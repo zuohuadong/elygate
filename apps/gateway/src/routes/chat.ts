@@ -5,6 +5,7 @@ import { memoryCache } from '../services/cache';
 import { circuitBreaker } from '../services/circuitBreaker';
 import { billAndLog, preCheckAndDecrement, reconcileQuota } from '../services/billing';
 import { calculateCost } from '../services/ratio';
+import { lookupSemanticCache, storeSemanticCache } from '../services/semanticCache';
 import { ChannelType, ProviderHandler } from '../providers/types';
 import { OpenAIApiHandler } from '../providers/openai';
 import { GeminiApiHandler } from '../providers/gemini';
@@ -72,6 +73,23 @@ export const chatRouter = new Elysia()
         }
 
         let lastError: any = null;
+
+        // Semantic Cache: pick an embedding channel for vector lookup
+        const embeddingChannel = memoryCache.selectChannels('text-embedding-3-small')[0]
+            ?? memoryCache.selectChannels('nomic-embed-text')[0];
+
+        // --- Semantic Cache Lookup (Before upstream dispatch, non-stream only) ---
+        if (embeddingChannel && !stream) {
+            const userPrompt = Array.isArray(body.messages)
+                ? body.messages.map((m: any) => m.content).join(' ')
+                : '';
+            const cachedResponse = await lookupSemanticCache(userPrompt, model, embeddingChannel);
+            if (cachedResponse) {
+                console.log(`[SemanticCache] HIT for model: ${model}`);
+                return cachedResponse;
+            }
+        }
+        // ---------------------------------------------------------------------------
 
         // 3. Iterate through channels for retry attempts
         for (const channelConfig of candidateChannels) {
@@ -177,6 +195,16 @@ export const chatRouter = new Elysia()
                 // If not streaming, return JSON object and handle protocol transformation
                 const rawData = await response.json();
                 const formattedData = handler.transformResponse(rawData);
+
+                // Async: write to semantic cache (fire-and-forget)
+                if (embeddingChannel && !stream) {
+                    const userPrompt = Array.isArray(body.messages)
+                        ? body.messages.map((m: any) => m.content).join(' ')
+                        : '';
+                    storeSemanticCache(userPrompt, model, formattedData, embeddingChannel).catch(e =>
+                        console.warn('[SemanticCache] Store failed:', e)
+                    );
+                }
 
                 // 5. Trigger Billing and Logging (Asynchronous)
                 const { promptTokens, completionTokens } = handler.extractUsage(rawData);
