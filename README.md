@@ -2,178 +2,211 @@
 
 [English](#english) | [简体中文](#chinese)
 
+---
+
 <a name="english"></a>
 ## English
 
-High-performance, minimalist AI Large Language Model interface management and distribution gateway.
-Deeply inspired by the open-source benchmark **New-API** in architecture design, database entity mapping, and authentication logic. Dedicated to achieving concurrency and billing consistency far exceeding traditional architectures using PostgreSQL 18 advanced features and native **Bun** asynchronous foundation without relying on Redis.
+**High-performance, Redis-less AI Gateway. Build on Bun + PostgreSQL 18.**
 
-### ✨ Core Features
+### 📦 Quick Start (Docker Compose) - Recommended
 
-- **Extreme Purity & High Performance**: Eschews heavy traditional components, built entirely with `Bun` + `Elysia.js`.
-- **$O(1)$ High-Availability Billing**: First to implement $O(N) \to O(1)$ batch SQL optimization, merging concurrent deductions and logs into single atomic operations (`UPDATE FROM VALUES`), ensuring millisecond-latency under 10k+ QPS.
-- **Log Partitioning & BRIN Storage**: Native support for time-range partitioning and BRIN (Block Range Index), reducing log index size by 99% while maintaining extreme range query efficiency.
-- **Multi-level Fault Tolerance & Circuit Breaking**: Automatically switches to backups during upstream blocking, network anomalies, or 429 overloads.
-- **Dynamic Cross-Ratio Engine**: Native support for "Model Base Ratio" x "Completion Output Ratio" x "User/VIP Group Ratio" stacking billing system.
-- **Full Protocol Auto-Completion & Conversion**: Clients only need to call standard `OpenAI API`. The gateway automatically converts request bodies and SSE streams to `Google Gemini`, `Anthropic Claude`, `Azure OpenAI`, and `Cloudflare Worker AI` formats.
+Launch the entire stack (Database, Gateway, and Web UI) with one command.
 
-### ⚡ Performance: Elysia vs Gin (New-API Native)
+#### 1. Configuration
+```bash
+git clone https://github.com/zuohuadong/elygate.git && cd elygate
+cp .env.example .env
+```
 
-We chose **Bun + Elysia.js** over the traditional Golang system for the staggering throughput gains shown in the TechEmpower benchmarks:
+#### 2. Run
+```bash
+docker compose up -d
+```
 
-#### 🚀 Framework Throughput Comparison (reqs/s)
+#### 3. Access
+| Service | URL | Default Credentials |
+| :--- | :--- | :--- |
+| **Admin Panel** | [http://localhost:3001](http://localhost:3001) | `admin` / `admin123` |
+| **API Endpoint** | [http://localhost:3000](http://localhost:3000) | Generate keys in Admin |
+| **Postgres** | `localhost:5432` | `root` / `password` |
+
+---
+
+### 💻 Manual Installation (Development)
+
+If you prefer to run services manually on your host machine:
+
+1. **Install Dependencies**:
+   ```bash
+   bun install
+   ```
+
+2. **Setup Database**:
+   - Ensure PostgreSQL 15+ is running.
+   - Run `packages/db/src/init.sql` to initialize schema.
+   - Configure `DATABASE_URL` in `.env`.
+
+3. **Start Gateway**:
+   ```bash
+   cd apps/gateway && bun run dev
+   ```
+
+4. **Start Web Panel**:
+   ```bash
+   cd apps/web && bun run dev
+   ```
+
+---
+
+### ⚡ Performance Comparison
+
+We chose **Bun + Elysia.js** for its exceptional throughput. While Gin is highly efficient, Elysia leverages Bun's native asynchronous I/O to push boundaries.
+
+#### 🚀 Framework Throughput (reqs/s)
 
 ```text
-Elysia  (Bun)  ███████████████████████████████████ 2,454,631  (🥇 21x)
+Elysia  (Bun)  ███████████████████████████████████ 2,454,631  (🥇 3.6x vs Gin)
 Gin     (Go)   █████████                           676,019
 Spring  (Java) ███████                             506,087
 Fastify (JS)   ██████                              415,600
-Express (JS)   █                                   113,117
+Express (JS)   █                                   113,117    (21x slower)
 ```
-*(In extreme hardware/specific driver scenarios, Elysia has achieved over 26 million reqs/s)*
+*Numbers based on standard TechEmpower-style plaintext benchmarks.*
 
-### 🥊 Architecture Benchmarking: Why Elygate is the Next Generation?
+---
 
-| Dimension | Traditional Benchmark (New-API) | **Elygate (Bun + Elysia)** | **Core Benefits** |
-| :--- | :--- | :--- | :--- |
-| **Language** | Golang | **TypeScript (Fullstack)** | Full Monorepo unification, high code reuse. |
-| **Web Engine** | Gin / Fiber | **Bun Native + Elysia.js** | Native async event-driven, **21x QPS increase**. |
-| **Database** | MySQL (or SQLite) | **PostgreSQL (15+)** | Uses advanced PG features (RETURNING, JSONB, **Partitioning**). |
-| **Concurrency** | Heavy **Redis** Dependency | **Redis-less Batching** | Memory-buffered microtasks + **Batch SQL (O(1))**. |
-| **Admin UI** | React + Traditional UI | **Svelte 5 + Tailwind v4** | Extremely fast interaction, modern aesthetics. |
-| **Deployment** | Multi-container / Separate | **Micro-monolith** | One Bun command, perfect for Serverless/Edge. |
-
-### 📦 Project Structure (Monorepo)
+### 📂 Project Structure (Monorepo)
 
 ```text
 elygate
 ├── apps
-│   ├── gateway    # Gateway engine (API routes, billing queue, auth/rate-limit)
-│   └── web        # Svelte 5 + Tailwind v4 Admin Panel
-└── packages
-    └── db         # Database init and native models (Bun SQL)
+│   ├── gateway    # Gateway engine (Elysia.js, billing, auth)
+│   └── web        # Admin Panel (Svelte 5 + Tailwind 4)
+├── packages
+│   └── db         # Database schema, init SQL and types
+├── Dockerfile.gateway
+├── Dockerfile.web
+├── Dockerfile.postgres
+└── docker-compose.yml
 ```
 
-### 🛠️ Quick Start
+---
 
-#### 1. Requirements
-- [Bun](https://bun.sh/) (^1.3.0)
-- [Docker](https://docs.docker.com/get-docker/) & Docker Compose
+### ✨ Core Innovations
 
-#### 2. Start Database (with Extensions)
-The bundled `Dockerfile.postgres` automatically compiles and installs `pgvector`, `pg_cron` and `pg_bigm`.
-```bash
-docker compose up -d db
-# First startup triggers auto-initialization from packages/db/src/
-```
-
-#### 3. Run Services
-**Start Gateway (Default port 3000):**
-```bash
-cd apps/gateway
-bun run dev
-```
-**Start Admin Panel (Default port 5173):**
-```bash
-cd apps/web
-bun run dev
-```
-
-#### 4. Configure Semantic Cache
-The semantic cache is **enabled by default**. You can tune it live via the `options` table:
-```sql
--- Disable semantic cache
-INSERT INTO options (key, value) VALUES ('SemanticCacheEnabled', 'false')
-  ON CONFLICT (key) DO UPDATE SET value = 'false';
-
--- Adjust similarity threshold (default: 0.95, range: 0.0-1.0)
-INSERT INTO options (key, value) VALUES ('SemanticCacheThreshold', '0.95')
-  ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
-
--- Adjust cache TTL in hours (default: 24)
-INSERT INTO options (key, value) VALUES ('SemanticCacheTTLHours', '24')
-  ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
-```
-
-### 🔌 API Usage
-Standard `OpenAI SDK` compatible. Unified endpoint:
-```
-POST /v1/chat/completions
-```
-Use the `Bearer` token generated in the admin panel.
+- **🚀 Bun-Native Engine**: Massive throughput improvement over traditional JS/Go stacks.
+- **🧠 Semantic Cache**: Integrated vector similarity search to deduplicate requests.
+- **💾 O(1) Billing**: Atomic batch processing eliminating SQL lock contention.
+- **📊 Auto-Maintenance**: Built-in cron jobs for partition rotation and cleanup.
+- **🛡️ Apache 2.0**: Open-source and enterprise-ready.
 
 ---
 
 <a name="chinese"></a>
 ## 简体中文
 
-高性能、极简主义的 AI 大语言模型接口管理与分发网关。
-本网关在架构设计、数据库实体映射以及鉴权逻辑上**深度参考了开源标杆 New-API**，致力于在不依赖 Redis 的前提下，利用 PostgreSQL 18 的先进特性与原生 **Bun** 异步底座，实现远超传统架构的并发处理能力与计费强一致性。
+**高性能、无 Redis 依赖的 AI 分发网关与计费系统。基于 Bun + PostgreSQL 18。**
 
-### ✨ 核心特性
+### 📦 快速部署 (Docker Compose) - 推荐
 
-- **极致纯粹与高性能**: 摒弃传统的繁重全家桶组件，全链路使用 `Bun` + `Elysia.js` 构建。
-- **$O(1)$ 高可用缓冲扣费**: 首创并实现了 $O(N) \to O(1)$ 批量 SQL 优化，通过 `UPDATE FROM VALUES` 将高并发下的锁竞争合并为单次原子操作。
-- **日志分区与 BRIN 存储**: 原生支持对 `logs` 表进行时间范围分区与 **BRIN 索引**，在降低 99% 索引体积的同时，保持了极致的范围查询性能。
-- **多级容错与熔断降级**: 遇到上游封控、网络异常、429 超载时，网关将**无感静默切换**至备用的同模型权重下游服务器进行重试。
-- **动态交叉倍率引擎**: 原生支持对标商业级平台的 “模型基础倍率” x “补全输出倍率” x “用户/VIP 组别倍率” 叠加计费体系。
-- **全系协议自动补全转换**: 下游客户端仅需按照标准的 `OpenAI API` 进行调用，网关会自动将请求体与包含 SSE 流的响应体转换为 `Google Gemini`, `Anthropic Claude`, `Azure OpenAI` 甚至 `Cloudflare Worker AI` 等多模态异构格式。
+只需简单几步，即可一键启动全栈环境。
 
-### ⚡ 性能直观揭秘：Elysia vs Gin (New-API 原生架构)
+#### 1. 环境准备
+```bash
+git clone https://github.com/zuohuadong/elygate.git && cd elygate
+cp .env.example .env
+```
+
+#### 2. 一键启动
+```bash
+docker compose up -d
+```
+
+#### 3. 服务看板
+| 服务 | 访问地址 | 默认凭据 |
+| :--- | :--- | :--- |
+| **管理后台 (Web)** | [http://localhost:3001](http://localhost:3001) | `admin` / `admin123` |
+| **分发网关 (API)** | [http://localhost:3000](http://localhost:3000) | 使用后台生成的 sk- 密钥 |
+| **数据库 (DB)** | `localhost:5432` | `root` / `password` |
+
+---
+
+### 💻 手动安装 (开发模式)
+
+如果您希望在宿主机手动运行各项服务：
+
+1. **安装依赖**:
+   ```bash
+   bun install
+   ```
+
+2. **数据库准备**:
+   - 确保已安装 PostgreSQL 15+。
+   - 执行 `packages/db/src/init.sql` 初始化表结构。
+   - 在 `.env` 中正确配置 `DATABASE_URL`。
+
+3. **启动网关**:
+   ```bash
+   cd apps/gateway && bun run dev
+   ```
+
+4. **启动后台**:
+   ```bash
+   cd apps/web && bun run dev
+   ```
+
+---
+
+### ⚡ 性能对比
+
+选择 **Bun + Elysia.js** 是为了追求极致的吞吐量。虽然 Go (Gin) 已经非常高效，但 Elysia 利用 Bun 的原生异步 I/O 将 Web 性能提升到了新的高度。
 
 #### 🚀 框架绝对吞吐量对比 (reqs/s)
 
 ```text
-Elysia  (Bun)  ███████████████████████████████████ 2,454,631  (🥇 21x)
+Elysia  (Bun)  ███████████████████████████████████ 2,454,631  (🥇 3.6倍于 Gin)
 Gin     (Go)   █████████                           676,019
 Spring  (Java) ███████                             506,087
 Fastify (JS)   ██████                              415,600
-Express (JS)   █                                   113,117
+Express (JS)   █                                   113,117    (慢 21 倍)
 ```
 
-### 🥊 全架构对标：为什么本项目是极致进化版？
+---
 
-| 对比维度 | 传统标杆 (New-API 生态) | **本网关 (Bun + Elysia)** | **核心红利与降维打击** |
-| :--- | :--- | :--- | :--- |
-| **底层开发语言** | Golang | **TypeScript (全栈)** | 彻底的 Monorepo 全栈统一，产研效率极高。 |
-| **API Web 引擎** | Gin / Fiber | **Bun 原生 + Elysia.js** | 基于原生异步事件驱动，QPS **提升近 21 倍**。 |
-| **数据库强依赖** | MySQL (或 SQLite) | **PostgreSQL (15+)** | 利用 PG 先进特性（**表分区**、RETURNING、JSONB）。 |
-| **防高频并发机制** | 强依赖重型 **Redis** | **抛弃 Redis 引入批量 SQL** | 内存缓冲微任务队列 + **$O(1)$ 批量合并入库**。 |
-| **管理后台 UI** | React + 传统 UI 组件 | **Svelte 5 + Tailwind v4** | 摒弃 Virtual DOM，Svelte 原生运行极速且极其精美。 |
-| **部署与运维** | 多容器组合 | **微型单体构建** | 一个 Bun 命令全包，完美契合无服务器边缘部署。 |
+### 📂 项目目录结构 (Monorepo)
 
-### 🛠️ 快速启动指南
-
-#### 1. 环境准备
-- [Bun](https://bun.sh/) (要求 ^1.3.0)
-- [Docker](https://docs.docker.com/get-docker/) 及 Docker Compose
-
-#### 2. 启动数据库（含扩展插件）
-项目内置的 `Dockerfile.postgres` 会自动编译安装 `pgvector`、`pg_cron` 和 `pg_bigm`。
-```bash
-docker compose up -d db
-# 首次启动自动执行 packages/db/src/ 下的初始化 SQL
+```text
+elygate
+├── apps
+│   ├── gateway    # 网关核心引擎 (Elysia.js, 计费, 鉴权)
+│   └── web        # 管理后台 (Svelte 5 + Tailwind 4)
+├── packages
+│   └── db         # 数据库 Schema, 初始化 SQL 及类型定义
+├── Dockerfile.gateway
+├── Dockerfile.web
+├── Dockerfile.postgres
+└── docker-compose.yml
 ```
 
-#### 3. 启动服务
-**启动核心网关服务:**
-```bash
-cd apps/gateway
-bun run dev
-```
+---
 
-#### 4. 配置语义缓存
-语义缓存**默认开启**，可通过数据库动态调整：
+### 🛠️ 核心优势
+
+- **🚀 Bun 原生性能**: 相比传统 Node.js/Go 架构有显著吞吐量提升。
+- **🧠 语义缓存**: 内置 `pgvector` 相似度检索，大幅降低上游 Token 消耗。
+- **💾 O(1) 合并计费**: 通过批量原子 SQL 彻底解决高并发下的数据库竞争。
+- **📊 全自动运维**: 通过 `pg_cron` 原生支持日志自动分区与缓存定期清理。
+- **🛡️ Apache 2.0**: 协议友好，支持商业化二次开发。
+
+### 🧩 语义缓存动态配置
+语义缓存默认开启，支持在数据库 `options` 表中实时调整：
 ```sql
--- 关闭语义缓存
-INSERT INTO options (key, value) VALUES ('SemanticCacheEnabled', 'false')
-  ON CONFLICT (key) DO UPDATE SET value = 'false';
-
--- 调整相似度阈值（默认 0.95，范围 0.0-1.0）
-INSERT INTO options (key, value) VALUES ('SemanticCacheThreshold', '0.95')
-  ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
+-- 调整相似度阈值 (默认 0.95，越高越严格)
+INSERT INTO options (key, value) VALUES ('SemanticCacheThreshold', '0.96')
+ON CONFLICT (key) DO UPDATE SET value = '0.96';
 ```
 
 ## 🛡️ License & Acknowledgements
-Deep gratitude to the [New-API] open-source community for their exploration of commercial gateway billing architectures.
-深度感谢 [New-API] 开源社区对商业化网关计费架构、渠道管理策略的探索。
+Deep gratitude to the [New-API] community for their pioneering exploration.
+项目基于 Apache 2.0 协议开源，部分设计思路致敬 New-API 及其开源生态。
