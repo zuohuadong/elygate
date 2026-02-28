@@ -173,8 +173,8 @@ export const adminRouter = new Elysia({ prefix: '/admin' })
         return await sql`SELECT * FROM tokens ORDER BY id DESC`;
     })
     .post('/tokens', async ({ body, user }: any) => {
-        // Generate a random sk- key if not provided
-        const key = body.key || `sk-${Buffer.from(crypto.getRandomValues(new Uint8Array(24))).toString('hex')}`;
+        // Generate a random sk- key using Bun native UUID v7
+        const key = body.key || `sk-${Bun.randomUUIDv7('hex')}`;
         const [result] = await sql`
             INSERT INTO tokens (user_id, name, key, status, remain_quota, models)
             VALUES (${body.userId || user.id}, ${body.name}, ${key}, ${body.status || 1}, ${body.remainQuota || -1}, ${JSON.stringify(body.models || [])})
@@ -258,19 +258,16 @@ export const adminRouter = new Elysia({ prefix: '/admin' })
         const count = body.count || 1;
         const quota = body.quota || 500000;
 
-        let generated = [];
-        for (let i = 0; i < count; i++) {
-            // Generate a random CDK: e.g., elygate-xxxxx
-            const randomHex = Buffer.from(crypto.getRandomValues(new Uint8Array(12))).toString('hex');
-            const code = `elygate-${randomHex}`;
+        // Generate all CDK codes using Bun.randomUUIDv7, then insert in parallel
+        const codes = Array.from({ length: count }, () => `elygate-${Bun.randomUUIDv7('hex').slice(0, 24)}`);
 
-            const [result] = await sql`
+        const generated = await Promise.all(
+            codes.map(code => sql`
                 INSERT INTO redemptions (code, quota, status)
                 VALUES (${code}, ${quota}, 1)
                 RETURNING *
-            `;
-            generated.push(result);
-        }
+            `.then(([r]) => r)
+            ));
 
         return { success: true, generated };
     });

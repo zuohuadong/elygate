@@ -26,8 +26,8 @@ export const authService = {
                 RETURNING id, username, role, quota, status
             `;
 
-            // Optionally create a default token for the user immediately
-            const defaultTokenKey = `sk-${Buffer.from(crypto.getRandomValues(new Uint8Array(24))).toString('hex')}`;
+            // Generate default API key using Bun native UUID v7 (time-ordered, faster)
+            const defaultTokenKey = `sk-${Bun.randomUUIDv7('hex')}`;
             await sql`
                 INSERT INTO tokens (user_id, name, key, status, remain_quota)
                 VALUES (${user.id}, 'Default Token', ${defaultTokenKey}, 1, -1)
@@ -43,8 +43,7 @@ export const authService = {
      * a token that the frontend can use or just set a cookie.
      */
     async generateSessionToken(userId: number) {
-        // This would typically involve a library like 'jose' or 'jsonwebtoken'
-        // For now, we'll just return a mock token string.
-        return `sess_${Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('hex')}`;
+        // Use Bun native UUID v7: time-ordered, cryptographically random, no external deps
+        return `sess_${Bun.randomUUIDv7('hex')}`;
     }
 };

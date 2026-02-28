@@ -95,10 +95,12 @@ export async function storeSemanticCache(
     const embedding = await generateEmbedding(prompt, embeddingChannel);
     if (!embedding) return;
 
+    // Use Bun native CryptoHasher for md5 - faster than delegating to SQL
+    const promptHash = new Bun.CryptoHasher('md5').update(prompt).digest('hex');
     const vectorLiteral = `[${embedding.join(',')}]`;
     await sql`
         INSERT INTO semantic_cache (model_name, prompt_hash, prompt, embedding, response)
-        VALUES (${model}, md5(${prompt}), ${prompt}, ${vectorLiteral}::vector, ${JSON.stringify(response)})
+        VALUES (${model}, ${promptHash}, ${prompt}, ${vectorLiteral}::vector, ${JSON.stringify(response)})
         ON CONFLICT (model_name, prompt_hash) DO UPDATE
         SET response = EXCLUDED.response,
             embedding = EXCLUDED.embedding,
