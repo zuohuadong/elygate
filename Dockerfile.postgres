@@ -1,0 +1,37 @@
+FROM postgres:18-alpine
+
+# Install build dependencies
+RUN apk add --no-cache \
+    build-base \
+    clang \
+    llvm \
+    git \
+    wget \
+    curl \
+    perl \
+    python3 \
+    pkgconfig \
+    openssl-dev \
+    postgresql-dev
+
+# Install pgvector
+RUN cd /tmp \
+    && git clone https://github.com/pgvector/pgvector.git \
+    && cd pgvector \
+    && make && make install \
+    && cd / && rm -rf /tmp/pgvector
+
+# Install pg_cron
+RUN cd /tmp \
+    && git clone https://github.com/citusdata/pg_cron.git \
+    && cd pg_cron \
+    && make && make install \
+    && cd / && rm -rf /tmp/pg_cron
+
+# pg_bigm is harder to build on Alpine; use the pre-built package if available
+# Fallback: copy from unofficial registry or build manually
+# Uncomment below for systems where pg_bigm is available via pgxman or pre-built
+# RUN wget -q https://github.com/pgbigm/pg_bigm/releases/download/v1.2-20231011/pg_bigm-1.2.20231011-pg18.tar.gz ...
+
+# Pre-load pg_cron (must be in shared_preload_libraries)
+RUN echo "shared_preload_libraries = 'pg_cron'" >> /usr/local/share/postgresql/postgresql.conf.sample

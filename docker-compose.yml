@@ -1,8 +1,12 @@
 version: "3.8"
+
 services:
+  # ──── PostgreSQL with pgvector + pg_cron + pg_bigm ────────
   db:
-    image: postgres:18-alpine
-    container_name: ai-api-postgres
+    build:
+      context: .
+      dockerfile: Dockerfile.postgres
+    container_name: elygate-db
     restart: always
     environment:
       POSTGRES_DB: ai_api
@@ -12,7 +16,45 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./packages/db/src/init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
     command: >
-      postgres  -c max_connections=200  -c io_method=io_uring  -c fsync=off
+      postgres -c max_connections=200 -c io_method=io_uring -c fsync=off -c shared_preload_libraries=pg_cron -c cron.database_name=ai_api
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U root -d ai_api" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ──── Gateway (Bun + Elysia) ──────────────────────────────
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.gateway
+    container_name: elygate-gateway
+    restart: always
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://root:password@db:5432/ai_api
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # ──── Web Admin Panel (SvelteKit + Bun) ──────────────────
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    container_name: elygate-web
+    restart: always
+    env_file: .env
+    environment:
+      VITE_API_BASE_URL: http://gateway:3000
+    ports:
+      - "3001:3001"
+    depends_on:
+      - gateway
+
 volumes:
   pgdata:

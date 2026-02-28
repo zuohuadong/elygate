@@ -1,0 +1,20 @@
+# ─── Production Gateway Dockerfile ───────────────────────────
+# Uses Bun as both the JS runtime and package manager.
+FROM oven/bun:1-alpine AS base
+WORKDIR /app
+
+# Install only production deps first (layer cache)
+COPY package.json bun.lock ./
+COPY apps/gateway/package.json ./apps/gateway/
+COPY packages/db/package.json ./packages/db/
+
+RUN bun install --frozen-lockfile --production
+
+# Copy source
+COPY apps/gateway ./apps/gateway
+COPY packages/db ./packages/db
+
+EXPOSE 3000
+ENV NODE_ENV=production
+
+CMD ["bun", "run", "apps/gateway/src/index.ts"]

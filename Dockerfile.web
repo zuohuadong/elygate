@@ -1,0 +1,29 @@
+# ─── Production Web (SvelteKit) Dockerfile ────────────────────
+FROM oven/bun:1-alpine AS builder
+WORKDIR /app
+
+# Install all deps (including dev) for build
+COPY package.json bun.lock ./
+COPY apps/web/package.json ./apps/web/
+COPY packages/db/package.json ./packages/db/
+
+RUN bun install --frozen-lockfile
+
+# Copy source and build
+COPY apps/web ./apps/web
+COPY packages/db ./packages/db
+
+WORKDIR /app/apps/web
+RUN bun run build
+
+# ─── Production runtime ─────────────────────────────────────
+FROM oven/bun:1-alpine AS runner
+WORKDIR /app
+
+COPY --from=builder /app/apps/web/build ./build
+COPY --from=builder /app/apps/web/package.json ./
+
+EXPOSE 3001
+ENV NODE_ENV=production PORT=3001
+
+CMD ["bun", "./build/index.js"]

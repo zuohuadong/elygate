@@ -58,15 +58,14 @@ elygate
 
 #### 1. Requirements
 - [Bun](https://bun.sh/) (^1.3.0)
-- PostgreSQL (18+)
+- [Docker](https://docs.docker.com/get-docker/) & Docker Compose
 
-#### 2. Database Setup
-Copy the environment file:
+#### 2. Start Database (with Extensions)
+The bundled `Dockerfile.postgres` automatically compiles and installs `pgvector`, `pg_cron` and `pg_bigm`.
 ```bash
-cp .env.example .env
-# Edit .env to set your DATABASE_URL 
+docker compose up -d db
+# First startup triggers auto-initialization from packages/db/src/
 ```
-Import `packages/db/init.sql` into your PostgreSQL database to initialize tables.
 
 #### 3. Run Services
 **Start Gateway (Default port 3000):**
@@ -77,7 +76,23 @@ bun run dev
 **Start Admin Panel (Default port 5173):**
 ```bash
 cd apps/web
-bun run dev 
+bun run dev
+```
+
+#### 4. Configure Semantic Cache
+The semantic cache is **enabled by default**. You can tune it live via the `options` table:
+```sql
+-- Disable semantic cache
+INSERT INTO options (key, value) VALUES ('SemanticCacheEnabled', 'false')
+  ON CONFLICT (key) DO UPDATE SET value = 'false';
+
+-- Adjust similarity threshold (default: 0.95, range: 0.0-1.0)
+INSERT INTO options (key, value) VALUES ('SemanticCacheThreshold', '0.95')
+  ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
+
+-- Adjust cache TTL in hours (default: 24)
+INSERT INTO options (key, value) VALUES ('SemanticCacheTTLHours', '24')
+  ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
 ```
 
 ### 🔌 API Usage
@@ -131,16 +146,32 @@ Express (JS)   █                                   113,117
 
 #### 1. 环境准备
 - [Bun](https://bun.sh/) (要求 ^1.3.0)
-- PostgreSQL (18+)
+- [Docker](https://docs.docker.com/get-docker/) 及 Docker Compose
 
-#### 2. 数据库配置
-将 `packages/db/init.sql` 导入您的 PostgreSQL 数据库完成建表初始化。
+#### 2. 启动数据库（含扩展插件）
+项目内置的 `Dockerfile.postgres` 会自动编译安装 `pgvector`、`pg_cron` 和 `pg_bigm`。
+```bash
+docker compose up -d db
+# 首次启动自动执行 packages/db/src/ 下的初始化 SQL
+```
 
 #### 3. 启动服务
 **启动核心网关服务:**
 ```bash
 cd apps/gateway
 bun run dev
+```
+
+#### 4. 配置语义缓存
+语义缓存**默认开启**，可通过数据库动态调整：
+```sql
+-- 关闭语义缓存
+INSERT INTO options (key, value) VALUES ('SemanticCacheEnabled', 'false')
+  ON CONFLICT (key) DO UPDATE SET value = 'false';
+
+-- 调整相似度阈值（默认 0.95，范围 0.0-1.0）
+INSERT INTO options (key, value) VALUES ('SemanticCacheThreshold', '0.95')
+  ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
 ```
 
 ## 🛡️ License & Acknowledgements
