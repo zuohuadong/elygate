@@ -1,0 +1,169 @@
+import { Elysia } from 'elysia';
+import { sql } from '@elygate/db';
+import { authPlugin } from '../middleware/auth';
+import { memoryCache } from '../services/cache';
+import { billAndLog } from '../services/billing';
+import { ChannelType, ProviderHandler } from '../providers/types';
+import { OpenAIApiHandler } from '../providers/openai';
+import { GeminiApiHandler } from '../providers/gemini';
+
+import { AnthropicApiHandler } from '../providers/anthropic';
+import { AzureOpenAIApiHandler } from '../providers/azure';
+
+// Assign the corresponding converter based on the channel type in the database
+function getProviderHandler(type: number): ProviderHandler {
+    switch (type) {
+        case ChannelType.GEMINI:
+            return new GeminiApiHandler();
+        case ChannelType.ANTHROPIC:
+            return new AnthropicApiHandler();
+        case ChannelType.AZURE:
+            return new AzureOpenAIApiHandler();
+        case ChannelType.OPENAI:
+        default:
+            return new OpenAIApiHandler(); // Unknown or compatible channels default to OpenAI standard passthrough
+    }
+}
+
+export const chatRouter = new Elysia()
+    .use(authPlugin)
+    .post('/completions', async ({ body, token, user, request }: any) => {
+        // 1. Extract key information from request body
+        const { model, stream } = body as Record<string, any>;
+
+        if (!model) {
+            throw new Error("Missing 'model' field in request body");
+        }
+
+        console.log(`[Request] UserID: ${user.id}, Token: ${token.name}, Model: ${model}, Group: ${user.group}`);
+
+        // 2. Dynamic Routing: Get candidate channel list based on model name and weight (Multi-channel failover)
+        const candidateChannels = memoryCache.selectChannels(model);
+
+        if (!candidateChannels || candidateChannels.length === 0) {
+            throw new Error(`No available channel found for model: ${model}`);
+        }
+
+        let lastError: any = null;
+
+        // 3. Iterate through channels for retry attempts
+        for (const channelConfig of candidateChannels) {
+            console.log(`[Dispatch] Targeting Channel ID: ${channelConfig.id}, Type: ${channelConfig.type}, Weight: ${channelConfig.weight}`);
+
+            // Get Converter/Handler
+            const handler = getProviderHandler(channelConfig.type);
+
+            // Multi-key support: keys are separated by \n, pick one randomly
+            const keys = channelConfig.key.split('\n').map((k: string) => k.trim()).filter(Boolean);
+            const activeKey = keys[Math.floor(Math.random() * keys.length)];
+
+            const fetchHeaders = handler.buildHeaders(activeKey);
+
+            // Check Model Mapping
+            let upstreamModel = model;
+            if (channelConfig.modelMapping && channelConfig.modelMapping[model]) {
+                upstreamModel = channelConfig.modelMapping[model];
+                console.log(`[Mapping] Model ${model} mapped to ${upstreamModel} for channel ${channelConfig.id}`);
+            }
+
+            const transformedBody = handler.transformRequest(body, upstreamModel);
+
+            // Build Upstream URL
+            let upstreamUrl = `${channelConfig.baseUrl}/v1/chat/completions`;
+
+            if (channelConfig.type === ChannelType.GEMINI) {
+                upstreamUrl = `${channelConfig.baseUrl}/v1beta/models/${upstreamModel}:generateContent`;
+                if (stream) {
+                    upstreamUrl = `${channelConfig.baseUrl}/v1beta/models/${upstreamModel}:streamGenerateContent?alt=sse`;
+                }
+            }
+
+            try {
+                const response = await fetch(upstreamUrl, {
+                    method: 'POST',
+                    headers: fetchHeaders,
+                    body: JSON.stringify(transformedBody)
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.warn(`[Retry Notice] Channel ${channelConfig.id} returned status ${response.status}. Detail: ${errorText}`);
+                    // If client-side parameter error (400), strictly we shouldn't retry.
+                    // However, for maximum robustness, we throw all exceptions to trigger the next candidate channel.
+                    throw new Error(`Status ${response.status}: ${errorText}`);
+                }
+
+                // 4. Handle SSE Stream Passthrough and Billing Interception
+                if (stream && response.body) {
+                    const [clientStream, billingStream] = response.body.tee();
+
+                    (async () => {
+                        try {
+                            const reader = billingStream.getReader();
+                            const decoder = new TextDecoder();
+                            let totalCompletionLength = 0;
+
+                            while (true) {
+                                const { done, value } = await reader.read();
+                                if (done) break;
+                                totalCompletionLength += decoder.decode(value, { stream: true }).length;
+                            }
+
+                            // Rough estimation for streaming tokens
+                            const estimatedCompletionTokens = Math.floor(totalCompletionLength / 3);
+                            const estimatedPromptTokens = 0;
+
+                            await billAndLog({
+                                userId: user.id,
+                                tokenId: token.id,
+                                channelId: channelConfig.id,
+                                modelName: model,
+                                promptTokens: estimatedPromptTokens,
+                                completionTokens: estimatedCompletionTokens,
+                                userGroup: user.group,
+                                isStream: true
+                            });
+                        } catch (e) {
+                            console.error("[Stream Billing Error]", e);
+                        }
+                    })();
+
+                    return new Response(clientStream, {
+                        headers: {
+                            'Content-Type': 'text/event-stream',
+                            'Cache-Control': 'no-cache',
+                            'Connection': 'keep-alive'
+                        }
+                    });
+                }
+
+                // If not streaming, return JSON object and handle protocol transformation
+                const rawData = await response.json();
+                const formattedData = handler.transformResponse(rawData);
+                const { promptTokens, completionTokens } = handler.extractUsage(rawData);
+
+                // 5. Trigger Billing and Logging
+                await billAndLog({
+                    userId: user.id,
+                    tokenId: token.id,
+                    channelId: channelConfig.id,
+                    modelName: model,
+                    promptTokens,
+                    completionTokens,
+                    userGroup: user.group,
+                    isStream: false
+                });
+
+                return formattedData;
+
+            } catch (e: any) {
+                // Catch exceptions, log lastError, and continue to next channel in loop
+                lastError = e;
+                console.error(`[Channel Failed] Channel ID: ${channelConfig.id} failed. Error: ${e.message}`);
+                continue;
+            }
+        }
+
+        // All candidate channels failed, throw summarized error
+        throw new Error(`All candidate channels failed. Last upstream error: ${lastError?.message || 'Unknown network error'}`);
+    });
