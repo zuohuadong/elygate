@@ -1,6 +1,7 @@
 import { Elysia } from 'elysia';
 import { authPlugin } from '../middleware/auth';
 import { memoryCache } from '../services/cache';
+import { circuitBreaker } from '../services/circuitBreaker';
 import { billAndLog } from '../services/billing';
 import { ChannelType, ProviderHandler } from '../providers/types';
 import { OpenAIApiHandler } from '../providers/openai';
@@ -24,7 +25,7 @@ function getProviderHandler(type: number): ProviderHandler {
 
 export const embeddingsRouter = new Elysia()
     .use(authPlugin)
-    .post('/embeddings', async ({ body, token, user }: any) => {
+    .post('/embeddings', async ({ body, token, user, set }: any) => {
         const { model, input } = body as Record<string, any>;
 
         if (!model) {
@@ -34,6 +35,20 @@ export const embeddingsRouter = new Elysia()
         if (!input) {
             throw new Error("Missing 'input' field in request body");
         }
+
+        // --- Phase 4 & 6: Access Control ---
+        const groupModelKey = `group_models_${user.group}`;
+        const allowedGroupModels = memoryCache.getOption(groupModelKey);
+        if (allowedGroupModels && Array.isArray(allowedGroupModels) && !allowedGroupModels.includes(model)) {
+            set.status = 403;
+            throw new Error(`Your group '${user.group}' is not allowed to use model '${model}'`);
+        }
+
+        if (token.models && token.models.length > 0 && !token.models.includes(model)) {
+            set.status = 403;
+            throw new Error(`Your API key is not allowed to use model '${model}'`);
+        }
+        // ------------------------------------------
 
         console.log(`[Embeddings Request] UserID: ${user.id}, Token: ${token.name}, Model: ${model}`);
 
@@ -74,8 +89,11 @@ export const embeddingsRouter = new Elysia()
                 if (!response.ok) {
                     const errorText = await response.text();
                     console.warn(`[Retry Notice] Embeddings Channel ${channelConfig.id} returned status ${response.status}. Detail: ${errorText}`);
+                    await circuitBreaker.recordError(channelConfig.id, response.status);
                     throw new Error(`Status ${response.status}: ${errorText}`);
                 }
+
+                circuitBreaker.recordSuccess(channelConfig.id);
 
                 const rawData = await response.json();
 
@@ -101,6 +119,9 @@ export const embeddingsRouter = new Elysia()
 
             } catch (e: any) {
                 lastError = e;
+                if (!e.message.startsWith('Status')) {
+                    await circuitBreaker.recordError(channelConfig.id);
+                }
                 continue;
             }
         }

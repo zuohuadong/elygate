@@ -28,7 +28,13 @@ export const ChannelType = {
     BAIDU: 15,
     ZEN: 16,
     ALI: 17,
+    XUNFEI: 18,
     GEMINI: 23,
+    MIDJOURNEY: 24,
+    JINA: 25,
+    SUNO: 26,
     DEEPSEEK: 31,
     CF_WORKER: 33,
+    FLUX: 34,
+    UDIO: 35,
 } as const;

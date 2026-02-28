@@ -1,7 +1,22 @@
 import { expect, test, describe } from "bun:test";
-import { calculateCost, ModelRatio, GroupRatio, CompletionRatio } from "../src/services/ratio";
+import { calculateCost } from "../src/services/ratio";
+
+import { optionCache } from "../src/services/optionCache";
+import { mock } from "bun:test";
 
 describe("Ratio Calculation Engine (New-API Parity)", () => {
+    // Mock optionCache.get to return expected ratios for testing
+    mock.module("../src/services/optionCache", () => ({
+        optionCache: {
+            get: (key: string, defaultValue: any) => {
+                if (key === 'ModelRatio') return { 'gpt-3.5-turbo': 1, 'gpt-4': 15, 'claude-3-opus-20240229': 15 };
+                if (key === 'CompletionRatio') return { 'gpt-3.5-turbo': 1.33, 'gpt-4': 2, 'claude-3-opus-20240229': 5 };
+                if (key === 'GroupRatio') return { 'default': 1, 'vip': 0.8, 'svip': 0.6 };
+                return defaultValue;
+            }
+        }
+    }));
+
 
     test("Standard GPT-3.5 Request for Default User", () => {
         // modelRatio = 1, groupRatio = 1, completionRatio = 1.33

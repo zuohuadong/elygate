@@ -1,4 +1,4 @@
-import { sql } from '@ai-api/db';
+import { sql } from '@elygate/db';
 
 /**
  * In-memory Cache Pool (Acts as a Redis replacement)
@@ -8,16 +8,18 @@ export const memoryCache = {
     // Channel cache: modelName -> Channel[] 
     channelRoutes: new Map<string, any[]>(),
     lastUpdated: 0,
+    options: new Map<string, any>(),
 
     /**
      * Refresh Cache: Pulls all active channels from PostgreSQL.
+     * @param skipBroadcast - If true, do not notify other instances (prevents feedback loops)
      */
-    async refresh() {
+    async refresh(skipBroadcast = false) {
         try {
             console.log('[Cache] Refreshing channel routes from DB...');
             // Fetch all properly enabled channels using native SQL
             const activeChannels = await sql`
-                SELECT id, type, name, base_url AS "baseUrl", key, models, model_mapping AS "modelMapping", weight, status
+                SELECT id, type, name, base_url AS "baseUrl", key, models, model_mapping AS "modelMapping", weight, priority, groups, status
                 FROM channels 
                 WHERE status = 1
             `;
@@ -59,6 +61,10 @@ export const memoryCache = {
             this.channelRoutes = newRoutes;
             this.lastUpdated = Date.now();
             console.log(`[Cache] Successfully loaded ${activeChannels.length} channels.`);
+
+            if (!skipBroadcast) {
+                await sql`NOTIFY refresh_cache, 'refresh_cache'`;
+            }
         } catch (e) {
             console.error('[Cache] Failed to refresh channels:', e);
         }
@@ -94,18 +100,58 @@ export const memoryCache = {
 
     /**
      * Returns a sorted list of candidate channels for failover/retry scenarios.
-     * Shuffles and sorts based on weight composite scores.
+     * Filtered by user group and sorted by priority + weight.
      */
-    selectChannels(modelName: string): any[] {
+    selectChannels(modelName: string, userGroup = 'default'): any[] {
         const available = this.channelRoutes.get(modelName) || [];
         if (available.length === 0) return [];
 
-        // Sort by composite score (Random * Weight) to balance high-concurrency pressure.
-        // Higher weight increases the probability of appearing first.
-        return [...available].sort((a, b) => {
+        // 1. Filter by User Group
+        const candidateChannels = available.filter(ch => {
+            if (!ch.groups || !Array.isArray(ch.groups) || ch.groups.length === 0) return true;
+            return ch.groups.includes(userGroup);
+        });
+
+        if (candidateChannels.length === 0) return [];
+
+        // 2. Hierarchical Sort: Priority (Tier) first, then Weighted Random within Tier.
+        return [...candidateChannels].sort((a, b) => {
+            // First sort by Priority (Tier) descending
+            if ((b.priority || 0) !== (a.priority || 0)) {
+                return (b.priority || 0) - (a.priority || 0);
+            }
+
+            // Within the same tier, use weighted random score for load balancing
             const scoreA = Math.random() * (a.weight || 1);
             const scoreB = Math.random() * (b.weight || 1);
             return scoreB - scoreA;
         });
+    },
+
+    setOptions(options: Record<string, any>) {
+        for (const [key, value] of Object.entries(options)) {
+            this.options.set(key, value);
+        }
+    },
+
+    getOption(key: string) {
+        return this.options.get(key);
+    },
+
+    /**
+     * Initialize PostgreSQL LISTEN for multi-instance sync.
+     */
+    async initSync() {
+        console.log('[Cache] Initializing PostgreSQL LISTEN for sync...');
+        // Casting to any to bypass potential outdated type definitions in local environment
+        (sql as any).listen('refresh_cache', (payload: string) => {
+            console.log(`[Cache] Received sync signal: ${payload}`);
+            if (payload === 'refresh_cache') {
+                this.refresh(true).catch(console.error);
+            }
+        });
     }
 };
+
+// Start synchronization listener
+memoryCache.initSync().catch(e => console.error('[Cache] Failed to init sync:', e));

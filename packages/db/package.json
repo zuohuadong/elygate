@@ -8,5 +8,8 @@
             "types": "./src/types.ts",
             "import": "./src/index.ts"
         }
+    },
+    "dependencies": {
+        "drizzle-orm": "^0.45.1"
     }
 }

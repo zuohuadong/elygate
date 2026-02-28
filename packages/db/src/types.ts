@@ -9,7 +9,7 @@ export interface User {
     quota: number;        // Unit: 0.001 cent (0.001 cent = 1)
     usedQuota: number;
     group: string;        // e.g., 'vip', 'default'
-    status: number;       // 1-Active, 2-Banned
+    status: number;       // 1-Active, 2-Bans
     createdAt: Date;
 }
 

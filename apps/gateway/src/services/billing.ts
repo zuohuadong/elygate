@@ -19,9 +19,66 @@ const billingQueue: BillingContext[] = [];
 let isFlushing = false;
 
 /**
- * Receive a consumption request and push it into the in-memory asynchronous queue.
- * Returns immediately without blocking the main request flow.
- * The foundation of extreme concurrency throughput.
+ * Synchronous Quota Check and Pre-decrement
+ * Call this before upstream request to prevent user/token overdraft under high concurrency.
+ * Pre-charges based on max_tokens * ratio (worst case scenario).
+ */
+export async function preCheckAndDecrement(ctx: {
+    userId: number;
+    tokenId: number;
+    modelName: string;
+    userGroup: string;
+    maxTokens: number;
+}) {
+    const estimatedCost = calculateCost(ctx.modelName, ctx.userGroup, 0, ctx.maxTokens || 4096);
+
+    // Perform atomic check and deduction
+    const result = await sql.begin(async (tx) => {
+        const [user] = await tx`
+            UPDATE users 
+            SET quota = quota - ${estimatedCost}
+            WHERE id = ${ctx.userId} AND quota >= ${estimatedCost}
+            RETURNING id
+        `;
+        if (!user) return false;
+
+        const [token] = await tx`
+            UPDATE tokens
+            SET remain_quota = CASE WHEN remain_quota > 0 THEN remain_quota - ${estimatedCost} ELSE remain_quota END
+            WHERE id = ${ctx.tokenId} AND (remain_quota = -1 OR remain_quota >= ${estimatedCost})
+            RETURNING id
+        `;
+        return !!token;
+    });
+
+    if (!result) {
+        throw new Error("Insufficient quota (Locked/Pre-deducted)");
+    }
+    return estimatedCost;
+}
+
+/**
+ * Reconcile Quota after request completion.
+ * Corrects the pre-deducted amount with the actual usage.
+ */
+export async function reconcileQuota(ctx: {
+    userId: number;
+    tokenId: number;
+    preDeducted: number;
+    actualCost: number;
+}) {
+    const diff = ctx.preDeducted - ctx.actualCost;
+    if (diff === 0) return;
+
+    // Refund the difference (diff can be negative if usage exceeded max_tokens somehow, though unlikely)
+    await sql.begin(async (tx) => {
+        await tx`UPDATE users SET quota = quota + ${diff} WHERE id = ${ctx.userId}`;
+        await tx`UPDATE tokens SET remain_quota = CASE WHEN remain_quota >= 0 THEN remain_quota + ${diff} ELSE remain_quota END WHERE id = ${ctx.tokenId}`;
+    });
+}
+
+/**
+ * Receive a consumption request...
  */
 export async function billAndLog(ctx: BillingContext) {
     if ((ctx.promptTokens + ctx.completionTokens) <= 0) return;
@@ -70,7 +127,7 @@ async function flushBillingQueue() {
 
     try {
         // 2. Atomic update using native SQL transaction
-        await sql.begin(async (tx: any) => {
+        await sql.begin(async (tx) => {
             // Batch update Tokens quota
             for (const [tokenId, cost] of Object.entries(tokenAgg)) {
                 await tx`
@@ -103,6 +160,19 @@ async function flushBillingQueue() {
             }
         });
 
+        // 3. Post-flush check for Quota Alarms
+        for (const [userIdStr, cost] of Object.entries(userAgg)) {
+            const userId = Number(userIdStr);
+            const [user] = await sql`SELECT quota, username FROM users WHERE id = ${userId}`;
+            if (user && user.quota < 500000) { // Threshold: e.g. 0.5M quota units
+                const { notificationService } = await import('./notification');
+                await notificationService.send(
+                    'Quota Alarm',
+                    `User ${user.username} (ID: ${userId}) has low quota: ${user.quota}. Please top up soon.`
+                );
+            }
+        }
+
         console.log(`[Billing/Flush] Merged & Ingested ${tasks.length} logs successfully.`);
     } catch (e: any) {
         console.error(`[Billing/Error] Failed to flush queue, re-queueing ${tasks.length} tasks. Error:`, e.message);
@@ -115,3 +185,21 @@ async function flushBillingQueue() {
 
 // Start background daemon: flushes the queue every 1000ms (1 second)
 setInterval(flushBillingQueue, 1000);
+
+/**
+ * Log Rotation Worker
+ * Deletes logs older than LogRetentionDays (default 7 days) every 24 hours.
+ */
+async function rotateLogs() {
+    const { optionCache } = await import('./optionCache');
+    const days = optionCache.get('LogRetentionDays', 7);
+    console.log(`[Billing/Rotation] Cleaning up logs older than ${days} days...`);
+    try {
+        await sql`DELETE FROM logs WHERE created_at < NOW() - INTERVAL '${sql.unsafe(days.toString())} days'`;
+    } catch (e) {
+        console.error('[Billing/Rotation] Failed:', e);
+    }
+}
+
+// Run every 24 hours
+setInterval(rotateLogs, 24 * 60 * 60 * 1000);

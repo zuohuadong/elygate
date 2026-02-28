@@ -1,5 +1,5 @@
 -- Database: ai_api
--- 该脚本用于免 Drizzle ORM 环境下的直接建表初始化
+-- This script is used for direct table initialization without Drizzle ORM
 
 CREATE TABLE IF NOT EXISTS users (
     id SERIAL PRIMARY KEY,
@@ -41,8 +41,9 @@ CREATE TABLE IF NOT EXISTS tokens (
 CREATE INDEX IF NOT EXISTS idx_tokens_key ON tokens(key);
 
 
--- 注意：logs 表因高频写入特点，在 PG 15+ 依然建议采用普通表配合内存聚合，
--- 若追求极致可改写为 UNLOGGED TABLE logs (...)
+-- Note: Due to high-frequency writes, for logs table in PG 15+, 
+-- it's still recommended to use standard tables with in-memory aggregation.
+-- For extreme performance, it can be rewritten as UNLOGGED TABLE logs (...)
 CREATE TABLE IF NOT EXISTS logs (
     id SERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -58,7 +59,31 @@ CREATE TABLE IF NOT EXISTS logs (
 CREATE INDEX IF NOT EXISTS idx_logs_user_id ON logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_logs_created_at ON logs(created_at);
 
--- 初始管理员账号 admin / 123456
+CREATE TABLE IF NOT EXISTS redemptions (
+    id SERIAL PRIMARY KEY,
+    code VARCHAR(255) UNIQUE NOT NULL,
+    quota BIGINT NOT NULL,
+    status INTEGER NOT NULL DEFAULT 1,
+    used_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    used_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_redemptions_code ON redemptions(code);
+
+CREATE TABLE IF NOT EXISTS options (
+    key VARCHAR(255) PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+-- Initial default ratios and configuration parameters (Align with New-API)
+INSERT INTO options (key, value) VALUES
+('ModelRatio', '{"gpt-3.5-turbo": 1, "gpt-4": 15, "gpt-4o": 5, "claude-3-opus-20240229": 15, "claude-3-sonnet-20240229": 3, "gemini-1.5-pro-latest": 3, "gemini-1.5-flash-latest": 0.5, "text-embedding-3-small": 0.02, "text-embedding-3-large": 0.1, "text-embedding-ada-002": 0.05, "dall-e-2": 20000, "dall-e-3": 40000}'),
+('CompletionRatio', '{"gpt-3.5-turbo": 1.33, "gpt-4": 2, "gpt-4o": 3, "claude-3-opus-20240229": 5, "claude-3-sonnet-20240229": 5, "gemini-1.5-pro-latest": 2, "gemini-1.5-flash-latest": 2}'),
+('GroupRatio', '{"default": 1, "vip": 0.8, "svip": 0.6, "enterprise": 0.5}')
+ON CONFLICT (key) DO NOTHING;
+
+-- Initial administrator account: admin / 123456
 INSERT INTO users (id, username, password_hash, role, quota, used_quota, "group", status)
 VALUES (
     1, 

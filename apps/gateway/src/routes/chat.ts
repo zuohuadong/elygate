@@ -2,13 +2,18 @@ import { Elysia } from 'elysia';
 import { sql } from '@elygate/db';
 import { authPlugin } from '../middleware/auth';
 import { memoryCache } from '../services/cache';
-import { billAndLog } from '../services/billing';
+import { circuitBreaker } from '../services/circuitBreaker';
+import { billAndLog, preCheckAndDecrement, reconcileQuota } from '../services/billing';
+import { calculateCost } from '../services/ratio';
 import { ChannelType, ProviderHandler } from '../providers/types';
 import { OpenAIApiHandler } from '../providers/openai';
 import { GeminiApiHandler } from '../providers/gemini';
-
 import { AnthropicApiHandler } from '../providers/anthropic';
 import { AzureOpenAIApiHandler } from '../providers/azure';
+import { BaiduApiHandler } from '../providers/baidu';
+import { AliApiHandler } from '../providers/ali';
+import { XunfeiApiHandler } from '../providers/xunfei';
+import { MidjourneyApiHandler } from '../providers/mj';
 
 // Assign the corresponding converter based on the channel type in the database
 function getProviderHandler(type: number): ProviderHandler {
@@ -19,6 +24,14 @@ function getProviderHandler(type: number): ProviderHandler {
             return new AnthropicApiHandler();
         case ChannelType.AZURE:
             return new AzureOpenAIApiHandler();
+        case ChannelType.BAIDU:
+            return new BaiduApiHandler();
+        case ChannelType.ALI:
+            return new AliApiHandler();
+        case ChannelType.XUNFEI:
+            return new XunfeiApiHandler();
+        case ChannelType.MIDJOURNEY:
+            return new MidjourneyApiHandler();
         case ChannelType.OPENAI:
         default:
             return new OpenAIApiHandler(); // Unknown or compatible channels default to OpenAI standard passthrough
@@ -27,13 +40,27 @@ function getProviderHandler(type: number): ProviderHandler {
 
 export const chatRouter = new Elysia()
     .use(authPlugin)
-    .post('/completions', async ({ body, token, user, request }: any) => {
+    .post('/completions', async ({ body, token, user, request, set }: any) => {
         // 1. Extract key information from request body
         const { model, stream } = body as Record<string, any>;
 
         if (!model) {
             throw new Error("Missing 'model' field in request body");
         }
+
+        // --- Phase 4 & 6: Access Control ---
+        const groupModelKey = `group_models_${user.group}`;
+        const allowedGroupModels = memoryCache.getOption(groupModelKey);
+        if (allowedGroupModels && Array.isArray(allowedGroupModels) && !allowedGroupModels.includes(model)) {
+            set.status = 403;
+            throw new Error(`Your group '${user.group}' is not allowed to use model '${model}'`);
+        }
+
+        if (token.models && token.models.length > 0 && !token.models.includes(model)) {
+            set.status = 403;
+            throw new Error(`Your API key is not allowed to use model '${model}'`);
+        }
+        // ------------------------------------------
 
         console.log(`[Request] UserID: ${user.id}, Token: ${token.name}, Model: ${model}, Group: ${user.group}`);
 
@@ -68,6 +95,15 @@ export const chatRouter = new Elysia()
 
             const transformedBody = handler.transformRequest(body, upstreamModel);
 
+            // 3.1 Quota Pre-decrement (To prevent overdraft)
+            const preDeducted = await preCheckAndDecrement({
+                userId: user.id,
+                tokenId: token.id,
+                modelName: model,
+                userGroup: user.group,
+                maxTokens: body.max_tokens || 4096
+            });
+
             // Build Upstream URL
             let upstreamUrl = `${channelConfig.baseUrl}/v1/chat/completions`;
 
@@ -88,10 +124,11 @@ export const chatRouter = new Elysia()
                 if (!response.ok) {
                     const errorText = await response.text();
                     console.warn(`[Retry Notice] Channel ${channelConfig.id} returned status ${response.status}. Detail: ${errorText}`);
-                    // If client-side parameter error (400), strictly we shouldn't retry.
-                    // However, for maximum robustness, we throw all exceptions to trigger the next candidate channel.
+                    await circuitBreaker.recordError(channelConfig.id, response.status);
                     throw new Error(`Status ${response.status}: ${errorText}`);
                 }
+
+                circuitBreaker.recordSuccess(channelConfig.id);
 
                 // 4. Handle SSE Stream Passthrough and Billing Interception
                 if (stream && response.body) {
@@ -140,9 +177,18 @@ export const chatRouter = new Elysia()
                 // If not streaming, return JSON object and handle protocol transformation
                 const rawData = await response.json();
                 const formattedData = handler.transformResponse(rawData);
-                const { promptTokens, completionTokens } = handler.extractUsage(rawData);
 
-                // 5. Trigger Billing and Logging
+                // 5. Trigger Billing and Logging (Asynchronous)
+                const { promptTokens, completionTokens } = handler.extractUsage(rawData);
+                const actualCost = calculateCost(model, user.group, promptTokens, completionTokens);
+
+                await reconcileQuota({
+                    userId: user.id,
+                    tokenId: token.id,
+                    preDeducted,
+                    actualCost
+                });
+
                 await billAndLog({
                     userId: user.id,
                     tokenId: token.id,
@@ -157,8 +203,19 @@ export const chatRouter = new Elysia()
                 return formattedData;
 
             } catch (e: any) {
+                // Refund quota on failure before moving to next channel
+                await reconcileQuota({
+                    userId: user.id,
+                    tokenId: token.id,
+                    preDeducted,
+                    actualCost: 0
+                });
+
                 // Catch exceptions, log lastError, and continue to next channel in loop
                 lastError = e;
+                if (!e.message.startsWith('Status')) {
+                    await circuitBreaker.recordError(channelConfig.id);
+                }
                 console.error(`[Channel Failed] Channel ID: ${channelConfig.id} failed. Error: ${e.message}`);
                 continue;
             }

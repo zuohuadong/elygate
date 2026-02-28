@@ -1,67 +1,43 @@
+import { sql } from '@elygate/db';
+
 /**
- * Simple In-memory Rate Limiter (Token Bucket)
- * Relies on Bun's single-process characteristic for an in-process firewall.
- * Intercepts high-frequency requests (e.g., balance spamming) without Redis overhead.
+ * PostgreSQL-native Distributed Rate Limiter
+ * Ensures rate limits are enforced across all gateway instances using a fixed-window approach.
  */
 
-// Store access timestamps mapped to user_id or token_id
-const accessRecords = new Map<string, number[]>();
-
-// Global limit configuration (configurable via DB in the future)
-// Currently sets a ceiling of 300 requests per 60 seconds.
 const WINDOW_MS = 60 * 1000;
 const MAX_REQUESTS_PER_WINDOW = 300;
 
 /**
- * Check if the given identifier triggers rate limiting
+ * Check if the given identifier triggers rate limiting using PostgreSQL
  * @param identifier Unique ID (Token ID or User ID)
  * @returns true if limited (rejected)
  */
-export function isRateLimited(identifier: string | number): boolean {
-    const key = String(identifier);
-    const now = Date.now();
+export async function isRateLimited(identifier: string | number): Promise<boolean> {
+    const now = new Date();
+    const windowStart = new Date(Math.floor(now.getTime() / WINDOW_MS) * WINDOW_MS);
+    const expiredAt = new Date(windowStart.getTime() + WINDOW_MS + 1000); // 1s buffer
+    const key = `${identifier}:${windowStart.getTime()}`;
 
-    if (!accessRecords.has(key)) {
-        accessRecords.set(key, [now]);
+    try {
+        // Atomic Insert or Update using Postgres 9.5+ feature (UPSERT)
+        const [result] = await sql`
+            INSERT INTO rate_limits (key, count, expired_at)
+            VALUES (${key}, 1, ${expiredAt})
+            ON CONFLICT (key) DO UPDATE
+            SET count = rate_limits.count + 1
+            RETURNING count
+        `;
+
+        // Periodic cleanup of expired entries (fire and forget)
+        if (Math.random() < 0.01) { // 1% chance per request to prune
+            sql`DELETE FROM rate_limits WHERE expired_at < NOW()`.catch(() => { });
+        }
+
+        return result.count > MAX_REQUESTS_PER_WINDOW;
+    } catch (e) {
+        console.error('[RateLimit/Postgres] Error:', e);
+        // Fallback to allow if DB is struggling (fail-open)
         return false;
     }
-
-    const timestamps = accessRecords.get(key)!;
-
-    // Filter out timestamps outside the sliding window
-    const windowStart = now - WINDOW_MS;
-
-    // Only keep records within the window for performance
-    let validStartIndex = 0;
-    while (validStartIndex < timestamps.length && timestamps[validStartIndex] < windowStart) {
-        validStartIndex++;
-    }
-
-    // Evict expired records
-    if (validStartIndex > 0) {
-        timestamps.splice(0, validStartIndex);
-    }
-
-    if (timestamps.length >= MAX_REQUESTS_PER_WINDOW) {
-        return true; // Limit triggered
-    }
-
-    // Record this request
-    timestamps.push(now);
-    return false;
 }
-
-/**
- * Periodically clean up stale records every 5 minutes to prevent memory leaks.
- */
-setInterval(() => {
-    const now = Date.now();
-    const windowStart = now - WINDOW_MS;
-
-    for (const [key, timestamps] of accessRecords.entries()) {
-        const lastTimestamp = timestamps[timestamps.length - 1];
-        if (!lastTimestamp || lastTimestamp < windowStart) {
-            accessRecords.delete(key);
-        }
-    }
-}, 5 * 60 * 1000);

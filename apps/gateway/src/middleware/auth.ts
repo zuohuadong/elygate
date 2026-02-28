@@ -1,5 +1,5 @@
 import { Elysia } from 'elysia';
-import { sql } from '@ai-api/db';
+import { sql } from '@elygate/db';
 import { isRateLimited } from '../services/ratelimit';
 
 /**
@@ -20,7 +20,7 @@ export const authPlugin = new Elysia({ name: 'auth' })
         // Use Bun SQL template for high-speed parameterized queries (pre-compiled)
         const rows = await sql`
             SELECT 
-                t.id AS token_id, t.name, t.key, t.remain_quota, t.used_quota, t.status AS token_status, t.expired_at,
+                t.id AS token_id, t.name, t.key, t.remain_quota, t.used_quota, t.status AS token_status, t.expired_at, t.models AS token_models,
                 u.id AS user_id, u.username, u.group, u.role, u.quota, u.status AS user_status
             FROM tokens t
             INNER JOIN users u ON t.user_id = u.id
@@ -43,7 +43,8 @@ export const authPlugin = new Elysia({ name: 'auth' })
             remainQuota: Number(raw.remain_quota),
             usedQuota: Number(raw.used_quota),
             status: raw.token_status,
-            expiredAt: raw.expired_at ? new Date(raw.expired_at) : null
+            expiredAt: raw.expired_at ? new Date(raw.expired_at) : null,
+            models: Array.isArray(raw.token_models) ? raw.token_models : []
         };
 
         const userRecord = {
@@ -82,7 +83,7 @@ export const authPlugin = new Elysia({ name: 'auth' })
         }
 
         // Rate Limiting: Apply global frequency control based on UserID
-        if (isRateLimited(`user_${userRecord.id}`)) {
+        if (await isRateLimited(`user_${userRecord.id}`)) {
             set.status = 429;
             throw new Error('Too Many Requests');
         }

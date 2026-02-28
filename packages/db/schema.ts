@@ -23,6 +23,7 @@ export const users = pgTable('users', {
     role: integer('role').notNull().default(1),
     group: text('group').notNull().default('default'), // User group for multi-ratio billing
     status: integer('status').notNull().default(1),
+    externalId: text('external_id').unique(), // External identity mapping for SSO
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
@@ -36,6 +37,8 @@ export const channels = pgTable('channels', {
     models: jsonb('models').notNull().default('[]'), // List of supported models
     modelMapping: jsonb('model_mapping').notNull().default('{}'), // e.g. {"gpt-4": "gpt4-turbo"}
     weight: integer('weight').notNull().default(1), // Load balancing weight
+    priority: integer('priority').notNull().default(1), // Tiered failover priority (higher = first)
+    groups: jsonb('groups').notNull().default('[]'), // Allowed user groups for this channel
     status: integer('status').notNull().default(1), // 1-Enabled, 2-Disabled, 3-Auto-disabled
     testAt: timestamp('test_at'),
     responseTime: integer('response_time').notNull().default(0),
@@ -52,6 +55,7 @@ export const tokens = pgTable('tokens', {
     remainQuota: integer('remain_quota').notNull().default(0), // Token-specific quota (-1 for unlimited, capped by user quota)
     usedQuota: integer('used_quota').notNull().default(0),
     expiredAt: timestamp('expired_at'), // -1/null for never expired
+    models: jsonb('models').notNull().default('[]'), // Token-level model ACL
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
 }, (table) => ({
@@ -75,13 +79,27 @@ export const logs = pgTable('logs', {
     createdAtIdx: index('idx_log_created_at').on(table.createdAt)
 }));
 
-// -- Relations --
-export const usersRelations = relations(users, ({ many }) => ({
-    tokens: many(tokens),
-    logs: many(logs),
+export const redemptions = pgTable('redemptions', {
+    id: serial('id').primaryKey(),
+    code: text('code').notNull().unique(), // The CDK string
+    quota: integer('quota').notNull(), // Quota value the CDK provides
+    status: integer('status').notNull().default(1), // 1-Unused, 2-Used, 3-Disabled
+    usedBy: integer('used_by').references(() => users.id, { onDelete: 'set null' }),
+    usedAt: timestamp('used_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+}, (table) => ({
+    codeIdx: uniqueIndex('idx_redemption_code').on(table.code)
 }));
 
-export const tokensRelations = relations(tokens, ({ one, many }) => ({
+// -- Relations --
+export const usersRelations = relations(users, ({ many }: any) => ({
+    tokens: many(tokens),
+    logs: many(logs),
+    redemptions: many(redemptions),
+}));
+
+export const tokensRelations = relations(tokens, ({ one, many }: any) => ({
     user: one(users, {
         fields: [tokens.userId],
         references: [users.id],
@@ -89,11 +107,11 @@ export const tokensRelations = relations(tokens, ({ one, many }) => ({
     logs: many(logs),
 }));
 
-export const channelsRelations = relations(channels, ({ many }) => ({
+export const channelsRelations = relations(channels, ({ many }: any) => ({
     logs: many(logs),
 }));
 
-export const logsRelations = relations(logs, ({ one }) => ({
+export const logsRelations = relations(logs, ({ one }: any) => ({
     user: one(users, {
         fields: [logs.userId],
         references: [users.id],
@@ -106,4 +124,24 @@ export const logsRelations = relations(logs, ({ one }) => ({
         fields: [logs.channelId],
         references: [channels.id],
     }),
+}));
+
+export const redemptionsRelations = relations(redemptions, ({ one }: any) => ({
+    user: one(users, {
+        fields: [redemptions.usedBy],
+        references: [users.id],
+    }),
+}));
+
+export const options = pgTable('options', {
+    key: text('key').primaryKey(),
+    value: text('value').notNull(),
+});
+
+export const rateLimits = pgTable('rate_limits', {
+    key: text('key').primaryKey(), // identifier:window
+    count: integer('count').notNull().default(0),
+    expiredAt: timestamp('expired_at').notNull(),
+}, (table) => ({
+    expiredIdx: index('idx_ratelimit_expired').on(table.expiredAt)
 }));
