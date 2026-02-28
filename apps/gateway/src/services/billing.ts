@@ -128,35 +128,47 @@ async function flushBillingQueue() {
     try {
         // 2. Atomic update using native SQL transaction
         await sql.begin(async (tx) => {
-            // Batch update Tokens quota
-            for (const [tokenId, cost] of Object.entries(tokenAgg)) {
+            // Batch update Tokens quota using UPDATE ... FROM (VALUES ...)
+            if (Object.keys(tokenAgg).length > 0) {
+                const tokenValues = Object.entries(tokenAgg).map(([id, cost]) => [Number(id), cost]);
                 await tx`
-                    UPDATE tokens
-                    SET used_quota = used_quota + ${cost},
-                        remain_quota = CASE WHEN remain_quota > 0 THEN remain_quota - ${cost} ELSE remain_quota END
-                    WHERE id = ${Number(tokenId)}
+                    UPDATE tokens AS t
+                    SET used_quota = t.used_quota + v.cost,
+                        remain_quota = CASE WHEN t.remain_quota > 0 THEN t.remain_quota - v.cost ELSE t.remain_quota END
+                    FROM (VALUES ${tokenValues}) AS v(id, cost)
+                    WHERE t.id = v.id
                 `;
             }
 
-            // Batch update Users quota
-            for (const [userId, cost] of Object.entries(userAgg)) {
+            // Batch update Users quota using UPDATE ... FROM (VALUES ...)
+            if (Object.keys(userAgg).length > 0) {
+                const userValues = Object.entries(userAgg).map(([id, cost]) => [Number(id), cost]);
                 await tx`
-                    UPDATE users
-                    SET used_quota = used_quota + ${cost},
-                        quota = quota - ${cost}
-                    WHERE id = ${Number(userId)}
+                    UPDATE users AS u
+                    SET used_quota = u.used_quota + v.cost,
+                        quota = u.quota - v.cost
+                    FROM (VALUES ${userValues}) AS v(id, cost)
+                    WHERE u.id = v.id
                 `;
             }
 
-            // Batch INSERT log records
+            // Batch INSERT log records (Postgres native multi-row insert)
             if (logInserts.length > 0) {
-                for (const log of logInserts) {
-                    await tx`
-                        INSERT INTO logs (user_id, token_id, channel_id, model_name, prompt_tokens, completion_tokens, quota_cost, is_stream)
-                        VALUES (${log.userId}, ${log.tokenId || null}, ${log.channelId || null}, ${log.modelName}, 
-                                ${log.promptTokens}, ${log.completionTokens}, ${log.quotaCost}, ${log.isStream})
-                    `;
-                }
+                const values = logInserts.map(log => [
+                    log.userId,
+                    log.tokenId || null,
+                    log.channelId || null,
+                    log.modelName,
+                    log.promptTokens,
+                    log.completionTokens,
+                    log.quotaCost,
+                    log.isStream
+                ]);
+
+                await tx`
+                    INSERT INTO logs (user_id, token_id, channel_id, model_name, prompt_tokens, completion_tokens, quota_cost, is_stream)
+                    VALUES ${values}
+                `;
             }
         });
 
@@ -189,13 +201,23 @@ setInterval(flushBillingQueue, 1000);
 /**
  * Log Rotation Worker
  * Deletes logs older than LogRetentionDays (default 7 days) every 24 hours.
+ * 
+ * NOTE: If using Table Partitioning (see packages/db/src/optimize_logs.sql):
+ * It's recommended to handle this via pg_cron or a dedicated script using:
+ * "DROP TABLE logs_yXXXXmXX" or "ALTER TABLE logs DETACH PARTITION ..."
+ * This is much faster than DELETE and avoids disk fragmentation.
  */
 async function rotateLogs() {
     const { optionCache } = await import('./optionCache');
     const days = optionCache.get('LogRetentionDays', 7);
     console.log(`[Billing/Rotation] Cleaning up logs older than ${days} days...`);
     try {
+        // Fallback to DELETE for non-partitioned tables or safety.
+        // For partitioned tables, the query optimizer in PG 12+ will prune partitions automatically.
         await sql`DELETE FROM logs WHERE created_at < NOW() - INTERVAL '${sql.unsafe(days.toString())} days'`;
+
+        // Potential future enhancement if partition naming is predictable:
+        // await sql`DROP TABLE IF EXISTS ${sql.unsafe(`logs_old_partition_name`)}`;
     } catch (e) {
         console.error('[Billing/Rotation] Failed:', e);
     }

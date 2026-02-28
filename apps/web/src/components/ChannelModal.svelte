@@ -177,6 +177,8 @@
                     />
                 </div>
 
+                <div class="space-y-1.5">
+                    <label for="ch-mapping" class="text-sm font-medium text-slate-700 dark:text-slate-300">{i18n.t.channels.modelMapping}</label>
                     <textarea 
                         id="ch-mapping"
                         bind:value={formData.modelMapping}
