@@ -1,0 +1,21 @@
+
+Usage: sv create [options] [path]
+
+scaffolds a new SvelteKit project
+
+Arguments:
+  path                              where the project will be created
+
+Options:
+  --template <type>                 template to scaffold (choices: minimal,
+                                    demo, library, addon)
+  --[no-]types <lang>               add type checking (choices: ts, jsdoc)
+  --no-add-ons                      do not prompt to add add-ons
+  --add <addon...>                  add-on to include
+  --from-playground <url>           create a project from the svelte playground
+  --no-dir-check                    even if the folder is not empty, no prompt
+                                    will be shown
+  --no-download-check               skip all download confirmation prompts
+  --[no-]install <package-manager>  installs dependencies with a specified
+                                    package manager (choices: npm, yarn, pnpm,
+                                    bun, deno)
