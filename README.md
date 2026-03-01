@@ -40,10 +40,15 @@ Inspired by New-API, Elygate provides pre-compiled single-file binaries. No Node
 1. **Download**: Go to [Releases](../../releases) and download the binary for your OS.
 2. **Configure**: Create a `.env` file with your `DATABASE_URL`.
 3. **Run**:
-   ```bash
-   chmod +x elygate-linux-amd64
-   ./elygate-linux-amd64
-   ```
+   - **Linux / macOS**:
+     ```bash
+     chmod +x elygate-linux-amd64
+     ./elygate-linux-amd64
+     ```
+   - **Windows**:
+     ```cmd
+     elygate-bun-windows-x64.exe
+     ```
    *The binary embeds both the Gateway API engine and the Svelte Admin Panel.*
 
 ---
@@ -163,10 +168,16 @@ docker compose up -d
 1. **下载**: 访问 [Releases](../../releases) 页面，下载对应您的操作系统的文件。
 2. **配置**: 准备好 PostgreSQL 并同级目录下创建 `.env` 配置 `DATABASE_URL`。
 3. **运行**:
-   ```bash
-   chmod +x elygate-linux-amd64
-   ./elygate-linux-amd64
-   ```
+   - **Linux / Mac**:
+     ```bash
+     chmod +x elygate-linux-amd64
+     ./elygate-linux-amd64
+     ```
+   - **Windows**:
+     直接双击运行下载好的 `.exe` 软件，或通过 CMD 执行：
+     ```cmd
+     elygate-bun-windows-x64.exe
+     ```
 
 ---
 

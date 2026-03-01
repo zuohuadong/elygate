@@ -4,6 +4,9 @@
   "workspaces": {
     "": {
       "name": "ai-api",
+      "devDependencies": {
+        "@types/bun": "^1.3.9",
+      },
     },
     "apps/gateway": {
       "name": "gateway",

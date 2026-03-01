@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "bun --cwd apps/gateway dev & bun --cwd apps/web dev",
     "build": "bun --cwd apps/web build",
-    "start": "bun --cwd apps/gateway start & bun --cwd apps/web start"
+    "start": "bun --cwd apps/gateway start & bun --cwd apps/web start",
+    "changelog": "bun run scripts/changelog.ts"
   },
   "workspaces": [
     "apps/*",
@@ -14,5 +15,8 @@
   ],
   "engines": {
     "bun": ">=1.3.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.9"
   }
 }

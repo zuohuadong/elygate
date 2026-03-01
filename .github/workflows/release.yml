@@ -54,7 +54,11 @@ jobs:
         if: steps.check_version.outputs.changed == 'true'
         run: |
           mkdir -p build
-          bun build src/index.ts --compile --minify --target=${{ matrix.target }} --outfile=build/elygate-${{ matrix.target }}
+          if [[ "${{ matrix.target }}" == *"windows"* ]]; then
+            bun build src/index.ts --compile --minify --target=${{ matrix.target }} --outfile=build/elygate-${{ matrix.target }}.exe
+          else
+            bun build src/index.ts --compile --minify --target=${{ matrix.target }} --outfile=build/elygate-${{ matrix.target }}
+          fi
         working-directory: ./apps/gateway
 
       - name: Upload Binary to Artifacts
@@ -62,7 +66,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target }}
-          path: apps/gateway/build/elygate-${{ matrix.target }}
+          path: apps/gateway/build/elygate-*
 
   publish:
     needs: release
@@ -82,12 +86,8 @@ jobs:
           diff-search: true
       
       - name: Create Tag and Changelog
-        id: tag_version
         if: steps.check_version.outputs.changed == 'true'
-        uses: mathieudutour/github-tag-action@v6.2
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          custom_tag: ${{ steps.check_version.outputs.version }}
+        run: bun run changelog
 
       - name: Download Artifacts
         if: steps.check_version.outputs.changed == 'true'
@@ -100,9 +100,9 @@ jobs:
         if: steps.check_version.outputs.changed == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.tag_version.outputs.new_tag }}
-          name: Release ${{ steps.tag_version.outputs.new_tag }}
-          body: ${{ steps.tag_version.outputs.changelog }}
+          tag_name: v${{ steps.check_version.outputs.version }}
+          name: Release v${{ steps.check_version.outputs.version }}
+          body_path: RELEASE_NOTE.md
           files: binaries/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
