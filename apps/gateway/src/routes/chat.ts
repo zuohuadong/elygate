@@ -33,6 +33,7 @@ function getProviderHandler(type: number): ProviderHandler {
             return new XunfeiApiHandler();
         case ChannelType.MIDJOURNEY:
             return new MidjourneyApiHandler();
+        case ChannelType.NVIDIA:
         case ChannelType.OPENAI:
         default:
             return new OpenAIApiHandler(); // Unknown or compatible channels default to OpenAI standard passthrough

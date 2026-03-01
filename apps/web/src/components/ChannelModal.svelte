@@ -165,10 +165,15 @@
                             bind:value={formData.type}
                             class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
                         >
-                            <option value={1}>OpenAI</option>
-                            <option value={8}>Azure OpenAI</option>
-                            <option value={14}>Anthropic</option>
+                            <option value={1}>OpenAI / Compatible</option>
+                            <option value={8}>Azure / Microsoft</option>
+                            <option value={14}>Anthropic Claude</option>
+                            <option value={15}>Baidu Wenxin</option>
+                            <option value={17}>Ali Qwen</option>
+                            <option value={18}>Xunfei Spark</option>
                             <option value={23}>Google Gemini</option>
+                            <option value={24}>Midjourney</option>
+                            <option value={41}>Nvidia AI</option>
                         </select>
                     </div>
                 </div>
