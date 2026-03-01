@@ -1,0 +1,19 @@
+$ vite build
+[36mvite v7.3.1 [32mbuilding ssr environment for production...[36m[39m
+transforming...
+[32m✓[39m 28 modules transformed.
+✗ Build failed in 473ms
+error during build:
+[vite-plugin-svelte:compile] [plugin vite-plugin-svelte:compile] src/components/ChannelModal.svelte (186:45): D:/workspace/ai-api/apps/web/src/components/ChannelModal.svelte:186:45 Expected token }
+https://svelte.dev/e/expected_token
+file: D:/workspace/ai-api/apps/web/src/components/ChannelModal.svelte:186:45
+
+ 184 |                          bind:value={formData.modelMapping}
+ 185 |                          rows="3"
+ 186 |                          placeholder='{"gpt-4": "gpt-4-32k"}'
+                                                     ^
+ 187 |                          class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-sm font-mono focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+ 188 |                      ></textarea>
+
+
+error: script "build" exited with code 1

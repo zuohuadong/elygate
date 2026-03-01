@@ -1,0 +1,108 @@
+name: Release Binary
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'package.json'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    strategy:
+      matrix:
+        target: 
+          - bun-linux-x64
+          - bun-linux-arm64
+          - bun-darwin-x64
+          - bun-darwin-arm64
+          - bun-windows-x64
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check package version
+        id: check_version
+        uses: EndBug/version-check@v2
+        with:
+          diff-search: true
+
+      - name: Setup Bun
+        # Only proceed with heavy build if version changed
+        if: steps.check_version.outputs.changed == 'true'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install Dependencies
+        if: steps.check_version.outputs.changed == 'true'
+        run: bun install
+
+      - name: Build Web UI
+        if: steps.check_version.outputs.changed == 'true'
+        run: bun run build
+        working-directory: ./apps/web
+
+      - name: Build Gateway Binary
+        if: steps.check_version.outputs.changed == 'true'
+        run: |
+          mkdir -p build
+          bun build src/index.ts --compile --minify --target=${{ matrix.target }} --outfile=build/elygate-${{ matrix.target }}
+        working-directory: ./apps/gateway
+
+      - name: Upload Binary to Artifacts
+        if: steps.check_version.outputs.changed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: apps/gateway/build/elygate-${{ matrix.target }}
+
+  publish:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check package version
+        id: check_version
+        uses: EndBug/version-check@v2
+        with:
+          diff-search: true
+      
+      - name: Create Tag and Changelog
+        id: tag_version
+        if: steps.check_version.outputs.changed == 'true'
+        uses: mathieudutour/github-tag-action@v6.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          custom_tag: ${{ steps.check_version.outputs.version }}
+
+      - name: Download Artifacts
+        if: steps.check_version.outputs.changed == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          path: binaries
+          merge-multiple: true
+
+      - name: Create Release
+        if: steps.check_version.outputs.changed == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag_version.outputs.new_tag }}
+          name: Release ${{ steps.tag_version.outputs.new_tag }}
+          body: ${{ steps.tag_version.outputs.changelog }}
+          files: binaries/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

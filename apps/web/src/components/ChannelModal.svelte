@@ -3,11 +3,11 @@
     import { fade, scale } from "svelte/transition";
     import { i18n } from "$lib/i18n";
 
-    let { 
-        show = false, 
-        channel = null, 
-        onClose = () => {}, 
-        onSave = (data: any) => {} 
+    let {
+        show = false,
+        channel = null,
+        onClose = () => {},
+        onSave = (data: any) => {},
     } = $props<{
         show: boolean;
         channel: any | null;
@@ -24,7 +24,7 @@
         models: "",
         modelMapping: "",
         weight: 1,
-        status: 1
+        status: 1,
     });
 
     let isSubmitting = $state(false);
@@ -39,10 +39,14 @@
                     name: channel.name || "",
                     baseUrl: channel.baseUrl || "",
                     key: channel.key || "",
-                    models: Array.isArray(channel.models) ? channel.models.join(",") : (channel.models || ""),
-                    modelMapping: channel.modelMapping ? JSON.stringify(channel.modelMapping, null, 2) : "{}",
+                    models: Array.isArray(channel.models)
+                        ? channel.models.join(",")
+                        : channel.models || "",
+                    modelMapping: channel.modelMapping
+                        ? JSON.stringify(channel.modelMapping, null, 2)
+                        : "{}",
                     weight: channel.weight || 1,
-                    status: channel.status || 1
+                    status: channel.status || 1,
                 };
             } else {
                 formData = {
@@ -53,7 +57,7 @@
                     models: "gpt-3.5-turbo,gpt-4",
                     modelMapping: "{}",
                     weight: 1,
-                    status: 1
+                    status: 1,
                 };
             }
             error = "";
@@ -69,13 +73,20 @@
             try {
                 mapping = JSON.parse(formData.modelMapping || "{}");
             } catch (e: any) {
-                throw new Error(i18n.lang === 'zh' ? "模型映射 JSON 格式错误" : "Invalid model mapping JSON");
+                throw new Error(
+                    i18n.lang === "zh"
+                        ? "模型映射 JSON 格式错误"
+                        : "Invalid model mapping JSON",
+                );
             }
 
             const payload = {
                 ...formData,
-                models: formData.models.split(",").map(m => m.trim()).filter(Boolean),
-                modelMapping: mapping
+                models: formData.models
+                    .split(",")
+                    .map((m) => m.trim())
+                    .filter(Boolean),
+                modelMapping: mapping,
             };
 
             await onSave(payload);
@@ -90,22 +101,26 @@
 {#if show}
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div 
+    <div
         class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
         transition:fade={{ duration: 200 }}
         onclick={onClose}
     >
-        <div 
+        <div
             class="bg-white dark:bg-slate-950 w-full max-w-2xl rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden"
             transition:scale={{ duration: 200, start: 0.95 }}
-            onclick={e => e.stopPropagation()}
+            onclick={(e) => e.stopPropagation()}
         >
             <!-- Header -->
-            <div class="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-900/50">
-                <h3 class="text-lg font-semibold text-slate-900 dark:text-white">
+            <div
+                class="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-900/50"
+            >
+                <h3
+                    class="text-lg font-semibold text-slate-900 dark:text-white"
+                >
                     {channel ? i18n.t.common.edit : i18n.t.common.add}
                 </h3>
-                <button 
+                <button
                     onclick={onClose}
                     class="p-2 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-500 transition-colors"
                 >
@@ -114,17 +129,25 @@
             </div>
 
             <!-- Body -->
-            <div class="px-6 py-6 max-h-[70vh] overflow-y-auto space-y-4 text-left">
+            <div
+                class="px-6 py-6 max-h-[70vh] overflow-y-auto space-y-4 text-left"
+            >
                 {#if error}
-                    <div class="p-3 bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 text-sm rounded-lg border border-rose-100 dark:border-rose-800/50">
+                    <div
+                        class="p-3 bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 text-sm rounded-lg border border-rose-100 dark:border-rose-800/50"
+                    >
                         {error}
                     </div>
                 {/if}
 
                 <div class="grid grid-cols-2 gap-4">
                     <div class="space-y-1.5">
-                        <label for="ch-name" class="text-sm font-medium text-slate-700 dark:text-slate-300">{i18n.t.channels.name}</label>
-                        <input 
+                        <label
+                            for="ch-name"
+                            class="text-sm font-medium text-slate-700 dark:text-slate-300"
+                            >{i18n.t.channels.name}</label
+                        >
+                        <input
                             id="ch-name"
                             bind:value={formData.name}
                             placeholder="e.g. Official OpenAI"
@@ -132,8 +155,12 @@
                         />
                     </div>
                     <div class="space-y-1.5">
-                        <label for="ch-type" class="text-sm font-medium text-slate-700 dark:text-slate-300">{i18n.t.channels.type}</label>
-                        <select 
+                        <label
+                            for="ch-type"
+                            class="text-sm font-medium text-slate-700 dark:text-slate-300"
+                            >{i18n.t.channels.type}</label
+                        >
+                        <select
                             id="ch-type"
                             bind:value={formData.type}
                             class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
@@ -147,8 +174,12 @@
                 </div>
 
                 <div class="space-y-1.5">
-                    <label for="ch-url" class="text-sm font-medium text-slate-700 dark:text-slate-300">{i18n.t.channels.baseUrl}</label>
-                    <input 
+                    <label
+                        for="ch-url"
+                        class="text-sm font-medium text-slate-700 dark:text-slate-300"
+                        >{i18n.t.channels.baseUrl}</label
+                    >
+                    <input
                         id="ch-url"
                         bind:value={formData.baseUrl}
                         placeholder="https://api.openai.com"
@@ -157,8 +188,12 @@
                 </div>
 
                 <div class="space-y-1.5">
-                    <label for="ch-key" class="text-sm font-medium text-slate-700 dark:text-slate-300">{i18n.t.channels.key}</label>
-                    <textarea 
+                    <label
+                        for="ch-key"
+                        class="text-sm font-medium text-slate-700 dark:text-slate-300"
+                        >{i18n.t.channels.key}</label
+                    >
+                    <textarea
                         id="ch-key"
                         bind:value={formData.key}
                         rows="2"
@@ -168,8 +203,12 @@
                 </div>
 
                 <div class="space-y-1.5">
-                    <label for="ch-models" class="text-sm font-medium text-slate-700 dark:text-slate-300">{i18n.t.channels.models}</label>
-                    <input 
+                    <label
+                        for="ch-models"
+                        class="text-sm font-medium text-slate-700 dark:text-slate-300"
+                        >{i18n.t.channels.models}</label
+                    >
+                    <input
                         id="ch-models"
                         bind:value={formData.models}
                         placeholder="gpt-3.5-turbo,gpt-4"
@@ -178,20 +217,28 @@
                 </div>
 
                 <div class="space-y-1.5">
-                    <label for="ch-mapping" class="text-sm font-medium text-slate-700 dark:text-slate-300">{i18n.t.channels.modelMapping}</label>
-                    <textarea 
+                    <label
+                        for="ch-mapping"
+                        class="text-sm font-medium text-slate-700 dark:text-slate-300"
+                        >{i18n.t.channels.modelMapping}</label
+                    >
+                    <textarea
                         id="ch-mapping"
                         bind:value={formData.modelMapping}
                         rows="3"
-                        placeholder='{"gpt-4": "gpt-4-32k"}'
+                        placeholder={'{"gpt-4": "gpt-4-32k"}'}
                         class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-sm font-mono focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
                     ></textarea>
                 </div>
 
                 <div class="grid grid-cols-2 gap-4">
                     <div class="space-y-1.5">
-                        <label for="ch-weight" class="text-sm font-medium text-slate-700 dark:text-slate-300">{i18n.t.channels.weight}</label>
-                        <input 
+                        <label
+                            for="ch-weight"
+                            class="text-sm font-medium text-slate-700 dark:text-slate-300"
+                            >{i18n.t.channels.weight}</label
+                        >
+                        <input
                             id="ch-weight"
                             type="number"
                             bind:value={formData.weight}
@@ -199,34 +246,43 @@
                         />
                     </div>
                     <div class="space-y-1.5">
-                        <label for="ch-status" class="text-sm font-medium text-slate-700 dark:text-slate-300">{i18n.t.channels.status}</label>
-                        <select 
+                        <label
+                            for="ch-status"
+                            class="text-sm font-medium text-slate-700 dark:text-slate-300"
+                            >{i18n.t.channels.status}</label
+                        >
+                        <select
                             id="ch-status"
                             bind:value={formData.status}
                             class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
                         >
                             <option value={1}>{i18n.t.channels.active}</option>
-                            <option value={2}>{i18n.t.channels.disabled}</option>
+                            <option value={2}>{i18n.t.channels.disabled}</option
+                            >
                         </select>
                     </div>
                 </div>
             </div>
 
             <!-- Footer -->
-            <div class="px-6 py-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-end gap-3 bg-slate-50/50 dark:bg-slate-900/50">
-                <button 
+            <div
+                class="px-6 py-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-end gap-3 bg-slate-50/50 dark:bg-slate-900/50"
+            >
+                <button
                     onclick={onClose}
                     class="px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
                 >
                     {i18n.t.common.cancel}
                 </button>
-                <button 
+                <button
                     onclick={handleSubmit}
                     disabled={isSubmitting}
                     class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg shadow-sm transition-colors"
                 >
                     {#if isSubmitting}
-                        <div class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                        <div
+                            class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"
+                        ></div>
                     {:else}
                         <Save class="w-4 h-4" />
                     {/if}

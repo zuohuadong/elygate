@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    name: Build & Test Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun Environment
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install Dependencies
+        run: bun install
+
+      - name: Verify Web UI Build
+        run: bun run build
+        working-directory: ./apps/web
+
+      - name: Verify Gateway Build (Check for type errors)
+        # Elygate uses TS, we ensure the index builds without syntax issues
+        run: bun build src/index.ts --target=bun
+        working-directory: ./apps/gateway

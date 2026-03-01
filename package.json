@@ -1,8 +1,13 @@
 {
   "name": "elygate",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "AI API 批发平台",
   "private": true,
+  "scripts": {
+    "dev": "bun --cwd apps/gateway dev & bun --cwd apps/web dev",
+    "build": "bun --cwd apps/web build",
+    "start": "bun --cwd apps/gateway start & bun --cwd apps/web start"
+  },
   "workspaces": [
     "apps/*",
     "packages/*"

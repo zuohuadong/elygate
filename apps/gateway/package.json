@@ -3,9 +3,11 @@
   "version": "1.0.50",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "bun run --watch src/index.ts"
+    "dev": "bun run --watch src/index.ts",
+    "start": "NODE_ENV=production bun src/index.ts"
   },
   "dependencies": {
+    "@elysiajs/static": "^1.4.7",
     "elysia": "latest",
     "ioredis": "^5.10.0"
   },

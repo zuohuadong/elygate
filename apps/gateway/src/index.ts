@@ -1,6 +1,7 @@
 import { Elysia } from "elysia";
 import { cors } from "@elysiajs/cors";
 import { swagger } from "@elysiajs/swagger";
+import { staticPlugin } from "@elysiajs/static";
 import { authPlugin } from "./middleware/auth";
 import { chatRouter } from "./routes/chat";
 import { modelsRouter } from "./routes/models";
@@ -27,6 +28,11 @@ const app = new Elysia()
   }))
   .get("/", () => "Welcome to AI API Gateway")
   .use(sysRouter)
+  // Serve static files from the Web UI build folder
+  .use(staticPlugin({
+    assets: '../web/build',
+    prefix: '/'
+  }))
   .group("/api", (app) =>
     app.use(adminRouter)
       .use(redemptionsRouter)
@@ -43,6 +49,15 @@ const app = new Elysia()
       .use(videoRouter)
   )
   .use(modelsRouter)
+  // SPA Fallback for static Web UI
+  .get("*", async ({ request, set }) => {
+    const url = new URL(request.url);
+    if (!url.pathname.startsWith('/api') && !url.pathname.startsWith('/v1')) {
+      return Bun.file('../web/build/index.html');
+    }
+    set.status = 404;
+    return { error: 'Not Found' };
+  })
   .listen(3000);
 
 console.log(`🦊 AI API Gateway is running at ${app.server?.hostname}:${app.server?.port}`);

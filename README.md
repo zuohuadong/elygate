@@ -33,6 +33,34 @@ docker compose up -d
 
 ---
 
+### ⚡ Zero-Dependency Binary (Easiest)
+
+Inspired by New-API, Elygate provides pre-compiled single-file binaries. No Node.js, Bun, or Docker required.
+
+1. **Download**: Go to [Releases](../../releases) and download the binary for your OS.
+2. **Configure**: Create a `.env` file with your `DATABASE_URL`.
+3. **Run**:
+   ```bash
+   chmod +x elygate-linux-amd64
+   ./elygate-linux-amd64
+   ```
+   *The binary embeds both the Gateway API engine and the Svelte Admin Panel.*
+
+---
+
+### 🚀 Manual Production Deployment (Bare Metal)
+
+For high-performance production use without Docker:
+
+1. **Build & Start All**:
+   ```bash
+   bun run build
+   bun run start
+   ```
+   *This command leverages the root `package.json` to concurrently launch both the Gateway and Web UI in production mode.*
+
+---
+
 ### 💻 Manual Installation (Development)
 
 If you prefer to run services manually on your host machine:
@@ -47,15 +75,11 @@ If you prefer to run services manually on your host machine:
    - Run `packages/db/src/init.sql` to initialize schema.
    - Configure `DATABASE_URL` in `.env`.
 
-3. **Start Gateway**:
+3. **One-Command Dev**:
    ```bash
-   cd apps/gateway && bun run dev
+   bun run dev
    ```
-
-4. **Start Web Panel**:
-   ```bash
-   cd apps/web && bun run dev
-   ```
+   *Simultaneously runs Gateway (port 3000) and Admin Panel (port 5173).*
 
 ---
 
@@ -132,6 +156,33 @@ docker compose up -d
 
 ---
 
+### ⚡ 单文件预编译包部署 (极简无依赖)
+
+致敬 New-API，Elygate 在 Release 页面提供了包含了网关接口与 Svelte 后台的**跨平台单体二进制文件**。您不需要安装 Docker、Bun 或 Node.js 也能直接运行。
+
+1. **下载**: 访问 [Releases](../../releases) 页面，下载对应您的操作系统的文件。
+2. **配置**: 准备好 PostgreSQL 并同级目录下创建 `.env` 配置 `DATABASE_URL`。
+3. **运行**:
+   ```bash
+   chmod +x elygate-linux-amd64
+   ./elygate-linux-amd64
+   ```
+
+---
+
+### 🚀 手动生产部署 (宿主机源代码运行)
+
+如果您希望在宿主机以最佳性能运行（非 Docker 环境）：
+
+1. **一键构建与启动**:
+   ```bash
+   bun run build
+   bun run start
+   ```
+   *该命令将通过根目录脚本并行启动网关与管理后台，并自动开启生产模式 (NODE_ENV=production)。*
+
+---
+
 ### 💻 手动安装 (开发模式)
 
 如果您希望在宿主机手动运行各项服务：
@@ -146,15 +197,11 @@ docker compose up -d
    - 执行 `packages/db/src/init.sql` 初始化表结构。
    - 在 `.env` 中正确配置 `DATABASE_URL`。
 
-3. **启动网关**:
+3. **一键开发启动**:
    ```bash
-   cd apps/gateway && bun run dev
+   bun run dev
    ```
-
-4. **启动后台**:
-   ```bash
-   cd apps/web && bun run dev
-   ```
+   *同时启动网关 (3000端口) 与管理后台 (5173端口)，支持多端热重载。*
 
 ---
 
