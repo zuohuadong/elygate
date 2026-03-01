@@ -35,8 +35,6 @@ jobs:
           diff-search: true
 
       - name: Setup Bun
-        # Only proceed with heavy build if version changed
-        if: steps.check_version.outputs.changed == 'true'
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
