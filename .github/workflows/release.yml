@@ -84,6 +84,12 @@ jobs:
         uses: EndBug/version-check@v2
         with:
           diff-search: true
+
+      - name: Setup Bun
+        if: steps.check_version.outputs.changed == 'true'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
       
       - name: Create Tag and Changelog
         if: steps.check_version.outputs.changed == 'true'
