@@ -147,7 +147,7 @@ $$);
 -- ============================================================
 
 INSERT INTO users (username, password_hash, role, quota)
-VALUES ('admin', '$2b$10$placeholder_change_this_hash', 10, 100000000)
+VALUES ('admin', '$argon2id$v=19$m=65536,t=2,p=1$S9+t4mEmPtTXPaZA5M0VjA$fFEYyLuuoJ2YNe4/PCF2IXf', 10, 100000000)
 ON CONFLICT (username) DO NOTHING;
 
 -- Default system options

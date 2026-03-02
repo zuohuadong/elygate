@@ -1,4 +1,5 @@
 import { Elysia, t } from 'elysia';
+import { sql } from '@elygate/db';
 import { authService } from '../services/auth';
 
 const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID || '';
@@ -53,4 +54,83 @@ export const authRouter = new Elysia({ prefix: '/auth' })
 
         const targetUrl = process.env.WEB_URL || 'http://localhost:5173';
         set.redirect = `${targetUrl}/auth/callback?token=${sessionToken}&username=${user.username}`;
+    })
+    // Admin username/password login - returns the user's API token for management panel use
+    .post('/login', async ({ body, set }: any) => {
+        const { username, password } = body;
+        if (!username || !password) {
+            set.status = 400;
+            throw new Error('Username and password are required');
+        }
+
+        const [user] = await sql`
+            SELECT id, username, password_hash, role, status
+            FROM users
+            WHERE username = ${username}
+            LIMIT 1
+        `;
+
+        if (!user) {
+            set.status = 401;
+            throw new Error('Invalid username or password');
+        }
+        if (user.status !== 1) {
+            set.status = 403;
+            throw new Error('Account is disabled');
+        }
+        if (user.role < 10) {
+            set.status = 403;
+            throw new Error('Admin privileges required');
+        }
+
+        // Verify password using Bun's native bcrypt
+        const isValid = await Bun.password.verify(password, user.password_hash);
+        if (!isValid) {
+            set.status = 401;
+            throw new Error('Invalid username or password');
+        }
+
+        // Get the user's first active token (or create one)
+        let [token] = await sql`
+            SELECT key FROM tokens 
+            WHERE user_id = ${user.id} AND status = 1
+            ORDER BY id ASC LIMIT 1
+        `;
+
+        if (!token) {
+            const newKey = `sk-${Bun.randomUUIDv7('hex')}`;
+            [token] = await sql`
+                INSERT INTO tokens (user_id, name, key, status, remain_quota)
+                VALUES (${user.id}, 'Admin Token', ${newKey}, 1, -1)
+                RETURNING key
+            `;
+        }
+
+        return {
+            success: true,
+            token: token.key,
+            username: user.username,
+            role: user.role
+        };
+    })
+    // Validate a token and return user info (for /me checks in the frontend)
+    .get('/me', async ({ request, set }: any) => {
+        const authHeader = request.headers.get('authorization');
+        if (!authHeader?.startsWith('Bearer ')) {
+            set.status = 401;
+            throw new Error('Unauthorized');
+        }
+        const key = authHeader.substring(7);
+        const [row] = await sql`
+            SELECT u.username, u.role, t.key
+            FROM tokens t
+            JOIN users u ON t.user_id = u.id
+            WHERE t.key = ${key} AND t.status = 1 AND u.status = 1
+            LIMIT 1
+        `;
+        if (!row) {
+            set.status = 401;
+            throw new Error('Invalid or expired token');
+        }
+        return { username: row.username, role: row.role };
     });

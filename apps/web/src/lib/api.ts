@@ -1,7 +1,10 @@
 // SvelteKit frontend shared API fetch client
 // Encapsulates communication with the gateway backend with credentials
 
-export const API_BASE = 'http://localhost:3000/api';
+// Derive API_BASE from the current window location to support remote deployments
+export const API_BASE = typeof window !== 'undefined'
+    ? `http://${window.location.hostname}:3000/api`
+    : 'http://localhost:3000/api';
 
 /**
  * Get the stored admin token from localStorage

@@ -9,12 +9,29 @@
 		Languages,
 	} from "lucide-svelte";
 	import { page } from "$app/state";
-	import { i18n } from "$lib/i18n";
+	import { i18n } from "$lib/i18n/index.svelte";
+	import { clearToken } from "$lib/api";
+	import { goto } from "$app/navigation";
 	import { onMount } from "svelte";
 
 	let { children } = $props();
+	let adminUsername = $state("");
 
-	onMount(() => i18n.init());
+	onMount(() => {
+		i18n.init();
+		const token = localStorage.getItem("admin_token");
+		if (!token) {
+			goto("/login");
+			return;
+		}
+		adminUsername = localStorage.getItem("admin_username") || "Admin";
+	});
+
+	function logout() {
+		clearToken();
+		localStorage.removeItem("admin_username");
+		goto("/login");
+	}
 
 	// Side navigation data (derived from current language)
 	const navItems = $derived([
@@ -69,25 +86,49 @@
 		<!-- Sidebar Bottom User Info -->
 		<div class="p-4 border-t border-slate-200 dark:border-slate-800">
 			<div
-				class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800/50 cursor-pointer transition-colors"
+				class="flex items-center gap-3 px-3 py-2 rounded-lg transition-colors"
 			>
 				<div
-					class="w-8 h-8 rounded-full bg-gradient-to-tr from-cyan-400 to-blue-500 flex items-center justify-center text-white font-medium text-sm shadow-md"
+					class="w-8 h-8 rounded-full bg-gradient-to-tr from-cyan-400 to-blue-500 flex items-center justify-center text-white font-medium text-sm shadow-md shrink-0"
 				>
-					A
+					{adminUsername.charAt(0).toUpperCase() || "A"}
 				</div>
 				<div class="flex-1 overflow-hidden">
 					<p
 						class="text-sm font-medium text-slate-900 dark:text-white truncate"
 					>
-						Admin
+						{adminUsername || "Admin"}
 					</p>
-					<p
-						class="text-xs text-slate-500 dark:text-slate-400 truncate"
-					>
-						admin@elygate.io
+					<p class="text-xs text-slate-500 dark:text-slate-400">
+						Super Admin
 					</p>
 				</div>
+				<button
+					onclick={logout}
+					title="Logout"
+					class="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 transition-colors"
+				>
+					<svg
+						xmlns="http://www.w3.org/2000/svg"
+						width="16"
+						height="16"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+					>
+						<path
+							d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"
+						/><polyline points="16 17 21 12 16 7" /><line
+							x1="21"
+							y1="12"
+							x2="9"
+							y2="12"
+						/>
+					</svg>
+				</button>
 			</div>
 		</div>
 	</aside>
