@@ -15,7 +15,6 @@ import { rerankRouter } from "./routes/rerank";
 import { videoRouter } from "./routes/video";
 import { sysRouter } from "./routes/sys";
 import { memoryCache } from "./services/cache";
-
 const app = new Elysia()
   .use(cors())
   .use(swagger({
@@ -26,13 +25,15 @@ const app = new Elysia()
       }
     }
   }))
-  .get("/", () => "Welcome to AI API Gateway")
+  // Serve static files if they exist (all-in-one mode)
+  .onBeforeHandle(({ path }) => {
+    if (path.startsWith('/api') || path.startsWith('/v1')) return;
+    const staticPath = join(process.cwd(), 'apps/web/build', path === '/' ? 'index.html' : path);
+    if (existsSync(staticPath) && statSync(staticPath).isFile()) {
+      return Bun.file(staticPath);
+    }
+  })
   .use(sysRouter)
-  // Serve static files from the Web UI build folder
-  .use(staticPlugin({
-    assets: '../web/build',
-    prefix: '/'
-  }))
   .group("/api", (app) =>
     app.use(adminRouter)
       .use(redemptionsRouter)
@@ -53,12 +54,21 @@ const app = new Elysia()
   .get("*", async ({ request, set }) => {
     const url = new URL(request.url);
     if (!url.pathname.startsWith('/api') && !url.pathname.startsWith('/v1')) {
-      return Bun.file('../web/build/index.html');
+      const fallback = join(process.cwd(), 'apps/web/build/index.html');
+      if (existsSync(fallback)) {
+        return Bun.file(fallback);
+      }
     }
     set.status = 404;
     return { error: 'Not Found' };
   })
-  .listen(3000);
+  .listen({
+    port: 3000,
+    hostname: "0.0.0.0"
+  });
+
+import { join } from "path";
+import { existsSync, statSync } from "fs";
 
 console.log(`🦊 AI API Gateway is running at ${app.server?.hostname}:${app.server?.port}`);
 

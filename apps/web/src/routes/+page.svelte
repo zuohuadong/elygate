@@ -1,7 +1,7 @@
 <script lang="ts">
     import { Activity, CreditCard, DollarSign, Users } from "lucide-svelte";
     import { apiFetch } from "$lib/api";
-    import { i18n } from "$lib/i18n";
+    import { i18n } from "$lib/i18n/index.svelte";
     import { onMount } from "svelte";
 
     // Responsive state variables

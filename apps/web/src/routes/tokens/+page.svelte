@@ -3,7 +3,7 @@
     import TokenModal from "../../components/TokenModal.svelte";
     import { KeyRound, Search, Plus, RefreshCw } from "lucide-svelte";
     import { apiFetch } from "$lib/api";
-    import { i18n } from "$lib/i18n";
+    import { i18n } from "$lib/i18n/index.svelte";
     import { onMount } from "svelte";
 
     // Local state

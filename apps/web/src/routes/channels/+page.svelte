@@ -3,7 +3,7 @@
     import ChannelModal from "../../components/ChannelModal.svelte";
     import { Plus, Server } from "lucide-svelte";
     import { apiFetch } from "$lib/api";
-    import { i18n } from "$lib/i18n";
+    import { i18n } from "$lib/i18n/index.svelte";
     import { onMount } from "svelte";
 
     // Responsive state with Svelte 5 $state

@@ -1,7 +1,7 @@
 <script lang="ts">
     import { X, Save } from "lucide-svelte";
     import { fade, scale } from "svelte/transition";
-    import { i18n } from "$lib/i18n";
+    import { i18n } from "$lib/i18n/index.svelte";
 
     let {
         show = false,

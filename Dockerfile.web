@@ -21,9 +21,9 @@ FROM oven/bun:1-alpine AS runner
 WORKDIR /app
 
 COPY --from=builder /app/apps/web/build ./build
-COPY --from=builder /app/apps/web/package.json ./
+COPY apps/web/server.js ./server.js
 
 EXPOSE 3001
 ENV NODE_ENV=production PORT=3001
 
-CMD ["bun", "./build/index.js"]
+CMD ["bun", "server.js"]
