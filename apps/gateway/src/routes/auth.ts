@@ -57,61 +57,72 @@ export const authRouter = new Elysia({ prefix: '/auth' })
     })
     // Admin username/password login - returns the user's API token for management panel use
     .post('/login', async ({ body, set }: any) => {
-        const { username, password } = body;
-        if (!username || !password) {
-            set.status = 400;
-            throw new Error('Username and password are required');
-        }
+        try {
+            const { username, password } = body;
+            if (!username || !password) {
+                set.status = 400;
+                return { success: false, message: 'Username and password are required' };
+            }
 
-        const [user] = await sql`
-            SELECT id, username, password_hash, role, status
-            FROM users
-            WHERE username = ${username}
-            LIMIT 1
-        `;
-
-        if (!user) {
-            set.status = 401;
-            throw new Error('Invalid username or password');
-        }
-        if (user.status !== 1) {
-            set.status = 403;
-            throw new Error('Account is disabled');
-        }
-        if (user.role < 10) {
-            set.status = 403;
-            throw new Error('Admin privileges required');
-        }
-
-        // Verify password using Bun's native bcrypt
-        const isValid = await Bun.password.verify(password, user.password_hash);
-        if (!isValid) {
-            set.status = 401;
-            throw new Error('Invalid username or password');
-        }
-
-        // Get the user's first active token (or create one)
-        let [token] = await sql`
-            SELECT key FROM tokens 
-            WHERE user_id = ${user.id} AND status = 1
-            ORDER BY id ASC LIMIT 1
-        `;
-
-        if (!token) {
-            const newKey = `sk-${Bun.randomUUIDv7('hex')}`;
-            [token] = await sql`
-                INSERT INTO tokens (user_id, name, key, status, remain_quota)
-                VALUES (${user.id}, 'Admin Token', ${newKey}, 1, -1)
-                RETURNING key
+            const [user] = await sql`
+                SELECT id, username, password_hash, role, status
+                FROM users
+                WHERE username = ${username}
+                LIMIT 1
             `;
-        }
 
-        return {
-            success: true,
-            token: token.key,
-            username: user.username,
-            role: user.role
-        };
+            if (!user) {
+                set.status = 401;
+                return { success: false, message: 'Invalid username or password' };
+            }
+            if (user.status !== 1) {
+                set.status = 403;
+                return { success: false, message: 'Account is disabled' };
+            }
+            if (user.role < 10) {
+                set.status = 403;
+                return { success: false, message: 'Admin privileges required' };
+            }
+
+            // Verify password using Bun's native bcrypt/argon2
+            let isValid = false;
+            try {
+                isValid = await Bun.password.verify(password, user.password_hash);
+            } catch (_) {
+                isValid = false;
+            }
+
+            if (!isValid) {
+                set.status = 401;
+                return { success: false, message: 'Invalid username or password' };
+            }
+
+            // Get the user's first active token (or create one)
+            let [token] = await sql`
+                SELECT key FROM tokens 
+                WHERE user_id = ${user.id} AND status = 1
+                ORDER BY id ASC LIMIT 1
+            `;
+
+            if (!token) {
+                const newKey = `sk-${Bun.randomUUIDv7('hex')}`;
+                [token] = await sql`
+                    INSERT INTO tokens (user_id, name, key, status, remain_quota)
+                    VALUES (${user.id}, 'Admin Token', ${newKey}, 1, -1)
+                    RETURNING key
+                `;
+            }
+
+            return {
+                success: true,
+                token: token.key,
+                username: user.username,
+                role: user.role
+            };
+        } catch (e: any) {
+            set.status = 500;
+            return { success: false, message: e?.message || 'Internal server error' };
+        }
     })
     // Validate a token and return user info (for /me checks in the frontend)
     .get('/me', async ({ request, set }: any) => {

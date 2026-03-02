@@ -25,6 +25,9 @@ const app = new Elysia()
       }
     }
   }))
+  .onError(({ code, error, set }) => {
+    return { success: false, message: error instanceof Error ? error.message : String(error) };
+  })
   // Serve static files if they exist (all-in-one mode)
   .onBeforeHandle(({ path }) => {
     if (path.startsWith('/api') || path.startsWith('/v1')) return;

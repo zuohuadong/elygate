@@ -44,135 +44,143 @@
 
 	// Current active path detection
 	const isActive = (href: string) => page.url.pathname === href;
+	const isLoginPage = $derived(page.url.pathname === "/login");
 </script>
 
-<div class="flex h-screen w-full bg-slate-50 dark:bg-slate-950 overflow-hidden">
-	<!-- Glassmorphism Sidebar -->
-	<aside
-		class="hidden md:flex flex-col w-64 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border-r border-slate-200 dark:border-slate-800 shadow-sm transition-all duration-300 z-10"
+{#if isLoginPage}
+	{@render children()}
+{:else}
+	<div
+		class="flex h-screen w-full bg-slate-50 dark:bg-slate-950 overflow-hidden"
 	>
-		<div
-			class="h-16 flex items-center px-6 border-b border-slate-200 dark:border-slate-800"
+		<!-- Glassmorphism Sidebar -->
+		<aside
+			class="hidden md:flex flex-col w-64 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border-r border-slate-200 dark:border-slate-800 shadow-sm transition-all duration-300 z-10"
 		>
 			<div
-				class="w-8 h-8 rounded-lg bg-gradient-to-tr from-indigo-500 to-purple-500 shrink-0 shadow-lg shadow-indigo-500/20"
-			></div>
-			<span
-				class="ml-3 font-semibold text-lg tracking-tight text-slate-900 dark:text-white"
-				>Elygate</span
-			>
-		</div>
-
-		<nav class="flex-1 overflow-y-auto py-6 px-4 space-y-1.5">
-			{#each navItems as item}
-				{@const Icon = item.icon}
-				<a
-					href={item.href}
-					class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200
-					{isActive(item.href)
-						? 'bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 shadow-sm'
-						: 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-white'}"
-				>
-					<Icon
-						class="w-5 h-5 {isActive(item.href)
-							? 'stroke-indigo-600 dark:stroke-indigo-400'
-							: 'stroke-slate-500 dark:stroke-slate-400'}"
-					/>
-					{item.name}
-				</a>
-			{/each}
-		</nav>
-
-		<!-- Sidebar Bottom User Info -->
-		<div class="p-4 border-t border-slate-200 dark:border-slate-800">
-			<div
-				class="flex items-center gap-3 px-3 py-2 rounded-lg transition-colors"
+				class="h-16 flex items-center px-6 border-b border-slate-200 dark:border-slate-800"
 			>
 				<div
-					class="w-8 h-8 rounded-full bg-gradient-to-tr from-cyan-400 to-blue-500 flex items-center justify-center text-white font-medium text-sm shadow-md shrink-0"
+					class="w-8 h-8 rounded-lg bg-gradient-to-tr from-indigo-500 to-purple-500 shrink-0 shadow-lg shadow-indigo-500/20"
+				></div>
+				<span
+					class="ml-3 font-semibold text-lg tracking-tight text-slate-900 dark:text-white"
+					>Elygate</span
 				>
-					{adminUsername.charAt(0).toUpperCase() || "A"}
-				</div>
-				<div class="flex-1 overflow-hidden">
-					<p
-						class="text-sm font-medium text-slate-900 dark:text-white truncate"
+			</div>
+
+			<nav class="flex-1 overflow-y-auto py-6 px-4 space-y-1.5">
+				{#each navItems as item}
+					{@const Icon = item.icon}
+					<a
+						href={item.href}
+						class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200
+						{isActive(item.href)
+							? 'bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 shadow-sm'
+							: 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-white'}"
 					>
-						{adminUsername || "Admin"}
-					</p>
-					<p class="text-xs text-slate-500 dark:text-slate-400">
-						Super Admin
-					</p>
-				</div>
-				<button
-					onclick={logout}
-					title="Logout"
-					class="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 transition-colors"
-				>
-					<svg
-						xmlns="http://www.w3.org/2000/svg"
-						width="16"
-						height="16"
-						viewBox="0 0 24 24"
-						fill="none"
-						stroke="currentColor"
-						stroke-width="2"
-						stroke-linecap="round"
-						stroke-linejoin="round"
-					>
-						<path
-							d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"
-						/><polyline points="16 17 21 12 16 7" /><line
-							x1="21"
-							y1="12"
-							x2="9"
-							y2="12"
+						<Icon
+							class="w-5 h-5 {isActive(item.href)
+								? 'stroke-indigo-600 dark:stroke-indigo-400'
+								: 'stroke-slate-500 dark:stroke-slate-400'}"
 						/>
-					</svg>
-				</button>
-			</div>
-		</div>
-	</aside>
+						{item.name}
+					</a>
+				{/each}
+			</nav>
 
-	<!-- Main Exhibit Area -->
-	<main
-		class="flex-1 flex flex-col min-w-0 bg-slate-50/50 dark:bg-slate-950/50 relative"
-	>
-		<!-- Top Bar -->
-		<header
-			class="h-16 flex-shrink-0 flex items-center justify-between px-8 bg-white/60 dark:bg-slate-900/60 backdrop-blur-md border-b border-slate-200/60 dark:border-slate-800/60 sticky top-0 z-20"
+			<!-- Sidebar Bottom User Info -->
+			<div class="p-4 border-t border-slate-200 dark:border-slate-800">
+				<div
+					class="flex items-center gap-3 px-3 py-2 rounded-lg transition-colors"
+				>
+					<div
+						class="w-8 h-8 rounded-full bg-gradient-to-tr from-cyan-400 to-blue-500 flex items-center justify-center text-white font-medium text-sm shadow-md shrink-0"
+					>
+						{adminUsername.charAt(0).toUpperCase() || "A"}
+					</div>
+					<div class="flex-1 overflow-hidden">
+						<p
+							class="text-sm font-medium text-slate-900 dark:text-white truncate"
+						>
+							{adminUsername || "Admin"}
+						</p>
+						<p class="text-xs text-slate-500 dark:text-slate-400">
+							Super Admin
+						</p>
+					</div>
+					<button
+						onclick={logout}
+						title="Logout"
+						class="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 transition-colors"
+					>
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							width="16"
+							height="16"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+						>
+							<path
+								d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"
+							/><polyline points="16 17 21 12 16 7" /><line
+								x1="21"
+								y1="12"
+								x2="9"
+								y2="12"
+							/>
+						</svg>
+					</button>
+				</div>
+			</div>
+		</aside>
+
+		<!-- Main Exhibit Area -->
+		<main
+			class="flex-1 flex flex-col min-w-0 bg-slate-50/50 dark:bg-slate-950/50 relative"
 		>
-			<div class="flex items-center">
-				<h1
-					class="text-lg font-medium text-slate-800 dark:text-slate-100"
-				>
-					{navItems.find((i) => isActive(i.href))?.name || "Overview"}
-				</h1>
-			</div>
-			<div class="flex items-center gap-4">
-				<!-- Language Switcher -->
-				<button
-					onclick={() =>
-						i18n.setLang(i18n.lang === "zh" ? "en" : "zh")}
-					class="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors border border-slate-200 dark:border-slate-800"
-				>
-					<Languages class="w-4 h-4" />
-					{i18n.lang === "zh" ? "English" : "简体中文"}
-				</button>
+			<!-- Top Bar -->
+			<header
+				class="h-16 flex-shrink-0 flex items-center justify-between px-8 bg-white/60 dark:bg-slate-900/60 backdrop-blur-md border-b border-slate-200/60 dark:border-slate-800/60 sticky top-0 z-20"
+			>
+				<div class="flex items-center">
+					<h1
+						class="text-lg font-medium text-slate-800 dark:text-slate-100"
+					>
+						{navItems.find((i) => isActive(i.href))?.name ||
+							"Overview"}
+					</h1>
+				</div>
+				<div class="flex items-center gap-4">
+					<!-- Language Switcher -->
+					<button
+						onclick={() =>
+							i18n.setLang(i18n.lang === "zh" ? "en" : "zh")}
+						class="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors border border-slate-200 dark:border-slate-800"
+					>
+						<Languages class="w-4 h-4" />
+						{i18n.lang === "zh" ? "English" : "简体中文"}
+					</button>
 
-				<button
-					class="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors rounded-full hover:bg-slate-100 dark:hover:bg-slate-800"
-				>
-					<MonitorSpeaker class="w-5 h-5" />
-				</button>
-			</div>
-		</header>
+					<button
+						class="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors rounded-full hover:bg-slate-100 dark:hover:bg-slate-800"
+					>
+						<MonitorSpeaker class="w-5 h-5" />
+					</button>
+				</div>
+			</header>
 
-		<!-- Smooth Content Slot -->
-		<div class="flex-1 overflow-y-auto p-8 layout-content">
-			{@render children()}
-		</div>
-	</main>
-</div>
+			<!-- Smooth Content Slot -->
+			<div class="flex-1 overflow-y-auto p-8 layout-content">
+				{@render children()}
+			</div>
+		</main>
+	</div>
+{/if}
 
 <style>
 	:global(body) {

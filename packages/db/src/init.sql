@@ -147,7 +147,7 @@ $$);
 -- ============================================================
 
 INSERT INTO users (username, password_hash, role, quota)
-VALUES ('admin', '$argon2id$v=19$m=65536,t=2,p=1$S9+t4mEmPtTXPaZA5M0VjA$fFEYyLuuoJ2YNe4/PCF2IXf', 10, 100000000)
+VALUES ('admin', '$argon2id$v=19$m=65536,t=2,p=1$YV3wTB83V0mMIG8xiW2/H4S7fEsz2nxAdFTvBjrIdgI$iJsslt6xW+TqGL+tOwDLxWT0ncdcM4wzogJJz2ppnTY', 10, 100000000)
 ON CONFLICT (username) DO NOTHING;
 
 -- Default system options
