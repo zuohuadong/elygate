@@ -3,25 +3,20 @@ version: "3.8"
 services:
   # ──── PostgreSQL with pgvector + pg_cron + pg_bigm ────────
   db:
-    build:
-      context: .
-      dockerfile: Dockerfile.postgres
+    image: pgsty/pigsty:v4.2.0
     container_name: elygate-db
     restart: always
-    environment:
-      POSTGRES_DB: ai_api
-      POSTGRES_USER: root
-      POSTGRES_PASSWORD: password
+    privileged: true
     ports:
       - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
-      - ./packages/db/src/init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
-    command: >
-      postgres -c max_connections=200 -c io_method=io_uring -c fsync=off -c shared_preload_libraries=pg_cron -c cron.database_name=ai_api
+      - /sys/fs/cgroup:/sys/fs/cgroup:ro
+      - pgdata:/data
+      - ./packages/db/src/init.sql:/tmp/init.sql:ro
+    # Pigsty default admin password is DBUser.DBA, default connection database can be postgres
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U root -d ai_api" ]
-      interval: 5s
+      test: [ "CMD-SHELL", "pg_isready -U dbuser_dba -d postgres" ]
+      interval: 10s
       timeout: 5s
       retries: 10
 
@@ -34,7 +29,7 @@ services:
     restart: always
     env_file: .env
     environment:
-      DATABASE_URL: postgresql://root:password@db:5432/ai_api
+      DATABASE_URL: postgresql://dbuser_dba:DBUser.DBA@db:5432/postgres
     ports:
       - "3000:3000"
     depends_on:

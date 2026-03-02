@@ -1,4 +1,9 @@
-FROM postgres:18-alpine
+FROM library/postgres:16-alpine
+
+# If in a region with restricted access, use Aliyun mirror for Alpine
+RUN if ! wget -q --spider --timeout=3 https://www.google.com; then \
+    sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories; \
+    fi
 
 # Install build dependencies
 RUN apk add --no-cache \
@@ -14,18 +19,23 @@ RUN apk add --no-cache \
     openssl-dev \
     postgresql-dev
 
-# Install pgvector
+# If in a region with restricted access, configure git proxy for Github
+RUN if ! wget -q --spider --timeout=3 https://www.google.com; then \
+    git config --global url."https://gh-proxy.net/https://github.com".insteadOf "https://github.com"; \
+    fi
+
+# Install pgvector (use -fno-lto to fix missing llvm-lto error on Alpine)
 RUN cd /tmp \
-    && git clone https://github.com/pgvector/pgvector.git \
+    && git clone --branch v0.8.0 https://github.com/pgvector/pgvector.git \
     && cd pgvector \
-    && make && make install \
+    && make USE_PGXS=1 PG_CFLAGS="-fno-lto" OPTFLAGS="" && make USE_PGXS=1 install \
     && cd / && rm -rf /tmp/pgvector
 
 # Install pg_cron
 RUN cd /tmp \
     && git clone https://github.com/citusdata/pg_cron.git \
     && cd pg_cron \
-    && make && make install \
+    && make USE_PGXS=1 && make USE_PGXS=1 install \
     && cd / && rm -rf /tmp/pg_cron
 
 # pg_bigm is harder to build on Alpine; use the pre-built package if available
