@@ -30,7 +30,7 @@ function getProviderHandler(type: number) {
  * Admin Management APIs (CRUD for Channels, Tokens, Logs, Users)
  * Consumed by Svelte client or other management panels.
  */
-export const adminRouter = new Elysia({ prefix: '/admin' })
+export const adminRouter = new Elysia()
     // Shared Auth Middleware: requires Bearer Token with admin privileges
     .use(authPlugin)
     .onBeforeHandle(({ user, set }: any) => {
