@@ -5,9 +5,9 @@ USER root
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PG_VERSION=18
 
-RUN pig update && pig install pg${PG_VERSION} -y
+RUN pig repo set
 
-RUN pig repo add pigsty -u
+RUN pig install pg${PG_VERSION} -y
 
 RUN pig install pgvector -v ${PG_VERSION} -y
 
@@ -15,19 +15,21 @@ RUN pig install pg_cron -v ${PG_VERSION} -y
 
 RUN pig install pg_bigm -v ${PG_VERSION} -y || echo "pg_bigm not available for PG18, skipping"
 
-RUN mkdir -p /etc/postgresql/${PG_VERSION}/main /var/lib/postgresql/${PG_VERSION}/main /var/run/postgresql /docker-entrypoint-initdb.d
+RUN mkdir -p /var/lib/postgresql/${PG_VERSION}/main /var/run/postgresql /docker-entrypoint-initdb.d
 
-RUN printf "data_directory = '/var/lib/postgresql/18/main'\nhba_file = '/etc/postgresql/18/main/pg_hba.conf'\nlisten_addresses = '*'\nport = 5432\nmax_connections = 100\nshared_buffers = 256MB\ndynamic_shared_memory_type = posix\nmax_wal_size = 1GB\nmin_wal_size = 80MB\nlog_timezone = Asia/Shanghai\ndatestyle = 'iso, mdy'\ntimezone = Asia/Shanghai\nlc_messages = C\nlc_monetary = C\nlc_numeric = C\nlc_time = C\ndefault_text_search_config = 'pg_catalog.english'\nshared_preload_libraries = 'pg_cron'\ncron.database_name = postgres\n" > /etc/postgresql/${PG_VERSION}/main/postgresql.conf
+RUN printf "listen_addresses = '*'\nport = 5432\nmax_connections = 100\nshared_buffers = 256MB\nshared_preload_libraries = 'pg_cron'\ncron.database_name = postgres\n" >> /usr/share/postgresql/${PG_VERSION}/postgresql.conf.sample
 
-RUN printf "local all all trust\nhost all all 127.0.0.1/32 trust\nhost all all 0.0.0.0/0 md5\nhost all all ::1/128 trust\n" > /etc/postgresql/${PG_VERSION}/main/pg_hba.conf
-
-RUN chown -R postgres:postgres /etc/postgresql/${PG_VERSION} /var/lib/postgresql /var/run/postgresql
+RUN chown -R postgres:postgres /var/lib/postgresql /var/run/postgresql
 
 COPY packages/db/src/init.sql /docker-entrypoint-initdb.d/init.sql
-COPY scripts/init-pigsty-entrypoint.sh /docker-entrypoint.sh
-RUN chmod +x /docker-entrypoint.sh
 
 EXPOSE 5432
+
+ENV PGDATA=/var/lib/postgresql/${PG_VERSION}/main
+ENV PATH="/usr/lib/postgresql/${PG_VERSION}/bin:$PATH"
+
+COPY scripts/init-pigsty-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["postgres"]
