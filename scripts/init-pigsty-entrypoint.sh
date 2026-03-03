@@ -14,8 +14,8 @@ if [ ! -f "$DATA_DIR/postgresql.conf" ]; then
     echo "listen_addresses = '*'" >> "$DATA_DIR/postgresql.conf"
     echo "shared_preload_libraries = 'pg_cron'" >> "$DATA_DIR/postgresql.conf"
     echo "cron.database_name = 'postgres'" >> "$DATA_DIR/postgresql.conf"
-    echo "host all all 0.0.0.0/0 md5" >> "$DATA_DIR/pg_hba.conf"
-    echo "host all all ::/0 md5" >> "$DATA_DIR/pg_hba.conf"
+    echo "host all all 0.0.0.0/0 scram-sha-256" >> "$DATA_DIR/pg_hba.conf"
+    echo "host all all ::/0 scram-sha-256" >> "$DATA_DIR/pg_hba.conf"
     
     echo "=== Starting PostgreSQL temporarily ==="
     su - postgres -c "$PG_BIN/pg_ctl -D $DATA_DIR -l /tmp/pg.log start"
