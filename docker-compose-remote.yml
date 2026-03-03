@@ -1,0 +1,48 @@
+version: "3.8"
+
+services:
+  # ____ PostgreSQL with pgvector + pg_cron + pg_bigm ________
+  db:
+    image: pgsty/pigsty:v4.2.0
+    container_name: elygate-db
+    restart: always
+    privileged: true
+    ports:
+      - "5432:5432"
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:ro
+      - pgdata:/data
+      - ./packages/db/src/init.sql:/tmp/init.sql:ro
+
+  # ____ Gateway (Bun + Elysia) ______________________________
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.gateway
+    container_name: elygate-gateway
+    restart: always
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://dbuser_dba:DBUser.DBA@db:5432/postgres
+    ports:
+      - "3000:3000"
+    depends_on:
+      - db
+
+  # ____ Web Admin Panel (SvelteKit + Bun) __________________
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    container_name: elygate-web
+    restart: always
+    env_file: .env
+    environment:
+      VITE_API_BASE_URL: http://gateway:3000
+    ports:
+      - "3001:3001"
+    depends_on:
+      - gateway
+
+volumes:
+  pgdata:
