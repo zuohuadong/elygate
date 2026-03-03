@@ -7,7 +7,26 @@ import { authPlugin } from '../middleware/auth';
  * Allows registered users to redeem CDKs for quota.
  */
 export const redemptionsRouter = new Elysia({ prefix: '/redemptions' })
-    .use(authPlugin)
+    // Direct Auth Logic
+    .onBeforeHandle(async ({ request, set }: any) => {
+        const authHeader = request.headers.get('authorization');
+        if (!authHeader?.startsWith('Bearer ')) {
+            set.status = 401;
+            throw new Error('Unauthorized');
+        }
+        const apiKey = authHeader.substring(7);
+        const [user] = await sql`
+            SELECT u.id, u.group FROM tokens t
+            JOIN users u ON t.user_id = u.id
+            WHERE t.key = ${apiKey} AND t.status = 1 AND u.status = 1
+            LIMIT 1
+        `;
+        if (!user) {
+            set.status = 401;
+            throw new Error('Invalid or expired token');
+        }
+        return { user };
+    })
     .post('/redeem', async ({ body, user }: any) => {
         const key = body?.key?.trim();
 
