@@ -1,6 +1,7 @@
 #!/bin/bash
 set -e
 
+export PATH="/usr/lib/postgresql/18/bin:$PATH"
 DATA_DIR="/var/lib/postgresql/18/main"
 
 if [ ! -d "$DATA_DIR/base" ]; then
