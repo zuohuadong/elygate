@@ -6,6 +6,8 @@ PG_BIN="/usr/lib/postgresql/18/bin"
 
 if [ ! -f "$DATA_DIR/postgresql.conf" ]; then
     echo "=== Initializing PostgreSQL data directory ==="
+    rm -rf "$DATA_DIR"/*
+    rm -rf "$DATA_DIR"/.[!.]*
     su - postgres -c "$PG_BIN/initdb -D $DATA_DIR"
     
     echo "=== Configuring PostgreSQL ==="
