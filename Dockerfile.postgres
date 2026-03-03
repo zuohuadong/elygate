@@ -5,11 +5,15 @@ USER root
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PG_VERSION=18
 
-RUN pig install pg${PG_VERSION} -y
+RUN pig update && pig install pg${PG_VERSION} -y
 
 RUN pig repo add pigsty -u
 
-RUN pig install pgvector pg_cron pg_bigm -v ${PG_VERSION} -y
+RUN pig install pgvector -v ${PG_VERSION} -y
+
+RUN pig install pg_cron -v ${PG_VERSION} -y
+
+RUN pig install pg_bigm -v ${PG_VERSION} -y || echo "pg_bigm not available for PG18, skipping"
 
 RUN mkdir -p /etc/postgresql/${PG_VERSION}/main /var/lib/postgresql/${PG_VERSION}/main /var/run/postgresql /docker-entrypoint-initdb.d
 
