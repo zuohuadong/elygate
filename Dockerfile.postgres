@@ -15,9 +15,7 @@ RUN pig install pg_cron -v ${PG_VERSION} -y
 
 RUN pig install pg_bigm -v ${PG_VERSION} -y || echo "pg_bigm not available for PG18, skipping"
 
-RUN mkdir -p /var/lib/postgresql/${PG_VERSION}/main /var/run/postgresql /docker-entrypoint-initdb.d
-
-RUN printf "listen_addresses = '*'\nport = 5432\nmax_connections = 100\nshared_buffers = 256MB\nshared_preload_libraries = 'pg_cron'\ncron.database_name = postgres\n" >> /usr/share/postgresql/${PG_VERSION}/postgresql.conf.sample
+RUN mkdir -p /var/run/postgresql /docker-entrypoint-initdb.d
 
 RUN chown -R postgres:postgres /var/lib/postgresql /var/run/postgresql
 
