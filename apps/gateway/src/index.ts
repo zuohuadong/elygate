@@ -14,6 +14,7 @@ import { audioRouter } from "./routes/audio";
 import { rerankRouter } from "./routes/rerank";
 import { videoRouter } from "./routes/video";
 import { sysRouter } from "./routes/sys";
+import { mjRouter } from "./routes/mj";
 import { memoryCache } from "./services/cache";
 const app = new Elysia()
   .use(cors())
@@ -42,6 +43,7 @@ const app = new Elysia()
       .use(redemptionsRouter)
       .use(authRouter)
   )
+  .use(mjRouter)
   .group("/v1/chat", (app) =>
     app.use(chatRouter)
   )
