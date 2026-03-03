@@ -2,7 +2,7 @@ version: "3.8"
 
 services:
   db:
-    image: postgres:17
+    image: ghcr.nju.edu.cn/zuohuadong/elygate-db:latest
     container_name: elygate-db
     restart: always
     environment:
