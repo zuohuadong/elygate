@@ -20,7 +20,9 @@ export function calculateCost(
     // Check for fixed cost models first
     if (FixedCostModels[modelName] !== undefined) {
         const gRatio = GroupRatio[groupName] || 1;
-        return Math.ceil(FixedCostModels[modelName] * gRatio);
+        // In endpoints like images, completionTokens carries the 'n' count
+        const count = Math.max(1, promptTokens + completionTokens);
+        return Math.ceil(FixedCostModels[modelName] * count * gRatio);
     }
 
     const mRatio = ModelRatio[modelName] !== undefined ? ModelRatio[modelName] : 1;
