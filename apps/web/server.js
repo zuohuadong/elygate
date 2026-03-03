@@ -2,7 +2,7 @@ import { serve } from "bun";
 import { join } from "path";
 import { existsSync } from "fs";
 
-const port = process.env.PORT || 3001;
+const port = parseInt(process.env.PORT || "3001", 10);
 
 // 自动探测 build 目录位置
 let buildDir = join(process.cwd(), "build");
