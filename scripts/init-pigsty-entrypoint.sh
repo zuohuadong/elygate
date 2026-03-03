@@ -4,7 +4,7 @@ set -e
 DATA_DIR="/var/lib/postgresql/18/main"
 PG_BIN="/usr/lib/postgresql/18/bin"
 
-if [ ! -f "$DATA_DIR/PG_VERSION" ]; then
+if [ ! -f "$DATA_DIR/postgresql.conf" ]; then
     echo "=== Initializing PostgreSQL data directory ==="
     rm -rf "$DATA_DIR"
     su - postgres -c "$PG_BIN/initdb -D $DATA_DIR"
