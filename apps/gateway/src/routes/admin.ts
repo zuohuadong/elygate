@@ -30,23 +30,38 @@ function getProviderHandler(type: number) {
  * Admin Management APIs (CRUD for Channels, Tokens, Logs, Users)
  * Consumed by Svelte client or other management panels.
  */
-export const adminRouter = new Elysia()
-    // Shared Auth Middleware: requires Bearer Token with admin privileges
-    .use(authPlugin)
-    .onBeforeHandle(({ user, set, request }: any) => {
-        console.log(`[Admin] Auth check for path: ${new URL(request.url).pathname}, User:`, user?.id || 'undefined');
-
-        // Safety Guard: ensure user is defined to avoid TypeError: undefined is not an object (evaluating 'user.role')
-        if (!user) {
+export const adminRouter = new Elysia({ prefix: '/admin' })
+    // Direct Authentication Hook - Resolved scoping issues with .derive by inlining
+    .onBeforeHandle(async ({ request, set }: any) => {
+        const authHeader = request.headers.get('authorization');
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
             set.status = 401;
-            throw new Error("Unauthorized: Identity could not be verified");
+            throw new Error('Missing or invalid Authorization header');
         }
 
-        // Authorization Guard: Strict check allowing only role 10 (Super Admin)
+        const apiKey = authHeader.substring(7);
+        const rows = await sql`
+            SELECT u.id, u.username, u.role, u.status
+            FROM tokens t
+            JOIN users u ON t.user_id = u.id
+            WHERE t.key = ${apiKey} AND t.status = 1 AND u.status = 1
+            LIMIT 1
+        `;
+
+        if (!rows || rows.length === 0) {
+            set.status = 401;
+            throw new Error('Invalid API key or token expired');
+        }
+
+        const user = rows[0];
+        console.log(`[Admin] Auth success for ${user.username}, Path: ${new URL(request.url).pathname}`);
+
         if (user.role !== 10) {
             set.status = 403;
             throw new Error("Forbidden: Admin privileges required");
         }
+
+        return { user };
     })
 
     // --- Channel Management (Channels) ---
