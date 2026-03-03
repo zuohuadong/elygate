@@ -140,20 +140,23 @@ export const memoryCache = {
 
     /**
      * Initialize PostgreSQL LISTEN for multi-instance sync.
+     * Use isolated local postgres.js build to avoid touching package.json
      */
     async initSync() {
         console.log('[Cache] Initializing PostgreSQL LISTEN for sync...');
         try {
-            if (typeof (sql as any).listen === 'function') {
-                (sql as any).listen('refresh_cache', (payload: string) => {
-                    console.log(`[Cache] Received sync signal: ${payload}`);
-                    if (payload === 'refresh_cache') {
-                        this.refresh(true).catch(console.error);
-                    }
-                });
-            } else {
-                console.warn('[Cache] sql.listen is not supported by the current DB driver. Multi-instance sync is disabled.');
-            }
+            // Lazy load the locally bundled postgres driver
+            // @ts-expect-error: Loading raw JS bundle without type definitions
+            const { default: postgres } = await import('./postgres_bundled.js');
+            const sqlListen = postgres(process.env.DATABASE_URL!);
+
+            await sqlListen.listen('refresh_cache', (payload: string) => {
+                console.log(`[Cache] Received sync signal: ${payload}`);
+                if (payload === 'refresh_cache') {
+                    this.refresh(true).catch(console.error);
+                }
+            });
+            console.log('[Cache] Multi-instance sync listener established.');
         } catch (e) {
             console.error('[Cache] Failed setting up listener:', e);
         }
