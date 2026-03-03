@@ -1,32 +1,54 @@
-FROM postgres:17-bookworm
+FROM pgsty/pigsty:v4.2.0
+
+USER root
 
 ENV DEBIAN_FRONTEND=noninteractive
-ENV PG_VERSION=17
+ENV PG_VERSION=18
 
-RUN apt-get update && apt-get install -y \
-    curl \
-    ca-certificates \
-    gnupg \
-    lsb-release \
-    && rm -rf /var/lib/apt/lists/*
+RUN pig install pg${PG_VERSION} -y
 
-RUN curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /usr/share/keyrings/postgresql-keyring.gpg \
-    && echo "deb [signed-by=/usr/share/keyrings/postgresql-keyring.gpg] http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list
+RUN pig repo add pigsty -u
 
-RUN apt-get update && apt-get install -y \
-    postgresql-${PG_VERSION}-cron \
-    && rm -rf /var/lib/apt/lists/*
+RUN pig install pgvector pg_cron pg_bigm -v ${PG_VERSION} -y
 
-RUN apt-get update && apt-get install -y \
-    postgresql-${PG_VERSION}-pg-bigm \
-    || echo "pg_bigm not available, skipping" \
-    && rm -rf /var/lib/apt/lists/*
+RUN mkdir -p /etc/postgresql/${PG_VERSION}/main /var/lib/postgresql/${PG_VERSION}/main /var/run/postgresql /docker-entrypoint-initdb.d
 
-RUN mkdir -p /docker-entrypoint-initdb.d
+RUN cat > /etc/postgresql/${PG_VERSION}/main/postgresql.conf << 'EOF'
+data_directory = '/var/lib/postgresql/18/main'
+hba_file = '/etc/postgresql/18/main/pg_hba.conf'
+listen_addresses = '*'
+port = 5432
+max_connections = 100
+shared_buffers = 256MB
+dynamic_shared_memory_type = posix
+max_wal_size = 1GB
+min_wal_size = 80MB
+log_timezone = Asia/Shanghai
+datestyle = 'iso, mdy'
+timezone = Asia/Shanghai
+lc_messages = C
+lc_monetary = C
+lc_numeric = C
+lc_time = C
+default_text_search_config = 'pg_catalog.english'
+shared_preload_libraries = 'pg_cron'
+cron.database_name = postgres
+EOF
+
+RUN cat > /etc/postgresql/${PG_VERSION}/main/pg_hba.conf << 'EOF'
+local all all trust
+host all all 127.0.0.1/32 trust
+host all all 0.0.0.0/0 md5
+host all all ::1/128 trust
+EOF
+
+RUN chown -R postgres:postgres /etc/postgresql/${PG_VERSION} /var/lib/postgresql /var/run/postgresql
 
 COPY packages/db/src/init.sql /docker-entrypoint-initdb.d/init.sql
-
-RUN echo "shared_preload_libraries = 'pg_cron'" >> /usr/share/postgresql/postgresql.conf.sample \
-    && echo "cron.database_name = 'postgres'" >> /usr/share/postgresql/postgresql.conf.sample
+COPY scripts/init-pigsty-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
 
 EXPOSE 5432
+
+ENTRYPOINT ["/docker-entrypoint.sh"]
+CMD ["postgres"]
