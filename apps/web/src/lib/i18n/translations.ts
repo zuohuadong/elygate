@@ -52,6 +52,7 @@ export const en = {
         users: "Users",
         settings: "Settings",
         redemptions: "Redemptions",
+        pricing: "Pricing",
     }
 };
 
@@ -109,5 +110,6 @@ export const zh = {
         users: "用户管理",
         settings: "系统设置",
         redemptions: "兑换码",
+        pricing: "计费倍率",
     }
 };

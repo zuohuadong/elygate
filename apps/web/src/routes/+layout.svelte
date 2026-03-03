@@ -10,6 +10,7 @@
 		Users,
 		Gift,
 		WalletCards,
+		BadgeDollarSign,
 	} from "lucide-svelte";
 	import { page } from "$app/state";
 	import { i18n } from "$lib/i18n/index.svelte";
@@ -69,6 +70,11 @@
 				name: i18n.t.nav.redemptions || "Redemptions",
 				href: "/redemptions",
 				icon: Gift,
+			});
+			baseNav.push({
+				name: i18n.t.nav.pricing || "Pricing",
+				href: "/pricing",
+				icon: BadgeDollarSign,
 			});
 			baseNav.push({
 				name: i18n.t.nav.settings,
