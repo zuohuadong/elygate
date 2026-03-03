@@ -17,7 +17,7 @@ services:
 
     # ──── Gateway (Bun + Elysia) ──────────────────────────────
   gateway:
-    image: ghcr.io/zuohuadong/elygate-gateway:latest
+    image: ghcr.nju.edu.cn/zuohuadong/elygate-gateway:latest
     container_name: elygate-gateway
     restart: always
     env_file: .env
@@ -30,7 +30,7 @@ services:
 
   # ──── Web Admin Panel (SvelteKit + Bun) ──────────────────
   web:
-    image: ghcr.io/zuohuadong/elygate-web:latest
+    image: ghcr.nju.edu.cn/zuohuadong/elygate-web:latest
     container_name: elygate-web
     restart: always
     env_file: .env
