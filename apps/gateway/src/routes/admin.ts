@@ -214,6 +214,61 @@ export const adminRouter = new Elysia()
             ORDER BY id DESC
         `;
     })
+    .post('/users', async ({ body }: any) => {
+        let passwordHash = '';
+        if (body.password) {
+            passwordHash = await Bun.password.hash(body.password, { algorithm: "argon2id" });
+        }
+        const [result] = await sql`
+            INSERT INTO users (username, password_hash, role, quota, "group", status)
+            VALUES (${body.username}, ${passwordHash}, ${body.role || 1}, ${body.quota || 0}, ${body.group || 'default'}, ${body.status || 1})
+            RETURNING id, username, quota, used_quota AS "usedQuota", role, "group", status, created_at AS "createdAt"
+        `;
+        return result;
+    })
+    .put('/users/:id', async ({ params: { id }, body }: any) => {
+        let updatePasswordSql = sql``;
+        if (body.password) {
+            const hash = await Bun.password.hash(body.password, { algorithm: "argon2id" });
+            updatePasswordSql = sql`, password_hash = ${hash}`;
+        }
+        const [result] = await sql`
+            UPDATE users 
+            SET username = COALESCE(${body.username}, username),
+                role = COALESCE(${body.role}, role),
+                quota = COALESCE(${body.quota}, quota),
+                "group" = COALESCE(${body.group}, "group"),
+                status = COALESCE(${body.status}, status)
+                ${updatePasswordSql}
+            WHERE id = ${Number(id)}
+            RETURNING id, username, quota, used_quota AS "usedQuota", role, "group", status, created_at AS "createdAt"
+        `;
+        return result;
+    })
+    .delete('/users/:id', async ({ params: { id } }) => {
+        const [result] = await sql`DELETE FROM users WHERE id = ${Number(id)} RETURNING id`;
+        return { success: true, deleted: result };
+    })
+
+    // --- System Options (Settings) ---
+    .get('/options', async () => {
+        const rows = await sql`SELECT key, value FROM options`;
+        // Convert array of {key, value} to a single record object
+        const settings: Record<string, string> = {};
+        for (const r of rows) settings[r.key] = r.value;
+        return settings;
+    })
+    .put('/options', async ({ body }: any) => {
+        // body is a key-value record
+        const updates = Object.entries(body).map(([key, value]) =>
+            sql`INSERT INTO options (key, value) VALUES (${key}, ${String(value)}) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`
+        );
+        if (updates.length > 0) {
+            await Promise.all(updates);
+            memoryCache.refresh().catch(console.error);
+        }
+        return { success: true };
+    })
 
     // --- Dashboard Stats ---
     .get('/dashboard/stats', async () => {

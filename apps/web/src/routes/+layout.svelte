@@ -7,6 +7,7 @@
 		MonitorSpeaker,
 		Settings,
 		Languages,
+		Users,
 	} from "lucide-svelte";
 	import { page } from "$app/state";
 	import { i18n } from "$lib/i18n/index.svelte";
@@ -39,6 +40,7 @@
 		{ name: i18n.t.nav.channels, href: "/channels", icon: MonitorSpeaker },
 		{ name: i18n.t.nav.tokens, href: "/tokens", icon: KeyRound },
 		{ name: i18n.t.nav.logs, href: "/logs", icon: House },
+		{ name: i18n.t.nav.users, href: "/users", icon: Users },
 		{ name: i18n.t.nav.settings, href: "/settings", icon: Settings },
 	]);
 
