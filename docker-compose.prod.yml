@@ -1,0 +1,45 @@
+version: "3.8"
+
+services:
+  # ──── PostgreSQL with pgvector + pg_cron + pg_bigm ────────
+  db:
+    image: pgsty/pigsty:v4.2.0
+    container_name: elygate-db
+    restart: always
+    privileged: true
+    ports:
+      - "5432:5432"
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:ro
+      - pgdata:/data
+      - ./packages/db/src/init.sql:/tmp/init.sql:ro
+    # Removed healthcheck to avoid pg_isready not found issues on Podman
+
+    # ──── Gateway (Bun + Elysia) ──────────────────────────────
+  gateway:
+    image: ghcr.io/zuohuadong/elygate-gateway:latest
+    container_name: elygate-gateway
+    restart: always
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://dbuser_dba:DBUser.DBA@db:5432/postgres
+    ports:
+      - "3000:3000"
+    depends_on:
+      - db
+
+  # ──── Web Admin Panel (SvelteKit + Bun) ──────────────────
+  web:
+    image: ghcr.io/zuohuadong/elygate-web:latest
+    container_name: elygate-web
+    restart: always
+    env_file: .env
+    environment:
+      VITE_API_BASE_URL: http://gateway:3000
+    ports:
+      - "3001:3001"
+    depends_on:
+      - gateway
+
+volumes:
+  pgdata:
