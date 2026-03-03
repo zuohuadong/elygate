@@ -19,9 +19,19 @@ git clone https://github.com/zuohuadong/elygate.git && cd elygate
 cp .env.example .env
 ```
 
-#### 2. Run
+#### 2. Run (Pre-built Images)
+By default, this pulls images from `ghcr.io`. 
+*Note: If you are in Mainland China, see the Chinese README for mirror acceleration.*
+
 ```bash
-docker compose up -d
+# Download the lightweight production compose file
+curl -O https://raw.githubusercontent.com/zuohuadong/elygate/main/docker-compose.prod.yml
+
+# Check and restore "ghcr.io" if it was changed to a mirror
+sed -i 's/ghcr.nju.edu.cn/ghcr.io/g' docker-compose.prod.yml
+
+# Run the stack
+docker compose -f docker-compose.prod.yml up -d
 ```
 
 #### 3. Access
@@ -147,9 +157,24 @@ git clone https://github.com/zuohuadong/elygate.git && cd elygate
 cp .env.example .env
 ```
 
-#### 2. 一键启动
+#### 2. 一键启动 (预编译镜像部署)
+
+得益于 GitHub Actions，您**无需在服务器编译**即可极速拉取并启动应用。
+
+**对于国内服务器（默认已开启南京大学 GHCR 镜像加速）：**
 ```bash
-docker compose up -d
+# 下载专为线上优化的轻量级编排文件
+curl -O https://raw.githubusercontent.com/zuohuadong/elygate/main/docker-compose.prod.yml
+
+# 一键启动（享受国内镜像高速拉取）
+docker compose -f docker-compose.prod.yml up -d
+```
+
+**对于海外服务器（需要换回官方源）：**
+```bash
+curl -O https://raw.githubusercontent.com/zuohuadong/elygate/main/docker-compose.prod.yml
+sed -i 's/ghcr.nju.edu.cn/ghcr.io/g' docker-compose.prod.yml
+docker compose -f docker-compose.prod.yml up -d
 ```
 
 #### 3. 服务看板
