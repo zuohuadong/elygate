@@ -9,7 +9,7 @@ COPY apps/gateway/package.json ./apps/gateway/
 COPY apps/web/package.json ./apps/web/
 COPY packages/db/package.json ./packages/db/
 
-RUN bun install --production
+RUN bun install
 
 # Copy source
 COPY apps/gateway ./apps/gateway
