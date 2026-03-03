@@ -24,7 +24,8 @@
         isLoading = true;
         errorMsg = "";
         try {
-            const data = await apiFetch<Record<string, string>>("/options");
+            const data =
+                await apiFetch<Record<string, string>>("/admin/options");
             settings = { ...settings, ...data }; // Merge with defaults
         } catch (err: any) {
             errorMsg = err.message || "Failed to load settings";
@@ -41,7 +42,7 @@
         errorMsg = "";
         successMsg = "";
         try {
-            await apiFetch("/options", {
+            await apiFetch("/admin/options", {
                 method: "PUT",
                 body: JSON.stringify(settings),
             });

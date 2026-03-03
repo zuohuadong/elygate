@@ -18,7 +18,7 @@
     async function loadChannels() {
         isLoading = true;
         try {
-            const data = await apiFetch<any[]>("/channels");
+            const data = await apiFetch<any[]>("/admin/channels");
             channels = data.map((c) => ({
                 ...c,
                 displayStatus:
@@ -96,7 +96,9 @@
         );
         if (!confirm(confirmMsg)) return;
         try {
-            await apiFetch(`/channels/${channel.id}`, { method: "DELETE" });
+            await apiFetch(`/admin/channels/${channel.id}`, {
+                method: "DELETE",
+            });
             await loadChannels();
         } catch (err: any) {
             alert(i18n.t.common.failed + ": " + err.message);
@@ -106,12 +108,12 @@
     async function handleSave(data: any) {
         try {
             if (selectedChannel) {
-                await apiFetch(`/channels/${selectedChannel.id}`, {
+                await apiFetch(`/admin/channels/${selectedChannel.id}`, {
                     method: "PUT",
                     body: JSON.stringify(data),
                 });
             } else {
-                await apiFetch("/channels", {
+                await apiFetch("/admin/channels", {
                     method: "POST",
                     body: JSON.stringify(data),
                 });

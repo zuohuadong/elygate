@@ -19,7 +19,7 @@
     async function loadTokens() {
         isLoading = true;
         try {
-            const data = await apiFetch<any[]>("/tokens");
+            const data = await apiFetch<any[]>("/admin/tokens");
             tokens = data.map((t) => ({
                 ...t,
                 // Status 1-Active 2-Banned, mapping based on DB Schema
@@ -90,7 +90,7 @@
         );
         if (!confirm(confirmMsg)) return;
         try {
-            await apiFetch(`/tokens/${token.id}`, { method: "DELETE" });
+            await apiFetch(`/admin/tokens/${token.id}`, { method: "DELETE" });
             await loadTokens();
         } catch (err: any) {
             alert(i18n.t.common.failed + ": " + err.message);
@@ -100,12 +100,12 @@
     async function handleSave(data: any) {
         try {
             if (selectedToken) {
-                await apiFetch(`/tokens/${selectedToken.id}`, {
+                await apiFetch(`/admin/tokens/${selectedToken.id}`, {
                     method: "PUT",
                     body: JSON.stringify(data),
                 });
             } else {
-                await apiFetch("/tokens", {
+                await apiFetch("/admin/tokens", {
                     method: "POST",
                     body: JSON.stringify(data),
                 });

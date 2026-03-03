@@ -16,7 +16,7 @@
     async function loadUsers() {
         isLoading = true;
         try {
-            const data = await apiFetch<any[]>("/users");
+            const data = await apiFetch<any[]>("/admin/users");
             users = data.map((u) => ({
                 ...u,
                 displayRole: u.role >= 10 ? "Admin" : "Normal User",
@@ -77,7 +77,7 @@
         )
             return;
         try {
-            await apiFetch(`/users/${user.id}`, { method: "DELETE" });
+            await apiFetch(`/admin/users/${user.id}`, { method: "DELETE" });
             await loadUsers();
         } catch (err: any) {
             alert(i18n.t.common.failed + ": " + err.message);
@@ -87,12 +87,12 @@
     async function handleSave(data: any) {
         try {
             if (selectedUser) {
-                await apiFetch(`/users/${selectedUser.id}`, {
+                await apiFetch(`/admin/users/${selectedUser.id}`, {
                     method: "PUT",
                     body: JSON.stringify(data),
                 });
             } else {
-                await apiFetch("/users", {
+                await apiFetch("/admin/users", {
                     method: "POST",
                     body: JSON.stringify(data),
                 });

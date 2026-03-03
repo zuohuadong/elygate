@@ -13,8 +13,8 @@
         try {
             // Fetch aggregated stats and recent errors from backend
             const [statsRes, errorsRes] = await Promise.all([
-                apiFetch<any>("/dashboard/stats"),
-                apiFetch<any[]>("/dashboard/errors"),
+                apiFetch<any>("/admin/dashboard/stats"),
+                apiFetch<any[]>("/admin/dashboard/errors"),
             ]);
             stats = statsRes;
             errorLogs = errorsRes;
