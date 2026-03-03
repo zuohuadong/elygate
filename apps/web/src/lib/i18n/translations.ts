@@ -51,6 +51,7 @@ export const en = {
         logs: "Logs",
         users: "Users",
         settings: "Settings",
+        redemptions: "Redemptions",
     }
 };
 
@@ -107,5 +108,6 @@ export const zh = {
         logs: "收支明细",
         users: "用户管理",
         settings: "系统设置",
+        redemptions: "兑换码",
     }
 };

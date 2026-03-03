@@ -8,6 +8,8 @@
 		Settings,
 		Languages,
 		Users,
+		Gift,
+		WalletCards,
 	} from "lucide-svelte";
 	import { page } from "$app/state";
 	import { i18n } from "$lib/i18n/index.svelte";
@@ -17,6 +19,7 @@
 
 	let { children } = $props();
 	let adminUsername = $state("");
+	let userRole = $state(1); // 1 = normal, 10 = admin
 
 	onMount(() => {
 		i18n.init();
@@ -25,24 +28,68 @@
 			goto("/login");
 			return;
 		}
-		adminUsername = localStorage.getItem("admin_username") || "Admin";
+		adminUsername = localStorage.getItem("admin_username") || "User";
+		userRole = parseInt(localStorage.getItem("admin_role") || "1", 10);
 	});
 
 	function logout() {
 		clearToken();
 		localStorage.removeItem("admin_username");
+		localStorage.removeItem("admin_role");
 		goto("/login");
 	}
 
-	// Side navigation data (derived from current language)
-	const navItems = $derived([
-		{ name: i18n.t.nav.dashboard, href: "/", icon: LayoutDashboard },
-		{ name: i18n.t.nav.channels, href: "/channels", icon: MonitorSpeaker },
-		{ name: i18n.t.nav.tokens, href: "/tokens", icon: KeyRound },
-		{ name: i18n.t.nav.logs, href: "/logs", icon: House },
-		{ name: i18n.t.nav.users, href: "/users", icon: Users },
-		{ name: i18n.t.nav.settings, href: "/settings", icon: Settings },
-	]);
+	// Side navigation data (derived from current language and role)
+	const navItems = $derived.by(() => {
+		const baseNav = [];
+		if (userRole >= 10) {
+			// Admin links
+			baseNav.push({
+				name: i18n.t.nav.dashboard,
+				href: "/",
+				icon: LayoutDashboard,
+			});
+			baseNav.push({
+				name: i18n.t.nav.channels,
+				href: "/channels",
+				icon: MonitorSpeaker,
+			});
+			baseNav.push({
+				name: i18n.t.nav.tokens,
+				href: "/tokens",
+				icon: KeyRound,
+			});
+			baseNav.push({ name: i18n.t.nav.logs, href: "/logs", icon: House });
+			baseNav.push({
+				name: i18n.t.nav.users,
+				href: "/users",
+				icon: Users,
+			});
+			baseNav.push({
+				name: i18n.t.nav.redemptions || "Redemptions",
+				href: "/redemptions",
+				icon: Gift,
+			});
+			baseNav.push({
+				name: i18n.t.nav.settings,
+				href: "/settings",
+				icon: Settings,
+			});
+		} else {
+			// Consumer user links
+			baseNav.push({
+				name: i18n.lang === "zh" ? "我的钱包" : "My Wallet",
+				href: "/consumer",
+				icon: WalletCards,
+			});
+			baseNav.push({
+				name: i18n.t.nav.tokens || "Tokens",
+				href: "/tokens",
+				icon: KeyRound,
+			});
+		}
+		return baseNav;
+	});
 
 	// Current active path detection
 	const isActive = (href: string) => page.url.pathname === href;
@@ -108,7 +155,7 @@
 							{adminUsername || "Admin"}
 						</p>
 						<p class="text-xs text-slate-500 dark:text-slate-400">
-							Super Admin
+							{userRole >= 10 ? "Super Admin" : "User"}
 						</p>
 					</div>
 					<button

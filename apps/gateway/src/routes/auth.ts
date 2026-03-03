@@ -138,7 +138,7 @@ export const authRouter = new Elysia({ prefix: '/auth' })
         }
         const key = authHeader.substring(7);
         const [row] = await sql`
-            SELECT u.username, u.role, t.key
+            SELECT u.id, u.username, u.role, u.quota, u.used_quota as "usedQuota", u."group", t.key
             FROM tokens t
             JOIN users u ON t.user_id = u.id
             WHERE t.key = ${key} AND t.status = 1 AND u.status = 1
@@ -148,5 +148,33 @@ export const authRouter = new Elysia({ prefix: '/auth' })
             set.status = 401;
             throw new Error('Invalid or expired token');
         }
-        return { username: row.username, role: row.role };
+        return row;
+    })
+    // Get personal logs
+    .get('/logs', async ({ request, set }: any) => {
+        const authHeader = request.headers.get('authorization');
+        if (!authHeader?.startsWith('Bearer ')) {
+            set.status = 401;
+            throw new Error('Unauthorized');
+        }
+        const key = authHeader.substring(7);
+        const [userRow] = await sql`
+            SELECT u.id
+            FROM tokens t
+            JOIN users u ON t.user_id = u.id
+            WHERE t.key = ${key} AND t.status = 1 AND u.status = 1
+            LIMIT 1
+        `;
+        if (!userRow) {
+            set.status = 401;
+            throw new Error('Unauthorized');
+        }
+
+        return await sql`
+            SELECT id, model_name as "modelName", prompt_tokens as "promptTokens", completion_tokens as "completionTokens", quota_cost as "quotaCost", created_at as "createdAt"
+            FROM logs 
+            WHERE user_id = ${userRow.id}
+            ORDER BY created_at DESC 
+            LIMIT 50
+        `;
     });

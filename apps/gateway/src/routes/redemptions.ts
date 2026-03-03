@@ -9,18 +9,19 @@ import { authPlugin } from '../middleware/auth';
 export const redemptionsRouter = new Elysia({ prefix: '/redemptions' })
     .use(authPlugin)
     .post('/redeem', async ({ body, user }: any) => {
-        const code = body?.code?.trim();
+        const key = body?.key?.trim();
 
-        if (!code) {
-            throw new Error("Missing 'code' in request body");
+        if (!key) {
+            throw new Error("Missing 'key' in request body");
         }
 
         // Atomic CDK redemption using CTE to prevent race conditions
         const result = await sql`
             WITH claimed AS (
                 UPDATE redemptions 
-                SET status = 2, used_by = ${user.id}, used_at = CURRENT_TIMESTAMP 
-                WHERE code = ${code} AND status = 1 
+                SET used_count = used_count + 1,
+                    status = CASE WHEN used_count + 1 >= count THEN 2 ELSE 1 END
+                WHERE key = ${key} AND status = 1 
                 RETURNING quota
             )
             UPDATE users 

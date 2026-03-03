@@ -325,19 +325,37 @@ export const adminRouter = new Elysia()
         return await sql`SELECT * FROM redemptions ORDER BY id DESC`;
     })
     .post('/redemptions', async ({ body }: any) => {
-        const count = body.count || 1;
-        const quota = body.quota || 500000;
+        const count = body.count ? parseInt(body.count, 10) : 1;
+        const quota = body.quota ? parseInt(body.quota, 10) : 500000;
+        const name = body.name || 'Redemption Code';
 
-        // Generate all CDK codes using Bun.randomUUIDv7, then insert in parallel
-        const codes = Array.from({ length: count }, () => `elygate-${Bun.randomUUIDv7('hex').slice(0, 24)}`);
+        // Generate CDKs using Bun.randomUUIDv7
+        const codesToGenerate = body.key ? [body.key] : Array.from({ length: 1 }, () => `elygate-${Bun.randomUUIDv7('hex').slice(0, 24)}`);
 
         const generated = await Promise.all(
-            codes.map(code => sql`
-                INSERT INTO redemptions (code, quota, status)
-                VALUES (${code}, ${quota}, 1)
+            codesToGenerate.map((key: string) => sql`
+                INSERT INTO redemptions (name, key, quota, count, status)
+                VALUES (${name}, ${key}, ${quota}, ${count}, 1)
                 RETURNING *
-            `.then(([r]) => r)
-            ));
+            `.then(([r]) => r))
+        );
 
-        return { success: true, generated };
+        return generated.length === 1 ? generated[0] : { success: true, generated };
+    })
+    .put('/redemptions/:id', async ({ params: { id }, body }: any) => {
+        const [result] = await sql`
+            UPDATE redemptions 
+            SET name = COALESCE(${body.name}, name),
+                key = COALESCE(${body.key}, key),
+                quota = COALESCE(${body.quota}, quota),
+                count = COALESCE(${body.count}, count),
+                status = COALESCE(${body.status}, status)
+            WHERE id = ${Number(id)}
+            RETURNING *
+        `;
+        return result;
+    })
+    .delete('/redemptions/:id', async ({ params: { id } }) => {
+        const [result] = await sql`DELETE FROM redemptions WHERE id = ${Number(id)} RETURNING id`;
+        return { success: true, deleted: result };
     });
