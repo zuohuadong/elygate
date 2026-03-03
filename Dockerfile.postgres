@@ -17,34 +17,9 @@ RUN pig install pg_bigm -v ${PG_VERSION} -y || echo "pg_bigm not available for P
 
 RUN mkdir -p /etc/postgresql/${PG_VERSION}/main /var/lib/postgresql/${PG_VERSION}/main /var/run/postgresql /docker-entrypoint-initdb.d
 
-RUN cat > /etc/postgresql/${PG_VERSION}/main/postgresql.conf << 'EOF'
-data_directory = '/var/lib/postgresql/18/main'
-hba_file = '/etc/postgresql/18/main/pg_hba.conf'
-listen_addresses = '*'
-port = 5432
-max_connections = 100
-shared_buffers = 256MB
-dynamic_shared_memory_type = posix
-max_wal_size = 1GB
-min_wal_size = 80MB
-log_timezone = Asia/Shanghai
-datestyle = 'iso, mdy'
-timezone = Asia/Shanghai
-lc_messages = C
-lc_monetary = C
-lc_numeric = C
-lc_time = C
-default_text_search_config = 'pg_catalog.english'
-shared_preload_libraries = 'pg_cron'
-cron.database_name = postgres
-EOF
+RUN printf "data_directory = '/var/lib/postgresql/18/main'\nhba_file = '/etc/postgresql/18/main/pg_hba.conf'\nlisten_addresses = '*'\nport = 5432\nmax_connections = 100\nshared_buffers = 256MB\ndynamic_shared_memory_type = posix\nmax_wal_size = 1GB\nmin_wal_size = 80MB\nlog_timezone = Asia/Shanghai\ndatestyle = 'iso, mdy'\ntimezone = Asia/Shanghai\nlc_messages = C\nlc_monetary = C\nlc_numeric = C\nlc_time = C\ndefault_text_search_config = 'pg_catalog.english'\nshared_preload_libraries = 'pg_cron'\ncron.database_name = postgres\n" > /etc/postgresql/${PG_VERSION}/main/postgresql.conf
 
-RUN cat > /etc/postgresql/${PG_VERSION}/main/pg_hba.conf << 'EOF'
-local all all trust
-host all all 127.0.0.1/32 trust
-host all all 0.0.0.0/0 md5
-host all all ::1/128 trust
-EOF
+RUN printf "local all all trust\nhost all all 127.0.0.1/32 trust\nhost all all 0.0.0.0/0 md5\nhost all all ::1/128 trust\n" > /etc/postgresql/${PG_VERSION}/main/pg_hba.conf
 
 RUN chown -R postgres:postgres /etc/postgresql/${PG_VERSION} /var/lib/postgresql /var/run/postgresql
 
