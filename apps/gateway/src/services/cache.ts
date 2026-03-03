@@ -143,13 +143,20 @@ export const memoryCache = {
      */
     async initSync() {
         console.log('[Cache] Initializing PostgreSQL LISTEN for sync...');
-        // Casting to any to bypass potential outdated type definitions in local environment
-        (sql as any).listen('refresh_cache', (payload: string) => {
-            console.log(`[Cache] Received sync signal: ${payload}`);
-            if (payload === 'refresh_cache') {
-                this.refresh(true).catch(console.error);
+        try {
+            if (typeof (sql as any).listen === 'function') {
+                (sql as any).listen('refresh_cache', (payload: string) => {
+                    console.log(`[Cache] Received sync signal: ${payload}`);
+                    if (payload === 'refresh_cache') {
+                        this.refresh(true).catch(console.error);
+                    }
+                });
+            } else {
+                console.warn('[Cache] sql.listen is not supported by the current DB driver. Multi-instance sync is disabled.');
             }
-        });
+        } catch (e) {
+            console.error('[Cache] Failed setting up listener:', e);
+        }
     }
 };
 
