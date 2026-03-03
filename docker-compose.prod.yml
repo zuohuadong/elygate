@@ -13,8 +13,12 @@ services:
       - /sys/fs/cgroup:/sys/fs/cgroup:ro
       - pgdata:/data
       - ./packages/db/src/init.sql:/tmp/init.sql:ro
-    # Removed healthcheck to avoid pg_isready not found issues on Podman
-
+    # Pigsty default admin password is DBUser.DBA, default connection database can be postgres
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U dbuser_dba -d postgres" ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
     # ──── Gateway (Bun + Elysia) ──────────────────────────────
   gateway:
     image: ghcr.nju.edu.cn/zuohuadong/elygate-gateway:latest
@@ -22,11 +26,12 @@ services:
     restart: always
     env_file: .env
     environment:
-      DATABASE_URL: postgresql://dbuser_dba:DBUser.DBA@db:5432/postgres
+      DATABASE_URL: postgres://dbuser_dba:DBUser.DBA@db:5432/postgres
     ports:
       - "3000:3000"
     depends_on:
-      - db
+      db:
+        condition: service_healthy
 
   # ──── Web Admin Panel (SvelteKit + Bun) ──────────────────
   web:
@@ -35,7 +40,7 @@ services:
     restart: always
     env_file: .env
     environment:
-      VITE_API_BASE_URL: http://gateway:3000
+      VITE_API_BASE_URL: http://81.70.19.83:3000
     ports:
       - "3001:3001"
     depends_on:
