@@ -33,7 +33,15 @@ function getProviderHandler(type: number) {
 export const adminRouter = new Elysia()
     // Shared Auth Middleware: requires Bearer Token with admin privileges
     .use(authPlugin)
-    .onBeforeHandle(({ user, set }: any) => {
+    .onBeforeHandle(({ user, set, request }: any) => {
+        console.log(`[Admin] Auth check for path: ${new URL(request.url).pathname}, User:`, user?.id || 'undefined');
+
+        // Safety Guard: ensure user is defined to avoid TypeError: undefined is not an object (evaluating 'user.role')
+        if (!user) {
+            set.status = 401;
+            throw new Error("Unauthorized: Identity could not be verified");
+        }
+
         // Authorization Guard: Strict check allowing only role 10 (Super Admin)
         if (user.role !== 10) {
             set.status = 403;

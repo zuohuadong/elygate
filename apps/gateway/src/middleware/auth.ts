@@ -28,7 +28,10 @@ export const authPlugin = new Elysia({ name: 'auth' })
             LIMIT 1
         `;
 
+        console.log(`[Auth] API Key: ${apiKey.substring(0, 5)}..., Result rows: ${rows?.length || 0}`);
+
         if (!rows || rows.length === 0) {
+            console.error(`[Auth] No valid token/user found for key starting with: ${apiKey.substring(0, 5)}`);
             set.status = 401;
             throw new Error('Invalid API key or User not found');
         }
@@ -103,6 +106,7 @@ export const authPlugin = new Elysia({ name: 'auth' })
         }
 
         // Attach validated token and user data to the context for downstream routes
+        console.log(`[Auth] Successfully identified user: ${userRecord.username}, Role: ${userRecord.role}`);
         return {
             token: tokenRecord,
             user: userRecord
