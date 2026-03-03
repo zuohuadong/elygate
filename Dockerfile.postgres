@@ -1,7 +1,7 @@
 FROM debian:bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
-ENV PG_VERSION=18
+ENV PG_VERSION=17
 
 RUN apt-get update && apt-get install -y \
     curl \
@@ -25,8 +25,8 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 RUN cat > /etc/postgresql/${PG_VERSION}/main/postgresql.conf << 'EOF'
-data_directory = '/var/lib/postgresql/18/main'
-hba_file = '/etc/postgresql/18/main/pg_hba.conf'
+data_directory = '/var/lib/postgresql/17/main'
+hba_file = '/etc/postgresql/17/main/pg_hba.conf'
 listen_addresses = '*'
 port = 5432
 max_connections = 100

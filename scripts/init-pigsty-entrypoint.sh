@@ -1,11 +1,11 @@
 #!/bin/bash
 set -e
 
-DATA_DIR="/var/lib/postgresql/18/main"
+DATA_DIR="/var/lib/postgresql/17/main"
 
 if [ ! -d "$DATA_DIR/base" ]; then
     echo "=== Initializing PostgreSQL data directory ==="
-    pg_ctlcluster 18 main start || true
+    pg_ctlcluster 17 main start || true
     sleep 3
     
     echo "=== Creating user and database ==="
@@ -17,8 +17,8 @@ if [ ! -d "$DATA_DIR/base" ]; then
     fi
     
     echo "=== Stopping PostgreSQL ==="
-    pg_ctlcluster 18 main stop
+    pg_ctlcluster 17 main stop
 fi
 
 echo "=== Starting PostgreSQL ==="
-exec pg_ctlcluster 18 main start -o "-c listen_addresses='*'"
+exec pg_ctlcluster 17 main start -o "-c listen_addresses='*'"
