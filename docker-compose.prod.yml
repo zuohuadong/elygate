@@ -1,9 +1,8 @@
 version: "3.8"
 
 services:
-  # ──── PostgreSQL with pgvector + pg_cron + pg_bigm ────────
   db:
-    image: ankane/pgvector:v0.5.1
+    image: ghcr.nju.edu.cn/zuohuadong/elygate-db:latest
     container_name: elygate-db
     restart: always
     environment:
@@ -14,13 +13,12 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./packages/db/src/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U dbuser_dba -d postgres"]
       interval: 10s
       timeout: 5s
       retries: 10
-    # ──── Gateway (Bun + Elysia) ──────────────────────────────
+
   gateway:
     image: ghcr.nju.edu.cn/zuohuadong/elygate-gateway:latest
     container_name: elygate-gateway
@@ -34,7 +32,6 @@ services:
       db:
         condition: service_healthy
 
-  # ──── Web Admin Panel (SvelteKit + Bun) ──────────────────
   web:
     image: ghcr.nju.edu.cn/zuohuadong/elygate-web:latest
     container_name: elygate-web

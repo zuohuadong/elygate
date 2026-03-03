@@ -10,6 +10,7 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME_GATEWAY: ${{ github.repository_owner }}/elygate-gateway
   IMAGE_NAME_WEB: ${{ github.repository_owner }}/elygate-web
+  IMAGE_NAME_DB: ${{ github.repository_owner }}/elygate-db
 
 jobs:
   build-and-push:
@@ -64,3 +65,21 @@ jobs:
           push: true
           tags: ${{ steps.meta-web.outputs.tags }}
           labels: ${{ steps.meta-web.outputs.labels }}
+
+      - name: Extract metadata (tags, labels) for DB
+        id: meta-db
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_DB }}
+          tags: |
+            type=raw,value=latest
+            type=sha
+
+      - name: Build and push DB image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.postgres
+          push: true
+          tags: ${{ steps.meta-db.outputs.tags }}
+          labels: ${{ steps.meta-db.outputs.labels }}
