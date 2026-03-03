@@ -123,11 +123,6 @@ export const authRouter = new Elysia({ prefix: '/auth' })
             set.status = 500;
             return { success: false, message: e?.message || 'Internal server error' };
         }
-    }, {
-        body: t.Object({
-            username: t.String(),
-            password: t.String()
-        })
     })
     // Validate a token and return user info (for /me checks in the frontend)
     .get('/me', async ({ request, set }: any) => {
