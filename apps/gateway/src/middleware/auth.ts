@@ -112,3 +112,17 @@ export const authPlugin = new Elysia({ name: 'auth' })
             user: userRecord
         };
     });
+
+/**
+ * Admin-only Authentication Guard
+ * Same as authPlugin but strictly requires role = 10 (Admin)
+ */
+export const adminGuard = new Elysia({ name: 'adminGuard' })
+    .use(authPlugin)
+    .derive(({ user, set }) => {
+        if (!user || user.role !== 10) {
+            set.status = 403;
+            throw new Error('Forbidden: Admin privileges required');
+        }
+        return { user };
+    });

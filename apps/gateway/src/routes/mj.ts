@@ -14,30 +14,7 @@ function generateTaskId() {
 }
 
 export const mjRouter = new Elysia()
-    // Direct Authentication - Use .derive to avoid short-circuiting handlers
-    .derive(async ({ request, set }) => {
-        const authHeader = request.headers.get('authorization');
-        if (!authHeader?.startsWith('Bearer ')) {
-            set.status = 401;
-            throw new Error('Unauthorized');
-        }
-        const apiKey = authHeader.substring(7);
-        const [tokenRow] = await sql`
-            SELECT t.id as token_id, u.id as user_id, u.group, u.role, u.status as user_status, t.status as token_status
-            FROM tokens t
-            JOIN users u ON t.user_id = u.id
-            WHERE t.key = ${apiKey}
-            LIMIT 1
-        `;
-        if (!tokenRow || tokenRow.token_status !== 1 || tokenRow.user_status !== 1) {
-            set.status = 401;
-            throw new Error('Invalid or disabled token/user');
-        }
-        return {
-            token: { id: tokenRow.token_id },
-            user: { id: tokenRow.user_id, group: tokenRow.group, role: tokenRow.role }
-        };
-    })
+    .use(authPlugin)
 
     // --- Submit Imagine (Text to Image) ---
     .post('/mj/submit/imagine', async ({ body, token, user, set }: any) => {

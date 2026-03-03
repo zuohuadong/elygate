@@ -1,6 +1,6 @@
 import { Elysia, t } from 'elysia';
 import { sql } from '@elygate/db';
-import { authPlugin } from '../middleware/auth';
+import { adminGuard } from '../middleware/auth';
 import { memoryCache } from '../services/cache';
 import { ChannelType } from '../providers/types';
 import { OpenAIApiHandler } from '../providers/openai';
@@ -31,37 +31,7 @@ function getProviderHandler(type: number) {
  * Consumed by Svelte client or other management panels.
  */
 export const adminRouter = new Elysia({ prefix: '/admin' })
-    // Direct Authentication Hook - Use .derive to add 'user' to context without short-circuiting
-    .derive(async ({ request, set }) => {
-        const authHeader = request.headers.get('authorization');
-        if (!authHeader || !authHeader.startsWith('Bearer ')) {
-            set.status = 401;
-            throw new Error('Missing or invalid Authorization header');
-        }
-
-        const apiKey = authHeader.substring(7);
-        const [userRow] = await sql`
-            SELECT u.id, u.username, u.role, u.status
-            FROM tokens t
-            JOIN users u ON t.user_id = u.id
-            WHERE t.key = ${apiKey} AND t.status = 1 AND u.status = 1
-            LIMIT 1
-        `;
-
-        if (!userRow) {
-            set.status = 401;
-            throw new Error('Invalid API key or token expired');
-        }
-
-        console.log(`[Admin] Auth success for ${userRow.username}, Path: ${new URL(request.url).pathname}`);
-
-        if (userRow.role !== 10) {
-            set.status = 403;
-            throw new Error("Forbidden: Admin privileges required");
-        }
-
-        return { user: userRow };
-    })
+    .use(adminGuard)
 
     // --- Channel Management (Channels) ---
     .get('/channels', async () => {

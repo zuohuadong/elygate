@@ -16,7 +16,7 @@
     async function loadData() {
         isLoading = true;
         try {
-            const data = await apiFetch<any[]>("/redemptions");
+            const data = await apiFetch<any[]>("/admin/redemptions");
             redemptions = data.map((u) => ({
                 ...u,
                 displayStatus:
@@ -72,7 +72,9 @@
         )
             return;
         try {
-            await apiFetch(`/redemptions/${item.id}`, { method: "DELETE" });
+            await apiFetch(`/admin/redemptions/${item.id}`, {
+                method: "DELETE",
+            });
             await loadData();
         } catch (err: any) {
             alert(i18n.t.common.failed + ": " + err.message);
@@ -82,12 +84,12 @@
     async function handleSave(data: any) {
         try {
             if (selectedItem) {
-                await apiFetch(`/redemptions/${selectedItem.id}`, {
+                await apiFetch(`/admin/redemptions/${selectedItem.id}`, {
                     method: "PUT",
                     body: JSON.stringify(data),
                 });
             } else {
-                await apiFetch("/redemptions", {
+                await apiFetch("/admin/redemptions", {
                     method: "POST",
                     body: JSON.stringify(data),
                 });
