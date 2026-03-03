@@ -20,7 +20,7 @@ export const authPlugin = new Elysia({ name: 'auth' })
         // Use Bun SQL template for high-speed parameterized queries (pre-compiled)
         const rows = await sql`
             SELECT 
-                t.id AS token_id, t.name, t.key, t.remain_quota, t.used_quota, t.status AS token_status, t.expired_at, t.models AS token_models,
+                t.id AS token_id, t.name, t.key, t.remain_quota, t.used_quota, t.status AS token_status, t.expired_at, t.models AS token_models, t.subnet, t.rate_limit,
                 u.id AS user_id, u.username, u.group, u.role, u.quota, u.status AS user_status
             FROM tokens t
             INNER JOIN users u ON t.user_id = u.id
@@ -44,7 +44,9 @@ export const authPlugin = new Elysia({ name: 'auth' })
             usedQuota: Number(raw.used_quota),
             status: raw.token_status,
             expiredAt: raw.expired_at ? new Date(raw.expired_at) : null,
-            models: Array.isArray(raw.token_models) ? raw.token_models : []
+            models: Array.isArray(raw.token_models) ? raw.token_models : [],
+            subnet: raw.subnet || '',
+            rateLimit: Number(raw.rate_limit || 0)
         };
 
         const userRecord = {
@@ -59,6 +61,18 @@ export const authPlugin = new Elysia({ name: 'auth' })
         if (tokenRecord.status !== 1) { // 1-normal, 2-disabled
             set.status = 403;
             throw new Error('API key is disabled');
+        }
+
+        // --- IP Whitelist Validation ---
+        if (tokenRecord.subnet) {
+            const clientIp = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || '127.0.0.1';
+            const allowedSubnets = tokenRecord.subnet.split(',').map((s: string) => s.trim()).filter(Boolean);
+
+            // Basic exact match for now. In production, consider ip-cidr package for subnet masking.
+            if (allowedSubnets.length > 0 && !allowedSubnets.includes(clientIp)) {
+                set.status = 403;
+                throw new Error(`IP Origin ${clientIp} is not whitelisted for this API key.`);
+            }
         }
         if (userRecord.status !== 1) {
             set.status = 403;
@@ -82,8 +96,8 @@ export const authPlugin = new Elysia({ name: 'auth' })
             throw new Error('Insufficient token quota');
         }
 
-        // Rate Limiting: Apply global frequency control based on UserID
-        if (await isRateLimited(`user_${userRecord.id}`)) {
+        // Rate Limiting: Apply frequency control based on TokenID (or UserID if fallback)
+        if (await isRateLimited(`token_${tokenRecord.id}`, tokenRecord.rateLimit)) {
             set.status = 429;
             throw new Error('Too Many Requests');
         }

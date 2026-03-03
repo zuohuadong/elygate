@@ -11,13 +11,15 @@ const MAX_REQUESTS_PER_WINDOW = 300;
 /**
  * Check if the given identifier triggers rate limiting using PostgreSQL
  * @param identifier Unique ID (Token ID or User ID)
+ * @param limit Override the default max requests (0 = use default)
  * @returns true if limited (rejected)
  */
-export async function isRateLimited(identifier: string | number): Promise<boolean> {
+export async function isRateLimited(identifier: string | number, limit: number = 0): Promise<boolean> {
     const now = new Date();
     const windowStart = new Date(Math.floor(now.getTime() / WINDOW_MS) * WINDOW_MS);
     const expiredAt = new Date(windowStart.getTime() + WINDOW_MS + 1000); // 1s buffer
     const key = `${identifier}:${windowStart.getTime()}`;
+    const maxAllowed = limit > 0 ? limit : MAX_REQUESTS_PER_WINDOW;
 
     try {
         // Atomic Insert or Update using Postgres 9.5+ feature (UPSERT)
@@ -34,7 +36,7 @@ export async function isRateLimited(identifier: string | number): Promise<boolea
             sql`DELETE FROM rate_limits WHERE expired_at < NOW()`.catch(() => { });
         }
 
-        return result.count > MAX_REQUESTS_PER_WINDOW;
+        return result.count > maxAllowed;
     } catch (e) {
         console.error('[RateLimit/Postgres] Error:', e);
         // Fallback to allow if DB is struggling (fail-open)

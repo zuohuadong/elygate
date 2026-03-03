@@ -16,6 +16,7 @@ import { videoRouter } from "./routes/video";
 import { sysRouter } from "./routes/sys";
 import { mjRouter } from "./routes/mj";
 import { memoryCache } from "./services/cache";
+import "./services/health";
 const app = new Elysia()
   .use(cors())
   .use(swagger({
