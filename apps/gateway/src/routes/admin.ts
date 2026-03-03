@@ -31,8 +31,8 @@ function getProviderHandler(type: number) {
  * Consumed by Svelte client or other management panels.
  */
 export const adminRouter = new Elysia({ prefix: '/admin' })
-    // Direct Authentication Hook - Resolved scoping issues with .derive by inlining
-    .onBeforeHandle(async ({ request, set }: any) => {
+    // Direct Authentication Hook - Use .derive to add 'user' to context without short-circuiting
+    .derive(async ({ request, set }) => {
         const authHeader = request.headers.get('authorization');
         if (!authHeader || !authHeader.startsWith('Bearer ')) {
             set.status = 401;
@@ -40,7 +40,7 @@ export const adminRouter = new Elysia({ prefix: '/admin' })
         }
 
         const apiKey = authHeader.substring(7);
-        const rows = await sql`
+        const [userRow] = await sql`
             SELECT u.id, u.username, u.role, u.status
             FROM tokens t
             JOIN users u ON t.user_id = u.id
@@ -48,20 +48,19 @@ export const adminRouter = new Elysia({ prefix: '/admin' })
             LIMIT 1
         `;
 
-        if (!rows || rows.length === 0) {
+        if (!userRow) {
             set.status = 401;
             throw new Error('Invalid API key or token expired');
         }
 
-        const user = rows[0];
-        console.log(`[Admin] Auth success for ${user.username}, Path: ${new URL(request.url).pathname}`);
+        console.log(`[Admin] Auth success for ${userRow.username}, Path: ${new URL(request.url).pathname}`);
 
-        if (user.role !== 10) {
+        if (userRow.role !== 10) {
             set.status = 403;
             throw new Error("Forbidden: Admin privileges required");
         }
 
-        return { user };
+        return { user: userRow };
     })
 
     // --- Channel Management (Channels) ---

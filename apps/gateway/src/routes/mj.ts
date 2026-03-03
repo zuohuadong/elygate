@@ -14,8 +14,8 @@ function generateTaskId() {
 }
 
 export const mjRouter = new Elysia()
-    // Direct Authentication
-    .onBeforeHandle(async ({ request, set }: any) => {
+    // Direct Authentication - Use .derive to avoid short-circuiting handlers
+    .derive(async ({ request, set }) => {
         const authHeader = request.headers.get('authorization');
         if (!authHeader?.startsWith('Bearer ')) {
             set.status = 401;
