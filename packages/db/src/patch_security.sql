@@ -9,7 +9,6 @@ ALTER TABLE tokens ADD COLUMN IF NOT EXISTS subnet TEXT;
 ALTER TABLE tokens ADD COLUMN IF NOT EXISTS rate_limit INTEGER NOT NULL DEFAULT 0;
 
 -- Track concurrent connections at the user level (New-API Parity)
--- Usually managed in Redis, but we can set a max limit in Postgres for validation
 ALTER TABLE users ADD COLUMN IF NOT EXISTS max_ips INTEGER NOT NULL DEFAULT 0; -- 0 means no limit
 
 -- Alter channels table to track consecutive test failures for auto-disable

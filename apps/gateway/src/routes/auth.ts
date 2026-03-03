@@ -55,6 +55,57 @@ export const authRouter = new Elysia({ prefix: '/auth' })
         const targetUrl = process.env.WEB_URL || 'http://localhost:5173';
         set.redirect = `${targetUrl}/auth/callback?token=${sessionToken}&username=${user.username}`;
     })
+    // User registration
+    .post('/register', async ({ body, set }: any) => {
+        try {
+            const { username, password } = body;
+            if (!username || !password) {
+                set.status = 400;
+                return { success: false, message: 'Username and password are required' };
+            }
+
+            // Check if user exists
+            const [existing] = await sql`SELECT id FROM users WHERE username = ${username} LIMIT 1`;
+            if (existing) {
+                set.status = 409;
+                return { success: false, message: 'Username already exists' };
+            }
+
+            // Hash password
+            const passwordHash = await Bun.password.hash(password);
+
+            // Create user
+            const [user] = await sql`
+                INSERT INTO users (username, password_hash, role, quota, status)
+                VALUES (${username}, ${passwordHash}, 1, 500000, 1)
+                RETURNING id, username, role
+            `;
+
+            // Create default token
+            const newKey = `sk-${Bun.randomUUIDv7('hex')}`;
+            await sql`
+                INSERT INTO tokens (user_id, name, key, status, remain_quota)
+                VALUES (${user.id}, 'Default Token', ${newKey}, 1, -1)
+            `;
+
+            return {
+                success: true,
+                message: 'Registration successful',
+                data: {
+                    username: user.username,
+                    role: user.role
+                }
+            };
+        } catch (e: any) {
+            set.status = 500;
+            return { success: false, message: e?.message || 'Internal server error' };
+        }
+    }, {
+        body: t.Object({
+            username: t.String(),
+            password: t.String()
+        })
+    })
     // Admin username/password login - returns the user's API token for management panel use
     .post('/login', async ({ body, set }: any) => {
         try {

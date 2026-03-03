@@ -1,7 +1,7 @@
 import { sql } from '@elygate/db';
 
 /**
- * In-memory Cache Pool (Acts as a Redis replacement)
+ * In-memory Cache Pool
  * Stores active and available channel data.
  */
 export const memoryCache = {

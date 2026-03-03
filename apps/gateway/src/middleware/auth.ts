@@ -1,4 +1,5 @@
 import { Elysia } from 'elysia';
+import { cors } from '@elysiajs/cors';
 import { sql } from '@elygate/db';
 import { isRateLimited } from '../services/ratelimit';
 
@@ -118,6 +119,7 @@ export const authPlugin = new Elysia({ name: 'auth' })
  * Same as authPlugin but strictly requires role = 10 (Admin)
  */
 export const adminGuard = new Elysia({ name: 'adminGuard' })
+    .use(cors())
     .use(authPlugin)
     .derive(({ user, set }) => {
         if (!user || user.role !== 10) {

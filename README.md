@@ -7,7 +7,7 @@
 <a name="english"></a>
 ## English
 
-**High-performance, Redis-less AI Gateway. Build on Bun + PostgreSQL 18.**
+**High-performance AI Gateway. Build on Bun + PostgreSQL 18.**
 
 ### 📦 Quick Start (Docker Compose) - Recommended
 
@@ -145,7 +145,7 @@ elygate
 <a name="chinese"></a>
 ## 简体中文
 
-**高性能、无 Redis 依赖的 AI 分发网关与计费系统。基于 Bun + PostgreSQL 18。**
+**高性能AI分发网关与计费系统。基于 Bun + PostgreSQL 18。**
 
 ### 📦 快速部署 (Docker Compose) - 推荐
 
