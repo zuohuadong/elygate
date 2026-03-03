@@ -27,4 +27,4 @@ COPY apps/web/server.js ./server.js
 EXPOSE 3001
 ENV NODE_ENV=production PORT=3001
 
-CMD ["bun", "server.js"]
+CMD PORT=3001 bun server.js
