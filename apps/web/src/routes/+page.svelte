@@ -14,7 +14,7 @@
             // Fetch aggregated stats and recent errors from backend
             const [statsRes, errorsRes] = await Promise.all([
                 apiFetch<any>("/dashboard/stats"),
-                apiFetch<any[]>("/dashboard/errors")
+                apiFetch<any[]>("/dashboard/errors"),
             ]);
             stats = statsRes;
             errorLogs = errorsRes;
@@ -165,29 +165,34 @@
                         : "High-frequency errors blocked in last 24h"}
                 </p>
             </div>
-                {#if errorLogs.length === 0}
-                    <p class="text-sm text-slate-400 text-center py-4">No anomalies detected in last 24h</p>
-                {:else}
-                    <div class="space-y-4">
-                        {#each errorLogs as item}
-                            <div class="flex items-center">
-                                <div class="ml-4 space-y-1">
-                                    <p class="text-sm font-medium leading-none text-rose-500">
-                                        {item.title || "Unknown Error"}
-                                    </p>
-                                    <p class="text-sm text-slate-500">
-                                        IP: {item.ip || "Unknown"}
-                                    </p>
-                                </div>
-                                <div class="ml-auto font-medium text-sm text-slate-500">
-                                    + {item.count}
-                                    {i18n.lang === "zh" ? "拦截" : "Blocked"}
-                                </div>
+            {#if errorLogs.length === 0}
+                <p class="text-sm text-slate-400 text-center py-4">
+                    No anomalies detected in last 24h
+                </p>
+            {:else}
+                <div class="space-y-4">
+                    {#each errorLogs as item}
+                        <div class="flex items-center">
+                            <div class="ml-4 space-y-1">
+                                <p
+                                    class="text-sm font-medium leading-none text-rose-500"
+                                >
+                                    {item.title || "Unknown Error"}
+                                </p>
+                                <p class="text-sm text-slate-500">
+                                    IP: {item.ip || "Unknown"}
+                                </p>
                             </div>
-                        {/each}
-                    </div>
-                {/if}
-            </div>
+                            <div
+                                class="ml-auto font-medium text-sm text-slate-500"
+                            >
+                                + {item.count}
+                                {i18n.lang === "zh" ? "拦截" : "Blocked"}
+                            </div>
+                        </div>
+                    {/each}
+                </div>
+            {/if}
         </div>
     </div>
 </div>
