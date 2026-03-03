@@ -6,12 +6,18 @@
 
     // Responsive state variables
     let stats = $state<any>(null);
+    let errorLogs = $state<any[]>([]);
     let isLoading = $state(true);
 
     onMount(async () => {
         try {
-            // Fetch aggregated stats from backend
-            stats = await apiFetch<any>("/dashboard/stats");
+            // Fetch aggregated stats and recent errors from backend
+            const [statsRes, errorsRes] = await Promise.all([
+                apiFetch<any>("/dashboard/stats"),
+                apiFetch<any[]>("/dashboard/errors")
+            ]);
+            stats = statsRes;
+            errorLogs = errorsRes;
         } catch (e: any) {
             console.error("[Dashboard] Load Failed", e.message);
         } finally {
@@ -159,29 +165,28 @@
                         : "High-frequency errors blocked in last 24h"}
                 </p>
             </div>
-            <div
-                class="p-6 pt-4 border-t border-slate-100 dark:border-slate-800 mt-4 space-y-4"
-            >
-                {#each Array(4) as _, i}
-                    <div class="flex items-center">
-                        <div class="ml-4 space-y-1">
-                            <p
-                                class="text-sm font-medium leading-none text-rose-500"
-                            >
-                                {i18n.lang === "zh"
-                                    ? "API Key 失效"
-                                    : "Invalid API Key"}
-                            </p>
-                            <p class="text-sm text-slate-500">
-                                IP: 192.168.1.{i + 10}
-                            </p>
-                        </div>
-                        <div class="ml-auto font-medium text-sm text-slate-500">
-                            + {i * 12 + 5}
-                            {i18n.lang === "zh" ? "拦截" : "Blocked"}
-                        </div>
+                {#if errorLogs.length === 0}
+                    <p class="text-sm text-slate-400 text-center py-4">No anomalies detected in last 24h</p>
+                {:else}
+                    <div class="space-y-4">
+                        {#each errorLogs as item}
+                            <div class="flex items-center">
+                                <div class="ml-4 space-y-1">
+                                    <p class="text-sm font-medium leading-none text-rose-500">
+                                        {item.title || "Unknown Error"}
+                                    </p>
+                                    <p class="text-sm text-slate-500">
+                                        IP: {item.ip || "Unknown"}
+                                    </p>
+                                </div>
+                                <div class="ml-auto font-medium text-sm text-slate-500">
+                                    + {item.count}
+                                    {i18n.lang === "zh" ? "拦截" : "Blocked"}
+                                </div>
+                            </div>
+                        {/each}
                     </div>
-                {/each}
+                {/if}
             </div>
         </div>
     </div>

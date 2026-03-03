@@ -282,6 +282,21 @@ export const adminRouter = new Elysia()
         `;
         return stats;
     })
+    .get('/dashboard/errors', async () => {
+        // Real anomaly monitoring: Group 4xx/5xx errors by message and IP in last 24h
+        return await sql`
+            SELECT 
+                error_message as title, 
+                ip, 
+                count(*)::int as count 
+            FROM logs 
+            WHERE created_at >= NOW() - INTERVAL '24 hours' 
+              AND status_code >= 400
+            GROUP BY error_message, ip
+            ORDER BY count DESC
+            LIMIT 10
+        `;
+    })
     .get('/stats/granular', async ({ query }) => {
         const { start, end, group_by } = query as any;
         const startDate = start ? new Date(start) : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
