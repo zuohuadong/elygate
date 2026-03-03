@@ -35,7 +35,7 @@ export const adminRouter = new Elysia({ prefix: '/admin' })
 
     // --- Channel Management (Channels) ---
     .get('/channels', async () => {
-        return await sql`SELECT * FROM channels ORDER BY id DESC`;
+        return [...await sql`SELECT * FROM channels ORDER BY id DESC`];
     })
     .post('/channels', async ({ body }: any) => {
         // Manually construct SQL for JSONB insertion (Bun SQL recommends template strings)
@@ -162,7 +162,7 @@ export const adminRouter = new Elysia({ prefix: '/admin' })
     // --- Token Management (Tokens) ---
     .get('/tokens', async () => {
         // Returns raw snake_case columns. Front-end adapts as needed.
-        return await sql`SELECT * FROM tokens ORDER BY id DESC`;
+        return [...await sql`SELECT * FROM tokens ORDER BY id DESC`];
     })
     .post('/tokens', async ({ body, user }: any) => {
         // Generate a random sk- key using Bun native UUID v7
@@ -194,17 +194,17 @@ export const adminRouter = new Elysia({ prefix: '/admin' })
     // --- Audit Logs (Logs) ---
     .get('/logs', async () => {
         // Fetch last 1000 logs in descending order
-        return await sql`SELECT * FROM logs ORDER BY id DESC LIMIT 1000`;
+        return [...await sql`SELECT * FROM logs ORDER BY id DESC LIMIT 1000`];
     })
 
     // --- User Management (Users) ---
     .get('/users', async () => {
         // Exclude password_hash for safety
-        return await sql`
+        return [...await sql`
             SELECT id, username, quota, used_quota AS "usedQuota", role, "group", status, created_at AS "createdAt"
             FROM users 
             ORDER BY id DESC
-        `;
+        `];
     })
     .post('/users', async ({ body }: any) => {
         let passwordHash = '';
@@ -276,7 +276,7 @@ export const adminRouter = new Elysia({ prefix: '/admin' })
     })
     .get('/dashboard/errors', async () => {
         // Real anomaly monitoring: Group 4xx/5xx errors by message and IP in last 24h
-        return await sql`
+        return [...await sql`
             SELECT 
                 error_message as title, 
                 ip, 
@@ -287,7 +287,16 @@ export const adminRouter = new Elysia({ prefix: '/admin' })
             GROUP BY error_message, ip
             ORDER BY count DESC
             LIMIT 10
-        `;
+        `];
+    })
+    .get('/models', () => {
+        // Collect unique models from cache and return in a format the frontend expects
+        const uniqueModels = Array.from(memoryCache.channelRoutes.keys());
+        return uniqueModels.map(model => ({
+            id: model,
+            name: model,
+            object: 'model'
+        }));
     })
     .get('/stats/granular', async ({ query }) => {
         const { start, end, group_by } = query as any;
@@ -309,12 +318,12 @@ export const adminRouter = new Elysia({ prefix: '/admin' })
             GROUP BY 1
             ORDER BY 1 ASC
         `;
-        return stats;
+        return [...stats];
     })
 
     // --- Redemptions (CDK) ---
     .get('/redemptions', async () => {
-        return await sql`SELECT * FROM redemptions ORDER BY id DESC`;
+        return [...await sql`SELECT * FROM redemptions ORDER BY id DESC`];
     })
     .post('/redemptions', async ({ body }: any) => {
         const count = body.count ? parseInt(body.count, 10) : 1;

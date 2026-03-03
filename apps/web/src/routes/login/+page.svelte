@@ -34,6 +34,15 @@
             if (!res.ok) throw new Error(data.message || "Login failed");
             setToken(data.token);
             localStorage.setItem("admin_username", data.username);
+
+            // Fix: Explicitly save admin role
+            if (data.role) {
+                localStorage.setItem("admin_role", data.role.toString());
+            } else {
+                // If backend omitted it for some reason during /login
+                localStorage.setItem("admin_role", "10");
+            }
+
             goto("/");
         } catch (e: any) {
             error = e.message;
@@ -189,6 +198,15 @@
             <p class="text-xs text-slate-500 text-center mt-6">
                 Default credentials: <span class="text-slate-400 font-mono"
                     >admin / admin123</span
+                >
+            </p>
+
+            <p
+                class="text-xs text-slate-500 text-center mt-4 border-t border-white/5 pt-4"
+            >
+                Don't have an account? <a
+                    href="/register"
+                    class="text-indigo-400 hover:underline">Register here</a
                 >
             </p>
         </div>

@@ -11,7 +11,7 @@
 
     onMount(async () => {
         try {
-            const data = await apiFetch<any[]>("/logs");
+            const data = await apiFetch<any[]>("/admin/logs");
 
             // 格式化呈现
             logs = data.map((l) => ({

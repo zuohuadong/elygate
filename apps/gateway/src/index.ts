@@ -16,9 +16,17 @@ import { videoRouter } from "./routes/video";
 import { sysRouter } from "./routes/sys";
 import { mjRouter } from "./routes/mj";
 import { memoryCache } from "./services/cache";
+import { sql } from "@elygate/db";
+import { join } from "path";
+import { existsSync, statSync } from "fs";
 import "./services/health";
 const app = new Elysia()
-  .use(cors())
+  .use(cors({
+    origin: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'Accept'],
+    credentials: true
+  }))
   .use(swagger({
     documentation: {
       info: {
@@ -68,16 +76,32 @@ const app = new Elysia()
     set.status = 404;
     return { error: 'Not Found' };
   })
-  .listen({
+// Startup readiness check
+async function init() {
+  console.log("⏳ Waiting for database readiness...");
+  let retries = 0;
+  const maxRetries = 15;
+  while (retries < maxRetries) {
+    try {
+      await sql`SELECT 1`;
+      console.log("✅ Database is ready.");
+      break;
+    } catch (err: any) {
+      retries++;
+      console.log(`[DB] Retry ${retries}/${maxRetries}: ${err.message}`);
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+  }
+
+  // Refresh channel cache
+  memoryCache.refresh().catch(console.error);
+
+  app.listen({
     port: 3000,
     hostname: "0.0.0.0"
   });
+  console.log(`🦊 AI API Gateway is running at ${app.server?.hostname}:${app.server?.port}`);
+}
 
-import { join } from "path";
-import { existsSync, statSync } from "fs";
-
-console.log(`🦊 AI API Gateway is running at ${app.server?.hostname}:${app.server?.port}`);
-
-// Refresh channel cache on initialization
-memoryCache.refresh().catch(console.error);
+init();
 

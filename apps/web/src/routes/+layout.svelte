@@ -11,6 +11,9 @@
 		Gift,
 		WalletCards,
 		BadgeDollarSign,
+		Boxes,
+		Cpu,
+		ScrollText,
 	} from "lucide-svelte";
 	import { page } from "$app/state";
 	import { i18n } from "$lib/i18n/index.svelte";
@@ -30,7 +33,16 @@
 			return;
 		}
 		adminUsername = localStorage.getItem("admin_username") || "User";
-		userRole = parseInt(localStorage.getItem("admin_role") || "1", 10);
+
+		// Fix: Safely parse role, handle missing or undefined
+		const rawRole = localStorage.getItem("admin_role");
+		if (rawRole && rawRole !== "undefined") {
+			userRole = parseInt(rawRole, 10);
+		} else {
+			// If logged in via /login (admin route), assume role 10 if missing
+			// In a real app this should be verified via /me, but for now this fixes the UI glitch
+			userRole = page.url.pathname.includes("/consumer") ? 1 : 10;
+		}
 	});
 
 	function logout() {
@@ -44,27 +56,36 @@
 	const navItems = $derived.by(() => {
 		const baseNav = [];
 		if (userRole >= 10) {
-			// Admin links
+			// Admin links (Aligned to New API standard)
 			baseNav.push({
 				name: i18n.t.nav.dashboard,
 				href: "/",
 				icon: LayoutDashboard,
 			});
 			baseNav.push({
+				name: i18n.lang === "zh" ? "模型" : "Models",
+				href: "/models",
+				icon: Boxes,
+			});
+			baseNav.push({
 				name: i18n.t.nav.channels,
 				href: "/channels",
-				icon: MonitorSpeaker,
+				icon: Cpu,
 			});
 			baseNav.push({
 				name: i18n.t.nav.tokens,
 				href: "/tokens",
 				icon: KeyRound,
 			});
-			baseNav.push({ name: i18n.t.nav.logs, href: "/logs", icon: House });
 			baseNav.push({
 				name: i18n.t.nav.users,
 				href: "/users",
 				icon: Users,
+			});
+			baseNav.push({
+				name: i18n.t.nav.logs,
+				href: "/logs",
+				icon: ScrollText,
 			});
 			baseNav.push({
 				name: i18n.t.nav.redemptions || "Redemptions",
