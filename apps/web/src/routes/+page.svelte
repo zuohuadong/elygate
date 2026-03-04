@@ -221,9 +221,13 @@
                 </p>
             </div>
             {#if errorLogs.length === 0}
-                <p class="text-sm text-slate-400 text-center py-4">
-                    No anomalies detected in last 24h
-                </p>
+                <div class="flex items-center justify-center py-8">
+                    <p class="text-sm text-slate-400">
+                        {i18n.lang === "zh"
+                            ? "最近 24 小时未检测到异常"
+                            : "No anomalies detected in last 24h"}
+                    </p>
+                </div>
             {:else}
                 <div class="space-y-4">
                     {#each errorLogs as item}
