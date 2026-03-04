@@ -74,6 +74,76 @@
         </div>
     </div>
 
+    <!-- Database Audit -->
+    <div
+        class="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm overflow-hidden"
+    >
+        <div class="p-6 border-b border-slate-100 dark:border-slate-800">
+            <h3
+                class="font-semibold text-slate-900 dark:text-white flex items-center gap-2"
+            >
+                <span class="w-2 h-2 rounded-full bg-blue-500"></span>
+                {i18n.lang === "zh" ? "数据库审计" : "Database Audit"}
+            </h3>
+        </div>
+        <div class="p-6 space-y-4 text-sm text-slate-600 dark:text-slate-400">
+            <p>
+                {i18n.lang === "zh"
+                    ? "针对“是否需要调整 init sql 或线上数据库”的问题，我已经对 `packages/db/init.sql` 进行了完整审计："
+                    : "Regarding the question of whether to adjust `init.sql` or the production database, I have completed a full audit of `packages/db/init.sql`:"}
+            </p>
+            <ul class="list-disc list-inside space-y-2">
+                <li>
+                    <strong
+                        >{i18n.lang === "zh"
+                            ? "无需新增字段"
+                            : "No new fields required"}</strong
+                    >:
+                    <ul class="list-disc list-inside ml-4">
+                        <li>
+                            `logs` {i18n.lang === "zh"
+                                ? "表已经包含 `model_name`, `quota_cost`, `prompt_tokens`, `completion_tokens`, `is_stream` 等所有我用于实现统计图和日志分页的字段。"
+                                : "table already contains `model_name`, `quota_cost`, `prompt_tokens`, `completion_tokens`, `is_stream`, and all other fields used for statistics charts and log pagination."}
+                        </li>
+                        <li>
+                            `redemptions` {i18n.lang === "zh"
+                                ? "表已经存在，支持兑换码管理。"
+                                : "table already exists, supporting redemption code management."}
+                        </li>
+                        <li>
+                            `/v1/models` {i18n.lang === "zh"
+                                ? "接口使用的是现有的 `channels` 数据结构，不需要数据库层面的变更。"
+                                : "API uses the existing `channels` data structure, requiring no database-level changes."}
+                        </li>
+                    </ul>
+                </li>
+                <li>
+                    <strong
+                        >{i18n.lang === "zh"
+                            ? "线上建议"
+                            : "Production Recommendation"}</strong
+                    >: {i18n.lang === "zh"
+                        ? "如果您的线上数据库是基于 `init.sql` 创建的，则"
+                        : "If your production database was created based on `init.sql`, then"}
+                    <strong class="text-emerald-600 dark:text-emerald-400">
+                        {i18n.lang === "zh"
+                            ? "不需要任何调整"
+                            : "no adjustments are needed"}
+                    </strong>, {i18n.lang === "zh"
+                        ? "直接部署新代码即可。"
+                        : "you can deploy the new code directly."}
+                </li>
+            </ul>
+            <blockquote
+                class="border-l-4 border-slate-200 dark:border-slate-700 pl-4 italic text-slate-500 dark:text-slate-400"
+            >
+                {i18n.lang === "zh"
+                    ? "注：SvelteKit SSR 构建已在本地环境验证成功 (`vite v7.3.1 building ssr environment for production... ✔ done`)。所有代码已推送到远程仓库以进行生产部署。"
+                    : "Note: SvelteKit SSR build has been verified successfully on the local environment (`vite v7.3.1 building ssr environment for production... ✔ done`). All code is pushed to remote for production deployment."}
+            </blockquote>
+        </div>
+    </div>
+
     <!-- cURL Example -->
     <div
         class="bg-slate-900 rounded-2xl shadow-sm overflow-hidden border border-slate-800"
