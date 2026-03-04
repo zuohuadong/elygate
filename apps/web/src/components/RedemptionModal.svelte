@@ -3,6 +3,8 @@
     import { fade, scale } from "svelte/transition";
     import { i18n } from "$lib/i18n/index.svelte";
 
+    import { type Redemption } from "$lib/types";
+
     let {
         show = false,
         redemption = null,
@@ -10,7 +12,7 @@
         onSave = (data: any) => {},
     } = $props<{
         show: boolean;
-        redemption: any | null;
+        redemption: Redemption | null;
         onClose: () => void;
         onSave: (data: any) => Promise<void>;
     }>();
@@ -155,10 +157,12 @@
 
                 <div class="space-y-1.5 pt-2">
                     <label
+                        for="rd-status"
                         class="text-sm font-medium text-slate-700 dark:text-slate-300"
                         >Status</label
                     >
                     <select
+                        id="rd-status"
                         bind:value={formData.status}
                         class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
                     >

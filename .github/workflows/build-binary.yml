@@ -1,14 +1,16 @@
-name: Release Binary
+name: Build Binary
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version (e.g., v1.0.0)'
-        required: true
+        description: 'Version tag (e.g., v1.0.0)'
+        required: false
 
 jobs:
   build:
@@ -22,14 +24,19 @@ jobs:
         include:
           - target: bun-linux-x64
             os: ubuntu-latest
+            arch: x64
           - target: bun-linux-arm64
             os: ubuntu-latest
+            arch: arm64
           - target: bun-darwin-x64
             os: macos-latest
+            arch: x64
           - target: bun-darwin-arm64
             os: macos-latest
+            arch: arm64
           - target: bun-windows-x64
             os: windows-latest
+            arch: x64
 
     steps:
       - name: Checkout Code
@@ -48,15 +55,11 @@ jobs:
         working-directory: ./apps/web
 
       - name: Build Binary
-        run: bun run scripts/build-binary.ts
-        shell: bash
-
-      - name: Rename Binary
         run: |
           if [ "${{ matrix.target }}" = "bun-windows-x64" ]; then
-            mv elygate-*.exe elygate-${{ matrix.target }}.exe || true
+            bun build apps/gateway/src/index.ts --compile --minify --target=${{ matrix.target }} --outfile=elygate-${{ matrix.target }}.exe
           else
-            mv elygate-* elygate-${{ matrix.target }} || true
+            bun build apps/gateway/src/index.ts --compile --minify --target=${{ matrix.target }} --outfile=elygate-${{ matrix.target }}
           fi
         shell: bash
 
@@ -90,8 +93,10 @@ jobs:
         run: |
           if [ "${{ github.event.inputs.version }}" != "" ]; then
             echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
-          else
+          elif [ "${{ github.ref_type }}" = "tag" ]; then
             echo "version=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=v$(date +%Y%m%d-%H%M%S)" >> $GITHUB_OUTPUT
           fi
 
       - name: Create Release
@@ -115,28 +120,17 @@ jobs:
             ## 🚀 Quick Start
             
             ```bash
-            # Linux/macOS
+            # Download and run
             chmod +x elygate-*
             ./elygate-*
-            
-            # Windows
-            .\elygate-bun-windows-x64.exe
             ```
             
             ## 📋 Requirements
             
             - PostgreSQL 15+
-            - Environment variables in `.env`
+            - Environment variables configured
             
-            ## 🔧 Environment Variables
-            
-            ```bash
-            DATABASE_URL=postgresql://user:pass@localhost:5432/elygate
-            GATEWAY_URL=http://localhost:3000
-            WEB_URL=http://localhost:3000
-            ```
-            
-            See [Binary Build Guide](https://github.com/${{ github.repository }}/blob/main/BINARY_BUILD.md) for detailed instructions.
+            See [documentation](https://github.com/${{ github.repository }}/blob/main/BINARY_BUILD.md) for details.
           files: |
             artifacts/elygate-bun-linux-x64/elygate-bun-linux-x64
             artifacts/elygate-bun-linux-arm64/elygate-bun-linux-arm64

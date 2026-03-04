@@ -3,6 +3,8 @@
     import { fade, scale } from "svelte/transition";
     import { i18n } from "$lib/i18n/index.svelte";
 
+    import { type User } from "$lib/types";
+
     let {
         show = false,
         user = null,
@@ -10,7 +12,7 @@
         onSave = (data: any) => {},
     } = $props<{
         show: boolean;
-        user: any | null;
+        user: User | null;
         onClose: () => void;
         onSave: (data: any) => Promise<void>;
     }>();
@@ -113,10 +115,12 @@
 
                 <div class="space-y-1.5">
                     <label
+                        for="u-username"
                         class="text-sm font-medium text-slate-700 dark:text-slate-300"
                         >Username</label
                     >
                     <input
+                        id="u-username"
                         bind:value={formData.username}
                         class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
                     />
@@ -124,10 +128,12 @@
 
                 <div class="space-y-1.5">
                     <label
+                        for="u-password"
                         class="text-sm font-medium text-slate-700 dark:text-slate-300"
                         >Password</label
                     >
                     <input
+                        id="u-password"
                         type="password"
                         placeholder={user
                             ? "Leave blank to keep unchanged"
@@ -140,10 +146,12 @@
                 <div class="grid grid-cols-2 gap-4">
                     <div class="space-y-1.5">
                         <label
+                            for="u-role"
                             class="text-sm font-medium text-slate-700 dark:text-slate-300"
                             >Role</label
                         >
                         <select
+                            id="u-role"
                             bind:value={formData.role}
                             class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
                         >
@@ -153,10 +161,12 @@
                     </div>
                     <div class="space-y-1.5">
                         <label
+                            for="u-quota"
                             class="text-sm font-medium text-slate-700 dark:text-slate-300"
                             >Quota</label
                         >
                         <input
+                            id="u-quota"
                             type="number"
                             bind:value={formData.quota}
                             class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
@@ -167,20 +177,24 @@
                 <div class="grid grid-cols-2 gap-4">
                     <div class="space-y-1.5">
                         <label
+                            for="u-group"
                             class="text-sm font-medium text-slate-700 dark:text-slate-300"
                             >Group</label
                         >
                         <input
+                            id="u-group"
                             bind:value={formData.group}
                             class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
                         />
                     </div>
                     <div class="space-y-1.5">
                         <label
+                            for="u-status"
                             class="text-sm font-medium text-slate-700 dark:text-slate-300"
                             >Status</label
                         >
                         <select
+                            id="u-status"
                             bind:value={formData.status}
                             class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
                         >

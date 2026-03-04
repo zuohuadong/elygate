@@ -14,6 +14,8 @@
 		Boxes,
 		Cpu,
 		ScrollText,
+		CreditCard,
+		BarChart3,
 	} from "lucide-svelte";
 	import { page } from "$app/state";
 	import { i18n } from "$lib/i18n/index.svelte";
@@ -98,6 +100,11 @@
 				icon: BadgeDollarSign,
 			});
 			baseNav.push({
+				name: i18n.lang === "zh" ? "数据统计" : "Statistics",
+				href: "/stats",
+				icon: BarChart3,
+			});
+			baseNav.push({
 				name: i18n.t.nav.settings,
 				href: "/settings",
 				icon: Settings,
@@ -108,6 +115,11 @@
 				name: i18n.lang === "zh" ? "我的钱包" : "My Wallet",
 				href: "/consumer",
 				icon: WalletCards,
+			});
+			baseNav.push({
+				name: i18n.lang === "zh" ? "充值中心" : "Payment",
+				href: "/payment",
+				icon: CreditCard,
 			});
 			baseNav.push({
 				name: i18n.t.nav.tokens || "Tokens",

@@ -1,0 +1,15 @@
+{
+  "name": "@elygate/gateway-tests",
+  "version": "1.0.0",
+  "scripts": {
+    "test": "bun test",
+    "test:payment": "bun test apps/gateway/tests/payment.test.ts",
+    "test:stats": "bun test apps/gateway/tests/stats.test.ts",
+    "test:oauth": "bun test apps/gateway/tests/oauth.test.ts",
+    "test:providers": "bun test apps/gateway/tests/providers.test.ts",
+    "test:database": "bun test apps/gateway/tests/database-enhancements.test.ts",
+    "test:coverage": "bun test --coverage",
+    "test:integration": "bash test-integration.sh",
+    "test:all": "bun test && bash test-integration.sh"
+  }
+}

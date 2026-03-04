@@ -3,7 +3,7 @@ FROM oven/bun:1-alpine AS builder
 WORKDIR /app
 
 # Install all deps (including dev) for build
-COPY package.json bun.lock ./
+COPY package.json bun.lock* bun.lockb* ./
 COPY apps/gateway/package.json ./apps/gateway/
 COPY apps/web/package.json ./apps/web/
 COPY packages/db/package.json ./packages/db/

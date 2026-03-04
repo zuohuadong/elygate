@@ -11,6 +11,9 @@ import { BaiduApiHandler } from '../providers/baidu';
 import { AliApiHandler } from '../providers/ali';
 import { XunfeiApiHandler } from '../providers/xunfei';
 import { MidjourneyApiHandler } from '../providers/mj';
+import { DeepSeekApiHandler } from '../providers/deepseek';
+import { SunoApiHandler } from '../providers/suno';
+import { type UserRecord, type TokenRecord, type ChannelConfig } from '../types';
 
 function getProviderHandler(type: number) {
     switch (type) {
@@ -21,6 +24,8 @@ function getProviderHandler(type: number) {
         case ChannelType.ALI: return new AliApiHandler();
         case ChannelType.XUNFEI: return new XunfeiApiHandler();
         case ChannelType.MIDJOURNEY: return new MidjourneyApiHandler();
+        case ChannelType.DEEPSEEK: return new DeepSeekApiHandler();
+        case ChannelType.SUNO: return new SunoApiHandler();
         case ChannelType.OPENAI:
         default: return new OpenAIApiHandler();
     }
@@ -38,13 +43,14 @@ export const adminRouter = new Elysia({ prefix: '/admin' })
         return [...await sql`SELECT * FROM channels ORDER BY id DESC`];
     })
     .post('/channels', async ({ body }: any) => {
+        const b = body as ChannelConfig;
         // Manually construct SQL for JSONB insertion (Bun SQL recommends template strings)
         const [result] = await sql`
             INSERT INTO channels (type, name, base_url, key, models, model_mapping, weight, status)
-            VALUES (${body.type}, ${body.name}, ${body.baseUrl || null}, ${body.key}, 
-                    ${body.models ? JSON.stringify(body.models) : '[]'}::jsonb, 
-                    ${body.modelMapping ? JSON.stringify(body.modelMapping) : '{}'}::jsonb, 
-                    ${body.weight || 1}, ${body.status || 1})
+            VALUES (${b.type}, ${b.name}, ${b.baseUrl || null}, ${b.key}, 
+                    ${b.models ? JSON.stringify(b.models) : '[]'}::jsonb, 
+                    ${b.modelMapping ? JSON.stringify(b.modelMapping) : '{}'}::jsonb, 
+                    ${b.weight || 1}, ${b.status || 1})
             RETURNING *
         `;
         memoryCache.refresh().catch(console.error); // Async cache refresh, non-blocking
@@ -73,16 +79,17 @@ export const adminRouter = new Elysia({ prefix: '/admin' })
         };
     })
     .put('/channels/:id', async ({ params: { id }, body }: any) => {
+        const b = body as Partial<ChannelConfig>;
         const [result] = await sql`
             UPDATE channels 
-            SET type = COALESCE(${body.type}, type), 
-                name = COALESCE(${body.name}, name), 
-                base_url = ${body.baseUrl || null}, 
-                key = COALESCE(${body.key}, key), 
-                models = COALESCE(${body.models ? JSON.stringify(body.models) : null}::jsonb, models),
-                model_mapping = COALESCE(${body.modelMapping ? JSON.stringify(body.modelMapping) : null}::jsonb, model_mapping),
-                weight = COALESCE(${body.weight}, weight),
-                status = COALESCE(${body.status}, status)
+            SET type = COALESCE(${b.type}, type), 
+                name = COALESCE(${b.name}, name), 
+                base_url = ${b.baseUrl || null}, 
+                key = COALESCE(${b.key}, key), 
+                models = COALESCE(${b.models ? JSON.stringify(b.models) : null}::jsonb, models),
+                model_mapping = COALESCE(${b.modelMapping ? JSON.stringify(b.modelMapping) : null}::jsonb, model_mapping),
+                weight = COALESCE(${b.weight}, weight),
+                status = COALESCE(${b.status}, status)
             WHERE id = ${Number(id)}
             RETURNING *
         `;
@@ -165,11 +172,13 @@ export const adminRouter = new Elysia({ prefix: '/admin' })
         return [...await sql`SELECT * FROM tokens ORDER BY id DESC`];
     })
     .post('/tokens', async ({ body, user }: any) => {
+        const b = body as any;
+        const u = user as UserRecord;
         // Generate a random sk- key using Bun native UUID v7
-        const key = body.key || `sk-${Bun.randomUUIDv7('hex')}`;
+        const key = b.key || `sk-${Bun.randomUUIDv7('hex')}`;
         const [result] = await sql`
             INSERT INTO tokens (user_id, name, key, status, remain_quota, models)
-            VALUES (${body.userId || user.id}, ${body.name}, ${key}, ${body.status || 1}, ${body.remainQuota || -1}, ${JSON.stringify(body.models || [])})
+            VALUES (${b.userId || u.id}, ${b.name}, ${key}, ${b.status || 1}, ${b.remainQuota || -1}, ${JSON.stringify(b.models || [])})
             RETURNING *
         `;
         return result;

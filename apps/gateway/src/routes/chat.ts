@@ -7,6 +7,7 @@ import { billAndLog, preCheckAndDecrement, reconcileQuota } from '../services/bi
 import { calculateCost } from '../services/ratio';
 import { lookupSemanticCache, storeSemanticCache } from '../services/semanticCache';
 import { ChannelType, ProviderHandler } from '../providers/types';
+import { type TokenRecord, type UserRecord, type ChannelConfig } from '../types';
 import { OpenAIApiHandler } from '../providers/openai';
 import { GeminiApiHandler } from '../providers/gemini';
 import { AnthropicApiHandler } from '../providers/anthropic';
@@ -43,6 +44,8 @@ function getProviderHandler(type: number): ProviderHandler {
 export const chatRouter = new Elysia()
     .use(authPlugin)
     .post('/completions', async ({ body, token, user, request, set }: any) => {
+        const u = user as UserRecord;
+        const t = token as TokenRecord;
         // 1. Extract key information from request body
         const { model, stream } = body as Record<string, any>;
 
@@ -93,7 +96,8 @@ export const chatRouter = new Elysia()
         // ---------------------------------------------------------------------------
 
         // 3. Iterate through channels for retry attempts
-        for (const channelConfig of candidateChannels) {
+        const channels = candidateChannels as ChannelConfig[];
+        for (const channelConfig of channels) {
             console.log(`[Dispatch] Targeting Channel ID: ${channelConfig.id}, Type: ${channelConfig.type}, Weight: ${channelConfig.weight}`);
 
             // Get Converter/Handler

@@ -1,12 +1,13 @@
 import { sql } from '@elygate/db';
+import { type ChannelConfig } from '../types';
 
 /**
  * In-memory Cache Pool
  * Stores active and available channel data.
  */
 export const memoryCache = {
-    // Channel cache: modelName -> Channel[] 
-    channelRoutes: new Map<string, any[]>(),
+    // Channel cache: modelName -> ChannelConfig[] 
+    channelRoutes: new Map<string, ChannelConfig[]>(),
     lastUpdated: 0,
     options: new Map<string, any>(),
 
@@ -24,7 +25,7 @@ export const memoryCache = {
                 WHERE status = 1
             `;
 
-            const newRoutes = new Map<string, any[]>();
+            const newRoutes = new Map<string, ChannelConfig[]>();
 
             for (const channel of activeChannels) {
                 // Handle JSONB: already an object or needs parsing from string
@@ -102,7 +103,7 @@ export const memoryCache = {
      * Returns a sorted list of candidate channels for failover/retry scenarios.
      * Filtered by user group and sorted by priority + weight.
      */
-    selectChannels(modelName: string, userGroup = 'default'): any[] {
+    selectChannels(modelName: string, userGroup = 'default'): ChannelConfig[] {
         const available = this.channelRoutes.get(modelName) || [];
         if (available.length === 0) return [];
 
