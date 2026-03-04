@@ -227,13 +227,65 @@ export const authRouter = new Elysia({ prefix: '/auth' })
             throw new Error('Unauthorized');
         }
 
-        return await sql`
-            SELECT id, model_name as "modelName", prompt_tokens as "promptTokens", completion_tokens as "completionTokens", quota_cost as "quotaCost", created_at as "createdAt"
+        const page = Number(request.query?.page) || 1;
+        const limit = Number(request.query?.limit) || 50;
+        const offset = (page - 1) * limit;
+
+        const [countRow] = await sql`
+            SELECT COUNT(*) as total
+            FROM logs
+            WHERE user_id = ${userRow.id}
+        `;
+
+        const data = await sql`
+            SELECT id, model_name as "modelName", prompt_tokens as "promptTokens", completion_tokens as "completionTokens", quota_cost as "quotaCost", created_at as "createdAt", is_stream as "isStream"
             FROM logs 
             WHERE user_id = ${userRow.id}
             ORDER BY created_at DESC 
-            LIMIT 50
+            LIMIT ${limit} OFFSET ${offset}
         `;
+
+        return {
+            data,
+            total: countRow.total,
+            page,
+            limit
+        };
+    })
+    // Get personal stats (for Dashboard chart)
+    .get('/stats', async ({ request, set }: any) => {
+        const authHeader = request.headers.get('authorization');
+        if (!authHeader?.startsWith('Bearer ')) {
+            set.status = 401;
+            throw new Error('Unauthorized');
+        }
+        const key = authHeader.substring(7);
+        const [userRow] = await sql`
+            SELECT u.id
+            FROM tokens t
+            JOIN users u ON t.user_id = u.id
+            WHERE t.key = ${key} AND t.status = 1 AND u.status = 1
+            LIMIT 1
+        `;
+        if (!userRow) {
+            set.status = 401;
+            throw new Error('Unauthorized');
+        }
+
+        const dailyStats = await sql`
+            SELECT 
+                DATE(created_at) as date,
+                SUM(prompt_tokens + completion_tokens) as total_tokens,
+                SUM(quota_cost) as total_cost,
+                COUNT(*) as request_count
+            FROM logs
+            WHERE user_id = ${userRow.id}
+            AND created_at >= NOW() - INTERVAL '14 days'
+            GROUP BY DATE(created_at)
+            ORDER BY date ASC
+        `;
+
+        return dailyStats;
     })
 
     .get('/discord', ({ set }) => {

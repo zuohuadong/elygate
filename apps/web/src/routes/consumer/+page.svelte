@@ -6,6 +6,7 @@
 
     let userInfo = $state<any>(null);
     let logs = $state<any[]>([]);
+    let trend = $state<any[]>([]);
     let isLoading = $state(true);
     let isRedeeming = $state(false);
     let topupCode = $state("");
@@ -14,11 +15,14 @@
     async function loadData() {
         isLoading = true;
         try {
-            const data = await apiFetch<any>("/auth/me");
-            userInfo = data;
-
-            const logsData = await apiFetch<any[]>("/auth/logs");
-            logs = logsData.slice(0, 10);
+            const [userData, logsData, statsData] = await Promise.all([
+                apiFetch<any>("/auth/me"),
+                apiFetch<any>("/auth/logs?limit=5"),
+                apiFetch<any[]>("/auth/stats"),
+            ]);
+            userInfo = userData;
+            logs = logsData.data || logsData; // Handle both paginated and old unpaginated formats
+            trend = statsData || [];
         } catch (err: any) {
             console.error(err);
         } finally {
@@ -165,6 +169,78 @@
                     </div>
                 {/if}
             </form>
+        </div>
+    </div>
+
+    <!-- Usage Trend Chart -->
+    <div
+        class="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm overflow-hidden"
+    >
+        <div class="p-6 pb-2">
+            <h3
+                class="font-semibold leading-none tracking-tight text-slate-900 dark:text-white"
+            >
+                {i18n.lang === "zh"
+                    ? "积分消耗趋势 (最近 14 天)"
+                    : "Quota Usage Trend (Last 14 days)"}
+            </h3>
+        </div>
+        <div
+            class="p-6 pt-4 h-[250px] flex items-center justify-center text-slate-500 mt-2"
+        >
+            {#if isLoading}
+                <div class="flex flex-col items-center gap-2">
+                    <div
+                        class="animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-600"
+                    ></div>
+                </div>
+            {:else if trend.length === 0}
+                <div class="flex flex-col items-center gap-2 text-slate-400">
+                    <span
+                        >{i18n.lang === "zh"
+                            ? "暂无消耗数据"
+                            : "No usage data available"}</span
+                    >
+                </div>
+            {:else}
+                <div
+                    class="w-full h-full flex items-end justify-between px-2 pb-4 gap-2"
+                >
+                    {#each Array.from({ length: 14 }).map((_, i) => {
+                        // Pad array to always show 14 days ending today
+                        const d = new Date();
+                        d.setDate(d.getDate() - (13 - i));
+                        const dateStr = d.toISOString().split("T")[0];
+                        const dayData = trend.find((t) => {
+                            // Check string or Date object
+                            const tDate = new Date(t.date)
+                                .toISOString()
+                                .split("T")[0];
+                            return tDate === dateStr;
+                        });
+                        return { label: dateStr.slice(5), tokens: dayData ? Number(dayData.total_tokens) : 0, cost: dayData ? Number(dayData.total_cost) : 0 }; // mm-dd
+                    }) as day}
+                        <div
+                            class="bg-indigo-500/20 hover:bg-indigo-500/40 transition-all rounded-t-sm relative group flex-1"
+                            style="height: {Math.max(
+                                5,
+                                Math.min(
+                                    100,
+                                    (day.tokens / 50000) * 100, // Estimate max height scale
+                                ),
+                            )}%"
+                        >
+                            <div
+                                class="opacity-0 group-hover:opacity-100 absolute -top-12 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-[10px] py-1 px-2 rounded whitespace-nowrap z-10 pointer-events-none transition-opacity shadow-lg"
+                            >
+                                {day.label}: {(day.tokens / 1000).toFixed(1)}k
+                                tokens<br />
+                                Cost: ${(day.cost / 1000).toFixed(4)}
+                            </div>
+                        </div>
+                    {/each}
+                </div>
+            {/if}
         </div>
     </div>
 
