@@ -136,9 +136,9 @@ export const authRouter = new Elysia({ prefix: '/auth' })
                 set.status = 403;
                 return { success: false, message: 'Account is disabled' };
             }
-            if (user.role < 10) {
+            if (user.role < 1) {
                 set.status = 403;
-                return { success: false, message: 'Admin privileges required' };
+                return { success: false, message: 'Account has no access' };
             }
 
             // Verify password using Bun's native bcrypt/argon2
@@ -235,12 +235,12 @@ export const authRouter = new Elysia({ prefix: '/auth' })
             LIMIT 50
         `;
     })
-    
+
     .get('/discord', ({ set }) => {
         const url = `https://discord.com/api/oauth2/authorize?client_id=${DISCORD_CLIENT_ID}&redirect_uri=${encodeURIComponent(DISCORD_REDIRECT_URI)}&response_type=code&scope=identify`;
         set.redirect = url;
     })
-    
+
     .get('/discord/callback', async ({ query, set }) => {
         const { code } = query;
         if (!code) throw new Error("No code provided");
@@ -307,10 +307,10 @@ export const authRouter = new Elysia({ prefix: '/auth' })
         const targetUrl = process.env.WEB_URL || 'http://localhost:5173';
         set.redirect = `${targetUrl}/auth/callback?token=${sessionToken}&username=${user.username}`;
     })
-    
+
     .get('/telegram', async ({ query, set }) => {
         const { id, first_name, last_name, username, photo_url, auth_date, hash } = query as any;
-        
+
         if (!id || !auth_date || !hash) {
             set.status = 400;
             throw new Error('Invalid Telegram login data');
@@ -330,7 +330,7 @@ export const authRouter = new Elysia({ prefix: '/auth' })
             false,
             ['sign']
         );
-        
+
         const signature = await crypto.subtle.sign('HMAC', secretKey, encoder.encode(dataCheckString));
         const expectedHash = Array.from(new Uint8Array(signature))
             .map(b => b.toString(16).padStart(2, '0'))
@@ -363,7 +363,7 @@ export const authRouter = new Elysia({ prefix: '/auth' })
             const telegramUsername = username || `telegram_${id}`;
             const fullName = [first_name, last_name].filter(Boolean).join(' ');
             const displayUsername = `telegram:${telegramUsername}`;
-            
+
             const [newUser] = await sql`
                 INSERT INTO users (username, password_hash, role, quota, status)
                 VALUES (${displayUsername}, 'oauth-no-password', 1, 500000, 1)
