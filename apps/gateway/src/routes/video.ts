@@ -1,20 +1,9 @@
 import { Elysia } from 'elysia';
-import { authPlugin } from '../middleware/auth';
+import { authPlugin, assertModelAccess } from '../middleware/auth';
 import { memoryCache } from '../services/cache';
 import { billAndLog, preCheckAndDecrement, reconcileQuota } from '../services/billing';
 import { calculateCost } from '../services/ratio';
-import { ChannelType, ProviderHandler } from '../providers/types';
-import { KlingApiHandler } from '../providers/kling';
-import { OpenAIApiHandler } from '../providers/openai';
-
-function getVideoHandler(type: number): ProviderHandler {
-    switch (type) {
-        case ChannelType.ALI: // Some providers might use Ali DashScope for video
-            return new KlingApiHandler(); // Assuming Kling for now or Alis own
-        default:
-            return new OpenAIApiHandler();
-    }
-}
+import { ChannelType, getProviderHandler } from '../providers';
 
 export const videoRouter = new Elysia({ prefix: '/v1/video' })
     .use(authPlugin)
@@ -26,17 +15,7 @@ export const videoRouter = new Elysia({ prefix: '/v1/video' })
         }
 
         // --- Phase 4 & 6: Access Control ---
-        const groupModelKey = `group_models_${user.group}`;
-        const allowedGroupModels = memoryCache.getOption(groupModelKey);
-        if (allowedGroupModels && Array.isArray(allowedGroupModels) && !allowedGroupModels.includes(model)) {
-            set.status = 403;
-            throw new Error(`Your group '${user.group}' is not allowed to use model '${model}'`);
-        }
-
-        if (token.models && token.models.length > 0 && !token.models.includes(model)) {
-            set.status = 403;
-            throw new Error(`Your API key is not allowed to use model '${model}'`);
-        }
+        assertModelAccess(user, token, model, set);
         // ------------------------------------------
 
         const candidateChannels = memoryCache.selectChannels(model);
@@ -46,7 +25,7 @@ export const videoRouter = new Elysia({ prefix: '/v1/video' })
 
         let lastError = null;
         for (const channelConfig of candidateChannels) {
-            const handler = getVideoHandler(channelConfig.type);
+            const handler = getProviderHandler(channelConfig.type);
             const keys = channelConfig.key.split('\n').filter(Boolean);
             const activeKey = keys[Math.floor(Math.random() * keys.length)].trim();
 

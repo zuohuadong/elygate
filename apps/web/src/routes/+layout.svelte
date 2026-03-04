@@ -154,10 +154,12 @@
 
 	// Current active path detection
 	const isActive = (href: string) => page.url.pathname === href;
-	const isLoginPage = $derived(page.url.pathname === "/login");
+	const isAuthPage = $derived(
+		page.url.pathname === "/login" || page.url.pathname === "/register",
+	);
 </script>
 
-{#if isLoginPage}
+{#if isAuthPage}
 	{@render children()}
 {:else}
 	<div

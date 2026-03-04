@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { onMount } from "svelte";
     import { API_BASE } from "$lib/api";
     import { goto } from "$app/navigation";
 
@@ -6,11 +7,31 @@
     let password = $state("");
     let confirmPassword = $state("");
     let isLoading = $state(false);
+    let isChecking = $state(true);
+    let registrationEnabled = $state(true);
     let error = $state("");
     let success = $state("");
 
+    onMount(async () => {
+        try {
+            const res = await fetch(`${API_BASE}/api/option`);
+            const data = await res.json();
+            if (data.success) {
+                registrationEnabled = !!data.data.SignEnabled;
+            }
+        } catch (e) {
+            console.error("Failed to fetch registration status", e);
+        } finally {
+            isChecking = false;
+        }
+    });
+
     async function handleRegister(e: Event) {
         e.preventDefault();
+        if (!registrationEnabled) {
+            error = "Registration is currently disabled.";
+            return;
+        }
         if (isLoading) return;
         error = "";
         success = "";
@@ -86,76 +107,89 @@
         >
             <h2 class="text-lg font-semibold text-white mb-6">Register</h2>
 
-            <form onsubmit={handleRegister} class="space-y-5">
-                <div>
-                    <label
-                        for="username"
-                        class="block text-sm font-medium text-slate-300 mb-1.5"
-                        >Username</label
-                    >
-                    <input
-                        id="username"
-                        type="text"
-                        bind:value={username}
-                        required
-                        placeholder="Your username"
-                        class="w-full px-4 py-2.5 bg-white/10 border border-white/10 rounded-xl text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
-                    />
-                </div>
-                <div>
-                    <label
-                        for="password"
-                        class="block text-sm font-medium text-slate-300 mb-1.5"
-                        >Password</label
-                    >
-                    <input
-                        id="password"
-                        type="password"
-                        bind:value={password}
-                        required
-                        placeholder="••••••••"
-                        class="w-full px-4 py-2.5 bg-white/10 border border-white/10 rounded-xl text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
-                    />
-                </div>
-                <div>
-                    <label
-                        for="confirm-password"
-                        class="block text-sm font-medium text-slate-300 mb-1.5"
-                        >Confirm Password</label
-                    >
-                    <input
-                        id="confirm-password"
-                        type="password"
-                        bind:value={confirmPassword}
-                        required
-                        placeholder="••••••••"
-                        class="w-full px-4 py-2.5 bg-white/10 border border-white/10 rounded-xl text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
-                    />
-                </div>
-
-                {#if error}
-                    <div
-                        class="flex items-center gap-2 text-rose-400 text-sm bg-rose-500/10 border border-rose-500/20 rounded-xl px-4 py-3"
-                    >
-                        {error}
-                    </div>
-                {/if}
-
-                {#if success}
-                    <div
-                        class="flex items-center gap-2 text-emerald-400 text-sm bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-4 py-3"
-                    >
-                        {success}
-                    </div>
-                {/if}
-
-                <button
-                    type="submit"
-                    disabled={isLoading}
-                    class="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white font-medium rounded-xl text-sm transition-all duration-200"
+            {#if !registrationEnabled && !isChecking}
+                <div
+                    class="flex items-center gap-2 text-amber-400 text-sm bg-amber-500/10 border border-amber-500/20 rounded-xl px-4 py-3 mb-6"
                 >
-                    {isLoading ? "Registering..." : "Register"}
-                </button>
+                    Registration is currently disabled by administrator.
+                </div>
+            {/if}
+
+            <form onsubmit={handleRegister} class="space-y-5">
+                <fieldset
+                    disabled={!registrationEnabled || isLoading}
+                    class="space-y-5 border-none p-0 m-0"
+                >
+                    <div>
+                        <label
+                            for="username"
+                            class="block text-sm font-medium text-slate-300 mb-1.5"
+                            >Username</label
+                        >
+                        <input
+                            id="username"
+                            type="text"
+                            bind:value={username}
+                            required
+                            placeholder="Your username"
+                            class="w-full px-4 py-2.5 bg-white/10 border border-white/10 rounded-xl text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+                        />
+                    </div>
+                    <div>
+                        <label
+                            for="password"
+                            class="block text-sm font-medium text-slate-300 mb-1.5"
+                            >Password</label
+                        >
+                        <input
+                            id="password"
+                            type="password"
+                            bind:value={password}
+                            required
+                            placeholder="••••••••"
+                            class="w-full px-4 py-2.5 bg-white/10 border border-white/10 rounded-xl text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+                        />
+                    </div>
+                    <div>
+                        <label
+                            for="confirm-password"
+                            class="block text-sm font-medium text-slate-300 mb-1.5"
+                            >Confirm Password</label
+                        >
+                        <input
+                            id="confirm-password"
+                            type="password"
+                            bind:value={confirmPassword}
+                            required
+                            placeholder="••••••••"
+                            class="w-full px-4 py-2.5 bg-white/10 border border-white/10 rounded-xl text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+                        />
+                    </div>
+
+                    {#if error}
+                        <div
+                            class="flex items-center gap-2 text-rose-400 text-sm bg-rose-500/10 border border-rose-500/20 rounded-xl px-4 py-3"
+                        >
+                            {error}
+                        </div>
+                    {/if}
+
+                    {#if success}
+                        <div
+                            class="flex items-center gap-2 text-emerald-400 text-sm bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-4 py-3"
+                        >
+                            {success}
+                        </div>
+                    {/if}
+
+                    <button
+                        type="submit"
+                        disabled={isLoading}
+                        class="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white font-medium rounded-xl text-sm transition-all duration-200"
+                    >
+                        {isLoading ? "Registering..." : "Register"}
+                    </button>
+                </fieldset>
             </form>
 
             <p class="text-xs text-slate-500 text-center mt-6">

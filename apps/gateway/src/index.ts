@@ -18,6 +18,7 @@ import { mjRouter } from "./routes/mj";
 import { paymentRouter } from "./routes/payment";
 import { statsRouter } from "./routes/stats";
 import { memoryCache } from "./services/cache";
+import { auth as betterAuthInstance } from "./services/betterAuth";
 import { sql } from "@elygate/db";
 import { join } from "path";
 import { existsSync, statSync } from "fs";
@@ -48,6 +49,7 @@ const app = new Elysia()
       return Bun.file(staticPath);
     }
   })
+  .mount("/api/auth/better", betterAuthInstance.handler)
   .use(sysRouter)
   .group("/api", (app) =>
     app.use(adminRouter)
@@ -94,6 +96,18 @@ async function init() {
       retries++;
       console.log(`[DB] Retry ${retries}/${maxRetries}: ${err.message}`);
       await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+  }
+
+  // Run schema fix patch if exists (idempotent)
+  const patchPath = join(process.cwd(), '../../packages/db/src/patch_v1_schema_fix.sql');
+  if (existsSync(patchPath)) {
+    try {
+      const patchSql = await Bun.file(patchPath).text();
+      await sql.unsafe(patchSql);
+      console.log("✅ Schema fix patch reapplied.");
+    } catch (e: any) {
+      console.error("❌ Failed to reapply schema patch:", e.message);
     }
   }
 

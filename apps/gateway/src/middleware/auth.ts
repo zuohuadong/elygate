@@ -3,7 +3,21 @@ import { cors } from '@elysiajs/cors';
 import { sql } from '@elygate/db';
 import { isRateLimited } from '../services/ratelimit';
 import { type TokenRecord, type UserRecord } from '../types';
+import { memoryCache } from '../services/cache';
 
+export function assertModelAccess(user: UserRecord, token: TokenRecord, modelName: string, set: any) {
+    const groupModelKey = `group_models_${user.group}`;
+    const allowedGroupModels = memoryCache.getOption(groupModelKey);
+    if (allowedGroupModels && Array.isArray(allowedGroupModels) && !allowedGroupModels.includes(modelName)) {
+        set.status = 403;
+        throw new Error(`Your group '${user.group}' is not allowed to use model '${modelName}'`);
+    }
+
+    if (token.models && token.models.length > 0 && !token.models.includes(modelName)) {
+        set.status = 403;
+        throw new Error(`Your API key is not allowed to use model '${modelName}'`);
+    }
+}
 /**
  * Bearer Token Authentication Middleware
  * Parses "Authorization: Bearer sk-xxx" from OpenAI protocol

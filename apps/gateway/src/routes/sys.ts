@@ -45,6 +45,7 @@ export const sysRouter = new Elysia({ prefix: '/api' })
                 ServerAddress: optionCache.get('ServerAddress', 'https://api.elygate.com'),
                 SMTPConfigured: !!optionCache.get('SMTPConfig', {}).host,
                 TelegramConfigured: !!optionCache.get('TelegramConfig', {}).token,
+                SignEnabled: optionCache.get('SignEnabled', 'true') === 'true',
             }
         };
     });

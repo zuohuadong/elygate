@@ -1,24 +1,9 @@
 import { Elysia } from 'elysia';
-import { authPlugin } from '../middleware/auth';
+import { authPlugin, assertModelAccess } from '../middleware/auth';
 import { memoryCache } from '../services/cache';
 import { circuitBreaker } from '../services/circuitBreaker';
 import { billAndLog } from '../services/billing';
-import { ChannelType, ProviderHandler } from '../providers/types';
-import { OpenAIApiHandler } from '../providers/openai';
-import { AzureOpenAIApiHandler } from '../providers/azure';
-import { FluxApiHandler } from '../providers/flux';
-
-function getProviderHandler(type: number): ProviderHandler {
-    switch (type) {
-        case ChannelType.AZURE:
-            return new AzureOpenAIApiHandler();
-        case ChannelType.FLUX:
-            return new FluxApiHandler();
-        case ChannelType.OPENAI:
-        default:
-            return new OpenAIApiHandler();
-    }
-}
+import { ChannelType, getProviderHandler } from '../providers';
 
 export const imagesRouter = new Elysia()
     .use(authPlugin)
@@ -33,17 +18,7 @@ export const imagesRouter = new Elysia()
         const targetModel = model || 'dall-e-3';
 
         // --- Phase 4 & 6: Access Control ---
-        const groupModelKey = `group_models_${user.group}`;
-        const allowedGroupModels = memoryCache.getOption(groupModelKey);
-        if (allowedGroupModels && Array.isArray(allowedGroupModels) && !allowedGroupModels.includes(targetModel)) {
-            set.status = 403;
-            throw new Error(`Your group '${user.group}' is not allowed to use model '${targetModel}'`);
-        }
-
-        if (token.models && token.models.length > 0 && !token.models.includes(targetModel)) {
-            set.status = 403;
-            throw new Error(`Your API key is not allowed to use model '${targetModel}'`);
-        }
+        assertModelAccess(user, token, targetModel, set);
         // ------------------------------------------
 
         console.log(`[Images Request] UserID: ${user.id}, Token: ${token.name}, Model: ${targetModel}`);

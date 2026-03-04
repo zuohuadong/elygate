@@ -140,7 +140,6 @@ export const authRouter = new Elysia({ prefix: '/auth' })
                 set.status = 403;
                 return { success: false, message: 'Account has no access' };
             }
-
             // Verify password using Bun's native bcrypt/argon2
             let isValid = false;
             try {

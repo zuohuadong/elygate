@@ -2,34 +2,8 @@ import { Elysia, t } from 'elysia';
 import { sql } from '@elygate/db';
 import { adminGuard } from '../middleware/auth';
 import { memoryCache } from '../services/cache';
-import { ChannelType } from '../providers/types';
-import { OpenAIApiHandler } from '../providers/openai';
-import { GeminiApiHandler } from '../providers/gemini';
-import { AnthropicApiHandler } from '../providers/anthropic';
-import { AzureOpenAIApiHandler } from '../providers/azure';
-import { BaiduApiHandler } from '../providers/baidu';
-import { AliApiHandler } from '../providers/ali';
-import { XunfeiApiHandler } from '../providers/xunfei';
-import { MidjourneyApiHandler } from '../providers/mj';
-import { DeepSeekApiHandler } from '../providers/deepseek';
-import { SunoApiHandler } from '../providers/suno';
+import { ChannelType, getProviderHandler } from '../providers';
 import { type UserRecord, type TokenRecord, type ChannelConfig } from '../types';
-
-function getProviderHandler(type: number) {
-    switch (type) {
-        case ChannelType.GEMINI: return new GeminiApiHandler();
-        case ChannelType.ANTHROPIC: return new AnthropicApiHandler();
-        case ChannelType.AZURE: return new AzureOpenAIApiHandler();
-        case ChannelType.BAIDU: return new BaiduApiHandler();
-        case ChannelType.ALI: return new AliApiHandler();
-        case ChannelType.XUNFEI: return new XunfeiApiHandler();
-        case ChannelType.MIDJOURNEY: return new MidjourneyApiHandler();
-        case ChannelType.DEEPSEEK: return new DeepSeekApiHandler();
-        case ChannelType.SUNO: return new SunoApiHandler();
-        case ChannelType.OPENAI:
-        default: return new OpenAIApiHandler();
-    }
-}
 
 /**
  * Admin Management APIs (CRUD for Channels, Tokens, Logs, Users)

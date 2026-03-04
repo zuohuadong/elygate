@@ -1,45 +1,13 @@
 import { Elysia } from 'elysia';
 import { sql } from '@elygate/db';
-import { authPlugin } from '../middleware/auth';
+import { authPlugin, assertModelAccess } from '../middleware/auth';
 import { memoryCache } from '../services/cache';
 import { circuitBreaker } from '../services/circuitBreaker';
 import { billAndLog, preCheckAndDecrement, reconcileQuota } from '../services/billing';
 import { calculateCost } from '../services/ratio';
 import { lookupSemanticCache, storeSemanticCache } from '../services/semanticCache';
-import { ChannelType, ProviderHandler } from '../providers/types';
+import { ChannelType, getProviderHandler } from '../providers';
 import { type TokenRecord, type UserRecord, type ChannelConfig } from '../types';
-import { OpenAIApiHandler } from '../providers/openai';
-import { GeminiApiHandler } from '../providers/gemini';
-import { AnthropicApiHandler } from '../providers/anthropic';
-import { AzureOpenAIApiHandler } from '../providers/azure';
-import { BaiduApiHandler } from '../providers/baidu';
-import { AliApiHandler } from '../providers/ali';
-import { XunfeiApiHandler } from '../providers/xunfei';
-import { MidjourneyApiHandler } from '../providers/mj';
-
-// Assign the corresponding converter based on the channel type in the database
-function getProviderHandler(type: number): ProviderHandler {
-    switch (type) {
-        case ChannelType.GEMINI:
-            return new GeminiApiHandler();
-        case ChannelType.ANTHROPIC:
-            return new AnthropicApiHandler();
-        case ChannelType.AZURE:
-            return new AzureOpenAIApiHandler();
-        case ChannelType.BAIDU:
-            return new BaiduApiHandler();
-        case ChannelType.ALI:
-            return new AliApiHandler();
-        case ChannelType.XUNFEI:
-            return new XunfeiApiHandler();
-        case ChannelType.MIDJOURNEY:
-            return new MidjourneyApiHandler();
-        case ChannelType.NVIDIA:
-        case ChannelType.OPENAI:
-        default:
-            return new OpenAIApiHandler(); // Unknown or compatible channels default to OpenAI standard passthrough
-    }
-}
 
 export const chatRouter = new Elysia()
     .use(authPlugin)
@@ -54,17 +22,7 @@ export const chatRouter = new Elysia()
         }
 
         // --- Phase 4 & 6: Access Control ---
-        const groupModelKey = `group_models_${user.group}`;
-        const allowedGroupModels = memoryCache.getOption(groupModelKey);
-        if (allowedGroupModels && Array.isArray(allowedGroupModels) && !allowedGroupModels.includes(model)) {
-            set.status = 403;
-            throw new Error(`Your group '${user.group}' is not allowed to use model '${model}'`);
-        }
-
-        if (token.models && token.models.length > 0 && !token.models.includes(model)) {
-            set.status = 403;
-            throw new Error(`Your API key is not allowed to use model '${model}'`);
-        }
+        assertModelAccess(user, token, model, set);
         // ------------------------------------------
 
         console.log(`[Request] UserID: ${user.id}, Token: ${token.name}, Model: ${model}, Group: ${user.group}`);

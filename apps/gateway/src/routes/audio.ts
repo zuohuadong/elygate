@@ -1,32 +1,15 @@
 import { Elysia } from 'elysia';
-import { authPlugin } from '../middleware/auth';
+import { authPlugin, assertModelAccess } from '../middleware/auth';
 import { memoryCache } from '../services/cache';
 import { circuitBreaker } from '../services/circuitBreaker';
 import { billAndLog } from '../services/billing';
-import { ChannelType, ProviderHandler } from '../providers/types';
-import { OpenAIApiHandler } from '../providers/openai';
-import { AzureOpenAIApiHandler } from '../providers/azure';
-import { SunoApiHandler } from '../providers/suno';
-import { UdioApiHandler } from '../providers/udio';
-
-function getProviderHandler(type: number): ProviderHandler {
-    switch (type) {
-        case ChannelType.SUNO:
-            return new SunoApiHandler();
-        case ChannelType.UDIO:
-            return new UdioApiHandler();
-        case ChannelType.AZURE:
-        case ChannelType.OPENAI:
-        default:
-            return new OpenAIApiHandler();
-    }
-}
+import { ChannelType, getProviderHandler } from '../providers';
 
 /**
  * Common request dispatcher for Audio Endpoints
  * Supports /v1/audio/speech, /v1/audio/transcriptions, /v1/audio/translations
  */
-async function handleAudioRequest(endpoint: string, { body, request, token, user }: any) {
+async function handleAudioRequest(endpoint: string, { body, request, token, user, set }: any) {
     let modelName;
     let transformedBody = body;
     let isFormData = false;
@@ -46,15 +29,7 @@ async function handleAudioRequest(endpoint: string, { body, request, token, user
     }
 
     // --- Phase 4 & 6: Access Control ---
-    const groupModelKey = `group_models_${user.group}`;
-    const allowedGroupModels = memoryCache.getOption(groupModelKey);
-    if (allowedGroupModels && Array.isArray(allowedGroupModels) && !allowedGroupModels.includes(modelName)) {
-        throw new Error(`Your group '${user.group}' is not allowed to use model '${modelName}'`);
-    }
-
-    if (token.models && token.models.length > 0 && !token.models.includes(modelName)) {
-        throw new Error(`Your API key is not allowed to use model '${modelName}'`);
-    }
+    assertModelAccess(user, token, modelName, set);
     // ------------------------------------------
 
     console.log(`[Audio Request] UserID: ${user.id}, Token: ${token.name}, Endpoint: ${endpoint}, Model: ${modelName}`);
