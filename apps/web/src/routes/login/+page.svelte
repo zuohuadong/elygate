@@ -215,6 +215,7 @@
                     <!-- GitHub -->
                     <a
                         href={`${API_BASE.replace("/api", "")}/api/auth/github`}
+                        aria-label="Login with GitHub"
                         class="flex items-center justify-center px-4 py-2.5 bg-white/10 hover:bg-white/15 border border-white/10 rounded-xl text-white text-sm transition-all"
                     >
                         <svg
@@ -231,6 +232,7 @@
                     <!-- Discord -->
                     <a
                         href={`${API_BASE.replace("/api", "")}/api/auth/discord`}
+                        aria-label="Login with Discord"
                         class="flex items-center justify-center px-4 py-2.5 bg-white/10 hover:bg-white/15 border border-white/10 rounded-xl text-white text-sm transition-all"
                     >
                         <svg
@@ -247,6 +249,7 @@
                     <!-- Telegram -->
                     <a
                         href={`${API_BASE.replace("/api", "")}/api/auth/telegram`}
+                        aria-label="Login with Telegram"
                         class="flex items-center justify-center px-4 py-2.5 bg-white/10 hover:bg-white/15 border border-white/10 rounded-xl text-white text-sm transition-all"
                     >
                         <svg

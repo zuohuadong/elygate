@@ -2,12 +2,7 @@
 	import { onMount } from "svelte";
 	import { i18n } from "$lib/i18n/index.svelte";
 	import { apiFetch } from "$lib/api";
-	import {
-		CreditCard,
-		Clock,
-		CheckCircle2,
-		XCircle,
-	} from "lucide-svelte";
+	import { CreditCard, Clock, CheckCircle2, XCircle } from "lucide-svelte";
 
 	let balance = $state(0);
 	let orders = $state<any[]>([]);
@@ -43,7 +38,9 @@
 			loading = true;
 			const userId = localStorage.getItem("admin_user_id");
 			if (userId) {
-				const data = await apiFetch<any[]>(`/api/payment/orders/${userId}`);
+				const data = await apiFetch<any[]>(
+					`/api/payment/orders/${userId}`,
+				);
 				orders = data || [];
 			}
 		} catch (error) {
@@ -340,11 +337,11 @@
 
 				<!-- Payment Method Selection -->
 				<div class="mb-6">
-					<label
+					<div
 						class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
 					>
 						{i18n.lang === "zh" ? "支付方式" : "Payment Method"}
-					</label>
+					</div>
 					<div class="space-y-2">
 						<label
 							class="flex items-center p-3 border rounded-lg cursor-pointer {selectedMethod ===

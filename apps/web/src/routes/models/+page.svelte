@@ -15,11 +15,11 @@
         error = "";
         try {
             // Fetch from the public /v1/models endpoint instead of /admin/models
-            const res = await apiFetch("/v1/models");
+            const res = await apiFetch<any>("/v1/models");
             if (Array.isArray(res)) {
                 models = res;
-            } else if (res && Array.isArray(res.data)) {
-                models = res.data;
+            } else if (res && Array.isArray((res as any).data)) {
+                models = (res as any).data;
             } else {
                 models = [];
             }
@@ -84,7 +84,7 @@
                 class="inline-flex items-center gap-2 px-4 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800 transition-all font-medium text-sm shadow-sm disabled:opacity-50"
             >
                 <RefreshCw class="w-4 h-4 {isLoading ? 'animate-spin' : ''}" />
-                {i18n.t.common.refresh}
+                {i18n.lang === "zh" ? "刷新" : "Refresh"}
             </button>
         </div>
     </div>
