@@ -65,20 +65,25 @@ jobs:
           push: true
           tags: ${{ steps.meta-web.outputs.tags }}
           labels: ${{ steps.meta-web.outputs.labels }}
-      - name: Extract metadata (tags, labels) for DB
-        id: meta-db
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_DB }}
-          tags: |
-            type=raw,value=latest
-            type=sha
-
-      - name: Build and push DB image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile.postgres
-          push: true
-          tags: ${{ steps.meta-db.outputs.tags }}
-          labels: ${{ steps.meta-db.outputs.labels }}
+      - name: Build and Push pre-baked DB Image 
+        run: |
+          echo "Building base DB image..."
+          docker build -t elygate-db-base -f Dockerfile.postgres .
+          
+          echo "Starting privileged container for data baking..."
+          docker run -d --privileged --name elygate-db-baking elygate-db-base
+          
+          echo "Copying baking script into container..."
+          docker cp scripts/elygate-db-ci-build.sh elygate-db-baking:/opt/elygate/
+          
+          echo "Executing data initialization inside container..."
+          docker exec -t elygate-db-baking bash /opt/elygate/elygate-db-ci-build.sh
+          
+          echo "Committing initialized state to new image..."
+          docker commit elygate-db-baking ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_DB }}:latest
+          
+          echo "Pushing final initialized image..."
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_DB }}:latest
+          
+          echo "Cleaning up..."
+          docker rm -f elygate-db-baking

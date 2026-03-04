@@ -18,10 +18,10 @@ RUN pig install pg_bigm -v ${PG_VERSION} -y || echo "pg_bigm not available for P
 RUN mkdir -p /opt/elygate
 
 COPY packages/db/src/init.sql /opt/elygate/init.sql
-COPY scripts/elygate-db-init.sh /opt/elygate/elygate-db-init.sh
-COPY scripts/elygate-db-init.service /etc/systemd/system/elygate-db-init.service
+COPY scripts/elygate-db-data-recovery.sh /opt/elygate/elygate-db-data-recovery.sh
+COPY scripts/elygate-db-data-recovery.service /etc/systemd/system/elygate-db-data-recovery.service
 
-RUN chmod +x /opt/elygate/elygate-db-init.sh && \
-    systemctl enable elygate-db-init.service
+RUN chmod +x /opt/elygate/elygate-db-data-recovery.sh && \
+    systemctl enable elygate-db-data-recovery.service
 
 EXPOSE 5432

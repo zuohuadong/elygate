@@ -1,0 +1,17 @@
+[Unit]
+Description=Elygate Database Recovery (from Baked Image)
+DefaultDependencies=no
+Before=sysinit.target local-fs.target
+ConditionPathExists=/opt/elygate/db-backup/.elygate-db-baked
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/opt/elygate/elygate-db-data-recovery.sh
+RemainAfterExit=yes
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=elygate-db-recovery
+
+[Install]
+WantedBy=sysinit.target
