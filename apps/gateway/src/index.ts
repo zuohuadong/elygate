@@ -2,7 +2,7 @@ import { Elysia } from "elysia";
 import { cors } from "@elysiajs/cors";
 import { swagger } from "@elysiajs/swagger";
 import { staticPlugin } from "@elysiajs/static";
-import { authPlugin } from "./middleware/auth";
+import { authPlugin, adminGuard } from "./middleware/auth";
 import { chatRouter } from "./routes/chat";
 import { modelsRouter } from "./routes/models";
 import { embeddingsRouter } from "./routes/embeddings";
@@ -23,6 +23,7 @@ import { sql } from "@elygate/db";
 import { join } from "path";
 import { existsSync, statSync } from "fs";
 import "./services/health";
+
 const app = new Elysia()
   .use(cors({
     origin: true,
@@ -52,11 +53,11 @@ const app = new Elysia()
   .mount("/api/auth/better", betterAuthInstance.handler)
   .use(sysRouter)
   .group("/api", (app) =>
-    app.use(adminRouter)
-      .use(redemptionsRouter)
-      .use(authRouter)
-      .use(paymentRouter)
-      .use(statsRouter)
+    app.group("/auth", (app) => app.use(authRouter))
+      .group("/payment", (app) => app.use(paymentRouter))
+      .group("/admin", (app) => app.use(adminGuard).use(adminRouter))
+      .group("/stats", (app) => app.use(adminGuard).use(statsRouter))
+      .group("/redemptions", (app) => app.use(authPlugin).use(redemptionsRouter))
   )
   .use(mjRouter)
   .group("/v1/chat", (app) =>
@@ -82,6 +83,7 @@ const app = new Elysia()
     set.status = 404;
     return { error: 'Not Found' };
   })
+
 // Startup readiness check
 async function init() {
   console.log("⏳ Waiting for database readiness...");
@@ -122,4 +124,3 @@ async function init() {
 }
 
 init();
-

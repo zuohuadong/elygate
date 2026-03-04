@@ -12,7 +12,7 @@ const DISCORD_REDIRECT_URI = process.env.DISCORD_REDIRECT_URI || 'http://localho
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 
-export const authRouter = new Elysia({ prefix: '/auth' })
+export const authRouter = new Elysia()
     .get('/github', ({ set }) => {
         const url = `https://github.com/login/oauth/authorize?client_id=${GITHUB_CLIENT_ID}&redirect_uri=${REDIRECT_URI}&scope=read:user`;
         set.redirect = url;
