@@ -21,28 +21,28 @@
     const configDefinitions = [
         {
             key: "ModelRatio",
-            title: "Model Ratios",
-            desc: "Multiplier applied to the base cost for specific models. e.g. 'gpt-4': 15",
+            title: i18n.t.pricing.modelRatio,
+            desc: i18n.t.pricing.modelRatioDesc,
         },
         {
             key: "CompletionRatio",
-            title: "Completion Ratio",
-            desc: "Multiplier applied specifically to completion tokens before model ratio. e.g. 1.33 for basic, 2 for GPT-4.",
+            title: i18n.t.pricing.completionRatio,
+            desc: i18n.t.pricing.completionRatioDesc,
         },
         {
             key: "GroupRatio",
-            title: "Group Ratios",
-            desc: "Global multiplier applied based on user 'group'. e.g. VIP users get a 20% discount with 'vip': 0.8",
+            title: i18n.t.pricing.groupRatio,
+            desc: i18n.t.pricing.groupRatioDesc,
         },
         {
             key: "GroupModelRatio",
-            title: "Group-Specific Model Ratios",
-            desc: "Override model ratio for specific groups. Nested JSON: { 'group': { 'model': ratio } }",
+            title: i18n.t.pricing.groupModelRatio,
+            desc: i18n.t.pricing.groupModelRatioDesc,
         },
         {
             key: "FixedCostModels",
-            title: "Fixed Cost Models",
-            desc: "Flat quota deductions for requests to these models (ignores token usage), e.g. Image Gen. 500,000 = $0.5",
+            title: i18n.t.pricing.fixedCostModels,
+            desc: i18n.t.pricing.fixedCostModelsDesc,
         },
     ] as const;
 
@@ -134,8 +134,7 @@
                 {i18n.t.nav.pricing}
             </h1>
             <p class="text-slate-500 dark:text-slate-400 mt-1">
-                Configure advanced JSON rules for Model, Group, and Fixed
-                Pricing Quota formulas.
+                {i18n.t.pricing.desc}
             </p>
         </div>
         <div class="flex items-center gap-3">
@@ -218,7 +217,7 @@
             class="bg-indigo-50/50 dark:bg-indigo-900/10 border border-indigo-100 dark:border-indigo-800/30 rounded-2xl p-6 flex flex-col justify-center"
         >
             <h3 class="font-medium text-indigo-900 dark:text-indigo-300 mb-2">
-                Cost Calculation Formula
+                {i18n.t.pricing.costFormula}
             </h3>
             <div
                 class="text-sm font-mono text-indigo-700 dark:text-indigo-400 bg-indigo-100 dark:bg-indigo-900/30 p-4 rounded-lg"
@@ -233,8 +232,7 @@
             <p
                 class="text-xs text-indigo-600 dark:text-indigo-500 mt-4 leading-relaxed"
             >
-                If a model is defined in Fixed Cost Models, token counts are
-                ignored and the flat rate is multiplied only by the GroupRatio.
+                {i18n.t.pricing.fixedCostNote}
             </p>
         </div>
     </div>
