@@ -5,14 +5,11 @@ services:
     image: ghcr.nju.edu.cn/zuohuadong/elygate-db:latest
     container_name: elygate-db
     restart: always
-    environment:
-      POSTGRES_USER: dbuser_dba
-      POSTGRES_PASSWORD: DBUser.DBA
-      POSTGRES_DB: postgres
+    privileged: true
     ports:
       - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/18/main
+      - pgdata:/data
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U dbuser_dba -d postgres" ]
       interval: 10s

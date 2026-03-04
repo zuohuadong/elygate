@@ -15,19 +15,13 @@ RUN pig install pg_cron -v ${PG_VERSION} -y
 
 RUN pig install pg_bigm -v ${PG_VERSION} -y || echo "pg_bigm not available for PG18, skipping"
 
-RUN mkdir -p /var/run/postgresql /docker-entrypoint-initdb.d
+RUN mkdir -p /opt/elygate
 
-RUN chown -R postgres:postgres /var/lib/postgresql /var/run/postgresql
+COPY packages/db/src/init.sql /opt/elygate/init.sql
+COPY scripts/elygate-db-init.sh /opt/elygate/elygate-db-init.sh
+COPY scripts/elygate-db-init.service /etc/systemd/system/elygate-db-init.service
 
-COPY packages/db/src/init.sql /docker-entrypoint-initdb.d/init.sql
+RUN chmod +x /opt/elygate/elygate-db-init.sh && \
+    systemctl enable elygate-db-init.service
 
 EXPOSE 5432
-
-ENV PGDATA=/var/lib/postgresql/${PG_VERSION}/main
-ENV PATH="/usr/lib/postgresql/${PG_VERSION}/bin:$PATH"
-
-COPY scripts/init-pigsty-entrypoint.sh /docker-entrypoint.sh
-RUN chmod +x /docker-entrypoint.sh
-
-ENTRYPOINT ["/docker-entrypoint.sh"]
-CMD ["postgres"]
