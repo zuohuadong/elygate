@@ -66,11 +66,15 @@
 </script>
 
 {#if show}
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
         class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
         transition:fade={{ duration: 200 }}
         onclick={onClose}
     >
+        <!-- svelte-ignore a11y_click_events_have_key_events -->
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
             class="bg-white dark:bg-slate-950 w-full max-w-lg rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden"
             transition:scale={{ duration: 200, start: 0.95 }}
@@ -105,10 +109,12 @@
 
                 <div class="space-y-1.5">
                     <label
+                        for="r-name"
                         class="text-sm font-medium text-slate-700 dark:text-slate-300"
                         >Name / Note</label
                     >
                     <input
+                        id="r-name"
                         bind:value={formData.name}
                         placeholder="e.g. VIP Gift"
                         class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
@@ -117,10 +123,12 @@
 
                 <div class="space-y-1.5">
                     <label
+                        for="r-key"
                         class="text-sm font-medium text-slate-700 dark:text-slate-300"
                         >Specific Key (Leave blank to auto-generate)</label
                     >
                     <input
+                        id="r-key"
                         bind:value={formData.key}
                         placeholder="elygate-xxx"
                         disabled={!!redemption}
@@ -131,10 +139,12 @@
                 <div class="grid grid-cols-2 gap-4">
                     <div class="space-y-1.5">
                         <label
+                            for="r-quota"
                             class="text-sm font-medium text-slate-700 dark:text-slate-300"
                             >Quota (Value)</label
                         >
                         <input
+                            id="r-quota"
                             type="number"
                             bind:value={formData.quota}
                             class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
@@ -143,10 +153,12 @@
                     </div>
                     <div class="space-y-1.5">
                         <label
+                            for="r-uses"
                             class="text-sm font-medium text-slate-700 dark:text-slate-300"
                             >Max Uses</label
                         >
                         <input
+                            id="r-uses"
                             type="number"
                             bind:value={formData.count}
                             disabled={!!redemption && redemption.used_count > 0}

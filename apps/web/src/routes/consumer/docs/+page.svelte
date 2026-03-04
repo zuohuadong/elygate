@@ -41,10 +41,11 @@
         </div>
         <div class="p-6 space-y-4">
             <div>
-                <label
+                <div
                     class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1"
-                    >Base URL</label
                 >
+                    Base URL
+                </div>
                 <div class="relative">
                     <code
                         class="block w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-sm font-mono text-slate-800 dark:text-slate-200"
