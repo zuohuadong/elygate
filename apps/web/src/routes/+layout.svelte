@@ -16,6 +16,8 @@
 		ScrollText,
 		CreditCard,
 		BarChart3,
+		History,
+		BookOpen,
 	} from "lucide-svelte";
 	import { page } from "$app/state";
 	import { i18n } from "$lib/i18n/index.svelte";
@@ -135,6 +137,16 @@
 				name: i18n.t.nav.pricing || "Pricing",
 				href: "/pricing",
 				icon: BadgeDollarSign,
+			});
+			baseNav.push({
+				name: i18n.lang === "zh" ? "我的日志" : "Logs",
+				href: "/consumer/logs",
+				icon: History,
+			});
+			baseNav.push({
+				name: i18n.lang === "zh" ? "在线文档" : "API Docs",
+				href: "/consumer/docs",
+				icon: BookOpen,
 			});
 		}
 		return baseNav;

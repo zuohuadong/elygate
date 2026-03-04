@@ -119,91 +119,146 @@
         </div>
     </div>
 
-    <!-- Data Table -->
+    <!-- Model Cards Grid -->
     <div
-        class="bg-white/60 dark:bg-slate-900/60 backdrop-blur-xl border border-slate-200/60 dark:border-slate-800/60 rounded-2xl shadow-sm overflow-hidden"
+        class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6"
     >
-        <div class="overflow-x-auto">
-            <table class="w-full text-left text-sm whitespace-nowrap">
-                <thead
-                    class="bg-slate-50/50 dark:bg-slate-950/50 text-slate-500 dark:text-slate-400 border-b border-slate-200/60 dark:border-slate-800/60"
+        {#if isLoading}
+            {#each Array(8) as _}
+                <div
+                    class="bg-white/60 dark:bg-slate-900/60 rounded-2xl p-6 border border-slate-200/60 dark:border-slate-800/60 shadow-sm animate-pulse flex flex-col gap-4"
                 >
-                    <tr>
-                        <th class="px-6 py-4 font-semibold text-xs uppercase"
-                            >ID</th
-                        >
-                        <th class="px-6 py-4 font-semibold text-xs uppercase"
-                            >Name / Description</th
-                        >
-                        <th class="px-6 py-4 font-semibold text-xs uppercase"
-                            >Type</th
-                        >
-                    </tr>
-                </thead>
-                <tbody
-                    class="divide-y divide-slate-100 dark:divide-slate-800/60 text-slate-700 dark:text-slate-300"
+                    <div
+                        class="h-6 bg-slate-200 dark:bg-slate-800 rounded w-2/3"
+                    ></div>
+                    <div
+                        class="h-4 bg-slate-200 dark:bg-slate-800 rounded w-1/4"
+                    ></div>
+                    <div
+                        class="mt-auto pt-4 border-t border-slate-100 dark:border-slate-800 flex justify-between"
+                    >
+                        <div
+                            class="h-8 bg-slate-200 dark:bg-slate-800 rounded w-16"
+                        ></div>
+                        <div
+                            class="h-8 bg-slate-200 dark:bg-slate-800 rounded w-16"
+                        ></div>
+                    </div>
+                </div>
+            {/each}
+        {:else if filteredModels.length === 0}
+            <div
+                class="col-span-full py-16 text-center bg-white/60 dark:bg-slate-900/60 border border-slate-200/60 dark:border-slate-800/60 rounded-2xl shadow-sm"
+            >
+                <div class="flex flex-col items-center justify-center gap-3">
+                    <MonitorSpeaker
+                        class="w-12 h-12 text-slate-300 dark:text-slate-600 mb-2"
+                    />
+                    <p
+                        class="text-lg font-semibold text-slate-700 dark:text-slate-300"
+                    >
+                        {i18n.lang === "zh"
+                            ? "暂无可用模型"
+                            : "No models available"}
+                    </p>
+                    <p class="text-sm text-slate-500 max-w-sm">
+                        {i18n.lang === "zh"
+                            ? "系统尚未配置或支持任何模型，或者当前搜索条件未匹配任何结果。"
+                            : "No models have been configured yet, or the current search terms yielded no results."}
+                    </p>
+                </div>
+            </div>
+        {:else}
+            {#each filteredModels as model (model.id)}
+                <div
+                    class="bg-white hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800/80 rounded-2xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm transition-all hover:shadow-md hover:-translate-y-1 flex flex-col group relative overflow-hidden"
+                    transition:fade={{ duration: 150 }}
                 >
-                    {#if isLoading}
-                        <tr>
-                            <td colspan="3" class="px-6 py-8 text-center">
-                                <div
-                                    class="inline-block w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"
-                                ></div>
-                            </td>
-                        </tr>
-                    {:else if filteredModels.length === 0}
-                        <tr>
-                            <td
-                                colspan="3"
-                                class="px-6 py-12 text-center text-slate-400 dark:text-slate-500"
+                    <!-- Status Indicator Line -->
+                    <div
+                        class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-400 to-teal-500"
+                    ></div>
+
+                    <!-- Header -->
+                    <div class="mb-4">
+                        <div class="flex items-center justify-between mb-2">
+                            <h3
+                                class="font-bold text-slate-900 dark:text-white truncate"
+                                title={model.id}
                             >
-                                <div
-                                    class="flex flex-col items-center justify-center gap-3"
-                                >
-                                    <MonitorSpeaker
-                                        class="w-10 h-10 opacity-50"
-                                    />
-                                    <p class="text-base font-medium">
-                                        {i18n.lang === "zh"
-                                            ? "暂无可用模型"
-                                            : "No models available"}
-                                    </p>
-                                    <p class="text-sm opacity-75">
-                                        {i18n.lang === "zh"
-                                            ? "系统尚未配置或支持任何模型。"
-                                            : "No models have been configured or supported yet."}
-                                    </p>
-                                </div>
-                            </td>
-                        </tr>
-                    {:else}
-                        {#each filteredModels as model (model.id)}
-                            <tr
-                                class="hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-colors group"
-                                transition:fade={{ duration: 150 }}
+                                {model.id}
+                            </h3>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span
+                                class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-50 text-emerald-600 border border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20"
                             >
-                                <td
-                                    class="px-6 py-4 text-slate-900 dark:text-white font-medium"
+                                <span
+                                    class="w-1.5 h-1.5 rounded-full bg-emerald-500"
+                                ></span>
+                                {i18n.lang === "zh" ? "可用" : "Available"}
+                            </span>
+                            <span
+                                class="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-medium bg-indigo-50 text-indigo-600 border border-indigo-100 dark:bg-indigo-500/10 dark:text-indigo-400 dark:border-indigo-500/20 uppercase tracking-wide"
+                            >
+                                {model.object || "chat"}
+                            </span>
+                        </div>
+                    </div>
+
+                    <!-- Details -->
+                    <div class="flex-1 mt-2 mb-6">
+                        <p
+                            class="text-sm text-slate-500 dark:text-slate-400 line-clamp-3 leading-relaxed"
+                        >
+                            {model.name ||
+                                model.description ||
+                                (i18n.lang === "zh"
+                                    ? "标准对话模型支持"
+                                    : "Standard conversational model support.")}
+                        </p>
+                    </div>
+
+                    <!-- Footer Actions -->
+                    <div
+                        class="mt-auto pt-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between"
+                    >
+                        <a
+                            href="/pricing"
+                            class="text-xs font-medium text-slate-500 hover:text-indigo-600 dark:text-slate-400 dark:hover:text-indigo-400 transition-colors"
+                        >
+                            {i18n.lang === "zh"
+                                ? "查看计费规则"
+                                : "View Pricing"} &rarr;
+                        </a>
+                        <div class="flex gap-2 text-slate-400">
+                            <button
+                                title="API Docs"
+                                class="p-1 hover:text-slate-900 dark:hover:text-white transition-colors"
+                                onclick={() =>
+                                    (window.location.href = "/consumer/docs")}
+                            >
+                                <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    width="16"
+                                    height="16"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    ><path
+                                        d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"
+                                    /><path
+                                        d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"
+                                    /></svg
                                 >
-                                    {model.id || "unknown"}
-                                </td>
-                                <td
-                                    class="px-6 py-4 text-slate-500 dark:text-slate-400"
-                                >
-                                    {model.name || model.description || "—"}
-                                </td>
-                                <td class="px-6 py-4">
-                                    <span
-                                        class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-500/20"
-                                    >
-                                        {model.object || "model"}
-                                    </span>
-                                </td>
-                            </tr>
-                        {/each}
-                    {/if}
-                </tbody>
-            </table>
-        </div>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            {/each}
+        {/if}
     </div>
 </div>
