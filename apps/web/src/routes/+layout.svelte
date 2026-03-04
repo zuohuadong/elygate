@@ -126,6 +126,16 @@
 				href: "/tokens",
 				icon: KeyRound,
 			});
+			baseNav.push({
+				name: i18n.lang === "zh" ? "模型列表" : "Models",
+				href: "/models",
+				icon: Boxes,
+			});
+			baseNav.push({
+				name: i18n.t.nav.pricing || "Pricing",
+				href: "/pricing",
+				icon: BadgeDollarSign,
+			});
 		}
 		return baseNav;
 	});

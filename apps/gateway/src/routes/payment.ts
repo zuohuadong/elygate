@@ -10,7 +10,7 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
     .post('/create-order', async ({ body, set }: any) => {
         try {
             const { userId, amount, paymentMethod } = body;
-            
+
             if (!userId || !amount || amount <= 0) {
                 set.status = 400;
                 return { success: false, message: 'Invalid parameters' };
@@ -32,7 +32,7 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
             `;
 
             let paymentUrl = '';
-            
+
             if (paymentMethod === 'stripe' && STRIPE_SECRET_KEY) {
                 const stripeResponse = await fetch('https://api.stripe.com/v1/checkout/sessions', {
                     method: 'POST',
@@ -93,7 +93,7 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
         try {
             const { data } = body;
             const orderId = data?.object?.metadata?.order_id;
-            
+
             if (!orderId) {
                 set.status = 400;
                 return { success: false, message: 'Invalid callback data' };
@@ -120,7 +120,7 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
             `;
 
             console.log(`[Payment] Stripe payment success: Order ${orderId}, User ${order.user_id}, Amount ${order.amount}`);
-            
+
             return { success: true };
         } catch (e: any) {
             console.error('[Payment] Stripe callback error:', e);
@@ -133,12 +133,12 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
         try {
             const params = new URLSearchParams(query);
             const sign = params.get('sign');
-            
+
             params.delete('sign');
             params.delete('sign_type');
-            
+
             const expectedSign = await generateEPaySign(params.toString(), EPAY_APP_SECRET);
-            
+
             if (sign !== expectedSign) {
                 set.status = 400;
                 return 'fail';
@@ -146,7 +146,7 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
 
             const outTradeNo = params.get('out_trade_no') || '';
             const orderId = parseInt(outTradeNo.replace('ELY', '').substring(0, outTradeNo.indexOf(Date.now().toString()) - 4));
-            
+
             const [order] = await sql`
                 SELECT * FROM payment_orders WHERE id = ${orderId} LIMIT 1
             `;
@@ -168,7 +168,7 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
             `;
 
             console.log(`[Payment] EPay payment success: Order ${orderId}, User ${order.user_id}, Amount ${order.amount}`);
-            
+
             return 'success';
         } catch (e: any) {
             console.error('[Payment] EPay callback error:', e);
@@ -189,6 +189,14 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
             set.status = 500;
             return { success: false, message: e.message };
         }
+    })
+
+    .get('/options', async () => {
+        const rows = await sql`SELECT key, value FROM options`;
+        // Convert array of {key, value} to a single record object
+        const settings: Record<string, string> = {};
+        for (const r of rows) settings[r.key] = r.value;
+        return settings;
     });
 
 async function generateEPaySign(params: string, secret: string): Promise<string> {
