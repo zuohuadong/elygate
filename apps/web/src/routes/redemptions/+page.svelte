@@ -42,11 +42,11 @@
     };
 
     let columns = $derived([
-        { key: "id", label: "ID" },
-        { key: "name", label: "Name" },
-        { key: "key", label: "Code Key" },
-        { key: "formattedQuota", label: i18n.t.tokens.quota },
-        { key: "usageStr", label: "Used / Total" },
+        { key: "id", label: i18n.t.redemptions.id },
+        { key: "name", label: i18n.t.redemptions.name },
+        { key: "key", label: i18n.t.redemptions.codeKey },
+        { key: "formattedQuota", label: i18n.t.redemptions.quota },
+        { key: "usageStr", label: i18n.t.redemptions.usedTotal },
         {
             key: "displayStatus",
             label: i18n.t.tokens.status,

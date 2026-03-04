@@ -66,9 +66,7 @@
             {i18n.t.nav.settings}
         </h2>
         <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">
-            {i18n.lang === "zh"
-                ? "配置系统全局参数、注册奖励及邮件等服务"
-                : "Configure global system parameters, registration rewards and mail services"}
+            {i18n.t.settings.desc}
         </p>
     </div>
 
@@ -102,14 +100,14 @@
                 <h3
                     class="text-base font-semibold text-slate-900 dark:text-white mb-4"
                 >
-                    General Configuration
+                    {i18n.t.settings.general}
                 </h3>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div class="space-y-2">
                         <label
                             for="server-name"
                             class="text-sm font-medium text-slate-700 dark:text-slate-300"
-                            >System Name</label
+                            >{i18n.t.settings.systemName}</label
                         >
                         <input
                             id="server-name"
@@ -127,29 +125,29 @@
                 <h3
                     class="text-base font-semibold text-slate-900 dark:text-white mb-4"
                 >
-                    Registration & Users
+                    {i18n.t.settings.registration}
                 </h3>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div class="space-y-2">
                         <label
                             for="sign-enabled"
                             class="text-sm font-medium text-slate-700 dark:text-slate-300"
-                            >Enable Registration</label
+                            >{i18n.t.settings.enableRegistration}</label
                         >
                         <select
                             id="sign-enabled"
                             bind:value={settings.SignEnabled}
                             class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
                         >
-                            <option value="true">Enabled</option>
-                            <option value="false">Disabled</option>
+                            <option value="true">{i18n.t.settings.enabled}</option>
+                            <option value="false">{i18n.t.settings.disabled}</option>
                         </select>
                     </div>
                     <div class="space-y-2">
                         <label
                             for="sign-quota"
                             class="text-sm font-medium text-slate-700 dark:text-slate-300"
-                            >Initial Quota ($0.5 = 500000)</label
+                            >{i18n.t.settings.initialQuota}</label
                         >
                         <input
                             id="sign-quota"
@@ -162,7 +160,7 @@
                         <label
                             for="default-group"
                             class="text-sm font-medium text-slate-700 dark:text-slate-300"
-                            >Default Group</label
+                            >{i18n.t.settings.defaultGroup}</label
                         >
                         <input
                             id="default-group"
@@ -180,14 +178,14 @@
                 <h3
                     class="text-base font-semibold text-slate-900 dark:text-white mb-4"
                 >
-                    SMTP Configuration (Optional)
+                    {i18n.t.settings.smtp}
                 </h3>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div class="space-y-2">
                         <label
                             for="smtp-server"
                             class="text-sm font-medium text-slate-700 dark:text-slate-300"
-                            >SMTP Server</label
+                            >{i18n.t.settings.smtpServer}</label
                         >
                         <input
                             id="smtp-server"
@@ -200,7 +198,7 @@
                         <label
                             for="smtp-port"
                             class="text-sm font-medium text-slate-700 dark:text-slate-300"
-                            >SMTP Port</label
+                            >{i18n.t.settings.smtpPort}</label
                         >
                         <input
                             id="smtp-port"
@@ -214,7 +212,7 @@
                         <label
                             for="smtp-account"
                             class="text-sm font-medium text-slate-700 dark:text-slate-300"
-                            >SMTP Account</label
+                            >{i18n.t.settings.smtpAccount}</label
                         >
                         <input
                             id="smtp-account"
@@ -227,7 +225,7 @@
                         <label
                             for="smtp-password"
                             class="text-sm font-medium text-slate-700 dark:text-slate-300"
-                            >SMTP Password</label
+                            >{i18n.t.settings.smtpPassword}</label
                         >
                         <input
                             id="smtp-password"

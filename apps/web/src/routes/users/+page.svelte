@@ -48,10 +48,10 @@
     };
 
     let columns = $derived([
-        { key: "id", label: "ID" },
-        { key: "username", label: "Username" },
-        { key: "displayRole", label: "Role" },
-        { key: "group", label: "Group" },
+        { key: "id", label: i18n.t.users.id },
+        { key: "username", label: i18n.t.users.username },
+        { key: "displayRole", label: i18n.t.users.role },
+        { key: "group", label: i18n.t.users.group },
         { key: "formattedQuota", label: i18n.t.tokens.quota },
         { key: "formattedUsed", label: i18n.t.tokens.used },
         {
