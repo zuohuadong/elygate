@@ -1,17 +1,17 @@
 [Unit]
-Description=Elygate Database Initialization
-After=postgresql.service
-Requires=postgresql.service
+Description=Elygate Database Initialization (Pigsty Deploy & DB Init)
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=oneshot
-User=postgres
-Group=postgres
+User=root
 ExecStart=/opt/elygate/elygate-db-init.sh
 RemainAfterExit=yes
 StandardOutput=syslog
 StandardError=syslog
 SyslogIdentifier=elygate-db-init
+TimeoutStartSec=3600
 
 [Install]
 WantedBy=multi-user.target
