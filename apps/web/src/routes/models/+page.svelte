@@ -66,13 +66,9 @@
     >
         <div>
             <h1
-                class="text-2xl font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-3"
+                class="text-2xl font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-2"
             >
-                <div
-                    class="p-2.5 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 rounded-xl"
-                >
-                    <MonitorSpeaker class="w-6 h-6" />
-                </div>
+                <MonitorSpeaker class="w-6 h-6 text-indigo-500" />
                 {i18n.lang === "zh" ? "模型管理" : "Models"}
             </h1>
             <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">
