@@ -2,8 +2,9 @@ import { Elysia, t } from 'elysia';
 import { sql } from '@elygate/db';
 import { adminGuard } from '../middleware/auth';
 
-// Stats Router - prefix and guard will be applied in index.ts
+// Stats Router - prefix will be applied in index.ts
 export const statsRouter = new Elysia()
+    .use(adminGuard)
     .get('/overview', async () => {
         const [overview] = await sql`
             SELECT * FROM mv_system_overview LIMIT 1

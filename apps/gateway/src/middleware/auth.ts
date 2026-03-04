@@ -136,11 +136,10 @@ export const authPlugin = new Elysia({ name: 'auth' })
 export const adminGuard = new Elysia({ name: 'adminGuard' })
     .use(cors())
     .use(authPlugin)
-    .derive(({ user, set }: any) => {
+    .onBeforeHandle(({ user, set }: any) => {
         const u = user as UserRecord;
         if (!u || u.role !== 10) {
             set.status = 403;
             throw new Error('Forbidden: Admin privileges required');
         }
-        return { user: u };
     });

@@ -5,8 +5,9 @@ import { memoryCache } from '../services/cache';
 import { getProviderHandler } from '../providers';
 import { ChannelType } from '../types';
 
-// Admin Router - prefix and guard will be applied in index.ts
+// Admin Router - prefix will be applied in index.ts
 export const adminRouter = new Elysia()
+    .use(adminGuard)
     // --- Channel Management (Channels) ---
     .get('/channels', async () => {
         const channels = await sql`
