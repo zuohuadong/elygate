@@ -8,6 +8,7 @@
     let isSaving = $state(false);
     let error: string | null = $state(null);
     let successMessage: string | null = $state(null);
+    let isAdmin = $state(false);
 
     // Default configuration template structures
     let configs = $state({
@@ -54,7 +55,7 @@
         successMessage = null;
         try {
             const data =
-                await apiFetch<Record<string, string>>("/admin/options");
+                await apiFetch<Record<string, string>>("/payment/options");
 
             // Re-map actual configs, safely formatting valid JSON keys
             for (const c of configDefinitions) {
@@ -119,6 +120,8 @@
     }
 
     onMount(() => {
+        const role = localStorage.getItem("admin_role");
+        isAdmin = role ? parseInt(role, 10) >= 10 : false;
         loadConfig();
     });
 </script>
@@ -145,20 +148,22 @@
             >
                 <RefreshCw class="w-5 h-5 {isLoading ? 'animate-spin' : ''}" />
             </button>
-            <button
-                onclick={saveConfig}
-                disabled={isSaving || isLoading}
-                class="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg shadow-sm transition-colors"
-            >
-                {#if isSaving}
-                    <div
-                        class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"
-                    ></div>
-                {:else}
-                    <Save class="w-4 h-4" />
-                {/if}
-                {i18n.t.common.save}
-            </button>
+            {#if isAdmin}
+                <button
+                    onclick={saveConfig}
+                    disabled={isSaving || isLoading}
+                    class="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg shadow-sm transition-colors"
+                >
+                    {#if isSaving}
+                        <div
+                            class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"
+                        ></div>
+                    {:else}
+                        <Save class="w-4 h-4" />
+                    {/if}
+                    {i18n.t.common.save}
+                </button>
+            {/if}
         </div>
     </div>
 
@@ -204,9 +209,12 @@
                 </div>
                 <div class="p-1 flex-1 bg-slate-100 dark:bg-slate-950">
                     <textarea
-                        class="w-full h-48 md:h-64 p-4 font-mono text-sm bg-transparent outline-none resize-none text-slate-800 dark:text-slate-200 placeholder:text-slate-400"
+                        class="w-full h-48 md:h-64 p-4 font-mono text-sm bg-transparent outline-none resize-none text-slate-800 dark:text-slate-200 placeholder:text-slate-400 {!isAdmin
+                            ? 'opacity-70 cursor-not-allowed'
+                            : ''}"
                         spellcheck="false"
                         bind:value={configs[def.key]}
+                        readonly={!isAdmin}
                     ></textarea>
                 </div>
             </div>

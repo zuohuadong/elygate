@@ -14,9 +14,8 @@
         isLoading = true;
         error = "";
         try {
-            // New API usually has an endpoint for models, but if it doesn't exist yet,
-            // we will catch the 404 and show a placeholder or empty list.
-            const res = await apiFetch("/admin/models");
+            // Fetch from the public /v1/models endpoint instead of /admin/models
+            const res = await apiFetch("/v1/models");
             if (Array.isArray(res)) {
                 models = res;
             } else if (res && Array.isArray(res.data)) {
