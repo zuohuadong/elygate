@@ -15,6 +15,8 @@ import { rerankRouter } from "./routes/rerank";
 import { videoRouter } from "./routes/video";
 import { sysRouter } from "./routes/sys";
 import { mjRouter } from "./routes/mj";
+import { paymentRouter } from "./routes/payment";
+import { statsRouter } from "./routes/stats";
 import { memoryCache } from "./services/cache";
 import { sql } from "@elygate/db";
 import { join } from "path";
@@ -51,6 +53,8 @@ const app = new Elysia()
     app.use(adminRouter)
       .use(redemptionsRouter)
       .use(authRouter)
+      .use(paymentRouter)
+      .use(statsRouter)
   )
   .use(mjRouter)
   .group("/v1/chat", (app) =>

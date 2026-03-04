@@ -67,12 +67,24 @@ Inspired by New-API, Elygate provides pre-compiled single-file binaries. No Node
 
 For high-performance production use without Docker:
 
-1. **Build & Start All**:
-   ```bash
-   bun run build
-   bun run start
-   ```
-   *This command leverages the root `package.json` to concurrently launch both the Gateway and Web UI in production mode.*
+#### One-Command Start
+```bash
+# Build the web application
+bun run build
+
+# Start both Gateway and Web with one command
+bun run start
+```
+
+This will start:
+- **Gateway API** on port 3000
+- **Web Admin Panel** on port 3001
+
+#### Access Points
+| Service | URL | Default Credentials |
+| :--- | :--- | :--- |
+| **Admin Panel** | [http://localhost:3001](http://localhost:3001) | `admin` / `admin123` |
+| **API Endpoint** | [http://localhost:3000](http://localhost:3000) | Generate keys in Admin |
 
 ---
 
@@ -80,21 +92,23 @@ For high-performance production use without Docker:
 
 If you prefer to run services manually on your host machine:
 
-1. **Install Dependencies**:
-   ```bash
-   bun install
-   ```
+#### One-Command Dev Start
+```bash
+# Install dependencies
+bun install
 
-2. **Setup Database**:
-   - Ensure PostgreSQL 15+ is running.
-   - Run `packages/db/src/init.sql` to initialize schema.
-   - Configure `DATABASE_URL` in `.env`.
+# Start both Gateway and Web in development mode
+bun run dev
+```
 
-3. **One-Command Dev**:
-   ```bash
-   bun run dev
-   ```
-   *Simultaneously runs Gateway (port 3000) and Admin Panel (port 5173).*
+This will start:
+- **Gateway API** on port 3000 (with hot reload)
+- **Web Admin Panel** on port 5173 (with hot reload)
+
+#### Database Setup
+1. Ensure PostgreSQL 15+ is running
+2. Run `packages/db/src/init.sql` to initialize schema
+3. Configure `DATABASE_URL` in `.env`
 
 ---
 
@@ -210,12 +224,24 @@ docker compose -f docker-compose.prod.yml up -d
 
 如果您希望在宿主机以最佳性能运行（非 Docker 环境）：
 
-1. **一键构建与启动**:
-   ```bash
-   bun run build
-   bun run start
-   ```
-   *该命令将通过根目录脚本并行启动网关与管理后台，并自动开启生产模式 (NODE_ENV=production)。*
+#### 一键启动
+```bash
+# 构建 Web 应用
+bun run build
+
+# 一键启动网关和管理后台
+bun run start
+```
+
+这将启动：
+- **网关 API** - 端口 3000
+- **Web 管理后台** - 端口 3001
+
+#### 访问地址
+| 服务 | 访问地址 | 默认凭据 |
+| :--- | :--- | :--- |
+| **管理后台** | [http://localhost:3001](http://localhost:3001) | `admin` / `admin123` |
+| **API 网关** | [http://localhost:3000](http://localhost:3000) | 使用后台生成的 sk- 密钥 |
 
 ---
 
@@ -223,21 +249,23 @@ docker compose -f docker-compose.prod.yml up -d
 
 如果您希望在宿主机手动运行各项服务：
 
-1. **安装依赖**:
-   ```bash
-   bun install
-   ```
+#### 一键开发启动
+```bash
+# 安装依赖
+bun install
 
-2. **数据库准备**:
-   - 确保已安装 PostgreSQL 15+。
-   - 执行 `packages/db/src/init.sql` 初始化表结构。
-   - 在 `.env` 中正确配置 `DATABASE_URL`。
+# 一键启动开发服务器
+bun run dev
+```
 
-3. **一键开发启动**:
-   ```bash
-   bun run dev
-   ```
-   *同时启动网关 (3000端口) 与管理后台 (5173端口)，支持多端热重载。*
+这将启动：
+- **网关 API** - 端口 3000（支持热重载）
+- **Web 管理后台** - 端口 5173（支持热重载）
+
+#### 数据库准备
+1. 确保已安装 PostgreSQL 15+
+2. 执行 `packages/db/src/init.sql` 初始化表结构
+3. 在 `.env` 中正确配置 `DATABASE_URL`
 
 ---
 

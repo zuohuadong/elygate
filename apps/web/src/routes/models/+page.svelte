@@ -1,13 +1,7 @@
 <script lang="ts">
     import { onMount } from "svelte";
     import { apiFetch } from "$lib/api";
-    import {
-        Search,
-        RefreshCw,
-        MonitorSpeaker,
-        CheckCircle2,
-        XCircle,
-    } from "lucide-svelte";
+    import { Search, RefreshCw, MonitorSpeaker, XCircle } from "lucide-svelte";
     import { fade, slide } from "svelte/transition";
     import { i18n } from "$lib/i18n/index.svelte";
 
@@ -51,8 +45,12 @@
     let filteredModels = $derived(
         models.filter(
             (m) =>
-                m.id?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                m.name?.toLowerCase().includes(searchQuery.toLowerCase()),
+                (m.id || "")
+                    .toLowerCase()
+                    .includes(searchQuery.toLowerCase()) ||
+                (m.name || "")
+                    .toLowerCase()
+                    .includes(searchQuery.toLowerCase()),
         ),
     );
 </script>
@@ -184,7 +182,7 @@
                             </td>
                         </tr>
                     {:else}
-                        {#each filteredModels as model (model.id || model.object)}
+                        {#each filteredModels as model (model.id)}
                             <tr
                                 class="hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-colors group"
                                 transition:fade={{ duration: 150 }}

@@ -2,6 +2,7 @@ import { Elysia } from 'elysia';
 import { cors } from '@elysiajs/cors';
 import { sql } from '@elygate/db';
 import { isRateLimited } from '../services/ratelimit';
+import { type TokenRecord, type UserRecord } from '../types';
 
 /**
  * Bearer Token Authentication Middleware
@@ -40,7 +41,7 @@ export const authPlugin = new Elysia({ name: 'auth' })
         const raw = rows[0];
 
         // Map raw database row to logical objects
-        const tokenRecord = {
+        const tokenRecord: TokenRecord = {
             id: raw.token_id,
             name: raw.name,
             key: raw.key,
@@ -53,7 +54,7 @@ export const authPlugin = new Elysia({ name: 'auth' })
             rateLimit: Number(raw.rate_limit || 0)
         };
 
-        const userRecord = {
+        const userRecord: UserRecord = {
             id: raw.user_id,
             username: raw.username,
             group: raw.group,
@@ -111,7 +112,7 @@ export const authPlugin = new Elysia({ name: 'auth' })
         return {
             token: tokenRecord,
             user: userRecord
-        };
+        } as { token: TokenRecord, user: UserRecord };
     });
 
 /**
@@ -121,10 +122,11 @@ export const authPlugin = new Elysia({ name: 'auth' })
 export const adminGuard = new Elysia({ name: 'adminGuard' })
     .use(cors())
     .use(authPlugin)
-    .derive(({ user, set }) => {
-        if (!user || user.role !== 10) {
+    .derive(({ user, set }: any) => {
+        const u = user as UserRecord;
+        if (!u || u.role !== 10) {
             set.status = 403;
             throw new Error('Forbidden: Admin privileges required');
         }
-        return { user };
+        return { user: u };
     });

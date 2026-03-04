@@ -3,6 +3,8 @@
     import { fade, scale } from "svelte/transition";
     import { i18n } from "$lib/i18n/index.svelte";
 
+    import { type Channel } from "$lib/types";
+
     let {
         show = false,
         channel = null,
@@ -10,7 +12,7 @@
         onSave = (data: any) => {},
     } = $props<{
         show: boolean;
-        channel: any | null;
+        channel: Channel | null;
         onClose: () => void;
         onSave: (data: any) => Promise<void>;
     }>();

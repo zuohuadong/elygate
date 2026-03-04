@@ -3,21 +3,29 @@
     import { apiFetch } from "$lib/api";
     import { i18n } from "$lib/i18n/index.svelte";
     import { onMount } from "svelte";
+    import type {
+        DashboardStats,
+        DashboardError,
+        UsageTrend,
+    } from "$lib/types";
 
     // Responsive state variables
-    let stats = $state<any>(null);
-    let errorLogs = $state<any[]>([]);
+    let stats = $state<DashboardStats | null>(null);
+    let errorLogs = $state<DashboardError[]>([]);
+    let trend = $state<UsageTrend[]>([]);
     let isLoading = $state(true);
 
     onMount(async () => {
         try {
-            // Fetch aggregated stats and recent errors from backend
-            const [statsRes, errorsRes] = await Promise.all([
-                apiFetch<any>("/admin/dashboard/stats"),
-                apiFetch<any[]>("/admin/dashboard/errors"),
+            // Fetch aggregated stats, recent errors and trend info from backend
+            const [statsRes, errorsRes, trendRes] = await Promise.all([
+                apiFetch<DashboardStats>("/admin/dashboard/stats"),
+                apiFetch<DashboardError[]>("/admin/dashboard/errors"),
+                apiFetch<UsageTrend[]>("/admin/stats/granular?group_by=day"),
             ]);
             stats = statsRes;
             errorLogs = errorsRes;
+            trend = trendRes;
         } catch (e: any) {
             console.error("[Dashboard] Load Failed", e.message);
         } finally {
@@ -148,7 +156,54 @@
             <div
                 class="p-6 pt-4 h-[350px] flex items-center justify-center text-slate-500 border-t border-slate-100 dark:border-slate-800 mt-4"
             >
-                {i18n.t.common.loading}
+                {#if isLoading}
+                    <div class="flex flex-col items-center gap-2">
+                        <div
+                            class="animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-600"
+                        ></div>
+                        <span>{i18n.t.common.loading}</span>
+                    </div>
+                {:else if trend.length === 0}
+                    <div
+                        class="flex flex-col items-center gap-2 text-slate-400"
+                    >
+                        <Activity class="h-8 w-8 opacity-20" />
+                        <span
+                            >{i18n.lang === "zh"
+                                ? "暂无消耗数据"
+                                : "No usage data available"}</span
+                        >
+                    </div>
+                {:else}
+                    <div
+                        class="w-full h-full flex items-end justify-between px-2 pb-4 gap-1"
+                    >
+                        {#each trend as day}
+                            <div
+                                class="bg-indigo-500/20 hover:bg-indigo-500/40 transition-all rounded-t-sm relative group flex-1"
+                                style="height: {Math.max(
+                                    10,
+                                    Math.min(
+                                        100,
+                                        (Number(day.prompt_tokens) +
+                                            Number(day.completion_tokens)) /
+                                            10000,
+                                    ),
+                                )}%"
+                            >
+                                <div
+                                    class="opacity-0 group-hover:opacity-100 absolute -top-12 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-[10px] py-1 px-2 rounded whitespace-nowrap z-10 pointer-events-none transition-opacity shadow-lg"
+                                >
+                                    {day.label}: {(
+                                        (Number(day.prompt_tokens) +
+                                            Number(day.completion_tokens)) /
+                                        1000
+                                    ).toFixed(1)}k tokens
+                                </div>
+                            </div>
+                        {/each}
+                    </div>
+                {/if}
             </div>
         </div>
 

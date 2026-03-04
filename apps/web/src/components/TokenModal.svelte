@@ -3,6 +3,8 @@
     import { fade, scale } from "svelte/transition";
     import { i18n } from "$lib/i18n/index.svelte";
 
+    import { type Token } from "$lib/types";
+
     let {
         show = false,
         token = null,
@@ -10,7 +12,7 @@
         onSave = (data: any) => {},
     } = $props<{
         show: boolean;
-        token: any | null;
+        token: Token | null;
         onClose: () => void;
         onSave: (data: any) => Promise<void>;
     }>();

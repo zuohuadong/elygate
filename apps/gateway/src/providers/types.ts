@@ -2,12 +2,12 @@ export interface ProviderHandler {
     /**
      * Transforms standard OpenAI request body to the format required by this provider.
      */
-    transformRequest(body: Record<string, any>, model: string): any;
+    transformRequest(body: Record<string, any>, model: string): Record<string, any>;
 
     /**
      * Transforms non-streaming response from upstream to standard OpenAI response format.
      */
-    transformResponse(data: any): any;
+    transformResponse(data: any): Record<string, any>;
 
     /**
      * Extracts and calculates token usage from non-streaming response.

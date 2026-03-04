@@ -6,6 +6,12 @@ const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID || '';
 const GITHUB_CLIENT_SECRET = process.env.GITHUB_CLIENT_SECRET || '';
 const REDIRECT_URI = process.env.GITHUB_REDIRECT_URI || 'http://localhost:3000/api/auth/github/callback';
 
+const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID || '';
+const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET || '';
+const DISCORD_REDIRECT_URI = process.env.DISCORD_REDIRECT_URI || 'http://localhost:3000/api/auth/discord/callback';
+
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
+
 export const authRouter = new Elysia({ prefix: '/auth' })
     .get('/github', ({ set }) => {
         const url = `https://github.com/login/oauth/authorize?client_id=${GITHUB_CLIENT_ID}&redirect_uri=${REDIRECT_URI}&scope=read:user`;
@@ -228,4 +234,156 @@ export const authRouter = new Elysia({ prefix: '/auth' })
             ORDER BY created_at DESC 
             LIMIT 50
         `;
+    })
+    
+    .get('/discord', ({ set }) => {
+        const url = `https://discord.com/api/oauth2/authorize?client_id=${DISCORD_CLIENT_ID}&redirect_uri=${encodeURIComponent(DISCORD_REDIRECT_URI)}&response_type=code&scope=identify`;
+        set.redirect = url;
+    })
+    
+    .get('/discord/callback', async ({ query, set }) => {
+        const { code } = query;
+        if (!code) throw new Error("No code provided");
+
+        const tokenRes = await fetch('https://discord.com/api/oauth2/token', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            body: new URLSearchParams({
+                client_id: DISCORD_CLIENT_ID,
+                client_secret: DISCORD_CLIENT_SECRET,
+                grant_type: 'authorization_code',
+                code: code,
+                redirect_uri: DISCORD_REDIRECT_URI
+            })
+        });
+
+        const tokenData = await tokenRes.json() as any;
+        if (tokenData.error) throw new Error(tokenData.error_description || "Discord auth failed");
+
+        const userRes = await fetch('https://discord.com/api/users/@me', {
+            headers: {
+                'Authorization': `Bearer ${tokenData.access_token}`
+            }
+        });
+
+        const discordUser = await userRes.json() as any;
+
+        const [existingOAuth] = await sql`
+            SELECT user_id FROM oauth_accounts 
+            WHERE provider = 'discord' AND provider_user_id = ${discordUser.id}
+            LIMIT 1
+        `;
+
+        let user;
+        if (existingOAuth) {
+            const [userRow] = await sql`
+                SELECT id, username FROM users WHERE id = ${existingOAuth.user_id} LIMIT 1
+            `;
+            user = userRow;
+        } else {
+            const username = `discord:${discordUser.username}#${discordUser.discriminator}`;
+            const [newUser] = await sql`
+                INSERT INTO users (username, password_hash, role, quota, status)
+                VALUES (${username}, 'oauth-no-password', 1, 500000, 1)
+                RETURNING id, username
+            `;
+            user = newUser;
+
+            await sql`
+                INSERT INTO oauth_accounts (user_id, provider, provider_user_id, access_token, refresh_token, expires_at)
+                VALUES (${user.id}, 'discord', ${discordUser.id}, ${tokenData.access_token}, ${tokenData.refresh_token}, NOW() + INTERVAL '${tokenData.expires_in} seconds')
+            `;
+
+            const newKey = `sk-${Bun.randomUUIDv7('hex')}`;
+            await sql`
+                INSERT INTO tokens (user_id, name, key, status, remain_quota)
+                VALUES (${user.id}, 'Default Token', ${newKey}, 1, -1)
+            `;
+        }
+
+        const sessionToken = await authService.generateSessionToken(user.id);
+        const targetUrl = process.env.WEB_URL || 'http://localhost:5173';
+        set.redirect = `${targetUrl}/auth/callback?token=${sessionToken}&username=${user.username}`;
+    })
+    
+    .get('/telegram', async ({ query, set }) => {
+        const { id, first_name, last_name, username, photo_url, auth_date, hash } = query as any;
+        
+        if (!id || !auth_date || !hash) {
+            set.status = 400;
+            throw new Error('Invalid Telegram login data');
+        }
+
+        const dataCheckString = Object.keys(query)
+            .filter(key => key !== 'hash')
+            .sort()
+            .map(key => `${key}=${query[key]}`)
+            .join('\n');
+
+        const encoder = new TextEncoder();
+        const secretKey = await crypto.subtle.importKey(
+            'raw',
+            encoder.encode(TELEGRAM_BOT_TOKEN),
+            { name: 'HMAC', hash: 'SHA-256' },
+            false,
+            ['sign']
+        );
+        
+        const signature = await crypto.subtle.sign('HMAC', secretKey, encoder.encode(dataCheckString));
+        const expectedHash = Array.from(new Uint8Array(signature))
+            .map(b => b.toString(16).padStart(2, '0'))
+            .join('');
+
+        if (hash !== expectedHash) {
+            set.status = 401;
+            throw new Error('Invalid Telegram login hash');
+        }
+
+        const authTimestamp = parseInt(auth_date);
+        if (Date.now() / 1000 - authTimestamp > 86400) {
+            set.status = 401;
+            throw new Error('Telegram login data is too old');
+        }
+
+        const [existingOAuth] = await sql`
+            SELECT user_id FROM oauth_accounts 
+            WHERE provider = 'telegram' AND provider_user_id = ${String(id)}
+            LIMIT 1
+        `;
+
+        let user;
+        if (existingOAuth) {
+            const [userRow] = await sql`
+                SELECT id, username FROM users WHERE id = ${existingOAuth.user_id} LIMIT 1
+            `;
+            user = userRow;
+        } else {
+            const telegramUsername = username || `telegram_${id}`;
+            const fullName = [first_name, last_name].filter(Boolean).join(' ');
+            const displayUsername = `telegram:${telegramUsername}`;
+            
+            const [newUser] = await sql`
+                INSERT INTO users (username, password_hash, role, quota, status)
+                VALUES (${displayUsername}, 'oauth-no-password', 1, 500000, 1)
+                RETURNING id, username
+            `;
+            user = newUser;
+
+            await sql`
+                INSERT INTO oauth_accounts (user_id, provider, provider_user_id)
+                VALUES (${user.id}, 'telegram', ${String(id)})
+            `;
+
+            const newKey = `sk-${Bun.randomUUIDv7('hex')}`;
+            await sql`
+                INSERT INTO tokens (user_id, name, key, status, remain_quota)
+                VALUES (${user.id}, 'Default Token', ${newKey}, 1, -1)
+            `;
+        }
+
+        const sessionToken = await authService.generateSessionToken(user.id);
+        const targetUrl = process.env.WEB_URL || 'http://localhost:5173';
+        set.redirect = `${targetUrl}/auth/callback?token=${sessionToken}&username=${user.username}`;
     });

@@ -107,10 +107,12 @@
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div class="space-y-2">
                         <label
+                            for="server-name"
                             class="text-sm font-medium text-slate-700 dark:text-slate-300"
                             >System Name</label
                         >
                         <input
+                            id="server-name"
                             bind:value={settings.ServerName}
                             class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
                         />
@@ -130,10 +132,12 @@
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div class="space-y-2">
                         <label
+                            for="sign-enabled"
                             class="text-sm font-medium text-slate-700 dark:text-slate-300"
                             >Enable Registration</label
                         >
                         <select
+                            id="sign-enabled"
                             bind:value={settings.SignEnabled}
                             class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
                         >
@@ -143,10 +147,12 @@
                     </div>
                     <div class="space-y-2">
                         <label
+                            for="sign-quota"
                             class="text-sm font-medium text-slate-700 dark:text-slate-300"
                             >Initial Quota ($0.5 = 500000)</label
                         >
                         <input
+                            id="sign-quota"
                             type="number"
                             bind:value={settings.SignRegisterQuota}
                             class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
@@ -154,10 +160,12 @@
                     </div>
                     <div class="space-y-2">
                         <label
+                            for="default-group"
                             class="text-sm font-medium text-slate-700 dark:text-slate-300"
                             >Default Group</label
                         >
                         <input
+                            id="default-group"
                             bind:value={settings.DefaultGroup}
                             class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
                         />
@@ -177,10 +185,12 @@
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div class="space-y-2">
                         <label
+                            for="smtp-server"
                             class="text-sm font-medium text-slate-700 dark:text-slate-300"
                             >SMTP Server</label
                         >
                         <input
+                            id="smtp-server"
                             bind:value={settings.SMTPServer}
                             placeholder="smtp.example.com"
                             class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
@@ -188,10 +198,12 @@
                     </div>
                     <div class="space-y-2">
                         <label
+                            for="smtp-port"
                             class="text-sm font-medium text-slate-700 dark:text-slate-300"
                             >SMTP Port</label
                         >
                         <input
+                            id="smtp-port"
                             type="number"
                             bind:value={settings.SMTPPort}
                             placeholder="465"
@@ -200,10 +212,12 @@
                     </div>
                     <div class="space-y-2">
                         <label
+                            for="smtp-account"
                             class="text-sm font-medium text-slate-700 dark:text-slate-300"
                             >SMTP Account</label
                         >
                         <input
+                            id="smtp-account"
                             bind:value={settings.SMTPAccount}
                             placeholder="no-reply@example.com"
                             class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
@@ -211,10 +225,12 @@
                     </div>
                     <div class="space-y-2">
                         <label
+                            for="smtp-password"
                             class="text-sm font-medium text-slate-700 dark:text-slate-300"
                             >SMTP Password</label
                         >
                         <input
+                            id="smtp-password"
                             type="password"
                             bind:value={settings.SMTPPassword}
                             class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"

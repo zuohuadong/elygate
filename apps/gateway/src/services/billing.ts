@@ -1,16 +1,6 @@
 import { sql } from '@elygate/db';
+import { type BillingContext } from '../types';
 import { calculateCost } from './ratio';
-
-export interface BillingContext {
-    userId: number;
-    tokenId: number;
-    channelId: number;
-    modelName: string;
-    promptTokens: number;
-    completionTokens: number;
-    userGroup: string; // User group for discount ratio mapping
-    isStream: boolean;
-}
 
 // Mocking the global log consumption buffer (channel) in New-API
 const billingQueue: BillingContext[] = [];
