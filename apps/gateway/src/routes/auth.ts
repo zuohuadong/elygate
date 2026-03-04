@@ -251,6 +251,120 @@ export const authRouter = new Elysia({ prefix: '/auth' })
             limit
         };
     })
+    // Get personal tokens
+    .get('/tokens', async ({ request, set }: any) => {
+        const authHeader = request.headers.get('authorization');
+        if (!authHeader?.startsWith('Bearer ')) {
+            set.status = 401;
+            throw new Error('Unauthorized');
+        }
+        const key = authHeader.substring(7);
+        const [userRow] = await sql`
+            SELECT u.id
+            FROM tokens t
+            JOIN users u ON t.user_id = u.id
+            WHERE t.key = ${key} AND t.status = 1 AND u.status = 1
+            LIMIT 1
+        `;
+        if (!userRow) {
+            set.status = 401;
+            throw new Error('Unauthorized');
+        }
+
+        const data = await sql`
+            SELECT id, name, key, status, remain_quota as "remainQuota", used_quota as "usedQuota", created_at as "createdAt", models
+            FROM tokens 
+            WHERE user_id = ${userRow.id}
+            ORDER BY id DESC
+        `;
+
+        return [...data];
+    })
+    .post('/tokens', async ({ body, request, set }: any) => {
+        const authHeader = request.headers.get('authorization');
+        if (!authHeader?.startsWith('Bearer ')) {
+            set.status = 401;
+            throw new Error('Unauthorized');
+        }
+        const key = authHeader.substring(7);
+        const [userRow] = await sql`
+            SELECT u.id FROM tokens t JOIN users u ON t.user_id = u.id
+            WHERE t.key = ${key} AND t.status = 1 AND u.status = 1
+            LIMIT 1
+        `;
+        if (!userRow) {
+            set.status = 401;
+            throw new Error('Unauthorized');
+        }
+
+        const b = body as any;
+        const newKey = `sk-${Bun.randomUUIDv7('hex')}`;
+        const [result] = await sql`
+            INSERT INTO tokens (user_id, name, key, status, remain_quota, models)
+            VALUES (${userRow.id}, ${b.name}, ${newKey}, 1, ${b.remainQuota || -1}, ${JSON.stringify(b.models || [])})
+            RETURNING *
+        `;
+        return result;
+    })
+    .put('/tokens/:id', async ({ params: { id }, body, request, set }: any) => {
+        const authHeader = request.headers.get('authorization');
+        if (!authHeader?.startsWith('Bearer ')) {
+            set.status = 401;
+            throw new Error('Unauthorized');
+        }
+        const key = authHeader.substring(7);
+        const [userRow] = await sql`
+            SELECT u.id FROM tokens t JOIN users u ON t.user_id = u.id
+            WHERE t.key = ${key} AND t.status = 1 AND u.status = 1
+            LIMIT 1
+        `;
+        if (!userRow) {
+            set.status = 401;
+            throw new Error('Unauthorized');
+        }
+
+        // Verify ownership
+        const [existing] = await sql`SELECT id FROM tokens WHERE id = ${Number(id)} AND user_id = ${userRow.id}`;
+        if (!existing) {
+            set.status = 403;
+            throw new Error('Forbidden: You do not own this token');
+        }
+
+        const [result] = await sql`
+            UPDATE tokens 
+            SET name = COALESCE(${body.name}, name),
+                status = COALESCE(${body.status}, status),
+                remain_quota = COALESCE(${body.remainQuota}, remain_quota),
+                models = COALESCE(${body.models ? JSON.stringify(body.models) : null}, models)
+            WHERE id = ${Number(id)} AND user_id = ${userRow.id}
+            RETURNING *
+        `;
+        return result;
+    })
+    .delete('/tokens/:id', async ({ params: { id }, request, set }: any) => {
+        const authHeader = request.headers.get('authorization');
+        if (!authHeader?.startsWith('Bearer ')) {
+            set.status = 401;
+            throw new Error('Unauthorized');
+        }
+        const key = authHeader.substring(7);
+        const [userRow] = await sql`
+            SELECT u.id FROM tokens t JOIN users u ON t.user_id = u.id
+            WHERE t.key = ${key} AND t.status = 1 AND u.status = 1
+            LIMIT 1
+        `;
+        if (!userRow) {
+            set.status = 401;
+            throw new Error('Unauthorized');
+        }
+
+        const [result] = await sql`DELETE FROM tokens WHERE id = ${Number(id)} AND user_id = ${userRow.id} RETURNING *`;
+        if (!result) {
+            set.status = 403;
+            throw new Error('Forbidden or token not found');
+        }
+        return { success: true, deleted: result };
+    })
     // Get personal stats (for Dashboard chart)
     .get('/stats', async ({ request, set }: any) => {
         const authHeader = request.headers.get('authorization');

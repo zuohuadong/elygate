@@ -35,11 +35,11 @@
             setToken(data.token);
             localStorage.setItem("admin_username", data.username);
 
-            if (data.role) {
+            if (data.role !== undefined && data.role !== null) {
                 localStorage.setItem("admin_role", data.role.toString());
             } else {
-                // If backend omitted it for some reason during /login
-                localStorage.setItem("admin_role", "10");
+                // Secure fallback: default to normal user if role is missing
+                localStorage.setItem("admin_role", "1");
             }
 
             if (data.role && data.role < 10) {

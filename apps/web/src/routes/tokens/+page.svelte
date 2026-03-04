@@ -11,6 +11,7 @@
     let isLoading = $state(true);
     let errorMsg = $state("");
     let searchQuery = $state("");
+    let isAdmin = $state(false);
 
     // Modal state
     let isModalOpen = $state(false);
@@ -19,10 +20,10 @@
     async function loadTokens() {
         isLoading = true;
         try {
-            const data = await apiFetch<any[]>("/admin/tokens");
+            const endpoint = isAdmin ? "/admin/tokens" : "/auth/tokens";
+            const data = await apiFetch<any[]>(endpoint);
             tokens = data.map((t) => ({
                 ...t,
-                // Status 1-Active 2-Banned, mapping based on DB Schema
                 dt_status:
                     t.status === 1
                         ? i18n.lang === "zh"
@@ -45,7 +46,11 @@
         }
     }
 
-    onMount(loadTokens);
+    onMount(() => {
+        const role = localStorage.getItem("admin_role");
+        isAdmin = role ? parseInt(role, 10) >= 10 : false;
+        loadTokens();
+    });
 
     const renderStatus = (val: string) => {
         const isActive = val === "正常" || val === "Active";
@@ -90,7 +95,10 @@
         );
         if (!confirm(confirmMsg)) return;
         try {
-            await apiFetch(`/admin/tokens/${token.id}`, { method: "DELETE" });
+            const endpoint = isAdmin
+                ? `/admin/tokens/${token.id}`
+                : `/auth/tokens/${token.id}`;
+            await apiFetch(endpoint, { method: "DELETE" });
             await loadTokens();
         } catch (err: any) {
             alert(i18n.t.common.failed + ": " + err.message);
@@ -100,12 +108,16 @@
     async function handleSave(data: any) {
         try {
             if (selectedToken) {
-                await apiFetch(`/admin/tokens/${selectedToken.id}`, {
+                const endpoint = isAdmin
+                    ? `/admin/tokens/${selectedToken.id}`
+                    : `/auth/tokens/${selectedToken.id}`;
+                await apiFetch(endpoint, {
                     method: "PUT",
                     body: JSON.stringify(data),
                 });
             } else {
-                await apiFetch("/admin/tokens", {
+                const endpoint = isAdmin ? "/admin/tokens" : "/auth/tokens";
+                await apiFetch(endpoint, {
                     method: "POST",
                     body: JSON.stringify(data),
                 });

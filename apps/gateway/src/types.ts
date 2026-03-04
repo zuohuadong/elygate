@@ -19,6 +19,20 @@ export interface TokenRecord {
     subnet: string;
     rateLimit: number;
 }
+export enum ChannelType {
+    OPENAI = 1,
+    AZURE = 2,
+    ANTHROPIC = 3,
+    GOOGLE = 4,
+    BAIDU = 5,
+    ALIBABA = 6,
+    ZHIPU = 7,
+    IFLYTEK = 8,
+    KIMI = 9,
+    XUNFEI = 10,
+    DEEPSEEK = 11,
+    GEMINI = 12
+}
 
 export interface ChannelConfig {
     id: number;

@@ -38,14 +38,21 @@
 		}
 		adminUsername = localStorage.getItem("admin_username") || "User";
 
-		// Fix: Safely parse role, handle missing or undefined
 		const rawRole = localStorage.getItem("admin_role");
 		if (rawRole && rawRole !== "undefined") {
 			userRole = parseInt(rawRole, 10);
 		} else {
-			// If logged in via /login (admin route), assume role 10 if missing
-			// In a real app this should be verified via /me, but for now this fixes the UI glitch
-			userRole = page.url.pathname.includes("/consumer") ? 1 : 10;
+			// fallback: check path, but prioritize localStorage
+			userRole =
+				page.url.pathname.startsWith("/consumer") ||
+				page.url.pathname === "/payment"
+					? 1
+					: 10;
+		}
+
+		// Home redirect for normal users
+		if (userRole < 10 && page.url.pathname === "/") {
+			goto("/consumer");
 		}
 	});
 
@@ -56,100 +63,100 @@
 		goto("/login");
 	}
 
-	// Side navigation data (derived from current language and role)
+	// Side navigation data (Strictly separated for Admin vs Consumer)
 	const navItems = $derived.by(() => {
-		const baseNav = [];
 		if (userRole >= 10) {
-			// Admin links (Aligned to New API standard)
-			baseNav.push({
-				name: i18n.t.nav.dashboard,
-				href: "/",
-				icon: LayoutDashboard,
-			});
-			baseNav.push({
-				name: i18n.lang === "zh" ? "模型" : "Models",
-				href: "/models",
-				icon: Boxes,
-			});
-			baseNav.push({
-				name: i18n.t.nav.channels,
-				href: "/channels",
-				icon: Cpu,
-			});
-			baseNav.push({
-				name: i18n.t.nav.tokens,
-				href: "/tokens",
-				icon: KeyRound,
-			});
-			baseNav.push({
-				name: i18n.t.nav.users,
-				href: "/users",
-				icon: Users,
-			});
-			baseNav.push({
-				name: i18n.t.nav.logs,
-				href: "/logs",
-				icon: ScrollText,
-			});
-			baseNav.push({
-				name: i18n.t.nav.redemptions || "Redemptions",
-				href: "/redemptions",
-				icon: Gift,
-			});
-			baseNav.push({
-				name: i18n.t.nav.pricing || "Pricing",
-				href: "/pricing",
-				icon: BadgeDollarSign,
-			});
-			baseNav.push({
-				name: i18n.lang === "zh" ? "数据统计" : "Statistics",
-				href: "/stats",
-				icon: BarChart3,
-			});
-			baseNav.push({
-				name: i18n.t.nav.settings,
-				href: "/settings",
-				icon: Settings,
-			});
+			return [
+				{
+					name: i18n.t.nav.dashboard,
+					href: "/",
+					icon: LayoutDashboard,
+				},
+				{
+					name: i18n.lang === "zh" ? "模型管理" : "Models",
+					href: "/models",
+					icon: Boxes,
+				},
+				{
+					name: i18n.t.nav.channels,
+					href: "/channels",
+					icon: Cpu,
+				},
+				{
+					name: i18n.t.nav.tokens,
+					href: "/tokens",
+					icon: KeyRound,
+				},
+				{
+					name: i18n.t.nav.users,
+					href: "/users",
+					icon: Users,
+				},
+				{
+					name: i18n.t.nav.logs,
+					href: "/logs",
+					icon: ScrollText,
+				},
+				{
+					name: i18n.t.nav.redemptions || "Redemptions",
+					href: "/redemptions",
+					icon: Gift,
+				},
+				{
+					name: i18n.t.nav.pricing || "Pricing",
+					href: "/pricing",
+					icon: BadgeDollarSign,
+				},
+				{
+					name: i18n.lang === "zh" ? "数据统计" : "Statistics",
+					href: "/stats",
+					icon: BarChart3,
+				},
+				{
+					name: i18n.t.nav.settings,
+					href: "/settings",
+					icon: Settings,
+				},
+			];
 		} else {
-			// Consumer user links
-			baseNav.push({
-				name: i18n.lang === "zh" ? "我的钱包" : "My Wallet",
-				href: "/consumer",
-				icon: WalletCards,
-			});
-			baseNav.push({
-				name: i18n.lang === "zh" ? "充值中心" : "Payment",
-				href: "/payment",
-				icon: CreditCard,
-			});
-			baseNav.push({
-				name: i18n.t.nav.tokens || "Tokens",
-				href: "/tokens",
-				icon: KeyRound,
-			});
-			baseNav.push({
-				name: i18n.lang === "zh" ? "模型列表" : "Models",
-				href: "/models",
-				icon: Boxes,
-			});
-			baseNav.push({
-				name: i18n.t.nav.pricing || "Pricing",
-				href: "/pricing",
-				icon: BadgeDollarSign,
-			});
-			baseNav.push({
-				name: i18n.lang === "zh" ? "我的日志" : "Logs",
-				href: "/consumer/logs",
-				icon: History,
-			});
-			baseNav.push({
-				name: i18n.lang === "zh" ? "在线文档" : "API Docs",
-				href: "/consumer/docs",
-				icon: BookOpen,
-			});
+			return [
+				{
+					name: i18n.lang === "zh" ? "我的钱包" : "My Wallet",
+					href: "/consumer",
+					icon: WalletCards,
+				},
+				{
+					name: i18n.lang === "zh" ? "充值中心" : "Payment",
+					href: "/payment",
+					icon: CreditCard,
+				},
+				{
+					name: i18n.lang === "zh" ? "令牌管理" : "Tokens",
+					href: "/tokens",
+					icon: KeyRound,
+				},
+				{
+					name: i18n.lang === "zh" ? "可用模型" : "Available Models",
+					href: "/models",
+					icon: Boxes,
+				},
+				{
+					name: i18n.lang === "zh" ? "计费倍率" : "Pricing Ratios",
+					href: "/pricing",
+					icon: BadgeDollarSign,
+				},
+				{
+					name: i18n.lang === "zh" ? "流水记录" : "Usage Logs",
+					href: "/consumer/logs",
+					icon: History,
+				},
+				{
+					name: i18n.lang === "zh" ? "在线文档" : "API Docs",
+					href: "/consumer/docs",
+					icon: BookOpen,
+				},
+			];
 		}
-		return baseNav;
 	});
 
 	// Current active path detection

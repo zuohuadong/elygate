@@ -9,6 +9,7 @@
     let isLoading = $state(true);
     let error = $state("");
     let searchQuery = $state("");
+    let isAdmin = $state(false);
 
     async function loadModels() {
         isLoading = true;
@@ -38,6 +39,8 @@
     }
 
     onMount(() => {
+        const role = localStorage.getItem("admin_role");
+        isAdmin = role ? parseInt(role, 10) >= 10 : false;
         loadModels();
     });
 
@@ -68,7 +71,13 @@
                 class="text-2xl font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-2"
             >
                 <MonitorSpeaker class="w-6 h-6 text-indigo-500" />
-                {i18n.lang === "zh" ? "模型管理" : "Models"}
+                {isAdmin
+                    ? i18n.lang === "zh"
+                        ? "模型管理"
+                        : "Model Management"
+                    : i18n.lang === "zh"
+                      ? "可用模型"
+                      : "Available Models"}
             </h1>
             <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">
                 {i18n.lang === "zh"

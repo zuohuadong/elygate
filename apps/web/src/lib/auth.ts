@@ -6,14 +6,11 @@ import { sql } from "@elygate/db";
 
 export const auth = betterAuth({
     database: {
-        async query(sql_query, values) {
-            const res = await sql.unsafe(sql_query, values);
+        async query(sql_query: string, values: any[] = []) {
+            const res = await (sql as any).unsafe(sql_query, values);
             return { rows: res };
         },
         type: "postgres"
-    },
-    advanced: {
-        generateId: "serial",
     },
     user: {
         modelName: "users",
