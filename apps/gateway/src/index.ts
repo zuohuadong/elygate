@@ -50,7 +50,7 @@ const app = new Elysia()
       return Bun.file(staticPath);
     }
   })
-  .mount("/api/auth/better", betterAuthInstance.handler)
+  // .mount("/api/auth/better", betterAuthInstance.handler)
   .use(sysRouter)
   .group("/api", (app) =>
     app.group("/auth", (app) => app.use(authRouter))
