@@ -49,7 +49,7 @@
 			]);
 		} catch (err: any) {
 			console.error("Failed to load stats:", err);
-			error = err.message || "Failed to load statistics";
+			error = err.message || (i18n.lang === "zh" ? "加载统计数据失败" : "Failed to load statistics");
 		} finally {
 			loading = false;
 		}

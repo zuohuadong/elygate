@@ -1,16 +1,20 @@
 import { betterAuth } from "better-auth";
-import { sveltekitCookies, svelteKitHandler } from "better-auth/svelte-kit";
+import { sveltekitCookies } from "better-auth/svelte-kit";
 import { username } from "better-auth/plugins";
 import { getRequestEvent } from "$app/server";
-import { sql } from "@elygate/db";
+import { building } from "$app/environment";
 
-export const auth = betterAuth({
-    database: {
-        async query(sql_query: string, values: any[] = []) {
-            const res = await (sql as any).unsafe(sql_query, values);
-            return { rows: res };
-        },
-        type: "postgres"
+async function getPgAdapter() {
+    const { Pool } = await import("pg");
+    return new Pool({
+        connectionString: process.env.DATABASE_URL
+    });
+}
+
+export const auth = !building ? betterAuth({
+    database: async () => {
+        const pool = await getPgAdapter();
+        return pool;
     },
     user: {
         modelName: "users",
@@ -27,4 +31,4 @@ export const auth = betterAuth({
         username(),
         sveltekitCookies(getRequestEvent)
     ]
-});
+}) : {} as any;

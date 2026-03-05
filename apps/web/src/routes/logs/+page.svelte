@@ -27,7 +27,7 @@
                 dt_status: "成功", // 纯消耗记录目前都算成功
             }));
         } catch (err: any) {
-            errorMsg = err.message || "Failed to load logs";
+            errorMsg = err.message || "加载日志失败";
         } finally {
             isLoading = false;
         }

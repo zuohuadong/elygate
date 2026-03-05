@@ -31,7 +31,7 @@
                 formattedUsed: `$${((u.usedQuota || 0) / 1000).toFixed(4)}`,
             }));
         } catch (err: any) {
-            errorMsg = err.message || "Failed to load users";
+            errorMsg = err.message || (i18n.lang === "zh" ? "加载用户失败" : "Failed to load users");
         } finally {
             isLoading = false;
         }

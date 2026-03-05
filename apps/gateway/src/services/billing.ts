@@ -123,8 +123,7 @@ async function flushBillingQueue() {
                 const tokenValues = Object.entries(tokenAgg).map(([id, cost]) => [Number(id), cost]);
                 await tx`
                     UPDATE tokens AS t
-                    SET used_quota = t.used_quota + v.cost,
-                        remain_quota = CASE WHEN t.remain_quota > 0 THEN t.remain_quota - v.cost ELSE t.remain_quota END
+                    SET used_quota = t.used_quota + v.cost
                     FROM (VALUES ${tokenValues}) AS v(id, cost)
                     WHERE t.id = v.id
                 `;
@@ -135,8 +134,7 @@ async function flushBillingQueue() {
                 const userValues = Object.entries(userAgg).map(([id, cost]) => [Number(id), cost]);
                 await tx`
                     UPDATE users AS u
-                    SET used_quota = u.used_quota + v.cost,
-                        quota = u.quota - v.cost
+                    SET used_quota = u.used_quota + v.cost
                     FROM (VALUES ${userValues}) AS v(id, cost)
                     WHERE u.id = v.id
                 `;

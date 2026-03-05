@@ -5,9 +5,9 @@ import { billAndLog, preCheckAndDecrement, reconcileQuota } from '../services/bi
 import { calculateCost } from '../services/ratio';
 import { ChannelType, getProviderHandler } from '../providers';
 
-export const videoRouter = new Elysia({ prefix: '/v1/video' })
+export const videoRouter = new Elysia()
     .use(authPlugin)
-    .post('/generations', async ({ body, token, user, set }: any) => {
+    .post('/video/generations', async ({ body, token, user, set }: any) => {
         const { model, prompt } = body;
         if (!model || !prompt) {
             set.status = 400;

@@ -40,7 +40,7 @@
                 dt_used_quota: `$ ${(t.usedQuota / 1000).toFixed(2)}`,
             }));
         } catch (err: any) {
-            errorMsg = err.message || "Failed to load tokens";
+            errorMsg = err.message || (i18n.lang === "zh" ? "加载令牌失败" : "Failed to load tokens");
         } finally {
             isLoading = false;
         }

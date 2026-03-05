@@ -4,7 +4,6 @@ import { swagger } from "@elysiajs/swagger";
 import { staticPlugin } from "@elysiajs/static";
 import { authPlugin, adminGuard } from "./middleware/auth";
 import { chatRouter } from "./routes/chat";
-import { modelsRouter } from "./routes/models";
 import { embeddingsRouter } from "./routes/embeddings";
 import { imagesRouter } from "./routes/images";
 import { adminRouter } from "./routes/admin";
@@ -22,6 +21,7 @@ import { auth as betterAuthInstance } from "./services/betterAuth";
 import { sql } from "@elygate/db";
 import { join } from "path";
 import { existsSync, statSync } from "fs";
+import { type UserRecord, type TokenRecord } from "./types";
 import "./services/health";
 
 const app = new Elysia()
@@ -54,23 +54,52 @@ const app = new Elysia()
   .use(sysRouter)
   .group("/api", (app) =>
     app.group("/auth", (app) => app.use(authRouter))
-      .group("/payment", (app) => app.use(paymentRouter))
+      .use(paymentRouter)
       .group("/admin", (app) => app.use(adminRouter))
       .group("/stats", (app) => app.use(statsRouter))
       .group("/redemptions", (app) => app.use(authPlugin).use(redemptionsRouter))
+      .use(mjRouter)
+      .group("/v1", (app) =>
+        app.use(authPlugin)
+          .get('/models', ({ user, token, set }: any) => {
+            if (!user || !token) {
+              set.status = 401;
+              return { success: false, message: "Unauthorized: Auth context missing" };
+            }
+
+            const u = user as UserRecord;
+            const t = token as TokenRecord;
+
+            let uniqueModels = Array.from(memoryCache.channelRoutes.keys());
+            const groupModelKey = `group_models_${u.group}`;
+            const allowedGroupModels = memoryCache.getOption(groupModelKey);
+            if (allowedGroupModels && Array.isArray(allowedGroupModels)) {
+              uniqueModels = uniqueModels.filter(m => allowedGroupModels.includes(m));
+            }
+            if (t.models && t.models.length > 0) {
+              uniqueModels = uniqueModels.filter(m => t.models.includes(m));
+            }
+            return {
+              object: 'list',
+              data: uniqueModels.map(model => ({
+                id: model,
+                object: 'model',
+                created: Math.floor(Date.now() / 1000),
+                owned_by: 'elygate',
+                permission: [],
+                root: model,
+                parent: null,
+              }))
+            };
+          })
+          .use(chatRouter)
+          .use(embeddingsRouter)
+          .use(imagesRouter)
+          .use(audioRouter)
+          .use(rerankRouter)
+          .use(videoRouter)
+      )
   )
-  .use(mjRouter)
-  .group("/v1/chat", (app) =>
-    app.use(chatRouter)
-  )
-  .group("/v1", (app) =>
-    app.use(embeddingsRouter)
-      .use(imagesRouter)
-      .use(audioRouter)
-      .use(rerankRouter)
-      .use(videoRouter)
-  )
-  .use(modelsRouter)
   // SPA Fallback for static Web UI
   .get("*", async ({ request, set }) => {
     const url = new URL(request.url);

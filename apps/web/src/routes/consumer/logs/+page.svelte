@@ -29,7 +29,7 @@
             }));
             currentPage = page;
         } catch (err: any) {
-            errorMsg = err.message || "Failed to load logs";
+            errorMsg = err.message || (i18n.lang === "zh" ? "加载日志失败" : "Failed to load logs");
         } finally {
             isLoading = false;
         }

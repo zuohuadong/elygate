@@ -5,7 +5,7 @@ import { billAndLog, preCheckAndDecrement, reconcileQuota } from '../services/bi
 import { calculateCost } from '../services/ratio';
 import { ChannelType, getProviderHandler } from '../providers';
 
-export const rerankRouter = new Elysia({ prefix: '/v1' })
+export const rerankRouter = new Elysia()
     .use(authPlugin)
     .post('/rerank', async ({ body, token, user, set }: any) => {
         const { model, query, documents } = body;

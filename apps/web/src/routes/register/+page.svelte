@@ -2,6 +2,7 @@
     import { onMount } from "svelte";
     import { API_BASE } from "$lib/api";
     import { goto } from "$app/navigation";
+    import { i18n } from "$lib/i18n/index.svelte";
 
     let username = $state("");
     let password = $state("");
@@ -29,7 +30,7 @@
     async function handleRegister(e: Event) {
         e.preventDefault();
         if (!registrationEnabled) {
-            error = "Registration is currently disabled.";
+            error = i18n.lang === "zh" ? "注册功能已关闭" : "Registration is currently disabled.";
             return;
         }
         if (isLoading) return;
@@ -37,7 +38,7 @@
         success = "";
 
         if (password !== confirmPassword) {
-            error = "Passwords do not match";
+            error = i18n.lang === "zh" ? "两次输入的密码不一致" : "Passwords do not match";
             return;
         }
 
@@ -49,9 +50,9 @@
                 body: JSON.stringify({ username, password }),
             });
             const data = await res.json();
-            if (!res.ok) throw new Error(data.message || "Registration failed");
+            if (!res.ok) throw new Error(data.message || (i18n.lang === "zh" ? "注册失败" : "Registration failed"));
 
-            success = "Registration successful! Redirecting to login...";
+            success = i18n.lang === "zh" ? "注册成功！正在跳转到登录页面..." : "Registration successful! Redirecting to login...";
             setTimeout(() => {
                 goto("/login");
             }, 2000);
@@ -99,19 +100,19 @@
             <h1 class="text-3xl font-bold text-white tracking-tight">
                 Elygate
             </h1>
-            <p class="text-slate-400 text-sm mt-1">Create your account</p>
+            <p class="text-slate-400 text-sm mt-1">{i18n.lang === "zh" ? "创建您的账户" : "Create your account"}</p>
         </div>
 
         <div
             class="bg-white/5 backdrop-blur-2xl border border-white/10 rounded-2xl p-8 shadow-2xl"
         >
-            <h2 class="text-lg font-semibold text-white mb-6">Register</h2>
+            <h2 class="text-lg font-semibold text-white mb-6">{i18n.lang === "zh" ? "注册" : "Register"}</h2>
 
             {#if !registrationEnabled && !isChecking}
                 <div
                     class="flex items-center gap-2 text-amber-400 text-sm bg-amber-500/10 border border-amber-500/20 rounded-xl px-4 py-3 mb-6"
                 >
-                    Registration is currently disabled by administrator.
+                    {i18n.lang === "zh" ? "注册功能已被管理员关闭" : "Registration is currently disabled by administrator."}
                 </div>
             {/if}
 
@@ -124,14 +125,14 @@
                         <label
                             for="username"
                             class="block text-sm font-medium text-slate-300 mb-1.5"
-                            >Username</label
+                            >{i18n.lang === "zh" ? "用户名" : "Username"}</label
                         >
                         <input
                             id="username"
                             type="text"
                             bind:value={username}
                             required
-                            placeholder="Your username"
+                            placeholder={i18n.lang === "zh" ? "请输入用户名" : "Your username"}
                             class="w-full px-4 py-2.5 bg-white/10 border border-white/10 rounded-xl text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
                         />
                     </div>
@@ -139,7 +140,7 @@
                         <label
                             for="password"
                             class="block text-sm font-medium text-slate-300 mb-1.5"
-                            >Password</label
+                            >{i18n.lang === "zh" ? "密码" : "Password"}</label
                         >
                         <input
                             id="password"
@@ -154,7 +155,7 @@
                         <label
                             for="confirm-password"
                             class="block text-sm font-medium text-slate-300 mb-1.5"
-                            >Confirm Password</label
+                            >{i18n.lang === "zh" ? "确认密码" : "Confirm Password"}</label
                         >
                         <input
                             id="confirm-password"
@@ -187,15 +188,15 @@
                         disabled={isLoading}
                         class="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white font-medium rounded-xl text-sm transition-all duration-200"
                     >
-                        {isLoading ? "Registering..." : "Register"}
+                        {isLoading ? (i18n.lang === "zh" ? "注册中..." : "Registering...") : (i18n.lang === "zh" ? "注册" : "Register")}
                     </button>
                 </fieldset>
             </form>
 
             <p class="text-xs text-slate-500 text-center mt-6">
-                Already have an account? <a
+                {i18n.lang === "zh" ? "已有账户？" : "Already have an account?"} <a
                     href="/login"
-                    class="text-indigo-400 hover:underline">Sign in</a
+                    class="text-indigo-400 hover:underline">{i18n.lang === "zh" ? "立即登录" : "Sign in"}</a
                 >
             </p>
         </div>

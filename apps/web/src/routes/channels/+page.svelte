@@ -30,7 +30,7 @@
                     : c.models || "",
             }));
         } catch (err: any) {
-            errorMsg = err.message || "Failed to load channels";
+            errorMsg = err.message || (i18n.lang === "zh" ? "加载渠道失败" : "Failed to load channels");
         } finally {
             isLoading = false;
         }

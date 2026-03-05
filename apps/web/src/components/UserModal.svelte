@@ -60,7 +60,7 @@
         isSubmitting = true;
         try {
             if (!user && !formData.password) {
-                throw new Error("Password is required for new users.");
+                throw new Error(i18n.lang === "zh" ? "新用户必须设置密码" : "Password is required for new users.");
             }
             const payload = { ...formData };
             if (user && !payload.password) {

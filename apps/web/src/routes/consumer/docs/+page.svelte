@@ -36,7 +36,7 @@
                 class="font-semibold text-slate-900 dark:text-white flex items-center gap-2"
             >
                 <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
-                Node Endpoints
+                {i18n.lang === "zh" ? "节点端点" : "Node Endpoints"}
             </h3>
         </div>
         <div class="p-6 space-y-4">

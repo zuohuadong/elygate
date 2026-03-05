@@ -2,6 +2,7 @@
     import { API_BASE, setToken } from "$lib/api";
     import { goto } from "$app/navigation";
     import { onMount } from "svelte";
+    import { i18n } from "$lib/i18n/index.svelte";
 
     let username = $state("admin");
     let password = $state("");
@@ -9,7 +10,6 @@
     let error = $state("");
 
     onMount(() => {
-        // already logged in — go to dashboard
         const existing = localStorage.getItem("admin_token");
         if (existing) goto("/");
     });
@@ -29,16 +29,15 @@
             try {
                 data = await res.json();
             } catch (err) {
-                throw new Error("Invalid response from server");
+                throw new Error(i18n.lang === "zh" ? "服务器响应无效" : "Invalid response from server");
             }
-            if (!res.ok) throw new Error(data.message || "Login failed");
+            if (!res.ok) throw new Error(data.message || (i18n.lang === "zh" ? "登录失败" : "Login failed"));
             setToken(data.token);
             localStorage.setItem("admin_username", data.username);
 
             if (data.role !== undefined && data.role !== null) {
                 localStorage.setItem("admin_role", data.role.toString());
             } else {
-                // Secure fallback: default to normal user if role is missing
                 localStorage.setItem("admin_role", "1");
             }
 
@@ -93,7 +92,7 @@
             <h1 class="text-3xl font-bold text-white tracking-tight">
                 Elygate
             </h1>
-            <p class="text-slate-400 text-sm mt-1">AI API Gateway Management</p>
+            <p class="text-slate-400 text-sm mt-1">{i18n.lang === "zh" ? "AI API 网关管理系统" : "AI API Gateway Management"}</p>
         </div>
 
         <!-- Card -->
@@ -101,7 +100,7 @@
             class="bg-white/5 backdrop-blur-2xl border border-white/10 rounded-2xl p-8 shadow-2xl"
         >
             <h2 class="text-lg font-semibold text-white mb-6">
-                Sign in to continue
+                {i18n.lang === "zh" ? "登录以继续" : "Sign in to continue"}
             </h2>
 
             <form onsubmit={handleLogin} class="space-y-5">
@@ -109,7 +108,7 @@
                     <label
                         for="username"
                         class="block text-sm font-medium text-slate-300 mb-1.5"
-                        >Username</label
+                        >{i18n.lang === "zh" ? "用户名" : "Username"}</label
                     >
                     <input
                         id="username"
@@ -125,7 +124,7 @@
                     <label
                         for="password"
                         class="block text-sm font-medium text-slate-300 mb-1.5"
-                        >Password</label
+                        >{i18n.lang === "zh" ? "密码" : "Password"}</label
                     >
                     <input
                         id="password"
@@ -190,10 +189,10 @@
                                     d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
                                 ></path>
                             </svg>
-                            Signing in…
+                            {i18n.lang === "zh" ? "登录中..." : "Signing in…"}
                         </span>
                     {:else}
-                        Sign in
+                        {i18n.lang === "zh" ? "登录" : "Sign in"}
                     {/if}
                 </button>
             </form>
@@ -206,7 +205,7 @@
                     </div>
                     <div class="relative flex justify-center text-sm">
                         <span class="px-2 bg-transparent text-slate-400"
-                            >Or continue with</span
+                            >{i18n.lang === "zh" ? "或使用以下方式登录" : "Or continue with"}</span
                         >
                     </div>
                 </div>

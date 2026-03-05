@@ -28,7 +28,7 @@
                 await apiFetch<Record<string, string>>("/admin/options");
             settings = { ...settings, ...data }; // Merge with defaults
         } catch (err: any) {
-            errorMsg = err.message || "Failed to load settings";
+            errorMsg = err.message || (i18n.lang === "zh" ? "加载设置失败" : "Failed to load settings");
         } finally {
             isLoading = false;
         }

@@ -25,7 +25,7 @@
                 usageStr: `${u.used_count} / ${u.count}`,
             }));
         } catch (err: any) {
-            errorMsg = err.message || "Failed to load redemptions";
+            errorMsg = err.message || (i18n.lang === "zh" ? "加载兑换码失败" : "Failed to load redemptions");
         } finally {
             isLoading = false;
         }

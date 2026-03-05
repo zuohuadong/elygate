@@ -88,6 +88,14 @@ CREATE TABLE IF NOT EXISTS tokens (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE UNLOGGED TABLE IF NOT EXISTS rate_limits (
+    key VARCHAR(255) PRIMARY KEY,
+    count INTEGER DEFAULT 1,
+    expired_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_rate_limits_expired_at ON rate_limits(expired_at);
+
 CREATE TABLE IF NOT EXISTS channels (
     id SERIAL PRIMARY KEY,
     type INTEGER NOT NULL DEFAULT 1,        -- 1=OpenAI, 8=Azure, 14=Anthropic, 23=Gemini
@@ -263,12 +271,12 @@ CREATE INDEX IF NOT EXISTS idx_logs_created_at_brin ON logs USING BRIN (created_
 -- Logs: dashboard queries
 CREATE INDEX IF NOT EXISTS idx_logs_user_id ON logs (user_id) INCLUDE (quota_cost, created_at);
 -- Logs: pg_bigm fuzzy search on model name
-CREATE INDEX IF NOT EXISTS idx_logs_model_bigm ON logs (model_name) USING gin (model_name gin_bigm_ops);
+CREATE INDEX IF NOT EXISTS idx_logs_model_bigm ON logs USING gin (model_name gin_bigm_ops);
 -- Tokens: lookup by key (hot path)
 CREATE INDEX IF NOT EXISTS idx_tokens_key ON tokens (key);
 -- Semantic Cache: vector cosine similarity
 CREATE INDEX IF NOT EXISTS idx_semantic_cache_embedding ON semantic_cache
-    USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+    USING hnsw (embedding vector_cosine_ops);
 
 -- View Indexes (for concurrent refresh)
 CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_system_overview_dummy ON mv_system_overview (total_users, active_tokens, active_channels);

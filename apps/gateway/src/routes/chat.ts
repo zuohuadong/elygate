@@ -118,26 +118,79 @@ export const chatRouter = new Elysia()
                     (async () => {
                         try {
                             const reader = billingStream.getReader();
-                            const decoder = new TextDecoder();
-                            let totalCompletionLength = 0;
+                            const decoder = new TextDecoder("utf-8");
+                            let completionText = '';
+                            let usageData: any = null;
+                            let buffer = '';
 
                             while (true) {
                                 const { done, value } = await reader.read();
                                 if (done) break;
-                                totalCompletionLength += decoder.decode(value, { stream: true }).length;
+
+                                buffer += decoder.decode(value, { stream: true });
+                                const lines = buffer.split('\n');
+                                buffer = lines.pop() || '';
+
+                                for (const line of lines) {
+                                    const trimmed = line.trim();
+                                    if (trimmed.startsWith('data: ') && trimmed !== 'data: [DONE]') {
+                                        try {
+                                            const data = JSON.parse(trimmed.slice(6));
+                                            if (data.choices && data.choices[0]?.delta?.content) {
+                                                completionText += data.choices[0].delta.content;
+                                            }
+                                            if (data.usage) {
+                                                usageData = data.usage;
+                                            }
+                                        } catch (e) {
+                                            // Ignore parse errors for incomplete JSON
+                                        }
+                                    }
+                                }
                             }
 
-                            // Rough estimation for streaming tokens
-                            const estimatedCompletionTokens = Math.floor(totalCompletionLength / 3);
-                            const estimatedPromptTokens = 0;
+                            if (buffer.trim().startsWith('data: ') && buffer.trim() !== 'data: [DONE]') {
+                                try {
+                                    const data = JSON.parse(buffer.trim().slice(6));
+                                    if (data.choices && data.choices[0]?.delta?.content) {
+                                        completionText += data.choices[0].delta.content;
+                                    }
+                                    if (data.usage) {
+                                        usageData = data.usage;
+                                    }
+                                } catch (e) { }
+                            }
+
+                            let finalPromptTokens = 0;
+                            let finalCompletionTokens = 0;
+
+                            if (usageData) {
+                                finalPromptTokens = usageData.prompt_tokens || 0;
+                                finalCompletionTokens = usageData.completion_tokens || 0;
+                            } else {
+                                // Heuristic estimation if usage is not provided in stream
+                                finalCompletionTokens = Math.ceil(completionText.length / 1.5);
+                                const promptText = Array.isArray(body.messages) ? body.messages.map((m: any) => typeof m.content === 'string' ? m.content : '').join(' ') : '';
+                                finalPromptTokens = Math.ceil(promptText.length / 1.5);
+                            }
+
+                            const actualCost = calculateCost(model, user.group, finalPromptTokens, finalCompletionTokens);
+
+                            // IMPORTANT: Refund the pre-deducted quota
+                            await reconcileQuota({
+                                userId: user.id,
+                                tokenId: token.id,
+                                preDeducted,
+                                actualCost
+                            });
 
                             await billAndLog({
                                 userId: user.id,
                                 tokenId: token.id,
                                 channelId: channelConfig.id,
                                 modelName: model,
-                                promptTokens: estimatedPromptTokens,
-                                completionTokens: estimatedCompletionTokens,
+                                promptTokens: finalPromptTokens,
+                                completionTokens: finalCompletionTokens,
                                 userGroup: user.group,
                                 isStream: true
                             });

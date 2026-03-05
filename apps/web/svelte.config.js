@@ -1,11 +1,9 @@
-import adapter from '@sveltejs/adapter-static';
+import adapter from 'svelte-adapter-bun';
 
 /** @type {import('@sveltejs/kit').Config} */
 const config = {
 	kit: {
-		adapter: adapter({
-			fallback: 'index.html' // SPA mode for Admin
-		})
+		adapter: adapter(),
 	}
 };
 

@@ -163,6 +163,6 @@ async function handleAudioRequest(endpoint: string, { body, request, token, user
 
 export const audioRouter = new Elysia()
     .use(authPlugin)
-    .post('/v1/audio/speech', (ctx) => handleAudioRequest('/v1/audio/speech', ctx))
-    .post('/v1/audio/transcriptions', (ctx) => handleAudioRequest('/v1/audio/transcriptions', ctx))
-    .post('/v1/audio/translations', (ctx) => handleAudioRequest('/v1/audio/translations', ctx));
+    .post('/audio/speech', (ctx) => handleAudioRequest('/v1/audio/speech', ctx))
+    .post('/audio/transcriptions', (ctx) => handleAudioRequest('/v1/audio/transcriptions', ctx))
+    .post('/audio/translations', (ctx) => handleAudioRequest('/v1/audio/translations', ctx));
