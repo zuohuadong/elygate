@@ -26,7 +26,7 @@
 
 	async function loadBalance() {
 		try {
-			const data = await apiFetch<any>("/api/auth/me");
+			const data = await apiFetch<any>("/auth/me");
 			balance = data.quota || 0;
 		} catch (error) {
 			console.error("Failed to load balance:", error);
@@ -38,9 +38,7 @@
 			loading = true;
 			const userId = localStorage.getItem("admin_user_id");
 			if (userId) {
-				const data = await apiFetch<any[]>(
-					`/api/payment/orders/${userId}`,
-				);
+				const data = await apiFetch<any[]>(`/payment/orders/${userId}`);
 				orders = data || [];
 			}
 		} catch (error) {
@@ -56,7 +54,7 @@
 			const userId = localStorage.getItem("admin_user_id");
 			if (!userId) return;
 
-			const data = await apiFetch<any>("/api/payment/create-order", {
+			const data = await apiFetch<any>("/payment/create-order", {
 				method: "POST",
 				body: JSON.stringify({
 					userId: parseInt(userId),

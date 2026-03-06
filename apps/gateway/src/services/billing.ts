@@ -23,7 +23,7 @@ export async function preCheckAndDecrement(ctx: {
     const estimatedCost = calculateCost(ctx.modelName, ctx.userGroup, 0, ctx.maxTokens || 4096);
 
     // Perform atomic check and deduction
-    const result = await sql.begin(async (tx) => {
+    const result = await sql.begin(async (tx: any) => {
         const [user] = await tx`
             UPDATE users 
             SET quota = quota - ${estimatedCost}
@@ -61,7 +61,7 @@ export async function reconcileQuota(ctx: {
     if (diff === 0) return;
 
     // Refund the difference (diff can be negative if usage exceeded max_tokens somehow, though unlikely)
-    await sql.begin(async (tx) => {
+    await sql.begin(async (tx: any) => {
         await tx`UPDATE users SET quota = quota + ${diff} WHERE id = ${ctx.userId}`;
         await tx`UPDATE tokens SET remain_quota = CASE WHEN remain_quota >= 0 THEN remain_quota + ${diff} ELSE remain_quota END WHERE id = ${ctx.tokenId}`;
     });
@@ -117,7 +117,7 @@ async function flushBillingQueue() {
 
     try {
         // 2. Atomic update using native SQL transaction
-        await sql.begin(async (tx) => {
+        await sql.begin(async (tx: any) => {
             // Batch update Tokens quota using UPDATE ... FROM (VALUES ...)
             if (Object.keys(tokenAgg).length > 0) {
                 const tokenValues = Object.entries(tokenAgg).map(([id, cost]) => [Number(id), cost]);

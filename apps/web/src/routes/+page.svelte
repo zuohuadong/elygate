@@ -13,24 +13,46 @@
     let stats = $state<DashboardStats | null>(null);
     let errorLogs = $state<DashboardError[]>([]);
     let trend = $state<UsageTrend[]>([]);
+    let realtime = $state({ rpm: 0, tpm: 0 });
     let isLoading = $state(true);
 
-    onMount(async () => {
+    async function fetchRealtime() {
         try {
-            // Fetch aggregated stats, recent errors and trend info from backend
-            const [statsRes, errorsRes, trendRes] = await Promise.all([
-                apiFetch<DashboardStats>("/admin/dashboard/stats"),
-                apiFetch<DashboardError[]>("/admin/dashboard/errors"),
-                apiFetch<UsageTrend[]>("/admin/stats/granular?group_by=day"),
-            ]);
-            stats = statsRes;
-            errorLogs = errorsRes;
-            trend = trendRes;
-        } catch (e: any) {
-            console.error("[Dashboard] Load Failed", e.message);
-        } finally {
-            isLoading = false;
-        }
+            const data = await apiFetch<any>("/stats/realtime");
+            if (data && data.stats) {
+                realtime = {
+                    rpm: data.stats.requests_per_minute || 0,
+                    tpm: data.stats.tokens_per_minute || 0,
+                };
+            }
+        } catch (e) {}
+    }
+
+    onMount(() => {
+        const loadInitialData = async () => {
+            try {
+                // Fetch aggregated stats, recent errors and trend info from backend
+                const [statsRes, errorsRes, trendRes] = await Promise.all([
+                    apiFetch<DashboardStats>("/admin/dashboard/stats"),
+                    apiFetch<DashboardError[]>("/admin/dashboard/errors"),
+                    apiFetch<UsageTrend[]>(
+                        "/admin/stats/granular?group_by=day",
+                    ),
+                ]);
+                stats = statsRes;
+                errorLogs = errorsRes;
+                trend = trendRes;
+                fetchRealtime();
+            } catch (e: any) {
+                console.error("[Dashboard] Load Failed", e.message);
+            } finally {
+                isLoading = false;
+            }
+        };
+
+        loadInitialData();
+        const interval = setInterval(fetchRealtime, 5000);
+        return () => clearInterval(interval);
     });
 
     // Derived metrics card data
@@ -104,6 +126,72 @@
             ></div>
         </div>
     {:else}
+        <!-- Real-time Status Bar -->
+        <div class="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+            <div
+                class="col-span-full bg-indigo-50/50 dark:bg-indigo-500/5 border border-indigo-100 dark:border-indigo-500/20 rounded-2xl p-6 flex flex-col sm:flex-row items-center justify-between gap-4 backdrop-blur-sm"
+            >
+                <div class="flex items-center gap-4">
+                    <div class="relative">
+                        <div
+                            class="w-3 h-3 rounded-full bg-emerald-500 animate-pulse"
+                        ></div>
+                        <div
+                            class="absolute inset-0 w-3 h-3 rounded-full bg-emerald-500 blur-[2px] opacity-50"
+                        ></div>
+                    </div>
+                    <div>
+                        <span
+                            class="text-sm font-semibold text-slate-800 dark:text-slate-100"
+                        >
+                            {i18n.lang === "zh"
+                                ? "系统实时监控"
+                                : "System Real-time Monitor"}
+                        </span>
+                        <p
+                            class="text-[10px] text-slate-500 uppercase tracking-widest mt-0.5"
+                        >
+                            Status: Online & Healthy
+                        </p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-12 self-end sm:self-center">
+                    <div class="flex flex-col items-center sm:items-end">
+                        <span
+                            class="text-[10px] font-bold text-slate-400/80 uppercase tracking-tighter mb-1"
+                        >
+                            {i18n.lang === "zh" ? "请求 / 分钟" : "RPM"}
+                        </span>
+                        <div class="flex items-baseline gap-1">
+                            <span
+                                class="text-3xl font-black text-indigo-600 dark:text-indigo-400 tabular-nums"
+                            >
+                                {realtime.rpm}
+                            </span>
+                        </div>
+                    </div>
+                    <div class="flex flex-col items-center sm:items-end">
+                        <span
+                            class="text-[10px] font-bold text-slate-400/80 uppercase tracking-tighter mb-1"
+                        >
+                            {i18n.lang === "zh" ? "令牌 / 分钟" : "TPM"}
+                        </span>
+                        <div class="flex items-baseline gap-1">
+                            <span
+                                class="text-3xl font-black text-indigo-600 dark:text-indigo-400 tabular-nums"
+                            >
+                                {(realtime.tpm / 1000).toFixed(1)}
+                            </span>
+                            <span
+                                class="text-xs font-bold text-indigo-600/50 dark:text-indigo-400/50"
+                                >k</span
+                            >
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <div class="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
             {#each metrics as item}
                 {@const Icon = item.icon}

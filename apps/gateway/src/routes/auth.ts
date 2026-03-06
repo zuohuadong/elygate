@@ -401,6 +401,41 @@ export const authRouter = new Elysia()
         return dailyStats;
     })
 
+    // Get personal real-time metrics (RPM/TPM)
+    .get('/realtime', async ({ request, set }: any) => {
+        const authHeader = request.headers.get('authorization');
+        if (!authHeader?.startsWith('Bearer ')) {
+            set.status = 401;
+            throw new Error('Unauthorized');
+        }
+        const key = authHeader.substring(7);
+        const [userRow] = await sql`
+            SELECT u.id
+            FROM tokens t
+            JOIN users u ON t.user_id = u.id
+            WHERE t.key = ${key} AND t.status = 1 AND u.status = 1
+            LIMIT 1
+        `;
+        if (!userRow) {
+            set.status = 401;
+            throw new Error('Unauthorized');
+        }
+
+        const [realtime] = await sql`
+            SELECT 
+                COUNT(*) as rpm,
+                COALESCE(SUM(prompt_tokens + completion_tokens), 0) as tpm
+            FROM logs
+            WHERE user_id = ${userRow.id}
+            AND created_at >= NOW() - INTERVAL '1 minute'
+        `;
+
+        return {
+            rpm: Number(realtime.rpm || 0),
+            tpm: Number(realtime.tpm || 0)
+        };
+    })
+
     .get('/discord', ({ set }) => {
         const url = `https://discord.com/api/oauth2/authorize?client_id=${DISCORD_CLIENT_ID}&redirect_uri=${encodeURIComponent(DISCORD_REDIRECT_URI)}&response_type=code&scope=identify`;
         set.redirect = url;

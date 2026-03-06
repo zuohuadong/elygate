@@ -12,6 +12,7 @@ export const auth = betterAuth({
         }
     },
     advanced: {
+        // @ts-ignore
         generateId: "serial",
     },
     user: {

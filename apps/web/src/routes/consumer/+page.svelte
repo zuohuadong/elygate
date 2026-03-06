@@ -7,6 +7,7 @@
     let userInfo = $state<any>(null);
     let logs = $state<any[]>([]);
     let trend = $state<any[]>([]);
+    let realtime = $state({ rpm: 0, tpm: 0 });
     let isLoading = $state(true);
     let isRedeeming = $state(false);
     let topupCode = $state("");
@@ -21,7 +22,7 @@
                 apiFetch<any[]>("/auth/stats"),
             ]);
             userInfo = userData;
-            logs = logsData.data || logsData; // Handle both paginated and old unpaginated formats
+            logs = logsData.data || logsData;
             trend = statsData || [];
         } catch (err: any) {
             console.error(err);
@@ -30,7 +31,21 @@
         }
     }
 
-    onMount(loadData);
+    async function fetchRealtime() {
+        try {
+            const data = await apiFetch<any>("/auth/realtime");
+            realtime = data;
+        } catch (err) {
+            // Silently fail for realtime updates
+        }
+    }
+
+    onMount(() => {
+        loadData();
+        fetchRealtime();
+        const interval = setInterval(fetchRealtime, 5000);
+        return () => clearInterval(interval);
+    });
 
     async function handleTopup(e: Event) {
         e.preventDefault();
@@ -108,12 +123,30 @@
                     </p>
                 </div>
                 <div>
-                    <p class="text-indigo-200 text-xs mb-1">
-                        {i18n.lang === "zh" ? "用户组" : "User Group"}
-                    </p>
                     <p class="font-medium capitalize">
                         {userInfo?.group || "Default"}
                     </p>
+                </div>
+            </div>
+
+            <!-- Live Metrics -->
+            <div
+                class="mt-4 pt-4 border-t border-white/10 flex items-center justify-between text-xs text-indigo-100 font-medium"
+            >
+                <div class="flex items-center gap-1.5">
+                    <div
+                        class="w-1.5 h-1.5 rounded-full {realtime.rpm > 0
+                            ? 'bg-emerald-400 animate-pulse'
+                            : 'bg-slate-400'}"
+                    ></div>
+                    <span
+                        >{i18n.lang === "zh" ? "当前 RPM" : "Current RPM"}: {realtime.rpm}</span
+                    >
+                </div>
+                <div class="opacity-80">
+                    {i18n.lang === "zh" ? "当前 TPM" : "Current TPM"}: {(
+                        realtime.tpm / 1000
+                    ).toFixed(1)}k
                 </div>
             </div>
         </div>

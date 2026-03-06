@@ -15,7 +15,7 @@ describe("Logic Parity: Model Mapping", () => {
             id: 1,
             type: 1, // OPENAI
             models: ["gpt-3.5-turbo", "gpt-4"],
-            model_mapping: { "gpt-3.5-turbo": "gpt-3.5-turbo-0125" },
+            modelMapping: { "gpt-3.5-turbo": "gpt-3.5-turbo-0125" },
             weight: 1,
             status: 1
         };
@@ -24,7 +24,7 @@ describe("Logic Parity: Model Mapping", () => {
             id: 2,
             type: 23, // GEMINI
             models: ["gpt-4"],
-            model_mapping: { "gpt-4": "gemini-1.5-pro" },
+            modelMapping: { "gpt-4": "gemini-1.5-pro" },
             weight: 1,
             status: 1
         };
@@ -53,8 +53,8 @@ describe("Logic Parity: Model Mapping", () => {
         expect(gemini).toBeDefined();
 
         let upstreamModel = "gpt-4";
-        if (gemini?.model_mapping && (gemini.model_mapping as any)["gpt-4"]) {
-            upstreamModel = (gemini.model_mapping as any)["gpt-4"];
+        if (gemini?.modelMapping && (gemini.modelMapping as any)["gpt-4"]) {
+            upstreamModel = (gemini.modelMapping as any)["gpt-4"];
         }
 
         expect(upstreamModel).toBe("gemini-1.5-pro");

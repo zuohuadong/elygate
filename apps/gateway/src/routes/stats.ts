@@ -181,6 +181,7 @@ export const statsRouter = new Elysia()
             SELECT 
                 COUNT(*) as requests_per_minute,
                 SUM(quota_cost) as cost_per_minute,
+                COALESCE(SUM(prompt_tokens + completion_tokens), 0) as tokens_per_minute,
                 COUNT(DISTINCT user_id) as active_users,
                 COUNT(DISTINCT model_name) as active_models
             FROM logs

@@ -208,6 +208,19 @@
 				{/each}
 			</nav>
 
+			<!-- Top-up Shortcut for Consumers -->
+			{#if userRole < 10}
+				<div class="px-4 mb-4">
+					<a
+						href="/payment"
+						class="flex items-center justify-center gap-2 w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-bold shadow-lg shadow-indigo-500/20 transition-all hover:scale-[1.02] active:scale-[0.98]"
+					>
+						<CreditCard class="w-4 h-4 text-white" />
+						{i18n.lang === "zh" ? "立即充值" : "Top-up Now"}
+					</a>
+				</div>
+			{/if}
+
 			<!-- Sidebar Bottom User Info -->
 			<div class="p-4 border-t border-slate-200 dark:border-slate-800">
 				<div
@@ -275,6 +288,19 @@
 					</h1>
 				</div>
 				<div class="flex items-center gap-4">
+					<!-- System Status Badge -->
+					<div
+						class="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-100 dark:border-emerald-500/20 rounded-full"
+					>
+						<div
+							class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"
+						></div>
+						<span
+							class="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-tight"
+							>System Online</span
+						>
+					</div>
+
 					<!-- Language Switcher -->
 					<button
 						onclick={() =>

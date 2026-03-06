@@ -73,9 +73,9 @@
                 list.push({
                     model,
                     type: "Chat / Text",
-                    // Based on $1.0 = 1,000,000 units
-                    inputPrice: (ratio / 1000).toFixed(4),
-                    outputPrice: ((ratio * compRatio) / 1000).toFixed(4),
+                    // The ratio is directly the price per 1M tokens
+                    inputPrice: ratio.toFixed(2),
+                    outputPrice: (ratio * compRatio).toFixed(2),
                     fixedPrice: "-",
                 });
             });
@@ -124,7 +124,11 @@
                 }
             }
         } catch (err: any) {
-            error = err.message || (i18n.lang === "zh" ? "加载计费配置失败" : "Failed to load pricing options");
+            error =
+                err.message ||
+                (i18n.lang === "zh"
+                    ? "加载计费配置失败"
+                    : "Failed to load pricing options");
         } finally {
             isLoading = false;
         }
@@ -147,7 +151,10 @@
                 const parsed = JSON.parse(raw);
                 payload[c.key] = JSON.stringify(parsed);
             } catch (err: any) {
-                error = (i18n.lang === "zh" ? `${c.title} JSON 格式错误: ` : `Invalid JSON in ${c.title}: `) + err.message;
+                error =
+                    (i18n.lang === "zh"
+                        ? `${c.title} JSON 格式错误: `
+                        : `Invalid JSON in ${c.title}: `) + err.message;
                 isSaving = false;
                 return;
             }
@@ -158,10 +165,17 @@
                 method: "PUT",
                 body: JSON.stringify(payload),
             });
-            successMessage = i18n.lang === "zh" ? "计费倍率保存成功！" : "Pricing ratios saved successfully!";
+            successMessage =
+                i18n.lang === "zh"
+                    ? "计费倍率保存成功！"
+                    : "Pricing ratios saved successfully!";
             setTimeout(() => (successMessage = null), 3000);
         } catch (err: any) {
-            error = err.message || (i18n.lang === "zh" ? "保存配置失败" : "Failed to save options");
+            error =
+                err.message ||
+                (i18n.lang === "zh"
+                    ? "保存配置失败"
+                    : "Failed to save options");
         } finally {
             isSaving = false;
         }
@@ -289,11 +303,15 @@
                             >
                             <th
                                 class="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400"
-                                >{i18n.t.pricing.tableInput}</th
+                                >{i18n.lang === "zh"
+                                    ? "输入 (每百万Token)"
+                                    : "Input (per 1M)"}</th
                             >
                             <th
                                 class="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400"
-                                >{i18n.t.pricing.tableOutput}</th
+                                >{i18n.lang === "zh"
+                                    ? "输出 (每百万Token)"
+                                    : "Output (per 1M)"}</th
                             >
                             <th
                                 class="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400"
@@ -359,8 +377,8 @@
                     class="text-sm text-slate-500 dark:text-slate-400 leading-relaxed max-w-2xl"
                 >
                     {i18n.lang === "zh"
-                        ? `我们的计费系统使用基于基础汇率 $1.0 = 1,000,000 单位的倍率系统。Token 计算公式为：(输入 + 输出 × 补全倍率) × 模型倍率。上表显示的是默认分组用户的实际生效费率。`
-                        : `Our billing system uses a multiplier system tied to a base exchange rate of $1.0 = 1,000,000 units. Tokens are calculated as: (Input + Output × CompletionRatio) × ModelMultiplier. Prices shown above are effective rates for the default user group.`}
+                        ? `我们的计费系统使用基于基础汇率 $1.0 = 1,000,000 单位的倍率系统。Token 计算公式为：(输入 + 输出 × 补全倍率) × 模型倍率。上表显示的是默认分组用户每 100 万 Token 的实际生效美元费率。`
+                        : `Our billing system uses a multiplier system tied to a base exchange rate of $1.0 = 1,000,000 units. Tokens are calculated as: (Input + Output × CompletionRatio) × ModelMultiplier. Prices shown above are effective USD rates per 1M tokens for the default user group.`}
                 </p>
             </div>
         </div>
