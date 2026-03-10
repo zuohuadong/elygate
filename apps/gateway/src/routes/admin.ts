@@ -32,7 +32,7 @@ export const adminRouter = new Elysia()
                    key_strategy AS "keyStrategy", key_status AS "keyStatus", price_ratio AS "priceRatio", created_at, 
                    (SELECT updated_at FROM channels c2 WHERE c2.id = channels.id) as updated_at
             FROM channels 
-            ORDER BY priority DESC, id DESC
+            ORDER BY id DESC
         `;
         return channels.map((c: any) => ({
             ...c,
