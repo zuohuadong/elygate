@@ -1,7 +1,7 @@
 {
 	"name": "web",
 	"private": true,
-	"version": "0.1.6",
+	"version": "0.1.7",
 	"type": "module",
 	"scripts": {
 		"dev": "vite dev",
@@ -31,7 +31,6 @@
 		"better-auth": "latest",
 		"clsx": "^2.1.1",
 		"lucide-svelte": "^0.575.0",
-		"pg": "^8.20.0",
 		"tailwind-merge": "^3.5.0",
 		"tailwind-variants": "^3.2.2"
 	}

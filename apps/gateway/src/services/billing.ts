@@ -1,6 +1,7 @@
 import { sql } from '@elygate/db';
 import { type BillingContext } from '../types';
 import { calculateCost } from './ratio';
+import { webhookService } from './webhook';
 
 // Mocking the global log consumption buffer (channel) in New-API
 const billingQueue: BillingContext[] = [];
@@ -68,10 +69,10 @@ export async function reconcileQuota(ctx: {
 }
 
 /**
- * Receive a consumption request...
+ * Receive a consumption request and add it to the billing queue.
+ * Always logs, even if token count is 0 (for error tracking).
  */
 export async function billAndLog(ctx: BillingContext) {
-    if ((ctx.promptTokens + ctx.completionTokens) <= 0) return;
     billingQueue.push(ctx);
 }
 
@@ -116,60 +117,71 @@ async function flushBillingQueue() {
     }
 
     try {
+        // Fetch price ratios for all channels involved in this batch
+        const uniqueChannelIds = [...new Set(tasks.map((t: any) => t.channelId).filter(Boolean))];
+        const channelRatios: Record<number, number> = {};
+        if (uniqueChannelIds.length > 0) {
+            const channels = await sql`SELECT id, price_ratio FROM channels WHERE id IN ${uniqueChannelIds}`;
+            for (const ch of channels) {
+                channelRatios[ch.id] = Number(ch.price_ratio) || 1.0;
+            }
+        }
+
         // 2. Atomic update using native SQL transaction
         await sql.begin(async (tx: any) => {
-            // Batch update Tokens quota using UPDATE ... FROM (VALUES ...)
-            if (Object.keys(tokenAgg).length > 0) {
-                const tokenValues = Object.entries(tokenAgg).map(([id, cost]) => [Number(id), cost]);
-                await tx`
-                    UPDATE tokens AS t
-                    SET used_quota = t.used_quota + v.cost
-                    FROM (VALUES ${tokenValues}) AS v(id, cost)
-                    WHERE t.id = v.id
-                `;
+            const correctedUserAgg: Record<number, number> = {};
+            const correctedTokenAgg: Record<number, number> = {};
+
+            for (const task of tasks) {
+                const baseCost = calculateCost(
+                    task.modelName,
+                    task.userGroup,
+                    task.promptTokens,
+                    task.completionTokens
+                );
+                const ratio = task.channelId ? (channelRatios[task.channelId] || 1.0) : 1.0;
+                const finalCost = Math.ceil(baseCost * ratio);
+
+                correctedUserAgg[task.userId] = (correctedUserAgg[task.userId] || 0) + finalCost;
+                correctedTokenAgg[task.tokenId] = (correctedTokenAgg[task.tokenId] || 0) + finalCost;
+
+                // Update quotaCost in logInserts
+                const log = logInserts.find(l =>
+                    l.userId === task.userId &&
+                    l.channelId === task.channelId &&
+                    l.modelName === task.modelName &&
+                    l.promptTokens === task.promptTokens &&
+                    l.completionTokens === task.completionTokens
+                );
+                if (log) log.quotaCost = finalCost;
             }
 
-            // Batch update Users quota using UPDATE ... FROM (VALUES ...)
-            if (Object.keys(userAgg).length > 0) {
-                const userValues = Object.entries(userAgg).map(([id, cost]) => [Number(id), cost]);
-                await tx`
-                    UPDATE users AS u
-                    SET used_quota = u.used_quota + v.cost
-                    FROM (VALUES ${userValues}) AS v(id, cost)
-                    WHERE u.id = v.id
-                `;
+            for (const [id, cost] of Object.entries(correctedTokenAgg)) {
+                await tx`UPDATE tokens SET used_quota = used_quota + ${cost} WHERE id = ${Number(id)}`;
             }
-
-            // Batch INSERT log records (Postgres native multi-row insert)
-            if (logInserts.length > 0) {
-                const values = logInserts.map(log => [
-                    log.userId,
-                    log.tokenId || null,
-                    log.channelId || null,
-                    log.modelName,
-                    log.promptTokens,
-                    log.completionTokens,
-                    log.quotaCost,
-                    log.isStream
-                ]);
-
+            for (const [id, cost] of Object.entries(correctedUserAgg)) {
+                await tx`UPDATE users SET used_quota = used_quota + ${cost} WHERE id = ${Number(id)}`;
+            }
+            for (const log of logInserts) {
                 await tx`
                     INSERT INTO logs (user_id, token_id, channel_id, model_name, prompt_tokens, completion_tokens, quota_cost, is_stream)
-                    VALUES ${values}
+                    VALUES (${log.userId}, ${log.tokenId || null}, ${log.channelId || null}, ${log.modelName}, ${log.promptTokens}, ${log.completionTokens}, ${log.quotaCost}, ${log.isStream})
                 `;
             }
         });
 
         // 3. Post-flush check for Quota Alarms
+        const alarmThreshold = (await import('./optionCache')).optionCache.get('QuotaAlarmThreshold', 500000);
         for (const [userIdStr, cost] of Object.entries(userAgg)) {
             const userId = Number(userIdStr);
             const [user] = await sql`SELECT quota, username FROM users WHERE id = ${userId}`;
-            if (user && user.quota < 500000) { // Threshold: e.g. 0.5M quota units
+            if (user && user.quota < alarmThreshold) {
                 const { notificationService } = await import('./notification');
                 await notificationService.send(
                     'Quota Alarm',
                     `User ${user.username} (ID: ${userId}) has low quota: ${user.quota}. Please top up soon.`
                 );
+                await webhookService.trigger('user.low_quota', { userId, username: user.username, quota: user.quota });
             }
         }
 
@@ -200,12 +212,10 @@ async function rotateLogs() {
     const days = optionCache.get('LogRetentionDays', 7);
     console.log(`[Billing/Rotation] Cleaning up logs older than ${days} days...`);
     try {
-        // Fallback to DELETE for non-partitioned tables or safety.
-        // For partitioned tables, the query optimizer in PG 12+ will prune partitions automatically.
-        await sql`DELETE FROM logs WHERE created_at < NOW() - INTERVAL '${sql.unsafe(days.toString())} days'`;
-
-        // Potential future enhancement if partition naming is predictable:
-        // await sql`DROP TABLE IF EXISTS ${sql.unsafe(`logs_old_partition_name`)}`;
+        // Use safe parameterized interval arithmetic (no sql.unsafe needed)
+        await sql`DELETE FROM logs WHERE created_at < NOW() - (${days} * INTERVAL '1 day')`;
+        // Cleanup health logs as well to prevent DB bloat
+        await sql`DELETE FROM health_logs WHERE created_at < NOW() - (${days} * INTERVAL '1 day')`;
     } catch (e) {
         console.error('[Billing/Rotation] Failed:', e);
     }

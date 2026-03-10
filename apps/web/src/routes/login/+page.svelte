@@ -1,8 +1,9 @@
 <script lang="ts">
-    import { API_BASE, setToken } from "$lib/api";
+    import { API_BASE } from "$lib/api";
     import { goto } from "$app/navigation";
     import { onMount } from "svelte";
     import { i18n } from "$lib/i18n/index.svelte";
+    import { session } from "$lib/session.svelte";
 
     let username = $state("admin");
     let password = $state("");
@@ -10,8 +11,7 @@
     let error = $state("");
 
     onMount(() => {
-        const existing = localStorage.getItem("admin_token");
-        if (existing) goto("/");
+        if (session.token) goto("/");
     });
 
     async function handleLogin(e: Event) {
@@ -29,19 +29,25 @@
             try {
                 data = await res.json();
             } catch (err) {
-                throw new Error(i18n.lang === "zh" ? "服务器响应无效" : "Invalid response from server");
+                throw new Error(
+                    i18n.lang === "zh"
+                        ? "服务器响应无效"
+                        : "Invalid response from server",
+                );
             }
-            if (!res.ok) throw new Error(data.message || (i18n.lang === "zh" ? "登录失败" : "Login failed"));
-            setToken(data.token);
-            localStorage.setItem("admin_username", data.username);
+            if (!res.ok)
+                throw new Error(
+                    data.message ||
+                        (i18n.lang === "zh" ? "登录失败" : "Login failed"),
+                );
 
-            if (data.role !== undefined && data.role !== null) {
-                localStorage.setItem("admin_role", data.role.toString());
-            } else {
-                localStorage.setItem("admin_role", "1");
-            }
+            session.update({
+                token: data.token,
+                username: data.username,
+                role: data.role !== undefined ? Number(data.role) : 1,
+            });
 
-            if (data.role && data.role < 10) {
+            if (session.role < 10) {
                 goto("/consumer");
             } else {
                 goto("/");
@@ -92,7 +98,11 @@
             <h1 class="text-3xl font-bold text-white tracking-tight">
                 Elygate
             </h1>
-            <p class="text-slate-400 text-sm mt-1">{i18n.lang === "zh" ? "AI API 网关管理系统" : "AI API Gateway Management"}</p>
+            <p class="text-slate-400 text-sm mt-1">
+                {i18n.lang === "zh"
+                    ? "AI API 网关管理系统"
+                    : "AI API Gateway Management"}
+            </p>
         </div>
 
         <!-- Card -->
@@ -205,7 +215,9 @@
                     </div>
                     <div class="relative flex justify-center text-sm">
                         <span class="px-2 bg-transparent text-slate-400"
-                            >{i18n.lang === "zh" ? "或使用以下方式登录" : "Or continue with"}</span
+                            >{i18n.lang === "zh"
+                                ? "或使用以下方式登录"
+                                : "Or continue with"}</span
                         >
                     </div>
                 </div>
@@ -264,14 +276,8 @@
                 </div>
             </div>
 
-            <p class="text-xs text-slate-500 text-center mt-6">
-                Default credentials: <span class="text-slate-400 font-mono"
-                    >admin / admin123</span
-                >
-            </p>
-
             <p
-                class="text-xs text-slate-500 text-center mt-4 border-t border-white/5 pt-4"
+                class="text-xs text-slate-500 text-center mt-6 border-t border-white/5 pt-6"
             >
                 Don't have an account? <a
                     href="/register"

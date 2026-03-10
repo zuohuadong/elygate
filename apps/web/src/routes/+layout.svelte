@@ -4,7 +4,6 @@
 		House,
 		LayoutDashboard,
 		KeyRound,
-		MonitorSpeaker,
 		Settings,
 		Languages,
 		Users,
@@ -18,54 +17,118 @@
 		BarChart3,
 		History,
 		BookOpen,
+		Coins,
+		Sun,
+		Moon,
+		Ticket,
 	} from "lucide-svelte";
 	import { page } from "$app/state";
 	import { i18n } from "$lib/i18n/index.svelte";
-	import { clearToken } from "$lib/api";
 	import { goto } from "$app/navigation";
 	import { onMount } from "svelte";
+	import { session } from "$lib/session.svelte";
+	import { apiFetch } from "$lib/api";
+	import { theme } from "$lib/theme.svelte";
+	import { keyboardShortcuts } from "$lib/keyboard.svelte";
 
 	let { children } = $props();
-	let adminUsername = $state("");
-	let userRole = $state(1); // 1 = normal, 10 = admin
+	let showShortcutsModal = $state(false);
+
+	// Admin-only routes (regular users should not access these)
+	const ADMIN_ROUTES = [
+		"/",
+		"/channels",
+		"/users",
+		"/logs",
+		"/stats",
+		"/redemptions",
+		"/invite-codes",
+		"/settings",
+		"/models",
+		"/tokens",
+	];
+	// Consumer-only routes (admins can still access / which is the dashboard)
+	const CONSUMER_ROUTES = [
+		"/consumer",
+		"/consumer/logs",
+		"/consumer/docs",
+		"/payment",
+	];
 
 	onMount(() => {
 		i18n.init();
-		const token = localStorage.getItem("admin_token");
-		if (!token) {
+		theme.init();
+		if (!session.token && !isAuthPage) {
 			goto("/login");
 			return;
 		}
-		adminUsername = localStorage.getItem("admin_username") || "User";
 
-		const rawRole = localStorage.getItem("admin_role");
-		if (rawRole && rawRole !== "undefined") {
-			userRole = parseInt(rawRole, 10);
-		} else {
-			// fallback: check path, but prioritize localStorage
-			userRole =
-				page.url.pathname.startsWith("/consumer") ||
-				page.url.pathname === "/payment"
-					? 1
-					: 10;
+		// Register keyboard shortcuts
+		keyboardShortcuts.registerMultiple([
+			{ key: 'd', ctrl: true, callback: () => theme.toggle(), description: 'Toggle dark mode' },
+			{ key: '?', shift: true, callback: () => showShortcutsModal = !showShortcutsModal, description: 'Show keyboard shortcuts' },
+			{ key: 'Escape', callback: () => showShortcutsModal = false, description: 'Close modal' },
+		]);
+
+		// Fetch system info for exchange rate
+		apiFetch<any>("/status")
+			.then((res: any) => {
+				if (res.data) {
+					session.setSystemInfo({
+						exchangeRate: res.data.exchange_rate || 7.2,
+						quotaPerUnit: res.data.quota_per_unit || 500000,
+					});
+				}
+			})
+			.catch(() => {});
+
+		const path = page.url.pathname;
+		const isAdmin = session.role >= 10;
+
+		// Admin goes to dashboard, user goes to consumer page
+		if (path === "/") {
+			if (!isAdmin) goto("/consumer");
+			return;
 		}
 
-		// Home redirect for normal users
-		if (userRole < 10 && page.url.pathname === "/") {
+		// Block non-admins from admin-only routes
+		if (
+			!isAdmin &&
+			ADMIN_ROUTES.some((r) => r !== "/" && path.startsWith(r))
+		) {
 			goto("/consumer");
+			return;
+		}
+
+		// Redirect admins who land on consumer pages to the admin dashboard
+		if (isAdmin && CONSUMER_ROUTES.some((r) => path.startsWith(r))) {
+			goto("/");
 		}
 	});
 
+	async function toggleCurrency() {
+		const newCurrency = session.currency === "USD" ? "RMB" : "USD";
+		try {
+			await apiFetch("/auth/currency", {
+				method: "PUT",
+				body: JSON.stringify({ currency: newCurrency }),
+			});
+			session.updateCurrency(newCurrency);
+		} catch (err) {
+			console.error("Failed to update currency preference:", err);
+			// Still update local state for better UX
+			session.updateCurrency(newCurrency);
+		}
+	}
+
 	function logout() {
-		clearToken();
-		localStorage.removeItem("admin_username");
-		localStorage.removeItem("admin_role");
+		session.clear();
 		goto("/login");
 	}
 
 	// Side navigation data (Strictly separated for Admin vs Consumer)
 	const navItems = $derived.by(() => {
-		if (userRole >= 10) {
+		if (session.role >= 10) {
 			return [
 				{
 					name: i18n.t.nav.dashboard,
@@ -101,6 +164,11 @@
 					name: i18n.t.nav.redemptions || "Redemptions",
 					href: "/redemptions",
 					icon: Gift,
+				},
+				{
+					name: i18n.lang === "zh" ? "邀请码" : "Invite Codes",
+					href: "/invite-codes",
+					icon: Ticket,
 				},
 				{
 					name: i18n.t.nav.pricing || "Pricing",
@@ -209,7 +277,7 @@
 			</nav>
 
 			<!-- Top-up Shortcut for Consumers -->
-			{#if userRole < 10}
+			{#if session.role < 10}
 				<div class="px-4 mb-4">
 					<a
 						href="/payment"
@@ -229,16 +297,16 @@
 					<div
 						class="w-8 h-8 rounded-full bg-gradient-to-tr from-cyan-400 to-blue-500 flex items-center justify-center text-white font-medium text-sm shadow-md shrink-0"
 					>
-						{adminUsername.charAt(0).toUpperCase() || "A"}
+						{(session.username || "A").charAt(0).toUpperCase()}
 					</div>
 					<div class="flex-1 overflow-hidden">
 						<p
 							class="text-sm font-medium text-slate-900 dark:text-white truncate"
 						>
-							{adminUsername || "Admin"}
+							{session.username || "Admin"}
 						</p>
 						<p class="text-xs text-slate-500 dark:text-slate-400">
-							{userRole >= 10 ? "Super Admin" : "User"}
+							{session.role >= 10 ? "Super Admin" : "User"}
 						</p>
 					</div>
 					<button
@@ -301,6 +369,15 @@
 						>
 					</div>
 
+					<!-- Currency Switcher -->
+					<button
+						onclick={toggleCurrency}
+						class="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors border border-slate-200 dark:border-slate-800"
+					>
+						<Coins class="w-4 h-4 text-amber-500" />
+						{session.currency === "USD" ? "USD / $" : "RMB / ¥"}
+					</button>
+
 					<!-- Language Switcher -->
 					<button
 						onclick={() =>
@@ -312,9 +389,15 @@
 					</button>
 
 					<button
+						onclick={() => theme.toggle()}
 						class="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors rounded-full hover:bg-slate-100 dark:hover:bg-slate-800"
+						title={theme.value === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
 					>
-						<MonitorSpeaker class="w-5 h-5" />
+						{#if theme.value === 'dark'}
+							<Sun class="w-5 h-5" />
+						{:else}
+							<Moon class="w-5 h-5" />
+						{/if}
 					</button>
 				</div>
 			</header>
@@ -324,6 +407,62 @@
 				{@render children()}
 			</div>
 		</main>
+	</div>
+{/if}
+
+<!-- Keyboard Shortcuts Modal -->
+{#if showShortcutsModal}
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<!-- svelte-ignore a11y_interactive_supports_focus -->
+	<div 
+		class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center"
+		onclick={() => showShortcutsModal = false}
+		onkeydown={(e) => e.key === 'Escape' && (showShortcutsModal = false)}
+		role="dialog"
+		aria-modal="true"
+		aria-label={i18n.lang === "zh" ? "键盘快捷键" : "Keyboard Shortcuts"}
+		tabindex="-1"
+	>
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<!-- svelte-ignore a11y_click_events_have_key_events -->
+		<div 
+			class="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 p-6 max-w-md w-full mx-4"
+			onclick={(e) => e.stopPropagation()}
+		>
+			<div class="flex items-center justify-between mb-4">
+				<h3 class="text-lg font-semibold text-slate-900 dark:text-white">
+					{i18n.lang === "zh" ? "键盘快捷键" : "Keyboard Shortcuts"}
+				</h3>
+				<button 
+					onclick={() => showShortcutsModal = false}
+					class="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+					aria-label={i18n.lang === "zh" ? "关闭" : "Close"}
+				>
+					<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+					</svg>
+				</button>
+			</div>
+			<div class="space-y-3">
+				{#each keyboardShortcuts.getShortcuts() as shortcut}
+					<div class="flex items-center justify-between py-2 border-b border-slate-100 dark:border-slate-800 last:border-0">
+						<span class="text-sm text-slate-600 dark:text-slate-400">{shortcut.description}</span>
+						<div class="flex items-center gap-1">
+							{#if shortcut.ctrl}
+								<kbd class="px-2 py-1 text-xs font-mono bg-slate-100 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700">⌘</kbd>
+							{/if}
+							{#if shortcut.shift}
+								<kbd class="px-2 py-1 text-xs font-mono bg-slate-100 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700">⇧</kbd>
+							{/if}
+							<kbd class="px-2 py-1 text-xs font-mono bg-slate-100 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 uppercase">{shortcut.key}</kbd>
+						</div>
+					</div>
+				{/each}
+			</div>
+			<p class="mt-4 text-xs text-slate-500 dark:text-slate-500 text-center">
+				{i18n.lang === "zh" ? "按 ? 显示此帮助" : "Press ? to show this help"}
+			</p>
+		</div>
 	</div>
 {/if}
 

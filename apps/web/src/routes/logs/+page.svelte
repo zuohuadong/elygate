@@ -1,37 +1,65 @@
 <script lang="ts">
     import DataTable from "../../components/DataTable.svelte";
-    import { House, Search, Filter } from "lucide-svelte";
+    import DataTableSkeleton from "../../components/DataTableSkeleton.svelte";
+    import { House, Search, Filter, Download } from "lucide-svelte";
     import { apiFetch } from "$lib/api";
     import { onMount } from "svelte";
 
-    // 本地状态
+    // Local state
     let logs = $state<any[]>([]);
     let isLoading = $state(true);
     let errorMsg = $state("");
+    let isExporting = $state(false);
 
     onMount(async () => {
         try {
-            const data = await apiFetch<any[]>("/admin/logs");
+            const response = await apiFetch<{ data: any[], total: number, page: number, limit: number } | any[]>("/admin/logs");
+            
+            // Handle both array and object response formats
+            const data = Array.isArray(response) ? response : (response.data || []);
 
-            // 格式化呈现
+            // Format for display
             logs = data.map((l) => ({
                 ...l,
-                dt_created_at: new Date(l.createdAt).toLocaleString(),
-                // 如果为空则显示无名 (为了简单化，实际项目中会联查对应字段)
-                dt_user: `用户 ${l.userId}`,
-                dt_model: l.modelName,
-                dt_channel: l.channelId ? `渠道 ${l.channelId}` : "未知",
-                dt_token: l.tokenId ? `Token ${l.tokenId}` : "直用",
-                dt_cost: `$ ${(l.quotaCost / 1000).toFixed(4)}`,
-                dt_duration: l.isStream ? "流式返回" : "标准",
-                dt_status: "成功", // 纯消耗记录目前都算成功
+                dt_created_at: new Date(l.created_at || l.createdAt).toLocaleString(),
+                dt_user: `User ${l.user_id || l.userId}`,
+                dt_model: l.model_name || l.modelName,
+                dt_channel: l.channel_id ? `Channel ${l.channel_id}` : l.channelId ? `Channel ${l.channelId}` : "Unknown",
+                dt_token: l.token_id ? `Token ${l.token_id}` : l.tokenId ? `Token ${l.tokenId}` : "Direct",
+                dt_cost: `$ ${((l.quota_cost || l.quotaCost || 0) / 1000).toFixed(4)}`,
+                dt_duration: l.is_stream || l.isStream ? "Stream" : "Standard",
+                dt_status: "Success",
             }));
         } catch (err: any) {
-            errorMsg = err.message || "加载日志失败";
+            errorMsg = err.message || "Failed to load logs";
         } finally {
             isLoading = false;
         }
     });
+
+    async function exportLogs(format: 'csv' | 'json') {
+        isExporting = true;
+        try {
+            const response = await fetch('/api/admin/logs/export?format=' + format, {
+                headers: {
+                    'Authorization': `Bearer ${localStorage.getItem('token')}`
+                }
+            });
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `logs_export.${format}`;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            a.remove();
+        } catch (err: any) {
+            alert('Export failed: ' + err.message);
+        } finally {
+            isExporting = false;
+        }
+    }
 
     const renderStatus = (val: string) => {
         if (val.includes("成功")) {
@@ -84,15 +112,38 @@
                 <Filter class="w-4 h-4" />
                 高级筛选
             </button>
+            <div class="relative">
+                <button
+                    onclick={() => {
+                        const dropdown = document.getElementById('export-dropdown');
+                        if (dropdown) dropdown.classList.toggle('hidden');
+                    }}
+                    class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg text-white bg-indigo-600 hover:bg-indigo-700 transition-colors shadow-sm disabled:opacity-50"
+                    disabled={isExporting}
+                >
+                    <Download class="w-4 h-4" />
+                    {isExporting ? 'Exporting...' : 'Export'}
+                </button>
+                <div id="export-dropdown" class="hidden absolute right-0 mt-2 w-32 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-lg z-10">
+                    <button
+                        onclick={() => { exportLogs('csv'); document.getElementById('export-dropdown')?.classList.add('hidden'); }}
+                        class="block w-full text-left px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-t-lg"
+                    >
+                        Export as CSV
+                    </button>
+                    <button
+                        onclick={() => { exportLogs('json'); document.getElementById('export-dropdown')?.classList.add('hidden'); }}
+                        class="block w-full text-left px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-b-lg"
+                    >
+                        Export as JSON
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
 
     {#if isLoading}
-        <div class="flex justify-center items-center py-12">
-            <div
-                class="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"
-            ></div>
-        </div>
+        <DataTableSkeleton rows={8} columns={8} />
     {:else if errorMsg}
         <div
             class="p-4 text-sm text-rose-800 bg-rose-50 rounded-lg dark:bg-rose-900/10 dark:text-rose-400"

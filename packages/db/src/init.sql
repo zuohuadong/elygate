@@ -85,6 +85,7 @@ CREATE TABLE IF NOT EXISTS tokens (
     subnet TEXT,                            -- IP whitelist
     rate_limit INTEGER NOT NULL DEFAULT 0,  -- RPM limit
     expired_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -108,9 +109,65 @@ CREATE TABLE IF NOT EXISTS channels (
     priority INTEGER NOT NULL DEFAULT 0,
     groups JSONB,                           -- allowed user groups (null = all)
     status INTEGER NOT NULL DEFAULT 1,      -- 1=active, 2=disabled
+    key_strategy INTEGER NOT NULL DEFAULT 0, -- 0=load_balance, 1=sequential
+    key_status JSONB NOT NULL DEFAULT '{}'::jsonb, -- key exhaustion status
+    price_ratio DECIMAL(10, 4) DEFAULT 1.0, -- price multiplier for dual currency support
     test_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Login attempts tracking table
+CREATE TABLE IF NOT EXISTS login_attempts (
+    id SERIAL PRIMARY KEY,
+    username TEXT NOT NULL,
+    ip_address TEXT,
+    success BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Add locked_until to users table
+ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ;
+
+-- Create indexes for login attempts
+CREATE INDEX IF NOT EXISTS idx_login_attempts_username ON login_attempts(username, created_at);
+CREATE INDEX IF NOT EXISTS idx_login_attempts_ip ON login_attempts(ip_address, created_at);
+
+-- Budget alerts table
+CREATE TABLE IF NOT EXISTS budget_alerts (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    username TEXT NOT NULL,
+    quota BIGINT NOT NULL,
+    used_quota BIGINT NOT NULL,
+    usage_percent DECIMAL(5, 4) NOT NULL,
+    alert_level TEXT NOT NULL CHECK (alert_level IN ('warning', 'critical', 'exhausted')),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Create indexes for budget alerts
+CREATE INDEX IF NOT EXISTS idx_budget_alerts_user_id ON budget_alerts(user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_budget_alerts_level ON budget_alerts(alert_level, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_budget_alerts_unique ON budget_alerts(user_id, alert_level, DATE(created_at));
+
+-- Audit logs table
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    username TEXT NOT NULL,
+    action TEXT NOT NULL,
+    resource TEXT NOT NULL,
+    resource_id INTEGER,
+    details JSONB,
+    ip_address TEXT,
+    user_agent TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Create indexes for audit logs
+CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs(user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action, created_at);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_resource ON audit_logs(resource, resource_id, created_at);
 
 CREATE TABLE IF NOT EXISTS logs (
     id SERIAL,

@@ -21,6 +21,19 @@ export class AliApiHandler implements ProviderHandler {
 
     transformResponse(data: any) {
         const choice = data.output?.choices?.[0] || {};
+        const message: any = {
+            role: 'assistant',
+            content: choice.message?.content || ''
+        };
+
+        if (choice.message?.reasoning_content) {
+            message.reasoning_content = choice.message.reasoning_content;
+        }
+
+        if (choice.message?.thought) {
+            message.reasoning_content = (message.reasoning_content || '') + choice.message.thought;
+        }
+
         return {
             id: data.request_id || `chatcmpl-ali-${Date.now()}`,
             object: 'chat.completion',
@@ -28,10 +41,7 @@ export class AliApiHandler implements ProviderHandler {
             choices: [
                 {
                     index: 0,
-                    message: {
-                        role: 'assistant',
-                        content: choice.message?.content || ''
-                    },
+                    message,
                     finish_reason: choice.finish_reason || 'stop'
                 }
             ],

@@ -1,152 +1,143 @@
 import { sql } from '@elygate/db';
 import { memoryCache } from './cache';
 import { notificationService } from './notification';
-
-const ERROR_THRESHOLD = 3; // Disable after 3 consecutive errors
-const HEALTH_CHECK_INTERVAL = 60 * 1000; // Check every 1 minute
+import { optionCache } from './optionCache';
+import { webhookService } from './webhook';
 
 class CircuitBreaker {
     // channelId -> consecutive error count
     private errorCounts = new Map<number, number>();
+    // channelId -> consecutive success count for half-open recovery
+    private successCounts = new Map<number, number>();
     private healthCheckTimer: NodeJS.Timeout | null = null;
 
     constructor() {
         this.startHealthCheck();
     }
 
+    private getThreshold(): number {
+        return parseInt(optionCache.get('CIRCUIT_BREAKER_THRESHOLD', '3'));
+    }
+
+    private getRecoveryThreshold(): number {
+        return parseInt(optionCache.get('CIRCUIT_BREAKER_RECOVERY_THRESHOLD', '5'));
+    }
+
     /**
-     * Record a success for a channel, resetting its error count.
+     * Record a success for a channel.
      */
-    public recordSuccess(channelId: number) {
+    public async recordSuccess(channelId: number) {
         if (this.errorCounts.has(channelId)) {
             this.errorCounts.delete(channelId);
-            console.log(`[CircuitBreaker] Channel ${channelId} recovered, error count reset.`);
+            console.log(`[CircuitBreaker] Channel ${channelId} error count reset.`);
+        }
+
+        // Handle Half-Open recovery
+        const channel = memoryCache.channels.get(channelId);
+        if (channel && channel.status === 4) {
+            const count = (this.successCounts.get(channelId) || 0) + 1;
+            const threshold = this.getRecoveryThreshold();
+
+            if (count >= threshold) {
+                console.log(`[CircuitBreaker] Channel ${channelId} fully recovered from Half-Open.`);
+                await sql`UPDATE channels SET status = 1, updated_at = NOW() WHERE id = ${channelId}`;
+                await memoryCache.refresh();
+                this.successCounts.delete(channelId);
+            } else {
+                this.successCounts.set(channelId, count);
+                console.log(`[CircuitBreaker] Channel ${channelId} Half-Open success: ${count}/${threshold}`);
+            }
         }
     }
 
     /**
-     * Record an error for a channel. If threshold reached, auto-disable.
+     * Record an error for a channel.
      */
     public async recordError(channelId: number, status?: number) {
-        // We only trip on 429 or 5xx or network errors (no status)
-        if (status && status >= 400 && status < 429) {
-            // Client errors like 400, 401, 404 do not trigger circuit breaker
+        if (status && status >= 400 && status < 429) return;
+
+        const channel = memoryCache.channels.get(channelId);
+        if (!channel) return;
+
+        // If in Half-Open, one failure trips it back to Disabled
+        if (channel.status === 4) {
+            console.warn(`[CircuitBreaker] Channel ${channelId} failed in Half-Open. Re-disabling.`);
+            await this.disableChannel(channelId);
             return;
         }
 
         const count = (this.errorCounts.get(channelId) || 0) + 1;
+        const threshold = this.getThreshold();
         this.errorCounts.set(channelId, count);
-        console.warn(`[CircuitBreaker] Channel ${channelId} error count: ${count}/${ERROR_THRESHOLD}`);
 
-        if (count >= ERROR_THRESHOLD) {
+        console.warn(`[CircuitBreaker] Channel ${channelId} error count: ${count}/${threshold}`);
+
+        if (count >= threshold) {
             await this.disableChannel(channelId);
         }
     }
 
     private async disableChannel(channelId: number) {
-        console.error(`[CircuitBreaker] Channel ${channelId} exceeded error threshold. Auto-disabling.`);
+        console.error(`[CircuitBreaker] Channel ${channelId} disabled by circuit breaker.`);
         try {
             await sql`
                 UPDATE channels
                 SET status = 3, updated_at = NOW()
-                WHERE id = ${channelId} AND status = 1
+                WHERE id = ${channelId} AND status IN (1, 4)
             `;
-            // Remove from cache immediately
             await memoryCache.refresh();
             this.errorCounts.delete(channelId);
+            this.successCounts.delete(channelId);
 
-            // Notify admin
             await notificationService.send(
-                'Channel Auto-Disabled',
-                `Channel ID ${channelId} has been auto-disabled after ${ERROR_THRESHOLD} consecutive errors.`
+                'Channel Prohibited',
+                `Channel ID ${channelId} has been disabled due to frequent failures.`
             );
+            await webhookService.trigger('channel.disabled', { channelId });
         } catch (e) {
             console.error(`[CircuitBreaker] Failed to disable channel ${channelId}:`, e);
         }
     }
 
-    /**
-     * Background daemon to ping disabled channels (status = 3) occasionally.
-     */
     private startHealthCheck() {
-        if (this.healthCheckTimer) {
-            clearInterval(this.healthCheckTimer);
-        }
-        this.healthCheckTimer = setInterval(() => this.runHealthCheck(), HEALTH_CHECK_INTERVAL);
+        if (this.healthCheckTimer) clearInterval(this.healthCheckTimer);
+        const interval = parseInt(optionCache.get('HEALTH_CHECK_INTERVAL', '60000'));
+        this.healthCheckTimer = setInterval(() => this.runHealthCheck(), interval);
     }
 
     private async runHealthCheck() {
         try {
-            // Find all auto-disabled channels
             const disabledChannels = await sql`
-                SELECT id, base_url AS "baseUrl", key, type
-                FROM channels
-                WHERE status = 3
+                SELECT id, base_url AS "baseUrl", key, type FROM channels WHERE status = 3
             `;
-
             if (disabledChannels.length === 0) return;
 
-            console.log(`[HealthCheck] Pinging ${disabledChannels.length} auto-disabled channels...`);
-
-            let recoveredCount = 0;
             for (const ch of disabledChannels) {
                 const isHealthy = await this.pingChannel(ch);
-
-                await sql`
-                    UPDATE channels
-                    SET test_at = NOW()
-                    WHERE id = ${ch.id}
-                `;
-
                 if (isHealthy) {
-                    console.log(`[HealthCheck] Channel ${ch.id} is healthy again. Re-enabling.`);
-                    await sql`
-                        UPDATE channels
-                        SET status = 1, updated_at = NOW()
-                        WHERE id = ${ch.id}
-                    `;
-                    recoveredCount++;
+                    console.log(`[HealthCheck] Channel ${ch.id} recovered to Half-Open.`);
+                    await sql`UPDATE channels SET status = 4, updated_at = NOW() WHERE id = ${ch.id}`;
                 }
             }
-
-            if (recoveredCount > 0) {
-                await memoryCache.refresh();
-            }
+            if (disabledChannels.length > 0) await memoryCache.refresh();
         } catch (e) {
             console.error('[HealthCheck] Error checking channels:', e);
         }
     }
 
     private async pingChannel(channel: any): Promise<boolean> {
-        // Pick active key
         const keys = channel.key.split('\n').map((k: string) => k.trim()).filter(Boolean);
         if (keys.length === 0) return false;
-        const activeKey = keys[0];
 
         try {
             const controller = new AbortController();
             const timeout = setTimeout(() => controller.abort(), 5000);
-
-            const req = await fetch(`${channel.baseUrl}/v1/chat/completions`, {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${activeKey}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    model: 'ping-model-test-ignore',
-                    messages: [{ role: 'user', content: 'hi' }],
-                    max_tokens: 1
-                }),
+            const res = await fetch(`${channel.baseUrl}/v1/models`, {
+                headers: { 'Authorization': `Bearer ${keys[0]}` },
                 signal: controller.signal
             });
             clearTimeout(timeout);
-
-            // 400/401/404 indicates the service is up.
-            if (req.status < 429) {
-                return true;
-            }
-            return false;
+            return res.status < 429;
         } catch (e) {
             return false;
         }

@@ -19,20 +19,8 @@ export interface TokenRecord {
     subnet: string;
     rateLimit: number;
 }
-export enum ChannelType {
-    OPENAI = 1,
-    AZURE = 2,
-    ANTHROPIC = 3,
-    GOOGLE = 4,
-    BAIDU = 5,
-    ALIBABA = 6,
-    ZHIPU = 7,
-    IFLYTEK = 8,
-    KIMI = 9,
-    XUNFEI = 10,
-    DEEPSEEK = 11,
-    GEMINI = 12
-}
+// ChannelType values matching New-API/One-API spec — defined in providers/types.ts
+export { ChannelType } from './providers/types';
 
 export interface ChannelConfig {
     id: number;
@@ -46,6 +34,8 @@ export interface ChannelConfig {
     priority: number;
     groups: string[];
     status: number;
+    keyStrategy: number;         // 0=Load balance, 1=Sequential
+    keyStatus: Record<string, string>; // { "sk-xxx": "exhausted" | "active" }
 }
 
 export interface UsageInfo {

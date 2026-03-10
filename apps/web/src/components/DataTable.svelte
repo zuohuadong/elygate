@@ -13,12 +13,40 @@
         columns = [],
         onEdit = (row: any) => {},
         onDelete = (row: any) => {},
+        pageSize = 10,
+        currentPage = 1,
+        total = 0,
+        onPageChange = (page: number) => {},
     }: {
         data: any[];
         columns: Column[];
         onEdit?: (row: any) => void;
         onDelete?: (row: any) => void;
+        pageSize?: number;
+        currentPage?: number;
+        total?: number;
+        onPageChange?: (page: number) => void;
     } = $props();
+
+    // Calculate pagination
+    const totalPages = $derived(Math.ceil(total / pageSize) || 1);
+    const startItem = $derived((currentPage - 1) * pageSize + 1);
+    const endItem = $derived(Math.min(currentPage * pageSize, total));
+
+    // Pagination controls
+    function goToPage(page: number) {
+        if (page >= 1 && page <= totalPages) {
+            onPageChange(page);
+        }
+    }
+
+    function goToPrevious() {
+        goToPage(currentPage - 1);
+    }
+
+    function goToNext() {
+        goToPage(currentPage + 1);
+    }
 </script>
 
 <div
@@ -97,24 +125,37 @@
         </table>
     </div>
 
-    <!-- 分页栏占位 -->
+    <!-- 分页栏 -->
     <div
         class="flex items-center justify-between px-6 py-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50/30 dark:bg-slate-900/30"
     >
         <span class="text-xs text-slate-500 dark:text-slate-400">
-            显示 {data.length > 0 ? 1 : 0} 到 {data.length} 条记录
+            {#if total > 0}
+                显示 {startItem} 到 {endItem} 条，共 {total} 条记录
+            {:else}
+                暂无数据
+            {/if}
         </span>
-        <div
-            class="inline-flex rounded-md shadow-sm opacity-50 pointer-events-none"
-        >
-            <button
-                class="px-3 py-1.5 text-sm font-medium text-slate-500 bg-white border border-slate-200 rounded-l-md hover:bg-slate-50 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-400"
-                >上一页</button
-            >
-            <button
-                class="px-3 py-1.5 text-sm font-medium text-slate-500 bg-white border border-l-0 border-slate-200 rounded-r-md hover:bg-slate-50 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-400"
-                >下一页</button
-            >
+        <div class="flex items-center gap-2">
+            <span class="text-xs text-slate-500 dark:text-slate-400">
+                第 {currentPage} / {totalPages} 页
+            </span>
+            <div class="inline-flex rounded-md shadow-sm">
+                <button
+                    onclick={goToPrevious}
+                    disabled={currentPage <= 1}
+                    class="px-3 py-1.5 text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-l-md hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-slate-900 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-800"
+                >
+                    上一页
+                </button>
+                <button
+                    onclick={goToNext}
+                    disabled={currentPage >= totalPages}
+                    class="px-3 py-1.5 text-sm font-medium text-slate-700 bg-white border border-l-0 border-slate-200 rounded-r-md hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-slate-900 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-800"
+                >
+                    下一页
+                </button>
+            </div>
         </div>
     </div>
 </div>

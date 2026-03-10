@@ -92,11 +92,27 @@ export const redemptions = pgTable('redemptions', {
     codeIdx: uniqueIndex('idx_redemption_code').on(table.code)
 }));
 
+export const inviteCodes = pgTable('invite_codes', {
+    id: serial('id').primaryKey(),
+    code: text('code').notNull().unique(),
+    maxUses: integer('max_uses').notNull().default(1),
+    usedCount: integer('used_count').notNull().default(0),
+    giftQuota: integer('gift_quota').notNull().default(0),
+    status: integer('status').notNull().default(1),
+    expiresAt: timestamp('expires_at'),
+    createdBy: integer('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+}, (table) => ({
+    codeIdx: uniqueIndex('idx_invite_code').on(table.code)
+}));
+
 // -- Relations --
 export const usersRelations = relations(users, ({ many }: any) => ({
     tokens: many(tokens),
     logs: many(logs),
     redemptions: many(redemptions),
+    inviteCodes: many(inviteCodes),
 }));
 
 export const tokensRelations = relations(tokens, ({ one, many }: any) => ({
@@ -129,6 +145,13 @@ export const logsRelations = relations(logs, ({ one }: any) => ({
 export const redemptionsRelations = relations(redemptions, ({ one }: any) => ({
     user: one(users, {
         fields: [redemptions.usedBy],
+        references: [users.id],
+    }),
+}));
+
+export const inviteCodesRelations = relations(inviteCodes, ({ one }: any) => ({
+    creator: one(users, {
+        fields: [inviteCodes.createdBy],
         references: [users.id],
     }),
 }));

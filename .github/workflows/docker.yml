@@ -43,7 +43,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./Dockerfile.gateway
+          file: ./docker/Dockerfile.gateway
           push: true
           tags: ${{ steps.meta-gateway.outputs.tags }}
           labels: ${{ steps.meta-gateway.outputs.labels }}
@@ -61,7 +61,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./Dockerfile.web
+          file: ./docker/Dockerfile.web
           push: true
           tags: ${{ steps.meta-web.outputs.tags }}
           labels: ${{ steps.meta-web.outputs.labels }}
@@ -78,7 +78,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./Dockerfile.postgres
+          file: ./docker/Dockerfile.postgres
           push: true
           tags: ${{ steps.meta-db.outputs.tags }}
           labels: ${{ steps.meta-db.outputs.labels }}

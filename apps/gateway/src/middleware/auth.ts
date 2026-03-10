@@ -182,7 +182,7 @@ export const adminGuard = new Elysia()
     .use(authPlugin)
     .onBeforeHandle(({ user, set }: any) => {
         const u = user as UserRecord;
-        if (!u || u.role !== 10) {
+        if (!u || u.role < 10) {
             set.status = 403;
             throw new Error('Forbidden: Admin privileges required');
         }

@@ -34,14 +34,19 @@ class HealthChecker {
                     const controller = new AbortController();
                     const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
 
+                    const startTime = Date.now();
                     const res = await fetch(testUrl, {
                         headers: { 'Authorization': `Bearer ${activeKey}` },
                         signal: controller.signal
                     });
+                    const latency = Date.now() - startTime;
 
                     clearTimeout(timeoutId);
 
                     if (res.ok) {
+                        // Record health log
+                        await sql`INSERT INTO health_logs (channel_id, status, latency) VALUES (${ch.id}, 1, ${latency})`;
+
                         // Reset error count on success
                         if (ch.test_errors > 0) {
                             await sql`UPDATE channels SET test_errors = 0, test_at = NOW() WHERE id = ${ch.id}`;
@@ -54,6 +59,9 @@ class HealthChecker {
                 } catch (e: any) {
                     const newErrors = ch.test_errors + 1;
                     console.warn(`[HealthCheck] Channel ${ch.id} failed ping (${newErrors}/${this.MAX_ERRORS}). Error:`, e.message);
+
+                    // Record failure health log
+                    await sql`INSERT INTO health_logs (channel_id, status, error_message) VALUES (${ch.id}, 0, ${e.message})`;
 
                     if (newErrors >= this.MAX_ERRORS) {
                         console.error(`[HealthCheck] Channel ${ch.id} auto-disabled due to consecutive failures.`);

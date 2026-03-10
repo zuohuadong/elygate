@@ -1,19 +1,19 @@
 {
   "name": "elygate",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "AI API 批发平台",
   "private": true,
   "scripts": {
     "dev": "bun --cwd apps/gateway dev & bun --cwd apps/web dev",
     "build": "bun --cwd apps/web build",
-    "start": "bun --cwd apps/gateway start & bun --cwd apps/web start",
     "build:binary": "bun run scripts/build-binary.ts",
-    "build:binary:linux-x64": "bun run scripts/build-binary.ts -- --platform linux-x64",
-    "build:binary:linux-arm64": "bun run scripts/build-binary.ts -- --platform linux-arm64",
-    "build:binary:darwin-x64": "bun run scripts/build-binary.ts -- --platform darwin-x64",
-    "build:binary:darwin-arm64": "bun run scripts/build-binary.ts -- --platform darwin-arm64",
-    "build:binary:windows": "bun run scripts/build-binary.ts -- --platform windows-x64",
-    "changelog": "bun run scripts/changelog.ts"
+    "build:binary:all": "bun run scripts/build-binary.ts --all",
+    "build:binary:linux-x64": "bun run scripts/build-binary.ts bun-linux-x64",
+    "build:binary:linux-arm64": "bun run scripts/build-binary.ts bun-linux-arm64",
+    "build:binary:darwin-x64": "bun run scripts/build-binary.ts bun-darwin-x64",
+    "build:binary:darwin-arm64": "bun run scripts/build-binary.ts bun-darwin-arm64",
+    "build:binary:windows": "bun run scripts/build-binary.ts bun-windows-x64",
+    "start": "bun --cwd apps/gateway start & bun --cwd apps/web start"
   },
   "workspaces": [
     "apps/*",

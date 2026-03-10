@@ -1,6 +1,8 @@
 import { Elysia, t } from 'elysia';
 import { sql } from '@elygate/db';
 import { authService } from '../services/auth';
+import { getLangFromHeader } from '../utils/i18n';
+import { optionCache } from '../services/optionCache';
 
 const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID || '';
 const GITHUB_CLIENT_SECRET = process.env.GITHUB_CLIENT_SECRET || '';
@@ -59,33 +61,87 @@ export const authRouter = new Elysia()
         const sessionToken = await authService.generateSessionToken(user.id);
 
         const targetUrl = process.env.WEB_URL || 'http://localhost:5173';
-        set.redirect = `${targetUrl}/auth/callback?token=${sessionToken}&username=${user.username}`;
+        set.redirect = `${targetUrl}/auth/callback?token=${sessionToken}&username=${user.username}&role=${user.role}`;
     })
     // User registration
-    .post('/register', async ({ body, set }: any) => {
+    .post('/register', async ({ body, set, request }: any) => {
+        const lang = getLangFromHeader(request.headers.get('accept-language'));
         try {
-            const { username, password } = body;
+            const { username, password, inviteCode } = body;
             if (!username || !password) {
                 set.status = 400;
-                return { success: false, message: 'Username and password are required' };
+                return { success: false, message: lang === 'zh' ? '用户名和密码不能为空' : 'Username and password are required' };
+            }
+
+            const registerMode = optionCache.get('RegisterMode', 'open');
+            const defaultQuota = parseInt(optionCache.get('SignRegisterQuota', '500000')) || 500000;
+
+            if (registerMode === 'closed') {
+                set.status = 403;
+                return { success: false, message: lang === 'zh' ? '注册功能已关闭' : 'Registration is currently disabled' };
+            }
+
+            let giftQuota = 0;
+            let inviteCodeRecord: any = null;
+
+            if (inviteCode) {
+                const [codeRecord] = await sql`
+                    SELECT * FROM invite_codes WHERE code = ${inviteCode} LIMIT 1
+                `;
+
+                if (!codeRecord) {
+                    set.status = 400;
+                    return { success: false, message: lang === 'zh' ? '邀请码无效' : 'Invalid invite code' };
+                }
+
+                if (codeRecord.status !== 1) {
+                    set.status = 400;
+                    return { success: false, message: lang === 'zh' ? '邀请码已禁用' : 'Invite code is disabled' };
+                }
+
+                if (codeRecord.expires_at && new Date(codeRecord.expires_at) < new Date()) {
+                    set.status = 400;
+                    return { success: false, message: lang === 'zh' ? '邀请码已过期' : 'Invite code has expired' };
+                }
+
+                if (codeRecord.used_count >= codeRecord.max_uses) {
+                    set.status = 400;
+                    return { success: false, message: lang === 'zh' ? '邀请码使用次数已达上限' : 'Invite code usage limit reached' };
+                }
+
+                giftQuota = codeRecord.gift_quota || 0;
+                inviteCodeRecord = codeRecord;
+            } else if (registerMode === 'invite') {
+                set.status = 400;
+                return { success: false, message: lang === 'zh' ? '注册需要邀请码' : 'Invite code is required for registration' };
             }
 
             // Check if user exists
             const [existing] = await sql`SELECT id FROM users WHERE username = ${username} LIMIT 1`;
             if (existing) {
                 set.status = 409;
-                return { success: false, message: 'Username already exists' };
+                return { success: false, message: lang === 'zh' ? '用户名已存在' : 'Username already exists' };
             }
 
             // Hash password
             const passwordHash = await Bun.password.hash(password);
 
+            const totalQuota = defaultQuota + giftQuota;
+
             // Create user
             const [user] = await sql`
                 INSERT INTO users (username, password_hash, role, quota, status)
-                VALUES (${username}, ${passwordHash}, 1, 500000, 1)
+                VALUES (${username}, ${passwordHash}, 1, ${totalQuota}, 1)
                 RETURNING id, username, role
             `;
+
+            if (inviteCodeRecord) {
+                await sql`
+                    UPDATE invite_codes 
+                    SET used_count = used_count + 1, updated_at = NOW()
+                    WHERE id = ${inviteCodeRecord.id}
+                `;
+            }
 
             // Create default token
             const newKey = `sk-${Bun.randomUUIDv7('hex')}`;
@@ -96,50 +152,69 @@ export const authRouter = new Elysia()
 
             return {
                 success: true,
-                message: 'Registration successful',
+                message: lang === 'zh' ? '注册成功' : 'Registration successful',
                 data: {
                     username: user.username,
-                    role: user.role
+                    role: user.role,
+                    giftQuota: giftQuota > 0 ? giftQuota : undefined
                 }
             };
         } catch (e: any) {
             set.status = 500;
-            return { success: false, message: e?.message || 'Internal server error' };
+            return { success: false, message: e?.message || (lang === 'zh' ? '服务器内部错误' : 'Internal server error') };
         }
     }, {
         body: t.Object({
             username: t.String(),
-            password: t.String()
+            password: t.String(),
+            inviteCode: t.Optional(t.String())
         })
     })
     // Admin username/password login - returns the user's API token for management panel use
-    .post('/login', async ({ body, set }: any) => {
+    .post('/login', async ({ body, set, request }: any) => {
+        const lang = getLangFromHeader(request.headers);
+        const clientIP = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown';
+
         try {
             const { username, password } = body;
             if (!username || !password) {
                 set.status = 400;
-                return { success: false, message: 'Username and password are required' };
+                return { success: false, message: lang === 'zh' ? '用户名和密码不能为空' : 'Username and password are required' };
             }
 
             const [user] = await sql`
-                SELECT id, username, password_hash, role, status
+                SELECT id, username, password_hash, role, status, locked_until, currency
                 FROM users
                 WHERE username = ${username}
                 LIMIT 1
             `;
-
             if (!user) {
+                await sql`INSERT INTO login_attempts (username, ip_address, success) VALUES (${username}, ${clientIP}, false)`;
                 set.status = 401;
-                return { success: false, message: 'Invalid username or password' };
+                return { success: false, message: lang === 'zh' ? '用户名或密码错误' : 'Invalid username or password' };
             }
+
+            // Check if account is locked
+            if (user.locked_until && new Date(user.locked_until) > new Date()) {
+                const remainingMinutes = Math.ceil((new Date(user.locked_until).getTime() - Date.now()) / 60000);
+                set.status = 403;
+                return {
+                    success: false,
+                    message: lang === 'zh'
+                        ? `账户已被锁定，请 ${remainingMinutes} 分钟后重试`
+                        : `Account is locked, please try again in ${remainingMinutes} minutes`
+                };
+            }
+
             if (user.status !== 1) {
                 set.status = 403;
-                return { success: false, message: 'Account is disabled' };
+                return { success: false, message: lang === 'zh' ? '账户已被禁用' : 'Account is disabled' };
             }
             if (user.role < 1) {
                 set.status = 403;
-                return { success: false, message: 'Account has no access' };
+                return { success: false, message: lang === 'zh' ? '账户无访问权限' : 'Account has no access' };
             }
+
             // Verify password using Bun's native bcrypt/argon2
             let isValid = false;
             try {
@@ -149,9 +224,38 @@ export const authRouter = new Elysia()
             }
 
             if (!isValid) {
+                // Record failed attempt
+                await sql`INSERT INTO login_attempts (username, ip_address, success) VALUES (${username}, ${clientIP}, false)`;
+
+                // Check failed attempts in last 15 minutes
+                const [failedAttempts] = await sql`
+                    SELECT COUNT(*) as count 
+                    FROM login_attempts 
+                    WHERE username = ${username} 
+                    AND success = false 
+                    AND created_at > NOW() - INTERVAL '15 minutes'
+                `;
+
+                // Lock account after 5 failed attempts
+                if (Number(failedAttempts.count) >= 5) {
+                    await sql`UPDATE users SET locked_until = NOW() + INTERVAL '15 minutes' WHERE id = ${user.id}`;
+                    set.status = 403;
+                    return {
+                        success: false,
+                        message: lang === 'zh'
+                            ? '登录失败次数过多，账户已被锁定 15 分钟'
+                            : 'Too many failed attempts, account locked for 15 minutes'
+                    };
+                }
+
                 set.status = 401;
-                return { success: false, message: 'Invalid username or password' };
+                return { success: false, message: lang === 'zh' ? '用户名或密码错误' : 'Invalid username or password' };
             }
+
+            // Successful login - clear failed attempts and unlock account
+            await sql`DELETE FROM login_attempts WHERE username = ${username}`;
+            await sql`UPDATE users SET locked_until = NULL WHERE id = ${user.id}`;
+            await sql`INSERT INTO login_attempts (username, ip_address, success) VALUES (${username}, ${clientIP}, true)`;
 
             // Get the user's first active token (or create one)
             let [token] = await sql`
@@ -173,7 +277,8 @@ export const authRouter = new Elysia()
                 success: true,
                 token: token.key,
                 username: user.username,
-                role: user.role
+                role: user.role,
+                currency: user.currency || 'USD'
             };
         } catch (e: any) {
             set.status = 500;
@@ -194,7 +299,7 @@ export const authRouter = new Elysia()
         }
         const key = authHeader.substring(7);
         const [row] = await sql`
-            SELECT u.id, u.username, u.role, u.quota, u.used_quota as "usedQuota", u."group", t.key
+            SELECT u.id, u.username, u.role, u.quota, u.used_quota as "usedQuota", u."group", u.currency, t.key
             FROM tokens t
             JOIN users u ON t.user_id = u.id
             WHERE t.key = ${key} AND t.status = 1 AND u.status = 1
@@ -207,7 +312,7 @@ export const authRouter = new Elysia()
         return row;
     })
     // Get personal logs
-    .get('/logs', async ({ request, set }: any) => {
+    .get('/logs', async ({ request, set, query }: any) => {
         const authHeader = request.headers.get('authorization');
         if (!authHeader?.startsWith('Bearer ')) {
             set.status = 401;
@@ -226,8 +331,8 @@ export const authRouter = new Elysia()
             throw new Error('Unauthorized');
         }
 
-        const page = Number(request.query?.page) || 1;
-        const limit = Number(request.query?.limit) || 50;
+        const page = Number(query?.page) || 1;
+        const limit = Number(query?.limit) || 50;
         const offset = (page - 1) * limit;
 
         const [countRow] = await sql`
@@ -479,7 +584,7 @@ export const authRouter = new Elysia()
         let user;
         if (existingOAuth) {
             const [userRow] = await sql`
-                SELECT id, username FROM users WHERE id = ${existingOAuth.user_id} LIMIT 1
+                SELECT id, username, role FROM users WHERE id = ${existingOAuth.user_id} LIMIT 1
             `;
             user = userRow;
         } else {
@@ -487,13 +592,13 @@ export const authRouter = new Elysia()
             const [newUser] = await sql`
                 INSERT INTO users (username, password_hash, role, quota, status)
                 VALUES (${username}, 'oauth-no-password', 1, 500000, 1)
-                RETURNING id, username
+                RETURNING id, username, role
             `;
             user = newUser;
 
             await sql`
                 INSERT INTO oauth_accounts (user_id, provider, provider_user_id, access_token, refresh_token, expires_at)
-                VALUES (${user.id}, 'discord', ${discordUser.id}, ${tokenData.access_token}, ${tokenData.refresh_token}, NOW() + INTERVAL '${tokenData.expires_in} seconds')
+                VALUES (${user.id}, 'discord', ${discordUser.id}, ${tokenData.access_token}, ${tokenData.refresh_token}, NOW() + (${Number(tokenData.expires_in) || 604800} * INTERVAL '1 second'))
             `;
 
             const newKey = `sk-${Bun.randomUUIDv7('hex')}`;
@@ -505,7 +610,7 @@ export const authRouter = new Elysia()
 
         const sessionToken = await authService.generateSessionToken(user.id);
         const targetUrl = process.env.WEB_URL || 'http://localhost:5173';
-        set.redirect = `${targetUrl}/auth/callback?token=${sessionToken}&username=${user.username}`;
+        set.redirect = `${targetUrl}/auth/callback?token=${sessionToken}&username=${user.username}&role=${user.role}`;
     })
 
     .get('/telegram', async ({ query, set }) => {
@@ -523,9 +628,11 @@ export const authRouter = new Elysia()
             .join('\n');
 
         const encoder = new TextEncoder();
+        // Per Telegram spec: secret_key = SHA256(bot_token), then HMAC-SHA256(data_check_string, secret_key)
+        const tokenDigest = await crypto.subtle.digest('SHA-256', encoder.encode(TELEGRAM_BOT_TOKEN));
         const secretKey = await crypto.subtle.importKey(
             'raw',
-            encoder.encode(TELEGRAM_BOT_TOKEN),
+            tokenDigest,
             { name: 'HMAC', hash: 'SHA-256' },
             false,
             ['sign']
@@ -556,7 +663,7 @@ export const authRouter = new Elysia()
         let user;
         if (existingOAuth) {
             const [userRow] = await sql`
-                SELECT id, username FROM users WHERE id = ${existingOAuth.user_id} LIMIT 1
+                SELECT id, username, role FROM users WHERE id = ${existingOAuth.user_id} LIMIT 1
             `;
             user = userRow;
         } else {
@@ -567,7 +674,7 @@ export const authRouter = new Elysia()
             const [newUser] = await sql`
                 INSERT INTO users (username, password_hash, role, quota, status)
                 VALUES (${displayUsername}, 'oauth-no-password', 1, 500000, 1)
-                RETURNING id, username
+                RETURNING id, username, role
             `;
             user = newUser;
 
@@ -585,5 +692,42 @@ export const authRouter = new Elysia()
 
         const sessionToken = await authService.generateSessionToken(user.id);
         const targetUrl = process.env.WEB_URL || 'http://localhost:5173';
-        set.redirect = `${targetUrl}/auth/callback?token=${sessionToken}&username=${user.username}`;
+        set.redirect = `${targetUrl}/auth/callback?token=${sessionToken}&username=${user.username}&role=${user.role}`;
+    })
+
+    // Update user currency preference
+    .put('/currency', async ({ body, request, set }: any) => {
+        const authHeader = request.headers.get('authorization');
+        if (!authHeader?.startsWith('Bearer ')) {
+            set.status = 401;
+            throw new Error('Unauthorized');
+        }
+        const key = authHeader.substring(7);
+        const { currency } = body;
+
+        if (!['USD', 'RMB'].includes(currency)) {
+            set.status = 400;
+            return { success: false, message: 'Invalid currency' };
+        }
+
+        const [userRow] = await sql`
+            SELECT u.id FROM tokens t JOIN users u ON t.user_id = u.id
+            WHERE t.key = ${key} AND t.status = 1 AND u.status = 1
+            LIMIT 1
+        `;
+
+        if (!userRow) {
+            set.status = 401;
+            throw new Error('Unauthorized');
+        }
+
+        await sql`
+            UPDATE users SET currency = ${currency} WHERE id = ${userRow.id}
+        `;
+
+        return { success: true, currency };
+    }, {
+        body: t.Object({
+            currency: t.String()
+        })
     });

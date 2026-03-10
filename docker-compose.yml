@@ -5,7 +5,7 @@ services:
   db:
     build:
       context: .
-      dockerfile: Dockerfile.postgres
+      dockerfile: docker/Dockerfile.postgres
     container_name: elygate-db
     restart: always
     privileged: true
@@ -25,12 +25,12 @@ services:
   gateway:
     build:
       context: .
-      dockerfile: Dockerfile.gateway
+      dockerfile: docker/Dockerfile.gateway
     container_name: elygate-gateway
     restart: always
     env_file: .env
     environment:
-      DATABASE_URL: postgresql://dbuser_dba:DBUser.DBA@db:5432/postgres
+      DATABASE_URL: postgresql://dbuser_dba:YOUR_DB_PASSWORD@db:5432/postgres
     ports:
       - "3000:3000"
     depends_on:
@@ -41,7 +41,7 @@ services:
   web:
     build:
       context: .
-      dockerfile: Dockerfile.web
+      dockerfile: docker/Dockerfile.web
     container_name: elygate-web
     restart: always
     env_file: .env

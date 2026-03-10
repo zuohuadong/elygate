@@ -39,3 +39,20 @@ export function calculateCost(
 
     return Math.ceil(baseCost * mRatio * gRatio * gmRatio);
 }
+
+/**
+ * Quota to Currency conversion
+ * Default: 500,000 Quota = $1.00
+ */
+export function quotaToUSD(quota: number): number {
+    return quota / 500000;
+}
+
+export function quotaToRMB(quota: number): number {
+    const exchangeRate = Number(optionCache.get('ExchangeRate', 7.2));
+    return (quota / 500000) * exchangeRate;
+}
+
+export function formatCurrency(value: number, symbol: string = '$'): string {
+    return `${symbol}${value.toFixed(4)}`;
+}

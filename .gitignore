@@ -5,3 +5,9 @@ dist
 build
 .DS_Store
 *.log
+ssh-config
+scripts/setup-ssh-key.exp
+scripts/setup-swap.sh
+*.pem
+*.key
+pigsty_passwords.txt

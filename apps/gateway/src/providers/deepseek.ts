@@ -17,7 +17,7 @@ export class DeepSeekApiHandler implements ProviderHandler {
                 reasoning_effort: 'high'
             };
         }
-        
+
         if (model.includes('-reasoning')) {
             const [baseModel, effort] = model.split('-reasoning-');
             return {
@@ -32,14 +32,15 @@ export class DeepSeekApiHandler implements ProviderHandler {
 
     transformResponse(data: any): any {
         if (data.choices && data.choices[0]?.message?.reasoning_content) {
+            const message: any = {
+                ...data.choices[0].message
+            };
+            // Keep original reasoning_content and content as separate fields
             return {
                 ...data,
                 choices: [{
                     ...data.choices[0],
-                    message: {
-                        ...data.choices[0].message,
-                        content: data.choices[0].message.reasoning_content + '\n\n' + data.choices[0].message.content
-                    }
+                    message
                 }]
             };
         }

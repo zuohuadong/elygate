@@ -1,1 +1,0 @@
-ALTER USER dbuser_dba WITH PASSWORD 'DBUser.DBA';

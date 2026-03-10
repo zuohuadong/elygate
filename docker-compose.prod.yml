@@ -22,7 +22,7 @@ services:
     restart: always
     env_file: .env
     environment:
-      DATABASE_URL: postgres://dbuser_dba:DBUser.DBA@db:5432/postgres
+      DATABASE_URL: postgresql://dbuser_dba:YOUR_DB_PASSWORD@db:5432/postgres
     ports:
       - "3000:3000"
     depends_on:
@@ -35,7 +35,7 @@ services:
     restart: always
     env_file: .env
     environment:
-      VITE_API_BASE_URL: http://81.70.19.83:3000
+      VITE_API_BASE_URL: http://gateway:3000
     ports:
       - "3001:3001"
     depends_on:

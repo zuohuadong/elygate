@@ -38,12 +38,28 @@ export const authService = {
     },
 
     /**
-     * Generate a simple JWT or opaque token for the frontend sessions.
-     * For simplicity in this gateway, we'll just return the user info and potentially 
-     * a token that the frontend can use or just set a cookie.
+     * Generate a session token for OAuth logins.
+     * Returns the user's first active API key (or creates one).
+     * This is what the frontend stores as the bearer token for all API calls.
      */
     async generateSessionToken(userId: number) {
-        // Use Bun native UUID v7: time-ordered, cryptographically random, no external deps
-        return `sess_${Bun.randomUUIDv7('hex')}`;
+        // Look up existing active token
+        let [token] = await sql`
+            SELECT key FROM tokens
+            WHERE user_id = ${userId} AND status = 1
+            ORDER BY id ASC LIMIT 1
+        `;
+
+        // No token yet: create a default one
+        if (!token) {
+            const newKey = `sk-${Bun.randomUUIDv7('hex')}`;
+            [token] = await sql`
+                INSERT INTO tokens (user_id, name, key, status, remain_quota)
+                VALUES (${userId}, 'Default Token', ${newKey}, 1, -1)
+                RETURNING key
+            `;
+        }
+
+        return token.key;
     }
 };
