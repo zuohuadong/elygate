@@ -47,7 +47,8 @@ export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): 
         headers['Authorization'] = `Bearer ${token}`;
     }
 
-    const response = await fetch(`${API_BASE}${endpoint}`, {
+    const baseUrl = endpoint.startsWith('/v1') ? '' : API_BASE;
+    const response = await fetch(`${baseUrl}${endpoint}`, {
         ...options,
         headers
     });
