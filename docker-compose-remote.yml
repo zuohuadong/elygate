@@ -18,7 +18,7 @@ services:
   gateway:
     build:
       context: .
-      dockerfile: Dockerfile.gateway
+      dockerfile: docker/Dockerfile.gateway
     container_name: elygate-gateway
     restart: always
     env_file: .env
@@ -33,7 +33,7 @@ services:
   web:
     build:
       context: .
-      dockerfile: Dockerfile.web
+      dockerfile: docker/Dockerfile.web
     container_name: elygate-web
     restart: always
     env_file: .env

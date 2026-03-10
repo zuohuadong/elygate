@@ -96,7 +96,8 @@ jobs:
           elif [ "${{ github.ref_type }}" = "tag" ]; then
             echo "version=${{ github.ref_name }}" >> $GITHUB_OUTPUT
           else
-            echo "version=v$(date +%Y%m%d-%H%M%S)" >> $GITHUB_OUTPUT
+            CURRENT_VERSION=$(jq -r .version package.json)
+            echo "version=v$CURRENT_VERSION" >> $GITHUB_OUTPUT
           fi
 
       - name: Create Release

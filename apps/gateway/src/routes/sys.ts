@@ -1,4 +1,6 @@
 import { Elysia } from 'elysia';
+import { sql } from '@elygate/db';
+import { memoryCache } from '../services/cache';
 import { optionCache } from '../services/optionCache';
 
 /**
@@ -6,16 +8,42 @@ import { optionCache } from '../services/optionCache';
  * These are required by New-API / One-API frontend panels to fetch initial configuration.
  */
 export const sysRouter = new Elysia({ prefix: '/api' })
-    .get('/status', () => {
-        // Mock status compatible with New-API
+    .get('/status', async () => {
+        let dbStatus = 'ok';
+        try { await sql`SELECT 1`; } catch { dbStatus = 'error'; }
+
         return {
             success: true,
             message: "",
             data: {
                 version: "v0.5.0-elygate",
+                status: dbStatus === 'ok' ? 'running' : 'degraded',
+                db: dbStatus,
+                cache: memoryCache.lastUpdated > 0 ? 'ok' : 'initializing',
                 start_time: Math.floor(Date.now() / 1000 - 3600), // mock uptime
-                quota_per_unit: 500000,
-                display_in_currency: false,
+                quota_per_unit: Number(optionCache.get('QuotaPerUnit', 500000)),
+                rmb_quota_per_unit: Number(optionCache.get('QuotaPerUnit', 500000)) / Number(optionCache.get('ExchangeRate', 7.2)),
+                exchange_rate: Number(optionCache.get('ExchangeRate', 7.2)),
+                display_in_currency: optionCache.get('DisplayInCurrency', 'false') === 'true',
+            }
+        };
+    })
+    .get('/health', async () => {
+        const [dbCheck] = await sql`SELECT 1 as ok`.catch(() => [{ ok: 0 }]);
+        const channelStats = {
+            total: memoryCache.channels.size,
+            active: Array.from(memoryCache.channels.values()).filter(c => c.status === 1).length,
+            prohibited: Array.from(memoryCache.channels.values()).filter(c => c.status === 3).length,
+            halfOpen: Array.from(memoryCache.channels.values()).filter(c => c.status === 4).length,
+        };
+
+        return {
+            status: dbCheck.ok ? 'healthy' : 'unhealthy',
+            timestamp: new Date().toISOString(),
+            components: {
+                database: dbCheck.ok ? 'up' : 'down',
+                cache: memoryCache.lastUpdated > 0 ? 'up' : 'down',
+                channels: channelStats
             }
         };
     })
@@ -45,7 +73,18 @@ export const sysRouter = new Elysia({ prefix: '/api' })
                 ServerAddress: optionCache.get('ServerAddress', 'https://api.elygate.com'),
                 SMTPConfigured: !!optionCache.get('SMTPConfig', {}).host,
                 TelegramConfigured: !!optionCache.get('TelegramConfig', {}).token,
-                SignEnabled: optionCache.get('SignEnabled', 'true') === 'true',
+                RegisterMode: optionCache.get('RegisterMode', 'open'),
+                QuotaPerUnit: optionCache.get('QuotaPerUnit', 500000),
+                CurrencySymbol: optionCache.get('CurrencySymbol', '$'),
+                CurrencyName: optionCache.get('CurrencyName', 'USD'),
+                ExchangeRate: optionCache.get('ExchangeRate', 7.2),
+                DisplayInCurrency: optionCache.get('DisplayInCurrency', 'false') === 'true',
+                PaymentEnabled: optionCache.get('PaymentEnabled', 'true') === 'true',
+                PaymentMethods: optionCache.get('PaymentMethods', 'redemption'),
+                LoginMethods: optionCache.get('LoginMethods', 'password'),
+                PasswordLoginEnabled: optionCache.get('PasswordLoginEnabled', 'true') === 'true',
+                GitHubOAuthEnabled: optionCache.get('GitHubOAuthEnabled', 'false') === 'true',
+                WeChatOAuthEnabled: optionCache.get('WeChatOAuthEnabled', 'false') === 'true',
             }
         };
     });

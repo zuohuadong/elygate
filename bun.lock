@@ -10,7 +10,11 @@
     },
     "apps/gateway": {
       "name": "gateway",
+<<<<<<< HEAD
       "version": "0.1.6",
+=======
+      "version": "0.1.7",
+>>>>>>> 8fadab6a8fcbeb295f1f6bceec054e95ce150324
       "dependencies": {
         "@elysiajs/cors": "^1.4.1",
         "@elysiajs/static": "^1.4.7",
@@ -26,13 +30,16 @@
     },
     "apps/web": {
       "name": "web",
+<<<<<<< HEAD
       "version": "0.1.6",
+=======
+      "version": "0.1.7",
+>>>>>>> 8fadab6a8fcbeb295f1f6bceec054e95ce150324
       "dependencies": {
         "@elygate/db": "workspace:*",
         "better-auth": "latest",
         "clsx": "^2.1.1",
         "lucide-svelte": "^0.575.0",
-        "pg": "^8.20.0",
         "tailwind-merge": "^3.5.0",
         "tailwind-variants": "^3.2.2",
       },
@@ -53,7 +60,11 @@
     },
     "packages/db": {
       "name": "@elygate/db",
+<<<<<<< HEAD
       "version": "0.1.5",
+=======
+      "version": "0.1.7",
+>>>>>>> 8fadab6a8fcbeb295f1f6bceec054e95ce150324
     },
   },
   "packages": {

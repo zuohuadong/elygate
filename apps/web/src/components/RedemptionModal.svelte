@@ -1,7 +1,8 @@
 <script lang="ts">
-    import { X, Save } from "lucide-svelte";
+    import { X, Save, Calculator } from "lucide-svelte";
     import { fade, scale } from "svelte/transition";
     import { i18n } from "$lib/i18n/index.svelte";
+    import QuotaCalculator from "./QuotaCalculator.svelte";
 
     import { type Redemption } from "$lib/types";
 
@@ -28,6 +29,7 @@
 
     let isSubmitting = $state(false);
     let error = $state("");
+    let showCalculator = $state(false);
 
     $effect(() => {
         if (show) {
@@ -62,6 +64,11 @@
         } finally {
             isSubmitting = false;
         }
+    }
+
+    function applyQuota(quota: number) {
+        formData.quota = quota;
+        showCalculator = false;
     }
 </script>
 

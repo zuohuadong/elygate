@@ -7,9 +7,10 @@
     let username = $state("");
     let password = $state("");
     let confirmPassword = $state("");
+    let inviteCode = $state("");
     let isLoading = $state(false);
     let isChecking = $state(true);
-    let registrationEnabled = $state(true);
+    let registerMode = $state("open");
     let error = $state("");
     let success = $state("");
 
@@ -18,7 +19,7 @@
             const res = await fetch(`${API_BASE}/api/option`);
             const data = await res.json();
             if (data.success) {
-                registrationEnabled = !!data.data.SignEnabled;
+                registerMode = data.data.RegisterMode || "open";
             }
         } catch (e) {
             console.error("Failed to fetch registration status", e);
@@ -29,7 +30,7 @@
 
     async function handleRegister(e: Event) {
         e.preventDefault();
-        if (!registrationEnabled) {
+        if (registerMode === "closed") {
             error = i18n.lang === "zh" ? "注册功能已关闭" : "Registration is currently disabled.";
             return;
         }
@@ -42,12 +43,17 @@
             return;
         }
 
+        if (registerMode === "invite" && !inviteCode) {
+            error = i18n.lang === "zh" ? "注册需要邀请码" : "Invite code is required for registration";
+            return;
+        }
+
         isLoading = true;
         try {
             const res = await fetch(`${API_BASE}/auth/register`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ username, password }),
+                body: JSON.stringify({ username, password, inviteCode: inviteCode || undefined }),
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.message || (i18n.lang === "zh" ? "注册失败" : "Registration failed"));
@@ -108,7 +114,7 @@
         >
             <h2 class="text-lg font-semibold text-white mb-6">{i18n.lang === "zh" ? "注册" : "Register"}</h2>
 
-            {#if !registrationEnabled && !isChecking}
+            {#if registerMode === "closed" && !isChecking}
                 <div
                     class="flex items-center gap-2 text-amber-400 text-sm bg-amber-500/10 border border-amber-500/20 rounded-xl px-4 py-3 mb-6"
                 >
@@ -118,7 +124,7 @@
 
             <form onsubmit={handleRegister} class="space-y-5">
                 <fieldset
-                    disabled={!registrationEnabled || isLoading}
+                    disabled={registerMode === "closed" || isLoading}
                     class="space-y-5 border-none p-0 m-0"
                 >
                     <div>
@@ -163,6 +169,26 @@
                             bind:value={confirmPassword}
                             required
                             placeholder="••••••••"
+                            class="w-full px-4 py-2.5 bg-white/10 border border-white/10 rounded-xl text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+                        />
+                    </div>
+                    <div>
+                        <label
+                            for="invite-code"
+                            class="block text-sm font-medium text-slate-300 mb-1.5"
+                        >
+                            {i18n.lang === "zh" ? "邀请码" : "Invite Code"}
+                            {#if registerMode === "invite"}
+                                <span class="text-rose-400">*</span>
+                            {:else}
+                                <span class="text-slate-500 text-xs">({i18n.lang === "zh" ? "可选，使用邀请码可获得额外额度" : "Optional, get bonus quota with invite code"})</span>
+                            {/if}
+                        </label>
+                        <input
+                            id="invite-code"
+                            type="text"
+                            bind:value={inviteCode}
+                            placeholder={i18n.lang === "zh" ? "请输入邀请码" : "Enter invite code"}
                             class="w-full px-4 py-2.5 bg-white/10 border border-white/10 rounded-xl text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
                         />
                     </div>

@@ -1,42 +1,34 @@
-# sv
+# Elygate Web Admin Panel
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+This is the Admin Panel for the Elygate project, built with [Svelte 5](https://svelte.dev/) and [Tailwind CSS v4](https://tailwindcss.com/).
 
-## Creating a project
+## Features
 
-If you're seeing this, you've probably already done this step. Congrats!
+- **Modern UI**: Clean, responsive interface powered by Tailwind v4.
+- **Real-time Metrics**: View API usage, latency, and cache hit rates.
+- **Key Management**: Generate and manage API keys for users.
+- **System Settings**: Configure semantic cache thresholds and other system parameters.
 
-```sh
-# create a new project
-npx sv create my-app
+## Development
+
+To run the web app in development mode with hot-reloading:
+
+```bash
+cd ../.. # Go to project root
+bun run dev
 ```
 
-To recreate this project with the same configuration:
+Alternatively, from within this directory:
 
-```sh
-# recreate this project
-bun x sv create --template minimal --types ts --install bun web
-```
-
-## Developing
-
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
-
-```sh
+```bash
+npm install
 npm run dev
-
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
 ```
 
 ## Building
 
-To create a production version of your app:
+To create a production build:
 
-```sh
+```bash
 npm run build
 ```
-
-You can preview the production build with `npm run preview`.
-
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.

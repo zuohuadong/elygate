@@ -1,10 +1,10 @@
 import { memoryCache } from './cache';
 
 /**
- * High-Performance In-Memory Distributed Rate Limiter
- * Ensures sub-millisecond latency for frequency control.
- * For true multi-node consistency, this can be swapped with Redis,
- * but in-memory is the fastest for single-node or sticky-session deployments.
+ * High-Performance In-Memory Rate Limiter
+ * Powered by Bun + PostgreSQL — no Redis dependency.
+ * Uses a sliding fixed-window algorithm with O(1) lookup via Map.
+ * Periodic GC prevents unbounded memory growth on high-cardinality keys.
  */
 
 const WINDOW_MS = 60 * 1000;
@@ -28,22 +28,20 @@ export async function isRateLimited(identifier: string | number, limit: number =
     let bucket = limitCache.get(key);
 
     if (!bucket || bucket.windowStart !== windowStart) {
-        // New window or new key
-        bucket = { count: 1, windowStart };
+        // New window or new key — start at 0 then increment below
+        bucket = { count: 0, windowStart };
         limitCache.set(key, bucket);
 
         // Periodic cleanup of stale entries (memory safety)
         if (limitCache.size > 10000) {
-            // Very basic cleanup: if cache grows too large, clear old ones
             for (const [k, v] of limitCache.entries()) {
                 if (v.windowStart < windowStart - WINDOW_MS) {
                     limitCache.delete(k);
                 }
             }
         }
-    } else {
-        bucket.count++;
     }
 
+    bucket.count++;
     return bucket.count > maxAllowed;
 }

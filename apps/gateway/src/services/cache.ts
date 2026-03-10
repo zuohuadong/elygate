@@ -8,6 +8,8 @@ import { type ChannelConfig } from '../types';
 export const memoryCache = {
     // Channel cache: modelName -> ChannelConfig[] 
     channelRoutes: new Map<string, ChannelConfig[]>(),
+    // All channels by ID for direct access/status checks
+    channels: new Map<number, ChannelConfig>(),
     lastUpdated: 0,
     options: new Map<string, any>(),
 
@@ -18,16 +20,21 @@ export const memoryCache = {
     async refresh(skipBroadcast = false) {
         try {
             console.log('[Cache] Refreshing channel routes from DB...');
-            // Fetch all properly enabled channels using native SQL
-            const activeChannels = await sql`
-                SELECT id, type, name, base_url AS "baseUrl", key, models, model_mapping AS "modelMapping", weight, priority, groups, status
+            const allChannels = await sql`
+                SELECT id, type, name, base_url AS "baseUrl", key, models, model_mapping AS "modelMapping", weight, priority, groups, status,
+                       key_strategy AS "keyStrategy", key_status AS "keyStatus", price_ratio AS "priceRatio"
                 FROM channels 
-                WHERE status = 1
+                WHERE status != 0
             `;
 
             const newRoutes = new Map<string, ChannelConfig[]>();
+            const newChannelsMap = new Map<number, ChannelConfig>();
 
-            for (const channel of activeChannels) {
+            for (const channel of allChannels) {
+                newChannelsMap.set(channel.id, channel);
+
+                // Only add to routes if status is Active (1) or Half-Open (4)
+                if (channel.status !== 1 && channel.status !== 4) continue;
                 // Handle JSONB: already an object or needs parsing from string
                 let supportedModels: string[] = [];
                 if (Array.isArray(channel.models)) {
@@ -51,6 +58,17 @@ export const memoryCache = {
                     channel.modelMapping = {};
                 }
 
+                // Handle keyStatus
+                if (typeof channel.keyStatus === 'string') {
+                    try {
+                        channel.keyStatus = JSON.parse(channel.keyStatus);
+                    } catch {
+                        channel.keyStatus = {};
+                    }
+                } else if (!channel.keyStatus) {
+                    channel.keyStatus = {};
+                }
+
                 for (const model of supportedModels) {
                     if (!newRoutes.has(model)) {
                         newRoutes.set(model, []);
@@ -60,8 +78,9 @@ export const memoryCache = {
             }
 
             this.channelRoutes = newRoutes;
+            this.channels = newChannelsMap;
             this.lastUpdated = Date.now();
-            console.log(`[Cache] Successfully loaded ${activeChannels.length} channels.`);
+            console.log(`[Cache] Successfully loaded ${allChannels.length} channels (${newRoutes.size} models).`);
 
             if (!skipBroadcast) {
                 await sql`NOTIFY refresh_cache, 'refresh_cache'`;
@@ -122,9 +141,12 @@ export const memoryCache = {
                 return (b.priority || 0) - (a.priority || 0);
             }
 
-            // Within the same tier, use weighted random score for load balancing
-            const scoreA = Math.random() * (a.weight || 1);
-            const scoreB = Math.random() * (b.weight || 1);
+            // Half-Open (status 4) has 90% weight reduction to limit traffic
+            const weightA = a.status === 4 ? (a.weight || 1) * 0.1 : (a.weight || 1);
+            const weightB = b.status === 4 ? (b.weight || 1) * 0.1 : (b.weight || 1);
+
+            const scoreA = Math.random() * weightA;
+            const scoreB = Math.random() * weightB;
             return scoreB - scoreA;
         });
     },

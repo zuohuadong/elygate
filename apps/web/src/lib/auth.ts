@@ -4,18 +4,11 @@ import { username } from "better-auth/plugins";
 import { getRequestEvent } from "$app/server";
 import { building } from "$app/environment";
 
-async function getPgAdapter() {
-    const { Pool } = await import("pg");
-    return new Pool({
-        connectionString: process.env.DATABASE_URL
-    });
-}
+import { sql } from "@elygate/db";
 
 export const auth = !building ? betterAuth({
-    database: async () => {
-        const pool = await getPgAdapter();
-        return pool;
-    },
+    database: sql() as any, // better-auth generic dialect support
+
     user: {
         modelName: "users",
         additionalFields: {

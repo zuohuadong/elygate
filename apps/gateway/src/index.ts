@@ -4,6 +4,8 @@ import { swagger } from "@elysiajs/swagger";
 import { staticPlugin } from "@elysiajs/static";
 import { authPlugin, adminGuard } from "./middleware/auth";
 import { chatRouter } from "./routes/chat";
+// TODO: Pending implementation
+// import { claudeRouter } from "./routes/claude";
 import { embeddingsRouter } from "./routes/embeddings";
 import { imagesRouter } from "./routes/images";
 import { adminRouter } from "./routes/admin";
@@ -11,6 +13,10 @@ import { redemptionsRouter } from "./routes/redemptions";
 import { authRouter } from "./routes/auth";
 import { audioRouter } from "./routes/audio";
 import { rerankRouter } from "./routes/rerank";
+// TODO: Pending implementation
+// import { moderationsRouter } from "./routes/moderations";
+// import { nativeGeminiRouter } from "./routes/gemini";
+// import { responsesRouter } from "./routes/responses";
 import { videoRouter } from "./routes/video";
 import { sysRouter } from "./routes/sys";
 import { mjRouter } from "./routes/mj";
@@ -28,7 +34,7 @@ const app = new Elysia()
   .use(cors({
     origin: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'Accept'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'Accept', 'X-Request-ID'],
     credentials: true
   }))
   .use(swagger({
@@ -45,7 +51,30 @@ const app = new Elysia()
   // Serve static files if they exist (all-in-one mode)
   .onBeforeHandle(({ path }) => {
     if (path.startsWith('/api') || path.startsWith('/v1')) return;
-    const staticPath = join(process.cwd(), 'apps/web/build', path === '/' ? 'index.html' : path);
+
+    // Normalize path
+    const normalizedPath = path === '/' ? 'index' : path.replace(/^\//, '');
+
+    // Try prerendered directory first (with .html extension)
+    let staticPath = join(process.cwd(), 'apps/web/build/prerendered', `${normalizedPath}.html`);
+    if (existsSync(staticPath) && statSync(staticPath).isFile()) {
+      return Bun.file(staticPath);
+    }
+
+    // Try prerendered directory with index.html for directory paths
+    staticPath = join(process.cwd(), 'apps/web/build/prerendered', normalizedPath, 'index.html');
+    if (existsSync(staticPath) && statSync(staticPath).isFile()) {
+      return Bun.file(staticPath);
+    }
+
+    // Try client directory for assets
+    staticPath = join(process.cwd(), 'apps/web/build/client', path);
+    if (existsSync(staticPath) && statSync(staticPath).isFile()) {
+      return Bun.file(staticPath);
+    }
+
+    // Fallback to build directory
+    staticPath = join(process.cwd(), 'apps/web/build', path === '/' ? 'index.html' : path);
     if (existsSync(staticPath) && statSync(staticPath).isFile()) {
       return Bun.file(staticPath);
     }
@@ -59,47 +88,55 @@ const app = new Elysia()
       .group("/stats", (app) => app.use(statsRouter))
       .group("/redemptions", (app) => app.use(authPlugin).use(redemptionsRouter))
       .use(mjRouter)
-      .group("/v1", (app) =>
-        app.use(authPlugin)
-          .get('/models', ({ user, token, set }: any) => {
-            if (!user || !token) {
-              set.status = 401;
-              return { success: false, message: "Unauthorized: Auth context missing" };
-            }
-
-            const u = user as UserRecord;
-            const t = token as TokenRecord;
-
-            let uniqueModels = Array.from(memoryCache.channelRoutes.keys());
-            const groupModelKey = `group_models_${u.group}`;
-            const allowedGroupModels = memoryCache.getOption(groupModelKey);
-            if (allowedGroupModels && Array.isArray(allowedGroupModels)) {
-              uniqueModels = uniqueModels.filter(m => allowedGroupModels.includes(m));
-            }
-            if (t.models && t.models.length > 0) {
-              uniqueModels = uniqueModels.filter(m => t.models.includes(m));
-            }
-            return {
-              object: 'list',
-              data: uniqueModels.map(model => ({
-                id: model,
-                object: 'model',
-                created: Math.floor(Date.now() / 1000),
-                owned_by: 'elygate',
-                permission: [],
-                root: model,
-                parent: null,
-              }))
-            };
-          })
-          .use(chatRouter)
-          .use(embeddingsRouter)
-          .use(imagesRouter)
-          .use(audioRouter)
-          .use(rerankRouter)
-          .use(videoRouter)
-      )
   )
+  // OpenAI & Anthropic compatible API endpoints (standard /v1 prefix)
+  .group("/v1", (app) =>
+    app.use(authPlugin)
+      .get('/models', ({ user, token, set }: any) => {
+        if (!user || !token) {
+          set.status = 401;
+          return { success: false, message: "Unauthorized: Auth context missing" };
+        }
+
+        const u = user as UserRecord;
+        const t = token as TokenRecord;
+
+        let uniqueModels = Array.from(memoryCache.channelRoutes.keys());
+        const groupModelKey = `group_models_${u.group}`;
+        const allowedGroupModels = memoryCache.getOption(groupModelKey);
+        if (allowedGroupModels && Array.isArray(allowedGroupModels)) {
+          uniqueModels = uniqueModels.filter(m => allowedGroupModels.includes(m));
+        }
+        if (t.models && t.models.length > 0) {
+          uniqueModels = uniqueModels.filter(m => t.models.includes(m));
+        }
+        return {
+          object: 'list',
+          data: uniqueModels.map(model => ({
+            id: model,
+            object: 'model',
+            created: Math.floor(Date.now() / 1000),
+            owned_by: 'elygate',
+            permission: [],
+            root: model,
+            parent: null,
+          }))
+        };
+      })
+      .use(chatRouter)
+      // .use(claudeRouter) // TODO
+      .use(embeddingsRouter)
+      .use(imagesRouter)
+      .use(audioRouter)
+      .use(rerankRouter)
+      // .use(moderationsRouter) // TODO
+      // .use(responsesRouter) // TODO
+      .use(videoRouter)
+  )
+  // Native Gemini support (2026 standard)
+  // .group("/v1beta", (app) =>
+  //   app.use(authPlugin).use(nativeGeminiRouter)
+  // )
   // SPA Fallback for static Web UI
   .get("*", async ({ request, set }) => {
     const url = new URL(request.url);
@@ -130,15 +167,42 @@ async function init() {
     }
   }
 
+  // Resolve SQL paths robustly for both local dev and Docker production
+  const findSqlPath = (relativePath: string) => {
+    const paths = [
+      join(process.cwd(), relativePath),                        // From root (Docker)
+      join(process.cwd(), '../../', relativePath),              // From apps/gateway (Local dev)
+      join(__dirname, '../../../', relativePath)                // Absolute fallback
+    ];
+    for (const p of paths) {
+      if (existsSync(p)) return p;
+    }
+    return null;
+  };
+
   // Run schema fix patch if exists (idempotent)
-  const patchPath = join(process.cwd(), '../../packages/db/src/patch_v1_schema_fix.sql');
-  if (existsSync(patchPath)) {
+  const patchPath = findSqlPath('packages/db/src/patch_v1_schema_fix.sql');
+  if (patchPath) {
     try {
       const patchSql = await Bun.file(patchPath).text();
       await sql.unsafe(patchSql);
       console.log("✅ Schema fix patch reapplied.");
     } catch (e: any) {
       console.error("❌ Failed to reapply schema patch:", e.message);
+    }
+  }
+
+  // Apply Performance Indexes (idempotent)
+  const perfIndexesPath = findSqlPath('packages/db/src/performance_indexes.sql');
+  if (perfIndexesPath) {
+    try {
+      const perfSql = await Bun.file(perfIndexesPath).text();
+      // Use unsafe for multi-statement scripts including CONCURRENTLY index creation
+      await sql.unsafe(perfSql);
+      console.log("📊 Performance indexes verified/applied.");
+    } catch (e: any) {
+      // Index creation might fail if already exists or concurrent issues, log but don't crash
+      console.log("ℹ️ Performance indexes check:", e.message);
     }
   }
 

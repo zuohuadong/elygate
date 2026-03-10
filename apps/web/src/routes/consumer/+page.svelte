@@ -3,6 +3,7 @@
     import { apiFetch } from "$lib/api";
     import { i18n } from "$lib/i18n/index.svelte";
     import { onMount } from "svelte";
+    import { session } from "$lib/session.svelte";
 
     let userInfo = $state<any>(null);
     let logs = $state<any[]>([]);
@@ -108,9 +109,12 @@
             </h3>
             <div class="mt-2 flex items-baseline gap-2">
                 <span class="text-4xl font-bold tracking-tight">
-                    ${((userInfo?.quota || 0) / 1000).toFixed(2)}
+                    {session.currency === "RMB" ? "¥" : "$"}{(
+                        ((userInfo?.quota || 0) / session.quotaPerUnit) *
+                        (session.currency === "RMB" ? session.exchangeRate : 1)
+                    ).toFixed(2)}
                 </span>
-                <span class="text-indigo-200 text-sm">USD</span>
+                <span class="text-indigo-200 text-sm">{session.currency}</span>
             </div>
 
             <div class="mt-8 grid grid-cols-2 gap-4">
@@ -119,7 +123,13 @@
                         {i18n.lang === "zh" ? "总消费" : "Total Spent"}
                     </p>
                     <p class="font-medium">
-                        $${((userInfo?.usedQuota || 0) / 1000).toFixed(2)}
+                        {session.currency === "RMB" ? "¥" : "$"}{(
+                            ((userInfo?.usedQuota || 0) /
+                                session.quotaPerUnit) *
+                            (session.currency === "RMB"
+                                ? session.exchangeRate
+                                : 1)
+                        ).toFixed(2)}
                     </p>
                 </div>
                 <div>
@@ -268,7 +278,12 @@
                             >
                                 {day.label}: {(day.tokens / 1000).toFixed(1)}k
                                 tokens<br />
-                                Cost: ${(day.cost / 1000).toFixed(4)}
+                                Cost: {session.currency === "RMB" ? "¥" : "$"}{(
+                                    (day.cost / session.quotaPerUnit) *
+                                    (session.currency === "RMB"
+                                        ? session.exchangeRate
+                                        : 1)
+                                ).toFixed(4)}
                             </div>
                         </div>
                     {/each}
@@ -297,7 +312,9 @@
                     <tr>
                         <th class="px-6 py-3 font-medium">Model</th>
                         <th class="px-6 py-3 font-medium">Tokens (P+C)</th>
-                        <th class="px-6 py-3 font-medium">Cost</th>
+                        <th class="px-6 py-3 font-medium"
+                            >Cost {session.currency}</th
+                        >
                         <th class="px-6 py-3 font-medium">Time</th>
                     </tr>
                 </thead>
@@ -329,7 +346,12 @@
                                 <td
                                     class="px-6 py-3 font-medium text-emerald-600 dark:text-emerald-400"
                                 >
-                                    ${(log.quotaCost / 1000).toFixed(6)}
+                                    {session.currency === "RMB" ? "¥" : "$"}{(
+                                        (log.quotaCost / session.quotaPerUnit) *
+                                        (session.currency === "RMB"
+                                            ? session.exchangeRate
+                                            : 1)
+                                    ).toFixed(6)}
                                 </td>
                                 <td
                                     class="px-6 py-3 text-slate-500 dark:text-slate-400 text-xs"

@@ -1,0 +1,378 @@
+<script lang="ts">
+    import DataTable from "../../components/DataTable.svelte";
+    import { Plus, Ticket, Trash2, Copy, Check } from "lucide-svelte";
+    import { apiFetch } from "$lib/api";
+    import { i18n } from "$lib/i18n/index.svelte";
+    import { onMount } from "svelte";
+
+    interface InviteCode {
+        id: number;
+        code: string;
+        maxUses: number;
+        usedCount: number;
+        giftQuota: number;
+        status: number;
+        expiresAt: string | null;
+        createdBy: number | null;
+        creatorName: string | null;
+        createdAt: string;
+        updatedAt: string;
+        displayStatus?: string;
+    }
+
+    let inviteCodes = $state<InviteCode[]>([]);
+    let isLoading = $state(true);
+    let errorMsg = $state("");
+    let total = $state(0);
+    let page = $state(1);
+    let limit = $state(50);
+
+    let isModalOpen = $state(false);
+    let isBatchMode = $state(false);
+
+    let formData = $state({
+        count: 1,
+        maxUses: 1,
+        giftQuota: 0,
+        expiresAt: "",
+        codePrefix: ""
+    });
+
+    let copiedId = $state<number | null>(null);
+
+    async function loadData() {
+        isLoading = true;
+        try {
+            const data = await apiFetch<{ data: InviteCode[], total: number }>(`/admin/invite-codes?page=${page}&limit=${limit}`);
+            inviteCodes = data.data.map((c) => ({
+                ...c,
+                displayStatus: getStatusText(c.status, c.usedCount, c.maxUses, c.expiresAt),
+                formattedQuota: `$${(c.giftQuota / 1000).toFixed(2)}`,
+                usageStr: `${c.usedCount} / ${c.maxUses}`,
+                formattedExpires: c.expiresAt ? new Date(c.expiresAt).toLocaleString() : "-"
+            }));
+            total = data.total;
+        } catch (err: any) {
+            errorMsg = err.message || (i18n.lang === "zh" ? "加载邀请码失败" : "Failed to load invite codes");
+        } finally {
+            isLoading = false;
+        }
+    }
+
+    function getStatusText(status: number, usedCount: number, maxUses: number, expiresAt: string | null): string {
+        if (status !== 1) return i18n.lang === "zh" ? "已禁用" : "Disabled";
+        if (usedCount >= maxUses) return i18n.lang === "zh" ? "已用完" : "Exhausted";
+        if (expiresAt && new Date(expiresAt) < new Date()) return i18n.lang === "zh" ? "已过期" : "Expired";
+        return i18n.lang === "zh" ? "有效" : "Active";
+    }
+
+    onMount(loadData);
+
+    const renderStatus = (val: string) => {
+        let colorClass = "bg-slate-100 text-slate-800 dark:bg-slate-500/10 dark:text-slate-400";
+        if (val === (i18n.lang === "zh" ? "有效" : "Active")) {
+            colorClass = "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-400";
+        } else if (val === (i18n.lang === "zh" ? "已用完" : "Exhausted") || val === (i18n.lang === "zh" ? "已过期" : "Expired")) {
+            colorClass = "bg-amber-100 text-amber-800 dark:bg-amber-500/10 dark:text-amber-400";
+        } else if (val === (i18n.lang === "zh" ? "已禁用" : "Disabled")) {
+            colorClass = "bg-rose-100 text-rose-800 dark:bg-rose-500/10 dark:text-rose-400";
+        }
+        return `<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${colorClass}">${val}</span>`;
+    };
+
+    let columns = $derived([
+        { key: "id", label: "ID" },
+        { key: "code", label: i18n.lang === "zh" ? "邀请码" : "Code" },
+        { key: "usageStr", label: i18n.lang === "zh" ? "使用次数" : "Usage" },
+        { key: "formattedQuota", label: i18n.lang === "zh" ? "赠送额度" : "Gift Quota" },
+        { key: "formattedExpires", label: i18n.lang === "zh" ? "过期时间" : "Expires" },
+        { key: "creatorName", label: i18n.lang === "zh" ? "创建者" : "Creator" },
+        { key: "displayStatus", label: i18n.t.tokens.status, render: renderStatus },
+    ]);
+
+    function handleAdd() {
+        isBatchMode = false;
+        formData = { count: 1, maxUses: 1, giftQuota: 0, expiresAt: "", codePrefix: "" };
+        isModalOpen = true;
+    }
+
+    function handleBatchAdd() {
+        isBatchMode = true;
+        formData = { count: 10, maxUses: 1, giftQuota: 0, expiresAt: "", codePrefix: "" };
+        isModalOpen = true;
+    }
+
+    async function handleDelete(item: InviteCode) {
+        if (!confirm(i18n.lang === "zh" ? `确定要删除邀请码 "${item.code}" 吗？` : `Are you sure you want to delete invite code "${item.code}"?`)) return;
+        try {
+            await apiFetch(`/admin/invite-codes/${item.id}`, { method: "DELETE" });
+            await loadData();
+        } catch (err: any) {
+            alert(i18n.t.common.failed + ": " + err.message);
+        }
+    }
+
+    async function handleToggleStatus(item: InviteCode) {
+        const newStatus = item.status === 1 ? 2 : 1;
+        try {
+            await apiFetch(`/admin/invite-codes/${item.id}`, {
+                method: "PUT",
+                body: JSON.stringify({ status: newStatus })
+            });
+            await loadData();
+        } catch (err: any) {
+            alert(i18n.t.common.failed + ": " + err.message);
+        }
+    }
+
+    async function handleSubmit(e: Event) {
+        e.preventDefault();
+        try {
+            const payload: Record<string, any> = {
+                maxUses: formData.maxUses,
+                giftQuota: formData.giftQuota,
+            };
+            if (isBatchMode) {
+                payload.count = formData.count;
+                if (formData.codePrefix) payload.codePrefix = formData.codePrefix;
+            }
+            if (formData.expiresAt) {
+                payload.expiresAt = formData.expiresAt;
+            }
+            await apiFetch("/admin/invite-codes", {
+                method: "POST",
+                body: JSON.stringify(payload)
+            });
+            isModalOpen = false;
+            await loadData();
+        } catch (err: any) {
+            alert(i18n.t.common.failed + ": " + err.message);
+        }
+    }
+
+    async function copyCode(code: string, id: number) {
+        await navigator.clipboard.writeText(code);
+        copiedId = id;
+        setTimeout(() => { copiedId = null; }, 2000);
+    }
+</script>
+
+<div class="flex-1 space-y-6 text-left">
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+            <h2 class="text-2xl font-bold tracking-tight flex items-center gap-2 text-slate-900 dark:text-white">
+                <Ticket class="w-6 h-6 text-indigo-500" />
+                {i18n.lang === "zh" ? "邀请码管理" : "Invite Codes"}
+            </h2>
+            <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                {i18n.lang === "zh" ? "管理和生成注册邀请码" : "Manage and generate registration invite codes"}
+            </p>
+        </div>
+        <div class="flex gap-3">
+            <button
+                onclick={loadData}
+                class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-800 transition-colors shadow-sm"
+            >
+                {i18n.lang === "zh" ? "刷新列表" : "Refresh"}
+            </button>
+            <button
+                onclick={handleAdd}
+                class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-800 transition-colors shadow-sm"
+            >
+                <Plus class="w-4 h-4" />
+                {i18n.lang === "zh" ? "生成邀请码" : "Generate"}
+            </button>
+            <button
+                onclick={handleBatchAdd}
+                class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg text-white bg-indigo-600 hover:bg-indigo-700 shadow-sm transition-colors focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+            >
+                <Plus class="w-4 h-4" />
+                {i18n.lang === "zh" ? "批量生成" : "Batch Generate"}
+            </button>
+        </div>
+    </div>
+
+    {#if isLoading}
+        <div class="flex justify-center items-center py-12">
+            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
+        </div>
+    {:else if errorMsg}
+        <div class="p-4 text-sm text-rose-800 bg-rose-50 rounded-lg dark:bg-rose-900/10 dark:text-rose-400">
+            {i18n.t.common.failed}: {errorMsg}
+        </div>
+    {:else}
+        <div class="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm text-left">
+                    <thead class="text-xs text-slate-700 dark:text-slate-300 uppercase bg-slate-50 dark:bg-slate-900">
+                        <tr>
+                            <th class="px-4 py-3">ID</th>
+                            <th class="px-4 py-3">{i18n.lang === "zh" ? "邀请码" : "Code"}</th>
+                            <th class="px-4 py-3">{i18n.lang === "zh" ? "使用次数" : "Usage"}</th>
+                            <th class="px-4 py-3">{i18n.lang === "zh" ? "赠送额度" : "Gift Quota"}</th>
+                            <th class="px-4 py-3">{i18n.lang === "zh" ? "过期时间" : "Expires"}</th>
+                            <th class="px-4 py-3">{i18n.lang === "zh" ? "创建者" : "Creator"}</th>
+                            <th class="px-4 py-3">{i18n.t.tokens.status}</th>
+                            <th class="px-4 py-3">{i18n.lang === "zh" ? "操作" : "Actions"}</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-200 dark:divide-slate-800">
+                        {#each inviteCodes as code (code.id)}
+                            <tr class="hover:bg-slate-50 dark:hover:bg-slate-900/50">
+                                <td class="px-4 py-3 text-slate-900 dark:text-slate-100">{code.id}</td>
+                                <td class="px-4 py-3">
+                                    <div class="flex items-center gap-2">
+                                        <code class="text-xs bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded">{code.code}</code>
+                                        <button
+                                            onclick={() => copyCode(code.code, code.id)}
+                                            class="p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded transition-colors"
+                                            title={i18n.lang === "zh" ? "复制" : "Copy"}
+                                        >
+                                            {#if copiedId === code.id}
+                                                <Check class="w-4 h-4 text-emerald-500" />
+                                            {:else}
+                                                <Copy class="w-4 h-4 text-slate-400" />
+                                            {/if}
+                                        </button>
+                                    </div>
+                                </td>
+                                <td class="px-4 py-3 text-slate-900 dark:text-slate-100">{code.usedCount} / {code.maxUses}</td>
+                                <td class="px-4 py-3 text-slate-900 dark:text-slate-100">${(code.giftQuota / 1000).toFixed(2)}</td>
+                                <td class="px-4 py-3 text-slate-900 dark:text-slate-100">{code.expiresAt ? new Date(code.expiresAt).toLocaleString() : "-"}</td>
+                                <td class="px-4 py-3 text-slate-900 dark:text-slate-100">{code.creatorName || "-"}</td>
+                                <td class="px-4 py-3">
+                                    {@html renderStatus(code.displayStatus || '')}
+                                </td>
+                                <td class="px-4 py-3">
+                                    <div class="flex items-center gap-2">
+                                        <button
+                                            onclick={() => handleToggleStatus(code)}
+                                            class="px-2 py-1 text-xs rounded bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-colors"
+                                        >
+                                            {code.status === 1 ? (i18n.lang === "zh" ? "禁用" : "Disable") : (i18n.lang === "zh" ? "启用" : "Enable")}
+                                        </button>
+                                        <button
+                                            onclick={() => handleDelete(code)}
+                                            class="p-1 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded transition-colors"
+                                            title={i18n.lang === "zh" ? "删除" : "Delete"}
+                                        >
+                                            <Trash2 class="w-4 h-4" />
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                        {:else}
+                            <tr>
+                                <td colspan="8" class="px-4 py-8 text-center text-slate-500 dark:text-slate-400">
+                                    {i18n.lang === "zh" ? "暂无邀请码" : "No invite codes found"}
+                                </td>
+                            </tr>
+                        {/each}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    {/if}
+</div>
+
+{#if isModalOpen}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <div 
+        class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" 
+        onclick={() => isModalOpen = false}
+        role="dialog"
+        aria-modal="true"
+        aria-label={isBatchMode ? (i18n.lang === "zh" ? "批量生成邀请码" : "Batch Generate Invite Codes") : (i18n.lang === "zh" ? "生成邀请码" : "Generate Invite Code")}
+        tabindex="-1"
+    >
+        <div class="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-md" onclick={(e) => e.stopPropagation()}>
+            <div class="p-6 border-b border-slate-200 dark:border-slate-800">
+                <h3 class="text-lg font-semibold text-slate-900 dark:text-white">
+                    {isBatchMode ? (i18n.lang === "zh" ? "批量生成邀请码" : "Batch Generate Invite Codes") : (i18n.lang === "zh" ? "生成邀请码" : "Generate Invite Code")}
+                </h3>
+            </div>
+            <form onsubmit={handleSubmit} class="p-6 space-y-4">
+                {#if isBatchMode}
+                    <div class="space-y-2">
+                        <label for="count" class="text-sm font-medium text-slate-700 dark:text-slate-300">
+                            {i18n.lang === "zh" ? "生成数量" : "Count"}
+                        </label>
+                        <input
+                            id="count"
+                            type="number"
+                            bind:value={formData.count}
+                            min="1"
+                            max="100"
+                            class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                        />
+                    </div>
+                    <div class="space-y-2">
+                        <label for="codePrefix" class="text-sm font-medium text-slate-700 dark:text-slate-300">
+                            {i18n.lang === "zh" ? "邀请码前缀（可选）" : "Code Prefix (Optional)"}
+                        </label>
+                        <input
+                            id="codePrefix"
+                            type="text"
+                            bind:value={formData.codePrefix}
+                            placeholder="e.g., promo2024"
+                            class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                        />
+                    </div>
+                {/if}
+                <div class="space-y-2">
+                    <label for="maxUses" class="text-sm font-medium text-slate-700 dark:text-slate-300">
+                        {i18n.lang === "zh" ? "最大使用次数" : "Max Uses"}
+                    </label>
+                    <input
+                        id="maxUses"
+                        type="number"
+                        bind:value={formData.maxUses}
+                        min="1"
+                        class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                    />
+                </div>
+                <div class="space-y-2">
+                    <label for="giftQuota" class="text-sm font-medium text-slate-700 dark:text-slate-300">
+                        {i18n.lang === "zh" ? "赠送额度（美元）" : "Gift Quota (USD)"}
+                    </label>
+                    <input
+                        id="giftQuota"
+                        type="number"
+                        bind:value={formData.giftQuota}
+                        min="0"
+                        step="0.01"
+                        class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                    />
+                    <p class="text-xs text-slate-500">{i18n.lang === "zh" ? "注册时额外赠送的额度" : "Extra quota given upon registration"}</p>
+                </div>
+                <div class="space-y-2">
+                    <label for="expiresAt" class="text-sm font-medium text-slate-700 dark:text-slate-300">
+                        {i18n.lang === "zh" ? "过期时间（可选）" : "Expires At (Optional)"}
+                    </label>
+                    <input
+                        id="expiresAt"
+                        type="datetime-local"
+                        bind:value={formData.expiresAt}
+                        class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                    />
+                </div>
+                <div class="flex gap-3 pt-4">
+                    <button
+                        type="button"
+                        onclick={() => isModalOpen = false}
+                        class="flex-1 px-4 py-2 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 rounded-xl transition-colors"
+                    >
+                        {i18n.t.common.cancel}
+                    </button>
+                    <button
+                        type="submit"
+                        class="flex-1 px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl transition-colors"
+                    >
+                        {i18n.lang === "zh" ? "生成" : "Generate"}
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+{/if}

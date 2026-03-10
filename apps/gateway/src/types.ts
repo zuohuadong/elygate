@@ -19,24 +19,8 @@ export interface TokenRecord {
     subnet: string;
     rateLimit: number;
 }
-export enum ChannelType {
-    OPENAI = 1,
-    AZURE = 8,
-    ANTHROPIC = 14,
-    BAIDU = 15,
-    ZEN = 16,
-    ALI = 17,
-    XUNFEI = 18,
-    GEMINI = 23,
-    MIDJOURNEY = 24,
-    JINA = 25,
-    SUNO = 26,
-    DEEPSEEK = 31,
-    CF_WORKER = 33,
-    FLUX = 34,
-    UDIO = 35,
-    NVIDIA = 41
-}
+// ChannelType values matching New-API/One-API spec — defined in providers/types.ts
+export { ChannelType } from './providers/types';
 
 export interface ChannelConfig {
     id: number;
@@ -50,6 +34,8 @@ export interface ChannelConfig {
     priority: number;
     groups: string[];
     status: number;
+    keyStrategy: number;         // 0=Load balance, 1=Sequential
+    keyStatus: Record<string, string>; // { "sk-xxx": "exhausted" | "active" }
 }
 
 export interface UsageInfo {

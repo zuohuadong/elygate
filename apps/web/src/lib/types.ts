@@ -6,6 +6,7 @@ export interface User {
     role: number;
     group: string;
     status: number;
+    currency?: string;
     createdAt: string;
 }
 

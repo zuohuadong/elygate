@@ -1,15 +1,25 @@
-# Elysia with Bun runtime
+# Elygate Gateway
 
-## Getting Started
-To get started with this template, simply paste this command into your terminal:
-```bash
-bun create elysia ./elysia-example
-```
+This is the high-performance API gateway for the Elygate project, built with [Elysia.js](https://elysiajs.com/) and running on the [Bun](https://bun.sh/) runtime.
+
+## Features
+
+- **Blazing Fast**: Leverages Bun's native asynchronous I/O and Elysia's optimized routing.
+- **Semantic Caching**: Integrated vector similarity search using `pgvector` to deduplicate and cache expensive AI requests.
+- **Atomic Billing**: O(1) batch processing eliminates SQL lock contention for high-throughput accounting.
 
 ## Development
-To start the development server run:
+
+To run the gateway in development mode with hot-reloading:
+
 ```bash
+cd ../.. # Go to project root
 bun run dev
 ```
 
-Open http://localhost:3000/ with your browser to see the result.
+Alternatively, from within this directory:
+
+```bash
+bun install
+bun run dev
+```

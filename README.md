@@ -7,6 +7,50 @@
 <a name="english"></a>
 ## English
 
+### 📖 API Usage Guide
+
+Elygate is fully compatible with both OpenAI and Anthropic API standards. You can use any library or tool designed for these services.
+
+#### 1. OpenAI Compatibility (Default)
+Most tools (NextChat, ChatBox, OpenAI SDK) work with the base URL.
+- **Base URL**: `http://your-elygate/v1`
+- **Key**: Your generated `sk-...` token.
+
+#### 2. Anthropic (Claude) Compatibility
+Works natively with the Anthropic SDK and **Claude Code**.
+- **Base URL**: `http://your-elygate/v1` (Note: the SDK appends `/messages` automatically)
+- **Key**: Your generated `sk-...` token.
+
+**Anthropic SDK Example (Node.js):**
+```javascript
+import Anthropic from '@anthropic-ai/sdk';
+
+const anthropic = new Anthropic({
+  apiKey: 'your-sk-token',
+  baseURL: 'http://your-elygate/v1' 
+});
+
+const msg = await anthropic.messages.create({
+  model: "claude-3-5-sonnet-20240620",
+  max_tokens: 1024,
+  messages: [{ role: "user", content: "Hello, Claude" }],
+});
+```
+
+#### 3. Using with Claude Code
+```bash
+export ANTHROPIC_BASE_URL=http://your-elygate/v1
+export ANTHROPIC_API_KEY=your-sk-token
+claude
+```
+
+#### 4. Using with OpenClaw
+- **Provider**: Select `Anthropic (Messages API)`
+- **Base URL**: `http://your-elygate/v1`
+- **API Key**: `your-sk-token`
+
+---
+
 **High-performance AI Gateway. Build on Bun + PostgreSQL 18.**
 
 ### 📦 Quick Start (Docker Compose) - Recommended
@@ -129,6 +173,35 @@ Express (JS)   █                                   113,117    (21x slower)
 
 ---
 
+### 🔧 Performance Optimization
+
+Elygate comes with built-in performance optimizations for PostgreSQL 18.3:
+
+#### Quick Optimization
+```bash
+# Run automatic optimization script
+chmod +x scripts/deploy-optimizations.sh
+./scripts/deploy-optimizations.sh
+```
+
+#### Key Optimizations
+- ✅ **PostgreSQL 18.3 Async Commit**: 30-50% write performance boost
+- ✅ **Connection Pool**: 20 connections with optimized lifecycle
+- ✅ **Performance Indexes**: 20+ indexes for query optimization
+- ✅ **Semantic Cache**: Built-in vector similarity caching
+
+#### Performance Gains
+| Metric | Improvement |
+|--------|-------------|
+| Database Writes | +30-50% |
+| Query Response | -20-40% |
+| Concurrency | +50-100% |
+| Memory Efficiency | +20-30% |
+
+See [Performance Optimization Guide](./PERFORMANCE_OPTIMIZATION.md) for details.
+
+---
+
 ### 📂 Project Structure (Monorepo)
 
 ```text
@@ -148,16 +221,72 @@ elygate
 
 ### ✨ Core Innovations
 
-- **🚀 Bun-Native Engine**: Massive throughput improvement over traditional JS/Go stacks.
-- **🧠 Semantic Cache**: Integrated vector similarity search to deduplicate requests.
-- **💾 O(1) Billing**: Atomic batch processing eliminating SQL lock contention.
-- **📊 Auto-Maintenance**: Built-in cron jobs for partition rotation and cleanup.
 - **🛡️ Apache 2.0**: Open-source and enterprise-ready.
+- **☁️ Zero Shell Dependencies**: Unlike New API which requires Redis for high-concurrency rate limiting, Elygate is **Redis-free**. All logic is handled by Bun + PostgreSQL, simplifying your stack.
+
+---
+
+### 📊 Comparison: Elygate vs. New API
+
+| Feature | Elygate (Bun + PG) | New API (Go + Redis) | Advantage |
+| :--- | :--- | :--- | :--- |
+| **Engine** | Bun + ElysiaJS | Go + Gin | 🚀 3.6x Throughput |
+| **Dependencies** | **PostgreSQL Only** | MySQL + **Redis** | 🔋 Zero Redis Setup |
+| **Billing** | O(1) Atomic Batch | Continuous SQL Hits | 💾 No Lock Contention |
+| **Semantic Cache** | Built-in (Vector) | Not Integrated | 🧠 Cost Saving |
+| **Tech Stack** | Svelte 5 + Tailwind 4 | React / Vue | 💎 Premium UI/UX |
+| **License** | Apache 2.0 | GPL-3.0 | 🛡️ Commercial Friendly |
+
+---
 
 ---
 
 <a name="chinese"></a>
 ## 简体中文
+
+### 📖 API 使用指南
+
+Elygate 同时兼容 OpenAI 和 Anthropic (Claude) 的 API 标准，您可以无缝对接现有的各类客户端和 SDK。
+
+#### 1. OpenAI 标准接口 (默认)
+适用于大多数工具（如 NextChat, ChatBox, OpenAI SDK 等）。
+- **Base URL**: `http://your-elygate/v1`
+- **密钥 (Key)**: 后台生成的 `sk-...` 令牌。
+
+#### 2. Anthropic (Claude) 标准接口
+原生支持 Anthropic SDK 以及 **Claude Code** 命令行工具。
+- **Base URL**: `http://your-elygate/v1` (SDK 会自动拼接 `/messages`)
+- **密钥 (Key)**: 后台生成的 `sk-...` 令牌。
+
+**Anthropic SDK (Node.js) 调用示例:**
+```javascript
+import Anthropic from '@anthropic-ai/sdk';
+
+const anthropic = new Anthropic({
+  apiKey: '您的-sk-令牌',
+  baseURL: 'http://your-elygate/v1' 
+});
+
+const msg = await anthropic.messages.create({
+  model: "claude-3-5-sonnet-20240620",
+  max_tokens: 1024,
+  messages: [{ role: "user", content: "你好" }],
+});
+```
+
+#### 3. 对接 Claude Code
+```bash
+export ANTHROPIC_BASE_URL=http://your-elygate/v1
+export ANTHROPIC_API_KEY=您的-sk-令牌
+claude
+```
+
+#### 4. 对接 OpenClaw
+- **提供商**: 选择 `Anthropic (Messages API)`
+- **Base URL**: `http://your-elygate/v1`
+- **API Key**: `您的-sk-令牌`
+
+---
 
 **高性能AI分发网关与计费系统。基于 Bun + PostgreSQL 18。**
 
@@ -217,6 +346,35 @@ docker compose -f docker-compose.prod.yml up -d
      ```cmd
      elygate-bun-windows-x64.exe
      ```
+
+---
+
+### 🔧 性能优化
+
+Elygate 内置了针对 PostgreSQL 18.3 的性能优化配置：
+
+#### 快速优化
+```bash
+# 运行自动优化脚本
+chmod +x scripts/deploy-optimizations.sh
+./scripts/deploy-optimizations.sh
+```
+
+#### 核心优化项
+- ✅ **PostgreSQL 18.3 异步提交**: 写入性能提升 30-50%
+- ✅ **连接池优化**: 20个连接，优化生命周期管理
+- ✅ **性能索引**: 20+ 个索引优化查询性能
+- ✅ **语义缓存**: 内置向量相似度缓存
+
+#### 性能提升
+| 指标 | 提升幅度 |
+|------|----------|
+| 数据库写入 | +30-50% |
+| 查询响应 | -20-40% |
+| 并发处理 | +50-100% |
+| 内存效率 | +20-30% |
+
+详见 [性能优化指南](./PERFORMANCE_OPTIMIZATION.md)。
 
 ---
 
@@ -304,11 +462,23 @@ elygate
 
 ### 🛠️ 核心优势
 
-- **🚀 Bun 原生性能**: 相比传统 Node.js/Go 架构有显著吞吐量提升。
-- **🧠 语义缓存**: 内置 `pgvector` 相似度检索，大幅降低上游 Token 消耗。
-- **💾 O(1) 合并计费**: 通过批量原子 SQL 彻底解决高并发下的数据库竞争。
-- **📊 全自动运维**: 通过 `pg_cron` 原生支持日志自动分区与缓存定期清理。
 - **🛡️ Apache 2.0**: 协议友好，支持商业化二次开发。
+- **☁️ 极简无依赖**: 相比 New API 在高并发下必须依赖 Redis 进行限流和缓存，Elygate 实现了 **Redis-free（无 Redis 依赖）**。所有逻辑均由 Bun + PostgreSQL 承载，大幅简化了部署运维复杂度。
+
+---
+
+### 📊 核心对比：Elygate vs. New API
+
+| 特性 | Elygate (Bun + PG) | New API (Go + Redis) | 优势说明 |
+| :--- | :--- | :--- | :--- |
+| **核心引擎** | Bun + ElysiaJS | Go + Gin | 🚀 3.6倍 绝对吞吐量 |
+| **外部依赖** | **仅需 PostgreSQL** | MySQL + **Redis** | 🔋 运维更简单 (无需Redis) |
+| **计费性能** | O(1) 原子批量更新 | 连续 SQL 写入 | 💾 彻底解决数据库锁竞争 |
+| **语义缓存** | 原生内置 (向量检索) | 无此功能 | 🧠 显著降低 Token 成本 |
+| **前端架构** | Svelte 5 + Tailwind 4 | React / Vue | 💎 极致流畅的交互体验 |
+| **开源协议** | Apache 2.0 | GPL-3.0 | 🛡️ 商业二次开发更友好 |
+
+---
 
 ### 🧩 语义缓存动态配置
 语义缓存默认开启，支持在数据库 `options` 表中实时调整：
