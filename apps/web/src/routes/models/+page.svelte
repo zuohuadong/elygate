@@ -38,6 +38,9 @@
         { id: "deepseek", label: "DeepSeek", labelEn: "DeepSeek" },
         { id: "meta", label: "Meta (Llama)", labelEn: "Meta (Llama)" },
         { id: "nvidia", label: "NVIDIA", labelEn: "NVIDIA" },
+        { id: "mistral", label: "Mistral", labelEn: "Mistral" },
+        { id: "cohere", label: "Cohere", labelEn: "Cohere" },
+        { id: "aws", label: "AWS (Bedrock)", labelEn: "AWS (Bedrock)" },
         { id: "others", label: "其他", labelEn: "Others" },
     ];
 
@@ -53,18 +56,38 @@
 
     function getProvider(modelId: string): string {
         const id = modelId.toLowerCase();
-        if (
-            id.startsWith("gpt-") ||
-            id.startsWith("o1-") ||
-            id.startsWith("o3-") ||
-            id.includes("dall-e")
-        )
-            return "openai";
-        if (id.startsWith("claude-")) return "anthropic";
-        if (id.startsWith("gemini-") || id.includes("palm")) return "google";
-        if (id.includes("llama")) return "meta";
-        if (id.startsWith("deepseek-")) return "deepseek";
-        if (id.includes("nvidia")) return "nvidia";
+
+        // Check for common ID formats like "provider/model" or "provider:model"
+        const prefixes = {
+            openai: "openai",
+            "gpt-": "openai",
+            "o1-": "openai",
+            "o3-": "openai",
+            "claude-": "anthropic",
+            anthropic: "anthropic",
+            "gemini-": "google",
+            palm: "google",
+            google: "google",
+            llama: "meta",
+            meta: "meta",
+            deepseek: "deepseek",
+            nvidia: "nvidia",
+            mistral: "mistral",
+            cohere: "cohere",
+            aws: "aws",
+        };
+
+        for (const [prefix, provider] of Object.entries(prefixes)) {
+            if (
+                id.startsWith(prefix) ||
+                id.includes(`/${prefix}`) ||
+                id.includes(`${prefix}:`)
+            ) {
+                return provider;
+            }
+        }
+
+        if (id.includes("dall-e")) return "openai";
         return "others";
     }
 

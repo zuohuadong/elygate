@@ -959,9 +959,29 @@ export const adminRouter = new Elysia()
             // A model is 'online' if it has at least one channel with status 1 (Active) or 4 (Half-Open)
             const isOnline = channels.some(ch => ch.status === 1 || ch.status === 4);
 
+            let displayName = meta?.name || modelId;
+
+            // Normalize Name: Strip common provider prefixes if no metadata name is found
+            if (!meta?.name) {
+                const prefixes = ['openai/', 'anthropic/', 'google/', 'deepseek/', 'meta/', 'nvidia/', 'mistral/', 'cohere/', 'aws/'];
+                const lowerId = modelId.toLowerCase();
+                for (const p of prefixes) {
+                    if (lowerId.startsWith(p)) {
+                        displayName = modelId.substring(p.length);
+                        break;
+                    }
+                    // Also handle colon-separated prefixes like deepseek:chat
+                    const pWithColon = p.replace('/', ':');
+                    if (lowerId.startsWith(pWithColon)) {
+                        displayName = modelId.substring(pWithColon.length);
+                        break;
+                    }
+                }
+            }
+
             return {
                 id: modelId,
-                name: meta?.name || modelId,
+                name: displayName,
                 description: meta?.description || '',
                 status: isOnline ? 'online' : 'offline',
                 object: 'model'
