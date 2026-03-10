@@ -377,20 +377,28 @@
 
                     <!-- Header -->
                     <div class="mb-4">
-                        <div class="flex items-center justify-between mb-2">
+                        <div class="space-y-1 mb-3">
                             <h3
-                                class="font-bold text-slate-900 dark:text-white truncate"
-                                title={model.id}
+                                class="font-bold text-slate-900 dark:text-white text-lg leading-tight"
+                                title={model.name || model.id}
                             >
-                                {model.id}
+                                {model.name || model.id}
                             </h3>
+                            {#if model.name && model.name !== model.id}
+                                <p
+                                    class="text-[10px] font-mono text-slate-400 dark:text-slate-500 truncate"
+                                    title={model.id}
+                                >
+                                    ID: {model.id}
+                                </p>
+                            {/if}
                         </div>
                         <div class="flex flex-wrap items-center gap-2">
                             <span
-                                class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-50 text-emerald-600 border border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20"
+                                class="inline-flex items-center gap-1.2 px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-50 text-emerald-600 border border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20"
                             >
                                 <span
-                                    class="w-1.5 h-1.5 rounded-full bg-emerald-500"
+                                    class="w-1 h-1 rounded-full bg-emerald-500 mr-1"
                                 ></span>
                                 {i18n.lang === "zh" ? "可用" : "Available"}
                             </span>
@@ -412,12 +420,11 @@
                     </div>
 
                     <!-- Details -->
-                    <div class="flex-1 mt-2 mb-6">
+                    <div class="flex-1 mt-1 mb-6">
                         <p
-                            class="text-sm text-slate-500 dark:text-slate-400 line-clamp-3 leading-relaxed"
+                            class="text-sm text-slate-500 dark:text-slate-400 line-clamp-3 leading-relaxed italic"
                         >
-                            {model.name ||
-                                model.description ||
+                            {model.description ||
                                 (i18n.lang === "zh"
                                     ? "标准对话模型支持"
                                     : "Standard conversational model support.")}

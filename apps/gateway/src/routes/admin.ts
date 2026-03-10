@@ -921,11 +921,26 @@ export const adminRouter = new Elysia()
     // --- Models List ---
     .get('/models', () => {
         const uniqueModels = Array.from(memoryCache.channelRoutes.keys());
-        return uniqueModels.map(model => ({
-            id: model,
-            name: model,
-            object: 'model'
-        }));
+
+        // Flatten all models from config into a single map for quick lookup
+        const metaMap = new Map<string, any>();
+        for (const provider of Object.values(modelConfig as any)) {
+            if ((provider as any).models && Array.isArray((provider as any).models)) {
+                for (const m of (provider as any).models) {
+                    metaMap.set(m.id, m);
+                }
+            }
+        }
+
+        return uniqueModels.map(modelId => {
+            const meta = metaMap.get(modelId);
+            return {
+                id: modelId,
+                name: meta?.name || modelId,
+                description: meta?.description || '',
+                object: 'model'
+            };
+        });
     })
 
     // --- Redemptions (CDK) ---
@@ -1132,7 +1147,7 @@ export const adminRouter = new Elysia()
         memoryCache.refresh().catch(console.error);
         return { success: true };
     })
-    
+
     // --- Rate Limits ---
     .get('/rate-limits', async () => {
         return await sql`SELECT * FROM rate_limit_rules ORDER BY id DESC`;
