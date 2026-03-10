@@ -32,6 +32,7 @@
 	import { apiFetch } from "$lib/api";
 	import { theme } from "$lib/theme.svelte";
 	import { keyboardShortcuts } from "$lib/keyboard.svelte";
+	import { initLogger } from "$lib/logger";
 
 	let { children } = $props();
 	let showShortcutsModal = $state(false);
@@ -61,6 +62,7 @@
 	];
 
 	onMount(() => {
+		initLogger();
 		i18n.init();
 		theme.init();
 		if (!session.token && !isAuthPage) {
@@ -70,9 +72,23 @@
 
 		// Register keyboard shortcuts
 		keyboardShortcuts.registerMultiple([
-			{ key: 'd', ctrl: true, callback: () => theme.toggle(), description: 'Toggle dark mode' },
-			{ key: '?', shift: true, callback: () => showShortcutsModal = !showShortcutsModal, description: 'Show keyboard shortcuts' },
-			{ key: 'Escape', callback: () => showShortcutsModal = false, description: 'Close modal' },
+			{
+				key: "d",
+				ctrl: true,
+				callback: () => theme.toggle(),
+				description: "Toggle dark mode",
+			},
+			{
+				key: "?",
+				shift: true,
+				callback: () => (showShortcutsModal = !showShortcutsModal),
+				description: "Show keyboard shortcuts",
+			},
+			{
+				key: "Escape",
+				callback: () => (showShortcutsModal = false),
+				description: "Close modal",
+			},
 		]);
 
 		// Fetch system info for exchange rate
@@ -411,9 +427,11 @@
 					<button
 						onclick={() => theme.toggle()}
 						class="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors rounded-full hover:bg-slate-100 dark:hover:bg-slate-800"
-						title={theme.value === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+						title={theme.value === "dark"
+							? "Switch to Light Mode"
+							: "Switch to Dark Mode"}
 					>
-						{#if theme.value === 'dark'}
+						{#if theme.value === "dark"}
 							<Sun class="w-5 h-5" />
 						{:else}
 							<Moon class="w-5 h-5" />
@@ -434,10 +452,10 @@
 {#if showShortcutsModal}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<!-- svelte-ignore a11y_interactive_supports_focus -->
-	<div 
+	<div
 		class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center"
-		onclick={() => showShortcutsModal = false}
-		onkeydown={(e) => e.key === 'Escape' && (showShortcutsModal = false)}
+		onclick={() => (showShortcutsModal = false)}
+		onkeydown={(e) => e.key === "Escape" && (showShortcutsModal = false)}
 		role="dialog"
 		aria-modal="true"
 		aria-label={i18n.lang === "zh" ? "键盘快捷键" : "Keyboard Shortcuts"}
@@ -445,42 +463,71 @@
 	>
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<!-- svelte-ignore a11y_click_events_have_key_events -->
-		<div 
+		<div
 			class="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 p-6 max-w-md w-full mx-4"
 			onclick={(e) => e.stopPropagation()}
 		>
 			<div class="flex items-center justify-between mb-4">
-				<h3 class="text-lg font-semibold text-slate-900 dark:text-white">
+				<h3
+					class="text-lg font-semibold text-slate-900 dark:text-white"
+				>
 					{i18n.lang === "zh" ? "键盘快捷键" : "Keyboard Shortcuts"}
 				</h3>
-				<button 
-					onclick={() => showShortcutsModal = false}
+				<button
+					onclick={() => (showShortcutsModal = false)}
 					class="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
 					aria-label={i18n.lang === "zh" ? "关闭" : "Close"}
 				>
-					<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+					<svg
+						class="w-5 h-5"
+						fill="none"
+						stroke="currentColor"
+						viewBox="0 0 24 24"
+					>
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							stroke-width="2"
+							d="M6 18L18 6M6 6l12 12"
+						/>
 					</svg>
 				</button>
 			</div>
 			<div class="space-y-3">
 				{#each keyboardShortcuts.getShortcuts() as shortcut}
-					<div class="flex items-center justify-between py-2 border-b border-slate-100 dark:border-slate-800 last:border-0">
-						<span class="text-sm text-slate-600 dark:text-slate-400">{shortcut.description}</span>
+					<div
+						class="flex items-center justify-between py-2 border-b border-slate-100 dark:border-slate-800 last:border-0"
+					>
+						<span class="text-sm text-slate-600 dark:text-slate-400"
+							>{shortcut.description}</span
+						>
 						<div class="flex items-center gap-1">
 							{#if shortcut.ctrl}
-								<kbd class="px-2 py-1 text-xs font-mono bg-slate-100 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700">⌘</kbd>
+								<kbd
+									class="px-2 py-1 text-xs font-mono bg-slate-100 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700"
+									>⌘</kbd
+								>
 							{/if}
 							{#if shortcut.shift}
-								<kbd class="px-2 py-1 text-xs font-mono bg-slate-100 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700">⇧</kbd>
+								<kbd
+									class="px-2 py-1 text-xs font-mono bg-slate-100 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700"
+									>⇧</kbd
+								>
 							{/if}
-							<kbd class="px-2 py-1 text-xs font-mono bg-slate-100 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 uppercase">{shortcut.key}</kbd>
+							<kbd
+								class="px-2 py-1 text-xs font-mono bg-slate-100 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 uppercase"
+								>{shortcut.key}</kbd
+							>
 						</div>
 					</div>
 				{/each}
 			</div>
-			<p class="mt-4 text-xs text-slate-500 dark:text-slate-500 text-center">
-				{i18n.lang === "zh" ? "按 ? 显示此帮助" : "Press ? to show this help"}
+			<p
+				class="mt-4 text-xs text-slate-500 dark:text-slate-500 text-center"
+			>
+				{i18n.lang === "zh"
+					? "按 ? 显示此帮助"
+					: "Press ? to show this help"}
 			</p>
 		</div>
 	</div>
