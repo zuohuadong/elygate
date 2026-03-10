@@ -95,6 +95,21 @@
         return "others";
     }
 
+    function parseModelId(modelId: string): {
+        provider: string;
+        modelName: string;
+    } {
+        if (modelId.includes("/")) {
+            const parts = modelId.split("/");
+            return { provider: parts[0], modelName: parts.slice(1).join("/") };
+        }
+        if (modelId.includes(":")) {
+            const parts = modelId.split(":");
+            return { provider: parts[0], modelName: parts.slice(1).join(":") };
+        }
+        return { provider: getProvider(modelId), modelName: modelId };
+    }
+
     function getCapability(modelId: string): string {
         const id = modelId.toLowerCase();
 
@@ -168,38 +183,14 @@
 
     let displayLimit = $state(24);
 
-    onMount(() => {
-        const role = localStorage.getItem("admin_role");
-        isAdmin = role ? parseInt(role, 10) >= 10 : false;
-        loadModels();
-
-        // Setup Intersection Observer for lazy loading
-        const observer = new IntersectionObserver(
-            (entries) => {
-                if (
-                    entries[0].isIntersecting &&
-                    displayLimit < filteredModels.length
-                ) {
-                    displayLimit += 24;
-                }
-            },
-            { threshold: 0.1 },
-        );
-
-        const loader = document.getElementById("scroll-loader");
-        if (loader) observer.observe(loader);
-
-        return () => observer.disconnect();
-    });
-
-    // Reset displayLimit on any filter or query change
-    $effect(() => {
-        searchQuery;
-        activeProvider;
-        activeCapability;
-        activeStatus;
+    // Reset displayLimit on filter or query change
+    function resetFilters() {
+        searchQuery = "";
+        activeProvider = "all";
+        activeCapability = "all";
+        activeStatus = "all";
         displayLimit = 24;
-    });
+    }
 
     let preStatusFilteredModels = $derived(
         models.filter((m) => {
@@ -235,6 +226,37 @@
     );
 
     let displayedModels = $derived(filteredModels.slice(0, displayLimit));
+
+    // Watch for filter changes and reset displayLimit
+    $effect(() => {
+        const _ =
+            searchQuery + activeProvider + activeCapability + activeStatus;
+        displayLimit = 24;
+    });
+
+    onMount(() => {
+        const role = localStorage.getItem("admin_role");
+        isAdmin = role ? parseInt(role, 10) >= 10 : false;
+        loadModels();
+
+        // Setup Intersection Observer for lazy loading
+        const observer = new IntersectionObserver(
+            (entries) => {
+                if (
+                    entries[0].isIntersecting &&
+                    displayLimit < filteredModels.length
+                ) {
+                    displayLimit += 24;
+                }
+            },
+            { threshold: 0.1 },
+        );
+
+        const loader = document.getElementById("scroll-loader");
+        if (loader) observer.observe(loader);
+
+        return () => observer.disconnect();
+    });
 </script>
 
 <svelte:head>
@@ -320,12 +342,7 @@
 
                 {#if activeProvider !== "all" || activeCapability !== "all" || searchQuery !== ""}
                     <button
-                        onclick={() => {
-                            activeProvider = "all";
-                            activeCapability = "all";
-                            activeStatus = "all";
-                            searchQuery = "";
-                        }}
+                        onclick={resetFilters}
                         class="px-3 py-1.5 text-xs font-semibold text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded-lg transition-colors flex items-center gap-1.5"
                         transition:fade
                     >
@@ -528,6 +545,7 @@
         {:else}
             {#each displayedModels as model (model.id)}
                 {@const isThinking = getCapability(model.id) === "thinking"}
+                {@const parsed = parseModelId(model.id)}
                 <div
                     class="bg-white hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800/80 rounded-2xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm transition-all hover:shadow-md hover:-translate-y-1 flex flex-col group relative overflow-hidden {model.status ===
                     'offline'
@@ -556,11 +574,18 @@
                     <!-- Header -->
                     <div class="mb-4">
                         <div class="space-y-1 mb-3">
+                            <!-- Provider Name -->
+                            <p
+                                class="text-[10px] font-semibold uppercase tracking-wider text-indigo-500 dark:text-indigo-400"
+                            >
+                                {parsed.provider}
+                            </p>
+                            <!-- Model Name -->
                             <h3
                                 class="font-bold text-slate-900 dark:text-white text-lg leading-tight"
-                                title={model.name || model.id}
+                                title={model.name || parsed.modelName}
                             >
-                                {model.name || model.id}
+                                {model.name || parsed.modelName}
                             </h3>
                             {#if model.name && model.name !== model.id}
                                 <p
@@ -678,7 +703,7 @@
             {#if displayLimit < filteredModels.length}
                 <div
                     id="scroll-loader"
-                    class="col-span-1 md:col-span-2 lg:col-span-3 py-12 flex justify-center"
+                    class="col-span-1 md:col-span-2 lg:col-span-3 xl:col-span-4 py-12 flex justify-center"
                 >
                     <div class="flex items-center gap-3 text-slate-400">
                         <RefreshCw class="w-5 h-5 animate-spin" />
@@ -689,13 +714,13 @@
                         </span>
                     </div>
                 </div>
-            {:else if filteredModels.length > 0}
+            {:else if filteredModels.length > 24}
                 <div
-                    class="col-span-1 md:col-span-2 lg:col-span-3 py-8 text-center text-slate-400 text-sm font-medium"
+                    class="col-span-1 md:col-span-2 lg:col-span-3 xl:col-span-4 py-8 text-center text-slate-400 text-sm font-medium"
                 >
                     {i18n.lang === "zh"
-                        ? "已显示全部模型"
-                        : "All models displayed"}
+                        ? "已显示全部 {filteredModels.length} 个模型"
+                        : "All {filteredModels.length} models displayed"}
                 </div>
             {/if}
         {/if}
