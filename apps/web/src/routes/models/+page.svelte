@@ -28,6 +28,7 @@
     // Filter states
     let activeProvider = $state("all");
     let activeCapability = $state("all");
+    let activeStatus = $state("all");
 
     const providers = [
         { id: "all", label: "全部", labelEn: "All" },
@@ -144,7 +145,15 @@
             const matchesCapability =
                 activeCapability === "all" ||
                 getCapability(id) === activeCapability;
-            return matchesSearch && matchesProvider && matchesCapability;
+            const matchesStatus =
+                activeStatus === "all" ||
+                (m.status || "online") === activeStatus;
+            return (
+                matchesSearch &&
+                matchesProvider &&
+                matchesCapability &&
+                matchesStatus
+            );
         }),
     );
 </script>
@@ -235,6 +244,7 @@
                         onclick={() => {
                             activeProvider = "all";
                             activeCapability = "all";
+                            activeStatus = "all";
                             searchQuery = "";
                         }}
                         class="px-3 py-1.5 text-xs font-semibold text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded-lg transition-colors flex items-center gap-1.5"
@@ -312,6 +322,54 @@
                     {/each}
                 </div>
             </div>
+
+            <!-- Availability Filter -->
+            <div
+                class="bg-white/40 dark:bg-slate-900/40 border border-slate-200/40 dark:border-slate-800/40 p-3 rounded-2xl md:col-span-2"
+            >
+                <div class="flex items-center gap-2 mb-3 px-1">
+                    <MonitorSpeaker class="w-4 h-4 text-emerald-500" />
+                    <span
+                        class="text-xs font-bold uppercase tracking-wider text-slate-400"
+                    >
+                        {i18n.lang === "zh" ? "可用性" : "Availability"}
+                    </span>
+                </div>
+                <div class="flex flex-wrap gap-1.5">
+                    <button
+                        onclick={() => (activeStatus = "all")}
+                        class="px-3 py-1.5 rounded-xl text-xs font-medium transition-all {activeStatus ===
+                        'all'
+                            ? 'bg-slate-800 text-white shadow-md scale-105'
+                            : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-800 hover:border-slate-300'}"
+                    >
+                        {i18n.lang === "zh" ? "全部" : "All"}
+                    </button>
+                    <button
+                        onclick={() => (activeStatus = "online")}
+                        class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-all {activeStatus ===
+                        'online'
+                            ? 'bg-emerald-600 text-white shadow-md shadow-emerald-500/20 scale-105'
+                            : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-800 hover:border-emerald-300'}"
+                    >
+                        <span
+                            class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"
+                        ></span>
+                        {i18n.lang === "zh" ? "仅在线" : "Online Only"}
+                    </button>
+                    <button
+                        onclick={() => (activeStatus = "offline")}
+                        class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-all {activeStatus ===
+                        'offline'
+                            ? 'bg-rose-600 text-white shadow-md shadow-rose-500/20 scale-105'
+                            : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-800 hover:border-rose-300'}"
+                    >
+                        <span class="w-1.5 h-1.5 rounded-full bg-slate-400"
+                        ></span>
+                        {i18n.lang === "zh" ? "已离线" : "Offline"}
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -367,12 +425,18 @@
         {:else}
             {#each filteredModels as model (model.id)}
                 <div
-                    class="bg-white hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800/80 rounded-2xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm transition-all hover:shadow-md hover:-translate-y-1 flex flex-col group relative overflow-hidden"
+                    class="bg-white hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800/80 rounded-2xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm transition-all hover:shadow-md hover:-translate-y-1 flex flex-col group relative overflow-hidden {model.status ===
+                    'offline'
+                        ? 'opacity-60 grayscale-[0.5]'
+                        : ''}"
                     transition:fade={{ duration: 150 }}
                 >
                     <!-- Status Indicator Line -->
                     <div
-                        class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-400 to-teal-500"
+                        class="absolute top-0 left-0 w-full h-1 {model.status ===
+                        'offline'
+                            ? 'bg-slate-300 dark:bg-slate-700'
+                            : 'bg-gradient-to-r from-emerald-400 to-teal-500'}"
                     ></div>
 
                     <!-- Header -->
@@ -394,14 +458,25 @@
                             {/if}
                         </div>
                         <div class="flex flex-wrap items-center gap-2">
-                            <span
-                                class="inline-flex items-center gap-1.2 px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-50 text-emerald-600 border border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20"
-                            >
+                            {#if model.status === "offline"}
                                 <span
-                                    class="w-1 h-1 rounded-full bg-emerald-500 mr-1"
-                                ></span>
-                                {i18n.lang === "zh" ? "可用" : "Available"}
-                            </span>
+                                    class="inline-flex items-center gap-1.2 px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-100 text-slate-500 border border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700"
+                                >
+                                    <span
+                                        class="w-1 h-1 rounded-full bg-slate-400 mr-1"
+                                    ></span>
+                                    {i18n.lang === "zh" ? "离线" : "Offline"}
+                                </span>
+                            {:else}
+                                <span
+                                    class="inline-flex items-center gap-1.2 px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-50 text-emerald-600 border border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20"
+                                >
+                                    <span
+                                        class="w-1 h-1 rounded-full bg-emerald-500 mr-1"
+                                    ></span>
+                                    {i18n.lang === "zh" ? "在线" : "Online"}
+                                </span>
+                            {/if}
                             <span
                                 class="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-medium bg-indigo-50 text-indigo-600 border border-indigo-100 dark:bg-indigo-500/10 dark:text-indigo-400 dark:border-indigo-500/20 uppercase tracking-wide"
                             >

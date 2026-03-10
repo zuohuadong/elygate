@@ -920,7 +920,28 @@ export const adminRouter = new Elysia()
 
     // --- Models List ---
     .get('/models', () => {
-        const uniqueModels = Array.from(memoryCache.channelRoutes.keys());
+        // Collect ALL models across all channels (both active and inactive)
+        const allModelIds = new Set<string>();
+        const modelToChannels = new Map<string, any[]>();
+
+        for (const channel of memoryCache.channels.values()) {
+            let supportedModels: string[] = [];
+            if (Array.isArray(channel.models)) {
+                supportedModels = channel.models;
+            } else if (typeof channel.models === 'string') {
+                try {
+                    supportedModels = JSON.parse(channel.models);
+                } catch {
+                    supportedModels = (channel.models as string).split(',').map((s: string) => s.trim());
+                }
+            }
+
+            for (const m of supportedModels) {
+                allModelIds.add(m);
+                if (!modelToChannels.has(m)) modelToChannels.set(m, []);
+                modelToChannels.get(m)!.push(channel);
+            }
+        }
 
         // Flatten all models from config into a single map for quick lookup
         const metaMap = new Map<string, any>();
@@ -932,12 +953,17 @@ export const adminRouter = new Elysia()
             }
         }
 
-        return uniqueModels.map(modelId => {
+        return Array.from(allModelIds).map(modelId => {
             const meta = metaMap.get(modelId);
+            const channels = modelToChannels.get(modelId) || [];
+            // A model is 'online' if it has at least one channel with status 1 (Active) or 4 (Half-Open)
+            const isOnline = channels.some(ch => ch.status === 1 || ch.status === 4);
+
             return {
                 id: modelId,
                 name: meta?.name || modelId,
                 description: meta?.description || '',
+                status: isOnline ? 'online' : 'offline',
                 object: 'model'
             };
         });
