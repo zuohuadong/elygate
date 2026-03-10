@@ -283,105 +283,172 @@
     {/if}
 
     {#if activeTab === "list"}
-        <div
-            class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm overflow-hidden"
-            in:fade
-        >
-            <div class="overflow-x-auto">
-                <table class="w-full text-left border-collapse">
-                    <thead>
-                        <tr
-                            class="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800"
-                        >
-                            <th
-                                class="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400"
-                                >{i18n.t.pricing.tableModel}</th
-                            >
-                            <th
-                                class="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400"
-                                >{i18n.t.pricing.tableType}</th
-                            >
-                            <th
-                                class="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400"
-                                >{i18n.lang === "zh"
-                                    ? "输入 (每百万Token)"
-                                    : "Input (per 1M)"}</th
-                            >
-                            <th
-                                class="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400"
-                                >{i18n.lang === "zh"
-                                    ? "输出 (每百万Token)"
-                                    : "Output (per 1M)"}</th
-                            >
-                            <th
-                                class="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400"
-                                >{i18n.t.pricing.tableFixed}</th
-                            >
-                        </tr>
-                    </thead>
-                    <tbody
-                        class="divide-y divide-slate-100 dark:divide-slate-800"
-                    >
-                        {#each pricingList as item}
-                            <tr
-                                class="hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition-colors"
-                            >
-                                <td
-                                    class="px-6 py-4 font-medium text-slate-900 dark:text-slate-100 truncate max-w-[200px]"
-                                    title={item.model}>{item.model}</td
-                                >
-                                <td
-                                    class="px-6 py-4 text-sm text-slate-500 dark:text-slate-400"
-                                >
-                                    <span
-                                        class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700"
-                                    >
-                                        {item.type}
-                                    </span>
-                                </td>
-                                <td
-                                    class="px-6 py-4 text-sm text-slate-700 dark:text-slate-300 font-mono"
-                                >
-                                    {item.inputPrice !== "-"
-                                        ? `$ ${item.inputPrice}`
-                                        : "-"}
-                                </td>
-                                <td
-                                    class="px-6 py-4 text-sm text-slate-700 dark:text-slate-300 font-mono"
-                                >
-                                    {item.outputPrice !== "-"
-                                        ? `$ ${item.outputPrice}`
-                                        : "-"}
-                                </td>
-                                <td
-                                    class="px-6 py-4 text-sm text-emerald-600 dark:text-emerald-400 font-medium"
-                                >
-                                    {item.fixedPrice}
-                                </td>
-                            </tr>
-                        {/each}
-                    </tbody>
-                </table>
-            </div>
-
+        {#if isLoading}
             <div
-                class="p-6 bg-slate-50/50 dark:bg-slate-800/20 border-t border-slate-100 dark:border-slate-800"
+                class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm overflow-hidden"
+                in:fade
             >
-                <h3
-                    class="font-medium text-slate-900 dark:text-slate-300 mb-2 flex items-center gap-2"
-                >
-                    <AlertCircle class="w-4 h-4 text-indigo-500" />
-                    {i18n.t.pricing.costFormula}
-                </h3>
-                <p
-                    class="text-sm text-slate-500 dark:text-slate-400 leading-relaxed max-w-2xl"
-                >
-                    {i18n.lang === "zh"
-                        ? `我们的计费系统使用基于基础汇率 $1.0 = 1,000,000 单位的倍率系统。Token 计算公式为：(输入 + 输出 × 补全倍率) × 模型倍率。上表显示的是默认分组用户每 100 万 Token 的实际生效美元费率。`
-                        : `Our billing system uses a multiplier system tied to a base exchange rate of $1.0 = 1,000,000 units. Tokens are calculated as: (Input + Output × CompletionRatio) × ModelMultiplier. Prices shown above are effective USD rates per 1M tokens for the default user group.`}
-                </p>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr
+                                class="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800"
+                            >
+                                <th
+                                    class="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400"
+                                    >{i18n.t.pricing.tableModel}</th
+                                >
+                                <th
+                                    class="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400"
+                                    >{i18n.t.pricing.tableType}</th
+                                >
+                                <th
+                                    class="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400"
+                                    >{i18n.lang === "zh"
+                                        ? "输入 (每百万Token)"
+                                        : "Input (per 1M)"}</th
+                                >
+                                <th
+                                    class="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400"
+                                    >{i18n.lang === "zh"
+                                        ? "输出 (每百万Token)"
+                                        : "Output (per 1M)"}</th
+                                >
+                                <th
+                                    class="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400"
+                                    >{i18n.t.pricing.tableFixed}</th
+                                >
+                            </tr>
+                        </thead>
+                        <tbody
+                            class="divide-y divide-slate-100 dark:divide-slate-800"
+                        >
+                            {#each Array(8) as _, i}
+                                <tr
+                                    class="hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition-colors"
+                                >
+                                    <td class="px-6 py-4">
+                                        <div class="h-4 w-32 bg-slate-200 dark:bg-slate-700 rounded animate-pulse"></div>
+                                    </td>
+                                    <td class="px-6 py-4">
+                                        <div class="h-5 w-16 bg-slate-200 dark:bg-slate-700 rounded animate-pulse"></div>
+                                    </td>
+                                    <td class="px-6 py-4">
+                                        <div class="h-4 w-20 bg-slate-200 dark:bg-slate-700 rounded animate-pulse"></div>
+                                    </td>
+                                    <td class="px-6 py-4">
+                                        <div class="h-4 w-20 bg-slate-200 dark:bg-slate-700 rounded animate-pulse"></div>
+                                    </td>
+                                    <td class="px-6 py-4">
+                                        <div class="h-4 w-16 bg-slate-200 dark:bg-slate-700 rounded animate-pulse"></div>
+                                    </td>
+                                </tr>
+                            {/each}
+                        </tbody>
+                    </table>
+                </div>
             </div>
-        </div>
+        {:else}
+            <div
+                class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm overflow-hidden"
+                in:fade
+            >
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr
+                                class="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800"
+                            >
+                                <th
+                                    class="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400"
+                                    >{i18n.t.pricing.tableModel}</th
+                                >
+                                <th
+                                    class="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400"
+                                    >{i18n.t.pricing.tableType}</th
+                                >
+                                <th
+                                    class="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400"
+                                    >{i18n.lang === "zh"
+                                        ? "输入 (每百万Token)"
+                                        : "Input (per 1M)"}</th
+                                >
+                                <th
+                                    class="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400"
+                                    >{i18n.lang === "zh"
+                                        ? "输出 (每百万Token)"
+                                        : "Output (per 1M)"}</th
+                                >
+                                <th
+                                    class="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400"
+                                    >{i18n.t.pricing.tableFixed}</th
+                                >
+                            </tr>
+                        </thead>
+                        <tbody
+                            class="divide-y divide-slate-100 dark:divide-slate-800"
+                        >
+                            {#each pricingList as item}
+                                <tr
+                                    class="hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition-colors"
+                                >
+                                    <td
+                                        class="px-6 py-4 font-medium text-slate-900 dark:text-slate-100 truncate max-w-[200px]"
+                                        title={item.model}>{item.model}</td
+                                    >
+                                    <td
+                                        class="px-6 py-4 text-sm text-slate-500 dark:text-slate-400"
+                                    >
+                                        <span
+                                            class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700"
+                                        >
+                                            {item.type}
+                                        </span>
+                                    </td>
+                                    <td
+                                        class="px-6 py-4 text-sm text-slate-700 dark:text-slate-300 font-mono"
+                                    >
+                                        {item.inputPrice !== "-"
+                                            ? `$ ${item.inputPrice}`
+                                            : "-"}
+                                    </td>
+                                    <td
+                                        class="px-6 py-4 text-sm text-slate-700 dark:text-slate-300 font-mono"
+                                    >
+                                        {item.outputPrice !== "-"
+                                            ? `$ ${item.outputPrice}`
+                                            : "-"}
+                                    </td>
+                                    <td
+                                        class="px-6 py-4 text-sm text-emerald-600 dark:text-emerald-400 font-medium"
+                                    >
+                                        {item.fixedPrice}
+                                    </td>
+                                </tr>
+                            {/each}
+                        </tbody>
+                    </table>
+                </div>
+
+                <div
+                    class="p-6 bg-slate-50/50 dark:bg-slate-800/20 border-t border-slate-100 dark:border-slate-800"
+                >
+                    <h3
+                        class="font-medium text-slate-900 dark:text-slate-300 mb-2 flex items-center gap-2"
+                    >
+                        <AlertCircle class="w-4 h-4 text-indigo-500" />
+                        {i18n.t.pricing.costFormula}
+                    </h3>
+                    <p
+                        class="text-sm text-slate-500 dark:text-slate-400 leading-relaxed max-w-2xl"
+                    >
+                        {i18n.lang === "zh"
+                            ? `我们的计费系统使用基于基础汇率 $1.0 = 1,000,000 单位的倍率系统。Token 计算公式为：(输入 + 输出 × 补全倍率) × 模型倍率。上表显示的是默认分组用户每 100 万 Token 的实际生效美元费率。`
+                            : `Our billing system uses a multiplier system tied to a base exchange rate of $1.0 = 1,000,000 units. Tokens are calculated as: (Input + Output × CompletionRatio) × ModelMultiplier. Prices shown above are effective USD rates per 1M tokens for the default user group.`}
+                    </p>
+                </div>
+            </div>
+        {/if}
     {:else}
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6" in:fade>
             {#each configDefinitions as def}
