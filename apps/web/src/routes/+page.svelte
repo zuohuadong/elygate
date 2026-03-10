@@ -1,345 +1,463 @@
-<script lang="ts">
-    import { Activity, CreditCard, DollarSign, Users } from "lucide-svelte";
-    import { apiFetch } from "$lib/api";
-    import { i18n } from "$lib/i18n/index.svelte";
-    import { onMount } from "svelte";
-    import type {
-        DashboardStats,
-        DashboardError,
-        UsageTrend,
-    } from "$lib/types";
-
-    // Responsive state variables
-    let stats = $state<DashboardStats | null>(null);
-    let errorLogs = $state<DashboardError[]>([]);
-    let trend = $state<UsageTrend[]>([]);
-    let realtime = $state({ rpm: 0, tpm: 0 });
-    let isLoading = $state(true);
-
-    async function fetchRealtime() {
-        try {
-            const data = await apiFetch<any>("/stats/realtime");
-            if (data && data.stats) {
-                realtime = {
-                    rpm: data.stats.requests_per_minute || 0,
-                    tpm: data.stats.tokens_per_minute || 0,
-                };
-            }
-        } catch (e) {}
-    }
-
-    onMount(() => {
-        const loadInitialData = async () => {
-            try {
-                // Fetch aggregated stats, recent errors and trend info from backend
-                const [statsRes, errorsRes, trendRes] = await Promise.all([
-                    apiFetch<DashboardStats>("/admin/dashboard/stats"),
-                    apiFetch<DashboardError[]>("/admin/dashboard/errors"),
-                    apiFetch<UsageTrend[]>(
-                        "/admin/stats/granular?group_by=day",
-                    ),
-                ]);
-                stats = statsRes;
-                errorLogs = errorsRes;
-                trend = trendRes;
-                fetchRealtime();
-            } catch (e: any) {
-                console.error("[Dashboard] Load Failed", e.message);
-            } finally {
-                isLoading = false;
-            }
-        };
-
-        loadInitialData();
-        const interval = setInterval(fetchRealtime, 5000);
-        return () => clearInterval(interval);
-    });
-
-    // Derived metrics card data
-    let metrics = $derived(
-        stats
-            ? [
-                  {
-                      title: i18n.t.dashboard.totalQuota,
-                      value: `$ ${(Number(stats.usedQuota) / 1000).toFixed(2)}`,
-                      change:
-                          i18n.lang === "zh"
-                              ? "历史总计消耗"
-                              : "Total historical consumption",
-                      icon: DollarSign,
-                      trend: "neutral",
-                  },
-                  {
-                      title: i18n.t.dashboard.todayTraffic,
-                      value: `$ ${(Number(stats.todayQuota) / 1000).toFixed(4)}`,
-                      change:
-                          i18n.lang === "zh"
-                              ? "今日累计下发"
-                              : "Today's total usage",
-                      icon: Activity,
-                      trend: "up",
-                  },
-                  {
-                      title: i18n.t.dashboard.totalUsers,
-                      value: stats.totalUsers.toString(),
-                      change:
-                          i18n.lang === "zh" ? "活跃账户数" : "Active accounts",
-                      icon: Users,
-                      trend: "up",
-                  },
-                  {
-                      title: i18n.t.dashboard.activeChannels,
-                      value: stats.activeChannels.toString(),
-                      change:
-                          i18n.lang === "zh"
-                              ? "负载均衡节点"
-                              : "Load balancing nodes",
-                      icon: CreditCard,
-                      trend: "up",
-                  },
-              ]
-            : [],
-    );
+<script module>
+    import { Target } from "lucide-svelte";
 </script>
 
-<div class="flex-1 space-y-8">
-    <div class="flex items-center justify-between space-y-2">
-        <h2
-            class="text-3xl font-bold tracking-tight text-slate-900 dark:text-white"
-        >
-            {i18n.t.dashboard.title}
-        </h2>
-        <div class="flex items-center space-x-2">
-            <button
-                class="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-indigo-500 disabled:pointer-events-none disabled:opacity-50 bg-slate-900 text-slate-50 hover:bg-slate-900/90 dark:bg-slate-50 dark:text-slate-900 dark:hover:bg-slate-50/90 h-9 px-4 py-2 shadow"
+<script lang="ts">
+    import {
+        Activity,
+        DollarSign,
+        RefreshCw,
+        Calendar,
+        Server,
+        Zap,
+        MousePointerClick,
+        TrendingUp,
+    } from "lucide-svelte";
+    import { apiFetch } from "$lib/api";
+    import { i18n } from "$lib/i18n/index.svelte";
+    import { onMount, onDestroy } from "svelte";
+
+    // New types for the redesigned stats
+    interface OverviewStats {
+        total_requests: number;
+        total_cost: number;
+        total_prompt_tokens: number;
+        total_completion_tokens: number;
+        cached_tokens: number;
+    }
+
+    interface ModelStat {
+        model_name: string;
+        requests: number;
+        tokens: number;
+        cost: number;
+        success_rate: number;
+        cost_percentage: number;
+    }
+
+    // State
+    let activePeriod = $state("today");
+    let isAutoRefresh = $state(true);
+    let isLoading = $state(true);
+    let lastRefresh = $state(new Date());
+
+    let overview = $state<OverviewStats>({
+        total_requests: 0,
+        total_cost: 0,
+        total_prompt_tokens: 0,
+        total_completion_tokens: 0,
+        cached_tokens: 0,
+    });
+    let modelsUser = $state<ModelStat[]>([]);
+    let modelsChannel = $state<ModelStat[]>([]);
+
+    let refreshInterval: ReturnType<typeof setInterval>;
+
+    const periods = [
+        { id: "today", label: "今天", labelEn: "Today" },
+        { id: "yesterday", label: "昨天", labelEn: "Yesterday" },
+        { id: "7d", label: "近7天", labelEn: "7 Days" },
+        { id: "30d", label: "近30天", labelEn: "30 Days" },
+    ];
+
+    async function fetchStats() {
+        isLoading = true;
+        try {
+            const data = await apiFetch<any>(
+                `/admin/dashboard/period_stats?period=${activePeriod}`,
+            );
+            if (data) {
+                overview = data.overview || overview;
+                modelsUser = data.models_user || [];
+                modelsChannel = data.models_channel || [];
+                lastRefresh = new Date();
+            }
+        } catch (e: any) {
+            console.error("[Dashboard] Load Failed", e.message);
+        } finally {
+            isLoading = false;
+        }
+    }
+
+    function setupAutoRefresh() {
+        if (refreshInterval) clearInterval(refreshInterval);
+        if (isAutoRefresh) {
+            refreshInterval = setInterval(fetchStats, 30000); // 30s
+        }
+    }
+
+    // Reactively re-fetch when period changes
+    $effect(() => {
+        fetchStats();
+    });
+
+    onMount(() => {
+        setupAutoRefresh();
+    });
+
+    onDestroy(() => {
+        if (refreshInterval) clearInterval(refreshInterval);
+    });
+
+    function formatNumber(num: number) {
+        return new Intl.NumberFormat("en-US").format(num);
+    }
+
+    function formatTokens(tokens: number) {
+        if (tokens >= 1000000) return (tokens / 1000000).toFixed(2) + "M";
+        if (tokens >= 1000) return (tokens / 1000).toFixed(2) + "k";
+        return formatNumber(tokens);
+    }
+</script>
+
+<div class="flex-1 space-y-6 max-w-[1400px] mx-auto w-full">
+    <!-- Header with Filters -->
+    <div
+        class="flex flex-col xl:flex-row xl:items-center justify-between gap-4 bg-white/60 dark:bg-slate-900/60 p-4 rounded-2xl border border-slate-200/60 dark:border-slate-800/60 backdrop-blur-xl"
+    >
+        <div class="flex items-center gap-3">
+            <div
+                class="bg-indigo-100 dark:bg-indigo-500/20 p-2 rounded-xl text-indigo-600 dark:text-indigo-400"
             >
-                {i18n.lang === "zh" ? "下载报告" : "Download Report"}
+                <Activity class="w-6 h-6" />
+            </div>
+            <div>
+                <h2
+                    class="text-xl font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-2"
+                >
+                    {i18n.lang === "zh" ? "密钥统计" : "Key Statistics"}
+                </h2>
+                <div
+                    class="flex items-center gap-2 text-xs text-slate-500 mt-0.5"
+                >
+                    <span class="flex items-center gap-1">
+                        <span
+                            class="w-2 h-2 rounded-full {isAutoRefresh
+                                ? 'bg-emerald-500 animate-pulse'
+                                : 'bg-slate-300 dark:bg-slate-600'}"
+                        ></span>
+                        {i18n.lang === "zh"
+                            ? "每30秒自动刷新"
+                            : "Auto-refresh every 30s"}
+                    </span>
+                    <span class="text-slate-300 dark:text-slate-600">|</span>
+                    <span>{lastRefresh.toLocaleTimeString()}</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-3">
+            <!-- Period Selector -->
+            <div
+                class="flex bg-slate-100/50 dark:bg-slate-800/50 p-1 rounded-xl border border-slate-200/50 dark:border-slate-700/50"
+            >
+                {#each periods as p}
+                    <button
+                        onclick={() => (activePeriod = p.id)}
+                        class="px-4 py-1.5 text-sm font-medium rounded-lg transition-all {activePeriod ===
+                        p.id
+                            ? 'bg-white dark:bg-slate-700 text-orange-500 dark:text-orange-400 shadow-sm border border-slate-200/50 dark:border-slate-600/50'
+                            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-700/50'}"
+                    >
+                        {i18n.lang === "zh" ? p.label : p.labelEn}
+                    </button>
+                {/each}
+            </div>
+
+            <!-- Custom Date Range (Visual Placeholder) -->
+            <button
+                class="flex items-center gap-2 px-4 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/80 transition-all"
+            >
+                <Calendar class="w-4 h-4 text-slate-400" />
+                {new Date().toISOString().split("T")[0]}
+            </button>
+
+            <!-- Manual Refresh -->
+            <button
+                onclick={fetchStats}
+                class="p-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/80 transition-all group"
+            >
+                <RefreshCw
+                    class="w-4 h-4 {isLoading
+                        ? 'animate-spin'
+                        : 'group-hover:rotate-180 transition-transform duration-500'}"
+                />
             </button>
         </div>
     </div>
 
-    <!-- Overview Cards -->
-    {#if isLoading}
-        <div class="flex justify-center items-center py-12">
-            <div
-                class="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"
-            ></div>
-        </div>
-    {:else}
-        <!-- Real-time Status Bar -->
-        <div class="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
-            <div
-                class="col-span-full bg-indigo-50/50 dark:bg-indigo-500/5 border border-indigo-100 dark:border-indigo-500/20 rounded-2xl p-6 flex flex-col sm:flex-row items-center justify-between gap-4 backdrop-blur-sm"
-            >
-                <div class="flex items-center gap-4">
-                    <div class="relative">
-                        <div
-                            class="w-3 h-3 rounded-full bg-emerald-500 animate-pulse"
-                        ></div>
-                        <div
-                            class="absolute inset-0 w-3 h-3 rounded-full bg-emerald-500 blur-[2px] opacity-50"
-                        ></div>
-                    </div>
-                    <div>
-                        <span
-                            class="text-sm font-semibold text-slate-800 dark:text-slate-100"
-                        >
-                            {i18n.lang === "zh"
-                                ? "系统实时监控"
-                                : "System Real-time Monitor"}
-                        </span>
-                        <p
-                            class="text-[10px] text-slate-500 uppercase tracking-widest mt-0.5"
-                        >
-                            Status: Online & Healthy
-                        </p>
-                    </div>
-                </div>
-                <div class="flex items-center gap-12 self-end sm:self-center">
-                    <div class="flex flex-col items-center sm:items-end">
-                        <span
-                            class="text-[10px] font-bold text-slate-400/80 uppercase tracking-tighter mb-1"
-                        >
-                            {i18n.lang === "zh" ? "请求 / 分钟" : "RPM"}
-                        </span>
-                        <div class="flex items-baseline gap-1">
-                            <span
-                                class="text-3xl font-black text-indigo-600 dark:text-indigo-400 tabular-nums"
-                            >
-                                {realtime.rpm}
-                            </span>
-                        </div>
-                    </div>
-                    <div class="flex flex-col items-center sm:items-end">
-                        <span
-                            class="text-[10px] font-bold text-slate-400/80 uppercase tracking-tighter mb-1"
-                        >
-                            {i18n.lang === "zh" ? "令牌 / 分钟" : "TPM"}
-                        </span>
-                        <div class="flex items-baseline gap-1">
-                            <span
-                                class="text-3xl font-black text-indigo-600 dark:text-indigo-400 tabular-nums"
-                            >
-                                {(realtime.tpm / 1000).toFixed(1)}
-                            </span>
-                            <span
-                                class="text-xs font-bold text-indigo-600/50 dark:text-indigo-400/50"
-                                >k</span
-                            >
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
-            {#each metrics as item}
-                {@const Icon = item.icon}
-                <div
-                    class="rounded-xl border border-slate-200 bg-white/50 text-slate-950 shadow-sm backdrop-blur-md dark:border-slate-800 dark:bg-slate-950/50 dark:text-slate-50 transition-all hover:shadow-md"
-                >
-                    <div
-                        class="p-6 flex flex-row items-center justify-between space-y-0 pb-2"
-                    >
-                        <h3
-                            class="tracking-tight text-sm font-medium text-slate-500 dark:text-slate-400"
-                        >
-                            {item.title}
-                        </h3>
-                        <Icon
-                            class="h-4 w-4 text-slate-400 dark:text-slate-500"
-                        />
-                    </div>
-                    <div class="p-6 pt-0">
-                        <div class="text-2xl font-bold">{item.value}</div>
-                        <p
-                            class="text-xs text-slate-500 dark:text-slate-400 mt-1"
-                        >
-                            <span
-                                class={item.trend === "up"
-                                    ? "text-emerald-500 font-medium"
-                                    : ""}
-                            >
-                                {item.change}
-                            </span>
-                        </p>
-                    </div>
-                </div>
-            {/each}
-        </div>
-    {/if}
-
-    <!-- Chart & Monitor Placeholder -->
-    <div class="grid gap-6 md:grid-cols-2 lg:grid-cols-7">
+    <!-- 4 Overview Cards -->
+    <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <!-- 1. Total Requests -->
         <div
-            class="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950 col-span-4 transition-all"
+            class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm"
         >
-            <div class="p-6 pb-2">
-                <h3 class="font-semibold leading-none tracking-tight">
-                    {i18n.lang === "zh"
-                        ? "消耗趋势 (Quota Usage)"
-                        : "Quota Usage Trend"}
+            <h3
+                class="text-sm font-medium text-slate-500 dark:text-slate-400 mb-2"
+            >
+                {i18n.lang === "zh" ? "总请求数" : "Total Requests"}
+            </h3>
+            <div
+                class="text-3xl font-bold text-slate-900 dark:text-white tabular-nums tracking-tight"
+            >
+                {formatNumber(overview.total_requests)}
+            </div>
+        </div>
+
+        <!-- 2. Total Cost -->
+        <div
+            class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm"
+        >
+            <h3
+                class="text-sm font-medium text-slate-500 dark:text-slate-400 mb-2"
+            >
+                {i18n.lang === "zh" ? "总费用" : "Total Cost"}
+            </h3>
+            <div
+                class="text-3xl font-bold text-slate-900 dark:text-white tabular-nums tracking-tight"
+            >
+                ${(overview.total_cost / 1000).toFixed(2)}
+            </div>
+        </div>
+
+        <!-- 3. Total Tokens -->
+        <div
+            class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm flex flex-col justify-between gap-4"
+        >
+            <div>
+                <h3
+                    class="text-sm font-medium text-slate-500 dark:text-slate-400 mb-2"
+                >
+                    {i18n.lang === "zh" ? "总Token数" : "Total Tokens"}
                 </h3>
+                <div
+                    class="text-3xl font-bold text-slate-900 dark:text-white tabular-nums tracking-tight"
+                >
+                    {formatTokens(
+                        Number(overview.total_prompt_tokens) +
+                            Number(overview.total_completion_tokens),
+                    )}
+                </div>
             </div>
             <div
-                class="p-6 pt-4 h-[350px] flex items-center justify-center text-slate-500 border-t border-slate-100 dark:border-slate-800 mt-4"
+                class="flex justify-between items-center text-xs border-t border-slate-100 dark:border-slate-800 pt-3 mt-auto"
             >
-                {#if isLoading}
-                    <div class="flex flex-col items-center gap-2">
-                        <div
-                            class="animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-600"
-                        ></div>
-                        <span>{i18n.t.common.loading}</span>
-                    </div>
-                {:else if trend.length === 0}
-                    <div
-                        class="flex flex-col items-center gap-2 text-slate-400"
-                    >
-                        <Activity class="h-8 w-8 opacity-20" />
+                <div class="flex flex-col gap-1">
+                    <span class="text-slate-400"
+                        >{i18n.lang === "zh" ? "输入:" : "Prompt:"}
                         <span
-                            >{i18n.lang === "zh"
-                                ? "暂无消耗数据"
-                                : "No usage data available"}</span
-                        >
-                    </div>
-                {:else}
-                    <div
-                        class="w-full h-full flex items-end justify-between px-2 pb-4 gap-1"
+                            class="text-slate-600 dark:text-slate-300 font-medium tabular-nums ml-1"
+                            >{formatTokens(overview.total_prompt_tokens)}</span
+                        ></span
                     >
-                        {#each trend as day}
-                            <div
-                                class="bg-indigo-500/20 hover:bg-indigo-500/40 transition-all rounded-t-sm relative group flex-1"
-                                style="height: {Math.max(
-                                    10,
-                                    Math.min(
-                                        100,
-                                        (Number(day.prompt_tokens) +
-                                            Number(day.completion_tokens)) /
-                                            10000,
-                                    ),
-                                )}%"
-                            >
-                                <div
-                                    class="opacity-0 group-hover:opacity-100 absolute -top-12 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-[10px] py-1 px-2 rounded whitespace-nowrap z-10 pointer-events-none transition-opacity shadow-lg"
+                    <span class="text-slate-400"
+                        >{i18n.lang === "zh" ? "输出:" : "Completion:"}
+                        <span
+                            class="text-slate-600 dark:text-slate-300 font-medium tabular-nums ml-1"
+                            >{formatTokens(
+                                overview.total_completion_tokens,
+                            )}</span
+                        ></span
+                    >
+                </div>
+            </div>
+        </div>
+
+        <!-- 4. Cached Tokens -->
+        <div
+            class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm flex flex-col justify-between gap-4"
+        >
+            <div>
+                <h3
+                    class="text-sm font-medium text-slate-500 dark:text-slate-400 mb-2"
+                >
+                    {i18n.lang === "zh" ? "缓存Token" : "Cached Tokens"}
+                </h3>
+                <div
+                    class="text-3xl font-bold text-slate-900 dark:text-white tabular-nums tracking-tight"
+                >
+                    {formatTokens(overview.cached_tokens)}
+                </div>
+            </div>
+            <div
+                class="flex justify-between items-center text-xs border-t border-slate-100 dark:border-slate-800 pt-3 mt-auto"
+            >
+                <div class="flex flex-col gap-1">
+                    <span class="text-slate-400"
+                        >{i18n.lang === "zh" ? "写入:" : "Write:"}
+                        <span
+                            class="text-slate-600 dark:text-slate-300 font-medium tabular-nums ml-1"
+                            >0</span
+                        ></span
+                    >
+                    <span class="text-slate-400"
+                        >{i18n.lang === "zh" ? "读取:" : "Read:"}
+                        <span
+                            class="text-slate-600 dark:text-slate-300 font-medium tabular-nums ml-1"
+                            >{formatTokens(overview.cached_tokens)}</span
+                        ></span
+                    >
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Granular Model Breakdown (Dual Layout) -->
+    <div
+        class="bg-white/60 dark:bg-slate-900/60 rounded-2xl border border-slate-200/60 dark:border-slate-800/60 shadow-sm backdrop-blur-xl overflow-hidden mt-8"
+    >
+        <div
+            class="p-4 border-b border-slate-200/60 dark:border-slate-800/60 font-semibold text-slate-800 dark:text-slate-100"
+        >
+            {i18n.lang === "zh" ? "按模型" : "By Model"}
+        </div>
+
+        <div
+            class="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-slate-200/60 dark:divide-slate-800/60 min-h-[500px]"
+        >
+            <!-- Left Column: Channel / Key -->
+            <div class="p-0">
+                <div
+                    class="p-4 bg-slate-50/50 dark:bg-slate-800/30 font-medium text-sm text-slate-500 dark:text-slate-400 sticky top-0 border-b border-slate-100 dark:border-slate-800/50"
+                >
+                    {i18n.lang === "zh" ? "密钥 (渠道)" : "Keys (Channels)"}
+                </div>
+                <div class="divide-y divide-slate-100 dark:divide-slate-800">
+                    {#each modelsChannel as model}
+                        <div
+                            class="p-4 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors flex justify-between items-center group"
+                        >
+                            <div class="space-y-1">
+                                <h4
+                                    class="font-bold text-slate-900 dark:text-slate-100 text-sm"
                                 >
-                                    {day.label}: {(
-                                        (Number(day.prompt_tokens) +
-                                            Number(day.completion_tokens)) /
-                                        1000
-                                    ).toFixed(1)}k tokens
+                                    {model.model_name}
+                                </h4>
+                                <div
+                                    class="flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400 font-medium tabular-nums"
+                                >
+                                    <span
+                                        class="flex items-center gap-1"
+                                        title="Requests"
+                                    >
+                                        <TrendingUp
+                                            class="w-3.5 h-3.5 text-slate-400"
+                                        />
+                                        {formatNumber(model.requests)}
+                                    </span>
+                                    <span
+                                        class="flex items-center gap-1 text-slate-400"
+                                        title="Tokens"
+                                    >
+                                        # {formatTokens(model.tokens)}
+                                    </span>
+                                    <span
+                                        class="flex items-center gap-1 font-semibold {model.success_rate >=
+                                        90
+                                            ? 'text-emerald-500'
+                                            : model.success_rate >= 70
+                                              ? 'text-amber-500'
+                                              : 'text-rose-500'}"
+                                    >
+                                        <Target class="w-3 h-3" />
+                                        {model.success_rate}%
+                                    </span>
                                 </div>
                             </div>
-                        {/each}
-                    </div>
-                {/if}
-            </div>
-        </div>
-
-        <div
-            class="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950 col-span-3 transition-all"
-        >
-            <div class="p-6 pb-2">
-                <h3 class="font-semibold leading-none tracking-tight">
-                    {i18n.lang === "zh" ? "异常监控" : "Anomaly Monitor"}
-                </h3>
-                <p class="text-sm text-slate-500 mt-1">
-                    {i18n.lang === "zh"
-                        ? "最近 24 小时出现的高频错误拦截"
-                        : "High-frequency errors blocked in last 24h"}
-                </p>
-            </div>
-            {#if errorLogs.length === 0}
-                <div class="flex items-center justify-center py-8">
-                    <p class="text-sm text-slate-400">
-                        {i18n.lang === "zh"
-                            ? "最近 24 小时未检测到异常"
-                            : "No anomalies detected in last 24h"}
-                    </p>
-                </div>
-            {:else}
-                <div class="space-y-4">
-                    {#each errorLogs as item}
-                        <div class="flex items-center">
-                            <div class="ml-4 space-y-1">
-                                <p
-                                    class="text-sm font-medium leading-none text-rose-500"
+                            <div class="text-right">
+                                <div
+                                    class="font-bold text-slate-900 dark:text-slate-100 text-sm tabular-nums"
                                 >
-                                    {item.title || "Unknown Error"}
-                                </p>
-                                <p class="text-sm text-slate-500">
-                                    IP: {item.ip || "Unknown"}
-                                </p>
-                            </div>
-                            <div
-                                class="ml-auto font-medium text-sm text-slate-500"
-                            >
-                                + {item.count}
-                                {i18n.lang === "zh" ? "拦截" : "Blocked"}
+                                    ${(model.cost / 1000).toFixed(2)}
+                                </div>
+                                <div
+                                    class="text-xs font-semibold text-slate-400 tabular-nums"
+                                >
+                                    ({model.cost_percentage}%)
+                                </div>
                             </div>
                         </div>
+                    {:else}
+                        {#if !isLoading}
+                            <div class="p-8 text-center text-sm text-slate-500">
+                                {i18n.lang === "zh" ? "暂无数据" : "No Data"}
+                            </div>
+                        {/if}
                     {/each}
                 </div>
-            {/if}
+            </div>
+
+            <!-- Right Column: User -->
+            <div class="p-0">
+                <div
+                    class="p-4 bg-slate-50/50 dark:bg-slate-800/30 font-medium text-sm text-slate-500 dark:text-slate-400 sticky top-0 border-b border-slate-100 dark:border-slate-800/50"
+                >
+                    {i18n.lang === "zh" ? "用户" : "Users"}
+                </div>
+                <div class="divide-y divide-slate-100 dark:divide-slate-800">
+                    {#each modelsUser as model}
+                        <div
+                            class="p-4 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors flex justify-between items-center group"
+                        >
+                            <div class="space-y-1">
+                                <h4
+                                    class="font-bold text-slate-900 dark:text-slate-100 text-sm"
+                                >
+                                    {model.model_name}
+                                </h4>
+                                <div
+                                    class="flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400 font-medium tabular-nums"
+                                >
+                                    <span
+                                        class="flex items-center gap-1"
+                                        title="Requests"
+                                    >
+                                        <Activity
+                                            class="w-3.5 h-3.5 text-slate-400"
+                                        />
+                                        {formatNumber(model.requests)}
+                                    </span>
+                                    <span
+                                        class="flex items-center gap-1 text-slate-400"
+                                        title="Tokens"
+                                    >
+                                        # {formatTokens(model.tokens)}
+                                    </span>
+                                    <span
+                                        class="flex items-center gap-1 font-semibold {model.success_rate >=
+                                        90
+                                            ? 'text-emerald-500'
+                                            : model.success_rate >= 70
+                                              ? 'text-amber-500'
+                                              : 'text-rose-500'}"
+                                    >
+                                        <Target class="w-3 h-3" />
+                                        {model.success_rate}%
+                                    </span>
+                                </div>
+                            </div>
+                            <div class="text-right">
+                                <div
+                                    class="font-bold text-slate-900 dark:text-slate-100 text-sm tabular-nums"
+                                >
+                                    ${(model.cost / 1000).toFixed(2)}
+                                </div>
+                                <div
+                                    class="text-xs font-semibold text-slate-400 tabular-nums"
+                                >
+                                    ({model.cost_percentage}%)
+                                </div>
+                            </div>
+                        </div>
+                    {:else}
+                        {#if !isLoading}
+                            <div class="p-8 text-center text-sm text-slate-500">
+                                {i18n.lang === "zh" ? "暂无数据" : "No Data"}
+                            </div>
+                        {/if}
+                    {/each}
+                </div>
+            </div>
         </div>
     </div>
 </div>

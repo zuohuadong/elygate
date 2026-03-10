@@ -135,7 +135,7 @@ export const adminRouter = new Elysia()
         try {
             const channels = body as any[];
             const results = [];
-            
+
             for (const ch of channels) {
                 try {
                     const encryptedKey = encryptChannelKeys(ch.key);
@@ -149,14 +149,14 @@ export const adminRouter = new Elysia()
                     results.push({ success: false, name: ch.name, error: e.message });
                 }
             }
-            
+
             await memoryCache.refresh();
-            return { 
-                success: true, 
+            return {
+                success: true,
                 total: channels.length,
                 imported: results.filter((r: any) => r.success).length,
                 failed: results.filter((r: any) => !r.success).length,
-                results 
+                results
             };
         } catch (e: any) {
             set.status = 500;
@@ -827,6 +827,95 @@ export const adminRouter = new Elysia()
             ORDER BY 1 ASC
         `;
         return stats;
+    })
+
+    .get('/dashboard/period_stats', async ({ query }) => {
+        const { period } = query as any;
+        let startDate = new Date();
+        startDate.setHours(0, 0, 0, 0); // Default to today
+
+        const now = new Date();
+        switch (period) {
+            case 'yesterday':
+                startDate.setDate(startDate.getDate() - 1);
+                // Yesterday ends at start of today
+                break;
+            case '7d':
+                startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+                break;
+            case '30d':
+                startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+                break;
+            case 'today':
+            default:
+                break;
+        }
+
+        const condition = period === 'yesterday'
+            ? sql`created_at >= ${startDate} AND created_at < ${new Date(new Date().setHours(0, 0, 0, 0))}`
+            : sql`created_at >= ${startDate}`;
+
+        // 1. Overall Aggregation
+        const [overview] = await sql`
+            SELECT 
+                COUNT(*)::int as total_requests,
+                COALESCE(SUM(quota_cost), 0)::bigint as total_cost,
+                COALESCE(SUM(prompt_tokens), 0)::bigint as total_prompt_tokens,
+                COALESCE(SUM(completion_tokens), 0)::bigint as total_completion_tokens
+            FROM logs
+            WHERE ${condition}
+        `;
+
+        // 2. Models by User (Consumer metrics)
+        const models_user = await sql`
+            SELECT 
+                model_name,
+                COUNT(*)::int as requests,
+                COALESCE(SUM(prompt_tokens + completion_tokens), 0)::bigint as tokens,
+                COALESCE(SUM(quota_cost), 0)::bigint as cost,
+                ROUND((COUNT(CASE WHEN status_code < 400 THEN 1 END)::numeric / NULLIF(COUNT(*), 0)) * 100, 1)::float as success_rate
+            FROM logs
+            WHERE ${condition}
+            GROUP BY model_name
+            ORDER BY cost DESC
+            LIMIT 20
+        `;
+
+        // Calculate cost percentage for users
+        const totalUserCost = Number(overview.total_cost || 1); // Avoid division by zero
+        models_user.forEach(m => {
+            m.cost_percentage = Number(((Number(m.cost) / totalUserCost) * 100).toFixed(1));
+        });
+
+        // 3. Models by Key (Channel metrics)
+        const models_channel = await sql`
+            SELECT 
+                model_name,
+                COUNT(*)::int as requests,
+                COALESCE(SUM(prompt_tokens + completion_tokens), 0)::bigint as tokens,
+                COALESCE(SUM(quota_cost), 0)::bigint as cost,
+                ROUND((COUNT(CASE WHEN status_code < 400 THEN 1 END)::numeric / NULLIF(COUNT(*), 0)) * 100, 1)::float as success_rate
+            FROM logs
+            WHERE ${condition} AND channel_id IS NOT NULL
+            GROUP BY model_name
+            ORDER BY cost DESC
+            LIMIT 20
+        `;
+
+        // Calculate cost percentage for channels
+        const totalChannelCost = models_channel.reduce((sum, m) => sum + Number(m.cost), 0) || 1;
+        models_channel.forEach(m => {
+            m.cost_percentage = Number(((Number(m.cost) / totalChannelCost) * 100).toFixed(1));
+        });
+
+        return {
+            overview: {
+                ...overview,
+                cached_tokens: 0 // Placeholder for future feature
+            },
+            models_user,
+            models_channel
+        };
     })
 
     // --- Models List ---
