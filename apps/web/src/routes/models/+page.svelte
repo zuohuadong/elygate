@@ -238,8 +238,10 @@
         const role = localStorage.getItem("admin_role");
         isAdmin = role ? parseInt(role, 10) >= 10 : false;
         loadModels();
+    });
 
-        // Setup Intersection Observer for lazy loading
+    // Svelte Action for lazy loading
+    function lazyLoad(node: HTMLElement) {
         const observer = new IntersectionObserver(
             (entries) => {
                 if (
@@ -251,12 +253,13 @@
             },
             { threshold: 0.1 },
         );
-
-        const loader = document.getElementById("scroll-loader");
-        if (loader) observer.observe(loader);
-
-        return () => observer.disconnect();
-    });
+        observer.observe(node);
+        return {
+            destroy() {
+                observer.disconnect();
+            },
+        };
+    }
 </script>
 
 <svelte:head>
@@ -702,7 +705,7 @@
             <!-- Scroll Loader Trigger -->
             {#if displayLimit < filteredModels.length}
                 <div
-                    id="scroll-loader"
+                    use:lazyLoad
                     class="col-span-1 md:col-span-2 lg:col-span-3 xl:col-span-4 py-12 flex justify-center"
                 >
                     <div class="flex items-center gap-3 text-slate-400">
