@@ -1,5 +1,5 @@
 import { Elysia } from 'elysia';
-import { authPlugin, assertModelAccess } from '../middleware/auth';
+import { assertModelAccess } from '../middleware/auth';
 import { UnifiedDispatcher } from '../services/dispatcher';
 
 /**
@@ -32,7 +32,6 @@ async function handleAudioRequest(endpoint: string, { body, request, token, user
 }
 
 export const audioRouter = new Elysia()
-    .use(authPlugin)
     .post('/audio/speech', (ctx) => handleAudioRequest('/v1/audio/speech', ctx))
     .post('/audio/transcriptions', (ctx) => handleAudioRequest('/v1/audio/transcriptions', ctx))
     .post('/audio/translations', (ctx) => handleAudioRequest('/v1/audio/translations', ctx));

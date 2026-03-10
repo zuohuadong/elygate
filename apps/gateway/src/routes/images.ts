@@ -1,9 +1,8 @@
 import { Elysia } from 'elysia';
-import { authPlugin, assertModelAccess } from '../middleware/auth';
+import { assertModelAccess } from '../middleware/auth';
 import { UnifiedDispatcher } from '../services/dispatcher';
 
 export const imagesRouter = new Elysia()
-    .use(authPlugin)
     .post('/images/generations', async ({ body, token, user, set }: any) => {
         const { model, prompt } = body as Record<string, any>;
 

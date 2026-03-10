@@ -1,17 +1,17 @@
 import { Elysia } from 'elysia';
 import { sql } from '@elygate/db';
-import { authPlugin, assertModelAccess } from '../middleware/auth';
+import { assertModelAccess } from '../middleware/auth';
 import { memoryCache } from '../services/cache';
 import { circuitBreaker } from '../services/circuitBreaker';
 import { billAndLog, preCheckAndDecrement, reconcileQuota } from '../services/billing';
 import { calculateCost } from '../services/ratio';
 import { lookupSemanticCache, storeSemanticCache } from '../services/semanticCache';
 import { ChannelType, getProviderHandler } from '../providers';
+import { decryptChannelKeys } from '../services/encryption';
 import { type TokenRecord, type UserRecord, type ChannelConfig } from '../types';
 
 export const chatRouter = new Elysia()
-    .use(authPlugin)
-    .post('/completions', async ({ body, token, user, request, set }: any) => {
+    .post('/chat/completions', async ({ body, token, user, request, set }: any) => {
         const u = user as UserRecord;
         const t = token as TokenRecord;
         // 1. Extract key information from request body
@@ -62,7 +62,8 @@ export const chatRouter = new Elysia()
             const handler = getProviderHandler(channelConfig.type);
 
             // Multi-key support: keys are separated by \n, pick one randomly
-            const keys = channelConfig.key.split('\n').map((k: string) => k.trim()).filter(Boolean);
+            const decryptedKeys = decryptChannelKeys(channelConfig.key);
+            const keys = decryptedKeys.split('\n').map((k: string) => k.trim()).filter(Boolean);
             const activeKey = keys[Math.floor(Math.random() * keys.length)];
 
             const fetchHeaders = handler.buildHeaders(activeKey);

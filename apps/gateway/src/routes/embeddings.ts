@@ -1,9 +1,8 @@
 import { Elysia } from 'elysia';
-import { authPlugin, assertModelAccess } from '../middleware/auth';
+import { assertModelAccess } from '../middleware/auth';
 import { UnifiedDispatcher } from '../services/dispatcher';
 
 export const embeddingsRouter = new Elysia()
-    .use(authPlugin)
     .post('/embeddings', async ({ body, token, user, set }: any) => {
         const { model, input } = body as Record<string, any>;
 
