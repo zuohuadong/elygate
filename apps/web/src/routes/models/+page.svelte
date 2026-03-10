@@ -15,6 +15,9 @@
         Zap,
         Compass,
         Filter,
+        Lightbulb,
+        Clock,
+        AlertCircle,
     } from "lucide-svelte";
     import { fade, slide, scale } from "svelte/transition";
     import { i18n } from "$lib/i18n/index.svelte";
@@ -46,6 +49,7 @@
 
     const capabilities = [
         { id: "all", label: "全部", labelEn: "All", icon: Compass },
+        { id: "thinking", label: "推理", labelEn: "Thinking", icon: Lightbulb },
         { id: "chat", label: "对话", labelEn: "Chat", icon: Brain },
         { id: "vision", label: "视觉", labelEn: "Vision", icon: Zap },
         { id: "image", label: "绘图", labelEn: "Image", icon: ImageIcon },
@@ -93,6 +97,18 @@
 
     function getCapability(modelId: string): string {
         const id = modelId.toLowerCase();
+
+        // Check for reasoning/thinking models first
+        if (
+            id.includes("thinking") ||
+            id.includes("reasoning") ||
+            id.includes("-r1") ||
+            id.startsWith("o1-") ||
+            id.startsWith("o3-")
+        ) {
+            return "thinking";
+        }
+
         if (id.includes("text-embedding") || id.includes("-embedding-"))
             return "embedding";
         if (
@@ -205,6 +221,7 @@
         online: preStatusFilteredModels.filter(
             (m) => (m.status || "online") === "online",
         ).length,
+        busy: preStatusFilteredModels.filter((m) => m.status === "busy").length,
         offline: preStatusFilteredModels.filter((m) => m.status === "offline")
             .length,
     });
@@ -426,6 +443,21 @@
                         >
                     </button>
                     <button
+                        onclick={() => (activeStatus = "busy")}
+                        class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-all {activeStatus ===
+                        'busy'
+                            ? 'bg-amber-600 text-white shadow-md shadow-amber-500/20 scale-105'
+                            : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-800 hover:border-amber-300'}"
+                    >
+                        <span
+                            class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"
+                        ></span>
+                        {i18n.lang === "zh" ? "繁忙" : "Busy"}
+                        <span class="ml-1 opacity-80 text-[10px]"
+                            >({counts.busy})</span
+                        >
+                    </button>
+                    <button
                         onclick={() => (activeStatus = "offline")}
                         class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-all {activeStatus ===
                         'offline'
@@ -495,19 +527,30 @@
             </div>
         {:else}
             {#each displayedModels as model (model.id)}
+                {@const isThinking = getCapability(model.id) === "thinking"}
                 <div
                     class="bg-white hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800/80 rounded-2xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm transition-all hover:shadow-md hover:-translate-y-1 flex flex-col group relative overflow-hidden {model.status ===
                     'offline'
                         ? 'opacity-60 grayscale-[0.5]'
+                        : ''} {isThinking
+                        ? 'ring-1 ring-indigo-500/20 dark:ring-indigo-400/20 ring-inset'
                         : ''}"
                     transition:fade={{ duration: 150 }}
                 >
+                    {#if isThinking}
+                        <div
+                            class="absolute -right-8 -top-8 w-24 h-24 bg-indigo-500/5 dark:bg-indigo-400/5 rounded-full blur-2xl group-hover:bg-indigo-500/10 transition-colors"
+                        ></div>
+                    {/if}
+
                     <!-- Status Indicator Line -->
                     <div
                         class="absolute top-0 left-0 w-full h-1 {model.status ===
                         'offline'
                             ? 'bg-slate-300 dark:bg-slate-700'
-                            : 'bg-gradient-to-r from-emerald-400 to-teal-500'}"
+                            : model.status === 'busy'
+                              ? 'bg-amber-400'
+                              : 'bg-gradient-to-r from-emerald-400 to-teal-500'}"
                     ></div>
 
                     <!-- Header -->
@@ -521,10 +564,18 @@
                             </h3>
                             {#if model.name && model.name !== model.id}
                                 <p
-                                    class="text-[10px] font-mono text-slate-400 dark:text-slate-500 truncate"
+                                    class="text-[10px] font-mono text-slate-400 dark:text-slate-500 truncate flex items-center gap-2"
                                     title={model.id}
                                 >
-                                    ID: {model.id}
+                                    <span>ID: {model.id}</span>
+                                    {#if model.latency && model.status !== "offline"}
+                                        <span
+                                            class="flex items-center gap-0.5 text-slate-400 dark:text-slate-600"
+                                        >
+                                            <Clock class="w-2.5 h-2.5" />
+                                            {model.latency}ms
+                                        </span>
+                                    {/if}
                                 </p>
                             {/if}
                         </div>
@@ -538,6 +589,16 @@
                                     ></span>
                                     {i18n.lang === "zh" ? "离线" : "Offline"}
                                 </span>
+                            {:else if model.status === "busy"}
+                                <span
+                                    class="inline-flex items-center gap-1.2 px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-50 text-amber-600 border border-amber-200 dark:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/20"
+                                    title={i18n.lang === "zh"
+                                        ? "模型响应延迟较高"
+                                        : "High response latency"}
+                                >
+                                    <AlertCircle class="w-2.5 h-2.5 mr-1" />
+                                    {i18n.lang === "zh" ? "繁忙" : "Busy"}
+                                </span>
                             {:else}
                                 <span
                                     class="inline-flex items-center gap-1.2 px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-50 text-emerald-600 border border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20"
@@ -549,14 +610,9 @@
                                 </span>
                             {/if}
                             <span
-                                class="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-medium bg-indigo-50 text-indigo-600 border border-indigo-100 dark:bg-indigo-500/10 dark:text-indigo-400 dark:border-indigo-500/20 uppercase tracking-wide"
-                            >
-                                {providers.find(
-                                    (p) => p.id === getProvider(model.id),
-                                )?.label || "Other"}
-                            </span>
-                            <span
-                                class="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-medium bg-amber-50 text-amber-600 border border-amber-100 dark:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/20 uppercase tracking-wide"
+                                class="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-medium {isThinking
+                                    ? 'bg-indigo-50 text-indigo-600 border border-indigo-100 dark:bg-indigo-500/10 dark:text-indigo-400 dark:border-indigo-500/20 ring-1 ring-indigo-500/10'
+                                    : 'bg-amber-50 text-amber-600 border border-amber-100 dark:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/20'} uppercase tracking-wide"
                             >
                                 {capabilities.find(
                                     (c) => c.id === getCapability(model.id),

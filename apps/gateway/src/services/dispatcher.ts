@@ -6,7 +6,7 @@ import { calculateCost } from './ratio';
 import { ChannelType, getProviderHandler } from '../providers';
 import { type TokenRecord, type UserRecord, type ChannelConfig } from '../types';
 import { decryptChannelKeys } from './encryption';
-import { isPackageRateLimited, waitForPackageConcurrency, packageConcurrencyMap, releasePackageConcurrency, getPackageLockId } from './ratelimit';
+import { isRateLimited, isPackageRateLimited, waitForPackageConcurrency, packageConcurrencyMap, releasePackageConcurrency, getPackageLockId } from './ratelimit';
 
 export interface DispatchOptions {
     model: string;
@@ -71,6 +71,16 @@ export class UnifiedDispatcher {
             }
             const activeKey = availableKeys[activeKeyIndex];
 
+            // 1.2 Channel-Specific Rate Limiting (e.g., NVIDIA 40 RPM limit)
+            if (channelConfig.type === ChannelType.NVIDIA) {
+                const nvidiaRpmLimit = 40;
+                const nvidiaKey = `channel_${channelConfig.id}_key_${activeKeyIndex}`;
+                if (await isRateLimited(nvidiaKey, nvidiaRpmLimit)) {
+                    console.warn(`[Dispatcher] NVIDIA Channel ${channelConfig.id} Key ${activeKeyIndex} hit global 40 RPM limit, skipping.`);
+                    continue;
+                }
+            }
+
             // 1.5 Concurrency Lock (Semaphore)
             const lockId = `${channelConfig.id}_${activeKeyIndex}`;
             if (channelConfig.keyConcurrencyLimit > 0) {
@@ -78,7 +88,7 @@ export class UnifiedDispatcher {
                 if (!acquired) {
                     console.warn(`[Dispatcher] Channel ${channelConfig.id} Key ${activeKeyIndex} concurrency maxed out (${channelConfig.keyConcurrencyLimit}), skipping after 15s wait.`);
                     // Let the loop continue to try the NEXT candidate channel in the fallback chain!
-                    continue; 
+                    continue;
                 }
             }
 
@@ -246,7 +256,7 @@ export class UnifiedDispatcher {
                         isStream: false,
                         isPackageFree
                     });
-                    
+
                     const currentActive = keyConcurrencyMap.get(lockId);
                     if (currentActive) keyConcurrencyMap.set(lockId, Math.max(0, currentActive - 1));
                     if (packageLockId) releasePackageConcurrency(packageLockId);
@@ -256,7 +266,7 @@ export class UnifiedDispatcher {
 
             } catch (e: any) {
                 // 7. Error & Refund Handling
-                
+
                 // Release lock on exception
                 const currentActive = keyConcurrencyMap.get(lockId);
                 if (currentActive) keyConcurrencyMap.set(lockId, Math.max(0, currentActive - 1));
@@ -410,11 +420,11 @@ export class UnifiedDispatcher {
                 console.error("[Stream Billing Error]", e);
                 // Refund pre-deducted quota natively on abrupt stream network drop before completion
                 await reconcileQuota({
-                    userId: user.id, 
-                    tokenId: token.id, 
-                    preDeducted, 
-                    actualCost: 0 
-                }).catch(() => {});
+                    userId: user.id,
+                    tokenId: token.id,
+                    preDeducted,
+                    actualCost: 0
+                }).catch(() => { });
             } finally {
                 // Stream ended, unconditionally release the semaphore pool lock
                 const currentActive = keyConcurrencyMap.get(lockId);

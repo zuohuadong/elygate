@@ -919,7 +919,7 @@ export const adminRouter = new Elysia()
     })
 
     // --- Models List ---
-    .get('/models', () => {
+    .get('/models', async () => {
         // Collect ALL models across all channels (both active and inactive)
         const allModelIds = new Set<string>();
         const modelToChannels = new Map<string, any[]>();
@@ -953,11 +953,44 @@ export const adminRouter = new Elysia()
             }
         }
 
+        // Fetch metrics (latency) for all models from recent health logs
+        const metrics = await sql`
+            SELECT channel_id, AVG(latency) as avg_latency
+            FROM (
+                SELECT channel_id, latency
+                FROM health_logs
+                WHERE status = 1
+                ORDER BY created_at DESC
+                LIMIT 1000
+            ) t
+            GROUP BY channel_id
+        `;
+        const channelLatencyMap = new Map<number, number>();
+        metrics.forEach((m: any) => channelLatencyMap.set(m.channel_id, Number(m.avg_latency)));
+
         return Array.from(allModelIds).map(modelId => {
             const meta = metaMap.get(modelId);
             const channels = modelToChannels.get(modelId) || [];
+
             // A model is 'online' if it has at least one channel with status 1 (Active) or 4 (Half-Open)
-            const isOnline = channels.some(ch => ch.status === 1 || ch.status === 4);
+            const activeChannels = channels.filter(ch => ch.status === 1 || ch.status === 4);
+            const isOnline = activeChannels.length > 0;
+
+            // Calculate average latency across all active channels for this model
+            let avgLatency = 0;
+            if (isOnline) {
+                const latencies = activeChannels
+                    .map(ch => channelLatencyMap.get(ch.id))
+                    .filter((l): l is number => l !== undefined && l > 0);
+                if (latencies.length > 0) {
+                    avgLatency = latencies.reduce((a, b) => a + b, 0) / latencies.length;
+                }
+            }
+
+            let status = isOnline ? 'online' : 'offline';
+            if (isOnline && avgLatency > 3000) {
+                status = 'busy';
+            }
 
             let displayName = meta?.name || modelId;
 
@@ -983,7 +1016,8 @@ export const adminRouter = new Elysia()
                 id: modelId,
                 name: displayName,
                 description: meta?.description || '',
-                status: isOnline ? 'online' : 'offline',
+                status,
+                latency: Math.round(avgLatency),
                 object: 'model'
             };
         });
