@@ -51,38 +51,55 @@ const app = new Elysia()
     return { success: false, message: error instanceof Error ? error.message : String(error) };
   })
   // Serve static files if they exist (all-in-one mode)
-  .onBeforeHandle(async ({ path }) => {
+  .onBeforeHandle(async ({ path, set }) => {
     if (path.startsWith('/api') || path.startsWith('/v1')) return;
 
+    // 1. Determine priority search paths
+    const buildPath = join(process.cwd(), 'apps/web/build');
+    const clientPath = join(buildPath, 'client');
+    const prerenderedPath = join(buildPath, 'prerendered');
+
     // Normalize path
-    const normalizedPath = path === '/' ? 'index' : path.replace(/^\//, '');
+    const normalizedPath = path === '/' ? '/index.html' : path;
+    const isAsset = path.includes('.');
 
-    // Try prerendered directory first (with .html extension)
-    let staticPath = join(process.cwd(), 'apps/web/build/prerendered', `${normalizedPath}.html`);
-    let file = Bun.file(staticPath);
-    if (await file.exists()) {
-      return file;
+    // Search order: client assets -> prerendered pages -> build root -> SPA Fallback
+    const searchPaths = [
+      join(clientPath, path),
+      join(prerenderedPath, normalizedPath.endsWith('.html') ? normalizedPath : `${normalizedPath}.html`),
+      join(prerenderedPath, normalizedPath, 'index.html'),
+      join(buildPath, normalizedPath)
+    ];
+
+    for (const fullPath of searchPaths) {
+      const file = Bun.file(fullPath);
+      if (await file.exists()) {
+        // Caching Logic
+        if (path.includes('/_app/immutable/')) {
+          set.headers['Cache-Control'] = 'public, max-age=31536000, immutable';
+        } else {
+          set.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
+        }
+
+        // MIME Type Handling (Bun usually handles this, but explicit for safety)
+        const ext = fullPath.split('.').pop();
+        if (ext === 'js') set.headers['Content-Type'] = 'application/javascript; charset=utf-8';
+        else if (ext === 'css') set.headers['Content-Type'] = 'text/css; charset=utf-8';
+        else if (ext === 'html') set.headers['Content-Type'] = 'text/html; charset=utf-8';
+        else if (ext === 'json') set.headers['Content-Type'] = 'application/json; charset=utf-8';
+
+        return file;
+      }
     }
 
-    // Try prerendered directory with index.html for directory paths
-    staticPath = join(process.cwd(), 'apps/web/build/prerendered', normalizedPath, 'index.html');
-    file = Bun.file(staticPath);
-    if (await file.exists()) {
-      return file;
-    }
-
-    // Try client directory for assets
-    staticPath = join(process.cwd(), 'apps/web/build/client', path);
-    file = Bun.file(staticPath);
-    if (await file.exists()) {
-      return file;
-    }
-
-    // Fallback to build directory
-    staticPath = join(process.cwd(), 'apps/web/build', path === '/' ? 'index.html' : path);
-    file = Bun.file(staticPath);
-    if (await file.exists()) {
-      return file;
+    // 2. SPA Fallback: If not an asset request (no dot), return index.html
+    if (!isAsset) {
+      const indexFile = Bun.file(join(buildPath, 'index.html'));
+      if (await indexFile.exists()) {
+        set.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
+        set.headers['Content-Type'] = 'text/html; charset=utf-8';
+        return indexFile;
+      }
     }
   })
   // .mount("/api/auth/better", betterAuthInstance.handler)
