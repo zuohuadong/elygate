@@ -1262,7 +1262,7 @@ export const adminRouter = new Elysia()
 
             const durationMs = Number(pkg.duration_days) * 24 * 60 * 60 * 1000;
 
-            // 检查该用户是否已有该同款尚未过期的套餐
+            // Check if the user already has an active subscription for this identical package
             const [existingSub] = await sql`
                 SELECT id, end_time 
                 FROM user_subscriptions 
@@ -1276,7 +1276,7 @@ export const adminRouter = new Elysia()
 
             let result;
             if (existingSub) {
-                // 如果存在，基于旧套餐的到期时间累加（同款套餐叠加延长有效期）
+                // If it exists, extend the expiration time based on the old package's end_time (stack identical packages)
                 const newEndTime = new Date(existingSub.end_time.getTime() + durationMs);
                 const [updated] = await sql`
                     UPDATE user_subscriptions
@@ -1286,7 +1286,7 @@ export const adminRouter = new Elysia()
                 `;
                 result = updated;
             } else {
-                // 否则创建全新的一条，从当前时间算起并行可用
+                // Otherwise create a completely new subscription, available in parallel starting from the current time
                 const newEndTime = new Date(Date.now() + durationMs);
                 const [inserted] = await sql`
                     INSERT INTO user_subscriptions (user_id, package_id, end_time, status)
