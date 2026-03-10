@@ -5,6 +5,7 @@ export interface UserRecord {
     role: number;
     quota: number;
     status: number;
+    activePackages?: any[]; // [{ models, defaultRateLimitId, modelRateLimits }]
 }
 
 export interface TokenRecord {
@@ -53,4 +54,5 @@ export interface BillingContext {
     completionTokens: number;
     userGroup: string;
     isStream: boolean;
+    isPackageFree?: boolean;
 }

@@ -1,6 +1,7 @@
 <script lang="ts">
     import DataTable from "../../components/DataTable.svelte";
     import UserModal from "../../components/UserModal.svelte";
+    import GrantPackageModal from "../../components/GrantPackageModal.svelte";
     import { Plus, Users } from "lucide-svelte";
     import { apiFetch } from "$lib/api";
     import { i18n } from "$lib/i18n/index.svelte";
@@ -12,6 +13,8 @@
 
     let isModalOpen = $state(false);
     let selectedUser = $state<any | null>(null);
+    let isGrantModalOpen = $state(false);
+    let grantSelectedUser = $state<any | null>(null);
 
     async function loadUsers() {
         isLoading = true;
@@ -69,6 +72,11 @@
     function handleEdit(user: any) {
         selectedUser = user;
         isModalOpen = true;
+    }
+
+    function handleGrantPackage(user: any) {
+        grantSelectedUser = user;
+        isGrantModalOpen = true;
     }
 
     async function handleDelete(user: any) {
@@ -157,6 +165,13 @@
             {columns}
             onEdit={handleEdit}
             onDelete={handleDelete}
+            extraActions={[
+                {
+                    label: i18n.lang === "zh" ? "派发套餐" : "Grant",
+                    class: "text-emerald-600 dark:text-emerald-400 hover:text-emerald-900 dark:hover:text-emerald-300",
+                    onClick: handleGrantPackage
+                }
+            ]}
         />
     {/if}
 </div>
@@ -166,4 +181,11 @@
     user={selectedUser}
     onClose={() => (isModalOpen = false)}
     onSave={handleSave}
+/>
+
+<GrantPackageModal
+    show={isGrantModalOpen}
+    user={grantSelectedUser}
+    onClose={() => (isGrantModalOpen = false)}
+    onSave={() => { isGrantModalOpen = false; loadUsers(); }}
 />

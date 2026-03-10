@@ -883,7 +883,7 @@ export const adminRouter = new Elysia()
 
         // Calculate cost percentage for users
         const totalUserCost = Number(overview.total_cost || 1); // Avoid division by zero
-        models_user.forEach(m => {
+        models_user.forEach((m: any) => {
             m.cost_percentage = Number(((Number(m.cost) / totalUserCost) * 100).toFixed(1));
         });
 
@@ -903,8 +903,8 @@ export const adminRouter = new Elysia()
         `;
 
         // Calculate cost percentage for channels
-        const totalChannelCost = models_channel.reduce((sum, m) => sum + Number(m.cost), 0) || 1;
-        models_channel.forEach(m => {
+        const totalChannelCost = models_channel.reduce((sum: any, m: any) => sum + Number(m.cost), 0) || 1;
+        models_channel.forEach((m: any) => {
             m.cost_percentage = Number(((Number(m.cost) / totalChannelCost) * 100).toFixed(1));
         });
 
@@ -1131,4 +1131,192 @@ export const adminRouter = new Elysia()
         }
         memoryCache.refresh().catch(console.error);
         return { success: true };
+    })
+    
+    // --- Rate Limits ---
+    .get('/rate-limits', async () => {
+        return await sql`SELECT * FROM rate_limit_rules ORDER BY id DESC`;
+    })
+    .post('/rate-limits', async ({ body, set }: any) => {
+        try {
+            const b = body as any;
+            const [result] = await sql`
+                INSERT INTO rate_limit_rules (name, rpm, rph, concurrent)
+                VALUES (${b.name}, ${b.rpm || 0}, ${b.rph || 0}, ${b.concurrent || 0})
+                RETURNING *
+            `;
+            await memoryCache.refresh();
+            return { success: true, data: result };
+        } catch (e: any) {
+            set.status = 500; return { success: false, message: e.message };
+        }
+    })
+    .put('/rate-limits/:id', async ({ params: { id }, body, set }: any) => {
+        try {
+            const b = body as any;
+            const [result] = await sql`
+                UPDATE rate_limit_rules 
+                SET name = COALESCE(${b.name}, name),
+                    rpm = COALESCE(${b.rpm}, rpm),
+                    rph = COALESCE(${b.rph}, rph),
+                    concurrent = COALESCE(${b.concurrent}, concurrent)
+                WHERE id = ${Number(id)} RETURNING *
+            `;
+            await memoryCache.refresh();
+            return { success: true, data: result };
+        } catch (e: any) {
+            set.status = 500; return { success: false, message: e.message };
+        }
+    })
+    .delete('/rate-limits/:id', async ({ params: { id }, set }: any) => {
+        try {
+            await sql`DELETE FROM rate_limit_rules WHERE id = ${Number(id)}`;
+            await memoryCache.refresh();
+            return { success: true };
+        } catch (e: any) {
+            set.status = 500; return { success: false, message: e.message };
+        }
+    })
+
+    // --- Packages ---
+    .get('/packages', async () => {
+        return await sql`
+            SELECT p.*, r.name as default_rate_limit_name 
+            FROM packages p 
+            LEFT JOIN rate_limit_rules r ON p.default_rate_limit_id = r.id 
+            ORDER BY p.id DESC
+        `;
+    })
+    .post('/packages', async ({ body, user, set }: any) => {
+        try {
+            const b = body as any;
+            const [result] = await sql`
+                INSERT INTO packages (name, description, price, duration_days, models, default_rate_limit_id, model_rate_limits, is_public, added_by)
+                VALUES (${b.name}, ${b.description || ''}, ${b.price || 0}, ${b.durationDays || 30}, ${JSON.stringify(b.models || [])}, ${b.defaultRateLimitId || null}, ${JSON.stringify(b.modelRateLimits || {})}, ${b.isPublic ?? true}, ${user.id})
+                RETURNING *
+            `;
+            return { success: true, data: result };
+        } catch (e: any) {
+            set.status = 500; return { success: false, message: e.message };
+        }
+    })
+    .put('/packages/:id', async ({ params: { id }, body, set }: any) => {
+        try {
+            const b = body as any;
+            const [result] = await sql`
+                UPDATE packages 
+                SET name = COALESCE(${b.name}, name),
+                    description = COALESCE(${b.description}, description),
+                    price = COALESCE(${b.price}, price),
+                    duration_days = COALESCE(${b.durationDays}, duration_days),
+                    models = COALESCE(${b.models ? JSON.stringify(b.models) : null}, models),
+                    default_rate_limit_id = COALESCE(${b.defaultRateLimitId}, default_rate_limit_id),
+                    model_rate_limits = COALESCE(${b.modelRateLimits ? JSON.stringify(b.modelRateLimits) : null}, model_rate_limits),
+                    is_public = COALESCE(${b.isPublic}, is_public),
+                    updated_at = NOW()
+                WHERE id = ${Number(id)} RETURNING *
+            `;
+            return { success: true, data: result };
+        } catch (e: any) {
+            set.status = 500; return { success: false, message: e.message };
+        }
+    })
+    .delete('/packages/:id', async ({ params: { id }, set }: any) => {
+        try {
+            await sql`DELETE FROM packages WHERE id = ${Number(id)}`;
+            return { success: true };
+        } catch (e: any) {
+            set.status = 500; return { success: false, message: e.message };
+        }
+    })
+
+    // --- Subscription Management ---
+    // Get all subscriptions across the platform
+    .get('/subscriptions', async () => {
+        return await sql`
+            SELECT s.*, u.username, p.name as package_name 
+            FROM user_subscriptions s
+            JOIN users u ON s.user_id = u.id
+            JOIN packages p ON s.package_id = p.id
+            ORDER BY s.id DESC LIMIT 100
+        `;
+    })
+    // Get subscriptions for a specific user
+    .get('/users/:id/subscriptions', async ({ params: { id } }: any) => {
+        return await sql`
+            SELECT s.*, p.name as package_name, p.models, p.duration_days
+            FROM user_subscriptions s
+            JOIN packages p ON s.package_id = p.id
+            WHERE s.user_id = ${Number(id)}
+            ORDER BY s.id DESC
+        `;
+    })
+    // Grant a package manually by Admin
+    .post('/users/:id/subscriptions', async ({ params: { id }, body, set }: any) => {
+        try {
+            const b = body as any;
+            const [pkg] = await sql`SELECT duration_days FROM packages WHERE id = ${b.packageId}`;
+            if (!pkg) {
+                set.status = 404; return { success: false, message: 'Package not found' };
+            }
+
+            const durationMs = Number(pkg.duration_days) * 24 * 60 * 60 * 1000;
+
+            // 检查该用户是否已有该同款尚未过期的套餐
+            const [existingSub] = await sql`
+                SELECT id, end_time 
+                FROM user_subscriptions 
+                WHERE user_id = ${Number(id)} 
+                AND package_id = ${b.packageId}
+                AND status = 1
+                AND end_time > NOW()
+                ORDER BY end_time DESC
+                LIMIT 1
+            `;
+
+            let result;
+            if (existingSub) {
+                // 如果存在，基于旧套餐的到期时间累加（同款套餐叠加延长有效期）
+                const newEndTime = new Date(existingSub.end_time.getTime() + durationMs);
+                const [updated] = await sql`
+                    UPDATE user_subscriptions
+                    SET end_time = ${newEndTime}, updated_at = NOW()
+                    WHERE id = ${existingSub.id}
+                    RETURNING *
+                `;
+                result = updated;
+            } else {
+                // 否则创建全新的一条，从当前时间算起并行可用
+                const newEndTime = new Date(Date.now() + durationMs);
+                const [inserted] = await sql`
+                    INSERT INTO user_subscriptions (user_id, package_id, end_time, status)
+                    VALUES (${Number(id)}, ${b.packageId}, ${newEndTime}, 1)
+                    RETURNING *
+                `;
+                result = inserted;
+            }
+
+            // Trigger Postgres auth_update notification to flush gateway's LRU auth cache instantly
+            await sql`NOTIFY auth_update, ${String(id)}`;
+
+            return { success: true, data: result };
+        } catch (e: any) {
+            set.status = 500; return { success: false, message: e.message };
+        }
+    })
+    .put('/subscriptions/:id', async ({ params: { id }, body, set }: any) => {
+        try {
+            // allows changing status (e.g. disable a subscription)
+            const [result] = await sql`
+                UPDATE user_subscriptions 
+                SET status = COALESCE(${body.status}, status), updated_at = NOW() 
+                WHERE id = ${Number(id)} RETURNING *
+            `;
+            if (result) {
+                await sql`NOTIFY auth_update, ${String(result.user_id)}`;
+            }
+            return { success: true, data: result };
+        } catch (e: any) {
+            set.status = 500; return { success: false, message: e.message };
+        }
     });

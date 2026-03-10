@@ -148,13 +148,31 @@ export const authPlugin = new Elysia({ name: 'auth' })
             throw new Error('User account is disabled');
         }
 
+        // Check active subscriptions
+        const subs = await sql`
+            SELECT p.models, p.default_rate_limit_id, p.model_rate_limits
+            FROM user_subscriptions us
+            JOIN packages p ON us.package_id = p.id
+            WHERE us.user_id = ${userRecord.id}
+              AND us.status = 1
+              AND us.start_time <= NOW()
+              AND us.end_time > NOW()
+        `;
+        
+        userRecord.activePackages = subs.map((s: any) => ({
+            models: Array.isArray(s.models) ? s.models : (typeof s.models === 'string' ? JSON.parse(s.models || '[]') : []),
+            defaultRateLimitId: s.default_rate_limit_id,
+            modelRateLimits: typeof s.model_rate_limits === 'string' ? JSON.parse(s.model_rate_limits || '{}') : (s.model_rate_limits || {})
+        }));
+
         if (tokenRecord.expiredAt && tokenRecord.expiredAt < new Date()) {
             set.status = 403;
             throw new Error('API key has expired');
         }
 
         // Pre-check quota to prevent overdraft and spamming
-        if (userRecord.quota <= 0) {
+        const hasActivePackages = userRecord.activePackages && userRecord.activePackages.length > 0;
+        if (userRecord.quota <= 0 && !hasActivePackages) {
             set.status = 403;
             throw new Error('Insufficient user quota');
         }

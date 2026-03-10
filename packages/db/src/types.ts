@@ -52,3 +52,38 @@ export interface Log {
     isStream: boolean;
     createdAt: Date;
 }
+
+export interface RateLimitRule {
+    id: number;
+    name: string;
+    rpm: number;
+    rph: number;
+    concurrent: number;
+    createdAt: Date;
+}
+
+export interface Package {
+    id: number;
+    name: string;
+    description: string;
+    price: number | string; // DECIMAL handles as string/number in JS
+    durationDays: number;
+    models: any; // JSONB
+    defaultRateLimitId: number | null;
+    modelRateLimits: any; // JSONB
+    isPublic: boolean;
+    addedBy: number | null;
+    updatedAt: Date;
+    createdAt: Date;
+}
+
+export interface UserSubscription {
+    id: number;
+    userId: number;
+    packageId: number;
+    startTime: Date;
+    endTime: Date;
+    status: number; // 1: active, 2: expired, 3: disabled
+    createdAt: Date;
+    updatedAt: Date;
+}

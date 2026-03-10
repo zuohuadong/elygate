@@ -21,6 +21,8 @@
 		Sun,
 		Moon,
 		Ticket,
+		ShoppingBag,
+		ShieldAlert,
 	} from "lucide-svelte";
 	import { page } from "$app/state";
 	import { i18n } from "$lib/i18n/index.svelte";
@@ -43,6 +45,8 @@
 		"/stats",
 		"/redemptions",
 		"/invite-codes",
+		"/packages",
+		"/rate-limits",
 		"/settings",
 		"/models",
 		"/tokens",
@@ -52,6 +56,7 @@
 		"/consumer",
 		"/consumer/logs",
 		"/consumer/docs",
+		"/consumer/packages",
 		"/payment",
 	];
 
@@ -166,6 +171,16 @@
 					icon: Gift,
 				},
 				{
+					name: i18n.lang === "zh" ? "套餐方案" : "Packages",
+					href: "/packages",
+					icon: ShoppingBag,
+				},
+				{
+					name: i18n.lang === "zh" ? "限流规则" : "Rate Limits",
+					href: "/rate-limits",
+					icon: ShieldAlert,
+				},
+				{
 					name: i18n.lang === "zh" ? "邀请码" : "Invite Codes",
 					href: "/invite-codes",
 					icon: Ticket,
@@ -212,6 +227,11 @@
 					name: i18n.lang === "zh" ? "计费倍率" : "Pricing Ratios",
 					href: "/pricing",
 					icon: BadgeDollarSign,
+				},
+				{
+					name: i18n.lang === "zh" ? "我的套餐" : "My Plans",
+					href: "/consumer/packages",
+					icon: ShoppingBag,
 				},
 				{
 					name: i18n.lang === "zh" ? "流水记录" : "Usage Logs",

@@ -20,7 +20,9 @@ export async function preCheckAndDecrement(ctx: {
     modelName: string;
     userGroup: string;
     maxTokens: number;
+    isPackageFree?: boolean;
 }) {
+    if (ctx.isPackageFree) return 0;
     const estimatedCost = calculateCost(ctx.modelName, ctx.userGroup, 0, ctx.maxTokens || 4096);
 
     // Perform atomic check and deduction
@@ -94,7 +96,7 @@ async function flushBillingQueue() {
 
     for (const task of tasks) {
         // Use abstract ratio engine to calculate the actual quota cost based on model and user group factors
-        const cost = calculateCost(
+        const cost = task.isPackageFree ? 0 : calculateCost(
             task.modelName,
             task.userGroup,
             task.promptTokens,
@@ -133,7 +135,7 @@ async function flushBillingQueue() {
             const correctedTokenAgg: Record<number, number> = {};
 
             for (const task of tasks) {
-                const baseCost = calculateCost(
+                const baseCost = task.isPackageFree ? 0 : calculateCost(
                     task.modelName,
                     task.userGroup,
                     task.promptTokens,

@@ -10,6 +10,8 @@ export const memoryCache = {
     channelRoutes: new Map<string, ChannelConfig[]>(),
     // All channels by ID for direct access/status checks
     channels: new Map<number, ChannelConfig>(),
+    // Rate limit rules caching
+    rateLimitRules: new Map<number, any>(),
     lastUpdated: 0,
     options: new Map<string, any>(),
 
@@ -19,13 +21,22 @@ export const memoryCache = {
      */
     async refresh(skipBroadcast = false) {
         try {
-            console.log('[Cache] Refreshing channel routes from DB...');
+            console.log('[Cache] Refreshing channel routes and rate limits from DB...');
             const allChannels = await sql`
                 SELECT id, type, name, base_url AS "baseUrl", key, models, model_mapping AS "modelMapping", weight, priority, groups, status,
                        key_strategy AS "keyStrategy", key_status AS "keyStatus", key_concurrency_limit AS "keyConcurrencyLimit", price_ratio AS "priceRatio"
                 FROM channels 
                 WHERE status != 0
             `;
+
+            const allRules = await sql`
+                SELECT id, name, rpm, rph, concurrent FROM rate_limit_rules
+            `;
+            const newRulesMap = new Map<number, any>();
+            for (const rule of allRules) {
+                newRulesMap.set(rule.id, rule);
+            }
+            this.rateLimitRules = newRulesMap;
 
             const newRoutes = new Map<string, ChannelConfig[]>();
             const newChannelsMap = new Map<number, ChannelConfig>();

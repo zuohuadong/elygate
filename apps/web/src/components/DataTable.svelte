@@ -11,8 +11,9 @@
     let {
         data = [],
         columns = [],
-        onEdit = (row: any) => {},
-        onDelete = (row: any) => {},
+        onEdit = undefined,
+        onDelete = undefined,
+        extraActions = [],
         pageSize = 10,
         currentPage = 1,
         total = 0,
@@ -22,6 +23,7 @@
         columns: Column[];
         onEdit?: (row: any) => void;
         onDelete?: (row: any) => void;
+        extraActions?: { label: string; class: string; onClick: (row: any) => void }[];
         pageSize?: number;
         currentPage?: number;
         total?: number;
@@ -66,7 +68,6 @@
                             {col.label}
                         </th>
                     {/each}
-                    <!-- 统一的操作列插槽 -->
                     <th
                         scope="col"
                         class="px-6 py-4 text-right font-medium tracking-wider"
@@ -87,7 +88,6 @@
                                 class="px-6 py-4 whitespace-nowrap text-slate-700 dark:text-slate-300"
                             >
                                 {#if col.render}
-                                    <!-- 此处 Svelte 5 snippets 会更优雅，作为演示我们使用函数 render -->
                                     {@html col.render(row[col.key], row)}
                                 {:else}
                                     {row[col.key]}
@@ -95,20 +95,29 @@
                             </td>
                         {/each}
 
-                        <!-- 通用的末尾操作插槽：此处我们写死常用的操作按钮供预览 -->
                         <td
                             class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium"
                         >
+                            {#each extraActions as action}
+                                <button
+                                    onclick={() => action.onClick(row)}
+                                    class="{action.class} mr-3 opacity-0 group-hover:opacity-100 transition-colors"
+                                >{action.label}</button>
+                            {/each}
+                            {#if onEdit}
                             <button
                                 onclick={() => onEdit(row)}
                                 class="text-indigo-600 dark:text-indigo-400 hover:text-indigo-900 dark:hover:text-indigo-300 transition-colors mr-3 opacity-0 group-hover:opacity-100"
                                 >编辑</button
                             >
+                            {/if}
+                            {#if onDelete}
                             <button
                                 onclick={() => onDelete(row)}
                                 class="text-rose-600 dark:text-rose-400 hover:text-rose-900 dark:hover:text-rose-300 transition-colors opacity-0 group-hover:opacity-100"
                                 >删除</button
                             >
+                            {/if}
                         </td>
                     </tr>
                 {:else}

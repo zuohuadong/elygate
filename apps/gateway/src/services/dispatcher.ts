@@ -6,6 +6,7 @@ import { calculateCost } from './ratio';
 import { ChannelType, getProviderHandler } from '../providers';
 import { type TokenRecord, type UserRecord, type ChannelConfig } from '../types';
 import { decryptChannelKeys } from './encryption';
+import { isPackageRateLimited, waitForPackageConcurrency, packageConcurrencyMap } from './ratelimit';
 
 export interface DispatchOptions {
     model: string;
@@ -110,7 +111,38 @@ export class UnifiedDispatcher {
                 forwardBody = JSON.stringify(skipTransform ? body : handler.transformRequest(body, upstreamModel));
             }
 
-            // 3. Billing Pre-check
+            // 3. Package & Rate Limit Check
+            let isPackageFree = false;
+            let effectiveRuleId: number | null = null;
+            if (user.activePackages) {
+                for (const pkg of user.activePackages) {
+                    if (pkg.models?.includes(model)) {
+                        isPackageFree = true;
+                        effectiveRuleId = pkg.modelRateLimits?.[model] || pkg.defaultRateLimitId;
+                        break;
+                    }
+                }
+            }
+
+            let packageLockId: string | null = null;
+            if (isPackageFree && effectiveRuleId) {
+                const rule = memoryCache.rateLimitRules.get(effectiveRuleId);
+                if (rule) {
+                    if (await isPackageRateLimited(user.id, rule)) {
+                        throw new Error(`Package Rate Limit (RPM/RPH) Exceeded for model ${model}`);
+                    }
+                    if (rule.concurrent > 0) {
+                        const acquired = await waitForPackageConcurrency(user.id, rule.concurrent);
+                        if (!acquired) {
+                            throw new Error(`Package Concurrency Limit Exceeded for model ${model}`);
+                        }
+                        packageLockId = `user_pkg_wait_${user.id}`;
+                        packageConcurrencyMap.set(packageLockId, (packageConcurrencyMap.get(packageLockId) || 0) + 1);
+                    }
+                }
+            }
+
+            // 3.5 Billing Pre-check
             let preDeducted = 0;
             try {
                 const maxTokens = this.estimateMaxTokens(body, endpointType);
@@ -119,7 +151,8 @@ export class UnifiedDispatcher {
                     tokenId: token.id,
                     modelName: model,
                     userGroup: user.group,
-                    maxTokens
+                    maxTokens,
+                    isPackageFree
                 });
 
                 if (body.computer_use) console.info(`[Dispatcher] User ${user.id} requested Computer Use with ${model}`);
@@ -143,7 +176,7 @@ export class UnifiedDispatcher {
                 // 5. Handle Response
                 if (isStream && response.body) {
                     const [clientStream, billingStream] = response.body.tee();
-                    this.handleStreamBilling(billingStream, body, user, token, channelConfig, model, preDeducted, lockId);
+                    this.handleStreamBilling(billingStream, body, user, token, channelConfig, model, preDeducted, lockId, isPackageFree, packageLockId);
 
                     return new Response(clientStream, {
                         headers: {
@@ -184,11 +217,16 @@ export class UnifiedDispatcher {
                         promptTokens,
                         completionTokens,
                         userGroup: user.group,
-                        isStream: false
+                        isStream: false,
+                        isPackageFree
                     });
 
                     const currentActive = keyConcurrencyMap.get(lockId);
                     if (currentActive) keyConcurrencyMap.set(lockId, Math.max(0, currentActive - 1));
+                    if (packageLockId) {
+                        const currPkgActive = packageConcurrencyMap.get(packageLockId);
+                        if (currPkgActive) packageConcurrencyMap.set(packageLockId, Math.max(0, currPkgActive - 1));
+                    }
 
                     return skipTransform ? rawData : handler.transformResponse(rawData);
                 } else {
@@ -208,11 +246,16 @@ export class UnifiedDispatcher {
                         promptTokens,
                         completionTokens: 0,
                         userGroup: user.group,
-                        isStream: false
+                        isStream: false,
+                        isPackageFree
                     });
                     
                     const currentActive = keyConcurrencyMap.get(lockId);
                     if (currentActive) keyConcurrencyMap.set(lockId, Math.max(0, currentActive - 1));
+                    if (packageLockId) {
+                        const currPkgActive = packageConcurrencyMap.get(packageLockId);
+                        if (currPkgActive) packageConcurrencyMap.set(packageLockId, Math.max(0, currPkgActive - 1));
+                    }
 
                     return new Response(buffer, { headers: { 'Content-Type': contentType } });
                 }
@@ -223,6 +266,10 @@ export class UnifiedDispatcher {
                 // Release lock on exception
                 const currentActive = keyConcurrencyMap.get(lockId);
                 if (currentActive) keyConcurrencyMap.set(lockId, Math.max(0, currentActive - 1));
+                if (packageLockId) {
+                    const currPkgActive = packageConcurrencyMap.get(packageLockId);
+                    if (currPkgActive) packageConcurrencyMap.set(packageLockId, Math.max(0, currPkgActive - 1));
+                }
 
                 if (preDeducted > 0) {
                     await reconcileQuota({
@@ -294,7 +341,9 @@ export class UnifiedDispatcher {
         channelConfig: ChannelConfig,
         model: string,
         preDeducted: number,
-        lockId: string
+        lockId: string,
+        isPackageFree: boolean,
+        packageLockId: string | null
     ) {
         (async () => {
             try {
@@ -363,7 +412,8 @@ export class UnifiedDispatcher {
                     promptTokens: finalPromptTokens,
                     completionTokens: finalCompletionTokens,
                     userGroup: user.group,
-                    isStream: true
+                    isStream: true,
+                    isPackageFree
                 });
             } catch (e) {
                 console.error("[Stream Billing Error]", e);
@@ -378,6 +428,10 @@ export class UnifiedDispatcher {
                 // Stream ended, unconditionally release the semaphore pool lock
                 const currentActive = keyConcurrencyMap.get(lockId);
                 if (currentActive) keyConcurrencyMap.set(lockId, Math.max(0, currentActive - 1));
+                if (packageLockId) {
+                    const currPkgActive = packageConcurrencyMap.get(packageLockId);
+                    if (currPkgActive) packageConcurrencyMap.set(packageLockId, Math.max(0, currPkgActive - 1));
+                }
             }
         })();
     }

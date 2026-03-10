@@ -632,4 +632,45 @@ export const authRouter = new Elysia()
         body: t.Object({
             currency: t.String()
         })
+    })
+
+    // Get public packages (C-end)
+    .get('/packages', async () => {
+        const data = await sql`
+            SELECT id, name, description, price, duration_days, models
+            FROM packages
+            WHERE is_public = true
+            ORDER BY price ASC
+        `;
+        return data;
+    })
+
+    // Get personal subscriptions (C-end)
+    .get('/subscriptions', async ({ request, set }: any) => {
+        const authHeader = request.headers.get('authorization');
+        if (!authHeader?.startsWith('Bearer ')) {
+            set.status = 401;
+            throw new Error('Unauthorized');
+        }
+        const key = authHeader.substring(7);
+        const [userRow] = await sql`
+            SELECT u.id
+            FROM tokens t
+            JOIN users u ON t.user_id = u.id
+            WHERE t.key = ${key} AND t.status = 1 AND u.status = 1
+            LIMIT 1
+        `;
+        if (!userRow) {
+            set.status = 401;
+            throw new Error('Unauthorized');
+        }
+
+        const data = await sql`
+            SELECT s.id, s.package_id, p.name as package_name, p.models, s.start_time, s.end_time, s.status
+            FROM user_subscriptions s
+            JOIN packages p ON s.package_id = p.id
+            WHERE s.user_id = ${userRow.id} AND s.status = 1
+            ORDER BY s.end_time DESC
+        `;
+        return data;
     });
