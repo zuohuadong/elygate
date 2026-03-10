@@ -188,7 +188,7 @@ async function flushBillingQueue() {
         console.log(`[Billing/Flush] Merged & Ingested ${tasks.length} logs successfully.`);
     } catch (e: any) {
         console.error(`[Billing/Error] Failed to flush queue, re-queueing ${tasks.length} tasks. Error:`, e.message);
-        // Re-queue tasks on failure (deadlock or phantom read)
+        // Fallback: push back to the end of the queue to maintain sequence and prevent unordered insertion
         billingQueue.push(...tasks);
     } finally {
         isFlushing = false;

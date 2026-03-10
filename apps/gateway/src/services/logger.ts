@@ -1,9 +1,9 @@
 import { formatWithOptions } from "util";
 
 /**
- * 高性能异步日志服务 (Bun 极致调优)
- * 拦截原生的 console.log 同步调用，使用微任务 (microtask) 与 batch 批量刷新
- * 最大化吞吐量，消除高并发下的 stdout I/O 阻塞。
+ * High-performance Asynchronous Logging Service (Bun Optimized)
+ * Intercepts native global console.log synchronous calls, utilizes queueMicrotask
+ * and batched stdout/stderr writing to maximize throughput and eliminate I/O blocking.
  */
 class AsyncLogger {
     private stdoutQueue: string[] = [];
@@ -11,14 +11,14 @@ class AsyncLogger {
     private flushScheduled = false;
 
     private formatArgs(args: any[]): string {
-        // 使用原生 util.format 保留控制台的颜色输出与对象深度展开
+        // Use native util.format to preserve console colors and deep object expansion
         return formatWithOptions({ colors: true, depth: 3 }, ...args);
     }
 
     private scheduleFlush() {
         if (!this.flushScheduled) {
             this.flushScheduled = true;
-            // 使用 queueMicrotask 保证在当前事件循环结束时做非阻塞批量输出
+            // Use queueMicrotask to ensure non-blocking batch output at the end of the current event loop
             queueMicrotask(() => this.flush());
         }
     }
@@ -59,7 +59,7 @@ const asyncLogger = new AsyncLogger();
 const originalLog = console.log;
 
 export function overrideConsole() {
-    // 覆盖全局 console 指针以实现无侵入式优化 50+ 个路由模块
+    // Override global console pointers for non-intrusive optimization across 50+ routing modules
     console.log = (...args: any[]) => asyncLogger.log(...args);
     console.info = (...args: any[]) => asyncLogger.log(...args);
     console.warn = (...args: any[]) => asyncLogger.warn(...args);
