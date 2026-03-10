@@ -6,7 +6,7 @@ import { calculateCost } from './ratio';
 import { ChannelType, getProviderHandler } from '../providers';
 import { type TokenRecord, type UserRecord, type ChannelConfig } from '../types';
 import { decryptChannelKeys } from './encryption';
-import { isPackageRateLimited, waitForPackageConcurrency, packageConcurrencyMap } from './ratelimit';
+import { isPackageRateLimited, waitForPackageConcurrency, packageConcurrencyMap, releasePackageConcurrency, getPackageLockId } from './ratelimit';
 
 export interface DispatchOptions {
     model: string;
@@ -132,11 +132,11 @@ export class UnifiedDispatcher {
                         throw new Error(`Package Rate Limit (RPM/RPH) Exceeded for model ${model}`);
                     }
                     if (rule.concurrent > 0) {
-                        const acquired = await waitForPackageConcurrency(user.id, rule.concurrent);
+                        const acquired = await waitForPackageConcurrency(user.id, effectiveRuleId, rule.concurrent);
                         if (!acquired) {
                             throw new Error(`Package Concurrency Limit Exceeded for model ${model}`);
                         }
-                        packageLockId = `user_pkg_wait_${user.id}`;
+                        packageLockId = getPackageLockId(user.id, effectiveRuleId);
                         packageConcurrencyMap.set(packageLockId, (packageConcurrencyMap.get(packageLockId) || 0) + 1);
                     }
                 }
@@ -223,10 +223,7 @@ export class UnifiedDispatcher {
 
                     const currentActive = keyConcurrencyMap.get(lockId);
                     if (currentActive) keyConcurrencyMap.set(lockId, Math.max(0, currentActive - 1));
-                    if (packageLockId) {
-                        const currPkgActive = packageConcurrencyMap.get(packageLockId);
-                        if (currPkgActive) packageConcurrencyMap.set(packageLockId, Math.max(0, currPkgActive - 1));
-                    }
+                    if (packageLockId) releasePackageConcurrency(packageLockId);
 
                     return skipTransform ? rawData : handler.transformResponse(rawData);
                 } else {
@@ -252,10 +249,7 @@ export class UnifiedDispatcher {
                     
                     const currentActive = keyConcurrencyMap.get(lockId);
                     if (currentActive) keyConcurrencyMap.set(lockId, Math.max(0, currentActive - 1));
-                    if (packageLockId) {
-                        const currPkgActive = packageConcurrencyMap.get(packageLockId);
-                        if (currPkgActive) packageConcurrencyMap.set(packageLockId, Math.max(0, currPkgActive - 1));
-                    }
+                    if (packageLockId) releasePackageConcurrency(packageLockId);
 
                     return new Response(buffer, { headers: { 'Content-Type': contentType } });
                 }
@@ -266,10 +260,7 @@ export class UnifiedDispatcher {
                 // Release lock on exception
                 const currentActive = keyConcurrencyMap.get(lockId);
                 if (currentActive) keyConcurrencyMap.set(lockId, Math.max(0, currentActive - 1));
-                if (packageLockId) {
-                    const currPkgActive = packageConcurrencyMap.get(packageLockId);
-                    if (currPkgActive) packageConcurrencyMap.set(packageLockId, Math.max(0, currPkgActive - 1));
-                }
+                if (packageLockId) releasePackageConcurrency(packageLockId);
 
                 if (preDeducted > 0) {
                     await reconcileQuota({
@@ -428,10 +419,7 @@ export class UnifiedDispatcher {
                 // Stream ended, unconditionally release the semaphore pool lock
                 const currentActive = keyConcurrencyMap.get(lockId);
                 if (currentActive) keyConcurrencyMap.set(lockId, Math.max(0, currentActive - 1));
-                if (packageLockId) {
-                    const currPkgActive = packageConcurrencyMap.get(packageLockId);
-                    if (currPkgActive) packageConcurrencyMap.set(packageLockId, Math.max(0, currPkgActive - 1));
-                }
+                if (packageLockId) releasePackageConcurrency(packageLockId);
             }
         })();
     }

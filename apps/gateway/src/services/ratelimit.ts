@@ -49,7 +49,8 @@ export async function isRateLimited(identifier: string | number, limit: number =
 const packageLimitCache = new Map<string, { rpmCount: number, rpmWindow: number, rphCount: number, rphWindow: number }>();
 
 /**
- * Check if the given User ID is rate limited by the provided Package Rule
+ * Check if the given User ID is rate limited by the provided Package Rule.
+ * Key is scoped to (userId, ruleId) so different packages use independent counters.
  */
 export async function isPackageRateLimited(userId: number, rule: any): Promise<boolean> {
    if (!rule) return false;
@@ -59,7 +60,7 @@ export async function isPackageRateLimited(userId: number, rule: any): Promise<b
    const now = Date.now();
    const minWindow = Math.floor(now / 60000) * 60000;
    const hrWindow = Math.floor(now / 3600000) * 3600000;
-   const key = `user_pkg_${userId}`;
+   const key = `user_pkg_${userId}_rule_${rule.id}`;
    
    let bucket = packageLimitCache.get(key);
    if (!bucket) {
@@ -86,17 +87,69 @@ export async function isPackageRateLimited(userId: number, rule: any): Promise<b
 
 export const packageConcurrencyMap = new Map<string, number>();
 
+// Event-driven concurrency wait queue: lockId -> resolve callbacks
+const concurrencyWaiters = new Map<string, (() => void)[]>();
+
 /**
- * Global wait for package concurrency
+ * Notify waiters that a concurrency slot has been freed.
  */
-export async function waitForPackageConcurrency(userId: number, limit: number, maxWaitMs = 15000): Promise<boolean> {
-    if (!limit || limit <= 0) return true;
-    const lockId = `user_pkg_wait_${userId}`;
-    const startTime = Date.now();
-    while (Date.now() - startTime < maxWaitMs) {
-        const current = packageConcurrencyMap.get(lockId) || 0;
-        if (current < limit) return true;
-        await new Promise(r => setTimeout(r, 100)); // Sleep before retry
+function notifyConcurrencyRelease(lockId: string) {
+    const queue = concurrencyWaiters.get(lockId);
+    if (queue && queue.length > 0) {
+        const resolve = queue.shift()!;
+        resolve();
+        if (queue.length === 0) concurrencyWaiters.delete(lockId);
     }
-    return false;
+}
+
+/**
+ * Wait for package concurrency using event-driven notifications instead of busy-wait polling.
+ * The lockId now includes ruleId so different packages use separate concurrency pools.
+ */
+export async function waitForPackageConcurrency(userId: number, ruleId: number, limit: number, maxWaitMs = 15000): Promise<boolean> {
+    if (!limit || limit <= 0) return true;
+    const lockId = `user_pkg_wait_${userId}_rule_${ruleId}`;
+    
+    const current = packageConcurrencyMap.get(lockId) || 0;
+    if (current < limit) return true;
+    
+    // Wait for a slot to open via event notification
+    return new Promise<boolean>((resolve) => {
+        const timer = setTimeout(() => {
+            // Timeout: remove ourselves from the queue
+            const queue = concurrencyWaiters.get(lockId);
+            if (queue) {
+                const idx = queue.indexOf(onRelease);
+                if (idx !== -1) queue.splice(idx, 1);
+                if (queue.length === 0) concurrencyWaiters.delete(lockId);
+            }
+            resolve(false);
+        }, maxWaitMs);
+        
+        const onRelease = () => {
+            clearTimeout(timer);
+            resolve(true);
+        };
+        
+        if (!concurrencyWaiters.has(lockId)) concurrencyWaiters.set(lockId, []);
+        concurrencyWaiters.get(lockId)!.push(onRelease);
+    });
+}
+
+/**
+ * Build the concurrency lock ID for a given user+rule combination.
+ */
+export function getPackageLockId(userId: number, ruleId: number): string {
+    return `user_pkg_wait_${userId}_rule_${ruleId}`;
+}
+
+/**
+ * Release a package concurrency slot and notify waiting requests.
+ */
+export function releasePackageConcurrency(lockId: string) {
+    const current = packageConcurrencyMap.get(lockId);
+    if (current) {
+        packageConcurrencyMap.set(lockId, Math.max(0, current - 1));
+    }
+    notifyConcurrencyRelease(lockId);
 }

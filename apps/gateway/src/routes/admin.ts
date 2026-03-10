@@ -1350,8 +1350,8 @@ export const adminRouter = new Elysia()
                 // Otherwise create a completely new subscription, available in parallel starting from the current time
                 const newEndTime = new Date(Date.now() + durationMs);
                 const [inserted] = await sql`
-                    INSERT INTO user_subscriptions (user_id, package_id, end_time, status)
-                    VALUES (${Number(id)}, ${b.packageId}, ${newEndTime}, 1)
+                    INSERT INTO user_subscriptions (user_id, package_id, start_time, end_time, status)
+                    VALUES (${Number(id)}, ${b.packageId}, NOW(), ${newEndTime}, 1)
                     RETURNING *
                 `;
                 result = inserted;
