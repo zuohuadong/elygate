@@ -1,14 +1,13 @@
+
 import { betterAuth } from "better-auth";
 import { sveltekitCookies } from "better-auth/svelte-kit";
 import { username } from "better-auth/plugins";
 import { getRequestEvent } from "$app/server";
 import { building } from "$app/environment";
-
 import { sql } from "@elygate/db";
 
 export const auth = !building ? betterAuth({
-    database: sql() as any, // better-auth generic dialect support
-
+    database: sql as any,
     user: {
         modelName: "users",
         additionalFields: {
