@@ -1,3 +1,6 @@
+import { overrideConsole } from "./services/logger";
+overrideConsole();
+
 import { Elysia } from "elysia";
 import { cors } from "@elysiajs/cors";
 import { swagger } from "@elysiajs/swagger";
