@@ -108,7 +108,7 @@ const app = new Elysia()
         const t = token as TokenRecord;
 
         let uniqueModels = Array.from(memoryCache.channelRoutes.keys());
-        const groupModelKey = `group_models_${u.group}`;
+        const groupModelKey = `group_models_${u.group || 'default'}`;
         const allowedGroupModels = memoryCache.getOption(groupModelKey);
         if (allowedGroupModels && Array.isArray(allowedGroupModels)) {
           uniqueModels = uniqueModels.filter(m => allowedGroupModels.includes(m));
