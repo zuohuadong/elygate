@@ -34,6 +34,7 @@ export interface ChannelConfig {
     priority: number;
     groups: string[];
     status: number;
+    keyConcurrencyLimit: number;
     keyStrategy: number;         // 0=Load balance, 1=Sequential
     keyStatus: Record<string, string>; // { "sk-xxx": "exhausted" | "active" }
 }

@@ -28,6 +28,7 @@
         modelMapping: "",
         weight: 1,
         status: 1,
+        keyConcurrencyLimit: 0,
         keyStrategy: 0,
         priceRatio: 1.0,
     });
@@ -53,6 +54,7 @@
                     : "{}",
                 weight: channel.weight || 1,
                 status: channel.status || 1,
+                keyConcurrencyLimit: channel.keyConcurrencyLimit || 0,
                 keyStrategy: channel.keyStrategy || 0,
                 priceRatio: channel.priceRatio || 1.0,
             };
@@ -66,6 +68,7 @@
             modelMapping: "{}",
             weight: 1,
             status: 1,
+            keyConcurrencyLimit: 0,
             keyStrategy: 0,
             priceRatio: 1.0,
         };
@@ -402,6 +405,22 @@
                             type="number"
                             step="0.0001"
                             bind:value={formData.priceRatio}
+                            class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                        />
+                    </div>
+                    <div class="space-y-1.5">
+                        <label
+                            for="ch-concurrency"
+                            class="text-sm font-medium text-slate-700 dark:text-slate-300"
+                            >{i18n.lang === "zh"
+                                ? "单 Key 并发限制 (0=不限)"
+                                : "Key Concurrency (0=Unlimited)"}</label
+                        >
+                        <input
+                            id="ch-concurrency"
+                            type="number"
+                            min="0"
+                            bind:value={formData.keyConcurrencyLimit}
                             class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
                         />
                     </div>

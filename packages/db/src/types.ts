@@ -22,6 +22,7 @@ export interface Channel {
     models: any;          // JSONB or string format
     modelMapping: any;    // JSONB: Dictionary for model name mapping
     weight: number;
+    keyConcurrencyLimit: number;
     status: number;       // 1-Active, 2-Disabled
     testAt: Date | null;
     createdAt: Date;

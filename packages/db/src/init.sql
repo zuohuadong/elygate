@@ -111,6 +111,7 @@ CREATE TABLE IF NOT EXISTS channels (
     status INTEGER NOT NULL DEFAULT 1,      -- 1=active, 2=disabled
     key_strategy INTEGER NOT NULL DEFAULT 0, -- 0=load_balance, 1=sequential
     key_status JSONB NOT NULL DEFAULT '{}'::jsonb, -- key exhaustion status
+    key_concurrency_limit INTEGER NOT NULL DEFAULT 0, -- 0=unlimited
     price_ratio DECIMAL(10, 4) DEFAULT 1.0, -- price multiplier for dual currency support
     test_at TIMESTAMPTZ,
     updated_at TIMESTAMPTZ DEFAULT NOW(),

@@ -17,6 +17,22 @@ export interface DispatchOptions {
     skipTransform?: boolean;
 }
 
+// Global in-memory concurrency tracker: Map<"channelId_keyIndex", currentActiveRequests>
+const keyConcurrencyMap = new Map<string, number>();
+
+async function waitForConcurrencyRelease(lockId: string, limit: number, maxWaitMs: number = 15000): Promise<boolean> {
+    if (limit <= 0) return true; // 0 = unlimited
+
+    const startTime = Date.now();
+    while (Date.now() - startTime < maxWaitMs) {
+        const current = keyConcurrencyMap.get(lockId) || 0;
+        if (current < limit) return true; // Slot available
+        // Wait 100ms before checking again (spin lock)
+        await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    return false; // Timed out waiting for slot
+}
+
 export class UnifiedDispatcher {
     static async dispatch(options: DispatchOptions) {
         const { model, body, user, token, endpointType, skipTransform } = options;
@@ -45,12 +61,28 @@ export class UnifiedDispatcher {
                 continue;
             }
 
-            let activeKey: string;
+            let activeKeyIndex = 0;
             if (channelConfig.keyStrategy === 1) {
-                activeKey = availableKeys[0];
+                // Sequential: just pick the first available
             } else {
-                activeKey = availableKeys[Math.floor(Math.random() * availableKeys.length)];
+                // Random load balance
+                activeKeyIndex = Math.floor(Math.random() * availableKeys.length);
             }
+            const activeKey = availableKeys[activeKeyIndex];
+
+            // 1.5 Concurrency Lock (Semaphore)
+            const lockId = `${channelConfig.id}_${activeKeyIndex}`;
+            if (channelConfig.keyConcurrencyLimit > 0) {
+                const acquired = await waitForConcurrencyRelease(lockId, channelConfig.keyConcurrencyLimit);
+                if (!acquired) {
+                    console.warn(`[Dispatcher] Channel ${channelConfig.id} Key ${activeKeyIndex} concurrency maxed out (${channelConfig.keyConcurrencyLimit}), skipping after 15s wait.`);
+                    // Let the loop continue to try the NEXT candidate channel in the fallback chain!
+                    continue; 
+                }
+            }
+
+            // Lock acquired, atomically increment concurrency
+            keyConcurrencyMap.set(lockId, (keyConcurrencyMap.get(lockId) || 0) + 1);
 
             // 2. Prepare Upstream Request
             const fetchHeaders = handler.buildHeaders(activeKey);
@@ -111,7 +143,7 @@ export class UnifiedDispatcher {
                 // 5. Handle Response
                 if (isStream && response.body) {
                     const [clientStream, billingStream] = response.body.tee();
-                    this.handleStreamBilling(billingStream, body, user, token, channelConfig, model, preDeducted);
+                    this.handleStreamBilling(billingStream, body, user, token, channelConfig, model, preDeducted, lockId);
 
                     return new Response(clientStream, {
                         headers: {
@@ -155,6 +187,9 @@ export class UnifiedDispatcher {
                         isStream: false
                     });
 
+                    const currentActive = keyConcurrencyMap.get(lockId);
+                    if (currentActive) keyConcurrencyMap.set(lockId, Math.max(0, currentActive - 1));
+
                     return skipTransform ? rawData : handler.transformResponse(rawData);
                 } else {
                     // Binary response (Audio, Image, Video blob)
@@ -175,12 +210,20 @@ export class UnifiedDispatcher {
                         userGroup: user.group,
                         isStream: false
                     });
+                    
+                    const currentActive = keyConcurrencyMap.get(lockId);
+                    if (currentActive) keyConcurrencyMap.set(lockId, Math.max(0, currentActive - 1));
 
                     return new Response(buffer, { headers: { 'Content-Type': contentType } });
                 }
 
             } catch (e: any) {
                 // 7. Error & Refund Handling
+                
+                // Release lock on exception
+                const currentActive = keyConcurrencyMap.get(lockId);
+                if (currentActive) keyConcurrencyMap.set(lockId, Math.max(0, currentActive - 1));
+
                 if (preDeducted > 0) {
                     await reconcileQuota({
                         userId: user.id,
@@ -250,7 +293,8 @@ export class UnifiedDispatcher {
         token: TokenRecord,
         channelConfig: ChannelConfig,
         model: string,
-        preDeducted: number
+        preDeducted: number,
+        lockId: string
     ) {
         (async () => {
             try {
@@ -330,6 +374,10 @@ export class UnifiedDispatcher {
                     preDeducted, 
                     actualCost: 0 
                 }).catch(() => {});
+            } finally {
+                // Stream ended, unconditionally release the semaphore pool lock
+                const currentActive = keyConcurrencyMap.get(lockId);
+                if (currentActive) keyConcurrencyMap.set(lockId, Math.max(0, currentActive - 1));
             }
         })();
     }

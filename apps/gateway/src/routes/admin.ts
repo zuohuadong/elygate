@@ -45,8 +45,8 @@ export const adminRouter = new Elysia()
             const b = body as any;
             const encryptedKey = encryptChannelKeys(b.key);
             const [result] = await sql`
-                INSERT INTO channels (name, type, key, base_url, models, priority, weight, status, key_strategy, key_status, price_ratio)
-                VALUES (${b.name}, ${b.type}, ${encryptedKey}, ${b.baseUrl}, ${b.models}, ${b.priority || 0}, ${b.weight || 1}, 1, ${b.keyStrategy || 0}, '{}'::jsonb, ${b.priceRatio || 1.0})
+                INSERT INTO channels (name, type, key, base_url, models, priority, weight, status, key_strategy, key_status, price_ratio, key_concurrency_limit)
+                VALUES (${b.name}, ${b.type}, ${encryptedKey}, ${b.baseUrl}, ${b.models}, ${b.priority || 0}, ${b.weight || 1}, 1, ${b.keyStrategy || 0}, '{}'::jsonb, ${b.priceRatio || 1.0}, ${b.keyConcurrencyLimit || 0})
                 RETURNING *
             `;
             await memoryCache.refresh();
@@ -65,7 +65,8 @@ export const adminRouter = new Elysia()
             priority: t.Optional(t.Number()),
             weight: t.Optional(t.Number()),
             keyStrategy: t.Optional(t.Number()),
-            priceRatio: t.Optional(t.Number())
+            priceRatio: t.Optional(t.Number()),
+            keyConcurrencyLimit: t.Optional(t.Number())
         })
     })
 
@@ -103,6 +104,7 @@ export const adminRouter = new Elysia()
                     key_strategy = ${b.keyStrategy ?? oldChannel.key_strategy},
                     key_status = ${b.keyStatus ? JSON.stringify(b.keyStatus) : oldChannel.key_status},
                     price_ratio = ${b.priceRatio ?? oldChannel.price_ratio},
+                    key_concurrency_limit = ${b.keyConcurrencyLimit ?? oldChannel.key_concurrency_limit},
                     updated_at = NOW()
                 WHERE id = ${Number(id)}
                 RETURNING *

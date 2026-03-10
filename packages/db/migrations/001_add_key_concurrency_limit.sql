@@ -1,0 +1,1 @@
+ALTER TABLE channels ADD COLUMN IF NOT EXISTS key_concurrency_limit INTEGER NOT NULL DEFAULT 0;
