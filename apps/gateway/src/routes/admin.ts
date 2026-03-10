@@ -716,8 +716,8 @@ export const adminRouter = new Elysia()
             SELECT 
                 (SELECT count(*) FROM users)::int as "totalUsers",
                 (SELECT count(*) FROM channels WHERE status = 1)::int as "activeChannels",
-                (SELECT sum(quota) FROM users)::bigint as "totalQuota",
-                (SELECT sum(used_quota) FROM users)::bigint as "usedQuota",
+                (SELECT COALESCE(sum(quota), 0) FROM users)::bigint as "totalQuota",
+                (SELECT COALESCE(sum(used_quota), 0) FROM users)::bigint as "usedQuota",
                 (SELECT COALESCE(sum(quota_cost), 0) FROM logs WHERE created_at >= CURRENT_DATE)::bigint as "todayQuota"
         `;
         return stats;

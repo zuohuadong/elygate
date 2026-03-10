@@ -200,7 +200,13 @@ export const statsRouter = new Elysia()
         `;
 
         return {
-            stats: realtimeStats[0],
+            stats: realtimeStats[0] || {
+                requests_per_minute: 0,
+                cost_per_minute: 0,
+                tokens_per_minute: 0,
+                active_users: 0,
+                active_models: 0
+            },
             topModels
         };
     })
