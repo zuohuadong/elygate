@@ -306,10 +306,7 @@
                                 ? 'bg-emerald-600 text-white shadow-md shadow-emerald-500/20 scale-105'
                                 : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-800 hover:border-emerald-300 dark:hover:border-emerald-700'}"
                         >
-                            <svelte:component
-                                this={c.icon}
-                                class="w-3.5 h-3.5"
-                            />
+                            <c.icon class="w-3.5 h-3.5" />
                             {i18n.lang === "zh" ? c.label : c.labelEn}
                         </button>
                     {/each}
