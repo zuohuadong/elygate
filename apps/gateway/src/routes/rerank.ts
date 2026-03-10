@@ -1,9 +1,8 @@
 import { Elysia } from 'elysia';
-import { authPlugin, assertModelAccess } from '../middleware/auth';
+import { assertModelAccess } from '../middleware/auth';
 import { UnifiedDispatcher } from '../services/dispatcher';
 
 export const rerankRouter = new Elysia()
-    .use(authPlugin)
     .post('/rerank', async ({ body, token, user, set }: any) => {
         const { model, query, documents } = body;
         if (!model || !query || !documents) {

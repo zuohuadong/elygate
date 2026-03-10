@@ -1,9 +1,8 @@
 import { Elysia } from 'elysia';
-import { authPlugin, assertModelAccess } from '../middleware/auth';
+import { assertModelAccess } from '../middleware/auth';
 import { UnifiedDispatcher } from '../services/dispatcher';
 
 export const videoRouter = new Elysia()
-    .use(authPlugin)
     .post('/video/generations', async ({ body, token, user, set }: any) => {
         const { model, prompt } = body;
         if (!model || !prompt) {

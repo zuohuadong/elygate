@@ -13,6 +13,7 @@ import { FluxApiHandler } from './flux';
 import { JinaApiHandler } from './jina';
 import { KlingApiHandler } from './kling';
 import { UdioApiHandler } from './udio';
+import { NvidiaApiHandler } from './nvidia';
 
 export function getProviderHandler(type: number): ProviderHandler {
     switch (type) {
@@ -28,6 +29,7 @@ export function getProviderHandler(type: number): ProviderHandler {
         case ChannelType.FLUX: return new FluxApiHandler();
         case ChannelType.JINA: return new JinaApiHandler();
         case ChannelType.UDIO: return new UdioApiHandler();
+        case ChannelType.NVIDIA: return new NvidiaApiHandler();
         // We can safely route everything else (including OpenAI standard) to OpenAIApiHandler.
         // Kling can be managed in video router specifically if it doesn't have a unique enum,
         // but default handles standard passthrough.
@@ -51,3 +53,4 @@ export * from './flux';
 export * from './jina';
 export * from './kling';
 export * from './udio';
+export * from './nvidia';
