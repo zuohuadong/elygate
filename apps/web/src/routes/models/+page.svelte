@@ -150,35 +150,74 @@
         }
     }
 
+    let displayLimit = $state(24);
+
     onMount(() => {
         const role = localStorage.getItem("admin_role");
         isAdmin = role ? parseInt(role, 10) >= 10 : false;
         loadModels();
+
+        // Setup Intersection Observer for lazy loading
+        const observer = new IntersectionObserver(
+            (entries) => {
+                if (
+                    entries[0].isIntersecting &&
+                    displayLimit < filteredModels.length
+                ) {
+                    displayLimit += 24;
+                }
+            },
+            { threshold: 0.1 },
+        );
+
+        const loader = document.getElementById("scroll-loader");
+        if (loader) observer.observe(loader);
+
+        return () => observer.disconnect();
     });
 
-    let filteredModels = $derived(
+    // Reset displayLimit on any filter or query change
+    $effect(() => {
+        searchQuery;
+        activeProvider;
+        activeCapability;
+        activeStatus;
+        displayLimit = 24;
+    });
+
+    let preStatusFilteredModels = $derived(
         models.filter((m) => {
             const id = (m.id || "").toLowerCase();
             const name = (m.name || "").toLowerCase();
-            const matchesSearch =
-                id.includes(searchQuery.toLowerCase()) ||
-                name.includes(searchQuery.toLowerCase());
+            const q = searchQuery.toLowerCase();
+            const matchesSearch = id.includes(q) || name.includes(q);
             const matchesProvider =
                 activeProvider === "all" || getProvider(id) === activeProvider;
             const matchesCapability =
                 activeCapability === "all" ||
                 getCapability(id) === activeCapability;
-            const matchesStatus =
-                activeStatus === "all" ||
-                (m.status || "online") === activeStatus;
-            return (
-                matchesSearch &&
-                matchesProvider &&
-                matchesCapability &&
-                matchesStatus
-            );
+            return matchesSearch && matchesProvider && matchesCapability;
         }),
     );
+
+    let counts = $derived({
+        all: preStatusFilteredModels.length,
+        online: preStatusFilteredModels.filter(
+            (m) => (m.status || "online") === "online",
+        ).length,
+        offline: preStatusFilteredModels.filter((m) => m.status === "offline")
+            .length,
+    });
+
+    let filteredModels = $derived(
+        preStatusFilteredModels.filter(
+            (m) =>
+                activeStatus === "all" ||
+                (m.status || "online") === activeStatus,
+        ),
+    );
+
+    let displayedModels = $derived(filteredModels.slice(0, displayLimit));
 </script>
 
 <svelte:head>
@@ -367,6 +406,9 @@
                             : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-800 hover:border-slate-300'}"
                     >
                         {i18n.lang === "zh" ? "全部" : "All"}
+                        <span class="ml-1 opacity-60 text-[10px]"
+                            >({counts.all})</span
+                        >
                     </button>
                     <button
                         onclick={() => (activeStatus = "online")}
@@ -379,6 +421,9 @@
                             class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"
                         ></span>
                         {i18n.lang === "zh" ? "仅在线" : "Online Only"}
+                        <span class="ml-1 opacity-80 text-[10px]"
+                            >({counts.online})</span
+                        >
                     </button>
                     <button
                         onclick={() => (activeStatus = "offline")}
@@ -390,6 +435,9 @@
                         <span class="w-1.5 h-1.5 rounded-full bg-slate-400"
                         ></span>
                         {i18n.lang === "zh" ? "已离线" : "Offline"}
+                        <span class="ml-1 opacity-80 text-[10px]"
+                            >({counts.offline})</span
+                        >
                     </button>
                 </div>
             </div>
@@ -446,7 +494,7 @@
                 </div>
             </div>
         {:else}
-            {#each filteredModels as model (model.id)}
+            {#each displayedModels as model (model.id)}
                 <div
                     class="bg-white hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800/80 rounded-2xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm transition-all hover:shadow-md hover:-translate-y-1 flex flex-col group relative overflow-hidden {model.status ===
                     'offline'
@@ -569,6 +617,31 @@
                     </div>
                 </div>
             {/each}
+
+            <!-- Scroll Loader Trigger -->
+            {#if displayLimit < filteredModels.length}
+                <div
+                    id="scroll-loader"
+                    class="col-span-1 md:col-span-2 lg:col-span-3 py-12 flex justify-center"
+                >
+                    <div class="flex items-center gap-3 text-slate-400">
+                        <RefreshCw class="w-5 h-5 animate-spin" />
+                        <span class="text-sm font-medium">
+                            {i18n.lang === "zh"
+                                ? "加载更多模型..."
+                                : "Loading more models..."}
+                        </span>
+                    </div>
+                </div>
+            {:else if filteredModels.length > 0}
+                <div
+                    class="col-span-1 md:col-span-2 lg:col-span-3 py-8 text-center text-slate-400 text-sm font-medium"
+                >
+                    {i18n.lang === "zh"
+                        ? "已显示全部模型"
+                        : "All models displayed"}
+                </div>
+            {/if}
         {/if}
     </div>
 </div>
