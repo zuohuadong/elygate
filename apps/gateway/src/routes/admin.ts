@@ -994,22 +994,14 @@ export const adminRouter = new Elysia()
 
             let displayName = meta?.name || modelId;
 
-            // Normalize Name: Strip common provider prefixes if no metadata name is found
-            if (!meta?.name) {
-                const prefixes = ['openai/', 'anthropic/', 'google/', 'deepseek/', 'meta/', 'nvidia/', 'mistral/', 'cohere/', 'aws/'];
-                const lowerId = modelId.toLowerCase();
-                for (const p of prefixes) {
-                    if (lowerId.startsWith(p)) {
-                        displayName = modelId.substring(p.length);
-                        break;
-                    }
-                    // Also handle colon-separated prefixes like deepseek:chat
-                    const pWithColon = p.replace('/', ':');
-                    if (lowerId.startsWith(pWithColon)) {
-                        displayName = modelId.substring(pWithColon.length);
-                        break;
-                    }
-                }
+            // Normalize Name: Generic extraction for OpenRouter/OneAPI formats
+            // Matches "provider/model_name" or "provider:model_name" (e.g., "google/gemma", "deepseek-ai/r1")
+            if (displayName.includes('/')) {
+                const prefixMatch = displayName.match(/^([a-zA-Z0-9\-_]+)\/(.+)$/);
+                if (prefixMatch) displayName = prefixMatch[2];
+            } else if (displayName.includes(':')) {
+                const prefixMatch = displayName.match(/^([a-zA-Z0-9\-_]+):(.+)$/);
+                if (prefixMatch) displayName = prefixMatch[2];
             }
 
             return {
