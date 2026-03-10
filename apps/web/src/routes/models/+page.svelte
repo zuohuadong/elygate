@@ -1,8 +1,22 @@
 <script lang="ts">
     import { onMount } from "svelte";
     import { apiFetch } from "$lib/api";
-    import { Search, RefreshCw, MonitorSpeaker, XCircle } from "lucide-svelte";
-    import { fade, slide } from "svelte/transition";
+    import {
+        Search,
+        RefreshCw,
+        MonitorSpeaker,
+        XCircle,
+        Layers,
+        Brain,
+        Image as ImageIcon,
+        Sparkles,
+        Mic,
+        Video,
+        Zap,
+        Compass,
+        Filter,
+    } from "lucide-svelte";
+    import { fade, slide, scale } from "svelte/transition";
     import { i18n } from "$lib/i18n/index.svelte";
 
     let models = $state<any[]>([]);
@@ -11,11 +25,87 @@
     let searchQuery = $state("");
     let isAdmin = $state(false);
 
+    // Filter states
+    let activeProvider = $state("all");
+    let activeCapability = $state("all");
+
+    const providers = [
+        { id: "all", label: "全部", labelEn: "All" },
+        { id: "openai", label: "OpenAI", labelEn: "OpenAI" },
+        { id: "anthropic", label: "Anthropic", labelEn: "Anthropic" },
+        { id: "google", label: "Google", labelEn: "Google" },
+        { id: "deepseek", label: "DeepSeek", labelEn: "DeepSeek" },
+        { id: "meta", label: "Meta (Llama)", labelEn: "Meta (Llama)" },
+        { id: "nvidia", label: "NVIDIA", labelEn: "NVIDIA" },
+        { id: "others", label: "其他", labelEn: "Others" },
+    ];
+
+    const capabilities = [
+        { id: "all", label: "全部", labelEn: "All", icon: Compass },
+        { id: "chat", label: "对话", labelEn: "Chat", icon: Brain },
+        { id: "vision", label: "视觉", labelEn: "Vision", icon: Zap },
+        { id: "image", label: "绘图", labelEn: "Image", icon: ImageIcon },
+        { id: "video", label: "视频", labelEn: "Video", icon: Video },
+        { id: "audio", label: "语音", labelEn: "Audio", icon: Mic },
+        { id: "embedding", label: "向量", labelEn: "Embedding", icon: Layers },
+    ];
+
+    function getProvider(modelId: string): string {
+        const id = modelId.toLowerCase();
+        if (
+            id.startsWith("gpt-") ||
+            id.startsWith("o1-") ||
+            id.startsWith("o3-") ||
+            id.includes("dall-e")
+        )
+            return "openai";
+        if (id.startsWith("claude-")) return "anthropic";
+        if (id.startsWith("gemini-") || id.includes("palm")) return "google";
+        if (id.includes("llama")) return "meta";
+        if (id.startsWith("deepseek-")) return "deepseek";
+        if (id.includes("nvidia")) return "nvidia";
+        return "others";
+    }
+
+    function getCapability(modelId: string): string {
+        const id = modelId.toLowerCase();
+        if (id.includes("text-embedding") || id.includes("-embedding-"))
+            return "embedding";
+        if (
+            id.includes("dall-e") ||
+            id.includes("midjourney") ||
+            id.includes("stable-diffusion") ||
+            id.includes("flux")
+        )
+            return "image";
+        if (
+            id.includes("tts-") ||
+            id.includes("whisper-") ||
+            id.includes("audio-")
+        )
+            return "audio";
+        if (
+            id.includes("video-") ||
+            id.includes("sora") ||
+            id.includes("luma") ||
+            id.includes("kling")
+        )
+            return "video";
+        if (
+            id.includes("vision") ||
+            id.includes("-vl") ||
+            id === "gpt-4o" ||
+            id === "gpt-4-turbo" ||
+            id.startsWith("claude-3-5")
+        )
+            return "vision";
+        return "chat";
+    }
+
     async function loadModels() {
         isLoading = true;
         error = "";
         try {
-            // Fetch from the public /v1/models endpoint instead of /admin/models
             const res = await apiFetch<any>("/v1/models");
             if (Array.isArray(res)) {
                 models = res;
@@ -25,13 +115,11 @@
                 models = [];
             }
         } catch (err: any) {
-            // For now, if the backend route is missing, we just show a friendly message or empty list
-            // rather than a hard error block, to keep the UI looking complete.
             console.warn("Failed to load models:", err);
             error =
                 i18n.lang === "zh"
-                    ? "无法加载模型列表，后端接口可能未实现。"
-                    : "Failed to load models. Backend endpoint may not be implemented yet.";
+                    ? "无法加载模型列表"
+                    : "Failed to load models";
             models = [];
         } finally {
             isLoading = false;
@@ -45,15 +133,19 @@
     });
 
     let filteredModels = $derived(
-        models.filter(
-            (m) =>
-                (m.id || "")
-                    .toLowerCase()
-                    .includes(searchQuery.toLowerCase()) ||
-                (m.name || "")
-                    .toLowerCase()
-                    .includes(searchQuery.toLowerCase()),
-        ),
+        models.filter((m) => {
+            const id = (m.id || "").toLowerCase();
+            const name = (m.name || "").toLowerCase();
+            const matchesSearch =
+                id.includes(searchQuery.toLowerCase()) ||
+                name.includes(searchQuery.toLowerCase());
+            const matchesProvider =
+                activeProvider === "all" || getProvider(id) === activeProvider;
+            const matchesCapability =
+                activeCapability === "all" ||
+                getCapability(id) === activeCapability;
+            return matchesSearch && matchesProvider && matchesCapability;
+        }),
     );
 </script>
 
@@ -109,22 +201,117 @@
     {/if}
 
     <!-- Toolbar -->
-    <div
-        class="bg-white/60 dark:bg-slate-900/60 backdrop-blur-xl p-4 border border-slate-200/60 dark:border-slate-800/60 rounded-2xl flex flex-col sm:flex-row gap-4 justify-between items-center shadow-sm"
-    >
-        <div class="relative w-full sm:max-w-md">
-            <Search
-                class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"
-            />
-            <input
-                type="text"
-                bind:value={searchQuery}
-                placeholder={i18n.t.common.search}
-                class="w-full pl-9 pr-4 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all text-slate-900 dark:text-white placeholder-slate-400"
-            />
+    <div class="space-y-4">
+        <div
+            class="bg-white/60 dark:bg-slate-900/60 backdrop-blur-xl p-4 border border-slate-200/60 dark:border-slate-800/60 rounded-2xl flex flex-col lg:flex-row gap-4 justify-between items-center shadow-sm"
+        >
+            <div class="relative w-full lg:max-w-md">
+                <Search
+                    class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"
+                />
+                <input
+                    type="text"
+                    bind:value={searchQuery}
+                    placeholder={i18n.t.common.search}
+                    class="w-full pl-9 pr-4 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all text-slate-900 dark:text-white placeholder-slate-400"
+                />
+            </div>
+
+            <div
+                class="flex flex-wrap items-center gap-2 justify-center lg:justify-end"
+            >
+                <div
+                    class="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100/50 dark:bg-slate-800/50 rounded-lg text-xs font-medium text-slate-500"
+                >
+                    <Filter class="w-3.5 h-3.5" />
+                    {i18n.lang === "zh" ? "筛选" : "Filters"}
+                </div>
+                <div
+                    class="h-4 w-px bg-slate-200 dark:bg-slate-800 mx-1 hidden sm:block"
+                ></div>
+
+                {#if activeProvider !== "all" || activeCapability !== "all" || searchQuery !== ""}
+                    <button
+                        onclick={() => {
+                            activeProvider = "all";
+                            activeCapability = "all";
+                            searchQuery = "";
+                        }}
+                        class="px-3 py-1.5 text-xs font-semibold text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded-lg transition-colors flex items-center gap-1.5"
+                        transition:fade
+                    >
+                        <RefreshCw class="w-3.5 h-3.5" />
+                        {i18n.lang === "zh" ? "重置" : "Reset"}
+                    </button>
+                {/if}
+
+                <div
+                    class="text-sm text-slate-500 font-medium whitespace-nowrap"
+                >
+                    {i18n.lang === "zh" ? "找到" : "Found"}:
+                    <span class="text-indigo-600 dark:text-indigo-400 font-bold"
+                        >{filteredModels.length}</span
+                    >
+                </div>
+            </div>
         </div>
-        <div class="text-sm text-slate-500 font-medium">
-            {i18n.lang === "zh" ? "总计" : "Total"}: {filteredModels.length}
+
+        <!-- Multi-dimensional Filters -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <!-- Provider Filter -->
+            <div
+                class="bg-white/40 dark:bg-slate-900/40 border border-slate-200/40 dark:border-slate-800/40 p-3 rounded-2xl"
+            >
+                <div class="flex items-center gap-2 mb-3 px-1">
+                    <Zap class="w-4 h-4 text-amber-500" />
+                    <span
+                        class="text-xs font-bold uppercase tracking-wider text-slate-400"
+                    >
+                        {i18n.lang === "zh" ? "模型厂商" : "Providers"}
+                    </span>
+                </div>
+                <div class="flex flex-wrap gap-1.5">
+                    {#each providers as p}
+                        <button
+                            onclick={() => (activeProvider = p.id)}
+                            class="px-3 py-1.5 rounded-xl text-xs font-medium transition-all {activeProvider ===
+                            p.id
+                                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/20 scale-105'
+                                : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-800 hover:border-indigo-300 dark:hover:border-indigo-700'}"
+                        >
+                            {i18n.lang === "zh" ? p.label : p.labelEn}
+                        </button>
+                    {/each}
+                </div>
+            </div>
+
+            <!-- Capability Filter -->
+            <div
+                class="bg-white/40 dark:bg-slate-900/40 border border-slate-200/40 dark:border-slate-800/40 p-3 rounded-2xl"
+            >
+                <div class="flex items-center gap-2 mb-3 px-1">
+                    <Sparkles class="w-4 h-4 text-indigo-500" />
+                    <span
+                        class="text-xs font-bold uppercase tracking-wider text-slate-400"
+                    >
+                        {i18n.lang === "zh" ? "核心功能" : "Capabilities"}
+                    </span>
+                </div>
+                <div class="flex flex-wrap gap-1.5">
+                    {#each capabilities as c}
+                        <button
+                            onclick={() => (activeCapability = c.id)}
+                            class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-all {activeCapability ===
+                            c.id
+                                ? 'bg-emerald-600 text-white shadow-md shadow-emerald-500/20 scale-105'
+                                : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-800 hover:border-emerald-300 dark:hover:border-emerald-700'}"
+                        >
+                            <c.icon class="w-3.5 h-3.5" />
+                            {i18n.lang === "zh" ? c.label : c.labelEn}
+                        </button>
+                    {/each}
+                </div>
+            </div>
         </div>
     </div>
 
@@ -198,7 +385,7 @@
                                 {model.id}
                             </h3>
                         </div>
-                        <div class="flex items-center gap-2">
+                        <div class="flex flex-wrap items-center gap-2">
                             <span
                                 class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-50 text-emerald-600 border border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20"
                             >
@@ -210,7 +397,16 @@
                             <span
                                 class="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-medium bg-indigo-50 text-indigo-600 border border-indigo-100 dark:bg-indigo-500/10 dark:text-indigo-400 dark:border-indigo-500/20 uppercase tracking-wide"
                             >
-                                {model.object || "chat"}
+                                {providers.find(
+                                    (p) => p.id === getProvider(model.id),
+                                )?.label || "Other"}
+                            </span>
+                            <span
+                                class="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-medium bg-amber-50 text-amber-600 border border-amber-100 dark:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/20 uppercase tracking-wide"
+                            >
+                                {capabilities.find(
+                                    (c) => c.id === getCapability(model.id),
+                                )?.label || "Chat"}
                             </span>
                         </div>
                     </div>
