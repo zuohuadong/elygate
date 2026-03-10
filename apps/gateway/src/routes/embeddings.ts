@@ -2,7 +2,8 @@ import { Elysia } from 'elysia';
 import { authPlugin, assertModelAccess } from '../middleware/auth';
 import { memoryCache } from '../services/cache';
 import { circuitBreaker } from '../services/circuitBreaker';
-import { billAndLog } from '../services/billing';
+import { billAndLog, preCheckAndDecrement, reconcileQuota } from '../services/billing';
+import { calculateCost } from '../services/ratio';
 import { ChannelType, getProviderHandler } from '../providers';
 
 export const embeddingsRouter = new Elysia()
@@ -18,9 +19,8 @@ export const embeddingsRouter = new Elysia()
             throw new Error("Missing 'input' field in request body");
         }
 
-        // --- Phase 4 & 6: Access Control ---
+        // --- Access Control ---
         assertModelAccess(user, token, model, set);
-        // ------------------------------------------
 
         console.log(`[Embeddings Request] UserID: ${user.id}, Token: ${token.name}, Model: ${model}`);
 
@@ -45,11 +45,22 @@ export const embeddingsRouter = new Elysia()
                 upstreamModel = channelConfig.modelMapping[model];
             }
 
-            // Note: Transform might need adjustments for non-chat contexts depending on the provider, 
-            // but for standard OpenAI API, embeddings body is `{ input, model }`.
             const transformedBody = { ...body, model: upstreamModel };
 
             let upstreamUrl = `${channelConfig.baseUrl}/v1/embeddings`;
+
+            // Estimate token count for pre-decrement
+            const estimatedTokens = typeof input === 'string'
+                ? Math.ceil(input.length / 4)
+                : Array.isArray(input) ? input.reduce((sum: number, s: any) => sum + (typeof s === 'string' ? Math.ceil(s.length / 4) : 1), 0) : 100;
+
+            const preDeducted = await preCheckAndDecrement({
+                userId: user.id,
+                tokenId: token.id,
+                modelName: model,
+                userGroup: user.group,
+                maxTokens: estimatedTokens
+            });
 
             try {
                 const response = await fetch(upstreamUrl, {
@@ -69,11 +80,17 @@ export const embeddingsRouter = new Elysia()
 
                 const rawData = await response.json();
 
-                // Note: Usage extraction might be slightly different for embeddings,
-                // but standard OpenAI returns `{ prompt_tokens: X, total_tokens: X }`.
-                // Embeddings don't have completion_tokens.
                 const usage = rawData.usage || {};
                 const promptTokens = usage.prompt_tokens || usage.total_tokens || 0;
+
+                const actualCost = calculateCost(model, user.group, promptTokens, 0);
+
+                await reconcileQuota({
+                    userId: user.id,
+                    tokenId: token.id,
+                    preDeducted,
+                    actualCost
+                });
 
                 await billAndLog({
                     userId: user.id,
@@ -86,10 +103,15 @@ export const embeddingsRouter = new Elysia()
                     isStream: false
                 });
 
-                // Return rawData as it usually conforms to the `{ object: 'list', data: [...] }` standard
                 return rawData;
 
             } catch (e: any) {
+                await reconcileQuota({
+                    userId: user.id,
+                    tokenId: token.id,
+                    preDeducted,
+                    actualCost: 0
+                });
                 lastError = e;
                 if (!e.message.startsWith('Status')) {
                     await circuitBreaker.recordError(channelConfig.id);

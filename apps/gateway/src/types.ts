@@ -21,17 +21,21 @@ export interface TokenRecord {
 }
 export enum ChannelType {
     OPENAI = 1,
-    AZURE = 2,
-    ANTHROPIC = 3,
-    GOOGLE = 4,
-    BAIDU = 5,
-    ALIBABA = 6,
-    ZHIPU = 7,
-    IFLYTEK = 8,
-    KIMI = 9,
-    XUNFEI = 10,
-    DEEPSEEK = 11,
-    GEMINI = 12
+    AZURE = 8,
+    ANTHROPIC = 14,
+    BAIDU = 15,
+    ZEN = 16,
+    ALI = 17,
+    XUNFEI = 18,
+    GEMINI = 23,
+    MIDJOURNEY = 24,
+    JINA = 25,
+    SUNO = 26,
+    DEEPSEEK = 31,
+    CF_WORKER = 33,
+    FLUX = 34,
+    UDIO = 35,
+    NVIDIA = 41
 }
 
 export interface ChannelConfig {

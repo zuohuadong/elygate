@@ -66,7 +66,7 @@ export async function lookupSemanticCache(
         SELECT response, 1 - (embedding <=> ${vectorLiteral}::vector) AS similarity
         FROM semantic_cache
         WHERE model_name = ${model}
-          AND created_at > NOW() - INTERVAL '${sql.unsafe(config.ttlHours.toString())} hours'
+          AND created_at > NOW() - make_interval(hours => ${config.ttlHours})
         ORDER BY embedding <=> ${vectorLiteral}::vector
         LIMIT 1
     `;

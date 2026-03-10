@@ -177,7 +177,7 @@ async function flushBillingQueue() {
     } catch (e: any) {
         console.error(`[Billing/Error] Failed to flush queue, re-queueing ${tasks.length} tasks. Error:`, e.message);
         // Re-queue tasks on failure (deadlock or phantom read)
-        billingQueue.unshift(...tasks);
+        billingQueue.push(...tasks);
     } finally {
         isFlushing = false;
     }
@@ -202,7 +202,7 @@ async function rotateLogs() {
     try {
         // Fallback to DELETE for non-partitioned tables or safety.
         // For partitioned tables, the query optimizer in PG 12+ will prune partitions automatically.
-        await sql`DELETE FROM logs WHERE created_at < NOW() - INTERVAL '${sql.unsafe(days.toString())} days'`;
+        await sql`DELETE FROM logs WHERE created_at < NOW() - make_interval(days => ${days})`;
 
         // Potential future enhancement if partition naming is predictable:
         // await sql`DROP TABLE IF EXISTS ${sql.unsafe(`logs_old_partition_name`)}`;

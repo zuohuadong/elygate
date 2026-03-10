@@ -1,5 +1,7 @@
 import { Elysia, t } from 'elysia';
 import { sql } from '@elygate/db';
+import { authPlugin } from '../middleware/auth';
+import type { UserRecord } from '../types';
 
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || '';
 const EPAY_APP_ID = process.env.EPAY_APP_ID || '';
@@ -7,20 +9,25 @@ const EPAY_APP_SECRET = process.env.EPAY_APP_SECRET || '';
 const EPAY_GATEWAY = process.env.EPAY_GATEWAY || 'https://api.epay.com';
 
 export const paymentRouter = new Elysia({ prefix: '/payment' })
-    .post('/create-order', async ({ body, set }: any) => {
-        try {
-            const { userId, amount, paymentMethod } = body;
+    .use(
+        new Elysia()
+            .use(authPlugin)
+            .post('/create-order', async ({ body, user, set }: any) => {
+                try {
+                    const { amount, paymentMethod } = body;
+                    const u = user as UserRecord;
+                    const userId = u.id;
 
-            if (!userId || !amount || amount <= 0) {
+                    if (!userId || !amount || amount <= 0) {
                 set.status = 400;
                 return { success: false, message: 'Invalid parameters' };
             }
 
-            const [user] = await sql`
+            const [dbUser] = await sql`
                 SELECT id, username FROM users WHERE id = ${userId} LIMIT 1
             `;
 
-            if (!user) {
+            if (!dbUser) {
                 set.status = 404;
                 return { success: false, message: 'User not found' };
             }
@@ -67,7 +74,7 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
                     money: (amount / 1000).toFixed(2)
                 });
 
-                const sign = await generateEPaySign(params.toString(), EPAY_APP_SECRET);
+                const sign = generateEPaySign(params.toString(), EPAY_APP_SECRET);
                 paymentUrl = `${EPAY_GATEWAY}/submit.php?${params}&sign=${sign}&sign_type=MD5`;
             }
 
@@ -83,12 +90,11 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
         }
     }, {
         body: t.Object({
-            userId: t.Number(),
             amount: t.Number(),
             paymentMethod: t.String()
         })
     })
-
+    )
     .post('/stripe/callback', async ({ body, set }: any) => {
         try {
             const { data } = body;
@@ -137,7 +143,7 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
             params.delete('sign');
             params.delete('sign_type');
 
-            const expectedSign = await generateEPaySign(params.toString(), EPAY_APP_SECRET);
+            const expectedSign = generateEPaySign(params.toString(), EPAY_APP_SECRET);
 
             if (sign !== expectedSign) {
                 set.status = 400;
@@ -145,7 +151,12 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
             }
 
             const outTradeNo = params.get('out_trade_no') || '';
-            const orderId = parseInt(outTradeNo.replace('ELY', '').substring(0, outTradeNo.indexOf(Date.now().toString()) - 4));
+            // Fix EPay out_trade_no parsing: out_trade_no is 'ELY' + orderId + timestamp.
+            // E.g., 'ELY1231700000000000'. If timestamp is 13 digits, length might vary.
+            // A safer approach is to strip 'ELY' and find the orderId, or extract orderId using regex.
+            const match = outTradeNo.match(/^ELY(\d+)\d{13}$/);
+            const orderIdStr = match ? match[1] : outTradeNo.replace('ELY', '').substring(0, outTradeNo.length - 16); // Fallback
+            const orderId = parseInt(orderIdStr || outTradeNo.replace('ELY', ''));
 
             const [order] = await sql`
                 SELECT * FROM payment_orders WHERE id = ${orderId} LIMIT 1
@@ -176,33 +187,37 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
         }
     })
 
-    .get('/orders/:userId', async ({ params: { userId }, set }: any) => {
-        try {
-            const orders = await sql`
-                SELECT * FROM payment_orders 
-                WHERE user_id = ${Number(userId)}
-                ORDER BY created_at DESC
-                LIMIT 50
-            `;
-            return orders;
-        } catch (e: any) {
-            set.status = 500;
-            return { success: false, message: e.message };
-        }
-    })
-
     .get('/options', async () => {
         const rows = await sql`SELECT key, value FROM options`;
         // Convert array of {key, value} to a single record object
         const settings: Record<string, string> = {};
         for (const r of rows) settings[r.key] = r.value;
         return settings;
-    });
+    })
+    .use(
+        new Elysia()
+            .use(authPlugin)
+            .get('/orders/:userId', async ({ params: { userId }, user, set }: any) => {
+                try {
+                    const u = user as UserRecord;
+                    if (u.id !== Number(userId) && u.role !== 10) {
+                        set.status = 403;
+                        return { success: false, message: 'Forbidden' };
+                    }
+                    const orders = await sql`
+                        SELECT * FROM payment_orders 
+                        WHERE user_id = ${Number(userId)}
+                        ORDER BY created_at DESC
+                        LIMIT 50
+                    `;
+                    return orders;
+                } catch (e: any) {
+                    set.status = 500;
+                    return { success: false, message: e.message };
+                }
+            })
+    );
 
-async function generateEPaySign(params: string, secret: string): Promise<string> {
-    const encoder = new TextEncoder();
-    const data = encoder.encode(params + secret);
-    const hashBuffer = await crypto.subtle.digest('MD5', data);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+function generateEPaySign(params: string, secret: string): string {
+    return new Bun.CryptoHasher("md5").update(params + secret).digest("hex");
 }

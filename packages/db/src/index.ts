@@ -13,5 +13,9 @@ const finalizedUrl = url.toString();
  * Export Native SQL connection pool instance
  * Explicitly passing the URL to ensure the Bun native driver uses the correct target.
  */
-export const sql = new (BunSQL || class { unsafe() { throw new Error("Bun.SQL not available"); } })(finalizedUrl);
+export const sql = BunSQL ? new BunSQL(finalizedUrl) : new Proxy({}, {
+    get() {
+        return () => { throw new Error("Bun.SQL native driver is not available in this environment."); };
+    }
+}) as any;
 export * from "./types";

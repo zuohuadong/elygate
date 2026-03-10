@@ -1,6 +1,8 @@
 import { Elysia, t } from 'elysia';
 import { sql } from '@elygate/db';
 import { authService } from '../services/auth';
+import { authPlugin } from '../middleware/auth';
+import type { UserRecord } from '../types';
 
 const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID || '';
 const GITHUB_CLIENT_SECRET = process.env.GITHUB_CLIENT_SECRET || '';
@@ -186,45 +188,25 @@ export const authRouter = new Elysia()
         })
     })
     // Validate a token and return user info (for /me checks in the frontend)
-    .get('/me', async ({ request, set }: any) => {
-        const authHeader = request.headers.get('authorization');
-        if (!authHeader?.startsWith('Bearer ')) {
-            set.status = 401;
-            throw new Error('Unauthorized');
-        }
-        const key = authHeader.substring(7);
-        const [row] = await sql`
-            SELECT u.id, u.username, u.role, u.quota, u.used_quota as "usedQuota", u."group", t.key
-            FROM tokens t
-            JOIN users u ON t.user_id = u.id
-            WHERE t.key = ${key} AND t.status = 1 AND u.status = 1
-            LIMIT 1
-        `;
-        if (!row) {
-            set.status = 401;
-            throw new Error('Invalid or expired token');
-        }
-        return row;
-    })
+    .use(
+        new Elysia()
+            .use(authPlugin)
+            .get('/me', async ({ user, token }: any) => {
+                const u = user as UserRecord;
+                const [row] = await sql`SELECT used_quota as "usedQuota" FROM users WHERE id = ${u.id}`;
+                return {
+                    id: u.id,
+                    username: u.username,
+                    role: u.role,
+                    quota: u.quota,
+                    usedQuota: row?.usedQuota || 0,
+                    group: u.group,
+                    key: token.key
+                };
+            })
     // Get personal logs
-    .get('/logs', async ({ request, set }: any) => {
-        const authHeader = request.headers.get('authorization');
-        if (!authHeader?.startsWith('Bearer ')) {
-            set.status = 401;
-            throw new Error('Unauthorized');
-        }
-        const key = authHeader.substring(7);
-        const [userRow] = await sql`
-            SELECT u.id
-            FROM tokens t
-            JOIN users u ON t.user_id = u.id
-            WHERE t.key = ${key} AND t.status = 1 AND u.status = 1
-            LIMIT 1
-        `;
-        if (!userRow) {
-            set.status = 401;
-            throw new Error('Unauthorized');
-        }
+    .get('/logs', async ({ request, user, set }: any) => {
+        const userRow = user as UserRecord;
 
         const page = Number(request.query?.page) || 1;
         const limit = Number(request.query?.limit) || 50;
@@ -252,24 +234,8 @@ export const authRouter = new Elysia()
         };
     })
     // Get personal tokens
-    .get('/tokens', async ({ request, set }: any) => {
-        const authHeader = request.headers.get('authorization');
-        if (!authHeader?.startsWith('Bearer ')) {
-            set.status = 401;
-            throw new Error('Unauthorized');
-        }
-        const key = authHeader.substring(7);
-        const [userRow] = await sql`
-            SELECT u.id
-            FROM tokens t
-            JOIN users u ON t.user_id = u.id
-            WHERE t.key = ${key} AND t.status = 1 AND u.status = 1
-            LIMIT 1
-        `;
-        if (!userRow) {
-            set.status = 401;
-            throw new Error('Unauthorized');
-        }
+    .get('/tokens', async ({ user, set }: any) => {
+        const userRow = user as UserRecord;
 
         const data = await sql`
             SELECT id, name, key, status, remain_quota as "remainQuota", used_quota as "usedQuota", created_at as "createdAt", models
@@ -280,22 +246,8 @@ export const authRouter = new Elysia()
 
         return [...data];
     })
-    .post('/tokens', async ({ body, request, set }: any) => {
-        const authHeader = request.headers.get('authorization');
-        if (!authHeader?.startsWith('Bearer ')) {
-            set.status = 401;
-            throw new Error('Unauthorized');
-        }
-        const key = authHeader.substring(7);
-        const [userRow] = await sql`
-            SELECT u.id FROM tokens t JOIN users u ON t.user_id = u.id
-            WHERE t.key = ${key} AND t.status = 1 AND u.status = 1
-            LIMIT 1
-        `;
-        if (!userRow) {
-            set.status = 401;
-            throw new Error('Unauthorized');
-        }
+    .post('/tokens', async ({ body, user, set }: any) => {
+        const userRow = user as UserRecord;
 
         const b = body as any;
         const newKey = `sk-${Bun.randomUUIDv7('hex')}`;
@@ -306,22 +258,8 @@ export const authRouter = new Elysia()
         `;
         return result;
     })
-    .put('/tokens/:id', async ({ params: { id }, body, request, set }: any) => {
-        const authHeader = request.headers.get('authorization');
-        if (!authHeader?.startsWith('Bearer ')) {
-            set.status = 401;
-            throw new Error('Unauthorized');
-        }
-        const key = authHeader.substring(7);
-        const [userRow] = await sql`
-            SELECT u.id FROM tokens t JOIN users u ON t.user_id = u.id
-            WHERE t.key = ${key} AND t.status = 1 AND u.status = 1
-            LIMIT 1
-        `;
-        if (!userRow) {
-            set.status = 401;
-            throw new Error('Unauthorized');
-        }
+    .put('/tokens/:id', async ({ params: { id }, body, user, set }: any) => {
+        const userRow = user as UserRecord;
 
         // Verify ownership
         const [existing] = await sql`SELECT id FROM tokens WHERE id = ${Number(id)} AND user_id = ${userRow.id}`;
@@ -341,22 +279,8 @@ export const authRouter = new Elysia()
         `;
         return result;
     })
-    .delete('/tokens/:id', async ({ params: { id }, request, set }: any) => {
-        const authHeader = request.headers.get('authorization');
-        if (!authHeader?.startsWith('Bearer ')) {
-            set.status = 401;
-            throw new Error('Unauthorized');
-        }
-        const key = authHeader.substring(7);
-        const [userRow] = await sql`
-            SELECT u.id FROM tokens t JOIN users u ON t.user_id = u.id
-            WHERE t.key = ${key} AND t.status = 1 AND u.status = 1
-            LIMIT 1
-        `;
-        if (!userRow) {
-            set.status = 401;
-            throw new Error('Unauthorized');
-        }
+    .delete('/tokens/:id', async ({ params: { id }, user, set }: any) => {
+        const userRow = user as UserRecord;
 
         const [result] = await sql`DELETE FROM tokens WHERE id = ${Number(id)} AND user_id = ${userRow.id} RETURNING *`;
         if (!result) {
@@ -366,24 +290,8 @@ export const authRouter = new Elysia()
         return { success: true, deleted: result };
     })
     // Get personal stats (for Dashboard chart)
-    .get('/stats', async ({ request, set }: any) => {
-        const authHeader = request.headers.get('authorization');
-        if (!authHeader?.startsWith('Bearer ')) {
-            set.status = 401;
-            throw new Error('Unauthorized');
-        }
-        const key = authHeader.substring(7);
-        const [userRow] = await sql`
-            SELECT u.id
-            FROM tokens t
-            JOIN users u ON t.user_id = u.id
-            WHERE t.key = ${key} AND t.status = 1 AND u.status = 1
-            LIMIT 1
-        `;
-        if (!userRow) {
-            set.status = 401;
-            throw new Error('Unauthorized');
-        }
+    .get('/stats', async ({ user, set }: any) => {
+        const userRow = user as UserRecord;
 
         const dailyStats = await sql`
             SELECT 
@@ -402,24 +310,8 @@ export const authRouter = new Elysia()
     })
 
     // Get personal real-time metrics (RPM/TPM)
-    .get('/realtime', async ({ request, set }: any) => {
-        const authHeader = request.headers.get('authorization');
-        if (!authHeader?.startsWith('Bearer ')) {
-            set.status = 401;
-            throw new Error('Unauthorized');
-        }
-        const key = authHeader.substring(7);
-        const [userRow] = await sql`
-            SELECT u.id
-            FROM tokens t
-            JOIN users u ON t.user_id = u.id
-            WHERE t.key = ${key} AND t.status = 1 AND u.status = 1
-            LIMIT 1
-        `;
-        if (!userRow) {
-            set.status = 401;
-            throw new Error('Unauthorized');
-        }
+    .get('/realtime', async ({ user, set }: any) => {
+        const userRow = user as UserRecord;
 
         const [realtime] = await sql`
             SELECT 
@@ -435,6 +327,7 @@ export const authRouter = new Elysia()
             tpm: Number(realtime.tpm || 0)
         };
     })
+    )
 
     .get('/discord', ({ set }) => {
         const url = `https://discord.com/api/oauth2/authorize?client_id=${DISCORD_CLIENT_ID}&redirect_uri=${encodeURIComponent(DISCORD_REDIRECT_URI)}&response_type=code&scope=identify`;
@@ -522,19 +415,9 @@ export const authRouter = new Elysia()
             .map(key => `${key}=${query[key]}`)
             .join('\n');
 
-        const encoder = new TextEncoder();
-        const secretKey = await crypto.subtle.importKey(
-            'raw',
-            encoder.encode(TELEGRAM_BOT_TOKEN),
-            { name: 'HMAC', hash: 'SHA-256' },
-            false,
-            ['sign']
-        );
-
-        const signature = await crypto.subtle.sign('HMAC', secretKey, encoder.encode(dataCheckString));
-        const expectedHash = Array.from(new Uint8Array(signature))
-            .map(b => b.toString(16).padStart(2, '0'))
-            .join('');
+        const expectedHash = new Bun.CryptoHasher("sha256", TELEGRAM_BOT_TOKEN)
+            .update(dataCheckString)
+            .digest("hex");
 
         if (hash !== expectedHash) {
             set.status = 401;

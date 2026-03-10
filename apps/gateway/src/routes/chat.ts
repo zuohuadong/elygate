@@ -123,7 +123,18 @@ export const chatRouter = new Elysia()
                             let usageData: any = null;
                             let buffer = '';
 
+                            // Timeout protection: if stream hangs (e.g., client disconnects),
+                            // ensure we still reconcile quota after 60 seconds.
+                            const timeoutMs = 60_000;
+                            const deadline = Date.now() + timeoutMs;
+
                             while (true) {
+                                if (Date.now() > deadline) {
+                                    console.warn('[Stream Billing] Timeout reached, cancelling billing stream reader.');
+                                    reader.cancel().catch(() => {});
+                                    break;
+                                }
+
                                 const { done, value } = await reader.read();
                                 if (done) break;
 
@@ -196,6 +207,13 @@ export const chatRouter = new Elysia()
                             });
                         } catch (e) {
                             console.error("[Stream Billing Error]", e);
+                            // On unexpected error, still try to refund pre-deducted quota
+                            await reconcileQuota({
+                                userId: user.id,
+                                tokenId: token.id,
+                                preDeducted,
+                                actualCost: 0
+                            }).catch(() => {});
                         }
                     })();
 

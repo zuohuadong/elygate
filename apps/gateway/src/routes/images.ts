@@ -2,7 +2,8 @@ import { Elysia } from 'elysia';
 import { authPlugin, assertModelAccess } from '../middleware/auth';
 import { memoryCache } from '../services/cache';
 import { circuitBreaker } from '../services/circuitBreaker';
-import { billAndLog } from '../services/billing';
+import { billAndLog, preCheckAndDecrement, reconcileQuota } from '../services/billing';
+import { calculateCost } from '../services/ratio';
 import { ChannelType, getProviderHandler } from '../providers';
 
 export const imagesRouter = new Elysia()
@@ -14,12 +15,10 @@ export const imagesRouter = new Elysia()
             throw new Error("Missing 'prompt' field in request body");
         }
 
-        // Default image model if not provided, though clients typically provide one like 'dall-e-3'
         const targetModel = model || 'dall-e-3';
 
-        // --- Phase 4 & 6: Access Control ---
+        // --- Access Control ---
         assertModelAccess(user, token, targetModel, set);
-        // ------------------------------------------
 
         console.log(`[Images Request] UserID: ${user.id}, Token: ${token.name}, Model: ${targetModel}`);
 
@@ -48,6 +47,15 @@ export const imagesRouter = new Elysia()
 
             let upstreamUrl = `${channelConfig.baseUrl}/v1/images/generations`;
 
+            // Quota pre-decrement (prevents overdraft under high concurrency)
+            const preDeducted = await preCheckAndDecrement({
+                userId: user.id,
+                tokenId: token.id,
+                modelName: targetModel,
+                userGroup: user.group,
+                maxTokens: n
+            });
+
             try {
                 const response = await fetch(upstreamUrl, {
                     method: 'POST',
@@ -66,9 +74,14 @@ export const imagesRouter = new Elysia()
 
                 const rawData = await response.json();
 
-                // Image generation billing logic:
-                // Instead of token counts, we treat `promptTokens` as `0` and use `completionTokens` to pass a custom weight unit (e.g., number of images generated) 
-                // Or handle images uniquely in the billing service soon. For now we pass 'n' (image count) as usage.
+                const actualCost = calculateCost(targetModel, user.group, 0, n);
+
+                await reconcileQuota({
+                    userId: user.id,
+                    tokenId: token.id,
+                    preDeducted,
+                    actualCost
+                });
 
                 await billAndLog({
                     userId: user.id,
@@ -76,7 +89,7 @@ export const imagesRouter = new Elysia()
                     channelId: channelConfig.id,
                     modelName: targetModel,
                     promptTokens: 0,
-                    completionTokens: n, // Using completionTokens to carry 'n' images count
+                    completionTokens: n,
                     userGroup: user.group,
                     isStream: false
                 });
@@ -84,6 +97,12 @@ export const imagesRouter = new Elysia()
                 return rawData;
 
             } catch (e: any) {
+                await reconcileQuota({
+                    userId: user.id,
+                    tokenId: token.id,
+                    preDeducted,
+                    actualCost: 0
+                });
                 lastError = e;
                 if (!e.message.startsWith('Status')) {
                     await circuitBreaker.recordError(channelConfig.id);

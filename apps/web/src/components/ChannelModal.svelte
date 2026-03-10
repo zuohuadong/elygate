@@ -233,7 +233,7 @@
                         id="ch-mapping"
                         bind:value={formData.modelMapping}
                         rows="3"
-                        placeholder={'{"gpt-4": "gpt-4-32k"}'}
+                        placeholder="&#123;&quot;gpt-4&quot;: &quot;gpt-4-32k&quot;&#125;"
                         class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-sm font-mono focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
                     ></textarea>
                 </div>

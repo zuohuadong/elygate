@@ -2,7 +2,7 @@ import { Elysia } from 'elysia';
 import { authPlugin } from '../middleware/auth';
 import { memoryCache } from '../services/cache';
 import { circuitBreaker } from '../services/circuitBreaker';
-import { billAndLog } from '../services/billing';
+import { billAndLog, preCheckAndDecrement, reconcileQuota } from '../services/billing';
 import { MidjourneyApiHandler } from '../providers/mj';
 import { sql } from '@elygate/db';
 
@@ -30,20 +30,20 @@ export const mjRouter = new Elysia()
 
         // Deduct 1 MJ action cost synchronously before forwarding
         // (Assuming 1 command = 1 credit or handled via FixedCostModels)
-        const costToDeduct = await import('../services/billing').then(m => m.preCheckAndDecrement({
+        const costToDeduct = await preCheckAndDecrement({
             userId: user.id,
             tokenId: token.id,
             modelName: targetModel,
             userGroup: user.group,
             maxTokens: 1 // For MJ, completion counts as 1 action
-        }));
+        });
 
         const candidateChannels = memoryCache.selectChannels(targetModel);
         if (!candidateChannels || candidateChannels.length === 0) {
             // Refund on failure
-            await import('../services/billing').then(m => m.reconcileQuota({
+            await reconcileQuota({
                 userId: user.id, tokenId: token.id, preDeducted: costToDeduct, actualCost: 0
-            }));
+            });
             set.status = 500;
             return { code: 4, description: "No MJ channels available" };
         }
@@ -96,9 +96,9 @@ export const mjRouter = new Elysia()
             }
         } catch (e: any) {
             // Refund quota if submit failed
-            await import('../services/billing').then(m => m.reconcileQuota({
+            await reconcileQuota({
                 userId: user.id, tokenId: token.id, preDeducted: costToDeduct, actualCost: 0
-            }));
+            });
             set.status = 500;
             return { code: 4, description: e.message };
         }
@@ -114,19 +114,19 @@ export const mjRouter = new Elysia()
 
         // Action is cheaper or same as imagine, handled by proxy. 
         // We will charge it as 1 action as well.
-        const costToDeduct = await import('../services/billing').then(m => m.preCheckAndDecrement({
+        const costToDeduct = await preCheckAndDecrement({
             userId: user.id,
             tokenId: token.id,
             modelName: targetModel,
             userGroup: user.group,
             maxTokens: 1
-        }));
+        });
 
         const candidateChannels = memoryCache.selectChannels(targetModel);
         if (!candidateChannels || !candidateChannels[0]) {
-            await import('../services/billing').then(m => m.reconcileQuota({
+            await reconcileQuota({
                 userId: user.id, tokenId: token.id, preDeducted: costToDeduct, actualCost: 0
-            }));
+            });
             return { code: 4, description: "No channels" };
         }
 
@@ -166,9 +166,9 @@ export const mjRouter = new Elysia()
                 throw new Error(JSON.stringify(rawData));
             }
         } catch (e: any) {
-            await import('../services/billing').then(m => m.reconcileQuota({
+            await reconcileQuota({
                 userId: user.id, tokenId: token.id, preDeducted: costToDeduct, actualCost: 0
-            }));
+            });
             return { code: 4, description: e.message };
         }
     })
@@ -239,7 +239,17 @@ export const mjRouter = new Elysia()
     })
 
     // --- Webhook Consumer (Upstream posts here when done) ---
-    .post('/mj/webhook', async ({ body }: any) => {
+    .post('/mj/webhook', async ({ body, request, set }: any) => {
+        // Verify webhook secret to prevent unauthorized callbacks
+        const webhookSecret = process.env.MJ_WEBHOOK_SECRET;
+        if (webhookSecret) {
+            const authHeader = request.headers.get('authorization') || '';
+            if (authHeader !== `Bearer ${webhookSecret}`) {
+                set.status = 401;
+                return { success: false, message: 'Unauthorized webhook call' };
+            }
+        }
+
         // MJ Proxy upstream sends result here
         const { id, status, imageUrl, progress, failReason } = body as any;
         if (!id) return { success: false };
