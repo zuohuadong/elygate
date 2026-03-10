@@ -131,6 +131,74 @@ export const adminRouter = new Elysia()
         }
     })
 
+    .post('/channels/batch', async ({ body, set }: any) => {
+        try {
+            const channels = body as any[];
+            const results = [];
+            
+            for (const ch of channels) {
+                try {
+                    const encryptedKey = encryptChannelKeys(ch.key);
+                    const [result] = await sql`
+                        INSERT INTO channels (name, type, key, base_url, models, priority, weight, status, key_strategy, key_status, price_ratio)
+                        VALUES (${ch.name}, ${ch.type}, ${encryptedKey}, ${ch.baseUrl}, ${ch.models}, ${ch.priority || 0}, ${ch.weight || 1}, ${ch.status || 1}, ${ch.keyStrategy || 0}, '{}'::jsonb, ${ch.priceRatio || 1.0})
+                        RETURNING id, name, type, base_url, models, status
+                    `;
+                    results.push({ success: true, channel: result });
+                } catch (e: any) {
+                    results.push({ success: false, name: ch.name, error: e.message });
+                }
+            }
+            
+            await memoryCache.refresh();
+            return { 
+                success: true, 
+                total: channels.length,
+                imported: results.filter((r: any) => r.success).length,
+                failed: results.filter((r: any) => !r.success).length,
+                results 
+            };
+        } catch (e: any) {
+            set.status = 500;
+            return { success: false, message: e.message };
+        }
+    }, {
+        body: t.Array(t.Object({
+            name: t.String(),
+            type: t.Number(),
+            key: t.String(),
+            baseUrl: t.String(),
+            models: t.Array(t.String()),
+            priority: t.Optional(t.Number()),
+            weight: t.Optional(t.Number()),
+            status: t.Optional(t.Number()),
+            keyStrategy: t.Optional(t.Number()),
+            priceRatio: t.Optional(t.Number())
+        }))
+    })
+
+    .post('/channels/:id/sync-models', async ({ params: { id }, set }: any) => {
+        const [channel] = await sql`SELECT * FROM channels WHERE id = ${Number(id)} LIMIT 1`;
+        if (!channel) return (set.status = 404, { success: false, message: 'Channel not found' });
+
+        const handler = getProviderHandler(channel.type);
+        const testKey = decryptChannelKeys(channel.key).split('\n').find(Boolean) || '';
+        const baseUrl = channel.base_url || 'https://api.openai.com';
+        const modelsUrl = channel.type === ChannelType.GEMINI ? `${baseUrl}/v1beta/models` : `${baseUrl}/v1/models`;
+
+        const res = await fetch(modelsUrl, { headers: handler.buildHeaders(testKey) });
+        if (!res.ok) return (set.status = 500, { success: false, message: `Failed: ${res.status}` });
+
+        const data = await res.json();
+        const models = channel.type === ChannelType.GEMINI
+            ? data.models?.map((m: any) => m.name?.replace('models/', '') || m.displayName).filter(Boolean) || []
+            : data.data?.map((m: any) => m.id).filter(Boolean) || data.map?.((m: any) => m.id || m.name).filter(Boolean) || [];
+
+        const [result] = await sql`UPDATE channels SET models = ${models}, updated_at = NOW() WHERE id = ${Number(id)} RETURNING *`;
+        await memoryCache.refresh();
+        return { success: true, modelsCount: models.length, channel: result };
+    })
+
     .post('/channels/:id/keys/clean', async ({ params: { id }, set }: any) => {
         try {
             const [channel] = await sql`SELECT * FROM channels WHERE id = ${Number(id)} LIMIT 1`;
