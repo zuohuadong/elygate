@@ -43,7 +43,13 @@
         { id: "nvidia", label: "NVIDIA", labelEn: "NVIDIA" },
         { id: "mistral", label: "Mistral", labelEn: "Mistral" },
         { id: "cohere", label: "Cohere", labelEn: "Cohere" },
-        { id: "aws", label: "AWS (Bedrock)", labelEn: "AWS (Bedrock)" },
+        { id: "alibaba", label: "阿里通义", labelEn: "Alibaba" },
+        { id: "zhipu", label: "智谱清言", labelEn: "Zhipu" },
+        { id: "minimax", label: "MiniMax", labelEn: "MiniMax" },
+        { id: "bytedance", label: "字节跳动", labelEn: "ByteDance" },
+        { id: "baichuan", label: "百川智能", labelEn: "Baichuan" },
+        { id: "01ai", label: "零一万物", labelEn: "01.AI" },
+        { id: "moonshot", label: "月之暗面", labelEn: "Moonshot" },
         { id: "others", label: "其他", labelEn: "Others" },
     ];
 
@@ -78,7 +84,17 @@
             nvidia: "nvidia",
             mistral: "mistral",
             cohere: "cohere",
-            aws: "aws",
+            qwen: "alibaba",
+            glm: "zhipu",
+            zhipu: "zhipu",
+            minimax: "minimax",
+            doubao: "bytedance",
+            bytedance: "bytedance",
+            baichuan: "baichuan",
+            "yi-": "01ai",
+            "01-ai": "01ai",
+            moonshot: "moonshot",
+            kimi: "moonshot",
         };
 
         for (const [prefix, provider] of Object.entries(prefixes)) {
