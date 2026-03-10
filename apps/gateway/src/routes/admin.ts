@@ -6,24 +6,21 @@ import { quotaToUSD, quotaToRMB } from '../services/ratio';
 import { getProviderHandler } from '../providers';
 import { ChannelType } from '../types';
 import { getLangFromHeader, getLangFromQuery } from '../utils/i18n';
-import { readFileSync } from 'fs';
 import { join } from 'path';
 import { encryptChannelKeys, decryptChannelKeys } from '../services/encryption';
 import { getAuditLogs } from '../services/auditLog';
 
-// Load model configurations
-function loadModelConfig() {
-    try {
-        const configPath = join(process.cwd(), 'apps/gateway/config/models.json');
-        const configData = readFileSync(configPath, 'utf-8');
-        return JSON.parse(configData);
-    } catch (error) {
-        console.error('[ModelConfig] Failed to load model config:', error);
-        return { anthropic: { models: [] } };
+// Load model configurations via top-level await (Bun native feature)
+let modelConfig: any = { anthropic: { models: [] } };
+try {
+    const configPath = join(process.cwd(), 'apps/gateway/config/models.json');
+    const file = Bun.file(configPath);
+    if (await file.exists()) {
+        modelConfig = await file.json();
     }
+} catch (error) {
+    console.error('[ModelConfig] Failed to load model config:', error);
 }
-
-const modelConfig = loadModelConfig();
 
 // Admin Router - prefix will be applied in index.ts
 export const adminRouter = new Elysia()

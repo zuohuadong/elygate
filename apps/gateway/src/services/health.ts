@@ -65,8 +65,21 @@ class HealthChecker {
 
                     if (newErrors >= this.MAX_ERRORS) {
                         console.error(`[HealthCheck] Channel ${ch.id} auto-disabled due to consecutive failures.`);
-                        await sql`UPDATE channels SET status = 2, test_errors = ${newErrors}, test_at = NOW() WHERE id = ${ch.id}`;
+                        await sql`UPDATE channels SET status = 3, test_errors = ${newErrors}, test_at = NOW() WHERE id = ${ch.id}`;
                         memoryCache.refresh().catch(console.error);
+
+                        // Also notify admin and trigger webhook (similar to circuit breaker)
+                        try {
+                            const { notificationService } = await import('./notification');
+                            const { webhookService } = await import('./webhook');
+                            await notificationService.send(
+                                'Proactive Health Check Failed',
+                                `Channel ID ${ch.id} has been disabled due to consecutive ping failures.`
+                            );
+                            await webhookService.trigger('channel.disabled', { channelId: ch.id });
+                        } catch (err) {
+                            console.error('[HealthCheck] Failed to send notification:', err);
+                        }
                     } else {
                         await sql`UPDATE channels SET test_errors = ${newErrors}, test_at = NOW() WHERE id = ${ch.id}`;
                     }

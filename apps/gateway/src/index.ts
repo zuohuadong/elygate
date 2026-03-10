@@ -26,7 +26,6 @@ import { memoryCache } from "./services/cache";
 import { auth as betterAuthInstance } from "./services/betterAuth";
 import { sql } from "@elygate/db";
 import { join } from "path";
-import { existsSync, statSync } from "fs";
 import { type UserRecord, type TokenRecord } from "./types";
 import "./services/health";
 
@@ -49,7 +48,7 @@ const app = new Elysia()
     return { success: false, message: error instanceof Error ? error.message : String(error) };
   })
   // Serve static files if they exist (all-in-one mode)
-  .onBeforeHandle(({ path }) => {
+  .onBeforeHandle(async ({ path }) => {
     if (path.startsWith('/api') || path.startsWith('/v1')) return;
 
     // Normalize path
@@ -57,26 +56,30 @@ const app = new Elysia()
 
     // Try prerendered directory first (with .html extension)
     let staticPath = join(process.cwd(), 'apps/web/build/prerendered', `${normalizedPath}.html`);
-    if (existsSync(staticPath) && statSync(staticPath).isFile()) {
-      return Bun.file(staticPath);
+    let file = Bun.file(staticPath);
+    if (await file.exists()) {
+      return file;
     }
 
     // Try prerendered directory with index.html for directory paths
     staticPath = join(process.cwd(), 'apps/web/build/prerendered', normalizedPath, 'index.html');
-    if (existsSync(staticPath) && statSync(staticPath).isFile()) {
-      return Bun.file(staticPath);
+    file = Bun.file(staticPath);
+    if (await file.exists()) {
+      return file;
     }
 
     // Try client directory for assets
     staticPath = join(process.cwd(), 'apps/web/build/client', path);
-    if (existsSync(staticPath) && statSync(staticPath).isFile()) {
-      return Bun.file(staticPath);
+    file = Bun.file(staticPath);
+    if (await file.exists()) {
+      return file;
     }
 
     // Fallback to build directory
     staticPath = join(process.cwd(), 'apps/web/build', path === '/' ? 'index.html' : path);
-    if (existsSync(staticPath) && statSync(staticPath).isFile()) {
-      return Bun.file(staticPath);
+    file = Bun.file(staticPath);
+    if (await file.exists()) {
+      return file;
     }
   })
   // .mount("/api/auth/better", betterAuthInstance.handler)
@@ -142,8 +145,9 @@ const app = new Elysia()
     const url = new URL(request.url);
     if (!url.pathname.startsWith('/api') && !url.pathname.startsWith('/v1')) {
       const fallback = join(process.cwd(), 'apps/web/build/index.html');
-      if (existsSync(fallback)) {
-        return Bun.file(fallback);
+      const file = Bun.file(fallback);
+      if (await file.exists()) {
+        return file;
       }
     }
     set.status = 404;
@@ -168,20 +172,20 @@ async function init() {
   }
 
   // Resolve SQL paths robustly for both local dev and Docker production
-  const findSqlPath = (relativePath: string) => {
+  const findSqlPath = async (relativePath: string) => {
     const paths = [
       join(process.cwd(), relativePath),                        // From root (Docker)
       join(process.cwd(), '../../', relativePath),              // From apps/gateway (Local dev)
       join(__dirname, '../../../', relativePath)                // Absolute fallback
     ];
     for (const p of paths) {
-      if (existsSync(p)) return p;
+      if (await Bun.file(p).exists()) return p;
     }
     return null;
   };
 
   // Run schema fix patch if exists (idempotent)
-  const patchPath = findSqlPath('packages/db/src/patch_v1_schema_fix.sql');
+  const patchPath = await findSqlPath('packages/db/src/patch_v1_schema_fix.sql');
   if (patchPath) {
     try {
       const patchSql = await Bun.file(patchPath).text();
@@ -193,7 +197,7 @@ async function init() {
   }
 
   // Apply Performance Indexes (idempotent)
-  const perfIndexesPath = findSqlPath('packages/db/src/performance_indexes.sql');
+  const perfIndexesPath = await findSqlPath('packages/db/src/performance_indexes.sql');
   if (perfIndexesPath) {
     try {
       const perfSql = await Bun.file(perfIndexesPath).text();
