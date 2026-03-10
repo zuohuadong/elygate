@@ -4,7 +4,7 @@ import { existsSync } from "fs";
 
 const port = parseInt(process.env.PORT || "3001", 10);
 
-// 自动探测 build 目录位置
+// Auto-detect build directory location
 let buildDir = join(process.cwd(), "build");
 if (!existsSync(buildDir)) {
     buildDir = join(process.cwd(), "apps/web/build");

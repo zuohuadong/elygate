@@ -260,8 +260,16 @@ export class UnifiedDispatcher {
                 let usageData: any = null;
                 let buffer = '';
 
+                const timeoutError = new Error('Stream idle timeout exceeded (60s)');
+                const readWithTimeout = (r: ReadableStreamDefaultReader<Uint8Array>) => {
+                    return Promise.race([
+                        r.read(),
+                        new Promise<any>((_, reject) => setTimeout(() => reject(timeoutError), 60000))
+                    ]);
+                };
+
                 while (true) {
-                    const { done, value } = await reader.read();
+                    const { done, value } = await readWithTimeout(reader);
                     if (done) break;
 
                     buffer += decoder.decode(value, { stream: true });
@@ -315,6 +323,13 @@ export class UnifiedDispatcher {
                 });
             } catch (e) {
                 console.error("[Stream Billing Error]", e);
+                // Refund pre-deducted quota natively on abrupt stream network drop before completion
+                await reconcileQuota({
+                    userId: user.id, 
+                    tokenId: token.id, 
+                    preDeducted, 
+                    actualCost: 0 
+                }).catch(() => {});
             }
         })();
     }
