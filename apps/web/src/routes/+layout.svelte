@@ -36,6 +36,7 @@
 
 	let { children } = $props();
 	let showShortcutsModal = $state(false);
+	let isReady = $state(false);
 
 	// Admin-only routes (regular users should not access these)
 	const ADMIN_ROUTES = [
@@ -83,11 +84,13 @@
 				}
 			} else if (!isAuthPage) {
 				goto("/login");
+				return;
 			}
 		} catch (err) {
 			// If we're on a non-auth page and /me fails, we must go to login
 			if (!isAuthPage) {
 				goto("/login");
+				return;
 			}
 		}
 
@@ -145,7 +148,10 @@
 		// Redirect admins who land on consumer pages to the admin dashboard
 		if (isAdmin && CONSUMER_ROUTES.some((r) => path.startsWith(r))) {
 			goto("/");
+			return;
 		}
+
+		isReady = true;
 	});
 
 	async function toggleCurrency() {
@@ -298,6 +304,10 @@
 
 {#if isAuthPage}
 	{@render children()}
+{:else if !isReady}
+	<div class="flex h-screen w-full items-center justify-center bg-slate-50 dark:bg-slate-950">
+		<div class="w-8 h-8 rounded-full border-2 border-indigo-600 border-t-transparent animate-spin"></div>
+	</div>
 {:else}
 	<div
 		class="flex h-screen w-full bg-slate-50 dark:bg-slate-950 overflow-hidden"
