@@ -21,12 +21,18 @@
             }, 2000);
         };
 
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(value).then(success).catch(err => {
-                console.error("Clipboard API failed, trying fallback:", err);
+        try {
+            const cb = (typeof navigator !== 'undefined' && navigator.clipboard);
+            if (cb && typeof cb.writeText === 'function') {
+                cb.writeText(value).then(success).catch(err => {
+                    console.error("Clipboard API failed, trying fallback:", err);
+                    fallbackCopy(value, success);
+                });
+            } else {
                 fallbackCopy(value, success);
-            });
-        } else {
+            }
+        } catch (err) {
+            console.error("Copy error, trying fallback:", err);
             fallbackCopy(value, success);
         }
     }
@@ -34,10 +40,11 @@
     function fallbackCopy(text: string, cb: () => void) {
         try {
             const textArea = document.createElement("textarea");
-            textArea.value = text;
+            textArea.value = text || "";
             textArea.style.position = "fixed";
             textArea.style.left = "-9999px";
             textArea.style.top = "0";
+            textArea.style.opacity = "0";
             document.body.appendChild(textArea);
             textArea.focus();
             textArea.select();

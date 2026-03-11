@@ -44,13 +44,16 @@
         isLoading = true;
         try {
             const data = await apiFetch<{ data: InviteCode[], total: number }>(`/admin/invite-codes?page=${page}&limit=${limit}`);
-            inviteCodes = data.data.map((c) => ({
-                ...c,
-                displayStatus: getStatusText(c.status, c.usedCount, c.maxUses, c.expiresAt),
-                formattedQuota: `$${(c.giftQuota / 500000).toFixed(2)}`,
-                usageStr: `${c.usedCount} / ${c.maxUses}`,
-                formattedExpires: c.expiresAt ? new Date(c.expiresAt).toLocaleString() : "-"
-            }));
+            inviteCodes = data.data.map((c) => {
+                const giftQuota = c.giftQuota || 0;
+                return {
+                    ...c,
+                    displayStatus: getStatusText(c.status, c.usedCount, c.maxUses, c.expiresAt),
+                    formattedQuota: `$ ${(Number(giftQuota) / 1000).toFixed(2)}`,
+                    usageStr: `${c.usedCount || 0} / ${c.maxUses || 0}`,
+                    formattedExpires: c.expiresAt ? new Date(c.expiresAt).toLocaleString() : "-"
+                };
+            });
             total = data.total;
         } catch (err: any) {
             errorMsg = err.message || (i18n.lang === "zh" ? "加载邀请码失败" : "Failed to load invite codes");

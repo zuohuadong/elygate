@@ -7,9 +7,14 @@
     let activeTab = $state<'chat' | 'embeddings' | 'images' | 'audio' | 'errors'>('chat');
 
     function copyCode(code: string, id: string) {
-        navigator.clipboard.writeText(code);
-        copied = id;
-        setTimeout(() => (copied = null), 2000);
+        if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(code).then(() => {
+                copied = id;
+                setTimeout(() => (copied = null), 2000);
+            }).catch(err => {
+                console.error("Copy failed:", err);
+            });
+        }
     }
 
     let apiHost = $state('http://localhost:3000');

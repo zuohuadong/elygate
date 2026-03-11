@@ -24,30 +24,32 @@
         try {
             const endpoint = isAdmin ? "/admin/tokens" : "/auth/tokens";
             const data = await apiFetch<any[]>(endpoint);
-            tokens = data.map((t) => ({
-                ...t,
-                // Ensure we handle both snake_case and camelCase from backend
-                name: t.name,
-                key: t.key,
-                status: t.status,
-                remainQuota: t.remainQuota ?? t.remain_quota,
-                usedQuota: t.usedQuota ?? t.used_quota,
-                createdAt: t.createdAt ?? t.created_at,
-                dt_status:
-                    t.status === 1
-                        ? i18n.lang === "zh"
-                            ? "正常"
-                            : "Active"
-                        : i18n.lang === "zh"
-                          ? "禁用"
-                          : "Banned",
-                dt_created_at: (t.createdAt ?? t.created_at) ? new Date(t.createdAt ?? t.created_at).toLocaleString() : "-",
-                dt_remain_quota:
-                    (t.remainQuota ?? t.remain_quota) === -1
-                        ? i18n.t.tokens.unlimited
-                        : `$ ${((t.remainQuota ?? t.remain_quota) / 500000).toFixed(2)}`,
-                dt_used_quota: `$ ${(((t.usedQuota ?? t.used_quota) || 0) / 500000).toFixed(4)}`,
-            }));
+            tokens = data.map((t) => {
+                const remainQuota = (t.remainQuota !== undefined ? t.remainQuota : t.remain_quota);
+                const usedQuota = (t.usedQuota !== undefined ? t.usedQuota : t.used_quota) || 0;
+                const createdAt = t.createdAt || t.created_at;
+
+                return {
+                    ...t,
+                    remainQuota,
+                    usedQuota,
+                    createdAt,
+                    dt_status:
+                        t.status === 1
+                            ? i18n.lang === "zh"
+                                ? "正常"
+                                : "Active"
+                            : i18n.lang === "zh"
+                              ? "禁用"
+                              : "Banned",
+                    dt_created_at: createdAt ? new Date(createdAt).toLocaleString() : "-",
+                    dt_remain_quota:
+                        remainQuota === -1
+                            ? i18n.t.tokens.unlimited
+                            : `$ ${(Number(remainQuota || 0) / 1000).toFixed(2)}`,
+                    dt_used_quota: `$ ${(Number(usedQuota) / 1000).toFixed(4)}`,
+                };
+            });
         } catch (err: any) {
             errorMsg = err.message || (i18n.lang === "zh" ? "加载令牌失败" : "Failed to load tokens");
         } finally {

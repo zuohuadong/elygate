@@ -18,13 +18,16 @@
         isLoading = true;
         try {
             const data = await apiFetch<any[]>("/admin/redemptions");
-            redemptions = data.map((u) => ({
-                ...u,
-                displayStatus:
-                    u.status === 1 ? i18n.t.channels.active : "Used/Disabled",
-                formattedQuota: `$${(u.quota / 500000).toFixed(2)}`,
-                usageStr: `${u.used_count} / ${u.count}`,
-            }));
+            redemptions = data.map((u) => {
+                const quota = u.quota || 0;
+                return {
+                    ...u,
+                    displayStatus:
+                        u.status === 1 ? i18n.t.channels.active : "Used/Disabled",
+                    formattedQuota: `$ ${(Number(quota) / 1000).toFixed(2)}`,
+                    usageStr: `${u.used_count || 0} / ${u.count || 0}`,
+                };
+            });
         } catch (err: any) {
             errorMsg = err.message || (i18n.lang === "zh" ? "加载兑换码失败" : "Failed to load redemptions");
         } finally {

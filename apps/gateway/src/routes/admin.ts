@@ -460,7 +460,7 @@ export const adminRouter = new Elysia()
 
     .get('/tokens', async () => {
         const tokens = await sql`
-            SELECT t.*, u.username as creator_name
+            SELECT t.id, t.name, t.key, t.status, t.remain_quota, t.used_quota, t.created_at, t.models, t.user_id, u.username as creator_name
             FROM tokens t
             LEFT JOIN users u ON t.user_id = u.id
             ORDER BY t.id DESC
