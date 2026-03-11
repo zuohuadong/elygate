@@ -4,7 +4,7 @@
 -- Enable extensions (requires superuser / Supabase equivalent permissions)
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS pg_cron;
-CREATE EXTENSION IF NOT EXISTS pg_bigm;
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 -- ============================================================
 -- Core Tables
@@ -346,8 +346,8 @@ $$ LANGUAGE plpgsql;
 CREATE INDEX IF NOT EXISTS idx_logs_created_at_brin ON logs USING BRIN (created_at);
 -- Logs: dashboard queries
 CREATE INDEX IF NOT EXISTS idx_logs_user_id ON logs (user_id) INCLUDE (quota_cost, created_at);
--- Logs: pg_bigm fuzzy search on model name
-CREATE INDEX IF NOT EXISTS idx_logs_model_bigm ON logs USING gin (model_name gin_bigm_ops);
+-- Logs: pg_trgm fuzzy search on model name
+CREATE INDEX IF NOT EXISTS idx_logs_model_trgm ON logs USING gin (model_name gin_trgm_ops);
 -- Tokens: lookup by key (hot path)
 CREATE INDEX IF NOT EXISTS idx_tokens_key ON tokens (key);
 -- Semantic Cache: vector cosine similarity

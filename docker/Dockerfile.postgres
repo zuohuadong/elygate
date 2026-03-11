@@ -1,27 +1,22 @@
-FROM pgsty/pigsty:v4.2.0
+FROM postgres:18
 
+# Use root for package installation
 USER root
 
-ENV DEBIAN_FRONTEND=noninteractive
-ENV PG_VERSION=18
+# Install required extensions via PGDG repository for PostgreSQL 18
+# pg_trgm is included in the postgres-18-contrib package which is installed by default in the official image, 
+# but we explicitly ensure essential tools are present.
+RUN apt-get update && apt-get install -y \
+    postgresql-18-pgvector \
+    postgresql-18-cron \
+    && rm -rf /var/lib/apt/lists/*
 
-RUN pig repo set
+# Pre-load extensions into shared memory (pg_trgm doesn't strictly need this, but pg_cron does)
+RUN sed -i "s/#shared_preload_libraries = ''/shared_preload_libraries = 'pg_cron'/" /usr/share/postgresql/postgresql.conf.sample
 
-RUN pig install pg${PG_VERSION} -y
-
-RUN pig install pgvector -v ${PG_VERSION} -y
-
-RUN pig install pg_cron -v ${PG_VERSION} -y
-
-RUN pig install pg_bigm -v ${PG_VERSION} -y || echo "pg_bigm not available for PG18, skipping"
-
-RUN mkdir -p /opt/elygate
-
-COPY packages/db/src/init.sql /opt/elygate/init.sql
-COPY scripts/elygate-db-init.sh /opt/elygate/elygate-db-init.sh
-COPY scripts/elygate-db-init.service /etc/systemd/system/elygate-db-init.service
-
-RUN chmod +x /opt/elygate/elygate-db-init.sh && \
-    systemctl enable elygate-db-init.service
+# Copy initialization SQL to official entrypoint directory
+RUN mkdir -p /docker-entrypoint-initdb.d
+COPY packages/db/src/init.sql /docker-entrypoint-initdb.d/01_init.sql
 
 EXPOSE 5432
+
