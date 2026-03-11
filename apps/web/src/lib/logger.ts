@@ -6,7 +6,11 @@ import { browser, dev } from '$app/environment';
  * from being printed to the browser developer console in production.
  */
 
-const SENSITIVE_KEYS = ['admin_token', 'elygate_session', 'password', 'sk-', 'token'];
+const SENSITIVE_KEYS = [
+    'admin_token', 'admin_role', 'admin_username', 'admin_user_id', 
+    'elygate_session', 'password', 'sk-', 'token', 'key', 'secret',
+    'session', 'cookie', 'auth_session'
+];
 
 /**
  * Check if the content contains sensitive information.

@@ -50,8 +50,6 @@
 		"/packages",
 		"/rate-limits",
 		"/settings",
-		"/models",
-		"/tokens",
 	];
 	// Consumer-only routes (admins can still access / which is the dashboard)
 	const CONSUMER_ROUTES = [
@@ -72,6 +70,7 @@
 			const me = await apiFetch<any>("/me");
 			if (me && me.username) {
 				session.update({
+					id: me.id,
 					token: me.token || "cookie-session",
 					username: me.username,
 					role: me.role || 1,
@@ -157,7 +156,7 @@
 	async function toggleCurrency() {
 		const newCurrency = session.currency === "USD" ? "RMB" : "USD";
 		try {
-			await apiFetch("/auth/currency", {
+			await apiFetch("/currency", {
 				method: "PUT",
 				body: JSON.stringify({ currency: newCurrency }),
 			});

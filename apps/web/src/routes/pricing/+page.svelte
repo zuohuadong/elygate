@@ -1,5 +1,6 @@
 <script lang="ts">
     import { onMount } from "svelte";
+    import { session } from "$lib/session.svelte";
     import { apiFetch } from "$lib/api";
     import {
         Save,
@@ -15,7 +16,7 @@
     let isSaving = $state(false);
     let error: string | null = $state(null);
     let successMessage: string | null = $state(null);
-    let isAdmin = $state(false);
+    let isAdmin = $derived(session.role >= 10);
     let activeTab = $state<"list" | "config">("list");
 
     // Default configuration template structures
@@ -182,8 +183,6 @@
     }
 
     onMount(() => {
-        const role = localStorage.getItem("admin_role");
-        isAdmin = role ? parseInt(role, 10) >= 10 : false;
         loadConfig();
     });
 </script>

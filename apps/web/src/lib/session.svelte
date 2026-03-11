@@ -6,6 +6,7 @@
     const STORAGE_KEY = 'elygate_session';
 
     interface SessionData {
+        id: string;
         token: string;
         username: string;
         role: number;
@@ -18,12 +19,12 @@
     }
 
     function loadFromStorage(): SessionData {
-        if (typeof window === 'undefined') return { token: '', username: '', role: 0, currency: 'USD' };
+        if (typeof window === 'undefined') return { id: '', token: '', username: '', role: 0, currency: 'USD' };
         try {
             const raw = localStorage.getItem(STORAGE_KEY);
             if (raw) return JSON.parse(raw);
         } catch {}
-        return { token: '', username: '', role: 0, currency: 'USD' };
+        return { id: '', token: '', username: '', role: 0, currency: 'USD' };
     }
 
     function saveToStorage(data: SessionData) {
@@ -35,6 +36,7 @@
 
     const initial = loadFromStorage();
 
+    let id = $state(initial.id);
     let token = $state(initial.token);
     let username = $state(initial.username);
     let role = $state(initial.role);
@@ -43,6 +45,7 @@
     let quotaPerUnit = $state(500000);
 
     export const session = {
+        get id() { return id; },
         get token() { return token; },
         get username() { return username; },
         get role() { return role; },
@@ -51,16 +54,17 @@
         get quotaPerUnit() { return quotaPerUnit; },
 
         update(data: Partial<SessionData>) {
+            if (data.id !== undefined) id = data.id;
             if (data.token !== undefined) token = data.token;
             if (data.username !== undefined) username = data.username;
             if (data.role !== undefined) role = data.role;
             if (data.currency !== undefined) currency = data.currency;
-            saveToStorage({ token, username, role, currency });
+            saveToStorage({ id, token, username, role, currency });
         },
 
         updateCurrency(newCurrency: string) {
             currency = newCurrency;
-            saveToStorage({ token, username, role, currency });
+            saveToStorage({ id, token, username, role, currency });
         },
 
         setSystemInfo(info: SystemInfo) {
@@ -69,6 +73,7 @@
         },
 
         clear() {
+            id = '';
             token = '';
             username = '';
             role = 0;

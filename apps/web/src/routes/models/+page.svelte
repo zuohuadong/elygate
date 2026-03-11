@@ -21,12 +21,13 @@
     } from "lucide-svelte";
     import { fade, slide, scale } from "svelte/transition";
     import { i18n } from "$lib/i18n/index.svelte";
+    import { session } from "$lib/session.svelte";
 
     let models = $state<any[]>([]);
     let isLoading = $state(true);
     let error = $state("");
     let searchQuery = $state("");
-    let isAdmin = $state(false);
+    let isAdmin = $derived(session.role >= 10);
 
     // Filter states
     let activeProvider = $state("all");
@@ -254,8 +255,6 @@
     });
 
     onMount(() => {
-        const role = localStorage.getItem("admin_role");
-        isAdmin = role ? parseInt(role, 10) >= 10 : false;
         loadModels();
     });
 

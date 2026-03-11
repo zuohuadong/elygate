@@ -5,13 +5,14 @@
     import { apiFetch } from "$lib/api";
     import { i18n } from "$lib/i18n/index.svelte";
     import { onMount } from "svelte";
+    import { session } from "$lib/session.svelte";
 
     // Local state
     let tokens = $state<any[]>([]);
     let isLoading = $state(true);
     let errorMsg = $state("");
     let searchQuery = $state("");
-    let isAdmin = $state(false);
+    let isAdmin = $derived(session.role >= 10);
 
     // Modal state
     let isModalOpen = $state(false);
@@ -47,8 +48,6 @@
     }
 
     onMount(() => {
-        const role = localStorage.getItem("admin_role");
-        isAdmin = role ? parseInt(role, 10) >= 10 : false;
         loadTokens();
     });
 

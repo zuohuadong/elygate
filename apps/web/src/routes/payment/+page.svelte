@@ -37,7 +37,8 @@
 	async function loadOrders() {
 		try {
 			loading = true;
-			const userId = localStorage.getItem("admin_user_id");
+			const isAdmin = session.role >= 10;
+			const userId = isAdmin ? localStorage.getItem("admin_user_id") : session.id;
 			if (userId) {
 				const data = await apiFetch<any[]>(`/payment/orders/${userId}`);
 				orders = data || [];

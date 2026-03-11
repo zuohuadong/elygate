@@ -5,7 +5,7 @@
     import { i18n } from "$lib/i18n/index.svelte";
     import { session } from "$lib/session.svelte";
 
-    let username = $state("admin");
+    let username = $state("");
     let password = $state("");
     let isLoading = $state(false);
     let error = $state("");
