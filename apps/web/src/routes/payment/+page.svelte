@@ -37,12 +37,13 @@
 	async function loadOrders() {
 		try {
 			loading = true;
-			const isAdmin = session.role >= 10;
-			const userId = isAdmin ? localStorage.getItem("admin_user_id") : session.id;
-			if (userId) {
-				const data = await apiFetch<any[]>(`/payment/orders/${userId}`);
+			// The isAdmin and userId variables are no longer needed as the endpoint does not require userId
+			// const isAdmin = session.role >= 10;
+			// const userId = isAdmin ? localStorage.getItem("admin_user_id") : session.id;
+			// if (userId) { // This condition is no longer needed
+				const data = await apiFetch<any[]>("/payment/orders");
 				orders = data || [];
-			}
+			// }
 		} catch (error) {
 			console.error("Failed to load orders:", error);
 		} finally {

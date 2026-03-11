@@ -16,7 +16,7 @@
         isLoading = true;
         try {
             const res = await apiFetch<any>(
-                `/auth/logs?page=${page}&limit=${limit}`,
+                `/logs?page=${page}&limit=${limit}`,
             );
             totalItems = res.total || 0;
             // Map keys

@@ -10,7 +10,7 @@ export const API_BASE = '/api';
  */
 export async function clearToken() {
     try {
-        await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+        await fetch('/api/logout', { method: 'POST', credentials: 'include' });
     } catch (e) { }
 }
 

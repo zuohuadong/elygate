@@ -1,7 +1,7 @@
 {
-	"name": "web",
+	"name": "@elygate/web",
+	"version": "0.2.2",
 	"private": true,
-	"version": "0.2.1",
 	"type": "module",
 	"scripts": {
 		"dev": "vite dev",
