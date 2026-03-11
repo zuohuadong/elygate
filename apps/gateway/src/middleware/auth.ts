@@ -5,6 +5,7 @@ import { isRateLimited } from '../services/ratelimit';
 import { type TokenRecord, type UserRecord } from '../types';
 import { memoryCache } from '../services/cache';
 import { LRUCache } from 'lru-cache';
+import { jwt } from '@elysiajs/jwt';
 
 // High-performance LRU cache for auth context (Token + User)
 // Reduces DB pressure by 90%+ for repeated requests from the same API key.
@@ -63,11 +64,67 @@ export function assertModelAccess(user: UserRecord, token: TokenRecord, modelNam
  * and validates the corresponding key in the database (with LRU Cache).
  */
 export const authPlugin = new Elysia({ name: 'auth' })
-    .derive({ as: 'global' }, async ({ request, set }) => {
+    .use(jwt({
+        name: 'jwt',
+        secret: process.env.JWT_SECRET || 'super-secret-elygate-jwt-key'
+    }))
+    .derive({ as: 'global' }, async ({ request, set, jwt, cookie: { auth_session } }: any) => {
         const authHeader = request.headers.get('authorization');
+
+        // --- DB Cookie Session Check (Dual Authentication) ---
         if (!authHeader || !authHeader.startsWith('Bearer ')) {
-            set.status = 401;
-            throw new Error('Missing or invalid Authorization header');
+            if (!auth_session.value) {
+                set.status = 401;
+                throw new Error('Missing or invalid Authorization header / Session cookie');
+            }
+
+            const [sessionRow] = await sql`
+                SELECT s.user_id, s.expires_at, u.id, u.username, u."group", u.role, u.quota, u.status 
+                FROM session s
+                JOIN users u ON s.user_id = u.id
+                WHERE s.token = ${auth_session.value}
+                LIMIT 1
+            `;
+
+            if (!sessionRow) {
+                set.status = 401;
+                throw new Error('Invalid Session');
+            }
+
+            if (new Date(sessionRow.expires_at) < new Date()) {
+                await sql`DELETE FROM session WHERE token = ${auth_session.value}`;
+                set.status = 401;
+                throw new Error('Session has expired');
+            }
+
+            if (sessionRow.status !== 1) {
+                set.status = 403;
+                throw new Error('User account is disabled or missing');
+            }
+
+            const tokenRecord: TokenRecord = {
+                id: 0,
+                name: 'Web Session',
+                key: 'jwt-session',
+                remainQuota: -1,
+                usedQuota: 0,
+                status: 1,
+                expiredAt: null,
+                models: [],
+                subnet: '',
+                rateLimit: 0
+            };
+
+            const userRecord: UserRecord = {
+                id: sessionRow.id,
+                username: sessionRow.username,
+                group: sessionRow.group || 'default',
+                role: sessionRow.role,
+                quota: Number(sessionRow.quota),
+                status: sessionRow.status
+            };
+
+            return { token: tokenRecord, user: userRecord };
         }
 
         const apiKey = authHeader.substring(7);
@@ -158,7 +215,7 @@ export const authPlugin = new Elysia({ name: 'auth' })
               AND us.start_time <= NOW()
               AND us.end_time > NOW()
         `;
-        
+
         userRecord.activePackages = subs.map((s: any) => ({
             models: Array.isArray(s.models) ? s.models : (typeof s.models === 'string' ? JSON.parse(s.models || '[]') : []),
             defaultRateLimitId: s.default_rate_limit_id,

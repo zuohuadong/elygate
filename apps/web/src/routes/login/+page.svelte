@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { API_BASE } from "$lib/api";
+    import { API_BASE, apiFetch } from "$lib/api";
     import { goto } from "$app/navigation";
     import { onMount } from "svelte";
     import { i18n } from "$lib/i18n/index.svelte";
@@ -19,31 +19,24 @@
         if (isLoading) return;
         error = "";
         isLoading = true;
+
         try {
-            const res = await fetch(`${API_BASE}/auth/login`, {
+            const data = await apiFetch<any>("/auth/login", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ username, password }),
             });
-            let data;
-            try {
-                data = await res.json();
-            } catch (err) {
-                throw new Error(
-                    i18n.lang === "zh"
-                        ? "服务器响应无效"
-                        : "Invalid response from server",
-                );
-            }
-            if (!res.ok)
-                throw new Error(
-                    data.message ||
-                        (i18n.lang === "zh" ? "登录失败" : "Login failed"),
-                );
 
+            if (!data || !data.success) {
+                error =
+                    data.message ||
+                    (i18n.lang === "zh" ? "登录失败" : "Login failed");
+                return;
+            }
+
+            // Sync legacy session state for backwards compatibility in the UI
             session.update({
-                token: data.token,
-                username: data.username,
+                token: data.token || "web-session",
+                username: data.username || username,
                 role: data.role !== undefined ? Number(data.role) : 1,
             });
 

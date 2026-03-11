@@ -5,6 +5,7 @@ import { Elysia } from "elysia";
 import { cors } from "@elysiajs/cors";
 import { swagger } from "@elysiajs/swagger";
 import { staticPlugin } from "@elysiajs/static";
+import { jwt } from "@elysiajs/jwt";
 import { authPlugin, adminGuard } from "./middleware/auth";
 import { chatRouter } from "./routes/chat";
 // TODO: Pending implementation
@@ -26,7 +27,6 @@ import { mjRouter } from "./routes/mj";
 import { paymentRouter } from "./routes/payment";
 import { statsRouter } from "./routes/stats";
 import { memoryCache } from "./services/cache";
-import { auth as betterAuthInstance } from "./services/betterAuth";
 import { sql } from "@elygate/db";
 import { join } from "path";
 import { type UserRecord, type TokenRecord } from "./types";
@@ -38,6 +38,11 @@ const app = new Elysia()
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'Accept', 'X-Request-ID'],
     credentials: true
+  }))
+  .use(jwt({
+    name: 'jwt',
+    secret: process.env.JWT_SECRET || 'super-secret-elygate-jwt-key',
+    exp: '7d'
   }))
   .use(swagger({
     documentation: {
@@ -102,10 +107,9 @@ const app = new Elysia()
       }
     }
   })
-  // .mount("/api/auth/better", betterAuthInstance.handler)
   .use(sysRouter)
   .group("/api", (app) =>
-    app.group("/auth", (app) => app.use(authRouter))
+    app.use(authRouter)
       .use(paymentRouter)
       .group("/admin", (app) => app.use(adminRouter))
       .group("/stats", (app) => app.use(statsRouter))

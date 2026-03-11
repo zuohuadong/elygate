@@ -16,7 +16,14 @@ const DISCORD_REDIRECT_URI = process.env.DISCORD_REDIRECT_URI || 'http://localho
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 
+import { jwt } from '@elysiajs/jwt';
+
 export const authRouter = new Elysia()
+    .use(jwt({
+        name: 'jwt',
+        secret: process.env.JWT_SECRET || 'super-secret-elygate-jwt-key',
+        exp: '7d'
+    }))
     .get('/github', ({ set }) => {
         const url = `https://github.com/login/oauth/authorize?client_id=${GITHUB_CLIENT_ID}&redirect_uri=${REDIRECT_URI}&scope=read:user`;
         set.redirect = url;
@@ -173,7 +180,7 @@ export const authRouter = new Elysia()
         })
     })
     // Admin username/password login - returns the user's API token for management panel use
-    .post('/login', async ({ body, set, request }: any) => {
+    .post('/login', async ({ body, set, request, jwt, cookie: { auth_session } }: any) => {
         const lang = getLangFromHeader(request.headers);
         const clientIP = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown';
 
@@ -275,6 +282,26 @@ export const authRouter = new Elysia()
                 `;
             }
 
+            // Set the HTTP-Only cookie for Web UI sessions (JWT-like payload as token)
+            // Cryptographically strong random session token
+            const sessionToken = `sess_${Bun.randomUUIDv7('hex')}${Bun.randomUUIDv7('hex')}`;
+            const expiresAt = new Date(Date.now() + 7 * 86400 * 1000); // 7 days
+            const sessionId = Bun.randomUUIDv7('hex');
+            const userAgent = request.headers.get('user-agent') || 'unknown';
+
+            await sql`
+                INSERT INTO session (id, user_id, token, expires_at, ip_address, user_agent)
+                VALUES (${sessionId}, ${user.id}, ${sessionToken}, ${expiresAt}, ${clientIP}, ${userAgent})
+            `;
+
+            auth_session.set({
+                value: sessionToken,
+                httpOnly: true,
+                secure: process.env.NODE_ENV === 'production',
+                maxAge: 7 * 86400,
+                path: '/'
+            });
+
             return {
                 success: true,
                 token: token.key,
@@ -291,6 +318,14 @@ export const authRouter = new Elysia()
             username: t.String(),
             password: t.String()
         })
+    })
+    // Logout route to clear JWT cookie
+    .post('/logout', async ({ cookie: { auth_session } }: any) => {
+        if (auth_session.value) {
+            await sql`DELETE FROM session WHERE token = ${auth_session.value}`;
+        }
+        auth_session.remove();
+        return { success: true, message: 'Logged out successfully' };
     })
     // Validate a token and return user info (for /me checks in the frontend)
     .get('/me', async ({ request, set }: any) => {

@@ -4,53 +4,30 @@
 // Derive API_BASE from the current window location to support remote deployments
 export const API_BASE = '/api';
 
-/**
- * Get the stored admin token from localStorage
- */
-function getToken(): string | null {
-    if (typeof localStorage !== 'undefined') {
-        return localStorage.getItem('admin_token');
-    }
-    return null;
-}
 
 /**
- * Set the admin token for the management panel
+ * Perform sign out and clear local session state
  */
-export function setToken(token: string) {
-    if (typeof localStorage !== 'undefined') {
-        localStorage.setItem('admin_token', token);
-    }
-}
-
-/**
- * Clear the stored token (logout)
- */
-export function clearToken() {
-    if (typeof localStorage !== 'undefined') {
-        localStorage.removeItem('admin_token');
-    }
+export async function clearToken() {
+    try {
+        await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+    } catch (e) { }
 }
 
 /**
  * Universal fetch with auth headers and JSON support
  */
 export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-    const token = getToken();
-
     const headers: Record<string, string> = {
         'Content-Type': 'application/json',
         ...(options.headers as Record<string, string> || {})
     };
 
-    if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-    }
-
     const baseUrl = endpoint.startsWith('/v1') ? '' : API_BASE;
     const response = await fetch(`${baseUrl}${endpoint}`, {
         ...options,
-        headers
+        headers,
+        credentials: 'include' // Allow sending HttpOnly better-auth cookies
     });
 
     if (!response.ok) {

@@ -8,9 +8,9 @@
   },
   "dependencies": {
     "@elysiajs/cors": "^1.4.1",
+    "@elysiajs/jwt": "^1.4.1",
     "@elysiajs/static": "^1.4.7",
     "@elysiajs/swagger": "^1.3.1",
-    "better-auth": "^1.5.3",
     "elysia": "latest",
     "lru-cache": "^11.2.6"
   },

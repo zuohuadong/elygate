@@ -28,7 +28,6 @@
 	},
 	"dependencies": {
 		"@elygate/db": "workspace:*",
-		"better-auth": "latest",
 		"clsx": "^2.1.1",
 		"lucide-svelte": "^0.575.0",
 		"tailwind-merge": "^3.5.0",
