@@ -1,0 +1,14 @@
+[Unit]
+Description=Elygate Database Initialization Service
+After=postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/elygate/elygate-db-init.sh
+RemainAfterExit=yes
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
