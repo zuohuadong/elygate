@@ -3,6 +3,7 @@
     import { fade, scale } from "svelte/transition";
     import { i18n } from "$lib/i18n/index.svelte";
     import { apiFetch } from "$lib/api";
+    import { session } from "$lib/session.svelte";
 
     import { type User } from "$lib/types";
 
@@ -18,12 +19,14 @@
         onSave: (data: any) => Promise<void>;
     }>();
 
-    // Form state
+    const QUOTA_PER_UNIT = 500000;
+
+    // Form state (quota in USD for display, converted on save)
     let formData = $state({
         username: "",
         password: "",
         role: 1,
-        quota: 0,
+        quotaUsd: 0,
         group: "default",
         status: 1,
     });
@@ -45,7 +48,7 @@
                     username: user.username || "",
                     password: "", // Never populate password on edit
                     role: user.role ?? 1,
-                    quota: user.quota ?? 0,
+                    quotaUsd: user.quota != null ? user.quota / QUOTA_PER_UNIT : 0,
                     group: user.group || "default",
                     status: user.status ?? 1,
                 };
@@ -54,7 +57,7 @@
                     username: "",
                     password: "",
                     role: 1,
-                    quota: 500000,
+                    quotaUsd: 1,
                     group: "default",
                     status: 1,
                 };
@@ -70,7 +73,14 @@
             if (!user && !formData.password) {
                 throw new Error(i18n.t.users.passwordRequired);
             }
-            const payload = { ...formData };
+            const payload = {
+                username: formData.username,
+                password: formData.password || undefined,
+                role: formData.role,
+                quota: Math.round(formData.quotaUsd * QUOTA_PER_UNIT),
+                group: formData.group,
+                status: formData.status,
+            };
             if (user && !payload.password) {
                 delete (payload as any).password;
             }
@@ -175,13 +185,14 @@
                         <label
                             for="u-quota"
                             class="text-sm font-medium text-slate-700 dark:text-slate-300"
-                            >{i18n.t.users.quota} (1 = $0.001)</label
+                            >{i18n.t.users.quota} ($)</label
                         >
                         <input
                             id="u-quota"
                             type="number"
-                            bind:value={formData.quota}
-                            placeholder="500000 = $1.00"
+                            step="0.01"
+                            bind:value={formData.quotaUsd}
+                            placeholder="e.g. 100.00"
                             class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
                         />
                     </div>
