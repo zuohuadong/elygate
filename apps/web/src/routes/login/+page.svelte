@@ -21,7 +21,7 @@
         isLoading = true;
 
         try {
-            const data = await apiFetch<any>("/auth/login", {
+            const data = await apiFetch<any>("/login", {
                 method: "POST",
                 body: JSON.stringify({ username, password }),
             });

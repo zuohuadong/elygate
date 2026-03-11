@@ -328,8 +328,43 @@ export const authRouter = new Elysia()
         auth_session.remove();
         return { success: true, message: 'Logged out successfully' };
     })
-    // Validate a token and return user info (for /me checks in the frontend)
-    .get('/me', async ({ request, set }: any) => {
+    // Validate a token or session cookie and return user info (for /me checks in the frontend)
+    .get('/me', async ({ request, set, cookie: { auth_session } }: any) => {
+        // First try Cookie Session authentication
+        if (auth_session?.value) {
+            const [sessionRow] = await sql`
+                SELECT s.user_id, s.expires_at, u.id, u.username, u.role, u.quota, u.used_quota as "usedQuota", u."group", u.currency, u.status
+                FROM session s
+                JOIN users u ON s.user_id = u.id
+                WHERE s.token = ${auth_session.value}
+                LIMIT 1
+            `;
+
+            if (sessionRow) {
+                if (new Date(sessionRow.expires_at) < new Date()) {
+                    await sql`DELETE FROM session WHERE token = ${auth_session.value}`;
+                    set.status = 401;
+                    throw new Error('Session has expired');
+                }
+
+                if (sessionRow.status !== 1) {
+                    set.status = 401;
+                    throw new Error('User account is disabled');
+                }
+
+                return {
+                    id: sessionRow.id,
+                    username: sessionRow.username,
+                    role: sessionRow.role,
+                    quota: sessionRow.quota,
+                    usedQuota: sessionRow.usedQuota,
+                    group: sessionRow.group,
+                    currency: sessionRow.currency || 'USD'
+                };
+            }
+        }
+
+        // Fallback to Bearer Token authentication
         const authHeader = request.headers.get('authorization');
         if (!authHeader?.startsWith('Bearer ')) {
             set.status = 401;

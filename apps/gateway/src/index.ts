@@ -34,10 +34,7 @@ import "./services/health";
 
 const app = new Elysia()
   .use(cors({
-    origin: (request) => {
-      const origin = request.headers.get('origin') || '*';
-      return origin;
-    },
+    origin: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'Accept', 'X-Request-ID', 'Cookie'],
     exposeHeaders: ['Set-Cookie'],
