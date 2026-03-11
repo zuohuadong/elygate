@@ -1,6 +1,7 @@
 <script lang="ts">
     import { X, Save, Calculator, DollarSign, Coins } from "lucide-svelte";
     import { fade, scale } from "svelte/transition";
+    import { untrack } from "svelte";
     import { i18n } from "$lib/i18n/index.svelte";
     import { session } from "$lib/session.svelte";
     import QuotaCalculator from "./QuotaCalculator.svelte";
@@ -56,25 +57,27 @@
 
     $effect(() => {
         if (show) {
-            if (redemption) {
-                formData = {
-                    name: redemption.name || "",
-                    key: redemption.key || "",
-                    quota: redemption.quota ?? 500000,
-                    count: redemption.count ?? 1,
-                    status: redemption.status ?? 1,
-                };
-            } else {
-                formData = {
-                    name: i18n.lang === 'zh' ? "额度充值码" : "Top-up Code",
-                    key: "",
-                    quota: 500000,
-                    count: 1,
-                    status: 1,
-                };
-            }
-            syncFromQuota(formData.quota);
-            error = "";
+            untrack(() => {
+                if (redemption) {
+                    formData = {
+                        name: redemption.name || "",
+                        key: redemption.key || "",
+                        quota: redemption.quota ?? 500000,
+                        count: redemption.count ?? 1,
+                        status: redemption.status ?? 1,
+                    };
+                } else {
+                    formData = {
+                        name: i18n.lang === 'zh' ? "额度充值码" : "Top-up Code",
+                        key: "",
+                        quota: 500000,
+                        count: 1,
+                        status: 1,
+                    };
+                }
+                syncFromQuota(formData.quota);
+                error = "";
+            });
         }
     });
 
@@ -164,7 +167,7 @@
                         bind:value={formData.key}
                         placeholder="elygate-xxx"
                         disabled={!!redemption}
-                        class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 disabled:text-slate-400 dark:bg-slate-900 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                        class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 disabled:bg-slate-50 dark:disabled:bg-slate-800 disabled:text-slate-400 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
                     />
                 </div>
 

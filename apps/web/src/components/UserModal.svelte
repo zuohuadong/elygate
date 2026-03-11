@@ -1,6 +1,7 @@
 <script lang="ts">
     import { X, Save } from "lucide-svelte";
     import { fade, scale } from "svelte/transition";
+    import { untrack } from "svelte";
     import { i18n } from "$lib/i18n/index.svelte";
     import { apiFetch } from "$lib/api";
     import { session } from "$lib/session.svelte";
@@ -38,37 +39,39 @@
 
     $effect(() => {
         if (show) {
-            if (userGroups.length === 0) {
-                apiFetch<any[]>("/admin/user-groups").then(data => {
-                    userGroups = data;
-                }).catch(e => console.error("Failed to load user groups:", e));
-            }
+            untrack(() => {
+                if (userGroups.length === 0) {
+                    apiFetch<any[]>("/admin/user-groups").then(data => {
+                        userGroups = data;
+                    }).catch(e => console.error("Failed to load user groups:", e));
+                }
 
-            if (user) {
-                // Convert quota to display currency (use user's currency preference or USD)
-                const userCurrency = (user as any).currency || "USD";
-                const quotaUsd = user.quota != null ? user.quota / QUOTA_PER_UNIT : 0;
-                formData = {
-                    username: user.username || "",
-                    password: "", // Never populate password on edit
-                    role: user.role ?? 1,
-                    quotaAmount: userCurrency === "RMB" ? quotaUsd * session.exchangeRate : quotaUsd,
-                    quotaCurrency: userCurrency,
-                    group: user.group || "default",
-                    status: user.status ?? 1,
-                };
-            } else {
-                formData = {
-                    username: "",
-                    password: "",
-                    role: 1,
-                    quotaAmount: 1,
-                    quotaCurrency: (session.currency as "USD" | "RMB") || "USD",
-                    group: "default",
-                    status: 1,
-                };
-            }
-            error = "";
+                if (user) {
+                    // Convert quota to display currency (use user's currency preference or USD)
+                    const userCurrency = (user as any).currency || "USD";
+                    const quotaUsd = user.quota != null ? user.quota / QUOTA_PER_UNIT : 0;
+                    formData = {
+                        username: user.username || "",
+                        password: "", // Never populate password on edit
+                        role: user.role ?? 1,
+                        quotaAmount: userCurrency === "RMB" ? quotaUsd * session.exchangeRate : quotaUsd,
+                        quotaCurrency: userCurrency,
+                        group: user.group || "default",
+                        status: user.status ?? 1,
+                    };
+                } else {
+                    formData = {
+                        username: "",
+                        password: "",
+                        role: 1,
+                        quotaAmount: 1,
+                        quotaCurrency: (session.currency as "USD" | "RMB") || "USD",
+                        group: "default",
+                        status: 1,
+                    };
+                }
+                error = "";
+            });
         }
     });
 

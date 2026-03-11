@@ -1,6 +1,7 @@
 <script lang="ts">
     import { X, Save, Key } from "lucide-svelte";
     import { fade, scale } from "svelte/transition";
+    import { untrack } from "svelte";
     import { i18n } from "$lib/i18n/index.svelte";
 
     import { type Token } from "$lib/types";
@@ -29,22 +30,24 @@
 
     $effect(() => {
         if (show) {
-            if (token) {
-                formData = {
-                    name: token.name || "",
-                    remainQuota: token.remainQuota || 0,
-                    expiredAt: token.expiredAt || -1,
-                    status: token.status || 1,
-                };
-            } else {
-                formData = {
-                    name: "",
-                    remainQuota: 1000000,
-                    expiredAt: -1,
-                    status: 1,
-                };
-            }
-            error = "";
+            untrack(() => {
+                if (token) {
+                    formData = {
+                        name: token.name || "",
+                        remainQuota: token.remainQuota || 0,
+                        expiredAt: token.expiredAt || -1,
+                        status: token.status || 1,
+                    };
+                } else {
+                    formData = {
+                        name: "",
+                        remainQuota: 1000000,
+                        expiredAt: -1,
+                        status: 1,
+                    };
+                }
+                error = "";
+            });
         }
     });
 

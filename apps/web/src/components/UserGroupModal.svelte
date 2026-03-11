@@ -1,6 +1,7 @@
 <script lang="ts">
     import { X } from "lucide-svelte";
     import { fade, fly } from "svelte/transition";
+    import { untrack } from "svelte";
     import { i18n } from "$lib/i18n/index.svelte";
 
     let { show, group, onClose, onSave } = $props<{
@@ -24,31 +25,33 @@
 
     $effect(() => {
         if (show) {
-            if (group) {
-                formData = {
-                    key: group.key,
-                    name: group.name,
-                    description: group.description || "",
-                    allowedChannelTypes: Array.isArray(group.allowed_channel_types) ? group.allowed_channel_types.join(",") : "",
-                    deniedChannelTypes: Array.isArray(group.denied_channel_types) ? group.denied_channel_types.join(",") : "",
-                    allowedModels: Array.isArray(group.allowed_models) ? group.allowed_models.join("\n") : "",
-                    deniedModels: Array.isArray(group.denied_models) ? group.denied_models.join("\n") : "",
-                    allowedPackages: Array.isArray(group.allowed_packages) ? group.allowed_packages.join(",") : "",
-                    status: group.status || 1
-                };
-            } else {
-                formData = {
-                    key: "",
-                    name: "",
-                    description: "",
-                    allowedChannelTypes: "",
-                    deniedChannelTypes: "",
-                    allowedModels: "",
-                    deniedModels: "",
-                    allowedPackages: "",
-                    status: 1
-                };
-            }
+            untrack(() => {
+                if (group) {
+                    formData = {
+                        key: group.key,
+                        name: group.name,
+                        description: group.description || "",
+                        allowedChannelTypes: Array.isArray(group.allowed_channel_types) ? group.allowed_channel_types.join(",") : "",
+                        deniedChannelTypes: Array.isArray(group.denied_channel_types) ? group.denied_channel_types.join(",") : "",
+                        allowedModels: Array.isArray(group.allowed_models) ? group.allowed_models.join("\n") : "",
+                        deniedModels: Array.isArray(group.denied_models) ? group.denied_models.join("\n") : "",
+                        allowedPackages: Array.isArray(group.allowed_packages) ? group.allowed_packages.join(",") : "",
+                        status: group.status || 1
+                    };
+                } else {
+                    formData = {
+                        key: "",
+                        name: "",
+                        description: "",
+                        allowedChannelTypes: "",
+                        deniedChannelTypes: "",
+                        allowedModels: "",
+                        deniedModels: "",
+                        allowedPackages: "",
+                        status: 1
+                    };
+                }
+            });
         }
     });
 

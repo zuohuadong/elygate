@@ -1,7 +1,7 @@
 <script lang="ts">
     import { X, ShoppingBag } from "lucide-svelte";
     import { i18n } from "$lib/i18n/index.svelte";
-    import { onMount } from "svelte";
+    import { onMount, untrack } from "svelte";
     import { apiFetch } from "$lib/api";
 
     let { show, pkg = null, onClose, onSave } = $props();
@@ -29,29 +29,31 @@
 
     $effect(() => {
         if (show) {
-            if (pkg) {
-                formData = {
-                    name: pkg.name || "",
-                    description: pkg.description || "",
-                    price: pkg.price || 0,
-                    durationDays: pkg.duration_days || 30,
-                    models: Array.isArray(pkg.models) ? pkg.models.join(",") : (pkg.models || ""),
-                    defaultRateLimitId: pkg.default_rate_limit_id ? String(pkg.default_rate_limit_id) : "",
-                    modelRateLimitsJson: pkg.model_rate_limits ? JSON.stringify(pkg.model_rate_limits, null, 2) : "{}",
-                    isPublic: pkg.is_public ?? true
-                };
-            } else {
-                formData = {
-                    name: "",
-                    description: "",
-                    price: 0,
-                    durationDays: 30,
-                    models: "",
-                    defaultRateLimitId: "",
-                    modelRateLimitsJson: "{}",
-                    isPublic: true
-                };
-            }
+            untrack(() => {
+                if (pkg) {
+                    formData = {
+                        name: pkg.name || "",
+                        description: pkg.description || "",
+                        price: pkg.price || 0,
+                        durationDays: pkg.duration_days || 30,
+                        models: Array.isArray(pkg.models) ? pkg.models.join(",") : (pkg.models || ""),
+                        defaultRateLimitId: pkg.default_rate_limit_id ? String(pkg.default_rate_limit_id) : "",
+                        modelRateLimitsJson: pkg.model_rate_limits ? JSON.stringify(pkg.model_rate_limits, null, 2) : "{}",
+                        isPublic: pkg.is_public ?? true
+                    };
+                } else {
+                    formData = {
+                        name: "",
+                        description: "",
+                        price: 0,
+                        durationDays: 30,
+                        models: "",
+                        defaultRateLimitId: "",
+                        modelRateLimitsJson: "{}",
+                        isPublic: true
+                    };
+                }
+            });
         }
     });
 

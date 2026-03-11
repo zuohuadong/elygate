@@ -1,5 +1,6 @@
 <script lang="ts">
     import { X, ShieldAlert } from "lucide-svelte";
+    import { untrack } from "svelte";
     import { i18n } from "$lib/i18n/index.svelte";
 
     let { show, rateLimit = null, onClose, onSave } = $props();
@@ -13,21 +14,23 @@
 
     $effect(() => {
         if (show) {
-            if (rateLimit) {
-                formData = {
-                    name: rateLimit.name || "",
-                    rpm: rateLimit.rpm || 0,
-                    rph: rateLimit.rph || 0,
-                    concurrent: rateLimit.concurrent || 0
-                };
-            } else {
-                formData = {
-                    name: "",
-                    rpm: 0,
-                    rph: 0,
-                    concurrent: 0
-                };
-            }
+            untrack(() => {
+                if (rateLimit) {
+                    formData = {
+                        name: rateLimit.name || "",
+                        rpm: rateLimit.rpm || 0,
+                        rph: rateLimit.rph || 0,
+                        concurrent: rateLimit.concurrent || 0
+                    };
+                } else {
+                    formData = {
+                        name: "",
+                        rpm: 0,
+                        rph: 0,
+                        concurrent: 0
+                    };
+                }
+            });
         }
     });
 
