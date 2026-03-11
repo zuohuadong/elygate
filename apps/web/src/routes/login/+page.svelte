@@ -18,8 +18,6 @@
     });
 
     onMount(() => {
-        if (session.token) goto("/");
-        
         apiFetch<any>("/status").then(res => {
             if (res && res.data) {
                 oauthConfig.github = res.data.github_oauth;

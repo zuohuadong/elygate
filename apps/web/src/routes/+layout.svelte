@@ -67,22 +67,27 @@
 		theme.init();
 
 		// Check if user is authenticated via Cookie
-		if (!isAuthPage) {
-			try {
-				const me = await apiFetch<any>("/auth/me");
-				if (me && me.username) {
-					session.update({
-						token: me.token || "cookie-session",
-						username: me.username,
-						role: me.role || 1,
-					});
-				} else {
-					goto("/login");
-					return;
+		try {
+			const me = await apiFetch<any>("/me");
+			if (me && me.username) {
+				session.update({
+					token: me.token || "cookie-session",
+					username: me.username,
+					role: me.role || 1,
+				});
+
+				// If user is already logged in but visiting login/register, redirect them away
+				if (isAuthPage) {
+					if (session.role >= 10) goto("/");
+					else goto("/consumer");
 				}
-			} catch (err) {
+			} else if (!isAuthPage) {
 				goto("/login");
-				return;
+			}
+		} catch (err) {
+			// If we're on a non-auth page and /me fails, we must go to login
+			if (!isAuthPage) {
+				goto("/login");
 			}
 		}
 
