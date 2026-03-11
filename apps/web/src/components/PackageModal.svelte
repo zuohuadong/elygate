@@ -46,6 +46,7 @@
                         cycleQuota: pkg.cycle_quota || 0,
                         cycleInterval: pkg.cycle_interval || 1,
                         cycleUnit: pkg.cycle_unit || "day",
+                        cachePolicy: pkg.cache_policy || { mode: 'smart' },
                         isPublic: pkg.is_public ?? true
                     };
                 } else {
@@ -60,6 +61,7 @@
                         cycleQuota: 0,
                         cycleInterval: 1,
                         cycleUnit: "day",
+                        cachePolicy: { mode: 'smart' },
                         isPublic: true
                     };
                 }
@@ -93,6 +95,7 @@
             cycleQuota: Number(formData.cycleQuota),
             cycleInterval: Number(formData.cycleInterval),
             cycleUnit: formData.cycleUnit,
+            cachePolicy: formData.cachePolicy,
             isPublic: formData.isPublic
         };
         
@@ -110,9 +113,10 @@
         <div class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm transition-opacity" 
              onmousedown={handleMouseDown}
              onclick={(e) => e.target === e.currentTarget && isBackdropMouseDown && onClose()}
+             onkeydown={(e) => e.key === 'Escape' && onClose()}
              role="button"
              aria-label="Close modal"
-             tabindex="-1"></div>
+             tabindex="0"></div>
         <div class="relative bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden ring-1 ring-slate-200 dark:ring-slate-800 animate-in fade-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]"
              role="dialog"
              aria-modal="true">
@@ -130,44 +134,44 @@
                 <div class="space-y-4">
                     <div class="grid grid-cols-2 gap-4">
                         <div class="col-span-2">
-                            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="pkg-name">
                                 {i18n.t.packages.name} <span class="text-rose-500">*</span>
                             </label>
-                            <input type="text" bind:value={formData.name} required placeholder={i18n.t.packages.namePlaceholder} class="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-sm text-slate-900 dark:text-white shadow-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors placeholder:text-slate-400" />
+                            <input type="text" id="pkg-name" bind:value={formData.name} required placeholder={i18n.t.packages.namePlaceholder} class="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-sm text-slate-900 dark:text-white shadow-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors placeholder:text-slate-400" />
                         </div>
                         
                         <div class="col-span-2">
-                            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="pkg-desc">
                                 {i18n.t.packages.description}
                             </label>
-                            <input type="text" bind:value={formData.description} placeholder={i18n.t.packages.descriptionPlaceholder} class="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-sm text-slate-900 dark:text-white shadow-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors placeholder:text-slate-400" />
+                            <input type="text" id="pkg-desc" bind:value={formData.description} placeholder={i18n.t.packages.descriptionPlaceholder} class="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-sm text-slate-900 dark:text-white shadow-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors placeholder:text-slate-400" />
                         </div>
 
                         <div>
-                            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="pkg-price">
                                 {i18n.t.packages.price} <span class="text-xs text-slate-400">{i18n.t.packages.priceUnit}</span> <span class="text-rose-500">*</span>
                             </label>
-                            <input type="number" step="0.01" min="0" bind:value={formData.price} required class="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-sm text-slate-900 dark:text-white shadow-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors" />
+                            <input type="number" id="pkg-price" step="0.01" min="0" bind:value={formData.price} required class="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-sm text-slate-900 dark:text-white shadow-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors" />
                         </div>
                         <div>
-                            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="pkg-duration">
                                 {i18n.t.packages.duration} <span class="text-xs text-slate-400">{i18n.t.packages.durationUnit}</span> <span class="text-rose-500">*</span>
                             </label>
-                            <input type="number" min="1" bind:value={formData.durationDays} required class="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-sm text-slate-900 dark:text-white shadow-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors" />
+                            <input type="number" id="pkg-duration" min="1" bind:value={formData.durationDays} required class="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-sm text-slate-900 dark:text-white shadow-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors" />
                         </div>
 
                         <div class="col-span-2">
-                            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="pkg-models">
                                 {i18n.t.packages.models} <span class="text-xs text-slate-400">{i18n.t.packages.modelsTip}</span> <span class="text-rose-500">*</span>
                             </label>
-                            <input type="text" bind:value={formData.models} required placeholder={i18n.t.packages.modelsPlaceholder} class="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-sm text-slate-900 dark:text-white shadow-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors font-mono" />
+                            <input type="text" id="pkg-models" bind:value={formData.models} required placeholder={i18n.t.packages.modelsPlaceholder} class="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-sm text-slate-900 dark:text-white shadow-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors font-mono" />
                         </div>
 
                         <div class="col-span-2">
-                            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="pkg-rate-limit">
                                 {i18n.t.packages.defaultRateLimit}
                             </label>
-                            <select bind:value={formData.defaultRateLimitId} class="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-sm text-slate-900 dark:text-white shadow-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors">
+                            <select id="pkg-rate-limit" bind:value={formData.defaultRateLimitId} class="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-sm text-slate-900 dark:text-white shadow-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors">
                                 <option value="">{i18n.t.packages.noLimit}</option>
                                 {#each rateLimits as rule}
                                     <option value={String(rule.id)}>{rule.name} (RPM:{rule.rpm} RPH:{rule.rph} Concurrent:{rule.concurrent})</option>
@@ -176,10 +180,10 @@
                         </div>
 
                         <div class="col-span-2">
-                            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="pkg-model-rate-limits">
                                 {i18n.t.packages.modelRateLimits}
                             </label>
-                            <textarea bind:value={formData.modelRateLimitsJson} rows="3" class="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-sm text-slate-900 dark:text-white shadow-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors font-mono" placeholder='"gpt-4o": 2, "claude-3-5-sonnet": 3'></textarea>
+                            <textarea id="pkg-model-rate-limits" bind:value={formData.modelRateLimitsJson} rows="3" class="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-sm text-slate-900 dark:text-white shadow-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors font-mono" placeholder='"gpt-4o": 2, "claude-3-5-sonnet": 3'></textarea>
                             <p class="text-xs text-slate-500 mt-1">
                                 {i18n.t.packages.modelRateLimitsTip} <code>{i18n.t.packages.modelRateLimitsFormat}</code>
                             </p>

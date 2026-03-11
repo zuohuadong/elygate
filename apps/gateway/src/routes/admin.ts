@@ -1490,6 +1490,47 @@ export const adminRouter = new Elysia()
 
     .put('/options', async ({ body }: any) => {
         const payload = body as Record<string, string>;
+        
+        // Check if embedding model is being updated
+        const newEmbeddingModel = payload.SemanticCacheEmbeddingModel;
+        if (newEmbeddingModel) {
+            // Get the dimension of the new embedding model
+            const channel = memoryCache.selectChannels(newEmbeddingModel)[0];
+            if (channel) {
+                try {
+                    const decryptedKeys = decryptChannelKeys(channel.key);
+                    const keys = decryptedKeys.split('\n').map((k: string) => k.trim()).filter(Boolean);
+                    const activeKey = keys[Math.floor(Math.random() * keys.length)];
+                    
+                    const response = await fetch(`${channel.baseUrl}/v1/embeddings`, {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${activeKey}`,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ model: newEmbeddingModel, input: 'test' })
+                    });
+                    
+                    if (response.ok) {
+                        const data = await response.json() as any;
+                        const dimension = data?.data?.[0]?.embedding?.length;
+                        
+                        if (dimension) {
+                            // Clear old cache data first (dimension incompatible)
+                            await sql`DELETE FROM semantic_cache`;
+                            console.log('[SemanticCache] Cleared old cache data');
+                            
+                            // Update the database column dimension
+                            await sql`ALTER TABLE semantic_cache ALTER COLUMN embedding TYPE vector(${dimension})`;
+                            console.log(`[SemanticCache] Updated embedding dimension to ${dimension}`);
+                        }
+                    }
+                } catch (e: any) {
+                    console.warn('[SemanticCache] Failed to update embedding dimension:', e.message);
+                }
+            }
+        }
+        
         for (const [key, value] of Object.entries(payload)) {
             await sql`
                 INSERT INTO options (key, value)
