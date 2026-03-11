@@ -5,6 +5,7 @@ import { authPlugin } from '../middleware/auth';
 import type { UserRecord } from '../types';
 import { getLangFromHeader } from '../utils/i18n';
 import { optionCache } from '../services/optionCache';
+import { memoryCache } from '../services/cache';
 
 const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID || '';
 const GITHUB_CLIENT_SECRET = process.env.GITHUB_CLIENT_SECRET || '';
@@ -706,14 +707,49 @@ export const authRouter = new Elysia()
     })
 
     // Get public packages (C-end)
-    .get('/packages', async () => {
+    .get('/packages', async ({ request, set }: any) => {
+        const authHeader = request.headers.get('authorization');
+        let userGroup = 'default';
+
+        if (authHeader?.startsWith('Bearer ')) {
+            const key = authHeader.substring(7);
+            const [userRow] = await sql`
+                SELECT u."group"
+                FROM tokens t
+                JOIN users u ON t.user_id = u.id
+                WHERE t.key = ${key} AND t.status = 1 AND u.status = 1
+                LIMIT 1
+            `;
+            if (userRow && userRow.group) {
+                userGroup = userRow.group;
+            }
+        }
+
         const data = await sql`
-            SELECT id, name, description, price, duration_days, models
+            SELECT id, name, description, price, duration_days, models, allowed_groups
             FROM packages
             WHERE is_public = true
             ORDER BY price ASC
         `;
-        return data;
+
+        const filtered = data.filter((pkg: any) => {
+            // Check Package -> Group direction
+            const allowedGroups = Array.isArray(pkg.allowed_groups) ? pkg.allowed_groups : (typeof pkg.allowed_groups === 'string' ? JSON.parse(pkg.allowed_groups || '[]') : []);
+            if (allowedGroups.length > 0 && !allowedGroups.includes(userGroup)) {
+                return false;
+            }
+
+            // Check Group -> Package direction
+            const policy = memoryCache.userGroups.get(userGroup);
+            if (policy && policy.allowedPackages && policy.allowedPackages.length > 0) {
+                if (!policy.allowedPackages.includes(pkg.id)) {
+                    return false;
+                }
+            }
+            return true;
+        });
+
+        return filtered;
     })
 
     // Get personal subscriptions (C-end)

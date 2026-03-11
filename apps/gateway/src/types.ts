@@ -8,6 +8,16 @@ export interface UserRecord {
     activePackages?: any[]; // [{ models, defaultRateLimitId, modelRateLimits }]
 }
 
+export interface UserGroupPolicy {
+    key: string;
+    name: string;
+    allowedChannelTypes: number[];
+    deniedChannelTypes: number[];
+    allowedModels: string[];
+    deniedModels: string[];
+    allowedPackages: number[];
+}
+
 export interface TokenRecord {
     id: number;
     name: string;

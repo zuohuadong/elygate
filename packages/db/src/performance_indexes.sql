@@ -15,6 +15,10 @@ WHERE status_code = 200;
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_logs_model_created 
 ON logs (model_name, created_at DESC);
 
+-- Optimize log queries by model (fuzzy search) using pg_trgm
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_logs_model_trgm
+ON logs USING gin (model_name gin_trgm_ops);
+
 -- Optimize log queries by channel for monitoring
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_logs_channel_created 
 ON logs (channel_id, created_at DESC) 

@@ -2,6 +2,7 @@
     import { X, Save } from "lucide-svelte";
     import { fade, scale } from "svelte/transition";
     import { i18n } from "$lib/i18n/index.svelte";
+    import { apiFetch } from "$lib/api";
 
     import { type User } from "$lib/types";
 
@@ -29,9 +30,16 @@
 
     let isSubmitting = $state(false);
     let error = $state("");
+    let userGroups = $state<any[]>([]);
 
     $effect(() => {
         if (show) {
+            if (userGroups.length === 0) {
+                apiFetch<any[]>("/admin/user-groups").then(data => {
+                    userGroups = data;
+                }).catch(e => console.error("Failed to load user groups:", e));
+            }
+
             if (user) {
                 formData = {
                     username: user.username || "",
@@ -185,11 +193,19 @@
                             class="text-sm font-medium text-slate-700 dark:text-slate-300"
                             >Group</label
                         >
-                        <input
+                        <select
                             id="u-group"
                             bind:value={formData.group}
                             class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
-                        />
+                        >
+                            {#if userGroups.length > 0}
+                                {#each userGroups as g}
+                                    <option value={g.key}>{g.name} ({g.key})</option>
+                                {/each}
+                            {:else}
+                                <option value={formData.group}>{formData.group}</option>
+                            {/if}
+                        </select>
                     </div>
                     <div class="space-y-1.5">
                         <label

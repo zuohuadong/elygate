@@ -12,6 +12,8 @@ export const memoryCache = {
     channels: new Map<number, ChannelConfig>(),
     // Rate limit rules caching
     rateLimitRules: new Map<number, any>(),
+    // User Group policies
+    userGroups: new Map<string, any>(),
     lastUpdated: 0,
     options: new Map<string, any>(),
 
@@ -37,6 +39,35 @@ export const memoryCache = {
                 newRulesMap.set(rule.id, rule);
             }
             this.rateLimitRules = newRulesMap;
+
+            // Load User Groups
+            const allGroups = await sql`
+                SELECT key, name, 
+                    allowed_channel_types AS "allowedChannelTypes",
+                    denied_channel_types AS "deniedChannelTypes",
+                    allowed_models AS "allowedModels",
+                    denied_models AS "deniedModels",
+                    allowed_packages AS "allowedPackages"
+                FROM user_groups
+                WHERE status = 1
+            `;
+            const newGroupsMap = new Map<string, any>();
+            for (const group of allGroups) {
+                const parseArray = (val: any) => {
+                    if (Array.isArray(val)) return val;
+                    if (typeof val === 'string') {
+                        try { return JSON.parse(val); } catch { return []; }
+                    }
+                    return [];
+                };
+                group.allowedChannelTypes = parseArray(group.allowedChannelTypes);
+                group.deniedChannelTypes = parseArray(group.deniedChannelTypes);
+                group.allowedModels = parseArray(group.allowedModels);
+                group.deniedModels = parseArray(group.deniedModels);
+                group.allowedPackages = parseArray(group.allowedPackages);
+                newGroupsMap.set(group.key, group);
+            }
+            this.userGroups = newGroupsMap;
 
             const newRoutes = new Map<string, ChannelConfig[]>();
             const newChannelsMap = new Map<number, ChannelConfig>();

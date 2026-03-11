@@ -208,6 +208,11 @@
 					icon: ShoppingBag,
 				},
 				{
+					name: i18n.lang === "zh" ? "用户组策略" : "User Groups",
+					href: "/user-groups",
+					icon: Users,
+				},
+				{
 					name: i18n.lang === "zh" ? "限流规则" : "Rate Limits",
 					href: "/rate-limits",
 					icon: ShieldAlert,

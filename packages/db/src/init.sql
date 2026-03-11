@@ -10,6 +10,23 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm;
 -- Core Tables
 -- ============================================================
 
+CREATE TABLE IF NOT EXISTS user_groups (
+    key VARCHAR(50) PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    description TEXT,
+    allowed_channel_types JSONB DEFAULT '[]',
+    denied_channel_types JSONB DEFAULT '[]',
+    allowed_models JSONB DEFAULT '[]',
+    denied_models JSONB DEFAULT '[]',
+    allowed_packages JSONB DEFAULT '[]',
+    status INTEGER NOT NULL DEFAULT 1,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+INSERT INTO user_groups (key, name, description) VALUES ('default', 'Default Group', 'Standard user group') ON CONFLICT DO NOTHING;
+INSERT INTO user_groups (key, name, description, denied_channel_types, denied_models) VALUES ('cn-safe', 'Mainland Safe', 'Only allows CN-registered models', '[1, 14, 23]', '["gpt-*", "claude-*", "gemini-*", "sora-*"]') ON CONFLICT DO NOTHING;
+
 CREATE TABLE IF NOT EXISTS users (
     id SERIAL PRIMARY KEY,
     username TEXT NOT NULL UNIQUE,
@@ -116,6 +133,7 @@ CREATE TABLE IF NOT EXISTS packages (
     default_rate_limit_id INT REFERENCES rate_limit_rules(id) ON DELETE SET NULL,
     model_rate_limits JSONB DEFAULT '{}', -- {"gpt-4": 1}
     is_public BOOLEAN DEFAULT true,
+    allowed_groups JSONB DEFAULT '[]', -- Package visibility: empty means visible to all groups
     added_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     created_at TIMESTAMPTZ DEFAULT NOW()

@@ -40,9 +40,55 @@ export class UnifiedDispatcher {
         const isStream = options.stream || body.stream || false;
         const isFormData = body instanceof FormData || (body && typeof body === 'object' && !Array.isArray(body) && Object.values(body).some(v => v instanceof File || v instanceof Blob));
 
-        const candidateChannels = memoryCache.selectChannels(model);
+        // 0. Check Package Bypass (Contractual Exemption)
+        let isPackageFree = false;
+        let effectiveRuleId: number | null = null;
+        if (user.activePackages) {
+            for (const pkg of user.activePackages) {
+                if (pkg.models?.includes(model)) {
+                    isPackageFree = true;
+                    effectiveRuleId = pkg.modelRateLimits?.[model] || pkg.defaultRateLimitId;
+                    break;
+                }
+            }
+        }
+
+        // 0.5 Group Policy Interception (Dual-Dimensional Enforcer)
+        const groupPolicy = memoryCache.userGroups.get(user.group);
+        
+        if (!isPackageFree && groupPolicy) {
+            // Wildcard Match Engine
+            const matchPattern = (modelName: string, patternList: string[]) => {
+                if (!patternList || patternList.length === 0) return false;
+                return patternList.some((pattern: string) => {
+                    if (pattern.endsWith('*')) return modelName.startsWith(pattern.slice(0, -1));
+                    return modelName === pattern;
+                });
+            };
+
+            const isModelDenied = matchPattern(model, groupPolicy.deniedModels);
+            if (isModelDenied) {
+                const isModelAllowed = matchPattern(model, groupPolicy.allowedModels);
+                if (!isModelAllowed) {
+                    throw new Error(`HTTP 403 Forbidden: Model '${model}' is strictly blocked by your current Group Policy [${groupPolicy.name}].`);
+                }
+            }
+        }
+
+        let candidateChannels = memoryCache.selectChannels(model, user.group);
+        
+        // 0.6 Provider Company Interception (Channel Type)
+        if (!isPackageFree && groupPolicy && candidateChannels?.length > 0) {
+            if (groupPolicy.deniedChannelTypes && groupPolicy.deniedChannelTypes.length > 0) {
+                candidateChannels = candidateChannels.filter((ch: ChannelConfig) => !groupPolicy.deniedChannelTypes.includes(ch.type));
+            }
+            if (groupPolicy.allowedChannelTypes && groupPolicy.allowedChannelTypes.length > 0) {
+                candidateChannels = candidateChannels.filter((ch: ChannelConfig) => groupPolicy.allowedChannelTypes.includes(ch.type));
+            }
+        }
+
         if (!candidateChannels || candidateChannels.length === 0) {
-            throw new Error(`No available channel found for model: ${model}`);
+            throw new Error(`No available or authorized channel found for model: ${model}`);
         }
 
         let lastError: any = null;
@@ -122,17 +168,7 @@ export class UnifiedDispatcher {
             }
 
             // 3. Package & Rate Limit Check
-            let isPackageFree = false;
-            let effectiveRuleId: number | null = null;
-            if (user.activePackages) {
-                for (const pkg of user.activePackages) {
-                    if (pkg.models?.includes(model)) {
-                        isPackageFree = true;
-                        effectiveRuleId = pkg.modelRateLimits?.[model] || pkg.defaultRateLimitId;
-                        break;
-                    }
-                }
-            }
+            // (isPackageFree & effectiveRuleId already calculated at step 0)
 
             let packageLockId: string | null = null;
             if (isPackageFree && effectiveRuleId) {

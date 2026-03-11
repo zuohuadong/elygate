@@ -131,14 +131,56 @@ const app = new Elysia()
         const t = token as TokenRecord;
 
         let uniqueModels = Array.from(memoryCache.channelRoutes.keys());
-        const groupModelKey = `group_models_${u.group || 'default'}`;
-        const allowedGroupModels = memoryCache.getOption(groupModelKey);
-        if (allowedGroupModels && Array.isArray(allowedGroupModels)) {
-          uniqueModels = uniqueModels.filter(m => allowedGroupModels.includes(m));
-        }
+
+        // 1. Token Key Restrictions
         if (t.models && t.models.length > 0) {
-          uniqueModels = uniqueModels.filter(m => t.models.includes(m));
+            uniqueModels = uniqueModels.filter(m => t.models.includes(m));
         }
+
+        // 2. Group Policy Enforcer (Dual-Dimensional)
+        const groupPolicy = memoryCache.userGroups.get(u.group);
+        if (groupPolicy) {
+            const matchPattern = (modelName: string, patternList: string[]) => {
+                if (!patternList || patternList.length === 0) return false;
+                return patternList.some((pattern: string) => {
+                    if (pattern.endsWith('*')) return modelName.startsWith(pattern.slice(0, -1));
+                    return modelName === pattern;
+                });
+            };
+
+            uniqueModels = uniqueModels.filter(model => {
+                // A. Active Package Exemption Bypass
+                let isPackageFree = false;
+                if (u.activePackages) {
+                    for (const pkg of u.activePackages) {
+                        if (pkg.models?.includes(model)) {
+                            isPackageFree = true;
+                            break;
+                        }
+                    }
+                }
+                if (isPackageFree) return true;
+
+                // B. Wildcard Denied Models Filter
+                if (matchPattern(model, groupPolicy.deniedModels)) {
+                    if (!matchPattern(model, groupPolicy.allowedModels)) {
+                        return false;
+                    }
+                }
+
+                // C. Channel Type / Provider Filter
+                let candidateChannels = memoryCache.selectChannels(model, u.group);
+                if (groupPolicy.deniedChannelTypes && groupPolicy.deniedChannelTypes.length > 0) {
+                    candidateChannels = candidateChannels.filter(ch => !groupPolicy.deniedChannelTypes.includes(ch.type));
+                }
+                if (groupPolicy.allowedChannelTypes && groupPolicy.allowedChannelTypes.length > 0) {
+                    candidateChannels = candidateChannels.filter(ch => groupPolicy.allowedChannelTypes.includes(ch.type));
+                }
+
+                return candidateChannels.length > 0;
+            });
+        }
+
         return {
           object: 'list',
           data: uniqueModels.map(model => ({

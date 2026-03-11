@@ -67,63 +67,66 @@
     function getProvider(modelId: string): string {
         const id = modelId.toLowerCase();
 
-        // Check for common ID formats like "provider/model" or "provider:model"
-        const prefixes = {
-            openai: "openai",
-            "gpt-": "openai",
-            "o1-": "openai",
-            "o3-": "openai",
-            "claude-": "anthropic",
-            anthropic: "anthropic",
-            "gemini-": "google",
-            palm: "google",
-            google: "google",
-            llama: "meta",
-            meta: "meta",
-            deepseek: "deepseek",
-            nvidia: "nvidia",
-            mistral: "mistral",
-            cohere: "cohere",
-            qwen: "alibaba",
-            glm: "zhipu",
-            zhipu: "zhipu",
-            minimax: "minimax",
-            doubao: "bytedance",
-            bytedance: "bytedance",
-            baichuan: "baichuan",
-            "yi-": "01ai",
-            "01-ai": "01ai",
-            moonshot: "moonshot",
-            kimi: "moonshot",
+        // Smart Probe: Infer real provider based on dictionary
+        const matchers = {
+            openai: ["openai", "gpt-", "o1-", "o3-", "dall-e"],
+            anthropic: ["anthropic", "claude-"],
+            google: ["google", "gemini-", "palm"],
+            meta: ["meta", "llama"],
+            deepseek: ["deepseek"],
+            nvidia: ["nvidia"],
+            mistral: ["mistral"],
+            cohere: ["cohere", "command-"],
+            alibaba: ["qwen", "alibaba", "tongyi"],
+            zhipu: ["glm", "zhipu", "chatglm"],
+            minimax: ["minimax", "abab"],
+            bytedance: ["doubao", "bytedance", "skylark"],
+            baichuan: ["baichuan"],
+            "01ai": ["yi-", "01-ai", "01ai"],
+            moonshot: ["moonshot", "kimi"],
+            stepfun: ["stepfun", "step-"],
+            tencent: ["hunyuan", "tencent"]
         };
 
-        for (const [prefix, provider] of Object.entries(prefixes)) {
-            if (
-                id.startsWith(prefix) ||
-                id.includes(`/${prefix}`) ||
-                id.includes(`${prefix}:`)
-            ) {
-                return provider;
+        for (const [provider, substrings] of Object.entries(matchers)) {
+            for (const sub of substrings) {
+                if (id.includes(sub)) {
+                    return provider;
+                }
             }
         }
-
-        if (id.includes("dall-e")) return "openai";
         return "others";
     }
 
     function parseModelId(modelId: string): {
         provider: string;
         modelName: string;
+        providerId: string;
     } {
-        if (modelId.includes("/")) {
-            const parts = modelId.split("/");
-            return { provider: parts[0], modelName: parts.slice(1).join("/") };
+        const providerId = getProvider(modelId);
+        const providerObj = providers.find(p => p.id === providerId) || providers[0]; // fallback
+        const providerLabel = i18n.lang === "zh" ? providerObj.label : providerObj.labelEn;
+
+        let cleanName = modelId;
+
+        // Special handling for market prefixes like "Pro/"
+        if (cleanName.toLowerCase().startsWith("pro/")) {
+            cleanName = cleanName.substring(4);
         }
-        if (modelId.includes(":")) {
-            const parts = modelId.split(":");
-            return { provider: parts[0], modelName: parts.slice(1).join(":") };
+
+        if (cleanName.includes("/")) {
+            const parts = cleanName.split("/");
+            cleanName = parts.slice(1).join("/");
+        } else if (cleanName.includes(":")) {
+            const parts = cleanName.split(":");
+            cleanName = parts.slice(1).join(":");
         }
-        return { provider: getProvider(modelId), modelName: modelId };
+
+        return { 
+            provider: providerId === 'others' && cleanName !== modelId ? modelId.split('/')[0] : providerLabel, 
+            modelName: cleanName,
+            providerId: providerId 
+        };
     }
 
     function getCapability(modelId: string): string {
