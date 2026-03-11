@@ -7,7 +7,11 @@
     let activeTab = $state<'chat' | 'embeddings' | 'images' | 'audio' | 'errors'>('chat');
 
     function copyCode(code: string, id: string) {
-        if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+        const hasClipboard = typeof navigator !== 'undefined' && 
+                           !!navigator.clipboard && 
+                           typeof navigator.clipboard.writeText === 'function';
+
+        if (hasClipboard) {
             navigator.clipboard.writeText(code).then(() => {
                 copied = id;
                 setTimeout(() => (copied = null), 2000);

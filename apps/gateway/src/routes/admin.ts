@@ -417,6 +417,92 @@ export const adminRouter = new Elysia()
     })
 
     // Fetch models from upstream channel
+    .post('/channels/fetch-models', async ({ body, set }: any) => {
+        // Fetch models using provided URL and key (not saved channel data)
+        const { url, key, type } = body as { url?: string; key?: string; type?: number };
+        
+        if (!url || !key) {
+            set.status = 400;
+            return { success: false, message: 'URL and key are required' };
+        }
+
+        const channelType = type ?? ChannelType.OPENAI;
+        const handler = getProviderHandler(channelType);
+
+        // Anthropic doesn't have a models endpoint
+        if (channelType === ChannelType.ANTHROPIC) {
+            const anthropicModels = modelConfig.anthropic?.models?.map((m: any) => m.id) || [];
+            return {
+                success: true,
+                models: anthropicModels,
+                total: anthropicModels.length
+            };
+        }
+
+        const keys = key.split('\n').map((k: string) => k.trim()).filter(Boolean);
+        const testKey = keys[0] || '';
+        const fetchHeaders = handler.buildHeaders(testKey);
+
+        // Smart URL handling: avoid duplicate /v1 prefix
+        let baseUrl = url.replace(/\/+$/, '');
+        let modelsUrl: string;
+        
+        if (channelType === ChannelType.GEMINI) {
+            if (baseUrl.endsWith('/v1beta')) {
+                modelsUrl = `${baseUrl}/models`;
+            } else if (baseUrl.includes('/v1beta/models')) {
+                modelsUrl = baseUrl;
+            } else {
+                modelsUrl = `${baseUrl}/v1beta/models`;
+            }
+        } else {
+            if (baseUrl.endsWith('/v1/models') || baseUrl.endsWith('/v1/models/')) {
+                modelsUrl = baseUrl;
+            } else if (baseUrl.endsWith('/v1')) {
+                modelsUrl = `${baseUrl}/models`;
+            } else {
+                modelsUrl = `${baseUrl}/v1/models`;
+            }
+        }
+
+        try {
+            const response = await fetch(modelsUrl, {
+                method: 'GET',
+                headers: fetchHeaders
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                const errorMsg = `Upstream Error (${response.status}): ${errorText.slice(0, 100)}${errorText.length > 100 ? '...' : ''}`;
+                throw new Error(errorMsg);
+            }
+
+            const data = await response.json();
+            if (!data) throw new Error("Empty response from upstream");
+
+            let models: string[] = [];
+
+            if (channelType === ChannelType.GEMINI) {
+                if (data.models && Array.isArray(data.models)) {
+                    models = data.models
+                        .map((m: any) => m.name?.replace('models/', '') || m.displayName)
+                        .filter(Boolean);
+                }
+            } else {
+                if (data.data && Array.isArray(data.data)) {
+                    models = data.data.map((m: any) => m.id).filter(Boolean);
+                } else if (Array.isArray(data)) {
+                    models = data.map((m: any) => m.id || m.name).filter(Boolean);
+                }
+            }
+
+            return { success: true, models, total: models.length };
+        } catch (e: any) {
+            set.status = 500;
+            return { success: false, message: e.message };
+        }
+    })
+
     .get('/channels/:id/models', async ({ params: { id }, set }: any) => {
         const [channel] = await sql`SELECT * FROM channels WHERE id = ${Number(id)} LIMIT 1`;
         if (!channel) {
@@ -445,16 +531,12 @@ export const adminRouter = new Elysia()
 
         // Construct models URL based on channel type
         // Smart URL handling: avoid duplicate /v1 prefix
-        let baseUrl = channel.base_url || 'https://api.openai.com';
-        
-        // Remove trailing slash for consistency
-        baseUrl = baseUrl.replace(/\/+$/, '');
+        let baseUrl = (channel.base_url || 'https://api.openai.com').replace(/\/+$/, '');
         
         let modelsUrl: string;
         
         // For Gemini, use different endpoint
         if (channel.type === ChannelType.GEMINI) {
-            // Check if URL already has /v1beta
             if (baseUrl.endsWith('/v1beta')) {
                 modelsUrl = `${baseUrl}/models`;
             } else if (baseUrl.includes('/v1beta/models')) {
@@ -464,7 +546,6 @@ export const adminRouter = new Elysia()
             }
         } else {
             // OpenAI-compatible endpoints
-            // Check if URL already has /v1 or /v1/models
             if (baseUrl.endsWith('/v1/models') || baseUrl.endsWith('/v1/models/')) {
                 modelsUrl = baseUrl;
             } else if (baseUrl.endsWith('/v1')) {
@@ -482,10 +563,12 @@ export const adminRouter = new Elysia()
 
             if (!response.ok) {
                 const errorText = await response.text();
-                throw new Error(`Failed to fetch models: ${response.status} - ${errorText}`);
+                const errorMsg = `Upstream Error (${response.status}): ${errorText.slice(0, 100)}${errorText.length > 100 ? '...' : ''}`;
+                throw new Error(errorMsg);
             }
 
             const data = await response.json();
+            if (!data) throw new Error("Empty response from upstream");
 
             // Parse models based on provider type
             let models: string[] = [];

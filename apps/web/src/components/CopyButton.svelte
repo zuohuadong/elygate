@@ -22,9 +22,12 @@
         };
 
         try {
-            const cb = (typeof navigator !== 'undefined' && navigator.clipboard);
-            if (cb && typeof cb.writeText === 'function') {
-                cb.writeText(value).then(success).catch(err => {
+            const hasClipboard = typeof navigator !== 'undefined' && 
+                               !!navigator.clipboard && 
+                               typeof navigator.clipboard.writeText === 'function';
+                               
+            if (hasClipboard) {
+                navigator.clipboard.writeText(value).then(success).catch(err => {
                     console.error("Clipboard API failed, trying fallback:", err);
                     fallbackCopy(value, success);
                 });

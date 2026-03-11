@@ -6,6 +6,7 @@
     import { apiFetch } from "$lib/api";
     import { i18n } from "$lib/i18n/index.svelte";
     import { onMount } from "svelte";
+    import { session } from "$lib/session.svelte";
 
     let users = $state<any[]>([]);
     let isLoading = $state(true);
@@ -30,8 +31,8 @@
                 formattedQuota:
                     u.quota < 0
                         ? i18n.t.tokens.unlimited
-                        : `$${(u.quota / 500000).toFixed(2)}`,
-                formattedUsed: `$${((u.usedQuota || 0) / 500000).toFixed(2)}`,
+                        : `$ ${(Number(u.quota || 0) / session.quotaPerUnit).toFixed(2)}`,
+                formattedUsed: `$ ${(Number(u.usedQuota || 0) / session.quotaPerUnit).toFixed(2)}`,
             }));
         } catch (err: any) {
             errorMsg = err.message || (i18n.lang === "zh" ? "加载用户失败" : "Failed to load users");

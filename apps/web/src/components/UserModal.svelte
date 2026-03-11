@@ -20,7 +20,6 @@
         onSave: (data: any) => Promise<void>;
     }>();
 
-    const QUOTA_PER_UNIT = 500000;
 
     // Form state (quota in display currency, converted on save)
     let formData = $state({
@@ -49,7 +48,7 @@
                 if (user) {
                     // Convert quota to display currency (use user's currency preference or USD)
                     const userCurrency = (user as any).currency || "USD";
-                    const quotaUsd = user.quota != null ? user.quota / QUOTA_PER_UNIT : 0;
+                    const quotaUsd = user.quota != null ? user.quota / session.quotaPerUnit : 0;
                     formData = {
                         username: user.username || "",
                         password: "", // Never populate password on edit
@@ -91,7 +90,7 @@
                 username: formData.username,
                 password: formData.password || undefined,
                 role: formData.role,
-                quota: Math.round(quotaUsd * QUOTA_PER_UNIT),
+                quota: Math.round(quotaUsd * session.quotaPerUnit),
                 group: formData.group,
                 status: formData.status,
                 currency: formData.quotaCurrency,

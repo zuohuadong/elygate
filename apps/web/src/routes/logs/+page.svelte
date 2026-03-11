@@ -4,6 +4,7 @@
     import { House, Search, Filter, Download } from "lucide-svelte";
     import { apiFetch } from "$lib/api";
     import { onMount } from "svelte";
+    import { session } from "$lib/session.svelte";
 
     // Local state
     let logs = $state<any[]>([]);
@@ -33,7 +34,7 @@
                     dt_model: l.model_name || l.modelName,
                     dt_channel: l.channel_id ? `Channel ${l.channel_id}` : l.channelId ? `Channel ${l.channelId}` : "Unknown",
                     dt_token: l.token_id ? `Token ${l.token_id}` : l.tokenId ? `Token ${l.tokenId}` : "Direct",
-                    dt_cost: `$ ${((l.quota_cost || l.quotaCost || 0) / 1000).toFixed(4)}`,
+                    dt_cost: `$ ${((l.quota_cost || l.quotaCost || 0) / session.quotaPerUnit).toFixed(4)}`,
                     dt_duration: durationStr,
                     dt_status: "Success",
                 };

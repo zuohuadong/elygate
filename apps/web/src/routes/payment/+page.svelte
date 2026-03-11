@@ -11,6 +11,7 @@
 	let showPaymentModal = $state(false);
 	let selectedAmount = $state(1000);
 	let selectedMethod = $state("stripe");
+	let isBackdropMouseDown = false;
 
 	// System settings
 	let paymentEnabled = $state(true);
@@ -123,6 +124,16 @@
 				return XCircle;
 			default:
 				return Clock;
+		}
+	}
+
+	function handleMouseDown(e: MouseEvent) {
+		isBackdropMouseDown = e.target === e.currentTarget;
+	}
+
+	function handleBackdropClick() {
+		if (isBackdropMouseDown) {
+			showPaymentModal = false;
 		}
 	}
 </script>
@@ -342,11 +353,16 @@
 
 <!-- Payment Modal -->
 {#if showPaymentModal}
+	<!-- svelte-ignore a11y_click_events_have_key_events -->
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
-		class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+		class="fixed inset-0 bg-black bg-opacity-50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+		onmousedown={handleMouseDown}
+		onclick={handleBackdropClick}
 	>
 		<div
-			class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4"
+			class="relative bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-md w-full overflow-hidden border border-slate-200 dark:border-slate-700 animate-in fade-in zoom-in-95 duration-200"
+			onclick={(e) => e.stopPropagation()}
 		>
 			<div class="p-6 border-b border-gray-200 dark:border-gray-700">
 				<h3 class="text-xl font-semibold text-gray-900 dark:text-white">

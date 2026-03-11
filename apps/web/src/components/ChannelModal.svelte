@@ -109,10 +109,15 @@
         }
     }
 
-    // Fetch models from upstream channel
+    // Fetch models from upstream channel using current input URL and key
     async function fetchModels() {
-        if (!channel?.id) {
-            fetchModelsError = i18n.lang === "zh" ? "Please save channel first" : "Please save channel first";
+        // Validate required fields
+        if (!formData.baseUrl) {
+            fetchModelsError = i18n.lang === "zh" ? "请输入 Base URL" : "Base URL is required";
+            return;
+        }
+        if (!formData.key) {
+            fetchModelsError = i18n.lang === "zh" ? "请输入 API Key" : "API Key is required";
             return;
         }
 
@@ -121,7 +126,15 @@
 
         try {
             const response = await apiFetch<{ success: boolean; models: string[]; message?: string }>(
-                `/admin/channels/${channel.id}/models`
+                `/admin/channels/fetch-models`,
+                {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        url: formData.baseUrl,
+                        key: formData.key,
+                        type: formData.type
+                    })
+                }
             );
 
             if (response.success && response.models) {
@@ -130,7 +143,7 @@
                 throw new Error(response.message || "Failed to fetch models");
             }
         } catch (err: any) {
-            fetchModelsError = err.message || (i18n.lang === "zh" ? "Failed to fetch models" : "Failed to fetch models");
+            fetchModelsError = err.message || (i18n.lang === "zh" ? "获取模型失败" : "Failed to fetch models");
         } finally {
             isFetchingModels = false;
         }

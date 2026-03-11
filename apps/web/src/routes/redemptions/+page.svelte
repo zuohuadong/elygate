@@ -6,6 +6,7 @@
     import { apiFetch } from "$lib/api";
     import { i18n } from "$lib/i18n/index.svelte";
     import { onMount } from "svelte";
+    import { session } from "$lib/session.svelte";
 
     let redemptions = $state<any[]>([]);
     let isLoading = $state(true);
@@ -24,7 +25,7 @@
                     ...u,
                     displayStatus:
                         u.status === 1 ? i18n.t.channels.active : "Used/Disabled",
-                    formattedQuota: `$ ${(Number(quota) / 1000).toFixed(2)}`,
+                    formattedQuota: `$ ${(Number(quota) / session.quotaPerUnit).toFixed(2)}`,
                     usageStr: `${u.used_count || 0} / ${u.count || 0}`,
                 };
             });
