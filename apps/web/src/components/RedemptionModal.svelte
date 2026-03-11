@@ -103,7 +103,7 @@
     <div
         class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
         transition:fade={{ duration: 200 }}
-        onclick={onClose}
+        onclick={(e) => e.target === e.currentTarget && onClose()}
     >
         <!-- svelte-ignore a11y_click_events_have_key_events -->
         <!-- svelte-ignore a11y_no_static_element_interactions -->

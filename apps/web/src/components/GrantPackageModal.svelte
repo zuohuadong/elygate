@@ -47,7 +47,7 @@
 
 {#if show}
     <div class="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-0">
-        <div class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm transition-opacity" onclick={onClose}></div>
+        <div class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm transition-opacity" onclick={(e) => e.target === e.currentTarget && onClose()}></div>
         <div class="relative bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden ring-1 ring-slate-200 dark:ring-slate-800 animate-in fade-in zoom-in-95 duration-200">
             <div class="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/50">
                 <h3 class="text-lg font-semibold text-slate-900 dark:text-white flex items-center gap-2">

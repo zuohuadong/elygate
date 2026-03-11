@@ -84,7 +84,7 @@
                     {token ? i18n.t.common.edit : i18n.t.tokens.add}
                 </h3>
                 <button
-                    onclick={onClose}
+                    onclick={(e) => e.target === e.currentTarget && onClose()}
                     class="p-2 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-500 transition-colors"
                 >
                     <X class="w-5 h-5" />
