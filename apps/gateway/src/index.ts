@@ -44,6 +44,7 @@ const app = new Elysia()
     secret: process.env.JWT_SECRET || 'super-secret-elygate-jwt-key',
     exp: '7d'
   }))
+  .state('auth_session', '')
   .use(swagger({
     documentation: {
       info: {

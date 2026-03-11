@@ -297,7 +297,8 @@ export const authRouter = new Elysia()
             auth_session.set({
                 value: sessionToken,
                 httpOnly: true,
-                secure: process.env.NODE_ENV === 'production',
+                secure: false, // Allow HTTP for development and non-HTTPS deployments
+                sameSite: 'lax',
                 maxAge: 7 * 86400,
                 path: '/'
             });
