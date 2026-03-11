@@ -28,6 +28,7 @@ import { paymentRouter } from "./routes/payment";
 import { statsRouter } from "./routes/stats";
 import { memoryCache } from "./services/cache";
 import { sql } from "@elygate/db";
+import { initEnv } from "./services/env";
 import { join } from "path";
 import { type UserRecord, type TokenRecord } from "./types";
 import "./services/health";
@@ -42,7 +43,7 @@ const app = new Elysia()
   }))
   .use(jwt({
     name: 'jwt',
-    secret: process.env.JWT_SECRET || 'super-secret-elygate-jwt-key',
+    secret: process.env.JWT_SECRET!,
     exp: '7d'
   }))
   .state('auth_session', '')
@@ -229,6 +230,9 @@ const app = new Elysia()
 
 // Startup readiness check
 async function init() {
+  // 0. Initialize environment and secrets
+  await initEnv();
+
   console.log("⏳ Waiting for database readiness...");
   let retries = 0;
   const maxRetries = 15;

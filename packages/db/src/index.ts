@@ -3,9 +3,16 @@
 const BunSQL = (globalThis as any).Bun?.SQL;
 
 // Ensure DATABASE_URL is available for the native driver. Fallback to a dummy URL during build steps so it doesn't crash `new URL()`
-const rawUrl = process.env.DATABASE_URL || 'postgresql://dummy:dummy@localhost:5432/postgres';
+const rawUrl = process.env.DATABASE_URL;
+if (!rawUrl) {
+    if (process.env.NODE_ENV === 'production') {
+        throw new Error('Critical: DATABASE_URL is missing in production environment.');
+    }
+    console.warn('⚠️  DATABASE_URL is missing. Using local development default.');
+}
+const finalizedRawUrl = rawUrl || 'postgresql://postgres:postgres@localhost:5432/elygate';
 // Enable asynchronous commit for ultra-high throughput on logs/metrics
-const url = new URL(rawUrl);
+const url = new URL(finalizedRawUrl);
 url.searchParams.set('options', '-c synchronous_commit=off');
 const finalizedUrl = url.toString();
 

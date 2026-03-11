@@ -44,14 +44,34 @@
     let successMsg = $state("");
     let embeddingCheckStatus = $state<"idle" | "checking" | "success" | "error">("idle");
     let embeddingCheckMessage = $state("");
+    let channels = $state<any[]>([]);
+    let selectedChannelId = $state<string>("");
+    let embeddingModels = $state<string[]>([]);
 
     async function loadSettings() {
         isLoading = true;
         errorMsg = "";
         try {
-            const data =
-                await apiFetch<Record<string, string>>("/admin/options");
-            settings = { ...settings, ...data }; // Merge with defaults
+            const [data, channelsData] = await Promise.all([
+                apiFetch<Record<string, string>>("/admin/options"),
+                apiFetch<any[]>("/admin/channels")
+            ]);
+            settings = { ...settings, ...data };
+            channels = channelsData.filter(c => c.status === 1);
+            
+            // Find embedding models from channels
+            const embeddingKeywords = ['embedding', 'bge-m3', 'bge-large', 'embed'];
+            const models = new Set<string>();
+            for (const channel of channels) {
+                if (channel.models && Array.isArray(channel.models)) {
+                    for (const model of channel.models) {
+                        if (embeddingKeywords.some(kw => model.toLowerCase().includes(kw))) {
+                            models.add(model);
+                        }
+                    }
+                }
+            }
+            embeddingModels = Array.from(models).sort();
         } catch (err: any) {
             errorMsg =
                 err.message ||
@@ -996,16 +1016,20 @@
                                 : "Embedding Model"}</label
                         >
                         <div class="flex gap-2">
-                            <input
+                            <select
                                 id="embedding-model"
                                 bind:value={settings.SemanticCacheEmbeddingModel}
-                                placeholder="text-embedding-3-small"
                                 class="flex-1 px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
-                            />
+                            >
+                                <option value="">{i18n.lang === "zh" ? "选择模型..." : "Select model..."}</option>
+                                {#each embeddingModels as model}
+                                    <option value={model}>{model}</option>
+                                {/each}
+                            </select>
                             <button
                                 type="button"
                                 onclick={checkEmbeddingModel}
-                                disabled={embeddingCheckStatus === "checking"}
+                                disabled={embeddingCheckStatus === "checking" || !settings.SemanticCacheEmbeddingModel}
                                 class="px-4 py-2 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 rounded-xl transition-all flex items-center gap-2"
                             >
                                 {#if embeddingCheckStatus === "checking"}
@@ -1016,6 +1040,11 @@
                                 {i18n.lang === "zh" ? "检查" : "Check"}
                             </button>
                         </div>
+                        <p class="text-xs text-slate-500">
+                            {i18n.lang === "zh"
+                                ? "从渠道中自动检测到的 embedding 模型"
+                                : "Embedding models detected from channels"}
+                        </p>
                         {#if embeddingCheckStatus === "success"}
                             <p class="text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
                                 <CheckCircle class="w-3 h-3" />

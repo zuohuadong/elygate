@@ -14,8 +14,12 @@ const SALT_LENGTH = 32;
  * Get encryption key from environment or generate one
  */
 function getEncryptionKey(): Buffer {
-    const secret = process.env.ENCRYPTION_SECRET || 'elygate-default-encryption-secret-key';
-    const salt = process.env.ENCRYPTION_SALT || 'elygate-default-salt';
+    const secret = process.env.ENCRYPTION_SECRET;
+    const salt = process.env.ENCRYPTION_SALT;
+    
+    if (!secret || !salt) {
+        throw new Error('[Encryption] Critical: ENCRYPTION_SECRET or ENCRYPTION_SALT is not set in environment.');
+    }
     
     // Derive a 32-byte key using scrypt
     return scryptSync(secret, salt, 32);
