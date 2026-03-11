@@ -33,16 +33,19 @@
     let rmb = $state(0);
 
     function syncFromQuota(q: number) {
+        if (isNaN(q) || q === null) return;
         usd = Number((q / session.quotaPerUnit).toFixed(4));
         rmb = Number((usd * session.exchangeRate).toFixed(2));
     }
 
     function syncFromUSD(u: number) {
+        if (isNaN(u) || u === null) return;
         formData.quota = Math.round(u * session.quotaPerUnit);
         rmb = Number((u * session.exchangeRate).toFixed(2));
     }
 
     function syncFromRMB(r: number) {
+        if (isNaN(r) || r === null) return;
         usd = Number((r / session.exchangeRate).toFixed(4));
         formData.quota = Math.round(usd * session.quotaPerUnit);
     }

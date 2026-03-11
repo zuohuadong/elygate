@@ -1147,6 +1147,14 @@ export const adminRouter = new Elysia()
             set.status = 500;
             return { success: false, message: e.message };
         }
+    }, {
+        body: t.Object({
+            name: t.String(),
+            quota: t.Number(),
+            key: t.Optional(t.String()),
+            count: t.Optional(t.Number()),
+            status: t.Optional(t.Number())
+        })
     })
 
     .put('/redemptions/:id', async ({ params: { id }, body }: any) => {
