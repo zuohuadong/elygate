@@ -155,7 +155,7 @@ export const authRouter = new Elysia()
             const newKey = `sk-${Bun.randomUUIDv7('hex')}`;
             await sql`
                 INSERT INTO tokens (user_id, name, key, status, remain_quota)
-                VALUES (${user.id}, 'Default Token', ${newKey}, 1, -1)
+                VALUES (${user.id}, 'Default API Key', ${newKey}, 1, -1)
             `;
 
             return {
@@ -242,7 +242,7 @@ export const authRouter = new Elysia()
             let [token] = await sql`SELECT key FROM tokens WHERE user_id = ${user.id} AND status = 1 ORDER BY id ASC LIMIT 1`;
             if (!token) {
                 const newKey = `sk-${Bun.randomUUIDv7('hex')}`;
-                [token] = await sql`INSERT INTO tokens (user_id, name, key, status, remain_quota) VALUES (${user.id}, 'Default Token', ${newKey}, 1, -1) RETURNING key`;
+                [token] = await sql`INSERT INTO tokens (user_id, name, key, status, remain_quota) VALUES (${user.id}, 'Default API Key', ${newKey}, 1, -1) RETURNING key`;
             }
 
             return { success: true, token: token.key, username: user.username, role: user.role, currency: user.currency || 'USD' };
@@ -390,8 +390,8 @@ export const authRouter = new Elysia()
             user = newUser;
             await sql`INSERT INTO oauth_accounts (user_id, provider, provider_user_id, access_token, refresh_token, expires_at) VALUES (${user.id}, 'discord', ${discordUser.id}, ${tokenData.access_token}, ${tokenData.refresh_token}, NOW() + (${Number(tokenData.expires_in) || 604800} * INTERVAL '1 second'))`;
             const newKey = `sk-${Bun.randomUUIDv7('hex')}`;
-            await sql`INSERT INTO tokens (user_id, name, key, status, remain_quota) VALUES (${user.id}, 'Default Token', ${newKey}, 1, -1)`;
-        }
+            await sql`INSERT INTO tokens (user_id, name, key, status, remain_quota) VALUES (${user.id}, 'Default API Key', ${newKey}, 1, -1)`;
+         }
         const sessionToken = await authService.generateSessionToken(user.id);
         const targetUrl = process.env.WEB_URL || 'http://localhost:5173';
         set.redirect = `${targetUrl}/auth/callback?token=${sessionToken}&username=${user.username}&role=${user.role}`;

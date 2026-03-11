@@ -30,7 +30,7 @@ export const authService = {
             const defaultTokenKey = `sk-${Bun.randomUUIDv7('hex')}`;
             await sql`
                 INSERT INTO tokens (user_id, name, key, status, remain_quota)
-                VALUES (${user.id}, 'Default Token', ${defaultTokenKey}, 1, -1)
+                VALUES (${user.id}, 'Default API Key', ${defaultTokenKey}, 1, -1)
             `;
         }
 
@@ -55,7 +55,7 @@ export const authService = {
             const newKey = `sk-${Bun.randomUUIDv7('hex')}`;
             [token] = await sql`
                 INSERT INTO tokens (user_id, name, key, status, remain_quota)
-                VALUES (${userId}, 'Default Token', ${newKey}, 1, -1)
+                VALUES (${userId}, 'Default API Key', ${newKey}, 1, -1)
                 RETURNING key
             `;
         }
