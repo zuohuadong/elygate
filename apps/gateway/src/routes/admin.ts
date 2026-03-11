@@ -9,6 +9,7 @@ import { getLangFromHeader, getLangFromQuery } from '../utils/i18n';
 import { join } from 'path';
 import { encryptChannelKeys, decryptChannelKeys } from '../services/encryption';
 import { getAuditLogs } from '../services/auditLog';
+import { optionCache } from '../services/optionCache';
 
 // Load model configurations via top-level await (Bun native feature)
 let modelConfig: any = { anthropic: { models: [] } };
@@ -558,10 +559,11 @@ export const adminRouter = new Elysia()
         try {
             const b = body as any;
             const passwordHash = await Bun.password.hash(b.password);
+            const defaultCurrency = optionCache.get('CurrencyName', 'USD');
             const [result] = await sql`
-                INSERT INTO users (username, password_hash, role, quota, status)
-                VALUES (${b.username}, ${passwordHash}, ${b.role || 1}, ${b.quota || 0}, 1)
-                RETURNING id, username, role, quota, status
+                INSERT INTO users (username, password_hash, role, quota, status, currency)
+                VALUES (${b.username}, ${passwordHash}, ${b.role || 1}, ${b.quota || 0}, 1, ${defaultCurrency})
+                RETURNING id, username, role, quota, status, currency
             `;
             return result;
         } catch (e: any) {

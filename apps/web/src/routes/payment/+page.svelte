@@ -2,6 +2,7 @@
 	import { onMount } from "svelte";
 	import { i18n } from "$lib/i18n/index.svelte";
 	import { apiFetch } from "$lib/api";
+	import { session } from "$lib/session.svelte";
 	import { CreditCard, Clock, CheckCircle2, XCircle } from "lucide-svelte";
 
 	let balance = $state(0);
@@ -80,7 +81,10 @@
 	}
 
 	function formatAmount(amount: number): string {
-		return `$${(amount / 1000).toFixed(2)}`;
+		return `${session.currency === "RMB" ? "¥" : "$"}${(
+			(amount / session.quotaPerUnit) *
+			(session.currency === "RMB" ? session.exchangeRate : 1)
+		).toFixed(2)}`;
 	}
 
 	function formatDate(date: string): string {
@@ -137,7 +141,10 @@
 					{i18n.lang === "zh" ? "当前余额" : "Current Balance"}
 				</p>
 				<p class="text-4xl font-bold mt-2">
-					${(balance / 1000).toFixed(2)}
+					{session.currency === "RMB" ? "¥" : "$"}{(
+						(balance / session.quotaPerUnit) *
+						(session.currency === "RMB" ? session.exchangeRate : 1)
+					).toFixed(2)}
 				</p>
 			</div>
 			<button

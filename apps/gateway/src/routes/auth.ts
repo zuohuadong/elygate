@@ -706,78 +706,66 @@ export const authRouter = new Elysia()
         })
     })
 
-    // Get public packages (C-end)
-    .get('/packages', async ({ request, set }: any) => {
-        const authHeader = request.headers.get('authorization');
-        let userGroup = 'default';
+    // Grouping C-end routes that frontend expects under /api/auth
+    .group('/auth', (app) =>
+        app
+            .use(authPlugin)
+            // Get public packages (C-end)
+            .get('/packages', async ({ request, set }: any) => {
+                const authHeader = request.headers.get('authorization');
+                let userGroup = 'default';
 
-        if (authHeader?.startsWith('Bearer ')) {
-            const key = authHeader.substring(7);
-            const [userRow] = await sql`
-                SELECT u."group"
-                FROM tokens t
-                JOIN users u ON t.user_id = u.id
-                WHERE t.key = ${key} AND t.status = 1 AND u.status = 1
-                LIMIT 1
-            `;
-            if (userRow && userRow.group) {
-                userGroup = userRow.group;
-            }
-        }
-
-        const data = await sql`
-            SELECT id, name, description, price, duration_days, models, allowed_groups
-            FROM packages
-            WHERE is_public = true
-            ORDER BY price ASC
-        `;
-
-        const filtered = data.filter((pkg: any) => {
-            // Check Package -> Group direction
-            const allowedGroups = Array.isArray(pkg.allowed_groups) ? pkg.allowed_groups : (typeof pkg.allowed_groups === 'string' ? JSON.parse(pkg.allowed_groups || '[]') : []);
-            if (allowedGroups.length > 0 && !allowedGroups.includes(userGroup)) {
-                return false;
-            }
-
-            // Check Group -> Package direction
-            const policy = memoryCache.userGroups.get(userGroup);
-            if (policy && policy.allowedPackages && policy.allowedPackages.length > 0) {
-                if (!policy.allowedPackages.includes(pkg.id)) {
-                    return false;
+                if (authHeader?.startsWith('Bearer ')) {
+                    const key = authHeader.substring(7);
+                    const [userRow] = await sql`
+                        SELECT u."group"
+                        FROM tokens t
+                        JOIN users u ON t.user_id = u.id
+                        WHERE t.key = ${key} AND t.status = 1 AND u.status = 1
+                        LIMIT 1
+                    `;
+                    if (userRow && userRow.group) {
+                        userGroup = userRow.group;
+                    }
                 }
-            }
-            return true;
-        });
 
-        return filtered;
-    })
+                const data = await sql`
+                    SELECT id, name, description, price, duration_days, models, allowed_groups
+                    FROM packages
+                    WHERE is_public = true
+                    ORDER BY price ASC
+                `;
 
-    // Get personal subscriptions (C-end)
-    .get('/subscriptions', async ({ request, set }: any) => {
-        const authHeader = request.headers.get('authorization');
-        if (!authHeader?.startsWith('Bearer ')) {
-            set.status = 401;
-            throw new Error('Unauthorized');
-        }
-        const key = authHeader.substring(7);
-        const [userRow] = await sql`
-            SELECT u.id
-            FROM tokens t
-            JOIN users u ON t.user_id = u.id
-            WHERE t.key = ${key} AND t.status = 1 AND u.status = 1
-            LIMIT 1
-        `;
-        if (!userRow) {
-            set.status = 401;
-            throw new Error('Unauthorized');
-        }
+                const filtered = data.filter((pkg: any) => {
+                    const allowedGroups = Array.isArray(pkg.allowed_groups) ? pkg.allowed_groups : (typeof pkg.allowed_groups === 'string' ? JSON.parse(pkg.allowed_groups || '[]') : []);
+                    if (allowedGroups.length > 0 && !allowedGroups.includes(userGroup)) {
+                        return false;
+                    }
 
-        const data = await sql`
-            SELECT s.id, s.package_id, p.name as package_name, p.models, s.start_time, s.end_time, s.status
-            FROM user_subscriptions s
-            JOIN packages p ON s.package_id = p.id
-            WHERE s.user_id = ${userRow.id} AND s.status = 1
-            ORDER BY s.end_time DESC
-        `;
-        return data;
-    });
+                    const policy = memoryCache.userGroups.get(userGroup);
+                    if (policy && policy.allowedPackages && policy.allowedPackages.length > 0) {
+                        if (!policy.allowedPackages.includes(pkg.id)) {
+                            return false;
+                        }
+                    }
+                    return true;
+                });
+
+                return filtered;
+            })
+            // Get personal subscriptions (C-end)
+            .get('/subscriptions', async ({ request, set, user }: any) => {
+                if (!user) {
+                    set.status = 401;
+                    throw new Error('Unauthorized');
+                }
+                const data = await sql`
+                    SELECT s.id, s.package_id, p.name as package_name, p.models, s.start_time, s.end_time, s.status
+                    FROM user_subscriptions s
+                    JOIN packages p ON s.package_id = p.id
+                    WHERE s.user_id = ${user.id} AND s.status = 1
+                    ORDER BY s.end_time DESC
+                `;
+                return data;
+            })
+    );
