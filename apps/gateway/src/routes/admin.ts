@@ -594,11 +594,12 @@ export const adminRouter = new Elysia()
                 SET username = COALESCE(${b.username}, username),
                     role = COALESCE(${b.role}, role),
                     quota = COALESCE(${b.quota}, quota),
+                    currency = COALESCE(${b.currency}, currency),
                     status = COALESCE(${b.status}, status),
                     updated_at = NOW()
                     ${passwordClause}
                 WHERE id = ${Number(id)}
-                RETURNING id, username, role, quota, status
+                RETURNING id, username, role, quota, currency, status
             `;
 
             // Notify auth cache to flush tokens for this user

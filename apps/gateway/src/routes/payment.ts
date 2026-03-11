@@ -15,6 +15,13 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
     // Create a new payment order (authenticated: userId comes from token, not request body)
     .post('/create-order', async ({ body, user, set }: any) => {
         try {
+            // Safeguard: Check if payment is enabled first
+            const [paymentEnabled] = await sql`SELECT value FROM options WHERE key = 'PaymentEnabled'`;
+            if (paymentEnabled && paymentEnabled.value === 'false') {
+                set.status = 403;
+                return { success: false, message: 'Self-recharge is currently disabled' };
+            }
+
             const { amount, paymentMethod } = body;
 
             if (!amount || amount <= 0) {

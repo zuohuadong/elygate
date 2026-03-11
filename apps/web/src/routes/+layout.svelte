@@ -447,14 +447,16 @@
 						>
 					</div>
 
-					<!-- Currency Switcher -->
-					<button
-						onclick={toggleCurrency}
-						class="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors border border-slate-200 dark:border-slate-800"
-					>
-						<Coins class="w-4 h-4 text-amber-500" />
-						{session.currency === "USD" ? "USD / $" : "RMB / ¥"}
-					</button>
+					<!-- Currency Switcher (only for non-admin users) -->
+					{#if session.role < 10}
+						<button
+							onclick={toggleCurrency}
+							class="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors border border-slate-200 dark:border-slate-800"
+						>
+							<Coins class="w-4 h-4 text-amber-500" />
+							{session.currency === "USD" ? "USD / $" : "RMB / ¥"}
+						</button>
+					{/if}
 
 					<!-- Language Switcher -->
 					<button

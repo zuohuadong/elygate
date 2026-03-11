@@ -21,12 +21,13 @@
 
     const QUOTA_PER_UNIT = 500000;
 
-    // Form state (quota in USD for display, converted on save)
+    // Form state (quota in display currency, converted on save)
     let formData = $state({
         username: "",
         password: "",
         role: 1,
-        quotaUsd: 0,
+        quotaAmount: 0,
+        quotaCurrency: "USD" as "USD" | "RMB",
         group: "default",
         status: 1,
     });
@@ -44,11 +45,15 @@
             }
 
             if (user) {
+                // Convert quota to display currency (use user's currency preference or USD)
+                const userCurrency = (user as any).currency || "USD";
+                const quotaUsd = user.quota != null ? user.quota / QUOTA_PER_UNIT : 0;
                 formData = {
                     username: user.username || "",
                     password: "", // Never populate password on edit
                     role: user.role ?? 1,
-                    quotaUsd: user.quota != null ? user.quota / QUOTA_PER_UNIT : 0,
+                    quotaAmount: userCurrency === "RMB" ? quotaUsd * session.exchangeRate : quotaUsd,
+                    quotaCurrency: userCurrency,
                     group: user.group || "default",
                     status: user.status ?? 1,
                 };
@@ -57,7 +62,8 @@
                     username: "",
                     password: "",
                     role: 1,
-                    quotaUsd: 1,
+                    quotaAmount: 1,
+                    quotaCurrency: session.currency || "USD",
                     group: "default",
                     status: 1,
                 };
@@ -73,13 +79,19 @@
             if (!user && !formData.password) {
                 throw new Error(i18n.t.users.passwordRequired);
             }
+            // Convert display currency to USD, then to quota
+            let quotaUsd = formData.quotaAmount;
+            if (formData.quotaCurrency === "RMB") {
+                quotaUsd = formData.quotaAmount / session.exchangeRate;
+            }
             const payload = {
                 username: formData.username,
                 password: formData.password || undefined,
                 role: formData.role,
-                quota: Math.round(formData.quotaUsd * QUOTA_PER_UNIT),
+                quota: Math.round(quotaUsd * QUOTA_PER_UNIT),
                 group: formData.group,
                 status: formData.status,
+                currency: formData.quotaCurrency,
             };
             if (user && !payload.password) {
                 delete (payload as any).password;
@@ -185,16 +197,25 @@
                         <label
                             for="u-quota"
                             class="text-sm font-medium text-slate-700 dark:text-slate-300"
-                            >{i18n.t.users.quota} ($)</label
+                            >{i18n.t.users.quota}</label
                         >
-                        <input
-                            id="u-quota"
-                            type="number"
-                            step="0.01"
-                            bind:value={formData.quotaUsd}
-                            placeholder="e.g. 100.00"
-                            class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
-                        />
+                        <div class="flex gap-2">
+                            <input
+                                id="u-quota"
+                                type="number"
+                                step="0.01"
+                                bind:value={formData.quotaAmount}
+                                placeholder="e.g. 100.00"
+                                class="flex-1 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                            />
+                            <select
+                                bind:value={formData.quotaCurrency}
+                                class="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                            >
+                                <option value="USD">USD ($)</option>
+                                <option value="RMB">RMB (¥)</option>
+                            </select>
+                        </div>
                     </div>
                 </div>
 

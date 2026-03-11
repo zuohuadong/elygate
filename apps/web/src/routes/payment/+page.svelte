@@ -12,6 +12,10 @@
 	let selectedAmount = $state(1000);
 	let selectedMethod = $state("stripe");
 
+	// System settings
+	let paymentEnabled = $state(true);
+	let paymentMethods = $state<string[]>([]);
+
 	const amounts = [
 		{ value: 1000, label: "$10.00" },
 		{ value: 5000, label: "$50.00" },
@@ -21,9 +25,25 @@
 	];
 
 	onMount(async () => {
+		await loadSettings();
 		await loadBalance();
 		await loadOrders();
 	});
+
+	async function loadSettings() {
+		try {
+			const res = await apiFetch<any>("/api/option");
+			if (res && res.data) {
+				paymentEnabled = res.data.PaymentEnabled;
+				paymentMethods = (res.data.PaymentMethods || "").split(",");
+				if (paymentMethods.length > 0 && !paymentMethods.includes(selectedMethod)) {
+					selectedMethod = paymentMethods[0];
+				}
+			}
+		} catch (error) {
+			console.error("Failed to load payment settings:", error);
+		}
+	}
 
 	async function loadBalance() {
 		try {
@@ -37,13 +57,8 @@
 	async function loadOrders() {
 		try {
 			loading = true;
-			// The isAdmin and userId variables are no longer needed as the endpoint does not require userId
-			// const isAdmin = session.role >= 10;
-			// const userId = isAdmin ? localStorage.getItem("admin_user_id") : session.id;
-			// if (userId) { // This condition is no longer needed
-				const data = await apiFetch<any[]>("/payment/orders");
-				orders = data || [];
-			// }
+			const data = await apiFetch<any[]>("/payment/orders");
+			orders = data || [];
 		} catch (error) {
 			console.error("Failed to load orders:", error);
 		} finally {
@@ -54,13 +69,9 @@
 	async function createPayment() {
 		try {
 			loading = true;
-			const userId = localStorage.getItem("admin_user_id");
-			if (!userId) return;
-
 			const data = await apiFetch<any>("/payment/create-order", {
 				method: "POST",
 				body: JSON.stringify({
-					userId: parseInt(userId),
 					amount: selectedAmount,
 					paymentMethod: selectedMethod,
 				}),
@@ -69,13 +80,9 @@
 			if (data.success && data.paymentUrl) {
 				window.location.href = data.paymentUrl;
 			}
-		} catch (error) {
+		} catch (error: any) {
 			console.error("Failed to create payment:", error);
-			alert(
-				i18n.lang === "zh"
-					? "创建支付订单失败"
-					: "Failed to create payment order",
-			);
+			alert(error.message || i18n.t.payment.createFailed);
 		} finally {
 			loading = false;
 			showPaymentModal = false;
@@ -135,82 +142,107 @@
 
 	<!-- Balance Card -->
 	<div
-		class="bg-gradient-to-r from-blue-500 to-purple-600 rounded-lg shadow-lg p-6 mb-8 text-white"
+		class="bg-gradient-to-r from-blue-600 to-indigo-700 rounded-xl p-8 text-white shadow-lg mb-8"
 	>
 		<div class="flex items-center justify-between">
-			<div>
-				<p class="text-sm opacity-90">
-					{i18n.lang === "zh" ? "当前余额" : "Current Balance"}
-				</p>
-				<p class="text-4xl font-bold mt-2">
-					{session.currency === "RMB" ? "¥" : "$"}{(
-						(balance / session.quotaPerUnit) *
-						(session.currency === "RMB" ? session.exchangeRate : 1)
-					).toFixed(2)}
+			<div class="flex-1">
+				<h1 class="text-3xl font-bold mb-2">
+					{i18n.t.payment.balance}
+				</h1>
+				<p class="text-blue-100 text-lg opacity-90">
+					{formatAmount(balance)}
 				</p>
 			</div>
-			<button
-				onclick={() => (showPaymentModal = true)}
-				class="bg-white text-blue-600 px-6 py-3 rounded-lg font-semibold hover:bg-opacity-90 transition flex items-center gap-2"
-			>
-				<CreditCard class="w-5 h-5" />
-				{i18n.lang === "zh" ? "立即充值" : "Top Up"}
-			</button>
+			{#if paymentEnabled}
+				<button
+					onclick={() => (showPaymentModal = true)}
+					class="bg-white text-blue-600 px-6 py-3 rounded-lg font-semibold hover:bg-opacity-90 transition flex items-center gap-2"
+				>
+					<CreditCard class="w-5 h-5" />
+					{i18n.t.payment.topup}
+				</button>
+			{/if}
 		</div>
 	</div>
 
-	<!-- Payment Methods -->
-	<div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-		<div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-			<div class="flex items-center gap-3 mb-4">
-				<div
-					class="w-12 h-12 bg-blue-100 dark:bg-blue-900 rounded-lg flex items-center justify-center"
-				>
-					<span class="text-2xl">💳</span>
-				</div>
-				<div>
-					<h3 class="font-semibold text-gray-900 dark:text-white">
-						Stripe
-					</h3>
-					<p class="text-sm text-gray-500 dark:text-gray-400">
+	<!-- Payment Methods / Disabled Notice -->
+	{#if paymentEnabled}
+		<div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+			{#if paymentMethods.includes("stripe")}
+				<div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+					<div class="flex items-center gap-3 mb-4">
+						<div
+							class="w-12 h-12 bg-blue-100 dark:bg-blue-900 rounded-lg flex items-center justify-center"
+						>
+							<span class="text-2xl">💳</span>
+						</div>
+						<div>
+							<h3 class="font-semibold text-gray-900 dark:text-white">
+								Stripe
+							</h3>
+							<p class="text-sm text-gray-500 dark:text-gray-400">
+								{i18n.lang === "zh"
+									? "支持信用卡、借记卡"
+									: "Credit & Debit Cards"}
+							</p>
+						</div>
+					</div>
+					<p class="text-sm text-gray-600 dark:text-gray-300">
 						{i18n.lang === "zh"
-							? "支持信用卡、借记卡"
-							: "Credit & Debit Cards"}
+							? "安全便捷的在线支付，支持全球主要信用卡"
+							: "Secure online payment supporting major credit cards worldwide"}
 					</p>
 				</div>
-			</div>
-			<p class="text-sm text-gray-600 dark:text-gray-300">
-				{i18n.lang === "zh"
-					? "安全便捷的在线支付，支持全球主要信用卡"
-					: "Secure online payment supporting major credit cards worldwide"}
-			</p>
-		</div>
+			{/if}
 
-		<div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-			<div class="flex items-center gap-3 mb-4">
-				<div
-					class="w-12 h-12 bg-green-100 dark:bg-green-900 rounded-lg flex items-center justify-center"
-				>
-					<span class="text-2xl">💰</span>
-				</div>
-				<div>
-					<h3 class="font-semibold text-gray-900 dark:text-white">
-						EPay
-					</h3>
-					<p class="text-sm text-gray-500 dark:text-gray-400">
+			{#if paymentMethods.includes("alipay") || paymentMethods.includes("epay")}
+				<div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+					<div class="flex items-center gap-3 mb-4">
+						<div
+							class="w-12 h-12 bg-green-100 dark:bg-green-900 rounded-lg flex items-center justify-center"
+						>
+							<span class="text-2xl">💰</span>
+						</div>
+						<div>
+							<h3 class="font-semibold text-gray-900 dark:text-white">
+								EPay / Alipay
+							</h3>
+							<p class="text-sm text-gray-500 dark:text-gray-400">
+								{i18n.lang === "zh"
+									? "支持支付宝、微信支付"
+									: "Alipay & WeChat Pay"}
+							</p>
+						</div>
+					</div>
+					<p class="text-sm text-gray-600 dark:text-gray-300">
 						{i18n.lang === "zh"
-							? "支持支付宝、微信支付"
-							: "Alipay & WeChat Pay"}
+							? "支持多种国内支付方式，快速到账"
+							: "Multiple domestic payment methods with instant processing"}
 					</p>
 				</div>
-			</div>
-			<p class="text-sm text-gray-600 dark:text-gray-300">
-				{i18n.lang === "zh"
-					? "支持多种国内支付方式，快速到账"
-					: "Multiple domestic payment methods with instant processing"}
-			</p>
+			{/if}
 		</div>
-	</div>
+	{:else}
+		<div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-orange-100 dark:border-orange-900/30 p-8 mb-8 text-center">
+			<div class="w-16 h-16 bg-orange-50 dark:bg-orange-900/20 rounded-full flex items-center justify-center mx-auto mb-4">
+				<Clock class="w-8 h-8 text-orange-500" />
+			</div>
+			<h3 class="text-xl font-bold text-gray-900 dark:text-white mb-2">
+				{i18n.t.payment.disabledTitle}
+			</h3>
+			<p class="text-gray-600 dark:text-gray-400 max-w-md mx-auto mb-6">
+				{i18n.t.payment.disabledDesc}
+			</p>
+			<div class="flex flex-wrap justify-center gap-4">
+				<a 
+					href="mailto:support@elygate.com"
+					class="inline-flex items-center gap-2 px-5 py-2.5 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 font-medium rounded-lg transition-all"
+				>
+					{i18n.t.payment.contactSupport}
+				</a>
+			</div>
+		</div>
+	{/if}
 
 	<!-- Orders History -->
 	<div class="bg-white dark:bg-gray-800 rounded-lg shadow">
@@ -347,43 +379,48 @@
 					<div
 						class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
 					>
-						{i18n.lang === "zh" ? "支付方式" : "Payment Method"}
+						{i18n.t.payment.method}
 					</div>
 					<div class="space-y-2">
-						<label
-							class="flex items-center p-3 border rounded-lg cursor-pointer {selectedMethod ===
-							'stripe'
-								? 'border-blue-500 bg-blue-50 dark:bg-blue-900'
-								: 'border-gray-200 dark:border-gray-600'}"
-						>
-							<input
-								type="radio"
-								name="paymentMethod"
-								value="stripe"
-								bind:group={selectedMethod}
-								class="mr-3"
-							/>
-							<span class="text-gray-900 dark:text-white"
-								>Stripe (Credit Card)</span
+						{#if paymentMethods.includes("stripe")}
+							<label
+								class="flex items-center p-3 border rounded-lg cursor-pointer {selectedMethod ===
+								'stripe'
+									? 'border-blue-500 bg-blue-50 dark:bg-blue-900'
+									: 'border-gray-200 dark:border-gray-600'}"
 							>
-						</label>
-						<label
-							class="flex items-center p-3 border rounded-lg cursor-pointer {selectedMethod ===
-							'epay'
-								? 'border-blue-500 bg-blue-50 dark:bg-blue-900'
-								: 'border-gray-200 dark:border-gray-600'}"
-						>
-							<input
-								type="radio"
-								name="paymentMethod"
-								value="epay"
-								bind:group={selectedMethod}
-								class="mr-3"
-							/>
-							<span class="text-gray-900 dark:text-white"
-								>EPay (Alipay/WeChat)</span
+								<input
+									type="radio"
+									name="paymentMethod"
+									value="stripe"
+									bind:group={selectedMethod}
+									class="mr-3"
+								/>
+								<span class="text-gray-900 dark:text-white"
+									>Stripe (Credit Card)</span
+								>
+							</label>
+						{/if}
+
+						{#if paymentMethods.includes("alipay") || paymentMethods.includes("epay")}
+							<label
+								class="flex items-center p-3 border rounded-lg cursor-pointer {selectedMethod ===
+								'alipay' || selectedMethod === 'epay'
+									? 'border-blue-500 bg-blue-50 dark:bg-blue-900'
+									: 'border-gray-200 dark:border-gray-600'}"
 							>
-						</label>
+								<input
+									type="radio"
+									name="paymentMethod"
+									value={paymentMethods.includes("alipay") ? "alipay" : "epay"}
+									bind:group={selectedMethod}
+									class="mr-3"
+								/>
+								<span class="text-gray-900 dark:text-white"
+									>Alipay / WeChat Pay</span
+								>
+							</label>
+						{/if}
 					</div>
 				</div>
 
@@ -391,22 +428,16 @@
 				<div class="flex gap-3">
 					<button
 						onclick={() => (showPaymentModal = false)}
-						class="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+						class="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition"
 					>
-						{i18n.lang === "zh" ? "取消" : "Cancel"}
+						{i18n.t.common.cancel}
 					</button>
 					<button
 						onclick={createPayment}
 						disabled={loading}
-						class="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+						class="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition disabled:opacity-50"
 					>
-						{loading
-							? i18n.lang === "zh"
-								? "处理中..."
-								: "Processing..."
-							: i18n.lang === "zh"
-								? "确认支付"
-								: "Confirm"}
+						{loading ? i18n.t.common.loading : i18n.t.payment.topup}
 					</button>
 				</div>
 			</div>
