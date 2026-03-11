@@ -1537,4 +1537,73 @@ export const adminRouter = new Elysia()
         } catch (e: any) {
             set.status = 500; return { success: false, message: e.message };
         }
+    })
+
+    // --- Embedding Model Check ---
+    .post('/check-embedding', async ({ body, set }: any) => {
+        try {
+            const { model } = body as { model: string };
+            if (!model) {
+                set.status = 400;
+                return { success: false, message: 'Model name is required' };
+            }
+
+            // Find channel with this embedding model
+            const channel = memoryCache.selectChannels(model)[0];
+            if (!channel) {
+                return { 
+                    success: false, 
+                    message: `No channel found with embedding model: ${model}` 
+                };
+            }
+
+            // Try to generate a test embedding
+            const keys = channel.key.split('\n').map((k: string) => k.trim()).filter(Boolean);
+            const activeKey = keys[Math.floor(Math.random() * keys.length)];
+
+            const response = await fetch(`${channel.baseUrl}/v1/embeddings`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${activeKey}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ model, input: 'test' })
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                let errorMessage = `API returned ${response.status}`;
+                try {
+                    const errorJson = JSON.parse(errorText);
+                    errorMessage = errorJson.error?.message || errorJson.message || errorMessage;
+                } catch {
+                    // Use default message
+                }
+                return { 
+                    success: false, 
+                    message: errorMessage,
+                    channel: channel.name
+                };
+            }
+
+            const data = await response.json() as any;
+            const embedding = data?.data?.[0]?.embedding;
+            
+            if (!embedding || !Array.isArray(embedding)) {
+                return { 
+                    success: false, 
+                    message: 'Invalid embedding response',
+                    channel: channel.name
+                };
+            }
+
+            return { 
+                success: true, 
+                message: `Embedding model is working (dimension: ${embedding.length})`,
+                channel: channel.name
+            };
+        } catch (e: any) {
+            set.status = 500;
+            return { success: false, message: e.message };
+        }
     });

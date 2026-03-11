@@ -41,12 +41,15 @@ export const chatRouter = new Elysia()
         let embeddingModel: string | undefined;
         
         // Try to find an embedding channel with the correct model
-        // Priority: gemini-embedding > bge-m3 > qwen-embedding
+        // Priority: OpenAI embedding > nvidia/bge-m3 > gemini-embedding > bge-m3
         const embeddingCandidates = [
-            { model: 'models/gemini-embedding-001', alias: 'gemini-embedding-001' },
-            { model: 'BAAI/bge-m3', alias: 'bge-m3' },
-            { model: 'Qwen/Qwen3-Embedding-8B', alias: 'Qwen3-Embedding-8B' },
             { model: 'text-embedding-3-small', alias: 'text-embedding-3-small' },
+            { model: 'text-embedding-3-large', alias: 'text-embedding-3-large' },
+            { model: 'baai/bge-m3', alias: 'bge-m3' },
+            { model: 'nvidia/nv-embed-v1', alias: 'nv-embed-v1' },
+            { model: 'models/gemini-embedding-001', alias: 'gemini-embedding-001' },
+            { model: 'BAAI/bge-m3', alias: 'BAAI/bge-m3' },
+            { model: 'Qwen/Qwen3-Embedding-8B', alias: 'Qwen3-Embedding-8B' },
             { model: 'nomic-embed-text', alias: 'nomic-embed-text' }
         ];
         

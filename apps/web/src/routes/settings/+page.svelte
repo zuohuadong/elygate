@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { Settings, Save } from "lucide-svelte";
+    import { Settings, Save, CheckCircle, XCircle, Loader2 } from "lucide-svelte";
     import { apiFetch } from "$lib/api";
     import { i18n } from "$lib/i18n/index.svelte";
     import { onMount } from "svelte";
@@ -31,13 +31,18 @@
         CircuitBreakerThreshold: "5",
         CircuitBreakerRecoveryThreshold: "3",
         LogRetentionDays: "7",
+        SemanticCacheEnabled: "true",
         SemanticCacheThreshold: "0.95",
+        SemanticCacheTTLHours: "24",
+        SemanticCacheEmbeddingModel: "text-embedding-3-small",
     });
 
     let isLoading = $state(true);
     let isSaving = $state(false);
     let errorMsg = $state("");
     let successMsg = $state("");
+    let embeddingCheckStatus = $state<"idle" | "checking" | "success" | "error">("idle");
+    let embeddingCheckMessage = $state("");
 
     async function loadSettings() {
         isLoading = true;
@@ -76,6 +81,27 @@
             errorMsg = err.message || i18n.t.common.failed;
         } finally {
             isSaving = false;
+        }
+    }
+
+    async function checkEmbeddingModel() {
+        embeddingCheckStatus = "checking";
+        embeddingCheckMessage = "";
+        try {
+            const result = await apiFetch<{ success: boolean; message: string; channel?: string }>("/admin/check-embedding", {
+                method: "POST",
+                body: JSON.stringify({ model: settings.SemanticCacheEmbeddingModel }),
+            });
+            if (result.success) {
+                embeddingCheckStatus = "success";
+                embeddingCheckMessage = result.message + (result.channel ? ` (${result.channel})` : "");
+            } else {
+                embeddingCheckStatus = "error";
+                embeddingCheckMessage = result.message;
+            }
+        } catch (err: any) {
+            embeddingCheckStatus = "error";
+            embeddingCheckMessage = err.message || "Check failed";
         }
     }
 </script>
@@ -921,6 +947,141 @@
                                 : "Re-enable channel after this many successes"}
                         </p>
                     </div>
+                </div>
+            </div>
+
+            <!-- Semantic Cache Settings -->
+            <div
+                class="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm"
+            >
+                <h3
+                    class="text-base font-semibold text-slate-900 dark:text-white mb-4"
+                >
+                    {i18n.lang === "zh" ? "语义缓存设置" : "Semantic Cache Settings"}
+                </h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="space-y-2">
+                        <label
+                            for="cache-enabled"
+                            class="text-sm font-medium text-slate-700 dark:text-slate-300"
+                            >{i18n.lang === "zh"
+                                ? "启用语义缓存"
+                                : "Enable Semantic Cache"}</label
+                        >
+                        <select
+                            id="cache-enabled"
+                            bind:value={settings.SemanticCacheEnabled}
+                            class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                        >
+                            <option value="true"
+                                >{i18n.t.settings.enabled}</option
+                            >
+                            <option value="false"
+                                >{i18n.t.settings.disabled}</option
+                            >
+                        </select>
+                        <p class="text-xs text-slate-500">
+                            {i18n.lang === "zh"
+                                ? "启用后，相似请求将返回缓存响应，节省 token 消耗"
+                                : "When enabled, similar requests return cached responses, saving token costs"}
+                        </p>
+                    </div>
+                    <div class="space-y-2">
+                        <label
+                            for="embedding-model"
+                            class="text-sm font-medium text-slate-700 dark:text-slate-300"
+                            >{i18n.lang === "zh"
+                                ? "Embedding 模型"
+                                : "Embedding Model"}</label
+                        >
+                        <div class="flex gap-2">
+                            <input
+                                id="embedding-model"
+                                bind:value={settings.SemanticCacheEmbeddingModel}
+                                placeholder="text-embedding-3-small"
+                                class="flex-1 px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                            />
+                            <button
+                                type="button"
+                                onclick={checkEmbeddingModel}
+                                disabled={embeddingCheckStatus === "checking"}
+                                class="px-4 py-2 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 rounded-xl transition-all flex items-center gap-2"
+                            >
+                                {#if embeddingCheckStatus === "checking"}
+                                    <Loader2 class="w-4 h-4 animate-spin" />
+                                {:else}
+                                    <CheckCircle class="w-4 h-4" />
+                                {/if}
+                                {i18n.lang === "zh" ? "检查" : "Check"}
+                            </button>
+                        </div>
+                        {#if embeddingCheckStatus === "success"}
+                            <p class="text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                                <CheckCircle class="w-3 h-3" />
+                                {embeddingCheckMessage}
+                            </p>
+                        {:else if embeddingCheckStatus === "error"}
+                            <p class="text-xs text-rose-600 dark:text-rose-400 flex items-center gap-1">
+                                <XCircle class="w-3 h-3" />
+                                {embeddingCheckMessage}
+                            </p>
+                        {/if}
+                    </div>
+                    <div class="space-y-2">
+                        <label
+                            for="cache-threshold"
+                            class="text-sm font-medium text-slate-700 dark:text-slate-300"
+                            >{i18n.lang === "zh"
+                                ? "相似度阈值"
+                                : "Similarity Threshold"}</label
+                        >
+                        <input
+                            id="cache-threshold"
+                            type="number"
+                            min="0.5"
+                            max="1.0"
+                            step="0.01"
+                            bind:value={settings.SemanticCacheThreshold}
+                            class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                        />
+                        <p class="text-xs text-slate-500">
+                            {i18n.lang === "zh"
+                                ? "语义缓存的余弦相似度匹配阈值 (0.0-1.0，默认 0.95)"
+                                : "Cosine similarity threshold for cache (0.0-1.0, default 0.95)"}
+                        </p>
+                    </div>
+                    <div class="space-y-2">
+                        <label
+                            for="cache-ttl"
+                            class="text-sm font-medium text-slate-700 dark:text-slate-300"
+                            >{i18n.lang === "zh"
+                                ? "缓存有效期 (小时)"
+                                : "Cache TTL (Hours)"}</label
+                        >
+                        <input
+                            id="cache-ttl"
+                            type="number"
+                            min="1"
+                            max="168"
+                            bind:value={settings.SemanticCacheTTLHours}
+                            class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                        />
+                        <p class="text-xs text-slate-500">
+                            {i18n.lang === "zh"
+                                ? "缓存条目的有效期，超过此时间后自动删除"
+                                : "Cache entries expire after this time"}
+                        </p>
+                    </div>
+                </div>
+                <div
+                    class="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800/50 rounded-lg"
+                >
+                    <p class="text-xs text-blue-700 dark:text-blue-400">
+                        <strong>{i18n.lang === "zh" ? "说明：" : "Note:"}</strong>
+                        {i18n.lang === "zh"
+                            ? "语义缓存使用 embedding 模型将用户请求转换为向量，相似请求将返回缓存响应。需要配置有效的 embedding 模型渠道。"
+                            : "Semantic cache uses embedding models to convert requests to vectors. Similar requests return cached responses. Requires a valid embedding model channel."}
+                    </p>
                 </div>
             </div>
 
