@@ -82,12 +82,14 @@
 					else goto("/consumer");
 				}
 			} else if (!isAuthPage) {
+				isReady = true;
 				goto("/login");
 				return;
 			}
 		} catch (err) {
 			// If we're on a non-auth page and /me fails, we must go to login
 			if (!isAuthPage) {
+				isReady = true;
 				goto("/login");
 				return;
 			}
@@ -131,8 +133,11 @@
 
 		// Admin goes to dashboard, user goes to consumer page
 		if (path === "/") {
-			if (!isAdmin) goto("/consumer");
-			return;
+			if (!isAdmin) {
+				isReady = true;
+				goto("/consumer");
+				return;
+			}
 		}
 
 		// Block non-admins from admin-only routes
@@ -140,12 +145,14 @@
 			!isAdmin &&
 			ADMIN_ROUTES.some((r) => r !== "/" && path.startsWith(r))
 		) {
+			isReady = true;
 			goto("/consumer");
 			return;
 		}
 
 		// Redirect admins who land on consumer pages to the admin dashboard
 		if (isAdmin && CONSUMER_ROUTES.some((r) => path.startsWith(r))) {
+			isReady = true;
 			goto("/");
 			return;
 		}
