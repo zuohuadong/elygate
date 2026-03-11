@@ -102,7 +102,28 @@ jobs:
           body: |
             # Elygate ${{ steps.version.outputs.version }}
             
-            ## 📦 Downloads
+            ---
+            
+            ## English
+            
+            ### 🆕 What's New
+            
+            - **🔐 Secure Cookie Session Authentication**
+              - HttpOnly Cookie-based authentication with server-side session management
+              - Supports multi-device login, server-side logout, and automatic session expiration
+              - Effectively prevents XSS attacks
+            
+            - **📊 Enhanced Model Management**
+              - Lazy loading for better performance with hundreds of models
+              - Real-time availability filtering (Online/Offline)
+              - Improved model card display with provider/model name separation
+            
+            - **🎨 UI/UX Improvements**
+              - Channel list now sorted by ID (newest first)
+              - Better visual distinction for offline models
+              - Console sensitive information filtering
+            
+            ### 📦 Downloads
             
             | Platform | Architecture | Download |
             |----------|--------------|----------|
@@ -112,7 +133,7 @@ jobs:
             | macOS | ARM64 | `elygate-bun-darwin-arm64` |
             | Windows | x64 | `elygate-bun-windows-x64.exe` |
             
-            ## 🚀 Quick Start
+            ### 🚀 Quick Start
             
             ```bash
             # Linux/macOS
@@ -123,18 +144,75 @@ jobs:
             .\elygate-bun-windows-x64.exe
             ```
             
-            ## 📋 Requirements
+            ### 📋 Requirements
             
             - PostgreSQL 15+
             - Environment variables in `.env`
             
-            ## 🔧 Environment Variables
+            ### 🔧 Environment Variables
             
             ```bash
             DATABASE_URL=postgresql://user:pass@localhost:5432/elygate
             GATEWAY_URL=http://localhost:3000
             WEB_URL=http://localhost:3000
             ```
+            
+            ---
+            
+            ## 简体中文
+            
+            ### 🆕 更新内容
+            
+            - **🔐 安全 Cookie 会话认证**
+              - 基于 HttpOnly Cookie 的服务端会话认证
+              - 支持多端登录、服务端注销和自动会话过期
+              - 有效防止 XSS 攻击
+            
+            - **📊 增强模型管理**
+              - 懒加载优化，流畅展示数百个模型
+              - 实时可用性筛选（在线/离线）
+              - 优化模型卡片显示，分离厂商/模型名称
+            
+            - **🎨 UI/UX 改进**
+              - 渠道列表按 ID 倒序排列（最新添加的显示在最上方）
+              - 离线模型视觉区分更明显
+              - 控制台敏感信息过滤
+            
+            ### 📦 下载
+            
+            | 平台 | 架构 | 下载文件 |
+            |----------|--------------|----------|
+            | Linux | x64 | `elygate-bun-linux-x64` |
+            | Linux | ARM64 | `elygate-bun-linux-arm64` |
+            | macOS | x64 | `elygate-bun-darwin-x64` |
+            | macOS | ARM64 | `elygate-bun-darwin-arm64` |
+            | Windows | x64 | `elygate-bun-windows-x64.exe` |
+            
+            ### 🚀 快速开始
+            
+            ```bash
+            # Linux/macOS
+            chmod +x elygate-*
+            ./elygate-*
+            
+            # Windows
+            .\elygate-bun-windows-x64.exe
+            ```
+            
+            ### 📋 系统要求
+            
+            - PostgreSQL 15+
+            - `.env` 环境变量配置
+            
+            ### 🔧 环境变量
+            
+            ```bash
+            DATABASE_URL=postgresql://user:pass@localhost:5432/elygate
+            GATEWAY_URL=http://localhost:3000
+            WEB_URL=http://localhost:3000
+            ```
+            
+            ---
             
             See [Binary Build Guide](https://github.com/${{ github.repository }}/blob/main/BINARY_BUILD.md) for detailed instructions.
           files: |
