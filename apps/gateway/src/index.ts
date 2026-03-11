@@ -113,7 +113,23 @@ const app = new Elysia()
   })
   .use(sysRouter)
   .group("/api", (app) =>
-    app.use(authRouter)
+    app.get('/status', async () => {
+      // Returns a simplified list of channels and their status for public consumption
+      const rows = await sql`
+        SELECT name, type, status, status_message AS "statusMessage", updated_at AS "updatedAt"
+        FROM channels
+        ORDER BY priority DESC, weight DESC
+      `;
+      return rows;
+    })
+    .get('/info', async () => {
+      const keys = ['ServerName', 'SEO_Title', 'SEO_Description', 'SEO_Keywords', 'Logo_URL', 'Footer_HTML', 'Custom_CSS', 'Custom_JS'];
+      const rows = await sql`SELECT key, value FROM options WHERE key IN ${sql(keys)}`;
+      const info: Record<string, string> = {};
+      for (const r of rows) info[r.key] = r.value;
+      return { success: true, data: info };
+    })
+    .use(authRouter)
       .use(paymentRouter)
       .group("/admin", (app) => app.use(adminRouter))
       .group("/stats", (app) => app.use(statsRouter))
@@ -266,7 +282,11 @@ async function init() {
   // Run schema fix patches (v1, v2) if exist (idempotent)
   const patches = [
     'packages/db/src/patch_v1_schema_fix.sql',
-    'packages/db/src/patch_v2_channel_status.sql'
+    'packages/db/src/patch_v2_channel_status.sql',
+    'packages/db/src/patch_v3_seo_options.sql',
+    'packages/db/src/patch_v4_branding_options.sql',
+    'packages/db/src/patch_v5_monitoring_options.sql',
+    'packages/db/src/patch_v6_audit_logs.sql'
   ];
   for (const p of patches) {
     const patchPath = await findSqlPath(p);

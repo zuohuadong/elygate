@@ -72,4 +72,6 @@ export interface BillingContext {
     statusCode?: number;
     errorMessage?: string;
     elapsedMs?: number;
+    ip?: string;
+    ua?: string;
 }

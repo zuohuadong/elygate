@@ -37,6 +37,15 @@
 	let { children } = $props();
 	let showShortcutsModal = $state(false);
 	let isReady = $state(false);
+	let publicInfo = $state({
+		SEO_Title: "Elygate",
+		SEO_Description: "",
+		SEO_Keywords: "",
+		Logo_URL: "",
+		Footer_HTML: "",
+		Custom_CSS: "",
+		Custom_JS: ""
+	});
 
 	// Admin-only routes (regular users should not access these)
 	const ADMIN_ROUTES = [
@@ -64,6 +73,13 @@
 		initLogger();
 		i18n.init();
 		theme.init();
+
+		// Fetch SEO metadata
+		apiFetch<{ success: boolean; data: any }>("/info")
+			.then((res) => {
+				if (res.success) publicInfo = { ...publicInfo, ...res.data };
+			})
+			.catch(() => {});
 
 		// Check if user is authenticated via Cookie
 		try {
@@ -307,6 +323,22 @@
 		page.url.pathname === "/login" || page.url.pathname === "/register",
 	);
 </script>
+
+<svelte:head>
+	<title>{publicInfo.SEO_Title}</title>
+	<meta name="description" content={publicInfo.SEO_Description} />
+	<meta name="keywords" content={publicInfo.SEO_Keywords} />
+	{#if publicInfo.Custom_CSS}
+		<style>
+			{@html publicInfo.Custom_CSS}
+		</style>
+	{/if}
+	{#if publicInfo.Custom_JS}
+		<script>
+			{@html publicInfo.Custom_JS}
+		</script>
+	{/if}
+</svelte:head>
 
 {#if isAuthPage}
 	{@render children()}

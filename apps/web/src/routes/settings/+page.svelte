@@ -36,6 +36,15 @@
         SemanticCacheThreshold: "0.95",
         SemanticCacheTTLHours: "24",
         SemanticCacheEmbeddingModel: "text-embedding-3-small",
+        SEO_Title: "Elygate",
+        SEO_Description: "",
+        SEO_Keywords: "",
+        Logo_URL: "",
+        Footer_HTML: "",
+        Custom_CSS: "",
+        Custom_JS: "",
+        WebhookURL: "",
+        Notify_On_Channel_Offline: "true",
     });
 
     let isLoading = $state(true);
@@ -183,6 +192,172 @@
                             id="server-name"
                             bind:value={settings.ServerName}
                             class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                        />
+                    </div>
+                </div>
+            </div>
+
+            <!-- SEO Settings -->
+            <div
+                class="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm"
+            >
+                <h3
+                    class="text-base font-semibold text-slate-900 dark:text-white mb-4"
+                >
+                    {i18n.t.settings.seo}
+                </h3>
+                <div class="space-y-4">
+                    <div class="space-y-2">
+                        <label
+                            for="seo-title"
+                            class="text-sm font-medium text-slate-700 dark:text-slate-300"
+                            >{i18n.t.settings.seoTitle}</label
+                        >
+                        <input
+                            id="seo-title"
+                            bind:value={settings.SEO_Title}
+                            placeholder="Elygate - Smart AI API Gateway"
+                            class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                        />
+                    </div>
+                    <div class="space-y-2">
+                        <label
+                            for="seo-description"
+                            class="text-sm font-medium text-slate-700 dark:text-slate-300"
+                            >{i18n.t.settings.seoDescription}</label
+                        >
+                        <textarea
+                            id="seo-description"
+                            bind:value={settings.SEO_Description}
+                            rows="2"
+                            placeholder="Describe your website for search engines..."
+                            class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all resize-none"
+                        ></textarea>
+                    </div>
+                    <div class="space-y-2">
+                        <label
+                            for="seo-keywords"
+                            class="text-sm font-medium text-slate-700 dark:text-slate-300"
+                            >{i18n.t.settings.seoKeywords}</label
+                        >
+                        <input
+                            id="seo-keywords"
+                            bind:value={settings.SEO_Keywords}
+                            placeholder="AI, API, Gateway, OpenAI..."
+                            class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                        />
+                    </div>
+                </div>
+            </div>
+
+            <!-- Branding & Customization -->
+            <div
+                class="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm"
+            >
+                <h3
+                    class="text-base font-semibold text-slate-900 dark:text-white mb-4"
+                >
+                    {i18n.t.settings.branding}
+                </h3>
+                <div class="space-y-4">
+                    <div class="space-y-2">
+                        <label
+                            for="branding-logo"
+                            class="text-sm font-medium text-slate-700 dark:text-slate-300"
+                            >{i18n.t.settings.brandingLogo}</label
+                        >
+                        <input
+                            id="branding-logo"
+                            bind:value={settings.Logo_URL}
+                            placeholder="https://example.com/logo.png"
+                            class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                        />
+                    </div>
+                    <div class="space-y-2">
+                        <label
+                            for="branding-footer"
+                            class="text-sm font-medium text-slate-700 dark:text-slate-300"
+                            >{i18n.t.settings.brandingFooter}</label
+                        >
+                        <textarea
+                            id="branding-footer"
+                            bind:value={settings.Footer_HTML}
+                            rows="2"
+                            placeholder="&lt;p&gt;© 2026 Elygate. All rights reserved.&lt;/p&gt;"
+                            class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all resize-none font-mono"
+                        ></textarea>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div class="space-y-2">
+                            <label
+                                for="custom-css"
+                                class="text-sm font-medium text-slate-700 dark:text-slate-300"
+                                >{i18n.t.settings.brandingCustomCss}</label
+                            >
+                            <textarea
+                                id="custom-css"
+                                bind:value={settings.Custom_CSS}
+                                rows="4"
+                                placeholder=":root --primary: #6366f1;"
+                                class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all resize-none font-mono"
+                            ></textarea>
+                        </div>
+                        <div class="space-y-2">
+                            <label
+                                for="custom-js"
+                                class="text-sm font-medium text-slate-700 dark:text-slate-300"
+                                >{i18n.t.settings.brandingCustomJs}</label
+                            >
+                            <textarea
+                                id="custom-js"
+                                bind:value={settings.Custom_JS}
+                                rows="4"
+                                placeholder="console.log('Hello from Elygate');"
+                                class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all resize-none font-mono"
+                            ></textarea>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Monitoring & Alerts -->
+            <div
+                class="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm"
+            >
+                <h3
+                    class="text-base font-semibold text-slate-900 dark:text-white mb-4"
+                >
+                    {i18n.lang === "zh" ? "监控与告警" : "Monitoring & Alerts"}
+                </h3>
+                <div class="space-y-4">
+                    <div class="space-y-2">
+                        <label
+                            for="webhook-url"
+                            class="text-sm font-medium text-slate-700 dark:text-slate-300"
+                            >Webhook URL</label
+                        >
+                        <input
+                            id="webhook-url"
+                            bind:value={settings.WebhookURL}
+                            placeholder="https://example.com/api/webhook"
+                            class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                        />
+                    </div>
+                    <div class="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
+                        <div class="space-y-1">
+                            <label for="notify-offline" class="text-sm font-medium text-slate-900 dark:text-white">
+                                {i18n.lang === "zh" ? "通道下线告警" : "Channel Offline Alert"}
+                            </label>
+                            <p class="text-xs text-slate-500">
+                                {i18n.lang === "zh" ? "当某个渠道被熔断器禁用时，发送 Webhook 通知" : "Send webhook notification when a channel is disabled by circuit breaker."}
+                            </p>
+                        </div>
+                        <input
+                            id="notify-offline"
+                            type="checkbox"
+                            checked={settings.Notify_On_Channel_Offline === "true"}
+                            onchange={(e) => settings.Notify_On_Channel_Offline = e.currentTarget.checked ? "true" : "false"}
+                            class="w-5 h-5 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300"
                         />
                     </div>
                 </div>
@@ -1030,7 +1205,7 @@
                                 type="button"
                                 onclick={checkEmbeddingModel}
                                 disabled={embeddingCheckStatus === "checking" || !settings.SemanticCacheEmbeddingModel}
-                                class="px-4 py-2 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 rounded-xl transition-all flex items-center gap-2"
+                                class="shrink-0 whitespace-nowrap px-4 py-2 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 rounded-xl transition-all flex items-center gap-2"
                             >
                                 {#if embeddingCheckStatus === "checking"}
                                     <Loader2 class="w-4 h-4 animate-spin" />

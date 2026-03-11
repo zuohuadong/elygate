@@ -417,6 +417,9 @@ ON CONFLICT (username) DO NOTHING;
 -- Default system options
 INSERT INTO options (key, value) VALUES
     ('SystemName', 'Elygate API'),
+    ('SEO_Title', 'Elygate - Smart AI API Gateway'),
+    ('SEO_Description', 'A powerful, high-performance AI API gateway with semantic caching, multi-channel load balancing, and advanced analytics.'),
+    ('SEO_Keywords', 'AI, API, Gateway, OpenAI, Claude, Gemini, Semantic Cache, LLM, Proxy'),
     ('SemanticCacheEnabled', 'true'),
     ('SemanticCacheThreshold', '0.95'),
     ('SemanticCacheTTLHours', '24'),

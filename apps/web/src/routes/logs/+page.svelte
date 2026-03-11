@@ -37,6 +37,8 @@
                     dt_cost: `$ ${((l.quota_cost || l.quotaCost || 0) / session.quotaPerUnit).toFixed(4)}`,
                     dt_duration: durationStr,
                     dt_latency: l.elapsed_ms ? `${l.elapsed_ms}ms` : "-",
+                    dt_ip: l.ip_address || "unknown",
+                    dt_ua: l.user_agent || "unknown",
                     dt_status: "Success",
                 };
             });
@@ -86,6 +88,8 @@
         { key: "dt_user", label: "用户" },
         { key: "dt_duration", label: "通信模式" },
         { key: "dt_latency", label: "延迟" },
+        { key: "dt_ip", label: "IP 地址" },
+        { key: "dt_ua", label: "User Agent" },
         { key: "dt_cost", label: "花费额度" },
         { key: "dt_status", label: "状态", render: renderStatus },
     ];

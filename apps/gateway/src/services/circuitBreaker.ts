@@ -98,11 +98,15 @@ class CircuitBreaker {
             this.errorCounts.delete(channelId);
             this.successCounts.delete(channelId);
 
-            await notificationService.send(
-                'Channel Disabled',
-                `Channel ID ${channelId} disabled: ${reason || 'Frequent failures'}`
-            );
-            await webhookService.trigger('channel.disabled', { channelId, reason });
+            const shouldNotify = optionCache.get('Notify_On_Channel_Offline', 'true') === 'true';
+
+            if (shouldNotify) {
+                await notificationService.send(
+                    'Channel Disabled',
+                    `Channel ID ${channelId} disabled: ${reason || 'Frequent failures'}`
+                );
+                await webhookService.trigger('channel.disabled', { channelId, reason });
+            }
         } catch (e) {
             console.error(`[CircuitBreaker] Failed to disable channel ${channelId}:`, e);
         }

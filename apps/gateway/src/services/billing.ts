@@ -118,7 +118,9 @@ async function flushBillingQueue() {
             isStream: task.isStream,
             statusCode: task.statusCode || 200,
             errorMessage: task.errorMessage || null,
-            elapsedMs: task.elapsedMs || 0
+            elapsedMs: task.elapsedMs || 0,
+            ip: task.ip || null,
+            ua: task.ua || null
         });
     }
 
@@ -171,12 +173,12 @@ async function flushBillingQueue() {
             for (const [id, cost] of Object.entries(correctedUserAgg)) {
                 await tx`UPDATE users SET used_quota = used_quota + ${cost} WHERE id = ${Number(id)}`;
             }
-            for (const log of logInserts) {
-                await tx`
-                    INSERT INTO logs (user_id, token_id, channel_id, model_name, prompt_tokens, completion_tokens, cached_tokens, quota_cost, is_stream, status_code, error_message, elapsed_ms)
-                    VALUES (${log.userId}, ${log.tokenId ?? null}, ${log.channelId !== undefined ? log.channelId : null}, ${log.modelName}, ${log.promptTokens}, ${log.completionTokens}, ${log.cachedTokens}, ${log.quotaCost}, ${log.isStream}, ${log.statusCode}, ${log.errorMessage}, ${log.elapsedMs})
-                `;
-            }
+                for (const log of logInserts) {
+                    await tx`
+                        INSERT INTO logs (user_id, token_id, channel_id, model_name, prompt_tokens, completion_tokens, cached_tokens, quota_cost, is_stream, status_code, error_message, elapsed_ms, ip_address, user_agent)
+                        VALUES (${log.userId}, ${log.tokenId ?? null}, ${log.channelId !== undefined ? log.channelId : null}, ${log.modelName}, ${log.promptTokens}, ${log.completionTokens}, ${log.cachedTokens}, ${log.quotaCost}, ${log.isStream}, ${log.statusCode}, ${log.errorMessage}, ${log.elapsedMs}, ${log.ip}, ${log.ua})
+                    `;
+                }
         });
 
         // 3. Post-flush check for Quota Alarms

@@ -27,7 +27,10 @@ export const chatRouter = new Elysia()
         assertModelAccess(user, token, model, set);
         // ------------------------------------------
 
-        console.log(`[Request] UserID: ${user.id}, Token: ${token.name}, Model: ${model}, Group: ${user.group}`);
+        const ip = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown';
+        const ua = request.headers.get('user-agent') || 'unknown';
+
+        console.log(`[Request] UserID: ${user.id}, Token: ${token.name}, Model: ${model}, Group: ${user.group}, IP: ${ip}`);
 
         // 2. Dynamic Routing: Get candidate channel list based on model name and weight (Multi-channel failover)
         const candidateChannels = memoryCache.selectChannels(model);
@@ -138,7 +141,9 @@ export const chatRouter = new Elysia()
                         completionTokens,
                         userGroup: user.group,
                         isStream: false,
-                        elapsedMs
+                        elapsedMs,
+                        ip,
+                        ua
                     });
                 } catch (e: any) {
                     console.error('[SemanticCache] Billing Error:', e.message);
@@ -329,7 +334,9 @@ export const chatRouter = new Elysia()
                                 userGroup: user.group,
                                 isStream: true,
                                 statusCode: response.status,
-                                elapsedMs: Date.now() - startTime
+                                elapsedMs: Date.now() - startTime,
+                                ip,
+                                ua
                             });
                         } catch (e) {
                             console.error("[Stream Billing Error]", e);
@@ -405,7 +412,9 @@ export const chatRouter = new Elysia()
                     userGroup: user.group,
                     isStream: false,
                     statusCode: response.status,
-                    elapsedMs: Date.now() - startTime
+                    elapsedMs: Date.now() - startTime,
+                    ip,
+                    ua
                 });
 
                 return formattedData;
@@ -431,7 +440,9 @@ export const chatRouter = new Elysia()
                     isStream: !!stream,
                     statusCode: e.message?.startsWith('Status') ? parseInt(e.message.split(' ')[1]) : 500,
                     errorMessage: e.message || 'Unknown network error',
-                    elapsedMs: Date.now() - startTime
+                    elapsedMs: Date.now() - startTime,
+                    ip,
+                    ua
                 }).catch(() => { });
 
                 // Catch exceptions, log lastError, and continue to next channel in loop
