@@ -20,6 +20,14 @@ class I18nManager {
             const saved = localStorage.getItem('elygate_lang') as Language;
             if (saved && (saved === 'zh' || saved === 'en')) {
                 this.lang = saved;
+            } else {
+                // Auto detect from browser
+                const browserLang = navigator.language.toLowerCase();
+                if (browserLang.startsWith('en')) {
+                    this.lang = 'en';
+                } else {
+                    this.lang = 'zh'; // Default to zh
+                }
             }
         }
     }

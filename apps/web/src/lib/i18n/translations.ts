@@ -168,6 +168,20 @@ export const en = {
         settings: "Settings",
         redemptions: "Redemptions",
         pricing: "Pricing",
+    },
+    login: {
+        title: "Sign in to continue",
+        username: "Username",
+        password: "Password",
+        signIn: "Sign in",
+        signingIn: "Signing in...",
+        failed: "Login failed",
+        orContinue: "Or continue with",
+        noOAuth: "No third-party login providers are enabled at the moment.",
+        loadingOAuth: "Loading third-party configurations...",
+        register: "Don't have an account? Register here",
+        usernamePlaceholder: "Enter your username",
+        passwordPlaceholder: "••••••••",
     }
 };
 
@@ -340,5 +354,19 @@ export const zh = {
         settings: "系统设置",
         redemptions: "兑换码",
         pricing: "计费倍率",
+    },
+    login: {
+        title: "登录以继续",
+        username: "用户名",
+        password: "密码",
+        signIn: "登录",
+        signingIn: "登录中...",
+        failed: "登录失败",
+        orContinue: "或使用以下方式登录",
+        noOAuth: "暂未开放任何第三方授权登录",
+        loadingOAuth: "加载第三方登录配置中...",
+        register: "没有账号？点击注册",
+        usernamePlaceholder: "请输入用户名",
+        passwordPlaceholder: "••••••••",
     }
 };

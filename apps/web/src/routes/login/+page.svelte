@@ -18,6 +18,7 @@
     });
 
     onMount(() => {
+        i18n.init();
         apiFetch<any>("/status").then(res => {
             if (res && res.data) {
                 oauthConfig.github = res.data.github_oauth;
@@ -112,6 +113,14 @@
                     ? "AI API 网关管理系统"
                     : "AI API Gateway Management"}
             </p>
+
+            <!-- Language Switcher -->
+            <button 
+                onclick={() => i18n.setLang(i18n.lang === 'zh' ? 'en' : 'zh')}
+                class="mt-4 px-3 py-1 text-xs font-medium text-slate-400 hover:text-white border border-white/10 rounded-lg hover:bg-white/5 transition-all"
+            >
+                {i18n.lang === 'zh' ? 'English' : '中文'}
+            </button>
         </div>
 
         <!-- Card -->
@@ -119,7 +128,7 @@
             class="bg-white/5 backdrop-blur-2xl border border-white/10 rounded-2xl p-8 shadow-2xl"
         >
             <h2 class="text-lg font-semibold text-white mb-6">
-                {i18n.lang === "zh" ? "登录以继续" : "Sign in to continue"}
+                {i18n.t.login.title}
             </h2>
 
             <form onsubmit={handleLogin} class="space-y-5">
@@ -127,7 +136,7 @@
                     <label
                         for="username"
                         class="block text-sm font-medium text-slate-300 mb-1.5"
-                        >{i18n.lang === "zh" ? "用户名" : "Username"}</label
+                        >{i18n.t.login.username}</label
                     >
                     <input
                         id="username"
@@ -135,7 +144,7 @@
                         bind:value={username}
                         required
                         autocomplete="username"
-                        placeholder="admin"
+                        placeholder={i18n.t.login.usernamePlaceholder}
                         class="w-full px-4 py-2.5 bg-white/10 border border-white/10 rounded-xl text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
                     />
                 </div>
@@ -143,7 +152,7 @@
                     <label
                         for="password"
                         class="block text-sm font-medium text-slate-300 mb-1.5"
-                        >{i18n.lang === "zh" ? "密码" : "Password"}</label
+                        >{i18n.t.login.password}</label
                     >
                     <input
                         id="password"
@@ -151,7 +160,7 @@
                         bind:value={password}
                         required
                         autocomplete="current-password"
-                        placeholder="••••••••"
+                        placeholder={i18n.t.login.passwordPlaceholder}
                         class="w-full px-4 py-2.5 bg-white/10 border border-white/10 rounded-xl text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
                     />
                 </div>
@@ -207,13 +216,13 @@
                                     fill="currentColor"
                                     d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
                                 ></path>
-                            </svg>
-                            {i18n.lang === "zh" ? "登录中..." : "Signing in…"}
-                        </span>
-                    {:else}
-                        {i18n.lang === "zh" ? "登录" : "Sign in"}
-                    {/if}
-                </button>
+                             </svg>
+                             {i18n.t.login.signingIn}
+                         </span>
+                     {:else}
+                         {i18n.t.login.signIn}
+                     {/if}
+                 </button>
             </form>
 
             <!-- Third-party login -->
@@ -224,20 +233,18 @@
                     </div>
                     <div class="relative flex justify-center text-sm">
                         <span class="px-2 bg-transparent text-slate-400"
-                            >{i18n.lang === "zh"
-                                ? "或使用以下方式登录"
-                                : "Or continue with"}</span
+                            >{i18n.t.login.orContinue}</span
                         >
                     </div>
                 </div>
 
                 {#if !oauthConfig.loaded}
                     <div class="mt-4 text-center text-xs text-slate-500 animate-pulse">
-                        {i18n.lang === "zh" ? "加载第三方登录配置中..." : "Loading third-party configurations..."}
+                        {i18n.t.login.loadingOAuth}
                     </div>
                 {:else if !oauthConfig.github && !oauthConfig.discord && !oauthConfig.telegram}
                     <div class="mt-5 text-center text-xs text-slate-400 px-4 py-3 bg-white/5 border border-white/5 rounded-xl">
-                        {i18n.lang === "zh" ? "暂未开放任何第三方授权登录" : "No third-party login providers are enabled at the moment."}
+                        {i18n.t.login.noOAuth}
                     </div>
                 {:else}
                     <div class="mt-4 flex flex-wrap justify-center gap-3">
@@ -304,9 +311,9 @@
             <p
                 class="text-xs text-slate-500 text-center mt-6 border-t border-white/5 pt-6"
             >
-                Don't have an account? <a
+                <a
                     href="/register"
-                    class="text-indigo-400 hover:underline">Register here</a
+                    class="text-indigo-400 hover:underline">{i18n.t.login.register}</a
                 >
             </p>
         </div>
