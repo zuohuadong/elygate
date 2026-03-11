@@ -15,6 +15,7 @@ export const chatRouter = new Elysia()
     .post('/chat/completions', async ({ body, token, user, request, set }: any) => {
         const u = user as UserRecord;
         const t = token as TokenRecord;
+        const startTime = Date.now();
         // 1. Extract key information from request body
         const { model, stream } = body as Record<string, any>;
 
@@ -119,6 +120,7 @@ export const chatRouter = new Elysia()
                     }
                     
                     const actualCost = calculateCost(model, user.group, promptTokens, completionTokens);
+                    const elapsedMs = Date.now() - startTime;
                     
                     await reconcileQuota({
                         userId: user.id,
@@ -135,7 +137,8 @@ export const chatRouter = new Elysia()
                         promptTokens,
                         completionTokens,
                         userGroup: user.group,
-                        isStream: false
+                        isStream: false,
+                        elapsedMs
                     });
                 } catch (e: any) {
                     console.error('[SemanticCache] Billing Error:', e.message);
@@ -325,7 +328,8 @@ export const chatRouter = new Elysia()
                                 completionTokens: finalCompletionTokens,
                                 userGroup: user.group,
                                 isStream: true,
-                                statusCode: response.status
+                                statusCode: response.status,
+                                elapsedMs: Date.now() - startTime
                             });
                         } catch (e) {
                             console.error("[Stream Billing Error]", e);
@@ -400,7 +404,8 @@ export const chatRouter = new Elysia()
                     cachedTokens,
                     userGroup: user.group,
                     isStream: false,
-                    statusCode: response.status
+                    statusCode: response.status,
+                    elapsedMs: Date.now() - startTime
                 });
 
                 return formattedData;
@@ -425,7 +430,8 @@ export const chatRouter = new Elysia()
                     userGroup: user.group,
                     isStream: !!stream,
                     statusCode: e.message?.startsWith('Status') ? parseInt(e.message.split(' ')[1]) : 500,
-                    errorMessage: e.message || 'Unknown network error'
+                    errorMessage: e.message || 'Unknown network error',
+                    elapsedMs: Date.now() - startTime
                 }).catch(() => { });
 
                 // Catch exceptions, log lastError, and continue to next channel in loop

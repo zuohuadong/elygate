@@ -26,6 +26,7 @@ import { sysRouter } from "./routes/sys";
 import { mjRouter } from "./routes/mj";
 import { paymentRouter } from "./routes/payment";
 import { statsRouter } from "./routes/stats";
+import { userStatsRouter } from "./routes/userStats";
 import { memoryCache } from "./services/cache";
 import { sql } from "@elygate/db";
 import { initEnv } from "./services/env";
@@ -117,6 +118,7 @@ const app = new Elysia()
       .group("/admin", (app) => app.use(adminRouter))
       .group("/stats", (app) => app.use(statsRouter))
       .group("/redemptions", (app) => app.use(authPlugin).use(redemptionsRouter))
+      .use(userStatsRouter)
       .use(mjRouter)
   )
   // OpenAI & Anthropic compatible API endpoints (standard /v1 prefix)

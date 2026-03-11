@@ -281,8 +281,19 @@ export const authRouter = new Elysia()
                 const offset = (page - 1) * limit;
                 const [countRow] = await sql`SELECT COUNT(*) as total FROM logs WHERE user_id = ${userRow.id}`;
                 const data = await sql`
-                    SELECT id, model_name as "modelName", prompt_tokens as "promptTokens", completion_tokens as "completionTokens", quota_cost as "quotaCost", created_at as "createdAt", is_stream as "isStream"
-                    FROM logs WHERE user_id = ${userRow.id} ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}
+                    SELECT 
+                        id, 
+                        model_name as "modelName", 
+                        prompt_tokens as "promptTokens", 
+                        completion_tokens as "completionTokens", 
+                        quota_cost as "quotaCost", 
+                        created_at as "createdAt", 
+                        is_stream as "isStream",
+                        elapsed_ms as "elapsedMs"
+                    FROM logs 
+                    WHERE user_id = ${userRow.id} 
+                    ORDER BY created_at DESC 
+                    LIMIT ${limit} OFFSET ${offset}
                 `;
                 return { data, total: countRow.total, page, limit };
             })

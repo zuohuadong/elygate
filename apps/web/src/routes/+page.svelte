@@ -28,6 +28,14 @@
         cache_profit_quota: number;
         cache_size_bytes: number;
         cache_record_count: number;
+        avg_latency: number;
+    }
+
+    interface TimeSeriesPoint {
+        date?: string;
+        hour?: number;
+        requests: number;
+        cost: number;
     }
 
     interface ModelStat {
@@ -55,7 +63,9 @@
         cache_profit_quota: 0,
         cache_size_bytes: 0,
         cache_record_count: 0,
+        avg_latency: 0,
     });
+    let timeSeries = $state<TimeSeriesPoint[]>([]);
     let modelsUser = $state<ModelStat[]>([]);
     let modelsChannel = $state<ModelStat[]>([]);
 
@@ -78,6 +88,7 @@
                 overview = data.overview || overview;
                 modelsUser = data.models_user || [];
                 modelsChannel = data.models_channel || [];
+                timeSeries = data.time_series || [];
                 lastRefresh = new Date();
             }
         } catch (e: any) {
@@ -316,6 +327,109 @@
                         </span>
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <!-- 5. Avg Latency -->
+        <div
+            class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm"
+        >
+            <h3
+                class="text-sm font-medium text-slate-500 dark:text-slate-400 mb-2"
+            >
+                {i18n.lang === "zh" ? i18n.t.dashboard.avgLatency : "Avg Latency"}
+            </h3>
+            <div
+                class="text-3xl font-bold text-slate-900 dark:text-white tabular-nums tracking-tight"
+            >
+                {overview.avg_latency || 0} <span class="text-sm font-medium text-slate-400">{i18n.lang === "zh" ? i18n.t.dashboard.ms : "ms"}</span>
+            </div>
+            <div class="mt-4 h-1 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                <div 
+                    class="h-full bg-indigo-500 rounded-full transition-all duration-1000" 
+                    style="width: {Math.min((overview.avg_latency / 2000) * 100, 100)}%"
+                ></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Charts Row -->
+    <div class="grid gap-6 lg:grid-cols-2 mt-8">
+        <!-- Traffic Trend -->
+        <div class="bg-white/60 dark:bg-slate-900/60 rounded-2xl border border-slate-200/60 dark:border-slate-800/60 p-6 backdrop-blur-xl">
+            <h3 class="text-sm font-semibold text-slate-900 dark:text-white mb-6">
+                {i18n.lang === "zh" ? i18n.t.dashboard.trafficTrend : "Traffic Trend"}
+            </h3>
+            <div class="h-48 w-full relative group">
+                {#if timeSeries?.length > 1}
+                    {@const max = Math.max(...timeSeries.map(p => p.requests)) * 1.2 || 1}
+                    {@const points = timeSeries.map((p, i) => `${(i / (timeSeries.length - 1)) * 100},${100 - (p.requests / max) * 100}`).join(' ')}
+                    <svg class="w-full h-full overflow-visible" preserveAspectRatio="none">
+                        <defs>
+                            <linearGradient id="trafficGrad" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stop-color="rgb(99, 102, 241)" stop-opacity="0.2" />
+                                <stop offset="100%" stop-color="rgb(99, 102, 241)" stop-opacity="0" />
+                            </linearGradient>
+                        </defs>
+                        <path
+                            d="M 0,100 L {points} L 100,100 Z"
+                            fill="url(#trafficGrad)"
+                            class="transition-all duration-1000"
+                        />
+                        <polyline
+                            fill="none"
+                            stroke="rgb(99, 102, 241)"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            points={points}
+                            class="transition-all duration-1000"
+                        />
+                    </svg>
+                {:else}
+                    <div class="flex items-center justify-center h-full text-slate-400 text-xs italic">
+                        {i18n.lang === "zh" ? i18n.t.common.loading : "Loading..."}
+                    </div>
+                {/if}
+            </div>
+        </div>
+
+        <!-- Cost Trend -->
+        <div class="bg-white/60 dark:bg-slate-900/60 rounded-2xl border border-slate-200/60 dark:border-slate-800/60 p-6 backdrop-blur-xl">
+            <h3 class="text-sm font-semibold text-slate-900 dark:text-white mb-6">
+                {i18n.lang === "zh" ? i18n.t.dashboard.costTrend : "Cost Trend"}
+            </h3>
+            <div class="h-48 w-full relative">
+                {#if timeSeries?.length > 1}
+                    {@const max = Math.max(...timeSeries.map(p => Number(p.cost))) * 1.2 || 1}
+                    {@const points = timeSeries.map((p, i) => `${(i / (timeSeries.length - 1)) * 100},${100 - (Number(p.cost) / max) * 100}`).join(' ')}
+                    <svg class="w-full h-full overflow-visible" preserveAspectRatio="none">
+                        <defs>
+                            <linearGradient id="costGrad" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stop-color="rgb(249, 115, 22)" stop-opacity="0.2" />
+                                <stop offset="100%" stop-color="rgb(249, 115, 22)" stop-opacity="0" />
+                            </linearGradient>
+                        </defs>
+                        <path
+                            d="M 0,100 L {points} L 100,100 Z"
+                            fill="url(#costGrad)"
+                            class="transition-all duration-1000"
+                        />
+                        <polyline
+                            fill="none"
+                            stroke="rgb(249, 115, 22)"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            points={points}
+                            class="transition-all duration-1000"
+                        />
+                    </svg>
+                {:else}
+                    <div class="flex items-center justify-center h-full text-slate-400 text-xs italic">
+                        {i18n.lang === "zh" ? i18n.t.common.loading : "Loading..."}
+                    </div>
+                {/if}
             </div>
         </div>
     </div>

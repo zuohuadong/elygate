@@ -32,10 +32,11 @@
                     dt_created_at: new Date(l.created_at || l.createdAt).toLocaleString(),
                     dt_user: `User ${l.user_id || l.userId}`,
                     dt_model: l.model_name || l.modelName,
-                    dt_channel: l.channel_id ? `Channel ${l.channel_id}` : l.channelId ? `Channel ${l.channelId}` : "Unknown",
+                    dt_channel: l.channel_name || (l.channel_id ? `Channel ${l.channel_id}` : l.channelId ? `Channel ${l.channelId}` : "Unknown"),
                     dt_token: l.token_id ? `Token ${l.token_id}` : l.tokenId ? `Token ${l.tokenId}` : "Direct",
                     dt_cost: `$ ${((l.quota_cost || l.quotaCost || 0) / session.quotaPerUnit).toFixed(4)}`,
                     dt_duration: durationStr,
+                    dt_latency: l.elapsed_ms ? `${l.elapsed_ms}ms` : "-",
                     dt_status: "Success",
                 };
             });
@@ -84,6 +85,7 @@
         { key: "dt_token", label: "令牌来源" },
         { key: "dt_user", label: "用户" },
         { key: "dt_duration", label: "通信模式" },
+        { key: "dt_latency", label: "延迟" },
         { key: "dt_cost", label: "花费额度" },
         { key: "dt_status", label: "状态", render: renderStatus },
     ];

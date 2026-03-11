@@ -220,6 +220,7 @@ CREATE TABLE IF NOT EXISTS logs (
     quota_cost BIGINT NOT NULL DEFAULT 0,
     prompt_tokens INTEGER NOT NULL DEFAULT 0,
     completion_tokens INTEGER NOT NULL DEFAULT 0,
+    elapsed_ms INTEGER NOT NULL DEFAULT 0,
     is_stream BOOLEAN DEFAULT false,
     error_message TEXT,
     status_code INTEGER NOT NULL DEFAULT 200,

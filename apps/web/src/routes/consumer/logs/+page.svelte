@@ -25,6 +25,7 @@
                 dt_model: l.modelName,
                 dt_tokens: `${l.promptTokens} + ${l.completionTokens}`,
                 dt_stream: l.isStream ? "SSE" : "JSON",
+                dt_latency: l.elapsedMs ? `${l.elapsedMs}ms` : "-",
                 dt_cost: `$${(l.quotaCost / 1000).toFixed(4)}`,
             }));
             currentPage = page;
@@ -47,6 +48,7 @@
         { key: "dt_model", label: i18n.lang === "zh" ? "模型名称" : "Model" },
         { key: "dt_tokens", label: "Tokens (P+C)" },
         { key: "dt_stream", label: i18n.lang === "zh" ? "模式" : "Mode" },
+        { key: "dt_latency", label: i18n.lang === "zh" ? "延迟" : "Latency" },
         { key: "dt_cost", label: i18n.lang === "zh" ? "消耗" : "Cost" },
     ];
 </script>

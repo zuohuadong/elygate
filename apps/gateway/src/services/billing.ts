@@ -117,7 +117,8 @@ async function flushBillingQueue() {
             quotaCost: cost,
             isStream: task.isStream,
             statusCode: task.statusCode || 200,
-            errorMessage: task.errorMessage || null
+            errorMessage: task.errorMessage || null,
+            elapsedMs: task.elapsedMs || 0
         });
     }
 
@@ -172,8 +173,8 @@ async function flushBillingQueue() {
             }
             for (const log of logInserts) {
                 await tx`
-                    INSERT INTO logs (user_id, token_id, channel_id, model_name, prompt_tokens, completion_tokens, cached_tokens, quota_cost, is_stream, status_code, error_message)
-                    VALUES (${log.userId}, ${log.tokenId ?? null}, ${log.channelId !== undefined ? log.channelId : null}, ${log.modelName}, ${log.promptTokens}, ${log.completionTokens}, ${log.cachedTokens}, ${log.quotaCost}, ${log.isStream}, ${log.statusCode}, ${log.errorMessage})
+                    INSERT INTO logs (user_id, token_id, channel_id, model_name, prompt_tokens, completion_tokens, cached_tokens, quota_cost, is_stream, status_code, error_message, elapsed_ms)
+                    VALUES (${log.userId}, ${log.tokenId ?? null}, ${log.channelId !== undefined ? log.channelId : null}, ${log.modelName}, ${log.promptTokens}, ${log.completionTokens}, ${log.cachedTokens}, ${log.quotaCost}, ${log.isStream}, ${log.statusCode}, ${log.errorMessage}, ${log.elapsedMs})
                 `;
             }
         });

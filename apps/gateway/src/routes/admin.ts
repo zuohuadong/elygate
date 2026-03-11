@@ -818,9 +818,13 @@ export const adminRouter = new Elysia()
 
         const [countRow] = await sql`SELECT COUNT(*) as total FROM logs ${whereClause}`;
         const data = await sql`
-            SELECT l.*, u.username as creator_name
+            SELECT 
+                l.*, 
+                u.username as creator_name,
+                c.name as channel_name
             FROM logs l
             LEFT JOIN users u ON l.user_id = u.id
+            LEFT JOIN channels c ON l.channel_id = c.id
             ${whereClause}
             ORDER BY l.created_at DESC 
             LIMIT ${limit} OFFSET ${offset}
@@ -829,9 +833,11 @@ export const adminRouter = new Elysia()
         return {
             data: data.map((l: any) => ({
                 ...l,
+                channel_name: l.channel_id === 0 ? (query?.lang === 'zh' ? '系统缓存' : 'Internal Cache') : (l.channel_name || `Unknown (${l.channel_id})`),
                 cost_usd: quotaToUSD(l.quota_cost),
                 cost_rmb: quotaToRMB(l.quota_cost),
-                cached_tokens: l.cached_tokens || 0
+                cached_tokens: l.cached_tokens || 0,
+                elapsed_ms: l.elapsed_ms || 0
             })),
             total: countRow.total,
             page,
@@ -1119,6 +1125,7 @@ export const adminRouter = new Elysia()
                 COALESCE(SUM(quota_cost), 0)::bigint as total_cost,
                 COALESCE(SUM(prompt_tokens), 0)::bigint as total_prompt_tokens,
                 COALESCE(SUM(completion_tokens), 0)::bigint as total_completion_tokens,
+                ROUND(COALESCE(AVG(CASE WHEN elapsed_ms > 0 THEN elapsed_ms ELSE NULL END), 0))::int as avg_latency,
                 COUNT(CASE WHEN channel_id = 0 THEN 1 END)::int as cache_hits,
                 COALESCE(SUM(CASE WHEN channel_id = 0 THEN quota_cost ELSE 0 END), 0)::bigint as cache_profit_quota,
                 COALESCE(SUM(CASE WHEN channel_id = 0 THEN prompt_tokens + completion_tokens ELSE 0 END), 0)::bigint as cached_tokens
@@ -1179,6 +1186,33 @@ export const adminRouter = new Elysia()
         models_channel.forEach((m: any) => {
             m.cost_percentage = Number(((Number(m.cost) / totalChannelCost) * 100).toFixed(1));
         });
+        
+        // 4. Time Series Data
+        let timeSeries;
+        if (period === '7d' || period === '30d') {
+            timeSeries = await sql`
+                SELECT 
+                    DATE(created_at) as date,
+                    COUNT(*)::int as requests,
+                    COALESCE(SUM(quota_cost), 0)::bigint as cost
+                FROM logs
+                WHERE ${condition}
+                GROUP BY DATE(created_at)
+                ORDER BY date ASC
+            `;
+        } else {
+            // hourly for today/yesterday
+            timeSeries = await sql`
+                SELECT 
+                    EXTRACT(HOUR FROM created_at) as hour,
+                    COUNT(*)::int as requests,
+                    COALESCE(SUM(quota_cost), 0)::bigint as cost
+                FROM logs
+                WHERE ${condition}
+                GROUP BY EXTRACT(HOUR FROM created_at)
+                ORDER BY hour ASC
+            `;
+        }
 
         return {
             overview: {
@@ -1187,7 +1221,8 @@ export const adminRouter = new Elysia()
                 cache_record_count
             },
             models_user,
-            models_channel
+            models_channel,
+            time_series: timeSeries
         };
     })
 

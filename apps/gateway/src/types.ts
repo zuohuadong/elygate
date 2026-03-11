@@ -71,4 +71,5 @@ export interface BillingContext {
     isPackageFree?: boolean;
     statusCode?: number;
     errorMessage?: string;
+    elapsedMs?: number;
 }

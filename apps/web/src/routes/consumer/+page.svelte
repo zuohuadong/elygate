@@ -1,18 +1,37 @@
 <script lang="ts">
-    import { CreditCard, History, KeyRound, WalletCards } from "lucide-svelte";
+    import { CreditCard, History, WalletCards, Activity, TrendingUp, Target, Clock } from "lucide-svelte";
     import { apiFetch } from "$lib/api";
     import { i18n } from "$lib/i18n/index.svelte";
     import { onMount } from "svelte";
     import { session } from "$lib/session.svelte";
 
+    interface UserStats {
+        overview: {
+            total_requests: number;
+            total_cost: number;
+            total_prompt_tokens: number;
+            total_completion_tokens: number;
+            avg_latency: number;
+        };
+        models: any[];
+        time_series: any[];
+    }
+
     let userInfo = $state<any>(null);
     let logs = $state<any[]>([]);
-    let trend = $state<any[]>([]);
-    let realtime = $state({ rpm: 0, tpm: 0 });
+    let stats = $state<UserStats | null>(null);
+    let activePeriod = $state("today");
     let isLoading = $state(true);
     let isRedeeming = $state(false);
     let topupCode = $state("");
     let message = $state({ type: "", text: "" });
+
+    const periods = [
+        { id: "today", label: "今天", labelEn: "Today" },
+        { id: "yesterday", label: "昨天", labelEn: "Yesterday" },
+        { id: "7d", label: "近7天", labelEn: "7 Days" },
+        { id: "30d", label: "近30天", labelEn: "30 Days" },
+    ];
 
     async function loadData() {
         isLoading = true;
@@ -20,11 +39,11 @@
             const [userData, logsData, statsData] = await Promise.all([
                 apiFetch<any>("/me"),
                 apiFetch<any>("/logs?limit=5"),
-                apiFetch<any[]>("/stats"),
+                apiFetch<UserStats>(`/user/dashboard/stats?period=${activePeriod}`),
             ]);
             userInfo = userData;
             logs = logsData.data || logsData;
-            trend = statsData || [];
+            stats = statsData;
         } catch (err: any) {
             console.error(err);
         } finally {
@@ -32,20 +51,12 @@
         }
     }
 
-    async function fetchRealtime() {
-        try {
-            const data = await apiFetch<any>("/realtime");
-            realtime = data;
-        } catch (err) {
-            // Silently fail for realtime updates
-        }
-    }
-
     onMount(() => {
         loadData();
-        fetchRealtime();
-        const interval = setInterval(fetchRealtime, 5000);
-        return () => clearInterval(interval);
+    });
+
+    $effect(() => {
+        if (activePeriod) loadData();
     });
 
     async function handleTopup(e: Event) {
@@ -65,7 +76,7 @@
                 text: `${i18n.lang === "zh" ? "充值成功！新增额度：" : "Top-up successful! Added: "}${session.currency === "RMB" ? "¥" : "$"}${((res.addedQuota / session.quotaPerUnit) * (session.currency === "RMB" ? session.exchangeRate : 1)).toFixed(2)}`,
             };
             topupCode = "";
-            await loadData(); // Refresh balance
+            await loadData();
         } catch (err: any) {
             message = {
                 type: "error",
@@ -75,36 +86,47 @@
             isRedeeming = false;
         }
     }
+
+    function formatNumber(num: number) {
+        return new Intl.NumberFormat("en-US").format(num);
+    }
 </script>
 
-<div class="flex-1 space-y-6 max-w-5xl mx-auto">
-    <div class="flex items-center justify-between">
+<div class="flex-1 space-y-6 max-w-6xl mx-auto w-full">
+    <!-- Header -->
+    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-            <h2
-                class="text-2xl font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-2"
-            >
+            <h2 class="text-2xl font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
                 <WalletCards class="w-6 h-6 text-indigo-500" />
-                {i18n.lang === "zh" ? "我的钱包" : "My Wallet"}
+                {i18n.lang === "zh" ? "个人工作台" : "User Dashboard"}
             </h2>
             <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                {i18n.lang === "zh"
-                    ? "管理您的额度与API凭证"
-                    : "Manage your quota and API credentials"}
+                {i18n.lang === "zh" ? "查看您的使用统计与账户余额" : "Monitor your usage and account balance"}
             </p>
+        </div>
+
+        <div class="flex items-center gap-2 bg-slate-100 dark:bg-slate-800/50 p-1 rounded-xl w-fit">
+            {#each periods as period}
+                <button
+                    onclick={() => (activePeriod = period.id)}
+                    class="px-4 py-1.5 text-xs font-semibold rounded-lg transition-all {activePeriod === period.id
+                        ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-white shadow-sm'
+                        : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-white'}"
+                >
+                    {i18n.lang === "zh" ? period.label : period.labelEn}
+                </button>
+            {/each}
         </div>
     </div>
 
-    <!-- Balance & Topup Card -->
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <!-- Balance Info -->
-        <div
-            class="bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl p-6 shadow-lg shadow-indigo-500/20 text-white relative overflow-hidden"
-        >
-            <div class="absolute top-0 right-0 p-4 opacity-20">
+    <!-- Top Row: Balance & Overview -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Balance Card -->
+        <div class="lg:col-span-1 bg-gradient-to-br from-indigo-600 to-violet-700 rounded-3xl p-6 text-white shadow-xl shadow-indigo-500/20 relative overflow-hidden h-fit">
+            <div class="absolute top-0 right-0 p-4 opacity-10">
                 <CreditCard class="w-24 h-24" />
             </div>
-
-            <h3 class="text-indigo-100 font-medium text-sm">
+            <h3 class="text-indigo-100 font-medium text-sm opacity-80">
                 {i18n.lang === "zh" ? "当前可用余额" : "Available Balance"}
             </h3>
             <div class="mt-2 flex items-baseline gap-2">
@@ -114,253 +136,153 @@
                         (session.currency === "RMB" ? session.exchangeRate : 1)
                     ).toFixed(2)}
                 </span>
-                <span class="text-indigo-200 text-sm">{session.currency}</span>
+                <span class="text-indigo-200 text-sm font-medium">{session.currency}</span>
             </div>
-
-            <div class="mt-8 grid grid-cols-2 gap-4">
-                <div>
-                    <p class="text-indigo-200 text-xs mb-1">
-                        {i18n.lang === "zh" ? "总消费" : "Total Spent"}
-                    </p>
-                    <p class="font-medium">
-                        {session.currency === "RMB" ? "¥" : "$"}{(
-                            ((userInfo?.usedQuota || 0) /
-                                session.quotaPerUnit) *
-                            (session.currency === "RMB"
-                                ? session.exchangeRate
-                                : 1)
-                        ).toFixed(2)}
-                    </p>
-                </div>
-                <div>
-                    <p class="font-medium capitalize">
-                        {userInfo?.group || "Default"}
-                    </p>
-                </div>
-            </div>
-
-            <!-- Live Metrics -->
-            <div
-                class="mt-4 pt-4 border-t border-white/10 flex items-center justify-between text-xs text-indigo-100 font-medium"
-            >
-                <div class="flex items-center gap-1.5">
-                    <div
-                        class="w-1.5 h-1.5 rounded-full {realtime.rpm > 0
-                            ? 'bg-emerald-400 animate-pulse'
-                            : 'bg-slate-400'}"
-                    ></div>
-                    <span
-                        >{i18n.lang === "zh" ? "当前 RPM" : "Current RPM"}: {realtime.rpm}</span
-                    >
-                </div>
-                <div class="opacity-80">
-                    {i18n.lang === "zh" ? "当前 TPM" : "Current TPM"}: {(
-                        realtime.tpm / 1000
-                    ).toFixed(1)}k
-                </div>
-            </div>
-        </div>
-
-        <!-- Topup Form -->
-        <div
-            class="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm flex flex-col justify-center"
-        >
-            <h3
-                class="text-lg font-semibold text-slate-900 dark:text-white mb-4"
-            >
-                {i18n.lang === "zh" ? "兑换额度" : "Redeem Quota"}
-            </h3>
-
-            <form onsubmit={handleTopup} class="space-y-4">
-                <div class="space-y-2">
-                    <label
-                        for="topupCode"
-                        class="text-sm font-medium text-slate-700 dark:text-slate-300"
-                    >
-                        {i18n.lang === "zh"
-                            ? "输入兑换码"
-                            : "Enter Redemption Code"}
-                    </label>
-                    <div class="flex gap-3">
+            
+            <div class="mt-8 pt-6 border-t border-white/10">
+                <form onsubmit={handleTopup} class="space-y-3">
+                    <div class="flex gap-2">
                         <input
-                            id="topupCode"
                             bind:value={topupCode}
-                            placeholder="elygate-..."
-                            class="flex-1 px-4 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                            placeholder={i18n.lang === 'zh' ? '输入兑换码' : 'Redeem Code'}
+                            class="flex-1 px-3 py-2 bg-white/10 border border-white/20 rounded-xl text-sm placeholder:text-indigo-200/50 outline-none focus:bg-white/20 transition-all"
                         />
                         <button
                             type="submit"
                             disabled={isRedeeming || !topupCode.trim()}
-                            class="px-6 py-2.5 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl shadow-sm transition-all"
+                            class="px-4 py-2 bg-white text-indigo-600 font-bold rounded-xl text-xs hover:bg-indigo-50 disabled:opacity-50 transition-all"
                         >
-                            {#if isRedeeming}
-                                <div
-                                    class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"
-                                ></div>
-                            {:else}
-                                {i18n.lang === "zh" ? "兑换" : "Redeem"}
-                            {/if}
+                            {isRedeeming ? "..." : (i18n.lang === "zh" ? "兑换" : "Redeem")}
                         </button>
                     </div>
-                </div>
+                </form>
+            </div>
+        </div>
 
-                {#if message.text}
-                    <div
-                        class={`p-3 text-sm rounded-lg border ${message.type === "success" ? "bg-emerald-50 text-emerald-800 border-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-800/50" : "bg-rose-50 text-rose-800 border-rose-100 dark:bg-rose-500/10 dark:text-rose-400 dark:border-rose-800/50"}`}
-                    >
-                        {message.text}
-                    </div>
-                {/if}
-            </form>
+        <!-- Quick Stats Cards -->
+        <div class="lg:col-span-2 grid grid-cols-2 md:grid-cols-3 gap-4">
+            <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm">
+                <div class="flex items-center gap-2 text-slate-500 dark:text-slate-400 mb-2">
+                    <Activity class="w-4 h-4" />
+                    <span class="text-xs font-medium">{i18n.lang === 'zh' ? '请求总数' : 'Requests'}</span>
+                </div>
+                <div class="text-2xl font-bold tabular-nums">{formatNumber(stats?.overview.total_requests || 0)}</div>
+            </div>
+
+            <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm">
+                <div class="flex items-center gap-2 text-slate-500 dark:text-slate-400 mb-2">
+                    <TrendingUp class="w-4 h-4" />
+                    <span class="text-xs font-medium">{i18n.lang === 'zh' ? '总消费' : 'Total Cost'}</span>
+                </div>
+                <div class="text-2xl font-bold tabular-nums">
+                    {session.currency === "RMB" ? "¥" : "$"}{(
+                        ((stats?.overview.total_cost || 0) / session.quotaPerUnit) *
+                        (session.currency === "RMB" ? session.exchangeRate : 1)
+                    ).toFixed(4)}
+                </div>
+            </div>
+
+            <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm">
+                <div class="flex items-center gap-2 text-slate-500 dark:text-slate-400 mb-2">
+                    <Clock class="w-4 h-4" />
+                    <span class="text-xs font-medium">{i18n.t.dashboard.avgLatency}</span>
+                </div>
+                <div class="text-2xl font-bold tabular-nums">{stats?.overview.avg_latency || 0} <span class="text-xs text-slate-400">ms</span></div>
+            </div>
         </div>
     </div>
 
-    <!-- Usage Trend Chart -->
-    <div
-        class="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm overflow-hidden"
-    >
-        <div class="p-6 pb-2">
-            <h3
-                class="font-semibold leading-none tracking-tight text-slate-900 dark:text-white"
-            >
-                {i18n.lang === "zh"
-                    ? "积分消耗趋势 (最近 14 天)"
-                    : "Quota Usage Trend (Last 14 days)"}
+    <!-- Charts Row -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <!-- Traffic trend -->
+        <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6">
+            <h3 class="text-sm font-semibold text-slate-900 dark:text-white mb-6 flex items-center gap-2">
+                <TrendingUp class="w-4 h-4 text-indigo-500" />
+                {i18n.t.dashboard.trafficTrend}
             </h3>
+            <div class="h-48 w-full relative">
+                {#if stats && stats.time_series.length > 1}
+                    {@const ts = stats.time_series}
+                    {@const max = Math.max(...ts.map(p => p.requests)) * 1.2 || 1}
+                    {@const pts = ts.map((p, i) => `${(i / (ts.length - 1)) * 100},${100 - (p.requests / max) * 100}`).join(' ')}
+                    <svg class="w-full h-full overflow-visible" preserveAspectRatio="none">
+                         <defs>
+                            <linearGradient id="userTrafficGrad" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stop-color="rgb(99, 102, 241)" stop-opacity="0.2" />
+                                <stop offset="100%" stop-color="rgb(99, 102, 241)" stop-opacity="0" />
+                            </linearGradient>
+                        </defs>
+                        <path d="M 0,100 L {pts} L 100,100 Z" fill="url(#userTrafficGrad)" />
+                        <polyline fill="none" stroke="rgb(99, 102, 241)" stroke-width="2" points={pts} />
+                    </svg>
+                {:else}
+                    <div class="h-full flex items-center justify-center text-slate-400 text-xs italic">{i18n.t.common.noData}</div>
+                {/if}
+            </div>
         </div>
-        <div
-            class="p-6 pt-4 h-[250px] flex items-center justify-center text-slate-500 mt-2"
-        >
-            {#if isLoading}
-                <div class="flex flex-col items-center gap-2">
-                    <div
-                        class="animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-600"
-                    ></div>
-                </div>
-            {:else if trend.length === 0}
-                <div class="flex flex-col items-center gap-2 text-slate-400">
-                    <span
-                        >{i18n.lang === "zh"
-                            ? "暂无消耗数据"
-                            : "No usage data available"}</span
-                    >
-                </div>
-            {:else}
-                <div
-                    class="w-full h-full flex items-end justify-between px-2 pb-4 gap-2"
-                >
-                    {#each Array.from({ length: 14 }).map((_, i) => {
-                        // Pad array to always show 14 days ending today
-                        const d = new Date();
-                        d.setDate(d.getDate() - (13 - i));
-                        const dateStr = d.toISOString().split("T")[0];
-                        const dayData = trend.find((t) => {
-                            // Check string or Date object
-                            const tDate = new Date(t.date)
-                                .toISOString()
-                                .split("T")[0];
-                            return tDate === dateStr;
-                        });
-                        return { label: dateStr.slice(5), tokens: dayData ? Number(dayData.total_tokens) : 0, cost: dayData ? Number(dayData.total_cost) : 0 }; // mm-dd
-                    }) as day}
-                        <div
-                            class="bg-indigo-500/20 hover:bg-indigo-500/40 transition-all rounded-t-sm relative group flex-1"
-                            style="height: {Math.max(
-                                5,
-                                Math.min(
-                                    100,
-                                    (day.tokens / 50000) * 100, // Estimate max height scale
-                                ),
-                            )}%"
-                        >
-                            <div
-                                class="opacity-0 group-hover:opacity-100 absolute -top-12 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-[10px] py-1 px-2 rounded whitespace-nowrap z-10 pointer-events-none transition-opacity shadow-lg"
-                            >
-                                {day.label}: {(day.tokens / 1000).toFixed(1)}k
-                                tokens<br />
-                                Cost: {session.currency === "RMB" ? "¥" : "$"}{(
-                                    (day.cost / session.quotaPerUnit) *
-                                    (session.currency === "RMB"
-                                        ? session.exchangeRate
-                                        : 1)
-                                ).toFixed(4)}
+
+        <!-- Model distribution -->
+        <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6">
+            <h3 class="text-sm font-semibold text-slate-900 dark:text-white mb-6 flex items-center gap-2">
+                <Target class="w-4 h-4 text-rose-500" />
+                {i18n.t.dashboard.modelDistribution}
+            </h3>
+            <div class="space-y-4">
+                {#if stats && stats.models.length > 0}
+                    {#each stats.models as model}
+                        <div class="space-y-1.5">
+                            <div class="flex justify-between text-xs">
+                                <span class="font-medium text-slate-700 dark:text-slate-300">{model.model_name}</span>
+                                <span class="text-slate-500">{formatNumber(model.requests)} {i18n.t.dashboard.requests}</span>
+                            </div>
+                            <div class="h-1.5 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                                <div class="h-full bg-indigo-500 rounded-full" style="width: {(model.requests / stats.overview.total_requests) * 100}%"></div>
                             </div>
                         </div>
                     {/each}
-                </div>
-            {/if}
+                {:else}
+                    <div class="h-32 flex items-center justify-center text-slate-400 text-xs italic">{i18n.t.common.noData}</div>
+                {/if}
+            </div>
         </div>
     </div>
 
-    <!-- Recent Logs -->
-    <div
-        class="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm overflow-hidden"
-    >
-        <div
-            class="p-6 border-b border-slate-100 dark:border-slate-800 flex items-center gap-2"
-        >
-            <History class="w-5 h-5 text-slate-400" />
-            <h3 class="font-semibold text-slate-900 dark:text-white">
-                {i18n.lang === "zh" ? "最近请求记录" : "Recent API Logs"}
+    <!-- Recent History -->
+    <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl overflow-hidden shadow-sm">
+        <div class="p-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+            <h3 class="font-bold text-slate-900 dark:text-white flex items-center gap-2 text-sm">
+                <History class="w-4 h-4 text-slate-400" />
+                {i18n.lang === 'zh' ? '最近使用记录' : 'Recent usage'}
             </h3>
         </div>
         <div class="overflow-x-auto">
             <table class="w-full text-sm text-left">
-                <thead
-                    class="text-xs text-slate-500 bg-slate-50/50 dark:bg-slate-900/50 uppercase border-b border-slate-100 dark:border-slate-800"
-                >
+                <thead class="text-[10px] text-slate-500 bg-slate-50/50 dark:bg-slate-900/50 uppercase tracking-wider border-b border-slate-100 dark:border-slate-800">
                     <tr>
-                        <th class="px-6 py-3 font-medium">Model</th>
-                        <th class="px-6 py-3 font-medium">Tokens (P+C)</th>
-                        <th class="px-6 py-3 font-medium"
-                            >Cost {session.currency}</th
-                        >
-                        <th class="px-6 py-3 font-medium">Time</th>
+                        <th class="px-6 py-4 font-semibold">Model</th>
+                        <th class="px-6 py-4 font-semibold text-center">Tokens</th>
+                        <th class="px-6 py-4 font-semibold text-right">Cost</th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
-                    {#if logs.length === 0}
-                        <tr>
-                            <td
-                                colspan="4"
-                                class="px-6 py-8 text-center text-slate-400"
-                            >
-                                No recent activity
+                    {#each logs as log}
+                        <tr class="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                            <td class="px-6 py-4">
+                                <div class="font-medium text-slate-900 dark:text-slate-200">{log.modelName}</div>
+                                <div class="text-[10px] text-slate-400 mt-0.5">{new Date(log.createdAt).toLocaleString()}</div>
+                            </td>
+                            <td class="px-6 py-4 text-center text-slate-600 dark:text-slate-400 whitespace-nowrap">
+                                {log.promptTokens + log.completionTokens}
+                            </td>
+                            <td class="px-6 py-4 text-right">
+                                <span class="font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">
+                                    {session.currency === "RMB" ? "¥" : "$"}{(
+                                        (log.quotaCost / session.quotaPerUnit) * (session.currency === "RMB" ? session.exchangeRate : 1)
+                                    ).toFixed(4)}
+                                </span>
                             </td>
                         </tr>
-                    {:else}
-                        {#each logs as log}
-                            <tr
-                                class="hover:bg-slate-50 dark:hover:bg-slate-900/50 transition-colors"
-                            >
-                                <td
-                                    class="px-6 py-3 font-medium text-slate-900 dark:text-slate-200 whitespace-nowrap"
-                                >
-                                    {log.modelName}
-                                </td>
-                                <td
-                                    class="px-6 py-3 text-slate-600 dark:text-slate-400"
-                                >
-                                    {log.promptTokens} + {log.completionTokens}
-                                </td>
-                                <td
-                                    class="px-6 py-3 font-medium text-emerald-600 dark:text-emerald-400"
-                                >
-                                    {session.currency === "RMB" ? "¥" : "$"}{(
-                                        (log.quotaCost / session.quotaPerUnit) *
-                                        (session.currency === "RMB"
-                                            ? session.exchangeRate
-                                            : 1)
-                                    ).toFixed(6)}
-                                </td>
-                                <td
-                                    class="px-6 py-3 text-slate-500 dark:text-slate-400 text-xs"
-                                >
-                                    {new Date(log.createdAt).toLocaleString()}
-                                </td>
-                            </tr>
-                        {/each}
-                    {/if}
+                    {/each}
                 </tbody>
             </table>
         </div>
