@@ -18,9 +18,9 @@
         isLoading = true;
         try {
             const [userData, logsData, statsData] = await Promise.all([
-                apiFetch<any>("/auth/me"),
-                apiFetch<any>("/auth/logs?limit=5"),
-                apiFetch<any[]>("/auth/stats"),
+                apiFetch<any>("/me"),
+                apiFetch<any>("/logs?limit=5"),
+                apiFetch<any[]>("/stats"),
             ]);
             userInfo = userData;
             logs = logsData.data || logsData;
@@ -34,7 +34,7 @@
 
     async function fetchRealtime() {
         try {
-            const data = await apiFetch<any>("/auth/realtime");
+            const data = await apiFetch<any>("/realtime");
             realtime = data;
         } catch (err) {
             // Silently fail for realtime updates

@@ -10,7 +10,7 @@
     },
     "apps/gateway": {
       "name": "gateway",
-      "version": "0.1.7",
+      "version": "0.2.1",
       "dependencies": {
         "@elysiajs/cors": "^1.4.1",
         "@elysiajs/jwt": "^1.4.1",
@@ -26,7 +26,7 @@
     },
     "apps/web": {
       "name": "web",
-      "version": "0.1.7",
+      "version": "0.2.1",
       "dependencies": {
         "@elygate/db": "workspace:*",
         "clsx": "^2.1.1",
@@ -51,7 +51,7 @@
     },
     "packages/db": {
       "name": "@elygate/db",
-      "version": "0.1.7",
+      "version": "0.2.1",
     },
   },
   "packages": {
