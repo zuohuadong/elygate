@@ -9,15 +9,15 @@
 	let orders = $state<any[]>([]);
 	let loading = $state(false);
 	let showPaymentModal = $state(false);
-	let selectedAmount = $state(10000);
+	let selectedAmount = $state(1000);
 	let selectedMethod = $state("stripe");
 
 	const amounts = [
-		{ value: 10000, label: "$10.00" },
-		{ value: 50000, label: "$50.00" },
-		{ value: 100000, label: "$100.00" },
-		{ value: 500000, label: "$500.00" },
-		{ value: 1000000, label: "$1000.00" },
+		{ value: 1000, label: "$10.00" },
+		{ value: 5000, label: "$50.00" },
+		{ value: 10000, label: "$100.00" },
+		{ value: 50000, label: "$500.00" },
+		{ value: 100000, label: "$1000.00" },
 	];
 
 	onMount(async () => {

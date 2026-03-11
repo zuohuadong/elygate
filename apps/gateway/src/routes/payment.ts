@@ -1,6 +1,7 @@
 import { Elysia, t } from 'elysia';
 import { sql } from '@elygate/db';
 import { authPlugin } from '../middleware/auth';
+import { optionCache } from '../services/optionCache';
 
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || '';
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || '';
@@ -42,7 +43,7 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
                     body: new URLSearchParams({
                         'payment_method_types[]': 'card',
                         'line_items[0][price_data][currency]': 'usd',
-                        'line_items[0][price_data][product_data][name]': `Elygate Top-up - $${(amount / 1000).toFixed(2)}`,
+                        'line_items[0][price_data][product_data][name]': `Elygate Top-up - $${(amount / 100).toFixed(2)}`,
                         'line_items[0][price_data][unit_amount]': String(amount),
                         'line_items[0][quantity]': '1',
                         'mode': 'payment',
@@ -67,8 +68,8 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
                     out_trade_no: outTradeNo,
                     notify_url: `${process.env.GATEWAY_URL}/api/payment/epay/callback`,
                     return_url: `${process.env.WEB_URL}/payment/success?order_id=${order.id}`,
-                    name: `Elygate Top-up - $${(amount / 1000).toFixed(2)}`,
-                    money: (amount / 1000).toFixed(2)
+                    name: `Elygate Top-up - $${(amount / 100).toFixed(2)}`,
+                    money: (amount / 100).toFixed(2)
                 });
 
                 // Sort params as required by EPay spec
@@ -145,13 +146,16 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
 
                 if (!order) return; // Already processed (idempotent)
 
+                const quotaPerUnit = Number(optionCache.get('QuotaPerUnit') || 500000);
+                const quotaToAdd = Math.floor((order.amount / 100) * quotaPerUnit);
+
                 await tx`
                     UPDATE users 
-                    SET quota = quota + ${order.amount}
+                    SET quota = quota + ${quotaToAdd}
                     WHERE id = ${order.user_id}
                 `;
 
-                console.log(`[Payment] Stripe success: Order ${orderId}, User ${order.user_id}, Amount ${order.amount}`);
+                console.log(`[Payment] Stripe success: Order ${orderId}, User ${order.user_id}, Amount ${order.amount}, QuotaAdded ${quotaToAdd}`);
             });
 
             return { success: true };
@@ -201,13 +205,16 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
 
                 if (!order) return; // Already processed (idempotent)
 
+                const quotaPerUnit = Number(optionCache.get('QuotaPerUnit') || 500000);
+                const quotaToAdd = Math.floor((order.amount / 100) * quotaPerUnit);
+
                 await tx`
                     UPDATE users 
-                    SET quota = quota + ${order.amount}
+                    SET quota = quota + ${quotaToAdd}
                     WHERE id = ${order.user_id}
                 `;
 
-                console.log(`[Payment] EPay success: Order ${orderId}, User ${order.user_id}, Amount ${order.amount}`);
+                console.log(`[Payment] EPay success: Order ${orderId}, User ${order.user_id}, Amount ${order.amount}, QuotaAdded ${quotaToAdd}`);
             });
 
             return 'success';

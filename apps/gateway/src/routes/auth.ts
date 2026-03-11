@@ -383,29 +383,20 @@ export const authRouter = new Elysia()
             set.status = 401;
             throw new Error('Invalid or expired token');
         }
-        return row;
     })
-    // Get personal logs
-    .get('/logs', async ({ request, set, query }: any) => {
-        const authHeader = request.headers.get('authorization');
-        if (!authHeader?.startsWith('Bearer ')) {
-            set.status = 401;
-            throw new Error('Unauthorized');
-        }
-        const key = authHeader.substring(7);
-        const [userRow] = await sql`
-            SELECT u.id
-            FROM tokens t
-            JOIN users u ON t.user_id = u.id
-            WHERE t.key = ${key} AND t.status = 1 AND u.status = 1
-            LIMIT 1
-        `;
-        if (!userRow) {
-            set.status = 401;
-            throw new Error('Unauthorized');
-        }
 
-        const page = Number(query?.page) || 1;
+    // Grouping C-end authenticated endpoints (Dashboard/Consumer)
+    .group('', (app) =>
+        app.use(authPlugin)
+            // Get personal logs
+            .get('/logs', async ({ request, set, query, user }: any) => {
+                if (!user) {
+                    set.status = 401;
+                    throw new Error('Unauthorized');
+                }
+                const userRow = user as UserRecord;
+
+                const page = Number(query?.page) || 1;
         const limit = Number(query?.limit) || 50;
         const offset = (page - 1) * limit;
 
@@ -521,9 +512,9 @@ export const authRouter = new Elysia()
 
         return {
             rpm: Number(realtime.rpm || 0),
-            tpm: Number(realtime.tpm || 0)
-        };
-    })
+            };
+        })
+    ) // End authenticated dashboard group
 
     .get('/discord', ({ set }) => {
         const url = `https://discord.com/api/oauth2/authorize?client_id=${DISCORD_CLIENT_ID}&redirect_uri=${encodeURIComponent(DISCORD_REDIRECT_URI)}&response_type=code&scope=identify`;

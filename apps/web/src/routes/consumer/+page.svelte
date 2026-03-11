@@ -62,7 +62,7 @@
             });
             message = {
                 type: "success",
-                text: `${i18n.lang === "zh" ? "充值成功！新增额度：" : "Top-up successful! Added: "}$${(res.addedQuota / 1000).toFixed(2)}`,
+                text: `${i18n.lang === "zh" ? "充值成功！新增额度：" : "Top-up successful! Added: "}${session.currency === "RMB" ? "¥" : "$"}${((res.addedQuota / session.quotaPerUnit) * (session.currency === "RMB" ? session.exchangeRate : 1)).toFixed(2)}`,
             };
             topupCode = "";
             await loadData(); // Refresh balance
