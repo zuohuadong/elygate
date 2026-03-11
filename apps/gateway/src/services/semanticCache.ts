@@ -36,7 +36,19 @@ async function generateEmbedding(text: string, embeddingChannel: any, embeddingM
 
     console.log(`[SemanticCache] Generating embedding with model: ${model}`);
 
-    const response = await fetch(`${embeddingChannel.baseUrl}/v1/embeddings`, {
+    // Smart URL handling: avoid duplicate /v1 prefix
+    let baseUrl = (embeddingChannel.baseUrl || '').replace(/\/+$/, '');
+    let embeddingsUrl: string;
+    
+    if (baseUrl.endsWith('/v1/embeddings')) {
+        embeddingsUrl = baseUrl;
+    } else if (baseUrl.endsWith('/v1')) {
+        embeddingsUrl = `${baseUrl}/embeddings`;
+    } else {
+        embeddingsUrl = `${baseUrl}/v1/embeddings`;
+    }
+
+    const response = await fetch(embeddingsUrl, {
         method: 'POST',
         headers: {
             'Authorization': `Bearer ${activeKey}`,

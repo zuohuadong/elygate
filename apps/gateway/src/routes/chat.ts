@@ -159,17 +159,38 @@ export const chatRouter = new Elysia()
             });
 
             // Build Upstream URL
-            let baseUrl = channelConfig.baseUrl;
-            // Remove trailing /v1 if already present to avoid duplication
-            if (baseUrl.endsWith('/v1')) {
-                baseUrl = baseUrl.slice(0, -3);
-            }
-            let upstreamUrl = `${baseUrl}/v1/chat/completions`;
-
+            // Smart URL handling: avoid duplicate /v1 prefix
+            let baseUrl = channelConfig.baseUrl.replace(/\/+$/, '');
+            let upstreamUrl: string;
+            
             if (channelConfig.type === ChannelType.GEMINI) {
-                upstreamUrl = `${baseUrl}/v1beta/models/${upstreamModel}:generateContent`;
-                if (stream) {
-                    upstreamUrl = `${baseUrl}/v1beta/models/${upstreamModel}:streamGenerateContent?alt=sse`;
+                // Gemini endpoints
+                if (baseUrl.endsWith('/v1beta')) {
+                    upstreamUrl = stream 
+                        ? `${baseUrl}/models/${upstreamModel}:streamGenerateContent?alt=sse`
+                        : `${baseUrl}/models/${upstreamModel}:generateContent`;
+                } else if (baseUrl.includes('/v1beta/models')) {
+                    // URL already contains models path
+                    if (baseUrl.includes(':generateContent') || baseUrl.includes(':streamGenerateContent')) {
+                        upstreamUrl = baseUrl;
+                    } else {
+                        upstreamUrl = stream
+                            ? `${baseUrl.split('/models/')[0]}/models/${upstreamModel}:streamGenerateContent?alt=sse`
+                            : `${baseUrl.split('/models/')[0]}/models/${upstreamModel}:generateContent`;
+                    }
+                } else {
+                    upstreamUrl = stream
+                        ? `${baseUrl}/v1beta/models/${upstreamModel}:streamGenerateContent?alt=sse`
+                        : `${baseUrl}/v1beta/models/${upstreamModel}:generateContent`;
+                }
+            } else {
+                // OpenAI-compatible endpoints
+                if (baseUrl.endsWith('/v1/chat/completions')) {
+                    upstreamUrl = baseUrl;
+                } else if (baseUrl.endsWith('/v1')) {
+                    upstreamUrl = `${baseUrl}/chat/completions`;
+                } else {
+                    upstreamUrl = `${baseUrl}/v1/chat/completions`;
                 }
             }
 

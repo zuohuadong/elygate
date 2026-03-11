@@ -46,8 +46,8 @@
                     dt_remain_quota:
                         remainQuota === -1
                             ? i18n.t.tokens.unlimited
-                            : `$ ${(Number(remainQuota || 0) / 1000).toFixed(2)}`,
-                    dt_used_quota: `$ ${(Number(usedQuota) / 1000).toFixed(4)}`,
+                            : `$ ${(Number(remainQuota || 0) / session.quotaPerUnit).toFixed(4)}`,
+                    dt_used_quota: `$ ${(Number(usedQuota || 0) / session.quotaPerUnit).toFixed(4)}`,
                 };
             });
         } catch (err: any) {

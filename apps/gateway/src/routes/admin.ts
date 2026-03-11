@@ -275,8 +275,26 @@ export const adminRouter = new Elysia()
 
         const handler = getProviderHandler(channel.type);
         const testKey = decryptChannelKeys(channel.key).split('\n').find(Boolean) || '';
-        const baseUrl = channel.base_url || 'https://api.openai.com';
-        const modelsUrl = channel.type === ChannelType.GEMINI ? `${baseUrl}/v1beta/models` : `${baseUrl}/v1/models`;
+        let baseUrl = (channel.base_url || 'https://api.openai.com').replace(/\/+$/, '');
+        
+        let modelsUrl: string;
+        if (channel.type === ChannelType.GEMINI) {
+            if (baseUrl.endsWith('/v1beta')) {
+                modelsUrl = `${baseUrl}/models`;
+            } else if (baseUrl.includes('/v1beta/models')) {
+                modelsUrl = baseUrl;
+            } else {
+                modelsUrl = `${baseUrl}/v1beta/models`;
+            }
+        } else {
+            if (baseUrl.endsWith('/v1/models') || baseUrl.endsWith('/v1/models/')) {
+                modelsUrl = baseUrl;
+            } else if (baseUrl.endsWith('/v1')) {
+                modelsUrl = `${baseUrl}/models`;
+            } else {
+                modelsUrl = `${baseUrl}/v1/models`;
+            }
+        }
 
         const res = await fetch(modelsUrl, { headers: handler.buildHeaders(testKey) });
         if (!res.ok) return (set.status = 500, { success: false, message: `Failed: ${res.status}` });
@@ -357,6 +375,26 @@ export const adminRouter = new Elysia()
         let testUrl = `${channel.base_url || 'https://api.openai.com'}/v1/chat/completions`;
         if (channel.type === ChannelType.GEMINI) {
             testUrl = `${channel.base_url || 'https://generativelanguage.googleapis.com'}/v1beta/models/${upstreamModel}:generateContent`;
+        }
+        
+        // Smart URL handling: avoid duplicate /v1 prefix
+        let baseUrl = (channel.base_url || 'https://api.openai.com').replace(/\/+$/, '');
+        if (channel.type === ChannelType.GEMINI) {
+            if (baseUrl.endsWith('/v1beta')) {
+                testUrl = `${baseUrl}/models/${upstreamModel}:generateContent`;
+            } else if (baseUrl.includes('/v1beta/models')) {
+                testUrl = baseUrl.includes(':generateContent') ? baseUrl : `${baseUrl.split('/models/')[0]}/models/${upstreamModel}:generateContent`;
+            } else {
+                testUrl = `${baseUrl}/v1beta/models/${upstreamModel}:generateContent`;
+            }
+        } else {
+            if (baseUrl.endsWith('/v1')) {
+                testUrl = `${baseUrl}/chat/completions`;
+            } else if (baseUrl.endsWith('/v1/chat/completions')) {
+                testUrl = baseUrl;
+            } else {
+                testUrl = `${baseUrl}/v1/chat/completions`;
+            }
         }
 
         const startTime = Date.now();
