@@ -132,6 +132,9 @@ CREATE TABLE IF NOT EXISTS packages (
     models JSONB DEFAULT '[]',
     default_rate_limit_id INT REFERENCES rate_limit_rules(id) ON DELETE SET NULL,
     model_rate_limits JSONB DEFAULT '{}', -- {"gpt-4": 1}
+    cycle_quota BIGINT DEFAULT 0, -- amount to refill each cycle
+    cycle_interval INTEGER DEFAULT 1, -- numeric interval
+    cycle_unit TEXT DEFAULT 'day', -- hour, day, week, month
     is_public BOOLEAN DEFAULT true,
     allowed_groups JSONB DEFAULT '[]', -- Package visibility: empty means visible to all groups
     added_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
@@ -147,6 +150,7 @@ CREATE TABLE IF NOT EXISTS user_subscriptions (
     start_time TIMESTAMPTZ DEFAULT NOW(),
     end_time TIMESTAMPTZ NOT NULL,
     status INTEGER DEFAULT 1, -- 1: active, 2: expired, 3: disabled
+    last_reset_at TIMESTAMPTZ DEFAULT NOW(),
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
