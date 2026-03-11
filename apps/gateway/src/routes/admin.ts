@@ -10,6 +10,7 @@ import { join } from 'path';
 import { encryptChannelKeys, decryptChannelKeys } from '../services/encryption';
 import { getAuditLogs } from '../services/auditLog';
 import { optionCache } from '../services/optionCache';
+import { checkAndResetSubscriptionQuota } from '../services/subscription';
 
 // Helper function to refresh both caches
 async function refreshAllCaches() {
@@ -1558,8 +1559,8 @@ export const adminRouter = new Elysia()
         try {
             const b = body as any;
             const [result] = await sql`
-                INSERT INTO packages (name, description, price, duration_days, models, default_rate_limit_id, model_rate_limits, is_public, added_by)
-                VALUES (${b.name}, ${b.description || ''}, ${b.price || 0}, ${b.durationDays || 30}, ${JSON.stringify(b.models || [])}, ${b.defaultRateLimitId || null}, ${JSON.stringify(b.modelRateLimits || {})}, ${b.isPublic ?? true}, ${user.id})
+                INSERT INTO packages (name, description, price, duration_days, models, default_rate_limit_id, model_rate_limits, cycle_quota, cycle_interval, cycle_unit, is_public, added_by)
+                VALUES (${b.name}, ${b.description || ''}, ${b.price || 0}, ${b.durationDays || 30}, ${JSON.stringify(b.models || [])}, ${b.defaultRateLimitId || null}, ${JSON.stringify(b.modelRateLimits || {})}, ${b.cycleQuota || 0}, ${b.cycleInterval || 1}, ${b.cycleUnit || 'day'}, ${b.isPublic ?? true}, ${user.id})
                 RETURNING *
             `;
             return { success: true, data: result };
@@ -1579,6 +1580,9 @@ export const adminRouter = new Elysia()
                     models = COALESCE(${b.models ? JSON.stringify(b.models) : null}, models),
                     default_rate_limit_id = COALESCE(${b.defaultRateLimitId}, default_rate_limit_id),
                     model_rate_limits = COALESCE(${b.modelRateLimits ? JSON.stringify(b.modelRateLimits) : null}, model_rate_limits),
+                    cycle_quota = COALESCE(${b.cycleQuota}, cycle_quota),
+                    cycle_interval = COALESCE(${b.cycleInterval}, cycle_interval),
+                    cycle_unit = COALESCE(${b.cycleUnit}, cycle_unit),
                     is_public = COALESCE(${b.isPublic}, is_public),
                     updated_at = NOW()
                 WHERE id = ${Number(id)} RETURNING *
@@ -1754,6 +1758,52 @@ export const adminRouter = new Elysia()
             };
         } catch (e: any) {
             set.status = 500;
+            return { success: false, message: e.message };
+        }
+    })
+
+    .get('/migrate-cycles', async () => {
+        try {
+            await sql`ALTER TABLE packages ADD COLUMN IF NOT EXISTS cycle_quota BIGINT DEFAULT 0`;
+            await sql`ALTER TABLE packages ADD COLUMN IF NOT EXISTS cycle_interval INTEGER DEFAULT 1`;
+            await sql`ALTER TABLE packages ADD COLUMN IF NOT EXISTS cycle_unit TEXT DEFAULT 'day'`;
+            await sql`ALTER TABLE user_subscriptions ADD COLUMN IF NOT EXISTS last_reset_at TIMESTAMPTZ DEFAULT NOW()`;
+            return { success: true, message: 'Schema updated for subscription cycles' };
+        } catch (e: any) {
+            return { success: false, message: e.message };
+        }
+    })
+
+    .get('/test-cycle-reset', async ({ user }: any) => {
+        try {
+            // 1. Create a dummy package with 1-hour reset and 1M quota
+            const [pkg] = await sql`
+                INSERT INTO packages (name, description, price, duration_days, cycle_quota, cycle_interval, cycle_unit, is_public)
+                VALUES ('Test Cycle Pkg', 'Debug reset logic', 0, 30, 1000000, 1, 'hour', false)
+                RETURNING id
+            `;
+
+            // 2. Grant it to the current user
+            const [sub] = await sql`
+                INSERT INTO user_subscriptions (user_id, package_id, start_time, end_time, status, last_reset_at)
+                VALUES (${user.id}, ${pkg.id}, NOW() - INTERVAL '2 hours', NOW() + INTERVAL '30 days', 1, NOW() - INTERVAL '2 hours')
+                RETURNING id
+            `;
+
+            // 3. Trigger lazy reset
+            await checkAndResetSubscriptionQuota(user.id);
+
+            // 4. Verify user quota increased
+            const [updatedUser] = await sql`SELECT quota FROM users WHERE id = ${user.id}`;
+
+            return { 
+                success: true, 
+                message: 'Test completed', 
+                newQuota: updatedUser.quota,
+                packageId: pkg.id,
+                subId: sub.id
+            };
+        } catch (e: any) {
             return { success: false, message: e.message };
         }
     });

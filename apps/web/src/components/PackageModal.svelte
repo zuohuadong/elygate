@@ -14,6 +14,9 @@
         models: "",
         defaultRateLimitId: "",
         modelRateLimitsJson: "{}",
+        cycleQuota: 0,
+        cycleInterval: 1,
+        cycleUnit: "day",
         isPublic: true
     });
 
@@ -39,6 +42,9 @@
                         models: Array.isArray(pkg.models) ? pkg.models.join(",") : (pkg.models || ""),
                         defaultRateLimitId: pkg.default_rate_limit_id ? String(pkg.default_rate_limit_id) : "",
                         modelRateLimitsJson: pkg.model_rate_limits ? JSON.stringify(pkg.model_rate_limits, null, 2) : "{}",
+                        cycleQuota: pkg.cycle_quota || 0,
+                        cycleInterval: pkg.cycle_interval || 1,
+                        cycleUnit: pkg.cycle_unit || "day",
                         isPublic: pkg.is_public ?? true
                     };
                 } else {
@@ -50,6 +56,9 @@
                         models: "",
                         defaultRateLimitId: "",
                         modelRateLimitsJson: "{}",
+                        cycleQuota: 0,
+                        cycleInterval: 1,
+                        cycleUnit: "day",
                         isPublic: true
                     };
                 }
@@ -80,6 +89,9 @@
             models: modelsArray,
             defaultRateLimitId: formData.defaultRateLimitId ? Number(formData.defaultRateLimitId) : null,
             modelRateLimits: parsedModelRateLimits,
+            cycleQuota: Number(formData.cycleQuota),
+            cycleInterval: Number(formData.cycleInterval),
+            cycleUnit: formData.cycleUnit,
             isPublic: formData.isPublic
         };
         
@@ -170,6 +182,38 @@
                             <p class="text-xs text-slate-500 mt-1">
                                 {i18n.t.packages.modelRateLimitsTip} <code>{i18n.t.packages.modelRateLimitsFormat}</code>
                             </p>
+                        </div>
+
+                        <div class="col-span-2 border-t border-slate-100 dark:border-slate-800 pt-4 mt-2">
+                            <h4 class="text-sm font-semibold text-indigo-600 dark:text-indigo-400 mb-4">{i18n.t.packages.cycleQuota}</h4>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="cycle-quota">
+                                        {i18n.t.packages.cycleQuota}
+                                    </label>
+                                    <input type="number" id="cycle-quota" min="0" bind:value={formData.cycleQuota} class="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-sm text-slate-900 dark:text-white shadow-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors" />
+                                    <p class="text-xs text-slate-400 mt-1">{i18n.t.packages.cycleQuotaTip}</p>
+                                </div>
+                                <div class="grid grid-cols-2 gap-2">
+                                    <div>
+                                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="cycle-interval">
+                                            {i18n.t.packages.cycleInterval}
+                                        </label>
+                                        <input type="number" id="cycle-interval" min="1" bind:value={formData.cycleInterval} class="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-sm text-slate-900 dark:text-white shadow-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors" />
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="cycle-unit">
+                                            {i18n.t.packages.cycleUnit}
+                                        </label>
+                                        <select id="cycle-unit" bind:value={formData.cycleUnit} class="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-sm text-slate-900 dark:text-white shadow-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors">
+                                            <option value="hour">{i18n.t.packages.hour}</option>
+                                            <option value="day">{i18n.t.packages.day}</option>
+                                            <option value="week">{i18n.t.packages.week}</option>
+                                            <option value="month">{i18n.t.packages.month}</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
 

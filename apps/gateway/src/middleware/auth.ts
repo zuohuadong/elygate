@@ -6,6 +6,7 @@ import { type TokenRecord, type UserRecord } from '../types';
 import { memoryCache } from '../services/cache';
 import { LRUCache } from 'lru-cache';
 import { jwt } from '@elysiajs/jwt';
+import { checkAndResetSubscriptionQuota } from '../services/subscription';
 
 // High-performance LRU cache for auth context (Token + User)
 // Reduces DB pressure by 90%+ for repeated requests from the same API key.
@@ -134,6 +135,9 @@ export const authPlugin = new Elysia({ name: 'auth' })
         // 1. Try LRU Cache Hit
         const cached = authCache.get(apiKey);
         if (cached) {
+            // Lazy-check quota reset even on cache hit (minimal DB impact if already reset)
+            await checkAndResetSubscriptionQuota(cached.user.id).catch(console.error);
+
             // Re-check rate limits for cached keys
             if (await isRateLimited(`token_${cached.token.id}`, cached.token.rateLimit)) {
                 set.status = 429;
