@@ -1,5 +1,6 @@
 import { sql } from '@elygate/db';
 import { optionCache } from './optionCache';
+import { decryptChannelKeys } from './encryption';
 
 // Default configuration - can be overridden via 'options' table in the database
 const DEFAULT_SIMILARITY_THRESHOLD = 0.95; // Cosine similarity threshold (0.0-1.0, higher = more strict)
@@ -24,7 +25,9 @@ function getConfig(): SemanticCacheConfig {
  * Generates a text embedding vector via an OpenAI-compatible embeddings endpoint.
  */
 async function generateEmbedding(text: string, embeddingChannel: any, embeddingModel?: string): Promise<number[] | null> {
-    const keys = embeddingChannel.key.split('\n').map((k: string) => k.trim()).filter(Boolean);
+    // Decrypt the API key
+    const decryptedKeys = decryptChannelKeys(embeddingChannel.key);
+    const keys = decryptedKeys.split('\n').map((k: string) => k.trim()).filter(Boolean);
     const activeKey = keys[Math.floor(Math.random() * keys.length)];
 
     // Use the specified embedding model, or find one from the channel's models

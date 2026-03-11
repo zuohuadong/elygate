@@ -3,6 +3,7 @@
     import { apiFetch } from "$lib/api";
     import { i18n } from "$lib/i18n/index.svelte";
     import { onMount } from "svelte";
+    import { session } from "$lib/session.svelte";
 
     let settings = $state<Record<string, string>>({
         ServerName: "Elygate",
@@ -333,8 +334,8 @@
                             <p
                                 class="text-slate-500 dark:text-slate-500 text-xs mt-1"
                             >
-                                1,000 quota = ${(1000 / 500000).toFixed(4)} = ¥{(
-                                    (1000 / 500000) *
+                                1,000 quota = ${(1000 / session.quotaPerUnit).toFixed(4)} = ¥{(
+                                    (1000 / session.quotaPerUnit) *
                                     parseFloat(settings.ExchangeRate || "7.2")
                                 ).toFixed(4)}
                             </p>

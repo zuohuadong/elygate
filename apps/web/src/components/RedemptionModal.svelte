@@ -24,7 +24,7 @@
     let formData = $state({
         name: "",
         key: "",
-        quota: 500000,
+        quota: session.quotaPerUnit,
         count: 1,
         status: 1,
     });
@@ -62,7 +62,7 @@
                     formData = {
                         name: redemption.name || "",
                         key: redemption.key || "",
-                        quota: redemption.quota ?? 500000,
+                        quota: redemption.quota ?? session.quotaPerUnit,
                         count: redemption.count ?? 1,
                         status: redemption.status ?? 1,
                     };
@@ -70,7 +70,7 @@
                     formData = {
                         name: i18n.lang === 'zh' ? "额度充值码" : "Top-up Code",
                         key: "",
-                        quota: 500000,
+                        quota: session.quotaPerUnit,
                         count: 1,
                         status: 1,
                     };

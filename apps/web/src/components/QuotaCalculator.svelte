@@ -1,10 +1,11 @@
 <script lang="ts">
     import { Calculator } from "lucide-svelte";
     import { i18n } from "$lib/i18n/index.svelte";
+    import { session } from "$lib/session.svelte";
 
     let {
-        quotaPerUnit = 500000,
-        exchangeRate = 7.2,
+        quotaPerUnit = session.quotaPerUnit,
+        exchangeRate = session.exchangeRate,
         onConvert = (quota: number) => {},
     } = $props<{
         quotaPerUnit?: number;

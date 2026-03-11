@@ -8,6 +8,7 @@ import { calculateCost } from '../services/ratio';
 import { lookupSemanticCache, storeSemanticCache } from '../services/semanticCache';
 import { ChannelType, getProviderHandler } from '../providers';
 import { decryptChannelKeys } from '../services/encryption';
+import { optionCache } from '../services/optionCache';
 import { type TokenRecord, type UserRecord, type ChannelConfig } from '../types';
 
 export const chatRouter = new Elysia()
@@ -40,31 +41,47 @@ export const chatRouter = new Elysia()
         let embeddingChannel: any = null;
         let embeddingModel: string | undefined;
         
-        // Try to find an embedding channel with the correct model
-        // Priority: OpenAI embedding > nvidia/bge-m3 > gemini-embedding > bge-m3
-        const embeddingCandidates = [
-            { model: 'text-embedding-3-small', alias: 'text-embedding-3-small' },
-            { model: 'text-embedding-3-large', alias: 'text-embedding-3-large' },
-            { model: 'baai/bge-m3', alias: 'bge-m3' },
-            { model: 'nvidia/nv-embed-v1', alias: 'nv-embed-v1' },
-            { model: 'models/gemini-embedding-001', alias: 'gemini-embedding-001' },
-            { model: 'BAAI/bge-m3', alias: 'BAAI/bge-m3' },
-            { model: 'Qwen/Qwen3-Embedding-8B', alias: 'Qwen3-Embedding-8B' },
-            { model: 'nomic-embed-text', alias: 'nomic-embed-text' }
-        ];
+        // Get embedding model from system settings
+        const configuredEmbeddingModel = optionCache.get('SemanticCacheEmbeddingModel');
         
-        for (const candidate of embeddingCandidates) {
-            const channel = memoryCache.selectChannels(candidate.model)[0];
+        if (configuredEmbeddingModel) {
+            // Use the configured embedding model
+            const channel = memoryCache.selectChannels(configuredEmbeddingModel)[0];
             if (channel) {
                 embeddingChannel = channel;
-                embeddingModel = candidate.model;
-                break;
+                embeddingModel = configuredEmbeddingModel;
             }
-            const aliasChannel = memoryCache.selectChannels(candidate.alias)[0];
-            if (aliasChannel) {
-                embeddingChannel = aliasChannel;
-                embeddingModel = candidate.model;
-                break;
+        }
+        
+        // Fallback: try to find an embedding channel if not configured
+        if (!embeddingChannel) {
+            const embeddingCandidates = [
+                { model: 'BAAI/bge-large-zh-v1.5', alias: 'bge-large-zh-v1.5' },
+                { model: 'BAAI/bge-large-en-v1.5', alias: 'bge-large-en-v1.5' },
+                { model: 'BAAI/bge-m3', alias: 'bge-m3' },
+                { model: 'Pro/BAAI/bge-m3', alias: 'Pro/bge-m3' },
+                { model: 'Qwen/Qwen3-Embedding-8B', alias: 'Qwen3-Embedding-8B' },
+                { model: 'text-embedding-3-small', alias: 'text-embedding-3-small' },
+                { model: 'text-embedding-3-large', alias: 'text-embedding-3-large' },
+                { model: 'baai/bge-m3', alias: 'baai/bge-m3' },
+                { model: 'nvidia/nv-embed-v1', alias: 'nv-embed-v1' },
+                { model: 'models/gemini-embedding-001', alias: 'gemini-embedding-001' },
+                { model: 'nomic-embed-text', alias: 'nomic-embed-text' }
+            ];
+            
+            for (const candidate of embeddingCandidates) {
+                const channel = memoryCache.selectChannels(candidate.model)[0];
+                if (channel) {
+                    embeddingChannel = channel;
+                    embeddingModel = candidate.model;
+                    break;
+                }
+                const aliasChannel = memoryCache.selectChannels(candidate.alias)[0];
+                if (aliasChannel) {
+                    embeddingChannel = aliasChannel;
+                    embeddingModel = candidate.model;
+                    break;
+                }
             }
         }
 

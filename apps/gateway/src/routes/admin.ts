@@ -1700,8 +1700,9 @@ export const adminRouter = new Elysia()
                 };
             }
 
-            // Try to generate a test embedding
-            const keys = channel.key.split('\n').map((k: string) => k.trim()).filter(Boolean);
+            // Decrypt the API key
+            const decryptedKeys = decryptChannelKeys(channel.key);
+            const keys = decryptedKeys.split('\n').map((k: string) => k.trim()).filter(Boolean);
             const activeKey = keys[Math.floor(Math.random() * keys.length)];
 
             const response = await fetch(`${channel.baseUrl}/v1/embeddings`, {
