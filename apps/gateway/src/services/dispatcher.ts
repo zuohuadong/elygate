@@ -222,7 +222,7 @@ export class UnifiedDispatcher {
                 // 5. Handle Response
                 if (isStream && response.body) {
                     const [clientStream, billingStream] = response.body.tee();
-                    this.handleStreamBilling(billingStream, body, user, token, channelConfig, model, preDeducted, lockId, isPackageFree, packageLockId);
+                    this.handleStreamBilling(billingStream, body, user, token, channelConfig, model, preDeducted, lockId, isPackageFree, packageLockId, response.status);
 
                     return new Response(clientStream, {
                         headers: {
@@ -264,7 +264,8 @@ export class UnifiedDispatcher {
                         completionTokens,
                         userGroup: user.group,
                         isStream: false,
-                        isPackageFree
+                        isPackageFree,
+                        statusCode: response.status
                     });
 
                     const currentActive = keyConcurrencyMap.get(lockId);
@@ -315,7 +316,8 @@ export class UnifiedDispatcher {
                         completionTokens,
                         userGroup: user.group,
                         isStream: false,
-                        isPackageFree
+                        isPackageFree,
+                        statusCode: response.status
                     });
 
                     const currentActive = keyConcurrencyMap.get(lockId);
@@ -341,7 +343,8 @@ export class UnifiedDispatcher {
                         completionTokens: 0,
                         userGroup: user.group,
                         isStream: false,
-                        isPackageFree
+                        isPackageFree,
+                        statusCode: response.status
                     });
 
                     const currentActive = keyConcurrencyMap.get(lockId);
@@ -368,6 +371,21 @@ export class UnifiedDispatcher {
                     }).catch(() => { });
                 }
                 lastError = e;
+
+                // Transparent Error Logging (Logged with $0.00 cost)
+                await billAndLog({
+                    userId: user.id,
+                    tokenId: token.id,
+                    channelId: channelConfig.id,
+                    modelName: model,
+                    promptTokens: 0,
+                    completionTokens: 0,
+                    userGroup: user.group,
+                    isStream,
+                    isPackageFree,
+                    statusCode: e.message?.startsWith('Status') ? parseInt(e.message.split(' ')[1]) : 500,
+                    errorMessage: e.message || 'Unknown network error'
+                }).catch(() => { });
 
                 // Handle key exhaustion (401/403/429 with specific error messages)
                 if (e.message?.includes('401') || e.message?.includes('403') || e.message?.includes('429')) {
@@ -435,7 +453,8 @@ export class UnifiedDispatcher {
         preDeducted: number,
         lockId: string,
         isPackageFree: boolean,
-        packageLockId: string | null
+        packageLockId: string | null,
+        statusCode: number = 200
     ) {
         (async () => {
             try {
@@ -505,7 +524,8 @@ export class UnifiedDispatcher {
                     completionTokens: finalCompletionTokens,
                     userGroup: user.group,
                     isStream: true,
-                    isPackageFree
+                    isPackageFree,
+                    statusCode: statusCode
                 });
             } catch (e) {
                 console.error("[Stream Billing Error]", e);

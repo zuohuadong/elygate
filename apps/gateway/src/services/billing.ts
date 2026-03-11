@@ -115,7 +115,9 @@ async function flushBillingQueue() {
             completionTokens: task.completionTokens,
             cachedTokens: task.cachedTokens || 0,
             quotaCost: cost,
-            isStream: task.isStream
+            isStream: task.isStream,
+            statusCode: task.statusCode || 200,
+            errorMessage: task.errorMessage || null
         });
     }
 
@@ -149,12 +151,15 @@ async function flushBillingQueue() {
                 correctedTokenAgg[task.tokenId] = (correctedTokenAgg[task.tokenId] || 0) + finalCost;
 
                 // Update quotaCost in logInserts
+                // Use a more robust way to find the log entry
                 const log = logInserts.find(l =>
                     l.userId === task.userId &&
+                    l.tokenId === task.tokenId && // Added tokenId to search criteria
                     l.channelId === task.channelId &&
                     l.modelName === task.modelName &&
                     l.promptTokens === task.promptTokens &&
-                    l.completionTokens === task.completionTokens
+                    l.completionTokens === task.completionTokens &&
+                    l.isStream === task.isStream // Added isStream to search criteria
                 );
                 if (log) log.quotaCost = finalCost;
             }
@@ -167,8 +172,8 @@ async function flushBillingQueue() {
             }
             for (const log of logInserts) {
                 await tx`
-                    INSERT INTO logs (user_id, token_id, channel_id, model_name, prompt_tokens, completion_tokens, cached_tokens, quota_cost, is_stream)
-                    VALUES (${log.userId}, ${log.tokenId || null}, ${log.channelId || null}, ${log.modelName}, ${log.promptTokens}, ${log.completionTokens}, ${log.cachedTokens}, ${log.quotaCost}, ${log.isStream})
+                    INSERT INTO logs (user_id, token_id, channel_id, model_name, prompt_tokens, completion_tokens, cached_tokens, quota_cost, is_stream, status_code, error_message)
+                    VALUES (${log.userId}, ${log.tokenId || null}, ${log.channelId || null}, ${log.modelName}, ${log.promptTokens}, ${log.completionTokens}, ${log.cachedTokens}, ${log.quotaCost}, ${log.isStream}, ${log.statusCode}, ${log.errorMessage})
                 `;
             }
         });

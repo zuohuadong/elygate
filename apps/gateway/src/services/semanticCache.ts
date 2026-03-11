@@ -23,9 +23,18 @@ function getConfig(): SemanticCacheConfig {
 /**
  * Generates a text embedding vector via an OpenAI-compatible embeddings endpoint.
  */
-async function generateEmbedding(text: string, embeddingChannel: any): Promise<number[] | null> {
+async function generateEmbedding(text: string, embeddingChannel: any, embeddingModel?: string): Promise<number[] | null> {
     const keys = embeddingChannel.key.split('\n').map((k: string) => k.trim()).filter(Boolean);
     const activeKey = keys[Math.floor(Math.random() * keys.length)];
+
+    // Use the specified embedding model, or find one from the channel's models
+    const model = embeddingModel || embeddingChannel.models.find((m: string) => 
+        m.toLowerCase().includes('embedding') || 
+        m.toLowerCase().includes('bge-m3') ||
+        m.toLowerCase().includes('bge-large')
+    ) || embeddingChannel.models[0];
+
+    console.log(`[SemanticCache] Generating embedding with model: ${model}`);
 
     const response = await fetch(`${embeddingChannel.baseUrl}/v1/embeddings`, {
         method: 'POST',
@@ -33,10 +42,13 @@ async function generateEmbedding(text: string, embeddingChannel: any): Promise<n
             'Authorization': `Bearer ${activeKey}`,
             'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ model: embeddingChannel.models[0], input: text })
+        body: JSON.stringify({ model, input: text })
     });
 
-    if (!response.ok) return null;
+    if (!response.ok) {
+        console.log(`[SemanticCache] Embedding API failed: ${response.status} ${response.statusText}`);
+        return null;
+    }
     const data = await response.json() as any;
     return data?.data?.[0]?.embedding ?? null;
 }
@@ -45,7 +57,7 @@ async function generateEmbedding(text: string, embeddingChannel: any): Promise<n
  * Retrieves a semantically similar cached response for the given query.
  * Returns the cached response if found within the similarity threshold, otherwise null.
  * 
- * Configurable via options table:
+ * Configurable via options:
  * - SemanticCacheEnabled (bool, default: true)
  * - SemanticCacheThreshold (float, default: 0.92)
  * - SemanticCacheTTLHours (int, default: 24)
@@ -53,12 +65,13 @@ async function generateEmbedding(text: string, embeddingChannel: any): Promise<n
 export async function lookupSemanticCache(
     prompt: string,
     model: string,
-    embeddingChannel: any
+    embeddingChannel: any,
+    embeddingModel?: string
 ): Promise<any | null> {
     const config = getConfig();
     if (!config.enabled) return null;
 
-    const embedding = await generateEmbedding(prompt, embeddingChannel);
+    const embedding = await generateEmbedding(prompt, embeddingChannel, embeddingModel);
     if (!embedding) return null;
 
     const vectorLiteral = `[${embedding.join(',')}]`;
@@ -87,12 +100,13 @@ export async function storeSemanticCache(
     prompt: string,
     model: string,
     response: any,
-    embeddingChannel: any
+    embeddingChannel: any,
+    embeddingModel?: string
 ): Promise<void> {
     const { enabled } = getConfig();
     if (!enabled) return;
 
-    const embedding = await generateEmbedding(prompt, embeddingChannel);
+    const embedding = await generateEmbedding(prompt, embeddingChannel, embeddingModel);
     if (!embedding) return;
 
     // Use Bun native CryptoHasher for md5 - faster than delegating to SQL

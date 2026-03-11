@@ -37,15 +37,42 @@ export const chatRouter = new Elysia()
         let lastError: any = null;
 
         // Semantic Cache: pick an embedding channel for vector lookup
-        const embeddingChannel = memoryCache.selectChannels('text-embedding-3-small')[0]
-            ?? memoryCache.selectChannels('nomic-embed-text')[0];
+        let embeddingChannel: any = null;
+        let embeddingModel: string | undefined;
+        
+        // Try to find an embedding channel with the correct model
+        // Priority: gemini-embedding > bge-m3 > qwen-embedding
+        const embeddingCandidates = [
+            { model: 'models/gemini-embedding-001', alias: 'gemini-embedding-001' },
+            { model: 'BAAI/bge-m3', alias: 'bge-m3' },
+            { model: 'Qwen/Qwen3-Embedding-8B', alias: 'Qwen3-Embedding-8B' },
+            { model: 'text-embedding-3-small', alias: 'text-embedding-3-small' },
+            { model: 'nomic-embed-text', alias: 'nomic-embed-text' }
+        ];
+        
+        for (const candidate of embeddingCandidates) {
+            const channel = memoryCache.selectChannels(candidate.model)[0];
+            if (channel) {
+                embeddingChannel = channel;
+                embeddingModel = candidate.model;
+                break;
+            }
+            const aliasChannel = memoryCache.selectChannels(candidate.alias)[0];
+            if (aliasChannel) {
+                embeddingChannel = aliasChannel;
+                embeddingModel = candidate.model;
+                break;
+            }
+        }
+
+        console.log(`[SemanticCache] Embedding channel found: ${embeddingChannel ? embeddingChannel.name : 'NONE'}, model: ${embeddingModel || 'N/A'}`);
 
         // --- Semantic Cache Lookup (Before upstream dispatch, non-stream only) ---
         if (embeddingChannel && !stream) {
             const userPrompt = Array.isArray(body.messages)
                 ? body.messages.map((m: any) => m.content).join(' ')
                 : '';
-            const cachedResponse = await lookupSemanticCache(userPrompt, model, embeddingChannel);
+            const cachedResponse = await lookupSemanticCache(userPrompt, model, embeddingChannel, embeddingModel);
             if (cachedResponse) {
                 console.log(`[SemanticCache] HIT for model: ${model}`);
                 
@@ -251,7 +278,8 @@ export const chatRouter = new Elysia()
                                 promptTokens: finalPromptTokens,
                                 completionTokens: finalCompletionTokens,
                                 userGroup: user.group,
-                                isStream: true
+                                isStream: true,
+                                statusCode: response.status
                             });
                         } catch (e) {
                             console.error("[Stream Billing Error]", e);
@@ -300,7 +328,7 @@ export const chatRouter = new Elysia()
                     const userPrompt = Array.isArray(body.messages)
                         ? body.messages.map((m: any) => m.content).join(' ')
                         : '';
-                    storeSemanticCache(userPrompt, model, formattedData, embeddingChannel).catch(e =>
+                    storeSemanticCache(userPrompt, model, formattedData, embeddingChannel, embeddingModel).catch(e =>
                         console.warn('[SemanticCache] Store failed:', e)
                     );
                 }
@@ -325,7 +353,8 @@ export const chatRouter = new Elysia()
                     completionTokens,
                     cachedTokens,
                     userGroup: user.group,
-                    isStream: false
+                    isStream: false,
+                    statusCode: response.status
                 });
 
                 return formattedData;
@@ -338,6 +367,20 @@ export const chatRouter = new Elysia()
                     preDeducted,
                     actualCost: 0
                 });
+
+                // Transparent Error Logging (Logged with $0.00 cost)
+                await billAndLog({
+                    userId: user.id,
+                    tokenId: token.id,
+                    channelId: channelConfig.id,
+                    modelName: model,
+                    promptTokens: 0,
+                    completionTokens: 0,
+                    userGroup: user.group,
+                    isStream: !!stream,
+                    statusCode: e.message?.startsWith('Status') ? parseInt(e.message.split(' ')[1]) : 500,
+                    errorMessage: e.message || 'Unknown network error'
+                }).catch(() => { });
 
                 // Catch exceptions, log lastError, and continue to next channel in loop
                 lastError = e;

@@ -69,4 +69,6 @@ export interface BillingContext {
     userGroup: string;
     isStream: boolean;
     isPackageFree?: boolean;
+    statusCode?: number;
+    errorMessage?: string;
 }
