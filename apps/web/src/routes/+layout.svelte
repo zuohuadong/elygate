@@ -61,13 +61,29 @@
 		"/payment",
 	];
 
-	onMount(() => {
+	onMount(async () => {
 		initLogger();
 		i18n.init();
 		theme.init();
-		if (!session.token && !isAuthPage) {
-			goto("/login");
-			return;
+
+		// Check if user is authenticated via Cookie
+		if (!isAuthPage) {
+			try {
+				const me = await apiFetch<any>("/auth/me");
+				if (me && me.username) {
+					session.update({
+						token: me.token || "cookie-session",
+						username: me.username,
+						role: me.role || 1,
+					});
+				} else {
+					goto("/login");
+					return;
+				}
+			} catch (err) {
+				goto("/login");
+				return;
+			}
 		}
 
 		// Register keyboard shortcuts
