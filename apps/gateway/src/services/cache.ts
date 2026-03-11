@@ -117,6 +117,22 @@ export const memoryCache = {
                     }
                     newRoutes.get(model)!.push(channel);
                 }
+
+                // Also add modelMapping aliases to routes (reverse mapping)
+                // modelMapping: { "requestedModel": "upstreamModel" }
+                // We need to add routes for requestedModel -> channel
+                if (channel.modelMapping && typeof channel.modelMapping === 'object') {
+                    for (const aliasModel of Object.keys(channel.modelMapping)) {
+                        if (!newRoutes.has(aliasModel)) {
+                            newRoutes.set(aliasModel, []);
+                        }
+                        // Avoid duplicates
+                        const existing = newRoutes.get(aliasModel)!;
+                        if (!existing.some(ch => ch.id === channel.id)) {
+                            existing.push(channel);
+                        }
+                    }
+                }
             }
 
             this.channelRoutes = newRoutes;

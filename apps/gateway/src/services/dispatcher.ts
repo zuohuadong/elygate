@@ -340,7 +340,11 @@ export class UnifiedDispatcher {
     }
 
     private static getUpstreamUrl(config: ChannelConfig, model: string, type: string, stream: boolean) {
-        const base = config.baseUrl;
+        let base = config.baseUrl;
+        // Remove trailing /v1 if already present to avoid duplication
+        if (base.endsWith('/v1')) {
+            base = base.slice(0, -3);
+        }
         // Native Gemini 3.5 Pro support
         if (config.type === ChannelType.GEMINI && (type === 'chat' || type === 'native-gemini')) {
             const endpoint = stream ? ':streamGenerateContent?alt=sse' : ':generateContent';

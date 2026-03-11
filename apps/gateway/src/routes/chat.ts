@@ -129,12 +129,17 @@ export const chatRouter = new Elysia()
             });
 
             // Build Upstream URL
-            let upstreamUrl = `${channelConfig.baseUrl}/v1/chat/completions`;
+            let baseUrl = channelConfig.baseUrl;
+            // Remove trailing /v1 if already present to avoid duplication
+            if (baseUrl.endsWith('/v1')) {
+                baseUrl = baseUrl.slice(0, -3);
+            }
+            let upstreamUrl = `${baseUrl}/v1/chat/completions`;
 
             if (channelConfig.type === ChannelType.GEMINI) {
-                upstreamUrl = `${channelConfig.baseUrl}/v1beta/models/${upstreamModel}:generateContent`;
+                upstreamUrl = `${baseUrl}/v1beta/models/${upstreamModel}:generateContent`;
                 if (stream) {
-                    upstreamUrl = `${channelConfig.baseUrl}/v1beta/models/${upstreamModel}:streamGenerateContent?alt=sse`;
+                    upstreamUrl = `${baseUrl}/v1beta/models/${upstreamModel}:streamGenerateContent?alt=sse`;
                 }
             }
 

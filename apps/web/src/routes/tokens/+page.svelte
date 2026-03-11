@@ -33,12 +33,12 @@
                             : "Active"
                         : i18n.lang === "zh"
                           ? "禁用"
-                          : "Banned",
+                dt_created_at: new Date(t.createdAt).toLocaleString(),
                 dt_created_at: t.createdAt ? new Date(t.createdAt).toLocaleString() : "-",
                 dt_remain_quota:
                     t.remainQuota === -1
-                        ? i18n.t.tokens.unlimited
-                        : `$ ${(t.remainQuota / 500000).toFixed(2)}`,
+                        : `$ ${(t.remainQuota / 1000).toFixed(2)}`,
+                dt_used_quota: `$ ${(t.usedQuota / 1000).toFixed(2)}`,
                 dt_used_quota: `$ ${((t.usedQuota || 0) / 500000).toFixed(4)}`,
             }));
         } catch (err: any) {
@@ -70,7 +70,6 @@
         { key: "dt_created_at", label: i18n.t.tokens.createdAt },
     ]);
 
-    function handleAdd() {
         selectedToken = null;
         isModalOpen = true;
     }
