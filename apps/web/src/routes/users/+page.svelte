@@ -30,8 +30,8 @@
                 formattedQuota:
                     u.quota < 0
                         ? i18n.t.tokens.unlimited
-                        : `$${(u.quota / 1000).toFixed(2)}`,
-                formattedUsed: `$${((u.usedQuota || 0) / 1000).toFixed(4)}`,
+                        : `$${(u.quota / 500000).toFixed(2)}`,
+                formattedUsed: `$${((u.usedQuota || 0) / 500000).toFixed(2)}`,
             }));
         } catch (err: any) {
             errorMsg = err.message || (i18n.lang === "zh" ? "加载用户失败" : "Failed to load users");
