@@ -113,6 +113,7 @@ async function flushBillingQueue() {
             modelName: task.modelName,
             promptTokens: task.promptTokens,
             completionTokens: task.completionTokens,
+            cachedTokens: task.cachedTokens || 0,
             quotaCost: cost,
             isStream: task.isStream
         });
@@ -166,8 +167,8 @@ async function flushBillingQueue() {
             }
             for (const log of logInserts) {
                 await tx`
-                    INSERT INTO logs (user_id, token_id, channel_id, model_name, prompt_tokens, completion_tokens, quota_cost, is_stream)
-                    VALUES (${log.userId}, ${log.tokenId || null}, ${log.channelId || null}, ${log.modelName}, ${log.promptTokens}, ${log.completionTokens}, ${log.quotaCost}, ${log.isStream})
+                    INSERT INTO logs (user_id, token_id, channel_id, model_name, prompt_tokens, completion_tokens, cached_tokens, quota_cost, is_stream)
+                    VALUES (${log.userId}, ${log.tokenId || null}, ${log.channelId || null}, ${log.modelName}, ${log.promptTokens}, ${log.completionTokens}, ${log.cachedTokens}, ${log.quotaCost}, ${log.isStream})
                 `;
             }
         });

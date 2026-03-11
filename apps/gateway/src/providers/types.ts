@@ -12,7 +12,7 @@ export interface ProviderHandler {
     /**
      * Extracts and calculates token usage from non-streaming response.
      */
-    extractUsage(data: any): { promptTokens: number; completionTokens: number };
+    extractUsage(data: any): { promptTokens: number; completionTokens: number; cachedTokens?: number };
 
     /**
      * (Optional) Different providers may have specific Headers requirements.

@@ -35,9 +35,13 @@ export class OpenAIApiHandler implements ProviderHandler {
     }
 
     extractUsage(data: any) {
+        const promptTokens = data.usage?.prompt_tokens || 0;
+        const completionTokens = data.usage?.completion_tokens || 0;
+        const cachedTokens = data.usage?.prompt_tokens_details?.cached_tokens;
         return {
-            promptTokens: data.usage?.prompt_tokens || 0,
-            completionTokens: data.usage?.completion_tokens || 0,
+            promptTokens,
+            completionTokens,
+            ...(cachedTokens !== undefined && { cachedTokens })
         };
     }
 

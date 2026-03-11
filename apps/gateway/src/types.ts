@@ -53,6 +53,7 @@ export interface ChannelConfig {
 export interface UsageInfo {
     promptTokens: number;
     completionTokens: number;
+    cachedTokens?: number;
 }
 
 export interface BillingContext {
@@ -62,6 +63,7 @@ export interface BillingContext {
     modelName: string;
     promptTokens: number;
     completionTokens: number;
+    cachedTokens?: number;
     userGroup: string;
     isStream: boolean;
     isPackageFree?: boolean;

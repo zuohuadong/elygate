@@ -25,6 +25,9 @@ export const sysRouter = new Elysia({ prefix: '/api' })
                 rmb_quota_per_unit: Number(optionCache.get('QuotaPerUnit', 500000)) / Number(optionCache.get('ExchangeRate', 7.2)),
                 exchange_rate: Number(optionCache.get('ExchangeRate', 7.2)),
                 display_in_currency: optionCache.get('DisplayInCurrency', 'false') === 'true',
+                github_oauth: !!process.env.GITHUB_CLIENT_ID,
+                discord_oauth: !!process.env.DISCORD_CLIENT_ID,
+                telegram_oauth: !!process.env.TELEGRAM_BOT_TOKEN
             }
         };
     })

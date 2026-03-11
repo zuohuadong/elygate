@@ -48,6 +48,48 @@ export const chatRouter = new Elysia()
             const cachedResponse = await lookupSemanticCache(userPrompt, model, embeddingChannel);
             if (cachedResponse) {
                 console.log(`[SemanticCache] HIT for model: ${model}`);
+                
+                // --- Semantic Cache Billing ---
+                try {
+                    let promptTokens = 0;
+                    let completionTokens = 0;
+                    if (cachedResponse.usage) {
+                        promptTokens = cachedResponse.usage.prompt_tokens || 0;
+                        completionTokens = cachedResponse.usage.completion_tokens || 0;
+                    } else {
+                        const promptText = userPrompt;
+                        let completionText = '';
+                        if (cachedResponse.choices && cachedResponse.choices[0]?.message?.content) {
+                            completionText = cachedResponse.choices[0].message.content;
+                        }
+                        promptTokens = Math.ceil(promptText.length / 1.5);
+                        completionTokens = Math.ceil(completionText.length / 1.5);
+                    }
+                    
+                    const actualCost = calculateCost(model, user.group, promptTokens, completionTokens);
+                    
+                    await reconcileQuota({
+                        userId: user.id,
+                        tokenId: token.id,
+                        preDeducted: 0,
+                        actualCost
+                    });
+                    
+                    await billAndLog({
+                        userId: user.id,
+                        tokenId: token.id,
+                        channelId: 0, // 0 signifies Semantic Cache Hit (Pure Profit)
+                        modelName: model,
+                        promptTokens,
+                        completionTokens,
+                        userGroup: user.group,
+                        isStream: false
+                    });
+                } catch (e: any) {
+                    console.error('[SemanticCache] Billing Error:', e.message);
+                }
+                // ------------------------------
+
                 return cachedResponse;
             }
         }
@@ -242,7 +284,7 @@ export const chatRouter = new Elysia()
                 }
 
                 // 5. Trigger Billing and Logging (Asynchronous)
-                const { promptTokens, completionTokens } = handler.extractUsage(rawData);
+                const { promptTokens, completionTokens, cachedTokens } = handler.extractUsage(rawData);
                 const actualCost = calculateCost(model, user.group, promptTokens, completionTokens);
 
                 await reconcileQuota({
@@ -259,6 +301,7 @@ export const chatRouter = new Elysia()
                     modelName: model,
                     promptTokens,
                     completionTokens,
+                    cachedTokens,
                     userGroup: user.group,
                     isStream: false
                 });

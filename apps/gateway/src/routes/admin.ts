@@ -659,7 +659,8 @@ export const adminRouter = new Elysia()
             data: data.map((l: any) => ({
                 ...l,
                 cost_usd: quotaToUSD(l.quota_cost),
-                cost_rmb: quotaToRMB(l.quota_cost)
+                cost_rmb: quotaToRMB(l.quota_cost),
+                cached_tokens: l.cached_tokens || 0
             })),
             total: countRow.total,
             page,
@@ -700,6 +701,7 @@ export const adminRouter = new Elysia()
             model_name: l.model_name,
             prompt_tokens: l.prompt_tokens,
             completion_tokens: l.completion_tokens,
+            cached_tokens: l.cached_tokens || 0,
             total_tokens: (l.prompt_tokens || 0) + (l.completion_tokens || 0),
             quota_cost: l.quota_cost,
             cost_usd: quotaToUSD(l.quota_cost),
@@ -720,7 +722,7 @@ export const adminRouter = new Elysia()
 
         const csvHeaders = [
             'ID', 'Created At', 'User ID', 'Username', 'Channel ID', 'Model',
-            'Prompt Tokens', 'Completion Tokens', 'Total Tokens', 'Quota Cost',
+            'Prompt Tokens', 'Completion Tokens', 'Cached Tokens', 'Total Tokens', 'Quota Cost',
             'Cost USD', 'Cost RMB', 'Status Code', 'Latency MS', 'IP',
             'Prompt', 'Response', 'Error Message'
         ].join(',');
@@ -734,6 +736,7 @@ export const adminRouter = new Elysia()
             `"${(l.model_name || '').replace(/"/g, '""')}"`,
             l.prompt_tokens,
             l.completion_tokens,
+            l.cached_tokens || 0,
             l.total_tokens,
             l.quota_cost,
             l.cost_usd,
@@ -890,7 +893,7 @@ export const adminRouter = new Elysia()
         return errorLogs;
     })
 
-    .get('/stats/granular', async ({ query }) => {
+    .get('/stats/granular', async ({ query }: any) => {
         const { start, end, group_by } = query as any;
         const startDate = start ? new Date(start) : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
         const endDate = end ? new Date(end) : new Date();
@@ -912,7 +915,7 @@ export const adminRouter = new Elysia()
         return stats;
     })
 
-    .get('/dashboard/period_stats', async ({ query }) => {
+    .get('/dashboard/period_stats', async ({ query }: any) => {
         const { period } = query as any;
         let startDate = new Date();
         startDate.setHours(0, 0, 0, 0); // Default to today
@@ -944,10 +947,25 @@ export const adminRouter = new Elysia()
                 COUNT(*)::int as total_requests,
                 COALESCE(SUM(quota_cost), 0)::bigint as total_cost,
                 COALESCE(SUM(prompt_tokens), 0)::bigint as total_prompt_tokens,
-                COALESCE(SUM(completion_tokens), 0)::bigint as total_completion_tokens
+                COALESCE(SUM(completion_tokens), 0)::bigint as total_completion_tokens,
+                COUNT(CASE WHEN channel_id = 0 THEN 1 END)::int as cache_hits,
+                COALESCE(SUM(CASE WHEN channel_id = 0 THEN quota_cost ELSE 0 END), 0)::bigint as cache_profit_quota,
+                COALESCE(SUM(CASE WHEN channel_id = 0 THEN prompt_tokens + completion_tokens ELSE 0 END), 0)::bigint as cached_tokens
             FROM logs
             WHERE ${condition}
         `;
+
+        // 1.5 Semantic Cache Storage Stats
+        let cache_size_bytes = 0;
+        let cache_record_count = 0;
+        try {
+            const [sizeRow] = await sql`SELECT pg_total_relation_size('semantic_cache') as size`;
+            const [countRow] = await sql`SELECT COUNT(*) as cnt FROM semantic_cache`;
+            cache_size_bytes = Number(sizeRow?.size || 0);
+            cache_record_count = Number(countRow?.cnt || 0);
+        } catch (e) {
+            console.warn('[Admin] Failed to read semantic_cache size:', e);
+        }
 
         // 2. Models by User (Consumer metrics)
         const models_user = await sql`
@@ -994,7 +1012,8 @@ export const adminRouter = new Elysia()
         return {
             overview: {
                 ...overview,
-                cached_tokens: 0 // Placeholder for future feature
+                cache_size_bytes,
+                cache_record_count
             },
             models_user,
             models_channel

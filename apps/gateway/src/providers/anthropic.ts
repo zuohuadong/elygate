@@ -140,9 +140,13 @@ export class AnthropicApiHandler implements ProviderHandler {
     }
 
     extractUsage(data: any) {
+        const promptTokens = data.usage?.input_tokens || 0;
+        const completionTokens = data.usage?.output_tokens || 0;
+        const cachedTokens = data.usage?.cache_read_input_tokens;
         return {
-            promptTokens: data.usage?.input_tokens || 0,
-            completionTokens: data.usage?.output_tokens || 0,
+            promptTokens,
+            completionTokens,
+            ...(cachedTokens !== undefined && { cachedTokens })
         };
     }
 

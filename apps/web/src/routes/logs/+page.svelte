@@ -19,17 +19,25 @@
             const data = Array.isArray(response) ? response : (response.data || []);
 
             // Format for display
-            logs = data.map((l) => ({
-                ...l,
-                dt_created_at: new Date(l.created_at || l.createdAt).toLocaleString(),
-                dt_user: `User ${l.user_id || l.userId}`,
-                dt_model: l.model_name || l.modelName,
-                dt_channel: l.channel_id ? `Channel ${l.channel_id}` : l.channelId ? `Channel ${l.channelId}` : "Unknown",
-                dt_token: l.token_id ? `Token ${l.token_id}` : l.tokenId ? `Token ${l.tokenId}` : "Direct",
-                dt_cost: `$ ${((l.quota_cost || l.quotaCost || 0) / 1000).toFixed(4)}`,
-                dt_duration: l.is_stream || l.isStream ? "Stream" : "Standard",
-                dt_status: "Success",
-            }));
+            logs = data.map((l) => {
+                let durationStr = l.is_stream || l.isStream ? "Stream" : "Standard";
+                const cachedTokens = l.cached_tokens || l.cachedTokens;
+                if (cachedTokens && cachedTokens > 0) {
+                    durationStr += ` <span class="text-emerald-500 font-bold ml-1" title="Prompt Caching: ${cachedTokens} tokens saved">🍃</span>`;
+                }
+
+                return {
+                    ...l,
+                    dt_created_at: new Date(l.created_at || l.createdAt).toLocaleString(),
+                    dt_user: `User ${l.user_id || l.userId}`,
+                    dt_model: l.model_name || l.modelName,
+                    dt_channel: l.channel_id ? `Channel ${l.channel_id}` : l.channelId ? `Channel ${l.channelId}` : "Unknown",
+                    dt_token: l.token_id ? `Token ${l.token_id}` : l.tokenId ? `Token ${l.tokenId}` : "Direct",
+                    dt_cost: `$ ${((l.quota_cost || l.quotaCost || 0) / 1000).toFixed(4)}`,
+                    dt_duration: durationStr,
+                    dt_status: "Success",
+                };
+            });
         } catch (err: any) {
             errorMsg = err.message || "Failed to load logs";
         } finally {

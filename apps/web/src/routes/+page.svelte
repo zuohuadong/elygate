@@ -24,6 +24,10 @@
         total_prompt_tokens: number;
         total_completion_tokens: number;
         cached_tokens: number;
+        cache_hits: number;
+        cache_profit_quota: number;
+        cache_size_bytes: number;
+        cache_record_count: number;
     }
 
     interface ModelStat {
@@ -47,6 +51,10 @@
         total_prompt_tokens: 0,
         total_completion_tokens: 0,
         cached_tokens: 0,
+        cache_hits: 0,
+        cache_profit_quota: 0,
+        cache_size_bytes: 0,
+        cache_record_count: 0,
     });
     let modelsUser = $state<ModelStat[]>([]);
     let modelsChannel = $state<ModelStat[]>([]);
@@ -263,40 +271,50 @@
             </div>
         </div>
 
-        <!-- 4. Cached Tokens -->
+        <!-- 4. Semantic Cache -->
         <div
             class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm flex flex-col justify-between gap-4"
         >
             <div>
                 <h3
-                    class="text-sm font-medium text-slate-500 dark:text-slate-400 mb-2"
+                    class="text-sm font-medium text-slate-500 dark:text-slate-400 mb-2 flex items-center justify-between"
                 >
-                    {i18n.lang === "zh" ? "缓存Token" : "Cached Tokens"}
+                    <span>{i18n.lang === "zh" ? "语义缓存" : "Semantic Cache"}</span>
+                    <span class="text-[10px] px-2 py-0.5 bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-full font-semibold">
+                        {i18n.lang === "zh" ? "纯利润" : "Pure Profit"}
+                    </span>
                 </h3>
-                <div
-                    class="text-3xl font-bold text-slate-900 dark:text-white tabular-nums tracking-tight"
-                >
-                    {formatTokens(overview.cached_tokens)}
+                <div class="flex items-baseline gap-2">
+                    <span class="text-3xl font-bold text-slate-900 dark:text-white tabular-nums tracking-tight">
+                        ${(overview.cache_profit_quota / 1000).toFixed(2)}
+                    </span>
+                    <span class="text-xs text-slate-400 font-medium">
+                        {i18n.lang === "zh" ? "盈利" : "Profit"}
+                    </span>
                 </div>
             </div>
             <div
                 class="flex justify-between items-center text-xs border-t border-slate-100 dark:border-slate-800 pt-3 mt-auto"
             >
-                <div class="flex flex-col gap-1">
-                    <span class="text-slate-400"
-                        >{i18n.lang === "zh" ? "写入:" : "Write:"}
-                        <span
-                            class="text-slate-600 dark:text-slate-300 font-medium tabular-nums ml-1"
-                            >0</span
-                        ></span
-                    >
-                    <span class="text-slate-400"
-                        >{i18n.lang === "zh" ? "读取:" : "Read:"}
-                        <span
-                            class="text-slate-600 dark:text-slate-300 font-medium tabular-nums ml-1"
-                            >{formatTokens(overview.cached_tokens)}</span
-                        ></span
-                    >
+                <div class="flex flex-col gap-1 w-full">
+                    <div class="flex justify-between w-full">
+                        <span class="text-slate-400">{i18n.lang === "zh" ? "命中次数:" : "Cache Hits:"}</span>
+                        <span class="text-slate-600 dark:text-slate-300 font-medium tabular-nums">{formatNumber(overview.cache_hits)}</span>
+                    </div>
+                    <div class="flex justify-between w-full">
+                        <span class="text-slate-400">{i18n.lang === "zh" ? "节省Token:" : "Tokens Saved:"}</span>
+                        <span class="text-slate-600 dark:text-slate-300 font-medium tabular-nums">{formatTokens(overview.cached_tokens)}</span>
+                    </div>
+                    <div class="flex justify-between w-full mt-1.5 pt-1.5 border-t border-slate-50 dark:border-slate-800/50">
+                        <span class="text-slate-400 text-[10px]">{i18n.lang === "zh" ? "数据库占用:" : "Storage:"}</span>
+                        <span class="text-slate-500 text-[10px] font-medium tabular-nums">
+                            {#if overview.cache_size_bytes > 0}
+                                {(overview.cache_size_bytes / 1024 / 1024).toFixed(1)} MB ({overview.cache_record_count})
+                            {:else}
+                                -
+                            {/if}
+                        </span>
+                    </div>
                 </div>
             </div>
         </div>
