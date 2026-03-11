@@ -55,6 +55,7 @@ export const en = {
         active: "Active",
         banned: "Banned",
         createdAt: "Created At",
+        used: "Used",
         add: "Add Key",
     },
     users: {
@@ -226,6 +227,7 @@ export const zh = {
         active: "正常",
         banned: "禁用/封禁",
         createdAt: "创建时间",
+        used: "已使用",
         add: "添加密钥",
     },
     users: {

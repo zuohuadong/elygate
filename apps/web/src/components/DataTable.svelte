@@ -18,6 +18,7 @@
         currentPage = 1,
         total = 0,
         onPageChange = (page: number) => {},
+        customActions,
     }: {
         data: any[];
         columns: Column[];
@@ -28,6 +29,7 @@
         currentPage?: number;
         total?: number;
         onPageChange?: (page: number) => void;
+        customActions?: import('svelte').Snippet<[any]>;
     } = $props();
 
     // Calculate pagination
@@ -98,6 +100,9 @@
                         <td
                             class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium"
                         >
+                            {#if customActions}
+                                {@render customActions(row)}
+                            {/if}
                             {#each extraActions as action}
                                 <button
                                     onclick={() => action.onClick(row)}
