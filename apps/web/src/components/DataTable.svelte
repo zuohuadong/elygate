@@ -30,6 +30,7 @@
         total?: number;
         onPageChange?: (page: number) => void;
         customActions?: import('svelte').Snippet<[any]>;
+        cell?: import('svelte').Snippet<[string, any, any]>;
     } = $props();
 
     // Calculate pagination
@@ -89,7 +90,9 @@
                             <td
                                 class="px-6 py-4 whitespace-nowrap text-slate-700 dark:text-slate-300"
                             >
-                                {#if col.render}
+                                {#if cell}
+                                    {@render cell(col.key, row[col.key], row)}
+                                {:else if col.render}
                                     {@html col.render(row[col.key], row)}
                                 {:else}
                                     {row[col.key]}

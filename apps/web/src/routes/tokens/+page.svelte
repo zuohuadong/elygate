@@ -33,12 +33,12 @@
                         : i18n.lang === "zh"
                           ? "禁用"
                           : "Banned",
-                dt_created_at: new Date(t.createdAt).toLocaleString(),
+                dt_created_at: t.createdAt ? new Date(t.createdAt).toLocaleString() : "-",
                 dt_remain_quota:
                     t.remainQuota === -1
                         ? i18n.t.tokens.unlimited
-                        : `$ ${(t.remainQuota / 1000).toFixed(2)}`,
-                dt_used_quota: `$ ${(t.usedQuota / 1000).toFixed(2)}`,
+                        : `$ ${(t.remainQuota / 500000).toFixed(2)}`,
+                dt_used_quota: `$ ${((t.usedQuota || 0) / 500000).toFixed(4)}`,
             }));
         } catch (err: any) {
             errorMsg = err.message || (i18n.lang === "zh" ? "加载令牌失败" : "Failed to load tokens");
@@ -70,6 +70,7 @@
 
     let columns = $derived([
         { key: "name", label: i18n.t.tokens.name },
+        ...(isAdmin ? [{ key: "creatorName", label: i18n.lang === "zh" ? "创建者" : "Creator" }] : []),
         { key: "key", label: i18n.t.tokens.key, render: renderKey },
         { key: "dt_remain_quota", label: i18n.t.tokens.quota },
         { key: "dt_used_quota", label: i18n.t.tokens.used },
