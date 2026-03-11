@@ -68,7 +68,7 @@
         isSubmitting = true;
         try {
             if (!user && !formData.password) {
-                throw new Error(i18n.lang === "zh" ? "新用户必须设置密码" : "Password is required for new users.");
+                throw new Error(i18n.t.users.passwordRequired);
             }
             const payload = { ...formData };
             if (user && !payload.password) {
@@ -104,7 +104,7 @@
                 <h3
                     class="text-lg font-semibold text-slate-900 dark:text-white"
                 >
-                    {user ? i18n.t.common.edit : i18n.t.common.add} User
+                    {user ? i18n.t.common.edit : i18n.t.common.add} {i18n.t.users.title}
                 </h3>
                 <button
                     onclick={onClose}
@@ -129,7 +129,7 @@
                     <label
                         for="u-username"
                         class="text-sm font-medium text-slate-700 dark:text-slate-300"
-                        >Username</label
+                        >{i18n.t.users.username}</label
                     >
                     <input
                         id="u-username"
@@ -142,14 +142,14 @@
                     <label
                         for="u-password"
                         class="text-sm font-medium text-slate-700 dark:text-slate-300"
-                        >Password</label
+                        >{i18n.t.users.password}</label
                     >
                     <input
                         id="u-password"
                         type="password"
                         placeholder={user
-                            ? "Leave blank to keep unchanged"
-                            : "Password"}
+                            ? i18n.t.users.passwordEditPlaceholder
+                            : i18n.t.users.passwordPlaceholder}
                         bind:value={formData.password}
                         class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
                     />
@@ -160,22 +160,22 @@
                         <label
                             for="u-role"
                             class="text-sm font-medium text-slate-700 dark:text-slate-300"
-                            >Role</label
+                            >{i18n.t.users.role}</label
                         >
                         <select
                             id="u-role"
                             bind:value={formData.role}
                             class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
                         >
-                            <option value={1}>Normal User</option>
-                            <option value={10}>Admin</option>
+                            <option value={1}>{i18n.t.users.normalUser}</option>
+                            <option value={10}>{i18n.t.users.admin}</option>
                         </select>
                     </div>
                     <div class="space-y-1.5">
                         <label
                             for="u-quota"
                             class="text-sm font-medium text-slate-700 dark:text-slate-300"
-                            >Quota</label
+                            >{i18n.t.users.quota}</label
                         >
                         <input
                             id="u-quota"
@@ -191,7 +191,7 @@
                         <label
                             for="u-group"
                             class="text-sm font-medium text-slate-700 dark:text-slate-300"
-                            >Group</label
+                            >{i18n.t.users.group}</label
                         >
                         <select
                             id="u-group"
@@ -211,15 +211,15 @@
                         <label
                             for="u-status"
                             class="text-sm font-medium text-slate-700 dark:text-slate-300"
-                            >Status</label
+                            >{i18n.t.users.status}</label
                         >
                         <select
                             id="u-status"
                             bind:value={formData.status}
                             class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
                         >
-                            <option value={1}>Active</option>
-                            <option value={2}>Disabled</option>
+                            <option value={1}>{i18n.t.users.active}</option>
+                            <option value={2}>{i18n.t.users.disabled}</option>
                         </select>
                     </div>
                 </div>

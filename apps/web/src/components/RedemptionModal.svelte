@@ -93,7 +93,7 @@
                 <h3
                     class="text-lg font-semibold text-slate-900 dark:text-white"
                 >
-                    {redemption ? i18n.t.common.edit : "Generate"} Redemption Code
+                    {redemption ? i18n.t.common.edit : i18n.t.redemptions.generateCode}
                 </h3>
                 <button
                     onclick={onClose}
@@ -118,12 +118,12 @@
                     <label
                         for="r-name"
                         class="text-sm font-medium text-slate-700 dark:text-slate-300"
-                        >Name / Note</label
+                        >{i18n.t.redemptions.nameNote}</label
                     >
                     <input
                         id="r-name"
                         bind:value={formData.name}
-                        placeholder="e.g. VIP Gift"
+                        placeholder={i18n.t.redemptions.namePlaceholder}
                         class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
                     />
                 </div>
@@ -132,7 +132,7 @@
                     <label
                         for="r-key"
                         class="text-sm font-medium text-slate-700 dark:text-slate-300"
-                        >Specific Key (Leave blank to auto-generate)</label
+                        >{i18n.t.redemptions.specificKey}</label
                     >
                     <input
                         id="r-key"
@@ -148,7 +148,7 @@
                         <label
                             for="r-quota"
                             class="text-sm font-medium text-slate-700 dark:text-slate-300"
-                            >Quota (Value)</label
+                            >{i18n.t.redemptions.quotaValue}</label
                         >
                         <input
                             id="r-quota"
@@ -162,7 +162,7 @@
                         <label
                             for="r-uses"
                             class="text-sm font-medium text-slate-700 dark:text-slate-300"
-                            >Max Uses</label
+                            >{i18n.t.redemptions.maxUses}</label
                         >
                         <input
                             id="r-uses"
@@ -178,15 +178,15 @@
                     <label
                         for="rd-status"
                         class="text-sm font-medium text-slate-700 dark:text-slate-300"
-                        >Status</label
+                        >{i18n.t.redemptions.status}</label
                     >
                     <select
                         id="rd-status"
                         bind:value={formData.status}
                         class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
                     >
-                        <option value={1}>Active</option>
-                        <option value={2}>Disabled / Exhausted</option>
+                        <option value={1}>{i18n.t.redemptions.active}</option>
+                        <option value={2}>{i18n.t.redemptions.disabled}</option>
                     </select>
                 </div>
             </div>

@@ -92,7 +92,7 @@
             <div class="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/50 shrink-0">
                 <h3 class="text-lg font-semibold text-slate-900 dark:text-white flex items-center gap-2">
                     <ShoppingBag class="w-5 h-5 text-indigo-500" />
-                    {pkg ? (i18n.lang === 'zh' ? '编辑套餐方案' : 'Edit Package') : (i18n.lang === 'zh' ? '新建套餐方案' : 'New Package')}
+                    {pkg ? i18n.t.packages.edit : i18n.t.packages.add}
                 </h3>
                 <button onclick={onClose} class="text-slate-400 hover:text-slate-500 dark:hover:text-slate-300 transition-colors p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800">
                     <X class="w-5 h-5" />
@@ -104,44 +104,44 @@
                     <div class="grid grid-cols-2 gap-4">
                         <div class="col-span-2">
                             <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                                {i18n.lang === 'zh' ? '套餐名称' : 'Package Name'} <span class="text-rose-500">*</span>
+                                {i18n.t.packages.name} <span class="text-rose-500">*</span>
                             </label>
-                            <input type="text" bind:value={formData.name} required placeholder="e.g. Pro Monthly Plan" class="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-sm text-slate-900 dark:text-white shadow-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors placeholder:text-slate-400" />
+                            <input type="text" bind:value={formData.name} required placeholder={i18n.t.packages.namePlaceholder} class="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-sm text-slate-900 dark:text-white shadow-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors placeholder:text-slate-400" />
                         </div>
                         
                         <div class="col-span-2">
                             <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                                {i18n.lang === 'zh' ? '描述文案' : 'Description'}
+                                {i18n.t.packages.description}
                             </label>
-                            <input type="text" bind:value={formData.description} placeholder="Short description seen by users" class="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-sm text-slate-900 dark:text-white shadow-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors placeholder:text-slate-400" />
+                            <input type="text" bind:value={formData.description} placeholder={i18n.t.packages.descriptionPlaceholder} class="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-sm text-slate-900 dark:text-white shadow-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors placeholder:text-slate-400" />
                         </div>
 
                         <div>
                             <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                                {i18n.lang === 'zh' ? '价格' : 'Price'} <span class="text-xs text-slate-400">($)</span> <span class="text-rose-500">*</span>
+                                {i18n.t.packages.price} <span class="text-xs text-slate-400">{i18n.t.packages.priceUnit}</span> <span class="text-rose-500">*</span>
                             </label>
                             <input type="number" step="0.01" min="0" bind:value={formData.price} required class="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-sm text-slate-900 dark:text-white shadow-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors" />
                         </div>
                         <div>
                             <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                                {i18n.lang === 'zh' ? '有效期' : 'Duration'} <span class="text-xs text-slate-400">({i18n.lang === 'zh' ? '天' : 'Days'})</span> <span class="text-rose-500">*</span>
+                                {i18n.t.packages.duration} <span class="text-xs text-slate-400">{i18n.t.packages.durationUnit}</span> <span class="text-rose-500">*</span>
                             </label>
                             <input type="number" min="1" bind:value={formData.durationDays} required class="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-sm text-slate-900 dark:text-white shadow-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors" />
                         </div>
 
                         <div class="col-span-2">
                             <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                                {i18n.lang === 'zh' ? '涵盖模型' : 'Included Models'} <span class="text-xs text-slate-400">({i18n.lang === 'zh' ? '英文逗号分隔' : 'Comma separated'})</span> <span class="text-rose-500">*</span>
+                                {i18n.t.packages.models} <span class="text-xs text-slate-400">{i18n.t.packages.modelsTip}</span> <span class="text-rose-500">*</span>
                             </label>
-                            <input type="text" bind:value={formData.models} required placeholder="gpt-4o, claude-3-5-sonnet" class="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-sm text-slate-900 dark:text-white shadow-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors font-mono" />
+                            <input type="text" bind:value={formData.models} required placeholder={i18n.t.packages.modelsPlaceholder} class="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-sm text-slate-900 dark:text-white shadow-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors font-mono" />
                         </div>
 
                         <div class="col-span-2">
                             <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                                {i18n.lang === 'zh' ? '通用限流方案' : 'Default Rate Limit Rule'}
+                                {i18n.t.packages.defaultRateLimit}
                             </label>
                             <select bind:value={formData.defaultRateLimitId} class="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-sm text-slate-900 dark:text-white shadow-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors">
-                                <option value="">{i18n.lang === 'zh' ? '-- 不限制 --' : '-- No Limit --'}</option>
+                                <option value="">{i18n.t.packages.noLimit}</option>
                                 {#each rateLimits as rule}
                                     <option value={String(rule.id)}>{rule.name} (RPM:{rule.rpm} RPH:{rule.rph} Concurrent:{rule.concurrent})</option>
                                 {/each}
@@ -150,11 +150,11 @@
 
                         <div class="col-span-2">
                             <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                                {i18n.lang === 'zh' ? '专属限流方案 (JSON)' : 'Model-specific Rate Limits (JSON)'}
+                                {i18n.t.packages.modelRateLimits}
                             </label>
                             <textarea bind:value={formData.modelRateLimitsJson} rows="3" class="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-sm text-slate-900 dark:text-white shadow-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors font-mono" placeholder='"gpt-4o": 2, "claude-3-5-sonnet": 3'></textarea>
                             <p class="text-xs text-slate-500 mt-1">
-                                {i18n.lang === 'zh' ? '格式：' : 'Format: '} <code>"model-name": rate_limit_rule_id</code> (Wrapped in JSON object)
+                                {i18n.t.packages.modelRateLimitsTip} <code>{i18n.t.packages.modelRateLimitsFormat}</code>
                             </p>
                         </div>
                     </div>
@@ -162,17 +162,17 @@
                     <div class="flex items-center gap-2 pt-2">
                         <input type="checkbox" id="pkg-public" bind:checked={formData.isPublic} class="w-4 h-4 text-indigo-600 bg-slate-100 border-slate-300 rounded focus:ring-indigo-500 dark:focus:ring-indigo-600 dark:ring-offset-slate-900 dark:bg-slate-800 dark:border-slate-700" />
                         <label for="pkg-public" class="text-sm font-medium text-slate-700 dark:text-slate-300">
-                            {i18n.lang === 'zh' ? '向所有用户公开销售 (C端可见)' : 'Available for public purchase (Visible to Consumers)'}
+                            {i18n.t.packages.isPublic}
                         </label>
                     </div>
                 </div>
 
                 <div class="flex items-center justify-end gap-3 pt-6 border-t border-slate-100 dark:border-slate-800 shrink-0">
                     <button type="button" onclick={onClose} class="px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors shadow-sm focus:ring-2 focus:ring-slate-500/20">
-                        {i18n.t.common?.cancel || 'Cancel'}
+                        {i18n.t.common.cancel}
                     </button>
                     <button type="submit" class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors shadow-sm focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:focus:ring-offset-slate-900">
-                        {i18n.t.common?.save || 'Save'}
+                        {i18n.t.common.save}
                     </button>
                 </div>
             </form>

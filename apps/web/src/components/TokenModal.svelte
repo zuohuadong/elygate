@@ -109,7 +109,7 @@
                     <input
                         id="tk-name"
                         bind:value={formData.name}
-                        placeholder="e.g., Test Key"
+                        placeholder={i18n.t.tokens.namePlaceholder}
                         class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
                     />
                 </div>
@@ -118,7 +118,7 @@
                     <label
                         for="tk-quota"
                         class="text-sm font-medium text-slate-700 dark:text-slate-300"
-                        >{i18n.t.tokens.quota} (1000 = $1.00)</label
+                        >{i18n.t.tokens.quota} {i18n.t.tokens.quotaUnit}</label
                     >
                     <div class="relative">
                         <span
@@ -139,9 +139,7 @@
                             <button
                                 onclick={() => (formData.remainQuota = -1)}
                                 class="text-[10px] px-2 py-0.5 rounded border border-slate-200 dark:border-slate-700 text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800"
-                                >{i18n.lang === "zh"
-                                    ? "设为无限"
-                                    : "Unlimited"}</button
+                                >{i18n.t.tokens.unlimited}</button
                             >
                             <button
                                 onclick={() =>
@@ -157,9 +155,7 @@
                     <label
                         for="tk-expire"
                         class="text-sm font-medium text-slate-700 dark:text-slate-300"
-                        >{i18n.lang === "zh"
-                            ? "过期时间 (-1 为永不过期)"
-                            : "Expiration (-1 for never)"}</label
+                        >{i18n.t.tokens.expiredAt} {i18n.t.tokens.expiredAtTip}</label
                     >
                     <input
                         id="tk-expire"
@@ -180,14 +176,8 @@
                         bind:value={formData.status}
                         class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
                     >
-                        <option value={1}
-                            >{i18n.lang === "zh" ? "正常" : "Active"}</option
-                        >
-                        <option value={2}
-                            >{i18n.lang === "zh"
-                                ? "禁用/封禁"
-                                : "Banned"}</option
-                        >
+                        <option value={1}>{i18n.t.tokens.active}</option>
+                        <option value={2}>{i18n.t.tokens.banned}</option>
                     </select>
                 </div>
             </div>
