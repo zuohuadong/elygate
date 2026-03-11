@@ -175,12 +175,13 @@
                         <label
                             for="u-quota"
                             class="text-sm font-medium text-slate-700 dark:text-slate-300"
-                            >{i18n.t.users.quota}</label
+                            >{i18n.t.users.quota} (1 = $0.001)</label
                         >
                         <input
                             id="u-quota"
                             type="number"
                             bind:value={formData.quota}
+                            placeholder="500000 = $1.00"
                             class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
                         />
                     </div>
