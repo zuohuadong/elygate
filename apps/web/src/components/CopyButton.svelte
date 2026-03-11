@@ -12,13 +12,41 @@
 
     function handleCopy(e: MouseEvent) {
         e.stopPropagation();
-        navigator.clipboard.writeText(value).then(() => {
+        
+        const success = () => {
             copied = true;
             if (timeout) clearTimeout(timeout);
             timeout = setTimeout(() => {
                 copied = false;
             }, 2000);
-        });
+        };
+
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(value).then(success).catch(err => {
+                console.error("Clipboard API failed, trying fallback:", err);
+                fallbackCopy(value, success);
+            });
+        } else {
+            fallbackCopy(value, success);
+        }
+    }
+
+    function fallbackCopy(text: string, cb: () => void) {
+        try {
+            const textArea = document.createElement("textarea");
+            textArea.value = text;
+            textArea.style.position = "fixed";
+            textArea.style.left = "-9999px";
+            textArea.style.top = "0";
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            const successful = document.execCommand('copy');
+            document.body.removeChild(textArea);
+            if (successful) cb();
+        } catch (err) {
+            console.error('Fallback copy failed:', err);
+        }
     }
 </script>
 

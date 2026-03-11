@@ -458,7 +458,6 @@ export const adminRouter = new Elysia()
         }
     })
 
-    // --- Token Management ---
     .get('/tokens', async () => {
         const tokens = await sql`
             SELECT t.*, u.username as creator_name
@@ -466,7 +465,18 @@ export const adminRouter = new Elysia()
             LEFT JOIN users u ON t.user_id = u.id
             ORDER BY t.id DESC
         `;
-        return tokens;
+        return tokens.map((t: any) => ({
+            id: t.id,
+            name: t.name,
+            key: t.key,
+            status: t.status,
+            remainQuota: t.remain_quota,
+            usedQuota: t.used_quota,
+            models: t.models,
+            createdAt: t.created_at,
+            userId: t.user_id,
+            creatorName: t.creator_name
+        }));
     })
 
     .post('/tokens', async ({ body, user, set }: any) => {

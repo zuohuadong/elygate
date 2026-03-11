@@ -26,6 +26,13 @@
             const data = await apiFetch<any[]>(endpoint);
             tokens = data.map((t) => ({
                 ...t,
+                // Ensure we handle both snake_case and camelCase from backend
+                name: t.name,
+                key: t.key,
+                status: t.status,
+                remainQuota: t.remainQuota ?? t.remain_quota,
+                usedQuota: t.usedQuota ?? t.used_quota,
+                createdAt: t.createdAt ?? t.created_at,
                 dt_status:
                     t.status === 1
                         ? i18n.lang === "zh"
@@ -33,13 +40,13 @@
                             : "Active"
                         : i18n.lang === "zh"
                           ? "禁用"
-                dt_created_at: new Date(t.createdAt).toLocaleString(),
-                dt_created_at: t.createdAt ? new Date(t.createdAt).toLocaleString() : "-",
+                          : "Banned",
+                dt_created_at: (t.createdAt ?? t.created_at) ? new Date(t.createdAt ?? t.created_at).toLocaleString() : "-",
                 dt_remain_quota:
-                    t.remainQuota === -1
-                        : `$ ${(t.remainQuota / 1000).toFixed(2)}`,
-                dt_used_quota: `$ ${(t.usedQuota / 1000).toFixed(2)}`,
-                dt_used_quota: `$ ${((t.usedQuota || 0) / 500000).toFixed(4)}`,
+                    (t.remainQuota ?? t.remain_quota) === -1
+                        ? i18n.t.tokens.unlimited
+                        : `$ ${((t.remainQuota ?? t.remain_quota) / 500000).toFixed(2)}`,
+                dt_used_quota: `$ ${(((t.usedQuota ?? t.used_quota) || 0) / 500000).toFixed(4)}`,
             }));
         } catch (err: any) {
             errorMsg = err.message || (i18n.lang === "zh" ? "加载令牌失败" : "Failed to load tokens");
@@ -70,6 +77,7 @@
         { key: "dt_created_at", label: i18n.t.tokens.createdAt },
     ]);
 
+    function handleAdd() {
         selectedToken = null;
         isModalOpen = true;
     }
