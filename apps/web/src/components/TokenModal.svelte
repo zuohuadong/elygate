@@ -62,6 +62,11 @@
             isSubmitting = false;
         }
     }
+
+    let isBackdropMouseDown = false;
+    function handleMouseDown(e: MouseEvent) {
+        isBackdropMouseDown = e.target === e.currentTarget;
+    }
 </script>
 
 {#if show}
@@ -70,7 +75,11 @@
     <div
         class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
         transition:fade={{ duration: 200 }}
-        onclick={onClose}
+        onmousedown={handleMouseDown}
+        onclick={(e) => e.target === e.currentTarget && isBackdropMouseDown && onClose()}
+        role="dialog"
+        aria-modal="true"
+        tabindex="-1"
     >
         <div
             class="bg-white dark:bg-slate-950 w-full max-w-md rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden"

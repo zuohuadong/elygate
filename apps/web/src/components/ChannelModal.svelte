@@ -79,7 +79,14 @@
         return JSON.stringify(formData) !== JSON.stringify(initial);
     }
 
+    let isBackdropMouseDown = false;
+
+    function handleMouseDown(e: MouseEvent) {
+        isBackdropMouseDown = e.target === e.currentTarget;
+    }
+
     function handleBackdropClick() {
+        if (!isBackdropMouseDown) return;
         if (hasChanges()) {
             showCloseConfirm = true;
         } else {
@@ -180,9 +187,11 @@
     <div
         class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
         transition:fade={{ duration: 200 }}
+        onmousedown={handleMouseDown}
         onclick={(e) => e.target === e.currentTarget && handleBackdropClick()}
         role="dialog"
         aria-modal="true"
+        tabindex="-1"
         aria-label={channel ? i18n.t.common.edit : i18n.t.common.add}
     >
         <div

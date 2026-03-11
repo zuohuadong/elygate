@@ -98,6 +98,11 @@
         syncFromQuota(quota);
         showCalculator = false;
     }
+
+    let isBackdropMouseDown = false;
+    function handleMouseDown(e: MouseEvent) {
+        isBackdropMouseDown = e.target === e.currentTarget;
+    }
 </script>
 
 {#if show}
@@ -106,7 +111,11 @@
     <div
         class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
         transition:fade={{ duration: 200 }}
-        onclick={(e) => e.target === e.currentTarget && onClose()}
+        onmousedown={handleMouseDown}
+        onclick={(e) => e.target === e.currentTarget && isBackdropMouseDown && onClose()}
+        role="dialog"
+        aria-modal="true"
+        tabindex="-1"
     >
         <!-- svelte-ignore a11y_click_events_have_key_events -->
         <!-- svelte-ignore a11y_no_static_element_interactions -->

@@ -406,12 +406,34 @@ export const adminRouter = new Elysia()
         const fetchHeaders = handler.buildHeaders(testKey);
 
         // Construct models URL based on channel type
-        const baseUrl = channel.base_url || 'https://api.openai.com';
-        let modelsUrl = `${baseUrl}/v1/models`;
-
+        // Smart URL handling: avoid duplicate /v1 prefix
+        let baseUrl = channel.base_url || 'https://api.openai.com';
+        
+        // Remove trailing slash for consistency
+        baseUrl = baseUrl.replace(/\/+$/, '');
+        
+        let modelsUrl: string;
+        
         // For Gemini, use different endpoint
         if (channel.type === ChannelType.GEMINI) {
-            modelsUrl = `${baseUrl}/v1beta/models`;
+            // Check if URL already has /v1beta
+            if (baseUrl.endsWith('/v1beta')) {
+                modelsUrl = `${baseUrl}/models`;
+            } else if (baseUrl.includes('/v1beta/models')) {
+                modelsUrl = baseUrl;
+            } else {
+                modelsUrl = `${baseUrl}/v1beta/models`;
+            }
+        } else {
+            // OpenAI-compatible endpoints
+            // Check if URL already has /v1 or /v1/models
+            if (baseUrl.endsWith('/v1/models') || baseUrl.endsWith('/v1/models/')) {
+                modelsUrl = baseUrl;
+            } else if (baseUrl.endsWith('/v1')) {
+                modelsUrl = `${baseUrl}/models`;
+            } else {
+                modelsUrl = `${baseUrl}/v1/models`;
+            }
         }
 
         try {
