@@ -161,14 +161,19 @@ const app = new Elysia()
                 }
                 if (isPackageFree) return true;
 
-                // B. Wildcard Denied Models Filter
-                if (matchPattern(model, groupPolicy.deniedModels)) {
+                // B. Allowed Models Filter (whitelist)
+                if (groupPolicy.allowedModels && groupPolicy.allowedModels.length > 0) {
                     if (!matchPattern(model, groupPolicy.allowedModels)) {
                         return false;
                     }
                 }
 
-                // C. Channel Type / Provider Filter
+                // C. Denied Models Filter (blacklist)
+                if (matchPattern(model, groupPolicy.deniedModels)) {
+                    return false;
+                }
+
+                // D. Channel Type / Provider Filter
                 let candidateChannels = memoryCache.selectChannels(model, u.group);
                 if (groupPolicy.deniedChannelTypes && groupPolicy.deniedChannelTypes.length > 0) {
                     candidateChannels = candidateChannels.filter(ch => !groupPolicy.deniedChannelTypes.includes(ch.type));
