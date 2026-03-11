@@ -124,7 +124,7 @@ async function flushBillingQueue() {
         const uniqueChannelIds = [...new Set(tasks.map((t: any) => t.channelId).filter(Boolean))];
         const channelRatios: Record<number, number> = {};
         if (uniqueChannelIds.length > 0) {
-            const channels = await sql`SELECT id, price_ratio FROM channels WHERE id IN ${uniqueChannelIds}`;
+            const channels = await sql`SELECT id, price_ratio FROM channels WHERE id IN ${sql(uniqueChannelIds)}`;
             for (const ch of channels) {
                 channelRatios[ch.id] = Number(ch.price_ratio) || 1.0;
             }

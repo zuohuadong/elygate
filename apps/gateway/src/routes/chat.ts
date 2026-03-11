@@ -275,7 +275,24 @@ export const chatRouter = new Elysia()
                 }
 
                 // If not streaming, return JSON object and handle protocol transformation
-                const rawData = await response.json();
+                let rawData: any;
+                const contentType = response.headers.get('content-type') || '';
+                
+                if (contentType.includes('application/json')) {
+                    rawData = await response.json();
+                } else if (contentType.includes('text/event-stream') || contentType.includes('text/plain')) {
+                    // Some providers return SSE format even for non-stream requests
+                    const text = await response.text();
+                    if (text.startsWith('data:')) {
+                        const jsonStr = text.trim().slice(5).trim();
+                        rawData = JSON.parse(jsonStr);
+                    } else {
+                        rawData = JSON.parse(text);
+                    }
+                } else {
+                    rawData = await response.json();
+                }
+                
                 const formattedData = handler.transformResponse(rawData);
 
                 // Async: write to semantic cache (fire-and-forget)
