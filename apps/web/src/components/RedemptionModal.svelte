@@ -1,7 +1,8 @@
 <script lang="ts">
-    import { X, Save, Calculator } from "lucide-svelte";
+    import { X, Save, Calculator, DollarSign, Coins } from "lucide-svelte";
     import { fade, scale } from "svelte/transition";
     import { i18n } from "$lib/i18n/index.svelte";
+    import { session } from "$lib/session.svelte";
     import QuotaCalculator from "./QuotaCalculator.svelte";
 
     import { type Redemption } from "$lib/types";
@@ -27,6 +28,25 @@
         status: 1,
     });
 
+    // Derived/Local conversion state for UI
+    let usd = $state(0);
+    let rmb = $state(0);
+
+    function syncFromQuota(q: number) {
+        usd = Number((q / session.quotaPerUnit).toFixed(4));
+        rmb = Number((usd * session.exchangeRate).toFixed(2));
+    }
+
+    function syncFromUSD(u: number) {
+        formData.quota = Math.round(u * session.quotaPerUnit);
+        rmb = Number((u * session.exchangeRate).toFixed(2));
+    }
+
+    function syncFromRMB(r: number) {
+        usd = Number((r / session.exchangeRate).toFixed(4));
+        formData.quota = Math.round(usd * session.quotaPerUnit);
+    }
+
     let isSubmitting = $state(false);
     let error = $state("");
     let showCalculator = $state(false);
@@ -43,13 +63,14 @@
                 };
             } else {
                 formData = {
-                    name: "Top-up Code",
+                    name: i18n.lang === 'zh' ? "额度充值码" : "Top-up Code",
                     key: "",
                     quota: 500000,
                     count: 1,
                     status: 1,
                 };
             }
+            syncFromQuota(formData.quota);
             error = "";
         }
     });
@@ -68,6 +89,7 @@
 
     function applyQuota(quota: number) {
         formData.quota = quota;
+        syncFromQuota(quota);
         showCalculator = false;
     }
 </script>
@@ -143,22 +165,88 @@
                     />
                 </div>
 
-                <div class="grid grid-cols-2 gap-4">
+                <div class="space-y-4 pt-2">
+                    <!-- Quota Input -->
                     <div class="space-y-1.5">
                         <label
                             for="r-quota"
-                            class="text-sm font-medium text-slate-700 dark:text-slate-300"
-                            >{i18n.t.redemptions.quotaValue}</label
+                            class="text-sm font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-2"
                         >
-                        <input
-                            id="r-quota"
-                            type="number"
-                            bind:value={formData.quota}
-                            class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
-                        />
-                        <p class="text-xs text-slate-500">500,000 = $0.5</p>
+                            <Calculator class="w-4 h-4 text-indigo-500" />
+                            {i18n.t.redemptions.quotaHelp}
+                        </label>
+                        <div class="relative">
+                            <input
+                                id="r-quota"
+                                type="number"
+                                bind:value={formData.quota}
+                                oninput={(e) => syncFromQuota(Number(e.currentTarget.value))}
+                                class="w-full pl-3 pr-10 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-sm font-medium focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                            />
+                            <div class="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400 uppercase">
+                                Qta
+                            </div>
+                        </div>
                     </div>
-                    <div class="space-y-1.5">
+
+                    <!-- Currency Conversion Grid -->
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="space-y-1.5">
+                            <label
+                                for="r-usd"
+                                class="text-xs font-medium text-slate-500 dark:text-slate-400 flex items-center gap-1.5"
+                            >
+                                <DollarSign class="w-3.5 h-3.5 text-emerald-500" />
+                                {i18n.t.redemptions.usdAmount}
+                            </label>
+                            <div class="relative">
+                                <input
+                                    id="r-usd"
+                                    type="number"
+                                    step="0.01"
+                                    bind:value={usd}
+                                    oninput={(e) => syncFromUSD(Number(e.currentTarget.value))}
+                                    class="w-full pl-3 pr-8 py-2 rounded-lg border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                                />
+                                <div class="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400">
+                                    USD
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="space-y-1.5">
+                            <label
+                                for="r-rmb"
+                                class="text-xs font-medium text-slate-500 dark:text-slate-400 flex items-center gap-1.5"
+                            >
+                                <Coins class="w-3.5 h-3.5 text-amber-500" />
+                                {i18n.t.redemptions.rmbAmount}
+                            </label>
+                            <div class="relative">
+                                <input
+                                    id="r-rmb"
+                                    type="number"
+                                    step="0.01"
+                                    bind:value={rmb}
+                                    oninput={(e) => syncFromRMB(Number(e.currentTarget.value))}
+                                    class="w-full pl-3 pr-8 py-2 rounded-lg border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                                />
+                                <div class="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400">
+                                    RMB
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-indigo-50/50 dark:bg-indigo-500/5 rounded-lg p-3 border border-indigo-100/50 dark:border-indigo-500/10">
+                        <p class="text-[11px] text-indigo-600 dark:text-indigo-400 leading-relaxed font-medium">
+                            {i18n.t.redemptions.conversionNotice.replace('{rate}', session.exchangeRate.toString())}
+                            <br/>
+                            1 USD = {session.quotaPerUnit.toLocaleString()} Quota
+                        </p>
+                    </div>
+
+                    <div class="space-y-1.5 pt-2">
                         <label
                             for="r-uses"
                             class="text-sm font-medium text-slate-700 dark:text-slate-300"

@@ -93,6 +93,10 @@ export const en = {
         disabled: "Disabled / Exhausted",
         generate: "Generate",
         generateCode: "Generate Redemption Code",
+        quotaHelp: "Quota",
+        usdAmount: "USD Amount",
+        rmbAmount: "RMB Amount",
+        conversionNotice: "Calculated based on rate: {rate}",
     },
     pricing: {
         title: "Pricing Ratios",
@@ -298,6 +302,10 @@ export const zh = {
         disabled: "禁用 / 已用尽",
         generate: "生成兑换码",
         generateCode: "生成兑换码",
+        quotaHelp: "充值额度",
+        usdAmount: "美元金额",
+        rmbAmount: "人民币金额",
+        conversionNotice: "基于当前汇率计算: {rate}",
     },
     pricing: {
         title: "计费倍率",

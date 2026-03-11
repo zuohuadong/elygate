@@ -63,7 +63,7 @@
                     password: "",
                     role: 1,
                     quotaAmount: 1,
-                    quotaCurrency: session.currency || "USD",
+                    quotaCurrency: (session.currency as "USD" | "RMB") || "USD",
                     group: "default",
                     status: 1,
                 };
