@@ -19,6 +19,7 @@
         total = 0,
         onPageChange = (page: number) => {},
         customActions,
+        cell,
     }: {
         data: any[];
         columns: Column[];

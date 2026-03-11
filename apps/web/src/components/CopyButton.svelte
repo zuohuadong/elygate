@@ -1,6 +1,6 @@
 <script lang="ts">
     import { Copy, Check } from "lucide-svelte";
-    import { fade } from "svelte/transition";
+    import { fade, fly } from "svelte/transition";
 
     let { value, class: className = "" } = $props<{
         value: string;
@@ -33,7 +33,7 @@
         </div>
         <div
             class="absolute -top-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-slate-900 dark:bg-slate-800 text-white text-[10px] rounded shadow-lg whitespace-nowrap"
-            in:fade={{ y: 5, duration: 200 }}
+            in:fly={{ y: 5, duration: 200 }}
             out:fade={{ duration: 150 }}
         >
             Copied!

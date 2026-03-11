@@ -1,6 +1,7 @@
 <script lang="ts">
     import DataTable from "../../components/DataTable.svelte";
     import TokenModal from "../../components/TokenModal.svelte";
+    import CopyButton from "../../components/CopyButton.svelte";
     import { KeyRound, Search, Plus, RefreshCw } from "lucide-svelte";
     import { apiFetch } from "$lib/api";
     import { i18n } from "$lib/i18n/index.svelte";
@@ -51,15 +52,6 @@
         loadTokens();
     });
 
-    const renderStatus = (val: string) => {
-        const isActive = val === "正常" || val === "Active";
-        return `<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${isActive ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-400" : "bg-rose-100 text-rose-800 dark:bg-rose-500/10 dark:text-rose-400"}"><span class="w-1.5 h-1.5 ${isActive ? "bg-emerald-500" : "bg-rose-500"} rounded-full mr-1.5"></span>${val}</span>`;
-    };
-
-    const renderKey = (val: string) => {
-        return `<span class="font-mono text-xs bg-slate-100 dark:bg-slate-800/60 text-slate-700 dark:text-slate-300 px-2 py-1 rounded border border-slate-200 dark:border-slate-700 select-all cursor-pointer active:scale-95 transition-transform" title="Copy">${val}</span>`;
-    };
-
     let filteredTokens = $derived(
         tokens.filter(
             (t) =>
@@ -71,10 +63,10 @@
     let columns = $derived([
         { key: "name", label: i18n.t.tokens.name },
         ...(isAdmin ? [{ key: "creatorName", label: i18n.lang === "zh" ? "创建者" : "Creator" }] : []),
-        { key: "key", label: i18n.t.tokens.key, render: renderKey },
+        { key: "key", label: i18n.t.tokens.key },
         { key: "dt_remain_quota", label: i18n.t.tokens.quota },
         { key: "dt_used_quota", label: i18n.t.tokens.used },
-        { key: "dt_status", label: i18n.t.tokens.status, render: renderStatus },
+        { key: "dt_status", label: i18n.t.tokens.status },
         { key: "dt_created_at", label: i18n.t.tokens.createdAt },
     ]);
 
@@ -196,7 +188,26 @@
             {columns}
             onEdit={handleEdit}
             onDelete={handleDelete}
-        />
+        >
+            {#snippet cell(key, value, row)}
+                {#if key === 'key'}
+                    <div class="flex items-center gap-2">
+                        <span class="font-mono text-xs bg-slate-100 dark:bg-slate-800/60 text-slate-700 dark:text-slate-300 px-2 py-1 rounded border border-slate-200 dark:border-slate-700 select-all cursor-pointer">
+                            {value}
+                        </span>
+                        <CopyButton {value} />
+                    </div>
+                {:else if key === 'dt_status'}
+                    {@const isActive = value === "正常" || value === "Active"}
+                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium {isActive ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-400' : 'bg-rose-100 text-rose-800 dark:bg-rose-500/10 dark:text-rose-400'}">
+                        <span class="w-1.5 h-1.5 {isActive ? 'bg-emerald-500' : 'bg-rose-500'} rounded-full mr-1.5"></span>
+                        {value}
+                    </span>
+                {:else}
+                    {value}
+                {/if}
+            {/snippet}
+        </DataTable>
     {/if}
 </div>
 

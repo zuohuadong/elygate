@@ -1,6 +1,7 @@
 <script lang="ts">
     import DataTable from "../../components/DataTable.svelte";
-    import { Plus, Ticket, Trash2, Copy, Check } from "lucide-svelte";
+    import CopyButton from "../../components/CopyButton.svelte";
+    import { Plus, Ticket, Trash2 } from "lucide-svelte";
     import { apiFetch } from "$lib/api";
     import { i18n } from "$lib/i18n/index.svelte";
     import { onMount } from "svelte";
@@ -13,11 +14,12 @@
         giftQuota: number;
         status: number;
         expiresAt: string | null;
-        createdBy: number | null;
         creatorName: string | null;
         createdAt: string;
-        updatedAt: string;
         displayStatus?: string;
+        usageStr?: string;
+        formattedQuota?: string;
+        formattedExpires?: string;
     }
 
     let inviteCodes = $state<InviteCode[]>([]);
@@ -38,8 +40,6 @@
         codePrefix: ""
     });
 
-    let copiedId = $state<number | null>(null);
-
     async function loadData() {
         isLoading = true;
         try {
@@ -47,7 +47,7 @@
             inviteCodes = data.data.map((c) => ({
                 ...c,
                 displayStatus: getStatusText(c.status, c.usedCount, c.maxUses, c.expiresAt),
-                formattedQuota: `$${(c.giftQuota / 1000).toFixed(2)}`,
+                formattedQuota: `$${(c.giftQuota / 500000).toFixed(2)}`,
                 usageStr: `${c.usedCount} / ${c.maxUses}`,
                 formattedExpires: c.expiresAt ? new Date(c.expiresAt).toLocaleString() : "-"
             }));
@@ -68,18 +68,6 @@
 
     onMount(loadData);
 
-    const renderStatus = (val: string) => {
-        let colorClass = "bg-slate-100 text-slate-800 dark:bg-slate-500/10 dark:text-slate-400";
-        if (val === (i18n.lang === "zh" ? "有效" : "Active")) {
-            colorClass = "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-400";
-        } else if (val === (i18n.lang === "zh" ? "已用完" : "Exhausted") || val === (i18n.lang === "zh" ? "已过期" : "Expired")) {
-            colorClass = "bg-amber-100 text-amber-800 dark:bg-amber-500/10 dark:text-amber-400";
-        } else if (val === (i18n.lang === "zh" ? "已禁用" : "Disabled")) {
-            colorClass = "bg-rose-100 text-rose-800 dark:bg-rose-500/10 dark:text-rose-400";
-        }
-        return `<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${colorClass}">${val}</span>`;
-    };
-
     let columns = $derived([
         { key: "id", label: "ID" },
         { key: "code", label: i18n.lang === "zh" ? "邀请码" : "Code" },
@@ -87,7 +75,7 @@
         { key: "formattedQuota", label: i18n.lang === "zh" ? "赠送额度" : "Gift Quota" },
         { key: "formattedExpires", label: i18n.lang === "zh" ? "过期时间" : "Expires" },
         { key: "creatorName", label: i18n.lang === "zh" ? "创建者" : "Creator" },
-        { key: "displayStatus", label: i18n.t.tokens.status, render: renderStatus },
+        { key: "displayStatus", label: i18n.t.tokens.status },
     ]);
 
     function handleAdd() {
@@ -149,12 +137,6 @@
             alert(i18n.t.common.failed + ": " + err.message);
         }
     }
-
-    async function copyCode(code: string, id: number) {
-        await navigator.clipboard.writeText(code);
-        copiedId = id;
-        setTimeout(() => { copiedId = null; }, 2000);
-    }
 </script>
 
 <div class="flex-1 space-y-6 text-left">
@@ -201,77 +183,42 @@
             {i18n.t.common.failed}: {errorMsg}
         </div>
     {:else}
-        <div class="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
-            <div class="overflow-x-auto">
-                <table class="w-full text-sm text-left">
-                    <thead class="text-xs text-slate-700 dark:text-slate-300 uppercase bg-slate-50 dark:bg-slate-900">
-                        <tr>
-                            <th class="px-4 py-3">ID</th>
-                            <th class="px-4 py-3">{i18n.lang === "zh" ? "邀请码" : "Code"}</th>
-                            <th class="px-4 py-3">{i18n.lang === "zh" ? "使用次数" : "Usage"}</th>
-                            <th class="px-4 py-3">{i18n.lang === "zh" ? "赠送额度" : "Gift Quota"}</th>
-                            <th class="px-4 py-3">{i18n.lang === "zh" ? "过期时间" : "Expires"}</th>
-                            <th class="px-4 py-3">{i18n.lang === "zh" ? "创建者" : "Creator"}</th>
-                            <th class="px-4 py-3">{i18n.t.tokens.status}</th>
-                            <th class="px-4 py-3">{i18n.lang === "zh" ? "操作" : "Actions"}</th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y divide-slate-200 dark:divide-slate-800">
-                        {#each inviteCodes as code (code.id)}
-                            <tr class="hover:bg-slate-50 dark:hover:bg-slate-900/50">
-                                <td class="px-4 py-3 text-slate-900 dark:text-slate-100">{code.id}</td>
-                                <td class="px-4 py-3">
-                                    <div class="flex items-center gap-2">
-                                        <code class="text-xs bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded">{code.code}</code>
-                                        <button
-                                            onclick={() => copyCode(code.code, code.id)}
-                                            class="p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded transition-colors"
-                                            title={i18n.lang === "zh" ? "复制" : "Copy"}
-                                        >
-                                            {#if copiedId === code.id}
-                                                <Check class="w-4 h-4 text-emerald-500" />
-                                            {:else}
-                                                <Copy class="w-4 h-4 text-slate-400" />
-                                            {/if}
-                                        </button>
-                                    </div>
-                                </td>
-                                <td class="px-4 py-3 text-slate-900 dark:text-slate-100">{code.usedCount} / {code.maxUses}</td>
-                                <td class="px-4 py-3 text-slate-900 dark:text-slate-100">${(code.giftQuota / 1000).toFixed(2)}</td>
-                                <td class="px-4 py-3 text-slate-900 dark:text-slate-100">{code.expiresAt ? new Date(code.expiresAt).toLocaleString() : "-"}</td>
-                                <td class="px-4 py-3 text-slate-900 dark:text-slate-100">{code.creatorName || "-"}</td>
-                                <td class="px-4 py-3">
-                                    {@html renderStatus(code.displayStatus || '')}
-                                </td>
-                                <td class="px-4 py-3">
-                                    <div class="flex items-center gap-2">
-                                        <button
-                                            onclick={() => handleToggleStatus(code)}
-                                            class="px-2 py-1 text-xs rounded bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-colors"
-                                        >
-                                            {code.status === 1 ? (i18n.lang === "zh" ? "禁用" : "Disable") : (i18n.lang === "zh" ? "启用" : "Enable")}
-                                        </button>
-                                        <button
-                                            onclick={() => handleDelete(code)}
-                                            class="p-1 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded transition-colors"
-                                            title={i18n.lang === "zh" ? "删除" : "Delete"}
-                                        >
-                                            <Trash2 class="w-4 h-4" />
-                                        </button>
-                                    </div>
-                                </td>
-                            </tr>
-                        {:else}
-                            <tr>
-                                <td colspan="8" class="px-4 py-8 text-center text-slate-500 dark:text-slate-400">
-                                    {i18n.lang === "zh" ? "暂无邀请码" : "No invite codes found"}
-                                </td>
-                            </tr>
-                        {/each}
-                    </tbody>
-                </table>
-            </div>
-        </div>
+        <DataTable
+            data={inviteCodes}
+            {columns}
+            onDelete={handleDelete}
+        >
+            {#snippet cell(key, value, row)}
+                {#if key === 'code'}
+                    <div class="flex items-center gap-2">
+                        <code class="text-xs bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded">{value}</code>
+                        <CopyButton {value} />
+                    </div>
+                {:else if key === 'displayStatus'}
+                    {@const isActive = value === (i18n.lang === "zh" ? "有效" : "Active")}
+                    {@const isAmber = value === (i18n.lang === "zh" ? "已用完" : "Exhausted") || value === (i18n.lang === "zh" ? "已过期" : "Expired")}
+                    {@const isRose = value === (i18n.lang === "zh" ? "已禁用" : "Disabled")}
+                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium 
+                        {isActive ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-400' : 
+                         isAmber ? 'bg-amber-100 text-amber-800 dark:bg-amber-500/10 dark:text-amber-400' :
+                         isRose ? 'bg-rose-100 text-rose-800 dark:bg-rose-500/10 dark:text-rose-400' :
+                         'bg-slate-100 text-slate-800 dark:bg-slate-500/10 dark:text-slate-400'}">
+                        {value}
+                    </span>
+                {:else}
+                    {value}
+                {/if}
+            {/snippet}
+
+            {#snippet customActions(row)}
+                <button
+                    onclick={() => handleToggleStatus(row)}
+                    class="px-2 py-1 text-xs rounded border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 transition-colors mr-2 opacity-0 group-hover:opacity-100"
+                >
+                    {row.status === 1 ? (i18n.lang === "zh" ? "禁用" : "Disable") : (i18n.lang === "zh" ? "启用" : "Enable")}
+                </button>
+            {/snippet}
+        </DataTable>
     {/if}
 </div>
 

@@ -1,6 +1,7 @@
 <script lang="ts">
     import DataTable from "../../components/DataTable.svelte";
     import RedemptionModal from "../../components/RedemptionModal.svelte";
+    import CopyButton from "../../components/CopyButton.svelte";
     import { Plus, Gift } from "lucide-svelte";
     import { apiFetch } from "$lib/api";
     import { i18n } from "$lib/i18n/index.svelte";
@@ -21,7 +22,7 @@
                 ...u,
                 displayStatus:
                     u.status === 1 ? i18n.t.channels.active : "Used/Disabled",
-                formattedQuota: `$${(u.quota / 1000).toFixed(2)}`,
+                formattedQuota: `$${(u.quota / 500000).toFixed(2)}`,
                 usageStr: `${u.used_count} / ${u.count}`,
             }));
         } catch (err: any) {
@@ -33,25 +34,13 @@
 
     onMount(loadData);
 
-    const renderStatus = (val: string) => {
-        const isActive = val === i18n.t.channels.active;
-        const colorClass = isActive
-            ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-400"
-            : "bg-slate-100 text-slate-800 dark:bg-slate-500/10 dark:text-slate-400";
-        return `<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${colorClass}">${val}</span>`;
-    };
-
     let columns = $derived([
         { key: "id", label: i18n.t.redemptions.id },
         { key: "name", label: i18n.t.redemptions.name },
         { key: "key", label: i18n.t.redemptions.codeKey },
         { key: "formattedQuota", label: i18n.t.redemptions.quota },
         { key: "usageStr", label: i18n.t.redemptions.usedTotal },
-        {
-            key: "displayStatus",
-            label: i18n.t.tokens.status,
-            render: renderStatus,
-        },
+        { key: "displayStatus", label: i18n.t.tokens.status },
     ]);
 
     function handleAdd() {
@@ -154,7 +143,25 @@
             {columns}
             onEdit={handleEdit}
             onDelete={handleDelete}
-        />
+        >
+            {#snippet cell(key, value, row)}
+                {#if key === 'key'}
+                    <div class="flex items-center gap-2">
+                        <span class="font-mono text-xs bg-slate-100 dark:bg-slate-800/60 text-slate-700 dark:text-slate-300 px-2 py-1 rounded border border-slate-200 dark:border-slate-700 select-all cursor-pointer">
+                            {value}
+                        </span>
+                        <CopyButton {value} />
+                    </div>
+                {:else if key === 'displayStatus'}
+                    {@const isActive = value === i18n.t.channels.active}
+                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium {isActive ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-400' : 'bg-slate-100 text-slate-800 dark:bg-slate-500/10 dark:text-slate-400'}">
+                        {value}
+                    </span>
+                {:else}
+                    {value}
+                {/if}
+            {/snippet}
+        </DataTable>
     {/if}
 </div>
 
