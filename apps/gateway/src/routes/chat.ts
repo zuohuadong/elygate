@@ -38,6 +38,8 @@ export const chatRouter = new Elysia()
         let lastError: any = null;
 
         // Semantic Cache: pick an embedding channel for vector lookup
+        // NOTE: We fetch from memoryCache which is refreshed on channel updates
+        // If channel key is updated, call /api/admin/channels/sync or restart elygate
         let embeddingChannel: any = null;
         let embeddingModel: string | undefined;
         

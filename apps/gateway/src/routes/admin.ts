@@ -11,6 +11,12 @@ import { encryptChannelKeys, decryptChannelKeys } from '../services/encryption';
 import { getAuditLogs } from '../services/auditLog';
 import { optionCache } from '../services/optionCache';
 
+// Helper function to refresh both caches
+async function refreshAllCaches() {
+    await memoryCache.refresh();
+    await optionCache.refresh();
+}
+
 // Load model configurations via top-level await (Bun native feature)
 let modelConfig: any = { anthropic: { models: [] } };
 try {
@@ -48,7 +54,7 @@ export const adminRouter = new Elysia()
                 VALUES (${b.key}, ${b.name}, ${b.description || ''}, ${b.allowedChannelTypes ? JSON.stringify(b.allowedChannelTypes) : '[]'}, ${b.deniedChannelTypes ? JSON.stringify(b.deniedChannelTypes) : '[]'}, ${b.allowedModels ? JSON.stringify(b.allowedModels) : '[]'}, ${b.deniedModels ? JSON.stringify(b.deniedModels) : '[]'}, ${b.allowedPackages ? JSON.stringify(b.allowedPackages) : '[]'}, ${b.status || 1})
                 RETURNING *
             `;
-            await memoryCache.refresh();
+            await refreshAllCaches();
             return result;
         } catch (e: any) {
             set.status = 500;
@@ -90,7 +96,7 @@ export const adminRouter = new Elysia()
                 WHERE key = ${key}
                 RETURNING *
             `;
-            await memoryCache.refresh();
+            await refreshAllCaches();
             return result;
         } catch (e: any) {
             set.status = 500;
@@ -109,7 +115,7 @@ export const adminRouter = new Elysia()
                 return { success: false, message: 'Cannot delete group with active users' };
             }
             await sql`DELETE FROM user_groups WHERE key = ${key}`;
-            await memoryCache.refresh();
+            await refreshAllCaches();
             return { success: true };
         } catch (e: any) {
             set.status = 500;
@@ -141,7 +147,7 @@ export const adminRouter = new Elysia()
                 VALUES (${b.name}, ${b.type}, ${encryptedKey}, ${b.baseUrl}, ${b.models}, ${b.priority || 0}, ${b.weight || 1}, 1, ${b.keyStrategy || 0}, '{}'::jsonb, ${b.priceRatio || 1.0}, ${b.keyConcurrencyLimit || 0})
                 RETURNING *
             `;
-            await memoryCache.refresh();
+            await refreshAllCaches();
             return result;
         } catch (e: any) {
             set.status = 500;
@@ -201,7 +207,7 @@ export const adminRouter = new Elysia()
                 WHERE id = ${Number(id)}
                 RETURNING *
             `;
-            await memoryCache.refresh();
+            await refreshAllCaches();
             return {
                 ...result,
                 key: decryptChannelKeys(result.key)
@@ -215,7 +221,7 @@ export const adminRouter = new Elysia()
     .delete('/channels/:id', async ({ params: { id }, set }: any) => {
         try {
             await sql`DELETE FROM channels WHERE id = ${Number(id)}`;
-            await memoryCache.refresh();
+            await refreshAllCaches();
             return { success: true };
         } catch (e: any) {
             set.status = 500;
@@ -242,7 +248,7 @@ export const adminRouter = new Elysia()
                 }
             }
 
-            await memoryCache.refresh();
+            await refreshAllCaches();
             return {
                 success: true,
                 total: channels.length,
@@ -305,7 +311,7 @@ export const adminRouter = new Elysia()
             : data.data?.map((m: any) => m.id).filter(Boolean) || data.map?.((m: any) => m.id || m.name).filter(Boolean) || [];
 
         const [result] = await sql`UPDATE channels SET models = ${models}, updated_at = NOW() WHERE id = ${Number(id)} RETURNING *`;
-        await memoryCache.refresh();
+        await refreshAllCaches();
         return { success: true, modelsCount: models.length, channel: result };
     })
 
@@ -338,7 +344,7 @@ export const adminRouter = new Elysia()
                 WHERE id = ${Number(id)}
                 RETURNING *
             `;
-            await memoryCache.refresh();
+            await refreshAllCaches();
             return {
                 success: true,
                 removedCount: keys.length - activeKeys.length,
@@ -407,11 +413,11 @@ export const adminRouter = new Elysia()
             const latency = Date.now() - startTime;
 
             await sql`UPDATE channels SET response_time = ${latency}, test_at = NOW() WHERE id = ${Number(id)}`;
-            await memoryCache.refresh();
+            await refreshAllCaches();
             return { success: true, response_time: latency };
         } catch (e: any) {
             await sql`UPDATE channels SET response_time = 0, test_at = NOW() WHERE id = ${Number(id)}`;
-            await memoryCache.refresh();
+            await refreshAllCaches();
             throw e;
         }
     })
@@ -1490,7 +1496,7 @@ export const adminRouter = new Elysia()
                 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
             `;
         }
-        memoryCache.refresh().catch(console.error);
+        refreshAllCaches().catch(console.error);
         return { success: true };
     })
 
@@ -1506,7 +1512,7 @@ export const adminRouter = new Elysia()
                 VALUES (${b.name}, ${b.rpm || 0}, ${b.rph || 0}, ${b.concurrent || 0})
                 RETURNING *
             `;
-            await memoryCache.refresh();
+            await refreshAllCaches();
             return { success: true, data: result };
         } catch (e: any) {
             set.status = 500; return { success: false, message: e.message };
@@ -1523,7 +1529,7 @@ export const adminRouter = new Elysia()
                     concurrent = COALESCE(${b.concurrent}, concurrent)
                 WHERE id = ${Number(id)} RETURNING *
             `;
-            await memoryCache.refresh();
+            await refreshAllCaches();
             return { success: true, data: result };
         } catch (e: any) {
             set.status = 500; return { success: false, message: e.message };
@@ -1532,7 +1538,7 @@ export const adminRouter = new Elysia()
     .delete('/rate-limits/:id', async ({ params: { id }, set }: any) => {
         try {
             await sql`DELETE FROM rate_limit_rules WHERE id = ${Number(id)}`;
-            await memoryCache.refresh();
+            await refreshAllCaches();
             return { success: true };
         } catch (e: any) {
             set.status = 500; return { success: false, message: e.message };
