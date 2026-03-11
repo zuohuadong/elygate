@@ -1559,8 +1559,8 @@ export const adminRouter = new Elysia()
         try {
             const b = body as any;
             const [result] = await sql`
-                INSERT INTO packages (name, description, price, duration_days, models, default_rate_limit_id, model_rate_limits, cycle_quota, cycle_interval, cycle_unit, is_public, added_by)
-                VALUES (${b.name}, ${b.description || ''}, ${b.price || 0}, ${b.durationDays || 30}, ${JSON.stringify(b.models || [])}, ${b.defaultRateLimitId || null}, ${JSON.stringify(b.modelRateLimits || {})}, ${b.cycleQuota || 0}, ${b.cycleInterval || 1}, ${b.cycleUnit || 'day'}, ${b.isPublic ?? true}, ${user.id})
+                INSERT INTO packages (name, description, price, duration_days, models, default_rate_limit_id, model_rate_limits, cycle_quota, cycle_interval, cycle_unit, cache_policy, is_public, added_by)
+                VALUES (${b.name}, ${b.description || ''}, ${b.price || 0}, ${b.durationDays || 30}, ${JSON.stringify(b.models || [])}, ${b.defaultRateLimitId || null}, ${JSON.stringify(b.modelRateLimits || {})}, ${b.cycleQuota || 0}, ${b.cycleInterval || 1}, ${b.cycleUnit || 'day'}, ${JSON.stringify(b.cachePolicy || null)}, ${b.isPublic ?? true}, ${user.id})
                 RETURNING *
             `;
             return { success: true, data: result };
@@ -1583,6 +1583,7 @@ export const adminRouter = new Elysia()
                     cycle_quota = COALESCE(${b.cycleQuota}, cycle_quota),
                     cycle_interval = COALESCE(${b.cycleInterval}, cycle_interval),
                     cycle_unit = COALESCE(${b.cycleUnit}, cycle_unit),
+                    cache_policy = COALESCE(${b.cachePolicy ? JSON.stringify(b.cachePolicy) : null}, cache_policy),
                     is_public = COALESCE(${b.isPublic}, is_public),
                     updated_at = NOW()
                 WHERE id = ${Number(id)} RETURNING *
@@ -1768,7 +1769,22 @@ export const adminRouter = new Elysia()
             await sql`ALTER TABLE packages ADD COLUMN IF NOT EXISTS cycle_interval INTEGER DEFAULT 1`;
             await sql`ALTER TABLE packages ADD COLUMN IF NOT EXISTS cycle_unit TEXT DEFAULT 'day'`;
             await sql`ALTER TABLE user_subscriptions ADD COLUMN IF NOT EXISTS last_reset_at TIMESTAMPTZ DEFAULT NOW()`;
-            return { success: true, message: 'Schema updated for subscription cycles' };
+            
+            // Semantic Cache Strategy Patches
+            await sql`ALTER TABLE packages ADD COLUMN IF NOT EXISTS cache_policy JSONB DEFAULT '{"mode": "default"}'`;
+            await sql`ALTER TABLE semantic_cache ADD COLUMN IF NOT EXISTS created_by INTEGER REFERENCES users(id) ON DELETE SET NULL`;
+            await sql`
+                CREATE TABLE IF NOT EXISTS semantic_cache_hits (
+                    id SERIAL PRIMARY KEY,
+                    cache_id INTEGER REFERENCES semantic_cache(id) ON DELETE CASCADE,
+                    account_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                    hit_count INTEGER DEFAULT 1,
+                    last_hit_at TIMESTAMPTZ DEFAULT NOW(),
+                    UNIQUE (cache_id, account_id)
+                )
+            `;
+            
+            return { success: true, message: 'Schema updated for subscription cycles & semantic cache' };
         } catch (e: any) {
             return { success: false, message: e.message };
         }

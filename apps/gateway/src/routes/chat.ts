@@ -94,7 +94,10 @@ export const chatRouter = new Elysia()
             const userPrompt = Array.isArray(body.messages)
                 ? body.messages.map((m: any) => m.content).join(' ')
                 : '';
-            const cachedResponse = await lookupSemanticCache(userPrompt, model, embeddingChannel, embeddingModel);
+            // Get active cache policy from user's primary/active package if available
+            const cachePolicy = user.activePackage?.cache_policy || { mode: 'default' };
+
+            const cachedResponse = await lookupSemanticCache(userPrompt, model, embeddingChannel, embeddingModel, user.id, cachePolicy);
             if (cachedResponse) {
                 console.log(`[SemanticCache] HIT for model: ${model}`);
                 
@@ -371,9 +374,9 @@ export const chatRouter = new Elysia()
                     const userPrompt = Array.isArray(body.messages)
                         ? body.messages.map((m: any) => m.content).join(' ')
                         : '';
-                    storeSemanticCache(userPrompt, model, formattedData, embeddingChannel, embeddingModel).catch(e =>
-                        console.warn('[SemanticCache] Store failed:', e)
-                    );
+                    await storeSemanticCache(userPrompt, model, formattedData, embeddingChannel, embeddingModel, user.id).catch(err => {
+                        console.error('[SemanticCache] Store Error:', err.message);
+                    });
                 }
 
                 // 5. Trigger Billing and Logging (Asynchronous)

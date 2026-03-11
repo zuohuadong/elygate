@@ -81,26 +81,62 @@ export async function lookupSemanticCache(
     prompt: string,
     model: string,
     embeddingChannel: any,
-    embeddingModel?: string
+    embeddingModel?: string,
+    userId?: number,
+    policy?: any
 ): Promise<any | null> {
     const config = getConfig();
-    if (!config.enabled) return null;
+    if (!config.enabled || policy?.mode === 'disabled') return null;
 
     const embedding = await generateEmbedding(prompt, embeddingChannel, embeddingModel);
     if (!embedding) return null;
 
     const vectorLiteral = `[${embedding.join(',')}]`;
+    
+    // Policy: Isolated mode (only hits cache created by this user)
+    const isolationClause = (policy?.mode === 'isolated' && userId) 
+        ? sql`AND created_by = ${userId}` 
+        : sql``;
+
     const rows = await sql`
-        SELECT response, 1 - (embedding <=> ${vectorLiteral}::vector) AS similarity
+        SELECT id, response, created_by, 1 - (embedding <=> ${vectorLiteral}::vector) AS similarity
         FROM semantic_cache
         WHERE model_name = ${model}
           AND created_at > NOW() - make_interval(hours => ${config.ttlHours})
+          ${isolationClause}
         ORDER BY embedding <=> ${vectorLiteral}::vector
         LIMIT 1
     `;
 
     if (rows.length > 0 && rows[0].similarity >= config.similarityThreshold) {
-        console.log(`[SemanticCache] HIT! Similarity: ${rows[0].similarity.toFixed(4)} (threshold: ${config.similarityThreshold})`);
+        const cacheId = rows[0].id;
+        
+        // Policy: Refresh on Count (N-th hit forced refresh)
+        if (policy?.mode === 'refresh_on_count' && userId) {
+            const refreshN = Number(policy.n) || 3;
+            
+            // Upsert hit count for this user and cache entry
+            const [hit] = await sql`
+                INSERT INTO semantic_cache_hits (cache_id, account_id, hit_count)
+                VALUES (${cacheId}, ${userId}, 1)
+                ON CONFLICT (cache_id, account_id) DO UPDATE
+                SET hit_count = semantic_cache_hits.hit_count + 1,
+                    last_hit_at = NOW()
+                RETURNING hit_count
+            `;
+
+            if (hit.hit_count >= refreshN) {
+                console.log(`[SemanticCache] Triggered FORCED REFRESH for user ${userId} (Hit ${hit.hit_count}/${refreshN})`);
+                // Reset hit count for the next cycle
+                await sql`UPDATE semantic_cache_hits SET hit_count = 0 WHERE cache_id = ${cacheId} AND account_id = ${userId}`;
+                return null; // Force a miss
+            }
+            
+            console.log(`[SemanticCache] HIT for user ${userId} (Hit ${hit.hit_count}/${refreshN})`);
+        } else {
+            console.log(`[SemanticCache] GLOBAL HIT! Similarity: ${rows[0].similarity.toFixed(4)}`);
+        }
+        
         return rows[0].response;
     }
 
@@ -116,7 +152,8 @@ export async function storeSemanticCache(
     model: string,
     response: any,
     embeddingChannel: any,
-    embeddingModel?: string
+    embeddingModel?: string,
+    createdBy?: number
 ): Promise<void> {
     const { enabled } = getConfig();
     if (!enabled) return;
@@ -128,11 +165,12 @@ export async function storeSemanticCache(
     const promptHash = new Bun.CryptoHasher('md5').update(prompt).digest('hex');
     const vectorLiteral = `[${embedding.join(',')}]`;
     await sql`
-        INSERT INTO semantic_cache (model_name, prompt_hash, prompt, embedding, response)
-        VALUES (${model}, ${promptHash}, ${prompt}, ${vectorLiteral}::vector, ${JSON.stringify(response)})
+        INSERT INTO semantic_cache (model_name, prompt_hash, prompt, embedding, response, created_by)
+        VALUES (${model}, ${promptHash}, ${prompt}, ${vectorLiteral}::vector, ${JSON.stringify(response)}, ${createdBy || null})
         ON CONFLICT (model_name, prompt_hash) DO UPDATE
         SET response = EXCLUDED.response,
             embedding = EXCLUDED.embedding,
+            created_by = EXCLUDED.created_by,
             created_at = NOW()
     `;
 }

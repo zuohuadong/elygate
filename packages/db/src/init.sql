@@ -135,6 +135,7 @@ CREATE TABLE IF NOT EXISTS packages (
     cycle_quota BIGINT DEFAULT 0, -- amount to refill each cycle
     cycle_interval INTEGER DEFAULT 1, -- numeric interval
     cycle_unit TEXT DEFAULT 'day', -- hour, day, week, month
+    cache_policy JSONB DEFAULT '{"mode": "default"}', -- default, isolated, refresh_on_count, disabled
     is_public BOOLEAN DEFAULT true,
     allowed_groups JSONB DEFAULT '[]', -- Package visibility: empty means visible to all groups
     added_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
@@ -317,8 +318,18 @@ CREATE TABLE IF NOT EXISTS semantic_cache (
     prompt TEXT NOT NULL,
     embedding VECTOR(1536),
     response JSONB NOT NULL,
+    created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE (model_name, prompt_hash)
+);
+
+CREATE TABLE IF NOT EXISTS semantic_cache_hits (
+    id SERIAL PRIMARY KEY,
+    cache_id INTEGER REFERENCES semantic_cache(id) ON DELETE CASCADE,
+    account_id INTEGER REFERENCES users(id) ON DELETE CASCADE, -- 'account_id' to match 'users.id' context
+    hit_count INTEGER DEFAULT 1,
+    last_hit_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (cache_id, account_id)
 );
 
 -- ============================================================

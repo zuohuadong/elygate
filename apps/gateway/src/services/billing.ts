@@ -173,7 +173,7 @@ async function flushBillingQueue() {
             for (const log of logInserts) {
                 await tx`
                     INSERT INTO logs (user_id, token_id, channel_id, model_name, prompt_tokens, completion_tokens, cached_tokens, quota_cost, is_stream, status_code, error_message)
-                    VALUES (${log.userId}, ${log.tokenId || null}, ${log.channelId || null}, ${log.modelName}, ${log.promptTokens}, ${log.completionTokens}, ${log.cachedTokens}, ${log.quotaCost}, ${log.isStream}, ${log.statusCode}, ${log.errorMessage})
+                    VALUES (${log.userId}, ${log.tokenId ?? null}, ${log.channelId !== undefined ? log.channelId : null}, ${log.modelName}, ${log.promptTokens}, ${log.completionTokens}, ${log.cachedTokens}, ${log.quotaCost}, ${log.isStream}, ${log.statusCode}, ${log.errorMessage})
                 `;
             }
         });
