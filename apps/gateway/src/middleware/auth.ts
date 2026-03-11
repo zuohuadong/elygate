@@ -121,7 +121,9 @@ export const authPlugin = new Elysia({ name: 'auth' })
                 group: sessionRow.group || 'default',
                 role: sessionRow.role,
                 quota: Number(sessionRow.quota),
-                status: sessionRow.status
+                usedQuota: Number(sessionRow.usedQuota),
+                status: sessionRow.status,
+                currency: sessionRow.currency || 'USD'
             };
 
             return { token: tokenRecord, user: userRecord };
@@ -182,7 +184,9 @@ export const authPlugin = new Elysia({ name: 'auth' })
             group: raw.group,
             role: raw.role,
             quota: Number(raw.quota),
-            status: raw.user_status
+            usedQuota: Number(raw.used_quota || 0),
+            status: raw.user_status,
+            currency: raw.currency || 'USD'
         };
 
         if (tokenRecord.status !== 1) { // 1-normal, 2-disabled
@@ -259,12 +263,14 @@ export const authPlugin = new Elysia({ name: 'auth' })
  * Admin-only Authentication Guard
  * Same as authPlugin but strictly requires role = 10 (Admin)
  */
-export const adminGuard = new Elysia()
-    .use(cors())
+export const adminGuard = new Elysia({ name: 'admin-guard' })
     .use(authPlugin)
     .onBeforeHandle(({ user, set }: any) => {
-        const u = user as UserRecord;
-        if (!u || u.role < 10) {
+        if (!user) {
+            set.status = 401;
+            throw new Error('Unauthorized');
+        }
+        if (user.role < 10) {
             set.status = 403;
             throw new Error('Forbidden: Admin privileges required');
         }

@@ -4,7 +4,9 @@ export interface UserRecord {
     group: string;
     role: number;
     quota: number;
+    usedQuota: number;
     status: number;
+    currency?: string;
     activePackages?: any[]; // [{ models, defaultRateLimitId, modelRateLimits }]
 }
 

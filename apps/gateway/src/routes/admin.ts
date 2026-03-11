@@ -26,6 +26,14 @@ try {
 // Admin Router - prefix will be applied in index.ts
 export const adminRouter = new Elysia()
     .use(adminGuard)
+    .guard({
+        beforeHandle: ({ user, set }: any) => {
+            if (!user || user.role < 10) {
+                set.status = 403;
+                throw new Error('Forbidden: Admin privileges required');
+            }
+        }
+    })
 
     // --- User Groups / Policies Management ---
     .get('/user-groups', async () => {

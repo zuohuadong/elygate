@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS user_groups (
 );
 
 INSERT INTO user_groups (key, name, description) VALUES ('default', 'Default Group', 'Standard user group') ON CONFLICT DO NOTHING;
-INSERT INTO user_groups (key, name, description, denied_channel_types, denied_models) VALUES ('cn-safe', 'Mainland Safe', 'Only allows CN-registered models', '[1, 14, 23]', '["gpt-*", "claude-*", "gemini-*", "sora-*"]') ON CONFLICT DO NOTHING;
+INSERT INTO user_groups (key, name, description, denied_channel_types, denied_models, allowed_models) VALUES ('cn-safe', 'Mainland Safe', 'Only allows CN-registered models', '[1, 14, 23]', '["*"]', '["qwen*", "glm*", "chatglm*", "cogview*", "ernie*", "eb*", "moonshot*", "kimi*", "deepseek*", "doubao*", "hunyuan*", "minimax*", "abab*", "spark*", "yi*", "step*", "baichuan*"]') ON CONFLICT DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS users (
     id SERIAL PRIMARY KEY,
