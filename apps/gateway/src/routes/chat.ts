@@ -228,8 +228,8 @@ export const chatRouter = new Elysia()
 
                 if (!response.ok) {
                     const errorText = await response.text();
-                    console.warn(`[Retry Notice] Channel ${channelConfig.id} returned status ${response.status}. Detail: ${errorText}`);
-                    await circuitBreaker.recordError(channelConfig.id, response.status);
+                    console.warn(`[Retry Notice] Channel ${channelConfig.id} returned status ${response.status}. Status: ${errorText}`);
+                    await circuitBreaker.recordError(channelConfig.id, response.status, errorText);
                     throw new Error(`Status ${response.status}: ${errorText}`);
                 }
 

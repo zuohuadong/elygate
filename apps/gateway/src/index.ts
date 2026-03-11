@@ -263,15 +263,21 @@ async function init() {
     return null;
   };
 
-  // Run schema fix patch if exists (idempotent)
-  const patchPath = await findSqlPath('packages/db/src/patch_v1_schema_fix.sql');
-  if (patchPath) {
-    try {
-      const patchSql = await Bun.file(patchPath).text();
-      await sql.unsafe(patchSql);
-      console.log("✅ Schema fix patch reapplied.");
-    } catch (e: any) {
-      console.error("❌ Failed to reapply schema patch:", e.message);
+  // Run schema fix patches (v1, v2) if exist (idempotent)
+  const patches = [
+    'packages/db/src/patch_v1_schema_fix.sql',
+    'packages/db/src/patch_v2_channel_status.sql'
+  ];
+  for (const p of patches) {
+    const patchPath = await findSqlPath(p);
+    if (patchPath) {
+      try {
+        const patchSql = await Bun.file(patchPath).text();
+        await sql.unsafe(patchSql);
+        console.log(`✅ Schema patch ${p.split('/').pop()} applied.`);
+      } catch (e: any) {
+        console.error(`❌ Failed to apply patch ${p}:`, e.message);
+      }
     }
   }
 

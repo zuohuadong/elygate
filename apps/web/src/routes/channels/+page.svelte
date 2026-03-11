@@ -19,16 +19,21 @@
         isLoading = true;
         try {
             const data = await apiFetch<any[]>("/admin/channels");
-            channels = data.map((c) => ({
-                ...c,
-                displayStatus:
-                    c.status === 1
-                        ? i18n.t.channels.active
-                        : i18n.t.channels.disabled,
-                displayModels: Array.isArray(c.models)
-                    ? c.models.join(",")
-                    : c.models || "",
-            }));
+            channels = data.map((c) => {
+                let statusLabel = i18n.t.channels.active;
+                if (c.status === 2) statusLabel = i18n.t.channels.disabled;
+                else if (c.status === 3) statusLabel = i18n.t.channels.offline;
+                else if (c.status === 4) statusLabel = "Testing";
+                else if (c.status === 5) statusLabel = i18n.t.channels.busy;
+
+                return {
+                    ...c,
+                    displayStatus: statusLabel,
+                    displayModels: Array.isArray(c.models)
+                        ? c.models.join(",")
+                        : c.models || "",
+                };
+            });
         } catch (err: any) {
             errorMsg = err.message || (i18n.lang === "zh" ? "加载渠道失败" : "Failed to load channels");
         } finally {
@@ -38,13 +43,17 @@
 
     onMount(loadChannels);
 
-    // Render status badge
-    const renderStatus = (val: string) => {
-        const isActive = val === i18n.t.channels.active;
-        const colorClass = isActive
-            ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-400"
-            : "bg-rose-100 text-rose-800 dark:bg-rose-500/10 dark:text-rose-400";
-        return `<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${colorClass}">${val}</span>`;
+    // Render status badge with tooltip support
+    const renderStatus = (val: string, row: any) => {
+        let colorClass = "bg-slate-100 text-slate-800 dark:bg-slate-500/10 dark:text-slate-400";
+        
+        if (row.status === 1) colorClass = "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-400";
+        else if (row.status === 2 || row.status === 3) colorClass = "bg-rose-100 text-rose-800 dark:bg-rose-500/10 dark:text-rose-400";
+        else if (row.status === 5) colorClass = "bg-amber-100 text-amber-800 dark:bg-amber-500/10 dark:text-amber-400";
+        else if (row.status === 4) colorClass = "bg-indigo-100 text-indigo-800 dark:bg-indigo-500/10 dark:text-indigo-400";
+
+        const tooltip = row.statusMessage ? `title="${row.statusMessage}"` : "";
+        return `<span ${tooltip} class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium cursor-help transition-opacity hover:opacity-80 ${colorClass}">${val}</span>`;
     };
 
     // Render models as small tags

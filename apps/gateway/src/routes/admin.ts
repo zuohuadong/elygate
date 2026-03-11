@@ -127,7 +127,7 @@ export const adminRouter = new Elysia()
     // --- Channel Management (Channels) ---
     .get('/channels', async () => {
         const channels = await sql`
-            SELECT id, name, type, key, base_url AS "baseUrl", models, model_mapping AS "modelMapping", priority, weight, groups, status, 
+            SELECT id, name, type, key, base_url AS "baseUrl", models, model_mapping AS "modelMapping", priority, weight, groups, status, status_message AS "statusMessage",
                    key_strategy AS "keyStrategy", key_status AS "keyStatus", price_ratio AS "priceRatio", created_at, 
                    (SELECT updated_at FROM channels c2 WHERE c2.id = channels.id) as updated_at
             FROM channels 

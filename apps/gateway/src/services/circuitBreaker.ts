@@ -29,23 +29,20 @@ class CircuitBreaker {
     public async recordSuccess(channelId: number) {
         if (this.errorCounts.has(channelId)) {
             this.errorCounts.delete(channelId);
-            console.log(`[CircuitBreaker] Channel ${channelId} error count reset.`);
         }
 
-        // Handle Half-Open recovery
         const channel = memoryCache.channels.get(channelId);
-        if (channel && channel.status === 4) {
+        if (channel && (channel.status === 4 || channel.status === 5)) {
             const count = (this.successCounts.get(channelId) || 0) + 1;
-            const threshold = this.getRecoveryThreshold();
+            const threshold = channel.status === 5 ? 1 : this.getRecoveryThreshold();
 
             if (count >= threshold) {
-                console.log(`[CircuitBreaker] Channel ${channelId} fully recovered from Half-Open.`);
-                await sql`UPDATE channels SET status = 1, updated_at = NOW() WHERE id = ${channelId}`;
+                console.log(`[CircuitBreaker] Channel ${channelId} recovered to Online.`);
+                await sql`UPDATE channels SET status = 1, status_message = NULL, updated_at = NOW() WHERE id = ${channelId}`;
                 await memoryCache.refresh();
                 this.successCounts.delete(channelId);
             } else {
                 this.successCounts.set(channelId, count);
-                console.log(`[CircuitBreaker] Channel ${channelId} Half-Open success: ${count}/${threshold}`);
             }
         }
     }
@@ -53,16 +50,31 @@ class CircuitBreaker {
     /**
      * Record an error for a channel.
      */
-    public async recordError(channelId: number, status?: number) {
-        if (status && status >= 400 && status < 429) return;
-
+    public async recordError(channelId: number, status?: number, message?: string) {
         const channel = memoryCache.channels.get(channelId);
         if (!channel) return;
 
+        // 1. Immediate Disable for Auth Errors (401/403)
+        if (status === 401 || status === 403) {
+            console.error(`[CircuitBreaker] Channel ${channelId} Auth Error (${status}). Disabling.`);
+            await this.disableChannel(channelId, `Auth Error: ${status} ${message || ""}`);
+            return;
+        }
+
+        // 2. Mark as Busy for Rate Limits (429)
+        if (status === 429) {
+            console.warn(`[CircuitBreaker] Channel ${channelId} Rate Limited (429). Marking as Busy.`);
+            await sql`UPDATE channels SET status = 5, status_message = 'Rate Limited (429)', updated_at = NOW() WHERE id = ${channelId}`;
+            await memoryCache.refresh();
+            return;
+        }
+
+        // 3. Regular error count logic for 5xx/Timeout
+        if (status && status >= 400 && status < 500) return;
+
         // If in Half-Open, one failure trips it back to Disabled
-        if (channel.status === 4) {
-            console.warn(`[CircuitBreaker] Channel ${channelId} failed in Half-Open. Re-disabling.`);
-            await this.disableChannel(channelId);
+        if (channel.status === 4 || channel.status === 5) {
+            await this.disableChannel(channelId, `Failed during recovery/busy period: ${status}`);
             return;
         }
 
@@ -70,30 +82,27 @@ class CircuitBreaker {
         const threshold = this.getThreshold();
         this.errorCounts.set(channelId, count);
 
-        console.warn(`[CircuitBreaker] Channel ${channelId} error count: ${count}/${threshold}`);
-
         if (count >= threshold) {
-            await this.disableChannel(channelId);
+            await this.disableChannel(channelId, `Consecutive failures: ${count}`);
         }
     }
 
-    private async disableChannel(channelId: number) {
-        console.error(`[CircuitBreaker] Channel ${channelId} disabled by circuit breaker.`);
+    private async disableChannel(channelId: number, reason?: string) {
         try {
             await sql`
                 UPDATE channels
-                SET status = 3, updated_at = NOW()
-                WHERE id = ${channelId} AND status IN (1, 4)
+                SET status = 3, status_message = ${reason || null}, updated_at = NOW()
+                WHERE id = ${channelId} AND status != 2
             `;
             await memoryCache.refresh();
             this.errorCounts.delete(channelId);
             this.successCounts.delete(channelId);
 
             await notificationService.send(
-                'Channel Prohibited',
-                `Channel ID ${channelId} has been disabled due to frequent failures.`
+                'Channel Disabled',
+                `Channel ID ${channelId} disabled: ${reason || 'Frequent failures'}`
             );
-            await webhookService.trigger('channel.disabled', { channelId });
+            await webhookService.trigger('channel.disabled', { channelId, reason });
         } catch (e) {
             console.error(`[CircuitBreaker] Failed to disable channel ${channelId}:`, e);
         }
@@ -107,19 +116,27 @@ class CircuitBreaker {
 
     private async runHealthCheck() {
         try {
-            const disabledChannels = await sql`
-                SELECT id, base_url AS "baseUrl", key, type FROM channels WHERE status = 3
+            // Auto-recover Status 5 (Busy) after cooldown
+            const busyChannels = await sql`
+                SELECT id FROM channels WHERE status = 5 AND updated_at < NOW() - INTERVAL '1 minute'
             `;
-            if (disabledChannels.length === 0) return;
+            for (const ch of busyChannels) {
+                await sql`UPDATE channels SET status = 1, status_message = NULL, updated_at = NOW() WHERE id = ${ch.id}`;
+            }
 
+            const disabledChannels = await sql`
+                SELECT id, base_url AS "baseUrl", key, type FROM channels WHERE status = 3 AND (status_message IS NULL OR status_message NOT LIKE 'Auth Error%')
+            `;
+            
+            let changed = busyChannels.length > 0;
             for (const ch of disabledChannels) {
                 const isHealthy = await this.pingChannel(ch);
                 if (isHealthy) {
-                    console.log(`[HealthCheck] Channel ${ch.id} recovered to Half-Open.`);
-                    await sql`UPDATE channels SET status = 4, updated_at = NOW() WHERE id = ${ch.id}`;
+                    await sql`UPDATE channels SET status = 4, status_message = 'Testing Recovery', updated_at = NOW() WHERE id = ${ch.id}`;
+                    changed = true;
                 }
             }
-            if (disabledChannels.length > 0) await memoryCache.refresh();
+            if (changed) await memoryCache.refresh();
         } catch (e) {
             console.error('[HealthCheck] Error checking channels:', e);
         }

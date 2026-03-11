@@ -98,7 +98,8 @@ CREATE TABLE IF NOT EXISTS channels (
     weight INTEGER NOT NULL DEFAULT 1,
     priority INTEGER NOT NULL DEFAULT 0,
     groups JSONB,                           -- allowed user groups (null = all)
-    status INTEGER NOT NULL DEFAULT 1,      -- 1=active, 2=disabled
+    status INTEGER NOT NULL DEFAULT 1,      -- 1=active, 2=manual disabled, 3=circuit broken, 4=half-open, 5=busy
+    status_message TEXT,                    -- detailed error or status message
     key_strategy INTEGER NOT NULL DEFAULT 0, -- 0=load_balance, 1=sequential
     key_status JSONB NOT NULL DEFAULT '{}'::jsonb, -- key exhaustion status
     key_concurrency_limit INTEGER NOT NULL DEFAULT 0, -- 0=unlimited
