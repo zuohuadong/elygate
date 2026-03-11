@@ -196,123 +196,158 @@
 		goto("/login");
 	}
 
-	// Side navigation data (Strictly separated for Admin vs Consumer)
-	const navItems = $derived.by(() => {
+	// Side navigation data (Grouped for better UX)
+	const navGroups = $derived.by(() => {
 		if (session.role >= 10) {
 			return [
 				{
-					name: i18n.t.nav.dashboard,
-					href: "/",
-					icon: LayoutDashboard,
+					title: i18n.t.nav.groups.general,
+					items: [
+						{
+							name: i18n.t.nav.dashboard,
+							href: "/",
+							icon: LayoutDashboard,
+						},
+						{
+							name: i18n.t.dashboard.title,
+							href: "/stats",
+							icon: BarChart3,
+						},
+					]
 				},
 				{
-					name: i18n.lang === "zh" ? "模型管理" : "Models",
-					href: "/models",
-					icon: Boxes,
+					title: i18n.t.nav.groups.resources,
+					items: [
+						{
+							name: i18n.lang === "zh" ? "模型管理" : "Models",
+							href: "/models",
+							icon: Boxes,
+						},
+						{
+							name: i18n.t.nav.channels,
+							href: "/channels",
+							icon: Cpu,
+						},
+					]
 				},
 				{
-					name: i18n.t.nav.channels,
-					href: "/channels",
-					icon: Cpu,
+					title: i18n.t.nav.groups.management,
+					items: [
+						{
+							name: i18n.t.nav.users,
+							href: "/users",
+							icon: Users,
+						},
+						{
+							name: i18n.lang === "zh" ? "用户组策略" : "User Groups",
+							href: "/user-groups",
+							icon: Users,
+						},
+					]
 				},
 				{
-					name: i18n.t.nav.tokens,
-					href: "/tokens",
-					icon: KeyRound,
+					title: i18n.t.nav.groups.sales,
+					items: [
+						{
+							name: i18n.lang === "zh" ? "套餐方案" : "Packages",
+							href: "/packages",
+							icon: ShoppingBag,
+						},
+						{
+							name: i18n.lang === "zh" ? "限流规则" : "Rate Limits",
+							href: "/rate-limits",
+							icon: ShieldAlert,
+						},
+						{
+							name: i18n.t.nav.redemptions || "Redemptions",
+							href: "/redemptions",
+							icon: Gift,
+						},
+						{
+							name: i18n.lang === "zh" ? "邀请码" : "Invite Codes",
+							href: "/invite-codes",
+							icon: Ticket,
+						},
+					]
 				},
 				{
-					name: i18n.t.nav.users,
-					href: "/users",
-					icon: Users,
-				},
-				{
-					name: i18n.t.nav.logs,
-					href: "/logs",
-					icon: ScrollText,
-				},
-				{
-					name: i18n.t.nav.redemptions || "Redemptions",
-					href: "/redemptions",
-					icon: Gift,
-				},
-				{
-					name: i18n.lang === "zh" ? "套餐方案" : "Packages",
-					href: "/packages",
-					icon: ShoppingBag,
-				},
-				{
-					name: i18n.lang === "zh" ? "用户组策略" : "User Groups",
-					href: "/user-groups",
-					icon: Users,
-				},
-				{
-					name: i18n.lang === "zh" ? "限流规则" : "Rate Limits",
-					href: "/rate-limits",
-					icon: ShieldAlert,
-				},
-				{
-					name: i18n.lang === "zh" ? "邀请码" : "Invite Codes",
-					href: "/invite-codes",
-					icon: Ticket,
-				},
-				{
-					name: i18n.t.nav.pricing || "Pricing",
-					href: "/pricing",
-					icon: BadgeDollarSign,
-				},
-				{
-					name: i18n.lang === "zh" ? "数据统计" : "Statistics",
-					href: "/stats",
-					icon: BarChart3,
-				},
-				{
-					name: i18n.t.nav.settings,
-					href: "/settings",
-					icon: Settings,
-				},
+					title: i18n.t.nav.groups.system,
+					items: [
+						{
+							name: i18n.t.nav.logs,
+							href: "/logs",
+							icon: ScrollText,
+						},
+						{
+							name: i18n.t.nav.settings,
+							href: "/settings",
+							icon: Settings,
+						},
+						{
+							name: i18n.t.nav.pricing || "Pricing",
+							href: "/pricing",
+							icon: BadgeDollarSign,
+						},
+						{
+							name: i18n.t.nav.tokens,
+							href: "/tokens",
+							icon: KeyRound,
+						},
+					]
+				}
 			];
 		} else {
 			return [
 				{
-					name: i18n.lang === "zh" ? "我的钱包" : "My Wallet",
-					href: "/consumer",
-					icon: WalletCards,
+					title: i18n.t.nav.groups.personal,
+					items: [
+						{
+							name: i18n.lang === "zh" ? "我的钱包" : "My Wallet",
+							href: "/consumer",
+							icon: WalletCards,
+						},
+						{
+							name: i18n.lang === "zh" ? "充值中心" : "Payment",
+							href: "/payment",
+							icon: CreditCard,
+						},
+						{
+							name: i18n.t.nav.tokens,
+							href: "/tokens",
+							icon: KeyRound,
+						},
+						{
+							name: i18n.t.nav.pricing || "Pricing",
+							href: "/pricing",
+							icon: BadgeDollarSign,
+						},
+					]
 				},
 				{
-					name: i18n.lang === "zh" ? "充值中心" : "Payment",
-					href: "/payment",
-					icon: CreditCard,
-				},
-				{
-					name: i18n.lang === "zh" ? "令牌管理" : "Tokens",
-					href: "/tokens",
-					icon: KeyRound,
-				},
-				{
-					name: i18n.lang === "zh" ? "可用模型" : "Available Models",
-					href: "/models",
-					icon: Boxes,
-				},
-				{
-					name: i18n.lang === "zh" ? "计费倍率" : "Pricing Ratios",
-					href: "/pricing",
-					icon: BadgeDollarSign,
-				},
-				{
-					name: i18n.lang === "zh" ? "我的套餐" : "My Plans",
-					href: "/consumer/packages",
-					icon: ShoppingBag,
-				},
-				{
-					name: i18n.lang === "zh" ? "流水记录" : "Usage Logs",
-					href: "/consumer/logs",
-					icon: History,
-				},
-				{
-					name: i18n.lang === "zh" ? "在线文档" : "API Docs",
-					href: "/consumer/docs",
-					icon: BookOpen,
-				},
+					title: i18n.t.nav.groups.docs,
+					items: [
+						{
+							name: i18n.lang === "zh" ? "可用模型" : "Available Models",
+							href: "/models",
+							icon: Boxes,
+						},
+						{
+							name: i18n.lang === "zh" ? "我的套餐" : "My Plans",
+							href: "/consumer/packages",
+							icon: ShoppingBag,
+						},
+						{
+							name: i18n.lang === "zh" ? "流水记录" : "Usage Logs",
+							href: "/consumer/logs",
+							icon: History,
+						},
+						{
+							name: i18n.lang === "zh" ? "在线文档" : "API Docs",
+							href: "/consumer/docs",
+							icon: BookOpen,
+						},
+					]
+				}
 			];
 		}
 	});
@@ -366,23 +401,32 @@
 				>
 			</div>
 
-			<nav class="flex-1 overflow-y-auto py-6 px-4 space-y-1.5">
-				{#each navItems as item}
-					{@const Icon = item.icon}
-					<a
-						href={item.href}
-						class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200
-						{isActive(item.href)
-							? 'bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 shadow-sm'
-							: 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-white'}"
-					>
-						<Icon
-							class="w-5 h-5 {isActive(item.href)
-								? 'stroke-indigo-600 dark:stroke-indigo-400'
-								: 'stroke-slate-500 dark:stroke-slate-400'}"
-						/>
-						{item.name}
-					</a>
+			<nav class="flex-1 overflow-y-auto py-6 px-4 space-y-6">
+				{#each navGroups as group}
+					<div class="space-y-1.5">
+						<h4 class="px-3 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-2">
+							{group.title}
+						</h4>
+						<div class="space-y-1">
+							{#each group.items as item}
+								{@const Icon = item.icon}
+								<a
+									href={item.href}
+									class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200
+									{isActive(item.href)
+										? 'bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 shadow-sm'
+										: 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-white'}"
+								>
+									<Icon
+										class="w-4 h-4 {isActive(item.href)
+											? 'stroke-indigo-600 dark:stroke-indigo-400'
+											: 'stroke-slate-500 dark:stroke-slate-400'}"
+									/>
+									{item.name}
+								</a>
+							{/each}
+						</div>
+					</div>
 				{/each}
 			</nav>
 
@@ -461,7 +505,7 @@
 					<h1
 						class="text-lg font-medium text-slate-800 dark:text-slate-100"
 					>
-						{navItems.find((i) => isActive(i.href))?.name ||
+						{navGroups.flatMap(g => g.items).find((i) => isActive(i.href))?.name ||
 							"Overview"}
 					</h1>
 				</div>

@@ -202,6 +202,15 @@ export const en = {
         settings: "Settings",
         redemptions: "Redemptions",
         pricing: "Pricing",
+        groups: {
+            general: "General",
+            resources: "Resources",
+            management: "User Management",
+            sales: "Sales & Financial",
+            system: "System & Audit",
+            personal: "Personal Center",
+            docs: "Resources & Docs"
+        }
     },
     payment: {
         title: "Wallet & Top-up",
@@ -441,6 +450,15 @@ export const zh = {
         settings: "系统设置",
         redemptions: "兑换码",
         pricing: "计费倍率",
+        groups: {
+            general: "常规",
+            resources: "资源管理",
+            management: "用户管理",
+            sales: "财务与销售",
+            system: "系统审计",
+            personal: "个人中心",
+            docs: "资源与文档"
+        }
     },
     payment: {
         title: "钱包充值",

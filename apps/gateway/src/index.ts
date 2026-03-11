@@ -282,11 +282,7 @@ async function init() {
   // Run schema fix patches (v1, v2) if exist (idempotent)
   const patches = [
     'packages/db/src/patch_v1_schema_fix.sql',
-    'packages/db/src/patch_v2_channel_status.sql',
-    'packages/db/src/patch_v3_seo_options.sql',
-    'packages/db/src/patch_v4_branding_options.sql',
-    'packages/db/src/patch_v5_monitoring_options.sql',
-    'packages/db/src/patch_v6_audit_logs.sql'
+    'packages/db/src/patch_v2_channel_status.sql'
   ];
   for (const p of patches) {
     const patchPath = await findSqlPath(p);

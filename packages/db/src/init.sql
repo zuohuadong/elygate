@@ -225,7 +225,8 @@ CREATE TABLE IF NOT EXISTS logs (
     is_stream BOOLEAN DEFAULT false,
     error_message TEXT,
     status_code INTEGER NOT NULL DEFAULT 200,
-    ip TEXT,
+    ip_address VARCHAR(45),
+    user_agent TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     PRIMARY KEY (id, created_at)
 ) PARTITION BY RANGE (created_at);
@@ -423,5 +424,11 @@ INSERT INTO options (key, value) VALUES
     ('SemanticCacheEnabled', 'true'),
     ('SemanticCacheThreshold', '0.95'),
     ('SemanticCacheTTLHours', '24'),
-    ('LogRetentionDays', '7')
+    ('LogRetentionDays', '7'),
+    ('Logo_URL', ''),
+    ('Footer_HTML', ''),
+    ('Custom_CSS', ''),
+    ('Custom_JS', ''),
+    ('WebhookURL', ''),
+    ('Notify_On_Channel_Offline', 'true')
 ON CONFLICT (key) DO NOTHING;
