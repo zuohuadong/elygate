@@ -668,7 +668,7 @@
                     </div>
 
                     <!-- Details -->
-                    <div class="flex-1 mt-1 mb-6">
+                    <div class="flex-1 mt-1 mb-4">
                         <p
                             class="text-sm text-slate-500 dark:text-slate-400 line-clamp-3 leading-relaxed italic"
                         >
@@ -678,6 +678,32 @@
                                     : "Standard conversational model support.")}
                         </p>
                     </div>
+
+                    <!-- Admin Sources -->
+                    {#if isAdmin && model.channels && model.channels.length > 0}
+                        <div class="mb-6 space-y-2">
+                            <div class="flex items-center gap-1.5 px-1">
+                                <Layers class="w-3 h-3 text-slate-400" />
+                                <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                                    {i18n.lang === "zh" ? "渠道源" : "Sources"}
+                                </span>
+                            </div>
+                            <div class="flex flex-wrap gap-1">
+                                {#each model.channels as ch}
+                                    <span 
+                                        class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-medium border
+                                        {ch.status === 1 || ch.status === 4 
+                                            ? 'bg-emerald-50 text-emerald-700 border-emerald-100 dark:bg-emerald-500/5 dark:text-emerald-400 dark:border-emerald-500/20' 
+                                            : 'bg-slate-50 text-slate-500 border-slate-100 dark:bg-slate-800 dark:text-slate-500 dark:border-slate-700'}"
+                                        title="ID: {ch.id}"
+                                    >
+                                        <span class="w-1 h-1 rounded-full {ch.status === 1 || ch.status === 4 ? 'bg-emerald-500' : 'bg-slate-400'}"></span>
+                                        {ch.name}
+                                    </span>
+                                {/each}
+                            </div>
+                        </div>
+                    {/if}
 
                     <!-- Footer Actions -->
                     <div

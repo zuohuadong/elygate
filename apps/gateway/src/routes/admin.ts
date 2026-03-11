@@ -1134,7 +1134,12 @@ export const adminRouter = new Elysia()
                 description: meta?.description || '',
                 status,
                 latency: Math.round(avgLatency),
-                object: 'model'
+                object: 'model',
+                channels: channels.map(ch => ({
+                    id: ch.id,
+                    name: ch.name,
+                    status: ch.status
+                }))
             };
         });
     })
