@@ -272,6 +272,57 @@ export class UnifiedDispatcher {
                     if (packageLockId) releasePackageConcurrency(packageLockId);
 
                     return skipTransform ? rawData : handler.transformResponse(rawData);
+                } else if (contentType.includes('text/event-stream') || contentType.includes('text/plain')) {
+                    // Some providers return SSE format even for non-stream requests
+                    const text = await response.text();
+                    let rawData: any = null;
+                    
+                    // Try to parse SSE format (data: {...})
+                    if (text.startsWith('data:')) {
+                        const jsonStr = text.trim().slice(5).trim();
+                        try {
+                            rawData = JSON.parse(jsonStr);
+                        } catch {
+                            throw new Error('Failed to parse SSE response as JSON');
+                        }
+                    } else {
+                        // Try direct JSON parse
+                        try {
+                            rawData = JSON.parse(text);
+                        } catch {
+                            throw new Error('Failed to parse response as JSON');
+                        }
+                    }
+
+                    // Usage extraction and billing
+                    let { promptTokens, completionTokens } = handler.extractUsage(rawData);
+
+                    const actualCost = calculateCost(model, user.group, promptTokens, completionTokens);
+
+                    await reconcileQuota({
+                        userId: user.id,
+                        tokenId: token.id,
+                        preDeducted,
+                        actualCost
+                    });
+
+                    await billAndLog({
+                        userId: user.id,
+                        tokenId: token.id,
+                        channelId: channelConfig.id,
+                        modelName: model,
+                        promptTokens,
+                        completionTokens,
+                        userGroup: user.group,
+                        isStream: false,
+                        isPackageFree
+                    });
+
+                    const currentActive = keyConcurrencyMap.get(lockId);
+                    if (currentActive) keyConcurrencyMap.set(lockId, Math.max(0, currentActive - 1));
+                    if (packageLockId) releasePackageConcurrency(packageLockId);
+
+                    return skipTransform ? rawData : handler.transformResponse(rawData);
                 } else {
                     // Binary response (Audio, Image, Video blob)
                     const buffer = await response.arrayBuffer();

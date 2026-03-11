@@ -116,6 +116,30 @@ export const memoryCache = {
                         newRoutes.set(model, []);
                     }
                     newRoutes.get(model)!.push(channel);
+
+                    // Auto-generate alias for models with provider prefix
+                    // e.g., "Qwen/Qwen3.5-397B-A17B" -> "Qwen3.5-397B-A17B"
+                    // e.g., "Pro/Qwen/Qwen2.5-7B" -> "Qwen/Qwen2.5-7B" and "Qwen2.5-7B"
+                    let alias = model;
+                    // Remove "Pro/" prefix first
+                    if (alias.toLowerCase().startsWith('pro/')) {
+                        alias = alias.substring(4);
+                    }
+                    // Remove provider prefix (e.g., "Qwen/")
+                    if (alias.includes('/')) {
+                        const parts = alias.split('/');
+                        // Generate alias without first part
+                        const aliasName = parts.slice(1).join('/');
+                        if (aliasName && aliasName !== model) {
+                            if (!newRoutes.has(aliasName)) {
+                                newRoutes.set(aliasName, []);
+                            }
+                            const existingAlias = newRoutes.get(aliasName)!;
+                            if (!existingAlias.some(ch => ch.id === channel.id)) {
+                                existingAlias.push(channel);
+                            }
+                        }
+                    }
                 }
 
                 // Also add modelMapping aliases to routes (reverse mapping)
