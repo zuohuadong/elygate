@@ -9,6 +9,7 @@
     let formData = $state({
         name: "",
         description: "",
+        cachePolicy: { mode: 'smart' },
         price: 0,
         durationDays: 30,
         models: "",
@@ -225,18 +226,10 @@
                                     <select id="cache-policy" bind:value={formData.cachePolicy.mode} class="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-sm text-slate-900 dark:text-white shadow-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors">
                                         <option value="default">{i18n.t.packages.cachePolicyDefault}</option>
                                         <option value="isolated">{i18n.t.packages.cachePolicyIsolated}</option>
-                                        <option value="refresh_on_count">{i18n.t.packages.cachePolicyRefresh}</option>
+                                        <option value="smart">{i18n.t.packages.cachePolicySmart}</option>
                                         <option value="disabled">{i18n.t.packages.cachePolicyDisabled}</option>
                                     </select>
                                 </div>
-                                {#if formData.cachePolicy.mode === 'refresh_on_count'}
-                                    <div>
-                                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="cache-refresh-n">
-                                            {i18n.t.packages.cacheRefreshN}
-                                        </label>
-                                        <input type="number" id="cache-refresh-n" min="1" bind:value={formData.cachePolicy.n} class="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-sm text-slate-900 dark:text-white shadow-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors" />
-                                    </div>
-                                {/if}
                             </div>
                         </div>
                     </div>

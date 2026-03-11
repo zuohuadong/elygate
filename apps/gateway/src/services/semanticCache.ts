@@ -98,45 +98,26 @@ export async function lookupSemanticCache(
         ? sql`AND created_by = ${userId}` 
         : sql``;
 
+    // Policy: Smart Refresh (Prefer others' cache, or own cache if very recent)
+    // Avoids "cold joke repetition" by forcing refresh if the user repeats their own prompt,
+    // unless it was just a page refresh/retry (within 2 minutes).
+    const smartClause = (policy?.mode === 'smart' && userId)
+        ? sql`AND (created_by != ${userId} OR created_at > NOW() - INTERVAL '2 minutes')`
+        : sql``;
+
     const rows = await sql`
         SELECT id, response, created_by, 1 - (embedding <=> ${vectorLiteral}::vector) AS similarity
         FROM semantic_cache
         WHERE model_name = ${model}
           AND created_at > NOW() - make_interval(hours => ${config.ttlHours})
           ${isolationClause}
+          ${smartClause}
         ORDER BY embedding <=> ${vectorLiteral}::vector
         LIMIT 1
     `;
 
     if (rows.length > 0 && rows[0].similarity >= config.similarityThreshold) {
-        const cacheId = rows[0].id;
-        
-        // Policy: Refresh on Count (N-th hit forced refresh)
-        if (policy?.mode === 'refresh_on_count' && userId) {
-            const refreshN = Number(policy.n) || 3;
-            
-            // Upsert hit count for this user and cache entry
-            const [hit] = await sql`
-                INSERT INTO semantic_cache_hits (cache_id, account_id, hit_count)
-                VALUES (${cacheId}, ${userId}, 1)
-                ON CONFLICT (cache_id, account_id) DO UPDATE
-                SET hit_count = semantic_cache_hits.hit_count + 1,
-                    last_hit_at = NOW()
-                RETURNING hit_count
-            `;
-
-            if (hit.hit_count >= refreshN) {
-                console.log(`[SemanticCache] Triggered FORCED REFRESH for user ${userId} (Hit ${hit.hit_count}/${refreshN})`);
-                // Reset hit count for the next cycle
-                await sql`UPDATE semantic_cache_hits SET hit_count = 0 WHERE cache_id = ${cacheId} AND account_id = ${userId}`;
-                return null; // Force a miss
-            }
-            
-            console.log(`[SemanticCache] HIT for user ${userId} (Hit ${hit.hit_count}/${refreshN})`);
-        } else {
-            console.log(`[SemanticCache] GLOBAL HIT! Similarity: ${rows[0].similarity.toFixed(4)}`);
-        }
-        
+        console.log(`[SemanticCache] HIT! Similarity: ${rows[0].similarity.toFixed(4)} Mode: ${policy?.mode || 'default'}`);
         return rows[0].response;
     }
 

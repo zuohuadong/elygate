@@ -1773,16 +1773,6 @@ export const adminRouter = new Elysia()
             // Semantic Cache Strategy Patches
             await sql`ALTER TABLE packages ADD COLUMN IF NOT EXISTS cache_policy JSONB DEFAULT '{"mode": "default"}'`;
             await sql`ALTER TABLE semantic_cache ADD COLUMN IF NOT EXISTS created_by INTEGER REFERENCES users(id) ON DELETE SET NULL`;
-            await sql`
-                CREATE TABLE IF NOT EXISTS semantic_cache_hits (
-                    id SERIAL PRIMARY KEY,
-                    cache_id INTEGER REFERENCES semantic_cache(id) ON DELETE CASCADE,
-                    account_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-                    hit_count INTEGER DEFAULT 1,
-                    last_hit_at TIMESTAMPTZ DEFAULT NOW(),
-                    UNIQUE (cache_id, account_id)
-                )
-            `;
             
             return { success: true, message: 'Schema updated for subscription cycles & semantic cache' };
         } catch (e: any) {

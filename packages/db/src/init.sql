@@ -316,20 +316,11 @@ CREATE TABLE IF NOT EXISTS semantic_cache (
     model_name TEXT NOT NULL,
     prompt_hash TEXT NOT NULL,
     prompt TEXT NOT NULL,
-    embedding VECTOR(1536),
+    embedding VECTOR(1024),
     response JSONB NOT NULL,
     created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE (model_name, prompt_hash)
-);
-
-CREATE TABLE IF NOT EXISTS semantic_cache_hits (
-    id SERIAL PRIMARY KEY,
-    cache_id INTEGER REFERENCES semantic_cache(id) ON DELETE CASCADE,
-    account_id INTEGER REFERENCES users(id) ON DELETE CASCADE, -- 'account_id' to match 'users.id' context
-    hit_count INTEGER DEFAULT 1,
-    last_hit_at TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE (cache_id, account_id)
 );
 
 -- ============================================================
