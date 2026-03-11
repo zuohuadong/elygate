@@ -22,7 +22,7 @@ import { jwt } from '@elysiajs/jwt';
 export const authRouter = new Elysia()
     .use(jwt({
         name: 'jwt',
-        secret: process.env.JWT_SECRET || 'super-secret-elygate-jwt-key',
+        secret: process.env.JWT_SECRET!,
         exp: '7d'
     }))
     .get('/github', ({ set }) => {

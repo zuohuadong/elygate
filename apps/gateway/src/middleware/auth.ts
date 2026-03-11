@@ -67,7 +67,7 @@ export function assertModelAccess(user: UserRecord, token: TokenRecord, modelNam
 export const authPlugin = new Elysia({ name: 'auth' })
     .use(jwt({
         name: 'jwt',
-        secret: process.env.JWT_SECRET || 'super-secret-elygate-jwt-key'
+        secret: process.env.JWT_SECRET!
     }))
     .derive({ as: 'global' }, async ({ request, set, jwt, cookie: { auth_session } }: any) => {
         const authHeader = request.headers.get('authorization');
