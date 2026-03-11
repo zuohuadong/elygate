@@ -34,9 +34,10 @@ import "./services/health";
 
 const app = new Elysia()
   .use(cors({
-    origin: true,
+    origin: '*',
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'Accept', 'X-Request-ID'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'Accept', 'X-Request-ID', 'Cookie'],
+    exposeHeaders: ['Set-Cookie'],
     credentials: true
   }))
   .use(jwt({
