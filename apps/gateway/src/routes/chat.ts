@@ -107,18 +107,24 @@ export const chatRouter = new Elysia()
             if (cachedResponse) {
                 console.log(`[SemanticCache] HIT for model: ${model}`);
                 
+                // Fix: Update model name in cached response to match requested model
+                const correctedResponse = {
+                    ...cachedResponse,
+                    model: model
+                };
+                
                 // --- Semantic Cache Billing ---
                 try {
                     let promptTokens = 0;
                     let completionTokens = 0;
-                    if (cachedResponse.usage) {
-                        promptTokens = cachedResponse.usage.prompt_tokens || 0;
-                        completionTokens = cachedResponse.usage.completion_tokens || 0;
+                    if (correctedResponse.usage) {
+                        promptTokens = correctedResponse.usage.prompt_tokens || 0;
+                        completionTokens = correctedResponse.usage.completion_tokens || 0;
                     } else {
                         const promptText = userPrompt;
                         let completionText = '';
-                        if (cachedResponse.choices && cachedResponse.choices[0]?.message?.content) {
-                            completionText = cachedResponse.choices[0].message.content;
+                        if (correctedResponse.choices && correctedResponse.choices[0]?.message?.content) {
+                            completionText = correctedResponse.choices[0].message.content;
                         }
                         promptTokens = Math.ceil(promptText.length / 1.5);
                         completionTokens = Math.ceil(completionText.length / 1.5);
@@ -152,7 +158,7 @@ export const chatRouter = new Elysia()
                 }
                 // ------------------------------
 
-                return cachedResponse;
+                return correctedResponse;
             }
         }
         // ---------------------------------------------------------------------------
@@ -365,19 +371,25 @@ export const chatRouter = new Elysia()
                 let rawData: any;
                 const contentType = response.headers.get('content-type') || '';
                 
-                if (contentType.includes('application/json')) {
-                    rawData = await response.json();
-                } else if (contentType.includes('text/event-stream') || contentType.includes('text/plain')) {
-                    // Some providers return SSE format even for non-stream requests
-                    const text = await response.text();
-                    if (text.startsWith('data:')) {
-                        const jsonStr = text.trim().slice(5).trim();
-                        rawData = JSON.parse(jsonStr);
+                try {
+                    if (contentType.includes('application/json')) {
+                        rawData = await response.json();
+                    } else if (contentType.includes('text/event-stream') || contentType.includes('text/plain')) {
+                        // Some providers return SSE format even for non-stream requests
+                        const text = await response.text();
+                        if (text.startsWith('data:')) {
+                            const jsonStr = text.trim().slice(5).trim();
+                            rawData = JSON.parse(jsonStr);
+                        } else {
+                            rawData = JSON.parse(text);
+                        }
                     } else {
-                        rawData = JSON.parse(text);
+                        rawData = await response.json();
                     }
-                } else {
-                    rawData = await response.json();
+                } catch (parseError: any) {
+                    const rawText = await response.text().catch(() => 'Unable to read response');
+                    console.error(`[Response Parse Error] Channel: ${channelConfig.id}, Model: ${model}, Content-Type: ${contentType}, Error: ${parseError.message}, Raw: ${rawText.substring(0, 500)}`);
+                    throw new Error(`Failed to parse upstream response: ${parseError.message}`);
                 }
                 
                 const formattedData = handler.transformResponse(rawData);
