@@ -111,6 +111,7 @@
 
     // Reactively re-fetch when period changes
     $effect(() => {
+        void activePeriod;
         fetchStats();
     });
 
