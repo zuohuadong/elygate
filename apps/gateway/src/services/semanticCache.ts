@@ -134,10 +134,11 @@ export async function storeSemanticCache(
     response: any,
     embeddingChannel: any,
     embeddingModel?: string,
-    createdBy?: number
+    createdBy?: number,
+    policy?: any
 ): Promise<void> {
     const { enabled } = getConfig();
-    if (!enabled) return;
+    if (!enabled || policy?.mode === 'disabled') return;
 
     const embedding = await generateEmbedding(prompt, embeddingChannel, embeddingModel);
     if (!embedding) return;

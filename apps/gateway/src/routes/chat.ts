@@ -93,14 +93,15 @@ export const chatRouter = new Elysia()
 
         console.log(`[SemanticCache] Embedding channel found: ${embeddingChannel ? embeddingChannel.name : 'NONE'}, model: ${embeddingModel || 'N/A'}`);
 
+        // --- Semantic Cache Configuration ---
+        const userPrompt = Array.isArray(body.messages)
+            ? body.messages.map((m: any) => m.content).join(' ')
+            : '';
+        const defaultMode = optionCache.get('SemanticCacheDefaultMode', 'default');
+        const cachePolicy = user.activePackage?.cache_policy || { mode: defaultMode };
+
         // --- Semantic Cache Lookup (Before upstream dispatch, non-stream only) ---
         if (embeddingChannel && !stream) {
-            const userPrompt = Array.isArray(body.messages)
-                ? body.messages.map((m: any) => m.content).join(' ')
-                : '';
-            // Get active cache policy from user's primary/active package if available
-            const cachePolicy = user.activePackage?.cache_policy || { mode: 'default' };
-
             const cachedResponse = await lookupSemanticCache(userPrompt, model, embeddingChannel, embeddingModel, user.id, cachePolicy);
             if (cachedResponse) {
                 console.log(`[SemanticCache] HIT for model: ${model}`);
@@ -385,7 +386,7 @@ export const chatRouter = new Elysia()
                     const userPrompt = Array.isArray(body.messages)
                         ? body.messages.map((m: any) => m.content).join(' ')
                         : '';
-                    await storeSemanticCache(userPrompt, model, formattedData, embeddingChannel, embeddingModel, user.id).catch(err => {
+                    await storeSemanticCache(userPrompt, model, formattedData, embeddingChannel, embeddingModel, user.id, cachePolicy).catch(err => {
                         console.error('[SemanticCache] Store Error:', err.message);
                     });
                 }

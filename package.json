@@ -1,6 +1,6 @@
 {
   "name": "elygate",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "AI API 批发平台",
   "private": true,
   "scripts": {

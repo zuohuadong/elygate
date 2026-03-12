@@ -430,5 +430,6 @@ INSERT INTO options (key, value) VALUES
     ('Custom_CSS', ''),
     ('Custom_JS', ''),
     ('WebhookURL', ''),
-    ('Notify_On_Channel_Offline', 'true')
+    ('Notify_On_Channel_Offline', 'true'),
+    ('SemanticCacheDefaultMode', 'default')
 ON CONFLICT (key) DO NOTHING;

@@ -1277,6 +1277,31 @@
                                 : "Cache entries expire after this time"}
                         </p>
                     </div>
+
+                    <div class="space-y-2">
+                        <label
+                            for="cache-default-mode"
+                            class="text-sm font-medium text-slate-700 dark:text-slate-300"
+                            >{i18n.lang === "zh"
+                                ? "全局默认策略"
+                                : "Global Default Mode"}</label
+                        >
+                        <select
+                            id="cache-default-mode"
+                            bind:value={settings.SemanticCacheDefaultMode}
+                            class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                        >
+                            <option value="default">{i18n.lang === "zh" ? "全局共享 (Default)" : "Global Sharing (Default)"}</option>
+                            <option value="isolated">{i18n.lang === "zh" ? "用户隔离 (Isolated)" : "User Isolation (Isolated)"}</option>
+                            <option value="smart">{i18n.lang === "zh" ? "智能避让 (Smart)" : "Self-Avoidance (Smart)"}</option>
+                            <option value="disabled">{i18n.lang === "zh" ? "完全禁用 (Disabled)" : "Disabled"}</option>
+                        </select>
+                        <p class="text-xs text-slate-500">
+                            {i18n.lang === "zh"
+                                ? "当用户没有生效中的套餐方案时，将遵循此全局默认策略"
+                                : "Applied when the user has no active package plan"}
+                        </p>
+                    </div>
                 </div>
                 <div
                     class="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800/50 rounded-lg"
