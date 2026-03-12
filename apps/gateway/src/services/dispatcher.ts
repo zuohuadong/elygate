@@ -5,8 +5,10 @@ import { billAndLog, preCheckAndDecrement, reconcileQuota } from './billing';
 import { calculateCost } from './ratio';
 import { ChannelType, getProviderHandler } from '../providers';
 import { type TokenRecord, type UserRecord, type ChannelConfig } from '../types';
-import { decryptChannelKeys } from './encryption';
+import { getChannelKeys } from './encryption';
 import { isRateLimited, isPackageRateLimited, waitForPackageConcurrency, packageConcurrencyMap, releasePackageConcurrency, getPackageLockId } from './ratelimit';
+import { buildUpstreamUrl } from '../utils/url';
+import { matchPattern } from '../utils/pattern';
 
 export interface DispatchOptions {
     model: string;
@@ -16,6 +18,8 @@ export interface DispatchOptions {
     endpointType: 'chat' | 'embeddings' | 'images' | 'audio' | 'audio/speech' | 'audio/transcriptions' | 'audio/translations' | 'moderations' | 'rerank' | 'video' | 'responses' | 'native-gemini';
     stream?: boolean;
     skipTransform?: boolean;
+    ip?: string;
+    ua?: string;
 }
 
 // Global in-memory concurrency tracker: Map<"channelId_keyIndex", currentActiveRequests>
@@ -57,15 +61,6 @@ export class UnifiedDispatcher {
         const groupPolicy = memoryCache.userGroups.get(user.group);
         
         if (!isPackageFree && groupPolicy) {
-            // Wildcard Match Engine
-            const matchPattern = (modelName: string, patternList: string[]) => {
-                if (!patternList || patternList.length === 0) return false;
-                return patternList.some((pattern: string) => {
-                    if (pattern.endsWith('*')) return modelName.startsWith(pattern.slice(0, -1));
-                    return modelName === pattern;
-                });
-            };
-
             const isModelDenied = matchPattern(model, groupPolicy.deniedModels);
             if (isModelDenied) {
                 const isModelAllowed = matchPattern(model, groupPolicy.allowedModels);
@@ -98,8 +93,7 @@ export class UnifiedDispatcher {
             const handler = getProviderHandler(channelConfig.type);
 
             // 1. Key Selection
-            const decryptedKeys = decryptChannelKeys(channelConfig.key);
-            const allKeys = decryptedKeys.split('\n').map((k: string) => k.trim()).filter(Boolean);
+            const allKeys = getChannelKeys(channelConfig.key);
             const statusMap = (channelConfig as any).keyStatus || {};
             const availableKeys = allKeys.filter(k => statusMap[k] !== 'exhausted');
 
@@ -148,7 +142,7 @@ export class UnifiedDispatcher {
                 upstreamModel = channelConfig.modelMapping[model];
             }
 
-            const upstreamUrl = this.getUpstreamUrl(channelConfig, upstreamModel, endpointType, isStream);
+            const upstreamUrl = buildUpstreamUrl(channelConfig, upstreamModel, endpointType, isStream);
 
             // 2.5 Prepare Body & Headers
             let forwardBody: any;
@@ -408,29 +402,7 @@ export class UnifiedDispatcher {
         throw new Error(`All candidate channels failed. Last error: ${lastError?.message || 'Unknown network error'}`);
     }
 
-    private static getUpstreamUrl(config: ChannelConfig, model: string, type: string, stream: boolean) {
-        let base = config.baseUrl;
-        // Remove trailing /v1 if already present to avoid duplication
-        if (base.endsWith('/v1')) {
-            base = base.slice(0, -3);
-        }
-        // Native Gemini 3.5 Pro support
-        if (config.type === ChannelType.GEMINI && (type === 'chat' || type === 'native-gemini')) {
-            const endpoint = stream ? ':streamGenerateContent?alt=sse' : ':generateContent';
-            return `${base}/v1beta/models/${model}${endpoint}`;
-        }
-
-        switch (type) {
-            case 'chat': return `${base}/v1/chat/completions`;
-            case 'embeddings': return `${base}/v1/embeddings`;
-            case 'images': return `${base}/v1/images/generations`;
-            case 'moderations': return `${base}/v1/moderations`;
-            case 'rerank': return `${base}/v1/rerank`;
-            case 'video': return `${base}/v1/video/generations`;
-            case 'responses': return `${base}/v1/responses`;
-            default: return `${base}/v1/${type}`;
-        }
-    }
+    // URL building is now handled by utils/url.ts buildUpstreamUrl()
 
     private static estimateMaxTokens(body: any, type: string) {
         if (type === 'chat') return body.max_tokens || 4096;

@@ -1,4 +1,5 @@
 import { ProviderHandler } from './types';
+import { removeNullFields } from '../utils/transform';
 
 /**
  * Native OpenAI Compatible Provider Handler
@@ -30,24 +31,7 @@ export class OpenAIApiHandler implements ProviderHandler {
     }
 
     transformResponse(data: any) {
-        // Remove null values to make response cleaner
-        const removeNulls = (obj: any): any => {
-            if (Array.isArray(obj)) {
-                return obj.map(removeNulls).filter(v => v !== null);
-            }
-            if (obj !== null && typeof obj === 'object') {
-                const cleaned: any = {};
-                for (const key of Object.keys(obj)) {
-                    const value = obj[key];
-                    if (value !== null) {
-                        cleaned[key] = removeNulls(value);
-                    }
-                }
-                return cleaned;
-            }
-            return obj;
-        };
-        return removeNulls(data);
+        return removeNullFields(data);
     }
 
     extractUsage(data: any) {

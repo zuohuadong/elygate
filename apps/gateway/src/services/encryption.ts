@@ -106,3 +106,11 @@ export function decryptChannelKeys(encryptedKeys: string): string {
     const decryptedKeys = keyList.map(k => decrypt(k));
     return decryptedKeys.join('\n');
 }
+
+/**
+ * Decrypt and split channel keys into an array.
+ * Convenience wrapper to eliminate the repeated decrypt+split+trim+filter pattern.
+ */
+export function getChannelKeys(encryptedKey: string): string[] {
+    return decryptChannelKeys(encryptedKey).split('\n').map(k => k.trim()).filter(Boolean);
+}
