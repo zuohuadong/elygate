@@ -6,25 +6,33 @@ import { adminGuard } from '../middleware/auth';
 export const statsRouter = new Elysia()
     .use(adminGuard)
     .get('/overview', async () => {
-        const [overview] = await sql`
+        const [overviewMV] = await sql`
             SELECT * FROM mv_system_overview LIMIT 1
+        `;
+
+        const [dynamic24h] = await sql`
+            SELECT 
+                COUNT(*)::int as requests_24h,
+                COALESCE(SUM(quota_cost), 0)::bigint as cost_24h
+            FROM logs 
+            WHERE created_at >= NOW() - INTERVAL '24 hours'
         `;
 
         const [todayStats] = await sql`
             SELECT 
-                COUNT(*) as request_count,
-                SUM(quota_cost) as total_cost,
-                SUM(prompt_tokens + completion_tokens) as total_tokens,
-                COUNT(CASE WHEN is_stream = true THEN 1 END) as stream_count
+                COUNT(*)::int as request_count,
+                COALESCE(SUM(quota_cost), 0)::bigint as total_cost,
+                COALESCE(SUM(prompt_tokens + completion_tokens), 0)::bigint as total_tokens,
+                COUNT(CASE WHEN is_stream = true THEN 1 END)::int as stream_count
             FROM logs 
             WHERE created_at >= CURRENT_DATE
         `;
 
-        const [hourlyStats] = await sql`
+        const hourlyStats = await sql`
             SELECT 
-                EXTRACT(HOUR FROM created_at) as hour,
-                COUNT(*) as request_count,
-                SUM(quota_cost) as total_cost
+                EXTRACT(HOUR FROM created_at)::int as hour,
+                COUNT(*)::int as request_count,
+                COALESCE(SUM(quota_cost), 0)::bigint as total_cost
             FROM logs 
             WHERE created_at >= NOW() - INTERVAL '24 hours'
             GROUP BY EXTRACT(HOUR FROM created_at)
@@ -32,7 +40,11 @@ export const statsRouter = new Elysia()
         `;
 
         return {
-            overview,
+            overview: {
+                ...overviewMV,
+                requests_24h: dynamic24h?.requests_24h || 0,
+                cost_24h: dynamic24h?.cost_24h || 0
+            },
             today: todayStats,
             hourly: hourlyStats
         };
@@ -179,11 +191,11 @@ export const statsRouter = new Elysia()
     .get('/realtime', async () => {
         const realtimeStats = await sql`
             SELECT 
-                COUNT(*) as requests_per_minute,
-                SUM(quota_cost) as cost_per_minute,
-                COALESCE(SUM(prompt_tokens + completion_tokens), 0) as tokens_per_minute,
-                COUNT(DISTINCT user_id) as active_users,
-                COUNT(DISTINCT model_name) as active_models
+                COUNT(*)::int as requests_per_minute,
+                COALESCE(SUM(quota_cost), 0)::bigint as cost_per_minute,
+                COALESCE(SUM(prompt_tokens + completion_tokens), 0)::bigint as tokens_per_minute,
+                COUNT(DISTINCT user_id)::int as active_users,
+                COUNT(DISTINCT model_name)::int as active_models
             FROM logs
             WHERE created_at >= NOW() - INTERVAL '1 minute'
         `;

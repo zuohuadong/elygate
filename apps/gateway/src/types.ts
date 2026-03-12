@@ -24,6 +24,7 @@ export interface TokenRecord {
     id: number;
     name: string;
     key: string;
+    userId: number;
     remainQuota: number;
     usedQuota: number;
     status: number;

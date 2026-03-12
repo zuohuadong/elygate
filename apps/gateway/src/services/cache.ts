@@ -1,21 +1,50 @@
 import { sql } from '@elygate/db';
-import { type ChannelConfig } from '../types';
+import { type ChannelConfig, type TokenRecord, type UserRecord } from '../types';
 
-/**
- * In-memory Cache Pool
- * Stores active and available channel data.
- */
+interface UserQuotaCache {
+    quota: number;
+    usedQuota: number;
+}
+
+interface CacheStats {
+    channelHits: number;
+    channelMisses: number;
+    tokenHits: number;
+    tokenMisses: number;
+    userQuotaHits: number;
+    userQuotaMisses: number;
+    semanticCacheHits: number;
+    semanticCacheMisses: number;
+    responseCacheHits: number;
+    responseCacheMisses: number;
+}
+
 export const memoryCache = {
-    // Channel cache: modelName -> ChannelConfig[] 
     channelRoutes: new Map<string, ChannelConfig[]>(),
-    // All channels by ID for direct access/status checks
     channels: new Map<number, ChannelConfig>(),
-    // Rate limit rules caching
     rateLimitRules: new Map<number, any>(),
-    // User Group policies
     userGroups: new Map<string, any>(),
     lastUpdated: 0,
     options: new Map<string, any>(),
+
+    tokens: new Map<string, TokenRecord>(),
+    userQuotas: new Map<number, UserQuotaCache>(),
+    users: new Map<number, UserRecord>(),
+
+    stats: {
+        channelHits: 0,
+        channelMisses: 0,
+        tokenHits: 0,
+        tokenMisses: 0,
+        userQuotaHits: 0,
+        userQuotaMisses: 0,
+        semanticCacheHits: 0,
+        semanticCacheMisses: 0,
+        responseCacheHits: 0,
+        responseCacheMisses: 0
+    } as CacheStats,
+
+    cleanupInterval: null as Timer | null,
 
     /**
      * Refresh Cache: Pulls all active channels from PostgreSQL.
@@ -231,6 +260,270 @@ export const memoryCache = {
             const scoreB = Math.random() * weightB;
             return scoreB - scoreA;
         });
+    },
+
+    getToken(key: string): TokenRecord | null {
+        const token = this.tokens.get(key);
+        if (token) {
+            this.stats.tokenHits++;
+            return token;
+        }
+        this.stats.tokenMisses++;
+        return null;
+    },
+
+    async getTokenFromCache(key: string): Promise<TokenRecord | null> {
+        const cached = this.getToken(key);
+        if (cached) return cached;
+
+        const keyHash = new Bun.CryptoHasher('sha256').update(key).digest('hex');
+        const cacheRows = await sql`
+            SELECT token_data FROM token_cache
+            WHERE key_hash = ${keyHash} AND (expired_at IS NULL OR expired_at > NOW())
+            LIMIT 1
+        `;
+        if (cacheRows.length > 0) {
+            const tokenData = cacheRows[0].token_data;
+            if (typeof tokenData === 'string') {
+                try {
+                    const token = JSON.parse(tokenData);
+                    this.setToken(key, token);
+                    return token;
+                } catch {}
+            } else {
+                this.setToken(key, tokenData);
+                return tokenData;
+            }
+        }
+
+        return this.getTokenFromDB(key);
+    },
+
+    async getTokenFromDB(key: string): Promise<TokenRecord | null> {
+        const rows = await sql`
+            SELECT t.id, t.name, t.key, t.remain_quota as "remainQuota", t.used_quota as "usedQuota", 
+                   t.status, t.expired_at as "expiredAt", t.models, t.subnet, t.rate_limit as "rateLimit",
+                   t.user_id as "userId"
+            FROM tokens t
+            WHERE t.key = ${key} AND t.status = 1
+            LIMIT 1
+        `;
+        if (rows.length > 0) {
+            const token = rows[0];
+            if (typeof token.models === 'string') {
+                try {
+                    token.models = JSON.parse(token.models);
+                } catch {
+                    token.models = [];
+                }
+            }
+            this.setToken(key, token);
+            await this.setTokenToCache(key, token);
+            return token;
+        }
+        return null;
+    },
+
+    async setTokenToCache(key: string, token: TokenRecord): Promise<void> {
+        const keyHash = new Bun.CryptoHasher('sha256').update(key).digest('hex');
+        const expiredAt = token.expiredAt ? new Date(token.expiredAt) : new Date(Date.now() + 24 * 60 * 60 * 1000);
+        await sql`
+            INSERT INTO token_cache (key_hash, token_data, user_id, expired_at)
+            VALUES (${keyHash}, ${JSON.stringify(token)}, ${token.userId}, ${expiredAt})
+            ON CONFLICT (key_hash) DO UPDATE
+            SET token_data = EXCLUDED.token_data,
+                updated_at = NOW(),
+                expired_at = EXCLUDED.expired_at
+        `;
+    },
+
+    setToken(key: string, token: TokenRecord): void {
+        this.tokens.set(key, token);
+    },
+
+    deleteToken(key: string): void {
+        this.tokens.delete(key);
+    },
+
+    async invalidateTokenCache(key: string): Promise<void> {
+        this.deleteToken(key);
+        const keyHash = new Bun.CryptoHasher('sha256').update(key).digest('hex');
+        await sql`DELETE FROM token_cache WHERE key_hash = ${keyHash}`;
+    },
+
+    getUserQuota(userId: number): UserQuotaCache | null {
+        const quota = this.userQuotas.get(userId);
+        if (quota) {
+            this.stats.userQuotaHits++;
+            return quota;
+        }
+        this.stats.userQuotaMisses++;
+        return null;
+    },
+
+    async getUserQuotaFromCache(userId: number): Promise<UserQuotaCache | null> {
+        const cached = this.getUserQuota(userId);
+        if (cached) return cached;
+
+        const cacheRows = await sql`
+            SELECT quota, used_quota as "usedQuota"
+            FROM user_quota_cache
+            WHERE user_id = ${userId}
+            LIMIT 1
+        `;
+        if (cacheRows.length > 0) {
+            const { quota, usedQuota } = cacheRows[0];
+            this.setUserQuota(userId, quota, usedQuota);
+            return { quota, usedQuota };
+        }
+
+        return this.getUserQuotaFromDB(userId);
+    },
+
+    async getUserQuotaFromDB(userId: number): Promise<UserQuotaCache | null> {
+        const rows = await sql`
+            SELECT quota, used_quota as "usedQuota"
+            FROM users
+            WHERE id = ${userId}
+            LIMIT 1
+        `;
+        if (rows.length > 0) {
+            const { quota, usedQuota } = rows[0];
+            this.setUserQuota(userId, quota, usedQuota);
+            await this.setUserQuotaToCache(userId, quota, usedQuota);
+            return { quota, usedQuota };
+        }
+        return null;
+    },
+
+    setUserQuota(userId: number, quota: number, usedQuota: number): void {
+        this.userQuotas.set(userId, { quota, usedQuota });
+    },
+
+    async setUserQuotaToCache(userId: number, quota: number, usedQuota: number): Promise<void> {
+        await sql`
+            INSERT INTO user_quota_cache (user_id, quota, used_quota)
+            VALUES (${userId}, ${quota}, ${usedQuota})
+            ON CONFLICT (user_id) DO UPDATE
+            SET quota = EXCLUDED.quota,
+                used_quota = EXCLUDED.used_quota,
+                updated_at = NOW()
+        `;
+    },
+
+    async updateUserQuotaInDB(userId: number, deltaQuota: number): Promise<boolean> {
+        try {
+            const result = await sql`
+                UPDATE users
+                SET used_quota = used_quota + ${deltaQuota}
+                WHERE id = ${userId} AND used_quota + ${deltaQuota} <= quota
+            `;
+            if (result.count > 0) {
+                const current = this.userQuotas.get(userId);
+                if (current) {
+                    current.usedQuota += deltaQuota;
+                    this.userQuotas.set(userId, current);
+                    await this.setUserQuotaToCache(userId, current.quota, current.usedQuota);
+                }
+                return true;
+            }
+            return false;
+        } catch (e) {
+            console.error('[Cache] Failed to update user quota:', e);
+            return false;
+        }
+    },
+
+    async invalidateUserQuotaCache(userId: number): Promise<void> {
+        this.userQuotas.delete(userId);
+        await sql`DELETE FROM user_quota_cache WHERE user_id = ${userId}`;
+    },
+
+    getUser(userId: number): UserRecord | null {
+        return this.users.get(userId) || null;
+    },
+
+    async getUserFromDB(userId: number): Promise<UserRecord | null> {
+        const cached = this.getUser(userId);
+        if (cached) return cached;
+
+        const rows = await sql`
+            SELECT id, username, group_key as "group", role, quota, used_quota as "usedQuota", 
+                   status, currency, active_packages as "activePackages"
+            FROM users
+            WHERE id = ${userId}
+            LIMIT 1
+        `;
+        if (rows.length > 0) {
+            const user = rows[0];
+            if (typeof user.activePackages === 'string') {
+                try {
+                    user.activePackages = JSON.parse(user.activePackages);
+                } catch {
+                    user.activePackages = [];
+                }
+            }
+            this.setUser(userId, user);
+            return user;
+        }
+        return null;
+    },
+
+    setUser(userId: number, user: UserRecord): void {
+        this.users.set(userId, user);
+    },
+
+    getStats() {
+        const total = this.stats.channelHits + this.stats.channelMisses;
+        const tokenTotal = this.stats.tokenHits + this.stats.tokenMisses;
+        const quotaTotal = this.stats.userQuotaHits + this.stats.userQuotaMisses;
+        return {
+            ...this.stats,
+            channelHitRate: total > 0 ? (this.stats.channelHits / total * 100).toFixed(2) + '%' : '0%',
+            tokenHitRate: tokenTotal > 0 ? (this.stats.tokenHits / tokenTotal * 100).toFixed(2) + '%' : '0%',
+            userQuotaHitRate: quotaTotal > 0 ? (this.stats.userQuotaHits / quotaTotal * 100).toFixed(2) + '%' : '0%',
+            channelCount: this.channels.size,
+            tokenCount: this.tokens.size,
+            userCount: this.users.size,
+            modelCount: this.channelRoutes.size
+        };
+    },
+
+    resetStats() {
+        this.stats = {
+            channelHits: 0,
+            channelMisses: 0,
+            tokenHits: 0,
+            tokenMisses: 0,
+            userQuotaHits: 0,
+            userQuotaMisses: 0,
+            semanticCacheHits: 0,
+            semanticCacheMisses: 0,
+            responseCacheHits: 0,
+            responseCacheMisses: 0
+        };
+    },
+
+    startCleanupTask(): void {
+        if (this.cleanupInterval) return;
+        this.cleanupInterval = setInterval(async () => {
+            console.log('[Cache] Running cleanup task...');
+            try {
+                await sql`CALL expire_cache_rows('7 days'::INTERVAL)`;
+                console.log('[Cache] Cleanup completed.');
+            } catch (e) {
+                console.error('[Cache] Cleanup failed:', e);
+            }
+        }, 60 * 60 * 1000);
+        console.log('[Cache] Cleanup task started (interval: 1 hour)');
+    },
+
+    stopCleanupTask(): void {
+        if (this.cleanupInterval) {
+            clearInterval(this.cleanupInterval);
+            this.cleanupInterval = null;
+            console.log('[Cache] Cleanup task stopped');
+        }
     },
 
     setOptions(options: Record<string, any>) {

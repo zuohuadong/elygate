@@ -5,7 +5,7 @@ import { billAndLog, reconcileQuota } from '../services/billing';
 import { calculateCost } from '../services/ratio';
 import { optionCache } from '../services/optionCache';
 import { lookupSemanticCache, storeSemanticCache } from '../services/semanticCache';
-import { lookupExactCache, storeExactCache } from '../services/responseCache';
+import { lookupResponseCache, storeResponseCache } from '../services/responseCache';
 import { getChannelKeys } from '../services/encryption';
 import { UnifiedDispatcher } from '../services/dispatcher';
 import { type TokenRecord, type UserRecord } from '../types';
@@ -109,7 +109,7 @@ export const chatRouter = new Elysia()
 
         // --- 1. Exact Response Cache Lookup (fastest, no embedding needed) ---
         if (!stream) {
-            const exactResponse = await lookupExactCache(messages, model, u.id, cachePolicy);
+            const exactResponse = await lookupResponseCache(model, messages, u.id);
             if (exactResponse) {
                 console.log(`[ResponseCache] HIT for model: ${model}`);
                 const correctedResponse = { ...exactResponse, model };
@@ -170,12 +170,12 @@ export const chatRouter = new Elysia()
         if (!stream && result && !(result instanceof Response)) {
             const formattedData = result as Record<string, any>;
 
-            storeExactCache(messages, model, formattedData, u.id, cachePolicy).catch(err => {
+            storeResponseCache(model, messages, formattedData, formattedData.usage, u.id).catch((err: Error) => {
                 console.error('[ResponseCache] Store Error:', err.message);
             });
 
             if (embeddingChannel) {
-                storeSemanticCache(userPrompt, model, formattedData, embeddingChannel, embeddingModel, u.id, cachePolicy).catch(err => {
+                storeSemanticCache(userPrompt, model, formattedData, embeddingChannel, embeddingModel, u.id, cachePolicy).catch((err: Error) => {
                     console.error('[SemanticCache] Store Error:', err.message);
                 });
             }

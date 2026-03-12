@@ -311,10 +311,10 @@ CREATE TABLE IF NOT EXISTS redemptions (
 );
 
 -- ============================================================
--- Semantic Cache Table (pgvector)
+-- Semantic Cache Table (pgvector) - UNLOGGED for performance
 -- ============================================================
 
-CREATE TABLE IF NOT EXISTS semantic_cache (
+CREATE UNLOGGED TABLE IF NOT EXISTS semantic_cache (
     id SERIAL PRIMARY KEY,
     model_name TEXT NOT NULL,
     prompt_hash TEXT NOT NULL,
@@ -327,21 +327,75 @@ CREATE TABLE IF NOT EXISTS semantic_cache (
 );
 
 -- ============================================================
--- Exact Match Response Cache Table
+-- Exact Match Response Cache Table - UNLOGGED for performance
 -- ============================================================
 
-CREATE TABLE IF NOT EXISTS response_cache (
-    hash TEXT PRIMARY KEY, -- SHA-256 of model + messages
+CREATE UNLOGGED TABLE IF NOT EXISTS response_cache (
+    hash TEXT PRIMARY KEY,
     model_name TEXT NOT NULL,
     response JSONB NOT NULL,
     usage JSONB,
     created_by INT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    expired_at TIMESTAMP WITH TIME ZONE
+    expired_at TIMESTAMP WITH TIME ZONE,
+    last_read_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_response_cache_model_created ON response_cache (model_name, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_response_cache_expired ON response_cache (expired_at);
+CREATE INDEX IF NOT EXISTS idx_response_cache_last_read ON response_cache (last_read_at);
+
+-- ============================================================
+-- Token Cache Table - UNLOGGED for performance
+-- ============================================================
+
+CREATE UNLOGGED TABLE IF NOT EXISTS token_cache (
+    key_hash TEXT PRIMARY KEY,
+    token_data JSONB NOT NULL,
+    user_id INTEGER NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    expired_at TIMESTAMP WITH TIME ZONE
+);
+
+CREATE INDEX IF NOT EXISTS idx_token_cache_user ON token_cache (user_id);
+CREATE INDEX IF NOT EXISTS idx_token_cache_expired ON token_cache (expired_at);
+
+-- ============================================================
+-- User Quota Cache Table - UNLOGGED for performance
+-- ============================================================
+
+CREATE UNLOGGED TABLE IF NOT EXISTS user_quota_cache (
+    user_id INTEGER PRIMARY KEY,
+    quota BIGINT NOT NULL,
+    used_quota BIGINT NOT NULL DEFAULT 0,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ============================================================
+-- LRU Eviction Procedure for Response Cache
+-- ============================================================
+
+CREATE OR REPLACE PROCEDURE expire_cache_rows(retention_period INTERVAL) AS $$
+BEGIN
+    DELETE FROM response_cache WHERE expired_at < NOW();
+    DELETE FROM semantic_cache WHERE created_at < NOW() - retention_period;
+    DELETE FROM token_cache WHERE expired_at < NOW();
+    COMMIT;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE PROCEDURE lru_eviction(eviction_count INTEGER) AS $$
+BEGIN
+    DELETE FROM response_cache
+    WHERE ctid IN (
+        SELECT ctid FROM response_cache
+        ORDER BY last_read_at ASC
+        LIMIT eviction_count
+    );
+    COMMIT;
+END;
+$$ LANGUAGE plpgsql;
 
 -- ============================================================
 -- Materialized Views

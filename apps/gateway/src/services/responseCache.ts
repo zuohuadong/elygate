@@ -1,72 +1,109 @@
 import { sql } from '@elygate/db';
 import { optionCache } from './optionCache';
+import { memoryCache } from './cache';
 
-const DEFAULT_CACHE_TTL_HOURS = 24;
+const DEFAULT_ENABLED = true;
+const DEFAULT_TTL_HOURS = 24;
 
-export async function lookupExactCache(
-    messages: any[],
+interface ResponseCacheConfig {
+    enabled: boolean;
+    ttlHours: number;
+}
+
+function getConfig(): ResponseCacheConfig {
+    return {
+        enabled: optionCache.get('ResponseCacheEnabled', DEFAULT_ENABLED),
+        ttlHours: optionCache.get('ResponseCacheTTLHours', DEFAULT_TTL_HOURS)
+    };
+}
+
+function generateHash(model: string, messages: any[]): string {
+    const content = JSON.stringify({ model, messages });
+    return new Bun.CryptoHasher('sha256').update(content).digest('hex');
+}
+
+export async function lookupResponseCache(
     model: string,
-    userId?: number,
-    policy?: any
+    messages: any[],
+    userId?: number
 ): Promise<any | null> {
-    // Basic checks
-    const globalEnabled = optionCache.get('ResponseCacheEnabled', 'true') === 'true';
-    if (!globalEnabled || policy?.mode === 'disabled') return null;
+    const config = getConfig();
+    if (!config.enabled) return null;
 
-    // Calculate hash: model + JSON stringified messages
-    const input = JSON.stringify({ model, messages });
-    const hash = new Bun.CryptoHasher('sha256').update(input).digest('hex');
+    const hash = generateHash(model, messages);
 
-    // Policy: Isolated mode (only hits cache created by this user)
-    const isolationClause = (policy?.mode === 'isolated' && userId) 
-        ? sql`AND created_by = ${userId}` 
-        : sql``;
-
-    // Policy: Smart Refresh (same as semantic cache logic)
-    const smartClause = (policy?.mode === 'smart' && userId)
-        ? sql`AND (created_by != ${userId} OR created_at > NOW() - INTERVAL '2 minutes')`
-        : sql``;
-
-    const [row] = await sql`
-        SELECT response, usage
+    const rows = await sql`
+        SELECT response, usage, created_at
         FROM response_cache
         WHERE hash = ${hash}
-          AND model_name = ${model}
-          AND created_at > NOW() - make_interval(hours => ${optionCache.get('SemanticCacheTTLHours', DEFAULT_CACHE_TTL_HOURS)})
-          ${isolationClause}
-          ${smartClause}
+          AND (expired_at IS NULL OR expired_at > NOW())
         LIMIT 1
     `;
 
-    if (row) {
-        console.log(`[ResponseCache] EXACT HIT! Hash: ${hash.substring(0, 8)}`);
-        return row.response;
+    if (rows.length > 0) {
+        console.log('[ResponseCache] HIT!');
+        memoryCache.stats.responseCacheHits++;
+        
+        await sql`
+            UPDATE response_cache
+            SET last_read_at = NOW()
+            WHERE hash = ${hash}
+        `;
+
+        const response = rows[0].response;
+        if (typeof response === 'string') {
+            try {
+                return JSON.parse(response);
+            } catch {
+                return response;
+            }
+        }
+        return response;
     }
 
+    memoryCache.stats.responseCacheMisses++;
+    console.log('[ResponseCache] MISS');
     return null;
 }
 
-export async function storeExactCache(
-    messages: any[],
+export async function storeResponseCache(
     model: string,
+    messages: any[],
     response: any,
-    createdBy?: number,
-    policy?: any
+    usage: any,
+    userId?: number
 ): Promise<void> {
-    const globalEnabled = optionCache.get('ResponseCacheEnabled', 'true') === 'true';
-    if (!globalEnabled || policy?.mode === 'disabled') return;
+    const config = getConfig();
+    if (!config.enabled) return;
 
-    const input = JSON.stringify({ model, messages });
-    const hash = new Bun.CryptoHasher('sha256').update(input).digest('hex');
+    const hash = generateHash(model, messages);
+    const expiredAt = new Date(Date.now() + config.ttlHours * 60 * 60 * 1000);
 
     await sql`
-        INSERT INTO response_cache (hash, model_name, response, usage, created_by)
-        VALUES (${hash}, ${model}, ${JSON.stringify(response)}, ${JSON.stringify(response.usage || null)}, ${createdBy || null})
+        INSERT INTO response_cache (hash, model_name, response, usage, created_by, expired_at)
+        VALUES (${hash}, ${model}, ${JSON.stringify(response)}, ${JSON.stringify(usage)}, ${userId || null}, ${expiredAt})
         ON CONFLICT (hash) DO UPDATE
         SET response = EXCLUDED.response,
             usage = EXCLUDED.usage,
-            created_by = EXCLUDED.created_by,
+            expired_at = EXCLUDED.expired_at,
             created_at = NOW()
     `;
-    console.log(`[ResponseCache] Stored hash: ${hash.substring(0, 8)} for model: ${model}`);
+    console.log('[ResponseCache] Stored response for model:', model);
+}
+
+export async function clearResponseCache(olderThanHours = 24): Promise<number> {
+    const result = await sql`
+        DELETE FROM response_cache 
+        WHERE created_at < NOW() - make_interval(hours => ${olderThanHours})
+    `;
+    return result.count;
+}
+
+export async function getResponseCacheStats(): Promise<{ total: number; expired: number }> {
+    const total = await sql`SELECT COUNT(*) as count FROM response_cache`;
+    const expired = await sql`SELECT COUNT(*) as count FROM response_cache WHERE expired_at < NOW()`;
+    return {
+        total: total[0].count,
+        expired: expired[0].count
+    };
 }
