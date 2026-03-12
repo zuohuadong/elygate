@@ -12,6 +12,23 @@ import { optionCache } from '../services/optionCache';
 import { type TokenRecord, type UserRecord, type ChannelConfig } from '../types';
 import { translateErrorBilingual } from '../services/i18n';
 
+function removeNullFields(obj: any): any {
+    if (Array.isArray(obj)) {
+        return obj.map(removeNullFields).filter(v => v !== null);
+    }
+    if (obj !== null && typeof obj === 'object') {
+        const cleaned: any = {};
+        for (const key of Object.keys(obj)) {
+            const value = obj[key];
+            if (value !== null) {
+                cleaned[key] = removeNullFields(value);
+            }
+        }
+        return cleaned;
+    }
+    return obj;
+}
+
 export const chatRouter = new Elysia()
     .post('/chat/completions', async ({ body, token, user, request, set }: any) => {
         const u = user as UserRecord;
@@ -158,7 +175,7 @@ export const chatRouter = new Elysia()
                 }
                 // ------------------------------
 
-                return correctedResponse;
+                return removeNullFields(correctedResponse);
             }
         }
         // ---------------------------------------------------------------------------
@@ -436,7 +453,7 @@ export const chatRouter = new Elysia()
                     ua
                 });
 
-                return formattedData;
+                return removeNullFields(formattedData);
 
             } catch (e: any) {
                 // Refund quota on failure before moving to next channel
