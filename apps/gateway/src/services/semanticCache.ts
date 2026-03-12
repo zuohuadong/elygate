@@ -118,7 +118,16 @@ export async function lookupSemanticCache(
 
     if (rows.length > 0 && rows[0].similarity >= config.similarityThreshold) {
         console.log(`[SemanticCache] HIT! Similarity: ${rows[0].similarity.toFixed(4)} Mode: ${policy?.mode || 'default'}`);
-        return rows[0].response;
+        // Ensure response is an object, not a string
+        const response = rows[0].response;
+        if (typeof response === 'string') {
+            try {
+                return JSON.parse(response);
+            } catch {
+                return response;
+            }
+        }
+        return response;
     }
 
     console.log(`[SemanticCache] MISS. Best similarity: ${rows[0]?.similarity?.toFixed(4) ?? 'N/A'}`);
