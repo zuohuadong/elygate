@@ -137,7 +137,7 @@
     }
 </script>
 
-<div class="flex-1 space-y-6 text-left max-w-4xl">
+<div class="flex-1 space-y-6 text-left max-w-5xl">
     <div>
         <h2
             class="text-2xl font-bold tracking-tight flex items-center gap-2 text-slate-900 dark:text-white"
@@ -545,13 +545,13 @@
                         </p>
                     </div>
                     <div class="space-y-2">
-                        <label
+                        <span
                             class="text-sm font-medium text-slate-700 dark:text-slate-300"
                         >
                             {i18n.lang === "zh"
                                 ? "换算参考"
                                 : "Conversion Reference"}
-                        </label>
+                        </span>
                         <div
                             class="px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm"
                         >
@@ -1242,7 +1242,7 @@
                                 : "When enabled, identical requests skip Embedding and return results instantly"}
                         </p>
                     </div>
-                    <div class="space-y-2">
+                    <div class="space-y-2 md:col-span-2">
                         <label
                             for="embedding-model"
                             class="text-sm font-medium text-slate-700 dark:text-slate-300"

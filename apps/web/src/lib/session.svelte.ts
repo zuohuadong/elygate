@@ -2,7 +2,7 @@ import { writable, get } from "svelte/store";
 
 type Currency = "USD" | "RMB";
 
-interface SessionData {
+export interface SessionData {
     id: string;
     token: string;
     username: string;
@@ -12,7 +12,7 @@ interface SessionData {
     quotaPerUnit: number;
 }
 
-interface SessionManager {
+export interface SessionManager {
     subscribe: any;
     update(data: Partial<SessionData>): void;
     setSystemInfo(info: { exchangeRate?: number; quotaPerUnit?: number }): void;
@@ -116,4 +116,4 @@ function createSession(): SessionManager {
     };
 }
 
-export const session = createSession();
+export const session: SessionManager = createSession();
