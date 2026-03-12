@@ -1093,15 +1093,16 @@ export const adminRouter = new Elysia()
     })
 
     .get('/dashboard/period_stats', async ({ query }: any) => {
-        const { period } = query as any;
+        const { period, timezone } = query as any;
+        const tz = timezone || 'UTC';
+        
         let startDate = new Date();
-        startDate.setHours(0, 0, 0, 0); // Default to today
+        startDate.setHours(0, 0, 0, 0);
 
         const now = new Date();
         switch (period) {
             case 'yesterday':
                 startDate.setDate(startDate.getDate() - 1);
-                // Yesterday ends at start of today
                 break;
             case '7d':
                 startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
@@ -1114,11 +1115,12 @@ export const adminRouter = new Elysia()
                 break;
         }
 
+        // Adjust condition to be relative to the requested timezone if necessary
+        // For Postgres aggregation:
         const condition = period === 'yesterday'
             ? sql`created_at >= ${startDate} AND created_at < ${new Date(new Date().setHours(0, 0, 0, 0))}`
             : sql`created_at >= ${startDate}`;
 
-        // 1. Overall Aggregation
         const [overview] = await sql`
             SELECT 
                 COUNT(*)::int as total_requests,
@@ -1187,29 +1189,29 @@ export const adminRouter = new Elysia()
             m.cost_percentage = Number(((Number(m.cost) / totalChannelCost) * 100).toFixed(1));
         });
         
-        // 4. Time Series Data
+        // 4. Time Series Data (Timezone Aware)
         let timeSeries;
         if (period === '7d' || period === '30d') {
             timeSeries = await sql`
                 SELECT 
-                    DATE(created_at) as date,
+                    DATE(created_at AT TIME ZONE 'UTC' AT TIME ZONE ${tz}) as date,
                     COUNT(*)::int as requests,
                     COALESCE(SUM(quota_cost), 0)::bigint as cost
                 FROM logs
                 WHERE ${condition}
-                GROUP BY DATE(created_at)
+                GROUP BY 1
                 ORDER BY date ASC
             `;
         } else {
             // hourly for today/yesterday
             timeSeries = await sql`
                 SELECT 
-                    EXTRACT(HOUR FROM created_at) as hour,
+                    EXTRACT(HOUR FROM created_at AT TIME ZONE 'UTC' AT TIME ZONE ${tz}) as hour,
                     COUNT(*)::int as requests,
                     COALESCE(SUM(quota_cost), 0)::bigint as cost
                 FROM logs
                 WHERE ${condition}
-                GROUP BY EXTRACT(HOUR FROM created_at)
+                GROUP BY 1
                 ORDER BY hour ASC
             `;
         }

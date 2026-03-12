@@ -438,6 +438,39 @@
                                 : "Initial quota for new users ($1 = 1000 quota)"}
                         </p>
                     </div>
+                    <div class="space-y-2">
+                        <label
+                            for="timezone"
+                            class="text-sm font-medium text-slate-700 dark:text-slate-300"
+                            >{i18n.t.settings.timezone}</label
+                        >
+                        <select
+                            id="timezone"
+                            bind:value={settings.Timezone}
+                            class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                        >
+                            <option value="UTC">UTC</option>
+                            <option value="Asia/Shanghai">Asia/Shanghai (CST, UTC+8)</option>
+                            <option value="Asia/Tokyo">Asia/Tokyo (JST, UTC+9)</option>
+                            <option value="Asia/Singapore">Asia/Singapore (SGT, UTC+8)</option>
+                            <option value="Asia/Hong_Kong">Asia/Hong_Kong (HKT, UTC+8)</option>
+                            <option value="America/New_York"
+                                >America/New_York (EST/EDT, UTC-5/-4)</option
+                            >
+                            <option value="America/Los_Angeles"
+                                >America/Los_Angeles (PST/PDT, UTC-8/-7)</option
+                            >
+                            <option value="Europe/London"
+                                >Europe/London (GMT/BST, UTC+0/+1)</option
+                            >
+                            <option value="Europe/Paris"
+                                >Europe/Paris (CET/CEST, UTC+1/+2)</option
+                            >
+                        </select>
+                        <p class="text-xs text-slate-500">
+                            {i18n.t.settings.timezoneTip}
+                        </p>
+                    </div>
                 </div>
                 {#if settings.RegisterMode === "invite"}
                     <div

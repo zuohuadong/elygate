@@ -81,8 +81,12 @@
     async function fetchStats() {
         isLoading = true;
         try {
+            // First fetch system settings to get configured timezone
+            const options = await apiFetch<Record<string, string>>("/admin/options");
+            const tz = options?.Timezone || "UTC";
+
             const data = await apiFetch<any>(
-                `/admin/dashboard/period_stats?period=${activePeriod}`,
+                `/admin/dashboard/period_stats?period=${activePeriod}&timezone=${encodeURIComponent(tz)}`,
             );
             if (data) {
                 overview = data.overview || overview;
