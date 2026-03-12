@@ -7,6 +7,7 @@ import { memoryCache } from '../services/cache';
 import { LRUCache } from 'lru-cache';
 import { jwt } from '@elysiajs/jwt';
 import { checkAndResetSubscriptionQuota } from '../services/subscription';
+import { translateErrorBilingual } from '../services/i18n';
 
 // High-performance LRU cache for auth context (Token + User)
 // Reduces DB pressure by 90%+ for repeated requests from the same API key.
@@ -232,18 +233,18 @@ export const authPlugin = new Elysia({ name: 'auth' })
 
         if (tokenRecord.expiredAt && tokenRecord.expiredAt < new Date()) {
             set.status = 403;
-            throw new Error('API key has expired');
+            throw new Error(translateErrorBilingual('API key has expired'));
         }
 
         // Pre-check quota to prevent overdraft and spamming
         const hasActivePackages = userRecord.activePackages && userRecord.activePackages.length > 0;
         if (userRecord.quota <= 0 && !hasActivePackages) {
             set.status = 403;
-            throw new Error('Insufficient user quota');
+            throw new Error(translateErrorBilingual('Insufficient user quota'));
         }
         if (tokenRecord.remainQuota !== -1 && tokenRecord.remainQuota <= 0) {
             set.status = 403;
-            throw new Error('Insufficient token quota');
+            throw new Error(translateErrorBilingual('Insufficient token quota'));
         }
 
         // Rate Limiting: Apply frequency control based on TokenID (or UserID if fallback)

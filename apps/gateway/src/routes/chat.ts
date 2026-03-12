@@ -10,6 +10,7 @@ import { ChannelType, getProviderHandler } from '../providers';
 import { decryptChannelKeys } from '../services/encryption';
 import { optionCache } from '../services/optionCache';
 import { type TokenRecord, type UserRecord, type ChannelConfig } from '../types';
+import { translateErrorBilingual } from '../services/i18n';
 
 export const chatRouter = new Elysia()
     .post('/chat/completions', async ({ body, token, user, request, set }: any) => {
@@ -36,7 +37,7 @@ export const chatRouter = new Elysia()
         const candidateChannels = memoryCache.selectChannels(model);
 
         if (!candidateChannels || candidateChannels.length === 0) {
-            throw new Error(`No available channel found for model: ${model}`);
+            throw new Error(translateErrorBilingual('Model not available') + `: ${model}`);
         }
 
         let lastError: any = null;
@@ -457,5 +458,5 @@ export const chatRouter = new Elysia()
         }
 
         // All candidate channels failed, throw summarized error
-        throw new Error(`All candidate channels failed. Last upstream error: ${lastError?.message || 'Unknown network error'}`);
+        throw new Error(translateErrorBilingual('All providers/models failed') + `. Last error: ${lastError?.message || 'Unknown'}`);
     });
