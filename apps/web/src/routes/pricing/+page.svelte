@@ -442,8 +442,8 @@
                         class="text-sm text-slate-500 dark:text-slate-400 leading-relaxed max-w-2xl"
                     >
                         {i18n.lang === "zh"
-                            ? `我们的计费系统使用基于基础汇率 $1.0 = 1,000,000 单位的倍率系统。Token 计算公式为：(输入 + 输出 × 补全倍率) × 模型倍率。上表显示的是默认分组用户每 100 万 Token 的实际生效美元费率。`
-                            : `Our billing system uses a multiplier system tied to a base exchange rate of $1.0 = 1,000,000 units. Tokens are calculated as: (Input + Output × CompletionRatio) × ModelMultiplier. Prices shown above are effective USD rates per 1M tokens for the default user group.`}
+                            ? `我们的计费系统使用基于基础汇率 $1.0 = ${session.quotaPerUnit * 2} 单位的倍率系统。Token 计算公式为：(输入 + 输出 × 补全倍率) × 模型倍率。上表显示的是默认分组用户每 100 万 Token 的实际生效美元费率。`
+                            : `Our billing system uses a multiplier system tied to a base exchange rate of $1.0 = ${session.quotaPerUnit * 2} units. Tokens are calculated as: (Input + Output × CompletionRatio) × ModelMultiplier. Prices shown above are effective USD rates per 1M tokens for the default user group.`}
                     </p>
                 </div>
             </div>

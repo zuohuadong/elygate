@@ -4,6 +4,7 @@
     import { Plus, Ticket, Trash2 } from "lucide-svelte";
     import { apiFetch } from "$lib/api";
     import { i18n } from "$lib/i18n/index.svelte";
+    import { session } from "$lib/session.svelte";
     import { onMount } from "svelte";
 
     interface InviteCode {
@@ -49,7 +50,7 @@
                 return {
                     ...c,
                     displayStatus: getStatusText(c.status, c.usedCount, c.maxUses, c.expiresAt),
-                    formattedQuota: `$ ${(Number(giftQuota) / 1000).toFixed(2)}`,
+                    formattedQuota: session.formatQuota(Number(giftQuota)),
                     usageStr: `${c.usedCount || 0} / ${c.maxUses || 0}`,
                     formattedExpires: c.expiresAt ? new Date(c.expiresAt).toLocaleString() : "-"
                 };

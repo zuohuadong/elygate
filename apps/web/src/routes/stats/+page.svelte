@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from "svelte";
 	import { i18n } from "$lib/i18n/index.svelte";
+	import { session } from "$lib/session.svelte";
 	import { apiFetch } from "$lib/api";
 	import {
 		TrendingUp,
@@ -101,8 +102,7 @@
 	}
 
 	function formatCurrency(amount: number): string {
-		if (!amount || amount === 0) return "$0.00";
-		return `$${(amount / 1000).toFixed(2)}`;
+		return session.formatQuota(amount, 2);
 	}
 
 	function getHourLabel(hour: number): string {
@@ -187,7 +187,7 @@
 		<div class="bg-white dark:bg-gray-800 rounded-lg shadow p-12 text-center">
 			<BarChart3 class="w-16 h-16 text-gray-400 mx-auto mb-4" />
 			<h3 class="text-xl font-semibold text-gray-900 dark:text-white mb-2">
-				{i18n.lang === "zh" ? "暂无统计数据" : "No Statistics Data"}
+				{i18n.t.common.noData}
 			</h3>
 			<p class="text-gray-600 dark:text-gray-400 mb-6">
 				{i18n.lang === "zh"
@@ -478,7 +478,7 @@
 				</div>
 				<div>
 					<p class="text-sm text-gray-600 dark:text-gray-400">
-						{i18n.lang === "zh" ? "总费用" : "Total Cost"}
+						{i18n.t.dashboard.title}
 					</p>
 					<p
 						class="text-2xl font-bold text-gray-900 dark:text-white mt-1"

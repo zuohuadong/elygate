@@ -4,6 +4,7 @@
     import { apiFetch } from "$lib/api";
     import { onMount } from "svelte";
     import { i18n } from "$lib/i18n/index.svelte";
+    import { session } from "$lib/session.svelte";
 
     let logs = $state<any[]>([]);
     let isLoading = $state(true);
@@ -26,7 +27,7 @@
                 dt_tokens: `${l.promptTokens} + ${l.completionTokens}`,
                 dt_stream: l.isStream ? "SSE" : "JSON",
                 dt_latency: l.elapsedMs ? `${l.elapsedMs}ms` : "-",
-                dt_cost: `$${(l.quotaCost / 1000).toFixed(4)}`,
+                dt_cost: session.formatQuota(l.quotaCost),
             }));
             currentPage = page;
         } catch (err: any) {

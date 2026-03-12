@@ -40,7 +40,7 @@
                             ? (i18n.lang === "zh" ? "语义缓存" : "Semantic Cache")
                             : (l.channel_name || (l.channel_id ? `Channel ${l.channel_id}` : l.channelId ? `Channel ${l.channelId}` : "Unknown")),
                     dt_token: l.token_id ? `Token ${l.token_id}` : l.tokenId ? `Token ${l.tokenId}` : "Direct",
-                    dt_cost: `$ ${((l.quota_cost || l.quotaCost || 0) / session.quotaPerUnit).toFixed(4)}`,
+                    dt_cost: session.formatQuota(l.quota_cost || l.quotaCost || 0),
                     dt_duration: durationStr,
                     dt_latency: l.elapsed_ms ? `${l.elapsed_ms}ms` : "-",
                     dt_ip: l.ip_address || "unknown",
@@ -87,17 +87,17 @@
     };
 
     const columns = [
-        { key: "dt_created_at", label: "时间" },
-        { key: "dt_model", label: "请求模型" },
-        { key: "dt_channel", label: "命中渠道" },
-        { key: "dt_token", label: "令牌来源" },
-        { key: "dt_user", label: "用户" },
-        { key: "dt_duration", label: "通信模式" },
-        { key: "dt_latency", label: "延迟" },
+        { key: "dt_created_at", label: i18n.lang === "zh" ? "时间" : "Time" },
+        { key: "dt_model", label: i18n.lang === "zh" ? "请求模型" : "Model" },
+        { key: "dt_channel", label: i18n.lang === "zh" ? "命中渠道" : "Channel" },
+        { key: "dt_token", label: i18n.lang === "zh" ? "令牌来源" : "Token" },
+        { key: "dt_user", label: i18n.lang === "zh" ? "用户" : "User" },
+        { key: "dt_duration", label: i18n.lang === "zh" ? "通信模式" : "Duration" },
+        { key: "dt_latency", label: i18n.lang === "zh" ? "延迟" : "Latency" },
         { key: "dt_ip", label: "IP 地址" },
         { key: "dt_ua", label: "User Agent" },
-        { key: "dt_cost", label: "花费额度" },
-        { key: "dt_status", label: "状态", render: renderStatus },
+        { key: "dt_cost", label: i18n.lang === "zh" ? "花费额度" : "Cost" },
+        { key: "dt_status", label: i18n.lang === "zh" ? "状态" : "Status", render: renderStatus },
     ];
 </script>
 

@@ -15,6 +15,7 @@
     } from "lucide-svelte";
     import { apiFetch } from "$lib/api";
     import { i18n } from "$lib/i18n/index.svelte";
+    import { session } from "$lib/session.svelte";
     import { onMount, onDestroy } from "svelte";
 
     // New types for the redesigned stats
@@ -170,7 +171,7 @@
                 <h2
                     class="text-xl font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-2"
                 >
-                    {i18n.lang === "zh" ? "密钥统计" : "Key Statistics"}
+                    {i18n.t.dashboard.title}
                 </h2>
                 <div
                     class="flex items-center gap-2 text-xs text-slate-500 mt-0.5"
@@ -240,7 +241,7 @@
             <h3
                 class="text-sm font-medium text-slate-500 dark:text-slate-400 mb-2"
             >
-                {i18n.lang === "zh" ? "总请求数" : "Total Requests"}
+                {i18n.t.dashboard.requests}
             </h3>
             <div
                 class="text-3xl font-bold text-slate-900 dark:text-white tabular-nums tracking-tight"
@@ -261,7 +262,7 @@
             <div
                 class="text-3xl font-bold text-slate-900 dark:text-white tabular-nums tracking-tight"
             >
-                ${(overview.total_cost / 1000).toFixed(2)}
+                {session.formatQuota(overview.total_cost, 2)}
             </div>
         </div>
 
@@ -316,17 +317,17 @@
                 <h3
                     class="text-sm font-medium text-slate-500 dark:text-slate-400 mb-2 flex items-center justify-between"
                 >
-                    <span>{i18n.lang === "zh" ? "语义缓存" : "Semantic Cache"}</span>
+                    <span>{i18n.t.dashboard.semanticCache} / {i18n.t.dashboard.exactCache}</span>
                     <span class="text-[10px] px-2 py-0.5 bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-full font-semibold">
-                        {i18n.lang === "zh" ? "纯利润" : "Pure Profit"}
+                        {i18n.t.dashboard.profit}
                     </span>
                 </h3>
                 <div class="flex items-baseline gap-2">
                     <span class="text-3xl font-bold text-slate-900 dark:text-white tabular-nums tracking-tight">
-                        ${((overview.semantic_profit_quota + overview.exact_profit_quota) / 1000).toFixed(2)}
+                        {session.formatQuota(overview.semantic_profit_quota + overview.exact_profit_quota, 2)}
                     </span>
                     <span class="text-xs text-slate-400 font-medium">
-                        {i18n.lang === "zh" ? "盈利" : "Profit"}
+                        {i18n.t.dashboard.profit}
                     </span>
                 </div>
             </div>
@@ -336,31 +337,31 @@
                 <!-- Exact Cache Stats -->
                 <div class="space-y-1">
                     <div class="flex justify-between w-full font-semibold text-amber-600 dark:text-amber-400">
-                        <span>{i18n.lang === "zh" ? "⚡ 精确缓存:" : "⚡ Exact Cache:"}</span>
+                        <span>⚡ {i18n.t.dashboard.exactCache}:</span>
                         <span>{formatNumber(overview.exact_hits)} hit</span>
                     </div>
                     <div class="flex justify-between w-full text-slate-400 pl-4">
-                        <span>{i18n.lang === "zh" ? "节省费用:" : "Profit:"}</span>
-                        <span class="text-slate-600 dark:text-slate-300 font-medium">${(overview.exact_profit_quota / 1000).toFixed(2)}</span>
+                        <span>{i18n.t.dashboard.profit}:</span>
+                        <span class="text-slate-600 dark:text-slate-300 font-medium">{session.formatQuota(overview.exact_profit_quota, 2)}</span>
                     </div>
                 </div>
 
                 <!-- Semantic Cache Stats -->
                 <div class="space-y-1">
                     <div class="flex justify-between w-full font-semibold text-emerald-600 dark:text-emerald-400">
-                        <span>{i18n.lang === "zh" ? "🍃 语义缓存:" : "🍃 Semantic Cache:"}</span>
+                        <span>🍃 {i18n.t.dashboard.semanticCache}:</span>
                         <span>{formatNumber(overview.semantic_hits)} hit</span>
                     </div>
                     <div class="flex justify-between w-full text-slate-400 pl-4">
-                        <span>{i18n.lang === "zh" ? "节省费用:" : "Profit:"}</span>
-                        <span class="text-slate-600 dark:text-slate-300 font-medium">${(overview.semantic_profit_quota / 1000).toFixed(2)}</span>
+                        <span>{i18n.t.dashboard.profit}:</span>
+                        <span class="text-slate-600 dark:text-slate-300 font-medium">{session.formatQuota(overview.semantic_profit_quota, 2)}</span>
                     </div>
                 </div>
 
                 <div class="flex justify-between w-full mt-1.5 pt-1.5 border-t border-slate-50 dark:border-slate-800/50">
-                    <span class="text-slate-400 text-[10px]">{i18n.lang === "zh" ? "库容 (E/S):" : "Storage (E/S):"}</span>
+                    <span class="text-slate-400 text-[10px]">{i18n.t.dashboard.storage} (E/S):</span>
                     <span class="text-slate-500 text-[10px] font-medium tabular-nums">
-                        {overview.exact_cache_count} / {overview.semantic_cache_count} rec
+                        {overview.exact_cache_count} / {overview.semantic_cache_count}
                     </span>
                 </div>
             </div>
@@ -536,7 +537,7 @@
                                 <div
                                     class="font-bold text-slate-900 dark:text-slate-100 text-sm tabular-nums"
                                 >
-                                    ${(model.cost / 1000).toFixed(2)}
+                                    {session.formatQuota(model.cost, 2)}
                                 </div>
                                 <div
                                     class="text-xs font-semibold text-slate-400 tabular-nums"
@@ -548,7 +549,7 @@
                     {:else}
                         {#if !isLoading}
                             <div class="p-8 text-center text-sm text-slate-500">
-                                {i18n.lang === "zh" ? "暂无数据" : "No Data"}
+                                {i18n.t.common.noData}
                             </div>
                         {/if}
                     {/each}
@@ -560,7 +561,7 @@
                 <div
                     class="p-4 bg-slate-50/50 dark:bg-slate-800/30 font-medium text-sm text-slate-500 dark:text-slate-400 sticky top-0 border-b border-slate-100 dark:border-slate-800/50"
                 >
-                    {i18n.lang === "zh" ? "用户" : "Users"}
+                    {i18n.t.nav.users}
                 </div>
                 <div class="divide-y divide-slate-100 dark:divide-slate-800">
                     {#each modelsUser as model}
@@ -608,7 +609,7 @@
                                 <div
                                     class="font-bold text-slate-900 dark:text-slate-100 text-sm tabular-nums"
                                 >
-                                    ${(model.cost / 1000).toFixed(2)}
+                                    {session.formatQuota(model.cost, 2)}
                                 </div>
                                 <div
                                     class="text-xs font-semibold text-slate-400 tabular-nums"
@@ -620,7 +621,7 @@
                     {:else}
                         {#if !isLoading}
                             <div class="p-8 text-center text-sm text-slate-500">
-                                {i18n.lang === "zh" ? "暂无数据" : "No Data"}
+                                {i18n.t.common.noData}
                             </div>
                         {/if}
                     {/each}

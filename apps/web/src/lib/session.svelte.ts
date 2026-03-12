@@ -3,6 +3,7 @@ import { writable, get } from "svelte/store";
 type Currency = "USD" | "RMB";
 
 interface SessionData {
+    id: string;
     token: string;
     username: string;
     role: number;
@@ -11,8 +12,25 @@ interface SessionData {
     quotaPerUnit: number;
 }
 
-function createSession() {
+interface SessionManager {
+    subscribe: any;
+    update(data: Partial<SessionData>): void;
+    setSystemInfo(info: { exchangeRate?: number; quotaPerUnit?: number }): void;
+    updateCurrency(currency: Currency): void;
+    clear(): void;
+    readonly id: string;
+    readonly token: string;
+    readonly username: string;
+    readonly role: number;
+    readonly currency: Currency;
+    readonly exchangeRate: number;
+    readonly quotaPerUnit: number;
+    formatQuota(quota: number, precision?: number): string;
+}
+
+function createSession(): SessionManager {
     const initial: SessionData = {
+        id: typeof window !== "undefined" ? localStorage.getItem("user_id") || "" : "",
         token: typeof window !== "undefined" ? localStorage.getItem("token") || "" : "",
         username: typeof window !== "undefined" ? localStorage.getItem("username") || "" : "",
         role: typeof window !== "undefined" ? parseInt(localStorage.getItem("role") || "0") : 0,
@@ -57,6 +75,7 @@ function createSession() {
                 localStorage.removeItem("currency");
             }
             set({
+                id: "",
                 token: "",
                 username: "",
                 role: 0,
@@ -64,6 +83,9 @@ function createSession() {
                 exchangeRate: 7.2,
                 quotaPerUnit: 500000,
             });
+        },
+        get id() {
+            return get(store).id;
         },
         get token() {
             return get(store).token;
@@ -83,6 +105,14 @@ function createSession() {
         get quotaPerUnit() {
             return get(store).quotaPerUnit;
         },
+        formatQuota(quota: number, precision: number = 4): string {
+            const s = get(store);
+            const val = quota / s.quotaPerUnit;
+            if (s.currency === "RMB") {
+                return `¥${(val * s.exchangeRate).toFixed(precision)}`;
+            }
+            return `$${val.toFixed(precision)}`;
+        }
     };
 }
 
