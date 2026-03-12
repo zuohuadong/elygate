@@ -393,6 +393,11 @@ export const chatRouter = new Elysia()
                 }
                 
                 const formattedData = handler.transformResponse(rawData);
+                
+                // Fix: Ensure model field matches requested model (not upstream model)
+                if (formattedData && formattedData.model) {
+                    formattedData.model = model;
+                }
 
                 // Async: write to semantic cache (fire-and-forget)
                 if (embeddingChannel && !stream) {
