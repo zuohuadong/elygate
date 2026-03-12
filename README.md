@@ -7,9 +7,41 @@
 <a name="english"></a>
 ## English
 
+### ✨ Key Features
+
+- **🚀 Extreme Performance**: Powered by Bun & ElysiaJS, delivering 3.6x more throughput than Gin (Go).
+- **☁️ Redis-Free Architecture**: High-concurrency rate limiting and billing powered entirely by PostgreSQL 18.3, simplifying deployment.
+- **🧠 Dual-Mode Semantic Cache**: Features both **Exact Match** (instant lightning hits ⚡) and **Vector Semantic Match** (intelligent breeze hits 🍃) to save costs and reduce latency.
+- **🔐 Enterprise-Grade Security**: HttpOnly Cookie sessions, server-side session management, and CSRF/XSS protection by default.
+- **💰 Robust Billing**: High-concurrency batch billing with support for dual-currency (USD/RMB) and dynamic price ratios.
+- **📊 Professional Analytics**: Real-time monitoring, 24h trends, interactive charts, and detailed latency tracking.
+- **🌍 I18n Ready**: Full multi-language support (English/Chinese) with automatic browser locale detection.
+
+### 🏗️ Architecture Overview
+
+Elygate is designed as a modern, unified gateway that consolidates billing, caching, and model management into a single high-performance engine.
+
+```mermaid
+graph TD
+    Client[Admin Panel / API Client] --> Gateway[Bun + ElysiaJS Gateway]
+    Gateway --> Auth[Session & JWT Auth]
+    Gateway --> Cache{Response Cache}
+    Cache -- Hit --> Exact[⚡ Exact Match]
+    Cache -- Hit --> Semantic[🍃 Semantic Match]
+    Cache -- Miss --> Models[Model Providers / Upstream]
+    Gateway --> DB[(PostgreSQL 18.3)]
+    DB --> Billing[Batch Billing logic]
+    DB --> Stats[Real-time Stats Engine]
+```
+
+---
+
 ### 📖 API Usage Guide
 
 Elygate is fully compatible with both OpenAI and Anthropic API standards. You can use any library or tool designed for these services.
+
+![Workbench English](docs/assets/en_workbench.png)
+![Dashboard English](docs/assets/en_dashboard.png)
 
 #### 1. OpenAI Compatibility (Default)
 Most tools (NextChat, ChatBox, OpenAI SDK) work with the base URL.
@@ -249,6 +281,9 @@ elygate
 ### 📖 API 使用指南
 
 Elygate 同时兼容 OpenAI 和 Anthropic (Claude) 的 API 标准，您可以无缝对接现有的各类客户端和 SDK。
+
+![工作台 中文](docs/assets/zh_workbench.png)
+![仪表盘 中文](docs/assets/zh_dashboard.png)
 
 #### 1. OpenAI 标准接口 (默认)
 适用于大多数工具（如 NextChat, ChatBox, OpenAI SDK 等）。
