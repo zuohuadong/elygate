@@ -33,6 +33,7 @@
         CircuitBreakerRecoveryThreshold: "3",
         LogRetentionDays: "7",
         SemanticCacheEnabled: "true",
+        ResponseCacheEnabled: "true",
         SemanticCacheThreshold: "0.95",
         SemanticCacheTTLHours: "24",
         SemanticCacheEmbeddingModel: "text-embedding-3-small",
@@ -1213,6 +1214,32 @@
                             {i18n.lang === "zh"
                                 ? "启用后，相似请求将返回缓存响应，节省 token 消耗"
                                 : "When enabled, similar requests return cached responses, saving token costs"}
+                        </p>
+                    </div>
+                    <div class="space-y-2">
+                        <label
+                            for="response-cache-enabled"
+                            class="text-sm font-medium text-slate-700 dark:text-slate-300"
+                            >{i18n.lang === "zh"
+                                ? "启用精确缓存"
+                                : "Enable Exact Cache"}</label
+                        >
+                        <select
+                            id="response-cache-enabled"
+                            bind:value={settings.ResponseCacheEnabled}
+                            class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                        >
+                            <option value="true"
+                                >{i18n.t.settings.enabled}</option
+                            >
+                            <option value="false"
+                                >{i18n.t.settings.disabled}</option
+                            >
+                        </select>
+                        <p class="text-xs text-slate-500">
+                            {i18n.lang === "zh"
+                                ? "启用后，完全相同的请求将跳过 Embedding 直接返回结果，响应速度极快"
+                                : "When enabled, identical requests skip Embedding and return results instantly"}
                         </p>
                     </div>
                     <div class="space-y-2">

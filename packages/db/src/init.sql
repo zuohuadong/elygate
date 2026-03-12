@@ -327,6 +327,23 @@ CREATE TABLE IF NOT EXISTS semantic_cache (
 );
 
 -- ============================================================
+-- Exact Match Response Cache Table
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS response_cache (
+    hash TEXT PRIMARY KEY, -- SHA-256 of model + messages
+    model_name TEXT NOT NULL,
+    response JSONB NOT NULL,
+    usage JSONB,
+    created_by INT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    expired_at TIMESTAMP WITH TIME ZONE
+);
+
+CREATE INDEX IF NOT EXISTS idx_response_cache_model_created ON response_cache (model_name, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_response_cache_expired ON response_cache (expired_at);
+
+-- ============================================================
 -- Materialized Views
 -- ============================================================
 

@@ -28,6 +28,17 @@
         cache_profit_quota: number;
         cache_size_bytes: number;
         cache_record_count: number;
+        // New specific fields
+        semantic_hits: number;
+        semantic_profit_quota: number;
+        semantic_tokens: number;
+        exact_hits: number;
+        exact_profit_quota: number;
+        exact_tokens: number;
+        semantic_cache_size: number;
+        semantic_cache_count: number;
+        exact_cache_size: number;
+        exact_cache_count: number;
         avg_latency: number;
     }
 
@@ -63,6 +74,16 @@
         cache_profit_quota: 0,
         cache_size_bytes: 0,
         cache_record_count: 0,
+        semantic_hits: 0,
+        semantic_profit_quota: 0,
+        semantic_tokens: 0,
+        exact_hits: 0,
+        exact_profit_quota: 0,
+        exact_tokens: 0,
+        semantic_cache_size: 0,
+        semantic_cache_count: 0,
+        exact_cache_size: 0,
+        exact_cache_count: 0,
         avg_latency: 0,
     });
     let timeSeries = $state<TimeSeriesPoint[]>([]);
@@ -302,7 +323,7 @@
                 </h3>
                 <div class="flex items-baseline gap-2">
                     <span class="text-3xl font-bold text-slate-900 dark:text-white tabular-nums tracking-tight">
-                        ${(overview.cache_profit_quota / 1000).toFixed(2)}
+                        ${((overview.semantic_profit_quota + overview.exact_profit_quota) / 1000).toFixed(2)}
                     </span>
                     <span class="text-xs text-slate-400 font-medium">
                         {i18n.lang === "zh" ? "盈利" : "Profit"}
@@ -310,27 +331,37 @@
                 </div>
             </div>
             <div
-                class="flex justify-between items-center text-xs border-t border-slate-100 dark:border-slate-800 pt-3 mt-auto"
+                class="flex flex-col gap-2 text-xs border-t border-slate-100 dark:border-slate-800 pt-3 mt-auto"
             >
-                <div class="flex flex-col gap-1 w-full">
-                    <div class="flex justify-between w-full">
-                        <span class="text-slate-400">{i18n.lang === "zh" ? "命中次数:" : "Cache Hits:"}</span>
-                        <span class="text-slate-600 dark:text-slate-300 font-medium tabular-nums">{formatNumber(overview.cache_hits)}</span>
+                <!-- Exact Cache Stats -->
+                <div class="space-y-1">
+                    <div class="flex justify-between w-full font-semibold text-amber-600 dark:text-amber-400">
+                        <span>{i18n.lang === "zh" ? "⚡ 精确缓存:" : "⚡ Exact Cache:"}</span>
+                        <span>{formatNumber(overview.exact_hits)} hit</span>
                     </div>
-                    <div class="flex justify-between w-full">
-                        <span class="text-slate-400">{i18n.lang === "zh" ? "节省Token:" : "Tokens Saved:"}</span>
-                        <span class="text-slate-600 dark:text-slate-300 font-medium tabular-nums">{formatTokens(overview.cached_tokens)}</span>
+                    <div class="flex justify-between w-full text-slate-400 pl-4">
+                        <span>{i18n.lang === "zh" ? "节省费用:" : "Profit:"}</span>
+                        <span class="text-slate-600 dark:text-slate-300 font-medium">${(overview.exact_profit_quota / 1000).toFixed(2)}</span>
                     </div>
-                    <div class="flex justify-between w-full mt-1.5 pt-1.5 border-t border-slate-50 dark:border-slate-800/50">
-                        <span class="text-slate-400 text-[10px]">{i18n.lang === "zh" ? "数据库占用:" : "Storage:"}</span>
-                        <span class="text-slate-500 text-[10px] font-medium tabular-nums">
-                            {#if overview.cache_size_bytes > 0}
-                                {(overview.cache_size_bytes / 1024 / 1024).toFixed(1)} MB ({overview.cache_record_count})
-                            {:else}
-                                -
-                            {/if}
-                        </span>
+                </div>
+
+                <!-- Semantic Cache Stats -->
+                <div class="space-y-1">
+                    <div class="flex justify-between w-full font-semibold text-emerald-600 dark:text-emerald-400">
+                        <span>{i18n.lang === "zh" ? "🍃 语义缓存:" : "🍃 Semantic Cache:"}</span>
+                        <span>{formatNumber(overview.semantic_hits)} hit</span>
                     </div>
+                    <div class="flex justify-between w-full text-slate-400 pl-4">
+                        <span>{i18n.lang === "zh" ? "节省费用:" : "Profit:"}</span>
+                        <span class="text-slate-600 dark:text-slate-300 font-medium">${(overview.semantic_profit_quota / 1000).toFixed(2)}</span>
+                    </div>
+                </div>
+
+                <div class="flex justify-between w-full mt-1.5 pt-1.5 border-t border-slate-50 dark:border-slate-800/50">
+                    <span class="text-slate-400 text-[10px]">{i18n.lang === "zh" ? "库容 (E/S):" : "Storage (E/S):"}</span>
+                    <span class="text-slate-500 text-[10px] font-medium tabular-nums">
+                        {overview.exact_cache_count} / {overview.semantic_cache_count} rec
+                    </span>
                 </div>
             </div>
         </div>

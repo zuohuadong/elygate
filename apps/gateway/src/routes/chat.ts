@@ -5,10 +5,11 @@ import { memoryCache } from '../services/cache';
 import { circuitBreaker } from '../services/circuitBreaker';
 import { billAndLog, preCheckAndDecrement, reconcileQuota } from '../services/billing';
 import { calculateCost } from '../services/ratio';
+import { optionCache } from '../services/optionCache';
 import { lookupSemanticCache, storeSemanticCache } from '../services/semanticCache';
+import { lookupExactCache, storeExactCache } from '../services/responseCache';
 import { ChannelType, getProviderHandler } from '../providers';
 import { decryptChannelKeys } from '../services/encryption';
-import { optionCache } from '../services/optionCache';
 import { type TokenRecord, type UserRecord, type ChannelConfig } from '../types';
 import { translateErrorBilingual } from '../services/i18n';
 
@@ -117,8 +118,45 @@ export const chatRouter = new Elysia()
             : '';
         const defaultMode = optionCache.get('SemanticCacheDefaultMode', 'default');
         const cachePolicy = user.activePackage?.cache_policy || { mode: defaultMode };
+        const messages = body.messages as any[];
 
-        // --- Semantic Cache Lookup (Before upstream dispatch, non-stream only) ---
+        // --- 1. Exact Response Cache Lookup (Fastest, No Embedding) ---
+        if (!stream) {
+            const exactResponse = await lookupExactCache(messages, model, user.id, cachePolicy);
+            if (exactResponse) {
+                console.log(`[ResponseCache] HIT for model: ${model}`);
+                const correctedResponse = { ...exactResponse, model };
+                
+                try {
+                    const { promptTokens, completionTokens } = {
+                        promptTokens: correctedResponse.usage?.prompt_tokens || 0,
+                        completionTokens: correctedResponse.usage?.completion_tokens || 0
+                    };
+                    const actualCost = calculateCost(model, user.group, promptTokens, completionTokens);
+                    const elapsedMs = Date.now() - startTime;
+
+                    await reconcileQuota({ userId: user.id, tokenId: token.id, preDeducted: 0, actualCost });
+                    await billAndLog({
+                        userId: user.id,
+                        tokenId: token.id,
+                        channelId: -1, // -1 signifies Exact Match Cache Hit
+                        modelName: model,
+                        promptTokens,
+                        completionTokens,
+                        userGroup: user.group,
+                        isStream: false,
+                        elapsedMs,
+                        ip,
+                        ua
+                    });
+                } catch (e: any) {
+                    console.error('[ResponseCache] Billing Error:', e.message);
+                }
+                return removeNullFields(correctedResponse);
+            }
+        }
+
+        // --- 2. Semantic Cache Lookup (Vector Similarity) ---
         if (embeddingChannel && !stream) {
             const cachedResponse = await lookupSemanticCache(userPrompt, model, embeddingChannel, embeddingModel, user.id, cachePolicy);
             if (cachedResponse) {
@@ -416,14 +454,19 @@ export const chatRouter = new Elysia()
                     formattedData.model = model;
                 }
 
-                // Async: write to semantic cache (fire-and-forget)
-                if (embeddingChannel && !stream) {
-                    const userPrompt = Array.isArray(body.messages)
-                        ? body.messages.map((m: any) => m.content).join(' ')
-                        : '';
-                    await storeSemanticCache(userPrompt, model, formattedData, embeddingChannel, embeddingModel, user.id, cachePolicy).catch(err => {
-                        console.error('[SemanticCache] Store Error:', err.message);
+                // Async: write to both Exact Cache and Semantic Cache (fire-and-forget)
+                if (!stream) {
+                    const messages = body.messages as any[];
+                    storeExactCache(messages, model, formattedData, user.id, cachePolicy).catch(err => {
+                        console.error('[ResponseCache] Store Error:', err.message);
                     });
+
+                    if (embeddingChannel) {
+                        const userPrompt = messages.map((m: any) => m.content).join(' ');
+                        storeSemanticCache(userPrompt, model, formattedData, embeddingChannel, embeddingModel, user.id, cachePolicy).catch(err => {
+                            console.error('[SemanticCache] Store Error:', err.message);
+                        });
+                    }
                 }
 
                 // 5. Trigger Billing and Logging (Asynchronous)

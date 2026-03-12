@@ -4,6 +4,7 @@
     import { House, Search, Filter, Download } from "lucide-svelte";
     import { apiFetch } from "$lib/api";
     import { onMount } from "svelte";
+    import { i18n } from "$lib/i18n/index.svelte";
     import { session } from "$lib/session.svelte";
 
     // Local state
@@ -22,9 +23,10 @@
             // Format for display
             logs = data.map((l) => {
                 let durationStr = l.is_stream || l.isStream ? "Stream" : "Standard";
-                const cachedTokens = l.cached_tokens || l.cachedTokens;
-                if (cachedTokens && cachedTokens > 0) {
-                    durationStr += ` <span class="text-emerald-500 font-bold ml-1" title="Prompt Caching: ${cachedTokens} tokens saved">🍃</span>`;
+                if (l.channel_id === -1 || l.channelId === -1) {
+                    durationStr += ` <span class="text-amber-500 font-bold ml-1" title="Exact Match HIT">⚡</span>`;
+                } else if (l.channel_id === 0 || l.channelId === 0) {
+                    durationStr += ` <span class="text-emerald-500 font-bold ml-1" title="Semantic Cache HIT">🍃</span>`;
                 }
 
                 return {
@@ -32,7 +34,11 @@
                     dt_created_at: new Date(l.created_at || l.createdAt).toLocaleString(),
                     dt_user: `User ${l.user_id || l.userId}`,
                     dt_model: l.model_name || l.modelName,
-                    dt_channel: l.channel_name || (l.channel_id ? `Channel ${l.channel_id}` : l.channelId ? `Channel ${l.channelId}` : "Unknown"),
+                    dt_channel: l.channel_id === -1 || l.channelId === -1 
+                        ? (i18n.lang === "zh" ? "精确缓存" : "Exact Cache")
+                        : (l.channel_id === 0 || l.channelId === 0)
+                            ? (i18n.lang === "zh" ? "语义缓存" : "Semantic Cache")
+                            : (l.channel_name || (l.channel_id ? `Channel ${l.channel_id}` : l.channelId ? `Channel ${l.channelId}` : "Unknown")),
                     dt_token: l.token_id ? `Token ${l.token_id}` : l.tokenId ? `Token ${l.tokenId}` : "Direct",
                     dt_cost: `$ ${((l.quota_cost || l.quotaCost || 0) / session.quotaPerUnit).toFixed(4)}`,
                     dt_duration: durationStr,

@@ -833,7 +833,11 @@ export const adminRouter = new Elysia()
         return {
             data: data.map((l: any) => ({
                 ...l,
-                channel_name: l.channel_id === 0 ? (query?.lang === 'zh' ? '系统缓存' : 'Internal Cache') : (l.channel_name || `Unknown (${l.channel_id})`),
+                channel_name: l.channel_id === -1 
+                    ? (query?.lang === 'zh' ? '系统精确缓存' : 'Exact Match Cache')
+                    : l.channel_id === 0 
+                        ? (query?.lang === 'zh' ? '系统语义缓存' : 'Semantic Cache') 
+                        : (l.channel_name || `Unknown (${l.channel_id})`),
                 cost_usd: quotaToUSD(l.quota_cost),
                 cost_rmb: quotaToRMB(l.quota_cost),
                 cached_tokens: l.cached_tokens || 0,
@@ -1128,24 +1132,40 @@ export const adminRouter = new Elysia()
                 COALESCE(SUM(prompt_tokens), 0)::bigint as total_prompt_tokens,
                 COALESCE(SUM(completion_tokens), 0)::bigint as total_completion_tokens,
                 ROUND(COALESCE(AVG(CASE WHEN elapsed_ms > 0 THEN elapsed_ms ELSE NULL END), 0))::int as avg_latency,
-                COUNT(CASE WHEN channel_id = 0 THEN 1 END)::int as cache_hits,
-                COALESCE(SUM(CASE WHEN channel_id = 0 THEN quota_cost ELSE 0 END), 0)::bigint as cache_profit_quota,
-                COALESCE(SUM(CASE WHEN channel_id = 0 THEN prompt_tokens + completion_tokens ELSE 0 END), 0)::bigint as cached_tokens
+                COUNT(CASE WHEN channel_id = 0 THEN 1 END)::int as semantic_hits,
+                COALESCE(SUM(CASE WHEN channel_id = 0 THEN quota_cost ELSE 0 END), 0)::bigint as semantic_profit_quota,
+                COALESCE(SUM(CASE WHEN channel_id = 0 THEN prompt_tokens + completion_tokens ELSE 0 END), 0)::bigint as semantic_tokens,
+                COUNT(CASE WHEN channel_id = -1 THEN 1 END)::int as exact_hits,
+                COALESCE(SUM(CASE WHEN channel_id = -1 THEN quota_cost ELSE 0 END), 0)::bigint as exact_profit_quota,
+                COALESCE(SUM(CASE WHEN channel_id = -1 THEN prompt_tokens + completion_tokens ELSE 0 END), 0)::bigint as exact_tokens,
+                -- Compatibility fields for old frontend
+                COUNT(CASE WHEN channel_id IN (0, -1) THEN 1 END)::int as cache_hits,
+                COALESCE(SUM(CASE WHEN channel_id IN (0, -1) THEN quota_cost ELSE 0 END), 0)::bigint as cache_profit_quota,
+                COALESCE(SUM(CASE WHEN channel_id IN (0, -1) THEN prompt_tokens + completion_tokens ELSE 0 END), 0)::bigint as cached_tokens
             FROM logs
             WHERE ${condition}
         `;
 
-        // 1.5 Semantic Cache Storage Stats
-        let cache_size_bytes = 0;
-        let cache_record_count = 0;
+        // 1.5 Cache Storage Stats
+        let semantic_cache_size = 0;
+        let semantic_cache_count = 0;
+        let exact_cache_size = 0;
+        let exact_cache_count = 0;
+
         try {
-            const [sizeRow] = await sql`SELECT pg_total_relation_size('semantic_cache') as size`;
-            const [countRow] = await sql`SELECT COUNT(*) as cnt FROM semantic_cache`;
-            cache_size_bytes = Number(sizeRow?.size || 0);
-            cache_record_count = Number(countRow?.cnt || 0);
+            const [semSize] = await sql`SELECT pg_total_relation_size('semantic_cache') as size`;
+            const [semCount] = await sql`SELECT COUNT(*) as cnt FROM semantic_cache`;
+            semantic_cache_size = Number(semSize?.size || 0);
+            semantic_cache_count = Number(semCount?.cnt || 0);
+
+            const [exSize] = await sql`SELECT pg_total_relation_size('response_cache') as size`;
+            const [exCount] = await sql`SELECT COUNT(*) as cnt FROM response_cache`;
+            exact_cache_size = Number(exSize?.size || 0);
+            exact_cache_count = Number(exCount?.cnt || 0);
         } catch (e) {
-            console.warn('[Admin] Failed to read semantic_cache size:', e);
+            console.warn('[Admin] Failed to read cache sizes:', e);
         }
+
 
         // 2. Models by User (Consumer metrics)
         const models_user = await sql`
@@ -1219,8 +1239,13 @@ export const adminRouter = new Elysia()
         return {
             overview: {
                 ...overview,
-                cache_size_bytes,
-                cache_record_count
+                semantic_cache_size,
+                semantic_cache_count,
+                exact_cache_size,
+                exact_cache_count,
+                // Backward compatibility
+                cache_size_bytes: semantic_cache_size,
+                cache_record_count: semantic_cache_count
             },
             models_user,
             models_channel,
