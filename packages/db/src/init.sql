@@ -427,6 +427,45 @@ SELECT
 FROM logs
 GROUP BY user_id, DATE(created_at);
 
+-- ============================================================
+-- Task Management (Async Jobs)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS tasks (
+    id SERIAL PRIMARY KEY,
+    type VARCHAR(50) NOT NULL, -- 'data_export', 'data_import', 'cache_clear', 'batch_operation'
+    name TEXT NOT NULL,
+    description TEXT,
+    status INTEGER NOT NULL DEFAULT 0, -- 0: pending, 1: running, 2: completed, 3: failed, 4: cancelled
+    priority INTEGER NOT NULL DEFAULT 0, -- higher = more important
+    progress INTEGER NOT NULL DEFAULT 0, -- 0-100
+    total_items INTEGER DEFAULT 0,
+    processed_items INTEGER DEFAULT 0,
+    result JSONB,
+    error_message TEXT,
+    created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    started_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tasks_type ON tasks(type, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tasks_created_by ON tasks(created_by, created_at DESC);
+
+-- Task execution logs
+CREATE TABLE IF NOT EXISTS task_logs (
+    id SERIAL PRIMARY KEY,
+    task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    level VARCHAR(20) NOT NULL, -- 'info', 'warning', 'error'
+    message TEXT NOT NULL,
+    details JSONB,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_logs_task_id ON task_logs(task_id, created_at DESC);
+
 CREATE OR REPLACE FUNCTION refresh_materialized_views()
 RETURNS void AS $$
 BEGIN
