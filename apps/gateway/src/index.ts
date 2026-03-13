@@ -15,7 +15,8 @@ async function init() {
   await initEnv();
 
   // 1. Dyamically import environment-dependent modules
-  const { sql, memoryCache } = await import("@elygate/db");
+  const { sql } = await import("@elygate/db");
+  const { memoryCache } = await import("./services/cache");
   const { authPlugin } = await import("./middleware/auth");
   const { staticFileHandler } = await import("./middleware/static");
   const { chatRouter } = await import("./routes/chat");
