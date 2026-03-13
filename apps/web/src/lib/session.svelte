@@ -11,6 +11,7 @@
         username: string;
         role: number;
         currency: string;
+        user: any;
     }
 
     interface SystemInfo {
@@ -19,12 +20,12 @@
     }
 
     function loadFromStorage(): SessionData {
-        if (typeof window === 'undefined') return { id: '', token: '', username: '', role: 0, currency: 'USD' };
+        if (typeof window === 'undefined') return { id: '', token: '', username: '', role: 0, currency: 'USD', user: null };
         try {
             const raw = localStorage.getItem(STORAGE_KEY);
             if (raw) return JSON.parse(raw);
         } catch {}
-        return { id: '', token: '', username: '', role: 0, currency: 'USD' };
+        return { id: '', token: '', username: '', role: 0, currency: 'USD', user: null };
     }
 
     function saveToStorage(data: SessionData) {
@@ -41,6 +42,7 @@
     let username = $state(initial.username);
     let role = $state(initial.role);
     let currency = $state(initial.currency);
+    let user = $state(initial.user);
     let exchangeRate = $state(7.2);
     let quotaPerUnit = $state(500000);
 
@@ -50,6 +52,7 @@
         get username() { return username; },
         get role() { return role; },
         get currency() { return currency; },
+        get user() { return user; },
         get exchangeRate() { return exchangeRate; },
         get quotaPerUnit() { return quotaPerUnit; },
 
@@ -59,17 +62,26 @@
             if (data.username !== undefined) username = data.username;
             if (data.role !== undefined) role = data.role;
             if (data.currency !== undefined) currency = data.currency;
-            saveToStorage({ id, token, username, role, currency });
+            if (data.user !== undefined) user = data.user;
+            saveToStorage({ id, token, username, role, currency, user });
         },
 
         updateCurrency(newCurrency: string) {
             currency = newCurrency;
-            saveToStorage({ id, token, username, role, currency });
+            saveToStorage({ id, token, username, role, currency, user });
         },
 
         setSystemInfo(info: SystemInfo) {
             exchangeRate = info.exchangeRate;
             quotaPerUnit = info.quotaPerUnit;
+        },
+
+        formatQuota(quota: number, precision: number = 4): string {
+            const val = quota / quotaPerUnit;
+            if (currency === "RMB") {
+                return `¥${(val * exchangeRate).toFixed(precision)}`;
+            }
+            return `$${val.toFixed(precision)}`;
         },
 
         clear() {
@@ -78,6 +90,7 @@
             username = '';
             role = 0;
             currency = 'USD';
+            user = null;
             if (typeof window !== 'undefined') {
                 localStorage.removeItem(STORAGE_KEY);
             }

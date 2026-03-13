@@ -137,7 +137,7 @@
                     <div
                         class="text-2xl font-bold text-slate-900 dark:text-white mt-1"
                     >
-                        {session.formatQuota(session.user?.quota - session.user?.usedQuota, 2)}
+                        {session.formatQuota((session.user?.quota || 0) - (session.user?.usedQuota || 0), 2)}
                     </div>
                 </div>
                 <div

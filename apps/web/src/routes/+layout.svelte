@@ -90,6 +90,7 @@
 					token: me.token || "cookie-session",
 					username: me.username,
 					role: me.role || 1,
+					user: me,
 				});
 
 				// If user is already logged in but visiting login/register, redirect them away
