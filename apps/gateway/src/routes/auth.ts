@@ -297,6 +297,52 @@ export const authRouter = new Elysia()
                 `;
                 return { data, total: countRow.total, page, limit };
             })
+            // Support both old and new (standardized) user dashboard paths
+            .group('/user', (app) =>
+                app.get('/info', async ({ user }: any) => {
+                    const u = user as UserRecord;
+                    return {
+                        id: u.id,
+                        username: u.username,
+                        role: u.role,
+                        quota: u.quota,
+                        usedQuota: u.usedQuota,
+                        group: u.group,
+                        currency: u.currency || 'USD'
+                    };
+                })
+                .get('/logs', async ({ query, user }: any) => {
+                    const userRow = user as UserRecord;
+                    const page = Number(query?.page) || 1;
+                    const limit = Number(query?.limit) || 50;
+                    const offset = (page - 1) * limit;
+                    const [countRow] = await sql`SELECT COUNT(*) as total FROM logs WHERE user_id = ${userRow.id}`;
+                    const data = await sql`
+                        SELECT 
+                            id, 
+                            model_name as "modelName", 
+                            prompt_tokens as "promptTokens", 
+                            completion_tokens as "completionTokens", 
+                            quota_cost as "quotaCost", 
+                            created_at as "createdAt", 
+                            is_stream as "isStream",
+                            elapsed_ms as "elapsedMs"
+                        FROM logs 
+                        WHERE user_id = ${userRow.id} 
+                        ORDER BY created_at DESC 
+                        LIMIT ${limit} OFFSET ${offset}
+                    `;
+                    return { data, total: countRow.total, page, limit };
+                })
+                .get('/tokens', async ({ user }: any) => {
+                    const userRow = user as UserRecord;
+                    const data = await sql`
+                        SELECT id, name, key, status, remain_quota as "remainQuota", used_quota as "usedQuota", created_at as "createdAt", models
+                        FROM tokens WHERE user_id = ${userRow.id} ORDER BY id DESC
+                    `;
+                    return [...data];
+                })
+            )
             .get('/stats', async ({ user }: any) => {
                 const userRow = user as UserRecord;
                 return await sql`
