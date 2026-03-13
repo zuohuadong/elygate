@@ -8,11 +8,11 @@ export const userStatsRouter = new Elysia({ prefix: '/user' })
     .get('/info', async ({ user }: any) => {
         const u = user as UserRecord;
         const [userInfo] = await sql`
-            SELECT quota, used_quota as "usedQuota"
+            SELECT id, username, role, quota, used_quota as "usedQuota", status, currency
             FROM users
             WHERE id = ${u.id}
         `;
-        return userInfo || { quota: 0, usedQuota: 0 };
+        return userInfo || { id: 0, username: '', role: 0, quota: 0, usedQuota: 0, status: 0, currency: 'USD' };
     })
     .get('/tokens', async ({ user }: any) => {
         const u = user as UserRecord;
