@@ -11,6 +11,10 @@
         Clock,
         TrendingUp,
         AlertCircle,
+        Users,
+        Layers,
+        Cpu,
+        BarChart3,
     } from "lucide-svelte";
     import { apiFetch } from "$lib/api";
     import { i18n } from "$lib/i18n/index.svelte";
@@ -42,16 +46,40 @@
         usedQuota: number;
     }
 
+    interface AdminStats {
+        totalUsers: number;
+        activeChannels: number;
+        totalQuota: number;
+        usedQuota: number;
+        todayQuota: number;
+    }
+
     let tokens = $state<Token[]>([]);
     let recentLogs = $state<RecentLog[]>([]);
     let userInfo = $state<UserInfo>({ quota: 0, usedQuota: 0 });
+    let adminStats = $state<AdminStats | null>(null);
     let isLoading = $state(true);
     let copiedId = $state<number | null>(null);
 
+    const isAdmin = $derived(session.role >= 10);
+
     onMount(async () => {
-        await Promise.all([loadTokens(), loadRecentLogs(), loadUserInfo()]);
+        if (isAdmin) {
+            await Promise.all([loadAdminStats(), loadRecentLogs(), loadTokens()]);
+        } else {
+            await Promise.all([loadTokens(), loadRecentLogs(), loadUserInfo()]);
+        }
         isLoading = false;
     });
+
+    async function loadAdminStats() {
+        try {
+            const data = await apiFetch<AdminStats>("/admin/dashboard/stats");
+            adminStats = data;
+        } catch (e) {
+            console.error("Failed to load admin stats:", e);
+        }
+    }
 
     async function loadUserInfo() {
         try {
@@ -119,123 +147,183 @@
                     {i18n.lang === "zh" ? "欢迎回来" : "Welcome Back"} 👋
                 </h1>
                 <p class="text-white/80 mt-1">
-                    {i18n.lang === "zh"
-                        ? "这是您的工作台，管理您的 API 密钥和查看使用情况"
-                        : "Your workspace to manage API keys and track usage"}
+                    {#if isAdmin}
+                        {i18n.lang === "zh"
+                            ? "系统管理员工作台，实时监控整个网关的运行状态"
+                            : "System administrator workspace, real-time monitoring of the entire gateway."}
+                    {:else}
+                        {i18n.lang === "zh"
+                            ? "这是您的工作台，管理您的 API 密钥和查看使用情况"
+                            : "Your workspace to manage API keys and track usage"}
+                    {/if}
                 </p>
             </div>
             <div class="hidden md:block">
-                <a
-                    href="/tokens"
-                    class="inline-flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg transition text-sm font-medium"
-                >
-                    <Plus class="w-4 h-4" />
-                    {i18n.lang === "zh" ? "创建令牌" : "Create Token"}
-                </a>
+                {#if isAdmin}
+                    <div class="flex gap-2">
+                        <a
+                            href="/channels"
+                            class="inline-flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg transition text-sm font-medium"
+                        >
+                            <Layers class="w-4 h-4" />
+                            {i18n.lang === "zh" ? "管理渠道" : "Channels"}
+                        </a>
+                        <a
+                            href="/users"
+                            class="inline-flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg transition text-sm font-medium"
+                        >
+                            <Users class="w-4 h-4" />
+                            {i18n.lang === "zh" ? "管理用户" : "Users"}
+                        </a>
+                    </div>
+                {:else}
+                    <a
+                        href="/tokens"
+                        class="inline-flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg transition text-sm font-medium"
+                    >
+                        <Plus class="w-4 h-4" />
+                        {i18n.lang === "zh" ? "创建令牌" : "Create Token"}
+                    </a>
+                {/if}
             </div>
         </div>
     </div>
 
     <!-- Stats Cards -->
     <div class="grid gap-4 md:grid-cols-3">
-        <!-- Balance -->
-        <div
-            class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm"
-        >
-            <div class="flex items-center justify-between">
-                <div>
-                    <h3
-                        class="text-sm font-medium text-slate-500 dark:text-slate-400"
-                    >
-                        {i18n.lang === "zh" ? "账户余额" : "Balance"}
-                    </h3>
-                    <div
-                        class="text-2xl font-bold text-slate-900 dark:text-white mt-1"
-                    >
-                        {session.formatQuota(userInfo.quota - userInfo.usedQuota, 2)}
+        {#if isAdmin && adminStats}
+            <!-- Total Users (Admin Only) -->
+            <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <h3 class="text-sm font-medium text-slate-500 dark:text-slate-400">
+                            {i18n.lang === "zh" ? "系统总用户" : "Total Users"}
+                        </h3>
+                        <div class="text-2xl font-bold text-slate-900 dark:text-white mt-1">
+                            {adminStats.totalUsers}
+                        </div>
+                    </div>
+                    <div class="w-12 h-12 bg-blue-100 dark:bg-blue-500/20 rounded-xl flex items-center justify-center">
+                        <Users class="w-6 h-6 text-blue-600 dark:text-blue-400" />
                     </div>
                 </div>
-                <div
-                    class="w-12 h-12 bg-emerald-100 dark:bg-emerald-500/20 rounded-xl flex items-center justify-center"
-                >
-                    <CreditCard class="w-6 h-6 text-emerald-600 dark:text-emerald-400" />
+                <div class="mt-3">
+                    <a href="/users" class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">
+                        {i18n.lang === "zh" ? "管理所有用户" : "Manage all users"} →
+                    </a>
                 </div>
             </div>
-            <div class="mt-3 flex items-center gap-2">
-                <a
-                    href="/payment"
-                    class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline"
-                >
-                    {i18n.lang === "zh" ? "充值" : "Recharge"} →
-                </a>
-            </div>
-        </div>
 
-        <!-- Active Tokens -->
-        <div
-            class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm"
-        >
-            <div class="flex items-center justify-between">
-                <div>
-                    <h3
-                        class="text-sm font-medium text-slate-500 dark:text-slate-400"
-                    >
-                        {i18n.lang === "zh" ? "活跃令牌" : "Active Tokens"}
-                    </h3>
-                    <div
-                        class="text-2xl font-bold text-slate-900 dark:text-white mt-1"
-                    >
-                        {tokens.filter((t) => t.status === 1).length}
+            <!-- Active Channels (Admin Only) -->
+            <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <h3 class="text-sm font-medium text-slate-500 dark:text-slate-400">
+                            {i18n.lang === "zh" ? "在线渠道" : "Active Channels"}
+                        </h3>
+                        <div class="text-2xl font-bold text-slate-900 dark:text-white mt-1">
+                            {adminStats.activeChannels}
+                        </div>
+                    </div>
+                    <div class="w-12 h-12 bg-emerald-100 dark:bg-emerald-500/20 rounded-xl flex items-center justify-center">
+                        <Layers class="w-6 h-6 text-emerald-600 dark:text-emerald-400" />
                     </div>
                 </div>
-                <div
-                    class="w-12 h-12 bg-blue-100 dark:bg-blue-500/20 rounded-xl flex items-center justify-center"
-                >
-                    <Key class="w-6 h-6 text-blue-600 dark:text-blue-400" />
+                <div class="mt-3">
+                    <a href="/channels" class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">
+                        {i18n.lang === "zh" ? "查看渠道状态" : "View channel status"} →
+                    </a>
                 </div>
             </div>
-            <div class="mt-3 flex items-center gap-2">
-                <a
-                    href="/tokens"
-                    class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline"
-                >
-                    {i18n.lang === "zh" ? "管理令牌" : "Manage Tokens"} →
-                </a>
-            </div>
-        </div>
 
-        <!-- Usage Today -->
-        <div
-            class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm"
-        >
-            <div class="flex items-center justify-between">
-                <div>
-                    <h3
-                        class="text-sm font-medium text-slate-500 dark:text-slate-400"
-                    >
-                        {i18n.lang === "zh" ? "今日请求" : "Requests Today"}
-                    </h3>
-                    <div
-                        class="text-2xl font-bold text-slate-900 dark:text-white mt-1"
-                    >
-                        {recentLogs.length > 0 ? recentLogs.length : 0}
+            <!-- System Today Usage (Admin Only) -->
+            <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <h3 class="text-sm font-medium text-slate-500 dark:text-slate-400">
+                            {i18n.lang === "zh" ? "全站今日消耗" : "Global Today Usage"}
+                        </h3>
+                        <div class="text-2xl font-bold text-slate-900 dark:text-white mt-1">
+                            {session.formatQuota(adminStats.todayQuota, 2)}
+                        </div>
+                    </div>
+                    <div class="w-12 h-12 bg-purple-100 dark:bg-purple-500/20 rounded-xl flex items-center justify-center">
+                        <Activity class="w-6 h-6 text-purple-600 dark:text-purple-400" />
                     </div>
                 </div>
-                <div
-                    class="w-12 h-12 bg-purple-100 dark:bg-purple-500/20 rounded-xl flex items-center justify-center"
-                >
-                    <Activity class="w-6 h-6 text-purple-600 dark:text-purple-400" />
+                <div class="mt-3">
+                    <a href="/stats" class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">
+                        {i18n.lang === "zh" ? "系统全局统计" : "Global statistics"} →
+                    </a>
                 </div>
             </div>
-            <div class="mt-3 flex items-center gap-2">
-                <a
-                    href="/stats"
-                    class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline"
-                >
-                    {i18n.lang === "zh" ? "查看统计" : "View Stats"} →
-                </a>
+        {:else}
+            <!-- Balance (Consumer Only) -->
+            <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <h3 class="text-sm font-medium text-slate-500 dark:text-slate-400">
+                            {i18n.lang === "zh" ? "账户余额" : "Balance"}
+                        </h3>
+                        <div class="text-2xl font-bold text-slate-900 dark:text-white mt-1">
+                            {session.formatQuota(userInfo.quota - userInfo.usedQuota, 2)}
+                        </div>
+                    </div>
+                    <div class="w-12 h-12 bg-emerald-100 dark:bg-emerald-500/20 rounded-xl flex items-center justify-center">
+                        <CreditCard class="w-6 h-6 text-emerald-600 dark:text-emerald-400" />
+                    </div>
+                </div>
+                <div class="mt-3 flex items-center gap-2">
+                    <a href="/payment" class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">
+                        {i18n.lang === "zh" ? "充值" : "Recharge"} →
+                    </a>
+                </div>
             </div>
-        </div>
+
+            <!-- Active Tokens (Consumer Only) -->
+            <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <h3 class="text-sm font-medium text-slate-500 dark:text-slate-400">
+                            {i18n.lang === "zh" ? "活跃令牌" : "Active Tokens"}
+                        </h3>
+                        <div class="text-2xl font-bold text-slate-900 dark:text-white mt-1">
+                            {tokens.filter((t) => t.status === 1).length}
+                        </div>
+                    </div>
+                    <div class="w-12 h-12 bg-blue-100 dark:bg-blue-500/20 rounded-xl flex items-center justify-center">
+                        <Key class="w-6 h-6 text-blue-600 dark:text-blue-400" />
+                    </div>
+                </div>
+                <div class="mt-3 flex items-center gap-2">
+                    <a href="/tokens" class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">
+                        {i18n.lang === "zh" ? "管理令牌" : "Manage Tokens"} →
+                    </a>
+                </div>
+            </div>
+
+            <!-- Usage Today (Consumer Only) -->
+            <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <h3 class="text-sm font-medium text-slate-500 dark:text-slate-400">
+                            {i18n.lang === "zh" ? "今日请求" : "Requests Today"}
+                        </h3>
+                        <div class="text-2xl font-bold text-slate-900 dark:text-white mt-1">
+                            {recentLogs.length > 0 ? recentLogs.length : 0}
+                        </div>
+                    </div>
+                    <div class="w-12 h-12 bg-purple-100 dark:bg-purple-500/20 rounded-xl flex items-center justify-center">
+                        <Activity class="w-6 h-6 text-purple-600 dark:text-purple-400" />
+                    </div>
+                </div>
+                <div class="mt-3 flex items-center gap-2">
+                    <a href="/stats" class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">
+                        {i18n.lang === "zh" ? "查看统计" : "View Stats"} →
+                    </a>
+                </div>
+            </div>
+        {/if}
     </div>
 
     <!-- Quick Actions -->
@@ -249,95 +337,165 @@
             {i18n.lang === "zh" ? "快速操作" : "Quick Actions"}
         </h2>
         <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <a
-                href="/tokens"
-                class="flex items-center gap-3 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition group"
-            >
-                <div
-                    class="w-10 h-10 bg-blue-100 dark:bg-blue-500/20 rounded-lg flex items-center justify-center"
+            {#if isAdmin}
+                <a
+                    href="/channels"
+                    class="flex items-center gap-3 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition group"
                 >
-                    <Key class="w-5 h-5 text-blue-600 dark:text-blue-400" />
-                </div>
-                <div>
-                    <div
-                        class="font-medium text-slate-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400"
-                    >
-                        {i18n.lang === "zh" ? "创建令牌" : "Create Token"}
+                    <div class="w-10 h-10 bg-emerald-100 dark:bg-emerald-500/20 rounded-lg flex items-center justify-center">
+                        <Layers class="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
                     </div>
-                    <div class="text-xs text-slate-500">
-                        {i18n.lang === "zh" ? "管理 API 密钥" : "Manage API keys"}
+                    <div>
+                        <div class="font-medium text-slate-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400">
+                            {i18n.lang === "zh" ? "渠道管理" : "Channels"}
+                        </div>
+                        <div class="text-xs text-slate-500">
+                            {i18n.lang === "zh" ? "管理上游 API 渠道" : "Manage upstream APIs"}
+                        </div>
                     </div>
-                </div>
-            </a>
+                </a>
 
-            <a
-                href="/consumer/docs"
-                class="flex items-center gap-3 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition group"
-            >
-                <div
-                    class="w-10 h-10 bg-emerald-100 dark:bg-emerald-500/20 rounded-lg flex items-center justify-center"
+                <a
+                    href="/users"
+                    class="flex items-center gap-3 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition group"
                 >
-                    <ExternalLink class="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
-                </div>
-                <div>
-                    <div
-                        class="font-medium text-slate-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400"
-                    >
-                        {i18n.lang === "zh" ? "API 文档" : "API Docs"}
+                    <div class="w-10 h-10 bg-blue-100 dark:bg-blue-500/20 rounded-lg flex items-center justify-center">
+                        <Users class="w-5 h-5 text-blue-600 dark:text-blue-400" />
                     </div>
-                    <div class="text-xs text-slate-500">
-                        {i18n.lang === "zh" ? "查看使用指南" : "View usage guide"}
+                    <div>
+                        <div class="font-medium text-slate-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400">
+                            {i18n.lang === "zh" ? "用户管理" : "Users"}
+                        </div>
+                        <div class="text-xs text-slate-500">
+                            {i18n.lang === "zh" ? "管理系统用户信息" : "Manage user accounts"}
+                        </div>
                     </div>
-                </div>
-            </a>
+                </a>
 
-            <a
-                href="/payment"
-                class="flex items-center gap-3 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition group"
-            >
-                <div
-                    class="w-10 h-10 bg-amber-100 dark:bg-amber-500/20 rounded-lg flex items-center justify-center"
+                <a
+                    href="/models"
+                    class="flex items-center gap-3 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition group"
                 >
-                    <CreditCard class="w-5 h-5 text-amber-600 dark:text-amber-400" />
-                </div>
-                <div>
-                    <div
-                        class="font-medium text-slate-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400"
-                    >
-                        {i18n.lang === "zh" ? "充值" : "Recharge"}
+                    <div class="w-10 h-10 bg-amber-100 dark:bg-amber-500/20 rounded-lg flex items-center justify-center">
+                        <Cpu class="w-5 h-5 text-amber-600 dark:text-amber-400" />
                     </div>
-                    <div class="text-xs text-slate-500">
-                        {i18n.lang === "zh" ? "添加账户余额" : "Add balance"}
+                    <div>
+                        <div class="font-medium text-slate-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400">
+                            {i18n.lang === "zh" ? "模型管理" : "Models"}
+                        </div>
+                        <div class="text-xs text-slate-500">
+                            {i18n.lang === "zh" ? "配置模型与价格" : "Configure models & pricing"}
+                        </div>
                     </div>
-                </div>
-            </a>
+                </a>
 
-            <a
-                href="/stats"
-                class="flex items-center gap-3 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition group"
-            >
-                <div
-                    class="w-10 h-10 bg-purple-100 dark:bg-purple-500/20 rounded-lg flex items-center justify-center"
+                <a
+                    href="/stats"
+                    class="flex items-center gap-3 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition group"
                 >
-                    <TrendingUp class="w-5 h-5 text-purple-600 dark:text-purple-400" />
-                </div>
-                <div>
+                    <div class="w-10 h-10 bg-purple-100 dark:bg-purple-500/20 rounded-lg flex items-center justify-center">
+                        <BarChart3 class="w-5 h-5 text-purple-600 dark:text-purple-400" />
+                    </div>
+                    <div>
+                        <div class="font-medium text-slate-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400">
+                            {i18n.lang === "zh" ? "多维统计" : "Analytics"}
+                        </div>
+                        <div class="text-xs text-slate-500">
+                            {i18n.lang === "zh" ? "全站运营数据分析" : "System-wide analytics"}
+                        </div>
+                    </div>
+                </a>
+            {:else}
+                <a
+                    href="/tokens"
+                    class="flex items-center gap-3 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition group"
+                >
                     <div
-                        class="font-medium text-slate-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400"
+                        class="w-10 h-10 bg-blue-100 dark:bg-blue-500/20 rounded-lg flex items-center justify-center"
                     >
-                        {i18n.lang === "zh" ? "数据统计" : "Statistics"}
+                        <Key class="w-5 h-5 text-blue-600 dark:text-blue-400" />
                     </div>
-                    <div class="text-xs text-slate-500">
-                        {i18n.lang === "zh" ? "查看详细分析" : "View detailed analytics"}
+                    <div>
+                        <div
+                            class="font-medium text-slate-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400"
+                        >
+                            {i18n.lang === "zh" ? "创建令牌" : "Create Token"}
+                        </div>
+                        <div class="text-xs text-slate-500">
+                            {i18n.lang === "zh" ? "管理 API 密钥" : "Manage API keys"}
+                        </div>
                     </div>
-                </div>
-            </a>
+                </a>
+
+                <a
+                    href="/consumer/docs"
+                    class="flex items-center gap-3 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition group"
+                >
+                    <div
+                        class="w-10 h-10 bg-emerald-100 dark:bg-emerald-500/20 rounded-lg flex items-center justify-center"
+                    >
+                        <ExternalLink class="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                    </div>
+                    <div>
+                        <div
+                            class="font-medium text-slate-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400"
+                        >
+                            {i18n.lang === "zh" ? "API 文档" : "API Docs"}
+                        </div>
+                        <div class="text-xs text-slate-500">
+                            {i18n.lang === "zh" ? "查看使用指南" : "View usage guide"}
+                        </div>
+                    </div>
+                </a>
+
+                <a
+                    href="/payment"
+                    class="flex items-center gap-3 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition group"
+                >
+                    <div
+                        class="w-10 h-10 bg-amber-100 dark:bg-amber-500/20 rounded-lg flex items-center justify-center"
+                    >
+                        <CreditCard class="w-5 h-5 text-amber-600 dark:text-amber-400" />
+                    </div>
+                    <div>
+                        <div
+                            class="font-medium text-slate-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400"
+                        >
+                            {i18n.lang === "zh" ? "充值" : "Recharge"}
+                        </div>
+                        <div class="text-xs text-slate-500">
+                            {i18n.lang === "zh" ? "添加账户余额" : "Add balance"}
+                        </div>
+                    </div>
+                </a>
+
+                <a
+                    href="/stats"
+                    class="flex items-center gap-3 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition group"
+                >
+                    <div
+                        class="w-10 h-10 bg-purple-100 dark:bg-purple-500/20 rounded-lg flex items-center justify-center"
+                    >
+                        <TrendingUp class="w-5 h-5 text-purple-600 dark:text-purple-400" />
+                    </div>
+                    <div>
+                        <div
+                            class="font-medium text-slate-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400"
+                        >
+                            {i18n.lang === "zh" ? "数据统计" : "Statistics"}
+                        </div>
+                        <div class="text-xs text-slate-500">
+                            {i18n.lang === "zh" ? "查看详细分析" : "View detailed analytics"}
+                        </div>
+                    </div>
+                </a>
+            {/if}
         </div>
     </div>
 
     <!-- Recent Activity -->
     <div class="grid gap-6 lg:grid-cols-2">
-        <!-- My Tokens -->
+        <!-- My Tokens (Always helpful to show recent API keys) -->
         <div
             class="bg-white/60 dark:bg-slate-900/60 rounded-2xl border border-slate-200/60 dark:border-slate-800/60 backdrop-blur-xl overflow-hidden"
         >
@@ -432,10 +590,10 @@
                     class="font-semibold text-slate-900 dark:text-white flex items-center gap-2"
                 >
                     <Clock class="w-4 h-4 text-purple-500" />
-                    {i18n.lang === "zh" ? "最近请求" : "Recent Requests"}
+                    {isAdmin ? (i18n.lang === "zh" ? "全系统最近请求" : "System Recent Requests") : (i18n.lang === "zh" ? "最近请求" : "Recent Requests")}
                 </h2>
                 <a
-                    href="/logs"
+                    href={isAdmin ? "/logs" : "/logs"}
                     class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline"
                 >
                     {i18n.lang === "zh" ? "查看全部" : "View All"}

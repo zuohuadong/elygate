@@ -716,7 +716,7 @@ export const adminRouter = new Elysia()
     // --- User Management ---
     .get('/users', async () => {
         const users = await sql`
-            SELECT id, username, role, quota, used_quota as "usedQuota", status, created_at, updated_at
+            SELECT id, username, role, quota, used_quota as "usedQuota", status, "group", created_at, updated_at
             FROM users 
             ORDER BY id DESC
         `;

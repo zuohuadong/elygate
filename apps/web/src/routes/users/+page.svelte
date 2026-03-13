@@ -26,8 +26,8 @@
                 displayRole: u.role >= 10 ? "Admin" : "Normal User",
                 displayStatus:
                     u.status === 1
-                        ? i18n.t.channels.active
-                        : i18n.t.channels.disabled,
+                        ? i18n.t.users.active
+                        : i18n.t.users.disabled,
                 formattedQuota:
                     u.quota < 0
                         ? i18n.t.tokens.unlimited

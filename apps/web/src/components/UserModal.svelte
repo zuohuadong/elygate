@@ -148,7 +148,7 @@
             </div>
 
             <div
-                class="px-6 py-6 max-h-[70vh] overflow-y-auto space-y-4 text-left"
+                class="px-6 py-6 space-y-4 text-left"
             >
                 {#if error}
                     <div
