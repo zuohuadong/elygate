@@ -176,6 +176,23 @@ async function init() {
 
   // Refresh channel cache
   memoryCache.refresh().catch(console.error);
+  
+  // Start cache cleanup task
+  memoryCache.startCleanupTask();
+
+  // Refresh materialized views on startup and schedule periodic refresh
+  const refreshMaterializedViews = async () => {
+    try {
+      await sql`REFRESH MATERIALIZED VIEW mv_system_overview`;
+      await sql`REFRESH MATERIALIZED VIEW mv_model_usage_stats`;
+      console.log('[MV] Materialized views refreshed');
+    } catch (e: any) {
+      console.error('[MV] Failed to refresh materialized views:', e.message);
+    }
+  };
+  
+  refreshMaterializedViews();
+  setInterval(refreshMaterializedViews, 5 * 60 * 1000); // Refresh every 5 minutes
 
   app.listen({
     port: 3000,
