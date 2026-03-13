@@ -101,8 +101,13 @@
 
     async function loadRecentLogs() {
         try {
-            const data = await apiFetch<RecentLog[]>("/user/logs?limit=5");
-            recentLogs = data || [];
+            if (isAdmin) {
+                const data = await apiFetch<{ data: RecentLog[] } | RecentLog[]>("/admin/logs?limit=5");
+                recentLogs = Array.isArray(data) ? data : (data?.data || []);
+            } else {
+                const data = await apiFetch<RecentLog[]>("/user/logs?limit=5");
+                recentLogs = data || [];
+            }
         } catch (e) {
             console.error("Failed to load logs:", e);
         }

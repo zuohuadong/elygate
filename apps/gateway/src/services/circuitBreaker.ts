@@ -128,11 +128,30 @@ class CircuitBreaker {
                 await sql`UPDATE channels SET status = 1, status_message = NULL, updated_at = NOW() WHERE id = ${ch.id}`;
             }
 
+            // Auto-recover Status 4 (Testing Recovery) after 5 minutes timeout
+            // If the channel is still reachable, it should be back online
+            const testingChannels = await sql`
+                SELECT id, base_url AS "baseUrl", key, type FROM channels 
+                WHERE status = 4 AND updated_at < NOW() - INTERVAL '5 minutes'
+            `;
+            let changed = busyChannels.length > 0;
+            for (const ch of testingChannels) {
+                const isHealthy = await this.pingChannel(ch);
+                if (isHealthy) {
+                    console.log(`[CircuitBreaker] Channel ${ch.id} auto-recovered from Testing Recovery (timeout).`);
+                    await sql`UPDATE channels SET status = 1, status_message = NULL, updated_at = NOW() WHERE id = ${ch.id}`;
+                    changed = true;
+                } else {
+                    // If still failing, put back to disabled
+                    await sql`UPDATE channels SET status = 3, status_message = 'Failed during testing recovery', updated_at = NOW() WHERE id = ${ch.id}`;
+                    changed = true;
+                }
+            }
+
             const disabledChannels = await sql`
                 SELECT id, base_url AS "baseUrl", key, type FROM channels WHERE status = 3 AND (status_message IS NULL OR status_message NOT LIKE 'Auth Error%')
             `;
             
-            let changed = busyChannels.length > 0;
             for (const ch of disabledChannels) {
                 const isHealthy = await this.pingChannel(ch);
                 if (isHealthy) {
