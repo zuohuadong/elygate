@@ -221,7 +221,7 @@
                             />
                             <select
                                 bind:value={formData.quotaCurrency}
-                                class="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                                class="shrink-0 w-[100px] px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
                             >
                                 <option value="USD">USD ($)</option>
                                 <option value="RMB">RMB (¥)</option>

@@ -1,6 +1,5 @@
 <script lang="ts">
-    // 这是一个基于 Svelte 5 Runes ($props) 封装的极简高级感 Table
-    // 设计参考 shadcn-svelte 的风格，但不依赖第三方重型结构
+    import { Search } from "lucide-svelte";
 
     type Column = {
         key: string;
@@ -18,6 +17,7 @@
         currentPage = 1,
         total = 0,
         onPageChange = (page: number) => {},
+        searchable = true,
         customActions,
         cell,
     }: {
@@ -30,14 +30,31 @@
         currentPage?: number;
         total?: number;
         onPageChange?: (page: number) => void;
+        searchable?: boolean;
         customActions?: import('svelte').Snippet<[any]>;
         cell?: import('svelte').Snippet<[string, any, any]>;
     } = $props();
 
+    let searchTerm = $state("");
+
+    // Local filtering if no server-side "total" is provided, or if specifically desired
+    const filteredData = $derived.by(() => {
+        if (!searchTerm) return data;
+        const lowSearch = searchTerm.toLowerCase();
+        return data.filter(item => 
+            Object.values(item).some(val => 
+                String(val).toLowerCase().includes(lowSearch)
+            )
+        );
+    });
+
+    const effectiveTotal = $derived(total || (searchTerm ? filteredData.length : data.length));
+    const effectiveData = $derived(total > 0 ? data : filteredData.slice((currentPage - 1) * pageSize, currentPage * pageSize));
+
     // Calculate pagination
-    const totalPages = $derived(Math.ceil(total / pageSize) || 1);
-    const startItem = $derived((currentPage - 1) * pageSize + 1);
-    const endItem = $derived(Math.min(currentPage * pageSize, total));
+    const totalPages = $derived(Math.ceil(effectiveTotal / pageSize) || 1);
+    const startItem = $derived(effectiveTotal === 0 ? 0 : (currentPage - 1) * pageSize + 1);
+    const endItem = $derived(Math.min(currentPage * pageSize, effectiveTotal));
 
     // Pagination controls
     function goToPage(page: number) {
@@ -58,6 +75,23 @@
 <div
     class="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 overflow-hidden shadow-sm"
 >
+    {#if searchable}
+    <div class="px-6 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/30 dark:bg-slate-900/30">
+        <div class="relative max-w-sm">
+            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <Search class="h-4 w-4 text-slate-400" />
+            </div>
+            <input
+                type="text"
+                bind:value={searchTerm}
+                oninput={() => { if(currentPage !== 1) onPageChange(1); }}
+                placeholder="Search..."
+                class="block w-full pl-10 pr-3 py-2 border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-950 text-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+            />
+        </div>
+    </div>
+    {/if}
+
     <div class="overflow-x-auto">
         <table class="w-full text-sm text-left">
             <thead
@@ -83,7 +117,7 @@
             <tbody
                 class="divide-y divide-slate-200 dark:divide-slate-800 bg-white dark:bg-slate-950"
             >
-                {#each data as row, i}
+                {#each effectiveData as row, i}
                     <tr
                         class="hover:bg-slate-50/80 dark:hover:bg-slate-900/80 transition-colors duration-150 group"
                     >
@@ -148,8 +182,8 @@
         class="flex items-center justify-between px-6 py-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50/30 dark:bg-slate-900/30"
     >
         <span class="text-xs text-slate-500 dark:text-slate-400">
-            {#if total > 0}
-                显示 {startItem} 到 {endItem} 条，共 {total} 条记录
+            {#if effectiveTotal > 0}
+                显示 {startItem} 到 {endItem} 条，共 {effectiveTotal} 条记录
             {:else}
                 暂无数据
             {/if}

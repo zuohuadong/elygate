@@ -197,7 +197,7 @@ export const authRouter = new Elysia()
                 LIMIT 1
             `;
             if (!user) {
-                await sql`INSERT INTO login_attempts (username, ip_address, success) VALUES (${username}, clientIP, false)`;
+                await sql`INSERT INTO login_attempts (username, ip_address, success) VALUES (${username}, ${clientIP}, false)`;
                 set.status = 401;
                 return { success: false, message: lang === 'zh' ? '用户名或密码错误' : 'Invalid username or password' };
             }

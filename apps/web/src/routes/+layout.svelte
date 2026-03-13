@@ -365,14 +365,10 @@
 	<meta name="description" content={publicInfo.SEO_Description} />
 	<meta name="keywords" content={publicInfo.SEO_Keywords} />
 	{#if publicInfo.Custom_CSS}
-		<style>
-			{@html publicInfo.Custom_CSS}
-		</style>
+		{@html `<style>${publicInfo.Custom_CSS}</style>`}
 	{/if}
 	{#if publicInfo.Custom_JS}
-		<script>
-			{@html publicInfo.Custom_JS}
-		</script>
+		{@html `<script>${publicInfo.Custom_JS}</script>`}
 	{/if}
 </svelte:head>
 

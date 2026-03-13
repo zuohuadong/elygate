@@ -1,118 +1,112 @@
 import { overrideConsole } from "./services/logger";
 overrideConsole();
 
+import { initEnv } from "./services/env";
 import { Elysia } from "elysia";
 import { cors } from "@elysiajs/cors";
 import { swagger } from "@elysiajs/swagger";
 import { jwt } from "@elysiajs/jwt";
-import { authPlugin } from "./middleware/auth";
-import { staticFileHandler } from "./middleware/static";
-import { chatRouter } from "./routes/chat";
-import { embeddingsRouter } from "./routes/embeddings";
-import { imagesRouter } from "./routes/images";
-import { adminRouter } from "./routes/admin/index";
-import { redemptionsRouter } from "./routes/redemptions";
-import { authRouter } from "./routes/auth";
-import { audioRouter } from "./routes/audio";
-import { rerankRouter } from "./routes/rerank";
-import { videoRouter } from "./routes/video";
-import { sysRouter } from "./routes/sys";
-import { mjRouter } from "./routes/mj";
-import { paymentRouter } from "./routes/payment";
-import { statsRouter } from "./routes/stats";
-import { userStatsRouter } from "./routes/userStats";
-import { modelsRouter } from "./routes/models";
-import { memoryCache } from "./services/cache";
-import { sql } from "@elygate/db";
-import { initEnv } from "./services/env";
 import { join } from "path";
 import "./services/health";
 
-const app = new Elysia()
-  .use(cors({
-    origin: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'Accept', 'X-Request-ID', 'Cookie'],
-    exposeHeaders: ['Set-Cookie'],
-    credentials: true
-  }))
-  .use(jwt({
-    name: 'jwt',
-    secret: process.env.JWT_SECRET!,
-    exp: '7d'
-  }))
-  .state('auth_session', '')
-  .use(swagger({
-    documentation: {
-      info: {
-        title: 'AI API Gateway',
-        version: '1.0.0'
+// Startup readiness check
+async function init() {
+  // 0. Initialize environment and secrets (MUST be first)
+  await initEnv();
+
+  // 1. Dyamically import environment-dependent modules
+  const { sql, memoryCache } = await import("@elygate/db");
+  const { authPlugin } = await import("./middleware/auth");
+  const { staticFileHandler } = await import("./middleware/static");
+  const { chatRouter } = await import("./routes/chat");
+  const { embeddingsRouter } = await import("./routes/embeddings");
+  const { imagesRouter } = await import("./routes/images");
+  const { adminRouter } = await import("./routes/admin/index");
+  const { redemptionsRouter } = await import("./routes/redemptions");
+  const { authRouter } = await import("./routes/auth");
+  const { audioRouter } = await import("./routes/audio");
+  const { rerankRouter } = await import("./routes/rerank");
+  const { videoRouter } = await import("./routes/video");
+  const { sysRouter } = await import("./routes/sys");
+  const { mjRouter } = await import("./routes/mj");
+  const { paymentRouter } = await import("./routes/payment");
+  const { statsRouter } = await import("./routes/stats");
+  const { userStatsRouter } = await import("./routes/userStats");
+  const { modelsRouter } = await import("./routes/models");
+
+  const app = new Elysia()
+    .use(cors({
+      origin: true,
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'Accept', 'X-Request-ID', 'Cookie'],
+      exposeHeaders: ['Set-Cookie'],
+      credentials: true
+    }))
+    .use(jwt({
+      name: 'jwt',
+      secret: process.env.JWT_SECRET!,
+      exp: '7d'
+    }))
+    .state('auth_session', '')
+    .use(swagger({
+      documentation: {
+        info: {
+          title: 'AI API Gateway',
+          version: '1.0.0'
+        }
       }
-    }
-  }))
-  .onError(({ code, error, set }) => {
-    return { success: false, message: error instanceof Error ? error.message : String(error) };
-  })
-  .onBeforeHandle(staticFileHandler())
-  .use(sysRouter)
-  .group("/api", (app) =>
-    app.get('/status', async () => {
-      // Returns a simplified list of channels and their status for public consumption
-      const rows = await sql`
-        SELECT name, type, status, status_message AS "statusMessage", updated_at AS "updatedAt"
-        FROM channels
-        ORDER BY priority DESC, weight DESC
-      `;
-      return rows;
+    }))
+    .onError(({ error }) => {
+      return { success: false, message: error instanceof Error ? error.message : String(error) };
     })
-    .get('/info', async () => {
-      const keys = ['ServerName', 'SEO_Title', 'SEO_Description', 'SEO_Keywords', 'Logo_URL', 'Footer_HTML', 'Custom_CSS', 'Custom_JS'];
-      const rows = await sql`SELECT key, value FROM options WHERE key IN ${sql(keys)}`;
-      const info: Record<string, string> = {};
-      for (const r of rows) info[r.key] = r.value;
-      return { success: true, data: info };
-    })
-    .use(authRouter)
+    .onBeforeHandle(staticFileHandler())
+    .use(sysRouter)
+    .group("/api", (app) =>
+      app.get('/status', async () => {
+        const rows = await sql`
+          SELECT name, type, status, status_message AS "statusMessage", updated_at AS "updatedAt"
+          FROM channels
+          ORDER BY priority DESC, weight DESC
+        `;
+        return rows;
+      })
+      .get('/info', async () => {
+        const keys = ['ServerName', 'SEO_Title', 'SEO_Description', 'SEO_Keywords', 'Logo_URL', 'Footer_HTML', 'Custom_CSS', 'Custom_JS'];
+        const rows = await sql`SELECT key, value FROM options WHERE key IN ${sql(keys)}`;
+        const info: Record<string, string> = {};
+        for (const r of rows) info[r.key] = r.value;
+        return { success: true, data: info };
+      })
+      .use(authRouter)
       .use(paymentRouter)
       .group("/admin", (app) => app.use(adminRouter))
       .group("/stats", (app) => app.use(statsRouter))
       .group("/redemptions", (app) => app.use(authPlugin).use(redemptionsRouter))
       .use(userStatsRouter)
       .use(mjRouter)
-  )
-  // OpenAI & Anthropic compatible API endpoints (standard /v1 prefix)
-  .group("/v1", (app) =>
-    app.use(authPlugin)
-      .use(modelsRouter)
-      .use(chatRouter)
-      .use(embeddingsRouter)
-      .use(imagesRouter)
-      .use(audioRouter)
-      .use(rerankRouter)
-      .use(videoRouter)
-  )
-  // Native Gemini support (2026 standard)
-  // .group("/v1beta", (app) =>
-  //   app.use(authPlugin).use(nativeGeminiRouter)
-  // )
-  // SPA Fallback for static Web UI
-  .get("*", async ({ request, set }) => {
-    const url = new URL(request.url);
-    if (!url.pathname.startsWith('/api') && !url.pathname.startsWith('/v1')) {
-      const fallback = join(process.cwd(), 'apps/web/build/index.html');
-      const file = Bun.file(fallback);
-      if (await file.exists()) {
-        return file;
+    )
+    .group("/v1", (app) =>
+      app.use(authPlugin)
+        .use(modelsRouter)
+        .use(chatRouter)
+        .use(embeddingsRouter)
+        .use(imagesRouter)
+        .use(audioRouter)
+        .use(rerankRouter)
+        .use(videoRouter)
+    )
+    .get("*", async ({ request, set }) => {
+      const url = new URL(request.url);
+      if (!url.pathname.startsWith('/api') && !url.pathname.startsWith('/v1')) {
+        const fallback = join(process.cwd(), 'apps/web/build/index.html');
+        const file = Bun.file(fallback);
+        if (await file.exists()) {
+          return file;
+        }
       }
-    }
-    set.status = 404;
-    return { error: 'Not Found' };
-  })
-
-// Startup readiness check
-async function init() {
-  // 0. Initialize environment and secrets
-  await initEnv();
+      set.status = 404;
+      return { error: 'Not Found' };
+    });
 
   console.log("⏳ Waiting for database readiness...");
   let retries = 0;
@@ -129,12 +123,11 @@ async function init() {
     }
   }
 
-  // Resolve SQL paths robustly for both local dev and Docker production
   const findSqlPath = async (relativePath: string) => {
     const paths = [
-      join(process.cwd(), relativePath),                        // From root (Docker)
-      join(process.cwd(), '../../', relativePath),              // From apps/gateway (Local dev)
-      join(__dirname, '../../../', relativePath)                // Absolute fallback
+      join(process.cwd(), relativePath),
+      join(process.cwd(), '../../', relativePath),
+      join(__dirname, '../../../', relativePath)
     ];
     for (const p of paths) {
       if (await Bun.file(p).exists()) return p;
@@ -142,7 +135,6 @@ async function init() {
     return null;
   };
 
-  // Run schema fix patches (v1, v2) if exist (idempotent)
   const patches = [
     'packages/db/src/patch_v1_schema_fix.sql',
     'packages/db/src/patch_v2_channel_status.sql'
@@ -160,27 +152,47 @@ async function init() {
     }
   }
 
-  // Apply Performance Indexes (idempotent)
   const perfIndexesPath = await findSqlPath('packages/db/src/performance_indexes.sql');
   if (perfIndexesPath) {
     try {
       const perfSql = await Bun.file(perfIndexesPath).text();
-      // Use unsafe for multi-statement scripts including CONCURRENTLY index creation
       await sql.unsafe(perfSql);
       console.log("📊 Performance indexes verified/applied.");
     } catch (e: any) {
-      // Index creation might fail if already exists or concurrent issues, log but don't crash
       console.log("ℹ️ Performance indexes check:", e.message);
     }
   }
 
-  // Refresh channel cache
   memoryCache.refresh().catch(console.error);
+
+  const adminPassword = process.env.ADMIN_PASSWORD;
+  if (adminPassword) {
+    try {
+      const passwordHash = await Bun.password.hash(adminPassword);
+      const [updated] = await sql`
+        UPDATE users 
+        SET password_hash = ${passwordHash}, updated_at = NOW() 
+        WHERE username = 'admin' AND role = 10
+        RETURNING id
+      `;
+      if (updated) {
+        console.log("💎 Admin password synchronized from environment.");
+      } else {
+        await sql`
+          INSERT INTO users (username, password_hash, role, quota)
+          VALUES ('admin', ${passwordHash}, 10, 100000000)
+          ON CONFLICT (username) DO UPDATE 
+          SET password_hash = ${passwordHash}, updated_at = NOW()
+        `;
+        console.log("💎 Admin user initialized/synced from environment.");
+      }
+    } catch (e: any) {
+      console.error("❌ Failed to sync admin password:", e.message);
+    }
+  }
   
-  // Start cache cleanup task
   memoryCache.startCleanupTask();
 
-  // Refresh materialized views on startup and schedule periodic refresh
   const refreshMaterializedViews = async () => {
     try {
       await sql`REFRESH MATERIALIZED VIEW mv_system_overview`;
@@ -192,7 +204,7 @@ async function init() {
   };
   
   refreshMaterializedViews();
-  setInterval(refreshMaterializedViews, 5 * 60 * 1000); // Refresh every 5 minutes
+  setInterval(refreshMaterializedViews, 5 * 60 * 1000);
 
   app.listen({
     port: 3000,

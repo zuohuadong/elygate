@@ -5,6 +5,45 @@ import { type UserRecord } from '../types';
 
 export const userStatsRouter = new Elysia({ prefix: '/user' })
     .use(authPlugin)
+    .get('/info', async ({ user }: any) => {
+        const u = user as UserRecord;
+        const [userInfo] = await sql`
+            SELECT quota, used_quota as "usedQuota"
+            FROM users
+            WHERE id = ${u.id}
+        `;
+        return userInfo || { quota: 0, usedQuota: 0 };
+    })
+    .get('/tokens', async ({ user }: any) => {
+        const u = user as UserRecord;
+        const tokens = await sql`
+            SELECT id, name, key, status, remain_quota as "remainQuota", used_quota as "usedQuota", created_at as "createdAt"
+            FROM tokens
+            WHERE user_id = ${u.id}
+            ORDER BY created_at DESC
+        `;
+        return tokens;
+    })
+    .get('/logs', async ({ user, query }: any) => {
+        const u = user as UserRecord;
+        const limit = parseInt((query as any).limit) || 10;
+        
+        const logs = await sql`
+            SELECT 
+                id,
+                model_name as "modelName",
+                prompt_tokens as "promptTokens",
+                completion_tokens as "completionTokens",
+                quota_cost as "quotaCost",
+                created_at as "createdAt",
+                CASE WHEN status_code < 400 THEN true ELSE false END as "isSuccess"
+            FROM logs
+            WHERE user_id = ${u.id}
+            ORDER BY created_at DESC
+            LIMIT ${limit}
+        `;
+        return logs;
+    })
     .get('/dashboard/stats', async ({ user, query }: any) => {
         const u = user as UserRecord;
         const { period } = query as any;

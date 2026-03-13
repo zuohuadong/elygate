@@ -62,7 +62,7 @@
         />
         <select
             bind:value={inputCurrency}
-            class="px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+            class="shrink-0 w-[100px] px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
         >
             <option value="USD">USD ($)</option>
             <option value="RMB">RMB (¥)</option>
