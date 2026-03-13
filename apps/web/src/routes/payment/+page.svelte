@@ -48,7 +48,7 @@
 
 	async function loadBalance() {
 		try {
-			const data = await apiFetch<any>("/me");
+			const data = await apiFetch<any>("/user/info");
 			balance = data.quota || 0;
 		} catch (error) {
 			console.error("Failed to load balance:", error);

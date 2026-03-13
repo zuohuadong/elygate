@@ -37,8 +37,8 @@
         isLoading = true;
         try {
             const [userData, logsData, statsData] = await Promise.all([
-                apiFetch<any>("/me"),
-                apiFetch<any>("/logs?limit=5"),
+                apiFetch<any>("/user/info"),
+                apiFetch<any>("/user/logs?limit=5"),
                 apiFetch<UserStats>(`/user/dashboard/stats?period=${activePeriod}`),
             ]);
             userInfo = userData;

@@ -13,8 +13,8 @@
         isLoading = true;
         try {
             const [pkgs, subs] = await Promise.all([
-                apiFetch<any[]>("/auth/packages"),
-                apiFetch<any[]>("/auth/subscriptions")
+                apiFetch<any[]>("/user/packages"),
+                apiFetch<any[]>("/user/subscriptions")
             ]);
             packages = pkgs;
             subscriptions = subs;

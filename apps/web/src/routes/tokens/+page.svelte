@@ -22,7 +22,7 @@
     async function loadTokens() {
         isLoading = true;
         try {
-            const endpoint = isAdmin ? "/admin/tokens" : "/auth/tokens";
+            const endpoint = isAdmin ? "/admin/tokens" : "/user/tokens";
             const data = await apiFetch<any[]>(endpoint);
             tokens = data.map((t) => {
                 const remainQuota = (t.remainQuota !== undefined ? t.remainQuota : t.remain_quota);
@@ -98,7 +98,7 @@
         try {
             const endpoint = isAdmin
                 ? `/admin/tokens/${token.id}`
-                : `/auth/tokens/${token.id}`;
+                : `/user/tokens/${token.id}`;
             await apiFetch(endpoint, { method: "DELETE" });
             await loadTokens();
         } catch (err: any) {
@@ -111,13 +111,13 @@
             if (selectedToken) {
                 const endpoint = isAdmin
                     ? `/admin/tokens/${selectedToken.id}`
-                    : `/auth/tokens/${selectedToken.id}`;
+                    : `/user/tokens/${selectedToken.id}`;
                 await apiFetch(endpoint, {
                     method: "PUT",
                     body: JSON.stringify(data),
                 });
             } else {
-                const endpoint = isAdmin ? "/admin/tokens" : "/auth/tokens";
+                const endpoint = isAdmin ? "/admin/tokens" : "/user/tokens";
                 await apiFetch(endpoint, {
                     method: "POST",
                     body: JSON.stringify(data),

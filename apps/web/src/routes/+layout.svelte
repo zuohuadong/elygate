@@ -83,7 +83,7 @@
 
 		// Check if user is authenticated via Cookie
 		try {
-			const me = await apiFetch<any>("/me");
+			const me = await apiFetch<any>("/user/info");
 			if (me && me.username) {
 				session.update({
 					id: me.id,

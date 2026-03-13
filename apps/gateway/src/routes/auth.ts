@@ -262,41 +262,6 @@ export const authRouter = new Elysia()
     // --- Authenticated Consumer Endpoints ---
     .group('', (app) =>
         app.use(authPlugin)
-            .get('/me', async ({ user }: any) => {
-                const u = user as UserRecord;
-                return {
-                    id: u.id,
-                    username: u.username,
-                    role: u.role,
-                    quota: u.quota,
-                    usedQuota: u.usedQuota,
-                    group: u.group,
-                    currency: u.currency || 'USD'
-                };
-            })
-            .get('/logs', async ({ query, user }: any) => {
-                const userRow = user as UserRecord;
-                const page = Number(query?.page) || 1;
-                const limit = Number(query?.limit) || 50;
-                const offset = (page - 1) * limit;
-                const [countRow] = await sql`SELECT COUNT(*) as total FROM logs WHERE user_id = ${userRow.id}`;
-                const data = await sql`
-                    SELECT 
-                        id, 
-                        model_name as "modelName", 
-                        prompt_tokens as "promptTokens", 
-                        completion_tokens as "completionTokens", 
-                        quota_cost as "quotaCost", 
-                        created_at as "createdAt", 
-                        is_stream as "isStream",
-                        elapsed_ms as "elapsedMs"
-                    FROM logs 
-                    WHERE user_id = ${userRow.id} 
-                    ORDER BY created_at DESC 
-                    LIMIT ${limit} OFFSET ${offset}
-                `;
-                return { data, total: countRow.total, page, limit };
-            })
             // Support both old and new (standardized) user dashboard paths
             .group('/user', (app) =>
                 app.get('/info', async ({ user }: any) => {
@@ -342,31 +307,7 @@ export const authRouter = new Elysia()
                     `;
                     return [...data];
                 })
-            )
-            .get('/stats', async ({ user }: any) => {
-                const userRow = user as UserRecord;
-                return await sql`
-                    SELECT DATE(created_at) as date, SUM(prompt_tokens + completion_tokens) as total_tokens, SUM(quota_cost) as total_cost, COUNT(*) as request_count
-                    FROM logs WHERE user_id = ${userRow.id} AND created_at >= NOW() - INTERVAL '14 days' GROUP BY DATE(created_at) ORDER BY date ASC
-                `;
-            })
-            .get('/realtime', async ({ user }: any) => {
-                const userRow = user as UserRecord;
-                const [realtime] = await sql`
-                    SELECT COUNT(*) as rpm, COALESCE(SUM(prompt_tokens + completion_tokens), 0) as tpm
-                    FROM logs WHERE user_id = ${userRow.id} AND created_at >= NOW() - INTERVAL '1 minute'
-                `;
-                return { rpm: Number(realtime.rpm || 0), tpm: Number(realtime.tpm || 0) };
-            })
-            .put('/currency', async ({ body, user }: any) => {
-                const userRow = user as UserRecord;
-                const { currency } = body;
-                if (!['USD', 'RMB'].includes(currency)) throw new Error('Invalid currency');
-                await sql`UPDATE users SET currency = ${currency} WHERE id = ${userRow.id}`;
-                return { success: true, currency };
-            })
-            .group('/auth', (app) =>
-                app.get('/packages', async ({ user }: any) => {
+                .get('/packages', async ({ user }: any) => {
                     const userRow = user as UserRecord;
                     const userGroup = userRow.group || 'default';
                     const data = await sql`SELECT id, name, description, price, duration_days, models, allowed_groups FROM packages WHERE is_public = true ORDER BY price ASC`;
@@ -381,14 +322,6 @@ export const authRouter = new Elysia()
                 .get('/subscriptions', async ({ user }: any) => {
                     const userRow = user as UserRecord;
                     return await sql`SELECT s.id, s.package_id, p.name as package_name, p.models, s.start_time, s.end_time, s.status FROM user_subscriptions s JOIN packages p ON s.package_id = p.id WHERE s.user_id = ${userRow.id} AND s.status = 1 ORDER BY s.end_time DESC`;
-                })
-                .get('/tokens', async ({ user }: any) => {
-                    const userRow = user as UserRecord;
-                    const data = await sql`
-                        SELECT id, name, key, status, remain_quota as "remainQuota", used_quota as "usedQuota", created_at as "createdAt", models
-                        FROM tokens WHERE user_id = ${userRow.id} ORDER BY id DESC
-                    `;
-                    return [...data];
                 })
                 .post('/tokens', async ({ body, user }: any) => {
                     const userRow = user as UserRecord;
@@ -418,6 +351,28 @@ export const authRouter = new Elysia()
                     return { success: true, deleted: result };
                 })
             )
+            .get('/stats', async ({ user }: any) => {
+                const userRow = user as UserRecord;
+                return await sql`
+                    SELECT DATE(created_at) as date, SUM(prompt_tokens + completion_tokens) as total_tokens, SUM(quota_cost) as total_cost, COUNT(*) as request_count
+                    FROM logs WHERE user_id = ${userRow.id} AND created_at >= NOW() - INTERVAL '14 days' GROUP BY DATE(created_at) ORDER BY date ASC
+                `;
+            })
+            .get('/realtime', async ({ user }: any) => {
+                const userRow = user as UserRecord;
+                const [realtime] = await sql`
+                    SELECT COUNT(*) as rpm, COALESCE(SUM(prompt_tokens + completion_tokens), 0) as tpm
+                    FROM logs WHERE user_id = ${userRow.id} AND created_at >= NOW() - INTERVAL '1 minute'
+                `;
+                return { rpm: Number(realtime.rpm || 0), tpm: Number(realtime.tpm || 0) };
+            })
+            .put('/currency', async ({ body, user }: any) => {
+                const userRow = user as UserRecord;
+                const { currency } = body;
+                if (!['USD', 'RMB'].includes(currency)) throw new Error('Invalid currency');
+                await sql`UPDATE users SET currency = ${currency} WHERE id = ${userRow.id}`;
+                return { success: true, currency };
+            })
     )
 
     .get('/discord', ({ set }) => {
