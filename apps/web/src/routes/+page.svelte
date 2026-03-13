@@ -101,13 +101,24 @@
 
     async function loadRecentLogs() {
         try {
+            let rawData: any[] = [];
             if (isAdmin) {
-                const data = await apiFetch<{ data: RecentLog[] } | RecentLog[]>("/admin/logs?limit=5");
-                recentLogs = Array.isArray(data) ? data : (data?.data || []);
+                const data = await apiFetch<{ data: any[] } | any[]>("/admin/logs?limit=5");
+                rawData = Array.isArray(data) ? data : (data?.data || []);
             } else {
-                const data = await apiFetch<RecentLog[]>("/user/logs?limit=5");
-                recentLogs = data || [];
+                const data = await apiFetch<any[]>("/user/logs?limit=5");
+                rawData = data || [];
             }
+            // Convert snake_case to camelCase
+            recentLogs = rawData.map((log: any) => ({
+                id: log.id,
+                modelName: log.model_name || log.modelName,
+                promptTokens: log.prompt_tokens ?? log.promptTokens ?? 0,
+                completionTokens: log.completion_tokens ?? log.completionTokens ?? 0,
+                quotaCost: log.quota_cost ?? log.quotaCost ?? 0,
+                createdAt: log.created_at || log.createdAt,
+                isSuccess: log.status_code === 200 || log.isSuccess === true
+            }));
         } catch (e) {
             console.error("Failed to load logs:", e);
         }
