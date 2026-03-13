@@ -23,6 +23,14 @@ export class NvidiaApiHandler implements ProviderHandler {
             model
         };
 
+        // Disable thinking mode for -F suffix models (Qwen3.5 style)
+        if (model.endsWith('-F')) {
+            transformed.chat_template_kwargs = {
+                ...(body.chat_template_kwargs || {}),
+                enable_thinking: false
+            };
+        }
+
         return transformed;
     }
 

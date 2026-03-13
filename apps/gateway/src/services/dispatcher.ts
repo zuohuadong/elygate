@@ -40,9 +40,18 @@ async function waitForConcurrencyRelease(lockId: string, limit: number, maxWaitM
 
 export class UnifiedDispatcher {
     static async dispatch(options: DispatchOptions) {
-        const { model, body, user, token, endpointType, skipTransform } = options;
+        const { body, user, token, endpointType, skipTransform } = options;
+        let model = options.model;
         const isStream = options.stream || body.stream || false;
         const isFormData = body instanceof FormData || (body && typeof body === 'object' && !Array.isArray(body) && Object.values(body).some(v => v instanceof File || v instanceof Blob));
+
+        // 0. Handle -F suffix (Non-Thinking Model)
+        // Models with -F suffix will have enable_thinking: false
+        const originalModel = model; // Keep original model name for transformRequest
+        const skipThinking = model.endsWith('-F');
+        if (skipThinking) {
+            model = model.slice(0, -2); // Remove -F suffix for routing
+        }
 
         // 0. Check Package Bypass (Contractual Exemption)
         let isPackageFree = false;
@@ -143,6 +152,7 @@ export class UnifiedDispatcher {
             }
 
             const upstreamUrl = buildUpstreamUrl(channelConfig, upstreamModel, endpointType, isStream);
+            console.log(`[Dispatcher] Selected channel: ${channelConfig.name} (id=${channelConfig.id}), upstream: ${upstreamUrl}, model: ${upstreamModel}`);
 
             // 2.5 Prepare Body & Headers
             let forwardBody: any;
@@ -158,7 +168,11 @@ export class UnifiedDispatcher {
                     else forwardBody.append(key, sourceBody[key]);
                 }
             } else {
-                forwardBody = JSON.stringify(skipTransform ? body : handler.transformRequest(body, upstreamModel));
+                // Pass original model name (with -F suffix) to transformRequest for enable_thinking handling
+                // but use upstreamModel for the actual model field in the request
+                const transformedBody = skipTransform ? body : handler.transformRequest(body, originalModel);
+                transformedBody.model = upstreamModel; // Override model with mapped name
+                forwardBody = JSON.stringify(transformedBody);
             }
 
             // 3. Package & Rate Limit Check

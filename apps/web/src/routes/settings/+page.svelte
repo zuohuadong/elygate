@@ -137,7 +137,7 @@
     }
 </script>
 
-<div class="flex-1 space-y-6 text-left max-w-5xl mx-auto">
+<div class="flex-1 space-y-6 text-left w-full">
     <div>
         <h2
             class="text-2xl font-bold tracking-tight flex items-center gap-2 text-slate-900 dark:text-white"

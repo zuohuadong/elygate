@@ -93,6 +93,7 @@ export const channelsRouter = new Elysia()
                     key = ${finalKey},
                     base_url = ${b.baseUrl ?? oldChannel.base_url},
                     models = ${b.models ?? oldChannel.models},
+                    model_mapping = ${b.modelMapping ? JSON.stringify(b.modelMapping) : oldChannel.model_mapping},
                     priority = ${b.priority ?? oldChannel.priority},
                     weight = ${b.weight ?? oldChannel.weight},
                     status = ${b.status ?? oldChannel.status},

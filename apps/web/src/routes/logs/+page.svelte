@@ -101,7 +101,7 @@
     ];
 </script>
 
-<div class="flex-1 space-y-6 max-w-5xl mx-auto w-full">
+<div class="flex-1 space-y-6 w-full">
     <div
         class="flex flex-col sm:flex-row sm:items-center justify-between gap-4"
     >

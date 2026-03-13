@@ -13,6 +13,103 @@ import { removeNullFields } from '../utils/transform';
 import { translateErrorBilingual } from '../services/i18n';
 
 /**
+ * Filter thinking content from response for -F suffix models.
+ * Removes reasoning_content and thinking process text from the response.
+ */
+function filterThinkingContent(response: any): any {
+    const filtered = JSON.parse(JSON.stringify(response));
+    
+    if (filtered.choices) {
+        for (const choice of filtered.choices) {
+            // Remove reasoning_content field (DeepSeek/Qwen style)
+            if (choice.message?.reasoning_content) {
+                delete choice.message.reasoning_content;
+            }
+            if (choice.delta?.reasoning_content) {
+                delete choice.delta.reasoning_content;
+            }
+            
+            // Filter thinking process text from content
+            if (choice.message?.content && typeof choice.message.content === 'string') {
+                let content = choice.message.content;
+                
+                // Pattern 1: "Thinking Process:\n\n...thinking...\n\nactual_response"
+                if (content.includes('Thinking Process:')) {
+                    // Split by double newlines to separate sections
+                    const parts = content.split(/\n\n+/);
+                    const answerParts: string[] = [];
+                    
+                    for (const part of parts) {
+                        // Skip thinking process sections
+                        if (part.startsWith('Thinking Process:') || 
+                            /^\d+\.\s+\*\*/.test(part) ||
+                            /^\s*\*\*[^*]+\*\*:/.test(part) ||
+                            /^\s*\*\s/.test(part)) {
+                            continue;
+                        }
+                        // Check if this looks like actual content (not thinking)
+                        if (part.trim() && !part.startsWith('*') && !/^\d+\./.test(part)) {
+                            answerParts.push(part);
+                        }
+                    }
+                    
+                    if (answerParts.length > 0) {
+                        content = answerParts.join('\n\n');
+                    } else {
+                        // If no answer found, the response might be truncated
+                        // Return a message indicating the response was incomplete
+                        content = '[Response was truncated during thinking process]';
+                    }
+                }
+                
+                // Pattern 2: <think...>...</think...>\n\nactual_response
+                const thinkTagMatch = content.match(/^<think[\s\S]*?<\/think>\s*\n*/);
+                if (thinkTagMatch) {
+                    content = content.replace(thinkTagMatch[0], '');
+                }
+                
+                choice.message.content = content.trim();
+            }
+            if (choice.delta?.content && typeof choice.delta.content === 'string') {
+                let content = choice.delta.content;
+                
+                if (content.includes('Thinking Process:')) {
+                    const parts = content.split(/\n\n+/);
+                    const answerParts: string[] = [];
+                    
+                    for (const part of parts) {
+                        if (part.startsWith('Thinking Process:') || 
+                            /^\d+\.\s+\*\*/.test(part) ||
+                            /^\s*\*\*[^*]+\*\*:/.test(part) ||
+                            /^\s*\*\s/.test(part)) {
+                            continue;
+                        }
+                        if (part.trim() && !part.startsWith('*') && !/^\d+\./.test(part)) {
+                            answerParts.push(part);
+                        }
+                    }
+                    
+                    if (answerParts.length > 0) {
+                        content = answerParts.join('\n\n');
+                    } else {
+                        content = '[Response was truncated during thinking process]';
+                    }
+                }
+                
+                const thinkTagMatch = content.match(/^<think[\s\S]*?<\/think>\s*\n*/);
+                if (thinkTagMatch) {
+                    content = content.replace(thinkTagMatch[0], '');
+                }
+                
+                choice.delta.content = content.trim();
+            }
+        }
+    }
+    
+    return filtered;
+}
+
+/**
  * Resolve embedding channel and model for semantic cache lookups.
  */
 function resolveEmbeddingChannel(): { channel: any; model: string | undefined } {
@@ -107,12 +204,23 @@ export const chatRouter = new Elysia()
         const defaultMode = optionCache.get('SemanticCacheDefaultMode', 'default');
         const cachePolicy = (u as any).activePackage?.cache_policy || { mode: defaultMode };
 
+        // --- 0. Handle -F suffix for cache key ---
+        // Use model name without -F suffix for cache key to share cache between thinking/non-thinking modes
+        const skipThinking = model.endsWith('-F');
+        const cacheModelKey = skipThinking ? model.slice(0, -2) : model;
+
         // --- 1. Exact Response Cache Lookup (fastest, no embedding needed) ---
         if (!stream) {
-            const exactResponse = await lookupResponseCache(model, messages, u.id);
+            const exactResponse = await lookupResponseCache(cacheModelKey, messages, u.id);
             if (exactResponse) {
-                console.log(`[ResponseCache] HIT for model: ${model}`);
-                const correctedResponse = { ...exactResponse, model };
+                console.log(`[ResponseCache] HIT for model: ${cacheModelKey} (requested: ${model})`);
+                let correctedResponse = { ...exactResponse, model };
+
+                // Filter thinking content if -F suffix was requested
+                if (skipThinking && correctedResponse.choices) {
+                    correctedResponse = filterThinkingContent(correctedResponse);
+                }
+
                 await billCacheHit(correctedResponse, model, u, t, -1, startTime, ip, ua).catch(e => {
                     console.error('[ResponseCache] Billing Error:', e.message);
                 });
@@ -125,10 +233,15 @@ export const chatRouter = new Elysia()
         console.log(`[SemanticCache] Embedding channel found: ${embeddingChannel ? embeddingChannel.name : 'NONE'}, model: ${embeddingModel || 'N/A'}`);
 
         if (embeddingChannel && !stream) {
-            const cachedResponse = await lookupSemanticCache(userPrompt, model, embeddingChannel, embeddingModel, u.id, cachePolicy);
+            const cachedResponse = await lookupSemanticCache(userPrompt, cacheModelKey, embeddingChannel, embeddingModel, u.id, cachePolicy);
             if (cachedResponse) {
-                console.log(`[SemanticCache] HIT for model: ${model}`);
-                const correctedResponse = { ...cachedResponse, model };
+                console.log(`[SemanticCache] HIT for model: ${cacheModelKey} (requested: ${model})`);
+                let correctedResponse = { ...cachedResponse, model };
+
+                // Filter thinking content if -F suffix was requested
+                if (skipThinking && correctedResponse.choices) {
+                    correctedResponse = filterThinkingContent(correctedResponse);
+                }
 
                 // Estimate tokens for semantic cache billing
                 let promptTokens = correctedResponse.usage?.prompt_tokens || 0;
