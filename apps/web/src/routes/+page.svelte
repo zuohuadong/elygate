@@ -37,15 +37,30 @@
         isSuccess: boolean;
     }
 
+    interface UserInfo {
+        quota: number;
+        usedQuota: number;
+    }
+
     let tokens = $state<Token[]>([]);
     let recentLogs = $state<RecentLog[]>([]);
+    let userInfo = $state<UserInfo>({ quota: 0, usedQuota: 0 });
     let isLoading = $state(true);
     let copiedId = $state<number | null>(null);
 
     onMount(async () => {
-        await Promise.all([loadTokens(), loadRecentLogs()]);
+        await Promise.all([loadTokens(), loadRecentLogs(), loadUserInfo()]);
         isLoading = false;
     });
+
+    async function loadUserInfo() {
+        try {
+            const data = await apiFetch<UserInfo>("/user/info");
+            userInfo = data || { quota: 0, usedQuota: 0 };
+        } catch (e) {
+            console.error("Failed to load user info:", e);
+        }
+    }
 
     async function loadTokens() {
         try {
@@ -137,7 +152,7 @@
                     <div
                         class="text-2xl font-bold text-slate-900 dark:text-white mt-1"
                     >
-                        {session.formatQuota((session.user?.quota || 0) - (session.user?.usedQuota || 0), 2)}
+                        {session.formatQuota(userInfo.quota - userInfo.usedQuota, 2)}
                     </div>
                 </div>
                 <div
