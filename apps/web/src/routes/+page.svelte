@@ -1,631 +1,484 @@
-<script module>
-    import { Target } from "lucide-svelte";
-</script>
-
 <script lang="ts">
     import {
+        Key,
+        CreditCard,
         Activity,
-        DollarSign,
-        RefreshCw,
-        Calendar,
-        Server,
+        Plus,
+        ExternalLink,
+        Copy,
+        Check,
         Zap,
-        MousePointerClick,
+        Clock,
         TrendingUp,
+        AlertCircle,
     } from "lucide-svelte";
     import { apiFetch } from "$lib/api";
     import { i18n } from "$lib/i18n/index.svelte";
     import { session } from "$lib/session.svelte";
-    import { onMount, onDestroy } from "svelte";
+    import { onMount } from "svelte";
 
-    // New types for the redesigned stats
-    interface OverviewStats {
-        total_requests: number;
-        total_cost: number;
-        total_prompt_tokens: number;
-        total_completion_tokens: number;
-        cached_tokens: number;
-        cache_hits: number;
-        cache_profit_quota: number;
-        cache_size_bytes: number;
-        cache_record_count: number;
-        // New specific fields
-        semantic_hits: number;
-        semantic_profit_quota: number;
-        semantic_tokens: number;
-        exact_hits: number;
-        exact_profit_quota: number;
-        exact_tokens: number;
-        semantic_cache_size: number;
-        semantic_cache_count: number;
-        exact_cache_size: number;
-        exact_cache_count: number;
-        avg_latency: number;
+    interface Token {
+        id: number;
+        name: string;
+        key: string;
+        status: number;
+        remainQuota: number;
+        usedQuota: number;
+        createdAt: string;
     }
 
-    interface TimeSeriesPoint {
-        date?: string;
-        hour?: number;
-        requests: number;
-        cost: number;
+    interface RecentLog {
+        id: number;
+        modelName: string;
+        promptTokens: number;
+        completionTokens: number;
+        quotaCost: number;
+        createdAt: string;
+        isSuccess: boolean;
     }
 
-    interface ModelStat {
-        model_name: string;
-        requests: number;
-        tokens: number;
-        cost: number;
-        success_rate: number;
-        cost_percentage: number;
-    }
-
-    // State
-    let activePeriod = $state("today");
-    let isAutoRefresh = $state(true);
+    let tokens = $state<Token[]>([]);
+    let recentLogs = $state<RecentLog[]>([]);
     let isLoading = $state(true);
-    let lastRefresh = $state(new Date());
+    let copiedId = $state<number | null>(null);
 
-    let overview = $state<OverviewStats>({
-        total_requests: 0,
-        total_cost: 0,
-        total_prompt_tokens: 0,
-        total_completion_tokens: 0,
-        cached_tokens: 0,
-        cache_hits: 0,
-        cache_profit_quota: 0,
-        cache_size_bytes: 0,
-        cache_record_count: 0,
-        semantic_hits: 0,
-        semantic_profit_quota: 0,
-        semantic_tokens: 0,
-        exact_hits: 0,
-        exact_profit_quota: 0,
-        exact_tokens: 0,
-        semantic_cache_size: 0,
-        semantic_cache_count: 0,
-        exact_cache_size: 0,
-        exact_cache_count: 0,
-        avg_latency: 0,
+    onMount(async () => {
+        await Promise.all([loadTokens(), loadRecentLogs()]);
+        isLoading = false;
     });
-    let timeSeries = $state<TimeSeriesPoint[]>([]);
-    let modelsUser = $state<ModelStat[]>([]);
-    let modelsChannel = $state<ModelStat[]>([]);
 
-    let refreshInterval: ReturnType<typeof setInterval>;
-
-    const periods = [
-        { id: "today", label: "今天", labelEn: "Today" },
-        { id: "yesterday", label: "昨天", labelEn: "Yesterday" },
-        { id: "7d", label: "近7天", labelEn: "7 Days" },
-        { id: "30d", label: "近30天", labelEn: "30 Days" },
-    ];
-
-    async function fetchStats() {
-        isLoading = true;
+    async function loadTokens() {
         try {
-            // First fetch system settings to get configured timezone
-            const options = await apiFetch<Record<string, string>>("/admin/options");
-            const tz = options?.Timezone || "UTC";
-
-            const data = await apiFetch<any>(
-                `/admin/dashboard/period_stats?period=${activePeriod}&timezone=${encodeURIComponent(tz)}`,
-            );
-            if (data) {
-                overview = data.overview || overview;
-                modelsUser = data.models_user || [];
-                modelsChannel = data.models_channel || [];
-                timeSeries = data.time_series || [];
-                lastRefresh = new Date();
-            }
-        } catch (e: any) {
-            console.error("[Dashboard] Load Failed", e.message);
-        } finally {
-            isLoading = false;
+            const data = await apiFetch<Token[]>("/user/tokens");
+            tokens = data || [];
+        } catch (e) {
+            console.error("Failed to load tokens:", e);
         }
     }
 
-    function setupAutoRefresh() {
-        if (refreshInterval) clearInterval(refreshInterval);
-        if (isAutoRefresh) {
-            refreshInterval = setInterval(fetchStats, 30000); // 30s
+    async function loadRecentLogs() {
+        try {
+            const data = await apiFetch<RecentLog[]>("/user/logs?limit=5");
+            recentLogs = data || [];
+        } catch (e) {
+            console.error("Failed to load logs:", e);
         }
     }
 
-    // Reactively re-fetch when period changes
-    $effect(() => {
-        void activePeriod;
-        fetchStats();
-    });
-
-    onMount(() => {
-        setupAutoRefresh();
-    });
-
-    onDestroy(() => {
-        if (refreshInterval) clearInterval(refreshInterval);
-    });
-
-    function formatNumber(num: number) {
-        return new Intl.NumberFormat("en-US").format(num);
+    function copyKey(key: string, id: number) {
+        navigator.clipboard.writeText(key);
+        copiedId = id;
+        setTimeout(() => (copiedId = null), 2000);
     }
 
-    function formatTokens(tokens: number) {
-        if (tokens >= 1000000) return (tokens / 1000000).toFixed(2) + "M";
-        if (tokens >= 1000) return (tokens / 1000).toFixed(2) + "k";
-        return formatNumber(tokens);
+    function maskKey(key: string): string {
+        if (key.length <= 12) return key;
+        return key.substring(0, 8) + "..." + key.substring(key.length - 4);
+    }
+
+    function formatTime(dateStr: string): string {
+        const date = new Date(dateStr);
+        const now = new Date();
+        const diff = now.getTime() - date.getTime();
+        const minutes = Math.floor(diff / 60000);
+        const hours = Math.floor(diff / 3600000);
+        const days = Math.floor(diff / 86400000);
+
+        if (minutes < 1) return i18n.lang === "zh" ? "刚刚" : "Just now";
+        if (minutes < 60)
+            return `${minutes} ${i18n.lang === "zh" ? "分钟前" : "min ago"}`;
+        if (hours < 24)
+            return `${hours} ${i18n.lang === "zh" ? "小时前" : "h ago"}`;
+        return `${days} ${i18n.lang === "zh" ? "天前" : "d ago"}`;
     }
 </script>
 
-<div class="flex-1 space-y-6 max-w-[1400px] mx-auto w-full">
-    <!-- Header with Filters -->
+<div class="flex-1 space-y-6 max-w-[1200px] mx-auto w-full">
+    <!-- Welcome Header -->
     <div
-        class="flex flex-col xl:flex-row xl:items-center justify-between gap-4 bg-white/60 dark:bg-slate-900/60 p-4 rounded-2xl border border-slate-200/60 dark:border-slate-800/60 backdrop-blur-xl"
+        class="bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 rounded-2xl p-6 text-white shadow-lg"
     >
-        <div class="flex items-center gap-3">
-            <div
-                class="bg-indigo-100 dark:bg-indigo-500/20 p-2 rounded-xl text-indigo-600 dark:text-indigo-400"
-            >
-                <Activity class="w-6 h-6" />
-            </div>
+        <div class="flex items-center justify-between">
             <div>
+                <h1 class="text-2xl font-bold">
+                    {i18n.lang === "zh" ? "欢迎回来" : "Welcome Back"} 👋
+                </h1>
+                <p class="text-white/80 mt-1">
+                    {i18n.lang === "zh"
+                        ? "这是您的工作台，管理您的 API 密钥和查看使用情况"
+                        : "Your workspace to manage API keys and track usage"}
+                </p>
+            </div>
+            <div class="hidden md:block">
+                <a
+                    href="/tokens"
+                    class="inline-flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg transition text-sm font-medium"
+                >
+                    <Plus class="w-4 h-4" />
+                    {i18n.lang === "zh" ? "创建令牌" : "Create Token"}
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Stats Cards -->
+    <div class="grid gap-4 md:grid-cols-3">
+        <!-- Balance -->
+        <div
+            class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm"
+        >
+            <div class="flex items-center justify-between">
+                <div>
+                    <h3
+                        class="text-sm font-medium text-slate-500 dark:text-slate-400"
+                    >
+                        {i18n.lang === "zh" ? "账户余额" : "Balance"}
+                    </h3>
+                    <div
+                        class="text-2xl font-bold text-slate-900 dark:text-white mt-1"
+                    >
+                        {session.formatQuota(session.user?.quota - session.user?.usedQuota, 2)}
+                    </div>
+                </div>
+                <div
+                    class="w-12 h-12 bg-emerald-100 dark:bg-emerald-500/20 rounded-xl flex items-center justify-center"
+                >
+                    <CreditCard class="w-6 h-6 text-emerald-600 dark:text-emerald-400" />
+                </div>
+            </div>
+            <div class="mt-3 flex items-center gap-2">
+                <a
+                    href="/payment"
+                    class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline"
+                >
+                    {i18n.lang === "zh" ? "充值" : "Recharge"} →
+                </a>
+            </div>
+        </div>
+
+        <!-- Active Tokens -->
+        <div
+            class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm"
+        >
+            <div class="flex items-center justify-between">
+                <div>
+                    <h3
+                        class="text-sm font-medium text-slate-500 dark:text-slate-400"
+                    >
+                        {i18n.lang === "zh" ? "活跃令牌" : "Active Tokens"}
+                    </h3>
+                    <div
+                        class="text-2xl font-bold text-slate-900 dark:text-white mt-1"
+                    >
+                        {tokens.filter((t) => t.status === 1).length}
+                    </div>
+                </div>
+                <div
+                    class="w-12 h-12 bg-blue-100 dark:bg-blue-500/20 rounded-xl flex items-center justify-center"
+                >
+                    <Key class="w-6 h-6 text-blue-600 dark:text-blue-400" />
+                </div>
+            </div>
+            <div class="mt-3 flex items-center gap-2">
+                <a
+                    href="/tokens"
+                    class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline"
+                >
+                    {i18n.lang === "zh" ? "管理令牌" : "Manage Tokens"} →
+                </a>
+            </div>
+        </div>
+
+        <!-- Usage Today -->
+        <div
+            class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm"
+        >
+            <div class="flex items-center justify-between">
+                <div>
+                    <h3
+                        class="text-sm font-medium text-slate-500 dark:text-slate-400"
+                    >
+                        {i18n.lang === "zh" ? "今日请求" : "Requests Today"}
+                    </h3>
+                    <div
+                        class="text-2xl font-bold text-slate-900 dark:text-white mt-1"
+                    >
+                        {recentLogs.length > 0 ? recentLogs.length : 0}
+                    </div>
+                </div>
+                <div
+                    class="w-12 h-12 bg-purple-100 dark:bg-purple-500/20 rounded-xl flex items-center justify-center"
+                >
+                    <Activity class="w-6 h-6 text-purple-600 dark:text-purple-400" />
+                </div>
+            </div>
+            <div class="mt-3 flex items-center gap-2">
+                <a
+                    href="/stats"
+                    class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline"
+                >
+                    {i18n.lang === "zh" ? "查看统计" : "View Stats"} →
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div
+        class="bg-white/60 dark:bg-slate-900/60 rounded-2xl border border-slate-200/60 dark:border-slate-800/60 p-6 backdrop-blur-xl"
+    >
+        <h2
+            class="text-lg font-semibold text-slate-900 dark:text-white mb-4 flex items-center gap-2"
+        >
+            <Zap class="w-5 h-5 text-amber-500" />
+            {i18n.lang === "zh" ? "快速操作" : "Quick Actions"}
+        </h2>
+        <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <a
+                href="/tokens"
+                class="flex items-center gap-3 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition group"
+            >
+                <div
+                    class="w-10 h-10 bg-blue-100 dark:bg-blue-500/20 rounded-lg flex items-center justify-center"
+                >
+                    <Key class="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                </div>
+                <div>
+                    <div
+                        class="font-medium text-slate-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400"
+                    >
+                        {i18n.lang === "zh" ? "创建令牌" : "Create Token"}
+                    </div>
+                    <div class="text-xs text-slate-500">
+                        {i18n.lang === "zh" ? "管理 API 密钥" : "Manage API keys"}
+                    </div>
+                </div>
+            </a>
+
+            <a
+                href="/consumer/docs"
+                class="flex items-center gap-3 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition group"
+            >
+                <div
+                    class="w-10 h-10 bg-emerald-100 dark:bg-emerald-500/20 rounded-lg flex items-center justify-center"
+                >
+                    <ExternalLink class="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                </div>
+                <div>
+                    <div
+                        class="font-medium text-slate-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400"
+                    >
+                        {i18n.lang === "zh" ? "API 文档" : "API Docs"}
+                    </div>
+                    <div class="text-xs text-slate-500">
+                        {i18n.lang === "zh" ? "查看使用指南" : "View usage guide"}
+                    </div>
+                </div>
+            </a>
+
+            <a
+                href="/payment"
+                class="flex items-center gap-3 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition group"
+            >
+                <div
+                    class="w-10 h-10 bg-amber-100 dark:bg-amber-500/20 rounded-lg flex items-center justify-center"
+                >
+                    <CreditCard class="w-5 h-5 text-amber-600 dark:text-amber-400" />
+                </div>
+                <div>
+                    <div
+                        class="font-medium text-slate-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400"
+                    >
+                        {i18n.lang === "zh" ? "充值" : "Recharge"}
+                    </div>
+                    <div class="text-xs text-slate-500">
+                        {i18n.lang === "zh" ? "添加账户余额" : "Add balance"}
+                    </div>
+                </div>
+            </a>
+
+            <a
+                href="/stats"
+                class="flex items-center gap-3 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition group"
+            >
+                <div
+                    class="w-10 h-10 bg-purple-100 dark:bg-purple-500/20 rounded-lg flex items-center justify-center"
+                >
+                    <TrendingUp class="w-5 h-5 text-purple-600 dark:text-purple-400" />
+                </div>
+                <div>
+                    <div
+                        class="font-medium text-slate-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400"
+                    >
+                        {i18n.lang === "zh" ? "数据统计" : "Statistics"}
+                    </div>
+                    <div class="text-xs text-slate-500">
+                        {i18n.lang === "zh" ? "查看详细分析" : "View detailed analytics"}
+                    </div>
+                </div>
+            </a>
+        </div>
+    </div>
+
+    <!-- Recent Activity -->
+    <div class="grid gap-6 lg:grid-cols-2">
+        <!-- My Tokens -->
+        <div
+            class="bg-white/60 dark:bg-slate-900/60 rounded-2xl border border-slate-200/60 dark:border-slate-800/60 backdrop-blur-xl overflow-hidden"
+        >
+            <div
+                class="p-4 border-b border-slate-200/60 dark:border-slate-800/60 flex items-center justify-between"
+            >
                 <h2
-                    class="text-xl font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-2"
+                    class="font-semibold text-slate-900 dark:text-white flex items-center gap-2"
                 >
-                    {i18n.t.dashboard.title}
+                    <Key class="w-4 h-4 text-blue-500" />
+                    {i18n.lang === "zh" ? "我的令牌" : "My Tokens"}
                 </h2>
-                <div
-                    class="flex items-center gap-2 text-xs text-slate-500 mt-0.5"
+                <a
+                    href="/tokens"
+                    class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline"
                 >
-                    <span class="flex items-center gap-1">
-                        <span
-                            class="w-2 h-2 rounded-full {isAutoRefresh
-                                ? 'bg-emerald-500 animate-pulse'
-                                : 'bg-slate-300 dark:bg-slate-600'}"
-                        ></span>
-                        {i18n.lang === "zh"
-                            ? "每30秒自动刷新"
-                            : "Auto-refresh every 30s"}
-                    </span>
-                    <span class="text-slate-300 dark:text-slate-600">|</span>
-                    <span>{lastRefresh.toLocaleTimeString()}</span>
-                </div>
+                    {i18n.lang === "zh" ? "查看全部" : "View All"}
+                </a>
             </div>
-        </div>
-
-        <div class="flex flex-wrap items-center gap-3">
-            <!-- Period Selector -->
-            <div
-                class="flex bg-slate-100/50 dark:bg-slate-800/50 p-1 rounded-xl border border-slate-200/50 dark:border-slate-700/50"
-            >
-                {#each periods as p}
-                    <button
-                        onclick={() => (activePeriod = p.id)}
-                        class="px-4 py-1.5 text-sm font-medium rounded-lg transition-all {activePeriod ===
-                        p.id
-                            ? 'bg-white dark:bg-slate-700 text-orange-500 dark:text-orange-400 shadow-sm border border-slate-200/50 dark:border-slate-600/50'
-                            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-700/50'}"
-                    >
-                        {i18n.lang === "zh" ? p.label : p.labelEn}
-                    </button>
-                {/each}
-            </div>
-
-            <!-- Custom Date Range (Visual Placeholder) -->
-            <button
-                class="flex items-center gap-2 px-4 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/80 transition-all"
-            >
-                <Calendar class="w-4 h-4 text-slate-400" />
-                {new Date().toISOString().split("T")[0]}
-            </button>
-
-            <!-- Manual Refresh -->
-            <button
-                onclick={fetchStats}
-                class="p-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/80 transition-all group"
-            >
-                <RefreshCw
-                    class="w-4 h-4 {isLoading
-                        ? 'animate-spin'
-                        : 'group-hover:rotate-180 transition-transform duration-500'}"
-                />
-            </button>
-        </div>
-    </div>
-
-    <!-- 4 Overview Cards -->
-    <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <!-- 1. Total Requests -->
-        <div
-            class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm"
-        >
-            <h3
-                class="text-sm font-medium text-slate-500 dark:text-slate-400 mb-2"
-            >
-                {i18n.t.dashboard.requests}
-            </h3>
-            <div
-                class="text-3xl font-bold text-slate-900 dark:text-white tabular-nums tracking-tight"
-            >
-                {formatNumber(overview.total_requests)}
-            </div>
-        </div>
-
-        <!-- 2. Total Cost -->
-        <div
-            class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm"
-        >
-            <h3
-                class="text-sm font-medium text-slate-500 dark:text-slate-400 mb-2"
-            >
-                {i18n.lang === "zh" ? "总费用" : "Total Cost"}
-            </h3>
-            <div
-                class="text-3xl font-bold text-slate-900 dark:text-white tabular-nums tracking-tight"
-            >
-                {session.formatQuota(overview.total_cost, 2)}
-            </div>
-        </div>
-
-        <!-- 3. Total Tokens -->
-        <div
-            class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm flex flex-col justify-between gap-4"
-        >
-            <div>
-                <h3
-                    class="text-sm font-medium text-slate-500 dark:text-slate-400 mb-2"
-                >
-                    {i18n.lang === "zh" ? "总Token数" : "Total Tokens"}
-                </h3>
-                <div
-                    class="text-3xl font-bold text-slate-900 dark:text-white tabular-nums tracking-tight"
-                >
-                    {formatTokens(
-                        Number(overview.total_prompt_tokens) +
-                            Number(overview.total_completion_tokens),
-                    )}
-                </div>
-            </div>
-            <div
-                class="flex justify-between items-center text-xs border-t border-slate-100 dark:border-slate-800 pt-3 mt-auto"
-            >
-                <div class="flex flex-col gap-1">
-                    <span class="text-slate-400"
-                        >{i18n.lang === "zh" ? "输入:" : "Prompt:"}
-                        <span
-                            class="text-slate-600 dark:text-slate-300 font-medium tabular-nums ml-1"
-                            >{formatTokens(overview.total_prompt_tokens)}</span
-                        ></span
-                    >
-                    <span class="text-slate-400"
-                        >{i18n.lang === "zh" ? "输出:" : "Completion:"}
-                        <span
-                            class="text-slate-600 dark:text-slate-300 font-medium tabular-nums ml-1"
-                            >{formatTokens(
-                                overview.total_completion_tokens,
-                            )}</span
-                        ></span
-                    >
-                </div>
-            </div>
-        </div>
-
-        <!-- 4. Semantic Cache -->
-        <div
-            class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm flex flex-col justify-between gap-4"
-        >
-            <div>
-                <h3
-                    class="text-sm font-medium text-slate-500 dark:text-slate-400 mb-2 flex items-center justify-between"
-                >
-                    <span>{i18n.t.dashboard.semanticCache} / {i18n.t.dashboard.exactCache}</span>
-                    <span class="text-[10px] px-2 py-0.5 bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-full font-semibold">
-                        {i18n.t.dashboard.profit}
-                    </span>
-                </h3>
-                <div class="flex items-baseline gap-2">
-                    <span class="text-3xl font-bold text-slate-900 dark:text-white tabular-nums tracking-tight">
-                        {session.formatQuota(overview.semantic_profit_quota + overview.exact_profit_quota, 2)}
-                    </span>
-                    <span class="text-xs text-slate-400 font-medium">
-                        {i18n.t.dashboard.profit}
-                    </span>
-                </div>
-            </div>
-            <div
-                class="flex flex-col gap-2 text-xs border-t border-slate-100 dark:border-slate-800 pt-3 mt-auto"
-            >
-                <!-- Exact Cache Stats -->
-                <div class="space-y-1">
-                    <div class="flex justify-between w-full font-semibold text-amber-600 dark:text-amber-400">
-                        <span>⚡ {i18n.t.dashboard.exactCache}:</span>
-                        <span>{formatNumber(overview.exact_hits)} hit</span>
+            <div class="divide-y divide-slate-100 dark:divide-slate-800">
+                {#if isLoading}
+                    <div class="p-8 text-center text-slate-500">
+                        {i18n.lang === "zh" ? "加载中..." : "Loading..."}
                     </div>
-                    <div class="flex justify-between w-full text-slate-400 pl-4">
-                        <span>{i18n.t.dashboard.profit}:</span>
-                        <span class="text-slate-600 dark:text-slate-300 font-medium">{session.formatQuota(overview.exact_profit_quota, 2)}</span>
+                {:else if tokens.length === 0}
+                    <div class="p-8 text-center">
+                        <Key class="w-12 h-12 text-slate-300 mx-auto mb-3" />
+                        <p class="text-slate-500 text-sm">
+                            {i18n.lang === "zh"
+                                ? "暂无令牌，点击创建"
+                                : "No tokens yet. Create one to get started."}
+                        </p>
+                        <a
+                            href="/tokens"
+                            class="inline-flex items-center gap-1 mt-3 text-sm text-indigo-600 dark:text-indigo-400 hover:underline"
+                        >
+                            <Plus class="w-4 h-4" />
+                            {i18n.lang === "zh" ? "创建令牌" : "Create Token"}
+                        </a>
                     </div>
-                </div>
-
-                <!-- Semantic Cache Stats -->
-                <div class="space-y-1">
-                    <div class="flex justify-between w-full font-semibold text-emerald-600 dark:text-emerald-400">
-                        <span>🍃 {i18n.t.dashboard.semanticCache}:</span>
-                        <span>{formatNumber(overview.semantic_hits)} hit</span>
-                    </div>
-                    <div class="flex justify-between w-full text-slate-400 pl-4">
-                        <span>{i18n.t.dashboard.profit}:</span>
-                        <span class="text-slate-600 dark:text-slate-300 font-medium">{session.formatQuota(overview.semantic_profit_quota, 2)}</span>
-                    </div>
-                </div>
-
-                <div class="flex justify-between w-full mt-1.5 pt-1.5 border-t border-slate-50 dark:border-slate-800/50">
-                    <span class="text-slate-400 text-[10px]">{i18n.t.dashboard.storage} (E/S):</span>
-                    <span class="text-slate-500 text-[10px] font-medium tabular-nums">
-                        {overview.exact_cache_count} / {overview.semantic_cache_count}
-                    </span>
-                </div>
-            </div>
-        </div>
-
-        <!-- 5. Avg Latency -->
-        <div
-            class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm"
-        >
-            <h3
-                class="text-sm font-medium text-slate-500 dark:text-slate-400 mb-2"
-            >
-                {i18n.lang === "zh" ? i18n.t.dashboard.avgLatency : "Avg Latency"}
-            </h3>
-            <div
-                class="text-3xl font-bold text-slate-900 dark:text-white tabular-nums tracking-tight"
-            >
-                {overview.avg_latency || 0} <span class="text-sm font-medium text-slate-400">{i18n.lang === "zh" ? i18n.t.dashboard.ms : "ms"}</span>
-            </div>
-            <div class="mt-4 h-1 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                <div 
-                    class="h-full bg-indigo-500 rounded-full transition-all duration-1000" 
-                    style="width: {Math.min((overview.avg_latency / 2000) * 100, 100)}%"
-                ></div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Charts Row -->
-    <div class="grid gap-6 lg:grid-cols-2 mt-8">
-        <!-- Traffic Trend -->
-        <div class="bg-white/60 dark:bg-slate-900/60 rounded-2xl border border-slate-200/60 dark:border-slate-800/60 p-6 backdrop-blur-xl">
-            <h3 class="text-sm font-semibold text-slate-900 dark:text-white mb-6">
-                {i18n.lang === "zh" ? i18n.t.dashboard.trafficTrend : "Traffic Trend"}
-            </h3>
-            <div class="h-48 w-full relative group">
-                {#if timeSeries?.length > 1}
-                    {@const max = Math.max(...timeSeries.map(p => p.requests)) * 1.2 || 1}
-                    {@const points = timeSeries.map((p, i) => `${(i / (timeSeries.length - 1)) * 100},${100 - (p.requests / max) * 100}`).join(' ')}
-                    <svg class="w-full h-full overflow-visible" preserveAspectRatio="none">
-                        <defs>
-                            <linearGradient id="trafficGrad" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="0%" stop-color="rgb(99, 102, 241)" stop-opacity="0.2" />
-                                <stop offset="100%" stop-color="rgb(99, 102, 241)" stop-opacity="0" />
-                            </linearGradient>
-                        </defs>
-                        <path
-                            d="M 0,100 L {points} L 100,100 Z"
-                            fill="url(#trafficGrad)"
-                            class="transition-all duration-1000"
-                        />
-                        <polyline
-                            fill="none"
-                            stroke="rgb(99, 102, 241)"
-                            stroke-width="2"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            points={points}
-                            class="transition-all duration-1000"
-                        />
-                    </svg>
                 {:else}
-                    <div class="flex items-center justify-center h-full text-slate-400 text-xs italic">
-                        {i18n.lang === "zh" ? i18n.t.common.loading : "Loading..."}
-                    </div>
+                    {#each tokens.slice(0, 3) as token}
+                        <div
+                            class="p-4 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition"
+                        >
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-3">
+                                    <div
+                                        class="w-8 h-8 bg-blue-100 dark:bg-blue-500/20 rounded-lg flex items-center justify-center"
+                                    >
+                                        <Key class="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                                    </div>
+                                    <div>
+                                        <div
+                                            class="font-medium text-slate-900 dark:text-white text-sm"
+                                        >
+                                            {token.name}
+                                        </div>
+                                        <div
+                                            class="text-xs text-slate-500 font-mono"
+                                        >
+                                            {maskKey(token.key)}
+                                        </div>
+                                    </div>
+                                </div>
+                                <button
+                                    onclick={() => copyKey(token.key, token.id)}
+                                    class="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition"
+                                    title={i18n.lang === "zh" ? "复制" : "Copy"}
+                                >
+                                    {#if copiedId === token.id}
+                                        <Check class="w-4 h-4 text-emerald-500" />
+                                    {:else}
+                                        <Copy class="w-4 h-4 text-slate-400" />
+                                    {/if}
+                                </button>
+                            </div>
+                        </div>
+                    {/each}
                 {/if}
             </div>
         </div>
 
-        <!-- Cost Trend -->
-        <div class="bg-white/60 dark:bg-slate-900/60 rounded-2xl border border-slate-200/60 dark:border-slate-800/60 p-6 backdrop-blur-xl">
-            <h3 class="text-sm font-semibold text-slate-900 dark:text-white mb-6">
-                {i18n.lang === "zh" ? i18n.t.dashboard.costTrend : "Cost Trend"}
-            </h3>
-            <div class="h-48 w-full relative">
-                {#if timeSeries?.length > 1}
-                    {@const max = Math.max(...timeSeries.map(p => Number(p.cost))) * 1.2 || 1}
-                    {@const points = timeSeries.map((p, i) => `${(i / (timeSeries.length - 1)) * 100},${100 - (Number(p.cost) / max) * 100}`).join(' ')}
-                    <svg class="w-full h-full overflow-visible" preserveAspectRatio="none">
-                        <defs>
-                            <linearGradient id="costGrad" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="0%" stop-color="rgb(249, 115, 22)" stop-opacity="0.2" />
-                                <stop offset="100%" stop-color="rgb(249, 115, 22)" stop-opacity="0" />
-                            </linearGradient>
-                        </defs>
-                        <path
-                            d="M 0,100 L {points} L 100,100 Z"
-                            fill="url(#costGrad)"
-                            class="transition-all duration-1000"
-                        />
-                        <polyline
-                            fill="none"
-                            stroke="rgb(249, 115, 22)"
-                            stroke-width="2"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            points={points}
-                            class="transition-all duration-1000"
-                        />
-                    </svg>
-                {:else}
-                    <div class="flex items-center justify-center h-full text-slate-400 text-xs italic">
-                        {i18n.lang === "zh" ? i18n.t.common.loading : "Loading..."}
+        <!-- Recent Logs -->
+        <div
+            class="bg-white/60 dark:bg-slate-900/60 rounded-2xl border border-slate-200/60 dark:border-slate-800/60 backdrop-blur-xl overflow-hidden"
+        >
+            <div
+                class="p-4 border-b border-slate-200/60 dark:border-slate-800/60 flex items-center justify-between"
+            >
+                <h2
+                    class="font-semibold text-slate-900 dark:text-white flex items-center gap-2"
+                >
+                    <Clock class="w-4 h-4 text-purple-500" />
+                    {i18n.lang === "zh" ? "最近请求" : "Recent Requests"}
+                </h2>
+                <a
+                    href="/logs"
+                    class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline"
+                >
+                    {i18n.lang === "zh" ? "查看全部" : "View All"}
+                </a>
+            </div>
+            <div class="divide-y divide-slate-100 dark:divide-slate-800">
+                {#if isLoading}
+                    <div class="p-8 text-center text-slate-500">
+                        {i18n.lang === "zh" ? "加载中..." : "Loading..."}
                     </div>
+                {:else if recentLogs.length === 0}
+                    <div class="p-8 text-center">
+                        <Activity class="w-12 h-12 text-slate-300 mx-auto mb-3" />
+                        <p class="text-slate-500 text-sm">
+                            {i18n.lang === "zh"
+                                ? "暂无请求记录"
+                                : "No recent requests"}
+                        </p>
+                    </div>
+                {:else}
+                    {#each recentLogs as log}
+                        <div
+                            class="p-4 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition"
+                        >
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-3">
+                                    <div
+                                        class="w-8 h-8 {log.isSuccess ? 'bg-emerald-100 dark:bg-emerald-500/20' : 'bg-red-100 dark:bg-red-500/20'} rounded-lg flex items-center justify-center"
+                                    >
+                                        {#if log.isSuccess}
+                                            <Check class="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                                        {:else}
+                                            <AlertCircle class="w-4 h-4 text-red-600 dark:text-red-400" />
+                                        {/if}
+                                    </div>
+                                    <div>
+                                        <div
+                                            class="font-medium text-slate-900 dark:text-white text-sm"
+                                        >
+                                            {log.modelName}
+                                        </div>
+                                        <div class="text-xs text-slate-500">
+                                            {log.promptTokens + log.completionTokens} tokens
+                                            · {formatTime(log.createdAt)}
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="text-right">
+                                    <div
+                                        class="text-sm font-medium text-slate-900 dark:text-white"
+                                    >
+                                        {session.formatQuota(log.quotaCost, 4)}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    {/each}
                 {/if}
-            </div>
-        </div>
-    </div>
-
-    <!-- Granular Model Breakdown (Dual Layout) -->
-    <div
-        class="bg-white/60 dark:bg-slate-900/60 rounded-2xl border border-slate-200/60 dark:border-slate-800/60 shadow-sm backdrop-blur-xl overflow-hidden mt-8"
-    >
-        <div
-            class="p-4 border-b border-slate-200/60 dark:border-slate-800/60 font-semibold text-slate-800 dark:text-slate-100"
-        >
-            {i18n.lang === "zh" ? "按模型" : "By Model"}
-        </div>
-
-        <div
-            class="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-slate-200/60 dark:divide-slate-800/60 min-h-[500px]"
-        >
-            <!-- Left Column: Channel / Key -->
-            <div class="p-0">
-                <div
-                    class="p-4 bg-slate-50/50 dark:bg-slate-800/30 font-medium text-sm text-slate-500 dark:text-slate-400 sticky top-0 border-b border-slate-100 dark:border-slate-800/50"
-                >
-                    {i18n.lang === "zh" ? "密钥 (渠道)" : "Keys (Channels)"}
-                </div>
-                <div class="divide-y divide-slate-100 dark:divide-slate-800">
-                    {#each modelsChannel as model}
-                        <div
-                            class="p-4 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors flex justify-between items-center group"
-                        >
-                            <div class="space-y-1">
-                                <h4
-                                    class="font-bold text-slate-900 dark:text-slate-100 text-sm"
-                                >
-                                    {model.model_name}
-                                </h4>
-                                <div
-                                    class="flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400 font-medium tabular-nums"
-                                >
-                                    <span
-                                        class="flex items-center gap-1"
-                                        title="Requests"
-                                    >
-                                        <TrendingUp
-                                            class="w-3.5 h-3.5 text-slate-400"
-                                        />
-                                        {formatNumber(model.requests)}
-                                    </span>
-                                    <span
-                                        class="flex items-center gap-1 text-slate-400"
-                                        title="Tokens"
-                                    >
-                                        # {formatTokens(model.tokens)}
-                                    </span>
-                                    <span
-                                        class="flex items-center gap-1 font-semibold {model.success_rate >=
-                                        90
-                                            ? 'text-emerald-500'
-                                            : model.success_rate >= 70
-                                              ? 'text-amber-500'
-                                              : 'text-rose-500'}"
-                                    >
-                                        <Target class="w-3 h-3" />
-                                        {model.success_rate}%
-                                    </span>
-                                </div>
-                            </div>
-                            <div class="text-right">
-                                <div
-                                    class="font-bold text-slate-900 dark:text-slate-100 text-sm tabular-nums"
-                                >
-                                    {session.formatQuota(model.cost, 2)}
-                                </div>
-                                <div
-                                    class="text-xs font-semibold text-slate-400 tabular-nums"
-                                >
-                                    ({model.cost_percentage}%)
-                                </div>
-                            </div>
-                        </div>
-                    {:else}
-                        {#if !isLoading}
-                            <div class="p-8 text-center text-sm text-slate-500">
-                                {i18n.t.common.noData}
-                            </div>
-                        {/if}
-                    {/each}
-                </div>
-            </div>
-
-            <!-- Right Column: User -->
-            <div class="p-0">
-                <div
-                    class="p-4 bg-slate-50/50 dark:bg-slate-800/30 font-medium text-sm text-slate-500 dark:text-slate-400 sticky top-0 border-b border-slate-100 dark:border-slate-800/50"
-                >
-                    {i18n.t.nav.users}
-                </div>
-                <div class="divide-y divide-slate-100 dark:divide-slate-800">
-                    {#each modelsUser as model}
-                        <div
-                            class="p-4 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors flex justify-between items-center group"
-                        >
-                            <div class="space-y-1">
-                                <h4
-                                    class="font-bold text-slate-900 dark:text-slate-100 text-sm"
-                                >
-                                    {model.model_name}
-                                </h4>
-                                <div
-                                    class="flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400 font-medium tabular-nums"
-                                >
-                                    <span
-                                        class="flex items-center gap-1"
-                                        title="Requests"
-                                    >
-                                        <Activity
-                                            class="w-3.5 h-3.5 text-slate-400"
-                                        />
-                                        {formatNumber(model.requests)}
-                                    </span>
-                                    <span
-                                        class="flex items-center gap-1 text-slate-400"
-                                        title="Tokens"
-                                    >
-                                        # {formatTokens(model.tokens)}
-                                    </span>
-                                    <span
-                                        class="flex items-center gap-1 font-semibold {model.success_rate >=
-                                        90
-                                            ? 'text-emerald-500'
-                                            : model.success_rate >= 70
-                                              ? 'text-amber-500'
-                                              : 'text-rose-500'}"
-                                    >
-                                        <Target class="w-3 h-3" />
-                                        {model.success_rate}%
-                                    </span>
-                                </div>
-                            </div>
-                            <div class="text-right">
-                                <div
-                                    class="font-bold text-slate-900 dark:text-slate-100 text-sm tabular-nums"
-                                >
-                                    {session.formatQuota(model.cost, 2)}
-                                </div>
-                                <div
-                                    class="text-xs font-semibold text-slate-400 tabular-nums"
-                                >
-                                    ({model.cost_percentage}%)
-                                </div>
-                            </div>
-                        </div>
-                    {:else}
-                        {#if !isLoading}
-                            <div class="p-8 text-center text-sm text-slate-500">
-                                {i18n.t.common.noData}
-                            </div>
-                        {/if}
-                    {/each}
-                </div>
             </div>
         </div>
     </div>
