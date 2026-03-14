@@ -4,6 +4,10 @@ import adapter from 'svelte-adapter-bun';
 const config = {
 	kit: {
 		adapter: adapter(),
+        alias: {
+            '$components': 'src/components',
+            '$lib': 'src/lib'
+        }
 	},
 	compilerOptions: {
 		warningFilter: (warning) => {

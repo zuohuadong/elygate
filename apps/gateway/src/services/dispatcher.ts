@@ -9,6 +9,9 @@ import { getChannelKeys } from './encryption';
 import { isRateLimited, isPackageRateLimited, waitForPackageConcurrency, packageConcurrencyMap, releasePackageConcurrency, getPackageLockId } from './ratelimit';
 import { buildUpstreamUrl } from '../utils/url';
 import { matchPattern } from '../utils/pattern';
+import { ContentFilter } from './filter';
+import { notifier } from './notifier';
+import { WebSearchPlugin } from './plugins/search';
 
 export interface DispatchOptions {
     model: string;
@@ -79,6 +82,33 @@ export class UnifiedDispatcher {
             }
         }
 
+        // 0.55 Content Guard (DLP)
+        const requestText = ContentFilter.extractText(body);
+        const filterResult = await ContentFilter.validate(requestText, user.group);
+        if (filterResult.blocked) {
+            throw new Error(`HTTP 403 Forbidden: Content blocked by safety policy (matched: ${filterResult.pattern})`);
+        }
+
+        // 0.58 Search Augmented Generation (SAG)
+        if (body.enable_search || model.endsWith(':search')) {
+            if (model.endsWith(':search')) model = model.slice(0, -7);
+            const query = body.messages?.[body.messages.length - 1]?.content || body.prompt || '';
+            if (query) {
+                console.log(`[SAG] Triggering web search for model ${model}: "${query}"`);
+                const searchResults = await WebSearchPlugin.search(query);
+                if (body.messages) {
+                    body.messages.push({ role: 'system', content: `[SEARCH CONTEXT]\n${searchResults}` });
+                } else if (body.prompt) {
+                    body.prompt = `${searchResults}\n\nUser Question: ${body.prompt}`;
+                }
+            }
+        }
+
+        // 0.6 Quota Alert
+        if (user.quota > 0 && user.usedQuota / user.quota > 0.9) {
+            notifier.notify('Low Quota Warning', `User ${user.username} has used ${Math.round(user.usedQuota / user.quota * 100)}% of their quota.`);
+        }
+
         let candidateChannels = memoryCache.selectChannels(model, user.group);
         
         // 0.6 Provider Company Interception (Channel Type)
@@ -147,8 +177,14 @@ export class UnifiedDispatcher {
             // 2. Prepare Upstream Request
             const fetchHeaders = handler.buildHeaders(activeKey);
             let upstreamModel = model;
-            if (channelConfig.modelMapping && channelConfig.modelMapping[model]) {
-                upstreamModel = channelConfig.modelMapping[model];
+            if (channelConfig.modelMapping) {
+                // Support wildcard matching in model mapping
+                for (const [pattern, target] of Object.entries(channelConfig.modelMapping)) {
+                    if (matchPattern(model, [pattern])) {
+                        upstreamModel = target as string;
+                        break;
+                    }
+                }
             }
 
             const upstreamUrl = buildUpstreamUrl(channelConfig, upstreamModel, endpointType, isStream);
@@ -213,6 +249,7 @@ export class UnifiedDispatcher {
                 if (body.tool_search || body.deferred_tools) console.info(`[Dispatcher] Model ${model} active with Tool Search / Deferred Loading.`);
 
                 // 4. Upstream Fetch
+                const startTime = Date.now();
                 const response = await fetch(upstreamUrl, {
                     method: 'POST',
                     headers: fetchHeaders,
@@ -225,7 +262,8 @@ export class UnifiedDispatcher {
                     throw new Error(`Status ${response.status}: ${errorText}`);
                 }
 
-                circuitBreaker.recordSuccess(channelConfig.id);
+                const latencyMs = Date.now() - startTime;
+                circuitBreaker.recordSuccess(channelConfig.id, latencyMs);
 
                 // 5. Handle Response
                 if (isStream && response.body) {

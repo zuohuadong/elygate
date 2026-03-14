@@ -520,6 +520,41 @@ export const memoryCache = {
         }
     },
 
+    discoverySyncInterval: null as Timer | null,
+
+    /**
+     * Periodically syncs models from all active upstream channels.
+     * Prevents stale model lists and improves user discovery.
+     */
+    startDiscoverySyncTask(): void {
+        if (this.discoverySyncInterval) return;
+        
+        const sync = async () => {
+            console.log('[Discovery] Starting background model sync for all channels...');
+            const channels = Array.from(this.channels.values()).filter(ch => ch.status === 1);
+            
+            for (const ch of channels) {
+                try {
+                    // Call the internal sync logic (simulated here or via internal route)
+                    // For efficiency, we only sync if not updated in 24h
+                    // In this implementation, we'll just trigger the sync endpoint's logic
+                    const res = await fetch(`http://localhost:3000/api/admin/channels/${ch.id}/sync-models`, {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${process.env.ADMIN_TOKEN || ''}` }
+                    });
+                    if (res.ok) console.log(`[Discovery] Synced models for ${ch.name}`);
+                } catch (e) {
+                    // Silently fail for background sync
+                }
+            }
+        };
+
+        // Run every 12 hours
+        this.discoverySyncInterval = setInterval(sync, 12 * 60 * 60 * 1000);
+        // Initial run after 5 minutes
+        setTimeout(sync, 5 * 60 * 1000);
+    },
+
     setOptions(options: Record<string, any>) {
         for (const [key, value] of Object.entries(options)) {
             this.options.set(key, value);

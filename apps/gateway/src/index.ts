@@ -22,6 +22,9 @@ async function init() {
   const { chatRouter } = await import("./routes/chat");
   const { embeddingsRouter } = await import("./routes/embeddings");
   const { imagesRouter } = await import("./routes/images");
+  const { geminiRouter } = await import("./routes/gemini");
+  const { aliRouter } = await import("./routes/ali");
+  const { baiduRouter } = await import("./routes/baidu");
   const { adminRouter } = await import("./routes/admin/index");
   const { redemptionsRouter } = await import("./routes/redemptions");
   const { authRouter } = await import("./routes/auth");
@@ -35,6 +38,7 @@ async function init() {
   const { userStatsRouter } = await import("./routes/userStats");
   const { modelsRouter } = await import("./routes/models");
   const { anthropicRouter } = await import("./routes/anthropic");
+  const { moderationsRouter } = await import("./routes/moderations");
 
   const app = new Elysia()
     .use(cors({
@@ -86,6 +90,8 @@ async function init() {
       .group("/redemptions", (app) => app.use(authPlugin).use(redemptionsRouter))
       .use(userStatsRouter)
       .use(mjRouter)
+      .get("/dashboard/health", () => statsService.getSystemHealth(), { detail: { tags: ["Admin"] } })
+      .get("/dashboard/latency-heatmap", () => statsService.getLatencyHeatmap(), { detail: { tags: ["Admin"] } })
     )
     .group("/v1", (app) =>
       app.use(authPlugin)
@@ -97,7 +103,13 @@ async function init() {
         .use(rerankRouter)
         .use(videoRouter)
         .use(anthropicRouter)
+        .use(geminiRouter)
+        .use(aliRouter)
+        .use(baiduRouter)
+        .use(moderationsRouter)
     )
+    .use(aliRouter)   // Ali often uses /api/v1/...
+    .use(baiduRouter) // Baidu uses /rpc/2.0/...
     .get("*", async ({ request, set }) => {
       const url = new URL(request.url);
       if (!url.pathname.startsWith('/api') && !url.pathname.startsWith('/v1')) {
@@ -195,6 +207,7 @@ async function init() {
   }
   
   memoryCache.startCleanupTask();
+  memoryCache.startDiscoverySyncTask();
 
   const refreshMaterializedViews = async () => {
     try {

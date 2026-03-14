@@ -81,6 +81,14 @@ export const authPlugin = new Elysia({ name: 'auth' })
             }
         }
 
+        // --- Support Gemini API x-goog-api-key header and query param ---
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            const googApiKey = request.headers.get('x-goog-api-key') || new URL(request.url).searchParams.get('key');
+            if (googApiKey) {
+                authHeader = `Bearer ${googApiKey}`;
+            }
+        }
+
         // --- DB Cookie Session Check (Dual Authentication) ---
         if (!authHeader || !authHeader.startsWith('Bearer ')) {
             if (!auth_session.value) {

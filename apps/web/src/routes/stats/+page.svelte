@@ -14,6 +14,7 @@
 		BarChart3,
 		AlertCircle
 	} from "lucide-svelte";
+    import LatencyHeatmap from "$components/LatencyHeatmap.svelte";
 
 	let overview = $state<any>({});
 	let todayStats = $state<any>({});
@@ -339,6 +340,11 @@
 			</div>
 		</div>
 	</div>
+
+	<!-- Heatmap Row -->
+    <div class="mb-8">
+        <LatencyHeatmap />
+    </div>
 
 	<!-- Charts Row -->
 	<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">

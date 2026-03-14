@@ -76,4 +76,20 @@ export const modelsRouter = new Elysia()
                 parent: null,
             }))
         };
+    })
+    .get('/models/:model', ({ user, token, params, set }: any) => {
+        if (!user || !token) {
+            set.status = 401;
+            return { success: false, message: "Unauthorized" };
+        }
+        const model = params.model;
+        return {
+            id: model,
+            object: 'model',
+            created: Math.floor(Date.now() / 1000),
+            owned_by: 'elygate',
+            permission: [],
+            root: model,
+            parent: null,
+        };
     });

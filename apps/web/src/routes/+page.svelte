@@ -150,55 +150,62 @@
             return `${hours} ${i18n.lang === "zh" ? "小时前" : "h ago"}`;
         return `${days} ${i18n.lang === "zh" ? "天前" : "d ago"}`;
     }
+
+    let systemHealth = $state({ online: 0, offline: 0, busy: 0 });
+    onMount(async () => {
+        try {
+            const health = await apiFetch<any>('/admin/dashboard/health');
+            systemHealth = health || { online: 0, offline: 0, busy: 0 };
+        } catch {}
+    });
 </script>
 
-<div class="flex-1 space-y-6 max-w-[1200px] mx-auto w-full">
+<div class="flex-1 space-y-8 max-w-[1400px] mx-auto w-full pb-12">
     <!-- Welcome Header -->
     <div
-        class="bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 rounded-2xl p-6 text-white shadow-lg"
+        class="glass-card bg-gradient-to-br from-indigo-600/90 to-purple-700/90 text-white backdrop-blur-3xl overflow-hidden relative"
     >
-        <div class="flex items-center justify-between">
+        <div class="absolute top-0 right-0 -mt-20 -mr-20 w-80 h-80 bg-white/10 rounded-full blur-3xl"></div>
+        <div class="absolute bottom-0 left-0 -mb-20 -ml-20 w-60 h-60 bg-indigo-400/20 rounded-full blur-2xl"></div>
+        
+        <div class="relative flex items-center justify-between">
             <div>
-                <h1 class="text-2xl font-bold">
-                    {i18n.lang === "zh" ? "欢迎回来" : "Welcome Back"} 👋
+                <h1 class="text-3xl font-extrabold tracking-tight">
+                    {i18n.lang === "zh" ? "欢迎回来" : "Welcome Back"}, <span class="text-indigo-200">{session.username}</span> 👋
                 </h1>
-                <p class="text-white/80 mt-1">
+                <p class="text-white/70 mt-2 font-medium">
                     {#if isAdmin}
                         {i18n.lang === "zh"
-                            ? "系统管理员工作台，实时监控整个网关的运行状态"
-                            : "System administrator workspace, real-time monitoring of the entire gateway."}
+                            ? "Elygate 工业级硬化网关正在平稳运行，实时掌控全局资源"
+                            : "Elygate Industrial-Grade gateway is running smoothly. Monitoring global resources in real-time."}
                     {:else}
                         {i18n.lang === "zh"
-                            ? "这是您的工作台，管理您的 API 密钥和查看使用情况"
-                            : "Your workspace to manage API keys and track usage"}
+                            ? "这是您的专属 AI 网关工作台"
+                            : "Your specialized AI Gateway workspace."}
                     {/if}
                 </p>
-            </div>
-            <div class="hidden md:block">
-                {#if isAdmin}
-                    <div class="flex gap-2">
-                        <a
-                            href="/channels"
-                            class="inline-flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg transition text-sm font-medium"
-                        >
-                            <Layers class="w-4 h-4" />
-                            {i18n.lang === "zh" ? "管理渠道" : "Channels"}
-                        </a>
-                        <a
-                            href="/users"
-                            class="inline-flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg transition text-sm font-medium"
-                        >
-                            <Users class="w-4 h-4" />
-                            {i18n.lang === "zh" ? "管理用户" : "Users"}
-                        </a>
+                
+                <div class="mt-6 flex gap-4">
+                    <div class="flex items-center gap-2 px-3 py-1 bg-white/10 rounded-full text-[10px] font-bold uppercase tracking-wider">
+                        <div class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></div>
+                        {systemHealth.online} Online
                     </div>
+                    {#if systemHealth.offline > 0}
+                        <div class="flex items-center gap-2 px-3 py-1 bg-rose-500/20 rounded-full text-[10px] font-bold uppercase tracking-wider">
+                            <div class="w-2 h-2 rounded-full bg-rose-400"></div>
+                            {systemHealth.offline} Offline
+                        </div>
+                    {/if}
+                </div>
+            </div>
+            <div class="hidden md:flex gap-3 relative">
+                {#if isAdmin}
+                    <a href="/channels" class="px-6 py-2.5 bg-white text-indigo-700 rounded-xl font-bold text-sm shadow-xl transition-all hover:scale-105 active:scale-95">
+                        {i18n.lang === "zh" ? "部署渠道" : "Deploy Channel"}
+                    </a>
                 {:else}
-                    <a
-                        href="/tokens"
-                        class="inline-flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg transition text-sm font-medium"
-                    >
-                        <Plus class="w-4 h-4" />
-                        {i18n.lang === "zh" ? "创建令牌" : "Create Token"}
+                    <a href="/tokens" class="px-6 py-2.5 bg-white text-indigo-700 rounded-xl font-bold text-sm shadow-xl transition-all hover:scale-105 active:scale-95">
+                        {i18n.lang === "zh" ? "管理令牌" : "Manage Tokens"}
                     </a>
                 {/if}
             </div>
@@ -206,136 +213,139 @@
     </div>
 
     <!-- Stats Cards -->
-    <div class="grid gap-4 md:grid-cols-3">
+    <div class="grid gap-6 md:grid-cols-3">
         {#if isAdmin && adminStats}
             <!-- Total Users (Admin Only) -->
-            <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm">
-                <div class="flex items-center justify-between">
+            <div class="glass-card group overflow-hidden relative">
+                <div class="absolute top-0 right-0 w-24 h-24 bg-blue-500/5 rounded-full -mr-12 -mt-12 transition-all group-hover:scale-150"></div>
+                <div class="flex items-center justify-between relative">
                     <div>
-                        <h3 class="text-sm font-medium text-slate-500 dark:text-slate-400">
+                        <h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest">
                             {i18n.lang === "zh" ? "系统总用户" : "Total Users"}
                         </h3>
-                        <div class="text-2xl font-bold text-slate-900 dark:text-white mt-1">
+                        <div class="text-3xl font-black text-slate-900 dark:text-white mt-2 font-mono">
                             {adminStats.totalUsers}
                         </div>
                     </div>
-                    <div class="w-12 h-12 bg-blue-100 dark:bg-blue-500/20 rounded-xl flex items-center justify-center">
+                    <div class="w-12 h-12 bg-blue-500/10 rounded-xl flex items-center justify-center">
                         <Users class="w-6 h-6 text-blue-600 dark:text-blue-400" />
                     </div>
                 </div>
-                <div class="mt-3">
-                    <a href="/users" class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">
-                        {i18n.lang === "zh" ? "管理所有用户" : "Manage all users"} →
+                <div class="mt-4 flex items-center justify-between">
+                    <a href="/users" class="text-[10px] font-bold text-indigo-500 uppercase tracking-tighter hover:underline">
+                        {i18n.lang === "zh" ? "管理用户" : "Manage"} →
                     </a>
                 </div>
             </div>
 
             <!-- Active Channels (Admin Only) -->
-            <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm">
-                <div class="flex items-center justify-between">
+            <div class="glass-card group overflow-hidden relative">
+                <div class="absolute top-0 right-0 w-24 h-24 bg-emerald-500/5 rounded-full -mr-12 -mt-12 transition-all group-hover:scale-150"></div>
+                <div class="flex items-center justify-between relative">
                     <div>
-                        <h3 class="text-sm font-medium text-slate-500 dark:text-slate-400">
+                        <h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest">
                             {i18n.lang === "zh" ? "在线渠道" : "Active Channels"}
                         </h3>
-                        <div class="text-2xl font-bold text-slate-900 dark:text-white mt-1">
+                        <div class="text-3xl font-black text-slate-900 dark:text-white mt-2 font-mono">
                             {adminStats.activeChannels}
                         </div>
                     </div>
-                    <div class="w-12 h-12 bg-emerald-100 dark:bg-emerald-500/20 rounded-xl flex items-center justify-center">
+                    <div class="w-12 h-12 bg-emerald-500/10 rounded-xl flex items-center justify-center">
                         <Layers class="w-6 h-6 text-emerald-600 dark:text-emerald-400" />
                     </div>
                 </div>
-                <div class="mt-3">
-                    <a href="/channels" class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">
-                        {i18n.lang === "zh" ? "查看渠道状态" : "View channel status"} →
+                <div class="mt-4 flex items-center justify-between">
+                    <a href="/channels" class="text-[10px] font-bold text-emerald-500 uppercase tracking-tighter hover:underline">
+                        {i18n.lang === "zh" ? "状态监控" : "Status"} →
                     </a>
                 </div>
             </div>
 
             <!-- System Today Usage (Admin Only) -->
-            <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm">
-                <div class="flex items-center justify-between">
+            <div class="glass-card group overflow-hidden relative">
+                <div class="absolute top-0 right-0 w-24 h-24 bg-purple-500/5 rounded-full -mr-12 -mt-12 transition-all group-hover:scale-150"></div>
+                <div class="flex items-center justify-between relative">
                     <div>
-                        <h3 class="text-sm font-medium text-slate-500 dark:text-slate-400">
+                        <h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest">
                             {i18n.lang === "zh" ? "全站今日消耗" : "Global Today Usage"}
                         </h3>
-                        <div class="text-2xl font-bold text-slate-900 dark:text-white mt-1">
+                        <div class="text-3xl font-black text-slate-900 dark:text-white mt-2 font-mono">
                             {session.formatQuota(adminStats.todayQuota, 2)}
                         </div>
                     </div>
-                    <div class="w-12 h-12 bg-purple-100 dark:bg-purple-500/20 rounded-xl flex items-center justify-center">
+                    <div class="w-12 h-12 bg-purple-500/10 rounded-xl flex items-center justify-center">
                         <Activity class="w-6 h-6 text-purple-600 dark:text-purple-400" />
                     </div>
                 </div>
-                <div class="mt-3">
-                    <a href="/stats" class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">
-                        {i18n.lang === "zh" ? "系统全局统计" : "Global statistics"} →
+                <div class="mt-4 flex items-center justify-between">
+                    <a href="/stats" class="text-[10px] font-bold text-purple-500 uppercase tracking-tighter hover:underline">
+                        {i18n.lang === "zh" ? "多维分析" : "Analytics"} →
                     </a>
                 </div>
             </div>
         {:else}
             <!-- Balance (Consumer Only) -->
-            <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm">
+            <div class="glass-card group">
                 <div class="flex items-center justify-between">
                     <div>
-                        <h3 class="text-sm font-medium text-slate-500 dark:text-slate-400">
+                        <h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest">
                             {i18n.lang === "zh" ? "账户余额" : "Balance"}
                         </h3>
-                        <div class="text-2xl font-bold text-slate-900 dark:text-white mt-1">
+                        <div class="text-3xl font-black text-slate-900 dark:text-white mt-2 font-mono">
                             {session.formatQuota(userInfo.quota - userInfo.usedQuota, 2)}
                         </div>
                     </div>
-                    <div class="w-12 h-12 bg-emerald-100 dark:bg-emerald-500/20 rounded-xl flex items-center justify-center">
+                    <div class="w-12 h-12 bg-emerald-500/10 rounded-xl flex items-center justify-center">
                         <CreditCard class="w-6 h-6 text-emerald-600 dark:text-emerald-400" />
                     </div>
                 </div>
-                <div class="mt-3 flex items-center gap-2">
-                    <a href="/payment" class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">
+                <div class="mt-4">
+                    <a href="/payment" class="text-[10px] font-bold text-emerald-500 uppercase tracking-tighter hover:underline">
                         {i18n.lang === "zh" ? "充值" : "Recharge"} →
                     </a>
                 </div>
             </div>
 
             <!-- Active Tokens (Consumer Only) -->
-            <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm">
+            <div class="glass-card group">
                 <div class="flex items-center justify-between">
                     <div>
-                        <h3 class="text-sm font-medium text-slate-500 dark:text-slate-400">
+                        <h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest">
                             {i18n.lang === "zh" ? "活跃令牌" : "Active Tokens"}
                         </h3>
-                        <div class="text-2xl font-bold text-slate-900 dark:text-white mt-1">
+                        <div class="text-3xl font-black text-slate-900 dark:text-white mt-2 font-mono">
                             {tokens.filter((t) => t.status === 1).length}
                         </div>
                     </div>
-                    <div class="w-12 h-12 bg-blue-100 dark:bg-blue-500/20 rounded-xl flex items-center justify-center">
+                    <div class="w-12 h-12 bg-blue-500/10 rounded-xl flex items-center justify-center">
                         <Key class="w-6 h-6 text-blue-600 dark:text-blue-400" />
                     </div>
                 </div>
-                <div class="mt-3 flex items-center gap-2">
-                    <a href="/tokens" class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">
-                        {i18n.lang === "zh" ? "管理令牌" : "Manage Tokens"} →
+                <div class="mt-4">
+                    <a href="/tokens" class="text-[10px] font-bold text-blue-500 uppercase tracking-tighter hover:underline">
+                        {i18n.lang === "zh" ? "管理" : "Manage"} →
                     </a>
                 </div>
             </div>
 
             <!-- Usage Today (Consumer Only) -->
-            <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm">
+            <div class="glass-card group">
                 <div class="flex items-center justify-between">
                     <div>
-                        <h3 class="text-sm font-medium text-slate-500 dark:text-slate-400">
+                        <h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest">
                             {i18n.lang === "zh" ? "今日请求" : "Requests Today"}
                         </h3>
-                        <div class="text-2xl font-bold text-slate-900 dark:text-white mt-1">
+                        <div class="text-3xl font-black text-slate-900 dark:text-white mt-2 font-mono">
                             {recentLogs.length > 0 ? recentLogs.length : 0}
                         </div>
                     </div>
-                    <div class="w-12 h-12 bg-purple-100 dark:bg-purple-500/20 rounded-xl flex items-center justify-center">
+                    <div class="w-12 h-12 bg-purple-500/10 rounded-xl flex items-center justify-center">
                         <Activity class="w-6 h-6 text-purple-600 dark:text-purple-400" />
                     </div>
                 </div>
-                <div class="mt-3 flex items-center gap-2">
-                    <a href="/stats" class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">
-                        {i18n.lang === "zh" ? "查看统计" : "View Stats"} →
+                <div class="mt-4">
+                    <a href="/stats" class="text-[10px] font-bold text-purple-500 uppercase tracking-tighter hover:underline">
+                        {i18n.lang === "zh" ? "统计" : "Stats"} →
                     </a>
                 </div>
             </div>

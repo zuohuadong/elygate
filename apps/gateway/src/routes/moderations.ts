@@ -3,15 +3,11 @@ import { UnifiedDispatcher } from '../services/dispatcher';
 import { ConverterFactory } from '../services/converters';
 import { memoryCache } from '../services/cache';
 
-export const audioRouter = new Elysia()
-    .post('/audio/speech', async (ctx) => handleAudio(ctx, 'audio/speech'))
-    .post('/v1/audio/speech', async (ctx) => handleAudio(ctx, 'audio/speech'))
-    .post('/audio/transcriptions', async (ctx) => handleAudio(ctx, 'audio/transcriptions'))
-    .post('/v1/audio/transcriptions', async (ctx) => handleAudio(ctx, 'audio/transcriptions'))
-    .post('/audio/translations', async (ctx) => handleAudio(ctx, 'audio/translations'))
-    .post('/v1/audio/translations', async (ctx) => handleAudio(ctx, 'audio/translations'));
+export const moderationsRouter = new Elysia()
+    .post('/moderations', async (ctx) => handleModeration(ctx))
+    .post('/v1/moderations', async (ctx) => handleModeration(ctx));
 
-async function handleAudio({ body, headers, params, request, query }: any, endpointType: string) {
+async function handleModeration({ body, headers, params, request, query }: any) {
     const apiKey = query?.access_token || request.headers.get('Authorization')?.replace('Bearer ', '');
     
     if (!apiKey) return new Response(JSON.stringify({ error: 'Missing API key' }), { status: 401 });
@@ -22,10 +18,10 @@ async function handleAudio({ body, headers, params, request, query }: any, endpo
     const u = await memoryCache.getUserFromDB(t.userId);
     if (!u) return new Response(JSON.stringify({ error: 'User not found' }), { status: 401 });
 
-    const converter = ConverterFactory.getConverter(`/audio/`);
+    const converter = ConverterFactory.getConverter('/moderations');
     const internalReq = converter.convertRequest(body);
     
-    const model = internalReq.model || body.model;
+    const model = internalReq.model;
 
     const ip = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown';
     const ua = request.headers.get('user-agent') || 'unknown';
@@ -36,13 +32,16 @@ async function handleAudio({ body, headers, params, request, query }: any, endpo
             body: internalReq,
             user: u,
             token: t,
-            endpointType: endpointType as any,
+            endpointType: 'moderations',
             stream: false,
             ip,
             ua
         });
 
-        // Binary responses are returned directly as Response objects from UnifiedDispatcher
+        if (result && !(result instanceof Response)) {
+            return converter.convertResponse(result as any);
+        }
+
         return result;
     } catch (error: any) {
         const mappedError = converter.convertError(error);

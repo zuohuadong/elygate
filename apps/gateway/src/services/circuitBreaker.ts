@@ -9,6 +9,8 @@ class CircuitBreaker {
     private errorCounts = new Map<number, number>();
     // channelId -> consecutive success count for half-open recovery
     private successCounts = new Map<number, number>();
+    // channelId -> rolling average latency (ms)
+    private latencyMetrics = new Map<number, number>();
     private healthCheckTimer: NodeJS.Timeout | null = null;
 
     constructor() {
@@ -24,11 +26,24 @@ class CircuitBreaker {
     }
 
     /**
-     * Record a success for a channel.
+     * Record success and latency.
      */
-    public async recordSuccess(channelId: number) {
+    public async recordSuccess(channelId: number, latencyMs?: number) {
         if (this.errorCounts.has(channelId)) {
             this.errorCounts.delete(channelId);
+        }
+
+        if (latencyMs !== undefined) {
+            const currentAvg = this.latencyMetrics.get(channelId) || latencyMs;
+            const newAvg = (currentAvg * 0.7) + (latencyMs * 0.3); // Simple EMA
+            this.latencyMetrics.set(channelId, newAvg);
+
+            const latencyThreshold = parseInt(optionCache.get('LATENCY_THRESHOLD_MS', '30000'));
+            if (newAvg > latencyThreshold) {
+                console.warn(`[CircuitBreaker] Channel ${channelId} high latency (${Math.round(newAvg)}ms). Marking as Busy.`);
+                await sql`UPDATE channels SET status = 5, status_message = 'High Latency', updated_at = NOW() WHERE id = ${channelId}`;
+                await memoryCache.refresh();
+            }
         }
 
         const channel = memoryCache.channels.get(channelId);
@@ -169,11 +184,37 @@ class CircuitBreaker {
         const keys = channel.key.split('\n').map((k: string) => k.trim()).filter(Boolean);
         if (keys.length === 0) return false;
 
+        const useTestPrompt = optionCache.get('HEALTH_CHECK_USE_PROMPT', 'false') === 'true';
+        const testPrompt = optionCache.get('HEALTH_CHECK_PROMPT', 'Hi');
+        const timeoutMs = parseInt(optionCache.get('HEALTH_CHECK_TIMEOUT', '10000'));
+
         try {
             const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), 5000);
-            const res = await fetch(`${channel.baseUrl}/v1/models`, {
-                headers: { 'Authorization': `Bearer ${keys[0]}` },
+            const timeout = setTimeout(() => controller.abort(), timeoutMs);
+            
+            let url = `${channel.baseUrl}/v1/models`;
+            let body = null;
+            let method = 'GET';
+
+            if (useTestPrompt && channel.models && channel.models.length > 0) {
+                const models = Array.isArray(channel.models) ? channel.models : JSON.parse(channel.models);
+                const testModel = models[0];
+                url = `${channel.baseUrl}/v1/chat/completions`;
+                method = 'POST';
+                body = JSON.stringify({
+                    model: testModel,
+                    messages: [{ role: 'user', content: testPrompt }],
+                    max_tokens: 1
+                });
+            }
+
+            const res = await fetch(url, {
+                method,
+                headers: { 
+                    'Authorization': `Bearer ${keys[0]}`,
+                    'Content-Type': 'application/json'
+                },
+                body,
                 signal: controller.signal
             });
             clearTimeout(timeout);
