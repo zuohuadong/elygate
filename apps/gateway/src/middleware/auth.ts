@@ -71,7 +71,15 @@ export const authPlugin = new Elysia({ name: 'auth' })
         secret: process.env.JWT_SECRET!
     }))
     .derive({ as: 'global' }, async ({ request, set, jwt, cookie: { auth_session } }: any) => {
-        const authHeader = request.headers.get('authorization');
+        let authHeader = request.headers.get('authorization');
+
+        // --- Support Anthropic API x-api-key header ---
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            const xApiKey = request.headers.get('x-api-key');
+            if (xApiKey) {
+                authHeader = `Bearer ${xApiKey}`;
+            }
+        }
 
         // --- DB Cookie Session Check (Dual Authentication) ---
         if (!authHeader || !authHeader.startsWith('Bearer ')) {

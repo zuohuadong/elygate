@@ -448,21 +448,15 @@ export const memoryCache = {
         if (cached) return cached;
 
         const rows = await sql`
-            SELECT id, username, group_key as "group", role, quota, used_quota as "usedQuota", 
-                   status, currency, active_packages as "activePackages"
+            SELECT id, username, "group", role, quota, used_quota as "usedQuota", 
+                   status, currency
             FROM users
             WHERE id = ${userId}
             LIMIT 1
         `;
         if (rows.length > 0) {
             const user = rows[0];
-            if (typeof user.activePackages === 'string') {
-                try {
-                    user.activePackages = JSON.parse(user.activePackages);
-                } catch {
-                    user.activePackages = [];
-                }
-            }
+            user.activePackages = [];
             this.setUser(userId, user);
             return user;
         }
