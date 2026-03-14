@@ -5,7 +5,8 @@
   "private": true,
   "scripts": {
     "dev": "bun --cwd apps/gateway dev & bun --cwd apps/web dev",
-    "build": "bun --cwd apps/web build",
+    "check": "bun --cwd apps/gateway check && bun --cwd apps/portal check && bun --cwd apps/web check",
+    "build": "bun run check && bun --cwd apps/portal build && bun --cwd apps/web build",
     "build:binary": "bun run scripts/build-binary.ts",
     "build:binary:all": "bun run scripts/build-binary.ts --all",
     "build:binary:linux-x64": "bun run scripts/build-binary.ts bun-linux-x64",

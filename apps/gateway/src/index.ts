@@ -19,6 +19,7 @@ async function init() {
   const { memoryCache } = await import("./services/cache");
   const { authPlugin } = await import("./middleware/auth");
   const { staticFileHandler } = await import("./middleware/static");
+  const { statsService } = await import("./services/stats");
   const { chatRouter } = await import("./routes/chat");
   const { embeddingsRouter } = await import("./routes/embeddings");
   const { imagesRouter } = await import("./routes/images");
@@ -152,7 +153,8 @@ async function init() {
 
   const patches = [
     'packages/db/src/patch_v1_schema_fix.sql',
-    'packages/db/src/patch_v2_channel_status.sql'
+    'packages/db/src/patch_v2_channel_status.sql',
+    'packages/db/src/phase7_updates.sql'
   ];
   for (const p of patches) {
     const patchPath = await findSqlPath(p);

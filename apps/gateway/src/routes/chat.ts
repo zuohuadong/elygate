@@ -155,7 +155,9 @@ async function billCacheHit(
     channelId: number,
     startTime: number,
     ip: string,
-    ua: string
+    ua: string,
+    traceId: string,
+    requestBody: string
 ): Promise<void> {
     const promptTokens = response.usage?.prompt_tokens || 0;
     const completionTokens = response.usage?.completion_tokens || 0;
@@ -174,7 +176,11 @@ async function billCacheHit(
         isStream: false,
         elapsedMs,
         ip,
-        ua
+        ua,
+        traceId,
+        orgId: user.orgId,
+        requestBody,
+        responseBody: JSON.stringify(response)
     });
 }
 
@@ -193,8 +199,9 @@ export const chatRouter = new Elysia()
 
         const ip = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown';
         const ua = request.headers.get('user-agent') || 'unknown';
+        const traceId = body.trace_id || `tr_log_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 
-        console.log(`[Request] UserID: ${u.id}, Token: ${t.name}, Model: ${model}, Group: ${u.group}, IP: ${ip}`);
+        console.log(`[Request] UserID: ${u.id}, Token: ${t.name}, Model: ${model}, Group: ${u.group}, IP: ${ip}, Trace: ${traceId}`);
 
         // --- Cache Configuration ---
         const messages = body.messages as any[];
@@ -221,7 +228,7 @@ export const chatRouter = new Elysia()
                     correctedResponse = filterThinkingContent(correctedResponse);
                 }
 
-                await billCacheHit(correctedResponse, model, u, t, -1, startTime, ip, ua).catch(e => {
+                await billCacheHit(correctedResponse, model, u, t, -1, startTime, ip, ua, traceId, JSON.stringify(body)).catch(e => {
                     console.error('[ResponseCache] Billing Error:', e.message);
                 });
                 return removeNullFields(correctedResponse);
@@ -260,7 +267,10 @@ export const chatRouter = new Elysia()
                 await billAndLog({
                     userId: u.id, tokenId: t.id, channelId: 0, modelName: model,
                     promptTokens, completionTokens, userGroup: u.group,
-                    isStream: false, elapsedMs: Date.now() - startTime, ip, ua
+                    isStream: false, elapsedMs: Date.now() - startTime, ip, ua,
+                    traceId, orgId: u.orgId,
+                    requestBody: JSON.stringify(body),
+                    responseBody: JSON.stringify(correctedResponse)
                 }).catch(e => console.error('[SemanticCache] Billing Error:', e.message));
 
                 return removeNullFields(correctedResponse);

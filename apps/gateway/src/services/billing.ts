@@ -116,7 +116,11 @@ async function flushBillingQueue(retryCount = 0) {
             errorMessage: task.errorMessage || null,
             elapsedMs: task.elapsedMs || 0,
             ip: task.ip || null,
-            ua: task.ua || null
+            ua: task.ua || null,
+            traceId: task.traceId || null,
+            orgId: task.orgId || null,
+            requestBody: task.requestBody || null,
+            responseBody: task.responseBody || null
         });
     }
 
@@ -165,12 +169,24 @@ async function flushBillingQueue(retryCount = 0) {
             for (const [id, cost] of Object.entries(correctedUserAgg)) {
                 await tx`UPDATE users SET used_quota = used_quota + ${cost} WHERE id = ${Number(id)}`;
             }
-                for (const log of logInserts) {
+            for (const log of logInserts) {
+                const [inserted] = await tx`
+                    INSERT INTO logs (user_id, token_id, channel_id, model_name, prompt_tokens, completion_tokens, cached_tokens, quota_cost, is_stream, status_code, error_message, elapsed_ms, ip_address, user_agent, trace_id, org_id)
+                    VALUES (${log.userId}, ${log.tokenId ?? null}, ${log.channelId !== undefined ? log.channelId : null}, ${log.modelName}, ${log.promptTokens}, ${log.completionTokens}, ${log.cachedTokens}, ${log.quotaCost}, ${log.isStream}, ${log.statusCode}, ${log.errorMessage}, ${log.elapsedMs}, ${log.ip}, ${log.ua}, ${log.traceId}, ${log.orgId})
+                    RETURNING id, created_at
+                `;
+
+                if (inserted && (log.requestBody || log.responseBody)) {
                     await tx`
-                        INSERT INTO logs (user_id, token_id, channel_id, model_name, prompt_tokens, completion_tokens, cached_tokens, quota_cost, is_stream, status_code, error_message, elapsed_ms, ip_address, user_agent)
-                        VALUES (${log.userId}, ${log.tokenId ?? null}, ${log.channelId !== undefined ? log.channelId : null}, ${log.modelName}, ${log.promptTokens}, ${log.completionTokens}, ${log.cachedTokens}, ${log.quotaCost}, ${log.isStream}, ${log.statusCode}, ${log.errorMessage}, ${log.elapsedMs}, ${log.ip}, ${log.ua})
+                        INSERT INTO log_details (log_id, log_created_at, request_body, response_body)
+                        VALUES (${inserted.id}, ${inserted.created_at}, ${log.requestBody}, ${log.responseBody})
+                        ON CONFLICT (log_id) DO UPDATE
+                        SET log_created_at = EXCLUDED.log_created_at,
+                            request_body = EXCLUDED.request_body,
+                            response_body = EXCLUDED.response_body
                     `;
                 }
+            }
         });
 
         const alarmThreshold = (await import('./optionCache')).optionCache.get('QuotaAlarmThreshold', 500000);

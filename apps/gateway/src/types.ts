@@ -2,12 +2,16 @@ export interface UserRecord {
     id: number;
     username: string;
     group: string;
+    orgId?: number;
     role: number;
     quota: number;
     usedQuota: number;
     status: number;
     currency?: string;
     activePackages?: any[]; // [{ models, defaultRateLimitId, modelRateLimits }]
+    orgAllowedModels?: string[];
+    orgDeniedModels?: string[];
+    orgAllowedSubnets?: string;
 }
 
 export interface UserGroupPolicy {
@@ -32,6 +36,7 @@ export interface TokenRecord {
     models: string[];
     subnet: string;
     rateLimit: number;
+    orgId?: number;
 }
 // ChannelType values matching New-API/One-API spec — defined in providers/types.ts
 export { ChannelType } from './providers/types';
@@ -75,4 +80,8 @@ export interface BillingContext {
     elapsedMs?: number;
     ip?: string;
     ua?: string;
+    orgId?: number;
+    traceId?: string;
+    requestBody?: string;
+    responseBody?: string;
 }

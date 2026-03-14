@@ -27,6 +27,23 @@ CREATE TABLE IF NOT EXISTS user_groups (
 INSERT INTO user_groups (key, name, description) VALUES ('default', 'Default Group', 'Standard user group') ON CONFLICT DO NOTHING;
 INSERT INTO user_groups (key, name, description, denied_channel_types, denied_models, allowed_models) VALUES ('cn-safe', 'Mainland Safe', 'Only allows CN-registered models', '[1, 14, 23]', '["*"]', '["qwen*", "glm*", "chatglm*", "cogview*", "ernie*", "eb*", "moonshot*", "kimi*", "deepseek*", "doubao*", "hunyuan*", "minimax*", "abab*", "spark*", "yi*", "step*", "baichuan*"]') ON CONFLICT DO NOTHING;
 
+CREATE TABLE IF NOT EXISTS organizations (
+    id SERIAL PRIMARY KEY,
+    slug VARCHAR(80) UNIQUE,
+    name VARCHAR(120) NOT NULL,
+    billing_email TEXT,
+    quota BIGINT NOT NULL DEFAULT 0,
+    used_quota BIGINT NOT NULL DEFAULT 0,
+    allowed_models JSONB NOT NULL DEFAULT '[]',
+    denied_models JSONB NOT NULL DEFAULT '[]',
+    allowed_subnets TEXT NOT NULL DEFAULT '',
+    quota_alarm_threshold INTEGER NOT NULL DEFAULT 80 CHECK (quota_alarm_threshold BETWEEN 1 AND 100),
+    status INTEGER NOT NULL DEFAULT 1 CHECK (status IN (1, 2)),
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS users (
     id SERIAL PRIMARY KEY,
     username TEXT NOT NULL UNIQUE,
@@ -35,15 +52,19 @@ CREATE TABLE IF NOT EXISTS users (
     name TEXT,
     password_hash TEXT NOT NULL DEFAULT '',
     image TEXT,
-    role INTEGER NOT NULL DEFAULT 1,        -- 1=user, 10=admin
+    role INTEGER NOT NULL DEFAULT 1,        -- 1=user, 5=org_admin, 10=super_admin
+    org_id INTEGER REFERENCES organizations(id) ON DELETE SET NULL,
     quota BIGINT NOT NULL DEFAULT 0,        -- available quota (0.001 cent units)
     used_quota BIGINT NOT NULL DEFAULT 0,
     "group" TEXT NOT NULL DEFAULT 'default',
     status INTEGER NOT NULL DEFAULT 1,      -- 1=active, 2=banned
+    currency TEXT NOT NULL DEFAULT 'USD' CHECK (currency IN ('USD', 'RMB')),
     github_id TEXT,
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS idx_users_org_id ON users(org_id);
 
 -- ============================================================
 -- Web Auth Sessions
@@ -66,6 +87,7 @@ CREATE INDEX IF NOT EXISTS idx_session_user_id ON session(user_id);
 CREATE TABLE IF NOT EXISTS tokens (
     id SERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    org_id INTEGER REFERENCES organizations(id) ON DELETE SET NULL,
     name TEXT NOT NULL,
     key TEXT NOT NULL UNIQUE,               -- sk-xxxx
     status INTEGER NOT NULL DEFAULT 1,      -- 1=active, 2=disabled
@@ -78,6 +100,8 @@ CREATE TABLE IF NOT EXISTS tokens (
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS idx_tokens_org_id ON tokens(org_id);
 
 CREATE UNLOGGED TABLE IF NOT EXISTS rate_limits (
     key VARCHAR(255) PRIMARY KEY,
@@ -193,6 +217,19 @@ CREATE INDEX IF NOT EXISTS idx_budget_alerts_user_id ON budget_alerts(user_id, c
 CREATE INDEX IF NOT EXISTS idx_budget_alerts_level ON budget_alerts(alert_level, created_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_budget_alerts_unique ON budget_alerts(user_id, alert_level, DATE(created_at));
 
+CREATE TABLE IF NOT EXISTS org_budget_alerts (
+    id SERIAL PRIMARY KEY,
+    org_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    quota BIGINT NOT NULL,
+    used_quota BIGINT NOT NULL,
+    usage_percent DECIMAL(5, 4) NOT NULL,
+    alert_level TEXT NOT NULL CHECK (alert_level IN ('warning', 'critical', 'exhausted')),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_org_budget_alerts_org_id ON org_budget_alerts(org_id, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_org_budget_alerts_unique ON org_budget_alerts(org_id, alert_level, DATE(created_at));
+
 -- Audit logs table
 CREATE TABLE IF NOT EXISTS audit_logs (
     id SERIAL PRIMARY KEY,
@@ -221,12 +258,15 @@ CREATE TABLE IF NOT EXISTS logs (
     quota_cost BIGINT NOT NULL DEFAULT 0,
     prompt_tokens INTEGER NOT NULL DEFAULT 0,
     completion_tokens INTEGER NOT NULL DEFAULT 0,
+    cached_tokens INTEGER NOT NULL DEFAULT 0,
     elapsed_ms INTEGER NOT NULL DEFAULT 0,
     is_stream BOOLEAN DEFAULT false,
     error_message TEXT,
     status_code INTEGER NOT NULL DEFAULT 200,
     ip_address VARCHAR(45),
     user_agent TEXT,
+    trace_id TEXT,
+    org_id INTEGER REFERENCES organizations(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     PRIMARY KEY (id, created_at)
 ) PARTITION BY RANGE (created_at);
@@ -238,6 +278,37 @@ CREATE TABLE IF NOT EXISTS logs_y2026m04 PARTITION OF logs
     FOR VALUES FROM ('2026-04-01') TO ('2026-05-01');
 CREATE TABLE IF NOT EXISTS logs_y2026m05 PARTITION OF logs
     FOR VALUES FROM ('2026-05-01') TO ('2026-06-01');
+
+CREATE INDEX IF NOT EXISTS idx_logs_org_id ON logs(org_id);
+CREATE INDEX IF NOT EXISTS idx_logs_trace_id ON logs(trace_id);
+
+CREATE TABLE IF NOT EXISTS log_details (
+    id SERIAL PRIMARY KEY,
+    log_id INTEGER NOT NULL UNIQUE,
+    log_created_at TIMESTAMPTZ,
+    request_body TEXT,
+    response_body TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT log_details_log_ref_fkey
+        FOREIGN KEY (log_id, log_created_at)
+        REFERENCES logs(id, created_at)
+        ON DELETE CASCADE
+        DEFERRABLE INITIALLY DEFERRED
+);
+
+CREATE INDEX IF NOT EXISTS idx_log_details_log_ref ON log_details(log_id, log_created_at);
+
+CREATE TABLE IF NOT EXISTS health_logs (
+    id SERIAL PRIMARY KEY,
+    channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    status INTEGER NOT NULL CHECK (status IN (0, 1)),
+    latency INTEGER,
+    error_message TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_health_logs_channel_id ON health_logs(channel_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_health_logs_created_at ON health_logs(created_at DESC);
 
 CREATE TABLE IF NOT EXISTS options (
     key TEXT PRIMARY KEY,

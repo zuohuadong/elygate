@@ -1,0 +1,30 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    @apply bg-[#0d1117] text-gray-200 antialiased selection:bg-blue-500/30;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+}
+
+@layer components {
+  .glass-card {
+    @apply bg-[#161b22]/80 backdrop-blur-md border border-[#30363d] rounded-xl shadow-xl transition-all duration-300;
+  }
+  
+  .glass-card-hover {
+    @apply hover:border-blue-500/30 hover:shadow-blue-500/10;
+  }
+
+  .nav-item {
+    @apply flex items-center gap-3 px-4 py-3 rounded-lg text-gray-400 transition-all hover:text-white hover:bg-white/5 cursor-pointer;
+  }
+
+  .nav-item-active {
+    @apply text-white bg-blue-500/10 border-r-2 border-blue-500;
+  }
+
+  .btn-primary {
+    @apply px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-all shadow-lg shadow-blue-900/20 active:scale-95 disabled:opacity-50;
+  }
+}

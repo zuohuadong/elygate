@@ -6,11 +6,30 @@ export interface User {
     username: string;
     passwordHash: string;
     role: number;
+    orgId: number | null;
     quota: number;        // Unit: 0.001 cent (0.001 cent = 1)
     usedQuota: number;
     group: string;        // e.g., 'vip', 'default'
     status: number;       // 1-Active, 2-Bans
+    currency: 'USD' | 'RMB';
     createdAt: Date;
+}
+
+export interface Organization {
+    id: number;
+    slug: string | null;
+    name: string;
+    billingEmail: string | null;
+    quota: number;
+    usedQuota: number;
+    allowedModels: string[];
+    deniedModels: string[];
+    allowedSubnets: string;
+    quotaAlarmThreshold: number;
+    status: number;
+    metadata: Record<string, unknown>;
+    createdAt: Date;
+    updatedAt: Date;
 }
 
 export interface Channel {
@@ -31,6 +50,7 @@ export interface Channel {
 export interface Token {
     id: number;
     userId: number;
+    orgId: number | null;
     name: string;
     key: string;          // sk-xxxx
     status: number;
@@ -45,10 +65,13 @@ export interface Log {
     userId: number;
     tokenId: number | null;
     channelId: number | null;
+    orgId: number | null;
     modelName: string;
     quotaCost: number;
     promptTokens: number;
     completionTokens: number;
+    cachedTokens: number;
+    traceId: string | null;
     isStream: boolean;
     createdAt: Date;
 }

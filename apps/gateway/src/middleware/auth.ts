@@ -48,6 +48,18 @@ async function initAuthSync() {
 initAuthSync().catch(console.error);
 
 export function assertModelAccess(user: UserRecord, token: TokenRecord, modelName: string, set: any) {
+    // 1. Organization Level Policy (Strictest)
+    if (user.orgDeniedModels && user.orgDeniedModels.length > 0 && user.orgDeniedModels.includes(modelName)) {
+        set.status = 403;
+        throw new Error(`Your organization policies prohibited use of model '${modelName}'`);
+    }
+
+    if (user.orgAllowedModels && user.orgAllowedModels.length > 0 && !user.orgAllowedModels.includes(modelName)) {
+        set.status = 403;
+        throw new Error(`Your organization policies only allow specific models. '${modelName}' is not permitted.`);
+    }
+
+    // 2. User Group Level Policy
     const groupModelKey = `group_models_${user.group}`;
     const allowedGroupModels = memoryCache.getOption(groupModelKey);
     if (allowedGroupModels && Array.isArray(allowedGroupModels) && !allowedGroupModels.includes(modelName)) {
@@ -55,6 +67,7 @@ export function assertModelAccess(user: UserRecord, token: TokenRecord, modelNam
         throw new Error(`Your group '${user.group}' is not allowed to use model '${modelName}'`);
     }
 
+    // 3. Token Level Policy (Most specific)
     if (token.models && token.models.length > 0 && !token.models.includes(modelName)) {
         set.status = 403;
         throw new Error(`Your API key is not allowed to use model '${modelName}'`);
@@ -97,7 +110,7 @@ export const authPlugin = new Elysia({ name: 'auth' })
             }
 
             const [sessionRow] = await sql`
-                SELECT s.user_id, s.expires_at, u.id, u.username, u."group", u.role, u.quota, u.status 
+                SELECT s.user_id, s.expires_at, u.id, u.username, u."group", u.role, u.quota, u.status, u.org_id
                 FROM session s
                 JOIN users u ON s.user_id = u.id
                 WHERE s.token = ${auth_session.value}
@@ -124,19 +137,22 @@ export const authPlugin = new Elysia({ name: 'auth' })
                 id: 0,
                 name: 'Web Session',
                 key: 'jwt-session',
+                userId: sessionRow.user_id,
                 remainQuota: -1,
                 usedQuota: 0,
                 status: 1,
                 expiredAt: null,
                 models: [],
                 subnet: '',
-                rateLimit: 0
+                rateLimit: 0,
+                orgId: sessionRow.org_id
             };
 
             const userRecord: UserRecord = {
                 id: sessionRow.id,
                 username: sessionRow.username,
                 group: sessionRow.group || 'default',
+                orgId: sessionRow.org_id,
                 role: sessionRow.role,
                 quota: Number(sessionRow.quota),
                 usedQuota: Number(sessionRow.usedQuota),
@@ -163,14 +179,16 @@ export const authPlugin = new Elysia({ name: 'auth' })
             return cached;
         }
 
-        // 2. Cache Miss: Perform DB Query
+        // 3. Cache Miss: Perform DB Query
         // Use Bun SQL template for high-speed parameterized queries (pre-compiled)
         const rows = await sql`
             SELECT 
-                t.id AS token_id, t.name, t.key, t.remain_quota, t.used_quota, t.status AS token_status, t.expired_at, t.models AS token_models, t.subnet, t.rate_limit,
-                u.id AS user_id, u.username, u.group, u.role, u.quota, u.status AS user_status
+                t.id AS token_id, t.name, t.key, t.remain_quota, t.used_quota, t.status AS token_status, t.expired_at, t.models AS token_models, t.subnet, t.rate_limit, t.org_id AS token_org_id,
+                u.id AS user_id, u.username, u.group, u.role, u.quota, u.status AS user_status, u.org_id AS user_org_id, u.currency,
+                o.allowed_models AS org_allowed_models, o.denied_models AS org_denied_models, o.allowed_subnets AS org_allowed_subnets
             FROM tokens t
             INNER JOIN users u ON t.user_id = u.id
+            LEFT JOIN organizations o ON u.org_id = o.id
             WHERE t.key = ${apiKey}
             LIMIT 1
         `;
@@ -190,24 +208,30 @@ export const authPlugin = new Elysia({ name: 'auth' })
             id: raw.token_id,
             name: raw.name,
             key: raw.key,
+            userId: raw.user_id,
             remainQuota: Number(raw.remain_quota),
             usedQuota: Number(raw.used_quota),
             status: raw.token_status,
             expiredAt: raw.expired_at ? new Date(raw.expired_at) : null,
             models: Array.isArray(raw.token_models) ? raw.token_models : [],
             subnet: raw.subnet || '',
-            rateLimit: Number(raw.rate_limit || 0)
+            rateLimit: Number(raw.rate_limit || 0),
+            orgId: raw.token_org_id
         };
 
         const userRecord: UserRecord = {
             id: raw.user_id,
             username: raw.username,
             group: raw.group,
+            orgId: raw.user_org_id || raw.token_org_id,
             role: raw.role,
             quota: Number(raw.quota),
             usedQuota: Number(raw.used_quota || 0),
             status: raw.user_status,
-            currency: raw.currency || 'USD'
+            currency: raw.currency || 'USD',
+            orgAllowedModels: Array.isArray(raw.org_allowed_models) ? raw.org_allowed_models : (typeof raw.org_allowed_models === 'string' ? JSON.parse(raw.org_allowed_models || '[]') : []),
+            orgDeniedModels: Array.isArray(raw.org_denied_models) ? raw.org_denied_models : (typeof raw.org_denied_models === 'string' ? JSON.parse(raw.org_denied_models || '[]') : []),
+            orgAllowedSubnets: raw.org_allowed_subnets
         };
 
         if (tokenRecord.status !== 1) { // 1-normal, 2-disabled
@@ -215,16 +239,27 @@ export const authPlugin = new Elysia({ name: 'auth' })
             throw new Error('API key is disabled');
         }
 
-        // --- IP Whitelist Validation ---
-        if (tokenRecord.subnet) {
-            const clientIp = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || '127.0.0.1';
-            const allowedSubnets = tokenRecord.subnet.split(',').map((s: string) => s.trim()).filter(Boolean);
+        // --- IP Whitelist Validation (Token Level + Org Level) ---
+        const clientIp = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || '127.0.0.1';
+        
+        // Org Level Check
+        if (raw.org_allowed_subnets) {
+            const orgSubnets = raw.org_allowed_subnets.split(',').map((s: string) => s.trim()).filter(Boolean);
+            if (orgSubnets.length > 0 && !orgSubnets.includes(clientIp)) {
+                set.status = 403;
+                throw new Error(`Your organization policies restricted access for IP ${clientIp}`);
+            }
+        }
 
+        // Token Level Check
+        if (tokenRecord.subnet) {
+            const allowedSubnets = tokenRecord.subnet.split(',').map((s: string) => s.trim()).filter(Boolean);
             if (allowedSubnets.length > 0 && !allowedSubnets.includes(clientIp)) {
                 set.status = 403;
                 throw new Error(`IP Origin ${clientIp} is not whitelisted for this API key.`);
             }
         }
+
         if (userRecord.status !== 1) {
             set.status = 403;
             throw new Error('User account is disabled');

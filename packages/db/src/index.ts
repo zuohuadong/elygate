@@ -1,11 +1,12 @@
 // In Bun, SQL is a global, but can also be imported. 
 // Using a runtime check to avoid build-time resolution errors in Vite/Node.
 const BunSQL = (globalThis as any).Bun?.SQL;
+const allowMissingDatabaseUrl = process.env.SKIP_DB_ENV_VALIDATION === '1';
 
 // Ensure DATABASE_URL is available for the native driver. Fallback to a dummy URL during build steps so it doesn't crash `new URL()`
 const rawUrl = process.env.DATABASE_URL;
 if (!rawUrl) {
-    if (process.env.NODE_ENV === 'production') {
+    if (process.env.NODE_ENV === 'production' && !allowMissingDatabaseUrl) {
         throw new Error('Critical: DATABASE_URL is missing in production environment.');
     }
     console.warn('⚠️  DATABASE_URL is missing. Using local development default.');

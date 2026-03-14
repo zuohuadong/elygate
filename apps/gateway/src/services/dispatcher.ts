@@ -129,6 +129,7 @@ export class UnifiedDispatcher {
         const channels = candidateChannels as ChannelConfig[];
 
         for (const channelConfig of channels) {
+            const traceId = (body as any).trace_id || `tr_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
             const handler = getProviderHandler(channelConfig.type);
 
             // 1. Key Selection
@@ -266,9 +267,11 @@ export class UnifiedDispatcher {
                 circuitBreaker.recordSuccess(channelConfig.id, latencyMs);
 
                 // 5. Handle Response
+                // 5. Handle Response
+
                 if (isStream && response.body) {
                     const [clientStream, billingStream] = response.body.tee();
-                    this.handleStreamBilling(billingStream, body, user, token, channelConfig, model, preDeducted, lockId, isPackageFree, packageLockId, response.status);
+                    this.handleStreamBilling(billingStream, body, user, token, channelConfig, model, preDeducted, lockId, isPackageFree, packageLockId, response.status, traceId, forwardBody);
 
                     return new Response(clientStream, {
                         headers: {
@@ -311,7 +314,11 @@ export class UnifiedDispatcher {
                         userGroup: user.group,
                         isStream: false,
                         isPackageFree,
-                        statusCode: response.status
+                        statusCode: response.status,
+                        traceId,
+                        requestBody: typeof forwardBody === 'string' ? forwardBody : '[FormData]',
+                        responseBody: JSON.stringify(rawData),
+                        orgId: user.orgId
                     });
 
                     const currentActive = keyConcurrencyMap.get(lockId);
@@ -363,7 +370,11 @@ export class UnifiedDispatcher {
                         userGroup: user.group,
                         isStream: false,
                         isPackageFree,
-                        statusCode: response.status
+                        statusCode: response.status,
+                        traceId,
+                        requestBody: typeof forwardBody === 'string' ? forwardBody : '[FormData]',
+                        responseBody: JSON.stringify(rawData),
+                        orgId: user.orgId
                     });
 
                     const currentActive = keyConcurrencyMap.get(lockId);
@@ -390,7 +401,11 @@ export class UnifiedDispatcher {
                         userGroup: user.group,
                         isStream: false,
                         isPackageFree,
-                        statusCode: response.status
+                        statusCode: response.status,
+                        traceId,
+                        requestBody: typeof forwardBody === 'string' ? forwardBody : '[FormData]',
+                        responseBody: '[Binary Response]',
+                        orgId: user.orgId
                     });
 
                     const currentActive = keyConcurrencyMap.get(lockId);
@@ -430,7 +445,9 @@ export class UnifiedDispatcher {
                     isStream,
                     isPackageFree,
                     statusCode: e.message?.startsWith('Status') ? parseInt(e.message.split(' ')[1]) : 500,
-                    errorMessage: e.message || 'Unknown network error'
+                    errorMessage: e.message || 'Unknown network error',
+                    traceId,
+                    orgId: user.orgId
                 }).catch(() => { });
 
                 // Handle key exhaustion (401/403/429 with specific error messages)
@@ -478,7 +495,9 @@ export class UnifiedDispatcher {
         lockId: string,
         isPackageFree: boolean,
         packageLockId: string | null,
-        statusCode: number = 200
+        statusCode: number = 200,
+        traceId?: string,
+        requestBody?: any
     ) {
         (async () => {
             try {
@@ -549,7 +568,11 @@ export class UnifiedDispatcher {
                     userGroup: user.group,
                     isStream: true,
                     isPackageFree,
-                    statusCode: statusCode
+                    statusCode: statusCode,
+                    traceId,
+                    requestBody: typeof requestBody === 'string' ? requestBody : (requestBody ? JSON.stringify(requestBody) : undefined),
+                    responseBody: completionText || undefined,
+                    orgId: user.orgId
                 });
             } catch (e) {
                 console.error("[Stream Billing Error]", e);
