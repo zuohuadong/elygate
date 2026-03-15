@@ -38,4 +38,5 @@ export const ChannelType = {
     FLUX: 34,
     UDIO: 35,
     NVIDIA: 41,
+    COMFYUI: 100,
 } as const;

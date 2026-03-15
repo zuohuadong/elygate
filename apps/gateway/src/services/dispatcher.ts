@@ -9,7 +9,7 @@ import { getChannelKeys } from './encryption';
 import { isRateLimited, isPackageRateLimited, waitForPackageConcurrency, packageConcurrencyMap, releasePackageConcurrency, getPackageLockId } from './ratelimit';
 import { buildUpstreamUrl } from '../utils/url';
 import { matchPattern } from '../utils/pattern';
-import { ContentFilter, cleanResponseTokens } from './filter';
+import { ContentFilter, cleanResponseTokens, cleanModelTokens } from './filter';
 import { notifier } from './notifier';
 import { WebSearchPlugin } from './plugins/search';
 
@@ -99,16 +99,17 @@ export class UnifiedDispatcher {
             if (existing) {
                 console.info(`[Dispatcher] Idempotency hit for key ${effectiveIdempotencyKey}, returning cached response.`);
                 const respBody = existing.response_body;
+                const cleanedRespBody = cleanResponseTokens(respBody);
                 if (isStream) {
                     // For stream, we can't easily replay the exact stream, but we can return the full text as a single event or an error.
                     // Usually, idempotency for stream is tricky. In simple cases, we return 409 or the cached final response as an event.
                     // Let's return the cached JSON as a single-event stream for now.
-                    const payload = `data: ${JSON.stringify(respBody)}\n\ndata: [DONE]\n\n`;
+                    const payload = `data: ${JSON.stringify(cleanedRespBody)}\n\ndata: [DONE]\n\n`;
                     return new Response(payload, {
                         headers: { 'Content-Type': 'text/event-stream' }
                     });
                 }
-                return skipTransform ? respBody : getProviderHandler(ChannelType.OPENAI).transformResponse(respBody); // Fallback to OpenAI transform if type unknown
+                return skipTransform ? cleanedRespBody : getProviderHandler(ChannelType.OPENAI).transformResponse(cleanedRespBody); // Fallback to OpenAI transform if type unknown
             }
         }
 
@@ -302,7 +303,16 @@ export class UnifiedDispatcher {
                     const [clientStream, billingStream] = response.body.tee();
                     this.handleStreamBilling(billingStream, body, user, token, channelConfig, model, preDeducted, lockId, isPackageFree, packageLockId, response.status, traceId, forwardBody, effectiveIdempotencyKey, externalTaskId, externalUserId, externalWorkspaceId, externalFeatureType);
 
-                    return new Response(clientStream, {
+                    // Create a TransformStream to clean model internal tokens from stream
+                    const cleanStream = new TransformStream({
+                        transform(chunk, controller) {
+                            const text = new TextDecoder().decode(chunk);
+                            const cleanedText = cleanModelTokens(text);
+                            controller.enqueue(new TextEncoder().encode(cleanedText));
+                        }
+                    });
+
+                    return new Response(clientStream.pipeThrough(cleanStream), {
                         headers: {
                             'Content-Type': 'text/event-stream',
                             'Cache-Control': 'no-cache',
@@ -440,7 +450,9 @@ export class UnifiedDispatcher {
                     if (currentActive) keyConcurrencyMap.set(lockId, Math.max(0, currentActive - 1));
                     if (packageLockId) releasePackageConcurrency(packageLockId);
 
-                    return skipTransform ? rawData : handler.transformResponse(rawData);
+                    // Clean model internal tokens from response
+                    const cleanedData = cleanResponseTokens(rawData);
+                    return skipTransform ? cleanedData : handler.transformResponse(cleanedData);
                 } else {
                     // Binary response (Audio, Image, Video blob)
                     const buffer = await response.arrayBuffer();

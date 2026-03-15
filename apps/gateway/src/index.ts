@@ -41,6 +41,7 @@ async function init() {
   const { anthropicRouter } = await import("./routes/anthropic");
   const { moderationsRouter } = await import("./routes/moderations");
   const { capabilitiesRouter } = await import("./routes/capabilities");
+  const { workflowsRouter } = await import("./routes/workflows");
 
   const app = new Elysia()
     .use(cors({
@@ -110,6 +111,7 @@ async function init() {
         .use(baiduRouter)
         .use(moderationsRouter)
         .use(capabilitiesRouter)
+        .use(workflowsRouter)
     )
     .use(aliRouter)   // Ali often uses /api/v1/...
     .use(baiduRouter) // Baidu uses /rpc/2.0/...
@@ -158,7 +160,8 @@ async function init() {
     'packages/db/src/patch_v2_channel_status.sql',
     'packages/db/src/phase7_updates.sql',
     'packages/db/src/phase8_org_alerting.sql',
-    'packages/db/src/phase9_external_metadata.sql'
+    'packages/db/src/phase9_external_metadata.sql',
+    'packages/db/src/phase10_comfyui_templates.sql'
   ];
   for (const p of patches) {
     const patchPath = await findSqlPath(p);
