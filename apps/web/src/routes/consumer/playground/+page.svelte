@@ -286,7 +286,7 @@
                             <Loader2 class="w-6 h-6 animate-spin text-indigo-500" />
                         </div>
                     {:else if showRaw && rawResponse}
-                        <pre class="text-xs text-slate-600 dark:text-slate-400 whitespace-pre-wrap">{JSON.stringify(rawResponse, null, 2)}</pre>
+                        <pre class="text-xs text-slate-200 dark:text-slate-200 whitespace-pre-wrap">{JSON.stringify(rawResponse, null, 2)}</pre>
                     {:else if response}
                         <div class="prose prose-sm dark:prose-invert max-w-none">
                             {response}

@@ -246,11 +246,11 @@ console.log(response.choices[0].message.content);`;
         <div class="mt-4 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
             <h4 class="font-semibold text-slate-900 dark:text-white text-sm mb-3">{i18n.lang === "zh" ? "请求参数" : "Request Parameters"}</h4>
             <div class="space-y-2 text-sm">
-                <div class="flex gap-2"><code class="text-indigo-500 font-mono">model</code><span class="text-slate-600 dark:text-slate-400">{i18n.lang === "zh" ? "(必需) 模型名称" : "(required) Model name"}</span></div>
-                <div class="flex gap-2"><code class="text-indigo-500 font-mono">messages</code><span class="text-slate-600 dark:text-slate-400">{i18n.lang === "zh" ? "(必需) 消息数组" : "(required) Message array"}</span></div>
-                <div class="flex gap-2"><code class="text-indigo-500 font-mono">stream</code><span class="text-slate-600 dark:text-slate-400">{i18n.lang === "zh" ? "(可选) 是否流式返回" : "(optional) Enable streaming"}</span></div>
-                <div class="flex gap-2"><code class="text-indigo-500 font-mono">temperature</code><span class="text-slate-600 dark:text-slate-400">{i18n.lang === "zh" ? "(可选) 温度参数 0-2" : "(optional) Temperature 0-2"}</span></div>
-                <div class="flex gap-2"><code class="text-indigo-500 font-mono">max_tokens</code><span class="text-slate-600 dark:text-slate-400">{i18n.lang === "zh" ? "(可选) 最大 token 数" : "(optional) Max tokens"}</span></div>
+                <div class="flex gap-2"><code class="text-indigo-500 font-mono">model</code><span class="text-slate-600 dark:text-slate-300">{i18n.lang === "zh" ? "(必需) 模型名称" : "(required) Model name"}</span></div>
+                <div class="flex gap-2"><code class="text-indigo-500 font-mono">messages</code><span class="text-slate-600 dark:text-slate-300">{i18n.lang === "zh" ? "(必需) 消息数组" : "(required) Message array"}</span></div>
+                <div class="flex gap-2"><code class="text-indigo-500 font-mono">stream</code><span class="text-slate-600 dark:text-slate-300">{i18n.lang === "zh" ? "(可选) 是否流式返回" : "(optional) Enable streaming"}</span></div>
+                <div class="flex gap-2"><code class="text-indigo-500 font-mono">temperature</code><span class="text-slate-600 dark:text-slate-300">{i18n.lang === "zh" ? "(可选) 温度参数 0-2" : "(optional) Temperature 0-2"}</span></div>
+                <div class="flex gap-2"><code class="text-indigo-500 font-mono">max_tokens</code><span class="text-slate-600 dark:text-slate-300">{i18n.lang === "zh" ? "(可选) 最大 token 数" : "(optional) Max tokens"}</span></div>
             </div>
         </div>
     {/if}
@@ -325,7 +325,7 @@ console.log(response.choices[0].message.content);`;
     {#if activeTab === 'errors'}
         <div class="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl p-6">
             <h4 class="font-semibold text-slate-900 dark:text-white text-sm mb-4">{i18n.lang === "zh" ? "错误响应格式" : "Error Response Format"}</h4>
-            <pre class="text-sm font-mono text-slate-600 dark:text-slate-400 bg-slate-50 dark:bg-slate-900 rounded-xl p-4 overflow-x-auto">&#123;
+            <pre class="text-sm font-mono text-slate-200 dark:text-slate-200 bg-slate-50 dark:bg-slate-900 rounded-xl p-4 overflow-x-auto">&#123;
   "success": false,
   "message": "Error description here"
 &#125;</pre>
@@ -334,23 +334,23 @@ console.log(response.choices[0].message.content);`;
             <div class="space-y-2 text-sm">
                 <div class="flex gap-3">
                     <code class="text-red-500 font-mono">401</code>
-                    <span class="text-slate-600 dark:text-slate-400">{i18n.lang === "zh" ? "认证失败，API Key 无效" : "Authentication failed, invalid API Key"}</span>
+                    <span class="text-slate-600 dark:text-slate-300">{i18n.lang === "zh" ? "认证失败，API Key 无效" : "Authentication failed, invalid API Key"}</span>
                 </div>
                 <div class="flex gap-3">
                     <code class="text-red-500 font-mono">403</code>
-                    <span class="text-slate-600 dark:text-slate-400">{i18n.lang === "zh" ? "权限不足或配额已用尽" : "Insufficient permissions or quota exhausted"}</span>
+                    <span class="text-slate-600 dark:text-slate-300">{i18n.lang === "zh" ? "权限不足或配额已用尽" : "Insufficient permissions or quota exhausted"}</span>
                 </div>
                 <div class="flex gap-3">
                     <code class="text-red-500 font-mono">404</code>
-                    <span class="text-slate-600 dark:text-slate-400">{i18n.lang === "zh" ? "模型不存在或无可用渠道" : "Model not found or no available channel"}</span>
+                    <span class="text-slate-600 dark:text-slate-300">{i18n.lang === "zh" ? "模型不存在或无可用渠道" : "Model not found or no available channel"}</span>
                 </div>
                 <div class="flex gap-3">
                     <code class="text-red-500 font-mono">429</code>
-                    <span class="text-slate-600 dark:text-slate-400">{i18n.lang === "zh" ? "请求过于频繁，请稍后重试" : "Rate limit exceeded, please retry later"}</span>
+                    <span class="text-slate-600 dark:text-slate-300">{i18n.lang === "zh" ? "请求过于频繁，请稍后重试" : "Rate limit exceeded, please retry later"}</span>
                 </div>
                 <div class="flex gap-3">
                     <code class="text-red-500 font-mono">500</code>
-                    <span class="text-slate-600 dark:text-slate-400">{i18n.lang === "zh" ? "服务器内部错误" : "Internal server error"}</span>
+                    <span class="text-slate-600 dark:text-slate-300">{i18n.lang === "zh" ? "服务器内部错误" : "Internal server error"}</span>
                 </div>
             </div>
         </div>
@@ -367,11 +367,11 @@ console.log(response.choices[0].message.content);`;
         <div class="p-6 space-y-4">
             <div>
                 <p class="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Python (OpenAI SDK)</p>
-                <pre class="text-xs font-mono text-slate-600 dark:text-slate-400 bg-slate-50 dark:bg-slate-900 rounded-xl p-4 overflow-x-auto whitespace-pre-wrap">{getPythonCode()}</pre>
+                <pre class="text-xs font-mono text-slate-200 dark:text-slate-200 bg-slate-50 dark:bg-slate-900 rounded-xl p-4 overflow-x-auto whitespace-pre-wrap">{getPythonCode()}</pre>
             </div>
             <div>
                 <p class="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Node.js (OpenAI SDK)</p>
-                <pre class="text-xs font-mono text-slate-600 dark:text-slate-400 bg-slate-50 dark:bg-slate-900 rounded-xl p-4 overflow-x-auto whitespace-pre-wrap">{getNodeCode()}</pre>
+                <pre class="text-xs font-mono text-slate-200 dark:text-slate-200 bg-slate-50 dark:bg-slate-900 rounded-xl p-4 overflow-x-auto whitespace-pre-wrap">{getNodeCode()}</pre>
             </div>
         </div>
     </div>
