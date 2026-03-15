@@ -39,8 +39,16 @@ export function createProxyRoute(config: ProxyRouteConfig): Elysia {
             }
 
             assertModelAccess(user, token, model, set);
+            
+            // Extract external metadata and idempotency key
+            const headers = (set.headers || {});
+            const idempotencyKey = headers['idempotency-key'] || headers['x-idempotency-key'] || body.idempotency_key || body.metadata?.idempotency_key;
+            const externalTaskId = headers['x-external-task-id'] || body.external_task_id || body.metadata?.external_task_id;
+            const externalUserId = headers['x-external-user-id'] || body.external_user_id || body.metadata?.external_user_id;
+            const externalWorkspaceId = headers['x-external-workspace-id'] || body.external_workspace_id || body.metadata?.external_workspace_id;
+            const externalFeatureType = headers['x-external-feature-type'] || body.external_feature_type || body.metadata?.external_feature_type;
 
-            console.log(`[${label}] UserID: ${user.id}, Token: ${token.name}, Model: ${model}`);
+            console.log(`[${label}] UserID: ${user.id}, Token: ${token.name}, Model: ${model}, TaskID: ${externalTaskId || 'N/A'}`);
 
             return await UnifiedDispatcher.dispatch({
                 model,
@@ -48,7 +56,12 @@ export function createProxyRoute(config: ProxyRouteConfig): Elysia {
                 user,
                 token,
                 endpointType: config.endpointType,
-                skipTransform: false
+                skipTransform: false,
+                idempotencyKey,
+                externalTaskId,
+                externalUserId,
+                externalWorkspaceId,
+                externalFeatureType
             });
         });
 }

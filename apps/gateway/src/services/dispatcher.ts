@@ -9,7 +9,7 @@ import { getChannelKeys } from './encryption';
 import { isRateLimited, isPackageRateLimited, waitForPackageConcurrency, packageConcurrencyMap, releasePackageConcurrency, getPackageLockId } from './ratelimit';
 import { buildUpstreamUrl } from '../utils/url';
 import { matchPattern } from '../utils/pattern';
-import { ContentFilter } from './filter';
+import { ContentFilter, cleanResponseTokens } from './filter';
 import { notifier } from './notifier';
 import { WebSearchPlugin } from './plugins/search';
 
@@ -23,6 +23,11 @@ export interface DispatchOptions {
     skipTransform?: boolean;
     ip?: string;
     ua?: string;
+    idempotencyKey?: string;
+    externalTaskId?: string;
+    externalUserId?: string;
+    externalWorkspaceId?: string;
+    externalFeatureType?: string;
 }
 
 // Global in-memory concurrency tracker: Map<"channelId_keyIndex", currentActiveRequests>
@@ -43,7 +48,7 @@ async function waitForConcurrencyRelease(lockId: string, limit: number, maxWaitM
 
 export class UnifiedDispatcher {
     static async dispatch(options: DispatchOptions) {
-        const { body, user, token, endpointType, skipTransform } = options;
+        const { body, user, token, endpointType, skipTransform, idempotencyKey, externalTaskId, externalUserId, externalWorkspaceId, externalFeatureType } = options;
         let model = options.model;
         const isStream = options.stream || body.stream || false;
         const isFormData = body instanceof FormData || (body && typeof body === 'object' && !Array.isArray(body) && Object.values(body).some(v => v instanceof File || v instanceof Blob));
@@ -79,6 +84,31 @@ export class UnifiedDispatcher {
                 if (!isModelAllowed) {
                     throw new Error(`HTTP 403 Forbidden: Model '${model}' is strictly blocked by your current Group Policy [${groupPolicy.name}].`);
                 }
+            }
+        }
+        
+        // 0.57 Idempotency Check (The "No Double Dip" Enforcer)
+        const effectiveIdempotencyKey = idempotencyKey || body.idempotency_key || (body.metadata?.idempotency_key);
+        if (effectiveIdempotencyKey) {
+            const keyHash = Bun.password.hashSync(effectiveIdempotencyKey, { algorithm: "argon2id" }).split('$').pop(); // Simple stable hash or just use the key if it's already a safe string
+            // Let's just use the string if it's short, or a crypto hash.
+            const cryptoHash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${user.id}_${effectiveIdempotencyKey}`))))
+                .map(b => b.toString(16).padStart(2, '0')).join('');
+
+            const [existing] = await sql`SELECT response_code, response_body FROM idempotency_keys WHERE key_hash = ${cryptoHash} AND user_id = ${user.id} AND expires_at > NOW()`;
+            if (existing) {
+                console.info(`[Dispatcher] Idempotency hit for key ${effectiveIdempotencyKey}, returning cached response.`);
+                const respBody = existing.response_body;
+                if (isStream) {
+                    // For stream, we can't easily replay the exact stream, but we can return the full text as a single event or an error.
+                    // Usually, idempotency for stream is tricky. In simple cases, we return 409 or the cached final response as an event.
+                    // Let's return the cached JSON as a single-event stream for now.
+                    const payload = `data: ${JSON.stringify(respBody)}\n\ndata: [DONE]\n\n`;
+                    return new Response(payload, {
+                        headers: { 'Content-Type': 'text/event-stream' }
+                    });
+                }
+                return skipTransform ? respBody : getProviderHandler(ChannelType.OPENAI).transformResponse(respBody); // Fallback to OpenAI transform if type unknown
             }
         }
 
@@ -267,11 +297,10 @@ export class UnifiedDispatcher {
                 circuitBreaker.recordSuccess(channelConfig.id, latencyMs);
 
                 // 5. Handle Response
-                // 5. Handle Response
 
                 if (isStream && response.body) {
                     const [clientStream, billingStream] = response.body.tee();
-                    this.handleStreamBilling(billingStream, body, user, token, channelConfig, model, preDeducted, lockId, isPackageFree, packageLockId, response.status, traceId, forwardBody);
+                    this.handleStreamBilling(billingStream, body, user, token, channelConfig, model, preDeducted, lockId, isPackageFree, packageLockId, response.status, traceId, forwardBody, effectiveIdempotencyKey, externalTaskId, externalUserId, externalWorkspaceId, externalFeatureType);
 
                     return new Response(clientStream, {
                         headers: {
@@ -316,16 +345,32 @@ export class UnifiedDispatcher {
                         isPackageFree,
                         statusCode: response.status,
                         traceId,
-                        requestBody: typeof forwardBody === 'string' ? forwardBody : '[FormData]',
                         responseBody: JSON.stringify(rawData),
-                        orgId: user.orgId
+                        orgId: user.orgId,
+                        externalTaskId,
+                        externalUserId,
+                        externalWorkspaceId,
+                        externalFeatureType
                     });
+
+                    // Save idempotency key
+                    if (effectiveIdempotencyKey) {
+                        const cryptoHash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${user.id}_${effectiveIdempotencyKey}`))))
+                            .map(b => b.toString(16).padStart(2, '0')).join('');
+                        await sql`
+                            INSERT INTO idempotency_keys (key_hash, user_id, response_code, response_body, expires_at)
+                            VALUES (${cryptoHash}, ${user.id}, ${response.status}, ${JSON.stringify(rawData)}, NOW() + INTERVAL '24 hours')
+                            ON CONFLICT (key_hash) DO NOTHING
+                        `.catch(() => { });
+                    }
 
                     const currentActive = keyConcurrencyMap.get(lockId);
                     if (currentActive) keyConcurrencyMap.set(lockId, Math.max(0, currentActive - 1));
                     if (packageLockId) releasePackageConcurrency(packageLockId);
 
-                    return skipTransform ? rawData : handler.transformResponse(rawData);
+                    // Clean model internal tokens from response
+                    const cleanedData = cleanResponseTokens(rawData);
+                    return skipTransform ? cleanedData : handler.transformResponse(cleanedData);
                 } else if (contentType.includes('text/event-stream') || contentType.includes('text/plain')) {
                     // Some providers return SSE format even for non-stream requests
                     const text = await response.text();
@@ -372,10 +417,24 @@ export class UnifiedDispatcher {
                         isPackageFree,
                         statusCode: response.status,
                         traceId,
-                        requestBody: typeof forwardBody === 'string' ? forwardBody : '[FormData]',
                         responseBody: JSON.stringify(rawData),
-                        orgId: user.orgId
+                        orgId: user.orgId,
+                        externalTaskId,
+                        externalUserId,
+                        externalWorkspaceId,
+                        externalFeatureType
                     });
+
+                    // Save idempotency key
+                    if (effectiveIdempotencyKey) {
+                        const cryptoHash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${user.id}_${effectiveIdempotencyKey}`))))
+                            .map(b => b.toString(16).padStart(2, '0')).join('');
+                        await sql`
+                            INSERT INTO idempotency_keys (key_hash, user_id, response_code, response_body, expires_at)
+                            VALUES (${cryptoHash}, ${user.id}, ${response.status}, ${JSON.stringify(rawData)}, NOW() + INTERVAL '24 hours')
+                            ON CONFLICT (key_hash) DO NOTHING
+                        `.catch(() => { });
+                    }
 
                     const currentActive = keyConcurrencyMap.get(lockId);
                     if (currentActive) keyConcurrencyMap.set(lockId, Math.max(0, currentActive - 1));
@@ -405,7 +464,11 @@ export class UnifiedDispatcher {
                         traceId,
                         requestBody: typeof forwardBody === 'string' ? forwardBody : '[FormData]',
                         responseBody: '[Binary Response]',
-                        orgId: user.orgId
+                        orgId: user.orgId,
+                        externalTaskId,
+                        externalUserId,
+                        externalWorkspaceId,
+                        externalFeatureType
                     });
 
                     const currentActive = keyConcurrencyMap.get(lockId);
@@ -447,7 +510,11 @@ export class UnifiedDispatcher {
                     statusCode: e.message?.startsWith('Status') ? parseInt(e.message.split(' ')[1]) : 500,
                     errorMessage: e.message || 'Unknown network error',
                     traceId,
-                    orgId: user.orgId
+                    orgId: user.orgId,
+                    externalTaskId,
+                    externalUserId,
+                    externalWorkspaceId,
+                    externalFeatureType
                 }).catch(() => { });
 
                 // Handle key exhaustion (401/403/429 with specific error messages)
@@ -497,7 +564,12 @@ export class UnifiedDispatcher {
         packageLockId: string | null,
         statusCode: number = 200,
         traceId?: string,
-        requestBody?: any
+        requestBody?: any,
+        idempotencyKey?: string,
+        externalTaskId?: string,
+        externalUserId?: string,
+        externalWorkspaceId?: string,
+        externalFeatureType?: string
     ) {
         (async () => {
             try {
@@ -572,8 +644,25 @@ export class UnifiedDispatcher {
                     traceId,
                     requestBody: typeof requestBody === 'string' ? requestBody : (requestBody ? JSON.stringify(requestBody) : undefined),
                     responseBody: completionText || undefined,
-                    orgId: user.orgId
+                    orgId: user.orgId,
+                    externalTaskId,
+                    externalUserId,
+                    externalWorkspaceId,
+                    externalFeatureType
                 });
+
+                // Save idempotency key for stream
+                if (idempotencyKey) {
+                    const cryptoHash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${user.id}_${idempotencyKey}`))))
+                        .map(b => b.toString(16).padStart(2, '0')).join('');
+                    // Reconstruct a standard response format if possible, or just the completion
+                    const mockResponse = { choices: [{ message: { content: completionText } }], usage: usageData };
+                    await sql`
+                        INSERT INTO idempotency_keys (key_hash, user_id, response_code, response_body, expires_at)
+                        VALUES (${cryptoHash}, ${user.id}, ${statusCode}, ${JSON.stringify(mockResponse)}, NOW() + INTERVAL '24 hours')
+                        ON CONFLICT (key_hash) DO NOTHING
+                    `.catch(() => { });
+                }
             } catch (e) {
                 console.error("[Stream Billing Error]", e);
                 // Refund pre-deducted quota natively on abrupt stream network drop before completion

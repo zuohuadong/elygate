@@ -33,6 +33,14 @@
             />
         </div>
         <div class="flex items-center gap-2">
+            <a 
+                href="/logs/export" 
+                download
+                class="flex items-center gap-2 px-3 py-2 bg-blue-500/10 border border-blue-500/20 rounded-lg text-sm text-blue-400 hover:bg-blue-500/20 transition-all"
+            >
+                <FileJson size={16} />
+                Export CSV
+            </a>
             <button class="flex items-center gap-2 px-3 py-2 bg-white/5 border border-[#30363d] rounded-lg text-sm hover:bg-white/10 transition-all">
                 <Clock size={16} />
                 Last 24 Hours

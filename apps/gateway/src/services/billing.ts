@@ -101,7 +101,6 @@ async function flushBillingQueue(retryCount = 0) {
 
         userAgg[task.userId] = (userAgg[task.userId] || 0) + cost;
         tokenAgg[task.tokenId] = (tokenAgg[task.tokenId] || 0) + cost;
-
         logInserts.push({
             userId: task.userId,
             tokenId: task.tokenId,
@@ -119,6 +118,10 @@ async function flushBillingQueue(retryCount = 0) {
             ua: task.ua || null,
             traceId: task.traceId || null,
             orgId: task.orgId || null,
+            externalTaskId: task.externalTaskId || null,
+            externalUserId: task.externalUserId || null,
+            externalWorkspaceId: task.externalWorkspaceId || null,
+            externalFeatureType: task.externalFeatureType || null,
             requestBody: task.requestBody || null,
             responseBody: task.responseBody || null
         });
@@ -137,6 +140,7 @@ async function flushBillingQueue(retryCount = 0) {
         await sql.begin(async (tx: any) => {
             const correctedUserAgg: Record<number, number> = {};
             const correctedTokenAgg: Record<number, number> = {};
+            const correctedOrgAgg: Record<number, number> = {};
 
             for (const task of tasks) {
                 const baseCost = task.isPackageFree ? 0 : calculateCost(
@@ -150,6 +154,9 @@ async function flushBillingQueue(retryCount = 0) {
 
                 correctedUserAgg[task.userId] = (correctedUserAgg[task.userId] || 0) + finalCost;
                 correctedTokenAgg[task.tokenId] = (correctedTokenAgg[task.tokenId] || 0) + finalCost;
+                if (task.orgId) {
+                    correctedOrgAgg[task.orgId] = (correctedOrgAgg[task.orgId] || 0) + finalCost;
+                }
 
                 const log = logInserts.find(l =>
                     l.userId === task.userId &&
@@ -169,10 +176,13 @@ async function flushBillingQueue(retryCount = 0) {
             for (const [id, cost] of Object.entries(correctedUserAgg)) {
                 await tx`UPDATE users SET used_quota = used_quota + ${cost} WHERE id = ${Number(id)}`;
             }
+            for (const [id, cost] of Object.entries(correctedOrgAgg)) {
+                await tx`UPDATE organizations SET used_quota = used_quota + ${cost} WHERE id = ${Number(id)}`;
+            }
             for (const log of logInserts) {
                 const [inserted] = await tx`
-                    INSERT INTO logs (user_id, token_id, channel_id, model_name, prompt_tokens, completion_tokens, cached_tokens, quota_cost, is_stream, status_code, error_message, elapsed_ms, ip_address, user_agent, trace_id, org_id)
-                    VALUES (${log.userId}, ${log.tokenId ?? null}, ${log.channelId !== undefined ? log.channelId : null}, ${log.modelName}, ${log.promptTokens}, ${log.completionTokens}, ${log.cachedTokens}, ${log.quotaCost}, ${log.isStream}, ${log.statusCode}, ${log.errorMessage}, ${log.elapsedMs}, ${log.ip}, ${log.ua}, ${log.traceId}, ${log.orgId})
+                    INSERT INTO logs (user_id, token_id, channel_id, model_name, prompt_tokens, completion_tokens, cached_tokens, quota_cost, is_stream, status_code, error_message, elapsed_ms, ip_address, user_agent, trace_id, org_id, external_task_id, external_user_id, external_workspace_id, external_feature_type)
+                    VALUES (${log.userId}, ${log.tokenId ?? null}, ${log.channelId !== undefined ? log.channelId : null}, ${log.modelName}, ${log.promptTokens}, ${log.completionTokens}, ${log.cachedTokens}, ${log.quotaCost}, ${log.isStream}, ${log.statusCode}, ${log.errorMessage}, ${log.elapsedMs}, ${log.ip}, ${log.ua}, ${log.traceId}, ${log.orgId}, ${log.externalTaskId}, ${log.externalUserId}, ${log.externalWorkspaceId}, ${log.externalFeatureType})
                     RETURNING id, created_at
                 `;
 
@@ -189,17 +199,51 @@ async function flushBillingQueue(retryCount = 0) {
             }
         });
 
-        const alarmThreshold = (await import('./optionCache')).optionCache.get('QuotaAlarmThreshold', 500000);
-        for (const [userIdStr, cost] of Object.entries(userAgg)) {
-            const userId = Number(userIdStr);
-            const [user] = await sql`SELECT quota, username FROM users WHERE id = ${userId}`;
-            if (user && user.quota < alarmThreshold) {
-                const { notificationService } = await import('./notification');
-                await notificationService.send(
-                    'Quota Alarm',
-                    `User ${user.username} (ID: ${userId}) has low quota: ${user.quota}. Please top up soon.`
-                );
-                await webhookService.trigger('user.low_quota', { userId, username: user.username, quota: user.quota });
+        // 5. Organization-level Quota Alerts
+        const uniqueOrgIds = [...new Set(tasks.map((t: any) => t.orgId).filter(Boolean))];
+        if (uniqueOrgIds.length > 0) {
+            const orgs = await sql`
+                SELECT id, name, quota, used_quota, alert_webhook_url, alert_threshold_pct, last_alert_at
+                FROM organizations
+                WHERE id IN ${sql(uniqueOrgIds)}
+            `;
+
+            for (const org of orgs) {
+                if (!org.alert_webhook_url) continue;
+
+                const threshold = org.alert_threshold_pct || 80;
+                const usagePct = (Number(org.used_quota) / Math.max(Number(org.quota), 1)) * 100;
+
+                if (usagePct >= threshold) {
+                    const lastAlert = org.last_alert_at ? new Date(org.last_alert_at).getTime() : 0;
+                    const oneDay = 24 * 60 * 60 * 1000;
+
+                    if (Date.now() - lastAlert > oneDay) {
+                        try {
+                            console.log(`[Billing/Alert] Sending quota alert for organization: ${org.name}`);
+                            await fetch(org.alert_webhook_url, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    event: 'org.quota_alert',
+                                    orgId: org.id,
+                                    orgName: org.name,
+                                    usagePct: usagePct.toFixed(1),
+                                    thresholdPct: threshold,
+                                    timestamp: new Date().toISOString()
+                                })
+                            });
+
+                            await sql`
+                                UPDATE organizations 
+                                SET last_alert_at = NOW() 
+                                WHERE id = ${org.id}
+                            `;
+                        } catch (err: any) {
+                            console.error(`[Billing/Error] Failed to send webhook alert for org ${org.id}:`, err.message);
+                        }
+                    }
+                }
             }
         }
 

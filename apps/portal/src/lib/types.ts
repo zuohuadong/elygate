@@ -15,7 +15,8 @@ export interface PortalPolicy {
 	allowedModels: string[];
 	deniedModels: string[];
 	allowedSubnets: string;
-	quotaAlarmThreshold: number;
+	alertThresholdPct: number;
+	alertWebhookUrl: string;
 }
 
 export interface PortalMember {

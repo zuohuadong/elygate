@@ -19,8 +19,8 @@ type LogDetailRow = {
     response_body: string | null;
 };
 
-export const load: PageServerLoad = async ({ params, parent }) => {
-    const { org } = await parent();
+export const load: PageServerLoad = async ({ params, locals }) => {
+    const { org } = locals as any;
     
     const [log] = await sql`
         SELECT l.*, ld.request_body, ld.response_body, u.username

@@ -104,18 +104,8 @@ WHERE ld.log_created_at IS NULL
 CREATE UNIQUE INDEX IF NOT EXISTS idx_log_details_log_id ON log_details(log_id);
 CREATE INDEX IF NOT EXISTS idx_log_details_log_ref ON log_details(log_id, log_created_at);
 
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1
-        FROM pg_constraint
-        WHERE conname = 'log_details_log_ref_fkey'
-    ) THEN
-        ALTER TABLE log_details
-        ADD CONSTRAINT log_details_log_ref_fkey
-        FOREIGN KEY (log_id, log_created_at)
-        REFERENCES logs(id, created_at)
-        ON DELETE CASCADE
-        DEFERRABLE INITIALLY DEFERRED;
-    END IF;
-END $$;
+-- Note: We intentionally do NOT add a foreign key constraint here because
+-- 'logs' is a partitioned table, and PostgreSQL does not support foreign keys
+-- referencing partitioned tables. Instead, we rely on application-level
+-- consistency (the billing service inserts both log and log_details in the
+-- same transaction).

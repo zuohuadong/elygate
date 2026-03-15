@@ -17,8 +17,8 @@ type LogRow = {
     has_details: boolean;
 };
 
-export const load: PageServerLoad = async ({ parent, url }) => {
-    const { org } = await parent();
+export const load: PageServerLoad = async ({ locals, url }) => {
+    const { org } = locals as any;
     
     // Simple pagination and filtering
     const page = Number(url.searchParams.get('page') || '1');

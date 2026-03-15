@@ -82,6 +82,10 @@ export interface BillingContext {
     ua?: string;
     orgId?: number;
     traceId?: string;
+    externalTaskId?: string;
+    externalUserId?: string;
+    externalWorkspaceId?: string;
+    externalFeatureType?: string;
     requestBody?: string;
     responseBody?: string;
 }
