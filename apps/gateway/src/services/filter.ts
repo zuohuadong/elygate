@@ -28,7 +28,7 @@ export function cleanModelTokens(text: string): string {
     for (const pattern of MODEL_INTERNAL_TOKENS) {
         cleaned = cleaned.replace(pattern, '');
     }
-    return cleaned.trim();
+    return cleaned;
 }
 
 /**
