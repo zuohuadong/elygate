@@ -325,6 +325,14 @@ export class UnifiedDispatcher {
                 if (contentType.includes('application/json')) {
                     const rawData = await response.json();
 
+                    // Check for upstream overload errors that should trigger retry
+                    const isOverloadError = this.checkUpstreamOverload(rawData);
+                    if (isOverloadError) {
+                        console.warn(`[Dispatcher] Upstream overload detected for model ${model} on channel ${channelConfig.name}, will retry with another channel`);
+                        await circuitBreaker.recordError(channelConfig.id, 503);
+                        throw new Error(`Upstream overload: ${JSON.stringify(rawData)}`);
+                    }
+
                     // Usage extraction and billing
                     let { promptTokens, completionTokens } = handler.extractUsage(rawData);
 
@@ -548,6 +556,56 @@ export class UnifiedDispatcher {
         }
 
         throw new Error(`All candidate channels failed. Last error: ${lastError?.message || 'Unknown network error'}`);
+    }
+
+    /**
+     * Check if upstream response indicates an overload/error that should trigger retry
+     * Some providers return 200 status but with an error message in the body
+     */
+    private static checkUpstreamOverload(data: any): boolean {
+        if (!data || typeof data !== 'object') return false;
+
+        // Check for error in choices[0].delta.content (streaming format)
+        if (data.choices && Array.isArray(data.choices) && data.choices.length > 0) {
+            const choice = data.choices[0];
+            const content = choice.delta?.content || choice.message?.content || '';
+            if (typeof content === 'string') {
+                const overloadPatterns = [
+                    /负载过高/i,
+                    /overload/i,
+                    /too many requests/i,
+                    /rate limit/i,
+                    /请稍后再试/i,
+                    /temporarily unavailable/i,
+                    /service unavailable/i,
+                    /请稍后/i,
+                ];
+                for (const pattern of overloadPatterns) {
+                    if (pattern.test(content)) return true;
+                }
+            }
+        }
+
+        // Check for error object in response
+        if (data.error) {
+            const errorMsg = data.error.message || data.error || '';
+            if (typeof errorMsg === 'string') {
+                const overloadPatterns = [
+                    /负载过高/i,
+                    /overload/i,
+                    /too many requests/i,
+                    /rate limit/i,
+                    /请稍后再试/i,
+                    /temporarily unavailable/i,
+                    /service unavailable/i,
+                ];
+                for (const pattern of overloadPatterns) {
+                    if (pattern.test(errorMsg)) return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     // URL building is now handled by utils/url.ts buildUpstreamUrl()
