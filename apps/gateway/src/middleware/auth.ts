@@ -110,7 +110,7 @@ export const authPlugin = new Elysia({ name: 'auth' })
             }
 
             const [sessionRow] = await sql`
-                SELECT s.user_id, s.expires_at, u.id, u.username, u."group", u.role, u.quota, u.status, u.org_id
+                SELECT s.user_id, s.expires_at, u.id, u.username, u."group", u.role, u.quota, u.status, u.org_id, u.used_quota
                 FROM session s
                 JOIN users u ON s.user_id = u.id
                 WHERE s.token = ${auth_session.value}
@@ -155,7 +155,7 @@ export const authPlugin = new Elysia({ name: 'auth' })
                 orgId: sessionRow.org_id,
                 role: sessionRow.role,
                 quota: Number(sessionRow.quota),
-                usedQuota: Number(sessionRow.usedQuota),
+                usedQuota: Number(sessionRow.used_quota || 0),
                 status: sessionRow.status,
                 currency: sessionRow.currency || 'USD'
             };

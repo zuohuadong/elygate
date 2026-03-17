@@ -251,7 +251,7 @@
                         <!-- GitHub -->
                         {#if oauthConfig.github}
                             <a
-                                href={`${API_BASE.replace("/api", "")}/api/github`}
+                                href="/api/github"
                                 aria-label="Login with GitHub"
                                 class="flex items-center justify-center px-6 py-2.5 bg-white/10 hover:bg-white/15 border border-white/10 rounded-xl text-white text-sm transition-all"
                             >
@@ -264,7 +264,7 @@
                         <!-- Discord -->
                         {#if oauthConfig.discord}
                             <a
-                                href={`${API_BASE.replace("/api", "")}/api/discord`}
+                                href="/api/discord"
                                 aria-label="Login with Discord"
                                 class="flex items-center justify-center px-6 py-2.5 bg-white/10 hover:bg-white/15 border border-white/10 rounded-xl text-white text-sm transition-all"
                             >
@@ -277,7 +277,7 @@
                         <!-- Telegram -->
                         {#if oauthConfig.telegram}
                             <a
-                                href={`${API_BASE.replace("/api", "")}/api/telegram`}
+                                href="/api/telegram"
                                 aria-label="Login with Telegram"
                                 class="flex items-center justify-center px-6 py-2.5 bg-white/10 hover:bg-white/15 border border-white/10 rounded-xl text-white text-sm transition-all"
                             >

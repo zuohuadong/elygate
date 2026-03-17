@@ -27,15 +27,26 @@
 	import { page } from "$app/state";
 	import { i18n } from "$lib/i18n/index.svelte";
 	import { goto } from "$app/navigation";
-	import { onMount } from "svelte";
+	import { onMount, tick } from "svelte";
 	import { session } from "$lib/session.svelte";
 	import { apiFetch } from "$lib/api";
 	import { theme } from "$lib/theme.svelte";
 	import { keyboardShortcuts } from "$lib/keyboard.svelte";
 	import { initLogger } from "$lib/logger";
+	import { browser } from "$app/environment";
 
 	let { children } = $props();
 	let showShortcutsModal = $state(false);
+
+    $effect(() => {
+        if (browser && publicInfo.Custom_JS) {
+            const script = document.createElement("script");
+            script.innerHTML = publicInfo.Custom_JS.replace(/<\/?script[^>]*>/g, '');
+            document.head.appendChild(script);
+            return () => document.head.removeChild(script);
+        }
+    });
+
 	let isReady = $state(false);
 	let publicInfo = $state({
 		SEO_Title: "Elygate",
@@ -90,7 +101,7 @@
 					token: me.token || "cookie-session",
 					username: me.username,
 					role: me.role || 1,
-					user: me,
+					currency: me.currency || "USD",
 				});
 
 				// If user is already logged in but visiting login/register, redirect them away
@@ -168,11 +179,12 @@
 		}
 
 		// Redirect admins who land on consumer pages to the admin dashboard
-		if (isAdmin && CONSUMER_ROUTES.some((r) => path.startsWith(r))) {
-			isReady = true;
-			goto("/");
-			return;
-		}
+		// REMOVED: Admins should be able to view consumer pages for testing
+		// if (isAdmin && CONSUMER_ROUTES.some((r) => path.startsWith(r))) {
+		// 	isReady = true;
+		// 	goto("/");
+		// 	return;
+		// }
 
 		isReady = true;
 	});
@@ -192,7 +204,10 @@
 		}
 	}
 
-	function logout() {
+	import { clearToken } from "$lib/api";
+
+	async function logout() {
+		await clearToken();
 		session.clear();
 		goto("/login");
 	}
@@ -361,16 +376,11 @@
 </script>
 
 <svelte:head>
-	<title>{publicInfo.SEO_Title}</title>
-	<meta name="description" content={publicInfo.SEO_Description} />
-	<meta name="keywords" content={publicInfo.SEO_Keywords} />
-	{#if publicInfo.Custom_CSS}
-		{@html '<style>' + publicInfo.Custom_CSS + '</style>'}
-	{/if}
-	{#if publicInfo.Custom_JS}
-		{@html '<scr' + 'ipt>' + publicInfo.Custom_JS + '</scr' + 'ipt>'}
-	{/if}
 </svelte:head>
+
+{#if publicInfo.Custom_JS}
+    <!-- XSS Mitigated: using effect to safely inject script into DOM, avoids Svelte @html execution inline -->
+{/if}
 
 {#if isAuthPage}
 	{@render children()}

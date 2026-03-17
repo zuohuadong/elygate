@@ -180,7 +180,7 @@ export const authRouter = new Elysia()
     })
     // Login route
     .post('/login', async ({ body, set, request, cookie: { auth_session } }: any) => {
-        const lang = getLangFromHeader(request.headers);
+        const lang = getLangFromHeader(request.headers.get('accept-language'));
         const clientIP = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown';
 
         try {
@@ -233,7 +233,7 @@ export const authRouter = new Elysia()
             auth_session.set({
                 value: sessionToken,
                 httpOnly: true,
-                secure: false,
+                secure: process.env.NODE_ENV === 'production',
                 sameSite: 'lax',
                 maxAge: 7 * 86400,
                 path: '/'

@@ -1,10 +1,22 @@
 import type { Handle } from '@sveltejs/kit';
 import { sql } from '$lib/server/db';
 
-// Basic in-memory rate limiter for a production demo
+// Basic in-memory rate limiter with periodic cleanup to prevent memory leaks
 const rateLimits = new Map<string, { count: number, lastReset: number }>();
 const LIMIT = 100; // requests
 const WINDOW = 60 * 1000; // 1 minute
+
+// Cleanup interval to prevent memory leak
+if (typeof setInterval !== 'undefined') {
+    setInterval(() => {
+        const now = Date.now();
+        for (const [ip, bucket] of rateLimits.entries()) {
+            if (now - bucket.lastReset > WINDOW * 2) {
+                rateLimits.delete(ip);
+            }
+        }
+    }, WINDOW * 5); // Clean up every 5 minutes
+}
 
 export const handle: Handle = async ({ event, resolve }) => {
     // 1. Rate Limiting
@@ -36,17 +48,19 @@ export const handle: Handle = async ({ event, resolve }) => {
             LIMIT 1
         `;
 
-        if (session && session.org_id) {
-            (event.locals as any).user = {
-                id: session.user_id,
-                username: session.username,
-                role: session.role
-            };
+    if (session) {
+        (event.locals as any).user = {
+            id: session.user_id,
+            username: session.username,
+            role: session.role
+        };
+        if (session.org_id) {
             (event.locals as any).org = {
                 id: session.org_id,
                 name: session.org_name
             };
         }
+    }
     }
 
     const response = await resolve(event);

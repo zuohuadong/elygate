@@ -156,8 +156,6 @@ async function init() {
   };
 
   const patches = [
-    'packages/db/src/patch_v1_schema_fix.sql',
-    'packages/db/src/patch_v2_channel_status.sql',
     'packages/db/src/phase7_updates.sql',
     'packages/db/src/phase8_org_alerting.sql',
     'packages/db/src/phase9_external_metadata.sql',
