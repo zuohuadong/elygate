@@ -7,7 +7,7 @@ import { matchPattern } from '../utils/pattern';
  * /v1/models endpoint - lists available models filtered by user permissions
  */
 export const modelsRouter = new Elysia()
-    .get('/models', ({ user, token, set }: any) => {
+    .get('/models', ({ user, token, set, query }: any) => {
         if (!user || !token) {
             set.status = 401;
             return { success: false, message: "Unauthorized: Auth context missing" };
@@ -15,6 +15,7 @@ export const modelsRouter = new Elysia()
 
         const u = user as UserRecord;
         const t = token as TokenRecord;
+        const includeChannels = query?.include_channels === 'true' || query?.include_channels === true;
 
         let uniqueModels = Array.from(memoryCache.channelRoutes.keys());
 
@@ -66,15 +67,31 @@ export const modelsRouter = new Elysia()
 
         return {
             object: 'list',
-            data: uniqueModels.map(model => ({
-                id: model,
-                object: 'model',
-                created: Math.floor(Date.now() / 1000),
-                owned_by: 'elygate',
-                permission: [],
-                root: model,
-                parent: null,
-            }))
+            data: uniqueModels.map(model => {
+                const modelData: any = {
+                    id: model,
+                    object: 'model',
+                    created: Math.floor(Date.now() / 1000),
+                    owned_by: 'elygate',
+                    permission: [],
+                    root: model,
+                    parent: null,
+                };
+
+                // Include channel information if requested (for admin)
+                if (includeChannels) {
+                    const channels = memoryCache.selectChannels(model, u.group);
+                    modelData.channels = channels.map(ch => ({
+                        id: ch.id,
+                        name: ch.name,
+                        type: ch.type,
+                        status: ch.status,
+                        priority: ch.priority,
+                    }));
+                }
+
+                return modelData;
+            })
         };
     })
     .get('/models/:model', ({ user, token, params, set }: any) => {

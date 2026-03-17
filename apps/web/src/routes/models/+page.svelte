@@ -181,7 +181,7 @@
         isLoading = true;
         error = "";
         try {
-            const res = await apiFetch<any>("/v1/models");
+            const res = await apiFetch<any>("/v1/models?include_channels=true");
             if (Array.isArray(res)) {
                 models = res;
             } else if (res && Array.isArray((res as any).data)) {
