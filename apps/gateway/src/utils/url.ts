@@ -24,6 +24,11 @@ export function buildUpstreamUrl(
         return `${base}/v1beta/models/${model}${endpoint}`;
     }
 
+    // Dakka Draw API endpoint
+    if (config.type === ChannelType.DAKKA) {
+        return `${base}/v1/draw/completions`;
+    }
+
     switch (endpointType) {
         case 'chat': return `${base}/v1/chat/completions`;
         case 'embeddings': return `${base}/v1/embeddings`;
@@ -83,6 +88,11 @@ export function buildTestUrl(
             return base.includes(':generateContent') ? base : `${root}/models/${model}:generateContent`;
         }
         return `${base}/v1beta/models/${model}:generateContent`;
+    }
+
+    // Dakka Draw API
+    if (channelType === ChannelType.DAKKA) {
+        return `${base}/v1/draw/completions`;
     }
 
     // OpenAI-compatible

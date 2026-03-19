@@ -280,7 +280,13 @@
                             <option value={18}>Xunfei Spark</option>
                             <option value={23}>Google Gemini</option>
                             <option value={24}>Midjourney</option>
-                            <option value={41}>Nvidia AI</option>
+                            <option value={31}>DeepSeek</option>
+                            <option value={33}>Cloudflare Worker AI</option>
+                            <option value={34}>Flux</option>
+                            <option value={35}>Udio</option>
+                            <option value={41}>Nvidia API</option>
+                            <option value={42}>Dakka Draw API (Sora/Veo)</option>
+                            <option value={100}>ComfyUI Workspace</option>
                         </select>
                     </div>
                 </div>
