@@ -19,23 +19,24 @@ const authCache = new LRUCache<string, { token: TokenRecord, user: UserRecord }>
 let authSyncPromise: Promise<void> | null = null;
 /**
  * Flush authentication cache when a token or user is updated in the DB.
- * Subscribes to PG NOTIFY.
+ * Subscribes to PG NOTIFY via @elygate/pg-listen (zero-dependency, Bun native TCP).
  * Guaranteed to only initialize once.
  */
 async function initAuthSync() {
     if (authSyncPromise) return authSyncPromise;
     authSyncPromise = (async () => {
         try {
-            // @ts-expect-error: Loading raw JS bundle
-            const { default: postgres } = await import('../services/postgres_bundled.js');
-            const sqlListen = postgres(process.env.DATABASE_URL!);
-
-            await sqlListen.listen('auth_update', (payload: string | null) => {
-                if (payload) {
-                    authCache.delete(payload);
-                    console.log(`[Auth/Cache] Flushed cache via DB notification: ${payload}`);
+            const { createPgListener } = await import('@elygate/pg-listen');
+            createPgListener(
+                process.env.DATABASE_URL!,
+                ['auth_update'],
+                (_channel, payload) => {
+                    if (payload) {
+                        authCache.delete(payload);
+                        console.log(`[Auth/Cache] Flushed cache via DB notification: ${payload}`);
+                    }
                 }
-            });
+            );
             console.log('[Auth/Cache] Listener established.');
         } catch (e) {
             console.error('[Auth/Cache] Failed setting up listener:', e);

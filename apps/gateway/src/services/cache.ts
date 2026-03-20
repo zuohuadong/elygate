@@ -569,24 +569,24 @@ export const memoryCache = {
 
     /**
      * Initialize PostgreSQL LISTEN for multi-instance sync.
+     * Uses @elygate/pg-listen (zero-dependency, Bun native TCP).
      * Guaranteed to only initialize once.
      */
     async initSync() {
         if (this.syncPromise) return this.syncPromise;
 
         this.syncPromise = (async () => {
-            console.log('[Cache] Initializing PostgreSQL LISTEN for sync...');
+            console.log('[Cache] Initializing pg-listen for sync...');
             try {
-                // @ts-expect-error: Loading raw JS bundle
-                const { default: postgres } = await import('./postgres_bundled.js');
-                const sqlListen = postgres(process.env.DATABASE_URL!);
-
-                await sqlListen.listen('refresh_cache', (payload: string) => {
-                    console.log(`[Cache] Received sync signal: ${payload}`);
-                    if (payload === 'refresh_cache') {
+                const { createPgListener } = await import('@elygate/pg-listen');
+                createPgListener(
+                    process.env.DATABASE_URL!,
+                    ['refresh_cache'],
+                    (_channel, payload) => {
+                        console.log(`[Cache] Received sync signal: ${payload}`);
                         this.refresh(true).catch(console.error);
                     }
-                });
+                );
                 console.log('[Cache] Multi-instance sync listener established.');
             } catch (e) {
                 console.error('[Cache] Failed setting up listener:', e);
@@ -599,3 +599,4 @@ export const memoryCache = {
 
 // Start synchronization listener safely
 memoryCache.initSync().catch(e => console.error('[Cache] Failed to init sync:', e));
+
