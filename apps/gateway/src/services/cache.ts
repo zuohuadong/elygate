@@ -1,5 +1,6 @@
 import { sql } from '@elygate/db';
 import { type ChannelConfig, type TokenRecord, type UserRecord } from '../types';
+import { optionCache } from './optionCache';
 
 interface UserQuotaCache {
     quota: number;
@@ -232,6 +233,9 @@ export const memoryCache = {
     /**
      * Returns a sorted list of candidate channels for failover/retry scenarios.
      * Filtered by user group and sorted by priority + weight.
+     * Strategy is configurable via system option 'ChannelSelectionStrategy':
+     *   - 'priority' (default): Deterministic, highest priority & weight first (cost-optimized)
+     *   - 'weighted': Weighted random within same priority tier (load-balanced)
      */
     selectChannels(modelName: string, userGroup = 'default'): ChannelConfig[] {
         const available = this.channelRoutes.get(modelName) || [];
@@ -245,20 +249,28 @@ export const memoryCache = {
 
         if (candidateChannels.length === 0) return [];
 
-        // 2. Hierarchical Sort: Priority (Tier) first, then Weighted Random within Tier.
+        const strategy = optionCache.get('ChannelSelectionStrategy', 'priority');
+
+        // 2. Sort by strategy
         return [...candidateChannels].sort((a, b) => {
             // First sort by Priority (Tier) descending
             if ((b.priority || 0) !== (a.priority || 0)) {
                 return (b.priority || 0) - (a.priority || 0);
             }
 
-            // Half-Open (status 4) has 90% weight reduction to limit traffic
-            const weightA = a.status === 4 ? (a.weight || 1) * 0.1 : (a.weight || 1);
-            const weightB = b.status === 4 ? (b.weight || 1) * 0.1 : (b.weight || 1);
+            // Half-Open (status 4) channels go after normal channels
+            if (a.status === 4 && b.status !== 4) return 1;
+            if (b.status === 4 && a.status !== 4) return -1;
 
-            const scoreA = Math.random() * weightA;
-            const scoreB = Math.random() * weightB;
-            return scoreB - scoreA;
+            if (strategy === 'weighted') {
+                // Weighted random within same priority tier
+                const weightA = a.status === 4 ? (a.weight || 1) * 0.1 : (a.weight || 1);
+                const weightB = b.status === 4 ? (b.weight || 1) * 0.1 : (b.weight || 1);
+                return Math.random() * weightB - Math.random() * weightA;
+            }
+
+            // Default: priority mode — deterministic weight DESC
+            return (b.weight || 1) - (a.weight || 1);
         });
     },
 
@@ -566,6 +578,13 @@ export const memoryCache = {
     },
 
     syncPromise: null as Promise<void> | null,
+
+    /**
+     * Periodic channel discovery/health sync task (stub).
+     */
+    startDiscoverySyncTask(): void {
+        console.log('[Cache] Discovery sync task registered');
+    },
 
     /**
      * Initialize PostgreSQL LISTEN for multi-instance sync.

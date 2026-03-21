@@ -171,12 +171,6 @@ export const authRouter = new Elysia()
             set.status = 500;
             return { success: false, message: e?.message || (lang === 'zh' ? '服务器内部错误' : 'Internal server error') };
         }
-    }, {
-        body: t.Object({
-            username: t.String(),
-            password: t.String(),
-            inviteCode: t.Optional(t.String())
-        })
     })
     // Login route
     .post('/login', async ({ body, set, request, cookie: { auth_session } }: any) => {
@@ -250,8 +244,6 @@ export const authRouter = new Elysia()
             set.status = 500;
             return { success: false, message: e?.message || 'Internal server error' };
         }
-    }, {
-        body: t.Object({ username: t.String(), password: t.String() })
     })
     .post('/logout', async ({ cookie: { auth_session } }: any) => {
         if (auth_session.value) { await sql`DELETE FROM session WHERE token = ${auth_session.value}`; }

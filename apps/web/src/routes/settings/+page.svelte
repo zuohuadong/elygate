@@ -46,6 +46,7 @@
         Custom_JS: "",
         WebhookURL: "",
         Notify_On_Channel_Offline: "true",
+        ChannelSelectionStrategy: "priority",
     });
 
     let isLoading = $state(true);
@@ -194,6 +195,32 @@
                             bind:value={settings.ServerName}
                             class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
                         />
+                    </div>
+                    <div class="space-y-2">
+                        <label
+                            for="channel-strategy"
+                            class="text-sm font-medium text-slate-700 dark:text-slate-300"
+                            >{i18n.lang === "zh" ? "渠道选择策略" : "Channel Selection Strategy"}</label
+                        >
+                        <select
+                            id="channel-strategy"
+                            bind:value={settings.ChannelSelectionStrategy}
+                            class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                        >
+                            <option value="priority">{i18n.lang === "zh" ? "优先级优先（成本优先）" : "Priority First (Cost Optimized)"}</option>
+                            <option value="weighted">{i18n.lang === "zh" ? "加权随机（负载均衡）" : "Weighted Random (Load Balanced)"}</option>
+                        </select>
+                        <p class="text-xs text-slate-500">
+                            {#if settings.ChannelSelectionStrategy === "priority"}
+                                {i18n.lang === "zh"
+                                    ? "始终先尝试最高优先级和权重的渠道，失败后按顺序回退到下一个"
+                                    : "Always try highest priority/weight channel first, fallback in order on failure"}
+                            {:else}
+                                {i18n.lang === "zh"
+                                    ? "同优先级内按权重随机选择渠道，实现负载均衡"
+                                    : "Randomly select channels weighted by weight within same priority tier"}
+                            {/if}
+                        </p>
                     </div>
                 </div>
             </div>
