@@ -2,7 +2,7 @@
     import { CreditCard, History, WalletCards, Activity, TrendingUp, Target, Clock } from "lucide-svelte";
     import { apiFetch } from "$lib/api";
     import { i18n } from "$lib/i18n/index.svelte";
-    import { onMount } from "svelte";
+    
     import { session } from "$lib/session.svelte";
 
     interface UserStats {
@@ -13,12 +13,29 @@
             total_completion_tokens: number;
             avg_latency: number;
         };
-        models: any[];
-        time_series: any[];
+        models: Record<string, any>[];
+        time_series: Record<string, any>[];
     }
 
-    let userInfo = $state<any>(null);
-    let logs = $state<any[]>([]);
+    interface UserInfo {
+        id: number;
+        username: string;
+        quota: number;
+        used_quota: number;
+        role: number;
+        group: string;
+    }
+
+    interface LogEntry {
+        modelName: string;
+        createdAt: string;
+        promptTokens: number;
+        completionTokens: number;
+        quotaCost: number;
+    }
+
+    let userInfo = $state<UserInfo | null>(null);
+    let logs = $state<LogEntry[]>([]);
     let stats = $state<UserStats | null>(null);
     let activePeriod = $state("today");
     let isLoading = $state(true);
@@ -37,21 +54,21 @@
         isLoading = true;
         try {
             const [userData, logsData, statsData] = await Promise.all([
-                apiFetch<any>("/user/info"),
-                apiFetch<any>("/user/logs?limit=5"),
+                apiFetch<Record<string, unknown>>("/user/info"),
+                apiFetch<Record<string, unknown>>("/user/logs?limit=5"),
                 apiFetch<UserStats>(`/user/dashboard/stats?period=${activePeriod}`),
             ]);
             userInfo = userData;
             logs = logsData.data || logsData;
             stats = statsData;
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error(err);
         } finally {
             isLoading = false;
         }
     }
 
-    onMount(() => {
+    $effect(() => {
         loadData();
     });
 
@@ -67,7 +84,7 @@
         message = { type: "", text: "" };
 
         try {
-            const res = await apiFetch<any>("/redemptions/redeem", {
+            const res = await apiFetch<Record<string, unknown>>("/redemptions/redeem", {
                 method: "POST",
                 body: JSON.stringify({ key: topupCode.trim() }),
             });
@@ -77,10 +94,10 @@
             };
             topupCode = "";
             await loadData();
-        } catch (err: any) {
+        } catch (err: unknown) {
             message = {
                 type: "error",
-                text: err.message || i18n.t.common.failed,
+                text: err instanceof Error ? err instanceof Error ? err.message : String(err) : i18n.t.common.failed,
             };
         } finally {
             isRedeeming = false;

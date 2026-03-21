@@ -1,10 +1,12 @@
+import { log } from '../services/logger';
+import { getErrorMessage } from '../utils/error';
 import { sql } from '@elygate/db';
 import { memoryCache } from './cache';
 import { circuitBreaker } from './circuitBreaker';
 import { billAndLog, preCheckAndDecrement, reconcileQuota } from './billing';
 import { calculateCost } from './ratio';
 import { ChannelType, getProviderHandler } from '../providers';
-import { type TokenRecord, type UserRecord, type ChannelConfig } from '../types';
+import type { TokenRecord, type UserRecord, type ChannelConfig } from '../types';
 import { getChannelKeys } from './encryption';
 import { isRateLimited, isPackageRateLimited, waitForPackageConcurrency, packageConcurrencyMap, releasePackageConcurrency, getPackageLockId } from './ratelimit';
 import { buildUpstreamUrl } from '../utils/url';
@@ -15,7 +17,7 @@ import { WebSearchPlugin } from './plugins/search';
 
 export interface DispatchOptions {
     model: string;
-    body: any;
+    body: Record<string, any>;
     user: UserRecord;
     token: TokenRecord;
     endpointType: 'chat' | 'embeddings' | 'images' | 'audio' | 'audio/speech' | 'audio/transcriptions' | 'audio/translations' | 'moderations' | 'rerank' | 'video' | 'responses' | 'native-gemini';
@@ -97,7 +99,7 @@ export class UnifiedDispatcher {
 
             const [existing] = await sql`SELECT response_code, response_body FROM idempotency_keys WHERE key_hash = ${cryptoHash} AND user_id = ${user.id} AND expires_at > NOW()`;
             if (existing) {
-                console.info(`[Dispatcher] Idempotency hit for key ${effectiveIdempotencyKey}, returning cached response.`);
+                log.info(`[Dispatcher] Idempotency hit for key ${effectiveIdempotencyKey}, returning cached response.`);
                 const respBody = existing.response_body;
                 const cleanedRespBody = cleanResponseTokens(respBody);
                 if (isStream) {
@@ -125,7 +127,7 @@ export class UnifiedDispatcher {
             if (model.endsWith(':search')) model = model.slice(0, -7);
             const query = body.messages?.[body.messages.length - 1]?.content || body.prompt || '';
             if (query) {
-                console.log(`[SAG] Triggering web search for model ${model}: "${query}"`);
+                log.info(`[SAG] Triggering web search for model ${model}: "${query}"`);
                 const searchResults = await WebSearchPlugin.search(query);
                 if (body.messages) {
                     body.messages.push({ role: 'system', content: `[SEARCH CONTEXT]\n${searchResults}` });
@@ -156,20 +158,20 @@ export class UnifiedDispatcher {
             throw new Error(`No available or authorized channel found for model: ${model}`);
         }
 
-        let lastError: any = null;
+        let lastError: unknown = null;
         const channels = candidateChannels as ChannelConfig[];
 
         for (const channelConfig of channels) {
-            const traceId = (body as any).trace_id || `tr_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+            const traceId = (body as Record<string, any>).trace_id || `tr_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
             const handler = getProviderHandler(channelConfig.type);
 
             // 1. Key Selection
             const allKeys = getChannelKeys(channelConfig.key);
-            const statusMap = (channelConfig as any).keyStatus || {};
+            const statusMap = (channelConfig as Record<string, any>).keyStatus || {};
             const availableKeys = allKeys.filter(k => statusMap[k] !== 'exhausted');
 
             if (availableKeys.length === 0) {
-                console.warn(`[Dispatcher] Channel ${channelConfig.id} has no available keys left.`);
+                log.warn(`[Dispatcher] Channel ${channelConfig.id} has no available keys left.`);
                 continue;
             }
 
@@ -187,7 +189,7 @@ export class UnifiedDispatcher {
                 const nvidiaRpmLimit = 40;
                 const nvidiaKey = `channel_${channelConfig.id}_key_${activeKeyIndex}`;
                 if (await isRateLimited(nvidiaKey, nvidiaRpmLimit)) {
-                    console.warn(`[Dispatcher] NVIDIA Channel ${channelConfig.id} Key ${activeKeyIndex} hit global 40 RPM limit, skipping.`);
+                    log.warn(`[Dispatcher] NVIDIA Channel ${channelConfig.id} Key ${activeKeyIndex} hit global 40 RPM limit, skipping.`);
                     continue;
                 }
             }
@@ -197,7 +199,7 @@ export class UnifiedDispatcher {
             if (channelConfig.keyConcurrencyLimit > 0) {
                 const acquired = await waitForConcurrencyRelease(lockId, channelConfig.keyConcurrencyLimit);
                 if (!acquired) {
-                    console.warn(`[Dispatcher] Channel ${channelConfig.id} Key ${activeKeyIndex} concurrency maxed out (${channelConfig.keyConcurrencyLimit}), skipping after 15s wait.`);
+                    log.warn(`[Dispatcher] Channel ${channelConfig.id} Key ${activeKeyIndex} concurrency maxed out (${channelConfig.keyConcurrencyLimit}), skipping after 15s wait.`);
                     // Let the loop continue to try the NEXT candidate channel in the fallback chain!
                     continue;
                 }
@@ -220,16 +222,16 @@ export class UnifiedDispatcher {
             }
 
             const upstreamUrl = buildUpstreamUrl(channelConfig, upstreamModel, endpointType, isStream);
-            console.log(`[Dispatcher] Selected channel: ${channelConfig.name} (id=${channelConfig.id}), upstream: ${upstreamUrl}, model: ${upstreamModel}`);
+            log.info(`[Dispatcher] Selected channel: ${channelConfig.name} (id=${channelConfig.id}), upstream: ${upstreamUrl}, model: ${upstreamModel}`);
 
             // 2.5 Prepare Body & Headers
-            let forwardBody: any;
+            let forwardBody: Record<string, any>;
             if (isFormData) {
                 if (fetchHeaders instanceof Headers) fetchHeaders.delete('Content-Type');
-                else delete (fetchHeaders as any)['Content-Type'];
+                else delete (fetchHeaders as Record<string, string>)['Content-Type'];
 
                 forwardBody = new FormData();
-                const sourceBody = body as any;
+                const sourceBody = body as Record<string, any>;
                 for (const key in sourceBody) {
                     if (key === 'model') forwardBody.append(key, upstreamModel);
                     else if (sourceBody[key] instanceof File) forwardBody.append(key, sourceBody[key], sourceBody[key].name);
@@ -277,8 +279,8 @@ export class UnifiedDispatcher {
                     isPackageFree
                 });
 
-                if (body.computer_use) console.info(`[Dispatcher] User ${user.id} requested Computer Use with ${model}`);
-                if (body.tool_search || body.deferred_tools) console.info(`[Dispatcher] Model ${model} active with Tool Search / Deferred Loading.`);
+                if (body.computer_use) log.info(`[Dispatcher] User ${user.id} requested Computer Use with ${model}`);
+                if (body.tool_search || body.deferred_tools) log.info(`[Dispatcher] Model ${model} active with Tool Search / Deferred Loading.`);
 
                 // 4. Upstream Fetch
                 const startTime = Date.now();
@@ -328,7 +330,7 @@ export class UnifiedDispatcher {
                     // Check for upstream overload errors that should trigger retry
                     const isOverloadError = this.checkUpstreamOverload(rawData);
                     if (isOverloadError) {
-                        console.warn(`[Dispatcher] Upstream overload detected for model ${model} on channel ${channelConfig.name}, will retry with another channel`);
+                        log.warn(`[Dispatcher] Upstream overload detected for model ${model} on channel ${channelConfig.name}, will retry with another channel`);
                         await circuitBreaker.recordError(channelConfig.id, 503);
                         throw new Error(`Upstream overload: ${JSON.stringify(rawData)}`);
                     }
@@ -379,7 +381,7 @@ export class UnifiedDispatcher {
                             INSERT INTO idempotency_keys (key_hash, user_id, response_code, response_body, expires_at)
                             VALUES (${cryptoHash}, ${user.id}, ${response.status}, ${JSON.stringify(rawData)}, NOW() + INTERVAL '24 hours')
                             ON CONFLICT (key_hash) DO NOTHING
-                        `.catch(() => { });
+                        `.catch((e: unknown) => log.warn('[Async] Suppressed:', e));
                     }
 
                     const currentActive = keyConcurrencyMap.get(lockId);
@@ -392,7 +394,7 @@ export class UnifiedDispatcher {
                 } else if (contentType.includes('text/event-stream') || contentType.includes('text/plain')) {
                     // Some providers return SSE format even for non-stream requests
                     const text = await response.text();
-                    let rawData: any = null;
+                    let rawData: Record<string, any> = null;
                     
                     // Try to parse SSE format (data: {...})
                     if (text.startsWith('data:')) {
@@ -451,7 +453,7 @@ export class UnifiedDispatcher {
                             INSERT INTO idempotency_keys (key_hash, user_id, response_code, response_body, expires_at)
                             VALUES (${cryptoHash}, ${user.id}, ${response.status}, ${JSON.stringify(rawData)}, NOW() + INTERVAL '24 hours')
                             ON CONFLICT (key_hash) DO NOTHING
-                        `.catch(() => { });
+                        `.catch((e: unknown) => log.warn('[Async] Suppressed:', e));
                     }
 
                     const currentActive = keyConcurrencyMap.get(lockId);
@@ -498,7 +500,7 @@ export class UnifiedDispatcher {
                     return new Response(buffer, { headers: { 'Content-Type': contentType } });
                 }
 
-            } catch (e: any) {
+            } catch (e: unknown) {
                 // 7. Error & Refund Handling
 
                 // Release lock on exception
@@ -512,7 +514,7 @@ export class UnifiedDispatcher {
                         tokenId: token.id,
                         preDeducted,
                         actualCost: 0
-                    }).catch(() => { });
+                    }).catch((e: unknown) => log.warn('[Async] Suppressed:', e));
                 }
                 lastError = e;
 
@@ -527,28 +529,28 @@ export class UnifiedDispatcher {
                     userGroup: user.group,
                     isStream,
                     isPackageFree,
-                    statusCode: e.message?.startsWith('Status') ? parseInt(e.message.split(' ')[1]) : 500,
-                    errorMessage: e.message || 'Unknown network error',
+                    statusCode: getErrorMessage(e)?.startsWith('Status') ? parseInt(getErrorMessage(e).split(' ')[1]) : 500,
+                    errorMessage: getErrorMessage(e) || 'Unknown network error',
                     traceId,
                     orgId: user.orgId,
                     externalTaskId,
                     externalUserId,
                     externalWorkspaceId,
                     externalFeatureType
-                }).catch(() => { });
+                }).catch((e: unknown) => log.warn('[Async] Suppressed:', e));
 
                 // Handle key exhaustion (401/403/429 with specific error messages)
-                if (e.message?.includes('401') || e.message?.includes('403') || e.message?.includes('429')) {
-                    const errMsg = e.message.toLowerCase();
+                if (getErrorMessage(e)?.includes('401') || getErrorMessage(e)?.includes('403') || getErrorMessage(e)?.includes('429')) {
+                    const errMsg = getErrorMessage(e).toLowerCase();
                     if (errMsg.includes('quota') || errMsg.includes('balance') || errMsg.includes('credit') || errMsg.includes('limit')) {
-                        console.error(`[Dispatcher] Key exhausted: ${activeKey.substring(0, 8)}...`);
+                        log.error(`[Dispatcher] Key exhausted: ${activeKey.substring(0, 8)}...`);
                         const newStatusMap = { ...statusMap, [activeKey]: 'exhausted' };
-                        await sql`UPDATE channels SET key_status = ${JSON.stringify(newStatusMap)}, updated_at = NOW() WHERE id = ${channelConfig.id}`.catch(() => { });
-                        await memoryCache.refresh(false).catch(() => { });
+                        await sql`UPDATE channels SET key_status = ${JSON.stringify(newStatusMap)}, updated_at = NOW() WHERE id = ${channelConfig.id}`.catch((e: unknown) => log.warn('[Async] Suppressed:', e));
+                        await memoryCache.refresh(false).catch((e: unknown) => log.warn('[Async] Suppressed:', e));
                     }
                 }
 
-                if (!e.message?.startsWith('Status')) {
+                if (!getErrorMessage(e)?.startsWith('Status')) {
                     await circuitBreaker.recordError(channelConfig.id);
                 }
                 continue;
@@ -562,7 +564,7 @@ export class UnifiedDispatcher {
      * Check if upstream response indicates an overload/error that should trigger retry
      * Some providers return 200 status but with an error message in the body
      */
-    private static checkUpstreamOverload(data: any): boolean {
+    private static checkUpstreamOverload(data: Record<string, any>): boolean {
         if (!data || typeof data !== 'object') return false;
 
         // Check for error in choices[0].delta.content (streaming format)
@@ -588,7 +590,7 @@ export class UnifiedDispatcher {
 
         // Check for error object in response
         if (data.error) {
-            const errorMsg = data.error.message || data.error || '';
+            const errorMsg = data.getErrorMessage(error) || data.error || '';
             if (typeof errorMsg === 'string') {
                 const overloadPatterns = [
                     /负载过高/i,
@@ -610,7 +612,7 @@ export class UnifiedDispatcher {
 
     // URL building is now handled by utils/url.ts buildUpstreamUrl()
 
-    private static estimateMaxTokens(body: any, type: string) {
+    private static estimateMaxTokens(body: Record<string, any>, type: string) {
         if (type === 'chat') return body.max_tokens || 4096;
         if (type === 'native-gemini') {
             const thinkingBudget = body.generationConfig?.thinkingConfig?.thinkingBudget || 0;
@@ -623,7 +625,7 @@ export class UnifiedDispatcher {
 
     private static handleStreamBilling(
         billingStream: ReadableStream,
-        body: any,
+        body: Record<string, any>,
         user: UserRecord,
         token: TokenRecord,
         channelConfig: ChannelConfig,
@@ -634,7 +636,7 @@ export class UnifiedDispatcher {
         packageLockId: string | null,
         statusCode: number = 200,
         traceId?: string,
-        requestBody?: any,
+        requestBody?: Record<string, any>,
         idempotencyKey?: string,
         externalTaskId?: string,
         externalUserId?: string,
@@ -646,7 +648,7 @@ export class UnifiedDispatcher {
                 const reader = billingStream.getReader();
                 const decoder = new TextDecoder("utf-8");
                 let completionText = '';
-                let usageData: any = null;
+                let usageData: Record<string, any> = null;
                 let buffer = '';
 
                 const timeoutError = new Error('Stream idle timeout exceeded (60s)');
@@ -676,7 +678,7 @@ export class UnifiedDispatcher {
                                     if (delta.reasoning_content) completionText += delta.reasoning_content;
                                 }
                                 if (data.usage) usageData = data.usage;
-                            } catch (e) { }
+                            } catch { /* non-critical — suppressed */ }
                         }
                     }
                 }
@@ -694,7 +696,7 @@ export class UnifiedDispatcher {
                         return Math.ceil(cjkCount + (text.length - cjkCount) / 4);
                     };
                     finalCompletionTokens = estimate(completionText);
-                    const promptText = Array.isArray(body.messages) ? body.messages.map((m: any) => m.content).join(' ') : '';
+                    const promptText = Array.isArray(body.messages) ? body.messages.map((m: Record<string, any>) => m.content).join(' ') : '';
                     finalPromptTokens = estimate(promptText);
                 }
 
@@ -731,17 +733,17 @@ export class UnifiedDispatcher {
                         INSERT INTO idempotency_keys (key_hash, user_id, response_code, response_body, expires_at)
                         VALUES (${cryptoHash}, ${user.id}, ${statusCode}, ${JSON.stringify(mockResponse)}, NOW() + INTERVAL '24 hours')
                         ON CONFLICT (key_hash) DO NOTHING
-                    `.catch(() => { });
+                    `.catch((e: unknown) => log.warn('[Async] Suppressed:', e));
                 }
             } catch (e) {
-                console.error("[Stream Billing Error]", e);
+                log.error("[Stream Billing Error]", e);
                 // Refund pre-deducted quota natively on abrupt stream network drop before completion
                 await reconcileQuota({
                     userId: user.id,
                     tokenId: token.id,
                     preDeducted,
                     actualCost: 0
-                }).catch(() => { });
+                }).catch((e: unknown) => log.warn('[Async] Suppressed:', e));
             } finally {
                 // Stream ended, unconditionally release the semaphore pool lock
                 const currentActive = keyConcurrencyMap.get(lockId);

@@ -1,3 +1,4 @@
+import { log } from '../services/logger';
 import { sql } from '@elygate/db';
 
 export type CycleUnit = 'hour' | 'day' | 'week' | 'month';
@@ -7,7 +8,7 @@ export type CycleUnit = 'hour' | 'day' | 'week' | 'month';
  * Implements a "Lazy Reset" pattern: quotas are refilled when a user makes a request
  * after their cycle reset period has passed.
  */
-export async function checkAndResetSubscriptionQuota(userId: number) {
+export async function checkAndResetSubscriptionQuota(userId: number): Promise<void> {
     // 1. Fetch active subscriptions with cycle configuration
     const activeSubs = await sql`
         SELECT 
@@ -47,9 +48,9 @@ export async function checkAndResetSubscriptionQuota(userId: number) {
     }
 
     if (resetSubIds.length > 0) {
-        console.log(`[Subscription] Refilling quota for User ${userId}. Total: ${totalRefill}. Subs: ${resetSubIds.join(',')}`);
+        log.info(`[Subscription] Refilling quota for User ${userId}. Total: ${totalRefill}. Subs: ${resetSubIds.join(',')}`);
         
-        await sql.begin(async (tx: any) => {
+        await sql.begin(async (tx) => {
             // Refill user quota
             await tx`UPDATE users SET quota = quota + ${totalRefill} WHERE id = ${userId}`;
             

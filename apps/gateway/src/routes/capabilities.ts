@@ -1,7 +1,7 @@
 import { Elysia, t } from 'elysia';
 import { memoryCache } from '../services/cache';
 import { authPlugin } from '../middleware/auth';
-import { ChannelType } from '../providers/types';
+import { ChannelType , ElysiaCtx } from '../providers/types';
 import { buildUpstreamUrl } from '../utils/url';
 
 export const capabilitiesRouter = new Elysia({ prefix: '/v1' })
@@ -68,7 +68,7 @@ export const capabilitiesRouter = new Elysia({ prefix: '/v1' })
             }
         };
     })
-    .post('/self-test', async ({ body, user, set }: any) => {
+    .post('/self-test', async ({ body, user, set }: ElysiaCtx) => {
         const { model } = body;
         if (!model) {
             set.status = 400;

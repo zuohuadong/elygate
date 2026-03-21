@@ -1,4 +1,6 @@
+import type { ElysiaCtx } from '../../types';
 import { Elysia } from 'elysia';
+import { getErrorMessage } from '../../utils/error';
 import { sql } from '@elygate/db';
 import { optionCache } from '../../services/optionCache';
 import { getLangFromHeader } from '../../utils/i18n';
@@ -12,7 +14,7 @@ export const usersRouter = new Elysia()
             LEFT JOIN users u ON t.user_id = u.id
             ORDER BY t.id DESC
         `;
-        return tokens.map((t: any) => ({
+        return tokens.map((t: Record<string, any>) => ({
             id: t.id,
             name: t.name,
             key: t.key,
@@ -26,9 +28,9 @@ export const usersRouter = new Elysia()
         }));
     })
 
-    .post('/tokens', async ({ body, user, set }: any) => {
+    .post('/tokens', async ({ body, user, set }: ElysiaCtx) => {
         try {
-            const b = body as any;
+            const b = body as Record<string, any>;
             const newKey = `sk-${Bun.randomUUIDv7('hex')}`;
             const [result] = await sql`
                 INSERT INTO tokens (user_id, name, key, status, remain_quota, models)
@@ -36,15 +38,15 @@ export const usersRouter = new Elysia()
                 RETURNING *
             `;
             return result;
-        } catch (e: any) {
+        } catch (e: unknown) {
             set.status = 500;
-            return { success: false, message: e.message };
+            return { success: false, message: getErrorMessage(e) };
         }
     })
 
-    .put('/tokens/:id', async ({ params: { id }, body, set }: any) => {
+    .put('/tokens/:id', async ({ params: { id }, body, set }: ElysiaCtx) => {
         try {
-            const b = body as any;
+            const b = body as Record<string, any>;
             const [oldToken] = await sql`SELECT * FROM tokens WHERE id = ${Number(id)} LIMIT 1`;
             if (!oldToken) {
                 set.status = 404;
@@ -66,13 +68,13 @@ export const usersRouter = new Elysia()
                 RETURNING *
             `;
             return result;
-        } catch (e: any) {
+        } catch (e: unknown) {
             set.status = 500;
-            return { success: false, message: e.message };
+            return { success: false, message: getErrorMessage(e) };
         }
     })
 
-    .post('/tokens/:id/regenerate', async ({ params: { id }, set }: any) => {
+    .post('/tokens/:id/regenerate', async ({ params: { id }, set }: ElysiaCtx) => {
         try {
             const [oldToken] = await sql`SELECT * FROM tokens WHERE id = ${Number(id)} LIMIT 1`;
             if (!oldToken) {
@@ -90,19 +92,19 @@ export const usersRouter = new Elysia()
             `;
 
             return { success: true, message: 'Token key regenerated successfully', token: result };
-        } catch (e: any) {
+        } catch (e: unknown) {
             set.status = 500;
-            return { success: false, message: e.message };
+            return { success: false, message: getErrorMessage(e) };
         }
     })
 
-    .delete('/tokens/:id', async ({ params: { id }, set }: any) => {
+    .delete('/tokens/:id', async ({ params: { id }, set }: ElysiaCtx) => {
         try {
             await sql`DELETE FROM tokens WHERE id = ${Number(id)}`;
             return { success: true };
-        } catch (e: any) {
+        } catch (e: unknown) {
             set.status = 500;
-            return { success: false, message: e.message };
+            return { success: false, message: getErrorMessage(e) };
         }
     })
 
@@ -116,9 +118,9 @@ export const usersRouter = new Elysia()
         return users;
     })
 
-    .post('/users', async ({ body, set }: any) => {
+    .post('/users', async ({ body, set }: ElysiaCtx) => {
         try {
-            const b = body as any;
+            const b = body as Record<string, any>;
             const passwordHash = await Bun.password.hash(b.password);
             const defaultCurrency = optionCache.get('CurrencyName', 'USD');
             const [result] = await sql`
@@ -127,15 +129,15 @@ export const usersRouter = new Elysia()
                 RETURNING id, username, role, quota, status, currency
             `;
             return result;
-        } catch (e: any) {
+        } catch (e: unknown) {
             set.status = 500;
-            return { success: false, message: e.message };
+            return { success: false, message: getErrorMessage(e) };
         }
     })
 
-    .put('/users/:id', async ({ params: { id }, body, set }: any) => {
+    .put('/users/:id', async ({ params: { id }, body, set }: ElysiaCtx) => {
         try {
-            const b = body as any;
+            const b = body as Record<string, any>;
             let passwordClause = sql``;
             if (b.password) {
                 const hash = await Bun.password.hash(b.password);
@@ -162,13 +164,13 @@ export const usersRouter = new Elysia()
             }
 
             return result;
-        } catch (e: any) {
+        } catch (e: unknown) {
             set.status = 500;
-            return { success: false, message: e.message };
+            return { success: false, message: getErrorMessage(e) };
         }
     })
 
-    .delete('/users/:id', async ({ params: { id }, user, set, request }: any) => {
+    .delete('/users/:id', async ({ params: { id }, user, set, request }: ElysiaCtx) => {
         const lang = getLangFromHeader(request.headers.get('accept-language'));
 
         if (Number(id) === user.id) {

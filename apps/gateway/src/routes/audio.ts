@@ -11,7 +11,7 @@ export const audioRouter = new Elysia()
     .post('/audio/translations', async (ctx) => handleAudio(ctx, 'audio/translations'))
     .post('/v1/audio/translations', async (ctx) => handleAudio(ctx, 'audio/translations'));
 
-async function handleAudio({ body, headers, params, request, query }: any, endpointType: string) {
+async function handleAudio({ body, headers, params, request, query }: Record<string, any>, endpointType: string) {
     const apiKey = query?.access_token || request.headers.get('Authorization')?.replace('Bearer ', '');
     
     if (!apiKey) return new Response(JSON.stringify({ error: 'Missing API key' }), { status: 401 });
@@ -36,7 +36,7 @@ async function handleAudio({ body, headers, params, request, query }: any, endpo
             body: internalReq,
             user: u,
             token: t,
-            endpointType: endpointType as any,
+            endpointType: endpointType as string,
             stream: false,
             ip,
             ua
@@ -44,7 +44,7 @@ async function handleAudio({ body, headers, params, request, query }: any, endpo
 
         // Binary responses are returned directly as Response objects from UnifiedDispatcher
         return result;
-    } catch (error: any) {
+    } catch (error: unknown) {
         const mappedError = converter.convertError(error);
         return new Response(JSON.stringify(mappedError), {
             status: 500,

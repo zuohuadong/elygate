@@ -2,7 +2,8 @@
     import { Settings, Save, CheckCircle, XCircle, Loader2 } from "lucide-svelte";
     import { apiFetch } from "$lib/api";
     import { i18n } from "$lib/i18n/index.svelte";
-    import { onMount } from "svelte";
+    
+
     import { session } from "$lib/session.svelte";
 
     let settings = $state<Record<string, string>>({
@@ -83,9 +84,9 @@
                 }
             }
             embeddingModels = Array.from(models).sort();
-        } catch (err: any) {
+        } catch (err: unknown) {
             errorMsg =
-                err.message ||
+                err instanceof Error ? err.message : String(err) ||
                 (i18n.lang === "zh"
                     ? "加载设置失败"
                     : "Failed to load settings");
@@ -94,7 +95,7 @@
         }
     }
 
-    onMount(loadSettings);
+    $effect(() => { loadSettings(); });
 
     async function handleSave(e: Event) {
         e.preventDefault();
@@ -109,8 +110,8 @@
             successMsg =
                 i18n.lang === "zh" ? "保存成功" : "Successfully saved settings";
             setTimeout(() => (successMsg = ""), 3000);
-        } catch (err: any) {
-            errorMsg = err.message || i18n.t.common.failed;
+        } catch (err: unknown) {
+            errorMsg = err instanceof Error ? err instanceof Error ? err.message : String(err) : i18n.t.common.failed;
         } finally {
             isSaving = false;
         }
@@ -131,9 +132,9 @@
                 embeddingCheckStatus = "error";
                 embeddingCheckMessage = result.message;
             }
-        } catch (err: any) {
+        } catch (err: unknown) {
             embeddingCheckStatus = "error";
-            embeddingCheckMessage = err.message || "Check failed";
+            embeddingCheckMessage = err instanceof Error ? err instanceof Error ? err.message : String(err) : "Check failed";
         }
     }
 </script>

@@ -4,7 +4,8 @@
     import { Plus, ShieldAlert } from "lucide-svelte";
     import { apiFetch } from "$lib/api";
     import { i18n } from "$lib/i18n/index.svelte";
-    import { onMount } from "svelte";
+    
+
 
     let rules = $state<any[]>([]);
     let isLoading = $state(true);
@@ -18,14 +19,14 @@
         try {
             const data = await apiFetch<any[]>("/admin/rate-limits");
             rules = data;
-        } catch (err: any) {
-            errorMsg = err.message || "Failed to load rate limits";
+        } catch (err: unknown) {
+            errorMsg = err instanceof Error ? err instanceof Error ? err.message : String(err) : "Failed to load rate limits";
         } finally {
             isLoading = false;
         }
     }
 
-    onMount(loadRules);
+    $effect(() => { loadRules(); });
 
     let columns = $derived([
         { key: "id", label: "ID" },
@@ -40,24 +41,24 @@
         isModalOpen = true;
     }
 
-    function handleEdit(rule: any) {
+    function handleEdit(rule: Record<string, unknown>) {
         selectedRule = rule;
         isModalOpen = true;
     }
 
-    async function handleDelete(rule: any) {
+    async function handleDelete(rule: Record<string, unknown>) {
         if (!confirm(i18n.lang === "zh" ? `确认删除限流规则 "${rule.name}" 吗？这可能导致正在使用此规则的套餐报错。` : `Delete rule "${rule.name}"?`)) return;
         try {
             await apiFetch(`/admin/rate-limits/${rule.id}`, {
                 method: "DELETE",
             });
             await loadRules();
-        } catch (err: any) {
-            alert(i18n.t.common.failed + ": " + err.message);
+        } catch (err: unknown) {
+            alert(i18n.t.common.failed + ": " + err instanceof Error ? err.message : String(err));
         }
     }
 
-    async function handleSave(data: any) {
+    async function handleSave(data: Record<string, unknown>) {
         try {
             if (selectedRule) {
                 await apiFetch(`/admin/rate-limits/${selectedRule.id}`, {
@@ -72,8 +73,8 @@
             }
             isModalOpen = false;
             await loadRules();
-        } catch (err: any) {
-            alert(i18n.t.common.failed + ": " + err.message);
+        } catch (err: unknown) {
+            alert(i18n.t.common.failed + ": " + err instanceof Error ? err.message : String(err));
         }
     }
 </script>

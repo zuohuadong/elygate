@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from "svelte";
+	
 	import { i18n } from "$lib/i18n/index.svelte";
 	import { apiFetch } from "$lib/api";
 	import { session } from "$lib/session.svelte";
@@ -11,7 +11,7 @@
 	let showPaymentModal = $state(false);
 	let selectedAmount = $state(1000);
 	let selectedMethod = $state("stripe");
-	let isBackdropMouseDown = false;
+	let isBackdropMouseDown = $state(false);
 
 	// System settings
 	let paymentEnabled = $state(true);
@@ -25,15 +25,15 @@
 		{ value: 100000, label: "$1000.00" },
 	];
 
-	onMount(async () => {
+	$effect(() => { (async () => {
 		await loadSettings();
 		await loadBalance();
 		await loadOrders();
-	});
+	})(); });
 
 	async function loadSettings() {
 		try {
-			const res = await apiFetch<any>("/api/option");
+			const res = await apiFetch<Record<string, unknown>>("/api/option");
 			if (res && res.data) {
 				paymentEnabled = res.data.PaymentEnabled;
 				paymentMethods = (res.data.PaymentMethods || "").split(",");
@@ -48,7 +48,7 @@
 
 	async function loadBalance() {
 		try {
-			const data = await apiFetch<any>("/user/info");
+			const data = await apiFetch<Record<string, unknown>>("/user/info");
 			balance = data.quota || 0;
 		} catch (error) {
 			console.error("Failed to load balance:", error);
@@ -70,7 +70,7 @@
 	async function createPayment() {
 		try {
 			loading = true;
-			const data = await apiFetch<any>("/payment/create-order", {
+			const data = await apiFetch<Record<string, unknown>>("/payment/create-order", {
 				method: "POST",
 				body: JSON.stringify({
 					amount: selectedAmount,
@@ -81,7 +81,7 @@
 			if (data.success && data.paymentUrl) {
 				window.location.href = data.paymentUrl;
 			}
-		} catch (error: any) {
+		} catch (error: unknown) {
 			console.error("Failed to create payment:", error);
 			alert(error.message || i18n.t.payment.createFailed);
 		} finally {

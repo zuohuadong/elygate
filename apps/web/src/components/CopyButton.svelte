@@ -8,7 +8,7 @@
     }>();
 
     let copied = $state(false);
-    let timeout: any;
+    let timeout: Record<string, unknown>;
 
     function handleCopy(e: MouseEvent) {
         e.stopPropagation();

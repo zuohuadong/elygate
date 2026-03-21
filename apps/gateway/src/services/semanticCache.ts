@@ -1,3 +1,4 @@
+import { log } from '../services/logger';
 import { sql } from '@elygate/db';
 import { optionCache } from './optionCache';
 import { decryptChannelKeys } from './encryption';
@@ -24,7 +25,7 @@ function getConfig(): SemanticCacheConfig {
 /**
  * Generates a text embedding vector via an OpenAI-compatible embeddings endpoint.
  */
-async function generateEmbedding(text: string, embeddingChannel: any, embeddingModel?: string): Promise<number[] | null> {
+async function generateEmbedding(text: string, embeddingChannel: Record<string, any>, embeddingModel?: string): Promise<number[] | null> {
     // Decrypt the API key
     const decryptedKeys = decryptChannelKeys(embeddingChannel.key);
     const keys = decryptedKeys.split('\n').map((k: string) => k.trim()).filter(Boolean);
@@ -37,7 +38,7 @@ async function generateEmbedding(text: string, embeddingChannel: any, embeddingM
         m.toLowerCase().includes('bge-large')
     ) || embeddingChannel.models[0];
 
-    console.log(`[SemanticCache] Generating embedding with model: ${model}`);
+    log.info(`[SemanticCache] Generating embedding with model: ${model}`);
 
     // Smart URL handling: avoid duplicate /v1 prefix
     let baseUrl = (embeddingChannel.baseUrl || '').replace(/\/+$/, '');
@@ -61,10 +62,10 @@ async function generateEmbedding(text: string, embeddingChannel: any, embeddingM
     });
 
     if (!response.ok) {
-        console.log(`[SemanticCache] Embedding API failed: ${response.status} ${response.statusText}`);
+        log.info(`[SemanticCache] Embedding API failed: ${response.status} ${response.statusText}`);
         return null;
     }
-    const data = await response.json() as any;
+    const data = await response.json() as Record<string, any>;
     return data?.data?.[0]?.embedding ?? null;
 }
 
@@ -80,10 +81,10 @@ async function generateEmbedding(text: string, embeddingChannel: any, embeddingM
 export async function lookupSemanticCache(
     prompt: string,
     model: string,
-    embeddingChannel: any,
+    embeddingChannel: Record<string, any>,
     embeddingModel?: string,
     userId?: number,
-    policy?: any
+    policy?: Record<string, any>
 ): Promise<any | null> {
     const config = getConfig();
     if (!config.enabled || policy?.mode === 'disabled') return null;
@@ -117,7 +118,7 @@ export async function lookupSemanticCache(
     `;
 
     if (rows.length > 0 && rows[0].similarity >= config.similarityThreshold) {
-        console.log(`[SemanticCache] HIT! Similarity: ${rows[0].similarity.toFixed(4)} Mode: ${policy?.mode || 'default'}`);
+        log.info(`[SemanticCache] HIT! Similarity: ${rows[0].similarity.toFixed(4)} Mode: ${policy?.mode || 'default'}`);
         // Ensure response is an object, not a string
         const response = rows[0].response;
         if (typeof response === 'string') {
@@ -130,7 +131,7 @@ export async function lookupSemanticCache(
         return response;
     }
 
-    console.log(`[SemanticCache] MISS. Best similarity: ${rows[0]?.similarity?.toFixed(4) ?? 'N/A'}`);
+    log.info(`[SemanticCache] MISS. Best similarity: ${rows[0]?.similarity?.toFixed(4) ?? 'N/A'}`);
     return null;
 }
 
@@ -140,11 +141,11 @@ export async function lookupSemanticCache(
 export async function storeSemanticCache(
     prompt: string,
     model: string,
-    response: any,
-    embeddingChannel: any,
+    response: Record<string, any>,
+    embeddingChannel: Record<string, any>,
     embeddingModel?: string,
     createdBy?: number,
-    policy?: any
+    policy?: Record<string, any>
 ): Promise<void> {
     const { enabled } = getConfig();
     if (!enabled || policy?.mode === 'disabled') return;

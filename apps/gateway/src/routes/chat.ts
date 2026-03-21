@@ -1,3 +1,4 @@
+import { log } from '../services/logger';
 import { Elysia } from 'elysia';
 import { assertModelAccess } from '../middleware/auth';
 import { memoryCache } from '../services/cache';
@@ -8,7 +9,7 @@ import { lookupSemanticCache, storeSemanticCache } from '../services/semanticCac
 import { lookupResponseCache, storeResponseCache } from '../services/responseCache';
 import { getChannelKeys } from '../services/encryption';
 import { UnifiedDispatcher } from '../services/dispatcher';
-import { type TokenRecord, type UserRecord } from '../types';
+import type { TokenRecord, type UserRecord , ElysiaCtx } from '../types';
 import { removeNullFields } from '../utils/transform';
 import { translateErrorBilingual } from '../services/i18n';
 
@@ -16,7 +17,7 @@ import { translateErrorBilingual } from '../services/i18n';
  * Filter thinking content from response for -F suffix models.
  * Removes reasoning_content and thinking process text from the response.
  */
-function filterThinkingContent(response: any): any {
+function filterThinkingContent(response: Response): Record<string, any> {
     const filtered = JSON.parse(JSON.stringify(response));
     
     if (filtered.choices) {
@@ -112,7 +113,7 @@ function filterThinkingContent(response: any): any {
 /**
  * Resolve embedding channel and model for semantic cache lookups.
  */
-function resolveEmbeddingChannel(): { channel: any; model: string | undefined } {
+function resolveEmbeddingChannel(): { channel: Record<string, any>; model: string | undefined } {
     const configuredModel = optionCache.get('SemanticCacheEmbeddingModel');
 
     if (configuredModel) {
@@ -148,7 +149,7 @@ function resolveEmbeddingChannel(): { channel: any; model: string | undefined } 
  * Bill a cache hit (both exact and semantic cache).
  */
 async function billCacheHit(
-    response: any,
+    response: Record<string, any>,
     model: string,
     user: UserRecord,
     token: TokenRecord,
@@ -185,7 +186,7 @@ async function billCacheHit(
 }
 
 export const chatRouter = new Elysia()
-    .post('/chat/completions', async ({ body, token, user, request, set }: any) => {
+    .post('/chat/completions', async ({ body, token, user, request, set }: ElysiaCtx) => {
         const u = user as UserRecord;
         const t = token as TokenRecord;
         const startTime = Date.now();
@@ -201,15 +202,15 @@ export const chatRouter = new Elysia()
         const ua = request.headers.get('user-agent') || 'unknown';
         const traceId = body.trace_id || `tr_log_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 
-        console.log(`[Request] UserID: ${u.id}, Token: ${t.name}, Model: ${model}, Group: ${u.group}, IP: ${ip}, Trace: ${traceId}`);
+        log.info(`[Request] UserID: ${u.id}, Token: ${t.name}, Model: ${model}, Group: ${u.group}, IP: ${ip}, Trace: ${traceId}`);
 
         // --- Cache Configuration ---
-        const messages = body.messages as any[];
+        const messages = body.messages as Record<string, any>[][];
         const userPrompt = Array.isArray(messages)
-            ? messages.map((m: any) => m.content).join(' ')
+            ? messages.map((m: Record<string, any>) => m.content).join(' ')
             : '';
         const defaultMode = optionCache.get('SemanticCacheDefaultMode', 'default');
-        const cachePolicy = (u as any).activePackage?.cache_policy || { mode: defaultMode };
+        const cachePolicy = (u as Record<string, any>).activePackage?.cache_policy || { mode: defaultMode };
 
         // --- 0. Handle -F suffix for cache key ---
         // Use model name without -F suffix for cache key to share cache between thinking/non-thinking modes
@@ -220,7 +221,7 @@ export const chatRouter = new Elysia()
         if (!stream) {
             const exactResponse = await lookupResponseCache(cacheModelKey, messages, u.id);
             if (exactResponse) {
-                console.log(`[ResponseCache] HIT for model: ${cacheModelKey} (requested: ${model})`);
+                log.info(`[ResponseCache] HIT for model: ${cacheModelKey} (requested: ${model})`);
                 let correctedResponse = { ...exactResponse, model };
 
                 // Filter thinking content if -F suffix was requested
@@ -229,7 +230,7 @@ export const chatRouter = new Elysia()
                 }
 
                 await billCacheHit(correctedResponse, model, u, t, -1, startTime, ip, ua, traceId, JSON.stringify(body)).catch(e => {
-                    console.error('[ResponseCache] Billing Error:', e.message);
+                    log.error('[ResponseCache] Billing Error:', e.message);
                 });
                 return removeNullFields(correctedResponse);
             }
@@ -237,12 +238,12 @@ export const chatRouter = new Elysia()
 
         // --- 2. Semantic Cache Lookup (vector similarity) ---
         const { channel: embeddingChannel, model: embeddingModel } = resolveEmbeddingChannel();
-        console.log(`[SemanticCache] Embedding channel found: ${embeddingChannel ? embeddingChannel.name : 'NONE'}, model: ${embeddingModel || 'N/A'}`);
+        log.info(`[SemanticCache] Embedding channel found: ${embeddingChannel ? embeddingChannel.name : 'NONE'}, model: ${embeddingModel || 'N/A'}`);
 
         if (embeddingChannel && !stream) {
             const cachedResponse = await lookupSemanticCache(userPrompt, cacheModelKey, embeddingChannel, embeddingModel, u.id, cachePolicy);
             if (cachedResponse) {
-                console.log(`[SemanticCache] HIT for model: ${cacheModelKey} (requested: ${model})`);
+                log.info(`[SemanticCache] HIT for model: ${cacheModelKey} (requested: ${model})`);
                 let correctedResponse = { ...cachedResponse, model };
 
                 // Filter thinking content if -F suffix was requested
@@ -263,7 +264,7 @@ export const chatRouter = new Elysia()
                 }
 
                 const actualCost = calculateCost(model, u.group, promptTokens, completionTokens);
-                await reconcileQuota({ userId: u.id, tokenId: t.id, preDeducted: 0, actualCost }).catch(() => {});
+                await reconcileQuota({ userId: u.id, tokenId: t.id, preDeducted: 0, actualCost }).catch((e: unknown) => log.warn('[Async] Suppressed:', e));
                 await billAndLog({
                     userId: u.id, tokenId: t.id, channelId: 0, modelName: model,
                     promptTokens, completionTokens, userGroup: u.group,
@@ -271,7 +272,7 @@ export const chatRouter = new Elysia()
                     traceId, orgId: u.orgId,
                     requestBody: JSON.stringify(body),
                     responseBody: JSON.stringify(correctedResponse)
-                }).catch(e => console.error('[SemanticCache] Billing Error:', e.message));
+                }).catch(e => log.error('[SemanticCache] Billing Error:', e.message));
 
                 return removeNullFields(correctedResponse);
             }
@@ -294,12 +295,12 @@ export const chatRouter = new Elysia()
             const formattedData = result as Record<string, any>;
 
             storeResponseCache(model, messages, formattedData, formattedData.usage, u.id).catch((err: Error) => {
-                console.error('[ResponseCache] Store Error:', err.message);
+                log.error('[ResponseCache] Store Error:', err.message);
             });
 
             if (embeddingChannel) {
                 storeSemanticCache(userPrompt, model, formattedData, embeddingChannel, embeddingModel, u.id, cachePolicy).catch((err: Error) => {
-                    console.error('[SemanticCache] Store Error:', err.message);
+                    log.error('[SemanticCache] Store Error:', err.message);
                 });
             }
         }

@@ -53,17 +53,17 @@ export const load: PageServerLoad = async ({ locals }) => {
 
     return {
         analytics: {
-            usageTrend: trendData.map((row: any) => ({
+            usageTrend: trendData.map((row: Record<string, any>) => ({
                 label: row.label,
                 cost: Number(row.cost_value),
                 errors: Number(row.error_count),
                 latency: Math.round(Number(row.avg_latency || 0))
             })),
-            modelDistribution: modelDistribution.map((row: any) => ({
+            modelDistribution: modelDistribution.map((row: Record<string, any>) => ({
                 name: row.name,
                 value: Number(row.value)
             })),
-            errorStats: errorStats.map((row: any) => ({
+            errorStats: errorStats.map((row: Record<string, any>) => ({
                 code: row.status_code,
                 count: Number(row.count)
             })),

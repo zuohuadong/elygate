@@ -34,11 +34,11 @@ export class NvidiaApiHandler implements ProviderHandler {
         return transformed;
     }
 
-    transformResponse(data: any) {
+    transformResponse(data: Record<string, any>) {
         return data;
     }
 
-    extractUsage(data: any) {
+    extractUsage(data: Record<string, any>) {
         return {
             promptTokens: data.usage?.prompt_tokens || 0,
             completionTokens: data.usage?.completion_tokens || 0,

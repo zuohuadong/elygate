@@ -4,7 +4,8 @@
     import { Plus, Users, ShieldAlert } from "lucide-svelte";
     import { apiFetch } from "$lib/api";
     import { i18n } from "$lib/i18n/index.svelte";
-    import { onMount } from "svelte";
+    
+
 
     let groups = $state<any[]>([]);
     let isLoading = $state(true);
@@ -23,14 +24,14 @@
                 displayChannels: g.denied_channel_types?.length > 0 ? (i18n.lang === 'zh' ? '有过滤商' : 'Filtered') : (i18n.lang === 'zh' ? '全放行' : 'All Providers'),
                 displayStatus: g.status === 1 ? (i18n.lang === 'zh' ? '正常' : 'Active') : (i18n.lang === 'zh' ? '禁用' : 'Disabled')
             }));
-        } catch (err: any) {
-            errorMsg = err.message || "Failed to load user groups";
+        } catch (err: unknown) {
+            errorMsg = err instanceof Error ? err instanceof Error ? err.message : String(err) : "Failed to load user groups";
         } finally {
             isLoading = false;
         }
     }
 
-    onMount(loadGroups);
+    $effect(() => { loadGroups(); });
 
     const renderStatus = (val: string) => {
         const isActive = val === 'Active' || val === '正常';
@@ -61,12 +62,12 @@
         isModalOpen = true;
     }
 
-    function handleEdit(group: any) {
+    function handleEdit(group: Record<string, any>) {
         selectedGroup = group;
         isModalOpen = true;
     }
 
-    async function handleDelete(group: any) {
+    async function handleDelete(group: Record<string, any>) {
         if (group.key === 'default' || group.key === 'cn-safe') {
             alert(i18n.lang === "zh" ? "系统内置组无法删除！" : "Cannot delete system default groups!");
             return;
@@ -77,12 +78,12 @@
                 method: "DELETE",
             });
             await loadGroups();
-        } catch (err: any) {
-            alert(i18n.t.common.failed + ": " + err.message);
+        } catch (err: unknown) {
+            alert(i18n.t.common.failed + ": " + err instanceof Error ? err.message : String(err));
         }
     }
 
-    async function handleSave(data: any) {
+    async function handleSave(data: Record<string, unknown>) {
         try {
             if (selectedGroup) {
                 await apiFetch(`/admin/user-groups/${selectedGroup.key}`, {
@@ -97,12 +98,12 @@
             }
             isModalOpen = false;
             await loadGroups();
-        } catch (err: any) {
-            alert(i18n.t.common.failed + ": " + err.message);
+        } catch (err: unknown) {
+            alert(i18n.t.common.failed + ": " + err instanceof Error ? err.message : String(err));
         }
     }
 
-    async function applyChinaCompliance(group: any) {
+    async function applyChinaCompliance(group: Record<string, any>) {
         if (!confirm(i18n.lang === "zh" ? `是否一键将 "${group.name}" 设为符合中国境内合规要求的策略组（如禁用境外被禁厂商）？` : `Apply China Compliance blocks to "${group.name}"?`)) return;
         try {
             const rules = {
@@ -115,8 +116,8 @@
                 body: JSON.stringify(rules),
             });
             await loadGroups();
-        } catch (err: any) {
-             alert(i18n.t.common.failed + ": " + err.message);
+        } catch (err: unknown) {
+             alert(i18n.t.common.failed + ": " + err instanceof Error ? err.message : String(err));
         }
     }
 </script>

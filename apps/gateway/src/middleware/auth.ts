@@ -1,8 +1,10 @@
+import { config } from '../config';
+import { log } from '../services/logger';
 import { Elysia } from 'elysia';
 import { cors } from '@elysiajs/cors';
 import { sql } from '@elygate/db';
 import { isRateLimited } from '../services/ratelimit';
-import { type TokenRecord, type UserRecord } from '../types';
+import type { TokenRecord, type UserRecord , ElysiaCtx } from '../types';
 import { memoryCache } from '../services/cache';
 import { LRUCache } from 'lru-cache';
 import { jwt } from '@elysiajs/jwt';
@@ -28,27 +30,27 @@ async function initAuthSync() {
         try {
             const { createPgListener } = await import('@elygate/pg-listen');
             createPgListener(
-                process.env.DATABASE_URL!,
+                config.databaseUrl!,
                 ['auth_update'],
                 (_channel, payload) => {
                     if (payload) {
                         authCache.delete(payload);
-                        console.log(`[Auth/Cache] Flushed cache via DB notification: ${payload}`);
+                        log.info(`[Auth/Cache] Flushed cache via DB notification: ${payload}`);
                     }
                 }
             );
-            console.log('[Auth/Cache] Listener established.');
+            log.info('[Auth/Cache] Listener established.');
         } catch (e) {
-            console.error('[Auth/Cache] Failed setting up listener:', e);
+            log.error('[Auth/Cache] Failed setting up listener:', e);
             authSyncPromise = null;
         }
     })();
     return authSyncPromise;
 }
 
-initAuthSync().catch(console.error);
+initAuthSync().catch((e: unknown) => log.error("[Async]", e));
 
-export function assertModelAccess(user: UserRecord, token: TokenRecord, modelName: string, set: any) {
+export function assertModelAccess(user: UserRecord, token: TokenRecord, modelName: string, set: { status?: number; headers?: Record<string, string> }): void {
     // 1. Organization Level Policy (Strictest)
     if (user.orgDeniedModels && user.orgDeniedModels.length > 0 && user.orgDeniedModels.includes(modelName)) {
         set.status = 403;
@@ -82,9 +84,9 @@ export function assertModelAccess(user: UserRecord, token: TokenRecord, modelNam
 export const authPlugin = new Elysia({ name: 'auth' })
     .use(jwt({
         name: 'jwt',
-        secret: process.env.JWT_SECRET!
+        secret: config.jwtSecret!
     }))
-    .derive({ as: 'global' }, async ({ request, set, jwt, cookie: { auth_session } }: any) => {
+    .derive({ as: 'global' }, async ({ request, set, jwt, cookie: { auth_session } }: ElysiaCtx) => {
         let authHeader = request.headers.get('authorization');
 
         // --- Support Anthropic API x-api-key header ---
@@ -170,7 +172,7 @@ export const authPlugin = new Elysia({ name: 'auth' })
         const cached = authCache.get(apiKey);
         if (cached) {
             // Lazy-check quota reset even on cache hit (minimal DB impact if already reset)
-            await checkAndResetSubscriptionQuota(cached.user.id).catch(console.error);
+            await checkAndResetSubscriptionQuota(cached.user.id).catch((e: unknown) => log.error("[Async]", e));
 
             // Re-check rate limits for cached keys
             if (await isRateLimited(`token_${cached.token.id}`, cached.token.rateLimit)) {
@@ -194,10 +196,10 @@ export const authPlugin = new Elysia({ name: 'auth' })
             LIMIT 1
         `;
 
-        console.log(`[Auth] API Key: ${apiKey.substring(0, 5)}..., Result rows: ${rows?.length || 0}`);
+        log.info(`[Auth] API Key: ${apiKey.substring(0, 5)}..., Result rows: ${rows?.length || 0}`);
 
         if (!rows || rows.length === 0) {
-            console.error(`[Auth] No valid token/user found for key starting with: ${apiKey.substring(0, 5)}`);
+            log.error(`[Auth] No valid token/user found for key starting with: ${apiKey.substring(0, 5)}`);
             set.status = 401;
             throw new Error('Invalid API key or User not found');
         }
@@ -277,7 +279,7 @@ export const authPlugin = new Elysia({ name: 'auth' })
               AND us.end_time > NOW()
         `;
 
-        userRecord.activePackages = subs.map((s: any) => ({
+        userRecord.activePackages = subs.map((s: Record<string, any>) => ({
             models: Array.isArray(s.models) ? s.models : (typeof s.models === 'string' ? JSON.parse(s.models || '[]') : []),
             defaultRateLimitId: s.default_rate_limit_id,
             modelRateLimits: typeof s.model_rate_limits === 'string' ? JSON.parse(s.model_rate_limits || '{}') : (s.model_rate_limits || {})
@@ -322,7 +324,7 @@ export const authPlugin = new Elysia({ name: 'auth' })
  */
 export const adminGuard = new Elysia({ name: 'admin-guard' })
     .use(authPlugin)
-    .onBeforeHandle(({ user, set }: any) => {
+    .onBeforeHandle(({ user, set }: ElysiaCtx) => {
         if (!user) {
             set.status = 401;
             throw new Error('Unauthorized');

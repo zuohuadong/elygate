@@ -14,6 +14,10 @@ const config = {
 			if (warning.code.startsWith('a11y_')) return false;
 			return true;
 		}
+	},
+	vitePlugin: {
+		dynamicCompileOptions: ({ filename }) =>
+			filename.includes('node_modules') ? undefined : { runes: true }
 	}
 };
 

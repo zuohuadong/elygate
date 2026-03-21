@@ -7,12 +7,12 @@ export interface ProviderHandler {
     /**
      * Transforms non-streaming response from upstream to standard OpenAI response format.
      */
-    transformResponse(data: any): Record<string, any>;
+    transformResponse(data: Record<string, any>): Record<string, any>;
 
     /**
      * Extracts and calculates token usage from non-streaming response.
      */
-    extractUsage(data: any): { promptTokens: number; completionTokens: number; cachedTokens?: number };
+    extractUsage(data: Record<string, any>): { promptTokens: number; completionTokens: number; cachedTokens?: number };
 
     /**
      * (Optional) Different providers may have specific Headers requirements.

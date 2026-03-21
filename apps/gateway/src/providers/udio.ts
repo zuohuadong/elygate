@@ -15,7 +15,7 @@ export class UdioApiHandler implements ProviderHandler {
         };
     }
 
-    transformResponse(data: any) {
+    transformResponse(data: Record<string, any>) {
         // Standardization for Audio/Music output
         return {
             id: data.id || `udio-${Date.now()}`,
@@ -26,7 +26,7 @@ export class UdioApiHandler implements ProviderHandler {
         };
     }
 
-    extractUsage(data: any) {
+    extractUsage(data: Record<string, any>) {
         // Music units billing
         return {
             promptTokens: 1, // 1 Generation task

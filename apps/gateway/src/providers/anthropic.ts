@@ -11,8 +11,8 @@ export class AnthropicApiHandler implements ProviderHandler {
 
         // Skip system messages for the 'messages' array
         const anthropicMessages = body.messages
-            .filter((m: any) => m.role !== 'system')
-            .map((m: any) => {
+            .filter((m: Record<string, any>) => m.role !== 'system')
+            .map((m: Record<string, any>) => {
                 // If content is already an array (Anthropic style), keep it.
                 // If it's a string, Anthropic supports it as-is or we could wrap it.
                 // Also handle tool_calls (OpenAI style) -> tool_use (Anthropic style)
@@ -45,7 +45,7 @@ export class AnthropicApiHandler implements ProviderHandler {
                 return { role: m.role, content: m.content };
             });
 
-        const systemMessage = body.messages.find((m: any) => m.role === 'system')?.content || '';
+        const systemMessage = body.messages.find((m: Record<string, any>) => m.role === 'system')?.content || '';
 
         const payload: Record<string, any> = {
             model,
@@ -60,7 +60,7 @@ export class AnthropicApiHandler implements ProviderHandler {
         }
 
         if (body.tools) {
-            payload.tools = body.tools.map((t: any) => ({
+            payload.tools = body.tools.map((t: Record<string, any>) => ({
                 name: t.function.name,
                 description: t.function.description,
                 input_schema: t.function.parameters
@@ -82,10 +82,10 @@ export class AnthropicApiHandler implements ProviderHandler {
         return payload;
     }
 
-    transformResponse(data: any): any {
+    transformResponse(data: Record<string, any>): Record<string, any> {
         if (!data || !data.content) return data;
 
-        const message: any = {
+        const message: Record<string, any> = {
             role: 'assistant',
             content: '',
         };
@@ -139,7 +139,7 @@ export class AnthropicApiHandler implements ProviderHandler {
         };
     }
 
-    extractUsage(data: any) {
+    extractUsage(data: Record<string, any>) {
         const promptTokens = data.usage?.input_tokens || 0;
         const completionTokens = data.usage?.output_tokens || 0;
         const cachedTokens = data.usage?.cache_read_input_tokens;

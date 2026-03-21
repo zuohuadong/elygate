@@ -1,7 +1,8 @@
 <script lang="ts">
     import { API_BASE, apiFetch } from "$lib/api";
     import { goto } from "$app/navigation";
-    import { onMount } from "svelte";
+    
+
     import { i18n } from "$lib/i18n/index.svelte";
     import { session } from "$lib/session.svelte";
 
@@ -17,16 +18,16 @@
         loaded: false
     });
 
-    onMount(() => {
+    $effect(() => {
         i18n.init();
-        apiFetch<any>("/status").then(res => {
+        apiFetch<Record<string, unknown>>("/status").then(res => {
             if (res && res.data) {
                 oauthConfig.github = res.data.github_oauth;
                 oauthConfig.discord = res.data.discord_oauth;
                 oauthConfig.telegram = res.data.telegram_oauth;
             }
             oauthConfig.loaded = true;
-        }).catch(() => {
+        }).catch((e: unknown) => { console.warn("[Login] Status fetch failed:", e);
             oauthConfig.loaded = true;
         });
     });
@@ -38,7 +39,7 @@
         isLoading = true;
 
         try {
-            const data = await apiFetch<any>("/login", {
+            const data = await apiFetch<Record<string, unknown>>("/login", {
                 method: "POST",
                 body: JSON.stringify({ username, password }),
             });
@@ -62,8 +63,8 @@
             } else {
                 goto("/");
             }
-        } catch (e: any) {
-            error = e.message;
+        } catch (e: unknown) {
+            error = e instanceof Error ? e.message : String(e);
         } finally {
             isLoading = false;
         }

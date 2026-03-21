@@ -15,12 +15,12 @@ export class JinaApiHandler implements ProviderHandler {
         };
     }
 
-    transformResponse(data: any) {
+    transformResponse(data: Record<string, any>) {
         // Jina response is already close to standard rerank format
         return data;
     }
 
-    extractUsage(data: any) {
+    extractUsage(data: Record<string, any>) {
         // Rerank usually billed per document or fixed
         return {
             promptTokens: data.usage?.total_tokens || (data.results?.length || 0),

@@ -8,7 +8,7 @@ export interface UserRecord {
     usedQuota: number;
     status: number;
     currency?: string;
-    activePackages?: any[]; // [{ models, defaultRateLimitId, modelRateLimits }]
+    activePackages?: Record<string, any>[]; // [{ models, defaultRateLimitId, modelRateLimits }]
     orgAllowedModels?: string[];
     orgDeniedModels?: string[];
     orgAllowedSubnets?: string;
@@ -22,6 +22,7 @@ export interface UserGroupPolicy {
     allowedModels: string[];
     deniedModels: string[];
     allowedPackages: number[];
+    forbiddenPatterns?: string[];
 }
 
 export interface TokenRecord {
@@ -89,3 +90,11 @@ export interface BillingContext {
     requestBody?: string;
     responseBody?: string;
 }
+
+/**
+ * Elysia request context type for route handlers.
+ * Covers all properties injected by Elysia's built-in context + .derive() middleware.
+ * Use this instead of `: any` in route handler destructured parameters.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type ElysiaCtx = Record<string, any>;

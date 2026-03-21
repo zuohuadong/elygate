@@ -1,7 +1,7 @@
 <script lang="ts">
     import { X, ShoppingBag } from "lucide-svelte";
     import { i18n } from "$lib/i18n/index.svelte";
-    import { onMount, untrack } from "svelte";
+    import { untrack } from "svelte";
     import { apiFetch } from "$lib/api";
 
     let { show, pkg = null, onClose, onSave } = $props();
@@ -23,13 +23,13 @@
 
     let rateLimits = $state<any[]>([]);
 
-    onMount(async () => {
+    $effect(() => { (async () => {
         try {
             rateLimits = await apiFetch<any[]>("/admin/rate-limits");
         } catch (e) {
             console.error("Failed to load rate limits", e);
         }
-    });
+    })(); });
 
     $effect(() => {
         if (show) {
@@ -102,7 +102,7 @@
         onSave(payload);
     }
 
-    let isBackdropMouseDown = false;
+    let isBackdropMouseDown = $state(false);
     function handleMouseDown(e: MouseEvent) {
         isBackdropMouseDown = e.target === e.currentTarget;
     }

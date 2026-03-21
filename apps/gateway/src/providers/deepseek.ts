@@ -8,7 +8,7 @@ export class DeepSeekApiHandler implements ProviderHandler {
         });
     }
 
-    transformRequest(body: Record<string, any>, model: string): any {
+    transformRequest(body: Record<string, any>, model: string): Record<string, any> {
         if (model.includes('-thinking')) {
             const [baseModel] = model.split('-thinking');
             return {
@@ -30,9 +30,9 @@ export class DeepSeekApiHandler implements ProviderHandler {
         return { ...body, model };
     }
 
-    transformResponse(data: any): any {
+    transformResponse(data: Record<string, any>): Record<string, any> {
         if (data.choices && data.choices[0]?.message?.reasoning_content) {
-            const message: any = {
+            const message: Record<string, any> = {
                 ...data.choices[0].message
             };
             // Keep original reasoning_content and content as separate fields
@@ -47,7 +47,7 @@ export class DeepSeekApiHandler implements ProviderHandler {
         return data;
     }
 
-    extractUsage(data: any): { promptTokens: number; completionTokens: number } {
+    extractUsage(data: Record<string, any>): { promptTokens: number; completionTokens: number } {
         return {
             promptTokens: data.usage?.prompt_tokens || 0,
             completionTokens: data.usage?.completion_tokens || 0

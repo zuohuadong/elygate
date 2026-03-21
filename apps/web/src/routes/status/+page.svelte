@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { onMount } from 'svelte';
+    
     import { Activity, CheckCircle2, AlertTriangle, XCircle, Clock } from 'lucide-svelte';
     import { apiFetch } from '$lib/api';
 
@@ -19,7 +19,7 @@
         }
     }
 
-    onMount(() => {
+    $effect(() => {
         fetchStatus();
         const interval = setInterval(fetchStatus, 30000); // 30s refresh
         return () => clearInterval(interval);

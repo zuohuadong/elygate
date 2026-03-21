@@ -1,3 +1,4 @@
+import { log } from '../services/logger';
 import { sql } from '@elygate/db';
 
 /**
@@ -34,7 +35,7 @@ export interface AuditLog {
     action: AuditAction;
     resource: string;
     resourceId?: string;
-    details?: any;
+    details?: Record<string, unknown>;
     ipAddress?: string;
     userAgent?: string;
     createdAt?: Date;
@@ -43,24 +44,24 @@ export interface AuditLog {
 /**
  * Record an audit log entry
  */
-export async function recordAuditLog(log: Omit<AuditLog, 'id' | 'createdAt'>): Promise<void> {
+export async function recordAuditLog(entry: Omit<AuditLog, 'id' | 'createdAt'>): Promise<void> {
     try {
         await sql`
             INSERT INTO audit_logs (user_id, username, action, resource, resource_id, details, ip_address, user_agent, created_at)
             VALUES (
-                ${log.userId},
-                ${log.username},
-                ${log.action},
-                ${log.resource},
-                ${log.resourceId || null},
-                ${JSON.stringify(log.details) || null},
-                ${log.ipAddress || null},
-                ${log.userAgent || null},
+                ${entry.userId},
+                ${entry.username},
+                ${entry.action},
+                ${entry.resource},
+                ${entry.resourceId || null},
+                ${JSON.stringify(entry.details) || null},
+                ${entry.ipAddress || null},
+                ${entry.userAgent || null},
                 NOW()
             )
         `;
     } catch (error) {
-        console.error('[AuditLog] Failed to record audit log:', error);
+        log.error('[AuditLog] Failed to record audit log:', error);
     }
 }
 
@@ -75,11 +76,11 @@ export async function getAuditLogs(
         limit?: number;
         offset?: number;
     } = {}
-): Promise<{ logs: any[]; total: number }> {
+): Promise<{ logs: Record<string, any>[]; total: number }> {
     const { userId, action, resource, limit = 50, offset = 0 } = options;
 
     let whereClause = 'WHERE 1=1';
-    const params: any[] = [];
+    const params: Record<string, any>[] = [];
 
     if (userId) {
         whereClause += ` AND user_id = $${params.length + 1}`;

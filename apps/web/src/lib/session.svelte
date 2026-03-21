@@ -11,7 +11,7 @@
         username: string;
         role: number;
         currency: string;
-        user: any;
+        user: Record<string, unknown>;
     }
 
     interface SystemInfo {
@@ -24,7 +24,7 @@
         try {
             const raw = localStorage.getItem(STORAGE_KEY);
             if (raw) return JSON.parse(raw);
-        } catch {}
+        } catch { /* session parse fallback */ }
         return { id: '', token: '', username: '', role: 0, currency: 'USD', user: null };
     }
 
@@ -32,7 +32,7 @@
         if (typeof window === 'undefined') return;
         try {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-        } catch {}
+        } catch { /* session parse fallback */ }
     }
 
     const initial = loadFromStorage();

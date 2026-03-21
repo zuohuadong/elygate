@@ -4,7 +4,8 @@
     import { Plus, ShoppingBag } from "lucide-svelte";
     import { apiFetch } from "$lib/api";
     import { i18n } from "$lib/i18n/index.svelte";
-    import { onMount } from "svelte";
+    
+
 
     let packages = $state<any[]>([]);
     let isLoading = $state(true);
@@ -25,14 +26,14 @@
                 displayPublic: p.is_public ? (i18n.lang === 'zh' ? '公开' : 'Public') : (i18n.lang === 'zh' ? '隐藏' : 'Hidden'),
                 displayRateLimit: p.default_rate_limit_name || (i18n.lang === 'zh' ? '无限制' : 'No Limit')
             }));
-        } catch (err: any) {
-            errorMsg = err.message || "Failed to load packages";
+        } catch (err: unknown) {
+            errorMsg = err instanceof Error ? err instanceof Error ? err.message : String(err) : "Failed to load packages";
         } finally {
             isLoading = false;
         }
     }
 
-    onMount(loadPackages);
+    $effect(() => { loadPackages(); });
 
     // Render models as small tags
     const renderModels = (val: string) => {
@@ -77,24 +78,24 @@
         isModalOpen = true;
     }
 
-    function handleEdit(pkg: any) {
+    function handleEdit(pkg: Record<string, any>) {
         selectedPackage = pkg;
         isModalOpen = true;
     }
 
-    async function handleDelete(pkg: any) {
+    async function handleDelete(pkg: Record<string, any>) {
         if (!confirm(i18n.lang === "zh" ? `确认删除套餐方案 "${pkg.name}" 吗？这只是下架套餐，已购买该套餐的用户不会受影响。` : `Delete package "${pkg.name}"?`)) return;
         try {
             await apiFetch(`/admin/packages/${pkg.id}`, {
                 method: "DELETE",
             });
             await loadPackages();
-        } catch (err: any) {
-            alert(i18n.t.common.failed + ": " + err.message);
+        } catch (err: unknown) {
+            alert(i18n.t.common.failed + ": " + err instanceof Error ? err.message : String(err));
         }
     }
 
-    async function handleSave(data: any) {
+    async function handleSave(data: Record<string, unknown>) {
         try {
             if (selectedPackage) {
                 await apiFetch(`/admin/packages/${selectedPackage.id}`, {
@@ -109,8 +110,8 @@
             }
             isModalOpen = false;
             await loadPackages();
-        } catch (err: any) {
-            alert(i18n.t.common.failed + ": " + err.message);
+        } catch (err: unknown) {
+            alert(i18n.t.common.failed + ": " + err instanceof Error ? err.message : String(err));
         }
     }
 </script>

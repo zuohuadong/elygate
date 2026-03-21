@@ -52,7 +52,7 @@ export function getLangFromHeader(acceptLanguage?: string | null | string[]): La
     return 'en';
 }
 
-export function getLangFromQuery(query?: any): Language {
+export function getLangFromQuery(query?: Record<string, string>): Language {
     if (!query) return 'zh';
     const lang = query.lang || query.language;
     if (lang === 'en' || lang === 'zh') return lang;

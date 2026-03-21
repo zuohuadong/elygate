@@ -1,3 +1,4 @@
+import type { ElysiaCtx } from '../../types';
 import { Elysia } from 'elysia';
 import { adminGuard } from '../../middleware/auth';
 import { memoryCache } from '../../services/cache';
@@ -26,7 +27,7 @@ export async function refreshAllCaches(): Promise<void> {
 export const adminRouter = new Elysia()
     .use(adminGuard)
     .guard({
-        beforeHandle: ({ user, set }: any) => {
+        beforeHandle: ({ user, set }: ElysiaCtx) => {
             if (!user || user.role < 10) {
                 set.status = 403;
                 throw new Error('Forbidden: Admin privileges required');

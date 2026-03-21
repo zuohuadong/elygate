@@ -2,7 +2,7 @@ import { Elysia } from 'elysia';
 import { UnifiedDispatcher } from '../services/dispatcher';
 import { ConverterFactory } from '../services/converters';
 import { memoryCache } from '../services/cache';
-import { type TokenRecord, type UserRecord } from '../types';
+import type { TokenRecord, type UserRecord , ElysiaCtx } from '../types';
 
 /**
  * Gemini API Compatible Endpoint
@@ -15,7 +15,7 @@ import { type TokenRecord, type UserRecord } from '../types';
  */
 
 export const geminiRouter = new Elysia()
-    .all('/models/*', async ({ request, params }: any) => {
+    .all('/models/*', async ({ request, params }: ElysiaCtx) => {
         const url = new URL(request.url);
         const pathname = url.pathname;
         
@@ -148,7 +148,7 @@ export const geminiRouter = new Elysia()
         });
 
         if (result && !(result instanceof Response)) {
-            const geminiRes = converter.convertResponse(result as any);
+            const geminiRes = converter.convertResponse(result as Record<string, any>[]);
             return geminiRes;
         }
 

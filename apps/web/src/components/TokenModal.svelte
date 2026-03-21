@@ -10,12 +10,12 @@
         show = false,
         token = null,
         onClose = () => {},
-        onSave = (data: any) => {},
+        onSave = (data: Record<string, unknown>) => {},
     } = $props<{
         show: boolean;
         token: Token | null;
         onClose: () => void;
-        onSave: (data: any) => Promise<void>;
+        onSave: (data: Record<string, unknown>) => Promise<void>;
     }>();
 
     let formData = $state({
@@ -56,14 +56,14 @@
         isSubmitting = true;
         try {
             await onSave(formData);
-        } catch (err: any) {
-            error = err.message || i18n.t.common.failed;
+        } catch (err: unknown) {
+            error = err instanceof Error ? err instanceof Error ? err.message : String(err) : i18n.t.common.failed;
         } finally {
             isSubmitting = false;
         }
     }
 
-    let isBackdropMouseDown = false;
+    let isBackdropMouseDown = $state(false);
     function handleMouseDown(e: MouseEvent) {
         isBackdropMouseDown = e.target === e.currentTarget;
     }

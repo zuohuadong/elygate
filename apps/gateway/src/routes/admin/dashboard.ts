@@ -1,3 +1,5 @@
+import type { ElysiaCtx } from '../../types';
+import { log } from '../../services/logger';
 import { Elysia } from 'elysia';
 import { sql } from '@elygate/db';
 import { memoryCache } from '../../services/cache';
@@ -32,8 +34,8 @@ export const dashboardRouter = new Elysia()
         return errorLogs;
     })
 
-    .get('/stats/granular', async ({ query }: any) => {
-        const { start, end, group_by } = query as any;
+    .get('/stats/granular', async ({ query }: ElysiaCtx) => {
+        const { start, end, group_by } = query as Record<string, string>;
         const startDate = start ? new Date(start) : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
         const endDate = end ? new Date(end) : new Date();
 
@@ -54,8 +56,8 @@ export const dashboardRouter = new Elysia()
         return stats;
     })
 
-    .get('/dashboard/period_stats', async ({ query }: any) => {
-        const { period, timezone } = query as any;
+    .get('/dashboard/period_stats', async ({ query }: ElysiaCtx) => {
+        const { period, timezone } = query as Record<string, string>;
         const tz = timezone || 'UTC';
         
         let startDate = new Date();
@@ -117,7 +119,7 @@ export const dashboardRouter = new Elysia()
             exact_cache_size = Number(exSize?.size || 0);
             exact_cache_count = Number(exCount?.cnt || 0);
         } catch (e) {
-            console.warn('[Admin] Failed to read cache sizes:', e);
+            log.warn('[Admin] Failed to read cache sizes:', e);
         }
 
         const models_user = await sql`
@@ -135,7 +137,7 @@ export const dashboardRouter = new Elysia()
         `;
 
         const totalUserCost = Number(overview.total_cost || 1);
-        models_user.forEach((m: any) => {
+        models_user.forEach((m: Record<string, any>) => {
             m.cost_percentage = Number(((Number(m.cost) / totalUserCost) * 100).toFixed(1));
         });
 
@@ -153,8 +155,8 @@ export const dashboardRouter = new Elysia()
             LIMIT 20
         `;
 
-        const totalChannelCost = models_channel.reduce((sum: any, m: any) => sum + Number(m.cost), 0) || 1;
-        models_channel.forEach((m: any) => {
+        const totalChannelCost = models_channel.reduce((sum: Record<string, any>, m: Record<string, any>) => sum + Number(m.cost), 0) || 1;
+        models_channel.forEach((m: Record<string, any>) => {
             m.cost_percentage = Number(((Number(m.cost) / totalChannelCost) * 100).toFixed(1));
         });
         
@@ -224,9 +226,9 @@ export const dashboardRouter = new Elysia()
         }
 
         const metaMap = new Map<string, any>();
-        for (const provider of Object.values(modelConfig as any)) {
-            if ((provider as any).models && Array.isArray((provider as any).models)) {
-                for (const m of (provider as any).models) {
+        for (const provider of Object.values(modelConfig as Record<string, any>)) {
+            if ((provider as Record<string, any>).models && Array.isArray((provider as Record<string, any>).models)) {
+                for (const m of (provider as Record<string, any>).models) {
                     metaMap.set(m.id, m);
                 }
             }
@@ -244,7 +246,7 @@ export const dashboardRouter = new Elysia()
             GROUP BY channel_id
         `;
         const channelLatencyMap = new Map<number, number>();
-        metrics.forEach((m: any) => channelLatencyMap.set(m.channel_id, Number(m.avg_latency)));
+        metrics.forEach((m: Record<string, any>) => channelLatencyMap.set(m.channel_id, Number(m.avg_latency)));
 
         return Array.from(allModelIds).map(modelId => {
             const meta = metaMap.get(modelId);

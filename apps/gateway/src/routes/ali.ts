@@ -1,10 +1,11 @@
+import type { ElysiaCtx } from '../types';
 import { Elysia } from 'elysia';
 import { UnifiedDispatcher } from '../services/dispatcher';
 import { ConverterFactory } from '../services/converters';
 import { memoryCache } from '../services/cache';
 
 export const aliRouter = new Elysia()
-    .post('/api/v1/services/aigc/text-generation/generation', async ({ body, headers, request }: any) => {
+    .post('/api/v1/services/aigc/text-generation/generation', async ({ body, headers, request }: ElysiaCtx) => {
         const apiKey = request.headers.get('Authorization')?.replace('Bearer ', '');
         if (!apiKey) return new Response(JSON.stringify({ code: 'Unauthorized', message: 'Missing API key' }), { status: 401 });
 
@@ -37,11 +38,11 @@ export const aliRouter = new Elysia()
             }
 
             if (result && !(result instanceof Response)) {
-                return converter.convertResponse(result as any);
+                return converter.convertResponse(result as Record<string, any>[]);
             }
 
             return result;
-        } catch (error: any) {
+        } catch (error: unknown) {
             const aliError = converter.convertError(error);
             return new Response(JSON.stringify(aliError), {
                 status: 500,
@@ -50,7 +51,7 @@ export const aliRouter = new Elysia()
         }
     });
 
-async function convertStreamToAli(response: Response, converter: any): Promise<Response> {
+async function convertStreamToAli(response: Response, converter: Record<string, any>): Promise<Response> {
     const reader = response.body?.getReader();
     if (!reader) return response;
     
@@ -77,12 +78,12 @@ async function convertStreamToAli(response: Response, converter: any): Promise<R
                                     const chunk = JSON.parse(data);
                                     const aliChunk = converter.convertStreamChunk(chunk);
                                     if (aliChunk) controller.enqueue(encoder.encode(aliChunk));
-                                } catch (e) {}
+                                } catch { /* stream chunk parse error — skip */ }
                             }
                         }
                     }
                 }
-            } catch (error) {}
+            } catch { /* stream complete — expected */ }
             controller.close();
         }
     });

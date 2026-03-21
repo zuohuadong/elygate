@@ -15,7 +15,7 @@ const SENSITIVE_KEYS = [
 /**
  * Check if the content contains sensitive information.
  */
-function isSensitive(data: any): boolean {
+function isSensitive(data: unknown): boolean {
     if (!data) return false;
 
     // Convert to string for broad checking
@@ -34,7 +34,7 @@ function isSensitive(data: any): boolean {
 /**
  * Sanitize an object by redacting sensitive keys.
  */
-function sanitize(obj: any): any {
+function sanitize(obj: unknown): unknown {
     if (obj === null || obj === undefined) return obj;
     if (typeof obj !== 'object') return isSensitive(obj) ? '[REDACTED]' : obj;
 
@@ -42,7 +42,7 @@ function sanitize(obj: any): any {
         return obj.map(item => sanitize(item));
     }
 
-    const sanitized: any = {};
+    const sanitized: Record<string, unknown> = {};
     for (const key in obj) {
         if (Object.prototype.hasOwnProperty.call(obj, key)) {
             if (SENSITIVE_KEYS.some(k => key.toLowerCase().includes(k.toLowerCase()))) {
@@ -73,7 +73,7 @@ export function initLogger() {
     const originalError = console.error;
 
     const wrap = (original: Function, level: string) => {
-        return (...args: any[]) => {
+        return (...args: unknown[]) => {
             // In dev mode, we allow logs but might still want to warn about sensitive data
             // In production, we sanitize everything or suppress if non-essential
 

@@ -5,7 +5,8 @@
     import { Plus, Gift } from "lucide-svelte";
     import { apiFetch } from "$lib/api";
     import { i18n } from "$lib/i18n/index.svelte";
-    import { onMount } from "svelte";
+    
+
     import { session } from "$lib/session.svelte";
 
     let redemptions = $state<any[]>([]);
@@ -29,14 +30,14 @@
                     usageStr: `${u.used_count || 0} / ${u.count || 0}`,
                 };
             });
-        } catch (err: any) {
-            errorMsg = err.message || (i18n.lang === "zh" ? "加载兑换码失败" : "Failed to load redemptions");
+        } catch (err: unknown) {
+            errorMsg = err instanceof Error ? err instanceof Error ? err.message : String(err) : (i18n.lang === "zh" ? "加载兑换码失败" : "Failed to load redemptions");
         } finally {
             isLoading = false;
         }
     }
 
-    onMount(loadData);
+    $effect(() => { loadData(); });
 
     let columns = $derived([
         { key: "id", label: i18n.t.redemptions.id },
@@ -52,12 +53,12 @@
         isModalOpen = true;
     }
 
-    function handleEdit(item: any) {
+    function handleEdit(item: Record<string, unknown>) {
         selectedItem = item;
         isModalOpen = true;
     }
 
-    async function handleDelete(item: any) {
+    async function handleDelete(item: Record<string, unknown>) {
         if (
             !confirm(
                 `Are you sure you want to delete redemption code "${item.name}"?`,
@@ -69,12 +70,12 @@
                 method: "DELETE",
             });
             await loadData();
-        } catch (err: any) {
-            alert(i18n.t.common.failed + ": " + err.message);
+        } catch (err: unknown) {
+            alert(i18n.t.common.failed + ": " + err instanceof Error ? err.message : String(err));
         }
     }
 
-    async function handleSave(data: any) {
+    async function handleSave(data: Record<string, unknown>) {
         try {
             if (selectedItem) {
                 await apiFetch(`/admin/redemptions/${selectedItem.id}`, {
@@ -89,8 +90,8 @@
             }
             isModalOpen = false;
             await loadData();
-        } catch (err: any) {
-            alert(i18n.t.common.failed + ": " + err.message);
+        } catch (err: unknown) {
+            alert(i18n.t.common.failed + ": " + err instanceof Error ? err.message : String(err));
         }
     }
 </script>

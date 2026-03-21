@@ -1,11 +1,12 @@
 import { Elysia } from 'elysia';
+import { getErrorMessage } from '../utils/error';
 import { memoryCache } from '../services/cache';
 import { UnifiedDispatcher } from '../services/dispatcher';
 import { ConverterFactory } from '../services/converters';
-import { type TokenRecord, type UserRecord } from '../types';
+import type { TokenRecord, type UserRecord , ElysiaCtx } from '../types';
 
 export const anthropicRouter = new Elysia()
-    .post('/messages', async ({ body, headers, request }: any) => {
+    .post('/messages', async ({ body, headers, request }: ElysiaCtx) => {
         const startTime = Date.now();
         const headerObj = headers as Record<string, string>;
         const getHeader = (name: string) => headerObj[name.toLowerCase()] || headerObj[name] || '';
@@ -60,23 +61,23 @@ export const anthropicRouter = new Elysia()
             }
 
             if (!isStream && result && !(result instanceof Response)) {
-                return converter.convertResponse(result as any);
+                return converter.convertResponse(result as Record<string, any>[]);
             }
 
             return result;
-        } catch (error: any) {
+        } catch (error: unknown) {
             const anthropicError = converter.convertError({
-                message: error.message,
+                message: getErrorMessage(error),
                 type: 'api_error'
             });
             return new Response(JSON.stringify(anthropicError), {
-                status: error.message?.includes('Unauthorized') || error.message?.includes('401') ? 401 : 500,
+                status: getErrorMessage(error)?.includes('Unauthorized') || getErrorMessage(error)?.includes('401') ? 401 : 500,
                 headers: { 'Content-Type': 'application/json' }
             });
         }
     });
 
-async function convertStreamToAnthropic(response: Response, model: string, converter: any): Promise<Response> {
+async function convertStreamToAnthropic(response: Response, model: string, converter: Record<string, any>): Promise<Response> {
     const reader = response.body?.getReader();
     if (!reader) return response;
     
@@ -122,12 +123,12 @@ async function convertStreamToAnthropic(response: Response, model: string, conve
                                     if (anthropicChunk) {
                                         controller.enqueue(encoder.encode(anthropicChunk));
                                     }
-                                } catch (e) {}
+                                } catch { /* stream chunk parse error — skip */ }
                             }
                         }
                     }
                 }
-            } catch (error) {}
+            } catch { /* stream complete — expected */ }
             controller.close();
         }
     });

@@ -18,8 +18,8 @@ export interface Channel {
     baseUrl?: string; // Frontend often uses camelCase
     key: string;
     models: string[] | string;
-    model_mapping?: any;
-    modelMapping?: any;
+    model_mapping?: Record<string, string>;
+    modelMapping?: Record<string, string>;
     weight: number;
     status: number;
     response_time?: number;

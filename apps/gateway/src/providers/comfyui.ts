@@ -91,7 +91,7 @@ export class ComfyUIProviderHandler implements ProviderHandler {
         };
     }
 
-    transformResponse(data: any) {
+    transformResponse(data: Record<string, any>) {
         // ComfyUI usually returns a prompt_id or results depending on the endpoint.
         // If it's the direct /prompt endpoint:
         if (data.prompt_id) {
@@ -107,13 +107,13 @@ export class ComfyUIProviderHandler implements ProviderHandler {
         // If it's a finished task response (standardized by a proxy or worker)
         return {
             created: Math.floor(Date.now() / 1000),
-            data: (data.images || []).map((img: any) => ({
+            data: (data.images || []).map((img: Record<string, any>) => ({
                 url: typeof img === 'string' ? img : img.url
             }))
         };
     }
 
-    extractUsage(data: any) {
+    extractUsage(data: Record<string, any>) {
         // Image generation usually counts as 1 per image/workflow execution
         return {
             promptTokens: 1,

@@ -16,12 +16,12 @@ export class KlingApiHandler implements ProviderHandler {
         };
     }
 
-    transformResponse(data: any) {
+    transformResponse(data: Record<string, any>) {
         // Return standard task ID or video URL if available immediately
         return data;
     }
 
-    extractUsage(data: any) {
+    extractUsage(data: Record<string, any>) {
         // Video is usually fixed high cost per second or action
         return {
             promptTokens: 1000, // Mock high cost for video

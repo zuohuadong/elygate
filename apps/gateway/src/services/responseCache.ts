@@ -1,3 +1,4 @@
+import { log } from '../services/logger';
 import { sql } from '@elygate/db';
 import { optionCache } from './optionCache';
 import { memoryCache } from './cache';
@@ -17,14 +18,14 @@ function getConfig(): ResponseCacheConfig {
     };
 }
 
-function generateHash(model: string, messages: any[]): string {
+function generateHash(model: string, messages: Record<string, any>[][]): string {
     const content = JSON.stringify({ model, messages });
     return new Bun.CryptoHasher('sha256').update(content).digest('hex');
 }
 
 export async function lookupResponseCache(
     model: string,
-    messages: any[],
+    messages: Record<string, any>[][],
     userId?: number
 ): Promise<any | null> {
     const config = getConfig();
@@ -41,7 +42,7 @@ export async function lookupResponseCache(
     `;
 
     if (rows.length > 0) {
-        console.log('[ResponseCache] HIT!');
+        log.info('[ResponseCache] HIT!');
         memoryCache.stats.responseCacheHits++;
         
         await sql`
@@ -62,15 +63,15 @@ export async function lookupResponseCache(
     }
 
     memoryCache.stats.responseCacheMisses++;
-    console.log('[ResponseCache] MISS');
+    log.info('[ResponseCache] MISS');
     return null;
 }
 
 export async function storeResponseCache(
     model: string,
-    messages: any[],
-    response: any,
-    usage: any,
+    messages: Record<string, any>[][],
+    response: Record<string, any>,
+    usage: Record<string, any>,
     userId?: number
 ): Promise<void> {
     const config = getConfig();
@@ -88,7 +89,7 @@ export async function storeResponseCache(
             expired_at = EXCLUDED.expired_at,
             created_at = NOW()
     `;
-    console.log('[ResponseCache] Stored response for model:', model);
+    log.info('[ResponseCache] Stored response for model:', model);
 }
 
 export async function clearResponseCache(olderThanHours = 24): Promise<number> {
@@ -96,7 +97,7 @@ export async function clearResponseCache(olderThanHours = 24): Promise<number> {
         DELETE FROM response_cache 
         WHERE created_at < NOW() - make_interval(hours => ${olderThanHours})
     `;
-    return result.count;
+    return result.length;
 }
 
 export async function getResponseCacheStats(): Promise<{ total: number; expired: number }> {

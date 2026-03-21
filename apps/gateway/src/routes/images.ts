@@ -9,7 +9,7 @@ export const imagesRouter = new Elysia()
     // Ali DashScope Image
     .post('/api/v1/services/aigc/text2image/image-synthesis', async (ctx) => handleImages(ctx, '/aigc/text2image/'));
 
-async function handleImages({ body, headers, params, request, query }: any, pathType: string) {
+async function handleImages({ body, headers, params, request, query }: Record<string, any>, pathType: string) {
     const apiKey = query?.access_token || request.headers.get('Authorization')?.replace('Bearer ', '') || request.headers.get('x-dashscope-api-key');
     
     if (!apiKey) return new Response(JSON.stringify({ error: 'Missing API key' }), { status: 401 });
@@ -41,11 +41,11 @@ async function handleImages({ body, headers, params, request, query }: any, path
         });
 
         if (result && !(result instanceof Response)) {
-            return converter.convertResponse(result as any);
+            return converter.convertResponse(result as Record<string, any>[]);
         }
 
         return result;
-    } catch (error: any) {
+    } catch (error: unknown) {
         const mappedError = converter.convertError(error);
         return new Response(JSON.stringify(mappedError), {
             status: 500,

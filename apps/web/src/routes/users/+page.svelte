@@ -5,7 +5,8 @@
     import { Plus, Users } from "lucide-svelte";
     import { apiFetch } from "$lib/api";
     import { i18n } from "$lib/i18n/index.svelte";
-    import { onMount } from "svelte";
+    
+
     import { session } from "$lib/session.svelte";
 
     let users = $state<any[]>([]);
@@ -34,14 +35,14 @@
                         : `$ ${(Number(u.quota || 0) / session.quotaPerUnit).toFixed(2)}`,
                 formattedUsed: `$ ${(Number(u.usedQuota || 0) / session.quotaPerUnit).toFixed(2)}`,
             }));
-        } catch (err: any) {
-            errorMsg = err.message || (i18n.lang === "zh" ? "加载用户失败" : "Failed to load users");
+        } catch (err: unknown) {
+            errorMsg = err instanceof Error ? err instanceof Error ? err.message : String(err) : (i18n.lang === "zh" ? "加载用户失败" : "Failed to load users");
         } finally {
             isLoading = false;
         }
     }
 
-    onMount(loadUsers);
+    $effect(() => { loadUsers(); });
 
     const renderStatus = (val: string) => {
         const isActive = val === i18n.t.channels.active;
@@ -70,17 +71,17 @@
         isModalOpen = true;
     }
 
-    function handleEdit(user: any) {
+    function handleEdit(user: Record<string, any>) {
         selectedUser = user;
         isModalOpen = true;
     }
 
-    function handleGrantPackage(user: any) {
+    function handleGrantPackage(user: Record<string, any>) {
         grantSelectedUser = user;
         isGrantModalOpen = true;
     }
 
-    async function handleDelete(user: any) {
+    async function handleDelete(user: Record<string, any>) {
         if (
             !confirm(`Are you sure you want to delete user "${user.username}"?`)
         )
@@ -88,12 +89,12 @@
         try {
             await apiFetch(`/admin/users/${user.id}`, { method: "DELETE" });
             await loadUsers();
-        } catch (err: any) {
-            alert(i18n.t.common.failed + ": " + err.message);
+        } catch (err: unknown) {
+            alert(i18n.t.common.failed + ": " + err instanceof Error ? err.message : String(err));
         }
     }
 
-    async function handleSave(data: any) {
+    async function handleSave(data: Record<string, unknown>) {
         try {
             if (selectedUser) {
                 await apiFetch(`/admin/users/${selectedUser.id}`, {
@@ -108,8 +109,8 @@
             }
             isModalOpen = false;
             await loadUsers();
-        } catch (err: any) {
-            alert(i18n.t.common.failed + ": " + err.message);
+        } catch (err: unknown) {
+            alert(i18n.t.common.failed + ": " + err instanceof Error ? err.message : String(err));
         }
     }
 </script>

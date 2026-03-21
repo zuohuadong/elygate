@@ -102,6 +102,6 @@ describe('Payment System Tests', () => {
             WHERE id = ${testOrderId} AND status = 0
         `;
         
-        expect(result.count).toBe(0);
+        expect(result.length).toBe(0);
     });
 });

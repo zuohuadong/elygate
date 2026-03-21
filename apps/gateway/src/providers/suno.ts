@@ -8,7 +8,7 @@ export class SunoApiHandler implements ProviderHandler {
         });
     }
 
-    transformRequest(body: Record<string, any>, model: string): any {
+    transformRequest(body: Record<string, any>, model: string): Record<string, any> {
         if (body.prompt) {
             return {
                 prompt: body.prompt,
@@ -26,7 +26,7 @@ export class SunoApiHandler implements ProviderHandler {
         };
     }
 
-    transformResponse(data: any): any {
+    transformResponse(data: Record<string, any>): Record<string, any> {
         if (Array.isArray(data)) {
             return {
                 id: `suno-${Date.now()}`,
@@ -37,7 +37,7 @@ export class SunoApiHandler implements ProviderHandler {
                     index: 0,
                     message: {
                         role: 'assistant',
-                        content: JSON.stringify(data.map((song: any) => ({
+                        content: JSON.stringify(data.map((song: Record<string, any>) => ({
                             id: song.id,
                             title: song.title,
                             image_url: song.image_url,
@@ -79,7 +79,7 @@ export class SunoApiHandler implements ProviderHandler {
         };
     }
 
-    extractUsage(data: any): { promptTokens: number; completionTokens: number } {
+    extractUsage(data: Record<string, any>): { promptTokens: number; completionTokens: number } {
         return {
             promptTokens: data.usage?.prompt_tokens || 0,
             completionTokens: data.usage?.completion_tokens || 0

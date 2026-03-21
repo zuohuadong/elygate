@@ -19,9 +19,9 @@ export class AliApiHandler implements ProviderHandler {
         };
     }
 
-    transformResponse(data: any) {
+    transformResponse(data: Record<string, any>) {
         const choice = data.output?.choices?.[0] || {};
-        const message: any = {
+        const message: Record<string, any> = {
             role: 'assistant',
             content: choice.message?.content || ''
         };
@@ -53,7 +53,7 @@ export class AliApiHandler implements ProviderHandler {
         };
     }
 
-    extractUsage(data: any) {
+    extractUsage(data: Record<string, any>) {
         return {
             promptTokens: data.usage?.input_tokens || 0,
             completionTokens: data.usage?.output_tokens || 0,

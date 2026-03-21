@@ -1,3 +1,6 @@
+import type { ElysiaCtx } from '../../types';
+import { log } from '../../services/logger';
+import { getErrorMessage } from '../../utils/error';
 import { Elysia } from 'elysia';
 import { sql } from '@elygate/db';
 import { memoryCache } from '../../services/cache';
@@ -14,7 +17,7 @@ export const settingsRouter = new Elysia()
         return options;
     })
 
-    .put('/options', async ({ body }: any) => {
+    .put('/options', async ({ body }: ElysiaCtx) => {
         const payload = body as Record<string, string>;
         
         const newEmbeddingModel = payload.SemanticCacheEmbeddingModel;
@@ -35,19 +38,19 @@ export const settingsRouter = new Elysia()
                     });
                     
                     if (response.ok) {
-                        const data = await response.json() as any;
+                        const data = await response.json() as Record<string, any>;
                         const dimension = data?.data?.[0]?.embedding?.length;
                         
                         if (dimension) {
                             await sql`DELETE FROM semantic_cache`;
-                            console.log('[SemanticCache] Cleared old cache data');
+                            log.info('[SemanticCache] Cleared old cache data');
                             
                             await sql`ALTER TABLE semantic_cache ALTER COLUMN embedding TYPE vector(${dimension})`;
-                            console.log(`[SemanticCache] Updated embedding dimension to ${dimension}`);
+                            log.info(`[SemanticCache] Updated embedding dimension to ${dimension}`);
                         }
                     }
-                } catch (e: any) {
-                    console.warn('[SemanticCache] Failed to update embedding dimension:', e.message);
+                } catch (e: unknown) {
+                    log.warn('[SemanticCache] Failed to update embedding dimension:', getErrorMessage(e));
                 }
             }
         }
@@ -59,12 +62,12 @@ export const settingsRouter = new Elysia()
                 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
             `;
         }
-        refreshAllCaches().catch(console.error);
+        refreshAllCaches().catch((e: unknown) => log.error("[Async]", e));
         return { success: true };
     })
 
     // --- Embedding Model Check ---
-    .post('/check-embedding', async ({ body, set }: any) => {
+    .post('/check-embedding', async ({ body, set }: ElysiaCtx) => {
         try {
             const { model } = body as { model: string };
             if (!model) {
@@ -108,7 +111,7 @@ export const settingsRouter = new Elysia()
                 };
             }
 
-            const data = await response.json() as any;
+            const data = await response.json() as Record<string, any>;
             const embedding = data?.data?.[0]?.embedding;
             
             if (!embedding || !Array.isArray(embedding)) {
@@ -124,9 +127,9 @@ export const settingsRouter = new Elysia()
                 message: `Embedding model is working (dimension: ${embedding.length})`,
                 channel: channel.name
             };
-        } catch (e: any) {
+        } catch (e: unknown) {
             set.status = 500;
-            return { success: false, message: e.message };
+            return { success: false, message: getErrorMessage(e) };
         }
     })
 
@@ -142,12 +145,12 @@ export const settingsRouter = new Elysia()
             await sql`ALTER TABLE semantic_cache ADD COLUMN IF NOT EXISTS created_by INTEGER REFERENCES users(id) ON DELETE SET NULL`;
             
             return { success: true, message: 'Schema updated for subscription cycles & semantic cache' };
-        } catch (e: any) {
-            return { success: false, message: e.message };
+        } catch (e: unknown) {
+            return { success: false, message: getErrorMessage(e) };
         }
     })
 
-    .get('/test-cycle-reset', async ({ user }: any) => {
+    .get('/test-cycle-reset', async ({ user }: ElysiaCtx) => {
         try {
             const [pkg] = await sql`
                 INSERT INTO packages (name, description, price, duration_days, cycle_quota, cycle_interval, cycle_unit, is_public)
@@ -172,7 +175,7 @@ export const settingsRouter = new Elysia()
                 packageId: pkg.id,
                 subId: sub.id
             };
-        } catch (e: any) {
-            return { success: false, message: e.message };
+        } catch (e: unknown) {
+            return { success: false, message: getErrorMessage(e) };
         }
     });

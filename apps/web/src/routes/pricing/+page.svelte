@@ -1,5 +1,6 @@
 <script lang="ts">
-    import { onMount } from "svelte";
+    
+
     import { session } from "$lib/session.svelte";
     import { apiFetch } from "$lib/api";
     import {
@@ -65,7 +66,7 @@
             const cRatios = JSON.parse(configs.CompletionRatio);
             const fModels = JSON.parse(configs.FixedCostModels);
 
-            const list: any[] = [];
+            const list: Record<string, unknown>[] = [];
 
             // 1. Handle Token-based models
             Object.keys(mRatios).forEach((model) => {
@@ -124,9 +125,9 @@
                     }
                 }
             }
-        } catch (err: any) {
+        } catch (err: unknown) {
             error =
-                err.message ||
+                err instanceof Error ? err.message : String(err) ||
                 (i18n.lang === "zh"
                     ? "加载计费配置失败"
                     : "Failed to load pricing options");
@@ -151,11 +152,11 @@
                 // Must be valid JSON
                 const parsed = JSON.parse(raw);
                 payload[c.key] = JSON.stringify(parsed);
-            } catch (err: any) {
+            } catch (err: unknown) {
                 error =
                     (i18n.lang === "zh"
                         ? `${c.title} JSON 格式错误: `
-                        : `Invalid JSON in ${c.title}: `) + err.message;
+                        : `Invalid JSON in ${c.title}: `) + err instanceof Error ? err.message : String(err);
                 isSaving = false;
                 return;
             }
@@ -171,9 +172,9 @@
                     ? "计费倍率保存成功！"
                     : "Pricing ratios saved successfully!";
             setTimeout(() => (successMessage = null), 3000);
-        } catch (err: any) {
+        } catch (err: unknown) {
             error =
-                err.message ||
+                err instanceof Error ? err.message : String(err) ||
                 (i18n.lang === "zh"
                     ? "保存配置失败"
                     : "Failed to save options");
@@ -182,7 +183,7 @@
         }
     }
 
-    onMount(() => {
+    $effect(() => {
         loadConfig();
     });
 </script>

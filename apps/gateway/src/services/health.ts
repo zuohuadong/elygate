@@ -1,3 +1,6 @@
+import { config } from '../config';
+import { log } from '../services/logger';
+import { getErrorMessage } from '../utils/error';
 import { sql } from "@elygate/db";
 import { memoryCache } from "./cache";
 
@@ -14,7 +17,7 @@ class HealthChecker {
         if (this.isRunning) return;
         this.isRunning = true;
         try {
-            console.log("[HealthCheck] Starting proactive channel verification...");
+            log.info("[HealthCheck] Starting proactive channel verification...");
 
             // Fetch all currently active channels
             const channels = await sql`
@@ -56,17 +59,17 @@ class HealthChecker {
                     } else {
                         throw new Error(`HTTP ${res.status}`);
                     }
-                } catch (e: any) {
+                } catch (e: unknown) {
                     const newErrors = ch.test_errors + 1;
-                    console.warn(`[HealthCheck] Channel ${ch.id} failed ping (${newErrors}/${this.MAX_ERRORS}). Error:`, e.message);
+                    log.warn(`[HealthCheck] Channel ${ch.id} failed ping (${newErrors}/${this.MAX_ERRORS}). Error:`, getErrorMessage(e));
 
                     // Record failure health log
-                    await sql`INSERT INTO health_logs (channel_id, status, error_message) VALUES (${ch.id}, 0, ${e.message})`;
+                    await sql`INSERT INTO health_logs (channel_id, status, error_message) VALUES (${ch.id}, 0, ${getErrorMessage(e)})`;
 
                     if (newErrors >= this.MAX_ERRORS) {
-                        console.error(`[HealthCheck] Channel ${ch.id} auto-disabled due to consecutive failures.`);
+                        log.error(`[HealthCheck] Channel ${ch.id} auto-disabled due to consecutive failures.`);
                         await sql`UPDATE channels SET status = 3, test_errors = ${newErrors}, test_at = NOW() WHERE id = ${ch.id}`;
-                        memoryCache.refresh().catch(console.error);
+                        memoryCache.refresh().catch((e: unknown) => log.error("[Async]", e));
 
                         // Also notify admin and trigger webhook (similar to circuit breaker)
                         try {
@@ -78,7 +81,7 @@ class HealthChecker {
                             );
                             await webhookService.trigger('channel.disabled', { channelId: ch.id });
                         } catch (err) {
-                            console.error('[HealthCheck] Failed to send notification:', err);
+                            log.error('[HealthCheck] Failed to send notification:', err);
                         }
                     } else {
                         await sql`UPDATE channels SET test_errors = ${newErrors}, test_at = NOW() WHERE id = ${ch.id}`;
@@ -86,7 +89,7 @@ class HealthChecker {
                 }
             }
         } catch (e) {
-            console.error("[HealthCheck] Global Error:", e);
+            log.error("[HealthCheck] Global Error:", e);
         } finally {
             this.isRunning = false;
         }
@@ -99,7 +102,7 @@ export const healthCheckService = new HealthChecker();
 setInterval(() => {
     // Only run if the environment specifically enables proactive testing
     // to save dummy request costs, or if optionCache defines it
-    if (process.env.ENABLE_HEALTH_CHECK === 'true') {
+    if (String(config.enableHealthCheck) === 'true') {
         healthCheckService.checkAllChannels();
     }
 }, 10 * 60 * 1000); // 10 minutes

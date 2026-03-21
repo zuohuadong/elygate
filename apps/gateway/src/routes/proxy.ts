@@ -1,3 +1,5 @@
+import type { ElysiaCtx } from '../types';
+import { log } from '../services/logger';
 import { Elysia } from 'elysia';
 import { assertModelAccess } from '../middleware/auth';
 import { UnifiedDispatcher, type DispatchOptions } from '../services/dispatcher';
@@ -8,7 +10,7 @@ interface ProxyRouteConfig {
     requiredFields?: string[];
     defaultModel?: string;
     /** Extract model name from body (defaults to body.model) */
-    getModel?: (body: any) => string | undefined;
+    getModel?: (body: Record<string, any>) => string | undefined;
 }
 
 /**
@@ -20,7 +22,7 @@ export function createProxyRoute(config: ProxyRouteConfig): Elysia {
     const label = config.endpointType.replace('/', '_').toUpperCase();
 
     return new Elysia()
-        .post(config.path, async ({ body, token, user, set }: any) => {
+        .post(config.path, async ({ body, token, user, set }: ElysiaCtx) => {
             const model = (config.getModel?.(body) ?? body.model ?? config.defaultModel) as string;
 
             if (!model) {
@@ -48,7 +50,7 @@ export function createProxyRoute(config: ProxyRouteConfig): Elysia {
             const externalWorkspaceId = headers['x-external-workspace-id'] || body.external_workspace_id || body.metadata?.external_workspace_id;
             const externalFeatureType = headers['x-external-feature-type'] || body.external_feature_type || body.metadata?.external_feature_type;
 
-            console.log(`[${label}] UserID: ${user.id}, Token: ${token.name}, Model: ${model}, TaskID: ${externalTaskId || 'N/A'}`);
+            log.info(`[${label}] UserID: ${user.id}, Token: ${token.name}, Model: ${model}, TaskID: ${externalTaskId || 'N/A'}`);
 
             return await UnifiedDispatcher.dispatch({
                 model,

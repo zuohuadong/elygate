@@ -15,17 +15,17 @@ export class FluxApiHandler implements ProviderHandler {
         };
     }
 
-    transformResponse(data: any) {
+    transformResponse(data: Record<string, any>) {
         // Standardize to OpenAI images generation format
         return {
             created: Math.floor(Date.now() / 1000),
-            data: (data.images || [data.image]).map((img: any) => ({
+            data: (data.images || [data.image]).map((img: Record<string, any>) => ({
                 url: typeof img === 'string' ? img : img.url
             }))
         };
     }
 
-    extractUsage(data: any) {
+    extractUsage(data: Record<string, any>) {
         // Fixed cost for images usually, but we return a count for billing
         return {
             promptTokens: 1, // Represent 1 image

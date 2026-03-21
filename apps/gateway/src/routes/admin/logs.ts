@@ -1,3 +1,4 @@
+import type { ElysiaCtx } from '../../types';
 import { Elysia } from 'elysia';
 import { sql } from '@elygate/db';
 import { quotaToUSD, quotaToRMB } from '../../services/ratio';
@@ -5,7 +6,7 @@ import { getAuditLogs } from '../../services/auditLog';
 import { memoryCache } from '../../services/cache';
 
 export const logsRouter = new Elysia()
-    .get('/logs', async ({ query }: any) => {
+    .get('/logs', async ({ query }: ElysiaCtx) => {
         const page = Number(query?.page) || 1;
         const limit = Number(query?.limit) || 50;
         const offset = (page - 1) * limit;
@@ -38,7 +39,7 @@ export const logsRouter = new Elysia()
         `;
 
         return {
-            data: data.map((l: any) => ({
+            data: data.map((l: Record<string, any>) => ({
                 ...l,
                 channel_name: l.channel_id === -1 
                     ? (query?.lang === 'zh' ? '系统精确缓存' : 'Exact Match Cache')
@@ -56,7 +57,7 @@ export const logsRouter = new Elysia()
         };
     })
 
-    .get('/logs/export', async ({ query, set }: any) => {
+    .get('/logs/export', async ({ query, set }: ElysiaCtx) => {
         const userId = query?.user_id;
         const channelId = query?.channel_id;
         const modelName = query?.model;
@@ -80,7 +81,7 @@ export const logsRouter = new Elysia()
             LIMIT 10000
         `;
 
-        const logs = data.map((l: any) => ({
+        const logs = data.map((l: Record<string, any>) => ({
             id: l.id,
             created_at: l.created_at,
             user_id: l.user_id,
@@ -115,7 +116,7 @@ export const logsRouter = new Elysia()
             'Prompt', 'Response', 'Error Message'
         ].join(',');
 
-        const csvRows = logs.map((l: any) => [
+        const csvRows = logs.map((l: Record<string, any>) => [
             l.id,
             l.created_at,
             l.user_id,
@@ -153,7 +154,7 @@ export const logsRouter = new Elysia()
         }));
     })
 
-    .get('/health-logs', async ({ query }: any) => {
+    .get('/health-logs', async ({ query }: ElysiaCtx) => {
         const channelId = query?.channel_id;
         const page = Number(query?.page) || 1;
         const limit = Number(query?.limit) || 50;
@@ -173,7 +174,7 @@ export const logsRouter = new Elysia()
         `;
 
         return {
-            data: data.map((l: any) => ({
+            data: data.map((l: Record<string, any>) => ({
                 id: l.id,
                 channel_id: l.channel_id,
                 channel_name: l.channel_name || 'Unknown',
@@ -210,14 +211,14 @@ export const logsRouter = new Elysia()
             GROUP BY c.id, c.name, c.type, c.status, c.test_errors, c.test_at
             ORDER BY c.id
         `;
-        return summary.map((s: any) => ({
+        return summary.map((s: Record<string, any>) => ({
             ...s,
             success_rate: s.total_checks > 0 ? ((s.successful_checks / s.total_checks) * 100).toFixed(1) : 'N/A',
             avg_latency: s.avg_latency ? Math.round(s.avg_latency) : null
         }));
     })
 
-    .get('/audit-logs', async ({ query }: any) => {
+    .get('/audit-logs', async ({ query }: ElysiaCtx) => {
         const userId = query?.user_id ? Number(query.user_id) : undefined;
         const action = query?.action;
         const resource = query?.resource;
@@ -234,7 +235,7 @@ export const logsRouter = new Elysia()
         });
 
         return {
-            data: result.logs.map((l: any) => ({
+            data: result.logs.map((l: Record<string, any>) => ({
                 id: l.id,
                 user_id: l.user_id,
                 username: l.username,

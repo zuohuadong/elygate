@@ -2,7 +2,7 @@
     import { DollarSign, Zap, Info, ChevronDown } from "lucide-svelte";
     import { apiFetch } from "$lib/api";
     import { i18n } from "$lib/i18n/index.svelte";
-    import { onMount } from "svelte";
+    
 
     interface ModelPricing {
         model: string;
@@ -26,7 +26,7 @@
         { id: "DeepSeek", label: "DeepSeek", labelEn: "DeepSeek" },
     ];
 
-    onMount(async () => {
+    $effect(() => { (async () => {
         try {
             const data = await apiFetch<ModelPricing[]>("/models/pricing");
             pricingData = data || getDefaultPricing();
@@ -36,7 +36,7 @@
         } finally {
             isLoading = false;
         }
-    });
+    })(); });
 
     function getDefaultPricing(): ModelPricing[] {
         return [

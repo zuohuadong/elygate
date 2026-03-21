@@ -1,10 +1,11 @@
+import type { ElysiaCtx } from '../types';
 import { Elysia } from 'elysia';
 import { UnifiedDispatcher } from '../services/dispatcher';
 import { ConverterFactory } from '../services/converters';
 import { memoryCache } from '../services/cache';
 
 export const baiduRouter = new Elysia()
-    .post('/rpc/2.0/ai_custom/v1/wenxinworkshop/chat/:model', async ({ body, params, request, query }: any) => {
+    .post('/rpc/2.0/ai_custom/v1/wenxinworkshop/chat/:model', async ({ body, params, request, query }: ElysiaCtx) => {
         const model = params.model;
         const apiKey = query.access_token || request.headers.get('Authorization')?.replace('Bearer ', '');
         
@@ -40,11 +41,11 @@ export const baiduRouter = new Elysia()
             }
 
             if (result && !(result instanceof Response)) {
-                return converter.convertResponse(result as any);
+                return converter.convertResponse(result as Record<string, any>[]);
             }
 
             return result;
-        } catch (error: any) {
+        } catch (error: unknown) {
             const baiduError = converter.convertError(error);
             return new Response(JSON.stringify(baiduError), {
                 status: 200, // Baidu often returns 200 with error_code
@@ -53,7 +54,7 @@ export const baiduRouter = new Elysia()
         }
     });
 
-async function convertStreamToBaidu(response: Response, converter: any): Promise<Response> {
+async function convertStreamToBaidu(response: Response, converter: Record<string, any>): Promise<Response> {
     const reader = response.body?.getReader();
     if (!reader) return response;
     
@@ -80,12 +81,12 @@ async function convertStreamToBaidu(response: Response, converter: any): Promise
                                     const chunk = JSON.parse(data);
                                     const baiduChunk = converter.convertStreamChunk(chunk);
                                     if (baiduChunk) controller.enqueue(encoder.encode(baiduChunk));
-                                } catch (e) {}
+                                } catch { /* stream chunk parse error — skip */ }
                             }
                         }
                     }
                 }
-            } catch (error) {}
+            } catch { /* stream complete — expected */ }
             controller.close();
         }
     });

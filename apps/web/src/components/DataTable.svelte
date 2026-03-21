@@ -4,7 +4,7 @@
     type Column = {
         key: string;
         label: string;
-        render?: (value: any, row: any) => any; // 支持自定义渲染如 Badge
+        render?: (value: unknown, row: Record<string, unknown>) => unknown; // Supports custom rendering like Badge
     };
 
     let {
@@ -21,11 +21,11 @@
         customActions,
         cell,
     }: {
-        data: any[];
+        data: Record<string, unknown>[];
         columns: Column[];
-        onEdit?: (row: any) => void;
-        onDelete?: (row: any) => void;
-        extraActions?: { label: string; class: string; onClick: (row: any) => void }[];
+        onEdit?: (row: Record<string, unknown>) => void;
+        onDelete?: (row: Record<string, unknown>) => void;
+        extraActions?: { label: string; class: string; onClick: (row: Record<string, unknown>) => void }[];
         pageSize?: number;
         currentPage?: number;
         total?: number;
@@ -177,7 +177,7 @@
         </table>
     </div>
 
-    <!-- 分页栏 -->
+    <!-- Pagination Bar -->
     <div
         class="flex items-center justify-between px-6 py-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50/30 dark:bg-slate-900/30"
     >

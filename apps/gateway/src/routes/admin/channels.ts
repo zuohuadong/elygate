@@ -1,14 +1,16 @@
+import { log } from '../../services/logger';
+import { getErrorMessage } from '../../utils/error';
 import { Elysia, t } from 'elysia';
 import { sql } from '@elygate/db';
 import { memoryCache } from '../../services/cache';
 import { getProviderHandler } from '../../providers';
-import { ChannelType } from '../../types';
+import { ChannelType , ElysiaCtx } from '../../types';
 import { encryptChannelKeys, decryptChannelKeys, getChannelKeys } from '../../services/encryption';
 import { buildModelsUrl, buildTestUrl } from '../../utils/url';
 import { refreshAllCaches } from './index';
 
 // Load model configurations
-let modelConfig: any = { anthropic: { models: [] } };
+let modelConfig: Record<string, any> = { anthropic: { models: [] } };
 try {
     const { join } = await import('path');
     const configPath = join(process.cwd(), 'apps/gateway/config/models.json');
@@ -17,7 +19,7 @@ try {
         modelConfig = await file.json();
     }
 } catch (error) {
-    console.error('[ModelConfig] Failed to load model config:', error);
+    log.error('[ModelConfig] Failed to load model config:', error);
 }
 
 export { modelConfig };
@@ -31,15 +33,15 @@ export const channelsRouter = new Elysia()
             FROM channels 
             ORDER BY id DESC
         `;
-        return channels.map((c: any) => ({
+        return channels.map((c: Record<string, any>) => ({
             ...c,
             key: decryptChannelKeys(c.key)
         }));
     })
 
-    .post('/channels', async ({ body, set }: any) => {
+    .post('/channels', async ({ body, set }: ElysiaCtx) => {
         try {
-            const b = body as any;
+            const b = body as Record<string, any>;
             const encryptedKey = encryptChannelKeys(b.key);
             const [result] = await sql`
                 INSERT INTO channels (name, type, key, base_url, models, priority, weight, status, key_strategy, key_status, price_ratio, key_concurrency_limit)
@@ -48,9 +50,9 @@ export const channelsRouter = new Elysia()
             `;
             await refreshAllCaches();
             return result;
-        } catch (e: any) {
+        } catch (e: unknown) {
             set.status = 500;
-            return { success: false, message: e.message };
+            return { success: false, message: getErrorMessage(e) };
         }
     }, {
         body: t.Object({
@@ -67,9 +69,9 @@ export const channelsRouter = new Elysia()
         })
     })
 
-    .put('/channels/:id', async ({ params: { id }, body, set }: any) => {
+    .put('/channels/:id', async ({ params: { id }, body, set }: ElysiaCtx) => {
         try {
-            const b = body as any;
+            const b = body as Record<string, any>;
             const [oldChannel] = await sql`SELECT * FROM channels WHERE id = ${Number(id)} LIMIT 1`;
             if (!oldChannel) {
                 set.status = 404;
@@ -110,26 +112,26 @@ export const channelsRouter = new Elysia()
                 ...result,
                 key: decryptChannelKeys(result.key)
             };
-        } catch (e: any) {
+        } catch (e: unknown) {
             set.status = 500;
-            return { success: false, message: e.message };
+            return { success: false, message: getErrorMessage(e) };
         }
     })
 
-    .delete('/channels/:id', async ({ params: { id }, set }: any) => {
+    .delete('/channels/:id', async ({ params: { id }, set }: ElysiaCtx) => {
         try {
             await sql`DELETE FROM channels WHERE id = ${Number(id)}`;
             await refreshAllCaches();
             return { success: true };
-        } catch (e: any) {
+        } catch (e: unknown) {
             set.status = 500;
-            return { success: false, message: e.message };
+            return { success: false, message: getErrorMessage(e) };
         }
     })
 
-    .post('/channels/batch', async ({ body, set }: any) => {
+    .post('/channels/batch', async ({ body, set }: ElysiaCtx) => {
         try {
-            const channels = body as any[];
+            const channels = body as Record<string, any>[];
             const results = [];
 
             for (const ch of channels) {
@@ -141,8 +143,8 @@ export const channelsRouter = new Elysia()
                         RETURNING id, name, type, base_url, models, status
                     `;
                     results.push({ success: true, channel: result });
-                } catch (e: any) {
-                    results.push({ success: false, name: ch.name, error: e.message });
+                } catch (e: unknown) {
+                    results.push({ success: false, name: ch.name, error: getErrorMessage(e) });
                 }
             }
 
@@ -150,13 +152,13 @@ export const channelsRouter = new Elysia()
             return {
                 success: true,
                 total: channels.length,
-                imported: results.filter((r: any) => r.success).length,
-                failed: results.filter((r: any) => !r.success).length,
+                imported: results.filter((r: Record<string, any>) => r.success).length,
+                failed: results.filter((r: Record<string, any>) => !r.success).length,
                 results
             };
-        } catch (e: any) {
+        } catch (e: unknown) {
             set.status = 500;
-            return { success: false, message: e.message };
+            return { success: false, message: getErrorMessage(e) };
         }
     }, {
         body: t.Array(t.Object({
@@ -173,14 +175,14 @@ export const channelsRouter = new Elysia()
         }))
     })
 
-    .post('/channels/:id/sync-models', async ({ params: { id }, set }: any) => {
+    .post('/channels/:id/sync-models', async ({ params: { id }, set }: ElysiaCtx) => {
         const [channel] = await sql`SELECT * FROM channels WHERE id = ${Number(id)} LIMIT 1`;
         if (!channel) return (set.status = 404, { success: false, message: 'Channel not found' });
 
         const handler = getProviderHandler(channel.type);
         const keys = getChannelKeys(channel.key);
         const testKey = keys[0] || '';
-        const baseUrl = (channel.base_url || 'https://api.openai.com').replace(/\/+$/, '');
+        const baseUrl = (channel.base_url || apiUrls.openaiDefault).replace(/\/+$/, '');
 
         const modelsUrl = buildModelsUrl(baseUrl, channel.type);
         const res = await fetch(modelsUrl, { headers: handler.buildHeaders(testKey) });
@@ -188,15 +190,15 @@ export const channelsRouter = new Elysia()
 
         const data = await res.json();
         const models = channel.type === ChannelType.GEMINI
-            ? data.models?.map((m: any) => m.name?.replace('models/', '') || m.displayName).filter(Boolean) || []
-            : data.data?.map((m: any) => m.id).filter(Boolean) || data.map?.((m: any) => m.id || m.name).filter(Boolean) || [];
+            ? data.models?.map((m: Record<string, any>) => m.name?.replace('models/', '') || m.displayName).filter(Boolean) || []
+            : data.data?.map((m: Record<string, any>) => m.id).filter(Boolean) || data.map?.((m: any) => m.id || m.name).filter(Boolean) || [];
 
         const [result] = await sql`UPDATE channels SET models = ${models}, updated_at = NOW() WHERE id = ${Number(id)} RETURNING *`;
         await refreshAllCaches();
         return { success: true, modelsCount: models.length, channel: result };
     })
 
-    .post('/channels/:id/keys/clean', async ({ params: { id }, set }: any) => {
+    .post('/channels/:id/keys/clean', async ({ params: { id }, set }: ElysiaCtx) => {
         try {
             const [channel] = await sql`SELECT * FROM channels WHERE id = ${Number(id)} LIMIT 1`;
             if (!channel) {
@@ -229,13 +231,13 @@ export const channelsRouter = new Elysia()
                 removedCount: keys.length - activeKeys.length,
                 channel: result
             };
-        } catch (e: any) {
+        } catch (e: unknown) {
             set.status = 500;
-            return { success: false, message: e.message };
+            return { success: false, message: getErrorMessage(e) };
         }
     })
 
-    .post('/channels/:id/test', async ({ params: { id } }: any) => {
+    .post('/channels/:id/test', async ({ params: { id } }: ElysiaCtx) => {
         const [channel] = await sql`SELECT * FROM channels WHERE id = ${Number(id)} LIMIT 1`;
         if (!channel) throw new Error("Channel not found");
 
@@ -250,7 +252,7 @@ export const channelsRouter = new Elysia()
         const testKey = keys[0] || '';
         const fetchHeaders = handler.buildHeaders(testKey);
 
-        const baseUrl = (channel.base_url || 'https://api.openai.com').replace(/\/+$/, '');
+        const baseUrl = (channel.base_url || apiUrls.openaiDefault).replace(/\/+$/, '');
         const testUrl = buildTestUrl(baseUrl, channel.type, testModel);
 
         const startTime = Date.now();
@@ -265,14 +267,14 @@ export const channelsRouter = new Elysia()
             await sql`UPDATE channels SET response_time = ${latency}, test_at = NOW() WHERE id = ${Number(id)}`;
             await refreshAllCaches();
             return { success: true, response_time: latency };
-        } catch (e: any) {
+        } catch (e: unknown) {
             await sql`UPDATE channels SET response_time = 0, test_at = NOW() WHERE id = ${Number(id)}`;
             await refreshAllCaches();
             throw e;
         }
     })
 
-    .post('/channels/fetch-models', async ({ body, set }: any) => {
+    .post('/channels/fetch-models', async ({ body, set }: ElysiaCtx) => {
         const { url, key, type } = body as { url?: string; key?: string; type?: number };
         
         if (!url || !key) {
@@ -284,7 +286,7 @@ export const channelsRouter = new Elysia()
         const handler = getProviderHandler(channelType);
 
         if (channelType === ChannelType.ANTHROPIC) {
-            const anthropicModels = modelConfig.anthropic?.models?.map((m: any) => m.id) || [];
+            const anthropicModels = modelConfig.anthropic?.models?.map((m: Record<string, any>) => m.id) || [];
             return { success: true, models: anthropicModels, total: anthropicModels.length };
         }
 
@@ -308,21 +310,21 @@ export const channelsRouter = new Elysia()
 
             let models: string[] = [];
             if (channelType === ChannelType.GEMINI) {
-                models = data.models?.map((m: any) => m.name?.replace('models/', '') || m.displayName).filter(Boolean) || [];
+                models = data.models?.map((m: Record<string, any>) => m.name?.replace('models/', '') || m.displayName).filter(Boolean) || [];
             } else if (data.data && Array.isArray(data.data)) {
-                models = data.data.map((m: any) => m.id).filter(Boolean);
+                models = data.data.map((m: Record<string, any>) => m.id).filter(Boolean);
             } else if (Array.isArray(data)) {
-                models = data.map((m: any) => m.id || m.name).filter(Boolean);
+                models = data.map((m: Record<string, any>) => m.id || m.name).filter(Boolean);
             }
 
             return { success: true, models, total: models.length };
-        } catch (e: any) {
+        } catch (e: unknown) {
             set.status = 500;
-            return { success: false, message: e.message };
+            return { success: false, message: getErrorMessage(e) };
         }
     })
 
-    .get('/channels/:id/models', async ({ params: { id }, set }: any) => {
+    .get('/channels/:id/models', async ({ params: { id }, set }: ElysiaCtx) => {
         const [channel] = await sql`SELECT * FROM channels WHERE id = ${Number(id)} LIMIT 1`;
         if (!channel) {
             set.status = 404;
@@ -332,7 +334,7 @@ export const channelsRouter = new Elysia()
         const handler = getProviderHandler(channel.type);
 
         if (channel.type === ChannelType.ANTHROPIC) {
-            const anthropicModels = modelConfig.anthropic?.models?.map((m: any) => m.id) || [];
+            const anthropicModels = modelConfig.anthropic?.models?.map((m: Record<string, any>) => m.id) || [];
             return {
                 success: true,
                 models: anthropicModels,
@@ -345,7 +347,7 @@ export const channelsRouter = new Elysia()
         const testKey = keys[0] || '';
         const fetchHeaders = handler.buildHeaders(testKey);
 
-        const baseUrl = (channel.base_url || 'https://api.openai.com').replace(/\/+$/, '');
+        const baseUrl = (channel.base_url || apiUrls.openaiDefault).replace(/\/+$/, '');
         const modelsUrl = buildModelsUrl(baseUrl, channel.type);
 
         try {
@@ -361,16 +363,16 @@ export const channelsRouter = new Elysia()
 
             let models: string[] = [];
             if (channel.type === ChannelType.GEMINI) {
-                models = data.models?.map((m: any) => m.name?.replace('models/', '') || m.displayName).filter(Boolean) || [];
+                models = data.models?.map((m: Record<string, any>) => m.name?.replace('models/', '') || m.displayName).filter(Boolean) || [];
             } else if (data.data && Array.isArray(data.data)) {
-                models = data.data.map((m: any) => m.id).filter(Boolean);
+                models = data.data.map((m: Record<string, any>) => m.id).filter(Boolean);
             } else if (Array.isArray(data)) {
-                models = data.map((m: any) => m.id || m.name).filter(Boolean);
+                models = data.map((m: Record<string, any>) => m.id || m.name).filter(Boolean);
             }
 
             return { success: true, models, total: models.length };
-        } catch (e: any) {
+        } catch (e: unknown) {
             set.status = 500;
-            return { success: false, message: e.message };
+            return { success: false, message: getErrorMessage(e) };
         }
     });

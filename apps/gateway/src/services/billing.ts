@@ -1,5 +1,7 @@
+import { log } from '../services/logger';
+import { getErrorMessage } from '../utils/error';
 import { sql } from '@elygate/db';
-import { type BillingContext } from '../types';
+import type { BillingContext } from '../types';
 import { calculateCost } from './ratio';
 import { webhookService } from './webhook';
 
@@ -10,7 +12,7 @@ const MAX_RETRY_COUNT = 3;
 const FLUSH_INTERVAL_MS = 500;
 const QUEUE_WARNING_THRESHOLD = 100;
 
-export function getQueueStats() {
+export function getQueueStats(): { length: number; isFlushing: boolean; warningThreshold: number; maxQueueSize: number } {
     return {
         length: billingQueue.length,
         isFlushing,
@@ -26,11 +28,11 @@ export async function preCheckAndDecrement(ctx: {
     userGroup: string;
     maxTokens: number;
     isPackageFree?: boolean;
-}) {
+}): Promise<number> {
     if (ctx.isPackageFree) return 0;
     const estimatedCost = calculateCost(ctx.modelName, ctx.userGroup, 0, ctx.maxTokens || 4096);
 
-    const result = await sql.begin(async (tx: any) => {
+    const result = await sql.begin(async (tx) => {
         const [user] = await tx`
             UPDATE users 
             SET quota = quota - ${estimatedCost}
@@ -59,25 +61,25 @@ export async function reconcileQuota(ctx: {
     tokenId: number;
     preDeducted: number;
     actualCost: number;
-}) {
+}): Promise<void> {
     const diff = ctx.preDeducted - ctx.actualCost;
     if (diff === 0) return;
 
-    await sql.begin(async (tx: any) => {
+    await sql.begin(async (tx) => {
         await tx`UPDATE users SET quota = quota + ${diff} WHERE id = ${ctx.userId}`;
         await tx`UPDATE tokens SET remain_quota = CASE WHEN remain_quota >= 0 THEN remain_quota + ${diff} ELSE remain_quota END WHERE id = ${ctx.tokenId}`;
     });
 }
 
-export async function billAndLog(ctx: BillingContext) {
+export async function billAndLog(ctx: BillingContext): Promise<void> {
     if (billingQueue.length >= MAX_QUEUE_SIZE) {
-        console.error(`[Billing/Warning] Queue is full (${billingQueue.length}/${MAX_QUEUE_SIZE}), dropping oldest entry`);
+        log.error(`[Billing/Warning] Queue is full (${billingQueue.length}/${MAX_QUEUE_SIZE}), dropping oldest entry`);
         billingQueue.shift();
     }
     billingQueue.push(ctx);
     
     if (billingQueue.length > QUEUE_WARNING_THRESHOLD) {
-        console.warn(`[Billing/Warning] Queue length is ${billingQueue.length}, consider scaling`);
+        log.warn(`[Billing/Warning] Queue length is ${billingQueue.length}, consider scaling`);
     }
 }
 
@@ -89,7 +91,7 @@ async function flushBillingQueue(retryCount = 0) {
 
     const userAgg: Record<number, number> = {};
     const tokenAgg: Record<number, number> = {};
-    const logInserts: any[] = [];
+    const logInserts: Record<string, any>[] = [];
 
     for (const task of tasks) {
         const cost = task.isPackageFree ? 0 : calculateCost(
@@ -128,7 +130,7 @@ async function flushBillingQueue(retryCount = 0) {
     }
 
     try {
-        const uniqueChannelIds = [...new Set(tasks.map((t: any) => t.channelId).filter(Boolean))];
+        const uniqueChannelIds = [...new Set(tasks.map((t: Record<string, any>) => t.channelId).filter(Boolean))];
         const channelRatios: Record<number, number> = {};
         if (uniqueChannelIds.length > 0) {
             const channels = await sql`SELECT id, price_ratio FROM channels WHERE id IN ${sql(uniqueChannelIds)}`;
@@ -137,7 +139,7 @@ async function flushBillingQueue(retryCount = 0) {
             }
         }
 
-        await sql.begin(async (tx: any) => {
+        await sql.begin(async (tx) => {
             const correctedUserAgg: Record<number, number> = {};
             const correctedTokenAgg: Record<number, number> = {};
             const correctedOrgAgg: Record<number, number> = {};
@@ -200,7 +202,7 @@ async function flushBillingQueue(retryCount = 0) {
         });
 
         // 5. Organization-level Quota Alerts
-        const uniqueOrgIds = [...new Set(tasks.map((t: any) => t.orgId).filter(Boolean))];
+        const uniqueOrgIds = [...new Set(tasks.map((t: Record<string, any>) => t.orgId).filter(Boolean))];
         if (uniqueOrgIds.length > 0) {
             const orgs = await sql`
                 SELECT id, name, quota, used_quota, alert_webhook_url, alert_threshold_pct, last_alert_at
@@ -220,7 +222,7 @@ async function flushBillingQueue(retryCount = 0) {
 
                     if (Date.now() - lastAlert > oneDay) {
                         try {
-                            console.log(`[Billing/Alert] Sending quota alert for organization: ${org.name}`);
+                            log.info(`[Billing/Alert] Sending quota alert for organization: ${org.name}`);
                             await fetch(org.alert_webhook_url, {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
@@ -239,17 +241,17 @@ async function flushBillingQueue(retryCount = 0) {
                                 SET last_alert_at = NOW() 
                                 WHERE id = ${org.id}
                             `;
-                        } catch (err: any) {
-                            console.error(`[Billing/Error] Failed to send webhook alert for org ${org.id}:`, err.message);
+                        } catch (err: unknown) {
+                            log.error(`[Billing/Error] Failed to send webhook alert for org ${org.id}:`, getErrorMessage(err));
                         }
                     }
                 }
             }
         }
 
-        console.log(`[Billing/Flush] Merged & Ingested ${tasks.length} logs successfully.`);
-    } catch (e: any) {
-        console.error(`[Billing/Error] Failed to flush queue (attempt ${retryCount + 1}/${MAX_RETRY_COUNT}). Error:`, e.message);
+        log.info(`[Billing/Flush] Merged & Ingested ${tasks.length} logs successfully.`);
+    } catch (e: unknown) {
+        log.error(`[Billing/Error] Failed to flush queue (attempt ${retryCount + 1}/${MAX_RETRY_COUNT}). Error:`, getErrorMessage(e));
         
         if (retryCount < MAX_RETRY_COUNT - 1) {
             billingQueue.unshift(...tasks);
@@ -257,7 +259,7 @@ async function flushBillingQueue(retryCount = 0) {
             setTimeout(() => flushBillingQueue(retryCount + 1), 100 * (retryCount + 1));
             return;
         } else {
-            console.error(`[Billing/Error] Max retries reached, dropping ${tasks.length} tasks`);
+            log.error(`[Billing/Error] Max retries reached, dropping ${tasks.length} tasks`);
             billingQueue.push(...tasks);
         }
     } finally {
@@ -270,12 +272,12 @@ setInterval(flushBillingQueue, FLUSH_INTERVAL_MS);
 async function rotateLogs() {
     const { optionCache } = await import('./optionCache');
     const days = optionCache.get('LogRetentionDays', 7);
-    console.log(`[Billing/Rotation] Cleaning up logs older than ${days} days...`);
+    log.info(`[Billing/Rotation] Cleaning up logs older than ${days} days...`);
     try {
         await sql`DELETE FROM logs WHERE created_at < NOW() - (${days} * INTERVAL '1 day')`;
         await sql`DELETE FROM health_logs WHERE created_at < NOW() - (${days} * INTERVAL '1 day')`;
     } catch (e) {
-        console.error('[Billing/Rotation] Failed:', e);
+        log.error('[Billing/Rotation] Failed:', e);
     }
 }
 

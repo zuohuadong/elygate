@@ -39,7 +39,7 @@
         onSave(formData);
     }
 
-    let isBackdropMouseDown = false;
+    let isBackdropMouseDown = $state(false);
     function handleMouseDown(e: MouseEvent) {
         isBackdropMouseDown = e.target === e.currentTarget;
     }

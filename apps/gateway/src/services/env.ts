@@ -1,3 +1,5 @@
+import { log } from '../services/logger';
+import { getErrorMessage } from '../utils/error';
 import { existsSync, writeFileSync, readFileSync, appendFileSync } from 'fs';
 import { join } from 'path';
 import { randomBytes } from 'crypto';
@@ -32,23 +34,23 @@ function parseEnvFile(content: string): Record<string, string> {
 /**
  * Initialize environment variables and perform one-time migration if needed
  */
-export async function initEnv() {
+export async function initEnv(): Promise<void> {
     let needsMigration = false;
     let envVars: Record<string, string> = {};
     
     // Check if .env exists and parse it
     if (existsSync(ENV_PATH)) {
-        console.log('✅ Environment configuration (.env) found.');
+        log.info('✅ Environment configuration (.env) found.');
         const content = readFileSync(ENV_PATH, 'utf-8');
         envVars = parseEnvFile(content);
         
         // Check if encryption keys are missing
         if (!envVars.ENCRYPTION_SECRET || !envVars.ENCRYPTION_SALT) {
-            console.log('⚠️  Missing encryption keys in .env. Will generate new ones and migrate data...');
+            log.info('⚠️  Missing encryption keys in .env. Will generate new ones and migrate data...');
             needsMigration = true;
         }
     } else {
-        console.log('🚀 Missing .env file. Generating new secure secrets...');
+        log.info('🚀 Missing .env file. Generating new secure secrets...');
         needsMigration = true;
     }
     
@@ -82,7 +84,7 @@ export async function initEnv() {
         if (connected) {
             const channels = await sql`SELECT id, key FROM channels`;
             if (channels.length > 0) {
-                console.log(`📦 Found ${channels.length} channels. Migrating encryption...`);
+                log.info(`📦 Found ${channels.length} channels. Migrating encryption...`);
                 
                 for (const channel of channels) {
                     if (channel.key && isEncrypted(channel.key)) {
@@ -101,11 +103,11 @@ export async function initEnv() {
                         await sql`UPDATE channels SET key = ${reEncrypted} WHERE id = ${channel.id}`;
                     }
                 }
-                console.log('✅ Successfully migrated channel encryption.');
+                log.info('✅ Successfully migrated channel encryption.');
             }
         }
-    } catch (err: any) {
-        console.error('❌ Migration failed:', err.message);
+    } catch (err: unknown) {
+        log.error('❌ Migration failed:', getErrorMessage(err));
     }
 
     // 2. Update or create .env file
@@ -134,13 +136,13 @@ export async function initEnv() {
 
     try {
         writeFileSync(ENV_PATH, envContent);
-        console.log(`✅ Generated new .env file at: ${ENV_PATH}`);
+        log.info(`✅ Generated new .env file at: ${ENV_PATH}`);
         
         // Update current process env
         process.env.ENCRYPTION_SECRET = newEncryptionSecret;
         process.env.ENCRYPTION_SALT = newEncryptionSalt;
         process.env.JWT_SECRET = newJwtSecret;
-    } catch (err: any) {
-        console.error('❌ Failed to write .env file:', err.message);
+    } catch (err: unknown) {
+        log.error('❌ Failed to write .env file:', getErrorMessage(err));
     }
 }

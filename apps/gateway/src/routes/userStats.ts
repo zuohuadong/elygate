@@ -1,11 +1,11 @@
 import { Elysia, t } from 'elysia';
 import { sql } from '@elygate/db';
 import { authPlugin } from '../middleware/auth';
-import { type UserRecord } from '../types';
+import type { UserRecord , ElysiaCtx } from '../types';
 
 export const userStatsRouter = new Elysia({ prefix: '/user' })
     .use(authPlugin)
-    .get('/info', async ({ user }: any) => {
+    .get('/info', async ({ user }: ElysiaCtx) => {
         const u = user as UserRecord;
         const [userInfo] = await sql`
             SELECT id, username, role, quota, used_quota as "usedQuota", status, currency
@@ -14,7 +14,7 @@ export const userStatsRouter = new Elysia({ prefix: '/user' })
         `;
         return userInfo || { id: 0, username: '', role: 0, quota: 0, usedQuota: 0, status: 0, currency: 'USD' };
     })
-    .get('/tokens', async ({ user }: any) => {
+    .get('/tokens', async ({ user }: ElysiaCtx) => {
         const u = user as UserRecord;
         const tokens = await sql`
             SELECT id, name, key, status, remain_quota as "remainQuota", used_quota as "usedQuota", created_at as "createdAt"
@@ -24,9 +24,9 @@ export const userStatsRouter = new Elysia({ prefix: '/user' })
         `;
         return tokens;
     })
-    .get('/logs', async ({ user, query }: any) => {
+    .get('/logs', async ({ user, query }: ElysiaCtx) => {
         const u = user as UserRecord;
-        const limit = parseInt((query as any).limit) || 10;
+        const limit = parseInt((query as Record<string, string>).limit) || 10;
         
         const logs = await sql`
             SELECT 
@@ -44,9 +44,9 @@ export const userStatsRouter = new Elysia({ prefix: '/user' })
         `;
         return logs;
     })
-    .get('/dashboard/stats', async ({ user, query }: any) => {
+    .get('/dashboard/stats', async ({ user, query }: ElysiaCtx) => {
         const u = user as UserRecord;
-        const { period } = query as any;
+        const { period } = query as Record<string, string>;
         
         let startDate = new Date();
         startDate.setHours(0, 0, 0, 0);

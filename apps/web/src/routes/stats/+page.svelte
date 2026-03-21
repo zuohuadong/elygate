@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from "svelte";
+	
 	import { i18n } from "$lib/i18n/index.svelte";
 	import { session } from "$lib/session.svelte";
 	import { apiFetch } from "$lib/api";
@@ -16,17 +16,44 @@
 	} from "lucide-svelte";
     import LatencyHeatmap from "$components/LatencyHeatmap.svelte";
 
-	let overview = $state<any>({});
-	let todayStats = $state<any>({});
-	let hourlyStats = $state<any[]>([]);
-	let modelStats = $state<any[]>([]);
-	let realtimeStats = $state<any>({});
+	interface StatsOverview {
+		total_users?: number;
+		active_tokens?: number;
+		requests_24h?: number;
+		cost_24h?: number;
+	}
+	interface TodayStats {
+		request_count?: number;
+		total_tokens?: number;
+		total_cost?: number;
+		stream_count?: number;
+	}
+	interface HourlyStat {
+		hour: number;
+		request_count: number;
+	}
+	interface ModelStat {
+		model_name: string;
+		request_count: number;
+		total_cost: number;
+	}
+	interface RealtimeStats {
+		requests_per_minute?: number;
+		active_users?: number;
+		active_models?: number;
+	}
+
+	let overview = $state<StatsOverview>({});
+	let todayStats = $state<TodayStats>({});
+	let hourlyStats = $state<HourlyStat[]>([]);
+	let modelStats = $state<ModelStat[]>([]);
+	let realtimeStats = $state<RealtimeStats>({});
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 	let autoRefresh = $state(true);
-	let refreshInterval: any = null;
+	let refreshInterval: ReturnType<typeof setInterval> | null = null;
 
-	onMount(() => {
+	$effect(() => {
 		loadAllStats();
 
 		if (autoRefresh) {
@@ -49,9 +76,9 @@
 				loadModelStats(),
 				loadRealtimeStats(),
 			]);
-		} catch (err: any) {
+		} catch (err: unknown) {
 			console.error("Failed to load stats:", err);
-			error = err.message || (i18n.lang === "zh" ? "加载统计数据失败" : "Failed to load statistics");
+			error = err instanceof Error ? err instanceof Error ? err.message : String(err) : (i18n.lang === "zh" ? "加载统计数据失败" : "Failed to load statistics");
 		} finally {
 			loading = false;
 		}
@@ -59,11 +86,11 @@
 
 	async function loadOverview() {
 		try {
-			const data = await apiFetch<any>("/stats/overview");
+			const data = await apiFetch<Record<string, unknown>>("/stats/overview");
 			overview = data?.overview || {};
 			todayStats = data?.today || {};
 			hourlyStats = data?.hourly || [];
-		} catch (err: any) {
+		} catch (err: unknown) {
 			console.error("Failed to load overview:", err);
 			// Set default values on error
 			overview = {};
@@ -74,9 +101,9 @@
 
 	async function loadModelStats() {
 		try {
-			const data = await apiFetch<any>("/stats/models");
+			const data = await apiFetch<Record<string, unknown>>("/stats/models");
 			modelStats = data?.trending || [];
-		} catch (err: any) {
+		} catch (err: unknown) {
 			console.error("Failed to load model stats:", err);
 			modelStats = [];
 		}
@@ -84,9 +111,9 @@
 
 	async function loadRealtimeStats() {
 		try {
-			const data = await apiFetch<any>("/stats/realtime");
+			const data = await apiFetch<Record<string, unknown>>("/stats/realtime");
 			realtimeStats = data?.stats || {};
-		} catch (err: any) {
+		} catch (err: unknown) {
 			console.error("Failed to load realtime stats:", err);
 			realtimeStats = {};
 		}

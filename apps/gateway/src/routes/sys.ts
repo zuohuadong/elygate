@@ -1,3 +1,4 @@
+import { config } from '../config';
 import { Elysia } from 'elysia';
 import { sql } from '@elygate/db';
 import { memoryCache } from '../services/cache';
@@ -24,15 +25,15 @@ export const sysRouter = new Elysia({ prefix: '/api' })
                 quota_per_unit: Number(optionCache.get('QuotaPerUnit', 500000)),
                 rmb_quota_per_unit: Number(optionCache.get('QuotaPerUnit', 500000)) / Number(optionCache.get('ExchangeRate', 7.2)),
                 exchange_rate: Number(optionCache.get('ExchangeRate', 7.2)),
-                display_in_currency: optionCache.get('DisplayInCurrency', 'false') === 'true',
-                github_oauth: !!process.env.GITHUB_CLIENT_ID,
-                discord_oauth: !!process.env.DISCORD_CLIENT_ID,
-                telegram_oauth: !!process.env.TELEGRAM_BOT_TOKEN
+                display_in_currency: String(optionCache.get('DisplayInCurrency', 'false')) === 'true',
+                github_oauth: !!config.github.clientId,
+                discord_oauth: !!config.discord.clientId,
+                telegram_oauth: !!config.telegram.botToken
             }
         };
     })
     .get('/health', async () => {
-        const [dbCheck] = await sql`SELECT 1 as ok`.catch(() => [{ ok: 0 }]);
+        const [dbCheck] = await sql`SELECT 1 as ok`.catch((e: unknown) => { log.warn("[Fallback]", e); return [{ ok: 0 }]; });
         const channelStats = {
             total: memoryCache.channels.size,
             active: Array.from(memoryCache.channels.values()).filter(c => c.status === 1).length,
@@ -74,20 +75,20 @@ export const sysRouter = new Elysia({ prefix: '/api' })
                 Favicon: optionCache.get('Favicon', ''),
                 GithubUrl: optionCache.get('GithubUrl', 'https://github.com/zuohuadong/elygate'),
                 ServerAddress: optionCache.get('ServerAddress', 'https://api.elygate.com'),
-                SMTPConfigured: !!optionCache.get('SMTPConfig', {}).host,
-                TelegramConfigured: !!optionCache.get('TelegramConfig', {}).token,
+                SMTPConfigured: !!(optionCache.get('SMTPConfig', {}) as {host?: string}).host,
+                TelegramConfigured: !!(optionCache.get('TelegramConfig', {}) as {token?: string}).token,
                 RegisterMode: optionCache.get('RegisterMode', 'open'),
                 QuotaPerUnit: optionCache.get('QuotaPerUnit', 500000),
                 CurrencySymbol: optionCache.get('CurrencySymbol', '$'),
                 CurrencyName: optionCache.get('CurrencyName', 'USD'),
                 ExchangeRate: optionCache.get('ExchangeRate', 7.2),
-                DisplayInCurrency: optionCache.get('DisplayInCurrency', 'false') === 'true',
-                PaymentEnabled: optionCache.get('PaymentEnabled', 'true') === 'true',
+                DisplayInCurrency: String(optionCache.get('DisplayInCurrency', 'false')) === 'true',
+                PaymentEnabled: String(optionCache.get('PaymentEnabled', 'true')) === 'true',
                 PaymentMethods: optionCache.get('PaymentMethods', 'redemption'),
                 LoginMethods: optionCache.get('LoginMethods', 'password'),
-                PasswordLoginEnabled: optionCache.get('PasswordLoginEnabled', 'true') === 'true',
-                GitHubOAuthEnabled: optionCache.get('GitHubOAuthEnabled', 'false') === 'true',
-                WeChatOAuthEnabled: optionCache.get('WeChatOAuthEnabled', 'false') === 'true',
+                PasswordLoginEnabled: String(optionCache.get('PasswordLoginEnabled', 'true')) === 'true',
+                GitHubOAuthEnabled: String(optionCache.get('GitHubOAuthEnabled', 'false')) === 'true',
+                WeChatOAuthEnabled: String(optionCache.get('WeChatOAuthEnabled', 'false')) === 'true',
             }
         };
     });

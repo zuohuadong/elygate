@@ -19,7 +19,7 @@
     import { apiFetch } from "$lib/api";
     import { i18n } from "$lib/i18n/index.svelte";
     import { session } from "$lib/session.svelte";
-    import { onMount } from "svelte";
+    
 
     interface Token {
         id: number;
@@ -63,14 +63,14 @@
 
     const isAdmin = $derived(session.role >= 10);
 
-    onMount(async () => {
+    $effect(() => { (async () => {
         if (isAdmin) {
             await Promise.all([loadAdminStats(), loadRecentLogs(), loadTokens()]);
         } else {
             await Promise.all([loadTokens(), loadRecentLogs(), loadUserInfo()]);
         }
         isLoading = false;
-    });
+    })(); });
 
     async function loadAdminStats() {
         try {
@@ -101,16 +101,16 @@
 
     async function loadRecentLogs() {
         try {
-            let rawData: any[] = [];
+            let rawData: Record<string, unknown>[] = [];
             if (isAdmin) {
-                const data = await apiFetch<{ data: any[] } | any[]>("/admin/logs?limit=5");
+                const data = await apiFetch<{ data: Record<string, unknown>[] } | any[]>("/admin/logs?limit=5");
                 rawData = Array.isArray(data) ? data : (data?.data || []);
             } else {
                 const data = await apiFetch<any[]>("/user/logs?limit=5");
                 rawData = data || [];
             }
             // Convert snake_case to camelCase
-            recentLogs = rawData.map((log: any) => ({
+            recentLogs = rawData.map((log: Record<string, unknown>) => ({
                 id: log.id,
                 modelName: log.model_name || log.modelName,
                 promptTokens: log.prompt_tokens ?? log.promptTokens ?? 0,
@@ -152,12 +152,12 @@
     }
 
     let systemHealth = $state({ online: 0, offline: 0, busy: 0 });
-    onMount(async () => {
+    $effect(() => { (async () => {
         try {
-            const health = await apiFetch<any>('/admin/dashboard/health');
+            const health = await apiFetch<Record<string, unknown>>('/admin/dashboard/health');
             systemHealth = health || { online: 0, offline: 0, busy: 0 };
-        } catch {}
-    });
+        } catch { /* stats parse fallback */ }
+    })(); });
 </script>
 
 <div class="flex-1 space-y-8 max-w-[1400px] mx-auto w-full pb-12">

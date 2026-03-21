@@ -1,3 +1,4 @@
+import { log } from '../services/logger';
 import { optionCache } from './optionCache';
 
 /**
@@ -28,9 +29,9 @@ export const webhookService = {
                 headers,
                 body: JSON.stringify(body)
             });
-            console.log(`[Webhook] Event '${event}' sent to ${webhookUrl}`);
+            log.info(`[Webhook] Event '${event}' sent to ${webhookUrl}`);
         } catch (e) {
-            console.error(`[Webhook] Failed to send '${event}':`, e);
+            log.error(`[Webhook] Failed to send '${event}':`, e);
         }
     }
 };

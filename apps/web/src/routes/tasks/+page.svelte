@@ -2,7 +2,7 @@
     import { ListTodo, Play, Pause, RotateCcw, Trash2, Clock, CheckCircle, XCircle, AlertCircle, Loader2 } from "lucide-svelte";
     import { apiFetch } from "$lib/api";
     import { i18n } from "$lib/i18n/index.svelte";
-    import { onMount } from "svelte";
+    
 
     interface Task {
         id: number;
@@ -14,7 +14,7 @@
         progress: number;
         total_items: number;
         processed_items: number;
-        result: any;
+        result: unknown;
         error_message: string;
         created_by: number;
         started_at: string;
@@ -28,7 +28,7 @@
     let filterStatus = $state("all");
     let filterType = $state("all");
 
-    const statusMap: Record<number, { label: string; labelEn: string; color: string; icon: any }> = {
+    const statusMap: Record<number, { label: string; labelEn: string; color: string; icon: unknown }> = {
         0: { label: "等待中", labelEn: "Pending", color: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400", icon: Clock },
         1: { label: "运行中", labelEn: "Running", color: "bg-blue-100 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400", icon: Loader2 },
         2: { label: "已完成", labelEn: "Completed", color: "bg-emerald-100 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400", icon: CheckCircle },
@@ -43,7 +43,7 @@
         batch_operation: { label: "批量操作", labelEn: "Batch Operation" },
     };
 
-    onMount(loadTasks);
+    $effect(() => { loadTasks(); });
 
     async function loadTasks() {
         isLoading = true;

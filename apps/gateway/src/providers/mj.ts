@@ -19,12 +19,12 @@ export class MidjourneyApiHandler implements ProviderHandler {
         };
     }
 
-    transformResponse(data: any) {
+    transformResponse(data: Record<string, any>) {
         // Usually MJ Proxy returns task ID or image URL inside standard OpenAI choices
         return data;
     }
 
-    extractUsage(data: any) {
+    extractUsage(data: Record<string, any>) {
         // MJ is usually fixed cost per action, mock as 1 token or use specific MJ pricing
         return {
             promptTokens: 1,

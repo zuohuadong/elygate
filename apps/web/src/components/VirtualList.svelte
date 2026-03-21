@@ -1,4 +1,4 @@
-<script lang="ts" generics="T extends Record<string, any>">
+<script lang="ts" generics="T extends Record<string, unknown>">
     let {
         items = $bindable(),
         itemHeight = 48,

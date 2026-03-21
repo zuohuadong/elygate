@@ -1,3 +1,4 @@
+import { log } from '../services/logger';
 import { memoryCache } from './cache';
 
 /**
@@ -34,7 +35,7 @@ export function cleanModelTokens(text: string): string {
 /**
  * Clean model internal tokens from response object
  */
-export function cleanResponseTokens(data: any): any {
+export function cleanResponseTokens(data: Record<string, any>): Record<string, any> {
     if (!data) return data;
     
     if (typeof data === 'string') {
@@ -46,7 +47,7 @@ export function cleanResponseTokens(data: any): any {
     }
     
     if (typeof data === 'object') {
-        const cleaned: any = {};
+        const cleaned: Record<string, any> = {};
         for (const [key, value] of Object.entries(data)) {
             if (key === 'content' && typeof value === 'string') {
                 cleaned[key] = cleanModelTokens(value);
@@ -87,7 +88,7 @@ export class ContentFilter {
                     return { blocked: true, pattern: p };
                 }
             } catch (e) {
-                console.warn(`[ContentFilter] Invalid regex pattern: ${p}`);
+                log.warn(`[ContentFilter] Invalid regex pattern: ${p}`);
             }
         }
 
@@ -97,13 +98,13 @@ export class ContentFilter {
     /**
      * Extracts all text from a request body for validation.
      */
-    static extractText(body: any): string {
+    static extractText(body: Record<string, any>): string {
         if (typeof body === 'string') return body;
         if (Array.isArray(body)) return body.map(this.extractText).join(' ');
         
         let text = '';
         if (body.messages && Array.isArray(body.messages)) {
-            text += body.messages.map((m: any) => typeof m.content === 'string' ? m.content : JSON.stringify(m.content)).join(' ');
+            text += body.messages.map((m: Record<string, any>) => typeof m.content === 'string' ? m.content : JSON.stringify(m.content)).join(' ');
         }
         if (body.prompt) text += ` ${body.prompt}`;
         if (body.input) text += ` ${typeof body.input === 'string' ? body.input : JSON.stringify(body.input)}`;

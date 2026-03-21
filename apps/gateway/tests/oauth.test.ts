@@ -1,4 +1,5 @@
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
+import { getErrorMessage } from '../src/utils/error';
 import { sql } from '@elygate/db';
 
 describe('OAuth System Tests', () => {
@@ -90,8 +91,8 @@ describe('OAuth System Tests', () => {
                 VALUES (${testUserId}, 'discord', 'discord_test_789')
             `;
             expect(true).toBe(false);
-        } catch (error: any) {
-            expect(error.message).toContain('unique');
+        } catch (error: unknown) {
+            expect(getErrorMessage(error)).toContain('unique');
         }
     });
 

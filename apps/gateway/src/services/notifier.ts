@@ -1,3 +1,4 @@
+import { log } from '../services/logger';
 import { optionCache } from './optionCache';
 import { webhookService } from './webhook';
 
@@ -6,8 +7,8 @@ import { webhookService } from './webhook';
  * Unifies Email (SMTP) and Webhook/Bot notifications.
  */
 export const notifier = {
-    async notify(subject: string, message: string, payload?: any) {
-        console.log(`[Notifier] ${subject}: ${message}`);
+    async notify(subject: string, message: string, payload?: Record<string, unknown>) {
+        log.info(`[Notifier] ${subject}: ${message}`);
         
         // 1. Email via SMTP (Simulation or implementation)
         const smtpEnabled = optionCache.get('SMTP_ENABLED', 'false') === 'true';
@@ -27,6 +28,6 @@ export const notifier = {
         if (!config.host) return;
 
         // Implementation with nodemailer would go here
-        console.log(`[SMTP] Sending "${subject}" to ${config.to}`);
+        log.info(`[SMTP] Sending "${subject}" to ${config.to}`);
     }
 };

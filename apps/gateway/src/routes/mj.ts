@@ -1,3 +1,7 @@
+import type { ElysiaCtx } from '../types';
+import { config } from '../config';
+import { log } from '../services/logger';
+import { getErrorMessage } from '../utils/error';
 import { Elysia } from 'elysia';
 import { authPlugin } from '../middleware/auth';
 import { memoryCache } from '../services/cache';
@@ -17,8 +21,8 @@ export const mjRouter = new Elysia()
     .use(authPlugin)
 
     // --- Submit Imagine (Text to Image) ---
-    .post('/mj/submit/imagine', async ({ body, token, user, set }: any) => {
-        const { prompt, base64Array, notifyHook, state } = body as any;
+    .post('/mj/submit/imagine', async ({ body, token, user, set }: ElysiaCtx) => {
+        const { prompt, base64Array, notifyHook, state } = body as Record<string, any>;
 
         if (!prompt) {
             set.status = 400;
@@ -94,19 +98,19 @@ export const mjRouter = new Elysia()
             } else {
                 throw new Error(`Upstream MJ Failed: ${JSON.stringify(rawData)}`);
             }
-        } catch (e: any) {
+        } catch (e: unknown) {
             // Refund quota if submit failed
             await reconcileQuota({
                 userId: user.id, tokenId: token.id, preDeducted: costToDeduct, actualCost: 0
             });
             set.status = 500;
-            return { code: 4, description: e.message };
+            return { code: 4, description: getErrorMessage(e) };
         }
     })
 
     // --- Submit Action (U1, V2, Reroll) ---
-    .post('/mj/submit/action', async ({ body, token, user, set }: any) => {
-        const { customId, taskId, state } = body as any;
+    .post('/mj/submit/action', async ({ body, token, user, set }: ElysiaCtx) => {
+        const { customId, taskId, state } = body as Record<string, any>;
 
         if (!customId) return { code: 4, description: "customId required" };
 
@@ -165,16 +169,16 @@ export const mjRouter = new Elysia()
             } else {
                 throw new Error(JSON.stringify(rawData));
             }
-        } catch (e: any) {
+        } catch (e: unknown) {
             await reconcileQuota({
                 userId: user.id, tokenId: token.id, preDeducted: costToDeduct, actualCost: 0
             });
-            return { code: 4, description: e.message };
+            return { code: 4, description: getErrorMessage(e) };
         }
     })
 
     // --- Task Fetch (Polling) ---
-    .get('/mj/task/:id/fetch', async ({ params: { id }, token, user }: any) => {
+    .get('/mj/task/:id/fetch', async ({ params: { id }, token, user }: ElysiaCtx) => {
         // Find task in local DB
         const [task] = await sql`SELECT * FROM mj_tasks WHERE uuid = ${id} AND user_id = ${user.id}`;
 
@@ -222,8 +226,8 @@ export const mjRouter = new Elysia()
                     `;
                     return upstreamData;
                 }
-            } catch (e: any) {
-                console.error("[MJ Fetch] Error proxying fetch to upstream", e.message);
+            } catch (e: unknown) {
+                log.error("[MJ Fetch] Error proxying fetch to upstream", getErrorMessage(e));
             }
         }
 
@@ -239,9 +243,9 @@ export const mjRouter = new Elysia()
     })
 
     // --- Webhook Consumer (Upstream posts here when done) ---
-    .post('/mj/webhook', async ({ body, request, set }: any) => {
+    .post('/mj/webhook', async ({ body, request, set }: ElysiaCtx) => {
         // Verify webhook secret to prevent unauthorized callbacks
-        const webhookSecret = process.env.MJ_WEBHOOK_SECRET;
+        const webhookSecret = config.mjWebhookSecret;
         if (webhookSecret) {
             const authHeader = request.headers.get('authorization') || '';
             if (authHeader !== `Bearer ${webhookSecret}`) {
@@ -251,7 +255,7 @@ export const mjRouter = new Elysia()
         }
 
         // MJ Proxy upstream sends result here
-        const { id, status, imageUrl, progress, failReason } = body as any;
+        const { id, status, imageUrl, progress, failReason } = body as Record<string, any>;
         if (!id) return { success: false };
 
         await sql`
@@ -264,6 +268,6 @@ export const mjRouter = new Elysia()
             WHERE uuid = ${id}
         `;
 
-        console.log(`[MJ Webhook] Task ${id} updated -> ${status}`);
+        log.info(`[MJ Webhook] Task ${id} updated -> ${status}`);
         return { success: true };
     });

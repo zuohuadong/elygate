@@ -10,12 +10,12 @@
         show = false,
         channel = null,
         onClose = () => {},
-        onSave = (data: any) => {},
+        onSave = (data: Record<string, unknown>) => {},
     } = $props<{
         show: boolean;
         channel: Channel | null;
         onClose: () => void;
-        onSave: (data: any) => Promise<void>;
+        onSave: (data: Record<string, unknown>) => Promise<void>;
     }>();
 
     // Form state using Svelte 5 $state
@@ -79,7 +79,7 @@
         return JSON.stringify(formData) !== JSON.stringify(initial);
     }
 
-    let isBackdropMouseDown = false;
+    let isBackdropMouseDown = $state(false);
 
     function handleMouseDown(e: MouseEvent) {
         isBackdropMouseDown = e.target === e.currentTarget;
@@ -140,10 +140,10 @@
             if (response.success && response.models) {
                 formData.models = response.models.join(",");
             } else {
-                throw new Error(response.message || "Failed to fetch models");
+                throw new Error(response instanceof Error ? e instanceof Error ? e.message : String(e) : "Failed to fetch models");
             }
-        } catch (err: any) {
-            fetchModelsError = err.message || (i18n.lang === "zh" ? "获取模型失败" : "Failed to fetch models");
+        } catch (err: unknown) {
+            fetchModelsError = err instanceof Error ? err instanceof Error ? err.message : String(err) : (i18n.lang === "zh" ? "获取模型失败" : "Failed to fetch models");
         } finally {
             isFetchingModels = false;
         }
@@ -166,7 +166,7 @@
             let mapping = {};
             try {
                 mapping = JSON.parse(formData.modelMapping || "{}");
-            } catch (e: any) {
+            } catch (e: unknown) {
                 throw new Error(
                     i18n.lang === "zh"
                         ? "模型映射 JSON 格式错误"
@@ -184,8 +184,8 @@
             };
 
             await onSave(payload);
-        } catch (err: any) {
-            error = err.message || i18n.t.common.failed;
+        } catch (err: unknown) {
+            error = err instanceof Error ? err instanceof Error ? err.message : String(err) : i18n.t.common.failed;
         } finally {
             isSubmitting = false;
         }

@@ -1,7 +1,7 @@
 <script lang="ts">
     import { BookOpen, Copy, Check, Zap, Code, MessageSquare, Image, Mic, FileText } from "lucide-svelte";
     import { i18n } from "$lib/i18n/index.svelte";
-    import { onMount } from "svelte";
+    
 
     let copied = $state<string | null>(null);
     let activeTab = $state<'chat' | 'embeddings' | 'images' | 'audio' | 'errors'>('chat');
@@ -23,7 +23,7 @@
 
     let apiHost = $state('http://localhost:3000');
 
-    onMount(() => {
+    $effect(() => {
         apiHost = window.location.origin;
     });
 

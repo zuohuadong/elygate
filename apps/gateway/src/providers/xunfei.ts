@@ -12,7 +12,7 @@ export class XunfeiApiHandler implements ProviderHandler {
         };
     }
 
-    transformResponse(data: any) {
+    transformResponse(data: Record<string, any>) {
         return {
             id: data.id || `chatcmpl-spark-${Date.now()}`,
             object: 'chat.completion',
@@ -35,7 +35,7 @@ export class XunfeiApiHandler implements ProviderHandler {
         };
     }
 
-    extractUsage(data: any) {
+    extractUsage(data: Record<string, any>) {
         return {
             promptTokens: data.usage?.prompt_tokens || 0,
             completionTokens: data.usage?.completion_tokens || 0,

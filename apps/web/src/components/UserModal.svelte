@@ -12,12 +12,12 @@
         show = false,
         user = null,
         onClose = () => {},
-        onSave = (data: any) => {},
+        onSave = (data: Record<string, unknown>) => {},
     } = $props<{
         show: boolean;
         user: User | null;
         onClose: () => void;
-        onSave: (data: any) => Promise<void>;
+        onSave: (data: Record<string, unknown>) => Promise<void>;
     }>();
 
 
@@ -47,7 +47,7 @@
 
                 if (user) {
                     // Convert quota to display currency (use user's currency preference or USD)
-                    const userCurrency = (user as any).currency || "USD";
+                    const userCurrency = (user as Record<string, any>).currency || "USD";
                     const quotaUsd = user.quota != null ? user.quota / session.quotaPerUnit : 0;
                     formData = {
                         username: user.username || "",
@@ -96,17 +96,17 @@
                 currency: formData.quotaCurrency,
             };
             if (user && !payload.password) {
-                delete (payload as any).password;
+                delete (payload as Record<string, any>).password;
             }
             await onSave(payload);
-        } catch (err: any) {
-            error = err.message || i18n.t.common.failed;
+        } catch (err: unknown) {
+            error = err instanceof Error ? err instanceof Error ? err.message : String(err) : i18n.t.common.failed;
         } finally {
             isSubmitting = false;
         }
     }
 
-    let isBackdropMouseDown = false;
+    let isBackdropMouseDown = $state(false);
     function handleMouseDown(e: MouseEvent) {
         isBackdropMouseDown = e.target === e.currentTarget;
     }

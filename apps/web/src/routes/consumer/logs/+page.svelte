@@ -2,7 +2,7 @@
     import DataTable from "../../../components/DataTable.svelte";
     import { History, Search } from "lucide-svelte";
     import { apiFetch } from "$lib/api";
-    import { onMount } from "svelte";
+    
     import { i18n } from "$lib/i18n/index.svelte";
     import { session } from "$lib/session.svelte";
 
@@ -16,12 +16,12 @@
     async function loadLogs(page: number) {
         isLoading = true;
         try {
-            const res = await apiFetch<any>(
+            const res = await apiFetch<Record<string, unknown>>(
                 `/user/logs?page=${page}&limit=${limit}`,
             );
             totalItems = res.total || 0;
             // Map keys
-            logs = res.data.map((l: any) => ({
+            logs = res.data.map((l: Record<string, unknown>) => ({
                 dt_created_at: new Date(l.createdAt).toLocaleString(),
                 dt_model: l.modelName,
                 dt_tokens: `${l.promptTokens} + ${l.completionTokens}`,
@@ -30,14 +30,14 @@
                 dt_cost: session.formatQuota(l.quotaCost),
             }));
             currentPage = page;
-        } catch (err: any) {
-            errorMsg = err.message || (i18n.lang === "zh" ? "加载日志失败" : "Failed to load logs");
+        } catch (err: unknown) {
+            errorMsg = err instanceof Error ? err instanceof Error ? err.message : String(err) : (i18n.lang === "zh" ? "加载日志失败" : "Failed to load logs");
         } finally {
             isLoading = false;
         }
     }
 
-    onMount(() => {
+    $effect(() => {
         loadLogs(1);
     });
 

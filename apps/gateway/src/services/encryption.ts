@@ -1,3 +1,5 @@
+import { config } from '../config';
+import { log } from '../services/logger';
 /**
  * Encryption Service
  * Provides AES-256-GCM encryption for sensitive data like API keys
@@ -14,8 +16,8 @@ const SALT_LENGTH = 32;
  * Get encryption key from environment or generate one
  */
 function getEncryptionKey(): Buffer {
-    const secret = process.env.ENCRYPTION_SECRET;
-    const salt = process.env.ENCRYPTION_SALT;
+    const secret = config.encryption.secret;
+    const salt = config.encryption.salt;
     
     if (!secret || !salt) {
         throw new Error('[Encryption] Critical: ENCRYPTION_SECRET or ENCRYPTION_SALT is not set in environment.');
@@ -68,7 +70,7 @@ export function decrypt(ciphertext: string): string {
         return decrypted;
     } catch (error) {
         // If decryption fails, assume it's not encrypted (backward compatibility)
-        console.warn('[Encryption] Failed to decrypt, returning as-is:', error);
+        log.warn('[Encryption] Failed to decrypt, returning as-is:', error);
         return ciphertext;
     }
 }

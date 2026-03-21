@@ -2,7 +2,8 @@
     import { ShoppingBag, Box, Clock, ShieldCheck } from "lucide-svelte";
     import { apiFetch } from "$lib/api";
     import { i18n } from "$lib/i18n/index.svelte";
-    import { onMount } from "svelte";
+    
+
 
     let packages = $state<any[]>([]);
     let subscriptions = $state<any[]>([]);
@@ -18,16 +19,16 @@
             ]);
             packages = pkgs;
             subscriptions = subs;
-        } catch (err: any) {
-            errorMsg = err.message || (i18n.lang === "zh" ? "加载数据失败" : "Failed to load data");
+        } catch (err: unknown) {
+            errorMsg = err instanceof Error ? err instanceof Error ? err.message : String(err) : (i18n.lang === "zh" ? "加载数据失败" : "Failed to load data");
         } finally {
             isLoading = false;
         }
     }
 
-    onMount(loadData);
+    $effect(() => { loadData(); });
 
-    const renderModels = (models: any) => {
+    const renderModels = (models: Record<string, any>[]) => {
         if (!models) return "";
         const arr = Array.isArray(models) ? models : (typeof models === 'string' ? models.split(',') : []);
         return arr.map((m: string) => `<span class="inline-block px-1.5 py-0.5 mr-1 mb-1 rounded bg-indigo-50 dark:bg-indigo-500/10 text-[11px] text-indigo-700 dark:text-indigo-300 font-mono tracking-tighter shadow-sm border border-indigo-100 dark:border-indigo-500/20">${m.trim()}</span>`).join("");

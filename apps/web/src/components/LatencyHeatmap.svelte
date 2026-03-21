@@ -1,12 +1,12 @@
 <script lang="ts">
-    import { onMount } from 'svelte';
+    
     import { apiFetch } from '$lib/api';
     import { i18n } from '$lib/i18n/index.svelte';
 
     let data = $state<any[]>([]);
     let isLoading = $state(true);
 
-    onMount(async () => {
+    $effect(() => { (async () => {
         try {
             const res = await apiFetch<any[]>('/admin/dashboard/latency-heatmap');
             data = res || [];
@@ -15,7 +15,7 @@
         } finally {
             isLoading = false;
         }
-    });
+    })(); });
 
     const hours = Array.from({ length: 24 }, (_, i) => i);
     

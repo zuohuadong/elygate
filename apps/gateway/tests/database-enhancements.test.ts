@@ -1,4 +1,5 @@
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
+import { getErrorMessage } from '../src/utils/error';
 import { sql } from '@elygate/db';
 
 describe('Database Enhancement Tests', () => {
@@ -290,8 +291,8 @@ describe('Database Enhancement Tests', () => {
                 VALUES (${user.id}, 'test_provider', 'test_user_id_2')
             `;
             expect(true).toBe(false);
-        } catch (error: any) {
-            expect(error.message).toContain('unique');
+        } catch (error: unknown) {
+            expect(getErrorMessage(error)).toContain('unique');
         }
         
         await sql`DELETE FROM oauth_accounts WHERE user_id = ${user.id}`;
@@ -316,8 +317,8 @@ describe('Database Enhancement Tests', () => {
                 VALUES (${user.id}, CURRENT_DATE, 200)
             `;
             expect(true).toBe(false);
-        } catch (error: any) {
-            expect(error.message).toContain('unique');
+        } catch (error: unknown) {
+            expect(getErrorMessage(error)).toContain('unique');
         }
         
         await sql`DELETE FROM daily_stats WHERE user_id = ${user.id}`;
@@ -342,8 +343,8 @@ describe('Database Enhancement Tests', () => {
                 VALUES ('test-model', ${user.id}, 100)
             `;
             expect(true).toBe(false);
-        } catch (error: any) {
-            expect(error.message).toContain('unique');
+        } catch (error: unknown) {
+            expect(getErrorMessage(error)).toContain('unique');
         }
         
         await sql`DELETE FROM model_stats WHERE user_id = ${user.id}`;

@@ -1,4 +1,4 @@
-import { type ProviderHandler } from './types';
+import type { ProviderHandler } from './types';
 
 export class DakkaApiHandler implements ProviderHandler {
     transformRequest(body: Record<string, any>, model: string): Record<string, any> {
@@ -29,7 +29,7 @@ export class DakkaApiHandler implements ProviderHandler {
         };
     }
 
-    transformResponse(data: any): Record<string, any> {
+    transformResponse(data: Record<string, any>): Record<string, any> {
         // Grsai Dakka API returns an object like:
         // { "id": "...", "url": "https://...", "status": "succeeded", "results": [{"url": "..."}] }
         
@@ -51,7 +51,7 @@ export class DakkaApiHandler implements ProviderHandler {
         };
     }
 
-    extractUsage(data: any): { promptTokens: number; completionTokens: number } {
+    extractUsage(data: Record<string, any>): { promptTokens: number; completionTokens: number } {
         // The API specification says variants increase cost (1 variant = 50 points etc.)
         // We will default to standard OpenAI usage calculation for image creation
         // which usually registers as a prompt token based on billing strategy

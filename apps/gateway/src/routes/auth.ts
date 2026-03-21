@@ -1,32 +1,33 @@
+import { config, apiUrls } from '../config';
 import { Elysia, t } from 'elysia';
 import { sql } from '@elygate/db';
 import { authService } from '../services/auth';
 import { authPlugin } from '../middleware/auth';
-import type { UserRecord } from '../types';
+import type { UserRecord , ElysiaCtx } from '../types';
 import { getLangFromHeader } from '../utils/i18n';
 import { optionCache } from '../services/optionCache';
 import { memoryCache } from '../services/cache';
 
-const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID || '';
-const GITHUB_CLIENT_SECRET = process.env.GITHUB_CLIENT_SECRET || '';
-const REDIRECT_URI = process.env.GITHUB_REDIRECT_URI || 'http://localhost:3000/api/auth/github/callback';
+const GITHUB_CLIENT_ID = config.github.clientId || '';
+const GITHUB_CLIENT_SECRET = config.github.clientSecret || '';
+const REDIRECT_URI = config.github.redirectUri || 'http://localhost:3000/api/auth/github/callback';
 
-const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID || '';
-const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET || '';
-const DISCORD_REDIRECT_URI = process.env.DISCORD_REDIRECT_URI || 'http://localhost:3000/api/auth/discord/callback';
+const DISCORD_CLIENT_ID = config.discord.clientId || '';
+const DISCORD_CLIENT_SECRET = config.discord.clientSecret || '';
+const DISCORD_REDIRECT_URI = config.discord.redirectUri || 'http://localhost:3000/api/auth/discord/callback';
 
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
+const TELEGRAM_BOT_TOKEN = config.telegram.botToken || '';
 
 import { jwt } from '@elysiajs/jwt';
 
 export const authRouter = new Elysia()
     .use(jwt({
         name: 'jwt',
-        secret: process.env.JWT_SECRET!,
+        secret: config.jwtSecret!,
         exp: '7d'
     }))
     .get('/github', ({ set }) => {
-        const url = `https://github.com/login/oauth/authorize?client_id=${GITHUB_CLIENT_ID}&redirect_uri=${REDIRECT_URI}&scope=read:user`;
+        const url = `${apiUrls.github.authorize}?client_id=${GITHUB_CLIENT_ID}&redirect_uri=${REDIRECT_URI}&scope=read:user`;
         set.redirect = url;
     })
     .get('/github/callback', async ({ query, set }) => {
@@ -34,7 +35,7 @@ export const authRouter = new Elysia()
         if (!code) throw new Error("No code provided");
 
         // 1. Exchange code for access token
-        const tokenRes = await fetch('https://github.com/login/oauth/access_token', {
+        const tokenRes = await fetch(apiUrls.github.accessToken, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -47,13 +48,13 @@ export const authRouter = new Elysia()
             })
         });
 
-        const tokenData = await tokenRes.json() as any;
+        const tokenData = await tokenRes.json() as Record<string, any>;
         if (tokenData.error) throw new Error(tokenData.error_description || "GitHub auth failed");
 
         const accessToken = tokenData.access_token;
 
         // 2. Fetch user info
-        const userRes = await fetch('https://github.com/user', {
+        const userRes = await fetch(apiUrls.github.user, {
             headers: {
                 'Authorization': `Bearer ${accessToken}`,
                 'Accept': 'application/json',
@@ -61,7 +62,7 @@ export const authRouter = new Elysia()
             }
         });
 
-        const githubUser = await userRes.json() as any;
+        const githubUser = await userRes.json() as Record<string, any>;
 
         // 3. Get or Create user in our DB
         const user = await authService.getOrCreateGithubUser(githubUser.id.toString(), githubUser.login);
@@ -69,11 +70,11 @@ export const authRouter = new Elysia()
         // 4. Generate local session
         const sessionToken = await authService.generateSessionToken(user.id);
 
-        const targetUrl = process.env.WEB_URL || 'http://localhost:5173';
+        const targetUrl = config.webUrl || 'http://localhost:5173';
         set.redirect = `${targetUrl}/auth/callback?token=${sessionToken}&username=${user.username}&role=${user.role}`;
     })
     // User registration
-    .post('/register', async ({ body, set, request }: any) => {
+    .post('/register', async ({ body, set, request }: ElysiaCtx) => {
         const lang = getLangFromHeader(request.headers.get('accept-language'));
         try {
             const { username, password, inviteCode } = body;
@@ -82,7 +83,7 @@ export const authRouter = new Elysia()
                 return { success: false, message: lang === 'zh' ? '用户名和密码不能为空' : 'Username and password are required' };
             }
 
-            const registerMode = optionCache.get('RegisterMode', 'open');
+            const registerMode = String(optionCache.get('RegisterMode', 'open'));
             const defaultQuota = parseInt(optionCache.get('SignRegisterQuota', '500000')) || 500000;
 
             if (registerMode === 'closed') {
@@ -91,7 +92,7 @@ export const authRouter = new Elysia()
             }
 
             let giftQuota = 0;
-            let inviteCodeRecord: any = null;
+            let inviteCodeRecord = null;
 
             if (inviteCode) {
                 const [codeRecord] = await sql`
@@ -167,13 +168,13 @@ export const authRouter = new Elysia()
                     giftQuota: giftQuota > 0 ? giftQuota : undefined
                 }
             };
-        } catch (e: any) {
+        } catch (e: unknown) {
             set.status = 500;
             return { success: false, message: e?.message || (lang === 'zh' ? '服务器内部错误' : 'Internal server error') };
         }
     })
     // Login route
-    .post('/login', async ({ body, set, request, cookie: { auth_session } }: any) => {
+    .post('/login', async ({ body, set, request, cookie: { auth_session } }: ElysiaCtx) => {
         const lang = getLangFromHeader(request.headers.get('accept-language'));
         const clientIP = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown';
 
@@ -227,7 +228,7 @@ export const authRouter = new Elysia()
             auth_session.set({
                 value: sessionToken,
                 httpOnly: true,
-                secure: process.env.NODE_ENV === 'production',
+                secure: config.nodeEnv === 'production',
                 sameSite: 'lax',
                 maxAge: 7 * 86400,
                 path: '/'
@@ -240,12 +241,12 @@ export const authRouter = new Elysia()
             }
 
             return { success: true, token: token.key, username: user.username, role: user.role, currency: user.currency || 'USD' };
-        } catch (e: any) {
+        } catch (e: unknown) {
             set.status = 500;
             return { success: false, message: e?.message || 'Internal server error' };
         }
     })
-    .post('/logout', async ({ cookie: { auth_session } }: any) => {
+    .post('/logout', async ({ cookie: { auth_session } }: ElysiaCtx) => {
         if (auth_session.value) { await sql`DELETE FROM session WHERE token = ${auth_session.value}`; }
         auth_session.remove();
         return { success: true, message: 'Logged out successfully' };
@@ -256,7 +257,7 @@ export const authRouter = new Elysia()
         app.use(authPlugin)
             // Support both old and new (standardized) user dashboard paths
             .group('/user', (app) =>
-                app.get('/info', async ({ user }: any) => {
+                app.get('/info', async ({ user }: ElysiaCtx) => {
                     const u = user as UserRecord;
                     return {
                         id: u.id,
@@ -268,7 +269,7 @@ export const authRouter = new Elysia()
                         currency: u.currency || 'USD'
                     };
                 })
-                .get('/logs', async ({ query, user }: any) => {
+                .get('/logs', async ({ query, user }: ElysiaCtx) => {
                     const userRow = user as UserRecord;
                     const page = Number(query?.page) || 1;
                     const limit = Number(query?.limit) || 50;
@@ -291,7 +292,7 @@ export const authRouter = new Elysia()
                     `;
                     return { data, total: countRow.total, page, limit };
                 })
-                .get('/tokens', async ({ user }: any) => {
+                .get('/tokens', async ({ user }: ElysiaCtx) => {
                     const userRow = user as UserRecord;
                     const data = await sql`
                         SELECT id, name, key, status, remain_quota as "remainQuota", used_quota as "usedQuota", created_at as "createdAt", models
@@ -299,11 +300,11 @@ export const authRouter = new Elysia()
                     `;
                     return [...data];
                 })
-                .get('/packages', async ({ user }: any) => {
+                .get('/packages', async ({ user }: ElysiaCtx) => {
                     const userRow = user as UserRecord;
                     const userGroup = userRow.group || 'default';
                     const data = await sql`SELECT id, name, description, price, duration_days, models, allowed_groups FROM packages WHERE is_public = true ORDER BY price ASC`;
-                    return data.filter((pkg: any) => {
+                    return data.filter((pkg: Record<string, any>) => {
                         const allowedGroups = Array.isArray(pkg.allowed_groups) ? pkg.allowed_groups : (typeof pkg.allowed_groups === 'string' ? JSON.parse(pkg.allowed_groups || '[]') : []);
                         if (allowedGroups.length > 0 && !allowedGroups.includes(userGroup)) return false;
                         const policy = memoryCache.userGroups.get(userGroup);
@@ -311,13 +312,13 @@ export const authRouter = new Elysia()
                         return true;
                     });
                 })
-                .get('/subscriptions', async ({ user }: any) => {
+                .get('/subscriptions', async ({ user }: ElysiaCtx) => {
                     const userRow = user as UserRecord;
                     return await sql`SELECT s.id, s.package_id, p.name as package_name, p.models, s.start_time, s.end_time, s.status FROM user_subscriptions s JOIN packages p ON s.package_id = p.id WHERE s.user_id = ${userRow.id} AND s.status = 1 ORDER BY s.end_time DESC`;
                 })
-                .post('/tokens', async ({ body, user }: any) => {
+                .post('/tokens', async ({ body, user }: ElysiaCtx) => {
                     const userRow = user as UserRecord;
-                    const b = body as any;
+                    const b = body as Record<string, any>;
                     const newKey = `sk-${Bun.randomUUIDv7('hex')}`;
                     const [result] = await sql`
                         INSERT INTO tokens (user_id, name, key, status, remain_quota, models)
@@ -326,7 +327,7 @@ export const authRouter = new Elysia()
                     `;
                     return result;
                 })
-                .put('/tokens/:id', async ({ params: { id }, body, user, set }: any) => {
+                .put('/tokens/:id', async ({ params: { id }, body, user, set }: ElysiaCtx) => {
                     const userRow = user as UserRecord;
                     const [existing] = await sql`SELECT id FROM tokens WHERE id = ${Number(id)} AND user_id = ${userRow.id}`;
                     if (!existing) { set.status = 403; throw new Error('Forbidden'); }
@@ -336,21 +337,21 @@ export const authRouter = new Elysia()
                     `;
                     return result;
                 })
-                .delete('/tokens/:id', async ({ params: { id }, user, set }: any) => {
+                .delete('/tokens/:id', async ({ params: { id }, user, set }: ElysiaCtx) => {
                     const userRow = user as UserRecord;
                     const [result] = await sql`DELETE FROM tokens WHERE id = ${Number(id)} AND user_id = ${userRow.id} RETURNING *`;
                     if (!result) { set.status = 403; throw new Error('Forbidden'); }
                     return { success: true, deleted: result };
                 })
             )
-            .get('/stats', async ({ user }: any) => {
+            .get('/stats', async ({ user }: ElysiaCtx) => {
                 const userRow = user as UserRecord;
                 return await sql`
                     SELECT DATE(created_at) as date, SUM(prompt_tokens + completion_tokens) as total_tokens, SUM(quota_cost) as total_cost, COUNT(*) as request_count
                     FROM logs WHERE user_id = ${userRow.id} AND created_at >= NOW() - INTERVAL '14 days' GROUP BY DATE(created_at) ORDER BY date ASC
                 `;
             })
-            .get('/realtime', async ({ user }: any) => {
+            .get('/realtime', async ({ user }: ElysiaCtx) => {
                 const userRow = user as UserRecord;
                 const [realtime] = await sql`
                     SELECT COUNT(*) as rpm, COALESCE(SUM(prompt_tokens + completion_tokens), 0) as tpm
@@ -358,7 +359,7 @@ export const authRouter = new Elysia()
                 `;
                 return { rpm: Number(realtime.rpm || 0), tpm: Number(realtime.tpm || 0) };
             })
-            .put('/currency', async ({ body, user }: any) => {
+            .put('/currency', async ({ body, user }: ElysiaCtx) => {
                 const userRow = user as UserRecord;
                 const { currency } = body;
                 if (!['USD', 'RMB'].includes(currency)) throw new Error('Invalid currency');
@@ -368,21 +369,21 @@ export const authRouter = new Elysia()
     )
 
     .get('/discord', ({ set }) => {
-        const url = `https://discord.com/api/oauth2/authorize?client_id=${DISCORD_CLIENT_ID}&redirect_uri=${encodeURIComponent(DISCORD_REDIRECT_URI)}&response_type=code&scope=identify`;
+        const url = `${apiUrls.discord.authorize}?client_id=${DISCORD_CLIENT_ID}&redirect_uri=${encodeURIComponent(DISCORD_REDIRECT_URI)}&response_type=code&scope=identify`;
         set.redirect = url;
     })
     .get('/discord/callback', async ({ query, set }) => {
         const { code } = query;
         if (!code) throw new Error("No code provided");
-        const tokenRes = await fetch('https://discord.com/api/oauth2/token', {
+        const tokenRes = await fetch(apiUrls.discord.token, {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: new URLSearchParams({ client_id: DISCORD_CLIENT_ID, client_secret: DISCORD_CLIENT_SECRET, grant_type: 'authorization_code', code: code, redirect_uri: DISCORD_REDIRECT_URI })
         });
-        const tokenData = await tokenRes.json() as any;
+        const tokenData = await tokenRes.json() as Record<string, any>;
         if (tokenData.error) throw new Error(tokenData.error_description || "Discord auth failed");
-        const userRes = await fetch('https://discord.com/api/users/@me', { headers: { 'Authorization': `Bearer ${tokenData.access_token}` } });
-        const discordUser = await userRes.json() as any;
+        const userRes = await fetch(apiUrls.discord.user, { headers: { 'Authorization': `Bearer ${tokenData.access_token}` } });
+        const discordUser = await userRes.json() as Record<string, any>;
         const [existingOAuth] = await sql`SELECT user_id FROM oauth_accounts WHERE provider = 'discord' AND provider_user_id = ${discordUser.id} LIMIT 1`;
         let user;
         if (existingOAuth) {
@@ -397,11 +398,11 @@ export const authRouter = new Elysia()
             await sql`INSERT INTO tokens (user_id, name, key, status, remain_quota) VALUES (${user.id}, 'Default API Key', ${newKey}, 1, -1)`;
          }
         const sessionToken = await authService.generateSessionToken(user.id);
-        const targetUrl = process.env.WEB_URL || 'http://localhost:5173';
+        const targetUrl = config.webUrl || 'http://localhost:5173';
         set.redirect = `${targetUrl}/auth/callback?token=${sessionToken}&username=${user.username}&role=${user.role}`;
     })
     .get('/telegram', async ({ query, set }) => {
-        const { id, username, auth_date, hash } = query as any;
+        const { id, username, auth_date, hash } = query as Record<string, string>;
         if (!id || !auth_date || !hash) throw new Error('Invalid Telegram data');
         const dataCheckString = Object.keys(query).filter(k => k !== 'hash').sort().map(k => `${k}=${query[k]}`).join('\n');
         const secretKey = new Bun.CryptoHasher("sha256").update(TELEGRAM_BOT_TOKEN).digest();
@@ -421,6 +422,6 @@ export const authRouter = new Elysia()
             await sql`INSERT INTO tokens (user_id, name, key, status, remain_quota) VALUES (${user.id}, 'Default Token', ${newKey}, 1, -1)`;
         }
         const sessionToken = await authService.generateSessionToken(user.id);
-        const targetUrl = process.env.WEB_URL || 'http://localhost:5173';
+        const targetUrl = config.webUrl || 'http://localhost:5173';
         set.redirect = `${targetUrl}/auth/callback?token=${sessionToken}&username=${user.username}&role=${user.role}`;
     });

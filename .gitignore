@@ -14,3 +14,6 @@ pigsty_passwords.txt
 scripts/test_*.sh
 scripts/test_*.ts
 tests/
+
+progress.md
+.agents

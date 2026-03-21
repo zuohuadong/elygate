@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { onMount } from "svelte";
+    
     import { apiFetch } from "$lib/api";
     import {
         Search,
@@ -181,15 +181,15 @@
         isLoading = true;
         error = "";
         try {
-            const res = await apiFetch<any>("/v1/models?include_channels=true");
+            const res = await apiFetch<Record<string, unknown>>("/v1/models?include_channels=true");
             if (Array.isArray(res)) {
                 models = res;
-            } else if (res && Array.isArray((res as any).data)) {
-                models = (res as any).data;
+            } else if (res && Array.isArray((res as Record<string, any>).data)) {
+                models = (res as Record<string, any>).data;
             } else {
                 models = [];
             }
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.warn("Failed to load models:", err);
             error =
                 i18n.lang === "zh"
@@ -254,7 +254,7 @@
         displayLimit = 24;
     });
 
-    onMount(() => {
+    $effect(() => {
         loadModels();
     });
 

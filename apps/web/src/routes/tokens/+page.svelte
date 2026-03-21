@@ -5,7 +5,8 @@
     import { KeyRound, Search, Plus, RefreshCw } from "lucide-svelte";
     import { apiFetch } from "$lib/api";
     import { i18n } from "$lib/i18n/index.svelte";
-    import { onMount } from "svelte";
+    
+
     import { session } from "$lib/session.svelte";
 
     // Local state
@@ -50,14 +51,14 @@
                     dt_used_quota: `$ ${(Number(usedQuota || 0) / session.quotaPerUnit).toFixed(4)}`,
                 };
             });
-        } catch (err: any) {
-            errorMsg = err.message || (i18n.lang === "zh" ? "加载令牌失败" : "Failed to load tokens");
+        } catch (err: unknown) {
+            errorMsg = err instanceof Error ? err instanceof Error ? err.message : String(err) : (i18n.lang === "zh" ? "加载令牌失败" : "Failed to load tokens");
         } finally {
             isLoading = false;
         }
     }
 
-    onMount(() => {
+    $effect(() => {
         loadTokens();
     });
 
@@ -84,12 +85,12 @@
         isModalOpen = true;
     }
 
-    function handleEdit(token: any) {
+    function handleEdit(token: Record<string, any>) {
         selectedToken = token;
         isModalOpen = true;
     }
 
-    async function handleDelete(token: any) {
+    async function handleDelete(token: Record<string, any>) {
         const confirmMsg = i18n.t.common.confirmDelete.replace(
             "{name}",
             `"${token.name}"`,
@@ -101,12 +102,12 @@
                 : `/user/tokens/${token.id}`;
             await apiFetch(endpoint, { method: "DELETE" });
             await loadTokens();
-        } catch (err: any) {
-            alert(i18n.t.common.failed + ": " + err.message);
+        } catch (err: unknown) {
+            alert(i18n.t.common.failed + ": " + err instanceof Error ? err.message : String(err));
         }
     }
 
-    async function handleSave(data: any) {
+    async function handleSave(data: Record<string, unknown>) {
         try {
             if (selectedToken) {
                 const endpoint = isAdmin
@@ -125,8 +126,8 @@
             }
             isModalOpen = false;
             await loadTokens();
-        } catch (err: any) {
-            alert(i18n.t.common.failed + ": " + err.message);
+        } catch (err: unknown) {
+            alert(i18n.t.common.failed + ": " + err instanceof Error ? err.message : String(err));
         }
     }
 </script>

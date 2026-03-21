@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { onMount } from "svelte";
+    
     import { API_BASE, apiFetch } from "$lib/api";
     import { goto } from "$app/navigation";
     import { i18n } from "$lib/i18n/index.svelte";
@@ -14,7 +14,7 @@
     let error = $state("");
     let success = $state("");
 
-    onMount(async () => {
+    $effect(() => { (async () => {
         try {
             const res = await fetch(`${API_BASE}/api/option`);
             const data = await res.json();
@@ -26,7 +26,7 @@
         } finally {
             isChecking = false;
         }
-    });
+    })(); });
 
     async function handleRegister(e: Event) {
         e.preventDefault();
@@ -59,7 +59,7 @@
 
         isLoading = true;
         try {
-            const data = await apiFetch<any>("/register", {
+            const data = await apiFetch<Record<string, unknown>>("/register", {
                 method: "POST",
                 body: JSON.stringify({
                     username,
@@ -84,8 +84,8 @@
             setTimeout(() => {
                 goto("/login");
             }, 2000);
-        } catch (e: any) {
-            error = e.message;
+        } catch (e: unknown) {
+            error = e instanceof Error ? e.message : String(e);
         } finally {
             isLoading = false;
         }

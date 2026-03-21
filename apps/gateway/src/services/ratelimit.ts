@@ -76,7 +76,7 @@ const packageLimitCache = new Map<string, { rpmCount: number, rpmWindow: number,
  * Check if the given User ID is rate limited by the provided Package Rule.
  * Key is scoped to (userId, ruleId) so different packages use independent counters.
  */
-export async function isPackageRateLimited(userId: number, rule: any): Promise<boolean> {
+export async function isPackageRateLimited(userId: number, rule: Record<string, any>): Promise<boolean> {
    if (!rule) return false;
    const { rpm, rph } = rule;
    if ((!rpm || rpm <= 0) && (!rph || rph <= 0)) return false;
@@ -170,7 +170,7 @@ export function getPackageLockId(userId: number, ruleId: number): string {
 /**
  * Release a package concurrency slot and notify waiting requests.
  */
-export function releasePackageConcurrency(lockId: string) {
+export function releasePackageConcurrency(lockId: string): void {
     const current = packageConcurrencyMap.get(lockId);
     if (current) {
         packageConcurrencyMap.set(lockId, Math.max(0, current - 1));

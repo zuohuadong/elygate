@@ -1,3 +1,4 @@
+import { log } from '../services/logger';
 import { optionCache } from './optionCache';
 
 /**
@@ -24,19 +25,19 @@ export const notificationService = {
     async sendEmail(subject: string, message: string) {
         const config = optionCache.get('SMTPConfig', {});
         if (!config.host || !config.user) {
-            console.warn('[Notification] SMTP not configured.');
+            log.warn('[Notification] SMTP not configured.');
             return;
         }
 
         // In a real implementation, use nodemailer here.
         // For Elygate parity, we log the attempt.
-        console.log(`[Notification/Email] To: ${config.adminEmail}, Subject: ${subject}`);
+        log.info(`[Notification/Email] To: ${config.adminEmail}, Subject: ${subject}`);
     },
 
     async sendTelegram(subject: string, message: string) {
         const config = optionCache.get('TelegramConfig', {});
         if (!config.token || !config.chatId) {
-            console.warn('[Notification] Telegram not configured.');
+            log.warn('[Notification] Telegram not configured.');
             return;
         }
 
@@ -51,9 +52,9 @@ export const notificationService = {
                     parse_mode: 'Markdown'
                 })
             });
-            console.log(`[Notification/Telegram] Message sent: ${subject}`);
+            log.info(`[Notification/Telegram] Message sent: ${subject}`);
         } catch (e) {
-            console.error('[Notification/Telegram] Failed:', e);
+            log.error('[Notification/Telegram] Failed:', e);
         }
     }
 };

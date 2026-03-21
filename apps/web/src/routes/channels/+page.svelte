@@ -4,7 +4,8 @@
     import { Plus, Server } from "lucide-svelte";
     import { apiFetch } from "$lib/api";
     import { i18n } from "$lib/i18n/index.svelte";
-    import { onMount } from "svelte";
+    
+
 
     // Responsive state with Svelte 5 $state
     let channels = $state<any[]>([]);
@@ -34,17 +35,17 @@
                         : c.models || "",
                 };
             });
-        } catch (err: any) {
-            errorMsg = err.message || (i18n.lang === "zh" ? "加载渠道失败" : "Failed to load channels");
+        } catch (err: unknown) {
+            errorMsg = err instanceof Error ? err instanceof Error ? err.message : String(err) : (i18n.lang === "zh" ? "加载渠道失败" : "Failed to load channels");
         } finally {
             isLoading = false;
         }
     }
 
-    onMount(loadChannels);
+    $effect(() => { loadChannels(); });
 
     // Render status badge with tooltip support
-    const renderStatus = (val: string, row: any) => {
+    const renderStatus = (val: string, row: Record<string, any>) => {
         let colorClass = "bg-slate-100 text-slate-800 dark:bg-slate-500/10 dark:text-slate-400";
         
         if (row.status === 1) colorClass = "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-400";
@@ -93,12 +94,12 @@
         isModalOpen = true;
     }
 
-    function handleEdit(channel: any) {
+    function handleEdit(channel: Record<string, unknown>) {
         selectedChannel = channel;
         isModalOpen = true;
     }
 
-    async function handleDelete(channel: any) {
+    async function handleDelete(channel: Record<string, unknown>) {
         const confirmMsg = i18n.t.common.confirmDelete.replace(
             "{name}",
             `"${channel.name}"`,
@@ -109,12 +110,12 @@
                 method: "DELETE",
             });
             await loadChannels();
-        } catch (err: any) {
-            alert(i18n.t.common.failed + ": " + err.message);
+        } catch (err: unknown) {
+            alert(i18n.t.common.failed + ": " + err instanceof Error ? err.message : String(err));
         }
     }
 
-    async function handleSave(data: any) {
+    async function handleSave(data: Record<string, unknown>) {
         try {
             if (selectedChannel) {
                 await apiFetch(`/admin/channels/${selectedChannel.id}`, {
@@ -129,8 +130,8 @@
             }
             isModalOpen = false;
             await loadChannels();
-        } catch (err: any) {
-            alert(i18n.t.common.failed + ": " + err.message);
+        } catch (err: unknown) {
+            alert(i18n.t.common.failed + ": " + err instanceof Error ? err.message : String(err));
         }
     }
 </script>

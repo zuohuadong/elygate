@@ -15,12 +15,12 @@ export class AzureOpenAIApiHandler implements ProviderHandler {
         };
     }
 
-    transformResponse(data: any): any {
+    transformResponse(data: Record<string, any>): Record<string, any> {
         // Response body is identical to native OpenAI
         return data;
     }
 
-    extractUsage(data: any) {
+    extractUsage(data: Record<string, any>) {
         return {
             promptTokens: data.usage?.prompt_tokens || 0,
             completionTokens: data.usage?.completion_tokens || 0,

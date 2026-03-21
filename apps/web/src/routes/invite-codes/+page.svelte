@@ -5,7 +5,7 @@
     import { apiFetch } from "$lib/api";
     import { i18n } from "$lib/i18n/index.svelte";
     import { session } from "$lib/session.svelte";
-    import { onMount } from "svelte";
+    
 
     interface InviteCode {
         id: number;
@@ -56,8 +56,8 @@
                 };
             });
             total = data.total;
-        } catch (err: any) {
-            errorMsg = err.message || (i18n.lang === "zh" ? "加载邀请码失败" : "Failed to load invite codes");
+        } catch (err: unknown) {
+            errorMsg = err instanceof Error ? err instanceof Error ? err.message : String(err) : (i18n.lang === "zh" ? "加载邀请码失败" : "Failed to load invite codes");
         } finally {
             isLoading = false;
         }
@@ -70,7 +70,7 @@
         return i18n.lang === "zh" ? "有效" : "Active";
     }
 
-    onMount(loadData);
+    $effect(() => { loadData(); });
 
     let columns = $derived([
         { key: "id", label: "ID" },
@@ -99,8 +99,8 @@
         try {
             await apiFetch(`/admin/invite-codes/${item.id}`, { method: "DELETE" });
             await loadData();
-        } catch (err: any) {
-            alert(i18n.t.common.failed + ": " + err.message);
+        } catch (err: unknown) {
+            alert(i18n.t.common.failed + ": " + err instanceof Error ? err.message : String(err));
         }
     }
 
@@ -112,15 +112,15 @@
                 body: JSON.stringify({ status: newStatus })
             });
             await loadData();
-        } catch (err: any) {
-            alert(i18n.t.common.failed + ": " + err.message);
+        } catch (err: unknown) {
+            alert(i18n.t.common.failed + ": " + err instanceof Error ? err.message : String(err));
         }
     }
 
     async function handleSubmit(e: Event) {
         e.preventDefault();
         try {
-            const payload: Record<string, any> = {
+            const payload: Record<string, unknown> = {
                 maxUses: formData.maxUses,
                 giftQuota: formData.giftQuota,
             };
@@ -137,8 +137,8 @@
             });
             isModalOpen = false;
             await loadData();
-        } catch (err: any) {
-            alert(i18n.t.common.failed + ": " + err.message);
+        } catch (err: unknown) {
+            alert(i18n.t.common.failed + ": " + err instanceof Error ? err.message : String(err));
         }
     }
 </script>

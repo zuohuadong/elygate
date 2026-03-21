@@ -1,5 +1,5 @@
 import { ChannelType } from '../providers/types';
-import { type ChannelConfig } from '../types';
+import type { ChannelConfig } from '../types';
 
 /**
  * Build upstream API URL based on channel config and endpoint type.

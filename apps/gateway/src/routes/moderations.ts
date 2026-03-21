@@ -1,3 +1,4 @@
+import type { ElysiaCtx } from '../types';
 import { Elysia } from 'elysia';
 import { UnifiedDispatcher } from '../services/dispatcher';
 import { ConverterFactory } from '../services/converters';
@@ -7,7 +8,7 @@ export const moderationsRouter = new Elysia()
     .post('/moderations', async (ctx) => handleModeration(ctx))
     .post('/v1/moderations', async (ctx) => handleModeration(ctx));
 
-async function handleModeration({ body, headers, params, request, query }: any) {
+async function handleModeration({ body, headers, params, request, query }: ElysiaCtx) {
     const apiKey = query?.access_token || request.headers.get('Authorization')?.replace('Bearer ', '');
     
     if (!apiKey) return new Response(JSON.stringify({ error: 'Missing API key' }), { status: 401 });
@@ -39,11 +40,11 @@ async function handleModeration({ body, headers, params, request, query }: any) 
         });
 
         if (result && !(result instanceof Response)) {
-            return converter.convertResponse(result as any);
+            return converter.convertResponse(result as Record<string, any>[]);
         }
 
         return result;
-    } catch (error: any) {
+    } catch (error: unknown) {
         const mappedError = converter.convertError(error);
         return new Response(JSON.stringify(mappedError), {
             status: 500,

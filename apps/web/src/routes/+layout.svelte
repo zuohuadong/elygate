@@ -27,7 +27,7 @@
 	import { page } from "$app/state";
 	import { i18n } from "$lib/i18n/index.svelte";
 	import { goto } from "$app/navigation";
-	import { onMount, tick } from "svelte";
+	import { tick } from "svelte";
 	import { session } from "$lib/session.svelte";
 	import { apiFetch } from "$lib/api";
 	import { theme } from "$lib/theme.svelte";
@@ -80,21 +80,21 @@
 		"/payment",
 	];
 
-	onMount(async () => {
+	$effect(() => { (async () => {
 		initLogger();
 		i18n.init();
 		theme.init();
 
 		// Fetch SEO metadata
-		apiFetch<{ success: boolean; data: any }>("/info")
+		apiFetch<{ success: boolean; data: Record<string, any> }>("/info")
 			.then((res) => {
 				if (res.success) publicInfo = { ...publicInfo, ...res.data };
 			})
-			.catch(() => {});
+			.catch((e: unknown) => console.warn("[Layout] Non-critical fetch failed:", e));
 
 		// Check if user is authenticated via Cookie
 		try {
-			const me = await apiFetch<any>("/user/info");
+			const me = await apiFetch<Record<string, unknown>>("/user/info");
 			if (me && me.username) {
 				session.update({
 					id: me.id,
@@ -145,8 +145,8 @@
 		]);
 
 		// Fetch system info for exchange rate
-		apiFetch<any>("/status")
-			.then((res: any) => {
+		apiFetch<Record<string, unknown>>("/status")
+			.then((res: Record<string, any>) => {
 				if (res.data) {
 					session.setSystemInfo({
 						exchangeRate: res.data.exchange_rate || 7.2,
@@ -154,7 +154,7 @@
 					});
 				}
 			})
-			.catch(() => {});
+			.catch((e: unknown) => console.warn("[Layout] Non-critical fetch failed:", e));
 
 		const path = page.url.pathname;
 		const isAdmin = session.role >= 10;
@@ -187,7 +187,7 @@
 		// }
 
 		isReady = true;
-	});
+	})(); });
 
 	async function toggleCurrency() {
 		const newCurrency = session.currency === "USD" ? "RMB" : "USD";

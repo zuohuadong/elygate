@@ -1,3 +1,4 @@
+import { log } from '../services/logger';
 import { sql } from '@elygate/db';
 import { memoryCache } from './cache';
 import { notificationService } from './notification';
@@ -40,7 +41,7 @@ class CircuitBreaker {
 
             const latencyThreshold = parseInt(optionCache.get('LATENCY_THRESHOLD_MS', '30000'));
             if (newAvg > latencyThreshold) {
-                console.warn(`[CircuitBreaker] Channel ${channelId} high latency (${Math.round(newAvg)}ms). Marking as Busy.`);
+                log.warn(`[CircuitBreaker] Channel ${channelId} high latency (${Math.round(newAvg)}ms). Marking as Busy.`);
                 await sql`UPDATE channels SET status = 5, status_message = 'High Latency', updated_at = NOW() WHERE id = ${channelId}`;
                 await memoryCache.refresh();
             }
@@ -52,7 +53,7 @@ class CircuitBreaker {
             const threshold = channel.status === 5 ? 1 : this.getRecoveryThreshold();
 
             if (count >= threshold) {
-                console.log(`[CircuitBreaker] Channel ${channelId} recovered to Online.`);
+                log.info(`[CircuitBreaker] Channel ${channelId} recovered to Online.`);
                 await sql`UPDATE channels SET status = 1, status_message = NULL, updated_at = NOW() WHERE id = ${channelId}`;
                 await memoryCache.refresh();
                 this.successCounts.delete(channelId);
@@ -71,14 +72,14 @@ class CircuitBreaker {
 
         // 1. Immediate Disable for Auth Errors (401/403)
         if (status === 401 || status === 403) {
-            console.error(`[CircuitBreaker] Channel ${channelId} Auth Error (${status}). Disabling.`);
+            log.error(`[CircuitBreaker] Channel ${channelId} Auth Error (${status}). Disabling.`);
             await this.disableChannel(channelId, `Auth Error: ${status} ${message || ""}`);
             return;
         }
 
         // 2. Mark as Busy for Rate Limits (429)
         if (status === 429) {
-            console.warn(`[CircuitBreaker] Channel ${channelId} Rate Limited (429). Marking as Busy.`);
+            log.warn(`[CircuitBreaker] Channel ${channelId} Rate Limited (429). Marking as Busy.`);
             await sql`UPDATE channels SET status = 5, status_message = 'Rate Limited (429)', updated_at = NOW() WHERE id = ${channelId}`;
             await memoryCache.refresh();
             return;
@@ -113,7 +114,7 @@ class CircuitBreaker {
             this.errorCounts.delete(channelId);
             this.successCounts.delete(channelId);
 
-            const shouldNotify = optionCache.get('Notify_On_Channel_Offline', 'true') === 'true';
+            const shouldNotify = String(optionCache.get('Notify_On_Channel_Offline', 'true')) === 'true';
 
             if (shouldNotify) {
                 await notificationService.send(
@@ -123,7 +124,7 @@ class CircuitBreaker {
                 await webhookService.trigger('channel.disabled', { channelId, reason });
             }
         } catch (e) {
-            console.error(`[CircuitBreaker] Failed to disable channel ${channelId}:`, e);
+            log.error(`[CircuitBreaker] Failed to disable channel ${channelId}:`, e);
         }
     }
 
@@ -153,7 +154,7 @@ class CircuitBreaker {
             for (const ch of testingChannels) {
                 const isHealthy = await this.pingChannel(ch);
                 if (isHealthy) {
-                    console.log(`[CircuitBreaker] Channel ${ch.id} auto-recovered from Testing Recovery (timeout).`);
+                    log.info(`[CircuitBreaker] Channel ${ch.id} auto-recovered from Testing Recovery (timeout).`);
                     await sql`UPDATE channels SET status = 1, status_message = NULL, updated_at = NOW() WHERE id = ${ch.id}`;
                     changed = true;
                 } else {
@@ -176,15 +177,15 @@ class CircuitBreaker {
             }
             if (changed) await memoryCache.refresh();
         } catch (e) {
-            console.error('[HealthCheck] Error checking channels:', e);
+            log.error('[HealthCheck] Error checking channels:', e);
         }
     }
 
-    private async pingChannel(channel: any): Promise<boolean> {
+    private async pingChannel(channel: Record<string, any>): Promise<boolean> {
         const keys = channel.key.split('\n').map((k: string) => k.trim()).filter(Boolean);
         if (keys.length === 0) return false;
 
-        const useTestPrompt = optionCache.get('HEALTH_CHECK_USE_PROMPT', 'false') === 'true';
+        const useTestPrompt = String(optionCache.get('HEALTH_CHECK_USE_PROMPT', 'false')) === 'true';
         const testPrompt = optionCache.get('HEALTH_CHECK_PROMPT', 'Hi');
         const timeoutMs = parseInt(optionCache.get('HEALTH_CHECK_TIMEOUT', '10000'));
 

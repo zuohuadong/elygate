@@ -1,10 +1,12 @@
+import { log } from '../services/logger';
+import { getErrorMessage } from '../utils/error';
 import { Elysia, t } from 'elysia';
 import { sql } from '@elygate/db';
 import { adminGuard } from '../middleware/auth';
 import { memoryCache } from '../services/cache';
 import { quotaToUSD, quotaToRMB } from '../services/ratio';
 import { getProviderHandler } from '../providers';
-import { ChannelType } from '../types';
+import { ChannelType , ElysiaCtx } from '../types';
 import { getLangFromHeader, getLangFromQuery } from '../utils/i18n';
 import { join } from 'path';
 import { encryptChannelKeys, decryptChannelKeys } from '../services/encryption';
@@ -19,7 +21,7 @@ async function refreshAllCaches() {
 }
 
 // Load model configurations via top-level await (Bun native feature)
-let modelConfig: any = { anthropic: { models: [] } };
+let modelConfig: Record<string, any> = { anthropic: { models: [] } };
 try {
     const configPath = join(process.cwd(), 'apps/gateway/config/models.json');
     const file = Bun.file(configPath);
@@ -27,14 +29,14 @@ try {
         modelConfig = await file.json();
     }
 } catch (error) {
-    console.error('[ModelConfig] Failed to load model config:', error);
+    log.error('[ModelConfig] Failed to load model config:', error);
 }
 
 // Admin Router - prefix will be applied in index.ts
 export const adminRouter = new Elysia()
     .use(adminGuard)
     .guard({
-        beforeHandle: ({ user, set }: any) => {
+        beforeHandle: ({ user, set }: ElysiaCtx) => {
             if (!user || user.role < 10) {
                 set.status = 403;
                 throw new Error('Forbidden: Admin privileges required');
@@ -47,9 +49,9 @@ export const adminRouter = new Elysia()
         const groups = await sql`SELECT * FROM user_groups ORDER BY created_at DESC`;
         return groups;
     })
-    .post('/user-groups', async ({ body, set }: any) => {
+    .post('/user-groups', async ({ body, set }: ElysiaCtx) => {
         try {
-            const b = body as any;
+            const b = body as Record<string, any>;
             const [result] = await sql`
                 INSERT INTO user_groups (key, name, description, allowed_channel_types, denied_channel_types, allowed_models, denied_models, allowed_packages, status)
                 VALUES (${b.key}, ${b.name}, ${b.description || ''}, ${b.allowedChannelTypes ? JSON.stringify(b.allowedChannelTypes) : '[]'}, ${b.deniedChannelTypes ? JSON.stringify(b.deniedChannelTypes) : '[]'}, ${b.allowedModels ? JSON.stringify(b.allowedModels) : '[]'}, ${b.deniedModels ? JSON.stringify(b.deniedModels) : '[]'}, ${b.allowedPackages ? JSON.stringify(b.allowedPackages) : '[]'}, ${b.status || 1})
@@ -57,9 +59,9 @@ export const adminRouter = new Elysia()
             `;
             await refreshAllCaches();
             return result;
-        } catch (e: any) {
+        } catch (e: unknown) {
             set.status = 500;
-            return { success: false, message: e.message };
+            return { success: false, message: getErrorMessage(e) };
         }
     }, {
         body: t.Object({
@@ -74,9 +76,9 @@ export const adminRouter = new Elysia()
             status: t.Optional(t.Number())
         })
     })
-    .put('/user-groups/:key', async ({ params: { key }, body, set }: any) => {
+    .put('/user-groups/:key', async ({ params: { key }, body, set }: ElysiaCtx) => {
         try {
-            const b = body as any;
+            const b = body as Record<string, any>;
             const [oldGroup] = await sql`SELECT * FROM user_groups WHERE key = ${key} LIMIT 1`;
             if (!oldGroup) {
                 set.status = 404;
@@ -99,12 +101,12 @@ export const adminRouter = new Elysia()
             `;
             await refreshAllCaches();
             return result;
-        } catch (e: any) {
+        } catch (e: unknown) {
             set.status = 500;
-            return { success: false, message: e.message };
+            return { success: false, message: getErrorMessage(e) };
         }
     })
-    .delete('/user-groups/:key', async ({ params: { key }, set }: any) => {
+    .delete('/user-groups/:key', async ({ params: { key }, set }: ElysiaCtx) => {
         try {
             if (key === 'default') {
                 set.status = 400;
@@ -118,9 +120,9 @@ export const adminRouter = new Elysia()
             await sql`DELETE FROM user_groups WHERE key = ${key}`;
             await refreshAllCaches();
             return { success: true };
-        } catch (e: any) {
+        } catch (e: unknown) {
             set.status = 500;
-            return { success: false, message: e.message };
+            return { success: false, message: getErrorMessage(e) };
         }
     })
 
@@ -133,15 +135,15 @@ export const adminRouter = new Elysia()
             FROM channels 
             ORDER BY id DESC
         `;
-        return channels.map((c: any) => ({
+        return channels.map((c: Record<string, any>) => ({
             ...c,
             key: decryptChannelKeys(c.key)
         }));
     })
 
-    .post('/channels', async ({ body, set }: any) => {
+    .post('/channels', async ({ body, set }: ElysiaCtx) => {
         try {
-            const b = body as any;
+            const b = body as Record<string, any>;
             const encryptedKey = encryptChannelKeys(b.key);
             const [result] = await sql`
                 INSERT INTO channels (name, type, key, base_url, models, priority, weight, status, key_strategy, key_status, price_ratio, key_concurrency_limit)
@@ -150,9 +152,9 @@ export const adminRouter = new Elysia()
             `;
             await refreshAllCaches();
             return result;
-        } catch (e: any) {
+        } catch (e: unknown) {
             set.status = 500;
-            return { success: false, message: e.message };
+            return { success: false, message: getErrorMessage(e) };
         }
     }, {
         body: t.Object({
@@ -169,9 +171,9 @@ export const adminRouter = new Elysia()
         })
     })
 
-    .put('/channels/:id', async ({ params: { id }, body, set }: any) => {
+    .put('/channels/:id', async ({ params: { id }, body, set }: ElysiaCtx) => {
         try {
-            const b = body as any;
+            const b = body as Record<string, any>;
             const [oldChannel] = await sql`SELECT * FROM channels WHERE id = ${Number(id)} LIMIT 1`;
             if (!oldChannel) {
                 set.status = 404;
@@ -213,26 +215,26 @@ export const adminRouter = new Elysia()
                 ...result,
                 key: decryptChannelKeys(result.key)
             };
-        } catch (e: any) {
+        } catch (e: unknown) {
             set.status = 500;
-            return { success: false, message: e.message };
+            return { success: false, message: getErrorMessage(e) };
         }
     })
 
-    .delete('/channels/:id', async ({ params: { id }, set }: any) => {
+    .delete('/channels/:id', async ({ params: { id }, set }: ElysiaCtx) => {
         try {
             await sql`DELETE FROM channels WHERE id = ${Number(id)}`;
             await refreshAllCaches();
             return { success: true };
-        } catch (e: any) {
+        } catch (e: unknown) {
             set.status = 500;
-            return { success: false, message: e.message };
+            return { success: false, message: getErrorMessage(e) };
         }
     })
 
-    .post('/channels/batch', async ({ body, set }: any) => {
+    .post('/channels/batch', async ({ body, set }: ElysiaCtx) => {
         try {
-            const channels = body as any[];
+            const channels = body as Record<string, any>[];
             const results = [];
 
             for (const ch of channels) {
@@ -244,8 +246,8 @@ export const adminRouter = new Elysia()
                         RETURNING id, name, type, base_url, models, status
                     `;
                     results.push({ success: true, channel: result });
-                } catch (e: any) {
-                    results.push({ success: false, name: ch.name, error: e.message });
+                } catch (e: unknown) {
+                    results.push({ success: false, name: ch.name, error: getErrorMessage(e) });
                 }
             }
 
@@ -253,13 +255,13 @@ export const adminRouter = new Elysia()
             return {
                 success: true,
                 total: channels.length,
-                imported: results.filter((r: any) => r.success).length,
-                failed: results.filter((r: any) => !r.success).length,
+                imported: results.filter((r: Record<string, any>) => r.success).length,
+                failed: results.filter((r: Record<string, any>) => !r.success).length,
                 results
             };
-        } catch (e: any) {
+        } catch (e: unknown) {
             set.status = 500;
-            return { success: false, message: e.message };
+            return { success: false, message: getErrorMessage(e) };
         }
     }, {
         body: t.Array(t.Object({
@@ -276,13 +278,13 @@ export const adminRouter = new Elysia()
         }))
     })
 
-    .post('/channels/:id/sync-models', async ({ params: { id }, set }: any) => {
+    .post('/channels/:id/sync-models', async ({ params: { id }, set }: ElysiaCtx) => {
         const [channel] = await sql`SELECT * FROM channels WHERE id = ${Number(id)} LIMIT 1`;
         if (!channel) return (set.status = 404, { success: false, message: 'Channel not found' });
 
         const handler = getProviderHandler(channel.type);
         const testKey = decryptChannelKeys(channel.key).split('\n').find(Boolean) || '';
-        let baseUrl = (channel.base_url || 'https://api.openai.com').replace(/\/+$/, '');
+        let baseUrl = (channel.base_url || apiUrls.openaiDefault).replace(/\/+$/, '');
         
         let modelsUrl: string;
         if (channel.type === ChannelType.GEMINI) {
@@ -308,15 +310,15 @@ export const adminRouter = new Elysia()
 
         const data = await res.json();
         const models = channel.type === ChannelType.GEMINI
-            ? data.models?.map((m: any) => m.name?.replace('models/', '') || m.displayName).filter(Boolean) || []
-            : data.data?.map((m: any) => m.id).filter(Boolean) || data.map?.((m: any) => m.id || m.name).filter(Boolean) || [];
+            ? data.models?.map((m: Record<string, any>) => m.name?.replace('models/', '') || m.displayName).filter(Boolean) || []
+            : data.data?.map((m: Record<string, any>) => m.id).filter(Boolean) || data.map?.((m: any) => m.id || m.name).filter(Boolean) || [];
 
         const [result] = await sql`UPDATE channels SET models = ${models}, updated_at = NOW() WHERE id = ${Number(id)} RETURNING *`;
         await refreshAllCaches();
         return { success: true, modelsCount: models.length, channel: result };
     })
 
-    .post('/channels/:id/keys/clean', async ({ params: { id }, set }: any) => {
+    .post('/channels/:id/keys/clean', async ({ params: { id }, set }: ElysiaCtx) => {
         try {
             const [channel] = await sql`SELECT * FROM channels WHERE id = ${Number(id)} LIMIT 1`;
             if (!channel) {
@@ -351,13 +353,13 @@ export const adminRouter = new Elysia()
                 removedCount: keys.length - activeKeys.length,
                 channel: result
             };
-        } catch (e: any) {
+        } catch (e: unknown) {
             set.status = 500;
-            return { success: false, message: e.message };
+            return { success: false, message: getErrorMessage(e) };
         }
     })
 
-    .post('/channels/:id/test', async ({ params: { id } }: any) => {
+    .post('/channels/:id/test', async ({ params: { id } }: ElysiaCtx) => {
         const [channel] = await sql`SELECT * FROM channels WHERE id = ${Number(id)} LIMIT 1`;
         if (!channel) throw new Error("Channel not found");
 
@@ -379,13 +381,13 @@ export const adminRouter = new Elysia()
         const testKey = keys[0] || '';
         const fetchHeaders = handler.buildHeaders(testKey);
 
-        let testUrl = `${channel.base_url || 'https://api.openai.com'}/v1/chat/completions`;
+        let testUrl = `${channel.base_url || apiUrls.openaiDefault}/v1/chat/completions`;
         if (channel.type === ChannelType.GEMINI) {
-            testUrl = `${channel.base_url || 'https://generativelanguage.googleapis.com'}/v1beta/models/${upstreamModel}:generateContent`;
+            testUrl = `${channel.base_url || apiUrls.geminiDefault}/v1beta/models/${upstreamModel}:generateContent`;
         }
         
         // Smart URL handling: avoid duplicate /v1 prefix
-        let baseUrl = (channel.base_url || 'https://api.openai.com').replace(/\/+$/, '');
+        let baseUrl = (channel.base_url || apiUrls.openaiDefault).replace(/\/+$/, '');
         if (channel.type === ChannelType.GEMINI) {
             if (baseUrl.endsWith('/v1beta')) {
                 testUrl = `${baseUrl}/models/${upstreamModel}:generateContent`;
@@ -416,7 +418,7 @@ export const adminRouter = new Elysia()
             await sql`UPDATE channels SET response_time = ${latency}, test_at = NOW() WHERE id = ${Number(id)}`;
             await refreshAllCaches();
             return { success: true, response_time: latency };
-        } catch (e: any) {
+        } catch (e: unknown) {
             await sql`UPDATE channels SET response_time = 0, test_at = NOW() WHERE id = ${Number(id)}`;
             await refreshAllCaches();
             throw e;
@@ -424,7 +426,7 @@ export const adminRouter = new Elysia()
     })
 
     // Fetch models from upstream channel
-    .post('/channels/fetch-models', async ({ body, set }: any) => {
+    .post('/channels/fetch-models', async ({ body, set }: ElysiaCtx) => {
         // Fetch models using provided URL and key (not saved channel data)
         const { url, key, type } = body as { url?: string; key?: string; type?: number };
         
@@ -438,7 +440,7 @@ export const adminRouter = new Elysia()
 
         // Anthropic doesn't have a models endpoint
         if (channelType === ChannelType.ANTHROPIC) {
-            const anthropicModels = modelConfig.anthropic?.models?.map((m: any) => m.id) || [];
+            const anthropicModels = modelConfig.anthropic?.models?.map((m: Record<string, any>) => m.id) || [];
             return {
                 success: true,
                 models: anthropicModels,
@@ -492,25 +494,25 @@ export const adminRouter = new Elysia()
             if (channelType === ChannelType.GEMINI) {
                 if (data.models && Array.isArray(data.models)) {
                     models = data.models
-                        .map((m: any) => m.name?.replace('models/', '') || m.displayName)
+                        .map((m: Record<string, any>) => m.name?.replace('models/', '') || m.displayName)
                         .filter(Boolean);
                 }
             } else {
                 if (data.data && Array.isArray(data.data)) {
-                    models = data.data.map((m: any) => m.id).filter(Boolean);
+                    models = data.data.map((m: Record<string, any>) => m.id).filter(Boolean);
                 } else if (Array.isArray(data)) {
-                    models = data.map((m: any) => m.id || m.name).filter(Boolean);
+                    models = data.map((m: Record<string, any>) => m.id || m.name).filter(Boolean);
                 }
             }
 
             return { success: true, models, total: models.length };
-        } catch (e: any) {
+        } catch (e: unknown) {
             set.status = 500;
-            return { success: false, message: e.message };
+            return { success: false, message: getErrorMessage(e) };
         }
     })
 
-    .get('/channels/:id/models', async ({ params: { id }, set }: any) => {
+    .get('/channels/:id/models', async ({ params: { id }, set }: ElysiaCtx) => {
         const [channel] = await sql`SELECT * FROM channels WHERE id = ${Number(id)} LIMIT 1`;
         if (!channel) {
             set.status = 404;
@@ -521,7 +523,7 @@ export const adminRouter = new Elysia()
 
         // Anthropic doesn't have a models endpoint, return from config
         if (channel.type === ChannelType.ANTHROPIC) {
-            const anthropicModels = modelConfig.anthropic?.models?.map((m: any) => m.id) || [];
+            const anthropicModels = modelConfig.anthropic?.models?.map((m: Record<string, any>) => m.id) || [];
             return {
                 success: true,
                 models: anthropicModels,
@@ -538,7 +540,7 @@ export const adminRouter = new Elysia()
 
         // Construct models URL based on channel type
         // Smart URL handling: avoid duplicate /v1 prefix
-        let baseUrl = (channel.base_url || 'https://api.openai.com').replace(/\/+$/, '');
+        let baseUrl = (channel.base_url || apiUrls.openaiDefault).replace(/\/+$/, '');
         
         let modelsUrl: string;
         
@@ -584,16 +586,16 @@ export const adminRouter = new Elysia()
                 // Gemini format: { models: [{ name: "models/gemini-pro", ... }] }
                 if (data.models && Array.isArray(data.models)) {
                     models = data.models
-                        .map((m: any) => m.name?.replace('models/', '') || m.displayName)
+                        .map((m: Record<string, any>) => m.name?.replace('models/', '') || m.displayName)
                         .filter(Boolean);
                 }
             } else {
                 // OpenAI format: { data: [{ id: "gpt-4", ... }] }
                 if (data.data && Array.isArray(data.data)) {
-                    models = data.data.map((m: any) => m.id).filter(Boolean);
+                    models = data.data.map((m: Record<string, any>) => m.id).filter(Boolean);
                 } else if (Array.isArray(data)) {
                     // Some providers return array directly
-                    models = data.map((m: any) => m.id || m.name).filter(Boolean);
+                    models = data.map((m: Record<string, any>) => m.id || m.name).filter(Boolean);
                 }
             }
 
@@ -602,9 +604,9 @@ export const adminRouter = new Elysia()
                 models,
                 total: models.length
             };
-        } catch (e: any) {
+        } catch (e: unknown) {
             set.status = 500;
-            return { success: false, message: e.message };
+            return { success: false, message: getErrorMessage(e) };
         }
     })
 
@@ -615,7 +617,7 @@ export const adminRouter = new Elysia()
             LEFT JOIN users u ON t.user_id = u.id
             ORDER BY t.id DESC
         `;
-        return tokens.map((t: any) => ({
+        return tokens.map((t: Record<string, any>) => ({
             id: t.id,
             name: t.name,
             key: t.key,
@@ -629,9 +631,9 @@ export const adminRouter = new Elysia()
         }));
     })
 
-    .post('/tokens', async ({ body, user, set }: any) => {
+    .post('/tokens', async ({ body, user, set }: ElysiaCtx) => {
         try {
-            const b = body as any;
+            const b = body as Record<string, any>;
             const newKey = `sk-${Bun.randomUUIDv7('hex')}`;
             const [result] = await sql`
                 INSERT INTO tokens (user_id, name, key, status, remain_quota, models)
@@ -639,15 +641,15 @@ export const adminRouter = new Elysia()
                 RETURNING *
             `;
             return result;
-        } catch (e: any) {
+        } catch (e: unknown) {
             set.status = 500;
-            return { success: false, message: e.message };
+            return { success: false, message: getErrorMessage(e) };
         }
     })
 
-    .put('/tokens/:id', async ({ params: { id }, body, set }: any) => {
+    .put('/tokens/:id', async ({ params: { id }, body, set }: ElysiaCtx) => {
         try {
-            const b = body as any;
+            const b = body as Record<string, any>;
             const [oldToken] = await sql`SELECT * FROM tokens WHERE id = ${Number(id)} LIMIT 1`;
             if (!oldToken) {
                 set.status = 404;
@@ -669,13 +671,13 @@ export const adminRouter = new Elysia()
                 RETURNING *
             `;
             return result;
-        } catch (e: any) {
+        } catch (e: unknown) {
             set.status = 500;
-            return { success: false, message: e.message };
+            return { success: false, message: getErrorMessage(e) };
         }
     })
 
-    .post('/tokens/:id/regenerate', async ({ params: { id }, set }: any) => {
+    .post('/tokens/:id/regenerate', async ({ params: { id }, set }: ElysiaCtx) => {
         try {
             const [oldToken] = await sql`SELECT * FROM tokens WHERE id = ${Number(id)} LIMIT 1`;
             if (!oldToken) {
@@ -697,19 +699,19 @@ export const adminRouter = new Elysia()
                 message: 'Token key regenerated successfully',
                 token: result
             };
-        } catch (e: any) {
+        } catch (e: unknown) {
             set.status = 500;
-            return { success: false, message: e.message };
+            return { success: false, message: getErrorMessage(e) };
         }
     })
 
-    .delete('/tokens/:id', async ({ params: { id }, set }: any) => {
+    .delete('/tokens/:id', async ({ params: { id }, set }: ElysiaCtx) => {
         try {
             await sql`DELETE FROM tokens WHERE id = ${Number(id)}`;
             return { success: true };
-        } catch (e: any) {
+        } catch (e: unknown) {
             set.status = 500;
-            return { success: false, message: e.message };
+            return { success: false, message: getErrorMessage(e) };
         }
     })
 
@@ -723,9 +725,9 @@ export const adminRouter = new Elysia()
         return users;
     })
 
-    .post('/users', async ({ body, set }: any) => {
+    .post('/users', async ({ body, set }: ElysiaCtx) => {
         try {
-            const b = body as any;
+            const b = body as Record<string, any>;
             const passwordHash = await Bun.password.hash(b.password);
             const defaultCurrency = optionCache.get('CurrencyName', 'USD');
             const [result] = await sql`
@@ -734,15 +736,15 @@ export const adminRouter = new Elysia()
                 RETURNING id, username, role, quota, status, currency
             `;
             return result;
-        } catch (e: any) {
+        } catch (e: unknown) {
             set.status = 500;
-            return { success: false, message: e.message };
+            return { success: false, message: getErrorMessage(e) };
         }
     })
 
-    .put('/users/:id', async ({ params: { id }, body, set }: any) => {
+    .put('/users/:id', async ({ params: { id }, body, set }: ElysiaCtx) => {
         try {
-            const b = body as any;
+            const b = body as Record<string, any>;
             let passwordClause = sql``;
             if (b.password) {
                 const hash = await Bun.password.hash(b.password);
@@ -769,13 +771,13 @@ export const adminRouter = new Elysia()
             }
 
             return result;
-        } catch (e: any) {
+        } catch (e: unknown) {
             set.status = 500;
-            return { success: false, message: e.message };
+            return { success: false, message: getErrorMessage(e) };
         }
     })
 
-    .delete('/users/:id', async ({ params: { id }, user, set, request }: any) => {
+    .delete('/users/:id', async ({ params: { id }, user, set, request }: ElysiaCtx) => {
         const lang = getLangFromHeader(request.headers.get('accept-language'));
 
         // Prevent admin from deleting themselves
@@ -798,7 +800,7 @@ export const adminRouter = new Elysia()
     })
 
     // --- Logs (Admin View) ---
-    .get('/logs', async ({ query }: any) => {
+    .get('/logs', async ({ query }: ElysiaCtx) => {
         const page = Number(query?.page) || 1;
         const limit = Number(query?.limit) || 50;
         const offset = (page - 1) * limit;
@@ -831,7 +833,7 @@ export const adminRouter = new Elysia()
         `;
 
         return {
-            data: data.map((l: any) => ({
+            data: data.map((l: Record<string, any>) => ({
                 ...l,
                 channel_name: l.channel_id === -1 
                     ? (query?.lang === 'zh' ? '系统精确缓存' : 'Exact Match Cache')
@@ -849,7 +851,7 @@ export const adminRouter = new Elysia()
         };
     })
 
-    .get('/logs/export', async ({ query, set }: any) => {
+    .get('/logs/export', async ({ query, set }: ElysiaCtx) => {
         const userId = query?.user_id;
         const channelId = query?.channel_id;
         const modelName = query?.model;
@@ -873,7 +875,7 @@ export const adminRouter = new Elysia()
             LIMIT 10000
         `;
 
-        const logs = data.map((l: any) => ({
+        const logs = data.map((l: Record<string, any>) => ({
             id: l.id,
             created_at: l.created_at,
             user_id: l.user_id,
@@ -908,7 +910,7 @@ export const adminRouter = new Elysia()
             'Prompt', 'Response', 'Error Message'
         ].join(',');
 
-        const csvRows = logs.map((l: any) => [
+        const csvRows = logs.map((l: Record<string, any>) => [
             l.id,
             l.created_at,
             l.user_id,
@@ -946,7 +948,7 @@ export const adminRouter = new Elysia()
         }));
     })
 
-    .get('/health-logs', async ({ query }: any) => {
+    .get('/health-logs', async ({ query }: ElysiaCtx) => {
         const channelId = query?.channel_id;
         const page = Number(query?.page) || 1;
         const limit = Number(query?.limit) || 50;
@@ -966,7 +968,7 @@ export const adminRouter = new Elysia()
         `;
 
         return {
-            data: data.map((l: any) => ({
+            data: data.map((l: Record<string, any>) => ({
                 id: l.id,
                 channel_id: l.channel_id,
                 channel_name: l.channel_name || 'Unknown',
@@ -1003,14 +1005,14 @@ export const adminRouter = new Elysia()
             GROUP BY c.id, c.name, c.type, c.status, c.test_errors, c.test_at
             ORDER BY c.id
         `;
-        return summary.map((s: any) => ({
+        return summary.map((s: Record<string, any>) => ({
             ...s,
             success_rate: s.total_checks > 0 ? ((s.successful_checks / s.total_checks) * 100).toFixed(1) : 'N/A',
             avg_latency: s.avg_latency ? Math.round(s.avg_latency) : null
         }));
     })
 
-    .get('/audit-logs', async ({ query }: any) => {
+    .get('/audit-logs', async ({ query }: ElysiaCtx) => {
         const userId = query?.user_id ? Number(query.user_id) : undefined;
         const action = query?.action;
         const resource = query?.resource;
@@ -1027,7 +1029,7 @@ export const adminRouter = new Elysia()
         });
 
         return {
-            data: result.logs.map((l: any) => ({
+            data: result.logs.map((l: Record<string, any>) => ({
                 id: l.id,
                 user_id: l.user_id,
                 username: l.username,
@@ -1074,8 +1076,8 @@ export const adminRouter = new Elysia()
         return errorLogs;
     })
 
-    .get('/stats/granular', async ({ query }: any) => {
-        const { start, end, group_by } = query as any;
+    .get('/stats/granular', async ({ query }: ElysiaCtx) => {
+        const { start, end, group_by } = query as Record<string, string>;
         const startDate = start ? new Date(start) : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
         const endDate = end ? new Date(end) : new Date();
 
@@ -1096,8 +1098,8 @@ export const adminRouter = new Elysia()
         return stats;
     })
 
-    .get('/dashboard/period_stats', async ({ query }: any) => {
-        const { period, timezone } = query as any;
+    .get('/dashboard/period_stats', async ({ query }: ElysiaCtx) => {
+        const { period, timezone } = query as Record<string, string>;
         const tz = timezone || 'UTC';
         
         let startDate = new Date();
@@ -1163,7 +1165,7 @@ export const adminRouter = new Elysia()
             exact_cache_size = Number(exSize?.size || 0);
             exact_cache_count = Number(exCount?.cnt || 0);
         } catch (e) {
-            console.warn('[Admin] Failed to read cache sizes:', e);
+            log.warn('[Admin] Failed to read cache sizes:', e);
         }
 
 
@@ -1184,7 +1186,7 @@ export const adminRouter = new Elysia()
 
         // Calculate cost percentage for users
         const totalUserCost = Number(overview.total_cost || 1); // Avoid division by zero
-        models_user.forEach((m: any) => {
+        models_user.forEach((m: Record<string, any>) => {
             m.cost_percentage = Number(((Number(m.cost) / totalUserCost) * 100).toFixed(1));
         });
 
@@ -1204,8 +1206,8 @@ export const adminRouter = new Elysia()
         `;
 
         // Calculate cost percentage for channels
-        const totalChannelCost = models_channel.reduce((sum: any, m: any) => sum + Number(m.cost), 0) || 1;
-        models_channel.forEach((m: any) => {
+        const totalChannelCost = models_channel.reduce((sum: Record<string, any>, m: Record<string, any>) => sum + Number(m.cost), 0) || 1;
+        models_channel.forEach((m: Record<string, any>) => {
             m.cost_percentage = Number(((Number(m.cost) / totalChannelCost) * 100).toFixed(1));
         });
         
@@ -1280,9 +1282,9 @@ export const adminRouter = new Elysia()
 
         // Flatten all models from config into a single map for quick lookup
         const metaMap = new Map<string, any>();
-        for (const provider of Object.values(modelConfig as any)) {
-            if ((provider as any).models && Array.isArray((provider as any).models)) {
-                for (const m of (provider as any).models) {
+        for (const provider of Object.values(modelConfig as Record<string, any>)) {
+            if ((provider as Record<string, any>).models && Array.isArray((provider as Record<string, any>).models)) {
+                for (const m of (provider as Record<string, any>).models) {
                     metaMap.set(m.id, m);
                 }
             }
@@ -1301,7 +1303,7 @@ export const adminRouter = new Elysia()
             GROUP BY channel_id
         `;
         const channelLatencyMap = new Map<number, number>();
-        metrics.forEach((m: any) => channelLatencyMap.set(m.channel_id, Number(m.avg_latency)));
+        metrics.forEach((m: Record<string, any>) => channelLatencyMap.set(m.channel_id, Number(m.avg_latency)));
 
         return Array.from(allModelIds).map(modelId => {
             const meta = metaMap.get(modelId);
@@ -1355,9 +1357,9 @@ export const adminRouter = new Elysia()
         return await sql`SELECT * FROM redemptions ORDER BY id DESC`;
     })
 
-    .post('/redemptions', async ({ body, set }: any) => {
+    .post('/redemptions', async ({ body, set }: ElysiaCtx) => {
         try {
-            const b = body as any;
+            const b = body as Record<string, any>;
             const key = b.key || `cdk-${Bun.randomUUIDv7('hex')}`;
             const [result] = await sql`
                 INSERT INTO redemptions (name, key, quota, count, status)
@@ -1365,9 +1367,9 @@ export const adminRouter = new Elysia()
                 RETURNING *
             `;
             return result;
-        } catch (e: any) {
+        } catch (e: unknown) {
             set.status = 500;
-            return { success: false, message: e.message };
+            return { success: false, message: getErrorMessage(e) };
         }
     }, {
         body: t.Object({
@@ -1379,7 +1381,7 @@ export const adminRouter = new Elysia()
         })
     })
 
-    .put('/redemptions/:id', async ({ params: { id }, body }: any) => {
+    .put('/redemptions/:id', async ({ params: { id }, body }: ElysiaCtx) => {
         const [result] = await sql`
             UPDATE redemptions 
             SET name = COALESCE(${body.name}, name),
@@ -1398,7 +1400,7 @@ export const adminRouter = new Elysia()
         return { success: true };
     })
 
-    .get('/invite-codes', async ({ query }: any) => {
+    .get('/invite-codes', async ({ query }: ElysiaCtx) => {
         const page = Number(query?.page) || 1;
         const limit = Number(query?.limit) || 50;
         const offset = (page - 1) * limit;
@@ -1420,7 +1422,7 @@ export const adminRouter = new Elysia()
         `;
 
         return {
-            data: data.map((c: any) => ({
+            data: data.map((c: Record<string, any>) => ({
                 id: c.id,
                 code: c.code,
                 maxUses: c.max_uses,
@@ -1439,11 +1441,11 @@ export const adminRouter = new Elysia()
         };
     })
 
-    .post('/invite-codes', async ({ body, user, set }: any) => {
+    .post('/invite-codes', async ({ body, user, set }: ElysiaCtx) => {
         try {
-            const b = body as any;
+            const b = body as Record<string, any>;
             const count = b.count || 1;
-            const results: any[] = [];
+            const results: Record<string, any>[][] = [];
 
             for (let i = 0; i < count; i++) {
                 const code = b.codePrefix ? `${b.codePrefix}-${Bun.randomUUIDv7('hex').substring(0, 8)}` : `inv-${Bun.randomUUIDv7('hex').substring(0, 12)}`;
@@ -1465,9 +1467,9 @@ export const adminRouter = new Elysia()
             }
 
             return { success: true, codes: results, count: results.length };
-        } catch (e: any) {
+        } catch (e: unknown) {
             set.status = 500;
-            return { success: false, message: e.message };
+            return { success: false, message: getErrorMessage(e) };
         }
     }, {
         body: t.Object({
@@ -1479,9 +1481,9 @@ export const adminRouter = new Elysia()
         })
     })
 
-    .put('/invite-codes/:id', async ({ params: { id }, body, set }: any) => {
+    .put('/invite-codes/:id', async ({ params: { id }, body, set }: ElysiaCtx) => {
         try {
-            const b = body as any;
+            const b = body as Record<string, any>;
             const [oldCode] = await sql`SELECT * FROM invite_codes WHERE id = ${Number(id)} LIMIT 1`;
             if (!oldCode) {
                 set.status = 404;
@@ -1511,34 +1513,34 @@ export const adminRouter = new Elysia()
                     updatedAt: result.updated_at
                 }
             };
-        } catch (e: any) {
+        } catch (e: unknown) {
             set.status = 500;
-            return { success: false, message: e.message };
+            return { success: false, message: getErrorMessage(e) };
         }
     })
 
-    .delete('/invite-codes/:id', async ({ params: { id }, set }: any) => {
+    .delete('/invite-codes/:id', async ({ params: { id }, set }: ElysiaCtx) => {
         try {
             await sql`DELETE FROM invite_codes WHERE id = ${Number(id)}`;
             return { success: true };
-        } catch (e: any) {
+        } catch (e: unknown) {
             set.status = 500;
-            return { success: false, message: e.message };
+            return { success: false, message: getErrorMessage(e) };
         }
     })
 
-    .delete('/invite-codes/batch', async ({ body, set }: any) => {
+    .delete('/invite-codes/batch', async ({ body, set }: ElysiaCtx) => {
         try {
-            const ids = (body as any).ids as number[];
+            const ids = (body as Record<string, any>).ids as number[];
             if (!ids || ids.length === 0) {
                 set.status = 400;
                 return { success: false, message: 'No IDs provided' };
             }
             await sql`DELETE FROM invite_codes WHERE id IN ${sql(ids)}`;
             return { success: true, deleted: ids.length };
-        } catch (e: any) {
+        } catch (e: unknown) {
             set.status = 500;
-            return { success: false, message: e.message };
+            return { success: false, message: getErrorMessage(e) };
         }
     })
 
@@ -1550,7 +1552,7 @@ export const adminRouter = new Elysia()
         return options;
     })
 
-    .put('/options', async ({ body }: any) => {
+    .put('/options', async ({ body }: ElysiaCtx) => {
         const payload = body as Record<string, string>;
         
         // Check if embedding model is being updated
@@ -1574,21 +1576,21 @@ export const adminRouter = new Elysia()
                     });
                     
                     if (response.ok) {
-                        const data = await response.json() as any;
+                        const data = await response.json() as Record<string, any>;
                         const dimension = data?.data?.[0]?.embedding?.length;
                         
                         if (dimension) {
                             // Clear old cache data first (dimension incompatible)
                             await sql`DELETE FROM semantic_cache`;
-                            console.log('[SemanticCache] Cleared old cache data');
+                            log.info('[SemanticCache] Cleared old cache data');
                             
                             // Update the database column dimension
                             await sql`ALTER TABLE semantic_cache ALTER COLUMN embedding TYPE vector(${dimension})`;
-                            console.log(`[SemanticCache] Updated embedding dimension to ${dimension}`);
+                            log.info(`[SemanticCache] Updated embedding dimension to ${dimension}`);
                         }
                     }
-                } catch (e: any) {
-                    console.warn('[SemanticCache] Failed to update embedding dimension:', e.message);
+                } catch (e: unknown) {
+                    log.warn('[SemanticCache] Failed to update embedding dimension:', getErrorMessage(e));
                 }
             }
         }
@@ -1600,7 +1602,7 @@ export const adminRouter = new Elysia()
                 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
             `;
         }
-        refreshAllCaches().catch(console.error);
+        refreshAllCaches().catch((e: unknown) => log.error("[Async]", e));
         return { success: true };
     })
 
@@ -1608,9 +1610,9 @@ export const adminRouter = new Elysia()
     .get('/rate-limits', async () => {
         return await sql`SELECT * FROM rate_limit_rules ORDER BY id DESC`;
     })
-    .post('/rate-limits', async ({ body, set }: any) => {
+    .post('/rate-limits', async ({ body, set }: ElysiaCtx) => {
         try {
-            const b = body as any;
+            const b = body as Record<string, any>;
             const [result] = await sql`
                 INSERT INTO rate_limit_rules (name, rpm, rph, concurrent)
                 VALUES (${b.name}, ${b.rpm || 0}, ${b.rph || 0}, ${b.concurrent || 0})
@@ -1618,13 +1620,13 @@ export const adminRouter = new Elysia()
             `;
             await refreshAllCaches();
             return { success: true, data: result };
-        } catch (e: any) {
-            set.status = 500; return { success: false, message: e.message };
+        } catch (e: unknown) {
+            set.status = 500; return { success: false, message: getErrorMessage(e) };
         }
     })
-    .put('/rate-limits/:id', async ({ params: { id }, body, set }: any) => {
+    .put('/rate-limits/:id', async ({ params: { id }, body, set }: ElysiaCtx) => {
         try {
-            const b = body as any;
+            const b = body as Record<string, any>;
             const [result] = await sql`
                 UPDATE rate_limit_rules 
                 SET name = COALESCE(${b.name}, name),
@@ -1635,17 +1637,17 @@ export const adminRouter = new Elysia()
             `;
             await refreshAllCaches();
             return { success: true, data: result };
-        } catch (e: any) {
-            set.status = 500; return { success: false, message: e.message };
+        } catch (e: unknown) {
+            set.status = 500; return { success: false, message: getErrorMessage(e) };
         }
     })
-    .delete('/rate-limits/:id', async ({ params: { id }, set }: any) => {
+    .delete('/rate-limits/:id', async ({ params: { id }, set }: ElysiaCtx) => {
         try {
             await sql`DELETE FROM rate_limit_rules WHERE id = ${Number(id)}`;
             await refreshAllCaches();
             return { success: true };
-        } catch (e: any) {
-            set.status = 500; return { success: false, message: e.message };
+        } catch (e: unknown) {
+            set.status = 500; return { success: false, message: getErrorMessage(e) };
         }
     })
 
@@ -1658,22 +1660,22 @@ export const adminRouter = new Elysia()
             ORDER BY p.id DESC
         `;
     })
-    .post('/packages', async ({ body, user, set }: any) => {
+    .post('/packages', async ({ body, user, set }: ElysiaCtx) => {
         try {
-            const b = body as any;
+            const b = body as Record<string, any>;
             const [result] = await sql`
                 INSERT INTO packages (name, description, price, duration_days, models, default_rate_limit_id, model_rate_limits, cycle_quota, cycle_interval, cycle_unit, cache_policy, is_public, added_by)
                 VALUES (${b.name}, ${b.description || ''}, ${b.price || 0}, ${b.durationDays || 30}, ${JSON.stringify(b.models || [])}, ${b.defaultRateLimitId || null}, ${JSON.stringify(b.modelRateLimits || {})}, ${b.cycleQuota || 0}, ${b.cycleInterval || 1}, ${b.cycleUnit || 'day'}, ${JSON.stringify(b.cachePolicy || null)}, ${b.isPublic ?? true}, ${user.id})
                 RETURNING *
             `;
             return { success: true, data: result };
-        } catch (e: any) {
-            set.status = 500; return { success: false, message: e.message };
+        } catch (e: unknown) {
+            set.status = 500; return { success: false, message: getErrorMessage(e) };
         }
     })
-    .put('/packages/:id', async ({ params: { id }, body, set }: any) => {
+    .put('/packages/:id', async ({ params: { id }, body, set }: ElysiaCtx) => {
         try {
-            const b = body as any;
+            const b = body as Record<string, any>;
             const [result] = await sql`
                 UPDATE packages 
                 SET name = COALESCE(${b.name}, name),
@@ -1692,16 +1694,16 @@ export const adminRouter = new Elysia()
                 WHERE id = ${Number(id)} RETURNING *
             `;
             return { success: true, data: result };
-        } catch (e: any) {
-            set.status = 500; return { success: false, message: e.message };
+        } catch (e: unknown) {
+            set.status = 500; return { success: false, message: getErrorMessage(e) };
         }
     })
-    .delete('/packages/:id', async ({ params: { id }, set }: any) => {
+    .delete('/packages/:id', async ({ params: { id }, set }: ElysiaCtx) => {
         try {
             await sql`DELETE FROM packages WHERE id = ${Number(id)}`;
             return { success: true };
-        } catch (e: any) {
-            set.status = 500; return { success: false, message: e.message };
+        } catch (e: unknown) {
+            set.status = 500; return { success: false, message: getErrorMessage(e) };
         }
     })
 
@@ -1717,7 +1719,7 @@ export const adminRouter = new Elysia()
         `;
     })
     // Get subscriptions for a specific user
-    .get('/users/:id/subscriptions', async ({ params: { id } }: any) => {
+    .get('/users/:id/subscriptions', async ({ params: { id } }: ElysiaCtx) => {
         return await sql`
             SELECT s.*, p.name as package_name, p.models, p.duration_days
             FROM user_subscriptions s
@@ -1727,9 +1729,9 @@ export const adminRouter = new Elysia()
         `;
     })
     // Grant a package manually by Admin
-    .post('/users/:id/subscriptions', async ({ params: { id }, body, set }: any) => {
+    .post('/users/:id/subscriptions', async ({ params: { id }, body, set }: ElysiaCtx) => {
         try {
-            const b = body as any;
+            const b = body as Record<string, any>;
             const [pkg] = await sql`SELECT duration_days FROM packages WHERE id = ${b.packageId}`;
             if (!pkg) {
                 set.status = 404; return { success: false, message: 'Package not found' };
@@ -1775,11 +1777,11 @@ export const adminRouter = new Elysia()
             await sql`NOTIFY auth_update, ${String(id)}`;
 
             return { success: true, data: result };
-        } catch (e: any) {
-            set.status = 500; return { success: false, message: e.message };
+        } catch (e: unknown) {
+            set.status = 500; return { success: false, message: getErrorMessage(e) };
         }
     })
-    .put('/subscriptions/:id', async ({ params: { id }, body, set }: any) => {
+    .put('/subscriptions/:id', async ({ params: { id }, body, set }: ElysiaCtx) => {
         try {
             // allows changing status (e.g. disable a subscription)
             const [result] = await sql`
@@ -1791,13 +1793,13 @@ export const adminRouter = new Elysia()
                 await sql`NOTIFY auth_update, ${String(result.user_id)}`;
             }
             return { success: true, data: result };
-        } catch (e: any) {
-            set.status = 500; return { success: false, message: e.message };
+        } catch (e: unknown) {
+            set.status = 500; return { success: false, message: getErrorMessage(e) };
         }
     })
 
     // --- Embedding Model Check ---
-    .post('/check-embedding', async ({ body, set }: any) => {
+    .post('/check-embedding', async ({ body, set }: ElysiaCtx) => {
         try {
             const { model } = body as { model: string };
             if (!model) {
@@ -1844,7 +1846,7 @@ export const adminRouter = new Elysia()
                 };
             }
 
-            const data = await response.json() as any;
+            const data = await response.json() as Record<string, any>;
             const embedding = data?.data?.[0]?.embedding;
             
             if (!embedding || !Array.isArray(embedding)) {
@@ -1860,9 +1862,9 @@ export const adminRouter = new Elysia()
                 message: `Embedding model is working (dimension: ${embedding.length})`,
                 channel: channel.name
             };
-        } catch (e: any) {
+        } catch (e: unknown) {
             set.status = 500;
-            return { success: false, message: e.message };
+            return { success: false, message: getErrorMessage(e) };
         }
     })
 
@@ -1878,12 +1880,12 @@ export const adminRouter = new Elysia()
             await sql`ALTER TABLE semantic_cache ADD COLUMN IF NOT EXISTS created_by INTEGER REFERENCES users(id) ON DELETE SET NULL`;
             
             return { success: true, message: 'Schema updated for subscription cycles & semantic cache' };
-        } catch (e: any) {
-            return { success: false, message: e.message };
+        } catch (e: unknown) {
+            return { success: false, message: getErrorMessage(e) };
         }
     })
 
-    .get('/test-cycle-reset', async ({ user }: any) => {
+    .get('/test-cycle-reset', async ({ user }: ElysiaCtx) => {
         try {
             // 1. Create a dummy package with 1-hour reset and 1M quota
             const [pkg] = await sql`
@@ -1912,7 +1914,7 @@ export const adminRouter = new Elysia()
                 packageId: pkg.id,
                 subId: sub.id
             };
-        } catch (e: any) {
-            return { success: false, message: e.message };
+        } catch (e: unknown) {
+            return { success: false, message: getErrorMessage(e) };
         }
     });

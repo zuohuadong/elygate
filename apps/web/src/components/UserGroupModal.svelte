@@ -6,9 +6,9 @@
 
     let { show, group, onClose, onSave } = $props<{
         show: boolean;
-        group: any | null;
+        group: Record<string, unknown> | null;
         onClose: () => void;
-        onSave: (data: any) => void;
+        onSave: (data: Record<string, unknown>) => void;
     }>();
 
     let formData = $state({
@@ -74,7 +74,7 @@
         onSave(data);
     }
 
-    let isBackdropMouseDown = false;
+    let isBackdropMouseDown = $state(false);
     function handleMouseDown(e: MouseEvent) {
         isBackdropMouseDown = e.target === e.currentTarget;
     }

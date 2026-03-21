@@ -1,7 +1,8 @@
 <script lang="ts">
     import { X, Gift } from "lucide-svelte";
     import { i18n } from "$lib/i18n/index.svelte";
-    import { onMount } from "svelte";
+    
+
     import { apiFetch } from "$lib/api";
 
     let { show, user = null, onClose, onSave } = $props();
@@ -11,13 +12,13 @@
     let isSubmitting = $state(false);
     let loadError = $state("");
 
-    onMount(async () => {
+    $effect(() => { (async () => {
         try {
             packages = await apiFetch<any[]>("/admin/packages");
-        } catch (e: any) {
-            loadError = e.message || "Failed to load packages";
+        } catch (e: unknown) {
+            loadError = e instanceof Error ? e instanceof Error ? e.message : String(e) : "Failed to load packages";
         }
-    });
+    })(); });
 
     $effect(() => {
         if (show) {
@@ -37,14 +38,14 @@
                 body: JSON.stringify({ packageId: Number(selectedPackageId) })
             });
             onSave();
-        } catch (e: any) {
-            alert(i18n.t.common.failed + ": " + e.message);
+        } catch (e: unknown) {
+            alert(i18n.t.common.failed + ": " + e instanceof Error ? e.message : String(e));
         } finally {
             isSubmitting = false;
         }
     }
 
-    let isBackdropMouseDown = false;
+    let isBackdropMouseDown = $state(false);
     function handleMouseDown(e: MouseEvent) {
         isBackdropMouseDown = e.target === e.currentTarget;
     }

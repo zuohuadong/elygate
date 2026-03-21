@@ -8,20 +8,20 @@ export class GeminiApiHandler implements ProviderHandler {
 
     transformRequest(body: Record<string, any>, model: string) {
         // body is now InternalRequest (OpenAI-like)
-        const systemMessages = (body.messages || []).filter((m: any) => m.role === 'system');
-        const nonSystemMessages = (body.messages || []).filter((m: any) => m.role !== 'system');
+        const systemMessages = (body.messages || []).filter((m: Record<string, any>) => m.role === 'system');
+        const nonSystemMessages = (body.messages || []).filter((m: Record<string, any>) => m.role !== 'system');
 
-        const contents = nonSystemMessages.map((msg: any) => {
+        const contents = nonSystemMessages.map((msg: Record<string, any>) => {
             const role = msg.role === 'assistant' ? 'model' : 'user';
             const parts = typeof msg.content === 'string'
                 ? [{ text: msg.content }]
                 : Array.isArray(msg.content)
-                    ? msg.content.map((c: any) => c.type === 'text' ? { text: c.text } : { text: c.image_url?.url || '' })
+                    ? msg.content.map((c: Record<string, any>) => c.type === 'text' ? { text: c.text } : { text: c.image_url?.url || '' })
                     : [{ text: String(msg.content) }];
             return { role, parts };
         });
 
-        const generationConfig: any = {
+        const generationConfig: Record<string, any> = {
             temperature: body.temperature,
             maxOutputTokens: body.max_tokens,
             topP: body.top_p,
@@ -30,17 +30,17 @@ export class GeminiApiHandler implements ProviderHandler {
         
         if (body.stop) generationConfig.stopSequences = Array.isArray(body.stop) ? body.stop : [body.stop];
 
-        const result: any = { contents, generationConfig };
+        const result: Record<string, any> = { contents, generationConfig };
 
         if (systemMessages.length > 0) {
-            const systemText = systemMessages.map((m: any) => m.content).join('\n');
+            const systemText = systemMessages.map((m: Record<string, any>) => m.content).join('\n');
             result.systemInstruction = { parts: [{ text: systemText }] };
         }
 
         return result;
     }
 
-    transformResponse(data: any) {
+    transformResponse(data: Record<string, any>) {
         // Return internal OpenAI format
         let text = '';
         if (data?.candidates?.[0]?.content?.parts) {
@@ -66,7 +66,7 @@ export class GeminiApiHandler implements ProviderHandler {
         };
     }
 
-    extractUsage(data: any) {
+    extractUsage(data: Record<string, any>) {
         return {
             promptTokens: data?.usage?.__prompt_tokens || data?.usageMetadata?.promptTokenCount || 0,
             completionTokens: data?.usage?.__completion_tokens || data?.usageMetadata?.candidatesTokenCount || 0,

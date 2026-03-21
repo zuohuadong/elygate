@@ -1,6 +1,8 @@
+import { config } from '../config';
+import { log } from '../services/logger';
 import { sql } from '@elygate/db';
 
-const INITIAL_QUOTA = Number(process.env.INITIAL_QUOTA) || 500000;
+const INITIAL_QUOTA = Number(String(config.initialQuota)) || 500000;
 
 export const authService = {
     /**
@@ -19,7 +21,7 @@ export const authService = {
         `;
 
         if (!user) {
-            console.log(`[Auth] Creating new GitHub user: ${username} (${githubId})`);
+            log.info(`[Auth] Creating new GitHub user: ${username} (${githubId})`);
             [user] = await sql`
                 INSERT INTO users (username, password_hash, role, quota, status)
                 VALUES (${internalUsername}, 'oauth-no-password', 1, ${INITIAL_QUOTA}, 1)

@@ -49,13 +49,13 @@ export const handle: Handle = async ({ event, resolve }) => {
         `;
 
     if (session) {
-        (event.locals as any).user = {
+        (event.locals as Record<string, any>).user = {
             id: session.user_id,
             username: session.username,
             role: session.role
         };
         if (session.org_id) {
-            (event.locals as any).org = {
+            (event.locals as Record<string, any>).org = {
                 id: session.org_id,
                 name: session.org_name
             };

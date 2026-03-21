@@ -20,7 +20,7 @@ type LogDetailRow = {
 };
 
 export const load: PageServerLoad = async ({ params, locals }) => {
-    const { org } = locals as any;
+    const { org } = locals as Record<string, any>;
     
     const [log] = await sql`
         SELECT l.*, ld.request_body, ld.response_body, u.username

@@ -1,3 +1,4 @@
+import { log } from '../services/logger';
 import { sql } from '@elygate/db';
 
 export const optionCache = {
@@ -6,7 +7,7 @@ export const optionCache = {
 
     async refresh() {
         try {
-            console.log('[OptionCache] Refreshing system options from DB...');
+            log.info('[OptionCache] Refreshing system options from DB...');
             const results = await sql`SELECT key, value FROM options`;
 
             const newOptions = new Map<string, any>();
@@ -22,11 +23,11 @@ export const optionCache = {
             this.options = newOptions;
             this.lastUpdated = Date.now();
         } catch (e) {
-            console.error('[OptionCache] Failed to refresh options:', e);
+            log.error('[OptionCache] Failed to refresh options:', e);
         }
     },
 
-    get(key: string, defaultValue?: any): any {
+    get(key: string, defaultValue?: unknown): unknown {
         if (this.options.has(key)) {
             return this.options.get(key);
         }
@@ -35,6 +36,6 @@ export const optionCache = {
 };
 
 // Initial load
-optionCache.refresh().catch(console.error);
+optionCache.refresh().catch((e: unknown) => log.error("[Async]", e));
 // Auto-refresh every minute to reflect dynamic changes
-setInterval(() => optionCache.refresh().catch(console.error), 60000);
+setInterval(() => optionCache.refresh().catch((e: unknown) => log.error("[Async]", e)), 60000);

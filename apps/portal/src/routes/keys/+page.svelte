@@ -3,7 +3,7 @@
     import { enhance } from '$app/forms';
     import { fade } from 'svelte/transition';
 
-    let { data }: { data: { tokens: any[] } } = $props();
+    let { data }: { data: { tokens: Record<string, any>[] } } = $props();
 
     let revokingId = $state<string | null>(null);
 </script>

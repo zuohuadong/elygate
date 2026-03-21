@@ -8,7 +8,7 @@ export class BaiduApiHandler implements ProviderHandler {
     transformRequest(body: Record<string, any>, model: string) {
         // Baidu messages: [{"role": "user", "content": "..."}] 
         // Roles: user, assistant
-        const messages = (body.messages || []).map((m: any) => ({
+        const messages = (body.messages || []).map((m: Record<string, any>) => ({
             role: m.role === 'assistant' ? 'assistant' : 'user',
             content: m.content
         }));
@@ -20,7 +20,7 @@ export class BaiduApiHandler implements ProviderHandler {
         };
     }
 
-    transformResponse(data: any) {
+    transformResponse(data: Record<string, any>) {
         // Baidu response -> OpenAI format
         return {
             id: data.id || `chatcmpl-baidu-${Date.now()}`,
@@ -44,7 +44,7 @@ export class BaiduApiHandler implements ProviderHandler {
         };
     }
 
-    extractUsage(data: any) {
+    extractUsage(data: Record<string, any>) {
         return {
             promptTokens: data.usage?.prompt_tokens || 0,
             completionTokens: data.usage?.completion_tokens || 0,

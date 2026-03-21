@@ -1,19 +1,23 @@
+import type { ElysiaCtx } from '../types';
+import { config } from '../config';
+import { log } from '../services/logger';
+import { getErrorMessage } from '../utils/error';
 import { Elysia, t } from 'elysia';
 import { sql } from '@elygate/db';
 import { authPlugin } from '../middleware/auth';
 import { optionCache } from '../services/optionCache';
 
-const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || '';
-const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || '';
-const EPAY_APP_ID = process.env.EPAY_APP_ID || '';
-const EPAY_APP_SECRET = process.env.EPAY_APP_SECRET || '';
-const EPAY_GATEWAY = process.env.EPAY_GATEWAY || 'https://api.epay.com';
+const STRIPE_SECRET_KEY = config.stripe.secretKey || '';
+const STRIPE_WEBHOOK_SECRET = config.stripe.webhookSecret || '';
+const EPAY_APP_ID = config.epay.appId || '';
+const EPAY_APP_SECRET = config.epay.appSecret || '';
+const EPAY_GATEWAY = config.epay.gateway || 'https://api.epay.com';
 
 export const paymentRouter = new Elysia({ prefix: '/payment' })
     .use(authPlugin)
 
     // Create a new payment order (authenticated: userId comes from token, not request body)
-    .post('/create-order', async ({ body, user, set }: any) => {
+    .post('/create-order', async ({ body, user, set }: ElysiaCtx) => {
         try {
             // Safeguard: Check if payment is enabled first
             const [paymentEnabled] = await sql`SELECT value FROM options WHERE key = 'PaymentEnabled'`;
@@ -41,7 +45,7 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
             let paymentUrl = '';
 
             if (paymentMethod === 'stripe' && STRIPE_SECRET_KEY) {
-                const stripeResponse = await fetch('https://api.stripe.com/v1/checkout/sessions', {
+                const stripeResponse = await fetch(apiUrls.stripe + '/v1/checkout/sessions', {
                     method: 'POST',
                     headers: {
                         'Authorization': `Bearer ${STRIPE_SECRET_KEY}`,
@@ -54,14 +58,14 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
                         'line_items[0][price_data][unit_amount]': String(amount),
                         'line_items[0][quantity]': '1',
                         'mode': 'payment',
-                        'success_url': `${process.env.WEB_URL}/payment/success?order_id=${order.id}`,
-                        'cancel_url': `${process.env.WEB_URL}/payment/cancel?order_id=${order.id}`,
+                        'success_url': `${config.webUrl}/payment/success?order_id=${order.id}`,
+                        'cancel_url': `${config.webUrl}/payment/cancel?order_id=${order.id}`,
                         'metadata[order_id]': String(order.id),
                         'metadata[user_id]': String(userId)
                     })
                 });
 
-                const session = await stripeResponse.json() as any;
+                const session = await stripeResponse.json() as Record<string, any>;
                 if (!session.url) {
                     throw new Error(`Stripe error: ${session.error?.message || 'Unknown error'}`);
                 }
@@ -73,8 +77,8 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
                     pid: EPAY_APP_ID,
                     type: 'alipay',
                     out_trade_no: outTradeNo,
-                    notify_url: `${process.env.GATEWAY_URL}/api/payment/epay/callback`,
-                    return_url: `${process.env.WEB_URL}/payment/success?order_id=${order.id}`,
+                    notify_url: `${config.gatewayUrl}/api/payment/epay/callback`,
+                    return_url: `${config.webUrl}/payment/success?order_id=${order.id}`,
                     name: `Elygate Top-up - $${(amount / 100).toFixed(2)}`,
                     money: (amount / 100).toFixed(2)
                 });
@@ -90,10 +94,10 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
                 orderId: order.id,
                 paymentUrl
             };
-        } catch (e: any) {
-            console.error('[Payment] Create order error:', e);
+        } catch (e: unknown) {
+            log.error('[Payment] Create order error:', e);
             set.status = 500;
-            return { success: false, message: e.message };
+            return { success: false, message: getErrorMessage(e) };
         }
     }, {
         body: t.Object({
@@ -103,7 +107,7 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
     })
 
     // Stripe webhook callback — verify Stripe-Signature header
-    .post('/stripe/callback', async ({ body, request, set }: any) => {
+    .post('/stripe/callback', async ({ body, request, set }: ElysiaCtx) => {
         try {
             // Verify Stripe webhook signature if webhook secret is configured
             if (STRIPE_WEBHOOK_SECRET) {
@@ -113,8 +117,8 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
                     return { success: false, message: 'Missing Stripe signature' };
                 }
 
-                const rawBody = await request.text().catch(() => '');
-                const parts = sigHeader.split(',').reduce((acc: any, part: string) => {
+                const rawBody = await request.text().catch((e: unknown) => { log.warn("[Fallback]", e); return ''; });
+                const parts = sigHeader.split(',').reduce((acc: Record<string, string>, part: string) => {
                     const [k, v] = part.split('=');
                     acc[k] = v;
                     return acc;
@@ -143,7 +147,7 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
             }
 
             // Atomic: update order status AND add quota in single transaction
-            await sql.begin(async (tx: any) => {
+            await sql.begin(async (tx) => {
                 const [order] = await tx`
                     UPDATE payment_orders
                     SET status = 1, transaction_id = ${data.object.id}, updated_at = NOW()
@@ -162,19 +166,19 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
                     WHERE id = ${order.user_id}
                 `;
 
-                console.log(`[Payment] Stripe success: Order ${orderId}, User ${order.user_id}, Amount ${order.amount}, QuotaAdded ${quotaToAdd}`);
+                log.info(`[Payment] Stripe success: Order ${orderId}, User ${order.user_id}, Amount ${order.amount}, QuotaAdded ${quotaToAdd}`);
             });
 
             return { success: true };
-        } catch (e: any) {
-            console.error('[Payment] Stripe callback error:', e);
+        } catch (e: unknown) {
+            log.error('[Payment] Stripe callback error:', e);
             set.status = 500;
-            return { success: false, message: e.message };
+            return { success: false, message: getErrorMessage(e) };
         }
     })
 
     // EPay async callback
-    .post('/epay/callback', async ({ query, set }: any) => {
+    .post('/epay/callback', async ({ query, set }: ElysiaCtx) => {
         try {
             const params = new URLSearchParams(query);
             const sign = params.get('sign');
@@ -187,7 +191,7 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
             const expectedSign = await generateEPaySign(sortedParams.toString(), EPAY_APP_SECRET);
 
             if (sign !== expectedSign) {
-                console.warn('[Payment] EPay signature mismatch, possible forgery attempt');
+                log.warn('[Payment] EPay signature mismatch, possible forgery attempt');
                 set.status = 400;
                 return 'fail';
             }
@@ -197,12 +201,12 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
             const orderId = parseInt(outTradeNo.replace(/^ELY/, ''), 10);
 
             if (isNaN(orderId)) {
-                console.error('[Payment] EPay: cannot parse orderId from out_trade_no:', outTradeNo);
+                log.error('[Payment] EPay: cannot parse orderId from out_trade_no:', outTradeNo);
                 return 'fail';
             }
 
             // Atomic: update order status AND add quota in single transaction
-            await sql.begin(async (tx: any) => {
+            await sql.begin(async (tx) => {
                 const [order] = await tx`
                     UPDATE payment_orders
                     SET status = 1, transaction_id = ${params.get('trade_no')}, updated_at = NOW()
@@ -221,18 +225,18 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
                     WHERE id = ${order.user_id}
                 `;
 
-                console.log(`[Payment] EPay success: Order ${orderId}, User ${order.user_id}, Amount ${order.amount}, QuotaAdded ${quotaToAdd}`);
+                log.info(`[Payment] EPay success: Order ${orderId}, User ${order.user_id}, Amount ${order.amount}, QuotaAdded ${quotaToAdd}`);
             });
 
             return 'success';
-        } catch (e: any) {
-            console.error('[Payment] EPay callback error:', e);
+        } catch (e: unknown) {
+            log.error('[Payment] EPay callback error:', e);
             return 'fail';
         }
     })
 
     // Get orders for the authenticated user only
-    .get('/orders', async ({ user, set }: any) => {
+    .get('/orders', async ({ user, set }: ElysiaCtx) => {
         try {
             const orders = await sql`
                 SELECT * FROM payment_orders 
@@ -241,9 +245,9 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
                 LIMIT 50
             `;
             return orders;
-        } catch (e: any) {
+        } catch (e: unknown) {
             set.status = 500;
-            return { success: false, message: e.message };
+            return { success: false, message: getErrorMessage(e) };
         }
     })
 

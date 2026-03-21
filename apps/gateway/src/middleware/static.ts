@@ -4,8 +4,8 @@ import { join } from 'path';
  * Static file serving middleware for SvelteKit build output.
  * Supports SPA fallback and immutable asset caching.
  */
-export function staticFileHandler() {
-    return async ({ path, set }: { path: string; set: any }) => {
+export function staticFileHandler(): (ctx: { path: string; set: { status?: number; headers?: Record<string, string> } }) => Promise<BunFile | undefined> {
+    return async ({ path, set }: { path: string; set: { status?: number; headers?: Record<string, string> } }) => {
         if (path.startsWith('/api') || path.startsWith('/v1')) return;
 
         const buildPath = join(process.cwd(), 'apps/web/build');

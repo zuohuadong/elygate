@@ -1,4 +1,6 @@
+import type { ElysiaCtx } from '../types';
 import { Elysia, t } from 'elysia';
+import { getErrorMessage } from '../utils/error';
 import { sql } from '@elygate/db';
 import { adminGuard } from '../middleware/auth';
 
@@ -50,7 +52,7 @@ export const statsRouter = new Elysia()
         };
     })
 
-    .get('/users/:userId', async ({ params: { userId } }: any) => {
+    .get('/users/:userId', async ({ params: { userId } }: ElysiaCtx) => {
         const dailyStats = await sql`
             SELECT 
                 stat_date,
@@ -123,7 +125,7 @@ export const statsRouter = new Elysia()
         };
     })
 
-    .get('/channels/:channelId', async ({ params: { channelId } }: any) => {
+    .get('/channels/:channelId', async ({ params: { channelId } }: ElysiaCtx) => {
         const channelStats = await sql`
             SELECT 
                 DATE(created_at) as date,
@@ -223,12 +225,12 @@ export const statsRouter = new Elysia()
         };
     })
 
-    .post('/refresh', async ({ set }: any) => {
+    .post('/refresh', async ({ set }: ElysiaCtx) => {
         try {
             await sql`SELECT refresh_materialized_views()`;
             return { success: true, message: 'Materialized views refreshed' };
-        } catch (e: any) {
+        } catch (e: unknown) {
             set.status = 500;
-            return { success: false, message: e.message };
+            return { success: false, message: getErrorMessage(e) };
         }
     });

@@ -1,5 +1,7 @@
+import { config } from '../config';
+import { log } from '../services/logger';
 import { sql } from '@elygate/db';
-import { type ChannelConfig, type TokenRecord, type UserRecord } from '../types';
+import type { ChannelConfig, type TokenRecord, type UserRecord } from '../types';
 import { optionCache } from './optionCache';
 
 interface UserQuotaCache {
@@ -53,7 +55,7 @@ export const memoryCache = {
      */
     async refresh(skipBroadcast = false) {
         try {
-            console.log('[Cache] Refreshing channel routes and rate limits from DB...');
+            log.info('[Cache] Refreshing channel routes and rate limits from DB...');
             const allChannels = await sql`
                 SELECT id, type, name, base_url AS "baseUrl", key, models, model_mapping AS "modelMapping", weight, priority, groups, status,
                        key_strategy AS "keyStrategy", key_status AS "keyStatus", key_concurrency_limit AS "keyConcurrencyLimit", price_ratio AS "priceRatio"
@@ -83,7 +85,7 @@ export const memoryCache = {
             `;
             const newGroupsMap = new Map<string, any>();
             for (const group of allGroups) {
-                const parseArray = (val: any) => {
+                const parseArray = (val: unknown) => {
                     if (Array.isArray(val)) return val;
                     if (typeof val === 'string') {
                         try { return JSON.parse(val); } catch { return []; }
@@ -192,13 +194,13 @@ export const memoryCache = {
             this.channelRoutes = newRoutes;
             this.channels = newChannelsMap;
             this.lastUpdated = Date.now();
-            console.log(`[Cache] Successfully loaded ${allChannels.length} channels (${newRoutes.size} models).`);
+            log.info(`[Cache] Successfully loaded ${allChannels.length} channels (${newRoutes.size} models).`);
 
             if (!skipBroadcast) {
                 await sql`NOTIFY refresh_cache, 'refresh_cache'`;
             }
         } catch (e) {
-            console.error('[Cache] Failed to refresh channels:', e);
+            log.error('[Cache] Failed to refresh channels:', e);
         }
     },
 
@@ -249,7 +251,7 @@ export const memoryCache = {
 
         if (candidateChannels.length === 0) return [];
 
-        const strategy = optionCache.get('ChannelSelectionStrategy', 'priority');
+        const strategy = String(optionCache.get('ChannelSelectionStrategy', 'priority'));
 
         // 2. Sort by strategy
         return [...candidateChannels].sort((a, b) => {
@@ -301,7 +303,7 @@ export const memoryCache = {
                     const token = JSON.parse(tokenData);
                     this.setToken(key, token);
                     return token;
-                } catch {}
+                } catch { /* channel config parse error — skip */ }
             } else {
                 this.setToken(key, tokenData);
                 return tokenData;
@@ -430,7 +432,7 @@ export const memoryCache = {
                 SET used_quota = used_quota + ${deltaQuota}
                 WHERE id = ${userId} AND used_quota + ${deltaQuota} <= quota
             `;
-            if (result.count > 0) {
+            if (result.length > 0) {
                 const current = this.userQuotas.get(userId);
                 if (current) {
                     current.usedQuota += deltaQuota;
@@ -441,7 +443,7 @@ export const memoryCache = {
             }
             return false;
         } catch (e) {
-            console.error('[Cache] Failed to update user quota:', e);
+            log.error('[Cache] Failed to update user quota:', e);
             return false;
         }
     },
@@ -513,22 +515,22 @@ export const memoryCache = {
     startCleanupTask(): void {
         if (this.cleanupInterval) return;
         this.cleanupInterval = setInterval(async () => {
-            console.log('[Cache] Running cleanup task...');
+            log.info('[Cache] Running cleanup task...');
             try {
                 await sql`CALL expire_cache_rows('7 days'::INTERVAL)`;
-                console.log('[Cache] Cleanup completed.');
+                log.info('[Cache] Cleanup completed.');
             } catch (e) {
-                console.error('[Cache] Cleanup failed:', e);
+                log.error('[Cache] Cleanup failed:', e);
             }
         }, 60 * 60 * 1000);
-        console.log('[Cache] Cleanup task started (interval: 1 hour)');
+        log.info('[Cache] Cleanup task started (interval: 1 hour)');
     },
 
     stopCleanupTask(): void {
         if (this.cleanupInterval) {
             clearInterval(this.cleanupInterval);
             this.cleanupInterval = null;
-            console.log('[Cache] Cleanup task stopped');
+            log.info('[Cache] Cleanup task stopped');
         }
     },
 
@@ -542,7 +544,7 @@ export const memoryCache = {
         if (this.discoverySyncInterval) return;
         
         const sync = async () => {
-            console.log('[Discovery] Starting background model sync for all channels...');
+            log.info('[Discovery] Starting background model sync for all channels...');
             const channels = Array.from(this.channels.values()).filter(ch => ch.status === 1);
             
             for (const ch of channels) {
@@ -552,9 +554,9 @@ export const memoryCache = {
                     // In this implementation, we'll just trigger the sync endpoint's logic
                     const res = await fetch(`http://localhost:3000/api/admin/channels/${ch.id}/sync-models`, {
                         method: 'POST',
-                        headers: { 'Authorization': `Bearer ${process.env.ADMIN_TOKEN || ''}` }
+                        headers: { 'Authorization': `Bearer ${config.adminToken || ''}` }
                     });
-                    if (res.ok) console.log(`[Discovery] Synced models for ${ch.name}`);
+                    if (res.ok) log.info(`[Discovery] Synced models for ${ch.name}`);
                 } catch (e) {
                     // Silently fail for background sync
                 }
@@ -580,13 +582,6 @@ export const memoryCache = {
     syncPromise: null as Promise<void> | null,
 
     /**
-     * Periodic channel discovery/health sync task (stub).
-     */
-    startDiscoverySyncTask(): void {
-        console.log('[Cache] Discovery sync task registered');
-    },
-
-    /**
      * Initialize PostgreSQL LISTEN for multi-instance sync.
      * Uses @elygate/pg-listen (zero-dependency, Bun native TCP).
      * Guaranteed to only initialize once.
@@ -595,20 +590,20 @@ export const memoryCache = {
         if (this.syncPromise) return this.syncPromise;
 
         this.syncPromise = (async () => {
-            console.log('[Cache] Initializing pg-listen for sync...');
+            log.info('[Cache] Initializing pg-listen for sync...');
             try {
                 const { createPgListener } = await import('@elygate/pg-listen');
                 createPgListener(
-                    process.env.DATABASE_URL!,
+                    config.databaseUrl!,
                     ['refresh_cache'],
                     (_channel, payload) => {
-                        console.log(`[Cache] Received sync signal: ${payload}`);
-                        this.refresh(true).catch(console.error);
+                        log.info(`[Cache] Received sync signal: ${payload}`);
+                        this.refresh(true).catch((e: unknown) => log.error("[Async]", e));
                     }
                 );
-                console.log('[Cache] Multi-instance sync listener established.');
+                log.info('[Cache] Multi-instance sync listener established.');
             } catch (e) {
-                console.error('[Cache] Failed setting up listener:', e);
+                log.error('[Cache] Failed setting up listener:', e);
                 this.syncPromise = null; // enable retry
             }
         })();
@@ -617,5 +612,5 @@ export const memoryCache = {
 };
 
 // Start synchronization listener safely
-memoryCache.initSync().catch(e => console.error('[Cache] Failed to init sync:', e));
+memoryCache.initSync().catch(e => log.error('[Cache] Failed to init sync:', e));
 

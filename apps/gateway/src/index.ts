@@ -1,3 +1,6 @@
+import { config } from './config';
+import { log } from './services/logger';
+import { getErrorMessage } from './utils/error';
 import { overrideConsole } from "./services/logger";
 overrideConsole();
 
@@ -45,7 +48,7 @@ async function init() {
     }))
     .use(jwt({
       name: 'jwt',
-      secret: process.env.JWT_SECRET!,
+      secret: config.jwtSecret!,
       exp: '7d'
     }))
     .state('auth_session', '')
@@ -60,11 +63,11 @@ async function init() {
     .onParse(async ({ request, contentType }) => {
       if (contentType === 'application/json') {
         const txt = await request.text();
-        try { return JSON.parse(txt); } catch (e) { return {}; }
+        try { return JSON.parse(txt); } catch { /* parse fallback */ return {}; }
       }
     })
     .onError(({ error }) => {
-      return { success: false, message: error instanceof Error ? error.message : String(error) };
+      return { success: false, message: error instanceof Error ? getErrorMessage(error) : String(error) };
     })
     .onBeforeHandle(staticFileHandler())
     .use(sysRouter)
@@ -115,17 +118,17 @@ async function init() {
       return { error: 'Not Found' };
     });
 
-  console.log("⏳ Waiting for database readiness...");
+  log.info("⏳ Waiting for database readiness...");
   let retries = 0;
   const maxRetries = 15;
   while (retries < maxRetries) {
     try {
       await sql`SELECT 1`;
-      console.log("✅ Database is ready.");
+      log.info("✅ Database is ready.");
       break;
-    } catch (err: any) {
+    } catch (err: unknown) {
       retries++;
-      console.log(`[DB] Retry ${retries}/${maxRetries}: ${err.message}`);
+      log.info(`[DB] Retry ${retries}/${maxRetries}: ${getErrorMessage(err)}`);
       await new Promise(resolve => setTimeout(resolve, 2000));
     }
   }
@@ -152,9 +155,9 @@ async function init() {
       try {
         const patchSql = await Bun.file(patchPath).text();
         await sql.unsafe(patchSql);
-        console.log(`✅ Schema patch ${p.split('/').pop()} applied.`);
-      } catch (e: any) {
-        console.error(`❌ Failed to apply patch ${p}:`, e.message);
+        log.info(`✅ Schema patch ${p.split('/').pop()} applied.`);
+      } catch (e: unknown) {
+        log.error(`❌ Failed to apply patch ${p}:`, getErrorMessage(e));
       }
     }
   }
@@ -164,15 +167,15 @@ async function init() {
     try {
       const perfSql = await Bun.file(perfIndexesPath).text();
       await sql.unsafe(perfSql);
-      console.log("📊 Performance indexes verified/applied.");
-    } catch (e: any) {
-      console.log("ℹ️ Performance indexes check:", e.message);
+      log.info("📊 Performance indexes verified/applied.");
+    } catch (e: unknown) {
+      log.info("ℹ️ Performance indexes check:", getErrorMessage(e));
     }
   }
 
-  memoryCache.refresh().catch(console.error);
+  memoryCache.refresh().catch((e: unknown) => log.error("[Async]", e));
 
-  const adminPassword = process.env.ADMIN_PASSWORD;
+  const adminPassword = config.adminPassword;
   if (adminPassword) {
     try {
       const passwordHash = await Bun.password.hash(adminPassword);
@@ -183,7 +186,7 @@ async function init() {
         RETURNING id
       `;
       if (updated) {
-        console.log("💎 Admin password synchronized from environment.");
+        log.info("💎 Admin password synchronized from environment.");
       } else {
         await sql`
           INSERT INTO users (username, password_hash, role, quota)
@@ -191,10 +194,10 @@ async function init() {
           ON CONFLICT (username) DO UPDATE 
           SET password_hash = ${passwordHash}, updated_at = NOW()
         `;
-        console.log("💎 Admin user initialized/synced from environment.");
+        log.info("💎 Admin user initialized/synced from environment.");
       }
-    } catch (e: any) {
-      console.error("❌ Failed to sync admin password:", e.message);
+    } catch (e: unknown) {
+      log.error("❌ Failed to sync admin password:", getErrorMessage(e));
     }
   }
   
@@ -204,9 +207,9 @@ async function init() {
     try {
       await sql`REFRESH MATERIALIZED VIEW mv_system_overview`;
       await sql`REFRESH MATERIALIZED VIEW mv_model_usage_stats`;
-      console.log('[MV] Materialized views refreshed');
-    } catch (e: any) {
-      console.error('[MV] Failed to refresh materialized views:', e.message);
+      log.info('[MV] Materialized views refreshed');
+    } catch (e: unknown) {
+      log.error('[MV] Failed to refresh materialized views:', getErrorMessage(e));
     }
   };
   
@@ -217,7 +220,7 @@ async function init() {
     port: 3000,
     hostname: "0.0.0.0"
   });
-  console.log(`🦊 AI API Gateway is running at ${app.server?.hostname}:${app.server?.port}`);
+  log.info(`🦊 AI API Gateway is running at ${app.server?.hostname}:${app.server?.port}`);
 }
 
 init();

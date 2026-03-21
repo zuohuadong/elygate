@@ -3,7 +3,8 @@
     import DataTableSkeleton from "../../components/DataTableSkeleton.svelte";
     import { House, Search, Filter, Download } from "lucide-svelte";
     import { apiFetch } from "$lib/api";
-    import { onMount } from "svelte";
+    
+
     import { i18n } from "$lib/i18n/index.svelte";
     import { session } from "$lib/session.svelte";
 
@@ -13,9 +14,9 @@
     let errorMsg = $state("");
     let isExporting = $state(false);
 
-    onMount(async () => {
+    $effect(() => { (async () => {
         try {
-            const response = await apiFetch<{ data: any[], total: number, page: number, limit: number } | any[]>("/admin/logs");
+            const response = await apiFetch<{ data: Record<string, unknown>[], total: number, page: number, limit: number } | any[]>("/admin/logs");
             
             // Handle both array and object response formats
             const data = Array.isArray(response) ? response : (response.data || []);
@@ -48,12 +49,12 @@
                     dt_status: "Success",
                 };
             });
-        } catch (err: any) {
-            errorMsg = err.message || "Failed to load logs";
+        } catch (err: unknown) {
+            errorMsg = err instanceof Error ? err instanceof Error ? err.message : String(err) : "Failed to load logs";
         } finally {
             isLoading = false;
         }
-    });
+    })(); });
 
     async function exportLogs(format: 'csv' | 'json') {
         isExporting = true;
@@ -72,8 +73,8 @@
             a.click();
             window.URL.revokeObjectURL(url);
             a.remove();
-        } catch (err: any) {
-            alert('Export failed: ' + err.message);
+        } catch (err: unknown) {
+            alert('Export failed: ' + err instanceof Error ? err.message : String(err));
         } finally {
             isExporting = false;
         }

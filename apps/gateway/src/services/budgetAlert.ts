@@ -1,3 +1,4 @@
+import { log } from '../services/logger';
 import { sql } from '@elygate/db';
 
 /**
@@ -116,7 +117,7 @@ export async function getUserBudgetAlerts(userId: number): Promise<any[]> {
  * Send budget alert notification (placeholder for email/webhook integration)
  */
 export async function sendBudgetAlertNotification(alert: BudgetAlert): Promise<void> {
-    console.log(`[BudgetAlert] User ${alert.username} has reached ${Math.round(alert.usagePercent * 100)}% quota usage`);
+    log.info(`[BudgetAlert] User ${alert.username} has reached ${Math.round(alert.usagePercent * 100)}% quota usage`);
 
     // TODO: Implement email notification
     // TODO: Implement webhook notification

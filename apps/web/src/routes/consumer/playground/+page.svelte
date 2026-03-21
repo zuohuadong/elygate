@@ -3,7 +3,7 @@
     import { apiFetch } from "$lib/api";
     import { i18n } from "$lib/i18n/index.svelte";
     import { session } from "$lib/session.svelte";
-    import { onMount } from "svelte";
+    
 
     interface Model {
         id: string;
@@ -16,7 +16,17 @@
         { role: "user", content: "" }
     ]);
     let response = $state("");
-    let rawResponse = $state<any>(null);
+    interface ChatCompletionResponse {
+        choices?: { message?: { content?: string } }[];
+        usage?: {
+            prompt_tokens: number;
+            completion_tokens: number;
+            total_tokens: number;
+        };
+        [key: string]: unknown;
+    }
+
+    let rawResponse = $state<ChatCompletionResponse | null>(null);
     let isLoading = $state(false);
     let copied = $state(false);
     let showRaw = $state(false);
@@ -24,7 +34,7 @@
     let maxTokens = $state(1024);
     let error = $state("");
 
-    onMount(async () => {
+    $effect(() => { (async () => {
         try {
             const data = await apiFetch<{ data: Model[] }>("/v1/models");
             models = data.data || [];
@@ -34,7 +44,7 @@
         } catch (e) {
             console.error("Failed to load models:", e);
         }
-    });
+    })(); });
 
     function addMessage() {
         messages = [...messages, { role: "user", content: "" }];
@@ -87,8 +97,8 @@
             const data = await res.json();
             rawResponse = data;
             response = data.choices?.[0]?.message?.content || "";
-        } catch (e: any) {
-            error = e.message;
+        } catch (e: unknown) {
+            error = e instanceof Error ? e.message : String(e);
         } finally {
             isLoading = false;
         }

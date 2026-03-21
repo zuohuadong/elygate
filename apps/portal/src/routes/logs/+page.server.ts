@@ -18,7 +18,7 @@ type LogRow = {
 };
 
 export const load: PageServerLoad = async ({ locals, url }) => {
-    const { org } = locals as any;
+    const { org } = locals as Record<string, any>;
     
     // Simple pagination and filtering
     const page = Number(url.searchParams.get('page') || '1');
