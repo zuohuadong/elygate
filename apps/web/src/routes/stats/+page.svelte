@@ -86,7 +86,7 @@
 
 	async function loadOverview() {
 		try {
-			const data = await apiFetch<any>("/stats/overview");
+			const data = await apiFetch<{overview: Record<string, any>, today: Record<string, any>, hourly: any[]}>("/stats/overview");
 			overview = data?.overview || {};
 			todayStats = data?.today || {};
 			hourlyStats = data?.hourly || [];
@@ -101,7 +101,7 @@
 
 	async function loadModelStats() {
 		try {
-			const data = await apiFetch<any>("/stats/models");
+			const data = await apiFetch<{trending: any[]}>("/stats/models");
 			modelStats = data?.trending || [];
 		} catch (err: unknown) {
 			console.error("Failed to load model stats:", err);
@@ -111,7 +111,7 @@
 
 	async function loadRealtimeStats() {
 		try {
-			const data = await apiFetch<any>("/stats/realtime");
+			const data = await apiFetch<{stats: Record<string, any>}>("/stats/realtime");
 			realtimeStats = data?.stats || {};
 		} catch (err: unknown) {
 			console.error("Failed to load realtime stats:", err);

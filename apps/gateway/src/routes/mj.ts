@@ -53,7 +53,7 @@ export const mjRouter = new Elysia()
         }
 
         const channelConfig = candidateChannels[0]; // Just take first
-        const handler = new MidjourneyApiHandler();
+        const handler = MidjourneyApiHandler;
         const keys = channelConfig.key.split('\n').map((k: string) => k.trim()).filter(Boolean);
         const activeKey = keys[Math.floor(Math.random() * keys.length)];
 
@@ -135,7 +135,7 @@ export const mjRouter = new Elysia()
         }
 
         const channelConfig = candidateChannels[0];
-        const handler = new MidjourneyApiHandler();
+        const handler = MidjourneyApiHandler;
         const activeKey = channelConfig.key.split('\n')[0].trim();
         const fetchHeaders = handler.buildHeaders(activeKey);
         const upstreamUrl = `${channelConfig.baseUrl}/mj/submit/action`;
@@ -204,7 +204,7 @@ export const mjRouter = new Elysia()
         const candidateChannels = memoryCache.selectChannels(targetModel);
         if (candidateChannels && candidateChannels[0]) {
             const channelConfig = candidateChannels[0];
-            const handler = new MidjourneyApiHandler();
+            const handler = MidjourneyApiHandler;
             const activeKey = channelConfig.key.split('\n')[0].trim();
 
             try {

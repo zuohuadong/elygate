@@ -1,11 +1,7 @@
 import { ProviderHandler } from './types';
 
-/**
- * Anthropic Claude API Adapter
- * Transforms OpenAI-like requests to Anthropic strictly required format.
- */
-export class AnthropicApiHandler implements ProviderHandler {
-    transformRequest(body: Record<string, any>, model: string) {
+export const AnthropicApiHandler: ProviderHandler = {
+transformRequest(body: Record<string, any>, model: string) {
         // Claude requires max_tokens parameter
         let maxTokens = body.max_tokens || 4096;
 
@@ -80,9 +76,9 @@ export class AnthropicApiHandler implements ProviderHandler {
         }
 
         return payload;
-    }
+    },
 
-    transformResponse(data: Record<string, any>): Record<string, any> {
+transformResponse(data: Record<string, any>): Record<string, any> {
         if (!data || !data.content) return data;
 
         const message: Record<string, any> = {
@@ -137,9 +133,9 @@ export class AnthropicApiHandler implements ProviderHandler {
                 total_tokens: (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0),
             },
         };
-    }
+    },
 
-    extractUsage(data: Record<string, any>) {
+extractUsage(data: Record<string, any>) {
         const promptTokens = data.usage?.input_tokens || 0;
         const completionTokens = data.usage?.output_tokens || 0;
         const cachedTokens = data.usage?.cache_read_input_tokens;
@@ -148,13 +144,14 @@ export class AnthropicApiHandler implements ProviderHandler {
             completionTokens,
             ...(cachedTokens !== undefined && { cachedTokens })
         };
-    }
+    },
 
-    buildHeaders(apiKey: string) {
+buildHeaders(apiKey: string) {
         const headers = new Headers();
         headers.set('Content-Type', 'application/json');
         headers.set('x-api-key', apiKey);
         headers.set('anthropic-version', '2023-06-01');
         return headers;
     }
-}
+};
+

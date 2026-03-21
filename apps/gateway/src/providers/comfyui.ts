@@ -5,7 +5,13 @@ import { ProviderHandler } from './types';
  * Supports both standard DALL-E style requests (mapped to a default workflow)
  * and template-based workflow execution.
  */
-export class ComfyUIProviderHandler implements ProviderHandler {
+export const ComfyUIProviderHandler: ProviderHandler = {
+    transformRequest,
+    transformResponse,
+    extractUsage,
+    buildHeaders
+};
+
     
     // In a real implementation, we might want to fetch templates from DB.
     // Since transformRequest is sync in the current architecture, we either:
@@ -14,7 +20,7 @@ export class ComfyUIProviderHandler implements ProviderHandler {
     // 3. Handle template resolution in the Dispatcher before calling the provider.
     // For now, we implement the structure and use standard image mapping as a baseline.
 
-    transformRequest(body: Record<string, any>, model: string) {
+function transformRequest(body: Record<string, any>, model: string) {
         // If this is a template-based request
         if (body.template_id) {
             // This part expects the template to have been 'resolved' or 'injected' 
@@ -91,7 +97,7 @@ export class ComfyUIProviderHandler implements ProviderHandler {
         };
     }
 
-    transformResponse(data: Record<string, any>) {
+function transformResponse(data: Record<string, any>) {
         // ComfyUI usually returns a prompt_id or results depending on the endpoint.
         // If it's the direct /prompt endpoint:
         if (data.prompt_id) {
@@ -113,7 +119,7 @@ export class ComfyUIProviderHandler implements ProviderHandler {
         };
     }
 
-    extractUsage(data: Record<string, any>) {
+function extractUsage(data: Record<string, any>) {
         // Image generation usually counts as 1 per image/workflow execution
         return {
             promptTokens: 1,
@@ -121,7 +127,7 @@ export class ComfyUIProviderHandler implements ProviderHandler {
         };
     }
 
-    buildHeaders(apiKey: string) {
+function buildHeaders(apiKey: string) {
         const headers = new Headers();
         headers.set('Content-Type', 'application/json');
         if (apiKey) {
@@ -129,4 +135,4 @@ export class ComfyUIProviderHandler implements ProviderHandler {
         }
         return headers;
     }
-}
+

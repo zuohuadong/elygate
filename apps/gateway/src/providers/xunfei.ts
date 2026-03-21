@@ -3,8 +3,14 @@ import { ProviderHandler } from './types';
 /**
  * Xunfei Spark API Handler (HTTP Version)
  */
-export class XunfeiApiHandler implements ProviderHandler {
-    transformRequest(body: Record<string, any>, model: string) {
+export const XunfeiApiHandler: ProviderHandler = {
+    transformRequest,
+    transformResponse,
+    extractUsage,
+    buildHeaders
+};
+
+function transformRequest(body: Record<string, any>, model: string) {
         return {
             model: model,
             messages: body.messages,
@@ -12,7 +18,7 @@ export class XunfeiApiHandler implements ProviderHandler {
         };
     }
 
-    transformResponse(data: Record<string, any>) {
+function transformResponse(data: Record<string, any>) {
         return {
             id: data.id || `chatcmpl-spark-${Date.now()}`,
             object: 'chat.completion',
@@ -35,17 +41,17 @@ export class XunfeiApiHandler implements ProviderHandler {
         };
     }
 
-    extractUsage(data: Record<string, any>) {
+function extractUsage(data: Record<string, any>) {
         return {
             promptTokens: data.usage?.prompt_tokens || 0,
             completionTokens: data.usage?.completion_tokens || 0,
         };
     }
 
-    buildHeaders(apiKey: string) {
+function buildHeaders(apiKey: string) {
         const headers = new Headers();
         headers.set('Content-Type', 'application/json');
         headers.set('Authorization', `Bearer ${apiKey}`);
         return headers;
     }
-}
+

@@ -1,14 +1,20 @@
 import { ProviderHandler } from './types';
 
-export class SunoApiHandler implements ProviderHandler {
-    buildHeaders(apiKey: string): Headers {
+export const SunoApiHandler: ProviderHandler = {
+    transformRequest,
+    transformResponse,
+    extractUsage,
+    buildHeaders
+};
+
+function buildHeaders(apiKey: string): Headers {
         return new Headers({
             'Authorization': `Bearer ${apiKey}`,
             'Content-Type': 'application/json'
         });
     }
 
-    transformRequest(body: Record<string, any>, model: string): Record<string, any> {
+function transformRequest(body: Record<string, any>, model: string): Record<string, any> {
         if (body.prompt) {
             return {
                 prompt: body.prompt,
@@ -26,7 +32,7 @@ export class SunoApiHandler implements ProviderHandler {
         };
     }
 
-    transformResponse(data: Record<string, any>): Record<string, any> {
+function transformResponse(data: Record<string, any>): Record<string, any> {
         if (Array.isArray(data)) {
             return {
                 id: `suno-${Date.now()}`,
@@ -79,10 +85,10 @@ export class SunoApiHandler implements ProviderHandler {
         };
     }
 
-    extractUsage(data: Record<string, any>): { promptTokens: number; completionTokens: number } {
+function extractUsage(data: Record<string, any>): { promptTokens: number; completionTokens: number } {
         return {
             promptTokens: data.usage?.prompt_tokens || 0,
             completionTokens: data.usage?.completion_tokens || 0
         };
     }
-}
+

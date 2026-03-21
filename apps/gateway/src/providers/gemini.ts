@@ -1,12 +1,7 @@
 import { ProviderHandler } from './types';
 
-/**
- * Google Gemini Native API Handler
- * Converts OpenAI format to :generateContent
- */
-export class GeminiApiHandler implements ProviderHandler {
-
-    transformRequest(body: Record<string, any>, model: string) {
+export const GeminiApiHandler: ProviderHandler = {
+transformRequest(body: Record<string, any>, model: string) {
         // body is now InternalRequest (OpenAI-like)
         const systemMessages = (body.messages || []).filter((m: Record<string, any>) => m.role === 'system');
         const nonSystemMessages = (body.messages || []).filter((m: Record<string, any>) => m.role !== 'system');
@@ -38,9 +33,9 @@ export class GeminiApiHandler implements ProviderHandler {
         }
 
         return result;
-    }
+    },
 
-    transformResponse(data: Record<string, any>) {
+transformResponse(data: Record<string, any>) {
         // Return internal OpenAI format
         let text = '';
         if (data?.candidates?.[0]?.content?.parts) {
@@ -64,20 +59,21 @@ export class GeminiApiHandler implements ProviderHandler {
                 total_tokens: data?.usageMetadata?.totalTokenCount || 0,
             }
         };
-    }
+    },
 
-    extractUsage(data: Record<string, any>) {
+extractUsage(data: Record<string, any>) {
         return {
             promptTokens: data?.usage?.__prompt_tokens || data?.usageMetadata?.promptTokenCount || 0,
             completionTokens: data?.usage?.__completion_tokens || data?.usageMetadata?.candidatesTokenCount || 0,
         };
-    }
+    },
 
-    buildHeaders(apiKey: string) {
+buildHeaders(apiKey: string) {
         const headers = new Headers();
         headers.set('Content-Type', 'application/json');
         // Gemini API Key is usually appended to URL query (?key=xxx); extra header check added here if needed.
         headers.set('x-goog-api-key', apiKey);
         return headers;
     }
-}
+};
+

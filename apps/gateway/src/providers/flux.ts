@@ -4,8 +4,14 @@ import { ProviderHandler } from './types';
  * Flux API Handler (Typically via Fal.ai or Replicate)
  * Standardizes Flux.1 model requests.
  */
-export class FluxApiHandler implements ProviderHandler {
-    transformRequest(body: Record<string, any>, model: string) {
+export const FluxApiHandler: ProviderHandler = {
+    transformRequest,
+    transformResponse,
+    extractUsage,
+    buildHeaders
+};
+
+function transformRequest(body: Record<string, any>, model: string) {
         return {
             prompt: body.prompt,
             image_size: body.size || '1024x1024',
@@ -15,7 +21,7 @@ export class FluxApiHandler implements ProviderHandler {
         };
     }
 
-    transformResponse(data: Record<string, any>) {
+function transformResponse(data: Record<string, any>) {
         // Standardize to OpenAI images generation format
         return {
             created: Math.floor(Date.now() / 1000),
@@ -25,7 +31,7 @@ export class FluxApiHandler implements ProviderHandler {
         };
     }
 
-    extractUsage(data: Record<string, any>) {
+function extractUsage(data: Record<string, any>) {
         // Fixed cost for images usually, but we return a count for billing
         return {
             promptTokens: 1, // Represent 1 image
@@ -33,10 +39,10 @@ export class FluxApiHandler implements ProviderHandler {
         };
     }
 
-    buildHeaders(apiKey: string) {
+function buildHeaders(apiKey: string) {
         const headers = new Headers();
         headers.set('Content-Type', 'application/json');
         headers.set('Authorization', `Key ${apiKey}`);
         return headers;
     }
-}
+

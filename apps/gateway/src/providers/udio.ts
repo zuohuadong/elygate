@@ -4,8 +4,14 @@ import { ProviderHandler } from './types';
  * Udio API Handler for Music Generation
  * Handles request transformation and usage estimation.
  */
-export class UdioApiHandler implements ProviderHandler {
-    transformRequest(body: Record<string, any>, model: string) {
+export const UdioApiHandler: ProviderHandler = {
+    transformRequest,
+    transformResponse,
+    extractUsage,
+    buildHeaders
+};
+
+function transformRequest(body: Record<string, any>, model: string) {
         return {
             prompt: body.prompt,
             gpt_description: body.description,
@@ -15,7 +21,7 @@ export class UdioApiHandler implements ProviderHandler {
         };
     }
 
-    transformResponse(data: Record<string, any>) {
+function transformResponse(data: Record<string, any>) {
         // Standardization for Audio/Music output
         return {
             id: data.id || `udio-${Date.now()}`,
@@ -26,7 +32,7 @@ export class UdioApiHandler implements ProviderHandler {
         };
     }
 
-    extractUsage(data: Record<string, any>) {
+function extractUsage(data: Record<string, any>) {
         // Music units billing
         return {
             promptTokens: 1, // 1 Generation task
@@ -34,10 +40,10 @@ export class UdioApiHandler implements ProviderHandler {
         };
     }
 
-    buildHeaders(apiKey: string) {
+function buildHeaders(apiKey: string) {
         const headers = new Headers();
         headers.set('Content-Type', 'application/json');
         headers.set('Authorization', `Bearer ${apiKey}`);
         return headers;
     }
-}
+

@@ -3,8 +3,14 @@ import { ProviderHandler } from './types';
 /**
  * Alibaba DashScope API Handler
  */
-export class AliApiHandler implements ProviderHandler {
-    transformRequest(body: Record<string, any>, model: string) {
+export const AliApiHandler: ProviderHandler = {
+    transformRequest,
+    transformResponse,
+    extractUsage,
+    buildHeaders
+};
+
+function transformRequest(body: Record<string, any>, model: string) {
         return {
             model: model,
             input: {
@@ -19,7 +25,7 @@ export class AliApiHandler implements ProviderHandler {
         };
     }
 
-    transformResponse(data: Record<string, any>) {
+function transformResponse(data: Record<string, any>) {
         const choice = data.output?.choices?.[0] || {};
         const message: Record<string, any> = {
             role: 'assistant',
@@ -53,17 +59,17 @@ export class AliApiHandler implements ProviderHandler {
         };
     }
 
-    extractUsage(data: Record<string, any>) {
+function extractUsage(data: Record<string, any>) {
         return {
             promptTokens: data.usage?.input_tokens || 0,
             completionTokens: data.usage?.output_tokens || 0,
         };
     }
 
-    buildHeaders(apiKey: string) {
+function buildHeaders(apiKey: string) {
         const headers = new Headers();
         headers.set('Content-Type', 'application/json');
         headers.set('Authorization', `Bearer ${apiKey}`);
         return headers;
     }
-}
+

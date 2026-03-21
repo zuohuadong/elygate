@@ -3,7 +3,7 @@ import { DeepSeekApiHandler } from '../src/providers/deepseek';
 import { SunoApiHandler } from '../src/providers/suno';
 
 describe('DeepSeek Provider Tests', () => {
-    const handler = new DeepSeekApiHandler();
+    const handler = DeepSeekApiHandler;
 
     test('should build correct headers', () => {
         const headers = handler.buildHeaders('test-api-key');
@@ -110,7 +110,7 @@ describe('DeepSeek Provider Tests', () => {
 });
 
 describe('Suno Provider Tests', () => {
-    const handler = new SunoApiHandler();
+    const handler = SunoApiHandler;
 
     test('should build correct headers', () => {
         const headers = handler.buildHeaders('test-api-key');

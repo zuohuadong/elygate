@@ -16,7 +16,7 @@
     async function loadLogs(page: number) {
         isLoading = true;
         try {
-            const res = await apiFetch<any>(
+            const res = await apiFetch<Record<string, any>>(
                 `/user/logs?page=${page}&limit=${limit}`,
             );
             totalItems = res.total || 0;

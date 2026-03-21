@@ -54,12 +54,12 @@
         isLoading = true;
         try {
             const [userData, logsData, statsData] = await Promise.all([
-                apiFetch<any>("/user/info"),
-                apiFetch<any>("/user/logs?limit=5"),
+                apiFetch<UserInfo>("/user/info"),
+                apiFetch<{data?: any[], [key: string]: any}>("/user/logs?limit=5"),
                 apiFetch<UserStats>(`/user/dashboard/stats?period=${activePeriod}`),
             ]);
             userInfo = userData;
-            logs = logsData.data || logsData;
+            logs = (logsData.data as LogEntry[]) || (logsData as unknown as LogEntry[]);
             stats = statsData;
         } catch (err: unknown) {
             console.error(err);
@@ -84,7 +84,7 @@
         message = { type: "", text: "" };
 
         try {
-            const res = await apiFetch<any>("/redemptions/redeem", {
+            const res = await apiFetch<{success: boolean, balance: number, addedQuota: number}>("/redemptions/redeem", {
                 method: "POST",
                 body: JSON.stringify({ key: topupCode.trim() }),
             });

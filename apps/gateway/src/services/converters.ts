@@ -37,30 +37,27 @@ export interface FormatConverter {
     convertError(error: unknown): Record<string, any>;
 }
 
-/**
- * OpenAI Format Converter (Passthrough)
- */
-export class OpenAIConverter implements FormatConverter {
-    convertRequest(body: Record<string, any>): InternalRequest {
+export const OpenAIConverter: FormatConverter = {
+convertRequest(body: Record<string, any>): InternalRequest {
         return body as InternalRequest;
-    }
-    convertResponse(internalRes: InternalResponse): Record<string, any> {
-        return internalRes;
-    }
-    convertStreamChunk(chunk: Record<string, any>): string | null {
-        return `data: ${JSON.stringify(chunk)}\n\n`;
-    }
+    },
 
-    convertError(error: unknown): Record<string, any> {
+convertResponse(internalRes: InternalResponse): Record<string, any> {
+        return internalRes;
+    },
+
+convertStreamChunk(chunk: Record<string, any>): string | null {
+        return `data: ${JSON.stringify(chunk)}\n\n`;
+    },
+
+convertError(error: unknown): Record<string, any> {
         return {} as any;
     }
-}
+};
 
-/**
- * Anthropic Format Converter
- */
-export class AnthropicConverter implements FormatConverter {
-    convertRequest(body: Record<string, any>): InternalRequest {
+
+export const AnthropicConverter: FormatConverter = {
+convertRequest(body: Record<string, any>): InternalRequest {
         const anthropicReq = body;
         const messages: { role: string; content: unknown }[] = [];
         
@@ -93,9 +90,9 @@ export class AnthropicConverter implements FormatConverter {
         }
         
         return {} as any;
-    }
+    },
 
-    convertResponse(internalRes: InternalResponse): Record<string, any> {
+convertResponse(internalRes: InternalResponse): Record<string, any> {
         const choice = internalRes.choices?.[0];
         const message = choice?.message;
         const content: unknown[] = [];
@@ -120,9 +117,9 @@ export class AnthropicConverter implements FormatConverter {
         else if (choice?.finish_reason === 'tool_calls') stopReason = 'tool_use';
         
         return {} as any;
-    }
+    },
 
-    convertStreamChunk(chunk: Record<string, any>): string | null {
+convertStreamChunk(chunk: Record<string, any>): string | null {
         const delta = chunk.choices?.[0]?.delta;
         if (!delta) return null;
 
@@ -135,9 +132,9 @@ export class AnthropicConverter implements FormatConverter {
         }
         
         return null;
-    }
+    },
 
-    convertError(error: unknown): Record<string, any> {
+convertError(error: unknown): Record<string, any> {
         let type = 'api_error';
         const msg = (error as any).message || 'Unknown error';
         if (msg.includes('401') || msg.includes('API key')) type = 'authentication_error';
@@ -146,13 +143,11 @@ export class AnthropicConverter implements FormatConverter {
 
         return {} as any;
     }
-}
+};
 
-/**
- * Gemini Format Converter
- */
-export class GeminiConverter implements FormatConverter {
-    convertRequest(body: Record<string, any>): InternalRequest {
+
+export const GeminiConverter: FormatConverter = {
+convertRequest(body: Record<string, any>): InternalRequest {
         // Simple mapping for Gemini :generateContent format
         const contents = body.contents || [];
         const messages: { role: string; content: unknown }[] = [];
@@ -171,152 +166,155 @@ export class GeminiConverter implements FormatConverter {
         }
 
         return {} as any;
-    }
+    },
 
-    convertResponse(internalRes: InternalResponse): Record<string, any> {
+convertResponse(internalRes: InternalResponse): Record<string, any> {
         const choice = internalRes.choices?.[0];
         return {} as any;
-    }
+    },
 
-    convertStreamChunk(chunk: Record<string, any>): string | null {
+convertStreamChunk(chunk: Record<string, any>): string | null {
         // Gemini streaming uses a different chunk format
         const choice = chunk.choices?.[0];
-        const res = this.convertResponse({ ...chunk, choices: [choice] } as any);
+        const res = GeminiConverter.convertResponse({ ...chunk, choices: [choice] } as any);
         return `${JSON.stringify(res)}\n`;
-    }
+    },
 
-    convertError(error: unknown): Record<string, any> {
+convertError(error: unknown): Record<string, any> {
         return {} as any;
     }
-}
+};
 
-/**
- * Ali DashScope Format Converter
- */
-export class AliConverter implements FormatConverter {
-    convertRequest(body: Record<string, any>): InternalRequest {
+
+export const AliConverter: FormatConverter = {
+convertRequest(body: Record<string, any>): InternalRequest {
         const input = body.input || {};
         const params = body.parameters || {};
         return {} as any;
-    }
+    },
 
-    convertResponse(internalRes: InternalResponse): Record<string, any> {
+convertResponse(internalRes: InternalResponse): Record<string, any> {
         const choice = internalRes.choices?.[0];
         return {} as any;
-    }
+    },
 
-    convertStreamChunk(chunk: Record<string, any>): string | null {
-        const res = this.convertResponse(chunk as any);
+convertStreamChunk(chunk: Record<string, any>): string | null {
+        const res = AliConverter.convertResponse(chunk as any);
         return `data: ${JSON.stringify(res)}\n\n`;
-    }
+    },
 
-    convertError(error: unknown): Record<string, any> {
+convertError(error: unknown): Record<string, any> {
         return {} as any;
     }
-}
+};
 
-/**
- * Ali Image Converter
- */
-export class AliImageConverter implements FormatConverter {
-    convertResponse(internalRes: Record<string, any>): Record<string, any> { return internalRes; }
-    convertRequest(body: Record<string, any>): InternalRequest {
+
+export const AliImageConverter: FormatConverter = {
+convertResponse(internalRes: Record<string, any>): Record<string, any> { return internalRes; },
+
+convertRequest(body: Record<string, any>): InternalRequest {
+        return {} as any;
+    },
+
+convertStreamChunk(): string | null { return null; },
+
+convertError(error: unknown): Record<string, any> {
         return {} as any;
     }
-    convertStreamChunk(): string | null { return null; }
-    convertError(error: unknown): Record<string, any> {
-        return {} as any;
-    }
-}
+};
 
-/**
- * Baidu ERNIE Format Converter
- */
-export class BaiduConverter implements FormatConverter {
-    convertRequest(body: Record<string, any>): InternalRequest {
-        return {} as any;
-    }
 
-    convertResponse(internalRes: InternalResponse): Record<string, any> {
+export const BaiduConverter: FormatConverter = {
+convertRequest(body: Record<string, any>): InternalRequest {
+        return {} as any;
+    },
+
+convertResponse(internalRes: InternalResponse): Record<string, any> {
         const choice = internalRes.choices?.[0];
         return {} as any;
-    }
+    },
 
-    convertStreamChunk(chunk: Record<string, any>): string | null {
-        const res = this.convertResponse(chunk as any);
+convertStreamChunk(chunk: Record<string, any>): string | null {
+        const res = BaiduConverter.convertResponse(chunk as any);
         return `data: ${JSON.stringify(res)}\n\n`;
-    }
+    },
 
-    convertError(error: unknown): Record<string, any> {
+convertError(error: unknown): Record<string, any> {
         return {} as any;
     }
-}
+};
 
-/**
- * Gemini Embedding Converter
- */
-export class GeminiEmbeddingConverter implements FormatConverter {
-    convertResponse(internalRes: Record<string, any>): Record<string, any> { return internalRes; }
-    convertRequest(body: Record<string, any>): InternalRequest {
-        return {} as any;
-    }
-    convertStreamChunk(): string | null { return null; }
-    convertError(error: unknown): Record<string, any> {
-        return {} as any;
-    }
-}
 
-/**
- * Ali Embedding Converter
- */
-export class AliEmbeddingConverter implements FormatConverter {
-    convertResponse(internalRes: Record<string, any>): Record<string, any> { return internalRes; }
-    convertRequest(body: Record<string, any>): InternalRequest {
-        return {} as any;
-    }
-    convertStreamChunk(): string | null { return null; }
-    convertError(error: unknown): Record<string, any> {
-        return {} as any;
-    }
-}
+export const GeminiEmbeddingConverter: FormatConverter = {
+convertResponse(internalRes: Record<string, any>): Record<string, any> { return internalRes; },
 
-/**
- * Baidu Embedding Converter
- */
-export class BaiduEmbeddingConverter implements FormatConverter {
-    convertResponse(internalRes: Record<string, any>): Record<string, any> { return internalRes; }
-    convertRequest(body: Record<string, any>): InternalRequest {
+convertRequest(body: Record<string, any>): InternalRequest {
         return {} as any;
-    }
-    convertStreamChunk(): string | null { return null; }
-    convertError(error: unknown): Record<string, any> {
-        return {} as any;
-    }
-}
+    },
 
-/**
- * Audio (TTS/STT) Converter
- */
-export class AudioConverter implements FormatConverter {
-    convertResponse(internalRes: Record<string, any>): Record<string, any> { return internalRes; }
-    convertStreamChunk(chunk: Record<string, any>): string | null { return null; }
-    convertError(error: any): Record<string, any> { return { error: error?.message || 'Error' }; }
-    convertRequest(body: Record<string, any>): InternalRequest {
-        return {} as any;
-    }
-}
+convertStreamChunk(): string | null { return null; },
 
-/**
- * Moderation Converter
- */
-export class ModerationConverter implements FormatConverter {
-    convertResponse(internalRes: Record<string, any>): Record<string, any> { return internalRes; }
-    convertStreamChunk(chunk: Record<string, any>): string | null { return null; }
-    convertError(error: any): Record<string, any> { return { error: error?.message || 'Error' }; }
-    convertRequest(body: Record<string, any>): InternalRequest {
+convertError(error: unknown): Record<string, any> {
         return {} as any;
     }
-}
+};
+
+
+export const AliEmbeddingConverter: FormatConverter = {
+convertResponse(internalRes: Record<string, any>): Record<string, any> { return internalRes; },
+
+convertRequest(body: Record<string, any>): InternalRequest {
+        return {} as any;
+    },
+
+convertStreamChunk(): string | null { return null; },
+
+convertError(error: unknown): Record<string, any> {
+        return {} as any;
+    }
+};
+
+
+export const BaiduEmbeddingConverter: FormatConverter = {
+convertResponse(internalRes: Record<string, any>): Record<string, any> { return internalRes; },
+
+convertRequest(body: Record<string, any>): InternalRequest {
+        return {} as any;
+    },
+
+convertStreamChunk(): string | null { return null; },
+
+convertError(error: unknown): Record<string, any> {
+        return {} as any;
+    }
+};
+
+
+export const AudioConverter: FormatConverter = {
+convertResponse(internalRes: Record<string, any>): Record<string, any> { return internalRes; },
+
+convertStreamChunk(chunk: Record<string, any>): string | null { return null; },
+
+convertError(error: any): Record<string, any> { return { error: error?.message || 'Error' }; },
+
+convertRequest(body: Record<string, any>): InternalRequest {
+        return {} as any;
+    }
+};
+
+
+export const ModerationConverter: FormatConverter = {
+convertResponse(internalRes: Record<string, any>): Record<string, any> { return internalRes; },
+
+convertStreamChunk(chunk: Record<string, any>): string | null { return null; },
+
+convertError(error: any): Record<string, any> { return { error: error?.message || 'Error' }; },
+
+convertRequest(body: Record<string, any>): InternalRequest {
+        return {} as any;
+    }
+};
+
 
 /**
  * Converter Factory
@@ -324,25 +322,25 @@ export class ModerationConverter implements FormatConverter {
 export class ConverterFactory {
     static getConverter(path: string): FormatConverter {
         // Chat
-        if (path.includes('/messages')) return new AnthropicConverter();
-        if (path.includes('/generateContent')) return new GeminiConverter();
-        if (path.includes('/aigc/text-generation/generation')) return new AliConverter();
-        if (path.includes('/wenxinworkshop/chat/')) return new BaiduConverter();
+        if (path.includes('/messages')) return AnthropicConverter;
+        if (path.includes('/generateContent')) return GeminiConverter;
+        if (path.includes('/aigc/text-generation/generation')) return AliConverter;
+        if (path.includes('/wenxinworkshop/chat/')) return BaiduConverter;
 
         // Embeddings
-        if (path.includes(':embedContent')) return new GeminiEmbeddingConverter();
-        if (path.includes('/aigc/multimodal-embedding/')) return new AliEmbeddingConverter();
-        if (path.includes('/wenxinworkshop/embeddings/')) return new BaiduEmbeddingConverter();
+        if (path.includes(':embedContent')) return GeminiEmbeddingConverter;
+        if (path.includes('/aigc/multimodal-embedding/')) return AliEmbeddingConverter;
+        if (path.includes('/wenxinworkshop/embeddings/')) return BaiduEmbeddingConverter;
 
         // Images
-        if (path.includes('/aigc/text2image/')) return new AliImageConverter();
+        if (path.includes('/aigc/text2image/')) return AliImageConverter;
 
         // Audio
-        if (path.includes('/audio/')) return new AudioConverter();
+        if (path.includes('/audio/')) return AudioConverter;
 
         // Moderations
-        if (path.includes('/moderations')) return new ModerationConverter();
+        if (path.includes('/moderations')) return ModerationConverter;
 
-        return new OpenAIConverter();
+        return OpenAIConverter;
     }
 }

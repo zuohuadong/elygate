@@ -19,26 +19,26 @@ import { DakkaApiHandler } from './dakka';
 
 export function getProviderHandler(type: number): ProviderHandler {
     switch (type) {
-        case ChannelType.GEMINI: return new GeminiApiHandler();
-        case ChannelType.ANTHROPIC: return new AnthropicApiHandler();
-        case ChannelType.AZURE: return new AzureOpenAIApiHandler();
-        case ChannelType.BAIDU: return new BaiduApiHandler();
-        case ChannelType.ALI: return new AliApiHandler();
-        case ChannelType.XUNFEI: return new XunfeiApiHandler();
-        case ChannelType.MIDJOURNEY: return new MidjourneyApiHandler();
-        case ChannelType.DEEPSEEK: return new DeepSeekApiHandler();
-        case ChannelType.SUNO: return new SunoApiHandler();
-        case ChannelType.FLUX: return new FluxApiHandler();
-        case ChannelType.JINA: return new JinaApiHandler();
-        case ChannelType.UDIO: return new UdioApiHandler();
-        case ChannelType.NVIDIA: return new NvidiaApiHandler();
-        case ChannelType.DAKKA: return new DakkaApiHandler();
-        case ChannelType.COMFYUI: return new ComfyUIProviderHandler();
+        case ChannelType.GEMINI: return GeminiApiHandler;
+        case ChannelType.ANTHROPIC: return AnthropicApiHandler;
+        case ChannelType.AZURE: return AzureOpenAIApiHandler;
+        case ChannelType.BAIDU: return BaiduApiHandler;
+        case ChannelType.ALI: return AliApiHandler;
+        case ChannelType.XUNFEI: return XunfeiApiHandler;
+        case ChannelType.MIDJOURNEY: return MidjourneyApiHandler;
+        case ChannelType.DEEPSEEK: return DeepSeekApiHandler;
+        case ChannelType.SUNO: return SunoApiHandler;
+        case ChannelType.FLUX: return FluxApiHandler;
+        case ChannelType.JINA: return JinaApiHandler;
+        case ChannelType.UDIO: return UdioApiHandler;
+        case ChannelType.NVIDIA: return NvidiaApiHandler;
+        case ChannelType.DAKKA: return DakkaApiHandler;
+        case ChannelType.COMFYUI: return ComfyUIProviderHandler;
         // We can safely route everything else (including OpenAI standard) to OpenAIApiHandler.
         // Kling can be managed in video router specifically if it doesn't have a unique enum,
         // but default handles standard passthrough.
         case ChannelType.OPENAI:
-        default: return new OpenAIApiHandler();
+        default: return OpenAIApiHandler;
     }
 }
 

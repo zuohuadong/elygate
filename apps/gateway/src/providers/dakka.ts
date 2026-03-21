@@ -1,7 +1,13 @@
 import type { ProviderHandler } from './types';
 
-export class DakkaApiHandler implements ProviderHandler {
-    transformRequest(body: Record<string, any>, model: string): Record<string, any> {
+export const DakkaApiHandler: ProviderHandler = {
+    transformRequest,
+    transformResponse,
+    extractUsage,
+    buildHeaders
+};
+
+function transformRequest(body: Record<string, any>, model: string): Record<string, any> {
         // Extract prompt from OpenAI request format
         let prompt = '';
         if (body.prompt) {
@@ -29,7 +35,7 @@ export class DakkaApiHandler implements ProviderHandler {
         };
     }
 
-    transformResponse(data: Record<string, any>): Record<string, any> {
+function transformResponse(data: Record<string, any>): Record<string, any> {
         // Grsai Dakka API returns an object like:
         // { "id": "...", "url": "https://...", "status": "succeeded", "results": [{"url": "..."}] }
         
@@ -51,17 +57,17 @@ export class DakkaApiHandler implements ProviderHandler {
         };
     }
 
-    extractUsage(data: Record<string, any>): { promptTokens: number; completionTokens: number } {
+function extractUsage(data: Record<string, any>): { promptTokens: number; completionTokens: number } {
         // The API specification says variants increase cost (1 variant = 50 points etc.)
         // We will default to standard OpenAI usage calculation for image creation
         // which usually registers as a prompt token based on billing strategy
         return { promptTokens: 1000, completionTokens: 0 };
     }
 
-    buildHeaders(apiKey: string): Headers {
+function buildHeaders(apiKey: string): Headers {
         return new Headers({
             'Authorization': `Bearer ${apiKey}`,
             'Content-Type': 'application/json'
         });
     }
-}
+

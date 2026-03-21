@@ -154,7 +154,7 @@
     let systemHealth = $state({ online: 0, offline: 0, busy: 0 });
     $effect(() => { (async () => {
         try {
-            const health = await apiFetch<any>('/admin/dashboard/health');
+            const health = await apiFetch<{ online: number, offline: number, busy: number }>('/admin/dashboard/health');
             systemHealth = health || { online: 0, offline: 0, busy: 0 };
         } catch { /* stats parse fallback */ }
     })(); });

@@ -57,12 +57,8 @@ export function cleanResponseTokens<T>(data: T): T {
     return data;
 }
 
-/**
- * Enterprise Content Filter (DLP)
- * Supports global and group-specific regex patterns to block sensitive data or inappropriate content.
- */
-export class ContentFilter {
-    static async validate(text: string, group: string): Promise<{ blocked: boolean; pattern?: string }> {
+export const ContentFilter = {
+    async validate(text: string, group: string): Promise<{ blocked: boolean; pattern?: string }> {
         if (!text) return { blocked: false };
 
         const groupPolicy = memoryCache.userGroups.get(group);
@@ -87,14 +83,11 @@ export class ContentFilter {
         }
 
         return { blocked: false };
-    }
+    },
 
-    /**
-     * Extracts all text from a request body for validation.
-     */
-    static extractText(body: Record<string, any>): string {
+    extractText(body: Record<string, any>): string {
         if (typeof body === 'string') return body;
-        if (Array.isArray(body)) return body.map(this.extractText).join(' ');
+        if (Array.isArray(body)) return body.map(ContentFilter.extractText).join(' ');
         
         let text = '';
         if (body.messages && Array.isArray(body.messages)) {
@@ -105,4 +98,5 @@ export class ContentFilter {
         
         return text;
     }
-}
+};
+

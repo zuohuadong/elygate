@@ -15,9 +15,15 @@ import { ProviderHandler } from './types';
  * 
  * Reference: https://build.nvidia.com/explore/discover/models
  */
-export class NvidiaApiHandler implements ProviderHandler {
+export const NvidiaApiHandler: ProviderHandler = {
+    transformRequest,
+    transformResponse,
+    extractUsage,
+    buildHeaders
+};
 
-    transformRequest(body: Record<string, any>, model: string) {
+
+function transformRequest(body: Record<string, any>, model: string) {
         const transformed: Record<string, any> = {
             ...body,
             model
@@ -34,24 +40,24 @@ export class NvidiaApiHandler implements ProviderHandler {
         return transformed;
     }
 
-    transformResponse(data: Record<string, any>) {
+function transformResponse(data: Record<string, any>) {
         return data;
     }
 
-    extractUsage(data: Record<string, any>) {
+function extractUsage(data: Record<string, any>) {
         return {
             promptTokens: data.usage?.prompt_tokens || 0,
             completionTokens: data.usage?.completion_tokens || 0,
         };
     }
 
-    buildHeaders(apiKey: string) {
+function buildHeaders(apiKey: string) {
         const headers = new Headers();
         headers.set('Content-Type', 'application/json');
         headers.set('Authorization', `Bearer ${apiKey}`);
         return headers;
     }
-}
+
 
 /**
  * NVIDIA NIM Model Categories:

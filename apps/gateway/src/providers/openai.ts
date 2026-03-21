@@ -1,13 +1,8 @@
 import { ProviderHandler } from './types';
 import { removeNullFields } from '../utils/transform';
 
-/**
- * Native OpenAI Compatible Provider Handler
- * Note: Most compatible APIs (e.g., AnyRouter, Groq, DeepSeek API) can be handled via direct passthrough.
- */
-export class OpenAIApiHandler implements ProviderHandler {
-
-    transformRequest(body: Record<string, any>, model: string) {
+export const OpenAIApiHandler: ProviderHandler = {
+transformRequest(body: Record<string, any>, model: string) {
         // Support for 2026 GPT-5.4 specific parameters
         const transformed: Record<string, any> = {
             ...body,
@@ -38,13 +33,13 @@ export class OpenAIApiHandler implements ProviderHandler {
         }
 
         return transformed;
-    }
+    },
 
-    transformResponse(data: Record<string, any>): Record<string, any> {
+transformResponse(data: Record<string, any>): Record<string, any> {
         return removeNullFields(data) as any;
-    }
+    },
 
-    extractUsage(data: Record<string, any>) {
+extractUsage(data: Record<string, any>) {
         const promptTokens = data.usage?.prompt_tokens || 0;
         const completionTokens = data.usage?.completion_tokens || 0;
         const cachedTokens = data.usage?.prompt_tokens_details?.cached_tokens;
@@ -53,12 +48,13 @@ export class OpenAIApiHandler implements ProviderHandler {
             completionTokens,
             ...(cachedTokens !== undefined && { cachedTokens })
         };
-    }
+    },
 
-    buildHeaders(apiKey: string) {
+buildHeaders(apiKey: string) {
         const headers = new Headers();
         headers.set('Content-Type', 'application/json');
         headers.set('Authorization', `Bearer ${apiKey}`);
         return headers;
     }
-}
+};
+

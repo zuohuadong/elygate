@@ -33,7 +33,7 @@
 
 	async function loadSettings() {
 		try {
-			const res = await apiFetch<any>("/api/option");
+			const res = await apiFetch<Record<string, any>>("/api/option");
 			if (res && res.data) {
 				paymentEnabled = res.data.PaymentEnabled;
 				paymentMethods = (res.data.PaymentMethods || "").split(",");
@@ -48,7 +48,7 @@
 
 	async function loadBalance() {
 		try {
-			const data = await apiFetch<any>("/user/info");
+			const data = await apiFetch<Record<string, any>>("/user/info");
 			balance = data.quota || 0;
 		} catch (error) {
 			console.error("Failed to load balance:", error);
@@ -70,7 +70,7 @@
 	async function createPayment() {
 		try {
 			loading = true;
-			const data = await apiFetch<any>("/payment/create-order", {
+			const data = await apiFetch<{success?: boolean, message?: string, paymentUrl?: string, checkout_url?: string, url?: string, payment?: any}>("/payment/create-order", {
 				method: "POST",
 				body: JSON.stringify({
 					amount: selectedAmount,

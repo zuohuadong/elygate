@@ -6,8 +6,14 @@ import { ProviderHandler } from './types';
  * Standard MJ-Proxy often uses /mj/submit/imagine etc., but here we support 
  * a chat-compatible passthrough if the upstream is an MJ-OpenAI bridge.
  */
-export class MidjourneyApiHandler implements ProviderHandler {
-    transformRequest(body: Record<string, any>, model: string) {
+export const MidjourneyApiHandler: ProviderHandler = {
+    transformRequest,
+    transformResponse,
+    extractUsage,
+    buildHeaders
+};
+
+function transformRequest(body: Record<string, any>, model: string) {
         // Multi-modal/Image specific parameters for MJ
         return {
             ...body,
@@ -19,12 +25,12 @@ export class MidjourneyApiHandler implements ProviderHandler {
         };
     }
 
-    transformResponse(data: Record<string, any>) {
+function transformResponse(data: Record<string, any>) {
         // Usually MJ Proxy returns task ID or image URL inside standard OpenAI choices
         return data;
     }
 
-    extractUsage(data: Record<string, any>) {
+function extractUsage(data: Record<string, any>) {
         // MJ is usually fixed cost per action, mock as 1 token or use specific MJ pricing
         return {
             promptTokens: 1,
@@ -32,11 +38,11 @@ export class MidjourneyApiHandler implements ProviderHandler {
         };
     }
 
-    buildHeaders(apiKey: string) {
+function buildHeaders(apiKey: string) {
         const headers = new Headers();
         headers.set('Content-Type', 'application/json');
         headers.set('mj-api-secret', apiKey); // Some MJ proxies use this header
         headers.set('Authorization', `Bearer ${apiKey}`);
         return headers;
     }
-}
+
