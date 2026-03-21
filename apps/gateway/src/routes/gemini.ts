@@ -1,6 +1,6 @@
 import { Elysia } from 'elysia';
-import { UnifiedDispatcher } from '../services/dispatcher';
-import { ConverterFactory } from '../services/converters';
+import { dispatch } from '../services/dispatcher';
+import { getConverter } from '../services/converters';
 import { memoryCache } from '../services/cache';
 import type { TokenRecord,  UserRecord  } from '../types';
 
@@ -115,7 +115,7 @@ export const geminiRouter = new Elysia()
         let body;
         try {
             body = await request.json();
-        } catch (e) {
+        } catch (e: unknown) {
             return new Response(JSON.stringify({ 
                 error: { 
                     code: 400, 
@@ -128,7 +128,7 @@ export const geminiRouter = new Elysia()
             });
         }
 
-        const converter = ConverterFactory.getConverter('/generateContent');
+        const converter = getConverter('/generateContent');
         const internalReq = converter.convertRequest(body);
         internalReq.model = model;
         internalReq.stream = isStream;
@@ -136,7 +136,7 @@ export const geminiRouter = new Elysia()
         const ip = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown';
         const ua = request.headers.get('user-agent') || 'unknown';
 
-        const result = await UnifiedDispatcher.dispatch({
+        const result = await dispatch({
             model,
             body: internalReq,
             user: u,

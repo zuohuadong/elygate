@@ -276,7 +276,7 @@ async function rotateLogs() {
     try {
         await sql`DELETE FROM logs WHERE created_at < NOW() - (${days} * INTERVAL '1 day')`;
         await sql`DELETE FROM health_logs WHERE created_at < NOW() - (${days} * INTERVAL '1 day')`;
-    } catch (e) {
+    } catch (e: unknown) {
         log.error('[Billing/Rotation] Failed:', e);
     }
 }

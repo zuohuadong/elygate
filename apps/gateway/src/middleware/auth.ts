@@ -40,7 +40,7 @@ async function initAuthSync() {
                 }
             );
             log.info('[Auth/Cache] Listener established.');
-        } catch (e) {
+        } catch (e: unknown) {
             log.error('[Auth/Cache] Failed setting up listener:', e);
             authSyncPromise = null;
         }

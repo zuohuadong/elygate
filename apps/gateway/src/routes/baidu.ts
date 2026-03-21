@@ -1,7 +1,7 @@
 import type { ElysiaCtx } from '../types';
 import { Elysia } from 'elysia';
-import { UnifiedDispatcher } from '../services/dispatcher';
-import { ConverterFactory } from '../services/converters';
+import { dispatch } from '../services/dispatcher';
+import { getConverter } from '../services/converters';
 import { memoryCache } from '../services/cache';
 
 export const baiduRouter = new Elysia()
@@ -17,7 +17,7 @@ export const baiduRouter = new Elysia()
         const u = await memoryCache.getUserFromDB(t.userId);
         if (!u) return new Response(JSON.stringify({ error_code: 1, error_msg: 'User not found' }), { status: 401 });
 
-        const converter = ConverterFactory.getConverter('/wenxinworkshop/chat/');
+        const converter = getConverter('/wenxinworkshop/chat/');
         const internalReq = converter.convertRequest(body);
         internalReq.model = model;
 
@@ -25,7 +25,7 @@ export const baiduRouter = new Elysia()
         const ua = request.headers.get('user-agent') || 'unknown';
 
         try {
-            const result = await UnifiedDispatcher.dispatch({
+            const result = await dispatch({
                 model,
                 body: internalReq,
                 user: u,

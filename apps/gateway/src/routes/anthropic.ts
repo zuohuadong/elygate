@@ -1,8 +1,8 @@
 import { Elysia } from 'elysia';
 import { getErrorMessage } from '../utils/error';
 import { memoryCache } from '../services/cache';
-import { UnifiedDispatcher } from '../services/dispatcher';
-import { ConverterFactory } from '../services/converters';
+import { dispatch } from '../services/dispatcher';
+import { getConverter } from '../services/converters';
 import type { TokenRecord,  UserRecord  } from '../types';
 
 export const anthropicRouter = new Elysia()
@@ -37,7 +37,7 @@ export const anthropicRouter = new Elysia()
             });
         }
 
-        const converter = ConverterFactory.getConverter('/v1/messages');
+        const converter = getConverter('/v1/messages');
         const internalReq = converter.convertRequest(body);
         const isStream = internalReq.stream || false;
 
@@ -45,7 +45,7 @@ export const anthropicRouter = new Elysia()
         const ua = getHeader('user-agent') || 'unknown';
 
         try {
-            const result = await UnifiedDispatcher.dispatch({
+            const result = await dispatch({
                 model: internalReq.model,
                 body: internalReq,
                 user: u,

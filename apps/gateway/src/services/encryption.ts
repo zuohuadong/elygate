@@ -68,7 +68,7 @@ export function decrypt(ciphertext: string): string {
         decrypted += decipher.final('utf8');
         
         return decrypted;
-    } catch (error) {
+    } catch (error: unknown) {
         // If decryption fails, assume it's not encrypted (backward compatibility)
         log.warn('[Encryption] Failed to decrypt, returning as-is:', error);
         return ciphertext;

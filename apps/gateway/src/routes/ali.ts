@@ -1,7 +1,7 @@
 import type { ElysiaCtx } from '../types';
 import { Elysia } from 'elysia';
-import { UnifiedDispatcher } from '../services/dispatcher';
-import { ConverterFactory } from '../services/converters';
+import { dispatch } from '../services/dispatcher';
+import { getConverter } from '../services/converters';
 import { memoryCache } from '../services/cache';
 
 export const aliRouter = new Elysia()
@@ -15,14 +15,14 @@ export const aliRouter = new Elysia()
         const u = await memoryCache.getUserFromDB(t.userId);
         if (!u) return new Response(JSON.stringify({ code: 'Unauthorized', message: 'User not found' }), { status: 401 });
 
-        const converter = ConverterFactory.getConverter('/aigc/text-generation/generation');
+        const converter = getConverter('/aigc/text-generation/generation');
         const internalReq = converter.convertRequest(body);
 
         const ip = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown';
         const ua = request.headers.get('user-agent') || 'unknown';
 
         try {
-            const result = await UnifiedDispatcher.dispatch({
+            const result = await dispatch({
                 model: internalReq.model,
                 body: internalReq,
                 user: u,

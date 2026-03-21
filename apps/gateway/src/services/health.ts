@@ -88,7 +88,7 @@ class HealthChecker {
                     }
                 }
             }
-        } catch (e) {
+        } catch (e: unknown) {
             log.error("[HealthCheck] Global Error:", e);
         } finally {
             this.isRunning = false;

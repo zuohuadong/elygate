@@ -60,7 +60,7 @@ export async function recordAuditLog(entry: Omit<AuditLog, 'id' | 'createdAt'>):
                 NOW()
             )
         `;
-    } catch (error) {
+    } catch (error: unknown) {
         log.error('[AuditLog] Failed to record audit log:', error);
     }
 }

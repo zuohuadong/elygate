@@ -22,7 +22,7 @@ export const optionCache = {
 
             this.options = newOptions;
             this.lastUpdated = Date.now();
-        } catch (e) {
+        } catch (e: unknown) {
             log.error('[OptionCache] Failed to refresh options:', e);
         }
     },

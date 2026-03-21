@@ -317,30 +317,28 @@ convertRequest(body: Record<string, any>): InternalRequest {
 
 
 /**
- * Converter Factory
+ * Converter Factory — selects the appropriate format converter based on request path
  */
-export class ConverterFactory {
-    static getConverter(path: string): FormatConverter {
-        // Chat
-        if (path.includes('/messages')) return AnthropicConverter;
-        if (path.includes('/generateContent')) return GeminiConverter;
-        if (path.includes('/aigc/text-generation/generation')) return AliConverter;
-        if (path.includes('/wenxinworkshop/chat/')) return BaiduConverter;
+export function getConverter(path: string): FormatConverter {
+    // Chat
+    if (path.includes('/messages')) return AnthropicConverter;
+    if (path.includes('/generateContent')) return GeminiConverter;
+    if (path.includes('/aigc/text-generation/generation')) return AliConverter;
+    if (path.includes('/wenxinworkshop/chat/')) return BaiduConverter;
 
-        // Embeddings
-        if (path.includes(':embedContent')) return GeminiEmbeddingConverter;
-        if (path.includes('/aigc/multimodal-embedding/')) return AliEmbeddingConverter;
-        if (path.includes('/wenxinworkshop/embeddings/')) return BaiduEmbeddingConverter;
+    // Embeddings
+    if (path.includes(':embedContent')) return GeminiEmbeddingConverter;
+    if (path.includes('/aigc/multimodal-embedding/')) return AliEmbeddingConverter;
+    if (path.includes('/wenxinworkshop/embeddings/')) return BaiduEmbeddingConverter;
 
-        // Images
-        if (path.includes('/aigc/text2image/')) return AliImageConverter;
+    // Images
+    if (path.includes('/aigc/text2image/')) return AliImageConverter;
 
-        // Audio
-        if (path.includes('/audio/')) return AudioConverter;
+    // Audio
+    if (path.includes('/audio/')) return AudioConverter;
 
-        // Moderations
-        if (path.includes('/moderations')) return ModerationConverter;
+    // Moderations
+    if (path.includes('/moderations')) return ModerationConverter;
 
-        return OpenAIConverter;
-    }
+    return OpenAIConverter;
 }

@@ -77,7 +77,7 @@ export const ContentFilter = {
                 if (regex.test(text)) {
                     return { blocked: true, pattern: p };
                 }
-            } catch (e) {
+            } catch (e: unknown) {
                 log.warn(`[ContentFilter] Invalid regex pattern: ${p}`);
             }
         }

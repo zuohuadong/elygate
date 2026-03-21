@@ -48,8 +48,8 @@ async function waitForConcurrencyRelease(lockId: string, limit: number, maxWaitM
     return false; // Timed out waiting for slot
 }
 
-export class UnifiedDispatcher {
-    static async dispatch(options: DispatchOptions) {
+// UnifiedDispatcher — functional module
+export async function dispatch(options: DispatchOptions) {
         const { body, user, token, endpointType, skipTransform, idempotencyKey, externalTaskId, externalUserId, externalWorkspaceId, externalFeatureType } = options;
         let model = options.model;
         const isStream = options.stream || body.stream || false;
@@ -276,7 +276,7 @@ export class UnifiedDispatcher {
             // 3.5 Billing Pre-check
             let preDeducted = 0;
             try {
-                const maxTokens = this.estimateMaxTokens(body, endpointType);
+                const maxTokens = estimateMaxTokens(body, endpointType);
                 preDeducted = await preCheckAndDecrement({
                     userId: user.id,
                     tokenId: token.id,
@@ -311,7 +311,7 @@ export class UnifiedDispatcher {
 
                 if (isStream && response.body) {
                     const [clientStream, billingStream] = response.body.tee();
-                    this.handleStreamBilling(billingStream, body, user, token, channelConfig, model, preDeducted, lockId, isPackageFree, packageLockId, response.status, traceId, forwardBody, effectiveIdempotencyKey, externalTaskId, externalUserId, externalWorkspaceId, externalFeatureType);
+                    handleStreamBilling(billingStream, body, user, token, channelConfig, model, preDeducted, lockId, isPackageFree, packageLockId, response.status, traceId, forwardBody, effectiveIdempotencyKey, externalTaskId, externalUserId, externalWorkspaceId, externalFeatureType);
 
                     // Create a TransformStream to clean model internal tokens from stream
                     const cleanStream = new TransformStream({
@@ -336,7 +336,7 @@ export class UnifiedDispatcher {
                     const rawData = await response.json();
 
                     // Check for upstream overload errors that should trigger retry
-                    const isOverloadError = this.checkUpstreamOverload(rawData);
+                    const isOverloadError = checkUpstreamOverload(rawData);
                     if (isOverloadError) {
                         log.warn(`[Dispatcher] Upstream overload detected for model ${model} on channel ${channelConfig.name}, will retry with another channel`);
                         await circuitBreaker.recordError(channelConfig.id, 503);
@@ -572,7 +572,7 @@ export class UnifiedDispatcher {
      * Check if upstream response indicates an overload/error that should trigger retry
      * Some providers return 200 status but with an error message in the body
      */
-    private static checkUpstreamOverload(data: Record<string, any>): boolean {
+function checkUpstreamOverload(data: Record<string, any>): boolean {
         if (!data || typeof data !== 'object') return false;
 
         // Check for error in choices[0].delta.content (streaming format)
@@ -618,7 +618,7 @@ export class UnifiedDispatcher {
 
     // URL building is now handled by utils/url.ts buildUpstreamUrl()
 
-    private static estimateMaxTokens(body: Record<string, any>, type: string) {
+function estimateMaxTokens(body: Record<string, any>, type: string) {
         if (type === 'chat') return body.max_tokens || 4096;
         if (type === 'native-gemini') {
             const thinkingBudget = body.generationConfig?.thinkingConfig?.thinkingBudget || 0;
@@ -629,7 +629,7 @@ export class UnifiedDispatcher {
         return 4096;
     }
 
-    private static handleStreamBilling(
+function handleStreamBilling(
         billingStream: ReadableStream,
         body: Record<string, any>,
         user: UserRecord,
@@ -741,7 +741,7 @@ export class UnifiedDispatcher {
                         ON CONFLICT (key_hash) DO NOTHING
                     `.catch((e: unknown) => log.warn('[Async] Suppressed:', e));
                 }
-            } catch (e) {
+            } catch (e: unknown) {
                 log.error("[Stream Billing Error]", e);
                 // Refund pre-deducted quota natively on abrupt stream network drop before completion
                 await reconcileQuota({
@@ -758,4 +758,4 @@ export class UnifiedDispatcher {
             }
         })();
     }
-}
+

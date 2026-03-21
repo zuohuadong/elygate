@@ -30,7 +30,7 @@ export const webhookService = {
                 body: JSON.stringify(body)
             });
             log.info(`[Webhook] Event '${event}' sent to ${webhookUrl}`);
-        } catch (e) {
+        } catch (e: unknown) {
             log.error(`[Webhook] Failed to send '${event}':`, e);
         }
     }

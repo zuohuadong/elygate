@@ -118,7 +118,7 @@ export const dashboardRouter = new Elysia()
             const [exCount] = await sql`SELECT COUNT(*) as cnt FROM response_cache`;
             exact_cache_size = Number(exSize?.size || 0);
             exact_cache_count = Number(exCount?.cnt || 0);
-        } catch (e) {
+        } catch (e: unknown) {
             log.warn('[Admin] Failed to read cache sizes:', e);
         }
 

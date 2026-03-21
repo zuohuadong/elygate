@@ -1,7 +1,7 @@
 import { Elysia, t } from 'elysia';
 import { sql } from '@elygate/db';
 import { authPlugin } from '../middleware/auth';
-import { UnifiedDispatcher } from '../services/dispatcher';
+import { dispatch } from '../services/dispatcher';
 import { ChannelType  } from '../providers/types';
 
 export const workflowsRouter = new Elysia({ prefix: '/v1/workflows' })
@@ -40,9 +40,9 @@ export const workflowsRouter = new Elysia({ prefix: '/v1/workflows' })
 
         const resolvedWorkflow = JSON.parse(workflowString);
 
-        // 3. Dispatch via UnifiedDispatcher
+        // 3. Dispatch via dispatch
         // We override the body with the resolved workflow
-        return await UnifiedDispatcher.dispatch({
+        return await dispatch({
             model: model || 'comfyui-default',
             body: { 
                 ...body, 

@@ -199,7 +199,7 @@ export const memoryCache = {
             if (!skipBroadcast) {
                 await sql`NOTIFY refresh_cache, 'refresh_cache'`;
             }
-        } catch (e) {
+        } catch (e: unknown) {
             log.error('[Cache] Failed to refresh channels:', e);
         }
     },
@@ -442,7 +442,7 @@ export const memoryCache = {
                 return true;
             }
             return false;
-        } catch (e) {
+        } catch (e: unknown) {
             log.error('[Cache] Failed to update user quota:', e);
             return false;
         }
@@ -519,7 +519,7 @@ export const memoryCache = {
             try {
                 await sql`CALL expire_cache_rows('7 days'::INTERVAL)`;
                 log.info('[Cache] Cleanup completed.');
-            } catch (e) {
+            } catch (e: unknown) {
                 log.error('[Cache] Cleanup failed:', e);
             }
         }, 60 * 60 * 1000);
@@ -557,7 +557,7 @@ export const memoryCache = {
                         headers: { 'Authorization': `Bearer ${config.adminToken || ''}` }
                     });
                     if (res.ok) log.info(`[Discovery] Synced models for ${ch.name}`);
-                } catch (e) {
+                } catch (e: unknown) {
                     // Silently fail for background sync
                 }
             }
@@ -602,7 +602,7 @@ export const memoryCache = {
                     }
                 );
                 log.info('[Cache] Multi-instance sync listener established.');
-            } catch (e) {
+            } catch (e: unknown) {
                 log.error('[Cache] Failed setting up listener:', e);
                 this.syncPromise = null; // enable retry
             }

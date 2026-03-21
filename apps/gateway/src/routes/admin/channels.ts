@@ -19,7 +19,7 @@ try {
     if (await file.exists()) {
         modelConfig = await file.json();
     }
-} catch (error) {
+} catch (error: unknown) {
     log.error('[ModelConfig] Failed to load model config:', error);
 }
 

@@ -53,7 +53,7 @@ export const notificationService = {
                 })
             });
             log.info(`[Notification/Telegram] Message sent: ${subject}`);
-        } catch (e) {
+        } catch (e: unknown) {
             log.error('[Notification/Telegram] Failed:', e);
         }
     }

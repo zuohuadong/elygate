@@ -1,6 +1,6 @@
 import { Elysia } from 'elysia';
-import { UnifiedDispatcher } from '../services/dispatcher';
-import { ConverterFactory } from '../services/converters';
+import { dispatch } from '../services/dispatcher';
+import { getConverter } from '../services/converters';
 import { memoryCache } from '../services/cache';
 
 export const audioRouter = new Elysia()
@@ -22,7 +22,7 @@ async function handleAudio({ body, headers, params, request, query }: Record<str
     const u = await memoryCache.getUserFromDB(t.userId);
     if (!u) return new Response(JSON.stringify({ error: 'User not found' }), { status: 401 });
 
-    const converter = ConverterFactory.getConverter(`/audio/`);
+    const converter = getConverter(`/audio/`);
     const internalReq = converter.convertRequest(body);
     
     const model = internalReq.model || body.model;
@@ -31,7 +31,7 @@ async function handleAudio({ body, headers, params, request, query }: Record<str
     const ua = request.headers.get('user-agent') || 'unknown';
 
     try {
-        const result = await UnifiedDispatcher.dispatch({
+        const result = await dispatch({
             model,
             body: internalReq,
             user: u,
@@ -42,7 +42,7 @@ async function handleAudio({ body, headers, params, request, query }: Record<str
             ua
         });
 
-        // Binary responses are returned directly as Response objects from UnifiedDispatcher
+        // Binary responses are returned directly as Response objects from dispatch
         return result;
     } catch (error: unknown) {
         const mappedError = converter.convertError(error);

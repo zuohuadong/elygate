@@ -2,7 +2,7 @@ import type { ElysiaCtx } from '../types';
 import { log } from '../services/logger';
 import { Elysia } from 'elysia';
 import { assertModelAccess } from '../middleware/auth';
-import { UnifiedDispatcher, type DispatchOptions } from '../services/dispatcher';
+import { dispatch, type DispatchOptions } from '../services/dispatcher';
 
 interface ProxyRouteConfig {
     path: string;
@@ -52,7 +52,7 @@ export function createProxyRoute(config: ProxyRouteConfig): Elysia {
 
             log.info(`[${label}] UserID: ${user.id}, Token: ${token.name}, Model: ${model}, TaskID: ${externalTaskId || 'N/A'}`);
 
-            return await UnifiedDispatcher.dispatch({
+            return await dispatch({
                 model,
                 body,
                 user,

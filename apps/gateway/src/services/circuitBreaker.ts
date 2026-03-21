@@ -123,7 +123,7 @@ class CircuitBreaker {
                 );
                 await webhookService.trigger('channel.disabled', { channelId, reason });
             }
-        } catch (e) {
+        } catch (e: unknown) {
             log.error(`[CircuitBreaker] Failed to disable channel ${channelId}:`, e);
         }
     }
@@ -176,7 +176,7 @@ class CircuitBreaker {
                 }
             }
             if (changed) await memoryCache.refresh();
-        } catch (e) {
+        } catch (e: unknown) {
             log.error('[HealthCheck] Error checking channels:', e);
         }
     }
@@ -220,7 +220,7 @@ class CircuitBreaker {
             });
             clearTimeout(timeout);
             return res.status < 429;
-        } catch (e) {
+        } catch (e: unknown) {
             return false;
         }
     }

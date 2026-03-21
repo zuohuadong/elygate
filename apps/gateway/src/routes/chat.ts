@@ -8,7 +8,7 @@ import { optionCache } from '../services/optionCache';
 import { lookupSemanticCache, storeSemanticCache } from '../services/semanticCache';
 import { lookupResponseCache, storeResponseCache } from '../services/responseCache';
 import { getChannelKeys } from '../services/encryption';
-import { UnifiedDispatcher } from '../services/dispatcher';
+import { dispatch } from '../services/dispatcher';
 import type { TokenRecord,  UserRecord  } from '../types';
 import { removeNullFields } from '../utils/transform';
 import { translateErrorBilingual } from '../services/i18n';
@@ -278,8 +278,8 @@ export const chatRouter = new Elysia()
             }
         }
 
-        // --- 3. Cache Miss: Dispatch to upstream via UnifiedDispatcher ---
-        const result = await UnifiedDispatcher.dispatch({
+        // --- 3. Cache Miss: Dispatch to upstream via dispatch ---
+        const result = await dispatch({
             model,
             body,
             user: u,
