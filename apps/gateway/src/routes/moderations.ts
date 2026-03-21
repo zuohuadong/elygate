@@ -8,7 +8,7 @@ export const moderationsRouter = new Elysia()
     .post('/moderations', async (ctx) => handleModeration(ctx))
     .post('/v1/moderations', async (ctx) => handleModeration(ctx));
 
-async function handleModeration({ body, headers, params, request, query }: ElysiaCtx) {
+async function handleModeration({ body, headers, params, request, query }: any) {
     const apiKey = query?.access_token || request.headers.get('Authorization')?.replace('Bearer ', '');
     
     if (!apiKey) return new Response(JSON.stringify({ error: 'Missing API key' }), { status: 401 });
@@ -40,7 +40,7 @@ async function handleModeration({ body, headers, params, request, query }: Elysi
         });
 
         if (result && !(result instanceof Response)) {
-            return converter.convertResponse(result as Record<string, any>[]);
+            return converter.convertResponse(result as any);
         }
 
         return result;

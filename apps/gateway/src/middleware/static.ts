@@ -1,3 +1,5 @@
+import type { BunFile } from 'bun';
+import fs from 'fs';
 import { join } from 'path';
 
 /**
@@ -26,12 +28,15 @@ export function staticFileHandler(): (ctx: { path: string; set: { status?: numbe
             const file = Bun.file(fullPath);
             if (await file.exists()) {
                 if (path.includes('/_app/immutable/')) {
-                    set.headers['Cache-Control'] = 'public, max-age=31536000, immutable';
+                    if (!set.headers) set.headers = {};
+                set.headers['Cache-Control'] = 'public, max-age=31536000, immutable';
                 } else {
-                    set.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
+                    if (!set.headers) set.headers = {};
+                set.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
                 }
 
                 const ext = fullPath.split('.').pop();
+                if (!set.headers) set.headers = {};
                 if (ext === 'js') set.headers['Content-Type'] = 'application/javascript; charset=utf-8';
                 else if (ext === 'css') set.headers['Content-Type'] = 'text/css; charset=utf-8';
                 else if (ext === 'html') set.headers['Content-Type'] = 'text/html; charset=utf-8';
@@ -45,6 +50,7 @@ export function staticFileHandler(): (ctx: { path: string; set: { status?: numbe
         if (!isAsset) {
             const indexFile = Bun.file(join(buildPath, 'index.html'));
             if (await indexFile.exists()) {
+                if (!set.headers) set.headers = {};
                 set.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
                 set.headers['Content-Type'] = 'text/html; charset=utf-8';
                 return indexFile;

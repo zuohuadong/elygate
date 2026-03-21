@@ -3,10 +3,10 @@ import { getErrorMessage } from '../utils/error';
 import { memoryCache } from '../services/cache';
 import { UnifiedDispatcher } from '../services/dispatcher';
 import { ConverterFactory } from '../services/converters';
-import type { TokenRecord, type UserRecord , ElysiaCtx } from '../types';
+import type { TokenRecord,  UserRecord  } from '../types';
 
 export const anthropicRouter = new Elysia()
-    .post('/messages', async ({ body, headers, request }: ElysiaCtx) => {
+    .post('/messages', async ({ body, headers, request }: any) => {
         const startTime = Date.now();
         const headerObj = headers as Record<string, string>;
         const getHeader = (name: string) => headerObj[name.toLowerCase()] || headerObj[name] || '';
@@ -61,7 +61,7 @@ export const anthropicRouter = new Elysia()
             }
 
             if (!isStream && result && !(result instanceof Response)) {
-                return converter.convertResponse(result as Record<string, any>[]);
+                return converter.convertResponse(result as any);
             }
 
             return result;

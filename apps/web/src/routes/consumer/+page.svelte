@@ -54,8 +54,8 @@
         isLoading = true;
         try {
             const [userData, logsData, statsData] = await Promise.all([
-                apiFetch<Record<string, unknown>>("/user/info"),
-                apiFetch<Record<string, unknown>>("/user/logs?limit=5"),
+                apiFetch<any>("/user/info"),
+                apiFetch<any>("/user/logs?limit=5"),
                 apiFetch<UserStats>(`/user/dashboard/stats?period=${activePeriod}`),
             ]);
             userInfo = userData;
@@ -84,7 +84,7 @@
         message = { type: "", text: "" };
 
         try {
-            const res = await apiFetch<Record<string, unknown>>("/redemptions/redeem", {
+            const res = await apiFetch<any>("/redemptions/redeem", {
                 method: "POST",
                 body: JSON.stringify({ key: topupCode.trim() }),
             });

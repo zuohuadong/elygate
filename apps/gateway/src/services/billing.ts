@@ -32,7 +32,7 @@ export async function preCheckAndDecrement(ctx: {
     if (ctx.isPackageFree) return 0;
     const estimatedCost = calculateCost(ctx.modelName, ctx.userGroup, 0, ctx.maxTokens || 4096);
 
-    const result = await sql.begin(async (tx) => {
+    const result = await sql.begin(async (tx: any) => {
         const [user] = await tx`
             UPDATE users 
             SET quota = quota - ${estimatedCost}
@@ -65,7 +65,7 @@ export async function reconcileQuota(ctx: {
     const diff = ctx.preDeducted - ctx.actualCost;
     if (diff === 0) return;
 
-    await sql.begin(async (tx) => {
+    await sql.begin(async (tx: any) => {
         await tx`UPDATE users SET quota = quota + ${diff} WHERE id = ${ctx.userId}`;
         await tx`UPDATE tokens SET remain_quota = CASE WHEN remain_quota >= 0 THEN remain_quota + ${diff} ELSE remain_quota END WHERE id = ${ctx.tokenId}`;
     });
@@ -139,7 +139,7 @@ async function flushBillingQueue(retryCount = 0) {
             }
         }
 
-        await sql.begin(async (tx) => {
+        await sql.begin(async (tx: any) => {
             const correctedUserAgg: Record<number, number> = {};
             const correctedTokenAgg: Record<number, number> = {};
             const correctedOrgAgg: Record<number, number> = {};

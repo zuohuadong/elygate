@@ -36,7 +36,7 @@ async function handleAudio({ body, headers, params, request, query }: Record<str
             body: internalReq,
             user: u,
             token: t,
-            endpointType: endpointType as string,
+            endpointType: endpointType as any,
             stream: false,
             ip,
             ua

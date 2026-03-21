@@ -17,7 +17,7 @@ export const settingsRouter = new Elysia()
         return options;
     })
 
-    .put('/options', async ({ body }: ElysiaCtx) => {
+    .put('/options', async ({ body }: any) => {
         const payload = body as Record<string, string>;
         
         const newEmbeddingModel = payload.SemanticCacheEmbeddingModel;
@@ -67,7 +67,7 @@ export const settingsRouter = new Elysia()
     })
 
     // --- Embedding Model Check ---
-    .post('/check-embedding', async ({ body, set }: ElysiaCtx) => {
+    .post('/check-embedding', async ({ body, set }: any) => {
         try {
             const { model } = body as { model: string };
             if (!model) {
@@ -150,7 +150,7 @@ export const settingsRouter = new Elysia()
         }
     })
 
-    .get('/test-cycle-reset', async ({ user }: ElysiaCtx) => {
+    .get('/test-cycle-reset', async ({ user }: any) => {
         try {
             const [pkg] = await sql`
                 INSERT INTO packages (name, description, price, duration_days, cycle_quota, cycle_interval, cycle_unit, is_public)

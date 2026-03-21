@@ -4,7 +4,7 @@ import { Elysia } from 'elysia';
 import { cors } from '@elysiajs/cors';
 import { sql } from '@elygate/db';
 import { isRateLimited } from '../services/ratelimit';
-import type { TokenRecord, type UserRecord , ElysiaCtx } from '../types';
+import type { TokenRecord,  UserRecord  } from '../types';
 import { memoryCache } from '../services/cache';
 import { LRUCache } from 'lru-cache';
 import { jwt } from '@elysiajs/jwt';
@@ -86,7 +86,7 @@ export const authPlugin = new Elysia({ name: 'auth' })
         name: 'jwt',
         secret: config.jwtSecret!
     }))
-    .derive({ as: 'global' }, async ({ request, set, jwt, cookie: { auth_session } }: ElysiaCtx) => {
+    .derive({ as: 'global' }, async ({ request, set, jwt, cookie: { auth_session } }: any) => {
         let authHeader = request.headers.get('authorization');
 
         // --- Support Anthropic API x-api-key header ---
@@ -324,7 +324,7 @@ export const authPlugin = new Elysia({ name: 'auth' })
  */
 export const adminGuard = new Elysia({ name: 'admin-guard' })
     .use(authPlugin)
-    .onBeforeHandle(({ user, set }: ElysiaCtx) => {
+    .onBeforeHandle(({ user, set }: any) => {
         if (!user) {
             set.status = 401;
             throw new Error('Unauthorized');

@@ -94,7 +94,7 @@
 
 		// Check if user is authenticated via Cookie
 		try {
-			const me = await apiFetch<Record<string, unknown>>("/user/info");
+			const me = await apiFetch<any>("/user/info");
 			if (me && me.username) {
 				session.update({
 					id: me.id,
@@ -145,7 +145,7 @@
 		]);
 
 		// Fetch system info for exchange rate
-		apiFetch<Record<string, unknown>>("/status")
+		apiFetch<any>("/status")
 			.then((res: Record<string, any>) => {
 				if (res.data) {
 					session.setSystemInfo({

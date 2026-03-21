@@ -6,9 +6,9 @@
 
     let { show, group, onClose, onSave } = $props<{
         show: boolean;
-        group: Record<string, unknown> | null;
+        group: Record<string, any> | null;
         onClose: () => void;
-        onSave: (data: Record<string, unknown>) => void;
+        onSave: (data: Record<string, any>) => void;
     }>();
 
     let formData = $state({

@@ -1,3 +1,4 @@
+import { log } from '../services/logger';
 import { config } from '../config';
 import { Elysia } from 'elysia';
 import { sql } from '@elygate/db';

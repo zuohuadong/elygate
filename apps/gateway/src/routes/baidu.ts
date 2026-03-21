@@ -5,7 +5,7 @@ import { ConverterFactory } from '../services/converters';
 import { memoryCache } from '../services/cache';
 
 export const baiduRouter = new Elysia()
-    .post('/rpc/2.0/ai_custom/v1/wenxinworkshop/chat/:model', async ({ body, params, request, query }: ElysiaCtx) => {
+    .post('/rpc/2.0/ai_custom/v1/wenxinworkshop/chat/:model', async ({ body, params, request, query }: any) => {
         const model = params.model;
         const apiKey = query.access_token || request.headers.get('Authorization')?.replace('Bearer ', '');
         
@@ -41,7 +41,7 @@ export const baiduRouter = new Elysia()
             }
 
             if (result && !(result instanceof Response)) {
-                return converter.convertResponse(result as Record<string, any>[]);
+                return converter.convertResponse(result as any);
             }
 
             return result;

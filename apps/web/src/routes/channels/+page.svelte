@@ -94,12 +94,12 @@
         isModalOpen = true;
     }
 
-    function handleEdit(channel: Record<string, unknown>) {
+    function handleEdit(channel: Record<string, any>) {
         selectedChannel = channel;
         isModalOpen = true;
     }
 
-    async function handleDelete(channel: Record<string, unknown>) {
+    async function handleDelete(channel: Record<string, any>) {
         const confirmMsg = i18n.t.common.confirmDelete.replace(
             "{name}",
             `"${channel.name}"`,
@@ -111,11 +111,11 @@
             });
             await loadChannels();
         } catch (err: unknown) {
-            alert(i18n.t.common.failed + ": " + err instanceof Error ? err.message : String(err));
+            alert(i18n.t.common.failed + ": " + (err instanceof Error ? err.message : String(err)));
         }
     }
 
-    async function handleSave(data: Record<string, unknown>) {
+    async function handleSave(data: Record<string, any>) {
         try {
             if (selectedChannel) {
                 await apiFetch(`/admin/channels/${selectedChannel.id}`, {
@@ -131,7 +131,7 @@
             isModalOpen = false;
             await loadChannels();
         } catch (err: unknown) {
-            alert(i18n.t.common.failed + ": " + err instanceof Error ? err.message : String(err));
+            alert(i18n.t.common.failed + ": " + (err instanceof Error ? err.message : String(err)));
         }
     }
 </script>

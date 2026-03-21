@@ -59,7 +59,7 @@
 
         isLoading = true;
         try {
-            const data = await apiFetch<Record<string, unknown>>("/register", {
+            const data = await apiFetch<any>("/register", {
                 method: "POST",
                 body: JSON.stringify({
                     username,

@@ -103,11 +103,11 @@
             await apiFetch(endpoint, { method: "DELETE" });
             await loadTokens();
         } catch (err: unknown) {
-            alert(i18n.t.common.failed + ": " + err instanceof Error ? err.message : String(err));
+            alert(i18n.t.common.failed + ": " + (err instanceof Error ? err.message : String(err)));
         }
     }
 
-    async function handleSave(data: Record<string, unknown>) {
+    async function handleSave(data: Record<string, any>) {
         try {
             if (selectedToken) {
                 const endpoint = isAdmin
@@ -127,7 +127,7 @@
             isModalOpen = false;
             await loadTokens();
         } catch (err: unknown) {
-            alert(i18n.t.common.failed + ": " + err instanceof Error ? err.message : String(err));
+            alert(i18n.t.common.failed + ": " + (err instanceof Error ? err.message : String(err)));
         }
     }
 </script>

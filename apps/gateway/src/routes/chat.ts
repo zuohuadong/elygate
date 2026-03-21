@@ -9,7 +9,7 @@ import { lookupSemanticCache, storeSemanticCache } from '../services/semanticCac
 import { lookupResponseCache, storeResponseCache } from '../services/responseCache';
 import { getChannelKeys } from '../services/encryption';
 import { UnifiedDispatcher } from '../services/dispatcher';
-import type { TokenRecord, type UserRecord , ElysiaCtx } from '../types';
+import type { TokenRecord,  UserRecord  } from '../types';
 import { removeNullFields } from '../utils/transform';
 import { translateErrorBilingual } from '../services/i18n';
 
@@ -113,12 +113,12 @@ function filterThinkingContent(response: Response): Record<string, any> {
 /**
  * Resolve embedding channel and model for semantic cache lookups.
  */
-function resolveEmbeddingChannel(): { channel: Record<string, any>; model: string | undefined } {
-    const configuredModel = optionCache.get('SemanticCacheEmbeddingModel');
+function resolveEmbeddingChannel(): { channel: Record<string, any> | null; model: string | undefined } {
+    const configuredModel = optionCache.get('CHAT_CHANNEL_MODEL', '') as string;
 
     if (configuredModel) {
-        const ch = memoryCache.selectChannels(configuredModel)[0];
-        if (ch) return { channel: ch, model: configuredModel };
+        const ch = memoryCache.selectChannels(configuredModel as string)[0];
+        if (ch) return { channel: ch, model: configuredModel as string };
     }
 
     const candidates = [
@@ -186,7 +186,7 @@ async function billCacheHit(
 }
 
 export const chatRouter = new Elysia()
-    .post('/chat/completions', async ({ body, token, user, request, set }: ElysiaCtx) => {
+    .post('/chat/completions', async ({ body, token, user, request, set }: any) => {
         const u = user as UserRecord;
         const t = token as TokenRecord;
         const startTime = Date.now();

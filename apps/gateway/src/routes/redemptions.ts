@@ -9,7 +9,7 @@ import { authPlugin } from '../middleware/auth';
  * Prefix and authPlugin are applied in index.ts
  */
 export const redemptionsRouter = new Elysia()
-    .post('/redeem', async ({ body, user }: ElysiaCtx) => {
+    .post('/redeem', async ({ body, user }: any) => {
         const key = body?.key?.trim();
 
         if (!key) {

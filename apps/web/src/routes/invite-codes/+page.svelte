@@ -94,13 +94,13 @@
         isModalOpen = true;
     }
 
-    async function handleDelete(item: InviteCode) {
+    async function handleDelete(item: any) {
         if (!confirm(i18n.lang === "zh" ? `确定要删除邀请码 "${item.code}" 吗？` : `Are you sure you want to delete invite code "${item.code}"?`)) return;
         try {
             await apiFetch(`/admin/invite-codes/${item.id}`, { method: "DELETE" });
             await loadData();
         } catch (err: unknown) {
-            alert(i18n.t.common.failed + ": " + err instanceof Error ? err.message : String(err));
+            alert(i18n.t.common.failed + ": " + (err instanceof Error ? err.message : String(err)));
         }
     }
 
@@ -113,14 +113,14 @@
             });
             await loadData();
         } catch (err: unknown) {
-            alert(i18n.t.common.failed + ": " + err instanceof Error ? err.message : String(err));
+            alert(i18n.t.common.failed + ": " + (err instanceof Error ? err.message : String(err)));
         }
     }
 
     async function handleSubmit(e: Event) {
         e.preventDefault();
         try {
-            const payload: Record<string, unknown> = {
+            const payload: Record<string, any> = {
                 maxUses: formData.maxUses,
                 giftQuota: formData.giftQuota,
             };
@@ -138,7 +138,7 @@
             isModalOpen = false;
             await loadData();
         } catch (err: unknown) {
-            alert(i18n.t.common.failed + ": " + err instanceof Error ? err.message : String(err));
+            alert(i18n.t.common.failed + ": " + (err instanceof Error ? err.message : String(err)));
         }
     }
 </script>

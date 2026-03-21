@@ -42,18 +42,19 @@ function sanitize(obj: unknown): unknown {
         return obj.map(item => sanitize(item));
     }
 
-    const sanitized: Record<string, unknown> = {};
+    const objAny = obj as Record<string, any>;
+    const sanitized: Record<string, any> = {};
     for (const key in obj) {
-        if (Object.prototype.hasOwnProperty.call(obj, key)) {
+        if (Object.prototype.hasOwnProperty.call(objAny, key)) {
             if (SENSITIVE_KEYS.some(k => key.toLowerCase().includes(k.toLowerCase()))) {
                 sanitized[key] = '[REDACTED]';
-            } else if (typeof obj[key] === 'object') {
-                sanitized[key] = sanitize(obj[key]);
-            } else if (isSensitive(obj[key])) {
+            } else if (typeof objAny[key] === 'object') {
+                sanitized[key] = sanitize(objAny[key]);
+            } else if (isSensitive(objAny[key])) {
                 // If the value itself looks sensitive (e.g. contains "sk-")
                 sanitized[key] = '[REDACTED]';
             } else {
-                sanitized[key] = obj[key];
+                sanitized[key] = objAny[key];
             }
         }
     }

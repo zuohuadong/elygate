@@ -28,7 +28,7 @@
 
     $effect(() => { loadData(); });
 
-    const renderModels = (models: Record<string, any>[]) => {
+    const renderModels = (models: any) => {
         if (!models) return "";
         const arr = Array.isArray(models) ? models : (typeof models === 'string' ? models.split(',') : []);
         return arr.map((m: string) => `<span class="inline-block px-1.5 py-0.5 mr-1 mb-1 rounded bg-indigo-50 dark:bg-indigo-500/10 text-[11px] text-indigo-700 dark:text-indigo-300 font-mono tracking-tighter shadow-sm border border-indigo-100 dark:border-indigo-500/20">${m.trim()}</span>`).join("");

@@ -21,7 +21,7 @@ export const mjRouter = new Elysia()
     .use(authPlugin)
 
     // --- Submit Imagine (Text to Image) ---
-    .post('/mj/submit/imagine', async ({ body, token, user, set }: ElysiaCtx) => {
+    .post('/mj/submit/imagine', async ({ body, token, user, set }: any) => {
         const { prompt, base64Array, notifyHook, state } = body as Record<string, any>;
 
         if (!prompt) {
@@ -109,7 +109,7 @@ export const mjRouter = new Elysia()
     })
 
     // --- Submit Action (U1, V2, Reroll) ---
-    .post('/mj/submit/action', async ({ body, token, user, set }: ElysiaCtx) => {
+    .post('/mj/submit/action', async ({ body, token, user, set }: any) => {
         const { customId, taskId, state } = body as Record<string, any>;
 
         if (!customId) return { code: 4, description: "customId required" };
@@ -178,7 +178,7 @@ export const mjRouter = new Elysia()
     })
 
     // --- Task Fetch (Polling) ---
-    .get('/mj/task/:id/fetch', async ({ params: { id }, token, user }: ElysiaCtx) => {
+    .get('/mj/task/:id/fetch', async ({ params: { id }, token, user }: any) => {
         // Find task in local DB
         const [task] = await sql`SELECT * FROM mj_tasks WHERE uuid = ${id} AND user_id = ${user.id}`;
 
@@ -243,7 +243,7 @@ export const mjRouter = new Elysia()
     })
 
     // --- Webhook Consumer (Upstream posts here when done) ---
-    .post('/mj/webhook', async ({ body, request, set }: ElysiaCtx) => {
+    .post('/mj/webhook', async ({ body, request, set }: any) => {
         // Verify webhook secret to prevent unauthorized callbacks
         const webhookSecret = config.mjWebhookSecret;
         if (webhookSecret) {

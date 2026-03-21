@@ -41,12 +41,12 @@
         isModalOpen = true;
     }
 
-    function handleEdit(rule: Record<string, unknown>) {
+    function handleEdit(rule: Record<string, any>) {
         selectedRule = rule;
         isModalOpen = true;
     }
 
-    async function handleDelete(rule: Record<string, unknown>) {
+    async function handleDelete(rule: Record<string, any>) {
         if (!confirm(i18n.lang === "zh" ? `确认删除限流规则 "${rule.name}" 吗？这可能导致正在使用此规则的套餐报错。` : `Delete rule "${rule.name}"?`)) return;
         try {
             await apiFetch(`/admin/rate-limits/${rule.id}`, {
@@ -54,11 +54,11 @@
             });
             await loadRules();
         } catch (err: unknown) {
-            alert(i18n.t.common.failed + ": " + err instanceof Error ? err.message : String(err));
+            alert(i18n.t.common.failed + ": " + (err instanceof Error ? err.message : String(err)));
         }
     }
 
-    async function handleSave(data: Record<string, unknown>) {
+    async function handleSave(data: Record<string, any>) {
         try {
             if (selectedRule) {
                 await apiFetch(`/admin/rate-limits/${selectedRule.id}`, {
@@ -74,7 +74,7 @@
             isModalOpen = false;
             await loadRules();
         } catch (err: unknown) {
-            alert(i18n.t.common.failed + ": " + err instanceof Error ? err.message : String(err));
+            alert(i18n.t.common.failed + ": " + (err instanceof Error ? err.message : String(err)));
         }
     }
 </script>

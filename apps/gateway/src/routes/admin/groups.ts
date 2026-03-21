@@ -10,7 +10,7 @@ export const groupsRouter = new Elysia()
         const groups = await sql`SELECT * FROM user_groups ORDER BY created_at DESC`;
         return groups;
     })
-    .post('/user-groups', async ({ body, set }: ElysiaCtx) => {
+    .post('/user-groups', async ({ body, set }: any) => {
         try {
             const b = body as Record<string, any>;
             const [result] = await sql`
@@ -37,7 +37,7 @@ export const groupsRouter = new Elysia()
             status: t.Optional(t.Number())
         })
     })
-    .put('/user-groups/:key', async ({ params: { key }, body, set }: ElysiaCtx) => {
+    .put('/user-groups/:key', async ({ params: { key }, body, set }: any) => {
         try {
             const b = body as Record<string, any>;
             const [oldGroup] = await sql`SELECT * FROM user_groups WHERE key = ${key} LIMIT 1`;
@@ -67,7 +67,7 @@ export const groupsRouter = new Elysia()
             return { success: false, message: getErrorMessage(e) };
         }
     })
-    .delete('/user-groups/:key', async ({ params: { key }, set }: ElysiaCtx) => {
+    .delete('/user-groups/:key', async ({ params: { key }, set }: any) => {
         try {
             if (key === 'default') {
                 set.status = 400;

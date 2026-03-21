@@ -27,7 +27,7 @@ export async function refreshAllCaches(): Promise<void> {
 export const adminRouter = new Elysia()
     .use(adminGuard)
     .guard({
-        beforeHandle: ({ user, set }: ElysiaCtx) => {
+        beforeHandle: ({ user, set }: any) => {
             if (!user || user.role < 10) {
                 set.status = 403;
                 throw new Error('Forbidden: Admin privileges required');

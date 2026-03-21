@@ -40,8 +40,8 @@ export class OpenAIApiHandler implements ProviderHandler {
         return transformed;
     }
 
-    transformResponse(data: Record<string, any>) {
-        return removeNullFields(data);
+    transformResponse(data: Record<string, any>): Record<string, any> {
+        return removeNullFields(data) as any;
     }
 
     extractUsage(data: Record<string, any>) {

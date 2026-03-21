@@ -1,7 +1,7 @@
 import { config } from '../config';
 import { log } from '../services/logger';
 import { sql } from '@elygate/db';
-import type { ChannelConfig, type TokenRecord, type UserRecord } from '../types';
+import type { ChannelConfig, TokenRecord, UserRecord } from '../types';
 import { optionCache } from './optionCache';
 
 interface UserQuotaCache {

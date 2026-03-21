@@ -79,11 +79,11 @@
             });
             await loadGroups();
         } catch (err: unknown) {
-            alert(i18n.t.common.failed + ": " + err instanceof Error ? err.message : String(err));
+            alert(i18n.t.common.failed + ": " + (err instanceof Error ? err.message : String(err)));
         }
     }
 
-    async function handleSave(data: Record<string, unknown>) {
+    async function handleSave(data: Record<string, any>) {
         try {
             if (selectedGroup) {
                 await apiFetch(`/admin/user-groups/${selectedGroup.key}`, {
@@ -99,7 +99,7 @@
             isModalOpen = false;
             await loadGroups();
         } catch (err: unknown) {
-            alert(i18n.t.common.failed + ": " + err instanceof Error ? err.message : String(err));
+            alert(i18n.t.common.failed + ": " + (err instanceof Error ? err.message : String(err)));
         }
     }
 
@@ -117,7 +117,7 @@
             });
             await loadGroups();
         } catch (err: unknown) {
-             alert(i18n.t.common.failed + ": " + err instanceof Error ? err.message : String(err));
+             alert(i18n.t.common.failed + ": " + (err instanceof Error ? err.message : String(err)));
         }
     }
 </script>

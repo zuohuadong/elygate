@@ -4,10 +4,11 @@ import { Elysia, t } from 'elysia';
 import { sql } from '@elygate/db';
 import { memoryCache } from '../../services/cache';
 import { getProviderHandler } from '../../providers';
-import { ChannelType , ElysiaCtx } from '../../types';
+import { ChannelType  } from '../../types';
 import { encryptChannelKeys, decryptChannelKeys, getChannelKeys } from '../../services/encryption';
 import { buildModelsUrl, buildTestUrl } from '../../utils/url';
 import { refreshAllCaches } from './index';
+import { apiUrls } from '../../config';
 
 // Load model configurations
 let modelConfig: Record<string, any> = { anthropic: { models: [] } };
@@ -39,7 +40,7 @@ export const channelsRouter = new Elysia()
         }));
     })
 
-    .post('/channels', async ({ body, set }: ElysiaCtx) => {
+    .post('/channels', async ({ body, set }: any) => {
         try {
             const b = body as Record<string, any>;
             const encryptedKey = encryptChannelKeys(b.key);
@@ -69,7 +70,7 @@ export const channelsRouter = new Elysia()
         })
     })
 
-    .put('/channels/:id', async ({ params: { id }, body, set }: ElysiaCtx) => {
+    .put('/channels/:id', async ({ params: { id }, body, set }: any) => {
         try {
             const b = body as Record<string, any>;
             const [oldChannel] = await sql`SELECT * FROM channels WHERE id = ${Number(id)} LIMIT 1`;
@@ -118,7 +119,7 @@ export const channelsRouter = new Elysia()
         }
     })
 
-    .delete('/channels/:id', async ({ params: { id }, set }: ElysiaCtx) => {
+    .delete('/channels/:id', async ({ params: { id }, set }: any) => {
         try {
             await sql`DELETE FROM channels WHERE id = ${Number(id)}`;
             await refreshAllCaches();
@@ -129,7 +130,7 @@ export const channelsRouter = new Elysia()
         }
     })
 
-    .post('/channels/batch', async ({ body, set }: ElysiaCtx) => {
+    .post('/channels/batch', async ({ body, set }: any) => {
         try {
             const channels = body as Record<string, any>[];
             const results = [];
@@ -175,14 +176,14 @@ export const channelsRouter = new Elysia()
         }))
     })
 
-    .post('/channels/:id/sync-models', async ({ params: { id }, set }: ElysiaCtx) => {
+    .post('/channels/:id/sync-models', async ({ params: { id }, set }: any) => {
         const [channel] = await sql`SELECT * FROM channels WHERE id = ${Number(id)} LIMIT 1`;
         if (!channel) return (set.status = 404, { success: false, message: 'Channel not found' });
 
         const handler = getProviderHandler(channel.type);
         const keys = getChannelKeys(channel.key);
         const testKey = keys[0] || '';
-        const baseUrl = (channel.base_url || apiUrls.openaiDefault).replace(/\/+$/, '');
+        const baseUrl = (channel.base_url || (apiUrls as any).openaiDefault).replace(/\/+$/, '');
 
         const modelsUrl = buildModelsUrl(baseUrl, channel.type);
         const res = await fetch(modelsUrl, { headers: handler.buildHeaders(testKey) });
@@ -191,14 +192,14 @@ export const channelsRouter = new Elysia()
         const data = await res.json();
         const models = channel.type === ChannelType.GEMINI
             ? data.models?.map((m: Record<string, any>) => m.name?.replace('models/', '') || m.displayName).filter(Boolean) || []
-            : data.data?.map((m: Record<string, any>) => m.id).filter(Boolean) || data.map?.((m: any) => m.id || m.name).filter(Boolean) || [];
+            : data.data?.map((m: Record<string, any>) => m.id).filter(Boolean) || data.map?.((m: Record<string, any>) => m.id || m.name).filter(Boolean) || [];
 
         const [result] = await sql`UPDATE channels SET models = ${models}, updated_at = NOW() WHERE id = ${Number(id)} RETURNING *`;
         await refreshAllCaches();
         return { success: true, modelsCount: models.length, channel: result };
     })
 
-    .post('/channels/:id/keys/clean', async ({ params: { id }, set }: ElysiaCtx) => {
+    .post('/channels/:id/keys/clean', async ({ params: { id }, set }: any) => {
         try {
             const [channel] = await sql`SELECT * FROM channels WHERE id = ${Number(id)} LIMIT 1`;
             if (!channel) {
@@ -237,7 +238,7 @@ export const channelsRouter = new Elysia()
         }
     })
 
-    .post('/channels/:id/test', async ({ params: { id } }: ElysiaCtx) => {
+    .post('/channels/:id/test', async ({ params: { id } }: any) => {
         const [channel] = await sql`SELECT * FROM channels WHERE id = ${Number(id)} LIMIT 1`;
         if (!channel) throw new Error("Channel not found");
 
@@ -252,7 +253,7 @@ export const channelsRouter = new Elysia()
         const testKey = keys[0] || '';
         const fetchHeaders = handler.buildHeaders(testKey);
 
-        const baseUrl = (channel.base_url || apiUrls.openaiDefault).replace(/\/+$/, '');
+        const baseUrl = (channel.base_url || (apiUrls as any).openaiDefault).replace(/\/+$/, '');
         const testUrl = buildTestUrl(baseUrl, channel.type, testModel);
 
         const startTime = Date.now();
@@ -274,7 +275,7 @@ export const channelsRouter = new Elysia()
         }
     })
 
-    .post('/channels/fetch-models', async ({ body, set }: ElysiaCtx) => {
+    .post('/channels/fetch-models', async ({ body, set }: any) => {
         const { url, key, type } = body as { url?: string; key?: string; type?: number };
         
         if (!url || !key) {
@@ -324,7 +325,7 @@ export const channelsRouter = new Elysia()
         }
     })
 
-    .get('/channels/:id/models', async ({ params: { id }, set }: ElysiaCtx) => {
+    .get('/channels/:id/models', async ({ params: { id }, set }: any) => {
         const [channel] = await sql`SELECT * FROM channels WHERE id = ${Number(id)} LIMIT 1`;
         if (!channel) {
             set.status = 404;
@@ -347,7 +348,7 @@ export const channelsRouter = new Elysia()
         const testKey = keys[0] || '';
         const fetchHeaders = handler.buildHeaders(testKey);
 
-        const baseUrl = (channel.base_url || apiUrls.openaiDefault).replace(/\/+$/, '');
+        const baseUrl = (channel.base_url || (apiUrls as any).openaiDefault).replace(/\/+$/, '');
         const modelsUrl = buildModelsUrl(baseUrl, channel.type);
 
         try {

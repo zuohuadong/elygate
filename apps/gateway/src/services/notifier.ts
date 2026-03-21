@@ -25,9 +25,9 @@ export const notifier = {
 
     async sendEmail(subject: string, message: string) {
         const config = optionCache.get('SMTP_CONFIG', {});
-        if (!config.host) return;
+        if (!(config as any).host) return;
 
         // Implementation with nodemailer would go here
-        log.info(`[SMTP] Sending "${subject}" to ${config.to}`);
+        log.info(`[SMTP] Sending "${subject}" to ${(config as any).to}`);
     }
 };

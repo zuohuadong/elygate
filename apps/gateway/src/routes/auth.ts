@@ -3,7 +3,7 @@ import { Elysia, t } from 'elysia';
 import { sql } from '@elygate/db';
 import { authService } from '../services/auth';
 import { authPlugin } from '../middleware/auth';
-import type { UserRecord , ElysiaCtx } from '../types';
+import type { UserRecord  } from '../types';
 import { getLangFromHeader } from '../utils/i18n';
 import { optionCache } from '../services/optionCache';
 import { memoryCache } from '../services/cache';
@@ -74,7 +74,7 @@ export const authRouter = new Elysia()
         set.redirect = `${targetUrl}/auth/callback?token=${sessionToken}&username=${user.username}&role=${user.role}`;
     })
     // User registration
-    .post('/register', async ({ body, set, request }: ElysiaCtx) => {
+    .post('/register', async ({ body, set, request }: any) => {
         const lang = getLangFromHeader(request.headers.get('accept-language'));
         try {
             const { username, password, inviteCode } = body;
@@ -170,11 +170,11 @@ export const authRouter = new Elysia()
             };
         } catch (e: unknown) {
             set.status = 500;
-            return { success: false, message: e?.message || (lang === 'zh' ? '服务器内部错误' : 'Internal server error') };
+            return { success: false, message: (e as any)?.message || (lang === 'zh' ? '服务器内部错误' : 'Internal server error') };
         }
     })
     // Login route
-    .post('/login', async ({ body, set, request, cookie: { auth_session } }: ElysiaCtx) => {
+    .post('/login', async ({ body, set, request, cookie: { auth_session } }: any) => {
         const lang = getLangFromHeader(request.headers.get('accept-language'));
         const clientIP = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown';
 
@@ -243,10 +243,10 @@ export const authRouter = new Elysia()
             return { success: true, token: token.key, username: user.username, role: user.role, currency: user.currency || 'USD' };
         } catch (e: unknown) {
             set.status = 500;
-            return { success: false, message: e?.message || 'Internal server error' };
+            return { success: false, message: (e as any)?.message || 'Internal server error' };
         }
     })
-    .post('/logout', async ({ cookie: { auth_session } }: ElysiaCtx) => {
+    .post('/logout', async ({ cookie: { auth_session } }: any) => {
         if (auth_session.value) { await sql`DELETE FROM session WHERE token = ${auth_session.value}`; }
         auth_session.remove();
         return { success: true, message: 'Logged out successfully' };
@@ -257,7 +257,7 @@ export const authRouter = new Elysia()
         app.use(authPlugin)
             // Support both old and new (standardized) user dashboard paths
             .group('/user', (app) =>
-                app.get('/info', async ({ user }: ElysiaCtx) => {
+                app.get('/info', async ({ user }: any) => {
                     const u = user as UserRecord;
                     return {
                         id: u.id,
@@ -269,7 +269,7 @@ export const authRouter = new Elysia()
                         currency: u.currency || 'USD'
                     };
                 })
-                .get('/logs', async ({ query, user }: ElysiaCtx) => {
+                .get('/logs', async ({ query, user }: any) => {
                     const userRow = user as UserRecord;
                     const page = Number(query?.page) || 1;
                     const limit = Number(query?.limit) || 50;
@@ -292,7 +292,7 @@ export const authRouter = new Elysia()
                     `;
                     return { data, total: countRow.total, page, limit };
                 })
-                .get('/tokens', async ({ user }: ElysiaCtx) => {
+                .get('/tokens', async ({ user }: any) => {
                     const userRow = user as UserRecord;
                     const data = await sql`
                         SELECT id, name, key, status, remain_quota as "remainQuota", used_quota as "usedQuota", created_at as "createdAt", models
@@ -300,7 +300,7 @@ export const authRouter = new Elysia()
                     `;
                     return [...data];
                 })
-                .get('/packages', async ({ user }: ElysiaCtx) => {
+                .get('/packages', async ({ user }: any) => {
                     const userRow = user as UserRecord;
                     const userGroup = userRow.group || 'default';
                     const data = await sql`SELECT id, name, description, price, duration_days, models, allowed_groups FROM packages WHERE is_public = true ORDER BY price ASC`;
@@ -312,11 +312,11 @@ export const authRouter = new Elysia()
                         return true;
                     });
                 })
-                .get('/subscriptions', async ({ user }: ElysiaCtx) => {
+                .get('/subscriptions', async ({ user }: any) => {
                     const userRow = user as UserRecord;
                     return await sql`SELECT s.id, s.package_id, p.name as package_name, p.models, s.start_time, s.end_time, s.status FROM user_subscriptions s JOIN packages p ON s.package_id = p.id WHERE s.user_id = ${userRow.id} AND s.status = 1 ORDER BY s.end_time DESC`;
                 })
-                .post('/tokens', async ({ body, user }: ElysiaCtx) => {
+                .post('/tokens', async ({ body, user }: any) => {
                     const userRow = user as UserRecord;
                     const b = body as Record<string, any>;
                     const newKey = `sk-${Bun.randomUUIDv7('hex')}`;
@@ -327,7 +327,7 @@ export const authRouter = new Elysia()
                     `;
                     return result;
                 })
-                .put('/tokens/:id', async ({ params: { id }, body, user, set }: ElysiaCtx) => {
+                .put('/tokens/:id', async ({ params: { id }, body, user, set }: any) => {
                     const userRow = user as UserRecord;
                     const [existing] = await sql`SELECT id FROM tokens WHERE id = ${Number(id)} AND user_id = ${userRow.id}`;
                     if (!existing) { set.status = 403; throw new Error('Forbidden'); }
@@ -337,21 +337,21 @@ export const authRouter = new Elysia()
                     `;
                     return result;
                 })
-                .delete('/tokens/:id', async ({ params: { id }, user, set }: ElysiaCtx) => {
+                .delete('/tokens/:id', async ({ params: { id }, user, set }: any) => {
                     const userRow = user as UserRecord;
                     const [result] = await sql`DELETE FROM tokens WHERE id = ${Number(id)} AND user_id = ${userRow.id} RETURNING *`;
                     if (!result) { set.status = 403; throw new Error('Forbidden'); }
                     return { success: true, deleted: result };
                 })
             )
-            .get('/stats', async ({ user }: ElysiaCtx) => {
+            .get('/stats', async ({ user }: any) => {
                 const userRow = user as UserRecord;
                 return await sql`
                     SELECT DATE(created_at) as date, SUM(prompt_tokens + completion_tokens) as total_tokens, SUM(quota_cost) as total_cost, COUNT(*) as request_count
                     FROM logs WHERE user_id = ${userRow.id} AND created_at >= NOW() - INTERVAL '14 days' GROUP BY DATE(created_at) ORDER BY date ASC
                 `;
             })
-            .get('/realtime', async ({ user }: ElysiaCtx) => {
+            .get('/realtime', async ({ user }: any) => {
                 const userRow = user as UserRecord;
                 const [realtime] = await sql`
                     SELECT COUNT(*) as rpm, COALESCE(SUM(prompt_tokens + completion_tokens), 0) as tpm
@@ -359,7 +359,7 @@ export const authRouter = new Elysia()
                 `;
                 return { rpm: Number(realtime.rpm || 0), tpm: Number(realtime.tpm || 0) };
             })
-            .put('/currency', async ({ body, user }: ElysiaCtx) => {
+            .put('/currency', async ({ body, user }: any) => {
                 const userRow = user as UserRecord;
                 const { currency } = body;
                 if (!['USD', 'RMB'].includes(currency)) throw new Error('Invalid currency');

@@ -11,7 +11,7 @@
         username: string;
         role: number;
         currency: string;
-        user: Record<string, unknown>;
+        user: Record<string, any> | null;
     }
 
     interface SystemInfo {

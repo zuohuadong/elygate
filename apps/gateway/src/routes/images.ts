@@ -41,7 +41,7 @@ async function handleImages({ body, headers, params, request, query }: Record<st
         });
 
         if (result && !(result instanceof Response)) {
-            return converter.convertResponse(result as Record<string, any>[]);
+            return converter.convertResponse(result as any);
         }
 
         return result;

@@ -20,7 +20,7 @@
 
     $effect(() => {
         i18n.init();
-        apiFetch<Record<string, unknown>>("/status").then(res => {
+        apiFetch<any>("/status").then(res => {
             if (res && res.data) {
                 oauthConfig.github = res.data.github_oauth;
                 oauthConfig.discord = res.data.discord_oauth;
@@ -39,7 +39,7 @@
         isLoading = true;
 
         try {
-            const data = await apiFetch<Record<string, unknown>>("/login", {
+            const data = await apiFetch<any>("/login", {
                 method: "POST",
                 body: JSON.stringify({ username, password }),
             });

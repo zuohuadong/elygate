@@ -24,14 +24,14 @@ export const notificationService = {
 
     async sendEmail(subject: string, message: string) {
         const config = optionCache.get('SMTPConfig', {});
-        if (!config.host || !config.user) {
+        if (!(config as any).host || !(config as any).user) {
             log.warn('[Notification] SMTP not configured.');
             return;
         }
 
         // In a real implementation, use nodemailer here.
         // For Elygate parity, we log the attempt.
-        log.info(`[Notification/Email] To: ${config.adminEmail}, Subject: ${subject}`);
+        log.info(`[Notification/Email] To: ${(config as any).adminEmail}, Subject: ${subject}`);
     },
 
     async sendTelegram(subject: string, message: string) {

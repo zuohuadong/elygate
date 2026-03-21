@@ -90,11 +90,11 @@
             await apiFetch(`/admin/users/${user.id}`, { method: "DELETE" });
             await loadUsers();
         } catch (err: unknown) {
-            alert(i18n.t.common.failed + ": " + err instanceof Error ? err.message : String(err));
+            alert(i18n.t.common.failed + ": " + (err instanceof Error ? err.message : String(err)));
         }
     }
 
-    async function handleSave(data: Record<string, unknown>) {
+    async function handleSave(data: Record<string, any>) {
         try {
             if (selectedUser) {
                 await apiFetch(`/admin/users/${selectedUser.id}`, {
@@ -110,7 +110,7 @@
             isModalOpen = false;
             await loadUsers();
         } catch (err: unknown) {
-            alert(i18n.t.common.failed + ": " + err instanceof Error ? err.message : String(err));
+            alert(i18n.t.common.failed + ": " + (err instanceof Error ? err.message : String(err)));
         }
     }
 </script>

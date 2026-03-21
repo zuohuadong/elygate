@@ -6,18 +6,18 @@
     import { session } from "$lib/session.svelte";
     import QuotaCalculator from "./QuotaCalculator.svelte";
 
-    import { type Redemption } from "$lib/types";
+    import type { Redemption  } from "$lib/types";
 
     let {
         show = false,
         redemption = null,
         onClose = () => {},
-        onSave = (data: Record<string, unknown>) => {},
+        onSave = (data: Record<string, any>) => {},
     } = $props<{
         show: boolean;
         redemption: Redemption | null;
         onClose: () => void;
-        onSave: (data: Record<string, unknown>) => Promise<void>;
+        onSave: (data: Record<string, any>) => Promise<void>;
     }>();
 
     // Form state

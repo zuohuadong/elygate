@@ -80,7 +80,7 @@ export async function getAuditLogs(
     const { userId, action, resource, limit = 50, offset = 0 } = options;
 
     let whereClause = 'WHERE 1=1';
-    const params: Record<string, any>[] = [];
+    const params: any[] = [];
 
     if (userId) {
         whereClause += ` AND user_id = $${params.length + 1}`;

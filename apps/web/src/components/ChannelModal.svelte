@@ -4,18 +4,18 @@
     import { i18n } from "$lib/i18n/index.svelte";
     import { apiFetch } from "$lib/api";
 
-    import { type Channel } from "$lib/types";
+    import type { Channel  } from "$lib/types";
 
     let {
         show = false,
         channel = null,
         onClose = () => {},
-        onSave = (data: Record<string, unknown>) => {},
+        onSave = (data: Record<string, any>) => {},
     } = $props<{
         show: boolean;
         channel: Channel | null;
         onClose: () => void;
-        onSave: (data: Record<string, unknown>) => Promise<void>;
+        onSave: (data: Record<string, any>) => Promise<void>;
     }>();
 
     // Form state using Svelte 5 $state
@@ -140,7 +140,7 @@
             if (response.success && response.models) {
                 formData.models = response.models.join(",");
             } else {
-                throw new Error(response instanceof Error ? e instanceof Error ? e.message : String(e) : "Failed to fetch models");
+                throw new Error(response instanceof Error ? 'Failed to fetch' : "Failed to fetch models");
             }
         } catch (err: unknown) {
             fetchModelsError = err instanceof Error ? err instanceof Error ? err.message : String(err) : (i18n.lang === "zh" ? "获取模型失败" : "Failed to fetch models");

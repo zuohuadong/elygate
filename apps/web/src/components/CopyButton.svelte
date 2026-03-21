@@ -8,14 +8,14 @@
     }>();
 
     let copied = $state(false);
-    let timeout: Record<string, unknown>;
+    let timeout: Record<string, any>;
 
     function handleCopy(e: MouseEvent) {
         e.stopPropagation();
         
         const success = () => {
             copied = true;
-            if (timeout) clearTimeout(timeout);
+            if (timeout) clearTimeout(timeout as any);
             timeout = setTimeout(() => {
                 copied = false;
             }, 2000);

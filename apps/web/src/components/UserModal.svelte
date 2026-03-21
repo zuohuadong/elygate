@@ -6,18 +6,18 @@
     import { apiFetch } from "$lib/api";
     import { session } from "$lib/session.svelte";
 
-    import { type User } from "$lib/types";
+    import type { User  } from "$lib/types";
 
     let {
         show = false,
         user = null,
         onClose = () => {},
-        onSave = (data: Record<string, unknown>) => {},
+        onSave = (data: Record<string, any>) => {},
     } = $props<{
         show: boolean;
         user: User | null;
         onClose: () => void;
-        onSave: (data: Record<string, unknown>) => Promise<void>;
+        onSave: (data: Record<string, any>) => Promise<void>;
     }>();
 
 

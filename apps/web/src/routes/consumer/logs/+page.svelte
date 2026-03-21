@@ -16,12 +16,12 @@
     async function loadLogs(page: number) {
         isLoading = true;
         try {
-            const res = await apiFetch<Record<string, unknown>>(
+            const res = await apiFetch<any>(
                 `/user/logs?page=${page}&limit=${limit}`,
             );
             totalItems = res.total || 0;
             // Map keys
-            logs = res.data.map((l: Record<string, unknown>) => ({
+            logs = res.data.map((l: Record<string, any>) => ({
                 dt_created_at: new Date(l.createdAt).toLocaleString(),
                 dt_model: l.modelName,
                 dt_tokens: `${l.promptTokens} + ${l.completionTokens}`,

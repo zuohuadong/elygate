@@ -39,7 +39,7 @@
             });
             onSave();
         } catch (e: unknown) {
-            alert(i18n.t.common.failed + ": " + e instanceof Error ? e.message : String(e));
+            alert(i18n.t.common.failed + ": " + (e instanceof Error ? e.message : String(e)));
         } finally {
             isSubmitting = false;
         }

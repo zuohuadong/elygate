@@ -34,7 +34,7 @@ export const dashboardRouter = new Elysia()
         return errorLogs;
     })
 
-    .get('/stats/granular', async ({ query }: ElysiaCtx) => {
+    .get('/stats/granular', async ({ query }: any) => {
         const { start, end, group_by } = query as Record<string, string>;
         const startDate = start ? new Date(start) : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
         const endDate = end ? new Date(end) : new Date();
@@ -56,7 +56,7 @@ export const dashboardRouter = new Elysia()
         return stats;
     })
 
-    .get('/dashboard/period_stats', async ({ query }: ElysiaCtx) => {
+    .get('/dashboard/period_stats', async ({ query }: any) => {
         const { period, timezone } = query as Record<string, string>;
         const tz = timezone || 'UTC';
         
@@ -155,7 +155,7 @@ export const dashboardRouter = new Elysia()
             LIMIT 20
         `;
 
-        const totalChannelCost = models_channel.reduce((sum: Record<string, any>, m: Record<string, any>) => sum + Number(m.cost), 0) || 1;
+        const totalChannelCost = models_channel.reduce((sum: number, m: Record<string, any>) => sum + Number(m.cost), 0) || 1;
         models_channel.forEach((m: Record<string, any>) => {
             m.cost_percentage = Number(((Number(m.cost) / totalChannelCost) * 100).toFixed(1));
         });

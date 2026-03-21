@@ -13,7 +13,7 @@ export const embeddingsRouter = new Elysia()
     // Baidu
     .post('/rpc/2.0/ai_custom/v1/wenxinworkshop/embeddings/:model', async (ctx) => handleEmbeddings(ctx, '/wenxinworkshop/embeddings/'));
 
-async function handleEmbeddings({ body, headers, params, request, query }: ElysiaCtx, pathType: string) {
+async function handleEmbeddings({ body, headers, params, request, query }: any, pathType: string) {
     const apiKey = query?.access_token || request.headers.get('Authorization')?.replace('Bearer ', '') || request.headers.get('x-dashscope-api-key');
     
     if (!apiKey) return new Response(JSON.stringify({ error: 'Missing API key' }), { status: 401 });
@@ -46,7 +46,7 @@ async function handleEmbeddings({ body, headers, params, request, query }: Elysi
         });
 
         if (result && !(result instanceof Response)) {
-            return converter.convertResponse(result as Record<string, any>[]);
+            return converter.convertResponse(result as any);
         }
 
         return result;

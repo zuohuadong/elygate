@@ -53,12 +53,12 @@
         isModalOpen = true;
     }
 
-    function handleEdit(item: Record<string, unknown>) {
+    function handleEdit(item: Record<string, any>) {
         selectedItem = item;
         isModalOpen = true;
     }
 
-    async function handleDelete(item: Record<string, unknown>) {
+    async function handleDelete(item: Record<string, any>) {
         if (
             !confirm(
                 `Are you sure you want to delete redemption code "${item.name}"?`,
@@ -71,11 +71,11 @@
             });
             await loadData();
         } catch (err: unknown) {
-            alert(i18n.t.common.failed + ": " + err instanceof Error ? err.message : String(err));
+            alert(i18n.t.common.failed + ": " + (err instanceof Error ? err.message : String(err)));
         }
     }
 
-    async function handleSave(data: Record<string, unknown>) {
+    async function handleSave(data: Record<string, any>) {
         try {
             if (selectedItem) {
                 await apiFetch(`/admin/redemptions/${selectedItem.id}`, {
@@ -91,7 +91,7 @@
             isModalOpen = false;
             await loadData();
         } catch (err: unknown) {
-            alert(i18n.t.common.failed + ": " + err instanceof Error ? err.message : String(err));
+            alert(i18n.t.common.failed + ": " + (err instanceof Error ? err.message : String(err)));
         }
     }
 </script>

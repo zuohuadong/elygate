@@ -52,7 +52,7 @@ export const statsRouter = new Elysia()
         };
     })
 
-    .get('/users/:userId', async ({ params: { userId } }: ElysiaCtx) => {
+    .get('/users/:userId', async ({ params: { userId } }: any) => {
         const dailyStats = await sql`
             SELECT 
                 stat_date,
@@ -125,7 +125,7 @@ export const statsRouter = new Elysia()
         };
     })
 
-    .get('/channels/:channelId', async ({ params: { channelId } }: ElysiaCtx) => {
+    .get('/channels/:channelId', async ({ params: { channelId } }: any) => {
         const channelStats = await sql`
             SELECT 
                 DATE(created_at) as date,
@@ -225,7 +225,7 @@ export const statsRouter = new Elysia()
         };
     })
 
-    .post('/refresh', async ({ set }: ElysiaCtx) => {
+    .post('/refresh', async ({ set }: any) => {
         try {
             await sql`SELECT refresh_materialized_views()`;
             return { success: true, message: 'Materialized views refreshed' };

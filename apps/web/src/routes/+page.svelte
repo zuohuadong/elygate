@@ -101,16 +101,16 @@
 
     async function loadRecentLogs() {
         try {
-            let rawData: Record<string, unknown>[] = [];
+            let rawData: Record<string, any>[] = [];
             if (isAdmin) {
-                const data = await apiFetch<{ data: Record<string, unknown>[] } | any[]>("/admin/logs?limit=5");
+                const data = await apiFetch<{ data: Record<string, any>[] } | any[]>("/admin/logs?limit=5");
                 rawData = Array.isArray(data) ? data : (data?.data || []);
             } else {
                 const data = await apiFetch<any[]>("/user/logs?limit=5");
                 rawData = data || [];
             }
             // Convert snake_case to camelCase
-            recentLogs = rawData.map((log: Record<string, unknown>) => ({
+            recentLogs = rawData.map((log: Record<string, any>) => ({
                 id: log.id,
                 modelName: log.model_name || log.modelName,
                 promptTokens: log.prompt_tokens ?? log.promptTokens ?? 0,
@@ -154,7 +154,7 @@
     let systemHealth = $state({ online: 0, offline: 0, busy: 0 });
     $effect(() => { (async () => {
         try {
-            const health = await apiFetch<Record<string, unknown>>('/admin/dashboard/health');
+            const health = await apiFetch<any>('/admin/dashboard/health');
             systemHealth = health || { online: 0, offline: 0, busy: 0 };
         } catch { /* stats parse fallback */ }
     })(); });

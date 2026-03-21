@@ -16,7 +16,7 @@
 
     $effect(() => { (async () => {
         try {
-            const response = await apiFetch<{ data: Record<string, unknown>[], total: number, page: number, limit: number } | any[]>("/admin/logs");
+            const response = await apiFetch<{ data: Record<string, any>[], total: number, page: number, limit: number } | any[]>("/admin/logs");
             
             // Handle both array and object response formats
             const data = Array.isArray(response) ? response : (response.data || []);
@@ -74,7 +74,7 @@
             window.URL.revokeObjectURL(url);
             a.remove();
         } catch (err: unknown) {
-            alert('Export failed: ' + err instanceof Error ? err.message : String(err));
+            alert('Export failed: ' + (err instanceof Error ? err.message : String(err)));
         } finally {
             isExporting = false;
         }

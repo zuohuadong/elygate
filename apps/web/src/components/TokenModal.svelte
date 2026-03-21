@@ -4,18 +4,18 @@
     import { untrack } from "svelte";
     import { i18n } from "$lib/i18n/index.svelte";
 
-    import { type Token } from "$lib/types";
+    import type { Token  } from "$lib/types";
 
     let {
         show = false,
         token = null,
         onClose = () => {},
-        onSave = (data: Record<string, unknown>) => {},
+        onSave = (data: Record<string, any>) => {},
     } = $props<{
         show: boolean;
         token: Token | null;
         onClose: () => void;
-        onSave: (data: Record<string, unknown>) => Promise<void>;
+        onSave: (data: Record<string, any>) => Promise<void>;
     }>();
 
     let formData = $state({

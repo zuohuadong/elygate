@@ -1,5 +1,5 @@
 import type { ElysiaCtx } from '../types';
-import { config } from '../config';
+import { config, apiUrls } from '../config';
 import { log } from '../services/logger';
 import { getErrorMessage } from '../utils/error';
 import { Elysia, t } from 'elysia';
@@ -17,7 +17,7 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
     .use(authPlugin)
 
     // Create a new payment order (authenticated: userId comes from token, not request body)
-    .post('/create-order', async ({ body, user, set }: ElysiaCtx) => {
+    .post('/create-order', async ({ body, user, set }: any) => {
         try {
             // Safeguard: Check if payment is enabled first
             const [paymentEnabled] = await sql`SELECT value FROM options WHERE key = 'PaymentEnabled'`;
@@ -107,7 +107,7 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
     })
 
     // Stripe webhook callback — verify Stripe-Signature header
-    .post('/stripe/callback', async ({ body, request, set }: ElysiaCtx) => {
+    .post('/stripe/callback', async ({ body, request, set }: any) => {
         try {
             // Verify Stripe webhook signature if webhook secret is configured
             if (STRIPE_WEBHOOK_SECRET) {
@@ -147,7 +147,7 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
             }
 
             // Atomic: update order status AND add quota in single transaction
-            await sql.begin(async (tx) => {
+            await sql.begin(async (tx: any) => {
                 const [order] = await tx`
                     UPDATE payment_orders
                     SET status = 1, transaction_id = ${data.object.id}, updated_at = NOW()
@@ -178,7 +178,7 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
     })
 
     // EPay async callback
-    .post('/epay/callback', async ({ query, set }: ElysiaCtx) => {
+    .post('/epay/callback', async ({ query, set }: any) => {
         try {
             const params = new URLSearchParams(query);
             const sign = params.get('sign');
@@ -206,7 +206,7 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
             }
 
             // Atomic: update order status AND add quota in single transaction
-            await sql.begin(async (tx) => {
+            await sql.begin(async (tx: any) => {
                 const [order] = await tx`
                     UPDATE payment_orders
                     SET status = 1, transaction_id = ${params.get('trade_no')}, updated_at = NOW()
@@ -236,7 +236,7 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
     })
 
     // Get orders for the authenticated user only
-    .get('/orders', async ({ user, set }: ElysiaCtx) => {
+    .get('/orders', async ({ user, set }: any) => {
         try {
             const orders = await sql`
                 SELECT * FROM payment_orders 

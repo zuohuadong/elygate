@@ -69,7 +69,7 @@ async function init() {
     .onError(({ error }) => {
       return { success: false, message: error instanceof Error ? getErrorMessage(error) : String(error) };
     })
-    .onBeforeHandle(staticFileHandler())
+    
     .use(sysRouter)
     .group("/api", (app) =>
       app.get('/status', async () => {

@@ -4,7 +4,7 @@
     type Column = {
         key: string;
         label: string;
-        render?: (value: unknown, row: Record<string, unknown>) => unknown; // Supports custom rendering like Badge
+        render?: (value: any, row: any) => unknown; // Supports custom rendering like Badge
     };
 
     let {
@@ -21,11 +21,11 @@
         customActions,
         cell,
     }: {
-        data: Record<string, unknown>[];
+        data: Record<string, any>[];
         columns: Column[];
-        onEdit?: (row: Record<string, unknown>) => void;
-        onDelete?: (row: Record<string, unknown>) => void;
-        extraActions?: { label: string; class: string; onClick: (row: Record<string, unknown>) => void }[];
+        onEdit?: (row: Record<string, any>) => void;
+        onDelete?: (row: Record<string, any>) => void;
+        extraActions?: { label: string; class: string; onClick: (row: Record<string, any>) => void }[];
         pageSize?: number;
         currentPage?: number;
         total?: number;

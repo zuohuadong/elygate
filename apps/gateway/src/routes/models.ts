@@ -1,13 +1,13 @@
 import { Elysia } from 'elysia';
 import { memoryCache } from '../services/cache';
-import type { UserRecord, type TokenRecord , ElysiaCtx } from '../types';
+import type { UserRecord,  TokenRecord  } from '../types';
 import { matchPattern } from '../utils/pattern';
 
 /**
  * /v1/models endpoint - lists available models filtered by user permissions
  */
 export const modelsRouter = new Elysia()
-    .get('/models', ({ user, token, set, query }: ElysiaCtx) => {
+    .get('/models', ({ user, token, set, query }: any) => {
         if (!user || !token) {
             set.status = 401;
             return { success: false, message: "Unauthorized: Auth context missing" };
@@ -94,7 +94,7 @@ export const modelsRouter = new Elysia()
             })
         };
     })
-    .get('/models/:model', ({ user, token, params, set }: ElysiaCtx) => {
+    .get('/models/:model', ({ user, token, params, set }: any) => {
         if (!user || !token) {
             set.status = 401;
             return { success: false, message: "Unauthorized" };

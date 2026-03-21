@@ -66,7 +66,7 @@
             const cRatios = JSON.parse(configs.CompletionRatio);
             const fModels = JSON.parse(configs.FixedCostModels);
 
-            const list: Record<string, unknown>[] = [];
+            const list: Record<string, any>[] = [];
 
             // 1. Handle Token-based models
             Object.keys(mRatios).forEach((model) => {
@@ -156,7 +156,7 @@
                 error =
                     (i18n.lang === "zh"
                         ? `${c.title} JSON 格式错误: `
-                        : `Invalid JSON in ${c.title}: `) + err instanceof Error ? err.message : String(err);
+                        : `Invalid JSON in ${c.title}: `) + (err instanceof Error ? err.message : String(err));
                 isSaving = false;
                 return;
             }

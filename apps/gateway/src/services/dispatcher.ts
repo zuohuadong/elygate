@@ -6,7 +6,7 @@ import { circuitBreaker } from './circuitBreaker';
 import { billAndLog, preCheckAndDecrement, reconcileQuota } from './billing';
 import { calculateCost } from './ratio';
 import { ChannelType, getProviderHandler } from '../providers';
-import type { TokenRecord, type UserRecord, type ChannelConfig, ElysiaCtx } from '../types';
+import type { TokenRecord, UserRecord, ChannelConfig } from '../types';
 import { getChannelKeys } from './encryption';
 import { isRateLimited, isPackageRateLimited, waitForPackageConcurrency, packageConcurrencyMap, releasePackageConcurrency, getPackageLockId } from './ratelimit';
 import { buildUpstreamUrl } from '../utils/url';
@@ -246,8 +246,10 @@ export class UnifiedDispatcher {
                 // Pass original model name (with -F suffix) to transformRequest for enable_thinking handling
                 // but use upstreamModel for the actual model field in the request
                 const transformedBody = skipTransform ? body : handler.transformRequest(body, originalModel);
-                transformedBody.model = upstreamModel; // Override model with mapped name
-                forwardBody = JSON.stringify(transformedBody);
+                if (!Array.isArray(transformedBody)) {
+                    transformedBody.model = upstreamModel; // Override model with mapped name
+                }
+                forwardBody = JSON.stringify(transformedBody) as any;
             }
 
             // 3. Package & Rate Limit Check
@@ -420,7 +422,7 @@ export class UnifiedDispatcher {
                     }
 
                     // Usage extraction and billing
-                    let { promptTokens, completionTokens } = handler.extractUsage(rawData);
+                    let { promptTokens, completionTokens } = handler.extractUsage(rawData || {});
 
                     const actualCost = calculateCost(model, user.group, promptTokens, completionTokens);
 
@@ -468,7 +470,7 @@ export class UnifiedDispatcher {
 
                     // Clean model internal tokens from response
                     const cleanedData = cleanResponseTokens(rawData);
-                    return skipTransform ? cleanedData : handler.transformResponse(cleanedData);
+                    return skipTransform ? cleanedData : handler.transformResponse(cleanedData || {});
                 } else {
                     // Binary response (Audio, Image, Video blob)
                     const buffer = await response.arrayBuffer();
@@ -522,7 +524,7 @@ export class UnifiedDispatcher {
                         actualCost: 0
                     }).catch((e: unknown) => log.warn('[Async] Suppressed:', e));
                 }
-                lastError = e;
+                lastError = e instanceof Error ? e : new Error(String(e));
 
                 // Transparent Error Logging (Logged with $0.00 cost)
                 await billAndLog({
