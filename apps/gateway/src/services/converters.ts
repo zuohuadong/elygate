@@ -54,7 +54,7 @@ export class OpenAIConverter implements FormatConverter {
     convertError(error: unknown): Record<string, any> {
         return {
             error: {
-                message: error.message || 'Unknown error',
+                message: (error as any).message || 'Unknown error',
                 type: error.type || 'api_error',
                 param: error.param,
                 code: error.code
@@ -170,7 +170,7 @@ export class AnthropicConverter implements FormatConverter {
 
     convertError(error: unknown): Record<string, any> {
         let type = 'api_error';
-        const msg = error.message || 'Unknown error';
+        const msg = (error as any).message || 'Unknown error';
         if (msg.includes('401') || msg.includes('API key')) type = 'authentication_error';
         else if (msg.includes('404')) type = 'not_found_error';
         else if (msg.includes('429')) type = 'rate_limit_error';
@@ -248,7 +248,7 @@ export class GeminiConverter implements FormatConverter {
         return {
             error: {
                 code: 500,
-                message: error.message || 'Unknown error',
+                message: (error as any).message || 'Unknown error',
                 status: 'INTERNAL'
             }
         };
@@ -301,7 +301,7 @@ export class AliConverter implements FormatConverter {
     convertError(error: unknown): Record<string, any> {
         return {
             code: 'InternalError',
-            message: error.message || 'Unknown error',
+            message: (error as any).message || 'Unknown error',
             request_id: `err_${Date.now()}`
         };
     }
@@ -318,7 +318,7 @@ export class AliImageConverter implements FormatConverter {
             size: body.parameters?.size || '1024*1024',
             n: body.parameters?.n || 1,
             [Symbol.for('isImage')]: true
-        } as Record<string, any>;
+        } as unknown as import("../types").InternalRequest;
     }
     convertResponse(internalRes: Record<string, any>): any {
         return {
@@ -332,7 +332,7 @@ export class AliImageConverter implements FormatConverter {
     }
     convertStreamChunk(): string | null { return null; }
     convertError(error: unknown): Record<string, any> {
-        return { code: 'InternalError', message: error.message || 'Unknown error' };
+        return { code: 'InternalError', message: (error as any).message || 'Unknown error' };
     }
 }
 
@@ -372,7 +372,7 @@ export class BaiduConverter implements FormatConverter {
     convertError(error: unknown): Record<string, any> {
         return {
             error_code: 1,
-            error_msg: error.message || 'Unknown error'
+            error_msg: (error as any).message || 'Unknown error'
         };
     }
 }
@@ -386,7 +386,7 @@ export class GeminiEmbeddingConverter implements FormatConverter {
             model: 'embedding-model',
             input: body.content?.parts?.[0]?.text || '',
             [Symbol.for('isEmbedding')]: true
-        } as Record<string, any>;
+        } as unknown as import("../types").InternalRequest;
     }
     convertResponse(internalRes: Record<string, any>): any {
         return {
@@ -397,7 +397,7 @@ export class GeminiEmbeddingConverter implements FormatConverter {
     }
     convertStreamChunk(): string | null { return null; }
     convertError(error: unknown): Record<string, any> {
-        return { error: { message: error.message || 'Unknown error', code: 500 } };
+        return { error: { message: (error as any).message || 'Unknown error', code: 500 } };
     }
 }
 
@@ -410,7 +410,7 @@ export class AliEmbeddingConverter implements FormatConverter {
             model: body.model,
             input: body.input?.texts || body.input?.text || '',
             [Symbol.for('isEmbedding')]: true
-        } as Record<string, any>;
+        } as unknown as import("../types").InternalRequest;
     }
     convertResponse(internalRes: Record<string, any>): any {
         return {
@@ -423,7 +423,7 @@ export class AliEmbeddingConverter implements FormatConverter {
     }
     convertStreamChunk(): string | null { return null; }
     convertError(error: unknown): Record<string, any> {
-        return { code: 'InternalError', message: error.message || 'Unknown error' };
+        return { code: 'InternalError', message: (error as any).message || 'Unknown error' };
     }
 }
 
@@ -436,7 +436,7 @@ export class BaiduEmbeddingConverter implements FormatConverter {
             model: 'baidu-embedding',
             input: body.input || [],
             [Symbol.for('isEmbedding')]: true
-        } as Record<string, any>;
+        } as unknown as import("../types").InternalRequest;
     }
     convertResponse(internalRes: Record<string, any>): any {
         return {
@@ -447,7 +447,7 @@ export class BaiduEmbeddingConverter implements FormatConverter {
     }
     convertStreamChunk(): string | null { return null; }
     convertError(error: unknown): Record<string, any> {
-        return { error_code: 1, error_msg: error.message || 'Unknown error' };
+        return { error_code: 1, error_msg: (error as any).message || 'Unknown error' };
     }
 }
 
@@ -461,14 +461,14 @@ export class AudioConverter implements FormatConverter {
             input: body.input || '',
             voice: body.voice,
             [Symbol.for('isAudio')]: true
-        } as Record<string, any>;
+        } as unknown as import("../types").InternalRequest;
     }
     convertResponse(internalRes: Record<string, any>): any {
         return internalRes; // Binaery responses usually passthru
     }
     convertStreamChunk(): string | null { return null; }
     convertError(error: unknown): Record<string, any> {
-        return { error: { message: error.message || 'Unknown error', type: 'audio_error' } };
+        return { error: { message: (error as any).message || 'Unknown error', type: 'audio_error' } };
     }
 }
 
@@ -481,14 +481,14 @@ export class ModerationConverter implements FormatConverter {
             model: body.model || 'omni-moderation-latest',
             input: body.input,
             [Symbol.for('isModeration')]: true
-        } as Record<string, any>;
+        } as unknown as import("../types").InternalRequest;
     }
     convertResponse(internalRes: Record<string, any>): any {
         return internalRes;
     }
     convertStreamChunk(): string | null { return null; }
     convertError(error: unknown): Record<string, any> {
-        return { error: { message: error.message || 'Unknown error', type: 'moderation_error' } };
+        return { error: { message: (error as any).message || 'Unknown error', type: 'moderation_error' } };
     }
 }
 

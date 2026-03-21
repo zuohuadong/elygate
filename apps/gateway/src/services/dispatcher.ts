@@ -6,7 +6,7 @@ import { circuitBreaker } from './circuitBreaker';
 import { billAndLog, preCheckAndDecrement, reconcileQuota } from './billing';
 import { calculateCost } from './ratio';
 import { ChannelType, getProviderHandler } from '../providers';
-import type { TokenRecord, type UserRecord, type ChannelConfig } from '../types';
+import type { TokenRecord, type UserRecord, type ChannelConfig, ElysiaCtx } from '../types';
 import { getChannelKeys } from './encryption';
 import { isRateLimited, isPackageRateLimited, waitForPackageConcurrency, packageConcurrencyMap, releasePackageConcurrency, getPackageLockId } from './ratelimit';
 import { buildUpstreamUrl } from '../utils/url';
@@ -158,7 +158,7 @@ export class UnifiedDispatcher {
             throw new Error(`No available or authorized channel found for model: ${model}`);
         }
 
-        let lastError: unknown = null;
+        let lastError: Error | null = null;
         const channels = candidateChannels as ChannelConfig[];
 
         for (const channelConfig of channels) {
@@ -220,6 +220,11 @@ export class UnifiedDispatcher {
                     }
                 }
             }
+            if (body && typeof body === 'object' && !Array.isArray(body) && !(body instanceof FormData)) {
+                if (!body.model) {
+                    body.model = model;
+                }
+            }
 
             const upstreamUrl = buildUpstreamUrl(channelConfig, upstreamModel, endpointType, isStream);
             log.info(`[Dispatcher] Selected channel: ${channelConfig.name} (id=${channelConfig.id}), upstream: ${upstreamUrl}, model: ${upstreamModel}`);
@@ -279,15 +284,16 @@ export class UnifiedDispatcher {
                     isPackageFree
                 });
 
-                if (body.computer_use) log.info(`[Dispatcher] User ${user.id} requested Computer Use with ${model}`);
-                if (body.tool_search || body.deferred_tools) log.info(`[Dispatcher] Model ${model} active with Tool Search / Deferred Loading.`);
+                const bodyObj = body as Record<string, any>;
+                if (bodyObj.computer_use) log.info(`[Dispatcher] User ${user.id} requested Computer Use with ${model}`);
+                if (bodyObj.tool_search || bodyObj.deferred_tools) log.info(`[Dispatcher] Model ${model} active with Tool Search / Deferred Loading.`);
 
                 // 4. Upstream Fetch
                 const startTime = Date.now();
                 const response = await fetch(upstreamUrl, {
                     method: 'POST',
                     headers: fetchHeaders,
-                    body: forwardBody
+                    body: typeof forwardBody === 'object' && !(forwardBody instanceof FormData) ? JSON.stringify(forwardBody) : (forwardBody as BodyInit)
                 });
 
                 if (!response.ok) {
@@ -340,7 +346,7 @@ export class UnifiedDispatcher {
 
                     // Fallback for image models if usage is not provided by upstream (common for OpenAI DALL-E)
                     if (endpointType === 'images' && promptTokens === 0 && completionTokens === 0) {
-                        promptTokens = body.n || 1;
+                        promptTokens = (body as Record<string, any>).n || 1;
                     }
 
                     const actualCost = calculateCost(model, user.group, promptTokens, completionTokens);
@@ -394,7 +400,7 @@ export class UnifiedDispatcher {
                 } else if (contentType.includes('text/event-stream') || contentType.includes('text/plain')) {
                     // Some providers return SSE format even for non-stream requests
                     const text = await response.text();
-                    let rawData: Record<string, any> = null;
+                    let rawData: Record<string, any> | null = null;
                     
                     // Try to parse SSE format (data: {...})
                     if (text.startsWith('data:')) {
@@ -468,7 +474,7 @@ export class UnifiedDispatcher {
                     const buffer = await response.arrayBuffer();
 
                     // Default audio billing if not JSON (approx 1 unit per request as fallback)
-                    let promptTokens = endpointType.startsWith('audio') ? (body.input?.length || 1) : 1000;
+                    let promptTokens = endpointType.startsWith('audio') ? ((body as Record<string, any>).input?.length || 1) : 1000;
                     const actualCost = calculateCost(model, user.group, promptTokens, 0);
 
                     await reconcileQuota({ userId: user.id, tokenId: token.id, preDeducted, actualCost });
@@ -590,7 +596,7 @@ export class UnifiedDispatcher {
 
         // Check for error object in response
         if (data.error) {
-            const errorMsg = data.getErrorMessage(error) || data.error || '';
+            const errorMsg = typeof data.error === 'string' ? data.error : (data.error?.message || '');
             if (typeof errorMsg === 'string') {
                 const overloadPatterns = [
                     /负载过高/i,
@@ -648,7 +654,7 @@ export class UnifiedDispatcher {
                 const reader = billingStream.getReader();
                 const decoder = new TextDecoder("utf-8");
                 let completionText = '';
-                let usageData: Record<string, any> = null;
+                let usageData: Record<string, any> | null = null;
                 let buffer = '';
 
                 const timeoutError = new Error('Stream idle timeout exceeded (60s)');

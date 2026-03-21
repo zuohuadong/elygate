@@ -50,7 +50,7 @@ export async function checkAndResetSubscriptionQuota(userId: number): Promise<vo
     if (resetSubIds.length > 0) {
         log.info(`[Subscription] Refilling quota for User ${userId}. Total: ${totalRefill}. Subs: ${resetSubIds.join(',')}`);
         
-        await sql.begin(async (tx) => {
+        await sql.begin(async (tx: import('bun').SQL) => {
             // Refill user quota
             await tx`UPDATE users SET quota = quota + ${totalRefill} WHERE id = ${userId}`;
             

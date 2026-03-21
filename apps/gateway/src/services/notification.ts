@@ -35,7 +35,7 @@ export const notificationService = {
     },
 
     async sendTelegram(subject: string, message: string) {
-        const config = optionCache.get('TelegramConfig', {});
+        const config = optionCache.get('TelegramConfig', {} as Record<string, any>);
         if (!config.token || !config.chatId) {
             log.warn('[Notification] Telegram not configured.');
             return;

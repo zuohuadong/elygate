@@ -11,13 +11,13 @@ export const notifier = {
         log.info(`[Notifier] ${subject}: ${message}`);
         
         // 1. Email via SMTP (Simulation or implementation)
-        const smtpEnabled = optionCache.get('SMTP_ENABLED', 'false') === 'true';
+        const smtpEnabled = optionCache.get<string>('SMTP_ENABLED', 'false') === 'true';
         if (smtpEnabled) {
             await this.sendEmail(subject, message);
         }
 
         // 2. Webhook / Robot
-        const webhookEnabled = optionCache.get('WEBHOOK_ENABLED', 'false') === 'true';
+        const webhookEnabled = optionCache.get<string>('WEBHOOK_ENABLED', 'false') === 'true';
         if (webhookEnabled) {
             await webhookService.trigger('system.alert', { subject, message, ...payload });
         }

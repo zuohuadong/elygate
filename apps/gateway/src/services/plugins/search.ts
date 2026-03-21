@@ -1,6 +1,7 @@
 import { log } from '../../services/logger';
 import { getErrorMessage } from '../../utils/error';
 import { optionCache } from '../optionCache';
+import { apiUrls } from '../../config';
 
 /**
  * Web Search Plugin

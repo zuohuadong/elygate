@@ -27,11 +27,11 @@ export const optionCache = {
         }
     },
 
-    get(key: string, defaultValue?: unknown): unknown {
+    get<T>(key: string, defaultValue?: T): T {
         if (this.options.has(key)) {
-            return this.options.get(key);
+            return this.options.get(key) as T;
         }
-        return defaultValue;
+        return defaultValue as T;
     }
 };
 

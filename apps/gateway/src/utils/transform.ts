@@ -9,7 +9,7 @@ export function removeNullFields(obj: unknown): unknown {
     if (obj !== null && typeof obj === 'object') {
         const cleaned: Record<string, any> = {};
         for (const key of Object.keys(obj)) {
-            const value = obj[key];
+            const value = (obj as Record<string, any>)[key];
             if (value !== null) {
                 cleaned[key] = removeNullFields(value);
             }

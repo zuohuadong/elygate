@@ -35,29 +35,23 @@ export function cleanModelTokens(text: string): string {
 /**
  * Clean model internal tokens from response object
  */
-export function cleanResponseTokens(data: Record<string, any>): Record<string, any> {
+export function cleanResponseTokens<T>(data: T): T {
     if (!data) return data;
     
     if (typeof data === 'string') {
-        return cleanModelTokens(data);
+        return cleanModelTokens(data) as unknown as T;
     }
     
     if (Array.isArray(data)) {
-        return data.map(item => cleanResponseTokens(item));
+        return data.map(item => cleanResponseTokens(item)) as unknown as T;
     }
     
     if (typeof data === 'object') {
         const cleaned: Record<string, any> = {};
         for (const [key, value] of Object.entries(data)) {
-            if (key === 'content' && typeof value === 'string') {
-                cleaned[key] = cleanModelTokens(value);
-            } else if (key === 'text' && typeof value === 'string') {
-                cleaned[key] = cleanModelTokens(value);
-            } else {
-                cleaned[key] = cleanResponseTokens(value);
-            }
+            cleaned[key] = cleanResponseTokens(value);
         }
-        return cleaned;
+        return cleaned as unknown as T;
     }
     
     return data;
