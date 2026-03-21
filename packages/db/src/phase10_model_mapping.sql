@@ -1,7 +1,7 @@
 -- Phase 10: Unified Model Mapping
 -- Standardize model names across all channels
 
--- Channel 1: 英伟达
+-- Channel 1: NVIDIA
 UPDATE channels SET model_mapping = '{
   "GLM-5": "z-ai/glm5",
   "GLM-4.7": "z-ai/glm4.7",
@@ -27,7 +27,7 @@ UPDATE channels SET model_mapping = '{
   "Step-3.5-Flash": "stepfun-ai/step-3.5-flash"
 }'::jsonb WHERE id = 1;
 
--- Channel 3: 硅基流动
+-- Channel 3: SiliconFlow
 UPDATE channels SET model_mapping = '{
   "GLM-5": "Pro/zai-org/GLM-5",
   "GLM-4.7": "Pro/zai-org/GLM-4.7",

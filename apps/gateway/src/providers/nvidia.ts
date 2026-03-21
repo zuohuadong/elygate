@@ -11,7 +11,7 @@ import { ProviderHandler } from './types';
  * 
  * Note: Image/Audio/Video models on NVIDIA NIM cloud are not available
  * through standard endpoints. They are hosted on partner platforms like
- * SiliconFlow (硅基流动).
+ * SiliconFlow.
  * 
  * Reference: https://build.nvidia.com/explore/discover/models
  */

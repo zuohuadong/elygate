@@ -581,14 +581,13 @@ export class UnifiedDispatcher {
             const content = choice.delta?.content || choice.message?.content || '';
             if (typeof content === 'string') {
                 const overloadPatterns = [
-                    /负载过高/i,
                     /overload/i,
                     /too many requests/i,
                     /rate limit/i,
-                    /请稍后再试/i,
+                    /try again later/i,
                     /temporarily unavailable/i,
                     /service unavailable/i,
-                    /请稍后/i,
+                    /please wait/i,
                 ];
                 for (const pattern of overloadPatterns) {
                     if (pattern.test(content)) return true;
@@ -601,11 +600,10 @@ export class UnifiedDispatcher {
             const errorMsg = typeof data.error === 'string' ? data.error : (data.error?.message || '');
             if (typeof errorMsg === 'string') {
                 const overloadPatterns = [
-                    /负载过高/i,
                     /overload/i,
                     /too many requests/i,
                     /rate limit/i,
-                    /请稍后再试/i,
+                    /try again later/i,
                     /temporarily unavailable/i,
                     /service unavailable/i,
                 ];
