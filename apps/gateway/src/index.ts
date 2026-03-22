@@ -202,6 +202,7 @@ async function init() {
   }
   
   memoryCache.startCleanupTask();
+  memoryCache.startDiscoverySyncTask();
 
   const refreshMaterializedViews = async () => {
     try {
@@ -215,6 +216,7 @@ async function init() {
   
   refreshMaterializedViews();
   setInterval(refreshMaterializedViews, 5 * 60 * 1000);
+
 
   app.listen({
     port: 3000,

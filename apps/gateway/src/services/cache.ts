@@ -538,35 +538,66 @@ export const memoryCache = {
 
     /**
      * Periodically syncs models from all active upstream channels.
-     * Prevents stale model lists and improves user discovery.
+     * Prevents stale model lists and auto-maintains aliases.
+     * Runs every 12 hours, initial run after 5 minutes.
      */
     startDiscoverySyncTask(): void {
         if (this.discoverySyncInterval) return;
-        
+
         const sync = async () => {
             log.info('[Discovery] Starting background model sync for all channels...');
             const channels = Array.from(this.channels.values()).filter(ch => ch.status === 1);
-            
+
+            // Get admin session token from DB for internal API auth
+            let sessionToken = '';
+            try {
+                const [session] = await sql`
+                    SELECT s.token FROM session s
+                    JOIN users u ON s.user_id = u.id
+                    WHERE u.role >= 10 AND s.expires_at > NOW()
+                    ORDER BY s.expires_at DESC
+                    LIMIT 1
+                `;
+                sessionToken = session?.token || '';
+            } catch (e: unknown) {
+                log.error('[Discovery] Failed to get admin session:', e);
+                return;
+            }
+
+            if (!sessionToken) {
+                log.warn('[Discovery] No active admin session found, skipping sync');
+                return;
+            }
+
+            let synced = 0;
+            let failed = 0;
             for (const ch of channels) {
                 try {
-                    // Call the internal sync logic (simulated here or via internal route)
-                    // For efficiency, we only sync if not updated in 24h
-                    // In this implementation, we'll just trigger the sync endpoint's logic
                     const res = await fetch(`http://localhost:3000/api/admin/channels/${ch.id}/sync-models`, {
                         method: 'POST',
-                        headers: { 'Authorization': `Bearer ${config.adminToken || ''}` }
+                        headers: { 'Cookie': `auth_session=${sessionToken}` }
                     });
-                    if (res.ok) log.info(`[Discovery] Synced models for ${ch.name}`);
+                    if (res.ok) {
+                        const data = await res.json() as Record<string, unknown>;
+                        log.info(`[Discovery] Synced ${ch.name}: ${data.modelsCount} models (+${data.added}/-${data.removed}), aliases: ${data.totalAliases}`);
+                        synced++;
+                    } else {
+                        log.warn(`[Discovery] Failed to sync ${ch.name}: HTTP ${res.status}`);
+                        failed++;
+                    }
                 } catch (e: unknown) {
-                    // Silently fail for background sync
+                    log.error(`[Discovery] Error syncing ${ch.name}:`, e);
+                    failed++;
                 }
             }
+            log.info(`[Discovery] Sync complete: ${synced}/${channels.length} channels synced, ${failed} failed`);
         };
 
         // Run every 12 hours
         this.discoverySyncInterval = setInterval(sync, 12 * 60 * 60 * 1000);
         // Initial run after 5 minutes
         setTimeout(sync, 5 * 60 * 1000);
+        log.info('[Discovery] Model sync task started (interval: 12 hours, initial: 5 min)');
     },
 
     setOptions(options: Record<string, any>) {

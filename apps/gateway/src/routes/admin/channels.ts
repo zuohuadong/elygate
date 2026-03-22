@@ -190,13 +190,89 @@ export const channelsRouter = new Elysia()
         if (!res.ok) return (set.status = 500, { success: false, message: `Failed: ${res.status}` });
 
         const data = await res.json();
-        const models = channel.type === ChannelType.GEMINI
+        const upstreamModels: string[] = channel.type === ChannelType.GEMINI
             ? data.models?.map((m: Record<string, any>) => m.name?.replace('models/', '') || m.displayName).filter(Boolean) || []
             : data.data?.map((m: Record<string, any>) => m.id).filter(Boolean) || data.map?.((m: Record<string, any>) => m.id || m.name).filter(Boolean) || [];
 
-        const [result] = await sql`UPDATE channels SET models = ${models}, updated_at = NOW() WHERE id = ${Number(id)} RETURNING *`;
+        const upstreamSet = new Set(upstreamModels);
+
+        // --- Compare with current models ---
+        const oldModels: string[] = Array.isArray(channel.models)
+            ? channel.models
+            : (typeof channel.models === 'string' ? JSON.parse(channel.models) : []);
+        const removedModels = oldModels.filter((m: string) => !upstreamSet.has(m));
+        const newModels = upstreamModels.filter((m: string) => !oldModels.includes(m));
+
+        // --- Clean broken aliases from model_mapping ---
+        let modelMapping: Record<string, string> = typeof channel.model_mapping === 'string'
+            ? JSON.parse(channel.model_mapping || '{}')
+            : (channel.model_mapping || {});
+        const brokenAliases: string[] = [];
+        for (const [alias, target] of Object.entries(modelMapping)) {
+            if (!upstreamSet.has(target)) {
+                brokenAliases.push(alias);
+                delete modelMapping[alias];
+            }
+        }
+
+        // --- Auto-generate aliases for new models ---
+        // Strategy: strip provider prefix (e.g., "deepseek-ai/DeepSeek-V3" -> "DeepSeek-V3")
+        // Skip image/audio/embedding models and models without slash
+        const skipPatterns = /flux|image|sd|stable|draw|kolors|tts|speech|sovits|bge|rerank|embed|whisper/i;
+        const existingAliases = new Set(Object.keys(modelMapping));
+        const existingTargets = new Set(Object.values(modelMapping));
+        const generatedAliases: Record<string, string> = {};
+
+        for (const model of newModels) {
+            if (skipPatterns.test(model)) continue;
+            if (!model.includes('/')) continue;
+
+            let stripped = model;
+            // Remove "Pro/" prefix
+            if (stripped.toLowerCase().startsWith('pro/')) {
+                stripped = stripped.substring(4);
+            }
+            // Remove provider prefix (first segment)
+            if (stripped.includes('/')) {
+                const parts = stripped.split('/');
+                stripped = parts.slice(1).join('/');
+            }
+
+            // Only add if alias is unique and doesn't conflict
+            if (stripped && stripped !== model
+                && !existingAliases.has(stripped)
+                && !existingTargets.has(model)
+                && !upstreamSet.has(stripped)) {
+                modelMapping[stripped] = model;
+                generatedAliases[stripped] = model;
+                existingAliases.add(stripped);
+                existingTargets.add(model);
+            }
+        }
+
+        // --- Update DB ---
+        const [result] = await sql`
+            UPDATE channels 
+            SET models = ${upstreamModels}, 
+                model_mapping = ${JSON.stringify(modelMapping)},
+                updated_at = NOW() 
+            WHERE id = ${Number(id)} 
+            RETURNING *`;
         await refreshAllCaches();
-        return { success: true, modelsCount: models.length, channel: result };
+
+        log.info(`[Sync] Channel ${channel.name}: ${upstreamModels.length} models (${newModels.length} new, ${removedModels.length} removed), ${brokenAliases.length} stale aliases cleaned, ${Object.keys(generatedAliases).length} aliases generated`);
+
+        return {
+            success: true,
+            modelsCount: upstreamModels.length,
+            added: newModels.length,
+            removed: removedModels.length,
+            removedModels: removedModels.length > 0 ? removedModels : undefined,
+            brokenAliasesCleaned: brokenAliases.length,
+            aliasesGenerated: Object.keys(generatedAliases).length,
+            generatedAliases: Object.keys(generatedAliases).length > 0 ? generatedAliases : undefined,
+            totalAliases: Object.keys(modelMapping).length
+        };
     })
 
     .post('/channels/:id/keys/clean', async ({ params: { id }, set }: any) => {
