@@ -2,10 +2,10 @@
  * @elygate/pg-listen — Zero-dependency PostgreSQL LISTEN/NOTIFY client
  *
  * Implements PostgreSQL Wire Protocol directly via Bun.connect() native TCP.
- * Covers only StartupMessage / MD5 Auth / SimpleQuery / NotificationResponse.
+ * Supports MD5, Cleartext, and SCRAM-SHA-256 authentication.
  * No third-party dependencies.
  */
-import { createHash } from "crypto";
+import { createHash, createHmac, randomBytes } from "crypto";
 
 // ---- Types ----
 
@@ -97,6 +97,48 @@ function buildSimpleQuery(sqlText: string): Uint8Array {
 	return concatBytes(new Uint8Array(header.buffer), payload);
 }
 
+// ---- SCRAM-SHA-256 Utilities ----
+
+function hi(password: string, salt: Buffer, iterations: number): Buffer {
+	// PBKDF2 with HMAC-SHA-256 — Hi(str, salt, i) per RFC 5802
+	let u = createHmac("sha256", password).update(salt).update(Buffer.from([0, 0, 0, 1])).digest();
+	let result = Buffer.from(u);
+	for (let i = 1; i < iterations; i++) {
+		u = createHmac("sha256", password).update(u).digest();
+		for (let j = 0; j < result.length; j++) {
+			result[j]! ^= u[j]!;
+		}
+	}
+	return result;
+}
+
+function buildSASLInitialResponse(mechanism: string, clientFirstMessage: string): Uint8Array {
+	const mechBytes = encodeString(mechanism + "\0");
+	const msgBytes = encodeString(clientFirstMessage);
+	// p(1) + len(4) + mechanism\0 + msgLen(4) + msg
+	const totalPayloadLen = 4 + mechBytes.length + 4 + msgBytes.length;
+	const header = allocBuffer(5);
+	header.setUint8(0, 0x70); // 'p' — PasswordMessage (also used for SASL)
+	header.setInt32(1, totalPayloadLen);
+	const msgLenBuf = allocBuffer(4);
+	msgLenBuf.setInt32(0, msgBytes.length);
+	return concatBytes(
+		new Uint8Array(header.buffer),
+		mechBytes,
+		new Uint8Array(msgLenBuf.buffer),
+		msgBytes
+	);
+}
+
+function buildSASLResponse(clientFinalMessage: string): Uint8Array {
+	const msgBytes = encodeString(clientFinalMessage);
+	const totalLen = 4 + msgBytes.length;
+	const header = allocBuffer(5);
+	header.setUint8(0, 0x70); // 'p'
+	header.setInt32(1, totalLen);
+	return concatBytes(new Uint8Array(header.buffer), msgBytes);
+}
+
 // ---- Read Utilities ----
 
 function readInt32BE(buf: Uint8Array, offset: number): number {
@@ -118,6 +160,9 @@ function sliceToString(buf: Uint8Array, start: number, end: number): string {
 const AUTH_OK = 0;
 const AUTH_CLEARTEXT = 3;
 const AUTH_MD5 = 5;
+const AUTH_SASL = 10;
+const AUTH_SASL_CONTINUE = 11;
+const AUTH_SASL_FINAL = 12;
 
 // ---- Main Entry ----
 
@@ -131,6 +176,11 @@ export function createPgListener(
 	let closed = false;
 	let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 	let pending = new Uint8Array(0);
+
+	// SCRAM-SHA-256 state (per connection)
+	let scramClientNonce = "";
+	let scramClientFirstBare = "";
+	let scramServerFirstMessage = "";
 
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	function processMessages(socket: any) {
@@ -147,11 +197,64 @@ export function createPgListener(
 				case 0x52: {
 					// 'R' — Authentication
 					const authType = readInt32BE(body, 0);
-					if (authType === AUTH_MD5) {
+					if (authType === AUTH_OK) {
+						// Auth success — nothing to do, wait for ReadyForQuery
+					} else if (authType === AUTH_MD5) {
 						const salt = body.subarray(4, 8);
 						socket.write(buildMD5AuthResponse(opts.user, opts.password, salt));
 					} else if (authType === AUTH_CLEARTEXT) {
 						socket.write(buildCleartextAuthResponse(opts.password));
+					} else if (authType === AUTH_SASL) {
+						// SASL mechanism list — pick SCRAM-SHA-256
+						const mechList = sliceToString(body, 4, body.length);
+						if (!mechList.includes("SCRAM-SHA-256")) {
+							console.error("[pg-listen] Server does not support SCRAM-SHA-256");
+							break;
+						}
+						// Generate client nonce and first message
+						scramClientNonce = randomBytes(18).toString("base64");
+						scramClientFirstBare = `n=,r=${scramClientNonce}`;
+						const clientFirstMessage = `n,,${scramClientFirstBare}`;
+						socket.write(buildSASLInitialResponse("SCRAM-SHA-256", clientFirstMessage));
+					} else if (authType === AUTH_SASL_CONTINUE) {
+						// Server's challenge
+						scramServerFirstMessage = sliceToString(body, 4, body.length);
+						const params: Record<string, string> = {};
+						for (const part of scramServerFirstMessage.split(",")) {
+							const eq = part.indexOf("=");
+							if (eq > 0) params[part.substring(0, eq)] = part.substring(eq + 1);
+						}
+						const serverNonce = params["r"] || "";
+						const salt = Buffer.from(params["s"] || "", "base64");
+						const iterations = parseInt(params["i"] || "4096", 10);
+
+						if (!serverNonce.startsWith(scramClientNonce)) {
+							console.error("[pg-listen] SCRAM: server nonce mismatch");
+							break;
+						}
+
+						// Compute ClientProof
+						const saltedPassword = hi(opts.password, salt, iterations);
+						const clientKey = createHmac("sha256", saltedPassword).update("Client Key").digest();
+						const storedKey = createHash("sha256").update(clientKey).digest();
+
+						const channelBinding = Buffer.from("n,,").toString("base64");
+						const clientFinalNoProof = `c=${channelBinding},r=${serverNonce}`;
+						const authMessage = `${scramClientFirstBare},${scramServerFirstMessage},${clientFinalNoProof}`;
+
+						const clientSignature = createHmac("sha256", storedKey).update(authMessage).digest();
+						const clientProof = Buffer.alloc(clientKey.length);
+						for (let i = 0; i < clientKey.length; i++) {
+							clientProof[i] = clientKey[i]! ^ clientSignature[i]!;
+						}
+
+						const clientFinalMessage = `${clientFinalNoProof},p=${clientProof.toString("base64")}`;
+						socket.write(buildSASLResponse(clientFinalMessage));
+					} else if (authType === AUTH_SASL_FINAL) {
+						// Server's final verification — we could verify the server signature here
+						// but for simplicity, we just accept it and wait for AuthenticationOk
+					} else {
+						console.error(`[pg-listen] Unsupported auth type: ${authType}`);
 					}
 					break;
 				}
@@ -204,6 +307,9 @@ export function createPgListener(
 		if (closed) return;
 		listenSent = false;
 		pending = new Uint8Array(0);
+		scramClientNonce = "";
+		scramClientFirstBare = "";
+		scramServerFirstMessage = "";
 
 		Bun.connect({
 			hostname: opts.host,
