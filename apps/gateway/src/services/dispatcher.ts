@@ -333,7 +333,18 @@ export async function dispatch(options: DispatchOptions) {
 
                 const contentType = response.headers.get('content-type') || '';
                 if (contentType.includes('application/json')) {
-                    const rawData = await response.json();
+                    // Some providers (e.g. Dakka) return Content-Type: application/json
+                    // but body is SSE-prefixed ("data: {...}"). Handle both cases.
+                    let rawData: Record<string, any>;
+                    const responseText = await response.text();
+                    const trimmed = responseText.trim();
+                    if (trimmed.startsWith('data:')) {
+                        // Strip SSE "data:" prefix and parse
+                        const jsonStr = trimmed.slice(5).trim();
+                        rawData = JSON.parse(jsonStr);
+                    } else {
+                        rawData = JSON.parse(trimmed);
+                    }
 
                     // Check for upstream overload errors that should trigger retry
                     const isOverloadError = checkUpstreamOverload(rawData);
