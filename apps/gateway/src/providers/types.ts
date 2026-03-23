@@ -7,7 +7,7 @@ export interface ProviderHandler {
     /**
      * Transforms non-streaming response from upstream to standard OpenAI response format.
      */
-    transformResponse(data: Record<string, any>): Record<string, any>;
+    transformResponse(data: Record<string, any>, context?: { baseUrl?: string; apiKey?: string; model?: string }): Record<string, any> | Promise<Record<string, any>>;
 
     /**
      * Extracts and calculates token usage from non-streaming response.

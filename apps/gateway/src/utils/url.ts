@@ -24,8 +24,14 @@ export function buildUpstreamUrl(
         return `${base}/v1beta/models/${model}${endpoint}`;
     }
 
-    // Dakka Draw API endpoint
+    // Dakka Draw API endpoint — different model families use different endpoints
     if (config.type === ChannelType.DAKKA) {
+        if (model.startsWith('nano-banana')) {
+            return `${base}/v1/draw/nano-banana`;
+        }
+        if (model.startsWith('veo')) {
+            return `${base}/v1/video/veo`;
+        }
         return `${base}/v1/draw/completions`;
     }
 
@@ -92,6 +98,9 @@ export function buildTestUrl(
 
     // Dakka Draw API
     if (channelType === ChannelType.DAKKA) {
+        if (model.startsWith('nano-banana')) {
+            return `${base}/v1/draw/nano-banana`;
+        }
         return `${base}/v1/draw/completions`;
     }
 
