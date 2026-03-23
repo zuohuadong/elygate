@@ -571,7 +571,9 @@ export const memoryCache = {
 
         const sync = async () => {
             log.info('[Discovery] Starting background model sync for all channels...');
-            const channels = Array.from(this.channels.values()).filter(ch => ch.status === 1);
+            const channels = Array.from(this.channels.values()).filter(ch =>
+                ch.status === 1 && (!ch.endpointType || ch.endpointType === 'auto')
+            );
 
             // Get admin session token from DB for internal API auth
             let sessionToken = '';

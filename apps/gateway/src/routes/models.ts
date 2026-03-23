@@ -17,7 +17,9 @@ export const modelsRouter = new Elysia()
         const t = token as TokenRecord;
         const includeChannels = query?.include_channels === 'true' || query?.include_channels === true;
 
-        let uniqueModels = Array.from(memoryCache.channelRoutes.keys());
+        let uniqueModels = Array.from(memoryCache.channelRoutes.keys())
+            // Only show models that have at least one active channel (status=1 or 4)
+            .filter(model => memoryCache.selectChannels(model, u.group).length > 0);
 
         // 1. Token Key Restrictions
         if (t.models && t.models.length > 0) {
@@ -68,23 +70,10 @@ export const modelsRouter = new Elysia()
         return {
             object: 'list',
             data: uniqueModels.map(model => {
-                // Determine model type from DB metadata (no regex)
-                const channels = memoryCache.selectChannels(model, u.group);
+                // Determine model type from DB metadata only (no channel fallback)
                 const meta = memoryCache.modelMetadata.get(model);
-                let type = meta?.type || 'chat';
-                let endpoint = meta?.endpoint || '/v1/chat/completions';
-
-                // Fallback: if no metadata, derive from channel config
-                if (!meta) {
-                    for (const ch of channels) {
-                        if (ch.endpointType === 'video') {
-                            type = 'video'; endpoint = '/v1/video/generations'; break;
-                        }
-                        if (ch.endpointType === 'draw' || ch.type === 42) {
-                            type = 'image'; endpoint = '/v1/images/generations'; break;
-                        }
-                    }
-                }
+                const type = meta?.type || 'chat';
+                const endpoint = meta?.endpoint || '/v1/chat/completions';
 
                 const modelData: Record<string, any> = {
                     id: model,
@@ -100,7 +89,7 @@ export const modelsRouter = new Elysia()
 
                 // Include channel information if requested (for admin)
                 if (includeChannels) {
-                    modelData.channels = channels.map(ch => ({
+                    modelData.channels = memoryCache.selectChannels(model, u.group).map((ch: any) => ({
                         id: ch.id,
                         name: ch.name,
                         type: ch.type,
