@@ -451,8 +451,8 @@ export async function dispatch(options: DispatchOptions) {
                     const cleanedData = cleanResponseTokens(rawData);
                     let result = skipTransform ? cleanedData : await handler.transformResponse(cleanedData, { baseUrl: channelConfig.baseUrl, apiKey: activeKey, model: upstreamModel });
 
-                    // Async video polling: if video endpoint returned a task/request ID, poll for the actual result
-                    const isVideoRoute = endpointType === 'video' || /^(Wan|wan)[\w.-]*(-T2V|-I2V)/i.test(upstreamModel);
+                    // Async video polling: if video channel returned a task/request ID, poll for the actual result
+                    const isVideoRoute = endpointType === 'video' || channelConfig.endpointType === 'video';
                     if (isVideoRoute && result && typeof result === 'object') {
                         const asyncId = result.requestId || result.request_id || (result.data?.requestId);
                         if (asyncId) {
@@ -544,7 +544,7 @@ export async function dispatch(options: DispatchOptions) {
                     let result = skipTransform ? cleanedData : await handler.transformResponse(cleanedData || {}, { baseUrl: channelConfig.baseUrl, apiKey: activeKey, model: upstreamModel });
 
                     // Async video polling for SSE/text responses
-                    const isVideoRoute = endpointType === 'video' || /^(Wan|wan)[\w.-]*(-T2V|-I2V)/i.test(upstreamModel);
+                    const isVideoRoute = endpointType === 'video' || channelConfig.endpointType === 'video';
                     if (isVideoRoute && result && typeof result === 'object') {
                         const asyncId = result.requestId || result.request_id || (result.data?.requestId);
                         if (asyncId) {

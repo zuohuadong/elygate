@@ -57,6 +57,7 @@ export interface ChannelConfig {
     keyConcurrencyLimit: number;
     keyStrategy: number;         // 0=Load balance, 1=Sequential
     keyStatus: Record<string, string>; // { "sk-xxx": "exhausted" | "active" }
+    endpointType: string;        // 'auto' | 'chat' | 'images' | 'video' | 'draw'
 }
 
 export interface UsageInfo {

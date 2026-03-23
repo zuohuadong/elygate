@@ -35,15 +35,14 @@ export function buildUpstreamUrl(
         return `${base}/v1/draw/completions`;
     }
 
-    // Auto-detect video models and route to video submit endpoint
-    // regardless of whether client used /images/generations or /video/generations
-    const isVideoModel = /^(Wan|wan)[\w.-]*(-T2V|-I2V|-t2v|-i2v)/i.test(model)
-        || /^(Wan-AI\/)/i.test(model);
-    if (isVideoModel) {
-        return `${base}/v1/video/submit`;
-    }
+    // Channel-level endpoint override: if channel has a specific endpointType configured,
+    // use it instead of the request's endpointType. This allows admins to configure
+    // video-only channels, image-only channels, etc. without hardcoding model names.
+    const effectiveEndpoint = (config.endpointType && config.endpointType !== 'auto')
+        ? config.endpointType
+        : endpointType;
 
-    switch (endpointType) {
+    switch (effectiveEndpoint) {
         case 'chat': return `${base}/v1/chat/completions`;
         case 'embeddings': return `${base}/v1/embeddings`;
         case 'images': return `${base}/v1/images/generations`;
@@ -51,7 +50,7 @@ export function buildUpstreamUrl(
         case 'rerank': return `${base}/v1/rerank`;
         case 'video': return `${base}/v1/video/submit`;
         case 'responses': return `${base}/v1/responses`;
-        default: return `${base}/v1/${endpointType}`;
+        default: return `${base}/v1/${effectiveEndpoint}`;
     }
 }
 

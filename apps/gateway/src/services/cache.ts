@@ -58,7 +58,8 @@ export const memoryCache = {
             log.info('[Cache] Refreshing channel routes and rate limits from DB...');
             const allChannels = await sql`
                 SELECT id, type, name, base_url AS "baseUrl", key, models, model_mapping AS "modelMapping", weight, priority, groups, status,
-                       key_strategy AS "keyStrategy", key_status AS "keyStatus", key_concurrency_limit AS "keyConcurrencyLimit", price_ratio AS "priceRatio"
+                       key_strategy AS "keyStrategy", key_status AS "keyStatus", key_concurrency_limit AS "keyConcurrencyLimit", price_ratio AS "priceRatio",
+                       endpoint_type AS "endpointType"
                 FROM channels 
                 WHERE status != 0
             `;

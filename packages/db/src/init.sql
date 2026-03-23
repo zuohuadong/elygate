@@ -130,6 +130,7 @@ CREATE TABLE IF NOT EXISTS channels (
     key_strategy INTEGER NOT NULL DEFAULT 0, -- 0=load_balance, 1=sequential
     key_status JSONB NOT NULL DEFAULT '{}'::jsonb, -- key exhaustion status
     key_concurrency_limit INTEGER NOT NULL DEFAULT 0, -- 0=unlimited
+    endpoint_type TEXT NOT NULL DEFAULT 'auto', -- 'auto'|'chat'|'images'|'video'|'draw'
     price_ratio DECIMAL(10, 4) DEFAULT 1.0, -- price multiplier for dual currency support
     test_at TIMESTAMPTZ,
     updated_at TIMESTAMPTZ DEFAULT NOW(),
