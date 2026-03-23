@@ -35,6 +35,14 @@ export function buildUpstreamUrl(
         return `${base}/v1/draw/completions`;
     }
 
+    // Auto-detect video models and route to video submit endpoint
+    // regardless of whether client used /images/generations or /video/generations
+    const isVideoModel = /^(Wan|wan)[\w.-]*(-T2V|-I2V|-t2v|-i2v)/i.test(model)
+        || /^(Wan-AI\/)/i.test(model);
+    if (isVideoModel) {
+        return `${base}/v1/video/submit`;
+    }
+
     switch (endpointType) {
         case 'chat': return `${base}/v1/chat/completions`;
         case 'embeddings': return `${base}/v1/embeddings`;
