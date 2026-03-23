@@ -105,12 +105,23 @@ async function processTask(task: TaskRecord) {
     await updateTask(task.id, { status: 'processing', progress: 0 });
 
     try {
-        // Find user and token from cache
-        const user = memoryCache.users.get(task.userId);
-        const token = Array.from(memoryCache.tokens.values()).find(t => t.id === task.tokenId);
+        // Resolve user from cache (falls back to DB query)
+        const user = await memoryCache.getUserFromDB(task.userId);
+
+        // Resolve token by ID from DB (cache is keyed by API key string, not ID)
+        let token = Array.from(memoryCache.tokens.values()).find(t => t.id === task.tokenId) || null;
+        if (!token) {
+            const [row] = await sql`
+                SELECT id, key, name, user_id AS "userId", models, status,
+                       quota, used_quota AS "usedQuota", unlimited_quota AS "unlimitedQuota",
+                       expire_time AS "expireTime"
+                FROM tokens WHERE id = ${task.tokenId} AND status = 1
+            `;
+            token = row as TokenRecord || null;
+        }
 
         if (!user || !token) {
-            throw new Error(`User or token not found for task ${task.id}`);
+            throw new Error(`User (id=${task.userId}) or token (id=${task.tokenId}) not found in DB`);
         }
 
         // Dispatch to provider (this includes the sync polling internally)
