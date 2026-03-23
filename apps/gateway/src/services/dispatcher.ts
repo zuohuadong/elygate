@@ -449,7 +449,16 @@ export async function dispatch(options: DispatchOptions) {
 
                     // Clean model internal tokens from response
                     const cleanedData = cleanResponseTokens(rawData);
-                    return skipTransform ? cleanedData : await handler.transformResponse(cleanedData, { baseUrl: channelConfig.baseUrl, apiKey: activeKey, model: upstreamModel });
+                    let result = skipTransform ? cleanedData : await handler.transformResponse(cleanedData, { baseUrl: channelConfig.baseUrl, apiKey: activeKey, model: upstreamModel });
+
+                    // Async video polling: if video endpoint returned a task/request ID, poll for the actual result
+                    if (endpointType === 'video' && result && typeof result === 'object') {
+                        const asyncId = result.requestId || result.request_id || (result.data?.requestId);
+                        if (asyncId) {
+                            result = await pollVideoResult(asyncId, channelConfig.baseUrl, activeKey);
+                        }
+                    }
+                    return result;
                 } else if (contentType.includes('text/event-stream') || contentType.includes('text/plain')) {
                     // Some providers return SSE format even for non-stream requests
                     // (e.g. Dakka nano-banana returns multiple progress events, last one has the result)
@@ -531,7 +540,16 @@ export async function dispatch(options: DispatchOptions) {
 
                     // Clean model internal tokens from response
                     const cleanedData = cleanResponseTokens(rawData);
-                    return skipTransform ? cleanedData : await handler.transformResponse(cleanedData || {}, { baseUrl: channelConfig.baseUrl, apiKey: activeKey, model: upstreamModel });
+                    let result = skipTransform ? cleanedData : await handler.transformResponse(cleanedData || {}, { baseUrl: channelConfig.baseUrl, apiKey: activeKey, model: upstreamModel });
+
+                    // Async video polling for SSE/text responses
+                    if (endpointType === 'video' && result && typeof result === 'object') {
+                        const asyncId = result.requestId || result.request_id || (result.data?.requestId);
+                        if (asyncId) {
+                            result = await pollVideoResult(asyncId, channelConfig.baseUrl, activeKey);
+                        }
+                    }
+                    return result;
                 } else {
                     // Binary response (Audio, Image, Video blob)
                     const buffer = await response.arrayBuffer();
@@ -820,3 +838,96 @@ function handleStreamBilling(
         })();
     }
 
+
+/**
+ * Generic async video polling for providers that use submit-then-poll patterns.
+ * Works with SiliconFlow (/v1/video/status) and similar async video APIs.
+ * 
+ * SiliconFlow flow: POST /v1/video/submit → {requestId} → GET /v1/video/status → {videos: [{url}]}
+ */
+async function pollVideoResult(
+    requestId: string,
+    baseUrl: string,
+    apiKey: string,
+    maxAttempts = 120,  // Max 120 polls
+    intervalMs = 5000   // 5 seconds between polls (total max ~10 minutes)
+): Promise<Record<string, any>> {
+    const base = baseUrl.replace(/\/+$/, '').replace(/\/v1$/, '');
+    const statusUrl = `${base}/v1/video/status`;
+
+    log.info(`[Video] Async task ${requestId} submitted. Polling ${statusUrl}...`);
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        await new Promise(r => setTimeout(r, intervalMs));
+
+        try {
+            const res = await fetch(statusUrl, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${apiKey}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ requestId })
+            });
+
+            const result = await res.json() as Record<string, any>;
+
+            // Check status
+            const status = result.data?.status || result.status;
+
+            if (status === 'InProgress' || status === 'pending' || status === 'processing' || status === 'running' || status === 'Pending') {
+                if (attempt % 6 === 0) { // Log every 30 seconds
+                    log.info(`[Video] Task ${requestId} still ${status} (attempt ${attempt}/${maxAttempts})`);
+                }
+                continue;
+            }
+
+            if (status === 'Failed' || status === 'failed' || status === 'error') {
+                const reason = result.data?.reason || result.data?.error || result.message || 'Unknown error';
+                throw new Error(`Video task ${requestId} failed: ${reason}`);
+            }
+
+            // Success: extract video URL
+            // SiliconFlow format: {data: {status: "Succeed", results: {videos: [{url: "..."}]}}}
+            if (status === 'Succeed' || status === 'succeeded' || status === 'completed') {
+                let videoUrl = '';
+
+                // SiliconFlow: data.results.videos[0].url
+                const videos = result.data?.results?.videos || result.data?.results?.images;
+                if (Array.isArray(videos) && videos.length > 0) {
+                    videoUrl = videos[0].url || '';
+                }
+                // Fallback: data.results[0].url
+                if (!videoUrl && Array.isArray(result.data?.results) && result.data.results.length > 0) {
+                    videoUrl = result.data.results[0].url || result.data.results[0].video_url || '';
+                }
+                // Fallback: data.url or data.video_url
+                if (!videoUrl) {
+                    videoUrl = result.data?.url || result.data?.video_url || '';
+                }
+
+                if (videoUrl) {
+                    log.info(`[Video] Task ${requestId} completed. Video URL obtained.`);
+                    return {
+                        created: Math.floor(Date.now() / 1000),
+                        data: [{ url: videoUrl }]
+                    };
+                }
+
+                throw new Error(`Video task ${requestId} completed but no URL found. Raw: ${JSON.stringify(result).substring(0, 300)}`);
+            }
+
+            // Unknown status — keep polling
+            if (attempt % 6 === 0) {
+                log.info(`[Video] Task ${requestId} unknown status: ${status} (attempt ${attempt}/${maxAttempts})`);
+            }
+        } catch (e: any) {
+            if (e.message.includes('failed') || e.message.includes('completed but no URL')) {
+                throw e;
+            }
+            log.warn(`[Video] Poll attempt ${attempt} error: ${e.message}`);
+        }
+    }
+
+    throw new Error(`Video task ${requestId} timed out after ${maxAttempts} polls (${(maxAttempts * intervalMs / 1000)}s)`);
+}

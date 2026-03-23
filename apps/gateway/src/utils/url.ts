@@ -41,7 +41,7 @@ export function buildUpstreamUrl(
         case 'images': return `${base}/v1/images/generations`;
         case 'moderations': return `${base}/v1/moderations`;
         case 'rerank': return `${base}/v1/rerank`;
-        case 'video': return `${base}/v1/video/generations`;
+        case 'video': return `${base}/v1/video/submit`;
         case 'responses': return `${base}/v1/responses`;
         default: return `${base}/v1/${endpointType}`;
     }
