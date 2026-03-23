@@ -212,13 +212,32 @@ export const chatRouter = new Elysia()
         const defaultMode = optionCache.get('SemanticCacheDefaultMode', 'default');
         const cachePolicy = (u as Record<string, any>).activePackage?.cache_policy || { mode: defaultMode };
 
+        // --- Vision/Multimodal Detection ---
+        // Detect if any message contains image content (image_url type or base64 data)
+        // Vision requests MUST bypass all caches because:
+        // 1. Our cache keys are text-only — different images with same text prompt hash identically
+        // 2. VLLM prefix caching may reuse KV-Cache across different images
+        const isVisionRequest = Array.isArray(messages) && messages.some((m: Record<string, any>) =>
+            Array.isArray(m.content) && m.content.some((c: Record<string, any>) =>
+                c.type === 'image_url' || c.type === 'image'
+            )
+        );
+        if (isVisionRequest) {
+            // Inject a random seed to break VLLM's Automatic Prefix Caching (APC)
+            // This ensures different requests produce different KV-Cache entries
+            if (!body.seed) {
+                body.seed = Math.floor(Math.random() * 2147483647);
+            }
+            log.info(`[Vision] Detected multimodal request. Cache bypassed, seed=${body.seed}`);
+        }
+
         // --- 0. Handle -F suffix for cache key ---
         // Use model name without -F suffix for cache key to share cache between thinking/non-thinking modes
         const skipThinking = model.endsWith('-F');
         const cacheModelKey = skipThinking ? model.slice(0, -2) : model;
 
         // --- 1. Exact Response Cache Lookup (fastest, no embedding needed) ---
-        if (!stream) {
+        if (!stream && !isVisionRequest) {
             const exactResponse = await lookupResponseCache(cacheModelKey, messages, u.id);
             if (exactResponse) {
                 log.info(`[ResponseCache] HIT for model: ${cacheModelKey} (requested: ${model})`);
@@ -240,7 +259,7 @@ export const chatRouter = new Elysia()
         const { channel: embeddingChannel, model: embeddingModel } = resolveEmbeddingChannel();
         log.info(`[SemanticCache] Embedding channel found: ${embeddingChannel ? embeddingChannel.name : 'NONE'}, model: ${embeddingModel || 'N/A'}`);
 
-        if (embeddingChannel && !stream) {
+        if (embeddingChannel && !stream && !isVisionRequest) {
             const cachedResponse = await lookupSemanticCache(userPrompt, cacheModelKey, embeddingChannel, embeddingModel, u.id, cachePolicy);
             if (cachedResponse) {
                 log.info(`[SemanticCache] HIT for model: ${cacheModelKey} (requested: ${model})`);
@@ -291,7 +310,7 @@ export const chatRouter = new Elysia()
         });
 
         // --- 4. Async cache storage for non-stream responses ---
-        if (!stream && result && !(result instanceof Response)) {
+        if (!stream && result && !(result instanceof Response) && !isVisionRequest) {
             const formattedData = result as Record<string, any>;
 
             storeResponseCache(model, messages, formattedData, formattedData.usage, u.id).catch((err: Error) => {

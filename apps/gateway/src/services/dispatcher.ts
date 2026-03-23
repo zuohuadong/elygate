@@ -3,6 +3,7 @@ import { getErrorMessage } from '../utils/error';
 import { sql } from '@elygate/db';
 import { memoryCache } from './cache';
 import { circuitBreaker } from './circuitBreaker';
+import { optionCache } from './optionCache';
 import { billAndLog, preCheckAndDecrement, reconcileQuota } from './billing';
 import { calculateCost } from './ratio';
 import { ChannelType, getProviderHandler } from '../providers';
@@ -111,7 +112,7 @@ export async function dispatch(options: DispatchOptions) {
                         headers: { 'Content-Type': 'text/event-stream' }
                     });
                 }
-                return skipTransform ? cleanedRespBody : getProviderHandler(ChannelType.OPENAI).transformResponse(cleanedRespBody); // Fallback to OpenAI transform if type unknown
+                return skipTransform ? cleanedRespBody : await getProviderHandler(ChannelType.OPENAI).transformResponse(cleanedRespBody); // Fallback to OpenAI transform if type unknown
             }
         }
 
@@ -220,6 +221,29 @@ export async function dispatch(options: DispatchOptions) {
                     }
                 }
             }
+            // Reverse-lookup auto-generated aliases: if user sent a short alias (e.g. "Qwen-Image")
+            // but the channel only has the full name (e.g. "Qwen/Qwen-Image"), map it back.
+            if (upstreamModel === model) {
+                const channelModels: string[] = Array.isArray(channelConfig.models)
+                    ? channelConfig.models
+                    : (typeof channelConfig.models === 'string' ? JSON.parse(channelConfig.models) : []);
+                if (!channelModels.includes(model)) {
+                    // Try to find a full model name that ends with /alias
+                    const fullName = channelModels.find(m => m.endsWith('/' + model));
+                    if (fullName) {
+                        upstreamModel = fullName;
+                    }
+                    // Also check "Pro/" prefix variants: "Pro/Qwen/Qwen-Image" -> alias "Qwen/Qwen-Image" or "Qwen-Image"
+                    if (!fullName) {
+                        const proFullName = channelModels.find(m =>
+                            m.toLowerCase().startsWith('pro/') && (m.endsWith('/' + model) || m.substring(4) === model)
+                        );
+                        if (proFullName) {
+                            upstreamModel = proFullName;
+                        }
+                    }
+                }
+            }
             if (body && typeof body === 'object' && !Array.isArray(body) && !(body instanceof FormData)) {
                 if (!body.model) {
                     body.model = model;
@@ -290,13 +314,29 @@ export async function dispatch(options: DispatchOptions) {
                 if (bodyObj.computer_use) log.info(`[Dispatcher] User ${user.id} requested Computer Use with ${model}`);
                 if (bodyObj.tool_search || bodyObj.deferred_tools) log.info(`[Dispatcher] Model ${model} active with Tool Search / Deferred Loading.`);
 
-                // 4. Upstream Fetch
+                // 4. Upstream Fetch (with timeout to prevent long waits before failover)
+                const upstreamTimeoutMs = parseInt(optionCache.get('UPSTREAM_TIMEOUT_MS', '30000'));
+                const abortCtl = new AbortController();
+                const fetchTimeout = setTimeout(() => abortCtl.abort(), upstreamTimeoutMs);
                 const startTime = Date.now();
-                const response = await fetch(upstreamUrl, {
-                    method: 'POST',
-                    headers: fetchHeaders,
-                    body: typeof forwardBody === 'object' && !(forwardBody instanceof FormData) ? JSON.stringify(forwardBody) : (forwardBody as BodyInit)
-                });
+                let response: Response;
+                try {
+                    response = await fetch(upstreamUrl, {
+                        method: 'POST',
+                        headers: fetchHeaders,
+                        body: typeof forwardBody === 'object' && !(forwardBody instanceof FormData) ? JSON.stringify(forwardBody) : (forwardBody as BodyInit),
+                        signal: abortCtl.signal
+                    });
+                } catch (fetchErr: any) {
+                    clearTimeout(fetchTimeout);
+                    if (fetchErr?.name === 'AbortError') {
+                        const elapsed = Date.now() - startTime;
+                        await circuitBreaker.recordError(channelConfig.id, 504, `Timeout after ${elapsed}ms`);
+                        throw new Error(`Upstream timeout after ${elapsed}ms (limit: ${upstreamTimeoutMs}ms)`);
+                    }
+                    throw fetchErr;
+                }
+                clearTimeout(fetchTimeout); // Don't abort during streaming
 
                 if (!response.ok) {
                     const errorText = await response.text();
@@ -409,24 +449,34 @@ export async function dispatch(options: DispatchOptions) {
 
                     // Clean model internal tokens from response
                     const cleanedData = cleanResponseTokens(rawData);
-                    return skipTransform ? cleanedData : handler.transformResponse(cleanedData);
+                    return skipTransform ? cleanedData : await handler.transformResponse(cleanedData, { baseUrl: channelConfig.baseUrl, apiKey: activeKey, model: upstreamModel });
                 } else if (contentType.includes('text/event-stream') || contentType.includes('text/plain')) {
                     // Some providers return SSE format even for non-stream requests
+                    // (e.g. Dakka nano-banana returns multiple progress events, last one has the result)
                     const text = await response.text();
                     let rawData: Record<string, any> | null = null;
                     
-                    // Try to parse SSE format (data: {...})
-                    if (text.startsWith('data:')) {
-                        const jsonStr = text.trim().slice(5).trim();
+                    // Parse SSE format: extract ALL "data:" lines and use the LAST one
+                    // (for streaming progress APIs like nano-banana, only the final event has the result)
+                    const lines = text.split('\n');
+                    let lastDataLine = '';
+                    for (const line of lines) {
+                        const trimmedLine = line.trim();
+                        if (trimmedLine.startsWith('data:')) {
+                            lastDataLine = trimmedLine.slice(5).trim();
+                        }
+                    }
+
+                    if (lastDataLine) {
                         try {
-                            rawData = JSON.parse(jsonStr);
+                            rawData = JSON.parse(lastDataLine);
                         } catch {
                             throw new Error('Failed to parse SSE response as JSON');
                         }
                     } else {
-                        // Try direct JSON parse
+                        // No data: prefix found, try direct JSON parse
                         try {
-                            rawData = JSON.parse(text);
+                            rawData = JSON.parse(text.trim());
                         } catch {
                             throw new Error('Failed to parse response as JSON');
                         }
@@ -481,7 +531,7 @@ export async function dispatch(options: DispatchOptions) {
 
                     // Clean model internal tokens from response
                     const cleanedData = cleanResponseTokens(rawData);
-                    return skipTransform ? cleanedData : handler.transformResponse(cleanedData || {});
+                    return skipTransform ? cleanedData : await handler.transformResponse(cleanedData || {}, { baseUrl: channelConfig.baseUrl, apiKey: activeKey, model: upstreamModel });
                 } else {
                     // Binary response (Audio, Image, Video blob)
                     const buffer = await response.arrayBuffer();

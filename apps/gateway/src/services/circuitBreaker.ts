@@ -5,9 +5,30 @@ import { notificationService } from './notification';
 import { optionCache } from './optionCache';
 import { webhookService } from './webhook';
 
+interface RequestEvent {
+    timestamp: number;
+    success: boolean;
+    status?: number;
+    latencyMs?: number;
+}
+
+/**
+ * Sliding Time-Window Circuit Breaker.
+ *
+ * Instead of requiring N consecutive failures (which resets on any success),
+ * this tracks ALL requests within a configurable time window and trips
+ * when the failure rate exceeds a threshold.
+ *
+ * Configurable via system options:
+ *   - CIRCUIT_BREAKER_WINDOW_MS: Time window size (default: 300000 = 5 minutes)
+ *   - CIRCUIT_BREAKER_FAILURE_RATE: Failure rate to trip (default: 0.5 = 50%)
+ *   - CIRCUIT_BREAKER_MIN_REQUESTS: Minimum requests in window before evaluation (default: 3)
+ *   - CIRCUIT_BREAKER_RECOVERY_THRESHOLD: Consecutive successes needed in half-open (default: 3)
+ *   - LATENCY_THRESHOLD_MS: Average latency to trigger busy status (default: 30000)
+ */
 class CircuitBreaker {
-    // channelId -> consecutive error count
-    private errorCounts = new Map<number, number>();
+    // channelId -> rolling window of request events
+    private events = new Map<number, RequestEvent[]>();
     // channelId -> consecutive success count for half-open recovery
     private successCounts = new Map<number, number>();
     // channelId -> rolling average latency (ms)
@@ -18,22 +39,72 @@ class CircuitBreaker {
         this.startHealthCheck();
     }
 
-    private getThreshold(): number {
-        return parseInt(optionCache.get('CIRCUIT_BREAKER_THRESHOLD', '3'));
+    private getWindowMs(): number {
+        return parseInt(optionCache.get('CIRCUIT_BREAKER_WINDOW_MS', '300000')); // 5 minutes
+    }
+
+    private getFailureRate(): number {
+        return parseFloat(optionCache.get('CIRCUIT_BREAKER_FAILURE_RATE', '0.5')); // 50%
+    }
+
+    private getMinRequests(): number {
+        return parseInt(optionCache.get('CIRCUIT_BREAKER_MIN_REQUESTS', '3'));
     }
 
     private getRecoveryThreshold(): number {
-        return parseInt(optionCache.get('CIRCUIT_BREAKER_RECOVERY_THRESHOLD', '5'));
+        return parseInt(optionCache.get('CIRCUIT_BREAKER_RECOVERY_THRESHOLD', '3'));
+    }
+
+    /**
+     * Prune events older than the time window.
+     */
+    private pruneEvents(channelId: number) {
+        const events = this.events.get(channelId);
+        if (!events) return;
+        const cutoff = Date.now() - this.getWindowMs();
+        const pruned = events.filter(e => e.timestamp > cutoff);
+        if (pruned.length === 0) {
+            this.events.delete(channelId);
+        } else {
+            this.events.set(channelId, pruned);
+        }
+    }
+
+    /**
+     * Get current failure rate for a channel within the time window.
+     */
+    private getChannelFailureRate(channelId: number): { total: number; failures: number; rate: number } {
+        this.pruneEvents(channelId);
+        const events = this.events.get(channelId) || [];
+        const total = events.length;
+        const failures = events.filter(e => !e.success).length;
+        return { total, failures, rate: total > 0 ? failures / total : 0 };
+    }
+
+    /**
+     * Check if the circuit breaker should trip based on the time window.
+     */
+    private async checkAndTrip(channelId: number) {
+        const { total, failures, rate } = this.getChannelFailureRate(channelId);
+        const minRequests = this.getMinRequests();
+        const failureRate = this.getFailureRate();
+
+        if (total >= minRequests && rate >= failureRate) {
+            log.warn(`[CircuitBreaker] Channel ${channelId} tripped: ${failures}/${total} failures (${(rate * 100).toFixed(0)}%) in ${this.getWindowMs() / 1000}s window.`);
+            await this.disableChannel(channelId, `Failure rate ${(rate * 100).toFixed(0)}% (${failures}/${total}) in ${this.getWindowMs() / 1000}s`);
+        }
     }
 
     /**
      * Record success and latency.
      */
     public async recordSuccess(channelId: number, latencyMs?: number) {
-        if (this.errorCounts.has(channelId)) {
-            this.errorCounts.delete(channelId);
-        }
+        // Add success event to window
+        const events = this.events.get(channelId) || [];
+        events.push({ timestamp: Date.now(), success: true, latencyMs });
+        this.events.set(channelId, events);
 
+        // Track latency
         if (latencyMs !== undefined) {
             const currentAvg = this.latencyMetrics.get(channelId) || latencyMs;
             const newAvg = (currentAvg * 0.7) + (latencyMs * 0.3); // Simple EMA
@@ -47,6 +118,7 @@ class CircuitBreaker {
             }
         }
 
+        // Half-Open recovery: track consecutive successes
         const channel = memoryCache.channels.get(channelId);
         if (channel && (channel.status === 4 || channel.status === 5)) {
             const count = (this.successCounts.get(channelId) || 0) + 1;
@@ -85,22 +157,25 @@ class CircuitBreaker {
             return;
         }
 
-        // 3. Regular error count logic for 5xx/Timeout
+        // 3. Skip client errors (4xx) — they're user mistakes, not channel problems
         if (status && status >= 400 && status < 500) return;
 
-        // If in Half-Open, one failure trips it back to Disabled
+        // 4. If in Half-Open, one failure trips it back to Disabled
         if (channel.status === 4 || channel.status === 5) {
             await this.disableChannel(channelId, `Failed during recovery/busy period: ${status}`);
             return;
         }
 
-        const count = (this.errorCounts.get(channelId) || 0) + 1;
-        const threshold = this.getThreshold();
-        this.errorCounts.set(channelId, count);
+        // 5. Add failure event to the time window
+        const events = this.events.get(channelId) || [];
+        events.push({ timestamp: Date.now(), success: false, status });
+        this.events.set(channelId, events);
 
-        if (count >= threshold) {
-            await this.disableChannel(channelId, `Consecutive failures: ${count}`);
-        }
+        // Reset consecutive success counter
+        this.successCounts.delete(channelId);
+
+        // 6. Check if failure rate in the window exceeds the threshold
+        await this.checkAndTrip(channelId);
     }
 
     private async disableChannel(channelId: number, reason?: string) {
@@ -111,7 +186,8 @@ class CircuitBreaker {
                 WHERE id = ${channelId} AND status != 2
             `;
             await memoryCache.refresh();
-            this.errorCounts.delete(channelId);
+            // Clear events and counters for this channel
+            this.events.delete(channelId);
             this.successCounts.delete(channelId);
 
             const shouldNotify = String(optionCache.get('Notify_On_Channel_Offline', 'true')) === 'true';
@@ -145,7 +221,6 @@ class CircuitBreaker {
             }
 
             // Auto-recover Status 4 (Testing Recovery) after 5 minutes timeout
-            // If the channel is still reachable, it should be back online
             const testingChannels = await sql`
                 SELECT id, base_url AS "baseUrl", key, type FROM channels 
                 WHERE status = 4 AND updated_at < NOW() - INTERVAL '5 minutes'
@@ -158,7 +233,6 @@ class CircuitBreaker {
                     await sql`UPDATE channels SET status = 1, status_message = NULL, updated_at = NOW() WHERE id = ${ch.id}`;
                     changed = true;
                 } else {
-                    // If still failing, put back to disabled
                     await sql`UPDATE channels SET status = 3, status_message = 'Failed during testing recovery', updated_at = NOW() WHERE id = ${ch.id}`;
                     changed = true;
                 }
@@ -223,6 +297,24 @@ class CircuitBreaker {
         } catch (e: unknown) {
             return false;
         }
+    }
+
+    /**
+     * Get circuit breaker stats for monitoring/admin.
+     */
+    public getStats() {
+        const stats: Record<number, { total: number; failures: number; rate: string; avgLatency: string }> = {};
+        for (const [channelId] of this.events) {
+            const { total, failures, rate } = this.getChannelFailureRate(channelId);
+            const avgLatency = this.latencyMetrics.get(channelId);
+            stats[channelId] = {
+                total,
+                failures,
+                rate: `${(rate * 100).toFixed(1)}%`,
+                avgLatency: avgLatency ? `${Math.round(avgLatency)}ms` : 'N/A'
+            };
+        }
+        return stats;
     }
 }
 
