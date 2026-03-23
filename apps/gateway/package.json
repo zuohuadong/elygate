@@ -1,6 +1,6 @@
 {
   "name": "@elygate/gateway",
-  "version": "0.3.19",
+  "version": "0.3.20",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "check": "tsc --noEmit -p tsconfig.json",

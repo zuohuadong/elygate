@@ -18,9 +18,9 @@ for (const relPath of packagesToUpdate) {
     
     let content = fs.readFileSync(fullPath, 'utf8');
     
-    // Naive bump 0.5.1 to 0.5.2
-    const prevVersion = '"version": "0.5.1"';
-    const nextVersion = '"version": "0.5.2"';
+    // Naive bump 0.5.3 to 0.5.4
+    const prevVersion = '"version": "0.5.3"';
+    const nextVersion = '"version": "0.5.4"';
     
     if (content.includes(prevVersion)) {
         content = content.replace(prevVersion, nextVersion);
@@ -28,7 +28,7 @@ for (const relPath of packagesToUpdate) {
         console.log(`Bumped version in ${relPath}`);
         successCount++;
     } else {
-        console.log(`WARNING: Version 0.5.1 not found in ${relPath}. Current content:`, content.split('\n').filter(l => l.includes('"version"'))[0]);
+        console.log(`WARNING: Version 0.5.3 not found in ${relPath}. Current content:`, content.split('\n').filter(l => l.includes('"version"'))[0]);
     }
 }
 console.log(`Success: bumped ${successCount} files.`);
