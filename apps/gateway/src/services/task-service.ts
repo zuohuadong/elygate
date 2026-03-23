@@ -169,6 +169,32 @@ async function scanPendingTasks() {
 
 // ── Worker Startup (LISTEN/NOTIFY via @elygate/pg-listen) ────
 
+/** Clean up old tasks: completed > 30 days, failed > 7 days, stuck processing > 1 hour */
+async function cleanupTasks() {
+    try {
+        const deleted = await sql`
+            DELETE FROM tasks
+            WHERE (status = 'completed' AND created_at < NOW() - INTERVAL '30 days')
+               OR (status = 'failed' AND created_at < NOW() - INTERVAL '7 days')
+            RETURNING id
+        `;
+
+        // Mark stuck processing tasks as failed
+        const stuck = await sql`
+            UPDATE tasks SET status = 'failed', error = 'Timed out (stuck processing > 1h)', updated_at = NOW()
+            WHERE status = 'processing'
+            AND updated_at < NOW() - INTERVAL '1 hour'
+            RETURNING id
+        `;
+
+        if (deleted.length > 0 || stuck.length > 0) {
+            log.info(`[TaskCleanup] Deleted ${deleted.length} old tasks, marked ${stuck.length} stuck tasks as failed`);
+        }
+    } catch (err: any) {
+        log.error(`[TaskCleanup] Error: ${err.message}`);
+    }
+}
+
 let workerStarted = false;
 
 export async function startTaskWorker() {
@@ -199,7 +225,11 @@ export async function startTaskWorker() {
     // Fallback: periodic scan every 30s for stuck tasks (belt + suspenders)
     setInterval(scanPendingTasks, 30_000);
 
+    // Cleanup: every 6 hours
+    setInterval(cleanupTasks, 6 * 60 * 60 * 1000);
+    await cleanupTasks(); // Initial cleanup
+
     // Initial scan
     await scanPendingTasks();
-    log.info('[TaskWorker] Worker started (LISTEN + fallback scan 30s)');
+    log.info('[TaskWorker] Worker started (LISTEN + scan 30s + cleanup 6h)');
 }
