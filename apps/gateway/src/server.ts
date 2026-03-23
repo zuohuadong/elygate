@@ -146,47 +146,7 @@ async function init() {
     }
   }
 
-  const findSqlPath = async (relativePath: string) => {
-    const paths = [
-      join(process.cwd(), relativePath),
-      join(process.cwd(), '../../', relativePath),
-      join(__dirname, '../../../', relativePath)
-    ];
-    for (const p of paths) {
-      if (await Bun.file(p).exists()) return p;
-    }
-    return null;
-  };
 
-  const patches = [
-    'packages/db/src/phase7_updates.sql',
-    'packages/db/src/phase8_org_alerting.sql',
-    'packages/db/src/phase9_external_metadata.sql',
-    'packages/db/src/phase10_comfyui_templates.sql'
-  ];
-  for (const p of patches) {
-    const patchPath = await findSqlPath(p);
-    if (patchPath) {
-      try {
-        const patchSql = await Bun.file(patchPath).text();
-        await sql.unsafe(patchSql);
-        log.info(`✅ Schema patch ${p.split('/').pop()} applied.`);
-      } catch (e: unknown) {
-        log.error(`❌ Failed to apply patch ${p}:`, getErrorMessage(e));
-      }
-    }
-  }
-
-  const perfIndexesPath = await findSqlPath('packages/db/src/performance_indexes.sql');
-  if (perfIndexesPath) {
-    try {
-      const perfSql = await Bun.file(perfIndexesPath).text();
-      await sql.unsafe(perfSql);
-      log.info("📊 Performance indexes verified/applied.");
-    } catch (e: unknown) {
-      log.info("ℹ️ Performance indexes check:", getErrorMessage(e));
-    }
-  }
 
   memoryCache.refresh().catch((e: unknown) => log.error("[Async]", e));
 

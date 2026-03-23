@@ -270,6 +270,10 @@ CREATE TABLE IF NOT EXISTS logs (
     user_agent TEXT,
     trace_id TEXT,
     org_id INTEGER REFERENCES organizations(id) ON DELETE SET NULL,
+    external_task_id TEXT,
+    external_user_id TEXT,
+    external_workspace_id TEXT,
+    external_feature_type TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     PRIMARY KEY (id, created_at)
 ) PARTITION BY RANGE (created_at);
@@ -284,6 +288,8 @@ CREATE TABLE IF NOT EXISTS logs_y2026m05 PARTITION OF logs
 
 CREATE INDEX IF NOT EXISTS idx_logs_org_id ON logs(org_id);
 CREATE INDEX IF NOT EXISTS idx_logs_trace_id ON logs(trace_id);
+CREATE INDEX IF NOT EXISTS idx_logs_external_task_id ON logs(external_task_id);
+CREATE INDEX IF NOT EXISTS idx_logs_external_user_id ON logs(external_user_id);
 
 CREATE TABLE IF NOT EXISTS log_details (
     id SERIAL PRIMARY KEY,
@@ -312,6 +318,44 @@ CREATE TABLE IF NOT EXISTS health_logs (
 
 CREATE INDEX IF NOT EXISTS idx_health_logs_channel_id ON health_logs(channel_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_health_logs_created_at ON health_logs(created_at DESC);
+
+-- ============================================================
+-- Idempotency Keys
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS idempotency_keys (
+    id SERIAL PRIMARY KEY,
+    key_hash TEXT NOT NULL UNIQUE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    response_code INTEGER,
+    response_body JSONB,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_idempotency_keys_expires_at ON idempotency_keys(expires_at);
+CREATE INDEX IF NOT EXISTS idx_idempotency_keys_user_key ON idempotency_keys(user_id, key_hash);
+
+-- ============================================================
+-- ComfyUI Workflow Templates
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS workflow_templates (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT NOT NULL,
+    description TEXT,
+    group_name TEXT DEFAULT 'default',
+    template_json JSONB NOT NULL,
+    input_parameters JSONB NOT NULL DEFAULT '[]',
+    provider_type INTEGER NOT NULL DEFAULT 100,
+    user_id UUID,
+    is_public BOOLEAN DEFAULT false,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_templates_name ON workflow_templates(name);
+CREATE INDEX IF NOT EXISTS idx_workflow_templates_group ON workflow_templates(group_name);
 
 CREATE TABLE IF NOT EXISTS options (
     key TEXT PRIMARY KEY,
@@ -455,6 +499,7 @@ BEGIN
     DELETE FROM response_cache WHERE expired_at < NOW();
     DELETE FROM semantic_cache WHERE created_at < NOW() - retention_period;
     DELETE FROM token_cache WHERE expired_at < NOW();
+    DELETE FROM idempotency_keys WHERE expires_at < NOW();
     COMMIT;
 END;
 $$ LANGUAGE plpgsql;
@@ -470,6 +515,33 @@ BEGIN
     COMMIT;
 END;
 $$ LANGUAGE plpgsql;
+
+-- ============================================================
+-- Maintenance Procedures
+-- ============================================================
+
+CREATE OR REPLACE PROCEDURE cleanup_old_logs(retention_days INTEGER DEFAULT 90)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    DELETE FROM log_details
+    WHERE log_created_at < NOW() - (retention_days || ' days')::INTERVAL;
+    DELETE FROM logs
+    WHERE created_at < NOW() - (retention_days || ' days')::INTERVAL;
+    RAISE NOTICE 'Cleaned up logs older than % days.', retention_days;
+END;
+$$;
+
+CREATE OR REPLACE PROCEDURE optimize_tables()
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    VACUUM ANALYZE logs;
+    VACUUM ANALYZE log_details;
+    VACUUM ANALYZE organizations;
+    VACUUM ANALYZE users;
+END;
+$$;
 
 -- ============================================================
 -- Materialized Views
@@ -616,5 +688,13 @@ INSERT INTO options (key, value) VALUES
     ('WebhookURL', ''),
     ('Notify_On_Channel_Offline', 'true'),
     ('SemanticCacheDefaultMode', 'default'),
-    ('Timezone', 'UTC')
+    ('Timezone', 'UTC'),
+    ('UPSTREAM_TIMEOUT_MS', '30000'),
+    ('CIRCUIT_BREAKER_WINDOW_MS', '300000'),
+    ('CIRCUIT_BREAKER_FAILURE_RATE', '0.5'),
+    ('CIRCUIT_BREAKER_MIN_REQUESTS', '3'),
+    ('CIRCUIT_BREAKER_RECOVERY_THRESHOLD', '3'),
+    ('LATENCY_THRESHOLD_MS', '30000'),
+    ('HEALTH_CHECK_INTERVAL', '60000'),
+    ('ChannelSelectionStrategy', 'priority')
 ON CONFLICT (key) DO NOTHING;
