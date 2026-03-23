@@ -113,8 +113,8 @@ async function processTask(task: TaskRecord) {
         if (!token) {
             const [row] = await sql`
                 SELECT id, key, name, user_id AS "userId", models, status,
-                       quota, used_quota AS "usedQuota", unlimited_quota AS "unlimitedQuota",
-                       expire_time AS "expireTime"
+                       remain_quota AS "remainQuota", used_quota AS "usedQuota",
+                       expired_at AS "expiredAt"
                 FROM tokens WHERE id = ${task.tokenId} AND status = 1
             `;
             token = row as TokenRecord || null;
