@@ -68,6 +68,28 @@ export const modelsRouter = new Elysia()
         return {
             object: 'list',
             data: uniqueModels.map(model => {
+                // Determine model capabilities from its channels
+                const channels = memoryCache.selectChannels(model, u.group);
+                let endpoint = '/v1/chat/completions'; // default
+                let type = 'text';
+                for (const ch of channels) {
+                    if (ch.endpointType === 'video' || (ch.type === 42 && /^veo/i.test(model))) {
+                        endpoint = '/v1/video/generations';
+                        type = 'video';
+                        break;
+                    }
+                    if (ch.type === 42 || ch.endpointType === 'draw') {
+                        endpoint = '/v1/images/generations';
+                        type = 'image';
+                        break;
+                    }
+                }
+                // Image models on non-DAKKA channels (e.g. Kolors, Qwen-Image)
+                if (type === 'text' && /image|kolors|flux|dall/i.test(model)) {
+                    endpoint = '/v1/images/generations';
+                    type = 'image';
+                }
+
                 const modelData: Record<string, any> = {
                     id: model,
                     object: 'model',
@@ -76,17 +98,19 @@ export const modelsRouter = new Elysia()
                     permission: [],
                     root: model,
                     parent: null,
+                    type,
+                    endpoint,
                 };
 
                 // Include channel information if requested (for admin)
                 if (includeChannels) {
-                    const channels = memoryCache.selectChannels(model, u.group);
                     modelData.channels = channels.map(ch => ({
                         id: ch.id,
                         name: ch.name,
                         type: ch.type,
                         status: ch.status,
                         priority: ch.priority,
+                        endpointType: ch.endpointType,
                     }));
                 }
 
