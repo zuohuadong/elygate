@@ -31,6 +31,7 @@ async function init() {
   const { audioRouter } = await import("./routes/audio");
   const { rerankRouter } = await import("./routes/rerank");
   const { videoRouter } = await import("./routes/video");
+  const { tasksRouter } = await import("./routes/tasks");
   const { sysRouter } = await import("./routes/sys");
   const { mjRouter } = await import("./routes/mj");
   const { paymentRouter } = await import("./routes/payment");
@@ -104,6 +105,7 @@ async function init() {
         .use(audioRouter)
         .use(rerankRouter)
         .use(videoRouter)
+        .use(tasksRouter)
     )
     .get("*", async ({ request, set }) => {
       const url = new URL(request.url);
@@ -165,6 +167,10 @@ async function init() {
   
   memoryCache.startCleanupTask();
   memoryCache.startDiscoverySyncTask();
+
+  // Start async task worker (LISTEN/NOTIFY + fallback scan)
+  const { startTaskWorker } = await import('./services/task-service');
+  startTaskWorker();
 
   const refreshMaterializedViews = async () => {
     try {

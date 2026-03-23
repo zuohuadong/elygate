@@ -68,26 +68,22 @@ export const modelsRouter = new Elysia()
         return {
             object: 'list',
             data: uniqueModels.map(model => {
-                // Determine model capabilities from its channels
+                // Determine model type from DB metadata (no regex)
                 const channels = memoryCache.selectChannels(model, u.group);
-                let endpoint = '/v1/chat/completions'; // default
-                let type = 'text';
-                for (const ch of channels) {
-                    if (ch.endpointType === 'video' || (ch.type === 42 && /^veo/i.test(model))) {
-                        endpoint = '/v1/video/generations';
-                        type = 'video';
-                        break;
+                const meta = memoryCache.modelMetadata.get(model);
+                let type = meta?.type || 'chat';
+                let endpoint = meta?.endpoint || '/v1/chat/completions';
+
+                // Fallback: if no metadata, derive from channel config
+                if (!meta) {
+                    for (const ch of channels) {
+                        if (ch.endpointType === 'video') {
+                            type = 'video'; endpoint = '/v1/video/generations'; break;
+                        }
+                        if (ch.endpointType === 'draw' || ch.type === 42) {
+                            type = 'image'; endpoint = '/v1/images/generations'; break;
+                        }
                     }
-                    if (ch.type === 42 || ch.endpointType === 'draw') {
-                        endpoint = '/v1/images/generations';
-                        type = 'image';
-                        break;
-                    }
-                }
-                // Image models on non-DAKKA channels (e.g. Kolors, Qwen-Image)
-                if (type === 'text' && /image|kolors|flux|dall/i.test(model)) {
-                    endpoint = '/v1/images/generations';
-                    type = 'image';
                 }
 
                 const modelData: Record<string, any> = {

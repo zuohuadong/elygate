@@ -22,11 +22,19 @@ interface CacheStats {
     responseCacheMisses: number;
 }
 
+export interface ModelMeta {
+    type: string;       // 'chat' | 'image' | 'video' | 'audio' | 'embedding' | 'rerank'
+    endpoint?: string;  // '/v1/video/generations' etc.
+    displayName?: string;
+    tags?: string[];
+}
+
 export const memoryCache = {
     channelRoutes: new Map<string, ChannelConfig[]>(),
     channels: new Map<number, ChannelConfig>(),
     rateLimitRules: new Map<number, any>(),
     userGroups: new Map<string, any>(),
+    modelMetadata: new Map<string, ModelMeta>(),
     lastUpdated: 0,
     options: new Map<string, any>(),
 
@@ -63,6 +71,22 @@ export const memoryCache = {
                 FROM channels 
                 WHERE status != 0
             `;
+
+            // Load model metadata
+            const allModelMeta = await sql`
+                SELECT model_name AS "modelName", type, endpoint, display_name AS "displayName", tags
+                FROM model_metadata
+            `;
+            const newMetaMap = new Map<string, ModelMeta>();
+            for (const m of allModelMeta) {
+                newMetaMap.set(m.modelName, {
+                    type: m.type,
+                    endpoint: m.endpoint || undefined,
+                    displayName: m.displayName || undefined,
+                    tags: Array.isArray(m.tags) ? m.tags : [],
+                });
+            }
+            this.modelMetadata = newMetaMap;
 
             const allRules = await sql`
                 SELECT id, name, rpm, rph, concurrent FROM rate_limit_rules
