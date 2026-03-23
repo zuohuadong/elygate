@@ -274,6 +274,12 @@ export async function dispatch(options: DispatchOptions) {
                     transformedBody.model = upstreamModel; // Override model with mapped name
                 }
                 forwardBody = JSON.stringify(transformedBody) as any;
+
+                // Log payload size for multimodal diagnostics
+                const payloadSizeBytes = typeof forwardBody === 'string' ? new Blob([forwardBody]).size : 0;
+                if (payloadSizeBytes > 500_000) {
+                    log.info(`[Dispatcher] ⚠️ Large payload: ${(payloadSizeBytes / 1024 / 1024).toFixed(2)} MB for model ${model}`);
+                }
             }
 
             // 3. Package & Rate Limit Check
@@ -314,8 +320,15 @@ export async function dispatch(options: DispatchOptions) {
                 if (bodyObj.computer_use) log.info(`[Dispatcher] User ${user.id} requested Computer Use with ${model}`);
                 if (bodyObj.tool_search || bodyObj.deferred_tools) log.info(`[Dispatcher] Model ${model} active with Tool Search / Deferred Loading.`);
 
-                // 4. Upstream Fetch (with timeout to prevent long waits before failover)
-                const upstreamTimeoutMs = parseInt(optionCache.get('UPSTREAM_TIMEOUT_MS', '30000'));
+                // 4. Upstream Fetch (with dynamic timeout for large payloads)
+                let upstreamTimeoutMs = parseInt(optionCache.get('UPSTREAM_TIMEOUT_MS', '30000'));
+                // Scale timeout for large payloads: +5s per MB over 1MB
+                const bodySize = typeof forwardBody === 'string' ? (forwardBody as unknown as string).length : 0;
+                if (bodySize > 1_000_000) {
+                    const extraMs = Math.ceil((bodySize - 1_000_000) / 1_000_000) * 5000;
+                    upstreamTimeoutMs += extraMs;
+                    log.info(`[Dispatcher] Extended timeout to ${upstreamTimeoutMs}ms for ${(bodySize / 1024 / 1024).toFixed(1)}MB payload`);
+                }
                 const abortCtl = new AbortController();
                 const fetchTimeout = setTimeout(() => abortCtl.abort(), upstreamTimeoutMs);
                 const startTime = Date.now();
@@ -341,6 +354,13 @@ export async function dispatch(options: DispatchOptions) {
                 if (!response.ok) {
                     const errorText = await response.text();
                     await circuitBreaker.recordError(channelConfig.id, response.status);
+                    // Enhanced diagnostics for empty error bodies (CF/proxy rejections)
+                    if (!errorText || errorText.trim() === '') {
+                        const cfRay = response.headers.get('cf-ray') || 'N/A';
+                        const server = response.headers.get('server') || 'N/A';
+                        const contentLength = response.headers.get('content-length') || 'N/A';
+                        throw new Error(`Status ${response.status} (empty body) — cf-ray: ${cfRay}, server: ${server}, content-length: ${contentLength}, body-size: ${bodySize}B`);
+                    }
                     throw new Error(`Status ${response.status}: ${errorText}`);
                 }
 
