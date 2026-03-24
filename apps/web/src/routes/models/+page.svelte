@@ -130,10 +130,14 @@
         };
     }
 
-    function getCapability(modelId: string): string {
+    function getCapability(modelId: string, modelType?: string): string {
+        // Use API type field as authoritative source
+        if (modelType === 'video') return 'video';
+        if (modelType === 'image') return 'image';
+
         const id = modelId.toLowerCase();
 
-        // Check for reasoning/thinking models first
+        // Subcategorize chat models via heuristics
         if (
             id.includes("thinking") ||
             id.includes("reasoning") ||
@@ -144,23 +148,30 @@
             return "thinking";
         }
 
-        if (id.includes("text-embedding") || id.includes("-embedding-"))
+        if (id.includes("text-embedding") || id.includes("-embedding-") || id.includes("bge-") || id.includes("reranker"))
             return "embedding";
         if (
             id.includes("dall-e") ||
             id.includes("midjourney") ||
             id.includes("stable-diffusion") ||
-            id.includes("flux")
+            id.includes("flux") ||
+            id.includes("kolors")
         )
             return "image";
         if (
             id.includes("tts-") ||
             id.includes("whisper-") ||
-            id.includes("audio-")
+            id.includes("audio-") ||
+            id.includes("cosyvoice") ||
+            id.includes("sensevoice") ||
+            id.includes("speechasr") ||
+            id.includes("indextts") ||
+            id.includes("moss-ttsd")
         )
             return "audio";
         if (
-            id.includes("video-") ||
+            id.includes("wan2.2") ||
+            id.includes("veo3") ||
             id.includes("sora") ||
             id.includes("luma") ||
             id.includes("kling")
@@ -222,7 +233,7 @@
                 activeProvider === "all" || getProvider(id) === activeProvider;
             const matchesCapability =
                 activeCapability === "all" ||
-                getCapability(id) === activeCapability;
+                getCapability(id, m.type) === activeCapability;
             return matchesSearch && matchesProvider && matchesCapability;
         }),
     );
@@ -565,7 +576,7 @@
             </div>
         {:else}
             {#each displayedModels as model (model.id)}
-                {@const isThinking = getCapability(model.id) === "thinking"}
+                {@const isThinking = getCapability(model.id, model.type) === "thinking"}
                 {@const parsed = parseModelId(model.id)}
                 <div
                     class="bg-white hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800/80 rounded-2xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm transition-all hover:shadow-md hover:-translate-y-1 flex flex-col group relative overflow-hidden {model.status ===
@@ -661,7 +672,7 @@
                                     : 'bg-amber-50 text-amber-600 border border-amber-100 dark:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/20'} uppercase tracking-wide"
                             >
                                 {capabilities.find(
-                                    (c) => c.id === getCapability(model.id),
+                                    (c) => c.id === getCapability(model.id, model.type),
                                 )?.label || "Chat"}
                             </span>
                         </div>
