@@ -189,7 +189,7 @@ async function scanPendingTasks() {
 
 // ── Worker Startup (LISTEN/NOTIFY via @elygate/pg-listen) ────
 
-/** Clean up old tasks: completed > 30 days, failed > 7 days, stuck processing > 1 hour */
+/** Clean up old tasks: completed > 30 days, failed > 7 days, stuck processing > 10 min */
 async function cleanupTasks() {
     try {
         const deleted = await sql`
@@ -199,11 +199,11 @@ async function cleanupTasks() {
             RETURNING id
         `;
 
-        // Mark stuck processing tasks as failed
+        // Mark stuck processing tasks as failed (> 10 min means worker died/restarted)
         const stuck = await sql`
-            UPDATE tasks SET status = 'failed', error = 'Timed out (stuck processing > 1h)', updated_at = NOW()
+            UPDATE tasks SET status = 'failed', error = 'Timed out (stuck processing > 10min)', updated_at = NOW()
             WHERE status = 'processing'
-            AND updated_at < NOW() - INTERVAL '1 hour'
+            AND updated_at < NOW() - INTERVAL '10 minutes'
             RETURNING id
         `;
 
@@ -245,11 +245,11 @@ export async function startTaskWorker() {
     // Fallback: periodic scan every 30s for stuck tasks (belt + suspenders)
     setInterval(scanPendingTasks, 30_000);
 
-    // Cleanup: every 6 hours
-    setInterval(cleanupTasks, 6 * 60 * 60 * 1000);
-    await cleanupTasks(); // Initial cleanup
+    // Cleanup: every 30 minutes (handles stuck processing tasks quickly after restarts)
+    setInterval(cleanupTasks, 30 * 60 * 1000);
+    await cleanupTasks(); // Initial cleanup — marks any stuck processing tasks as failed
 
     // Initial scan
     await scanPendingTasks();
-    log.info('[TaskWorker] Worker started (LISTEN + scan 30s + cleanup 6h)');
+    log.info('[TaskWorker] Worker started (LISTEN + scan 30s + cleanup 30min)');
 }
