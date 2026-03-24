@@ -168,11 +168,9 @@ class CircuitBreaker {
         // 3. Skip client errors (4xx) — they're user mistakes, not channel problems
         if (status && status >= 400 && status < 500) return;
 
-        // 4. If in Half-Open, one failure trips it back to Disabled
-        if (channel.status === 4 || channel.status === 5) {
-            await this.disableChannel(channelId, `Failed during recovery/busy period: ${status}`);
-            return;
-        }
+        // 4. For recovering/busy channels, don't disable on a single failure.
+        //    Let them use the same time-window failure rate check as normal channels.
+        //    The health check auto-recovery will handle status=4→1 transition.
 
         // 5. Add failure event to the time window
         const events = this.events.get(channelId) || [];
@@ -220,43 +218,49 @@ class CircuitBreaker {
 
     private async runHealthCheck() {
         try {
-            // Auto-recover Status 5 (Busy) after cooldown
+            let changed = false;
+
+            // 1. Auto-recover Status 5 (Busy) after 1 minute cooldown
             const busyChannels = await sql`
                 SELECT id FROM channels WHERE status = 5 AND updated_at < NOW() - INTERVAL '1 minute'
             `;
             for (const ch of busyChannels) {
+                log.info(`[HealthCheck] Auto-recovering Busy channel ${ch.id} to Online.`);
                 await sql`UPDATE channels SET status = 1, status_message = NULL, updated_at = NOW() WHERE id = ${ch.id}`;
+                changed = true;
             }
 
-            // Auto-recover Status 4 (Testing Recovery) after 5 minutes timeout
+            // 2. Auto-recover Status 4 (Testing Recovery) after 2 minutes — no re-ping needed
+            //    The initial ping that moved it from status=3→4 already proved connectivity.
+            //    Re-pinging can cause false negatives (e.g. /v1/models returns 404 but chat works).
             const testingChannels = await sql`
-                SELECT id, base_url AS "baseUrl", key, type FROM channels 
-                WHERE status = 4 AND updated_at < NOW() - INTERVAL '5 minutes'
+                SELECT id FROM channels 
+                WHERE status = 4 AND updated_at < NOW() - INTERVAL '2 minutes'
             `;
-            let changed = busyChannels.length > 0;
             for (const ch of testingChannels) {
-                const isHealthy = await this.pingChannel(ch);
-                if (isHealthy) {
-                    log.info(`[CircuitBreaker] Channel ${ch.id} auto-recovered from Testing Recovery (timeout).`);
-                    await sql`UPDATE channels SET status = 1, status_message = NULL, updated_at = NOW() WHERE id = ${ch.id}`;
-                    changed = true;
-                } else {
-                    await sql`UPDATE channels SET status = 3, status_message = 'Failed during testing recovery', updated_at = NOW() WHERE id = ${ch.id}`;
-                    changed = true;
-                }
+                log.info(`[HealthCheck] Auto-recovering Testing Recovery channel ${ch.id} to Online (cooldown passed).`);
+                await sql`UPDATE channels SET status = 1, status_message = NULL, updated_at = NOW() WHERE id = ${ch.id}`;
+                changed = true;
             }
 
+            // 3. Try to recover Status 3 (Disabled) channels — ping to check if they're back
+            //    Skip channels disabled for Auth Error (401) — those need manual key fix
             const disabledChannels = await sql`
-                SELECT id, base_url AS "baseUrl", key, type FROM channels WHERE status = 3 AND (status_message IS NULL OR status_message NOT LIKE 'Auth Error%')
+                SELECT id, base_url AS "baseUrl", key, type FROM channels 
+                WHERE status = 3 
+                  AND (status_message IS NULL OR status_message NOT LIKE 'Auth Error: 401%')
+                  AND updated_at < NOW() - INTERVAL '2 minutes'
             `;
             
             for (const ch of disabledChannels) {
                 const isHealthy = await this.pingChannel(ch);
                 if (isHealthy) {
+                    log.info(`[HealthCheck] Disabled channel ${ch.id} ping succeeded. Moving to Testing Recovery.`);
                     await sql`UPDATE channels SET status = 4, status_message = 'Testing Recovery', updated_at = NOW() WHERE id = ${ch.id}`;
                     changed = true;
                 }
             }
+
             if (changed) await memoryCache.refresh();
         } catch (e: unknown) {
             log.error('[HealthCheck] Error checking channels:', e);
