@@ -2,6 +2,13 @@ import { Elysia } from 'elysia';
 import { dispatch } from '../services/dispatcher';
 import { getConverter } from '../services/converters';
 import { memoryCache } from '../services/cache';
+import { createTask } from '../services/task-service';
+import { log } from '../services/logger';
+import type { UserRecord, TokenRecord } from '../types';
+
+// Models that require async processing (long generation times like video)
+// Reference: new-api treats sora-image, cogview, etc. as async tasks
+const ASYNC_IMAGE_MODELS = /sora|cogview|kling|hunyuan|wanx|jimeng/i;
 
 export const imagesRouter = new Elysia()
     .post('/images/generations', async (ctx) => handleImages(ctx, '/v1/images/generations'))
@@ -27,6 +34,25 @@ async function handleImages({ body, headers, params, request, query }: Record<st
 
     const ip = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown';
     const ua = request.headers.get('user-agent') || 'unknown';
+
+    // Async image models (sora-image, cogview, etc.) go through task queue
+    if (ASYNC_IMAGE_MODELS.test(model)) {
+        log.info(`[IMAGE-ASYNC] UserID: ${u.id}, Token: ${t.name}, Model: ${model}`);
+        const taskId = await createTask({
+            userId: u.id,
+            tokenId: t.id,
+            model,
+            type: 'image',
+            requestBody: body,
+        });
+        return new Response(JSON.stringify({
+            id: taskId,
+            object: 'task',
+            model,
+            status: 'pending',
+            message: 'Image generation task created. Poll GET /v1/tasks/{id} for status.',
+        }), { status: 202, headers: { 'Content-Type': 'application/json' } });
+    }
 
     try {
         const result = await dispatch({

@@ -142,10 +142,18 @@ class CircuitBreaker {
         const channel = memoryCache.channels.get(channelId);
         if (!channel) return;
 
-        // 1. Immediate Disable for Auth Errors (401/403)
-        if (status === 401 || status === 403) {
-            log.error(`[CircuitBreaker] Channel ${channelId} Auth Error (${status}). Disabling.`);
-            await this.disableChannel(channelId, `Auth Error: ${status} ${message || ""}`);
+        // 1. Immediate Disable for Auth Errors (401 only — invalid key)
+        if (status === 401) {
+            log.error(`[CircuitBreaker] Channel ${channelId} Auth Error (401). Disabling.`);
+            await this.disableChannel(channelId, `Auth Error: 401 ${message || ""}`);
+            return;
+        }
+
+        // 2. 403 may be upstream balance/quota issue — mark as Busy (auto-recoverable)
+        if (status === 403) {
+            log.warn(`[CircuitBreaker] Channel ${channelId} received 403 (may be upstream balance). Marking as Busy.`);
+            await sql`UPDATE channels SET status = 5, status_message = ${'Upstream 403: ' + (message || '').substring(0, 100)}, updated_at = NOW() WHERE id = ${channelId}`;
+            await memoryCache.refresh();
             return;
         }
 

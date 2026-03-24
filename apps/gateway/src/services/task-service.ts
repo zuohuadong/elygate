@@ -81,15 +81,18 @@ export async function getTask(taskId: string, userId?: number): Promise<TaskReco
 }
 
 async function updateTask(taskId: string, updates: Partial<Pick<TaskRecord, 'status' | 'providerTaskId' | 'channelId' | 'result' | 'error' | 'progress'>>) {
-    const parts: string[] = ['updated_at = NOW()'];
-    if (updates.status) parts.push(`status = '${updates.status}'`);
-    if (updates.providerTaskId) parts.push(`provider_task_id = '${updates.providerTaskId}'`);
-    if (updates.channelId) parts.push(`channel_id = ${updates.channelId}`);
-    if (updates.result) parts.push(`result = '${JSON.stringify(updates.result).replace(/'/g, "''")}'::jsonb`);
-    if (updates.error) parts.push(`error = '${updates.error.replace(/'/g, "''")}'`);
-    if (updates.progress !== undefined) parts.push(`progress = ${updates.progress}`);
-
-    await sql.unsafe(`UPDATE tasks SET ${parts.join(', ')} WHERE id = '${taskId}'`);
+    // Use parameterized queries to prevent SQL injection from upstream strings
+    await sql`
+        UPDATE tasks SET
+            updated_at = NOW(),
+            status = COALESCE(${updates.status || null}, status),
+            provider_task_id = COALESCE(${updates.providerTaskId || null}, provider_task_id),
+            channel_id = COALESCE(${updates.channelId || null}, channel_id),
+            result = COALESCE(${updates.result || null}, result),
+            error = COALESCE(${updates.error || null}, error),
+            progress = COALESCE(${updates.progress !== undefined ? updates.progress : null}, progress)
+        WHERE id = ${taskId}
+    `;
 
     // Notify on completion/failure
     if (updates.status === 'completed' || updates.status === 'failed') {
@@ -136,7 +139,7 @@ async function processTask(task: TaskRecord) {
             body: taskBody,
             user: user as UserRecord,
             token: token as TokenRecord,
-            endpointType: 'video',
+            endpointType: (task.type === 'image' ? 'images' : task.type) as 'video' | 'images',
             skipTransform: false,
         });
 
