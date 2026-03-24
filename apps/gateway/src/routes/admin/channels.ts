@@ -81,7 +81,7 @@ export const channelsRouter = new Elysia()
 
             let finalModels = oldChannel.models;
             if (b.models !== undefined) {
-                finalModels = Array.isArray(b.models) ? JSON.stringify(b.models) : b.models;
+                finalModels = b.models;
             }
 
             let finalKey = oldChannel.key;
