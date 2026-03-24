@@ -314,6 +314,64 @@ export const channelsRouter = new Elysia()
         }
     })
 
+    // Restore exhausted/invalid keys back to active
+    .post('/channels/:id/keys/restore', async ({ params: { id }, body, set }: any) => {
+        try {
+            const [channel] = await sql`SELECT * FROM channels WHERE id = ${Number(id)} LIMIT 1`;
+            if (!channel) {
+                set.status = 404;
+                return { success: false, message: 'Channel not found' };
+            }
+
+            const b = (body || {}) as Record<string, any>;
+            const statusMap: Record<string, string> = (typeof channel.key_status === 'string'
+                ? JSON.parse(channel.key_status || '{}')
+                : channel.key_status) || {};
+            const allKeys = channel.key.split('\n').map((k: string) => k.trim()).filter(Boolean);
+
+            let restoredCount = 0;
+
+            if (b.key) {
+                // Restore a specific key
+                if (statusMap[b.key]) {
+                    delete statusMap[b.key];
+                    restoredCount = 1;
+                }
+            } else {
+                // Restore all keys
+                restoredCount = Object.keys(statusMap).length;
+                for (const k of Object.keys(statusMap)) {
+                    delete statusMap[k];
+                }
+            }
+
+            // If channel was disabled due to all keys exhausted, auto-recover to Online
+            const newStatus = (channel.status === 3 && restoredCount > 0) ? 1 : channel.status;
+
+            const [result] = await sql`
+                UPDATE channels 
+                SET key_status = ${statusMap},
+                    status = ${newStatus},
+                    status_message = ${newStatus === 1 ? null : channel.status_message},
+                    updated_at = NOW()
+                WHERE id = ${Number(id)}
+                RETURNING *
+            `;
+            await refreshAllCaches();
+
+            return {
+                success: true,
+                restoredCount,
+                channelRestored: newStatus === 1 && channel.status !== 1,
+                keyStatus: statusMap,
+                totalKeys: allKeys.length
+            };
+        } catch (e: unknown) {
+            set.status = 500;
+            return { success: false, message: getErrorMessage(e) };
+        }
+    })
+
     .post('/channels/:id/test', async ({ params: { id } }: any) => {
         const [channel] = await sql`SELECT * FROM channels WHERE id = ${Number(id)} LIMIT 1`;
         if (!channel) throw new Error("Channel not found");
