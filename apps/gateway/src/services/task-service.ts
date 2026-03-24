@@ -53,7 +53,7 @@ export async function createTask(opts: {
     const id = generateTaskId();
     await sql`
         INSERT INTO tasks (id, user_id, token_id, model, type, status, request_body)
-        VALUES (${id}, ${opts.userId}, ${opts.tokenId}, ${opts.model}, ${opts.type}, 'pending', ${JSON.stringify(opts.requestBody)})
+        VALUES (${id}, ${opts.userId}, ${opts.tokenId}, ${opts.model}, ${opts.type}, 'pending', ${sql.json(opts.requestBody)})
     `;
     // Notify background worker
     await sql`SELECT pg_notify('task_created', ${id})`;
@@ -125,9 +125,15 @@ async function processTask(task: TaskRecord) {
         }
 
         // Dispatch to provider (this includes the sync polling internally)
+        // Handle double-serialized requestBody from older tasks
+        let taskBody = task.requestBody || {};
+        if (typeof taskBody === 'string') {
+            try { taskBody = JSON.parse(taskBody); } catch { /* use as-is */ }
+        }
+
         const result = await dispatch({
             model: task.model,
-            body: task.requestBody || {},
+            body: taskBody,
             user: user as UserRecord,
             token: token as TokenRecord,
             endpointType: 'video',
