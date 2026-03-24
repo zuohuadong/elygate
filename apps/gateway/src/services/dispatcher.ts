@@ -458,7 +458,7 @@ export async function dispatch(options: DispatchOptions) {
                             .map(b => b.toString(16).padStart(2, '0')).join('');
                         await sql`
                             INSERT INTO idempotency_keys (key_hash, user_id, response_code, response_body, expires_at)
-                            VALUES (${cryptoHash}, ${user.id}, ${response.status}, ${JSON.stringify(rawData)}, NOW() + INTERVAL '24 hours')
+                            VALUES (${cryptoHash}, ${user.id}, ${response.status}, ${rawData}, NOW() + INTERVAL '24 hours')
                             ON CONFLICT (key_hash) DO NOTHING
                         `.catch((e: unknown) => log.warn('[Async] Suppressed:', e));
                     }
@@ -550,7 +550,7 @@ export async function dispatch(options: DispatchOptions) {
                             .map(b => b.toString(16).padStart(2, '0')).join('');
                         await sql`
                             INSERT INTO idempotency_keys (key_hash, user_id, response_code, response_body, expires_at)
-                            VALUES (${cryptoHash}, ${user.id}, ${response.status}, ${JSON.stringify(rawData)}, NOW() + INTERVAL '24 hours')
+                            VALUES (${cryptoHash}, ${user.id}, ${response.status}, ${rawData}, NOW() + INTERVAL '24 hours')
                             ON CONFLICT (key_hash) DO NOTHING
                         `.catch((e: unknown) => log.warn('[Async] Suppressed:', e));
                     }
@@ -654,7 +654,7 @@ export async function dispatch(options: DispatchOptions) {
                     if (errMsg.includes('quota') || errMsg.includes('balance') || errMsg.includes('credit') || errMsg.includes('limit')) {
                         log.error(`[Dispatcher] Key exhausted: ${activeKey.substring(0, 8)}...`);
                         const newStatusMap = { ...statusMap, [activeKey]: 'exhausted' };
-                        await sql`UPDATE channels SET key_status = ${JSON.stringify(newStatusMap)}, updated_at = NOW() WHERE id = ${channelConfig.id}`.catch((e: unknown) => log.warn('[Async] Suppressed:', e));
+                        await sql`UPDATE channels SET key_status = ${newStatusMap}, updated_at = NOW() WHERE id = ${channelConfig.id}`.catch((e: unknown) => log.warn('[Async] Suppressed:', e));
                         await memoryCache.refresh(false).catch((e: unknown) => log.warn('[Async] Suppressed:', e));
                     }
                 }
@@ -838,7 +838,7 @@ function handleStreamBilling(
                     const mockResponse = { choices: [{ message: { content: completionText } }], usage: usageData };
                     await sql`
                         INSERT INTO idempotency_keys (key_hash, user_id, response_code, response_body, expires_at)
-                        VALUES (${cryptoHash}, ${user.id}, ${statusCode}, ${JSON.stringify(mockResponse)}, NOW() + INTERVAL '24 hours')
+                        VALUES (${cryptoHash}, ${user.id}, ${statusCode}, ${mockResponse}, NOW() + INTERVAL '24 hours')
                         ON CONFLICT (key_hash) DO NOTHING
                     `.catch((e: unknown) => log.warn('[Async] Suppressed:', e));
                 }

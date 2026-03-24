@@ -322,7 +322,7 @@ export const authRouter = new Elysia()
                     const newKey = `sk-${Bun.randomUUIDv7('hex')}`;
                     const [result] = await sql`
                         INSERT INTO tokens (user_id, name, key, status, remain_quota, models)
-                        VALUES (${userRow.id}, ${b.name}, ${newKey}, 1, ${b.remainQuota || -1}, ${JSON.stringify(b.models || [])})
+                        VALUES (${userRow.id}, ${b.name}, ${newKey}, 1, ${b.remainQuota || -1}, ${b.models || []})
                         RETURNING *
                     `;
                     return result;
@@ -332,7 +332,7 @@ export const authRouter = new Elysia()
                     const [existing] = await sql`SELECT id FROM tokens WHERE id = ${Number(id)} AND user_id = ${userRow.id}`;
                     if (!existing) { set.status = 403; throw new Error('Forbidden'); }
                     const [result] = await sql`
-                        UPDATE tokens SET name = COALESCE(${body.name}, name), status = COALESCE(${body.status}, status), remain_quota = COALESCE(${body.remainQuota}, remain_quota), models = COALESCE(${body.models ? JSON.stringify(body.models) : null}, models)
+                        UPDATE tokens SET name = COALESCE(${body.name}, name), status = COALESCE(${body.status}, status), remain_quota = COALESCE(${body.remainQuota}, remain_quota), models = COALESCE(${body.models || null}, models)
                         WHERE id = ${Number(id)} AND user_id = ${userRow.id} RETURNING *
                     `;
                     return result;

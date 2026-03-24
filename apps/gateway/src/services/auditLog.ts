@@ -54,7 +54,7 @@ export async function recordAuditLog(entry: Omit<AuditLog, 'id' | 'createdAt'>):
                 ${entry.action},
                 ${entry.resource},
                 ${entry.resourceId || null},
-                ${JSON.stringify(entry.details) || null},
+                ${entry.details || null},
                 ${entry.ipAddress || null},
                 ${entry.userAgent || null},
                 NOW()

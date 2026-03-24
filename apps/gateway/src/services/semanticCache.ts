@@ -158,7 +158,7 @@ export async function storeSemanticCache(
     const vectorLiteral = `[${embedding.join(',')}]`;
     await sql`
         INSERT INTO semantic_cache (model_name, prompt_hash, prompt, embedding, response, created_by)
-        VALUES (${model}, ${promptHash}, ${prompt}, ${vectorLiteral}::vector, ${JSON.stringify(response)}, ${createdBy || null})
+        VALUES (${model}, ${promptHash}, ${prompt}, ${vectorLiteral}::vector, ${response}, ${createdBy || null})
         ON CONFLICT (model_name, prompt_hash) DO UPDATE
         SET response = EXCLUDED.response,
             embedding = EXCLUDED.embedding,

@@ -82,7 +82,7 @@ export async function storeResponseCache(
 
     await sql`
         INSERT INTO response_cache (hash, model_name, response, usage, created_by, expired_at)
-        VALUES (${hash}, ${model}, ${JSON.stringify(response)}, ${JSON.stringify(usage)}, ${userId || null}, ${expiredAt})
+        VALUES (${hash}, ${model}, ${response}, ${usage}, ${userId || null}, ${expiredAt})
         ON CONFLICT (hash) DO UPDATE
         SET response = EXCLUDED.response,
             usage = EXCLUDED.usage,

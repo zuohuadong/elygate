@@ -15,7 +15,7 @@ export const groupsRouter = new Elysia()
             const b = body as Record<string, any>;
             const [result] = await sql`
                 INSERT INTO user_groups (key, name, description, allowed_channel_types, denied_channel_types, allowed_models, denied_models, allowed_packages, status)
-                VALUES (${b.key}, ${b.name}, ${b.description || ''}, ${b.allowedChannelTypes ? JSON.stringify(b.allowedChannelTypes) : '[]'}, ${b.deniedChannelTypes ? JSON.stringify(b.deniedChannelTypes) : '[]'}, ${b.allowedModels ? JSON.stringify(b.allowedModels) : '[]'}, ${b.deniedModels ? JSON.stringify(b.deniedModels) : '[]'}, ${b.allowedPackages ? JSON.stringify(b.allowedPackages) : '[]'}, ${b.status || 1})
+                VALUES (${b.key}, ${b.name}, ${b.description || ''}, ${b.allowedChannelTypes || []}, ${b.deniedChannelTypes || []}, ${b.allowedModels || []}, ${b.deniedModels || []}, ${b.allowedPackages || []}, ${b.status || 1})
                 RETURNING *
             `;
             await refreshAllCaches();
@@ -50,11 +50,11 @@ export const groupsRouter = new Elysia()
                 UPDATE user_groups 
                 SET name = ${b.name ?? oldGroup.name},
                     description = ${b.description ?? oldGroup.description},
-                    allowed_channel_types = ${b.allowedChannelTypes ? JSON.stringify(b.allowedChannelTypes) : oldGroup.allowed_channel_types},
-                    denied_channel_types = ${b.deniedChannelTypes ? JSON.stringify(b.deniedChannelTypes) : oldGroup.denied_channel_types},
-                    allowed_models = ${b.allowedModels ? JSON.stringify(b.allowedModels) : oldGroup.allowed_models},
-                    denied_models = ${b.deniedModels ? JSON.stringify(b.deniedModels) : oldGroup.denied_models},
-                    allowed_packages = ${b.allowedPackages ? JSON.stringify(b.allowedPackages) : oldGroup.allowed_packages},
+                    allowed_channel_types = ${b.allowedChannelTypes || oldGroup.allowed_channel_types},
+                    denied_channel_types = ${b.deniedChannelTypes || oldGroup.denied_channel_types},
+                    allowed_models = ${b.allowedModels || oldGroup.allowed_models},
+                    denied_models = ${b.deniedModels || oldGroup.denied_models},
+                    allowed_packages = ${b.allowedPackages || oldGroup.allowed_packages},
                     status = ${b.status ?? oldGroup.status},
                     updated_at = NOW()
                 WHERE key = ${key}

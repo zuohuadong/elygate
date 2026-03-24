@@ -368,7 +368,7 @@ export const memoryCache = {
         const expiredAt = token.expiredAt ? new Date(token.expiredAt) : new Date(Date.now() + 24 * 60 * 60 * 1000);
         await sql`
             INSERT INTO token_cache (key_hash, token_data, user_id, expired_at)
-            VALUES (${keyHash}, ${JSON.stringify(token)}, ${token.userId}, ${expiredAt})
+            VALUES (${keyHash}, ${token}, ${token.userId}, ${expiredAt})
             ON CONFLICT (key_hash) DO UPDATE
             SET token_data = EXCLUDED.token_data,
                 updated_at = NOW(),

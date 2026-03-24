@@ -51,11 +51,10 @@ export async function createTask(opts: {
     requestBody: Record<string, any>;
 }): Promise<string> {
     const id = generateTaskId();
-    const bodyJson = JSON.stringify(opts.requestBody).replace(/'/g, "''");
-    await sql.unsafe(`
+    await sql`
         INSERT INTO tasks (id, user_id, token_id, model, type, status, request_body)
-        VALUES ('${id}', ${opts.userId}, ${opts.tokenId}, '${opts.model}', '${opts.type}', 'pending', '${bodyJson}'::jsonb)
-    `);
+        VALUES (${id}, ${opts.userId}, ${opts.tokenId}, ${opts.model}, ${opts.type}, 'pending', ${opts.requestBody})
+    `;
     // Notify background worker
     await sql`SELECT pg_notify('task_created', ${id})`;
     log.info(`[Task] Created task ${id} for model ${opts.model}`);
@@ -86,7 +85,7 @@ async function updateTask(taskId: string, updates: Partial<Pick<TaskRecord, 'sta
     if (updates.status) parts.push(`status = '${updates.status}'`);
     if (updates.providerTaskId) parts.push(`provider_task_id = '${updates.providerTaskId}'`);
     if (updates.channelId) parts.push(`channel_id = ${updates.channelId}`);
-    if (updates.result) parts.push(`result = '${JSON.stringify(updates.result)}'::jsonb`);
+    if (updates.result) parts.push(`result = '${JSON.stringify(updates.result).replace(/'/g, "''")}'::jsonb`);
     if (updates.error) parts.push(`error = '${updates.error.replace(/'/g, "''")}'`);
     if (updates.progress !== undefined) parts.push(`progress = ${updates.progress}`);
 

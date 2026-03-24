@@ -55,7 +55,7 @@ export const adminRouter = new Elysia()
             const b = body as Record<string, any>;
             const [result] = await sql`
                 INSERT INTO user_groups (key, name, description, allowed_channel_types, denied_channel_types, allowed_models, denied_models, allowed_packages, status)
-                VALUES (${b.key}, ${b.name}, ${b.description || ''}, ${b.allowedChannelTypes ? JSON.stringify(b.allowedChannelTypes) : '[]'}, ${b.deniedChannelTypes ? JSON.stringify(b.deniedChannelTypes) : '[]'}, ${b.allowedModels ? JSON.stringify(b.allowedModels) : '[]'}, ${b.deniedModels ? JSON.stringify(b.deniedModels) : '[]'}, ${b.allowedPackages ? JSON.stringify(b.allowedPackages) : '[]'}, ${b.status || 1})
+                VALUES (${b.key}, ${b.name}, ${b.description || ''}, ${b.allowedChannelTypes || []}, ${b.deniedChannelTypes || []}, ${b.allowedModels || []}, ${b.deniedModels || []}, ${b.allowedPackages || []}, ${b.status || 1})
                 RETURNING *
             `;
             await refreshAllCaches();
@@ -343,7 +343,7 @@ export const adminRouter = new Elysia()
             const [result] = await sql`
                 UPDATE channels 
                 SET key = ${newKeyString},
-                    key_status = ${JSON.stringify(newStatusMap)},
+                    key_status = ${newStatusMap},
                     updated_at = NOW()
                 WHERE id = ${Number(id)}
                 RETURNING *
@@ -1666,7 +1666,7 @@ export const adminRouter = new Elysia()
             const b = body as Record<string, any>;
             const [result] = await sql`
                 INSERT INTO packages (name, description, price, duration_days, models, default_rate_limit_id, model_rate_limits, cycle_quota, cycle_interval, cycle_unit, cache_policy, is_public, added_by)
-                VALUES (${b.name}, ${b.description || ''}, ${b.price || 0}, ${b.durationDays || 30}, ${JSON.stringify(b.models || [])}, ${b.defaultRateLimitId || null}, ${JSON.stringify(b.modelRateLimits || {})}, ${b.cycleQuota || 0}, ${b.cycleInterval || 1}, ${b.cycleUnit || 'day'}, ${JSON.stringify(b.cachePolicy || null)}, ${b.isPublic ?? true}, ${user.id})
+                VALUES (${b.name}, ${b.description || ''}, ${b.price || 0}, ${b.durationDays || 30}, ${b.models || []}, ${b.defaultRateLimitId || null}, ${b.modelRateLimits || {}}, ${b.cycleQuota || 0}, ${b.cycleInterval || 1}, ${b.cycleUnit || 'day'}, ${b.cachePolicy || null}, ${b.isPublic ?? true}, ${user.id})
                 RETURNING *
             `;
             return { success: true, data: result };

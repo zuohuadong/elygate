@@ -96,12 +96,12 @@ export const channelsRouter = new Elysia()
                     key = ${finalKey},
                     base_url = ${b.baseUrl ?? oldChannel.base_url},
                     models = ${b.models ?? oldChannel.models},
-                    model_mapping = ${b.modelMapping ? JSON.stringify(b.modelMapping) : oldChannel.model_mapping},
+                    model_mapping = ${b.modelMapping || oldChannel.model_mapping},
                     priority = ${b.priority ?? oldChannel.priority},
                     weight = ${b.weight ?? oldChannel.weight},
                     status = ${b.status ?? oldChannel.status},
                     key_strategy = ${b.keyStrategy ?? oldChannel.key_strategy},
-                    key_status = ${b.keyStatus ? JSON.stringify(b.keyStatus) : oldChannel.key_status},
+                    key_status = ${b.keyStatus || oldChannel.key_status},
                     price_ratio = ${b.priceRatio ?? oldChannel.price_ratio},
                     key_concurrency_limit = ${b.keyConcurrencyLimit ?? oldChannel.key_concurrency_limit},
                     updated_at = NOW()
@@ -254,7 +254,7 @@ export const channelsRouter = new Elysia()
         const [result] = await sql`
             UPDATE channels 
             SET models = ${upstreamModels}, 
-                model_mapping = ${JSON.stringify(modelMapping)},
+                model_mapping = ${modelMapping},
                 updated_at = NOW() 
             WHERE id = ${Number(id)} 
             RETURNING *`;
@@ -297,7 +297,7 @@ export const channelsRouter = new Elysia()
             const [result] = await sql`
                 UPDATE channels 
                 SET key = ${newKeyString},
-                    key_status = ${JSON.stringify(newStatusMap)},
+                    key_status = ${newStatusMap},
                     updated_at = NOW()
                 WHERE id = ${Number(id)}
                 RETURNING *
