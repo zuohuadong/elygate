@@ -51,10 +51,11 @@ export async function createTask(opts: {
     requestBody: Record<string, any>;
 }): Promise<string> {
     const id = generateTaskId();
-    await sql`
+    const bodyJson = JSON.stringify(opts.requestBody).replace(/'/g, "''");
+    await sql.unsafe(`
         INSERT INTO tasks (id, user_id, token_id, model, type, status, request_body)
-        VALUES (${id}, ${opts.userId}, ${opts.tokenId}, ${opts.model}, ${opts.type}, 'pending', ${sql.json(opts.requestBody)})
-    `;
+        VALUES ('${id}', ${opts.userId}, ${opts.tokenId}, '${opts.model}', '${opts.type}', 'pending', '${bodyJson}'::jsonb)
+    `);
     // Notify background worker
     await sql`SELECT pg_notify('task_created', ${id})`;
     log.info(`[Task] Created task ${id} for model ${opts.model}`);
