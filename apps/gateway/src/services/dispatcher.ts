@@ -904,18 +904,22 @@ async function pollVideoResult(
             if (status === 'Succeed' || status === 'succeeded' || status === 'completed') {
                 let videoUrl = '';
 
-                // SiliconFlow: data.results.videos[0].url
-                const videos = result.data?.results?.videos || result.data?.results?.images;
+                // SiliconFlow: {data: {results: {videos: [...]}}} or {results: {videos: [...]}} (no .data wrapper)
+                const videos = result.data?.results?.videos || result.data?.results?.images
+                    || result.results?.videos || result.results?.images;
                 if (Array.isArray(videos) && videos.length > 0) {
                     videoUrl = videos[0].url || '';
                 }
-                // Fallback: data.results[0].url
-                if (!videoUrl && Array.isArray(result.data?.results) && result.data.results.length > 0) {
-                    videoUrl = result.data.results[0].url || result.data.results[0].video_url || '';
+                // Fallback: data.results[0].url or results[0].url
+                if (!videoUrl) {
+                    const resultArr = result.data?.results || result.results;
+                    if (Array.isArray(resultArr) && resultArr.length > 0) {
+                        videoUrl = resultArr[0].url || resultArr[0].video_url || '';
+                    }
                 }
                 // Fallback: data.url or data.video_url
                 if (!videoUrl) {
-                    videoUrl = result.data?.url || result.data?.video_url || '';
+                    videoUrl = result.data?.url || result.data?.video_url || result.url || result.video_url || '';
                 }
 
                 if (videoUrl) {
