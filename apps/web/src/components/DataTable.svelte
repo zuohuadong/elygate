@@ -25,7 +25,7 @@
         columns: Column[];
         onEdit?: (row: Record<string, any>) => void;
         onDelete?: (row: Record<string, any>) => void;
-        extraActions?: { label: string; class: string; onClick: (row: Record<string, any>) => void }[];
+        extraActions?: { label: string; class: string; onClick: (row: Record<string, any>) => void; condition?: (row: Record<string, any>) => boolean }[];
         pageSize?: number;
         currentPage?: number;
         total?: number;
@@ -142,10 +142,12 @@
                                 {@render customActions(row)}
                             {/if}
                             {#each extraActions as action}
+                                {#if !action.condition || action.condition(row)}
                                 <button
                                     onclick={() => action.onClick(row)}
                                     class="{action.class} mr-3 opacity-0 group-hover:opacity-100 transition-colors"
                                 >{action.label}</button>
+                                {/if}
                             {/each}
                             {#if onEdit}
                             <button
