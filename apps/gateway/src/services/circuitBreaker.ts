@@ -138,20 +138,22 @@ class CircuitBreaker {
     /**
      * Record an error for a channel.
      */
-    public async recordError(channelId: number, status?: number, message?: string) {
+    public async recordError(channelId: number, status?: number, message?: string, activeKey?: string) {
         const channel = memoryCache.channels.get(channelId);
         if (!channel) return;
 
-        // 1. Immediate Disable for Auth Errors (401 only — invalid key)
+        // 1. Auth/Balance errors (401/403) → mark individual KEY, not entire channel
+        if ((status === 401 || status === 403) && activeKey) {
+            return this.markKeyExhausted(channelId, activeKey, status, message);
+        }
+        // Fallback if no activeKey provided — legacy behavior
         if (status === 401) {
             log.error(`[CircuitBreaker] Channel ${channelId} Auth Error (401). Disabling.`);
             await this.disableChannel(channelId, `Auth Error: 401 ${message || ""}`);
             return;
         }
-
-        // 2. 403 may be upstream balance/quota issue — mark as Busy (auto-recoverable)
         if (status === 403) {
-            log.warn(`[CircuitBreaker] Channel ${channelId} received 403 (may be upstream balance). Marking as Busy.`);
+            log.warn(`[CircuitBreaker] Channel ${channelId} received 403. Marking as Busy.`);
             await sql`UPDATE channels SET status = 5, status_message = ${'Upstream 403: ' + (message || '').substring(0, 100)}, updated_at = NOW() WHERE id = ${channelId}`;
             await memoryCache.refresh();
             return;
@@ -182,6 +184,51 @@ class CircuitBreaker {
 
         // 6. Check if failure rate in the window exceeds the threshold
         await this.checkAndTrip(channelId);
+    }
+
+    /**
+     * Mark a specific key as exhausted. Only disable the channel if ALL keys are exhausted.
+     */
+    private async markKeyExhausted(channelId: number, key: string, status: number, message?: string) {
+        try {
+            // Fetch current channel state
+            const [ch] = await sql`SELECT key, key_status FROM channels WHERE id = ${channelId}`;
+            if (!ch) return;
+
+            const allKeys = ch.key.split('\n').map((k: string) => k.trim()).filter(Boolean);
+            const statusMap: Record<string, string> = (typeof ch.key_status === 'string'
+                ? JSON.parse(ch.key_status)
+                : ch.key_status) || {};
+
+            // Mark this key
+            const reason = status === 401 ? 'invalid' : 'exhausted';
+            statusMap[key] = reason;
+            log.warn(`[CircuitBreaker] Channel ${channelId} key ${key.substring(0, 8)}... marked as ${reason} (${status}). ${message || ''}`);
+
+            // Update key_status in DB
+            await sql`UPDATE channels SET key_status = ${statusMap}, updated_at = NOW() WHERE id = ${channelId}`;
+
+            // Check if ALL keys are now exhausted/invalid
+            const healthyKeys = allKeys.filter((k: string) => !statusMap[k] || (statusMap[k] !== 'exhausted' && statusMap[k] !== 'invalid'));
+
+            if (healthyKeys.length === 0) {
+                log.error(`[CircuitBreaker] Channel ${channelId} ALL ${allKeys.length} keys exhausted. Disabling channel.`);
+                await this.disableChannel(channelId, `All ${allKeys.length} keys ${reason}: ${status}`);
+            } else {
+                log.info(`[CircuitBreaker] Channel ${channelId} still has ${healthyKeys.length}/${allKeys.length} healthy keys.`);
+                await memoryCache.refresh();
+                // Notify admin about the exhausted key
+                const shouldNotify = String(optionCache.get('Notify_On_Channel_Offline', 'true')) === 'true';
+                if (shouldNotify) {
+                    await notificationService.send(
+                        'Key Exhausted',
+                        `Channel ${channelId} key ${key.substring(0, 8)}... marked ${reason}. ${healthyKeys.length}/${allKeys.length} keys remaining.`
+                    );
+                }
+            }
+        } catch (e: unknown) {
+            log.error(`[CircuitBreaker] Failed to mark key exhausted for channel ${channelId}:`, e);
+        }
     }
 
     private async disableChannel(channelId: number, reason?: string) {

@@ -648,20 +648,10 @@ export async function dispatch(options: DispatchOptions) {
                     externalFeatureType
                 }).catch((e: unknown) => log.warn('[Async] Suppressed:', e));
 
-                // Handle key exhaustion (401/403/429 with specific error messages)
-                if (getErrorMessage(e)?.includes('401') || getErrorMessage(e)?.includes('403') || getErrorMessage(e)?.includes('429')) {
-                    const errMsg = getErrorMessage(e).toLowerCase();
-                    if (errMsg.includes('quota') || errMsg.includes('balance') || errMsg.includes('credit') || errMsg.includes('limit')) {
-                        log.error(`[Dispatcher] Key exhausted: ${activeKey.substring(0, 8)}...`);
-                        const newStatusMap = { ...statusMap, [activeKey]: 'exhausted' };
-                        await sql`UPDATE channels SET key_status = ${newStatusMap}, updated_at = NOW() WHERE id = ${channelConfig.id}`.catch((e: unknown) => log.warn('[Async] Suppressed:', e));
-                        await memoryCache.refresh(false).catch((e: unknown) => log.warn('[Async] Suppressed:', e));
-                    }
-                }
-
-                if (!getErrorMessage(e)?.startsWith('Status')) {
-                    await circuitBreaker.recordError(channelConfig.id);
-                }
+                // Handle errors via CircuitBreaker (per-key for 401/403, per-channel for others)
+                const errMsg = getErrorMessage(e) || '';
+                const statusCode = errMsg.startsWith('Status') ? parseInt(errMsg.split(' ')[1]) : undefined;
+                await circuitBreaker.recordError(channelConfig.id, statusCode, errMsg.substring(0, 200), activeKey);
                 continue;
             }
         }
