@@ -313,6 +313,57 @@ class CircuitBreaker {
                 }
             }
 
+            // 4. Auto-recover exhausted keys — probe each exhausted key to see if balance is back
+            //    Reference: New API relay_controller pattern — periodic key re-validation
+            const channelsWithExhaustedKeys = await sql`
+                SELECT id, base_url AS "baseUrl", key, key_status, type, status, models
+                FROM channels
+                WHERE key_status != '{}' AND key_status IS NOT NULL
+                  AND updated_at < NOW() - INTERVAL '5 minutes'
+            `;
+
+            for (const ch of channelsWithExhaustedKeys) {
+                const statusMap: Record<string, any> = (typeof ch.key_status === 'string'
+                    ? JSON.parse(ch.key_status)
+                    : ch.key_status) || {};
+
+                const isKeyBad = (v: any) => {
+                    if (typeof v === 'string') return v === 'exhausted' || v === 'invalid';
+                    return v?.status === 'exhausted' || v?.status === 'invalid';
+                };
+
+                const exhaustedKeys = Object.entries(statusMap)
+                    .filter(([_, v]) => isKeyBad(v))
+                    .map(([k]) => k);
+
+                if (exhaustedKeys.length === 0) continue;
+
+                let restoredCount = 0;
+                for (const key of exhaustedKeys) {
+                    const isOk = await this.probeKey(ch.baseUrl, key);
+                    if (isOk) {
+                        delete statusMap[key];
+                        restoredCount++;
+                        log.info(`[HealthCheck] Key ${key.substring(0, 8)}... on channel ${ch.id} recovered. Restoring.`);
+                    }
+                }
+
+                if (restoredCount > 0) {
+                    await sql`UPDATE channels SET key_status = ${statusMap}, updated_at = NOW() WHERE id = ${ch.id}`;
+                    changed = true;
+
+                    // If channel was disabled due to all keys exhausted, bring it back online
+                    if (ch.status === 3) {
+                        const allKeys = ch.key.split('\n').map((k: string) => k.trim()).filter(Boolean);
+                        const stillBad = allKeys.filter((k: string) => statusMap[k] && isKeyBad(statusMap[k]));
+                        if (stillBad.length < allKeys.length) {
+                            log.info(`[HealthCheck] Channel ${ch.id} has ${allKeys.length - stillBad.length} healthy keys. Restoring to Online.`);
+                            await sql`UPDATE channels SET status = 1, status_message = NULL, updated_at = NOW() WHERE id = ${ch.id}`;
+                        }
+                    }
+                }
+            }
+
             if (changed) await memoryCache.refresh();
         } catch (e: unknown) {
             log.error('[HealthCheck] Error checking channels:', e);
@@ -359,6 +410,29 @@ class CircuitBreaker {
             clearTimeout(timeout);
             return res.status < 429;
         } catch (e: unknown) {
+            return false;
+        }
+    }
+
+    /**
+     * Probe a single key by making a lightweight /v1/models request.
+     * Returns true if the key is valid and has balance (status < 400).
+     */
+    private async probeKey(baseUrl: string, key: string): Promise<boolean> {
+        const timeoutMs = parseInt(optionCache.get('HEALTH_CHECK_TIMEOUT', '10000'));
+        try {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), timeoutMs);
+            const url = `${baseUrl.replace(/\/+$/, '')}/v1/models`;
+            const res = await fetch(url, {
+                method: 'GET',
+                headers: { 'Authorization': `Bearer ${key}` },
+                signal: controller.signal
+            });
+            clearTimeout(timeout);
+            // 401/403 = still bad, 200/other = recovered
+            return res.status < 400;
+        } catch {
             return false;
         }
     }
