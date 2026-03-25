@@ -26,7 +26,21 @@
                 // Parse key status
                 const allKeys = (c.key || "").split("\n").map((k: string) => k.trim()).filter(Boolean);
                 const keyStatus = c.keyStatus || {};
-                const exhaustedKeys = allKeys.filter((k: string) => keyStatus[k] === "exhausted" || keyStatus[k] === "invalid");
+                const isKeyBad = (v: any) => {
+                    if (typeof v === 'string') return v === 'exhausted' || v === 'invalid';
+                    return v?.status === 'exhausted' || v?.status === 'invalid';
+                };
+                const exhaustedKeys = allKeys.filter((k: string) => isKeyBad(keyStatus[k]));
+
+                // Build per-key detail for tooltip
+                const keyDetails = exhaustedKeys.map((k: string) => {
+                    const v = keyStatus[k];
+                    const label = k.substring(0, 8) + '...';
+                    if (typeof v === 'object' && v?.reason) {
+                        return `${label}: ${v.status} - ${v.reason.substring(0, 60)}`;
+                    }
+                    return `${label}: ${typeof v === 'string' ? v : 'exhausted'}`;
+                });
 
                 return {
                     ...c,
@@ -35,6 +49,7 @@
                     keyTotal: allKeys.length,
                     keyHealthy: allKeys.length - exhaustedKeys.length,
                     keyExhausted: exhaustedKeys.length,
+                    keyReasons: keyDetails.join('\n'),
                 };
             });
         } catch (err: unknown) {
@@ -64,7 +79,8 @@
         const color = row.keyHealthy === 0
             ? "bg-rose-100 text-rose-800 dark:bg-rose-500/10 dark:text-rose-400"
             : "bg-amber-100 text-amber-800 dark:bg-amber-500/10 dark:text-amber-400";
-        return `<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${color}" title="${row.keyExhausted} key(s) exhausted">${row.keyHealthy}/${row.keyTotal}</span>`;
+        const tip = row.keyReasons ? row.keyReasons.replace(/"/g, '&quot;') : `${row.keyExhausted} key(s) exhausted`;
+        return `<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium cursor-help ${color}" title="${tip}">${row.keyHealthy}/${row.keyTotal}</span>`;
     };
 
     const renderModels = (val: string) => {

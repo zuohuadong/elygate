@@ -169,7 +169,11 @@ export async function dispatch(options: DispatchOptions) {
             // 1. Key Selection
             const allKeys = getChannelKeys(channelConfig.key);
             const statusMap = (channelConfig as Record<string, any>).keyStatus || {};
-            const availableKeys = allKeys.filter(k => statusMap[k] !== 'exhausted');
+            const isKeyBad = (v: any) => {
+                if (typeof v === 'string') return v === 'exhausted' || v === 'invalid';
+                return v?.status === 'exhausted' || v?.status === 'invalid';
+            };
+            const availableKeys = allKeys.filter(k => !statusMap[k] || !isKeyBad(statusMap[k]));
 
             if (availableKeys.length === 0) {
                 log.warn(`[Dispatcher] Channel ${channelConfig.id} has no available keys left.`);

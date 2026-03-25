@@ -416,13 +416,20 @@ export const adminRouter = new Elysia()
             });
             const latency = Date.now() - startTime;
 
-            await sql`UPDATE channels SET response_time = ${latency}, test_at = NOW() WHERE id = ${Number(id)}`;
+            if (!res.ok) {
+                const text = await res.text().catch(() => '');
+                await sql`UPDATE channels SET test_at = NOW() WHERE id = ${Number(id)}`;
+                await refreshAllCaches();
+                return { success: false, latency, message: `Status ${res.status}: ${text.substring(0, 200)}` };
+            }
+            await sql`UPDATE channels SET test_at = NOW() WHERE id = ${Number(id)}`;
             await refreshAllCaches();
-            return { success: true, response_time: latency };
+            return { success: true, latency };
         } catch (e: unknown) {
-            await sql`UPDATE channels SET response_time = 0, test_at = NOW() WHERE id = ${Number(id)}`;
+            await sql`UPDATE channels SET test_at = NOW() WHERE id = ${Number(id)}`;
             await refreshAllCaches();
-            throw e;
+            const errMsg = e instanceof Error ? e.message : String(e);
+            return { success: false, latency: Date.now() - startTime, message: errMsg };
         }
     })
 

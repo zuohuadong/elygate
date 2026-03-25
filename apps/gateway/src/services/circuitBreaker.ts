@@ -196,20 +196,25 @@ class CircuitBreaker {
             if (!ch) return;
 
             const allKeys = ch.key.split('\n').map((k: string) => k.trim()).filter(Boolean);
-            const statusMap: Record<string, string> = (typeof ch.key_status === 'string'
+            const statusMap: Record<string, any> = (typeof ch.key_status === 'string'
                 ? JSON.parse(ch.key_status)
                 : ch.key_status) || {};
 
-            // Mark this key
+            // Mark this key with reason details
             const reason = status === 401 ? 'invalid' : 'exhausted';
-            statusMap[key] = reason;
-            log.warn(`[CircuitBreaker] Channel ${channelId} key ${key.substring(0, 8)}... marked as ${reason} (${status}). ${message || ''}`);
+            const shortMsg = (message || '').substring(0, 150);
+            statusMap[key] = { status: reason, reason: shortMsg, time: new Date().toISOString() };
+            log.warn(`[CircuitBreaker] Channel ${channelId} key ${key.substring(0, 8)}... marked as ${reason} (${status}). ${shortMsg}`);
 
             // Update key_status in DB
             await sql`UPDATE channels SET key_status = ${statusMap}, updated_at = NOW() WHERE id = ${channelId}`;
 
             // Check if ALL keys are now exhausted/invalid
-            const healthyKeys = allKeys.filter((k: string) => !statusMap[k] || (statusMap[k] !== 'exhausted' && statusMap[k] !== 'invalid'));
+            const isKeyBad = (v: any) => {
+                if (typeof v === 'string') return v === 'exhausted' || v === 'invalid';
+                return v?.status === 'exhausted' || v?.status === 'invalid';
+            };
+            const healthyKeys = allKeys.filter((k: string) => !statusMap[k] || !isKeyBad(statusMap[k]));
 
             if (healthyKeys.length === 0) {
                 log.error(`[CircuitBreaker] Channel ${channelId} ALL ${allKeys.length} keys exhausted. Disabling channel.`);
