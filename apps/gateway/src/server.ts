@@ -96,8 +96,6 @@ async function init() {
       .group("/redemptions", (app) => app.use(authPlugin).use(redemptionsRouter))
       .use(userStatsRouter)
       .use(mjRouter)
-      .get("/dashboard/health", () => statsService.getSystemHealth(), { detail: { tags: ["Admin"] } })
-      .get("/dashboard/latency-heatmap", () => statsService.getLatencyHeatmap(), { detail: { tags: ["Admin"] } })
     )
     .group("/v1", (app) =>
       app.use(authPlugin)

@@ -4,8 +4,11 @@ import { Elysia } from 'elysia';
 import { sql } from '@elygate/db';
 import { memoryCache } from '../../services/cache';
 import { modelConfig } from './channels';
+import { statsService } from '../../services/stats';
 
 export const dashboardRouter = new Elysia()
+    .get('/dashboard/health', () => statsService.getSystemHealth())
+    .get('/dashboard/latency-heatmap', () => statsService.getLatencyHeatmap())
     .get('/dashboard/stats', async () => {
         const [stats] = await sql`
             SELECT 
