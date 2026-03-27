@@ -8,12 +8,14 @@ COPY package.json bun.lock* bun.lockb* ./
 COPY apps/gateway/package.json ./apps/gateway/
 COPY apps/web/package.json ./apps/web/
 COPY packages/db/package.json ./packages/db/
+COPY packages/pg-listen/package.json ./packages/pg-listen/
 
 RUN bun install
 
 # Copy source
 COPY apps/gateway ./apps/gateway
 COPY packages/db ./packages/db
+COPY packages/pg-listen ./packages/pg-listen
 
 EXPOSE 3000
 ENV NODE_ENV=production
