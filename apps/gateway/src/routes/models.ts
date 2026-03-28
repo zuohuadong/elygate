@@ -17,9 +17,34 @@ export const modelsRouter = new Elysia()
         const t = token as TokenRecord;
         const includeChannels = query?.include_channels === 'true' || query?.include_channels === true;
 
-        let uniqueModels = Array.from(memoryCache.channelRoutes.keys())
+        let allModels = Array.from(memoryCache.channelRoutes.keys())
             // Only show models that have at least one active channel (status=1 or 4)
             .filter(model => memoryCache.selectChannels(model, u.group).length > 0);
+
+        // Deduplicate: remove vendor-prefixed names when short alias exists
+        // e.g., if both "Qwen/Qwen3.5-397B-A17B" and "Qwen3.5-397B-A17B" exist, keep only the short one
+        const modelSet = new Set(allModels);
+        const deduped = allModels.filter(model => {
+            if (model.includes('/')) {
+                const shortName = model.split('/').slice(1).join('/');
+                // If the short name (without prefix) also exists as a route, skip this prefixed version
+                if (shortName && modelSet.has(shortName)) {
+                    return false;
+                }
+            }
+            return true;
+        });
+
+        // Case-insensitive dedup: if both "GLM-5" and "glm-5" exist, keep the first one
+        const seenLower = new Map<string, string>(); // lowercase -> kept model name
+        let uniqueModels = deduped.filter(model => {
+            const lower = model.toLowerCase();
+            if (seenLower.has(lower)) {
+                return false;
+            }
+            seenLower.set(lower, model);
+            return true;
+        });
 
         // 1. Token Key Restrictions
         if (t.models && t.models.length > 0) {
