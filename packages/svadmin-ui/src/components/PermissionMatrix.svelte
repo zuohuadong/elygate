@@ -1,0 +1,190 @@
+<script module context="module">
+  export type RoleInfo = { code: string; name: string; [key: string]: any };
+  export type ResourceInfo = { code: string; name: string; section?: string; [key: string]: any };
+  export type ActionInfo = { code: string; name: string; [key: string]: any };
+</script>
+
+<script lang="ts">
+  import { Shield, AlertCircle, Check } from 'lucide-svelte';
+  import type { Snippet } from 'svelte';
+  
+  let {
+    // Basic metadata lists
+    roles = [],
+    resources = [],
+    actions = [],
+    
+    // Authorization state resolver
+    // isGranted(roleCode, resourceCode, actionCode) => boolean
+    isGranted,
+    
+    // Interactive states
+    selectedRole = $bindable(roles[0]?.code || ''),
+    loading = false,
+    
+    // Feedback and alerts (passed down from upper business logic)
+    message = '',
+    messageType = 'success', // 'success' | 'error' | 'warning'
+    conflictCount = 0,
+    
+    // Custom slots for injecting multi-tenant switchers or security filters
+    sidebarExtra,
+    headerExtra,
+
+    // Callback event
+    onToggle
+  }: {
+    roles: RoleInfo[];
+    resources: ResourceInfo[];
+    actions: ActionInfo[];
+    isGranted: (role: string, resource: string, action: string) => boolean;
+    selectedRole?: string;
+    loading?: boolean;
+    message?: string;
+    messageType?: 'success' | 'error' | 'warning';
+    conflictCount?: number;
+    sidebarExtra?: Snippet;
+    headerExtra?: Snippet;
+    onToggle: (role: string, resource: string, action: string, grant: boolean) => void;
+  } = $props();
+
+</script>
+
+<div class="h-full flex flex-col pt-2">
+  <!-- Header Title -->
+  <div class="mb-6 flex items-center justify-between">
+    <div>
+      <h1 class="text-2xl font-bold text-foreground flex items-center gap-2">
+        <Shield class="w-6 h-6 text-primary" />
+        统一操作权限矩阵
+      </h1>
+      <p class="text-muted-foreground mt-1 text-sm">直观配置系统模块与角色的鉴权规则网络。</p>
+    </div>
+    
+    <!-- Toast Feedback -->
+    {#if message}
+      <div class={`px-4 py-2 rounded-lg text-sm font-medium shadow-sm transition-all flex items-center gap-2 ${messageType === 'success' ? 'bg-green-500/10 text-green-600 dark:text-green-400 ring-1 ring-green-500/20' : 'bg-destructive/10 text-destructive ring-1 ring-destructive/20'}`}>
+        {#if messageType === 'success'}
+           <Check class="w-4 h-4" />
+        {:else}
+           <AlertCircle class="w-4 h-4" />
+        {/if}
+        {message}
+      </div>
+    {/if}
+  </div>
+
+  <div class="flex flex-col md:flex-row gap-6 flex-1 min-h-[500px]">
+    <!-- Left: Role Selector Sidebar -->
+    <div class="w-full md:w-64 flex-shrink-0 bg-card rounded-xl shadow-sm border border-border p-4 flex flex-col">
+      <h2 class="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4 px-2">业务受众角色</h2>
+      <div class="space-y-1 flex-1 overflow-y-auto">
+        {#each roles as role}
+          <button 
+            onclick={() => selectedRole = role.code}
+            class="w-full text-left px-3 py-2.5 rounded-lg text-sm transition-all duration-200 {selectedRole === role.code ? 'bg-primary/10 text-primary font-medium shadow-sm ring-1 ring-primary/20' : 'text-foreground hover:bg-muted'}"
+          >
+            {role.name}
+            <div class="text-[10px] mt-0.5 opacity-60 font-mono tracking-tighter">{role.code}</div>
+          </button>
+        {/each}
+        {#if roles.length === 0}
+          <p class="text-center text-muted-foreground text-sm p-4">暂无角色</p>
+        {/if}
+      </div>
+      
+      <!-- Slot for Upper Logic inject (e.g. Org Switcher, Security Level Filter) -->
+      {#if sidebarExtra}
+         <div class="mt-4 pt-4 border-t border-border">
+           {@render sidebarExtra()}
+         </div>
+      {/if}
+    </div>
+
+    <!-- Right: Matrix Grid -->
+    <div class="flex-1 bg-card rounded-xl shadow-sm border border-border overflow-hidden flex flex-col">
+      <!-- Matrix Header -->
+      <div class="p-5 border-b border-border bg-muted/30 flex items-center justify-between">
+        <div class="flex items-center gap-4">
+          <div>
+            <h2 class="text-lg font-bold text-foreground">当前视角: 
+              <span class="text-primary">{roles.find(r => r.code === selectedRole)?.name || '未选择'}</span>
+            </h2>
+            <p class="text-xs text-muted-foreground mt-1">勾选以即时挂载/收回操作权限</p>
+          </div>
+          
+          <!-- Slot for header extra logic -->
+          {#if headerExtra}
+            {@render headerExtra()}
+          {/if}
+        </div>
+        
+        {#if conflictCount > 0}
+          <div class="px-3 py-1.5 bg-destructive/10 text-destructive rounded-lg text-xs font-medium ring-1 ring-destructive/20 flex items-center gap-1.5">
+            <AlertCircle class="w-4 h-4" /> {conflictCount} 重叠/冲突规则
+          </div>
+        {/if}
+      </div>
+      
+      <!-- Table Area -->
+      <div class="flex-1 overflow-auto p-4">
+        <table class="min-w-full divide-y divide-border border border-border rounded-lg overflow-hidden">
+          <thead class="bg-muted/50">
+            <tr>
+              <th scope="col" class="py-3 pr-3 pl-4 text-left text-sm font-semibold text-foreground border-r border-border w-48">模块域与资源点</th>
+              {#each actions as action}
+                <th scope="col" class="px-2 py-3 text-center text-sm font-semibold text-foreground border-r border-border">
+                  <div class="flex flex-col items-center">
+                    <span>{action.name}</span>
+                    <span class="text-[10px] text-muted-foreground font-mono">{action.code}</span>
+                  </div>
+                </th>
+              {/each}
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-border bg-card">
+            {#if resources.length === 0}
+              <tr>
+                 <td colspan={actions.length + 1} class="py-10 text-center text-muted-foreground">暂无可用资源</td>
+              </tr>
+            {/if}
+            {#each resources as resource, i}
+              <!-- Section Grouping Header -->
+              {#if resource.section && (i === 0 || resource.section !== resources[i-1].section)}
+                <tr class="bg-primary/5">
+                  <td colspan="{actions.length + 1}" class="px-4 py-2 text-xs font-bold text-primary uppercase tracking-wider">{resource.section}</td>
+                </tr>
+              {/if}
+              
+              <tr class="hover:bg-muted/50 transition-colors">
+                <td class="whitespace-nowrap py-3 pl-4 pr-3 text-sm border-r border-border">
+                  <div class="font-medium text-foreground">{resource.name}</div>
+                  <div class="text-xs text-muted-foreground font-mono">{resource.code}</div>
+                </td>
+                
+                <!-- Action Checkboxes -->
+                {#each actions as action}
+                  {@const granted = selectedRole ? isGranted(selectedRole, resource.code, action.code) : false}
+                  <td class="whitespace-nowrap px-3 py-3 text-center border-r border-border">
+                    <div class="flex items-center justify-center">
+                      <button 
+                        disabled={loading || !selectedRole}
+                        aria-label="Toggle {action.name}"
+                        onclick={() => onToggle(selectedRole!, resource.code, action.code, !granted)}
+                        class="w-6 h-6 rounded border flex items-center justify-center transition-all focus:outline-none focus:ring-2 focus:ring-primary/50 {granted ? 'bg-primary border-primary text-primary-foreground' : 'border-input bg-background hover:bg-accent'} {loading || !selectedRole ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}"
+                      >
+                        <svg class="w-3.5 h-3.5 {granted ? 'block' : 'hidden'}" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
+                          <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+                        </svg>
+                      </button>
+                    </div>
+                  </td>
+                {/each}
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>

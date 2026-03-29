@@ -1,0 +1,353 @@
+// Auth Hooks — reactive wrappers around AuthProvider methods
+// Each hook encapsulates the auth call + loading state + error handling + redirect
+// Uses module-level $state — no component init-time constraints.
+
+import { getAuthProvider } from './context.svelte';
+import { navigate } from './router';
+import { toast } from './toast.svelte';
+import { t } from './i18n.svelte';
+import type { AuthActionResult, CheckResult, Identity } from './types';
+
+// ─── useLogin ─────────────────────────────────────────────────
+
+export function useLogin() {
+  const provider = getAuthProvider();
+  let isLoading = $state(false);
+
+  async function mutate(params: Record<string, unknown>): Promise<AuthActionResult> {
+    if (!provider) throw new Error('AuthProvider not configured');
+    isLoading = true;
+    try {
+      const result = await provider.login(params);
+      if (result.success) {
+        toast.success(t('common.operationSuccess'));
+        if (result.redirectTo) navigate(result.redirectTo);
+      } else {
+        const msg = result.error?.message ?? t('common.loginFailed');
+        toast.error(msg);
+      }
+      return result;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : t('common.loginFailed');
+      toast.error(msg);
+      return { success: false, error: { message: msg } };
+    } finally {
+      isLoading = false;
+    }
+  }
+
+  return {
+    mutate,
+    get isLoading() { return isLoading; },
+  };
+}
+
+// ─── useLogout ────────────────────────────────────────────────
+
+export function useLogout() {
+  const provider = getAuthProvider();
+  let isLoading = $state(false);
+
+  async function mutate(params?: Record<string, unknown>): Promise<AuthActionResult> {
+    if (!provider) throw new Error('AuthProvider not configured');
+    isLoading = true;
+    try {
+      const result = await provider.logout(params);
+      if (result.success) {
+        navigate(result.redirectTo ?? '/login');
+      }
+      return result;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : t('common.operationFailed');
+      toast.error(msg);
+      return { success: false, error: { message: msg } };
+    } finally {
+      isLoading = false;
+    }
+  }
+
+  return {
+    mutate,
+    get isLoading() { return isLoading; },
+  };
+}
+
+// ─── useRegister ──────────────────────────────────────────────
+
+export function useRegister() {
+  const provider = getAuthProvider();
+  let isLoading = $state(false);
+
+  async function mutate(params: Record<string, unknown>): Promise<AuthActionResult> {
+    if (!provider?.register) throw new Error('AuthProvider.register not implemented');
+    isLoading = true;
+    try {
+      const result = await provider.register(params);
+      if (result.success) {
+        toast.success(t('auth.registerSuccess'));
+        if (result.redirectTo) navigate(result.redirectTo);
+      } else {
+        const msg = result.error?.message ?? t('common.operationFailed');
+        toast.error(msg);
+      }
+      return result;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : t('common.operationFailed');
+      toast.error(msg);
+      return { success: false, error: { message: msg } };
+    } finally {
+      isLoading = false;
+    }
+  }
+
+  return {
+    mutate,
+    get isLoading() { return isLoading; },
+  };
+}
+
+// ─── useForgotPassword ───────────────────────────────────────
+
+export function useForgotPassword() {
+  const provider = getAuthProvider();
+  let isLoading = $state(false);
+
+  async function mutate(params: Record<string, unknown>): Promise<AuthActionResult> {
+    if (!provider?.forgotPassword) throw new Error('AuthProvider.forgotPassword not implemented');
+    isLoading = true;
+    try {
+      const result = await provider.forgotPassword(params);
+      if (result.success) {
+        toast.success(t('auth.resetLinkSent'));
+      } else {
+        const msg = result.error?.message ?? t('common.operationFailed');
+        toast.error(msg);
+      }
+      return result;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : t('common.operationFailed');
+      toast.error(msg);
+      return { success: false, error: { message: msg } };
+    } finally {
+      isLoading = false;
+    }
+  }
+
+  return {
+    mutate,
+    get isLoading() { return isLoading; },
+  };
+}
+
+// ─── useUpdatePassword ───────────────────────────────────────
+
+export function useUpdatePassword() {
+  const provider = getAuthProvider();
+  let isLoading = $state(false);
+
+  async function mutate(params: Record<string, unknown>): Promise<AuthActionResult> {
+    if (!provider?.updatePassword) throw new Error('AuthProvider.updatePassword not implemented');
+    isLoading = true;
+    try {
+      const result = await provider.updatePassword(params);
+      if (result.success) {
+        toast.success(t('common.operationSuccess'));
+        if (result.redirectTo) navigate(result.redirectTo);
+      } else {
+        const msg = result.error?.message ?? t('common.operationFailed');
+        toast.error(msg);
+      }
+      return result;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : t('common.operationFailed');
+      toast.error(msg);
+      return { success: false, error: { message: msg } };
+    } finally {
+      isLoading = false;
+    }
+  }
+
+  return {
+    mutate,
+    get isLoading() { return isLoading; },
+  };
+}
+
+// ─── useGetIdentity ──────────────────────────────────────────
+
+export function useGetIdentity() {
+  const provider = getAuthProvider();
+  let data = $state<Identity | null>(null);
+  let isLoading = $state(true);
+  let error = $state<Error | null>(null);
+
+  function fetch() {
+    if (!provider) { isLoading = false; return; }
+    isLoading = true;
+    provider.getIdentity().then(identity => {
+      data = identity;
+      isLoading = false;
+    }).catch(err => {
+      error = err instanceof Error ? err : new Error(String(err));
+      isLoading = false;
+      console.warn('[svadmin] useGetIdentity failed:', err);
+    });
+  }
+
+  fetch();
+
+  return {
+    get data() { return data; },
+    get isLoading() { return isLoading; },
+    get error() { return error; },
+    refetch: fetch,
+  };
+}
+
+// ─── useIsAuthenticated ──────────────────────────────────────
+
+export function useIsAuthenticated() {
+  const provider = getAuthProvider();
+  let isAuthenticated = $state(false);
+  let isLoading = $state(true);
+
+  if (provider) {
+    provider.check().then((result: CheckResult) => {
+      isAuthenticated = result.authenticated;
+      isLoading = false;
+    }).catch(() => {
+      isAuthenticated = false;
+      isLoading = false;
+    });
+  } else {
+    // No auth provider — treat as authenticated
+    isAuthenticated = true;
+    isLoading = false;
+  }
+
+  return {
+    get isAuthenticated() { return isAuthenticated; },
+    get isLoading() { return isLoading; },
+  };
+}
+
+// ─── useOnError ──────────────────────────────────────────────
+
+/**
+ * Handles errors from data hooks by calling authProvider.onError().
+ * If the provider returns { logout: true }, triggers logout flow.
+ * If it returns { redirectTo }, navigates there.
+ */
+export function useOnError() {
+  const provider = getAuthProvider();
+
+  async function mutate(error: unknown) {
+    if (!provider?.onError) {
+      console.warn('[svadmin] useOnError: authProvider.onError not implemented');
+      return;
+    }
+    try {
+      const result = await provider.onError(error);
+      if (result.logout) {
+        await provider.logout?.();
+        navigate(result.redirectTo ?? '/login');
+      } else if (result.redirectTo) {
+        navigate(result.redirectTo);
+      }
+    } catch (err) {
+      console.warn('[svadmin] useOnError failed:', err);
+    }
+  }
+
+  return { mutate };
+}
+
+// ─── usePermissions ──────────────────────────────────────────
+
+/**
+ * Fetches permissions from authProvider.getPermissions().
+ * Returns a reactive object with data, isLoading, and error.
+ */
+export function usePermissions<T = unknown>() {
+  const provider = getAuthProvider();
+  let data = $state<T | null>(null);
+  let isLoading = $state(true);
+  let error = $state<Error | null>(null);
+
+  if (provider?.getPermissions) {
+    provider.getPermissions().then(permissions => {
+      data = permissions as T;
+      isLoading = false;
+    }).catch(err => {
+      error = err instanceof Error ? err : new Error(String(err));
+      isLoading = false;
+      console.warn('[svadmin] usePermissions failed:', err);
+    });
+  } else {
+    isLoading = false;
+  }
+
+  return {
+    get data() { return data; },
+    get isLoading() { return isLoading; },
+    get error() { return error; },
+  };
+}
+
+// ─── useHasPermission ────────────────────────────────────────
+
+/**
+ * Reactive permission checker — returns a closure that re-evaluates
+ * when the underlying permissions data changes.
+ *
+ * Works with Casbin-style permission arrays, Sets, or permission objects.
+ * The returned function is safe to use inside `$derived()` for reactive UI updates.
+ *
+ * @example
+ * ```svelte
+ * <script>
+ *   import { useHasPermission } from '@svadmin/core';
+ *
+ *   const hasPermission = useHasPermission();
+ *   // ✅ Reactive — UI updates when permissions finish loading
+ *   const canDelete = $derived(hasPermission('admin'));
+ *   const canExport = $derived(hasPermission('data:export'));
+ * </script>
+ *
+ * {#if canDelete}
+ *   <Button variant="destructive">Delete</Button>
+ * {/if}
+ * ```
+ */
+export function useHasPermission() {
+  const provider = getAuthProvider();
+  let permissions = $state<unknown>(null);
+  let loaded = $state(false);
+
+  if (provider?.getPermissions) {
+    provider.getPermissions().then(p => {
+      permissions = p;
+      loaded = true;
+    }).catch(err => {
+      console.warn('[svadmin] useHasPermission: getPermissions failed', err);
+      loaded = true;
+    });
+  } else {
+    loaded = true;
+  }
+
+  /**
+   * Check if the current user has a specific permission.
+   * Supports: `string[]`, `Set<string>`, `Record<string, boolean>`, or any object with `.includes` / `.has`.
+   */
+  function hasPermission(perm: string): boolean {
+    if (!loaded || permissions == null) return false;
+    if (Array.isArray(permissions)) return permissions.includes(perm);
+    if (permissions instanceof Set) return (permissions as Set<string>).has(perm);
+    if (typeof permissions === 'object') return !!(permissions as Record<string, boolean>)[perm];
+    return false;
+  }
+
+  return hasPermission;
+}
+

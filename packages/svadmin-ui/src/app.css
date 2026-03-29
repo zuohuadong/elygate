@@ -1,0 +1,512 @@
+/* Typography — Inter font for clean, modern look */
+
+/* @svadmin/ui — Design Tokens (Elygate-inspired)
+ * Auto-imported by AdminApp. Can be overridden by consumer's CSS.
+ *
+ * Based on Elygate dashboard style: Indigo primary, light glassmorphism,
+ * professional admin aesthetic with subtle depth.
+ */
+
+@layer base {
+  /* Global border-color reset — ensures Tailwind border utilities
+   * (border-r, border-t, etc.) use the theme color instead of currentColor */
+  *,
+  ::after,
+  ::before {
+    border-color: var(--border);
+  }
+
+  :root {
+    --radius: 0.5rem;
+    --background: oklch(0.98 0.002 264);
+    --foreground: oklch(0.13 0.02 265);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.13 0.02 265);
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0.13 0.02 265);
+    --primary: oklch(0.488 0.243 264.376);
+    --primary-foreground: oklch(0.985 0 0);
+    --secondary: oklch(0.955 0.008 264);
+    --secondary-foreground: oklch(0.2 0.04 265);
+    --muted: oklch(0.955 0.005 264);
+    --muted-foreground: oklch(0.45 0.03 260);
+    --accent: oklch(0.955 0.008 264);
+    --accent-foreground: oklch(0.2 0.04 265);
+    --destructive: oklch(0.577 0.245 27.325);
+    --destructive-foreground: oklch(0.985 0 0);
+    --border: oklch(0.912 0.008 264);
+    --input: oklch(0.912 0.008 264);
+    --ring: oklch(0.488 0.243 264.376);
+    --chart-1: oklch(0.488 0.243 264.376);
+    --chart-2: oklch(0.6 0.118 184.704);
+    --chart-3: oklch(0.398 0.07 227.392);
+    --chart-4: oklch(0.828 0.189 84.429);
+    --chart-5: oklch(0.769 0.188 70.08);
+    --success: oklch(0.6 0.2 145);
+    --success-foreground: oklch(0.985 0 0);
+    --warning: oklch(0.75 0.18 85);
+    --warning-foreground: oklch(0.3 0.08 60);
+    --info: oklch(0.6 0.15 250);
+    --info-foreground: oklch(0.985 0 0);
+    --sidebar: oklch(1 0 0 / 80%);
+    --sidebar-foreground: oklch(0.13 0.02 265);
+    --sidebar-primary: oklch(0.488 0.243 264.376);
+    --sidebar-primary-foreground: oklch(0.985 0 0);
+    --sidebar-accent: oklch(0.94 0.025 264);
+    --sidebar-accent-foreground: oklch(0.33 0.17 264);
+    --sidebar-border: oklch(0.912 0.008 264);
+    --sidebar-ring: oklch(0.488 0.243 264.376);
+  }
+
+  .dark {
+    --background: oklch(0.13 0.015 265);
+    --foreground: oklch(0.985 0 0);
+    --card: oklch(0.16 0.015 265);
+    --card-foreground: oklch(0.985 0 0);
+    --popover: oklch(0.16 0.015 265);
+    --popover-foreground: oklch(0.985 0 0);
+    --primary: oklch(0.585 0.233 264);
+    --primary-foreground: oklch(0.15 0.04 265);
+    --secondary: oklch(0.23 0.025 265);
+    --secondary-foreground: oklch(0.985 0 0);
+    --muted: oklch(0.23 0.025 265);
+    --muted-foreground: oklch(0.7 0.02 260);
+    --accent: oklch(0.23 0.025 265);
+    --accent-foreground: oklch(0.985 0 0);
+    --destructive: oklch(0.704 0.191 22.216);
+    --destructive-foreground: oklch(0.985 0 0);
+    --border: oklch(0.23 0.025 265);
+    --input: oklch(0.23 0.025 265);
+    --ring: oklch(0.55 0.18 264);
+    --chart-1: oklch(0.585 0.233 264);
+    --chart-2: oklch(0.696 0.17 162.48);
+    --chart-3: oklch(0.769 0.188 70.08);
+    --chart-4: oklch(0.627 0.265 303.9);
+    --chart-5: oklch(0.645 0.246 16.439);
+    --success: oklch(0.65 0.2 150);
+    --success-foreground: oklch(0.985 0 0);
+    --warning: oklch(0.8 0.15 85);
+    --warning-foreground: oklch(0.25 0.05 60);
+    --info: oklch(0.65 0.15 250);
+    --info-foreground: oklch(0.985 0 0);
+    --sidebar: oklch(0.16 0.015 265 / 80%);
+    --sidebar-foreground: oklch(0.985 0 0);
+    --sidebar-primary: oklch(0.585 0.233 264);
+    --sidebar-primary-foreground: oklch(0.985 0 0);
+    --sidebar-accent: oklch(0.488 0.243 264.376 / 10%);
+    --sidebar-accent-foreground: oklch(0.7 0.15 264);
+    --sidebar-border: oklch(0.23 0.025 265);
+    --sidebar-ring: oklch(0.55 0.18 264);
+  }
+
+  /* Stripe-inspired Soft Shadows — premium, multi-layered depth */
+  [data-slot="button"],
+  [data-slot="input"],
+  [data-slot="select-trigger"],
+  [data-slot="select"],
+  [data-slot="textarea"] {
+    /* Subtle interaction shadow */
+    box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.04), 0 0 0 1px rgb(0 0 0 / 0.02);
+  }
+  
+  [data-slot="card"] {
+    /* Classic Stripe soft shadow: faint ambient + directional drop */
+    box-shadow: 0 2px 8px -2px rgb(0 0 0 / 0.05), 0 4px 16px -4px rgb(0 0 0 / 0.02);
+  }
+
+  [data-slot="dialog-content"],
+  [data-slot="sheet-content"] {
+    /* Deep floating layer for modals */
+    box-shadow: 0 10px 30px -5px rgb(0 0 0 / 0.08), 0 20px 40px -10px rgb(0 0 0 / 0.04);
+  }
+}
+
+body {
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Premium Typography Refinements */
+h1, h2, h3 {
+  letter-spacing: -0.025em;
+  font-weight: 600;
+}
+h4, h5, h6 {
+  letter-spacing: -0.01em;
+}
+
+/* Micro-interactions: Linear/Apple ecosystem click scales */
+[data-slot="button"],
+button {
+  transition: transform 0.1s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.15s ease, box-shadow 0.15s ease;
+}
+[data-slot="button"]:active:not(:disabled),
+button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+/* Subtle glowing focus ring for inputs */
+[data-slot="input"]:focus-visible,
+[data-slot="textarea"]:focus-visible,
+[data-slot="select-trigger"]:focus-visible {
+  box-shadow: 0 0 0 1px var(--color-background), 0 0 0 3px color-mix(in oklch, var(--color-primary) 30%, transparent) !important;
+  border-color: var(--color-primary);
+}
+
+/* Base scrollbar styling (Firefox + Standard) */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: oklch(0.8 0 0) transparent;
+}
+.dark * {
+  scrollbar-color: oklch(0.35 0 0) transparent;
+}
+
+/* Scrollbar styling (Webkit) */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: oklch(0.8 0 0); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: oklch(0.65 0 0); }
+.dark ::-webkit-scrollbar-thumb { background: oklch(0.35 0 0); }
+.dark ::-webkit-scrollbar-thumb:hover { background: oklch(0.45 0 0); }
+
+/* ① Card Hover Elevation Lift — Stripe-style float on hover */
+[data-slot="card"] {
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+@media (hover: hover) {
+  [data-slot="card"]:hover {
+    box-shadow: 0 4px 12px -2px rgb(0 0 0 / 0.08), 0 8px 24px -6px rgb(0 0 0 / 0.04);
+    transform: translateY(-1px);
+  }
+}
+
+/* ② Table Row Hover — primary color tint instead of plain gray */
+[data-slot="table-row"]:hover {
+  background-color: color-mix(in oklch, var(--primary) 4%, var(--background)) !important;
+}
+[data-slot="table-row"] {
+  transition: background-color 0.15s ease;
+}
+
+/* ③ Sidebar Active Indicator — Linear-style left accent bar */
+.sidebar-nav-active {
+  position: relative;
+}
+.sidebar-nav-active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 60%;
+  border-radius: 0 3px 3px 0;
+  background: var(--primary);
+  opacity: 1;
+  transition: opacity 0.2s ease;
+}
+
+/* ④ Skeleton Shimmer — metallic light sweep instead of static pulse */
+@keyframes svadmin-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+[data-slot="skeleton"] {
+  animation: svadmin-shimmer 1.5s ease-in-out infinite !important;
+  background: linear-gradient(90deg, var(--muted) 25%, color-mix(in oklch, var(--muted) 60%, white) 50%, var(--muted) 75%) !important;
+  background-size: 200% 100% !important;
+}
+.dark [data-slot="skeleton"] {
+  background: linear-gradient(90deg, var(--muted) 25%, color-mix(in oklch, var(--muted) 60%, var(--foreground)) 50%, var(--muted) 75%) !important;
+}
+
+/* ⑤ Route Page Transition — fade + subtle slide-up */
+@keyframes svadmin-page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.svadmin-page-enter {
+  animation: svadmin-page-enter 0.25s ease-out;
+}
+
+/* ⑥ Toast slide-in refinement (svelte-sonner) — tighter timing */
+[data-sonner-toaster] [data-sonner-toast] {
+  transition-duration: 200ms !important;
+  transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+/* ⑦ Gradient Top Border on Cards — Vercel dashboard style */
+[data-slot="card"]::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, color-mix(in oklch, var(--primary) 20%, transparent), transparent);
+  border-radius: inherit;
+  pointer-events: none;
+}
+[data-slot="card"] {
+  position: relative;
+  overflow: hidden;
+}
+
+/* ⑧ Dark Mode Primary Glow — Linear-style neon accents */
+.dark [data-slot="button"][data-variant="default"],
+.dark [data-slot="badge"][data-variant="default"] {
+  box-shadow: 0 0 12px -3px color-mix(in oklch, var(--primary) 40%, transparent);
+}
+
+/* ⑨ Form Validation Shake Animation */
+@keyframes svadmin-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-6px); }
+  40% { transform: translateX(5px); }
+  60% { transform: translateX(-4px); }
+  80% { transform: translateX(2px); }
+}
+.svadmin-shake {
+  animation: svadmin-shake 0.4s ease-out;
+}
+
+/* ⑩ Table Row Staggered Entrance */
+@keyframes svadmin-row-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+[data-slot="table-body"] [data-slot="table-row"] {
+  animation: svadmin-row-enter 0.3s ease-out both;
+}
+[data-slot="table-body"] [data-slot="table-row"]:nth-child(1) { animation-delay: 0s; }
+[data-slot="table-body"] [data-slot="table-row"]:nth-child(2) { animation-delay: 0.03s; }
+[data-slot="table-body"] [data-slot="table-row"]:nth-child(3) { animation-delay: 0.06s; }
+[data-slot="table-body"] [data-slot="table-row"]:nth-child(4) { animation-delay: 0.09s; }
+[data-slot="table-body"] [data-slot="table-row"]:nth-child(5) { animation-delay: 0.12s; }
+[data-slot="table-body"] [data-slot="table-row"]:nth-child(6) { animation-delay: 0.15s; }
+[data-slot="table-body"] [data-slot="table-row"]:nth-child(7) { animation-delay: 0.18s; }
+[data-slot="table-body"] [data-slot="table-row"]:nth-child(8) { animation-delay: 0.21s; }
+[data-slot="table-body"] [data-slot="table-row"]:nth-child(9) { animation-delay: 0.24s; }
+[data-slot="table-body"] [data-slot="table-row"]:nth-child(10) { animation-delay: 0.27s; }
+
+/* ⑪ Accessibility: Respect reduced motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ⑫b Safe Area Inset — iPhone notch / Home Bar support */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  main {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+/* ⑫ Optimistic Delete — row fade-out visual feedback */
+@keyframes svadmin-row-delete {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(20px);
+    height: 0;
+    padding: 0;
+    margin: 0;
+  }
+}
+.svadmin-deleting {
+  animation: svadmin-row-delete 0.3s ease-out forwards;
+  pointer-events: none;
+}
+
+/* ⑬ Popover & Dropdown — frosted glass backdrop + spring entrance */
+[data-slot="popover-content"],
+[data-slot="dropdown-menu-content"],
+[data-slot="context-menu-content"] {
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+/* ⑭ Tooltip spring entrance */
+[data-slot="tooltip-content"] {
+  animation: svadmin-tooltip-enter 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes svadmin-tooltip-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* ⑮ Smooth scrolling for content areas */
+main {
+  scroll-behavior: smooth;
+}
+
+/* ⑯ RTL (Right-to-Left) Language Support */
+[dir="rtl"] {
+  direction: rtl;
+}
+[dir="rtl"] aside {
+  left: auto;
+  right: 0;
+}
+[dir="rtl"] .sidebar-nav-active::before {
+  left: auto;
+  right: 0;
+  border-radius: 3px 0 0 3px;
+}
+/* Mirror sidebar margins for RTL */
+[dir="rtl"] .md\:ml-64 {
+  margin-left: 0;
+  margin-right: 16rem;
+}
+[dir="rtl"] .md\:ml-16 {
+  margin-left: 0;
+  margin-right: 4rem;
+}
+
+/* ⑰ Accessibility Minimum Touch Target — Apple HIG 44px minimum */
+@media (max-width: 640px) and (pointer: coarse) {
+  [data-slot="button"] {
+    position: relative;
+  }
+  [data-slot="button"]::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    min-width: 44px;
+    min-height: 44px;
+    width: 100%;
+    height: 100%;
+    z-index: 1;
+  }
+}
+
+/* Tailwind CSS v4 — Map design tokens to utility classes */
+@theme {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+/* ─── svadmin UI Components CSS ─────────────────────────────── */
+/* These rules were moved from .svelte files to eliminate <style> tags */
+
+/* MarkdownRenderer Styles */
+.prose {
+  line-height: 1.6;
+}
+.prose p {
+  margin-top: 0.5em;
+  margin-bottom: 0.5em;
+}
+
+/* Streaming cursor effect */
+.streaming > *:last-child::after {
+  content: '▋';
+  display: inline-block;
+  animation: svadmin-blink 1s step-start infinite;
+  margin-left: 2px;
+  vertical-align: baseline;
+  color: currentColor;
+}
+
+@keyframes svadmin-blink {
+  50% { opacity: 0; }
+}
+
+/* Handle copied state for dynamically injected buttons */
+.copy-btn[data-copied-id] {
+  color: #10b981; /* Tailwind emerald-500 */
+}
+.copy-btn[data-copied-id] svg {
+  /* Swap to Check icon */
+  content: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="%2310b981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>');
+}
+
+/* ChatDialog Styles */
+.chat-markdown pre.chat-code-block {
+  background: var(--color-muted, hsl(var(--muted)));
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+  margin: 0.5rem 0;
+  overflow-x: auto;
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+.chat-markdown code.chat-inline-code {
+  background: var(--color-muted, hsl(var(--muted)));
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.25rem;
+  font-size: 0.8125em;
+  font-family: ui-monospace, monospace;
+}
+.chat-markdown strong {
+  font-weight: 600;
+}
