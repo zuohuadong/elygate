@@ -6,7 +6,7 @@ import { getAuditLogs } from '../../services/auditLog';
 import { memoryCache } from '../../services/cache';
 
 export const logsRouter = new Elysia()
-    .get('/logs', async ({ query }: any) => {
+    .get('/logs', async ({ query }: ElysiaCtx) => {
         const page = Number(query?.page) || 1;
         const limit = Number(query?.limit) || 50;
         const offset = (page - 1) * limit;
@@ -57,7 +57,7 @@ export const logsRouter = new Elysia()
         };
     })
 
-    .get('/logs/export', async ({ query, set }: any) => {
+    .get('/logs/export', async ({ query, set }: ElysiaCtx) => {
         const userId = query?.user_id;
         const channelId = query?.channel_id;
         const modelName = query?.model;
@@ -154,7 +154,7 @@ export const logsRouter = new Elysia()
         }));
     })
 
-    .get('/health-logs', async ({ query }: any) => {
+    .get('/health-logs', async ({ query }: ElysiaCtx) => {
         const channelId = query?.channel_id;
         const page = Number(query?.page) || 1;
         const limit = Number(query?.limit) || 50;
@@ -218,7 +218,7 @@ export const logsRouter = new Elysia()
         }));
     })
 
-    .get('/audit-logs', async ({ query }: any) => {
+    .get('/audit-logs', async ({ query }: ElysiaCtx) => {
         const userId = query?.user_id ? Number(query.user_id) : undefined;
         const action = query?.action;
         const resource = query?.resource;

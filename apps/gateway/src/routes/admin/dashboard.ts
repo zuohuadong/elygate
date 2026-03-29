@@ -37,7 +37,7 @@ export const dashboardRouter = new Elysia()
         return errorLogs;
     })
 
-    .get('/stats/granular', async ({ query }: any) => {
+    .get('/stats/granular', async ({ query }: ElysiaCtx) => {
         const { start, end, group_by } = query as Record<string, string>;
         const startDate = start ? new Date(start) : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
         const endDate = end ? new Date(end) : new Date();
@@ -59,7 +59,7 @@ export const dashboardRouter = new Elysia()
         return stats;
     })
 
-    .get('/dashboard/period_stats', async ({ query }: any) => {
+    .get('/dashboard/period_stats', async ({ query }: ElysiaCtx) => {
         const { period, timezone } = query as Record<string, string>;
         const tz = timezone || 'UTC';
         

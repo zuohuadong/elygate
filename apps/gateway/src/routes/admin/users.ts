@@ -28,7 +28,7 @@ export const usersRouter = new Elysia()
         }));
     })
 
-    .post('/tokens', async ({ body, user, set }: any) => {
+    .post('/tokens', async ({ body, user, set }: ElysiaCtx) => {
         try {
             const b = body as Record<string, any>;
             const newKey = `sk-${Bun.randomUUIDv7('hex')}`;
@@ -44,7 +44,7 @@ export const usersRouter = new Elysia()
         }
     })
 
-    .put('/tokens/:id', async ({ params: { id }, body, set }: any) => {
+    .put('/tokens/:id', async ({ params: { id }, body, set }: ElysiaCtx) => {
         try {
             const b = body as Record<string, any>;
             const [oldToken] = await sql`SELECT * FROM tokens WHERE id = ${Number(id)} LIMIT 1`;
@@ -74,7 +74,7 @@ export const usersRouter = new Elysia()
         }
     })
 
-    .post('/tokens/:id/regenerate', async ({ params: { id }, set }: any) => {
+    .post('/tokens/:id/regenerate', async ({ params: { id }, set }: ElysiaCtx) => {
         try {
             const [oldToken] = await sql`SELECT * FROM tokens WHERE id = ${Number(id)} LIMIT 1`;
             if (!oldToken) {
@@ -98,7 +98,7 @@ export const usersRouter = new Elysia()
         }
     })
 
-    .delete('/tokens/:id', async ({ params: { id }, set }: any) => {
+    .delete('/tokens/:id', async ({ params: { id }, set }: ElysiaCtx) => {
         try {
             await sql`DELETE FROM tokens WHERE id = ${Number(id)}`;
             return { success: true };
@@ -118,7 +118,7 @@ export const usersRouter = new Elysia()
         return users;
     })
 
-    .post('/users', async ({ body, set }: any) => {
+    .post('/users', async ({ body, set }: ElysiaCtx) => {
         try {
             const b = body as Record<string, any>;
             const passwordHash = await Bun.password.hash(b.password);
@@ -135,7 +135,7 @@ export const usersRouter = new Elysia()
         }
     })
 
-    .put('/users/:id', async ({ params: { id }, body, set }: any) => {
+    .put('/users/:id', async ({ params: { id }, body, set }: ElysiaCtx) => {
         try {
             const b = body as Record<string, any>;
             let passwordClause = sql``;
@@ -170,7 +170,7 @@ export const usersRouter = new Elysia()
         }
     })
 
-    .delete('/users/:id', async ({ params: { id }, user, set, request }: any) => {
+    .delete('/users/:id', async ({ params: { id }, user, set, request }: ElysiaCtx) => {
         const lang = getLangFromHeader(request.headers.get('accept-language'));
 
         if (Number(id) === user.id) {

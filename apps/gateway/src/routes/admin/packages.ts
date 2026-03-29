@@ -11,7 +11,7 @@ export const packagesRouter = new Elysia()
         return await sql`SELECT * FROM redemptions ORDER BY id DESC`;
     })
 
-    .post('/redemptions', async ({ body, set }: any) => {
+    .post('/redemptions', async ({ body, set }: ElysiaCtx) => {
         try {
             const b = body as Record<string, any>;
             const key = b.key || `cdk-${Bun.randomUUIDv7('hex')}`;
@@ -35,7 +35,7 @@ export const packagesRouter = new Elysia()
         })
     })
 
-    .put('/redemptions/:id', async ({ params: { id }, body }: any) => {
+    .put('/redemptions/:id', async ({ params: { id }, body }: ElysiaCtx) => {
         const [result] = await sql`
             UPDATE redemptions 
             SET name = COALESCE(${body.name}, name),
@@ -55,7 +55,7 @@ export const packagesRouter = new Elysia()
     })
 
     // --- Invite Codes ---
-    .get('/invite-codes', async ({ query }: any) => {
+    .get('/invite-codes', async ({ query }: ElysiaCtx) => {
         const page = Number(query?.page) || 1;
         const limit = Number(query?.limit) || 50;
         const offset = (page - 1) * limit;
@@ -96,7 +96,7 @@ export const packagesRouter = new Elysia()
         };
     })
 
-    .post('/invite-codes', async ({ body, user, set }: any) => {
+    .post('/invite-codes', async ({ body, user, set }: ElysiaCtx) => {
         try {
             const b = body as Record<string, any>;
             const count = b.count || 1;
@@ -136,7 +136,7 @@ export const packagesRouter = new Elysia()
         })
     })
 
-    .put('/invite-codes/:id', async ({ params: { id }, body, set }: any) => {
+    .put('/invite-codes/:id', async ({ params: { id }, body, set }: ElysiaCtx) => {
         try {
             const b = body as Record<string, any>;
             const [oldCode] = await sql`SELECT * FROM invite_codes WHERE id = ${Number(id)} LIMIT 1`;
@@ -174,7 +174,7 @@ export const packagesRouter = new Elysia()
         }
     })
 
-    .delete('/invite-codes/:id', async ({ params: { id }, set }: any) => {
+    .delete('/invite-codes/:id', async ({ params: { id }, set }: ElysiaCtx) => {
         try {
             await sql`DELETE FROM invite_codes WHERE id = ${Number(id)}`;
             return { success: true };
@@ -184,7 +184,7 @@ export const packagesRouter = new Elysia()
         }
     })
 
-    .delete('/invite-codes/batch', async ({ body, set }: any) => {
+    .delete('/invite-codes/batch', async ({ body, set }: ElysiaCtx) => {
         try {
             const ids = (body as Record<string, any>).ids as number[];
             if (!ids || ids.length === 0) {
@@ -203,7 +203,7 @@ export const packagesRouter = new Elysia()
     .get('/rate-limits', async () => {
         return await sql`SELECT * FROM rate_limit_rules ORDER BY id DESC`;
     })
-    .post('/rate-limits', async ({ body, set }: any) => {
+    .post('/rate-limits', async ({ body, set }: ElysiaCtx) => {
         try {
             const b = body as Record<string, any>;
             const [result] = await sql`
@@ -217,7 +217,7 @@ export const packagesRouter = new Elysia()
             set.status = 500; return { success: false, message: getErrorMessage(e) };
         }
     })
-    .put('/rate-limits/:id', async ({ params: { id }, body, set }: any) => {
+    .put('/rate-limits/:id', async ({ params: { id }, body, set }: ElysiaCtx) => {
         try {
             const b = body as Record<string, any>;
             const [result] = await sql`
@@ -234,7 +234,7 @@ export const packagesRouter = new Elysia()
             set.status = 500; return { success: false, message: getErrorMessage(e) };
         }
     })
-    .delete('/rate-limits/:id', async ({ params: { id }, set }: any) => {
+    .delete('/rate-limits/:id', async ({ params: { id }, set }: ElysiaCtx) => {
         try {
             await sql`DELETE FROM rate_limit_rules WHERE id = ${Number(id)}`;
             await refreshAllCaches();
@@ -253,7 +253,7 @@ export const packagesRouter = new Elysia()
             ORDER BY p.id DESC
         `;
     })
-    .post('/packages', async ({ body, user, set }: any) => {
+    .post('/packages', async ({ body, user, set }: ElysiaCtx) => {
         try {
             const b = body as Record<string, any>;
             const [result] = await sql`
@@ -266,7 +266,7 @@ export const packagesRouter = new Elysia()
             set.status = 500; return { success: false, message: getErrorMessage(e) };
         }
     })
-    .put('/packages/:id', async ({ params: { id }, body, set }: any) => {
+    .put('/packages/:id', async ({ params: { id }, body, set }: ElysiaCtx) => {
         try {
             const b = body as Record<string, any>;
             const [result] = await sql`
@@ -291,7 +291,7 @@ export const packagesRouter = new Elysia()
             set.status = 500; return { success: false, message: getErrorMessage(e) };
         }
     })
-    .delete('/packages/:id', async ({ params: { id }, set }: any) => {
+    .delete('/packages/:id', async ({ params: { id }, set }: ElysiaCtx) => {
         try {
             await sql`DELETE FROM packages WHERE id = ${Number(id)}`;
             return { success: true };
@@ -310,7 +310,7 @@ export const packagesRouter = new Elysia()
             ORDER BY s.id DESC LIMIT 100
         `;
     })
-    .get('/users/:id/subscriptions', async ({ params: { id } }: any) => {
+    .get('/users/:id/subscriptions', async ({ params: { id } }: ElysiaCtx) => {
         return await sql`
             SELECT s.*, p.name as package_name, p.models, p.duration_days
             FROM user_subscriptions s
@@ -319,7 +319,7 @@ export const packagesRouter = new Elysia()
             ORDER BY s.id DESC
         `;
     })
-    .post('/users/:id/subscriptions', async ({ params: { id }, body, set }: any) => {
+    .post('/users/:id/subscriptions', async ({ params: { id }, body, set }: ElysiaCtx) => {
         try {
             const b = body as Record<string, any>;
             const [pkg] = await sql`SELECT duration_days FROM packages WHERE id = ${b.packageId}`;
@@ -367,7 +367,7 @@ export const packagesRouter = new Elysia()
             set.status = 500; return { success: false, message: getErrorMessage(e) };
         }
     })
-    .put('/subscriptions/:id', async ({ params: { id }, body, set }: any) => {
+    .put('/subscriptions/:id', async ({ params: { id }, body, set }: ElysiaCtx) => {
         try {
             const [result] = await sql`
                 UPDATE user_subscriptions 

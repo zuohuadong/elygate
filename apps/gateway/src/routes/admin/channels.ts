@@ -1,3 +1,4 @@
+import type { ElysiaCtx } from '../../types';
 import { log } from '../../services/logger';
 import { getErrorMessage } from '../../utils/error';
 import { Elysia, t } from 'elysia';
@@ -40,7 +41,7 @@ export const channelsRouter = new Elysia()
         }));
     })
 
-    .post('/channels', async ({ body, set }: any) => {
+    .post('/channels', async ({ body, set }: ElysiaCtx) => {
         try {
             const b = body as Record<string, any>;
             const encryptedKey = encryptChannelKeys(b.key);
@@ -70,7 +71,7 @@ export const channelsRouter = new Elysia()
         })
     })
 
-    .put('/channels/:id', async ({ params: { id }, body, set }: any) => {
+    .put('/channels/:id', async ({ params: { id }, body, set }: ElysiaCtx) => {
         try {
             const b = body as Record<string, any>;
             const [oldChannel] = await sql`SELECT * FROM channels WHERE id = ${Number(id)} LIMIT 1`;
@@ -119,7 +120,7 @@ export const channelsRouter = new Elysia()
         }
     })
 
-    .delete('/channels/:id', async ({ params: { id }, set }: any) => {
+    .delete('/channels/:id', async ({ params: { id }, set }: ElysiaCtx) => {
         try {
             await sql`DELETE FROM channels WHERE id = ${Number(id)}`;
             await refreshAllCaches();
@@ -130,7 +131,7 @@ export const channelsRouter = new Elysia()
         }
     })
 
-    .post('/channels/batch', async ({ body, set }: any) => {
+    .post('/channels/batch', async ({ body, set }: ElysiaCtx) => {
         try {
             const channels = body as Record<string, any>[];
             const results = [];
@@ -176,7 +177,7 @@ export const channelsRouter = new Elysia()
         }))
     })
 
-    .post('/channels/:id/sync-models', async ({ params: { id }, set }: any) => {
+    .post('/channels/:id/sync-models', async ({ params: { id }, set }: ElysiaCtx) => {
         const [channel] = await sql`SELECT * FROM channels WHERE id = ${Number(id)} LIMIT 1`;
         if (!channel) return (set.status = 404, { success: false, message: 'Channel not found' });
 
@@ -275,7 +276,7 @@ export const channelsRouter = new Elysia()
         };
     })
 
-    .post('/channels/:id/keys/clean', async ({ params: { id }, set }: any) => {
+    .post('/channels/:id/keys/clean', async ({ params: { id }, set }: ElysiaCtx) => {
         try {
             const [channel] = await sql`SELECT * FROM channels WHERE id = ${Number(id)} LIMIT 1`;
             if (!channel) {
@@ -315,7 +316,7 @@ export const channelsRouter = new Elysia()
     })
 
     // Restore exhausted/invalid keys back to active
-    .post('/channels/:id/keys/restore', async ({ params: { id }, body, set }: any) => {
+    .post('/channels/:id/keys/restore', async ({ params: { id }, body, set }: ElysiaCtx) => {
         try {
             const [channel] = await sql`SELECT * FROM channels WHERE id = ${Number(id)} LIMIT 1`;
             if (!channel) {
@@ -372,7 +373,7 @@ export const channelsRouter = new Elysia()
         }
     })
 
-    .post('/channels/:id/test', async ({ params: { id } }: any) => {
+    .post('/channels/:id/test', async ({ params: { id } }: ElysiaCtx) => {
         const [channel] = await sql`SELECT * FROM channels WHERE id = ${Number(id)} LIMIT 1`;
         if (!channel) throw new Error("Channel not found");
 
@@ -416,7 +417,7 @@ export const channelsRouter = new Elysia()
         }
     })
 
-    .post('/channels/fetch-models', async ({ body, set }: any) => {
+    .post('/channels/fetch-models', async ({ body, set }: ElysiaCtx) => {
         const { url, key, type } = body as { url?: string; key?: string; type?: number };
         
         if (!url || !key) {
@@ -466,7 +467,7 @@ export const channelsRouter = new Elysia()
         }
     })
 
-    .get('/channels/:id/models', async ({ params: { id }, set }: any) => {
+    .get('/channels/:id/models', async ({ params: { id }, set }: ElysiaCtx) => {
         const [channel] = await sql`SELECT * FROM channels WHERE id = ${Number(id)} LIMIT 1`;
         if (!channel) {
             set.status = 404;
