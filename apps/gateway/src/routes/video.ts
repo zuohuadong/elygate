@@ -1,3 +1,4 @@
+import type { ElysiaCtx } from '../types';
 import { Elysia } from 'elysia';
 import { log } from '../services/logger';
 import { assertModelAccess } from '../middleware/auth';
@@ -17,7 +18,7 @@ import type { UserRecord, TokenRecord } from '../types';
  *   GET  /v1/tasks/task_...    → { status: "completed", result: {...} }
  */
 export const videoRouter = new Elysia()
-    .post('/video/generations', async ({ body, token, user, set }: any) => {
+    .post('/video/generations', async ({ body, token, user, set }: ElysiaCtx) => {
         const model = (body.model) as string;
 
         if (!model) {

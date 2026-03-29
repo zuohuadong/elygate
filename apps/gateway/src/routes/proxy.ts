@@ -22,7 +22,7 @@ export function createProxyRoute(config: ProxyRouteConfig): Elysia {
     const label = config.endpointType.replace('/', '_').toUpperCase();
 
     return new Elysia()
-        .post(config.path, async ({ body, token, user, set }: any) => {
+        .post(config.path, async ({ body, token, user, set }: ElysiaCtx) => {
             const model = (config.getModel?.(body) ?? body.model ?? config.defaultModel) as string;
 
             if (!model) {

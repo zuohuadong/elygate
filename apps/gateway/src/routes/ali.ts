@@ -5,7 +5,7 @@ import { getConverter } from '../services/converters';
 import { memoryCache } from '../services/cache';
 
 export const aliRouter = new Elysia()
-    .post('/api/v1/services/aigc/text-generation/generation', async ({ body, headers, request }: any) => {
+    .post('/api/v1/services/aigc/text-generation/generation', async ({ body, headers, request }: ElysiaCtx) => {
         const apiKey = request.headers.get('Authorization')?.replace('Bearer ', '');
         if (!apiKey) return new Response(JSON.stringify({ code: 'Unauthorized', message: 'Missing API key' }), { status: 401 });
 

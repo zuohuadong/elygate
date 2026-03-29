@@ -1,3 +1,4 @@
+import type { ElysiaCtx } from '../types';
 import { Elysia } from 'elysia';
 import { dispatch } from '../services/dispatcher';
 import { getConverter } from '../services/converters';
@@ -15,7 +16,7 @@ import type { TokenRecord,  UserRecord  } from '../types';
  */
 
 export const geminiRouter = new Elysia()
-    .all('/models/*', async ({ request, params }: any) => {
+    .all('/models/*', async ({ request, params }: ElysiaCtx) => {
         const url = new URL(request.url);
         const pathname = url.pathname;
         

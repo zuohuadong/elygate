@@ -17,7 +17,7 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
     .use(authPlugin)
 
     // Create a new payment order (authenticated: userId comes from token, not request body)
-    .post('/create-order', async ({ body, user, set }: any) => {
+    .post('/create-order', async ({ body, user, set }: ElysiaCtx) => {
         try {
             // Safeguard: Check if payment is enabled first
             const [paymentEnabled] = await sql`SELECT value FROM options WHERE key = 'PaymentEnabled'`;
@@ -107,7 +107,7 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
     })
 
     // Stripe webhook callback — verify Stripe-Signature header
-    .post('/stripe/callback', async ({ body, request, set }: any) => {
+    .post('/stripe/callback', async ({ body, request, set }: ElysiaCtx) => {
         try {
             // Verify Stripe webhook signature if webhook secret is configured
             if (STRIPE_WEBHOOK_SECRET) {
@@ -178,7 +178,7 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
     })
 
     // EPay async callback
-    .post('/epay/callback', async ({ query, set }: any) => {
+    .post('/epay/callback', async ({ query, set }: ElysiaCtx) => {
         try {
             const params = new URLSearchParams(query);
             const sign = params.get('sign');
@@ -236,7 +236,7 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
     })
 
     // Get orders for the authenticated user only
-    .get('/orders', async ({ user, set }: any) => {
+    .get('/orders', async ({ user, set }: ElysiaCtx) => {
         try {
             const orders = await sql`
                 SELECT * FROM payment_orders 

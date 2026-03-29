@@ -1,3 +1,4 @@
+import type { ElysiaCtx } from '../types';
 import { Elysia } from 'elysia';
 import { getTask } from '../services/task-service';
 import type { UserRecord, TokenRecord } from '../types';
@@ -6,7 +7,7 @@ import type { UserRecord, TokenRecord } from '../types';
  * /v1/tasks endpoint — query async task status and results
  */
 export const tasksRouter = new Elysia()
-    .get('/tasks/:taskId', async ({ params, user, set }: any) => {
+    .get('/tasks/:taskId', async ({ params, user, set }: ElysiaCtx) => {
         if (!user) {
             set.status = 401;
             return { success: false, message: 'Unauthorized' };

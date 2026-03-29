@@ -1,3 +1,4 @@
+import type { ElysiaCtx } from '../types';
 import { Elysia, t } from 'elysia';
 import { sql } from '@elygate/db';
 import { authPlugin } from '../middleware/auth';
@@ -6,7 +7,7 @@ import { ChannelType  } from '../providers/types';
 
 export const workflowsRouter = new Elysia({ prefix: '/v1/workflows' })
     .use(authPlugin)
-    .post('/execute', async ({ body, user, token, set }: any) => {
+    .post('/execute', async ({ body, user, token, set }: ElysiaCtx) => {
         const { template_id, parameters, model } = body;
 
         if (!template_id) {

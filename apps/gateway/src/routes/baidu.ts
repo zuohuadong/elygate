@@ -5,7 +5,7 @@ import { getConverter } from '../services/converters';
 import { memoryCache } from '../services/cache';
 
 export const baiduRouter = new Elysia()
-    .post('/rpc/2.0/ai_custom/v1/wenxinworkshop/chat/:model', async ({ body, params, request, query }: any) => {
+    .post('/rpc/2.0/ai_custom/v1/wenxinworkshop/chat/:model', async ({ body, params, request, query }: ElysiaCtx) => {
         const model = params.model;
         const apiKey = query.access_token || request.headers.get('Authorization')?.replace('Bearer ', '');
         

@@ -1,3 +1,4 @@
+import type { ElysiaCtx } from '../types';
 import { log } from '../services/logger';
 import { Elysia } from 'elysia';
 import { assertModelAccess } from '../middleware/auth';
@@ -186,7 +187,7 @@ async function billCacheHit(
 }
 
 export const chatRouter = new Elysia()
-    .post('/chat/completions', async ({ body, token, user, request, set }: any) => {
+    .post('/chat/completions', async ({ body, token, user, request, set }: ElysiaCtx) => {
         const u = user as UserRecord;
         const t = token as TokenRecord;
         const startTime = Date.now();

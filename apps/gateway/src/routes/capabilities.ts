@@ -1,3 +1,4 @@
+import type { ElysiaCtx } from '../types';
 import { Elysia, t } from 'elysia';
 import { memoryCache } from '../services/cache';
 import { authPlugin } from '../middleware/auth';
@@ -68,7 +69,7 @@ export const capabilitiesRouter = new Elysia({ prefix: '/v1' })
             }
         };
     })
-    .post('/self-test', async ({ body, user, set }: any) => {
+    .post('/self-test', async ({ body, user, set }: ElysiaCtx) => {
         const { model } = body;
         if (!model) {
             set.status = 400;

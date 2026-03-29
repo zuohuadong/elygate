@@ -1,3 +1,4 @@
+import type { ElysiaCtx } from '../types';
 import { Elysia } from 'elysia';
 import { getErrorMessage } from '../utils/error';
 import { memoryCache } from '../services/cache';
@@ -6,7 +7,7 @@ import { getConverter } from '../services/converters';
 import type { TokenRecord,  UserRecord  } from '../types';
 
 export const anthropicRouter = new Elysia()
-    .post('/messages', async ({ body, headers, request }: any) => {
+    .post('/messages', async ({ body, headers, request }: ElysiaCtx) => {
         const startTime = Date.now();
         const headerObj = headers as Record<string, string>;
         const getHeader = (name: string) => headerObj[name.toLowerCase()] || headerObj[name] || '';

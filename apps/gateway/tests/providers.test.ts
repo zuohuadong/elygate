@@ -50,7 +50,7 @@ describe('DeepSeek Provider Tests', () => {
         expect(transformed.reasoning_effort).toBe('medium');
     });
 
-    test('should parse response with reasoning content', () => {
+    test('should parse response with reasoning content', async () => {
         const response = {
             id: 'test-id',
             choices: [{
@@ -63,13 +63,13 @@ describe('DeepSeek Provider Tests', () => {
             usage: { prompt_tokens: 10, completion_tokens: 20 }
         };
         
-        const parsed = handler.transformResponse(response);
+        const parsed = await handler.transformResponse(response);
         
-        expect(parsed.choices[0].message.content).toContain('Let me think about this...');
+        expect(parsed.choices[0].message.reasoning_content).toContain('Let me think about this...');
         expect(parsed.choices[0].message.content).toContain('Final answer');
     });
 
-    test('should parse normal response', () => {
+    test('should parse normal response', async () => {
         const response = {
             id: 'test-id',
             choices: [{
@@ -81,7 +81,7 @@ describe('DeepSeek Provider Tests', () => {
             usage: { prompt_tokens: 10, completion_tokens: 20 }
         };
         
-        const parsed = handler.transformResponse(response);
+        const parsed = await handler.transformResponse(response);
         
         expect(parsed.choices[0].message.content).toBe('Normal response');
     });
@@ -156,7 +156,7 @@ describe('Suno Provider Tests', () => {
         expect(transformed.mv).toBe('chirp-v3-5');
     });
 
-    test('should parse array response', () => {
+    test('should parse array response', async () => {
         const response = [
             {
                 id: 'song-1',
@@ -170,7 +170,7 @@ describe('Suno Provider Tests', () => {
             }
         ];
         
-        const parsed = handler.transformResponse(response);
+        const parsed = await handler.transformResponse(response);
         
         expect(parsed.id).toContain('suno-');
         expect(parsed.model).toBe('suno');
@@ -181,14 +181,14 @@ describe('Suno Provider Tests', () => {
         expect(content[0].audio_url).toBe('https://example.com/audio.mp3');
     });
 
-    test('should parse object response', () => {
+    test('should parse object response', async () => {
         const response = {
             id: 'song-2',
             title: 'Another Song',
             status: 'processing'
         };
         
-        const parsed = handler.transformResponse(response);
+        const parsed = await handler.transformResponse(response);
         
         expect(parsed.id).toContain('suno-');
         expect(parsed.choices[0].finish_reason).toBe('stop');
