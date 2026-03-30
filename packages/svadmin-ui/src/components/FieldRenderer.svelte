@@ -15,8 +15,10 @@
   import { Button } from './ui/button/index.js';
   import TooltipButton from './TooltipButton.svelte';
   import ComboboxField from './ComboboxField.svelte';
+  import ArrayField from './fields/ArrayField.svelte';
   import { Plus, X } from 'lucide-svelte';
   import type { Snippet } from 'svelte';
+  import { getRichTextEditor } from '../editor-config.svelte.js';
 
   let { field, value, onchange, children } = $props<{
     field: FieldDefinition;
@@ -76,7 +78,7 @@
 </script>
 
 <div class="space-y-1.5">
-  <Label for={field.key}>
+  <Label for={field.key} id="label-{field.key}">
     {field.label}
     {#if field.required}
       <span class="text-destructive">*</span>
@@ -85,6 +87,9 @@
 
   {#if children}
     {@render children()}
+
+  {:else if field.type === 'array'}
+    <ArrayField {field} {value} {onchange} />
 
   {:else if field.type === 'text' || field.type === 'image'}
     <Input
@@ -159,19 +164,42 @@
       required={field.required}
     />
 
-  {:else if field.type === 'textarea' || field.type === 'richtext'}
+  {:else if field.type === 'richtext'}
+    {@const EditorComp = getRichTextEditor()}
+    {#if EditorComp}
+      <EditorComp
+        id={field.key}
+        value={strVal}
+        placeholder={t('field.enterValue', { label: field.label })}
+        preset="full"
+        onchange={(html: string) => onchange(html)}
+      />
+    {:else}
+      <Textarea
+        id={field.key}
+        value={strVal}
+        oninput={(e) => onchange((e.target as HTMLTextAreaElement).value)}
+        required={field.required}
+        rows={10}
+        placeholder={t('field.enterValue', { label: field.label })}
+        class="resize-y"
+      />
+    {/if}
+
+  {:else if field.type === 'textarea'}
     <Textarea
       id={field.key}
       value={strVal}
       oninput={(e) => onchange((e.target as HTMLTextAreaElement).value)}
       required={field.required}
-      rows={field.type === 'richtext' ? 10 : 4}
+      rows={4}
       placeholder={t('field.enterValue', { label: field.label })}
       class="resize-y"
     />
 
   {:else if field.type === 'relation' && field.resource}
     <ComboboxField
+      id={field.key}
       resource={field.resource}
       value={value as string | number | null}
       onchange={(v) => onchange(v)}
@@ -184,6 +212,7 @@
     {#if (field.options?.length ?? 0) > 8}
       <!-- Many options → use ComboboxField-style search -->
       <ComboboxField
+        id={field.key}
         resource=""
         value={value as string | number | null}
         onchange={(v) => onchange(v)}
@@ -204,10 +233,15 @@
     {/if}
 
   {:else if field.type === 'multiselect'}
-    <div class="space-y-2 rounded-lg border border-input p-3 max-h-48 overflow-y-auto">
+    <div 
+      class="space-y-2 rounded-lg border border-input p-3 max-h-48 overflow-y-auto"
+      role="group" 
+      aria-labelledby="label-{field.key}"
+    >
       {#each field.options ?? [] as opt}
         <label class="flex items-center gap-2 text-sm cursor-pointer hover:bg-muted/50 rounded px-1 py-0.5 transition-colors">
           <Checkbox
+            id={`${field.key}-${opt.value}`}
             checked={multiVal.includes(opt.value)}
             onCheckedChange={() => toggleMulti(opt.value)}
           />
@@ -233,6 +267,7 @@
   {:else if field.type === 'boolean'}
     <div class="flex items-center gap-2 pt-1">
       <Switch
+        id={field.key}
         checked={boolVal}
         onCheckedChange={(v) => onchange(v)}
       />
@@ -255,6 +290,7 @@
         {/each}
       </div>
       <Input
+        id={field.key}
         type="text"
         placeholder={t('field.tagsPlaceholder')}
         onkeydown={handleTagKeydown}
@@ -275,6 +311,7 @@
       {#each imagesVal as url, i}
         <div class="flex items-center gap-2">
           <Input
+            id={i === 0 ? field.key : undefined}
             type="text"
             value={url}
             oninput={(e) => updateImage(i, (e.target as HTMLInputElement).value)}

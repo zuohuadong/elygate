@@ -2,11 +2,12 @@
   import { t } from '@svadmin/core/i18n';
   import { navigate } from '@svadmin/core/router';
   import { currentPath } from '@svadmin/core/router';
-  import { User, Palette, Info, Shield } from 'lucide-svelte';
+  import { User, Palette, Info, Shield, FileSearch } from 'lucide-svelte';
   import ProfilePage from './ProfilePage.svelte';
   import AppearanceSettings from './AppearanceSettings.svelte';
   import AboutSettings from './AboutSettings.svelte';
   import RolesSettings from './RolesSettings.svelte';
+  import AuditLogViewer from './AuditLogViewer.svelte';
 
   const sections = [
     {
@@ -20,6 +21,7 @@
       group: 'settings.system',
       items: [
         { key: 'roles', path: '/settings/roles', icon: Shield, label: 'settings.rolesAndPermissions' },
+        { key: 'audit', path: '/settings/audit', icon: FileSearch, label: 'settings.auditLogs' },
         { key: 'about', path: '/settings/about', icon: Info, label: 'settings.about' },
       ],
     },
@@ -29,6 +31,7 @@
     const path = currentPath();
     if (path.includes('/settings/appearance')) return 'appearance';
     if (path.includes('/settings/roles')) return 'roles';
+    if (path.includes('/settings/audit')) return 'audit';
     if (path.includes('/settings/about')) return 'about';
     return 'profile';
   });
@@ -44,7 +47,7 @@
 
 <div class="flex flex-col lg:flex-row gap-0 min-h-full">
   <!-- Left sidebar navigation -->
-  <nav class="w-full lg:w-56 shrink-0 border-b lg:border-b-0 lg:border-r border-border bg-muted/30">
+  <nav class="w-full lg:w-56 shrink-0 bg-muted/10 shadow-[inset_0_-1px_0_rgba(0,0,0,0.05)] lg:shadow-[inset_-1px_0_0_rgba(0,0,0,0.05)] dark:shadow-[inset_-1px_0_0_rgba(255,255,255,0.05)]">
     <!-- Mobile: horizontal scroll tabs -->
     <div class="flex lg:hidden overflow-x-auto px-4 py-2 gap-1">
       {#each sections as section}
@@ -94,13 +97,15 @@
   </nav>
 
   <!-- Right content area -->
-  <div class="flex-1 p-6 lg:p-8 max-w-3xl">
+  <div class="flex-1 p-6 lg:p-8 {activeKey === 'roles' || activeKey === 'audit' ? 'max-w-6xl' : 'max-w-3xl'}">
     {#if activeKey === 'profile'}
       <ProfilePage />
     {:else if activeKey === 'appearance'}
       <AppearanceSettings />
     {:else if activeKey === 'roles'}
       <RolesSettings />
+    {:else if activeKey === 'audit'}
+      <AuditLogViewer />
     {:else if activeKey === 'about'}
       <AboutSettings />
     {/if}

@@ -12,8 +12,8 @@
   }>();
 
   const nav = useNavigation();
-  const can = $derived(accessControl?.enabled ? useCan(resource, 'edit') : null);
-  const hidden = $derived(accessControl?.hideIfUnauthorized && can && !can.allowed);
+  const can = useCan(() => ({ resource, action: 'edit', queryOptions: { enabled: accessControl?.enabled ?? true } }));
+  const hidden = $derived(accessControl?.hideIfUnauthorized && !can.allowed);
 </script>
 
 {#if !hidden}
@@ -21,7 +21,7 @@
     variant="outline"
     size={hideText ? 'icon' : 'sm'}
     class={className}
-    disabled={can ? !can.allowed : false}
+    disabled={!can.allowed}
     onclick={() => nav.edit(resource, recordItemId)}
   >
     <Pencil class="h-4 w-4" />

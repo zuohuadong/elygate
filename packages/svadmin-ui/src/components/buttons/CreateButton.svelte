@@ -11,8 +11,8 @@
   }>();
 
   const nav = useNavigation();
-  const can = $derived(accessControl?.enabled ? useCan(resource, 'create') : null);
-  const hidden = $derived(accessControl?.hideIfUnauthorized && can && !can.allowed);
+  const can = useCan(() => ({ resource, action: 'create', queryOptions: { enabled: accessControl?.enabled ?? true } }));
+  const hidden = $derived(accessControl?.hideIfUnauthorized && !can.allowed);
 </script>
 
 {#if !hidden}
@@ -20,7 +20,7 @@
     variant="default"
     size={hideText ? 'icon' : 'default'}
     class={className}
-    disabled={can ? !can.allowed : false}
+    disabled={!can.allowed}
     onclick={() => nav.create(resource)}
   >
     <Plus class="h-4 w-4" />

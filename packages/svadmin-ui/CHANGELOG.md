@@ -1,5 +1,49 @@
 # Changelog
 
+## [0.20.2](https://github.com/zuohuadong/svadmin/compare/ui-v0.20.1...ui-v0.20.2) (2026-03-30)
+
+
+### Bug Fixes
+
+* **ui:** remove static export of Editor to prevent TS missing module errors ([769299d](https://github.com/zuohuadong/svadmin/commit/769299d6cb37207461e5a78cd4c6d4062a8ba0ab))
+
+## [0.20.1](https://github.com/zuohuadong/svadmin/compare/ui-v0.20.0...ui-v0.20.1) (2026-03-29)
+
+
+### Bug Fixes
+
+* **ui:** resolve svelte2tsx compilation errors for exported types ([f19db4f](https://github.com/zuohuadong/svadmin/commit/f19db4fc0b9cae9ce58863321fbe445b00ba22db))
+
+## [0.20.0](https://github.com/zuohuadong/svadmin/compare/ui-v0.19.0...ui-v0.20.0) (2026-03-29)
+
+
+### Features
+
+* implement FieldRenderer component and initialize rich text editor package with modular toolbar and extension support ([3d99335](https://github.com/zuohuadong/svadmin/commit/3d993350c9a2b476d51bd49e9d83bcd664b6aad6))
+* **ui:** wire AgentProvider into ChatDialog and CommandPalette with AI mode ([fc466a6](https://github.com/zuohuadong/svadmin/commit/fc466a60cf193628134a8d5f3aa42cc39af9e813))
+
+
+### Bug Fixes
+
+* **ui:** add missing DraggableHeader import in AutoTable ([4b2555b](https://github.com/zuohuadong/svadmin/commit/4b2555b6da3c01a23c22d64d1b23a456d516c363))
+* **ui:** add missing DraggableHeader import in AutoTable ([7917e3b](https://github.com/zuohuadong/svadmin/commit/7917e3bc0c9dca00b097c43aa76681b94178cb16))
+
+## [0.19.0](https://github.com/zuohuadong/svadmin/compare/ui-v0.18.0...ui-v0.19.0) (2026-03-29)
+
+
+### Features
+
+* **ui:** add ArrayField for nested dynamic form groups ([0407757](https://github.com/zuohuadong/svadmin/commit/04077572b3d6a668df136d6a22375206735d775c))
+* **ui:** add enterprise RBAC, audit logs, tenant switcher, task queue, and draggable grid ([449dfaf](https://github.com/zuohuadong/svadmin/commit/449dfaf73febe25a08073c4ea63f0d76f38a2f51))
+
+
+### Bug Fixes
+
+* **core:** migrate CanAccess and useCan logic to support Svelte 5 closures ([38d4f78](https://github.com/zuohuadong/svadmin/commit/38d4f785e2ca3d7dfc6b62445b29f230e74df284))
+* **ui:** refactor action buttons to use getter-based useCan signature and remove dead storybook configs ([a5ae668](https://github.com/zuohuadong/svadmin/commit/a5ae66818bfb172ac23425049c869ccb7fceb9de))
+* **ui:** remove stale null-checks on useCan result and add AC provide… ([1825b92](https://github.com/zuohuadong/svadmin/commit/1825b92f021ed3bd2cc01ed1afba4088b9213266))
+* **ui:** remove stale null-checks on useCan result and add AC provider guard to AutoTable ([93cb0c4](https://github.com/zuohuadong/svadmin/commit/93cb0c4cbad3471c3dc7d3b0989f3f2f32e3e432))
+
 ## [0.18.0](https://github.com/zuohuadong/svadmin/compare/ui-v0.17.0...ui-v0.18.0) (2026-03-29)
 
 

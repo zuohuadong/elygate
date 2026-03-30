@@ -1,5 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
+  import { cn } from '../utils.js';
   import {
     createTable,
     getCoreRowModel,
@@ -13,7 +14,7 @@
   import { useList, useDelete, getResource } from '@svadmin/core';
   import type { Pagination as PaginationState, Sort, Filter, FieldDefinition } from '@svadmin/core';
   import { navigate } from '@svadmin/core/router';
-  import { canAccess } from '@svadmin/core/permissions';
+  import { useCan, getAccessControlProvider } from '@svadmin/core';
   import { readURLState, writeURLState } from '@svadmin/core';
   import { t } from '@svadmin/core/i18n';
   import { fade } from 'svelte/transition';
@@ -36,6 +37,7 @@
   import ConfirmDialog from './ConfirmDialog.svelte';
   import TooltipButton from './TooltipButton.svelte';
   import InlineEdit from './InlineEdit.svelte';
+  import DraggableHeader from './DraggableHeader.svelte';
   import type { Snippet } from 'svelte';
 
   // ─── Props with Snippet composability ─────────────────────────
@@ -44,8 +46,10 @@
     selectable?: boolean;
     /** Custom header actions (right side) */
     headerActions?: Snippet;
-    /** Custom cell renderer per field */
-    cellRenderer?: Snippet<[{ field: FieldDefinition; value: unknown; record: Record<string, unknown> }]>;
+    /** Custom cell renderers by field key */
+    columns?: Record<string, Snippet<[{ value: unknown; record: Record<string, unknown> }]>>;
+    /** Global fallback cell renderer */
+    defaultCellRenderer?: Snippet<[{ field: FieldDefinition; value: unknown; record: Record<string, unknown> }]>;
     /** Custom row actions (edit/delete column) */
     rowActions?: Snippet<[{ record: Record<string, unknown>; id: string | number }]>;
     /** Custom empty state */
@@ -62,7 +66,8 @@
     resourceName,
     selectable = true,
     headerActions,
-    cellRenderer,
+    columns: customColumns,
+    defaultCellRenderer,
     rowActions,
     emptyState,
     expandedRowRender,
@@ -136,10 +141,15 @@
   const deleteMutation = deleteResult.mutation;
 
   // ─── Permissions ──────────────────────────────────────────────
-  const canCreate = $derived(canAccess(resourceName, 'create').can && resource.canCreate !== false);
-  const canEdit = $derived(canAccess(resourceName, 'edit').can && resource.canEdit !== false);
-  const canDelete = $derived(canAccess(resourceName, 'delete').can && resource.canDelete !== false);
-  const canExport = $derived(canAccess(resourceName, 'export').can);
+  const acEnabled = $derived(!!getAccessControlProvider());
+  const canCreatePerm = useCan(() => ({ resource: resourceName, action: 'create', queryOptions: { enabled: acEnabled } }));
+  const canEditPerm = useCan(() => ({ resource: resourceName, action: 'edit', queryOptions: { enabled: acEnabled } }));
+  const canDeletePerm = useCan(() => ({ resource: resourceName, action: 'delete', queryOptions: { enabled: acEnabled } }));
+  const canExportPerm = useCan(() => ({ resource: resourceName, action: 'export', queryOptions: { enabled: acEnabled } }));
+  const canCreate = $derived(canCreatePerm.allowed && resource.canCreate !== false);
+  const canEdit = $derived(canEditPerm.allowed && resource.canEdit !== false);
+  const canDelete = $derived(canDeletePerm.allowed && resource.canDelete !== false);
+  const canExport = $derived(canExportPerm.allowed);
 
   // ─── TanStack Table state ────────────────────────────────────
   let sorting = $state<SortingState>(untrack(() =>
@@ -298,9 +308,7 @@
     const ids = Object.keys(rowSelection);
     confirmMessage = t('common.batchDeleteConfirm', { count: ids.length });
     confirmAction = async () => {
-      for (const id of ids) {
-        await deleteMutation.mutateAsync({ id, resource: resourceName });
-      }
+      await Promise.allSettled(ids.map(id => deleteMutation.mutateAsync({ id, resource: resourceName })));
       rowSelection = {};
       confirmOpen = false;
     };
@@ -440,7 +448,7 @@
   {/if}
 
   <!-- Table (TanStack-powered) -->
-  <div class="rounded-lg bg-card shadow-sm overflow-hidden" role="region" aria-label="{resource.label} {t('common.list')}">
+  <div class="rounded-lg bg-card shadow-sm ring-1 ring-border/10 overflow-hidden" role="region" aria-label="{resource.label} {t('common.list')}">
     {#if query.isLoading}
       <div class="p-4 space-y-3">
         <div class="flex gap-4 mb-2">
@@ -518,7 +526,7 @@
               <ContextMenu.Root>
                 <ContextMenu.Trigger>
                   {#snippet child({ props })}
-                    <Table.Row {...props} class="transition-colors {row.getIsSelected() ? 'bg-accent' : ''}">
+                    <Table.Row {...props} class="transition-colors border-0 even:bg-muted/20 {row.getIsSelected() ? 'bg-accent/50' : 'hover:bg-muted/40'}">
                       {#each row.getVisibleCells() as cell}
                         <Table.Cell>
                           {#if cell.column.id === '_select'}
@@ -553,8 +561,10 @@
                             </div>
                           {:else}
                             {@const field = visibleFields.find(f => f.key === cell.column.id)}
-                            {#if cellRenderer && field}
-                              {@render cellRenderer({ field, value: cell.getValue(), record })}
+                            {#if customColumns && field && customColumns[field.key]}
+                              {@render customColumns[field.key]({ value: cell.getValue(), record })}
+                            {:else if defaultCellRenderer && field}
+                              {@render defaultCellRenderer({ field, value: cell.getValue(), record })}
                             {:else if field?.type === 'boolean'}
                               <span class="inline-block h-2 w-2 rounded-full {cell.getValue() ? 'bg-success' : 'bg-muted-foreground/30'}"></span>
                             {:else if field?.type === 'date' && cell.getValue()}
@@ -647,7 +657,7 @@
             {@const record = row.original}
             {@const id = record[primaryKey] as string | number}
             <div
-              class="rounded-xl border bg-card p-4 shadow-sm transition-colors {row.getIsSelected() ? 'ring-2 ring-primary bg-accent/30' : ''}"
+              class="rounded-xl shadow-sm ring-1 ring-border/10 bg-card p-4 transition-colors {row.getIsSelected() ? 'ring-2 ring-primary bg-accent/30' : ''}"
             >
               <!-- Card header: ID + select + actions -->
               <div class="flex items-center justify-between mb-3">
@@ -687,8 +697,10 @@
                   <div class="flex items-start justify-between gap-4">
                     <span class="text-xs font-medium text-muted-foreground shrink-0">{field.label}</span>
                     <span class="text-sm text-right truncate max-w-[60%]">
-                      {#if cellRenderer}
-                        {@render cellRenderer({ field, value, record })}
+                      {#if customColumns && field && customColumns[field.key]}
+                        {@render customColumns[field.key]({ value, record })}
+                      {:else if defaultCellRenderer && field}
+                        {@render defaultCellRenderer({ field, value, record })}
                       {:else if field.type === 'boolean'}
                         <span class="inline-block h-2 w-2 rounded-full {value ? 'bg-success' : 'bg-muted-foreground/30'}"></span>
                       {:else if field.type === 'date' && value}

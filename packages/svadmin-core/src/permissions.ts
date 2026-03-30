@@ -38,7 +38,7 @@ export interface CanResult {
  * ```
  */
 export interface AccessControlProvider {
-  can: (params: CanParams) => Promise<CanResult>;
+  can: (params: CanParams | CanParams[]) => Promise<CanResult | CanResult[]>;
   options?: {
     buttons?: {
       /** Enable access control checks on CRUD buttons globally. Default: false */
@@ -73,19 +73,21 @@ export function getAccessControlOptions() {
 }
 
 /**
- * Synchronous access check. Returns `{ can: true }` if no provider is set.
- * When a provider is registered, this warns since provider.can() is always async.
+ * Async access check. 
+ * Supports both single capability requests or an array of batched checks.
  */
-export function canAccess(resource: string, action: Action, params?: Record<string, unknown>): CanResult {
-  if (!provider) return { can: true };
-  console.warn('[permissions] canAccess called synchronously but provider.can() is async. Defaulting to { can: true }. Use canAccessAsync() instead.');
-  return { can: true };
-}
-
-/**
- * Async access check. Preferred over `canAccess()`.
- */
-export async function canAccessAsync(resource: string, action: Action, params?: Record<string, unknown>): Promise<CanResult> {
-  if (!provider) return { can: true };
-  return provider.can({ resource, action, params });
+export async function canAccessAsync(params: CanParams[]): Promise<CanResult[]>;
+export async function canAccessAsync(resource: string, action: Action, params?: Record<string, unknown>): Promise<CanResult>;
+export async function canAccessAsync(resourceOrBatch: string | CanParams[], action?: Action, params?: Record<string, unknown>): Promise<CanResult | CanResult[]> {
+  if (!provider) {
+    return Array.isArray(resourceOrBatch)
+      ? resourceOrBatch.map(() => ({ can: true }))
+      : { can: true };
+  }
+  
+  if (Array.isArray(resourceOrBatch)) {
+    return provider.can(resourceOrBatch);
+  }
+  
+  return provider.can({ resource: resourceOrBatch, action: action!, params }) as Promise<CanResult>;
 }

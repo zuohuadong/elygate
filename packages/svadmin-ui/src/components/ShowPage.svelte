@@ -36,10 +36,10 @@
   </PageHeader>
 
   {#if query.query.isLoading}
-    <Card.Root>
-      <Card.Content class="divide-y divide-border p-0">
-        {#each showFields.slice(0, 6) as _}
-          <div class="flex flex-col sm:flex-row px-4 sm:px-6 py-3 sm:py-4">
+    <Card.Root class="overflow-hidden border-border/40 shadow-sm">
+      <Card.Content class="p-0">
+        {#each showFields.slice(0, 6) as _, i}
+          <div class="flex flex-col sm:flex-row px-4 sm:px-6 py-3 sm:py-4 {i % 2 === 1 ? 'bg-muted/20' : ''}">
             <Skeleton class="h-4 w-1/2 sm:w-1/4" />
             <Skeleton class="h-4 w-3/4 sm:w-2/5 mt-1 sm:mt-0 sm:ml-auto" />
           </div>
@@ -47,12 +47,12 @@
       </Card.Content>
     </Card.Root>
   {:else if query.query.data?.data}
-    <Card.Root>
-      <Card.Content class="divide-y divide-border p-0">
-        {#each showFields as field}
+    <Card.Root class="overflow-hidden border-border/40 shadow-sm">
+      <Card.Content class="p-0">
+        {#each showFields as field, i}
           {@const value = (query.query.data!.data as Record<string, unknown>)[field.key]}
           {@const DisplayComponent = getDisplayComponent(field.type)}
-          <div class="flex flex-col sm:flex-row px-4 sm:px-6 py-3 sm:py-4">
+          <div class="flex flex-col sm:flex-row px-4 sm:px-6 py-3 sm:py-4 {i % 2 === 1 ? 'bg-muted/20' : ''}">
             <div class="sm:w-1/3 text-xs sm:text-sm font-medium text-muted-foreground mb-1 sm:mb-0">{field.label}</div>
             <div class="sm:w-2/3 text-sm text-foreground">
               {#if DisplayComponent && value != null}

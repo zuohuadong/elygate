@@ -11,8 +11,8 @@
   }>();
 
   const { triggerExport, isLoading } = useExport({ get resource() { return resource; } });
-  const can = $derived(accessControl?.enabled ? useCan(resource, 'export') : null);
-  const hidden = $derived(accessControl?.hideIfUnauthorized && can && !can.allowed);
+  const can = useCan(() => ({ resource, action: 'export', queryOptions: { enabled: accessControl?.enabled ?? true } }));
+  const hidden = $derived(accessControl?.hideIfUnauthorized && !can.allowed);
 </script>
 
 {#if !hidden}
@@ -21,7 +21,7 @@
     variant="outline"
     size={hideText ? 'icon' : 'sm'}
     class={className}
-    disabled={isLoading || (can ? !can.allowed : false)}
+    disabled={isLoading || !can.allowed}
     onclick={triggerExport}
   >
     <Download class="h-4 w-4" />

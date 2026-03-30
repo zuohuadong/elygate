@@ -12,6 +12,7 @@
   import ConsumerDashboard from './pages/ConsumerDashboard.svelte';
   import CustomShowPage from './pages/CustomShowPage.svelte';
   import CustomAutoTable from './components/CustomAutoTable.svelte';
+  import CustomLoginPage from './pages/CustomLoginPage.svelte';
 
   const dataProvider = createElysiaDataProvider({
     apiUrl: '/api/admin',
@@ -33,7 +34,6 @@
     logoutUrl: '/api/auth/logout',
     identityUrl: '/api/auth/user/info',
     tokenKey: null,
-    withCredentials: true,
   });
 
   // Inject ACL
@@ -72,6 +72,7 @@
   components={{
     AutoTable: CustomAutoTable,
     ShowPage: CustomShowPage,
+    LoginPage: CustomLoginPage,
   }}
 >
   {#snippet dashboard()}

@@ -4,9 +4,9 @@
   "description": "AI API 批发平台",
   "private": true,
   "scripts": {
-    "dev": "bun --cwd apps/gateway dev & bun --cwd apps/web dev",
-    "check": "bun --cwd apps/gateway check && bun --cwd apps/portal check && bun --cwd apps/web check",
-    "build": "bun run check && bun --cwd apps/portal build && bun --cwd apps/web build",
+    "dev": "bun --cwd apps/gateway dev & bun --cwd apps/admin dev",
+    "check": "bun --cwd apps/gateway check && bun --cwd apps/portal check && bun --cwd apps/admin check",
+    "build": "bun run check && bun --cwd apps/portal build && bun --cwd apps/admin build",
     "build:binary": "bun run scripts/build-binary.ts",
     "build:binary:all": "bun run scripts/build-binary.ts --all",
     "build:binary:linux-x64": "bun run scripts/build-binary.ts bun-linux-x64",
@@ -14,7 +14,7 @@
     "build:binary:darwin-x64": "bun run scripts/build-binary.ts bun-darwin-x64",
     "build:binary:darwin-arm64": "bun run scripts/build-binary.ts bun-darwin-arm64",
     "build:binary:windows": "bun run scripts/build-binary.ts bun-windows-x64",
-    "start": "bun --cwd apps/gateway start & bun --cwd apps/web start"
+    "start": "bun --cwd apps/gateway start & bun --cwd apps/admin start"
   },
   "workspaces": [
     "apps/*",

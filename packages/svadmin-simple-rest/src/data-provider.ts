@@ -6,7 +6,7 @@ import type {
   CreateParams, CreateResult, UpdateParams, UpdateResult, DeleteParams, DeleteResult,
   GetManyParams, GetManyResult, CreateManyParams, CreateManyResult,
   UpdateManyParams, UpdateManyResult, DeleteManyParams, DeleteManyResult,
-  CustomParams, CustomResult,
+  CustomParams, CustomResult, BaseRecord
 } from '@svadmin/core';
 
 export interface SimpleRestOptions {
@@ -32,7 +32,7 @@ export function createSimpleRestDataProvider(opts: SimpleRestOptions): DataProvi
   return {
     getApiUrl: () => apiUrl,
 
-    async getList<T>({ resource, pagination, sorters, filters }: GetListParams): Promise<GetListResult<T>> {
+    async getList<T extends BaseRecord = BaseRecord>({ resource, pagination, sorters, filters }: GetListParams): Promise<GetListResult<T>> {
       const params = new URLSearchParams();
       const { current = 1, pageSize = 10 } = pagination ?? {};
       params.set('_page', String(current));
@@ -55,83 +55,83 @@ export function createSimpleRestDataProvider(opts: SimpleRestOptions): DataProvi
       const response = await fetch(url, { headers: getHeaders(opts) });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
-      const data = await response.json() as T[];
+      const data = await response.json() as unknown as unknown as T[];
       const total = parseInt(response.headers.get('X-Total-Count') ?? String(data.length), 10);
       return { data, total };
     },
 
-    async getOne<T>({ resource, id }: GetOneParams): Promise<GetOneResult<T>> {
-      const data = await request<T>(`${apiUrl}/${resource}/${id}`);
-      return { data };
+    async getOne<T extends BaseRecord = BaseRecord>({ resource, id }: GetOneParams): Promise<GetOneResult<T>> {
+      const data = await request<unknown>(`${apiUrl}/${resource}/${id}`);
+      return { data: data as unknown as unknown as T };
     },
 
-    async create<T>({ resource, variables }: CreateParams): Promise<CreateResult<T>> {
-      const data = await request<T>(`${apiUrl}/${resource}`, {
+    async create<T extends BaseRecord = BaseRecord>({ resource, variables }: CreateParams): Promise<CreateResult<T>> {
+      const data = await request<unknown>(`${apiUrl}/${resource}`, {
         method: 'POST',
         body: JSON.stringify(variables),
       });
-      return { data };
+      return { data: data as unknown as unknown as T };
     },
 
-    async update<T>({ resource, id, variables }: UpdateParams): Promise<UpdateResult<T>> {
-      const data = await request<T>(`${apiUrl}/${resource}/${id}`, {
+    async update<T extends BaseRecord = BaseRecord>({ resource, id, variables }: UpdateParams): Promise<UpdateResult<T>> {
+      const data = await request<unknown>(`${apiUrl}/${resource}/${id}`, {
         method: 'PATCH',
         body: JSON.stringify(variables),
       });
-      return { data };
+      return { data: data as unknown as unknown as T };
     },
 
-    async deleteOne<T>({ resource, id }: DeleteParams): Promise<DeleteResult<T>> {
-      const data = await request<T>(`${apiUrl}/${resource}/${id}`, { method: 'DELETE' });
-      return { data };
+    async deleteOne<T extends BaseRecord = BaseRecord>({ resource, id }: DeleteParams): Promise<DeleteResult<T>> {
+      const data = await request<unknown>(`${apiUrl}/${resource}/${id}`, { method: 'DELETE' });
+      return { data: data as unknown as unknown as T };
     },
 
-    async getMany<T>({ resource, ids }: GetManyParams): Promise<GetManyResult<T>> {
+    async getMany<T extends BaseRecord = BaseRecord>({ resource, ids }: GetManyParams): Promise<GetManyResult<T>> {
       const params = ids.map(id => `id=${id}`).join('&');
-      const data = await request<T[]>(`${apiUrl}/${resource}?${params}`);
-      return { data };
+      const data = await request<unknown[]>(`${apiUrl}/${resource}?${params}`);
+      return { data: data as unknown as unknown as T[] };
     },
 
-    async createMany<T>({ resource, variables }: CreateManyParams): Promise<CreateManyResult<T>> {
+    async createMany<T extends BaseRecord = BaseRecord>({ resource, variables }: CreateManyParams): Promise<CreateManyResult<T>> {
       const results: T[] = [];
       for (const vars of variables) {
-        const data = await request<T>(`${apiUrl}/${resource}`, {
+        const data = await request<unknown>(`${apiUrl}/${resource}`, {
           method: 'POST',
           body: JSON.stringify(vars),
         });
-        results.push(data);
+        results.push(data as unknown as T);
       }
       return { data: results };
     },
 
-    async updateMany<T>({ resource, ids, variables }: UpdateManyParams): Promise<UpdateManyResult<T>> {
+    async updateMany<T extends BaseRecord = BaseRecord>({ resource, ids, variables }: UpdateManyParams): Promise<UpdateManyResult<T>> {
       const results: T[] = [];
       for (const id of ids) {
-        const data = await request<T>(`${apiUrl}/${resource}/${id}`, {
+        const data = await request<unknown>(`${apiUrl}/${resource}/${id}`, {
           method: 'PATCH',
           body: JSON.stringify(variables),
         });
-        results.push(data);
+        results.push(data as unknown as T);
       }
       return { data: results };
     },
 
-    async deleteMany<T>({ resource, ids }: DeleteManyParams): Promise<DeleteManyResult<T>> {
+    async deleteMany<T extends BaseRecord = BaseRecord>({ resource, ids }: DeleteManyParams): Promise<DeleteManyResult<T>> {
       const results: T[] = [];
       for (const id of ids) {
-        const data = await request<T>(`${apiUrl}/${resource}/${id}`, { method: 'DELETE' });
-        results.push(data);
+        const data = await request<unknown>(`${apiUrl}/${resource}/${id}`, { method: 'DELETE' });
+        results.push(data as unknown as T);
       }
       return { data: results };
     },
 
-    async custom<T>({ url, method, payload, headers }: CustomParams): Promise<CustomResult<T>> {
-      const data = await request<T>(url, {
+    async custom<T = unknown>({ url, method, payload, headers }: CustomParams): Promise<CustomResult<T>> {
+      const data = await request<unknown>(url, {
         method: method.toUpperCase(),
         headers,
         body: payload ? JSON.stringify(payload) : undefined,
       });
-      return { data };
+      return { data: data as unknown as unknown as T };
     },
   };
 }

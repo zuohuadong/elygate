@@ -76,14 +76,14 @@ async function request<T>(url: string, headers: Record<string, string>, init?: R
  */
 function defaultParseListResponse<T>(json: unknown): { data: T[]; total: number } {
   if (Array.isArray(json)) {
-    return { data: json as T[], total: json.length };
+    return { data: json as unknown as T[], total: json.length };
   }
   const obj = json as Record<string, unknown>;
   if (Array.isArray(obj.items)) {
-    return { data: obj.items as T[], total: obj.total !== undefined ? Number(obj.total) : obj.items.length };
+    return { data: obj.items as unknown as T[], total: obj.total !== undefined ? Number(obj.total) : obj.items.length };
   }
   if (Array.isArray(obj.data)) {
-    return { data: obj.data as T[], total: obj.total !== undefined ? Number(obj.total) : obj.data.length };
+    return { data: obj.data as unknown as T[], total: obj.total !== undefined ? Number(obj.total) : obj.data.length };
   }
   throw new Error('Unrecognized list response format. Expected { items, total }, { data, total }, or an array.');
 }

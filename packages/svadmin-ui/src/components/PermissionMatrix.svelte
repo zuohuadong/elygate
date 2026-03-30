@@ -1,12 +1,7 @@
-<script module context="module">
-  export type RoleInfo = { code: string; name: string; [key: string]: any };
-  export type ResourceInfo = { code: string; name: string; section?: string; [key: string]: any };
-  export type ActionInfo = { code: string; name: string; [key: string]: any };
-</script>
-
 <script lang="ts">
   import { Shield, AlertCircle, Check } from 'lucide-svelte';
   import type { Snippet } from 'svelte';
+  import type { RoleInfo, ResourceInfo, ActionInfo } from '../types.js';
   
   let {
     // Basic metadata lists
@@ -128,12 +123,12 @@
       
       <!-- Table Area -->
       <div class="flex-1 overflow-auto p-4">
-        <table class="min-w-full divide-y divide-border border border-border rounded-lg overflow-hidden">
+        <table class="min-w-full rounded-lg overflow-hidden shadow-sm ring-1 ring-border/10">
           <thead class="bg-muted/50">
             <tr>
-              <th scope="col" class="py-3 pr-3 pl-4 text-left text-sm font-semibold text-foreground border-r border-border w-48">模块域与资源点</th>
+              <th scope="col" class="py-3 pr-3 pl-4 text-left text-sm font-semibold text-foreground w-48">模块域与资源点</th>
               {#each actions as action}
-                <th scope="col" class="px-2 py-3 text-center text-sm font-semibold text-foreground border-r border-border">
+                <th scope="col" class="px-2 py-3 text-center text-sm font-semibold text-foreground">
                   <div class="flex flex-col items-center">
                     <span>{action.name}</span>
                     <span class="text-[10px] text-muted-foreground font-mono">{action.code}</span>
@@ -142,7 +137,7 @@
               {/each}
             </tr>
           </thead>
-          <tbody class="divide-y divide-border bg-card">
+          <tbody class="bg-card">
             {#if resources.length === 0}
               <tr>
                  <td colspan={actions.length + 1} class="py-10 text-center text-muted-foreground">暂无可用资源</td>
@@ -156,8 +151,8 @@
                 </tr>
               {/if}
               
-              <tr class="hover:bg-muted/50 transition-colors">
-                <td class="whitespace-nowrap py-3 pl-4 pr-3 text-sm border-r border-border">
+              <tr class="even:bg-muted/30 hover:bg-muted/50 transition-colors">
+                <td class="whitespace-nowrap py-3 pl-4 pr-3 text-sm">
                   <div class="font-medium text-foreground">{resource.name}</div>
                   <div class="text-xs text-muted-foreground font-mono">{resource.code}</div>
                 </td>
@@ -165,7 +160,7 @@
                 <!-- Action Checkboxes -->
                 {#each actions as action}
                   {@const granted = selectedRole ? isGranted(selectedRole, resource.code, action.code) : false}
-                  <td class="whitespace-nowrap px-3 py-3 text-center border-r border-border">
+                  <td class="whitespace-nowrap px-3 py-3 text-center">
                     <div class="flex items-center justify-center">
                       <button 
                         disabled={loading || !selectedRole}

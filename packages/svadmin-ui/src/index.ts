@@ -22,6 +22,7 @@ export { default as LoginPage } from './components/LoginPage.svelte';
 export { default as RegisterPage } from './components/RegisterPage.svelte';
 export { default as ForgotPasswordPage } from './components/ForgotPasswordPage.svelte';
 export { default as CanAccess } from './components/CanAccess.svelte';
+export { default as Can } from './components/CanAccess.svelte';
 export { default as UndoableNotification } from './components/UndoableNotification.svelte';
 export { default as ModalForm } from './components/ModalForm.svelte';
 export { default as DrawerForm } from './components/DrawerForm.svelte';
@@ -60,11 +61,23 @@ export { default as InlineEdit } from "./components/InlineEdit.svelte";
 export { default as VirtualTable } from "./components/VirtualTable.svelte";
 export { default as DraggableHeader } from "./components/DraggableHeader.svelte";
 export { default as SettingsPage } from "./components/SettingsPage.svelte";
+
+// Editor Registry
+export { setRichTextEditor, getRichTextEditor } from "./editor-config.svelte.js";
+
+// Settings & Preferences
 export { default as AppearanceSettings } from "./components/AppearanceSettings.svelte";
 export { default as AboutSettings } from "./components/AboutSettings.svelte";
 export { default as PermissionMatrix } from "./components/PermissionMatrix.svelte";
-export type { MatrixResource } from "./components/PermissionMatrix.svelte";
+export type { RoleInfo, ResourceInfo, ActionInfo } from "./types.js";
 export { default as RolesSettings } from "./components/RolesSettings.svelte";
+export { default as AuditLogViewer } from "./components/AuditLogViewer.svelte";
+export { default as TenantSwitcher } from "./components/TenantSwitcher.svelte";
+export type { Tenant } from "./types.js";
+export { default as TaskQueueDrawer } from "./components/TaskQueueDrawer.svelte";
+export type { BackgroundTask, TaskStatus } from "./types.js";
+export { default as DraggableGrid } from "./components/DraggableGrid.svelte";
+export type { GridModule } from "./types.js";
 
 // Dashboard Charts (zero-dependency SVG)
 export { BarChart, LineChart, PieChart } from './components/charts/index.js';
@@ -84,6 +97,8 @@ export { default as MultiSelectField } from './components/fields/MultiSelectFiel
 export { default as RelationField } from './components/fields/RelationField.svelte';
 export { default as JsonField } from './components/fields/JsonField.svelte';
 export { default as RichTextField } from './components/fields/RichTextField.svelte';
+
+// Rich text editor (requires @svadmin/editor) as a direct import in consumer app
 
 // CRUD Buttons
 export {

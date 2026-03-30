@@ -139,7 +139,7 @@
 
   {#if form.loading}
     <div class="max-w-3xl space-y-6">
-      <div class="rounded-lg border p-6 space-y-5">
+      <div class="rounded-lg shadow-sm ring-1 ring-border/10 p-6 space-y-5">
         {#each Array(4) as _}
           <div class="space-y-2">
             <Skeleton class="h-4 w-24" />
@@ -159,7 +159,7 @@
 
       {#if hasGroups}
         {#each groups as group}
-          <Card.Root>
+          <Card.Root class="border-border/40 shadow-sm">
             {#if group.name}
               <Card.Header>
                 <Card.Title class="text-lg">{group.name}</Card.Title>
@@ -186,7 +186,7 @@
           </Card.Root>
         {/each}
       {:else}
-        <Card.Root>
+        <Card.Root class="border-border/40 shadow-sm">
           <Card.Content class="space-y-5 px-4 sm:px-6 pb-4 sm:pb-6 pt-0">
             {#each formFields as field (field.key)}
               <div class:border-destructive={!!form.errors[field.key]}>

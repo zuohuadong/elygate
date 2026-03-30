@@ -112,7 +112,7 @@ print_success "Environment configuration created"
 echo ""
 echo "📦 Step 3: Installing dependencies..."
 
-ssh ${SERVER} "cd ${DEPLOY_DIR} && source ~/.bash_profile && bun install --production"
+ssh ${SERVER} "cd ${DEPLOY_DIR} && source ~/.bash_profile && bun install"
 
 print_success "Dependencies installed"
 
@@ -122,7 +122,7 @@ print_success "Dependencies installed"
 echo ""
 echo "🔨 Step 4: Building project..."
 
-ssh ${SERVER} "cd ${DEPLOY_DIR}/apps/web && source ~/.bash_profile && bun install && bun run build"
+ssh ${SERVER} "cd ${DEPLOY_DIR}/apps/admin && source ~/.bash_profile && bun install && bun run build"
 
 print_success "Project built successfully"
 

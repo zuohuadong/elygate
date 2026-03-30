@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Toaster } from 'svelte-sonner';
+  import { Toaster } from 'sonner-svelte';
   import { getResolvedTheme } from '@svadmin/core';
 
   const theme = $derived(getResolvedTheme() === 'dark' ? 'dark' : 'light');

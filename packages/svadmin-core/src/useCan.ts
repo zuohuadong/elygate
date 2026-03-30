@@ -22,36 +22,28 @@ export interface UseCanResult {
 
 /**
  * Reactive permission check backed by TanStack Query for caching and deduplication.
+ * Accepts a getter function for Svelte 5 fine-grained reactivity.
  *
  * @example
  * ```ts
- * // Simple usage (backward compatible)
- * const can = useCan('posts', 'delete');
+ * const can = useCan(() => ({ resource: 'posts', action: 'delete', params: { id: 1 } }));
  * if (can.allowed) { ... }
- *
- * // With options object
- * const can = useCan({ resource: 'posts', action: 'delete', params: { id: 1 } });
  * ```
  */
-export function useCan(resourceOrOptions: string | UseCanOptions, action?: Action, params?: Record<string, unknown>): UseCanResult {
-  // Normalize arguments: support both (resource, action, params) and (options) signatures
-  const options: UseCanOptions = typeof resourceOrOptions === 'string'
-    ? { resource: resourceOrOptions, action: action ?? 'list', params }
-    : resourceOrOptions;
+export function useCan(options: () => UseCanOptions): UseCanResult {
+  const query = createQuery<CanResult>(() => {
+    const opts = options();
+    return {
+      queryKey: ['useCan', opts.resource, opts.action, opts.params] as const,
+      queryFn: () => canAccessAsync(opts.resource, opts.action, opts.params),
+      enabled: opts.queryOptions?.enabled ?? true,
+      staleTime: opts.queryOptions?.staleTime ?? 5 * 60 * 1000,
+    };
+  });
 
-  // @tanstack/svelte-query v6 Accessor pattern
-  const query = createQuery<CanResult>(() => ({
-    queryKey: ['useCan', options.resource, options.action, options.params] as const,
-    queryFn: () => canAccessAsync(options.resource, options.action, options.params),
-    enabled: options.queryOptions?.enabled ?? true,
-    staleTime: options.queryOptions?.staleTime ?? 5 * 60 * 1000, // 5 min default cache
-  }));
-
-  // Access via query store — use safe property access with fallbacks
   return {
     get allowed() { return (query.data as CanResult | undefined)?.can ?? true; },
     get reason() { return (query.data as CanResult | undefined)?.reason; },
     get isLoading() { return query.isLoading; },
   };
 }
-

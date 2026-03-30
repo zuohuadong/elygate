@@ -18,6 +18,9 @@
     placeholder?: string;
     searchable?: boolean;
     onSearch?: (value: string) => Filter[];
+    id?: string;
+    class?: string;
+    [key: string]: any;
   }
 
   let {
@@ -29,6 +32,7 @@
     placeholder = 'Select...',
     searchable = true,
     onSearch,
+    ...restProps
   }: Props = $props();
 
   const { options, query, onSearchChange } = useSelect({
@@ -71,6 +75,7 @@
     type="button"
     class="w-full justify-between font-normal"
     onclick={() => { open = !open; }}
+    {...restProps}
   >
     {#if selectedLabel}
       <span class="truncate">{selectedLabel}</span>

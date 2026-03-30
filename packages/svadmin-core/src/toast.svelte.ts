@@ -1,7 +1,7 @@
-// Toast notification system — wraps svelte-sonner for consistent API
+// Toast notification system — wraps sonner-svelte for consistent API
 // Maintains backward-compatible `toast.success()` / `toast.error()` etc.
 
-import { toast as sonner } from 'svelte-sonner';
+import { toast as sonner } from 'sonner-svelte';
 
 export type ToastType = 'success' | 'error' | 'info' | 'warning' | 'undoable';
 
@@ -23,7 +23,7 @@ export function getToasts(): Toast[] {
 }
 
 export function addToast(type: ToastType, message: string, duration = 3000, options?: { onUndo?: () => void, onTimeout?: () => void }): void {
-  // Use svelte-sonner for regular toasts
+  // Use sonner-svelte for regular toasts
   if (type !== 'undoable') {
     switch (type) {
       case 'success': sonner.success(message, { duration }); break;

@@ -17,8 +17,8 @@
   }>();
 
   const deleteMut = useDelete({ get resource() { return resource; }, get mutationMode() { return undoable ? 'undoable' as const : 'pessimistic' as const; } });
-  const can = $derived(accessControl?.enabled ? useCan(resource, 'delete') : null);
-  const hidden = $derived(accessControl?.hideIfUnauthorized && can && !can.allowed);
+  const can = useCan(() => ({ resource, action: 'delete', queryOptions: { enabled: accessControl?.enabled ?? true } }));
+  const hidden = $derived(accessControl?.hideIfUnauthorized && !can.allowed);
   let confirming = $state(false);
 
   async function handleDelete() {
@@ -49,7 +49,7 @@
       variant="ghost"
       size={hideText ? 'icon' : 'sm'}
       class="text-destructive hover:text-destructive {className}"
-      disabled={can ? !can.allowed : false}
+      disabled={!can.allowed}
       onclick={handleDelete}
     >
       <Trash2 class="h-4 w-4" />

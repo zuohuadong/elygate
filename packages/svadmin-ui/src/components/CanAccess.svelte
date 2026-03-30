@@ -11,7 +11,7 @@
     fallback?: Snippet;
   }>();
 
-  const can = $derived(useCan(resource, action, params));
+  const can = useCan(() => ({ resource, action, params }));
 </script>
 
 {#if can.isLoading}
