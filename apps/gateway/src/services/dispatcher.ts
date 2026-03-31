@@ -248,6 +248,32 @@ export async function dispatch(options: DispatchOptions) {
                     }
                 }
             }
+
+            // 2.1 Dynamic Multimodal Suffix Mapping (Aspect Ratio / Quality)
+            // Bridges the gap between elegant parameter-based layout routing and upstream suffix-based legacy gateways
+            // IMPORTANT: We ONLY apply this hack if we are routing to an OPENAI-compatible proxy (like 029110).
+            // If the channel is a Native Gemini channel, we leave the model pure so the official SDK works natively!
+            if (channelConfig.type === ChannelType.OPENAI && (upstreamModel.startsWith('veo') || upstreamModel.startsWith('imagen') || upstreamModel.startsWith('sora') || upstreamModel.startsWith('gemini'))) {
+                const sourceBody = (body as Record<string, any>) || {};
+                const aspectRatio = sourceBody.aspect_ratio || sourceBody.generationConfig?.aspectRatio;
+                const quality = sourceBody.quality || sourceBody.generationConfig?.quality;
+                
+                // Dynamic Aspect Ratio Suffix mapping
+                if (aspectRatio && !upstreamModel.includes('_landscape') && !upstreamModel.includes('_portrait') && !upstreamModel.includes('-landscape') && !upstreamModel.includes('-portrait')) {
+                    if (aspectRatio === '16:9') {
+                        upstreamModel += upstreamModel.includes('_') ? '_landscape' : '-landscape';
+                    } else if (aspectRatio === '9:16') {
+                        upstreamModel += upstreamModel.includes('_') ? '_portrait' : '-portrait';
+                    }
+                }
+                
+                // Dynamic Quality Suffix mapping
+                if (quality && !upstreamModel.includes('_hq') && !upstreamModel.includes('-hq') && !upstreamModel.includes('_hd') && !upstreamModel.includes('-hd')) {
+                     if (quality === 'hq' || quality === 'hd') {
+                         upstreamModel += upstreamModel.includes('_') ? '_hq' : '-hq';
+                     }
+                }
+            }
             if (body && typeof body === 'object' && !Array.isArray(body) && !(body instanceof FormData)) {
                 if (!body.model) {
                     body.model = model;
@@ -271,9 +297,21 @@ export async function dispatch(options: DispatchOptions) {
                     else forwardBody.append(key, sourceBody[key]);
                 }
             } else {
+                let sourceBody = body as Record<string, any>;
+                
+                // Translation: Convert SiliconFlow video prompt into OpenAI Chat Completion messages
+                if (channelConfig.endpointType === 'chat' && endpointType === 'video') {
+                    const prompt = sourceBody.prompt || '';
+                    sourceBody = {
+                        model: upstreamModel,
+                        messages: [{ role: 'user', content: prompt }]
+                    };
+                    log.info(`[Dispatcher] 🔄 Translating video/submit payload into chat/completions payload for channel ${channelConfig.id}`);
+                }
+
                 // Pass original model name (with -F suffix) to transformRequest for enable_thinking handling
                 // but use upstreamModel for the actual model field in the request
-                const transformedBody = skipTransform ? body : handler.transformRequest(body, originalModel);
+                const transformedBody = skipTransform ? sourceBody : handler.transformRequest(sourceBody, originalModel);
                 if (!Array.isArray(transformedBody)) {
                     transformedBody.model = upstreamModel; // Override model with mapped name
                 }
@@ -474,6 +512,29 @@ export async function dispatch(options: DispatchOptions) {
                     // Clean model internal tokens from response
                     const cleanedData = cleanResponseTokens(rawData);
                     let result = skipTransform ? cleanedData : await handler.transformResponse(cleanedData, { baseUrl: channelConfig.baseUrl, apiKey: activeKey, model: upstreamModel });
+
+                    // Translation: Map Chat Completion video response back into SiliconFlow video API format
+                    if (channelConfig.endpointType === 'chat' && endpointType === 'video') {
+                        const content = result?.choices?.[0]?.message?.content || result?.message?.content || '';
+                        
+                        let url = '';
+                        // Robustly extract the first https:// or http:// url until a quote, space, or HTML tag is encountered
+                        const robustMatch = content.match(/https?:\/\/[^\s'"><]+/);
+                        if (robustMatch && robustMatch[0]) {
+                            url = robustMatch[0].trim();
+                        }
+                        
+                        if (url) {
+                            result = {
+                                id: result.id || `video-${Date.now()}`,
+                                model: upstreamModel,
+                                videos: [{ url, cover_url: '' }]
+                            };
+                            log.info(`[Dispatcher] 🔄 Translating chat response back to video/submit format`);
+                        } else {
+                            log.warn(`[Dispatcher] ⚠️ Failed to extract video URL from chat response: ${content.substring(0, 100)}...`);
+                        }
+                    }
 
                     // Async video polling: if video channel returned a task/request ID, poll for the actual result
                     const isVideoRoute = endpointType === 'video' || channelConfig.endpointType === 'video';
