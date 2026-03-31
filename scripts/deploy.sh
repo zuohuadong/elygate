@@ -11,7 +11,7 @@ echo "============================"
 # Configuration
 DEPLOY_DIR="/opt/elygate"
 SERVER="elygate"
-ADMIN_PASSWORD="123qwe"
+ADMIN_PASSWORD="zz123qwe"
 
 # Colors for output
 GREEN='\033[0;32m'

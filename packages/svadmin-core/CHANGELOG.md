@@ -1,5 +1,63 @@
 # Changelog
 
+## [0.19.2](https://github.com/zuohuadong/svadmin/compare/core-v0.19.1...core-v0.19.2) (2026-03-30)
+
+
+### 💅 Elegance & Refactoring
+
+* **core:** architectural refinements (notify, auth hooks, SSR, protective guards) ([f2e9333](https://github.com/zuohuadong/svadmin/commit/f2e93333826ab585ec1d72a2fe4d3cd8f524514f))
+* **core:** architectural refinements (notify, auth hooks, SSR, protective guards) ([59a8ad1](https://github.com/zuohuadong/svadmin/commit/59a8ad1e6051cf1fea2fa816878c2ce0bd997790))
+
+## [0.19.1](https://github.com/zuohuadong/svadmin/compare/core-v0.19.0...core-v0.19.1) (2026-03-30)
+
+
+### Bug Fixes
+
+* **core:** quality refinements — error handling, memory leaks, Svelte 5 compat ([01013db](https://github.com/zuohuadong/svadmin/commit/01013dbd3741d1e3abc11e6158e5358694ff8269))
+* **core:** quality refinements — error handling, memory leaks, Svelte 5 compat ([a92829a](https://github.com/zuohuadong/svadmin/commit/a92829aa34910f4df2b850bc33c076e9f1ceb66c))
+
+## [0.19.0](https://github.com/zuohuadong/svadmin/compare/core-v0.18.1...core-v0.19.0) (2026-03-30)
+
+
+### ⚠ BREAKING CHANGES
+
+* **core:** useTranslation now returns { t, locale, setLocale, getAvailableLocales } instead of { translate, getLocale, changeLocale }. The locale is a reactive property instead of a getter function.
+
+### Features
+
+* **core:** enterprise improvements for i18n and routing ([9388aa9](https://github.com/zuohuadong/svadmin/commit/9388aa92b687287f27280cff20345339107af28e))
+
+
+### Code Refactoring
+
+* **core:** adopt elegant useTranslation API ([ae97678](https://github.com/zuohuadong/svadmin/commit/ae976780076f695f013d53136fd496b7cc9a20bb))
+
+## [0.18.1](https://github.com/zuohuadong/svadmin/compare/core-v0.18.0...core-v0.18.1) (2026-03-30)
+
+
+### Bug Fixes
+
+* **core:** sync casl and casbin adapters with AccessControlProvider CanParams update ([47dedac](https://github.com/zuohuadong/svadmin/commit/47dedac167b72bc0814367912c8709d93567363a))
+* **core:** sync casl/casbin adapters with CanParams[] update ([ba2cee2](https://github.com/zuohuadong/svadmin/commit/ba2cee24882afe054582d5625321b8a5a868906f))
+
+## [0.18.0](https://github.com/zuohuadong/svadmin/compare/core-v0.17.1...core-v0.18.0) (2026-03-30)
+
+
+### ⚠ BREAKING CHANGES
+
+* Deprecated legacy useHasPermission API. usePermissions now returns immediate .has() and .can() methods and drops .data envelope. AutoTable drops global cellRenderer prop in favor of columns definitions map. Sidebar now defaults to SvelteKit path routing instead of hash-based (#).
+
+### Code Refactoring
+
+* modernize enterprise architecture and resolve technical debt ([860ae60](https://github.com/zuohuadong/svadmin/commit/860ae607b1d3002e3318c51047d6219bc073050f))
+
+## [0.17.1](https://github.com/zuohuadong/svadmin/compare/core-v0.17.0...core-v0.17.1) (2026-03-30)
+
+
+### Bug Fixes
+
+* **deps:** replace svelte-sonner with sonner-svelte to resolve Tailwind CSS v4 Vite plugin compile error ([98b330a](https://github.com/zuohuadong/svadmin/commit/98b330a8cea21bd81debd2a85b4923c5f3edf6cb))
+
 ## [0.17.0](https://github.com/zuohuadong/svadmin/compare/core-v0.16.0...core-v0.17.0) (2026-03-29)
 
 

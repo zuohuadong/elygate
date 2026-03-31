@@ -12,7 +12,17 @@
     "sourceMap": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "types": ["vite/client"]
+    "types": ["vite/client"],
+    "paths": {
+      "@svadmin/core": ["../../packages/svadmin-core/src/index.ts"],
+      "@svadmin/core/*": ["../../packages/svadmin-core/src/*"],
+      "@svadmin/ui": ["../../packages/svadmin-ui/src/index.ts"],
+      "@svadmin/ui/*": ["../../packages/svadmin-ui/src/*"],
+      "@svadmin/simple-rest": ["../../packages/svadmin-simple-rest/src/index.ts"],
+      "@svadmin/simple-rest/*": ["../../packages/svadmin-simple-rest/src/*"],
+      "@svadmin/elysia": ["../../packages/svadmin-elysia/src/index.ts"],
+      "@svadmin/elysia/*": ["../../packages/svadmin-elysia/src/*"]
+    }
   },
   "include": ["src/**/*.ts", "src/**/*.svelte", "vite.config.ts"]
 }
