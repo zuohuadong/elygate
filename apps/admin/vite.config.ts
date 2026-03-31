@@ -19,13 +19,6 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ['@svadmin/core', '@svadmin/ui', '@svadmin/elysia', '@svadmin/simple-rest'],
     include: [
-      'highlight.js',
-      'marked',
-      'marked-highlight',
-      'isomorphic-dompurify',
-      'clsx',
-      'tailwind-merge',
-      'tailwind-variants',
       '@tanstack/svelte-query',
     ],
   },
