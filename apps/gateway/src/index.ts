@@ -38,6 +38,7 @@ async function init() {
   const { statsRouter } = await import("./routes/stats");
   const { userStatsRouter } = await import("./routes/userStats");
   const { modelsRouter } = await import("./routes/models");
+  const { v1StatsRouter } = await import("./routes/v1-stats");
 
   const app = new Elysia()
     .use(cors({
@@ -106,6 +107,7 @@ async function init() {
         .use(rerankRouter)
         .use(videoRouter)
         .use(tasksRouter)
+        .use(v1StatsRouter)
     )
     .get("*", async ({ request, set }) => {
       const url = new URL(request.url);
