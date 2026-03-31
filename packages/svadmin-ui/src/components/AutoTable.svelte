@@ -308,7 +308,9 @@
     const ids = Object.keys(rowSelection);
     confirmMessage = t('common.batchDeleteConfirm', { count: ids.length });
     confirmAction = async () => {
-      await Promise.allSettled(ids.map(id => deleteMutation.mutateAsync({ id, resource: resourceName })));
+      for (const id of ids) {
+        await deleteMutation.mutateAsync({ id, resource: resourceName });
+      }
       rowSelection = {};
       confirmOpen = false;
     };

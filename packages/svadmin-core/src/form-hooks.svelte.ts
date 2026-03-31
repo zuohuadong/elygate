@@ -3,7 +3,7 @@ import { useParsed } from './useParsed.svelte';
 import { getAdminOptions } from './options.svelte';
 import { getDataProviderForResource } from './context.svelte';
 import { createQuery, createMutation } from '@tanstack/svelte-query';
-import { notify } from './notification.svelte';
+import { toast } from './toast.svelte';
 import { t } from './i18n.svelte';
 import { audit } from './audit';
 import { navigate } from './router';
@@ -245,9 +245,9 @@ export function useForm<
         const msg = Array.isArray(messages) ? messages[0] : messages;
         setFieldError(field, msg);
       }
-      if (errorNotification !== false) notify({ type: 'error', message: typeof errorNotification === 'string' ? errorNotification : (error.message || t('common.operationFailed')) });
+      if (errorNotification !== false) toast.error(errorNotification || error.message || t('common.operationFailed'));
     } else {
-      if (errorNotification !== false) notify({ type: 'error', message: typeof errorNotification === 'string' ? errorNotification : (t('common.operationFailed') + ': ' + error.message) });
+      if (errorNotification !== false) toast.error(errorNotification || t('common.operationFailed') + ': ' + error.message);
     }
   }
 
@@ -288,7 +288,7 @@ export function useForm<
     mutationFn: (variables: TVariables) => provider.create<TData, TVariables>({ resource, variables, meta: mutationMeta }),
     onSuccess: (data: { data: TData }) => {
       if (invalidateScopes !== false) queryClient.invalidateQueries({ queryKey: [resource] });
-      if (successNotification !== false) notify({ type: 'success', message: typeof successNotification === 'string' ? successNotification : t('common.createSuccess') });
+      if (successNotification !== false) toast.success(successNotification || t('common.createSuccess'));
       audit({ action: 'create', resource, recordId: String((data.data as Record<string, unknown>).id) });
       onMutationSuccess?.(data);
       if (redirectOverride !== false) doRedirect(redirectOverride ?? redirectDefault);
@@ -301,7 +301,7 @@ export function useForm<
     mutationFn: (variables: TVariables) => provider.update<TData, TVariables>({ resource, id: currentId!, variables, meta: mutationMeta }),
     onSuccess: (data: { data: TData }) => {
       if (invalidateScopes !== false) queryClient.invalidateQueries({ queryKey: [resource] });
-      if (successNotification !== false) notify({ type: 'success', message: typeof successNotification === 'string' ? successNotification : t('common.updateSuccess') });
+      if (successNotification !== false) toast.success(successNotification || t('common.updateSuccess'));
       audit({ action: 'update', resource, recordId: String(currentId) });
       onMutationSuccess?.(data);
       if (redirectOverride !== false) doRedirect(redirectOverride ?? redirectDefault);
@@ -324,17 +324,12 @@ export function useForm<
       if (result === false || cancelled) return;
     }
 
-    if (!runValidation()) { notify({ type: 'warning', message: t('validation.required') }); return; }
+    if (!runValidation()) { toast.warning(t('validation.required')); return; }
     redirectOverride = overrides?.redirect;
-    try {
-      if (action === 'create' || action === 'clone') await createMut.mutateAsync(values);
-      else await updateMut.mutateAsync(values);
-      // Untaint on success
-      tainted = {};
-    } catch (error) {
-      // Errors are already handled by the mutation's onError callback.
-      // We catch here to prevent unhandled promise rejections.
-    }
+    if (action === 'create' || action === 'clone') await createMut.mutateAsync(values);
+    else await updateMut.mutateAsync(values);
+    // Untaint on success
+    tainted = {};
   }
 
   // ─── AutoSave ───────────────────────────────────────────────────

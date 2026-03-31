@@ -477,7 +477,6 @@ const locales: Record<string, Locale> = {
 
 /** Detect best locale from browser language */
 function detectLocale(): string {
-  if (typeof navigator === 'undefined') return 'en'; // Safe default for SSR
   const browserLang = navigator.language || navigator.languages?.[0] || 'zh-CN';
   // Exact match
   if (locales[browserLang]) return browserLang;
@@ -520,23 +519,13 @@ export function addTranslations(locale: string, translations: Record<string, str
 }
 
 /**
- * useTranslation — Svelte 5 reactive translation hook
- * Tracks locale changes natively.
+ * useTranslation — standard i18n hook
+ * Returns { translate, getLocale, changeLocale }
  */
 export function useTranslation() {
-  const translate = $derived.by(() => {
-    // Read currentLocale so this $derived depends on it
-    const loc = currentLocale;
-    return (key: string, params?: Record<string, string | number>): string => {
-      // Intentionally passing the key to the main t() function which uses currentLocale
-      return t(key, params);
-    };
-  });
-  
-  return { 
-    get t() { return translate; },
-    get locale() { return currentLocale; },
-    setLocale,
-    getAvailableLocales
+  return {
+    translate: t,
+    getLocale,
+    changeLocale: setLocale,
   };
 }

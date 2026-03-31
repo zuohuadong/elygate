@@ -86,7 +86,8 @@ export function setResources(newResources: ResourceDefinition[]): void {
 }
 
 export function getResources(): ResourceDefinition[] {
-  return resources ?? [];
+  if (!resources || resources.length === 0) throw new Error('Resources not found. Did you call setResources in App.svelte?');
+  return resources;
 }
 
 export function getResource(nameOrIdentifier: string): ResourceDefinition {

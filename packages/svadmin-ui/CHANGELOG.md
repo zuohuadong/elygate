@@ -1,31 +1,5 @@
 # Changelog
 
-## [0.23.0](https://github.com/zuohuadong/svadmin/compare/ui-v0.22.1...ui-v0.23.0) (2026-03-30)
-
-
-### Features
-
-* **core:** enterprise improvements for i18n and routing ([9388aa9](https://github.com/zuohuadong/svadmin/commit/9388aa92b687287f27280cff20345339107af28e))
-
-## [0.22.1](https://github.com/zuohuadong/svadmin/compare/ui-v0.22.0...ui-v0.22.1) (2026-03-30)
-
-
-### Bug Fixes
-
-* **ui:** `DropdownMenu` missing open state rendering constraints ([31992fe](https://github.com/zuohuadong/svadmin/commit/31992fe7145f8b591aee1f134af8a3e70f87ffc8))
-* **ui:** fix DropdownMenu being open by default and unable to close ([52910ef](https://github.com/zuohuadong/svadmin/commit/52910efef0458e0dff9de38f927e36904f52356c))
-
-## [0.22.0](https://github.com/zuohuadong/svadmin/compare/ui-v0.21.0...ui-v0.22.0) (2026-03-30)
-
-
-### ⚠ BREAKING CHANGES
-
-* **ui:** The rich text editor is no longer bundled by default in @svadmin/ui. The static string dependency \`import('@svadmin/editor')\` inside FieldRenderer has been removed, preventing Vite from forcing its resolution during build. Users who want the Tiptap rich text editor must now explicitly provide it via global Dependency Injection.
-
-### Code Refactoring
-
-* **ui:** decouple @svadmin/editor from UI package ([3ea61e9](https://github.com/zuohuadong/svadmin/commit/3ea61e9c796dbad29b8eef43fb8a5252e8ad496d))
-
 ## [0.21.0](https://github.com/zuohuadong/svadmin/compare/ui-v0.20.3...ui-v0.21.0) (2026-03-30)
 
 

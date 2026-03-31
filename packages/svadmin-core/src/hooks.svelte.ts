@@ -170,11 +170,6 @@ export function useSelect<TData extends BaseRecord = BaseRecord, TOption = { lab
     debounceTimer = setTimeout(() => { searchText = value; }, debounceMs);
   }
 
-  // Cleanup debounce timer on unmount
-  $effect(() => {
-    return () => { if (debounceTimer) clearTimeout(debounceTimer); };
-  });
-
   return {
     query,
     get options() { return selectOptions; },

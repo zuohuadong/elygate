@@ -1,6 +1,6 @@
 {
   "name": "@svadmin/core",
-  "version": "0.19.3",
+  "version": "0.18.1",
   "author": "zuohuadong",
   "repository": {
     "type": "git",
@@ -62,5 +62,6 @@
   "type": "module",
   "types": "src/index.ts",
   "dependencies": {
+    "sonner-svelte": "^0.3.3"
   }
 }

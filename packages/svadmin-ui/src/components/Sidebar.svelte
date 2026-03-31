@@ -17,22 +17,15 @@
     ChevronLeft, ChevronDown, LogOut, Sun, Moon, Palette
   } from 'lucide-svelte';
 
-  let { collapsed, identity, title, onToggle, onLogout, menu, routeMode = 'auto' }: {
+  let { collapsed, identity, title, onToggle, onLogout, menu, legacyHashRouting = false }: {
     collapsed: boolean;
     identity: Identity | null;
     title: string;
     onToggle: () => void;
     onLogout: () => void;
     menu?: MenuItem[];
-    /** 'hash' for SPA hash routing, 'path' for SvelteKit/filesystem routing, 'auto' to detect */
-    routeMode?: 'hash' | 'path' | 'auto';
+    legacyHashRouting?: boolean;
   } = $props();
-
-  const effectiveRouteMode = $derived(
-    routeMode === 'auto'
-      ? (typeof window !== 'undefined' && window.location.hash.startsWith('#/') ? 'hash' : 'path')
-      : routeMode
-  );
 
   const resources = getResources();
 
@@ -105,7 +98,7 @@
 
   function isActive(itemPath: string): boolean {
     if (itemPath === '/') return path === '/';
-    return path === itemPath || path.startsWith(itemPath + "/");
+    return path.startsWith(itemPath);
   }
 
   /** Prefetch resource data on hover for instant navigation */
@@ -213,7 +206,7 @@
               {#each group.items as item}
                 {@const active = isActive(item.path)}
                 <a
-                  href={effectiveRouteMode === 'hash' ? `#${item.path}` : item.path}
+                  href={legacyHashRouting ? `#${item.path}` : item.path}
                   class="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-200
                   {active
                     ? 'bg-sidebar-accent text-sidebar-accent-foreground sidebar-nav-active'
@@ -236,7 +229,7 @@
                 {#snippet child({ props }: { props: Record<string, unknown> })}
                   <a
                     {...props}
-                    href={effectiveRouteMode === 'hash' ? `#${item.path}` : item.path}
+                    href={legacyHashRouting ? `#${item.path}` : item.path}
                     class="flex items-center justify-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200
                     {active
                       ? 'bg-sidebar-accent text-sidebar-accent-foreground'
@@ -252,7 +245,7 @@
             </Tooltip.Root>
           {:else}
             <a
-              href={effectiveRouteMode === 'hash' ? `#${item.path}` : item.path}
+              href={legacyHashRouting ? `#${item.path}` : item.path}
               class="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200
               {active
                 ? 'bg-sidebar-accent text-sidebar-accent-foreground sidebar-nav-active'

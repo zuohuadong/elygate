@@ -18,7 +18,6 @@
   import ArrayField from './fields/ArrayField.svelte';
   import { Plus, X } from 'lucide-svelte';
   import type { Snippet } from 'svelte';
-  import { getRichTextEditor } from '../editor-config.svelte.js';
 
   let { field, value, onchange, children } = $props<{
     field: FieldDefinition;
@@ -78,7 +77,7 @@
 </script>
 
 <div class="space-y-1.5">
-  <Label for={field.key} id="label-{field.key}">
+  <Label for={field.key}>
     {field.label}
     {#if field.required}
       <span class="text-destructive">*</span>
@@ -165,16 +164,7 @@
     />
 
   {:else if field.type === 'richtext'}
-    {@const EditorComp = getRichTextEditor()}
-    {#if EditorComp}
-      <EditorComp
-        id={field.key}
-        value={strVal}
-        placeholder={t('field.enterValue', { label: field.label })}
-        preset="full"
-        onchange={(html: string) => onchange(html)}
-      />
-    {:else}
+    {#await import('@svadmin/editor')}
       <Textarea
         id={field.key}
         value={strVal}
@@ -184,7 +174,25 @@
         placeholder={t('field.enterValue', { label: field.label })}
         class="resize-y"
       />
-    {/if}
+    {:then editorMod}
+      <editorMod.Editor
+        id={field.key}
+        value={strVal}
+        placeholder={t('field.enterValue', { label: field.label })}
+        preset="full"
+        onchange={(html: string) => onchange(html)}
+      />
+    {:catch}
+      <Textarea
+        id={field.key}
+        value={strVal}
+        oninput={(e) => onchange((e.target as HTMLTextAreaElement).value)}
+        required={field.required}
+        rows={10}
+        placeholder={t('field.enterValue', { label: field.label })}
+        class="resize-y"
+      />
+    {/await}
 
   {:else if field.type === 'textarea'}
     <Textarea
@@ -233,11 +241,7 @@
     {/if}
 
   {:else if field.type === 'multiselect'}
-    <div 
-      class="space-y-2 rounded-lg border border-input p-3 max-h-48 overflow-y-auto"
-      role="group" 
-      aria-labelledby="label-{field.key}"
-    >
+    <div class="space-y-2 rounded-lg border border-input p-3 max-h-48 overflow-y-auto">
       {#each field.options ?? [] as opt}
         <label class="flex items-center gap-2 text-sm cursor-pointer hover:bg-muted/50 rounded px-1 py-0.5 transition-colors">
           <Checkbox
