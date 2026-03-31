@@ -10,7 +10,7 @@ export function staticFileHandler(): (ctx: { path: string; set: { status?: numbe
     return async ({ path, set }: { path: string; set: { status?: number; headers?: Record<string, string> } }) => {
         if (path.startsWith('/api') || path.startsWith('/v1')) return;
 
-        const buildPath = join(process.cwd(), 'apps/web/build');
+        const buildPath = join(process.cwd(), 'apps/portal/build');
         const clientPath = join(buildPath, 'client');
         const prerenderedPath = join(buildPath, 'prerendered');
 

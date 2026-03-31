@@ -39,6 +39,7 @@ async function init() {
   const { userStatsRouter } = await import("./routes/userStats");
   const { modelsRouter } = await import("./routes/models");
   const { v1StatsRouter } = await import("./routes/v1-stats");
+  const { geminiRouter } = await import("./routes/gemini");
 
   const app = new Elysia()
     .use(cors({
@@ -109,10 +110,11 @@ async function init() {
         .use(tasksRouter)
         .use(v1StatsRouter)
     )
+    .use(geminiRouter)
     .get("*", async ({ request, set }) => {
       const url = new URL(request.url);
       if (!url.pathname.startsWith('/api') && !url.pathname.startsWith('/v1')) {
-        const fallback = join(process.cwd(), 'apps/web/build/index.html');
+        const fallback = join(process.cwd(), 'apps/portal/build/index.html');
         const file = Bun.file(fallback);
         if (await file.exists()) {
           return file;

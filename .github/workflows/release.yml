@@ -45,7 +45,6 @@ jobs:
 
       - name: Build Web UI
         run: bun run build
-        working-directory: ./apps/web
 
       - name: Build Binary
         run: bun run scripts/build-binary.ts

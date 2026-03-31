@@ -27,7 +27,6 @@ jobs:
 
       - name: Verify Web UI Build
         run: bun run build
-        working-directory: ./apps/web
 
       - name: Verify Gateway Build (Check for type errors)
         # Elygate uses TS, we ensure the index builds without syntax issues

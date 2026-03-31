@@ -119,7 +119,7 @@ async function init() {
     .get("*", async ({ request, set }) => {
       const url = new URL(request.url);
       if (!url.pathname.startsWith('/api') && !url.pathname.startsWith('/v1')) {
-        const fallback = join(process.cwd(), 'apps/web/build/index.html');
+        const fallback = join(process.cwd(), 'apps/portal/build/index.html');
         const file = Bun.file(fallback);
         if (await file.exists()) {
           return file;
