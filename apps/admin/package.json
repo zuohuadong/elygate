@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@svadmin/core": "workspace:*",
+    "@svadmin/editor": "workspace:*",
     "@svadmin/elysia": "workspace:*",
     "@svadmin/simple-rest": "workspace:*",
     "@svadmin/ui": "workspace:*",
