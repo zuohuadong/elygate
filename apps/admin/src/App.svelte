@@ -36,13 +36,13 @@
   const dataProvider = {
     ...baseDataProvider,
     getList: async (params: any) => {
-      if (['settings', 'models', 'playground'].includes(params.resource)) {
+      if (['system-options', 'models', 'playground'].includes(params.resource)) {
         return { data: [], total: 0 };
       }
       return baseDataProvider.getList(params);
     },
     getOne: async (params: any) => {
-      if (['settings', 'models', 'playground'].includes(params.resource)) {
+      if (['system-options', 'models', 'playground'].includes(params.resource)) {
         return { data: { id: params.id } as any };
       }
       try {
@@ -87,7 +87,7 @@
     { label: '限流策略', icon: 'shield', href: '/rate-limits' },
     { label: '模型状态', icon: 'cpu', href: '/models' },
     { label: 'API 测试', icon: 'play', href: '/playground' },
-    { label: '系统设置', icon: 'settings', href: '/settings' },
+    { label: '系统设置', icon: 'settings', href: '/system-options' },
   ];
 
   // Determine dashboard variant by identity role

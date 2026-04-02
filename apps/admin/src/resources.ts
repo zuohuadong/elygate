@@ -16,7 +16,7 @@ export const resources: ResourceDefinition[] = [
         { label: 'Anthropic', value: 14 },
       ] },
       { key: 'baseUrl', label: 'Base URL', type: 'url', required: true },
-      { key: 'key', label: '密钥', type: 'text', showInList: false, required: true },
+      { key: 'key', label: '密钥', type: 'textarea', showInList: false, required: true },
       { key: 'models', label: '模型', type: 'tags', showInList: false },
       { key: 'status', label: '状态', type: 'select', options: [
         { label: '在线', value: 1 },
@@ -132,7 +132,7 @@ export const resources: ResourceDefinition[] = [
   // ─── Virtual Resources (custom pages, no CRUD) ───────────────
   // These are intercepted by CustomAutoTable and rendered as custom Svelte pages.
   {
-    name: 'settings',
+    name: 'system-options',
     label: '系统设置',
     icon: 'settings',
     canCreate: false,

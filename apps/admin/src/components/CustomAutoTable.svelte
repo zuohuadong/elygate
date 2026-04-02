@@ -12,7 +12,7 @@
 
   // Map of virtual resource names to custom page components
   const customPages: Record<string, any> = {
-    settings: Settings,
+    'system-options': Settings,
     models: ModelsStatus,
     playground: Playground,
   };
