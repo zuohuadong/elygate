@@ -205,6 +205,38 @@ export const chatRouter = new Elysia()
 
         log.info(`[Request] UserID: ${u.id}, Token: ${t.name}, Model: ${model}, Group: ${u.group}, IP: ${ip}, Trace: ${traceId}`);
 
+        // --- Payload Sanitizer for 'response_format' compatibility ---
+        if (body.response_format) {
+            const isNativeJsonSupported = model.startsWith('gpt-') || 
+                                          model.startsWith('o1') || 
+                                          model.includes('deepseek-chat') || 
+                                          model.includes('claude-') || 
+                                          model.includes('gemini-');
+            
+            if (!isNativeJsonSupported) {
+                log.info(`[Sanitizer] Model ${model} marked as non-native. Stripping response_format to prevent HTTP 400.`);
+                const formatType = body.response_format.type;
+                delete body.response_format;
+                
+                if (formatType === 'json_object' || formatType === 'json_schema') {
+                    if (Array.isArray(body.messages) && body.messages.length > 0) {
+                        const lastMsg = body.messages[body.messages.length - 1];
+                        if (typeof lastMsg.content === 'string') {
+                            if (!lastMsg.content.toLowerCase().includes('json')) {
+                                lastMsg.content += '\n\n[System Inject: You must output the response STRICTLY and ONLY in a valid JSON format.]';
+                            }
+                        } else if (Array.isArray(lastMsg.content)) {
+                            // multimodal content array
+                            const hasJsonPrompt = lastMsg.content.some((c: any) => c.type === 'text' && c.text?.toLowerCase().includes('json'));
+                            if (!hasJsonPrompt) {
+                                lastMsg.content.push({ type: 'text', text: '\n\n[System Inject: You must output the response STRICTLY and ONLY in a valid JSON format.]' });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // --- Cache Configuration ---
         const messages = body.messages as Record<string, any>[][];
         const userPrompt = Array.isArray(messages)
