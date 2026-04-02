@@ -42,14 +42,20 @@ export function buildUpstreamUrl(
         ? config.endpointType
         : endpointType;
 
+    // Auto-detect non-v1 version paths (e.g. Zhipu /v4, DeepSeek /v1beta)
+    let vPrefix = '/v1';
+    if (base.match(/\/v[2-9](\.[0-9]+)?$/) || base.endsWith('v1beta')) {
+        vPrefix = '';
+    }
+
     switch (effectiveEndpoint) {
-        case 'chat': return `${base}/v1/chat/completions`;
-        case 'embeddings': return `${base}/v1/embeddings`;
-        case 'images': return `${base}/v1/images/generations`;
-        case 'moderations': return `${base}/v1/moderations`;
-        case 'rerank': return `${base}/v1/rerank`;
-        case 'video': return `${base}/v1/video/submit`;
-        case 'responses': return `${base}/v1/responses`;
+        case 'chat': return `${base}${vPrefix}/chat/completions`;
+        case 'embeddings': return `${base}${vPrefix}/embeddings`;
+        case 'images': return `${base}${vPrefix}/images/generations`;
+        case 'moderations': return `${base}${vPrefix}/moderations`;
+        case 'rerank': return `${base}${vPrefix}/rerank`;
+        case 'video': return `${base}${vPrefix}/video/submit`;
+        case 'responses': return `${base}${vPrefix}/responses`;
         default: return `${base}/v1/${effectiveEndpoint}`;
     }
 }
@@ -115,7 +121,7 @@ export function buildTestUrl(
     if (base.endsWith('/v1/chat/completions')) {
         return base;
     }
-    if (base.endsWith('/v1')) {
+    if (base.endsWith('/v1') || base.match(/\/v[2-9](\.[0-9]+)?$/) || base.endsWith('v1beta')) {
         return `${base}/chat/completions`;
     }
     return `${base}/v1/chat/completions`;
