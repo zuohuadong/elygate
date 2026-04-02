@@ -90,7 +90,7 @@ async function init() {
         for (const r of rows) info[r.key] = r.value;
         return { success: true, data: info };
       })
-      .use(authRouter)
+      .group("/auth", (app) => app.use(authRouter))
       .use(paymentRouter)
       .group("/admin", (app) => app.use(adminRouter))
       .group("/stats", (app) => app.use(statsRouter))
@@ -111,16 +111,11 @@ async function init() {
         .use(v1StatsRouter)
     )
     .use(geminiRouter)
-    .get("*", async ({ request, set }) => {
-      const url = new URL(request.url);
-      if (!url.pathname.startsWith('/api') && !url.pathname.startsWith('/v1')) {
-        const fallback = join(process.cwd(), 'apps/portal/build/index.html');
-        const file = Bun.file(fallback);
-        if (await file.exists()) {
-          return file;
-        }
-      }
-      set.status = 404;
+    .get("*", async (ctx) => {
+      const handler = staticFileHandler();
+      const result = await handler({ path: ctx.path, set: ctx.set as any });
+      if (result) return result;
+      ctx.set.status = 404;
       return { error: 'Not Found' };
     });
 

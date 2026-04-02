@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.19.2](https://github.com/zuohuadong/svadmin/compare/core-v0.19.1...core-v0.19.2) (2026-03-30)
+
+
+### 💅 Elegance & Refactoring
+
+* **core:** architectural refinements (notify, auth hooks, SSR, protective guards) ([f2e9333](https://github.com/zuohuadong/svadmin/commit/f2e93333826ab585ec1d72a2fe4d3cd8f524514f))
+* **core:** architectural refinements (notify, auth hooks, SSR, protective guards) ([59a8ad1](https://github.com/zuohuadong/svadmin/commit/59a8ad1e6051cf1fea2fa816878c2ce0bd997790))
+
+## [0.19.1](https://github.com/zuohuadong/svadmin/compare/core-v0.19.0...core-v0.19.1) (2026-03-30)
+
+
+### Bug Fixes
+
+* **core:** quality refinements — error handling, memory leaks, Svelte 5 compat ([01013db](https://github.com/zuohuadong/svadmin/commit/01013dbd3741d1e3abc11e6158e5358694ff8269))
+* **core:** quality refinements — error handling, memory leaks, Svelte 5 compat ([a92829a](https://github.com/zuohuadong/svadmin/commit/a92829aa34910f4df2b850bc33c076e9f1ceb66c))
+
+## [0.19.0](https://github.com/zuohuadong/svadmin/compare/core-v0.18.1...core-v0.19.0) (2026-03-30)
+
+
+### ⚠ BREAKING CHANGES
+
+* **core:** useTranslation now returns { t, locale, setLocale, getAvailableLocales } instead of { translate, getLocale, changeLocale }. The locale is a reactive property instead of a getter function.
+
+### Features
+
+* **core:** enterprise improvements for i18n and routing ([9388aa9](https://github.com/zuohuadong/svadmin/commit/9388aa92b687287f27280cff20345339107af28e))
+
+
+### Code Refactoring
+
+* **core:** adopt elegant useTranslation API ([ae97678](https://github.com/zuohuadong/svadmin/commit/ae976780076f695f013d53136fd496b7cc9a20bb))
+
 ## [0.18.1](https://github.com/zuohuadong/svadmin/compare/core-v0.18.0...core-v0.18.1) (2026-03-30)
 
 

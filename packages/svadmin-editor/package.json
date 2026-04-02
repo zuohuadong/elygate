@@ -18,10 +18,10 @@
   },
   "peerDependencies": {
     "svelte": "^5.0.0",
-    "@svadmin/core": "workspace:*"
+    "@svadmin/core": "^0.5.14"
   },
   "devDependencies": {
-    "@svadmin/core": "workspace:*"
+    "@svadmin/core": "^0.5.14"
   },
   "dependencies": {
     "@tiptap/core": "^2.12.0",

@@ -229,7 +229,7 @@ export const authRouter = new Elysia()
             auth_session.set({
                 value: sessionToken,
                 httpOnly: true,
-                secure: config.nodeEnv === 'production',
+                secure: request.headers.get('x-forwarded-proto') === 'https',
                 sameSite: 'lax',
                 maxAge: 7 * 86400,
                 path: '/'

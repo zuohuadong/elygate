@@ -6,7 +6,7 @@
   import SidebarItem from './SidebarItem.svelte';
   import {
     LayoutDashboard, FileText, Users, Settings, Home,
-    ChevronDown, Folder, ExternalLink, type Icon as LucideIcon,
+    ChevronDown, Folder, ExternalLink, Radio, Key, Package, Gift, Shield, Cpu, Play, type Icon as LucideIcon,
   } from 'lucide-svelte';
 
   let { item, currentPath, collapsed = false, depth = 0 }: {
@@ -17,12 +17,20 @@
   } = $props();
 
   const iconMap: Record<string, typeof LayoutDashboard> = {
+    'layout-dashboard': LayoutDashboard,
     dashboard: LayoutDashboard,
     posts: FileText,
     users: Users,
     settings: Settings,
     home: Home,
     folder: Folder,
+    radio: Radio,
+    key: Key,
+    package: Package,
+    gift: Gift,
+    shield: Shield,
+    cpu: Cpu,
+    play: Play
   };
 
   function getIcon(name?: string): typeof LayoutDashboard {

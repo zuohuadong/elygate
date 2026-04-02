@@ -16,6 +16,7 @@
     const currentPath = $derived(page.url.pathname);
 </script>
 
+{#if data.user}
 <div class="flex min-h-screen bg-[#0d1117] text-gray-200">
     <!-- Sidebar -->
     <aside class="w-64 border-r border-[#30363d] bg-[#0d1117] flex flex-col sticky top-0 h-screen">
@@ -47,7 +48,7 @@
                 </div>
                 <div class="overflow-hidden">
                     <p class="text-sm font-medium text-white truncate">{data.user.username}</p>
-                    <p class="text-xs text-gray-400 truncate">{data.org.name}</p>
+                    <p class="text-xs text-gray-400 truncate">{data.org?.name}</p>
                 </div>
             </div>
             <button class="flex items-center gap-2 text-sm text-gray-400 hover:text-red-400 transition-colors">
@@ -72,10 +73,10 @@
                         <div class="w-32 h-1.5 bg-gray-800 rounded-full overflow-hidden">
                             <div 
                                 class="h-full bg-blue-500 rounded-full" 
-                                style="width: {(data.org.usedQuota / data.org.totalQuota * 100).toFixed(1)}%"
+                                style="width: {data.org ? (data.org.usedQuota / data.org.totalQuota * 100).toFixed(1) : 0}%"
                             ></div>
                         </div>
-                        <span class="text-xs font-mono">{(data.org.usedQuota / data.org.totalQuota * 100).toFixed(1)}%</span>
+                        <span class="text-xs font-mono">{data.org ? (data.org.usedQuota / data.org.totalQuota * 100).toFixed(1) : 0}%</span>
                     </div>
                 </div>
             </div>
@@ -86,6 +87,9 @@
         </div>
     </main>
 </div>
+{:else}
+    {@render children()}
+{/if}
 
 <style>
     :global(body) {

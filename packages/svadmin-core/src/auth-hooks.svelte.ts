@@ -4,62 +4,42 @@
 
 import { getAuthProvider } from './context.svelte';
 import { navigate } from './router';
-import { toast } from './toast.svelte';
+import { notify } from './notification.svelte';
 import { t } from './i18n.svelte';
-import type { AuthActionResult, CheckResult, Identity } from './types';
+import type { AuthActionResult, CheckResult, Identity, AuthProvider } from './types';
 
-// ─── useLogin ─────────────────────────────────────────────────
+// ─── Mutate Factory ─────────────────────────────────────────────
 
-export function useLogin() {
-  const provider = getAuthProvider();
-  let isLoading = $state(false);
-
-  async function mutate(params: Record<string, unknown>): Promise<AuthActionResult> {
-    if (!provider) throw new Error('AuthProvider not configured');
-    isLoading = true;
-    try {
-      const result = await provider.login(params);
-      if (result.success) {
-        toast.success(t('common.operationSuccess'));
-        if (result.redirectTo) navigate(result.redirectTo);
-      } else {
-        const msg = result.error?.message ?? t('common.loginFailed');
-        toast.error(msg);
-      }
-      return result;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : t('common.loginFailed');
-      toast.error(msg);
-      return { success: false, error: { message: msg } };
-    } finally {
-      isLoading = false;
-    }
-  }
-
-  return {
-    mutate,
-    get isLoading() { return isLoading; },
-  };
+interface CreateAuthMutationOptions {
+  method: keyof AuthProvider;
+  successMessage?: string | null;
+  errorMessage?: string;
+  onSuccess?: (result: AuthActionResult) => void;
 }
 
-// ─── useLogout ────────────────────────────────────────────────
-
-export function useLogout() {
+function createAuthMutation(options: CreateAuthMutationOptions) {
   const provider = getAuthProvider();
   let isLoading = $state(false);
 
   async function mutate(params?: Record<string, unknown>): Promise<AuthActionResult> {
     if (!provider) throw new Error('AuthProvider not configured');
+    const fn = provider[options.method] as ((params?: Record<string, unknown>) => Promise<AuthActionResult>) | undefined;
+    if (!fn) throw new Error(`AuthProvider.${options.method} not implemented`);
+    
     isLoading = true;
     try {
-      const result = await provider.logout(params);
+      const result = await fn.call(provider, params);
       if (result.success) {
-        navigate(result.redirectTo ?? '/login');
+        if (options.successMessage) notify({ type: 'success', message: options.successMessage });
+        if (options.onSuccess) options.onSuccess(result);
+      } else {
+        const msg = result.error?.message ?? options.errorMessage ?? t('common.operationFailed');
+        notify({ type: 'error', message: msg });
       }
       return result;
     } catch (err) {
-      const msg = err instanceof Error ? err.message : t('common.operationFailed');
-      toast.error(msg);
+      const msg = err instanceof Error ? err.message : (options.errorMessage ?? t('common.operationFailed'));
+      notify({ type: 'error', message: msg });
       return { success: false, error: { message: msg } };
     } finally {
       isLoading = false;
@@ -70,107 +50,56 @@ export function useLogout() {
     mutate,
     get isLoading() { return isLoading; },
   };
+}
+
+// ─── useLogin ─────────────────────────────────────────────────
+
+export function useLogin() {
+  return createAuthMutation({
+    method: 'login',
+    successMessage: t('common.operationSuccess'),
+    errorMessage: t('common.loginFailed'),
+    onSuccess: (result) => { if (result.redirectTo) navigate(result.redirectTo); }
+  });
+}
+
+// ─── useLogout ────────────────────────────────────────────────
+
+export function useLogout() {
+  return createAuthMutation({
+    method: 'logout',
+    successMessage: null,
+    onSuccess: (result) => { navigate(result.redirectTo ?? '/login'); }
+  });
 }
 
 // ─── useRegister ──────────────────────────────────────────────
 
 export function useRegister() {
-  const provider = getAuthProvider();
-  let isLoading = $state(false);
-
-  async function mutate(params: Record<string, unknown>): Promise<AuthActionResult> {
-    if (!provider?.register) throw new Error('AuthProvider.register not implemented');
-    isLoading = true;
-    try {
-      const result = await provider.register(params);
-      if (result.success) {
-        toast.success(t('auth.registerSuccess'));
-        if (result.redirectTo) navigate(result.redirectTo);
-      } else {
-        const msg = result.error?.message ?? t('common.operationFailed');
-        toast.error(msg);
-      }
-      return result;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : t('common.operationFailed');
-      toast.error(msg);
-      return { success: false, error: { message: msg } };
-    } finally {
-      isLoading = false;
-    }
-  }
-
-  return {
-    mutate,
-    get isLoading() { return isLoading; },
-  };
+  return createAuthMutation({
+    method: 'register',
+    successMessage: t('auth.registerSuccess'),
+    onSuccess: (result) => { if (result.redirectTo) navigate(result.redirectTo); }
+  });
 }
 
 // ─── useForgotPassword ───────────────────────────────────────
 
 export function useForgotPassword() {
-  const provider = getAuthProvider();
-  let isLoading = $state(false);
-
-  async function mutate(params: Record<string, unknown>): Promise<AuthActionResult> {
-    if (!provider?.forgotPassword) throw new Error('AuthProvider.forgotPassword not implemented');
-    isLoading = true;
-    try {
-      const result = await provider.forgotPassword(params);
-      if (result.success) {
-        toast.success(t('auth.resetLinkSent'));
-      } else {
-        const msg = result.error?.message ?? t('common.operationFailed');
-        toast.error(msg);
-      }
-      return result;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : t('common.operationFailed');
-      toast.error(msg);
-      return { success: false, error: { message: msg } };
-    } finally {
-      isLoading = false;
-    }
-  }
-
-  return {
-    mutate,
-    get isLoading() { return isLoading; },
-  };
+  return createAuthMutation({
+    method: 'forgotPassword',
+    successMessage: t('auth.resetLinkSent')
+  });
 }
 
 // ─── useUpdatePassword ───────────────────────────────────────
 
 export function useUpdatePassword() {
-  const provider = getAuthProvider();
-  let isLoading = $state(false);
-
-  async function mutate(params: Record<string, unknown>): Promise<AuthActionResult> {
-    if (!provider?.updatePassword) throw new Error('AuthProvider.updatePassword not implemented');
-    isLoading = true;
-    try {
-      const result = await provider.updatePassword(params);
-      if (result.success) {
-        toast.success(t('common.operationSuccess'));
-        if (result.redirectTo) navigate(result.redirectTo);
-      } else {
-        const msg = result.error?.message ?? t('common.operationFailed');
-        toast.error(msg);
-      }
-      return result;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : t('common.operationFailed');
-      toast.error(msg);
-      return { success: false, error: { message: msg } };
-    } finally {
-      isLoading = false;
-    }
-  }
-
-  return {
-    mutate,
-    get isLoading() { return isLoading; },
-  };
+  return createAuthMutation({
+    method: 'updatePassword',
+    successMessage: t('common.operationSuccess'),
+    onSuccess: (result) => { if (result.redirectTo) navigate(result.redirectTo); }
+  });
 }
 
 // ─── useGetIdentity ──────────────────────────────────────────
@@ -266,7 +195,9 @@ export function useOnError() {
 
 /**
  * Fetches permissions from authProvider.getPermissions().
- * Returns a reactive integrated object.
+ * Returns a reactive object with convenience methods for permission checks.
+ * 
+ * Supports `refetch()` for session-level permission refresh (e.g., after role change).
  * 
  * @example
  * ```svelte
@@ -282,9 +213,12 @@ export function usePermissions<T = unknown>() {
   let permissions = $state<T | null>(null);
   let isLoading = $state(true);
   let error = $state<Error | null>(null);
-  let version = $state(0); // Force reactive invalidation
+  let version = $state(0);
 
-  if (provider?.getPermissions) {
+  function fetch() {
+    if (!provider?.getPermissions) { isLoading = false; return; }
+    isLoading = true;
+    error = null;
     provider.getPermissions().then(p => {
       permissions = p as T;
       version++;
@@ -294,19 +228,18 @@ export function usePermissions<T = unknown>() {
       isLoading = false;
       console.warn('[svadmin] usePermissions failed:', err);
     });
-  } else {
-    isLoading = false;
   }
+
+  fetch();
 
   return {
     get isLoading() { return isLoading; },
     get error() { return error; },
     get version() { return version; },
-    
-    /** Get the raw permissions data */
     get raw() { return permissions; },
+    refetch: fetch,
 
-    /** Convenience: check if a specific permission exists */
+    /** Check if a specific permission string exists */
     has(perm: string): boolean {
       if (!permissions) return false;
       if (Array.isArray(permissions)) return permissions.includes(perm);
@@ -315,12 +248,10 @@ export function usePermissions<T = unknown>() {
       return false;
     },
 
-    /** Convenience: check resource action (Casbin style representation if applicable) */
+    /** Check resource:action style permission */
     can(resource: string, action: string): boolean {
-      // Tries to map to a standard permission string format like "resource:action" 
-      // Replace with your own logic if your permissions are structured differently.
       return this.has(`${resource}:${action}`);
-    }
+    },
   };
 }
 

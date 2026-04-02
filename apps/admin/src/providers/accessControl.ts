@@ -8,22 +8,15 @@ import type { AccessControlProvider } from '@svadmin/core';
  */
 export function createRoleBasedAccessControl(): AccessControlProvider {
   return {
-    can: async (params) => {
-      const authProvider = getAuthProvider();
-      if (!authProvider?.getIdentity) {
-        return Array.isArray(params) ? params.map(() => ({ can: true })) : { can: true };
-      }
+    can: async ({ resource, action }) => {
+      if (!resource) return { can: true };
 
-      let role: number | undefined;
+      const authProvider = getAuthProvider();
+      if (!authProvider?.getIdentity) return { can: true };
+
       try {
         const identity = await authProvider.getIdentity();
-        role = (identity as Record<string, unknown>)?.role as number | undefined;
-      } catch {
-        return Array.isArray(params) ? params.map(() => ({ can: false, reason: '权限校验失败' })) : { can: false, reason: '权限校验失败' };
-      }
-
-      const checkSingle = ({ resource, action }: { resource?: string, action?: string }) => {
-        if (!resource) return { can: true };
+        const role = (identity as Record<string, unknown>)?.role;
 
         // Super Admin — full access
         if (role === 10) return { can: true };
@@ -40,14 +33,10 @@ export function createRoleBasedAccessControl(): AccessControlProvider {
         }
 
         return { can: false, reason: '未授权' };
-      };
-
-      if (Array.isArray(params)) {
-        return params.map(checkSingle);
+      } catch {
+        return { can: false, reason: '权限校验失败' };
       }
-      return checkSingle(params);
     },
-
     options: {
       buttons: {
         enableAccessControl: true,

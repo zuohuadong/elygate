@@ -308,9 +308,7 @@
     const ids = Object.keys(rowSelection);
     confirmMessage = t('common.batchDeleteConfirm', { count: ids.length });
     confirmAction = async () => {
-      for (const id of ids) {
-        await deleteMutation.mutateAsync({ id, resource: resourceName });
-      }
+      await Promise.allSettled(ids.map(id => deleteMutation.mutateAsync({ id, resource: resourceName })));
       rowSelection = {};
       confirmOpen = false;
     };
@@ -599,21 +597,21 @@
                     </Table.Row>
                   {/snippet}
                 </ContextMenu.Trigger>
-                <ContextMenu.Content class="w-48">
+                <ContextMenu.Content class="z-50 min-w-[12rem] overflow-hidden rounded-xl border border-border/50 bg-white/70 dark:bg-slate-900/50 backdrop-blur-2xl p-1 text-popover-foreground shadow-2xl animate-in fade-in-80 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95">
                   {#if canEdit}
-                    <ContextMenu.Item onclick={() => navigate(`/${resourceName}/edit/${id}`)} class="gap-2">
+                    <ContextMenu.Item onclick={() => navigate(`/${resourceName}/edit/${id}`)} class="relative flex cursor-pointer select-none items-center rounded-lg px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-slate-100 dark:data-[highlighted]:bg-slate-800 data-[highlighted]:text-accent-foreground transition-colors gap-2">
                       <Pencil class="h-4 w-4" /> {t('common.edit')}
                     </ContextMenu.Item>
                   {/if}
-                  <ContextMenu.Item onclick={() => navigate(`/${resourceName}/show/${id}`)} class="gap-2">
+                  <ContextMenu.Item onclick={() => navigate(`/${resourceName}/show/${id}`)} class="relative flex cursor-pointer select-none items-center rounded-lg px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-slate-100 dark:data-[highlighted]:bg-slate-800 data-[highlighted]:text-accent-foreground transition-colors gap-2">
                     <Eye class="h-4 w-4" /> {t('common.detail')}
                   </ContextMenu.Item>
-                  <ContextMenu.Item onclick={() => navigator.clipboard?.writeText(String(id))} class="gap-2">
+                  <ContextMenu.Item onclick={() => navigator.clipboard?.writeText(String(id))} class="relative flex cursor-pointer select-none items-center rounded-lg px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-slate-100 dark:data-[highlighted]:bg-slate-800 data-[highlighted]:text-accent-foreground transition-colors gap-2">
                     <Copy class="h-4 w-4" /> {t('common.copyId')}
                   </ContextMenu.Item>
                   {#if canDelete}
-                    <ContextMenu.Separator />
-                    <ContextMenu.Item onclick={() => confirmDelete(id)} class="gap-2 text-destructive">
+                    <ContextMenu.Separator class="-mx-1 my-1 h-px bg-border/50" />
+                    <ContextMenu.Item onclick={() => confirmDelete(id)} class="relative flex cursor-pointer select-none items-center rounded-lg px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-red-50 dark:data-[highlighted]:bg-red-900/20 data-[highlighted]:text-red-600 dark:data-[highlighted]:text-red-400 transition-colors gap-2 text-destructive">
                       <Trash2 class="h-4 w-4" /> {t('common.delete')}
                     </ContextMenu.Item>
                   {/if}

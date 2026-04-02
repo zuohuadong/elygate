@@ -32,10 +32,25 @@
     border-color: var(--border);
   }
   body {
-    background-color: var(--background);
+    background-color: #f8fafc !important; /* slate-50 */
     color: var(--foreground);
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
     @apply antialiased min-h-screen;
+    background-image: 
+      radial-gradient(at 10% 20%, rgba(99, 102, 241, 0.08) 0px, transparent 50%),
+      radial-gradient(at 90% 80%, rgba(168, 85, 247, 0.08) 0px, transparent 50%);
+    background-attachment: fixed;
+  }
+  .dark body {
+    background-color: #020617 !important; /* slate-950 */
+    background-image: 
+      radial-gradient(at 10% 20%, rgba(99, 102, 241, 0.15) 0px, transparent 50%),
+      radial-gradient(at 90% 80%, rgba(168, 85, 247, 0.15) 0px, transparent 50%);
+  }
+  
+  /* Reset app container background to let gradients through */
+  #app, [data-svadmin-app] {
+    background-color: transparent !important;
   }
 }
 
@@ -44,16 +59,81 @@
    ╚═══════════════════════════════════════════════════════════╝ */
 
 @layer components {
+  /* Sidebar global override */
+  .bg-sidebar {
+    background-color: rgba(255, 255, 255, 0.6) !important;
+    backdrop-filter: blur(28px) !important;
+    -webkit-backdrop-filter: blur(28px) !important;
+    border-right: 1px solid rgba(226, 232, 240, 0.6) !important;
+  }
+  .dark .bg-sidebar {
+    background-color: rgba(15, 23, 42, 0.5) !important;
+    border-right: 1px solid rgba(30, 41, 59, 0.6) !important;
+  }
+
+  /* Header override */
+  header {
+    background-color: rgba(255, 255, 255, 0.4) !important;
+    backdrop-filter: blur(20px) !important;
+    -webkit-backdrop-filter: blur(20px) !important;
+    border-bottom: 1px solid rgba(226, 232, 240, 0.5) !important;
+  }
+  .dark header {
+    background-color: rgba(15, 23, 42, 0.4) !important;
+    border-bottom: 1px solid rgba(30, 41, 59, 0.5) !important;
+  }
+
+  /* Enforce Shadcn cards to become Glassmorphism globally */
+  .bg-card, [data-slot="card"] {
+    background-color: rgba(255, 255, 255, 0.65) !important;
+    backdrop-filter: blur(20px) !important;
+    -webkit-backdrop-filter: blur(20px) !important;
+    box-shadow: 0 4px 20px -2px rgba(0,0,0,0.05), 0 0 1px rgba(0,0,0,0.1) !important;
+    border: 1px solid rgba(255, 255, 255, 0.8) !important;
+  }
+
+  .dark .bg-card, .dark [data-slot="card"] {
+    background-color: rgba(30, 41, 59, 0.4) !important;
+    box-shadow: 0 4px 20px -2px rgba(0,0,0,0.3) !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  }
+
   .glass {
-    @apply bg-white/70 dark:bg-slate-900/70 backdrop-blur-lg
-           border border-white/20 dark:border-slate-800/30 shadow-xl;
+    @apply bg-white/60 dark:bg-slate-900/40 backdrop-blur-xl
+           border border-white/60 dark:border-slate-800/50 shadow-xl;
   }
   .glass-card {
-    @apply bg-white/70 dark:bg-slate-900/70 backdrop-blur-lg
-           border border-white/20 dark:border-slate-800/30
+    @apply bg-white/70 dark:bg-slate-900/50 backdrop-blur-2xl
+           border border-white/80 dark:border-slate-800/60
            shadow-xl rounded-2xl p-6
            transition-all duration-300
            hover:shadow-2xl hover:scale-[1.01];
+  }
+
+  /* ── Sidebar Menu Refinements (Elygate Native Aesthetic) ── */
+  .sidebar-nav-active, .dark .sidebar-nav-active {
+    background-color: rgba(99, 102, 241, 0.08) !important;
+    color: #4f46e5 !important; /* text-indigo-600 */
+    font-weight: 600 !important;
+    border-radius: 0.5rem !important;
+  }
+  .dark .sidebar-nav-active {
+    background-color: rgba(99, 102, 241, 0.15) !important;
+    color: #818cf8 !important; /* text-indigo-400 */
+  }
+  .sidebar-nav-active::before, .dark .sidebar-nav-active::before {
+    display: none !important;
+  }
+  
+  /* Make all menu hovers slightly softer */
+  nav a:not(.sidebar-nav-active):hover, 
+  nav button:not(.sidebar-nav-active):hover {
+    background-color: rgba(248, 250, 252, 0.4) !important;
+    border-radius: 0.5rem !important;
+  }
+  .dark nav a:not(.sidebar-nav-active):hover,
+  .dark nav button:not(.sidebar-nav-active):hover {
+    background-color: rgba(30, 41, 59, 0.4) !important;
   }
 }
 

@@ -1,40 +1,40 @@
-// Toast notification system — wraps sonner-svelte for consistent API
-// Maintains backward-compatible `toast.success()` / `toast.error()` etc.
-
-import { toast as sonner } from 'sonner-svelte';
-
 export type ToastType = 'success' | 'error' | 'info' | 'warning' | 'undoable';
 
-export interface Toast {
+export interface ToastItem {
   id: number;
   type: ToastType;
   message: string;
-  duration: number;
+  duration?: number;
   onUndo?: () => void;
   onTimeout?: () => void;
 }
 
-// Legacy compatibility — kept for existing consumers
 let nextId = 0;
-let toasts = $state<Toast[]>([]);
 
-export function getToasts(): Toast[] {
-  return toasts;
-}
+// Queue for simple toasts (consumed by UI Toast bridge)
+let queue = $state<ToastItem[]>([]);
+export function getToastQueue() { return queue; }
+export function consumeToastQueue() { queue = []; }
 
-export function addToast(type: ToastType, message: string, duration = 3000, options?: { onUndo?: () => void, onTimeout?: () => void }): void {
-  // Use sonner-svelte for regular toasts
+// Promise Queue
+let promiseQueue = $state<{ id: number; promise: Promise<any>; opts: { loading: string; success: string; error: string } }[]>([]);
+export function getPromiseQueue() { return promiseQueue; }
+export function consumePromiseQueue() { promiseQueue = []; }
+
+// Legacy compatibility — kept for existing consumers (Undoable)
+let toasts = $state<ToastItem[]>([]);
+export function getToasts(): ToastItem[] { return toasts; }
+
+export function addToast(
+  type: ToastType, 
+  message: string, 
+  duration = 3000, 
+  options?: { onUndo?: () => void, onTimeout?: () => void }
+): void {
   if (type !== 'undoable') {
-    switch (type) {
-      case 'success': sonner.success(message, { duration }); break;
-      case 'error': sonner.error(message, { duration }); break;
-      case 'warning': sonner.warning(message, { duration }); break;
-      case 'info': sonner.info(message, { duration }); break;
-    }
+    queue.push({ id: nextId++, type, message, duration });
     return;
   }
-
-  // Undoable toasts still use custom system
   const id = nextId++;
   toasts = [...toasts, { id, type, message, duration, ...options }];
 }
@@ -52,6 +52,8 @@ export const toast = {
   undoable: (msg: string, duration: number, onUndo: () => void, onTimeout: () => void) =>
     addToast('undoable', msg, duration, { onUndo, onTimeout }),
   /** Promise toast — shows loading → success/error automatically */
-  promise: <T>(promise: Promise<T>, opts: { loading: string; success: string; error: string }) =>
-    sonner.promise(promise, opts),
+  promise: <T>(promise: Promise<T>, opts: { loading: string; success: string; error: string }) => {
+    promiseQueue.push({ id: nextId++, promise, opts });
+    return promise;
+  },
 };

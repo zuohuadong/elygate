@@ -61,6 +61,11 @@ export { default as InlineEdit } from "./components/InlineEdit.svelte";
 export { default as VirtualTable } from "./components/VirtualTable.svelte";
 export { default as DraggableHeader } from "./components/DraggableHeader.svelte";
 export { default as SettingsPage } from "./components/SettingsPage.svelte";
+
+// Editor Registry
+export { setRichTextEditor, getRichTextEditor } from "./editor-config.svelte.js";
+
+// Settings & Preferences
 export { default as AppearanceSettings } from "./components/AppearanceSettings.svelte";
 export { default as AboutSettings } from "./components/AboutSettings.svelte";
 export { default as PermissionMatrix } from "./components/PermissionMatrix.svelte";
@@ -125,7 +130,7 @@ export * as DropdownMenu from './components/ui/dropdown-menu/index.js';
 export * as Breadcrumb from './components/ui/breadcrumb/index.js';
 export * as Pagination from './components/ui/pagination/index.js';
 export * as ContextMenu from './components/ui/context-menu/index.js';
-export * as Drawer from './components/ui/drawer/index.js';
+
 export * as Collapsible from './components/ui/collapsible/index.js';
 export { Label } from './components/ui/label/index.js';
 export { Command } from './components/ui/command/index.js';

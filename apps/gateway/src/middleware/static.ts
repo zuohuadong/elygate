@@ -10,17 +10,11 @@ export function staticFileHandler(): (ctx: { path: string; set: { status?: numbe
     return async ({ path, set }: { path: string; set: { status?: number; headers?: Record<string, string> } }) => {
         if (path.startsWith('/api') || path.startsWith('/v1')) return;
 
-        const buildPath = join(process.cwd(), 'apps/portal/build');
-        const clientPath = join(buildPath, 'client');
-        const prerenderedPath = join(buildPath, 'prerendered');
-
+        const buildPath = join(process.cwd(), 'apps/admin/dist');
         const normalizedPath = path === '/' ? '/index.html' : path;
         const isAsset = path.includes('.');
 
         const searchPaths = [
-            join(clientPath, path),
-            join(prerenderedPath, normalizedPath.endsWith('.html') ? normalizedPath : `${normalizedPath}.html`),
-            join(prerenderedPath, normalizedPath, 'index.html'),
             join(buildPath, normalizedPath)
         ];
 

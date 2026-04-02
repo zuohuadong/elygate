@@ -29,7 +29,7 @@ export { matchRoute, navigate, currentPath, setActiveRouterProvider } from './ro
 export { readURLState, writeURLState } from './url-sync';
 export { setAccessControlProvider, getAccessControlProvider, getAccessControlOptions, canAccessAsync } from './permissions';
 export { useLive, useSubscription, usePublish } from './live.svelte';
-export { toast } from './toast.svelte';
+export { toast, getToastQueue, consumeToastQueue, getPromiseQueue, consumePromiseQueue } from './toast.svelte';
 export { notify, closeNotification, setNotificationProvider, getNotificationProvider } from './notification.svelte';
 export { t, setLocale, getLocale, getAvailableLocales, addTranslations, useTranslation } from './i18n.svelte';
 export { audit, setAuditHandler, setAuditLogProvider, getAuditLogProvider } from './audit';

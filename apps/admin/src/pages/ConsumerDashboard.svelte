@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { Card, Button, PageHeader, StatsCard } from '@svadmin/ui';
+  import { User, Folder, Database, Activity } from 'lucide-svelte';
 
   let userInfo = $state<Record<string, any> | null>(null);
   let logs = $state<any[]>([]);
@@ -18,9 +19,13 @@
   async function loadData() {
     loading = true;
     try {
+      const token = localStorage.getItem('auth_token');
+      const headers: Record<string, string> = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
       const [infoRes, logsRes] = await Promise.all([
-        fetch('/api/auth/user/info', { credentials: 'include' }),
-        fetch('/api/auth/user/logs?limit=5', { credentials: 'include' }),
+        fetch('/api/auth/user/info', { credentials: 'include', headers }),
+        fetch('/api/auth/user/logs?limit=5', { credentials: 'include', headers }),
       ]);
       if (infoRes.ok) userInfo = await infoRes.json();
       if (logsRes.ok) {
@@ -40,9 +45,13 @@
     redeeming = true;
     message = { type: '', text: '' };
     try {
+      const token = localStorage.getItem('auth_token');
+      const fetchHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) fetchHeaders['Authorization'] = `Bearer ${token}`;
+
       const res = await fetch('/api/redemptions/redeem', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: fetchHeaders,
         credentials: 'include',
         body: JSON.stringify({ key: topupCode.trim() }),
       });
@@ -106,10 +115,10 @@
 
       <!-- Info Cards -->
       <div class="lg:col-span-2 grid grid-cols-2 gap-4">
-        <StatsCard title="用户名" value={userInfo?.username || '-'} icon="user" />
-        <StatsCard title="用户组" value={userInfo?.group || 'default'} icon="folder" />
-        <StatsCard title="总额度" value={'$' + balanceUsd.toFixed(2)} icon="database" />
-        <StatsCard title="已用额度" value={'$' + usedUsd.toFixed(4)} icon="activity" />
+        <StatsCard label="用户名" value={userInfo?.username || '-'} icon={User} />
+        <StatsCard label="用户组" value={userInfo?.group || 'default'} icon={Folder} />
+        <StatsCard label="总额度" value={'$' + balanceUsd.toFixed(2)} icon={Database} />
+        <StatsCard label="已用额度" value={'$' + usedUsd.toFixed(4)} icon={Activity} />
       </div>
     </div>
 
