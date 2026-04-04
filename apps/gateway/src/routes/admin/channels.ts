@@ -30,7 +30,7 @@ export const channelsRouter = new Elysia()
     .get('/channels', async () => {
         const channels = await sql`
             SELECT id, name, type, key, base_url AS "baseUrl", models, model_mapping AS "modelMapping", priority, weight, groups, status, status_message AS "statusMessage",
-                   key_strategy AS "keyStrategy", key_status AS "keyStatus", price_ratio AS "priceRatio", created_at, 
+                   key_strategy AS "keyStrategy", key_status AS "keyStatus", price_ratio AS "priceRatio", endpoint_type AS "endpointType", key_concurrency_limit AS "keyConcurrencyLimit", created_at, 
                    (SELECT updated_at FROM channels c2 WHERE c2.id = channels.id) as updated_at
             FROM channels 
             ORDER BY id DESC
@@ -46,8 +46,8 @@ export const channelsRouter = new Elysia()
             const b = body as Record<string, any>;
             const encryptedKey = encryptChannelKeys(b.key);
             const [result] = await sql`
-                INSERT INTO channels (name, type, key, base_url, models, priority, weight, status, key_strategy, key_status, price_ratio, key_concurrency_limit)
-                VALUES (${b.name}, ${b.type}, ${encryptedKey}, ${b.baseUrl}, ${b.models}, ${b.priority || 0}, ${b.weight || 1}, 1, ${b.keyStrategy || 0}, '{}'::jsonb, ${b.priceRatio || 1.0}, ${b.keyConcurrencyLimit || 0})
+                INSERT INTO channels (name, type, key, base_url, models, priority, weight, status, key_strategy, key_status, price_ratio, key_concurrency_limit, endpoint_type)
+                VALUES (${b.name}, ${b.type}, ${encryptedKey}, ${b.baseUrl}, ${b.models}, ${b.priority || 0}, ${b.weight || 1}, 1, ${b.keyStrategy || 0}, '{}'::jsonb, ${b.priceRatio || 1.0}, ${b.keyConcurrencyLimit || 0}, ${b.endpointType || 'auto'})
                 RETURNING *
             `;
             await refreshAllCaches();
@@ -67,7 +67,8 @@ export const channelsRouter = new Elysia()
             weight: t.Optional(t.Number()),
             keyStrategy: t.Optional(t.Number()),
             priceRatio: t.Optional(t.Number()),
-            keyConcurrencyLimit: t.Optional(t.Number())
+            keyConcurrencyLimit: t.Optional(t.Number()),
+            endpointType: t.Optional(t.String())
         })
     })
 
@@ -105,6 +106,7 @@ export const channelsRouter = new Elysia()
                     key_status = ${b.keyStatus || oldChannel.key_status},
                     price_ratio = ${b.priceRatio ?? oldChannel.price_ratio},
                     key_concurrency_limit = ${b.keyConcurrencyLimit ?? oldChannel.key_concurrency_limit},
+                    endpoint_type = ${b.endpointType ?? oldChannel.endpoint_type},
                     updated_at = NOW()
                 WHERE id = ${Number(id)}
                 RETURNING *

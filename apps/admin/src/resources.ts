@@ -23,6 +23,12 @@ export const resources: ResourceDefinition[] = [
         { label: '测试中', value: 2 },
         { label: '已禁用', value: 3 },
       ], filterable: true },
+      { key: 'endpointType', label: '端点(防同步)', type: 'select', options: [
+        { label: '自动匹配 (随雷达同步)', value: 'auto' },
+        { label: '固定文本 (禁止同步)', value: 'chat' },
+        { label: '原生 Gemini', value: 'native-gemini' },
+      ] },
+      { key: 'keyConcurrencyLimit', label: '单Key并发', type: 'number' },
       { key: 'priority', label: '优先级', type: 'number' },
       { key: 'weight', label: '权重', type: 'number' },
     ],

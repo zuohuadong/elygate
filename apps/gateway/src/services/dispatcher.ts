@@ -143,6 +143,94 @@ export async function dispatch(options: DispatchOptions) {
             notifier.notify('Low Quota Warning', `User ${user.username} has used ${Math.round(user.usedQuota / user.quota * 100)}% of their quota.`);
         }
 
+        // 0.59 Dynamic Aspect, Resolution, and Modality Mapping for Google Ultra Models
+        if (model && (model.toLowerCase().includes('veo') || model.toLowerCase().includes('gemini') || model.toLowerCase().includes('imagen'))) {
+            // Normalize deprecated aliases
+            const aliasMap: Record<string, string> = {
+                "veo3.1-fast": "veo_3_1_t2v_fast",
+                "veo3.1-pro": "veo_3_1_t2v"
+            };
+            if (aliasMap[model]) model = aliasMap[model];
+
+            const aspectParam = (body.aspect_ratio || body.aspectRatio || body.generationConfig?.imageConfig?.aspectRatio)?.toLowerCase();
+            const sizeParam = (body.resolution || body.image_size || body.imageSize || body.generationConfig?.imageConfig?.imageSize)?.toUpperCase();
+
+            // Count images for Modality Auto-Adaptation (T2V vs I2V vs R2V)
+            let imageCount = 0;
+            if (body.messages && Array.isArray(body.messages)) {
+                for (const m of body.messages) {
+                    if (Array.isArray(m.content)) {
+                        imageCount += m.content.filter((c: any) => c.type === 'image_url' || c.type === 'image').length;
+                    }
+                }
+            } else if (body.contents && Array.isArray(body.contents)) {
+                for (const c of body.contents) {
+                    if (Array.isArray(c.parts)) {
+                        imageCount += c.parts.filter((p: any) => p.inlineData || p.fileData).length;
+                    }
+                }
+            } else if (body.image) {
+                imageCount = 1;
+            }
+
+            const separator = (model.toLowerCase().startsWith('gemini') || model.toLowerCase().startsWith('imagen')) ? '-' : '_';
+            
+            // --- Reassembly Engine ---
+            let base = model;
+            let hasUltra = false, hasFl = false, hasRelaxed = false;
+            let currentAspect = '', currentSize = '';
+
+            const strip = (m: string, needle: string) => {
+                if (m.includes(`_${needle}`) || m.includes(`-${needle}`)) return m.replace(new RegExp(`_${needle}|-${needle}`, 'g'), '');
+                return m;
+            };
+
+            if (base.includes('_ultra') || base.includes('-ultra')) { hasUltra = true; base = strip(base, 'ultra'); }
+            if (base.includes('_fl') || base.includes('-fl')) { hasFl = true; base = strip(base, 'fl'); }
+            if (base.includes('_relaxed') || base.includes('-relaxed')) { hasRelaxed = true; base = strip(base, 'relaxed'); }
+            
+            ['landscape', 'portrait', 'square', 'four-three', 'three-four'].forEach(a => {
+                if (base.includes(`_${a}`) || base.includes(`-${a}`)) { currentAspect = a; base = strip(base, a); }
+            });
+            ['4k', '2k', '1080p'].forEach(s => {
+                const sLower = s.toLowerCase();
+                if (base.includes(`_${sLower}`) || base.includes(`-${sLower}`)) { currentSize = sLower; base = strip(base, sLower); }
+            });
+
+            // Modality Upgrades
+            if (base.includes('t2v') && imageCount > 0) {
+                base = imageCount <= 2 ? base.replace('t2v', 'i2v_s') : base.replace('t2v', 'r2v');
+                if (imageCount <= 2 && base.includes('fast')) hasFl = true;
+            } else if ((base.includes('i2v') || base.includes('r2v')) && imageCount === 0) {
+                base = base.replace('i2v_s', 't2v').replace('r2v', 't2v');
+                hasFl = false;
+            }
+
+            // Param Overrides
+            if (aspectParam) {
+                if (['16:9', 'landscape'].includes(aspectParam)) currentAspect = 'landscape';
+                else if (['9:16', 'portrait'].includes(aspectParam)) currentAspect = 'portrait';
+                else if (['1:1', 'square'].includes(aspectParam)) currentAspect = 'square';
+                else if (aspectParam === '4:3') currentAspect = 'four-three';
+                else if (aspectParam === '3:4') currentAspect = 'three-four';
+            }
+            if (sizeParam) {
+                if (sizeParam.includes('4K')) currentSize = '4k';
+                else if (sizeParam.includes('2K')) currentSize = '2k';
+                else if (sizeParam.includes('1080P')) currentSize = '1080p';
+            }
+
+            // Reassemble
+            let newModel = base;
+            if (currentAspect) newModel += `${separator}${currentAspect}`;
+            if (hasUltra) newModel += `${separator}ultra`;
+            if (hasRelaxed) newModel += `${separator}relaxed`;
+            if (hasFl) newModel += `${separator}fl`;
+            if (currentSize) newModel += `${separator}${currentSize}`;
+
+            model = newModel;
+        }
+
         let candidateChannels = memoryCache.selectChannels(model, user.group);
         
         // 0.6 Provider Company Interception (Channel Type)

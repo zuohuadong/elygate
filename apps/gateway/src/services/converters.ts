@@ -2,7 +2,7 @@ import type { Context } from 'elysia';
 
 export interface InternalRequest {
     model: string;
-    messages: { role: string; content: unknown }[][];
+    messages: { role: string; content: unknown }[];
     stream?: boolean;
     temperature?: number;
     top_p?: number;
@@ -148,7 +148,6 @@ convertError(error: unknown): Record<string, any> {
 
 export const GeminiConverter: FormatConverter = {
 convertRequest(body: Record<string, any>): InternalRequest {
-        // Simple mapping for Gemini :generateContent format
         const contents = body.contents || [];
         const messages: { role: string; content: unknown }[] = [];
         
@@ -161,16 +160,42 @@ convertRequest(body: Record<string, any>): InternalRequest {
 
         for (const content of contents) {
             const role = content.role === 'model' ? 'assistant' : 'user';
-            const textParts = content.parts?.filter((p: Record<string, any>) => p.text).map((p: Record<string, any>) => p.text).join('\n');
-            messages.push({ role: role as string, content: textParts });
+            const parts = content.parts?.map((p: Record<string, any>) => {
+                if (p.text) return { type: 'text', text: p.text };
+                if (p.inlineData) return { type: 'image_url', image_url: { url: `data:${p.inlineData.mimeType};base64,${p.inlineData.data}` } };
+                if (p.fileData) return { type: 'image_url', image_url: { url: p.fileData.fileUri } };
+                return { type: 'text', text: '' };
+            });
+            messages.push({ role: role, content: parts });
         }
 
-        return {} as any;
+        return {
+            messages,
+            model: '',
+            generationConfig: body.generationConfig // Preserve generationConfig explicitly!
+        } as InternalRequest;
     },
 
 convertResponse(internalRes: InternalResponse): Record<string, any> {
         const choice = internalRes.choices?.[0];
-        return {} as any;
+        const textContent = typeof choice?.message?.content === 'string' ? choice.message.content : '';
+        return {
+            candidates: [
+                {
+                    content: {
+                        parts: [ { text: textContent } ],
+                        role: 'model'
+                    },
+                    finishReason: choice?.finish_reason?.toUpperCase() || 'STOP',
+                    index: 0
+                }
+            ],
+            usageMetadata: {
+                promptTokenCount: internalRes.usage?.prompt_tokens || 0,
+                candidatesTokenCount: internalRes.usage?.completion_tokens || 0,
+                totalTokenCount: internalRes.usage?.total_tokens || 0
+            }
+        };
     },
 
 convertStreamChunk(chunk: Record<string, any>): string | null {

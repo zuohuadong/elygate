@@ -81,7 +81,7 @@ export function buildModelsUrl(baseUrl: string, channelType: number): string {
     if (base.endsWith('/v1/models') || base.endsWith('/v1/models/')) {
         return base;
     }
-    if (base.endsWith('/v1')) {
+    if (base.match(/\/v[1-9](\.[0-9]+)?$/) || base.endsWith('v1beta')) {
         return `${base}/models`;
     }
     return `${base}/v1/models`;
