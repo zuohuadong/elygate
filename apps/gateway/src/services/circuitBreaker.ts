@@ -1,7 +1,7 @@
 import { log } from '../services/logger';
 import { sql } from '@elygate/db';
 import { memoryCache } from './cache';
-import { notificationService } from './notification';
+import { notificationService } from './notifier';
 import { optionCache } from './optionCache';
 import { webhookService } from './webhook';
 

@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.19.5](https://github.com/zuohuadong/svadmin/compare/core-v0.19.4...core-v0.19.5) (2026-04-05)
+
+
+### 🐛 Bug Fixes
+
+* **i18n:** add missing common.noDataHint translation keys ([#91](https://github.com/zuohuadong/svadmin/issues/91)) ([7842107](https://github.com/zuohuadong/svadmin/commit/78421072c182f3076f2cf71078fc82ad0c21509b))
+
+## [0.19.4](https://github.com/zuohuadong/svadmin/compare/core-v0.19.3...core-v0.19.4) (2026-04-03)
+
+
+### 🐛 Bug Fixes
+
+* **ui:** fix unclosed string literal in ConfigErrorScreen ternary ([#85](https://github.com/zuohuadong/svadmin/issues/85)) ([cee2db1](https://github.com/zuohuadong/svadmin/commit/cee2db17c87b314f8cbf7f1822b63bb57645f87d))
+
+## [0.19.3](https://github.com/zuohuadong/svadmin/compare/core-v0.19.2...core-v0.19.3) (2026-03-31)
+
+
+### 💅 Elegance & Refactoring
+
+* **core:** decouple sonner-svelte from core to make it truly headless ([e9ea226](https://github.com/zuohuadong/svadmin/commit/e9ea226cd1765fe3d43a0d53705a14ec27e5be44))
+* **core:** make core fully headless by decoupling sonner-svelte ([6f6c561](https://github.com/zuohuadong/svadmin/commit/6f6c5618597df5fcb8257f3bd09ba813710bce6c))
+* **nestjsx-crud:** remove unused query-string dependency ([e9ea226](https://github.com/zuohuadong/svadmin/commit/e9ea226cd1765fe3d43a0d53705a14ec27e5be44))
+
 ## [0.19.2](https://github.com/zuohuadong/svadmin/compare/core-v0.19.1...core-v0.19.2) (2026-03-30)
 
 

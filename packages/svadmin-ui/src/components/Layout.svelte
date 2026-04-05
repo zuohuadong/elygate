@@ -16,7 +16,7 @@
   import { Skeleton } from './ui/skeleton/index.js';
   import { Button } from './ui/button/index.js';
   import * as Sheet from './ui/sheet/index.js';
-  import { Menu } from 'lucide-svelte';
+  import { Menu } from '@lucide/svelte';
 
   let commandOpen = $state(false);
   let shortcutsOpen = $state(false);

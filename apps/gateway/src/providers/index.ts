@@ -16,8 +16,9 @@ import { UdioApiHandler } from './udio';
 import { NvidiaApiHandler } from './nvidia';
 import { ComfyUIProviderHandler } from './comfyui';
 import { DakkaApiHandler } from './dakka';
+import { ZhipuProvider } from './zhipu';
 
-export function getProviderHandler(type: number): ProviderHandler {
+export function getProviderHandler(type: number, baseUrl?: string): ProviderHandler {
     switch (type) {
         case ChannelType.GEMINI: return GeminiApiHandler;
         case ChannelType.ANTHROPIC: return AnthropicApiHandler;
@@ -38,7 +39,12 @@ export function getProviderHandler(type: number): ProviderHandler {
         // Kling can be managed in video router specifically if it doesn't have a unique enum,
         // but default handles standard passthrough.
         case ChannelType.OPENAI:
-        default: return OpenAIApiHandler;
+        default: {
+            if (baseUrl?.includes('bigmodel.cn')) {
+                return ZhipuProvider;
+            }
+            return OpenAIApiHandler;
+        }
     }
 }
 
@@ -59,3 +65,4 @@ export * from './kling';
 export * from './udio';
 export * from './nvidia';
 export * from './dakka';
+export * from './zhipu';

@@ -1,7 +1,7 @@
 <script lang="ts">
     import '../app.css';
     import { page } from '$app/state';
-    import { LayoutDashboard, Users, ShieldCheck, Settings, LogOut, Activity } from 'lucide-svelte';
+    import { LayoutDashboard, Users, ShieldCheck, Settings, LogOut, Activity } from '@lucide/svelte';
     
     let { data, children } = $props();
     

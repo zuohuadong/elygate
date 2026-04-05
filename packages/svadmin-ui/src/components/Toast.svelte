@@ -28,17 +28,19 @@
       consumePromiseQueue();
     }
   });
+
+  const toasterProps = $derived({
+    position: "top-right",
+    richColors: true,
+    closeButton: true,
+    expand: true,
+    theme,
+    toastOptions: {
+      classes: {
+        toast: 'font-sans',
+      },
+    }
+  } as any);
 </script>
 
-<Toaster
-  position="top-right"
-  richColors
-  closeButton
-  expand
-  {theme}
-  toastOptions={{
-    classes: {
-      toast: 'font-sans',
-    },
-  }}
-/>
+<Toaster {...toasterProps} />

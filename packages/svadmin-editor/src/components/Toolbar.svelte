@@ -18,7 +18,7 @@
     Palette, Highlighter, Type,
     Subscript, Superscript,
     Pilcrow,
-  } from 'lucide-svelte';
+  } from '@lucide/svelte';
   import { t } from '@svadmin/core';
 
   let { editor, onUpload, preset = 'full' } = $props<{

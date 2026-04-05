@@ -4,7 +4,7 @@
   import { getLocale, setLocale, getAvailableLocales } from '@svadmin/core/i18n';
   import * as Card from './ui/card/index.js';
   import { Button } from './ui/button/index.js';
-  import { Sun, Moon, Monitor, Check } from 'lucide-svelte';
+  import { Sun, Moon, Monitor, Check } from '@lucide/svelte';
 
   // Theme mode
   const themeOptions = [

@@ -7,7 +7,7 @@
   import * as Card from './ui/card/index.js';
   import * as Alert from './ui/alert/index.js';
   import PasswordInput from './PasswordInput.svelte';
-  import { User, Mail, Lock, Loader2, AlertCircle, CheckCircle, Camera } from 'lucide-svelte';
+  import { User, Mail, Lock, Loader2, AlertCircle, CheckCircle, Camera } from '@lucide/svelte';
 
   const identity = useGetIdentity();
   const updatePw = useUpdatePassword();

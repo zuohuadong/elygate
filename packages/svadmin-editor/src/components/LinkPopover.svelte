@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Editor } from '@tiptap/core';
-  import { ExternalLink, Unlink, Check } from 'lucide-svelte';
+  import { ExternalLink, Unlink, Check } from '@lucide/svelte';
   import { t } from '@svadmin/core';
 
   let { editor, onclose } = $props<{

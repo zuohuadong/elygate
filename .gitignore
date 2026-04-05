@@ -17,3 +17,8 @@ tests/
 
 progress.md
 .agents
+
+servers.local.md
+.mailbox/
+.agents/state/
+AGENTS.md

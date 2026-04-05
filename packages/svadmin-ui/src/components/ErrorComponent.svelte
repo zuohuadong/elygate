@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { AlertTriangle, RefreshCw } from 'lucide-svelte';
+  import { AlertTriangle, RefreshCw } from '@lucide/svelte';
   import { t } from '@svadmin/core';
   import { Button } from './ui/button';
   import * as Alert from './ui/alert/index.js';

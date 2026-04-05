@@ -3,7 +3,7 @@
   import { StatsCard, PageHeader, BarChart } from '@svadmin/ui';
   import * as Card from '@svadmin/ui/components/ui/card/index.js';
   import { useDataProvider } from '@svadmin/core';
-  import { Users, Radio, Activity, Database, Zap, Layers, Folder, Key, Clock, AlertCircle, Check } from 'lucide-svelte';
+  import { Users, Radio, Activity, Database, Zap, Layers, Folder, Key, Clock, AlertCircle, Check } from '@lucide/svelte';
 
   const dataProvider = useDataProvider()();
   

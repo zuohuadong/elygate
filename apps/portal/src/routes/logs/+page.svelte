@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { Search, Filter, FileJson, Clock, ChevronLeft, ChevronRight } from 'lucide-svelte';
+    import { Search, Filter, FileJson, Clock, ChevronLeft, ChevronRight } from '@lucide/svelte';
     import type { PortalLogSummary } from '$lib/types';
 
     type LogsPageData = {

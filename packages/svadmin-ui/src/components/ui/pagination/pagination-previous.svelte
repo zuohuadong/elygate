@@ -3,7 +3,7 @@
   import type { Snippet } from 'svelte';
   import type { HTMLButtonAttributes } from 'svelte/elements';
   import { buttonVariants } from '../button/index.js';
-  import { ChevronLeft } from 'lucide-svelte';
+  import { ChevronLeft } from '@lucide/svelte';
 
   let { class: className, children, ...restProps }: HTMLButtonAttributes & { children?: Snippet } = $props();
 </script>

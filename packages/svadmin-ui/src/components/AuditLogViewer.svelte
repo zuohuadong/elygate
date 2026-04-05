@@ -7,7 +7,7 @@
   import { Badge } from './ui/badge/index.js';
   import { Button } from './ui/button/index.js';
   import { Input } from './ui/input/index.js';
-  import { Loader2, ChevronLeft, ChevronRight, Search, FileSearch, Eye, X } from 'lucide-svelte';
+  import { Loader2, ChevronLeft, ChevronRight, Search, FileSearch, Eye, X } from '@lucide/svelte';
 
   const authProvider = getAuthProvider();
 

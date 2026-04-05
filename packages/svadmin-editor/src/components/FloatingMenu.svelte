@@ -1,13 +1,16 @@
 <script lang="ts">
   import type { Editor } from '@tiptap/core';
-  import { FloatingMenu as TiptapFloatingMenu } from '@tiptap/extension-floating-menu';
+  import { FloatingMenuPlugin } from '@tiptap/extension-floating-menu';
+  import { PluginKey } from '@tiptap/pm/state';
   import ToolbarButton from './ToolbarButton.svelte';
   import {
     Heading1, Heading2, Heading3,
     List, ListOrdered, ListChecks,
     Quote, Code2, Minus, ImageIcon, TableIcon,
-  } from 'lucide-svelte';
+  } from '@lucide/svelte';
   import { t } from '@svadmin/core';
+
+  const floatingMenuKey = new PluginKey('svadminFloatingMenu');
 
   let { editor } = $props<{
     editor: Editor;
@@ -18,21 +21,13 @@
   $effect(() => {
     if (!menuElement) return;
 
-    const existing = editor.extensionManager.extensions.find(
-      (e) => e.name === 'floatingMenu'
-    );
-    if (existing) return;
-
-    const plugin = TiptapFloatingMenu.configure({
+    const plugin = FloatingMenuPlugin({
+      pluginKey: floatingMenuKey,
+      editor,
       element: menuElement,
-      tippyOptions: {
-        duration: 150,
-        placement: 'left-start',
-      },
       shouldShow: ({ editor: e, state }) => {
         const { selection } = state;
         const { $anchor: anchor, empty } = selection;
-        // Show only on empty paragraphs
         if (!empty) return false;
         const isRootDepth = anchor.depth === 1;
         const isEmptyTextBlock = anchor.parent.isTextblock
@@ -42,7 +37,10 @@
       },
     });
 
-    editor.registerPlugin(plugin.options.plugin(plugin.options));
+    editor.registerPlugin(plugin);
+    return () => {
+      editor.unregisterPlugin(floatingMenuKey);
+    };
   });
 </script>
 

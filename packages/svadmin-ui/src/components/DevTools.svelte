@@ -10,7 +10,7 @@
   import { Badge } from './ui/badge/index.js';
   import { ScrollArea } from './ui/scroll-area/index.js';
   import { Separator } from './ui/separator/index.js';
-  import { X, Bug, ChevronDown, ChevronUp, Wand2 } from 'lucide-svelte';
+  import { X, Bug, ChevronDown, ChevronUp, Wand2 } from '@lucide/svelte';
   import InferencerPanel from './InferencerPanel.svelte';
 
   let visible = $state(false);

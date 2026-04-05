@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { Card, Button, PageHeader, StatsCard } from '@svadmin/ui';
-  import { User, Folder, Database, Activity } from 'lucide-svelte';
+  import { User, Folder, Database, Activity } from '@lucide/svelte';
 
   let userInfo = $state<Record<string, any> | null>(null);
   let logs = $state<any[]>([]);

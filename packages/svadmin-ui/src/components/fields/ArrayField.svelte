@@ -2,7 +2,7 @@
   import type { FieldDefinition } from '@svadmin/core';
   import { t } from '@svadmin/core/i18n';
   import { Button } from '../ui/button/index.js';
-  import { Plus, Trash2 } from 'lucide-svelte';
+  import { Plus, Trash2 } from '@lucide/svelte';
   import TooltipButton from '../TooltipButton.svelte';
   import FieldRenderer from '../FieldRenderer.svelte';
 

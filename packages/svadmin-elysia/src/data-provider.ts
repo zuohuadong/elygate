@@ -146,34 +146,34 @@ export function createElysiaDataProvider(opts: ElysiaDataProviderOptions): DataP
 
     async getOne<TData extends BaseRecord = BaseRecord>({ resource, id }: GetOneParams): Promise<GetOneResult<TData>> {
       const baseUrl = resolveResourceUrl(opts, resource);
-      const res = await request<any>(`${baseUrl}/${id}`, resolveHeaders(opts), undefined, withCredentials);
-      return { data: res?.data ?? res };
+      const data = await request<TData>(`${baseUrl}/${id}`, resolveHeaders(opts), undefined, withCredentials);
+      return { data };
     },
 
     async create<TData extends BaseRecord = BaseRecord, TVariables = unknown>({ resource, variables }: CreateParams<TVariables>): Promise<CreateResult<TData>> {
       const baseUrl = resolveResourceUrl(opts, resource);
-      const res = await request<any>(baseUrl, resolveHeaders(opts), {
+      const data = await request<TData>(baseUrl, resolveHeaders(opts), {
         method: 'POST',
         body: JSON.stringify(variables),
       }, withCredentials);
-      return { data: res?.data ?? res };
+      return { data };
     },
 
     async update<TData extends BaseRecord = BaseRecord, TVariables = unknown>({ resource, id, variables }: UpdateParams<TVariables>): Promise<UpdateResult<TData>> {
       const baseUrl = resolveResourceUrl(opts, resource);
-      const res = await request<any>(`${baseUrl}/${id}`, resolveHeaders(opts), {
+      const data = await request<TData>(`${baseUrl}/${id}`, resolveHeaders(opts), {
         method: updateMethod,
         body: JSON.stringify(variables),
       }, withCredentials);
-      return { data: res?.data ?? res };
+      return { data };
     },
 
     async deleteOne<TData extends BaseRecord = BaseRecord, TVariables = unknown>({ resource, id }: DeleteParams<TVariables>): Promise<DeleteResult<TData>> {
       const baseUrl = resolveResourceUrl(opts, resource);
-      const res = await request<any>(`${baseUrl}/${id}`, resolveHeaders(opts), {
+      const data = await request<TData>(`${baseUrl}/${id}`, resolveHeaders(opts), {
         method: 'DELETE',
       }, withCredentials);
-      return { data: res?.data ?? res };
+      return { data };
     },
 
     async getMany<TData extends BaseRecord = BaseRecord>({ resource, ids }: GetManyParams): Promise<GetManyResult<TData>> {

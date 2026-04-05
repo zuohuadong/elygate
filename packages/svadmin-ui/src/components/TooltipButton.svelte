@@ -32,18 +32,8 @@
 <Tooltip.Root>
   <Tooltip.Trigger>
     {#snippet child({ props })}
-      <Button
-        {...props}
-        {...restProps}
-        {variant}
-        {size}
-        {type}
-        class={className}
-        aria-label={restProps['aria-label'] ?? tooltip}
-        {onclick}
-        {disabled}
-        {tabindex}
-      >
+      {@const buttonProps = { ...props, ...restProps, variant, size, type, class: className, 'aria-label': restProps['aria-label'] ?? tooltip, onclick, disabled, tabindex } as any}
+      <Button {...buttonProps}>
         {@render children()}
       </Button>
     {/snippet}

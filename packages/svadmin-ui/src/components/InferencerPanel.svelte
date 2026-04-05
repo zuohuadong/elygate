@@ -10,7 +10,7 @@
   import { Skeleton } from './ui/skeleton/index.js';
   import { ScrollArea } from './ui/scroll-area/index.js';
   import { Select } from './ui/select/index.js';
-  import { Wand2, Copy, Check, RefreshCw, Loader2, AlertCircle } from 'lucide-svelte';
+  import { Wand2, Copy, Check, RefreshCw, Loader2, AlertCircle } from '@lucide/svelte';
 
   const dataProvider = getDataProvider();
   const resources = getResources();

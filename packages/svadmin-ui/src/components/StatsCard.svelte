@@ -29,7 +29,6 @@
     variant?: StyleVariant;
     /** Optional footer snippet for additional content below the value */
     footer?: Snippet;
-    description?: string;
     class?: string;
   }
 
@@ -42,7 +41,6 @@
     color = 'primary',
     variant = 'default',
     footer,
-    description,
     class: className = '',
   }: Props = $props();
 </script>
@@ -71,9 +69,6 @@
           </span>
         {/if}
       </div>
-      {#if description}
-        <p class="text-xs text-muted-foreground mt-1">{description}</p>
-      {/if}
     {/if}
     {#if footer}
       <div class="mt-2">

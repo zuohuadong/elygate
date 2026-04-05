@@ -1,5 +1,129 @@
 # Changelog
 
+## [0.27.0](https://github.com/zuohuadong/svadmin/compare/ui-v0.26.3...ui-v0.27.0) (2026-04-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* **deps:** @lucide/svelte replaces lucide-svelte as icon package. @tiptap/* upgraded from v2 to v3. zod upgraded from v3 to v4 in @svadmin/lite.
+
+### 🔧 Miscellaneous Chores
+
+* **deps:** major dependency audit - tiptap v3, zod v4, lucide unification ([4f4ca97](https://github.com/zuohuadong/svadmin/commit/4f4ca97e17e77b0aff769d14a7a8d23fb5e1c16f))
+
+## [0.26.3](https://github.com/zuohuadong/svadmin/compare/ui-v0.26.2...ui-v0.26.3) (2026-04-04)
+
+
+### 🐛 Bug Fixes
+
+* **ui:** global search ignores multiple searchable fields ([#89](https://github.com/zuohuadong/svadmin/issues/89)) ([2b775a2](https://github.com/zuohuadong/svadmin/commit/2b775a20a25ce569cf707baa6bdceca30246a94b))
+
+## [0.26.2](https://github.com/zuohuadong/svadmin/compare/ui-v0.26.1...ui-v0.26.2) (2026-04-04)
+
+
+### 🔧 Miscellaneous Chores
+
+* **deps:** update all dependencies and fix Svelte 5 & Tiptap breaking changes ([250f19c](https://github.com/zuohuadong/svadmin/commit/250f19c35d6fbed58f8e1710e1fab9087cf69f5a))
+
+## [0.26.1](https://github.com/zuohuadong/svadmin/compare/ui-v0.26.0...ui-v0.26.1) (2026-04-03)
+
+
+### 🐛 Bug Fixes
+
+* **ui:** fix unclosed string literal in ConfigErrorScreen ternary ([#85](https://github.com/zuohuadong/svadmin/issues/85)) ([cee2db1](https://github.com/zuohuadong/svadmin/commit/cee2db17c87b314f8cbf7f1822b63bb57645f87d))
+
+## [0.26.0](https://github.com/zuohuadong/svadmin/compare/ui-v0.25.3...ui-v0.26.0) (2026-04-02)
+
+
+### 🚀 Features
+
+* **ui:** remove default border classes in favor of shadow-based depth ([b580d88](https://github.com/zuohuadong/svadmin/commit/b580d889680aa7305183211ea1f74105c834fa0b))
+* **ui:** remove default border classes in favor of shadow-based depth ([748de0a](https://github.com/zuohuadong/svadmin/commit/748de0a6ecd5dc8f9e02e127fd4f6331b29f2947))
+
+
+### 🐛 Bug Fixes
+
+* **ui:** apply Stripe-style design tokens — subtler borders and card-fill inputs ([636594d](https://github.com/zuohuadong/svadmin/commit/636594dd463ded7224fd072943a615192620fed8))
+* **ui:** revert borderless PR [#82](https://github.com/zuohuadong/svadmin/issues/82), apply proper Stripe-style design tokens ([492e19e](https://github.com/zuohuadong/svadmin/commit/492e19ed4419aefb68fe461813c9f18f104234ba))
+
+## [0.25.3](https://github.com/zuohuadong/svadmin/compare/ui-v0.25.2...ui-v0.25.3) (2026-04-02)
+
+
+### 🐛 Bug Fixes
+
+* **ui:** add children snippet rendering to AlertDialog header and footer ([bfbf452](https://github.com/zuohuadong/svadmin/commit/bfbf452c0b36799380a152afbe17497757bbfbf6))
+* **ui:** gracefully handle missing optional marked dependencies ([dc90d72](https://github.com/zuohuadong/svadmin/commit/dc90d72b71991d78914b36c2c6e7fb7755af0630))
+* **ui:** gracefully handle missing optional marked dependencies ([d1cdcb7](https://github.com/zuohuadong/svadmin/commit/d1cdcb7b09c749c5efd80cc1b71d5e3e1c304cea))
+
+## [0.25.2](https://github.com/zuohuadong/svadmin/compare/ui-v0.25.1...ui-v0.25.2) (2026-04-01)
+
+
+### 🐛 Bug Fixes
+
+* **create-svadmin:** fix Tailwind v4 scaffolding and broken deps ([974a314](https://github.com/zuohuadong/svadmin/commit/974a314d736236e8de8ceba846ce97cdc2d9352e))
+* **create-svadmin:** fix Tailwind v4 scaffolding and broken deps ([945a611](https://github.com/zuohuadong/svadmin/commit/945a611e9bc3f8063ff47e9be598835227539241))
+
+## [0.25.1](https://github.com/zuohuadong/svadmin/compare/ui-v0.25.0...ui-v0.25.1) (2026-04-01)
+
+
+### 🐛 Bug Fixes
+
+* **ui:** remove invalid Pagination import causing Vite dev crash ([3f9f6c3](https://github.com/zuohuadong/svadmin/commit/3f9f6c337f048b4c4a95e9355ab359f56d033e87))
+* **ui:** remove invalid Pagination import causing Vite dev crash ([076aaed](https://github.com/zuohuadong/svadmin/commit/076aaed088e5ab7e7b104a629d4b0277dc673f3b))
+
+## [0.25.0](https://github.com/zuohuadong/svadmin/compare/ui-v0.24.1...ui-v0.25.0) (2026-03-31)
+
+
+### 🚀 Features
+
+* **ui:** add batchActions snippet prop to AutoTable for bulk operations ([c9e200d](https://github.com/zuohuadong/svadmin/commit/c9e200d65d568dd88225e71595ca68fa68efc756))
+
+
+### 🐛 Bug Fixes
+
+* **ui:** bypass svelte 5 props_invalid_value crash on undefined filter values by manually managing select and input state bindings ([c800d66](https://github.com/zuohuadong/svadmin/commit/c800d6675ee57fde7bafa3e467cb0bdf7f45b188))
+* **ui:** use native html select for AutoTable filters ([43c9dfe](https://github.com/zuohuadong/svadmin/commit/43c9dfe8097366646bc5f13cb654084bf9b54232))
+
+## [0.24.1](https://github.com/zuohuadong/svadmin/compare/ui-v0.24.0...ui-v0.24.1) (2026-03-31)
+
+
+### 🐛 Bug Fixes
+
+* **ui:** restore sidebar expand button when collapsed ([7342bf0](https://github.com/zuohuadong/svadmin/commit/7342bf06bef3c10abc79a626858df61847a4271e))
+* **ui:** restore sidebar expand button when collapsed ([086fb29](https://github.com/zuohuadong/svadmin/commit/086fb29768dd7518d4677afd30e69f1428d6323d))
+* **ui:** unify search and filter layout, support select options ([bc3f799](https://github.com/zuohuadong/svadmin/commit/bc3f799f93d84f8a252d5b0d254758673a488046))
+* **ui:** unify search and filter layout, support select options ([ba84768](https://github.com/zuohuadong/svadmin/commit/ba847687655e3f9c292f56bec9bfd83802dc9ee6))
+
+## [0.24.0](https://github.com/zuohuadong/svadmin/compare/ui-v0.23.2...ui-v0.24.0) (2026-03-31)
+
+
+### 🚀 Features
+
+* **ui:** upgrade marked optional peerDependencies strictly to newest major versions (v17) ([0bab9e4](https://github.com/zuohuadong/svadmin/commit/0bab9e474d1473edfa19bbe6624a9653f250b37b))
+
+
+### 🔧 Miscellaneous Chores
+
+* **release:** decouple workspace versions for local dev and use dynamic npm publishing ([a54fbe7](https://github.com/zuohuadong/svadmin/commit/a54fbe7270a1afd2b482bdae2684de3139379784))
+
+## [0.23.2](https://github.com/zuohuadong/svadmin/compare/ui-v0.23.1...ui-v0.23.2) (2026-03-31)
+
+
+### 🐛 Bug Fixes
+
+* **build:** resolve playwright error and preserve semver strings for npm publish using node-workspace ([67e71d4](https://github.com/zuohuadong/svadmin/commit/67e71d4946430122fe1eea7ac06bc40cf9441a85))
+
+## [0.23.1](https://github.com/zuohuadong/svadmin/compare/ui-v0.23.0...ui-v0.23.1) (2026-03-31)
+
+
+### 💅 Elegance & Refactoring
+
+* **core:** decouple sonner-svelte from core to make it truly headless ([e9ea226](https://github.com/zuohuadong/svadmin/commit/e9ea226cd1765fe3d43a0d53705a14ec27e5be44))
+* **core:** make core fully headless by decoupling sonner-svelte ([6f6c561](https://github.com/zuohuadong/svadmin/commit/6f6c5618597df5fcb8257f3bd09ba813710bce6c))
+* **nestjsx-crud:** remove unused query-string dependency ([e9ea226](https://github.com/zuohuadong/svadmin/commit/e9ea226cd1765fe3d43a0d53705a14ec27e5be44))
+* **ui:** encapsulate Headless UI dependencies and remove vaul-svelte ([695b42b](https://github.com/zuohuadong/svadmin/commit/695b42bafd6f94027fdab6c137f795b6eae262da))
+* **ui:** encapsulate UI headless dependencies and remove vaul-svelte ([c7484fd](https://github.com/zuohuadong/svadmin/commit/c7484fd43879487cfddbf5242d712526a9518e8b))
+
 ## [0.23.0](https://github.com/zuohuadong/svadmin/compare/ui-v0.22.1...ui-v0.23.0) (2026-03-30)
 
 

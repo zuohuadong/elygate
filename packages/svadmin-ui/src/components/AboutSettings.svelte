@@ -5,7 +5,7 @@
   import { getResolvedTheme, getColorTheme } from '@svadmin/core';
   import * as Card from './ui/card/index.js';
   import { Badge } from './ui/badge/index.js';
-  import { Info, Database, Globe, Palette, Layers } from 'lucide-svelte';
+  import { Info, Database, Globe, Palette, Layers } from '@lucide/svelte';
 
   const resources = getResources();
   const providerNames = getDataProviderNames();

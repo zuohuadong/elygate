@@ -1,6 +1,6 @@
 {
   "name": "@svadmin/simple-rest",
-  "version": "0.9.0",
+  "version": "0.9.3",
   "description": "Simple REST adapters — fetch-based DataProvider and JWT/Cookie AuthProvider",
   "type": "module",
   "sideEffects": false,
@@ -16,7 +16,7 @@
     }
   },
   "peerDependencies": {
-    "@svadmin/core": "^0.5.0"
+    "@svadmin/core": "workspace:*"
   },
   "license": "MIT",
   "author": "zuohuadong",

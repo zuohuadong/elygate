@@ -1,7 +1,7 @@
 <script lang="ts">
   import { t } from '@svadmin/core/i18n';
   import { Button } from '../ui/button/index.js';
-  import { Copy, Check, ChevronDown, ChevronRight } from 'lucide-svelte';
+  import { Copy, Check, ChevronDown, ChevronRight } from '@lucide/svelte';
 
   let { value } = $props<{
     value: unknown;

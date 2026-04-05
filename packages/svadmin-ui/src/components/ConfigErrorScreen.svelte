@@ -1,6 +1,6 @@
 <script lang="ts">
   import { t } from '@svadmin/core/i18n';
-  import { AlertTriangle, Copy, CheckCircle } from 'lucide-svelte';
+  import { AlertTriangle, Copy, CheckCircle } from '@lucide/svelte';
   import { Button } from './ui/button/index.js';
   import TooltipButton from './TooltipButton.svelte';
   import * as Card from './ui/card/index.js';

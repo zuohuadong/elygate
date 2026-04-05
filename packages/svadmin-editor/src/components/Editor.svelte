@@ -178,7 +178,7 @@
     const currentHtml = editor.getHTML();
     if (value !== currentHtml) {
       isUpdatingFromExternal = true;
-      editor.commands.setContent(value || '', false);
+      editor.commands.setContent(value || '', { emitUpdate: false });
       isUpdatingFromExternal = false;
     }
   });
@@ -191,8 +191,8 @@
   });
 
   // Character count
-  const charCount = $derived(editor?.storage.characterCount?.characters() ?? 0);
-  const wordCount = $derived(editor?.storage.characterCount?.words() ?? 0);
+  const charCount = $derived((editor?.storage as Record<string, any>)?.characterCount?.characters() ?? 0);
+  const wordCount = $derived((editor?.storage as Record<string, any>)?.characterCount?.words() ?? 0);
 </script>
 
 <div class="svadmin-editor {className}">

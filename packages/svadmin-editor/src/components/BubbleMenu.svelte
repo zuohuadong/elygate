@@ -1,12 +1,15 @@
 <script lang="ts">
   import type { Editor } from '@tiptap/core';
-  import { BubbleMenu as TiptapBubbleMenu } from '@tiptap/extension-bubble-menu';
+  import { BubbleMenuPlugin } from '@tiptap/extension-bubble-menu';
+  import { PluginKey } from '@tiptap/pm/state';
   import ToolbarButton from './ToolbarButton.svelte';
   import {
     Bold, Italic, Underline as UnderlineIcon, Strikethrough,
     Code, Link as LinkIcon, Highlighter,
-  } from 'lucide-svelte';
+  } from '@lucide/svelte';
   import { t } from '@svadmin/core';
+
+  const bubbleMenuKey = new PluginKey('svadminBubbleMenu');
 
   let { editor } = $props<{
     editor: Editor;
@@ -28,37 +31,25 @@
   const isCode = $derived((void txn, editor.isActive('code')));
   const isLink = $derived((void txn, editor.isActive('link')));
 
-  // Register the bubble menu extension
+  // Register the bubble menu plugin (Tiptap v3)
   $effect(() => {
     if (!menuElement) return;
 
-    // Check if BubbleMenu is already registered
-    const existing = editor.extensionManager.extensions.find(
-      (e) => e.name === 'bubbleMenu'
-    );
-    if (existing) return;
-
-    // We need to register the extension dynamically
-    // Tiptap handles this through the plugin system
-    const plugin = TiptapBubbleMenu.configure({
+    const plugin = BubbleMenuPlugin({
+      pluginKey: bubbleMenuKey,
+      editor,
       element: menuElement,
-      tippyOptions: {
-        duration: 150,
-        placement: 'top',
-        animation: 'shift-away',
-      },
       shouldShow: ({ editor: e, state }) => {
         const { selection } = state;
         const { empty } = selection;
-        // Don't show in code blocks or empty selections
         if (empty || e.isActive('codeBlock')) return false;
         return true;
       },
     });
 
-    editor.registerPlugin(plugin.options.plugin(plugin.options));
+    editor.registerPlugin(plugin);
     return () => {
-      // cleanup handled by editor destroy
+      editor.unregisterPlugin(bubbleMenuKey);
     };
   });
 </script>

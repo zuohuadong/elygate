@@ -1,7 +1,7 @@
 <script lang="ts">
   import { useNavigation, useCan, t } from '@svadmin/core';
   import { Button } from '../ui/button/index.js';
-  import { Eye } from 'lucide-svelte';
+  import { Eye } from '@lucide/svelte';
 
   let { resource, recordItemId, hideText = false, accessControl = { enabled: true, hideIfUnauthorized: true }, class: className = '' } = $props<{
     resource: string;

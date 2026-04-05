@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { Users, CreditCard, Activity, ArrowUpRight, BarChart3, PieChart, AlertCircle, Zap } from 'lucide-svelte';
+    import { Users, CreditCard, Activity, ArrowUpRight, BarChart3, PieChart, AlertCircle, Zap } from '@lucide/svelte';
     import type { PortalOrg } from '$lib/types';
 
     type DashboardData = {

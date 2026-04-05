@@ -28,12 +28,11 @@
   import * as DropdownMenu from './ui/dropdown-menu/index.js';
   import * as PaginationUI from './ui/pagination/index.js';
   import * as ContextMenu from './ui/context-menu/index.js';
-  import { Select } from './ui/select/index.js';
   import {
     Plus, Pencil, Trash2,
     Search, Download, Upload, ChevronDown, ChevronUp, SlidersHorizontal, Filter as FilterIcon,
     Eye, Copy
-  } from 'lucide-svelte';
+  } from '@lucide/svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
   import TooltipButton from './TooltipButton.svelte';
   import InlineEdit from './InlineEdit.svelte';
@@ -60,6 +59,8 @@
     pagination?: { current: number; pageSize: number };
     /** Externally controlled sorters */
     sorters?: Sort[];
+    /** Custom batch actions to render when rows are selected */
+    batchActions?: Snippet<[{ selectedIds: string[] }]>;
   }
 
   let {
@@ -71,6 +72,7 @@
     rowActions,
     emptyState,
     expandedRowRender,
+    batchActions,
     pagination: externalPagination,
     sorters: externalSorters,
   }: Props = $props();
@@ -118,7 +120,18 @@
   const activeFilters = $derived.by(() => {
     const result: Filter[] = [...filters];
     if (searchText.trim() && searchableFields.length > 0) {
-      result.push({ field: searchableFields[0].key, operator: 'contains', value: searchText });
+      if (searchableFields.length === 1) {
+        result.push({ field: searchableFields[0].key, operator: 'contains', value: searchText });
+      } else {
+        result.push({
+          operator: 'or',
+          value: searchableFields.map(f => ({
+            field: f.key,
+            operator: 'contains',
+            value: searchText
+          }))
+        } as any);
+      }
     }
     // Add popover filters
     for (const [key, value] of Object.entries(filterValues)) {
@@ -353,10 +366,20 @@
         </Button>
       {/if}
       {#if selectedCount > 0 && canDelete}
-        <Button variant="destructive" size="sm" onclick={confirmBatchDelete}>
+        <Button
+          variant="destructive"
+          size="sm"
+          class="h-9 whitespace-nowrap"
+          onclick={confirmBatchDelete}
+        >
           <Trash2 class="h-4 w-4" data-icon="inline-start" /> {t('common.batchDelete', { count: selectedCount })}
         </Button>
       {/if}
+      
+      {#if selectedCount > 0 && batchActions}
+        {@render batchActions({ selectedIds: Object.keys(rowSelection) })}
+      {/if}
+
       <!-- Column Visibility Picker (DropdownMenu) -->
       <DropdownMenu.Root>
         <DropdownMenu.Trigger>
@@ -388,64 +411,80 @@
     </div>
   </div>
 
-  <!-- Search -->
-  {#if searchableFields.length > 0}
-    <div class="relative max-w-sm">
-      <Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-      <Input
-        type="text"
-        bind:value={searchText}
-        oninput={() => { pagination = { ...pagination, current: 1 }; }}
-        placeholder={t('common.search')}
-        class="pl-10"
-      />
-    </div>
-  {/if}
+  <!-- Search and Advanced Filters -->
+  <div class="flex flex-wrap items-center gap-2">
+    {#if searchableFields.length > 0}
+      <div class="relative max-w-sm flex-1 sm:min-w-[250px]">
+        <Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          type="text"
+          bind:value={searchText}
+          oninput={() => { pagination = { ...pagination, current: 1 }; }}
+          placeholder={t('common.search')}
+          class="pl-10 h-9"
+        />
+      </div>
+    {/if}
 
-  <!-- Advanced Filters (Popover) -->
-  {#if filterableFields.length > 0}
-    <Popover.Root>
-      <Popover.Trigger>
-        {#snippet child({ props })}
-          <Button variant="outline" size="sm" {...props}>
-            <FilterIcon class="h-4 w-4" data-icon="inline-start" />
-            {t('common.filter')}
-            {#if activeFilterCount > 0}
-              <Badge variant="secondary" class="ml-1 h-5 min-w-5 px-1">{activeFilterCount}</Badge>
-            {/if}
-          </Button>
-        {/snippet}
-      </Popover.Trigger>
-      <Popover.Content class="w-80">
-        <div class="space-y-3">
-          <h4 class="font-medium text-sm">{t('common.filter')}</h4>
-          {#each filterableFields as field}
-            <div class="space-y-1">
-              <label class="text-xs text-muted-foreground" for="filter-{field.key}">{field.label}</label>
-              <Input
-                id="filter-{field.key}"
-                type="text"
-                bind:value={filterValues[field.key]}
-                placeholder={field.label}
-                class="h-8 text-sm"
-              />
+    {#if filterableFields.length > 0}
+      <Popover.Root>
+        <Popover.Trigger>
+          {#snippet child({ props })}
+            <Button variant="outline" size="sm" class="h-9 px-3" {...props}>
+              <FilterIcon class="h-4 w-4" data-icon="inline-start" />
+              {t('common.filter')}
+              {#if activeFilterCount > 0}
+                <Badge variant="secondary" class="ml-1 h-5 min-w-5 px-1">{activeFilterCount}</Badge>
+              {/if}
+            </Button>
+          {/snippet}
+        </Popover.Trigger>
+        <Popover.Content class="w-80">
+          <div class="space-y-3">
+            <h4 class="font-medium text-sm">{t('common.filter')}</h4>
+            {#each filterableFields as field}
+              <div class="space-y-1">
+                <label class="text-xs text-muted-foreground" for="filter-{field.key}">{field.label}</label>
+                {#if field.type === 'select' && field.options}
+                  <select
+                    id="filter-{field.key}"
+                    class="h-9 text-sm w-full font-normal flex w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                    value={filterValues[field.key] ?? ''}
+                    onchange={(e) => filterValues[field.key] = (e.currentTarget as HTMLSelectElement).value}
+                  >
+                    <option value="">全部</option>
+                    {#each field.options as opt}
+                      <option value={opt.value}>{opt.label}</option>
+                    {/each}
+                  </select>
+                {:else}
+                  <Input
+                    id="filter-{field.key}"
+                    type="text"
+                    value={filterValues[field.key] ?? ''}
+                    oninput={(e) => filterValues[field.key] = (e.currentTarget as HTMLInputElement).value}
+                    placeholder={field.label}
+                    class="h-9 text-sm"
+                  />
+                {/if}
+              </div>
+            {/each}
+            <div class="flex gap-2 pt-2">
+              <Button size="sm" class="flex-1" onclick={() => { pagination = { ...pagination, current: 1 }; }}>
+                {t('common.confirm')}
+              </Button>
+              <Button variant="outline" size="sm" onclick={() => {
+                filterValues = {};
+                pagination = { ...pagination, current: 1 };
+              }}>
+                {t('common.reset')}
+              </Button>
             </div>
-          {/each}
-          <div class="flex gap-2">
-            <Button size="sm" class="flex-1" onclick={() => { pagination = { ...pagination, current: 1 }; }}>
-              {t('common.confirm')}
-            </Button>
-            <Button variant="outline" size="sm" onclick={() => {
-              filterValues = {};
-              pagination = { ...pagination, current: 1 };
-            }}>
-              {t('common.reset')}
-            </Button>
           </div>
-        </div>
-      </Popover.Content>
-    </Popover.Root>
-  {/if}
+        </Popover.Content>
+      </Popover.Root>
+    {/if}
+  </div>
 
   <!-- Table (TanStack-powered) -->
   <div class="rounded-lg bg-card shadow-sm ring-1 ring-border/10 overflow-hidden" role="region" aria-label="{resource.label} {t('common.list')}">
@@ -597,21 +636,21 @@
                     </Table.Row>
                   {/snippet}
                 </ContextMenu.Trigger>
-                <ContextMenu.Content class="z-50 min-w-[12rem] overflow-hidden rounded-xl border border-border/50 bg-white/70 dark:bg-slate-900/50 backdrop-blur-2xl p-1 text-popover-foreground shadow-2xl animate-in fade-in-80 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95">
+                <ContextMenu.Content class="w-48">
                   {#if canEdit}
-                    <ContextMenu.Item onclick={() => navigate(`/${resourceName}/edit/${id}`)} class="relative flex cursor-pointer select-none items-center rounded-lg px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-slate-100 dark:data-[highlighted]:bg-slate-800 data-[highlighted]:text-accent-foreground transition-colors gap-2">
+                    <ContextMenu.Item onclick={() => navigate(`/${resourceName}/edit/${id}`)} class="gap-2">
                       <Pencil class="h-4 w-4" /> {t('common.edit')}
                     </ContextMenu.Item>
                   {/if}
-                  <ContextMenu.Item onclick={() => navigate(`/${resourceName}/show/${id}`)} class="relative flex cursor-pointer select-none items-center rounded-lg px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-slate-100 dark:data-[highlighted]:bg-slate-800 data-[highlighted]:text-accent-foreground transition-colors gap-2">
+                  <ContextMenu.Item onclick={() => navigate(`/${resourceName}/show/${id}`)} class="gap-2">
                     <Eye class="h-4 w-4" /> {t('common.detail')}
                   </ContextMenu.Item>
-                  <ContextMenu.Item onclick={() => navigator.clipboard?.writeText(String(id))} class="relative flex cursor-pointer select-none items-center rounded-lg px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-slate-100 dark:data-[highlighted]:bg-slate-800 data-[highlighted]:text-accent-foreground transition-colors gap-2">
+                  <ContextMenu.Item onclick={() => navigator.clipboard?.writeText(String(id))} class="gap-2">
                     <Copy class="h-4 w-4" /> {t('common.copyId')}
                   </ContextMenu.Item>
                   {#if canDelete}
-                    <ContextMenu.Separator class="-mx-1 my-1 h-px bg-border/50" />
-                    <ContextMenu.Item onclick={() => confirmDelete(id)} class="relative flex cursor-pointer select-none items-center rounded-lg px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-red-50 dark:data-[highlighted]:bg-red-900/20 data-[highlighted]:text-red-600 dark:data-[highlighted]:text-red-400 transition-colors gap-2 text-destructive">
+                    <ContextMenu.Separator />
+                    <ContextMenu.Item onclick={() => confirmDelete(id)} class="gap-2 text-destructive">
                       <Trash2 class="h-4 w-4" /> {t('common.delete')}
                     </ContextMenu.Item>
                   {/if}
@@ -741,18 +780,21 @@
   <div class="flex flex-col sm:flex-row items-center justify-between gap-2 text-sm text-muted-foreground">
     <div class="flex items-center gap-2">
       <span>{t('common.total', { total: query.data?.total ?? 0 })}</span>
-      <Select
-        class="hidden sm:inline-block h-8 w-auto text-xs"
+      <select
+        class="h-8 w-[70px] px-1 py-1 flex items-center justify-between rounded-md border border-input bg-background text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
         value={String(pagination.pageSize ?? 10)}
-        onchange={(e: Event) => {
+        onchange={(e) => {
           const size = Number((e.target as HTMLSelectElement).value);
-          pagination = { ...pagination, pageSize: size, current: 1 };
+          if (!isNaN(size)) {
+            pagination = { ...pagination, pageSize: size, current: 1 };
+          }
         }}
       >
-        {#each [10, 20, 50, 100] as size}
-          <option value={size}>{size} / {t('common.perPage')}</option>
-        {/each}
-      </Select>
+        <option value="10">10</option>
+        <option value="20">20</option>
+        <option value="50">50</option>
+        <option value="100">100</option>
+      </select>
     </div>
     <PaginationUI.Root>
       <PaginationUI.Content>

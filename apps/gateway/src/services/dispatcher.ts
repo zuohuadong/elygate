@@ -15,6 +15,8 @@ import { matchPattern } from '../utils/pattern';
 import { ContentFilter, cleanResponseTokens, cleanModelTokens } from './filter';
 import { notifier } from './notifier';
 import { WebSearchPlugin } from './plugins/search';
+import { lookupResponseCache, storeResponseCache } from './responseCache';
+import { lookupSemanticCache, storeSemanticCache } from './semanticCache';
 
 export interface DispatchOptions {
     model: string;
@@ -55,14 +57,6 @@ export async function dispatch(options: DispatchOptions) {
         let model = options.model;
         const isStream = options.stream || body.stream || false;
         const isFormData = body instanceof FormData || (body && typeof body === 'object' && !Array.isArray(body) && Object.values(body).some(v => v instanceof File || v instanceof Blob));
-
-        // 0. Handle -F suffix (Non-Thinking Model)
-        // Models with -F suffix will have enable_thinking: false
-        const originalModel = model; // Keep original model name for transformRequest
-        const skipThinking = model.endsWith('-F');
-        if (skipThinking) {
-            model = model.slice(0, -2); // Remove -F suffix for routing
-        }
 
         // 0. Check Package Bypass (Contractual Exemption)
         let isPackageFree = false;
@@ -231,6 +225,52 @@ export async function dispatch(options: DispatchOptions) {
             model = newModel;
         }
 
+        // ═══════════════════════════════════════════════════════════
+        // 🧠 DUAL-MODE CACHE LOOKUP (Exact Match ⚡ + Semantic Match 🍃)
+        // Only for chat/embeddings non-streaming requests.
+        // Architecture: Client → Cache{Hit?} → Upstream{Miss}
+        // ═══════════════════════════════════════════════════════════
+        const isCacheable = (endpointType === 'chat' || endpointType === 'embeddings') && !isStream && !isFormData;
+        if (isCacheable) {
+            const messages = (body as Record<string, any>).messages || [];
+
+            // Layer 1: ⚡ Exact Match (hash-based, O(1), zero cost)
+            try {
+                const exactHit = await lookupResponseCache(model, messages, user.id);
+                if (exactHit) {
+                    log.info(`[Dispatcher] ⚡ ResponseCache HIT for model=${model}, user=${user.id}`);
+                    return exactHit;
+                }
+            } catch (e: unknown) {
+                log.warn('[Dispatcher] ResponseCache lookup failed (non-fatal):', getErrorMessage(e));
+            }
+
+            // Layer 2: 🍃 Semantic Match (vector similarity, requires embedding channel)
+            try {
+                const embeddingChannels = memoryCache.selectChannels('bge-m3', user.group)
+                    || memoryCache.selectChannels('text-embedding-3-small', user.group)
+                    || memoryCache.selectChannels('embedding', user.group);
+                const embeddingChannel = embeddingChannels?.[0];
+
+                if (embeddingChannel) {
+                    const lastMessage = messages[messages.length - 1];
+                    const prompt = typeof lastMessage?.content === 'string'
+                        ? lastMessage.content
+                        : JSON.stringify(lastMessage?.content || '');
+
+                    if (prompt && prompt.length > 0 && prompt.length < 2000) {
+                        const semanticHit = await lookupSemanticCache(prompt, model, embeddingChannel);
+                        if (semanticHit) {
+                            log.info(`[Dispatcher] 🍃 SemanticCache HIT for model=${model}, user=${user.id}`);
+                            return semanticHit;
+                        }
+                    }
+                }
+            } catch (e: unknown) {
+                log.warn('[Dispatcher] SemanticCache lookup failed (non-fatal):', getErrorMessage(e));
+            }
+        }
+
         let candidateChannels = memoryCache.selectChannels(model, user.group);
         
         // 0.6 Provider Company Interception (Channel Type)
@@ -252,7 +292,7 @@ export async function dispatch(options: DispatchOptions) {
 
         for (const channelConfig of channels) {
             const traceId = (body as Record<string, any>).trace_id || `tr_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-            const handler = getProviderHandler(channelConfig.type);
+            const handler = getProviderHandler(channelConfig.type, channelConfig.baseUrl);
 
             // 1. Key Selection
             const allKeys = getChannelKeys(channelConfig.key);
@@ -368,7 +408,9 @@ export async function dispatch(options: DispatchOptions) {
                 }
             }
 
-            const upstreamUrl = buildUpstreamUrl(channelConfig, upstreamModel, endpointType, isStream);
+            const upstreamUrl = handler.overrideRequestUrl
+                ? handler.overrideRequestUrl(channelConfig.baseUrl, upstreamModel, endpointType) || buildUpstreamUrl(channelConfig, upstreamModel, endpointType, isStream)
+                : buildUpstreamUrl(channelConfig, upstreamModel, endpointType, isStream);
             log.info(`[Dispatcher] Selected channel: ${channelConfig.name} (id=${channelConfig.id}), upstream: ${upstreamUrl}, model: ${upstreamModel}`);
 
             // 2.5 Prepare Body & Headers
@@ -392,14 +434,13 @@ export async function dispatch(options: DispatchOptions) {
                     const prompt = sourceBody.prompt || '';
                     sourceBody = {
                         model: upstreamModel,
-                        messages: [{ role: 'user', content: prompt }]
+                        messages: [{ role: 'user', content: prompt }],
+                        stream: true
                     };
                     log.info(`[Dispatcher] 🔄 Translating video/submit payload into chat/completions payload for channel ${channelConfig.id}`);
                 }
 
-                // Pass original model name (with -F suffix) to transformRequest for enable_thinking handling
-                // but use upstreamModel for the actual model field in the request
-                const transformedBody = skipTransform ? sourceBody : handler.transformRequest(sourceBody, originalModel);
+                const transformedBody = skipTransform ? sourceBody : handler.transformRequest(sourceBody, upstreamModel);
                 if (!Array.isArray(transformedBody)) {
                     transformedBody.model = upstreamModel; // Override model with mapped name
                 }
@@ -629,8 +670,39 @@ export async function dispatch(options: DispatchOptions) {
                     if (isVideoRoute && result && typeof result === 'object') {
                         const asyncId = result.requestId || result.request_id || (result.data?.requestId);
                         if (asyncId) {
-                            result = await pollVideoResult(asyncId, channelConfig.baseUrl, activeKey);
+                            if (handler.pollAsyncResult) {
+                                result = await handler.pollAsyncResult(asyncId, channelConfig.baseUrl, activeKey);
+                            } else {
+                                result = await pollVideoResult(asyncId, channelConfig.baseUrl, activeKey);
+                            }
                         }
+                    }
+                    // 🧠 Cache Store: save successful non-streaming responses for future hits
+                    if (isCacheable && result && typeof result === 'object' && !isVideoRoute) {
+                        const messages = (body as Record<string, any>).messages || [];
+                        const usage = rawData?.usage || result?.usage || {};
+
+                        // ⚡ Exact Match store (fire-and-forget)
+                        storeResponseCache(model, messages, result, usage, user.id)
+                            .catch((e: unknown) => log.warn('[Async] ResponseCache store failed:', getErrorMessage(e)));
+
+                        // 🍃 Semantic Match store (fire-and-forget, only if embedding channel available)
+                        try {
+                            const embeddingChannels = memoryCache.selectChannels('bge-m3', user.group)
+                                || memoryCache.selectChannels('text-embedding-3-small', user.group)
+                                || memoryCache.selectChannels('embedding', user.group);
+                            const embeddingChannel = embeddingChannels?.[0];
+                            if (embeddingChannel) {
+                                const lastMessage = messages[messages.length - 1];
+                                const prompt = typeof lastMessage?.content === 'string'
+                                    ? lastMessage.content
+                                    : JSON.stringify(lastMessage?.content || '');
+                                if (prompt && prompt.length > 0 && prompt.length < 2000) {
+                                    storeSemanticCache(prompt, model, result, embeddingChannel, undefined, user.id)
+                                        .catch((e: unknown) => log.warn('[Async] SemanticCache store failed:', getErrorMessage(e)));
+                                }
+                            }
+                        } catch (_) { /* embedding channel unavailable, skip semantic store */ }
                     }
                     return result;
                 } else if (contentType.includes('text/event-stream') || contentType.includes('text/plain')) {
@@ -721,7 +793,11 @@ export async function dispatch(options: DispatchOptions) {
                     if (isVideoRoute && result && typeof result === 'object') {
                         const asyncId = result.requestId || result.request_id || (result.data?.requestId);
                         if (asyncId) {
-                            result = await pollVideoResult(asyncId, channelConfig.baseUrl, activeKey);
+                            if (handler.pollAsyncResult) {
+                                result = await handler.pollAsyncResult(asyncId, channelConfig.baseUrl, activeKey);
+                            } else {
+                                result = await pollVideoResult(asyncId, channelConfig.baseUrl, activeKey);
+                            }
                         }
                     }
                     return result;

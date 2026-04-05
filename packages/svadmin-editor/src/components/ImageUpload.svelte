@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Editor } from '@tiptap/core';
-  import { ImageIcon, Upload, Link as LinkIcon, X } from 'lucide-svelte';
+  import { ImageIcon, Upload, Link as LinkIcon, X } from '@lucide/svelte';
   import { t } from '@svadmin/core';
 
   let { editor, onUpload, onclose } = $props<{

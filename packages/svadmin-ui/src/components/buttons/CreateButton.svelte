@@ -1,7 +1,7 @@
 <script lang="ts">
   import { useNavigation, useCan, t } from '@svadmin/core';
   import { Button } from '../ui/button/index.js';
-  import { Plus } from 'lucide-svelte';
+  import { Plus } from '@lucide/svelte';
 
   let { resource, hideText = false, accessControl = { enabled: true, hideIfUnauthorized: true }, class: className = '' } = $props<{
     resource: string;

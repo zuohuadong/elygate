@@ -5,7 +5,7 @@
   import { toggleTheme } from '@svadmin/core';
   import { Command } from 'cmdk-sv';
   import * as Dialog from './ui/dialog/index.js';
-  import { Search, LayoutDashboard, Plus, Sun, FileText, Bot, Sparkles } from 'lucide-svelte';
+  import { Search, LayoutDashboard, Plus, Sun, FileText, Bot, Sparkles } from '@lucide/svelte';
 
   interface Props {
     open?: boolean;

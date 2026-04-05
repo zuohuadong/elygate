@@ -7,7 +7,7 @@
   import PageHeader from './PageHeader.svelte';
   import AutoTable from './AutoTable.svelte';
   import { Button } from './ui/button/index.js';
-  import { Plus } from 'lucide-svelte';
+  import { Plus } from '@lucide/svelte';
 
   interface Props {
     resourceName: string;
@@ -63,7 +63,7 @@
   <AutoTable
     {resourceName}
     {selectable}
-    {cellRenderer}
+    defaultCellRenderer={cellRenderer}
     {rowActions}
     {emptyState}
     {expandedRowRender}

@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount } from 'svelte';
     import { goto } from '$app/navigation';
-    import { LogIn, Key, Loader2, AlertCircle } from 'lucide-svelte';
+    import { LogIn, Key, Loader2, AlertCircle } from '@lucide/svelte';
 
     let username = $state('');
     let password = $state('');

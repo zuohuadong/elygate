@@ -73,7 +73,7 @@ class HealthChecker {
 
                         // Also notify admin and trigger webhook (similar to circuit breaker)
                         try {
-                            const { notificationService } = await import('./notification');
+                            const { notificationService } = await import('./notifier');
                             const { webhookService } = await import('./webhook');
                             await notificationService.send(
                                 'Proactive Health Check Failed',

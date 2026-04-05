@@ -5,7 +5,7 @@
   import { toggleTheme } from '@svadmin/core';
   import { Command } from 'cmdk-sv';
   import * as Dialog from './ui/dialog/index.js';
-  import { Search, LayoutDashboard, Plus, Sun, FileText, Sparkles, Loader2, Send } from 'lucide-svelte';
+  import { Search, LayoutDashboard, Plus, Sun, FileText, Sparkles, Loader2, Send } from '@lucide/svelte';
   import MarkdownRenderer from './MarkdownRenderer.svelte';
 
   let { open = $bindable(false) } = $props<{ open?: boolean }>();

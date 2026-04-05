@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Mic, MicOff, Loader2 } from 'lucide-svelte';
+  import { Mic, MicOff, Loader2 } from '@lucide/svelte';
   import TooltipButton from './TooltipButton.svelte';
 
   // Web Speech API type declarations
@@ -91,7 +91,8 @@
     };
   });
 
-  function toggleListening() {
+  function toggleListening(e?: MouseEvent) {
+    if (e) e.preventDefault();
     if (!recognition) return;
     
     if (isListening) {

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { useImport, useCan, t, type UseImportOptions } from '@svadmin/core';
   import { Button } from '../ui/button/index.js';
-  import { Upload } from 'lucide-svelte';
+  import { Upload } from '@lucide/svelte';
 
   let { resource, hideText = false, onFinish, accessControl = { enabled: true, hideIfUnauthorized: true }, class: className = '' } = $props<{
     resource: string;

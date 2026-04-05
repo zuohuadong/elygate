@@ -1,6 +1,6 @@
 <script lang="ts">
   import { getChatProvider } from '@svadmin/core';
-  import { Sparkles, RefreshCcw, Loader2 } from 'lucide-svelte';
+  import { Sparkles, RefreshCcw, Loader2 } from '@lucide/svelte';
   import { Button } from './ui/button/index.js';
   import MarkdownRenderer from './MarkdownRenderer.svelte';
 

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { cn } from '../../../utils.js';
   import type { HTMLAttributes } from 'svelte/elements';
-  import { Ellipsis } from 'lucide-svelte';
+  import { Ellipsis } from '@lucide/svelte';
 
   let { class: className, ...restProps }: HTMLAttributes<HTMLSpanElement> = $props();
 </script>

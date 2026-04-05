@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Shield, AlertCircle, Check } from 'lucide-svelte';
+  import { Shield, AlertCircle, Check } from '@lucide/svelte';
   import type { Snippet } from 'svelte';
   import type { RoleInfo, ResourceInfo, ActionInfo } from '../types.js';
   

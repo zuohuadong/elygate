@@ -4,7 +4,7 @@
     TableIcon, Plus, Minus, Trash2,
     MergeIcon, SplitIcon,
     ArrowDownToLine, ArrowRightToLine,
-  } from 'lucide-svelte';
+  } from '@lucide/svelte';
   import ToolbarButton from './ToolbarButton.svelte';
   import { t } from '@svadmin/core';
 
