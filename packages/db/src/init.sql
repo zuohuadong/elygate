@@ -882,3 +882,38 @@ CREATE TABLE IF NOT EXISTS vendors (
 );
 
 CREATE INDEX IF NOT EXISTS idx_vendors_type ON vendors(type);
+
+-- ============================================================
+-- Channel type compatibility migration
+-- New API reserves 34/35/42 for Cohere/MiniMax/Mistral. Older Elygate
+-- builds used those values for Flux/Udio/Dakka, so move recognizable legacy
+-- channels to the private 1000+ range.
+-- ============================================================
+UPDATE channels
+SET type = 1002
+WHERE type = 34
+  AND (
+    name ILIKE '%flux%'
+    OR base_url ILIKE '%replicate%'
+    OR base_url ILIKE '%fal.ai%'
+    OR models::text ILIKE '%flux%'
+  );
+
+UPDATE channels
+SET type = 1003
+WHERE type = 35
+  AND (
+    name ILIKE '%udio%'
+    OR base_url ILIKE '%udio%'
+    OR models::text ILIKE '%udio%'
+  );
+
+UPDATE channels
+SET type = 1004
+WHERE type = 42
+  AND (
+    name ILIKE '%dakka%'
+    OR base_url ILIKE '%dakka%'
+    OR models::text ILIKE '%nano-banana%'
+    OR models::text ILIKE '%veo%'
+  );

@@ -1006,6 +1006,22 @@ export const channelsRouter = new Elysia()
         } catch (e: unknown) { set.status = 500; return { success: false, message: getErrorMessage(e) }; }
     }, { body: t.Object({ channelId: t.Number(), model: t.String() }) })
 
+    .post('/channels/ollama/pull/stream', async ({ body, set }: ElysiaCtx) => {
+        const b = body as Record<string, any>;
+        const { channelId, model } = b;
+        if (!channelId || !model) { set.status = 400; return { success: false, message: 'channelId and model required' }; }
+        const [channel] = await sql`SELECT base_url FROM channels WHERE id = ${Number(channelId)} AND type = 4 LIMIT 1`;
+        if (!channel) { set.status = 404; return { success: false, message: 'Ollama channel not found' }; }
+        const baseUrl = channel.base_url.replace(/\/+$/, '');
+        try {
+            return await fetch(baseUrl + '/api/pull', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: model, stream: true })
+            });
+        } catch (e: unknown) { set.status = 500; return { success: false, message: getErrorMessage(e) }; }
+    }, { body: t.Object({ channelId: t.Number(), model: t.String() }) })
+
     // --- Ollama: Delete Model ---
     .delete('/channels/ollama/delete', async ({ body, set }: ElysiaCtx) => {
         const b = body as Record<string, any>;

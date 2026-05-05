@@ -62,6 +62,19 @@ async function incrementWindow(key: string, limit: number, windowMs: number): Pr
     } catch { /* fail silently */ }
 }
 
+async function readWindow(key: string): Promise<number> {
+    try {
+        const rows = await sql`
+            SELECT count FROM rate_limits
+            WHERE key = ${key} AND expired_at > NOW()
+            LIMIT 1
+        `;
+        return Number(rows[0]?.count || 0);
+    } catch {
+        return 0;
+    }
+}
+
 function getLimits(group: string): { total: number; success: number; durationMs: number } {
     const enabled = optionCache.get('ModelRequestRateLimitEnabled', false);
     if (!enabled) return { total: 0, success: 0, durationMs: 60000 };
@@ -96,10 +109,9 @@ export async function isModelRequestRateLimited(userId: number, group: string): 
         if (totalLimited) return true;
     }
 
-    // Check success request limit (pre-emptive check)
     if (success > 0) {
-        const successLimited = await consumeWindow(`model_req_success_check:${userId}:${group}`, success, durationMs);
-        if (successLimited) return true;
+        const successCount = await readWindow(`model_req_success:${userId}:${group}`);
+        if (successCount >= success) return true;
     }
 
     return false;

@@ -1,6 +1,8 @@
 import type { ElysiaCtx } from '../../types';
 import { Elysia, t } from 'elysia';
-import { sql } from '@elygate/db';
+import { db } from '@elygate/db';
+import { modelMetadata, options } from '@elygate/db/schema';
+import { eq, asc, sql as drizzleSql } from 'drizzle-orm';
 import { getErrorMessage } from '../../utils/error';
 import { refreshAllCaches } from './index';
 
@@ -9,19 +11,17 @@ export const modelsAdminRouter = new Elysia()
     .get('/models-meta', async ({ query }: ElysiaCtx) => {
         const search = (query?.keyword || '').trim();
         const type = query?.type;
-        const rows = await sql`
-            SELECT id, model_name, type, endpoint, display_name, tags, created_at, updated_at
-            FROM model_metadata
-            WHERE (${search || null} IS NULL OR model_name ILIKE ${'%' + search + '%'})
-              AND (${type || null} IS NULL OR type = ${type})
-            ORDER BY model_name LIMIT 500
-        `;
-        return rows;
+        const q = db.select().from(modelMetadata).$dynamic();
+        const conditions = [];
+        if (search) conditions.push(drizzleSql`${modelMetadata.modelName} ILIKE ${'%' + search + '%'}`);
+        if (type) conditions.push(eq(modelMetadata.type, type));
+        if (conditions.length > 0) q.where(drizzleSql.join(conditions, drizzleSql` AND `));
+        return await q.orderBy(asc(modelMetadata.modelName)).limit(500);
     })
 
     // --- Get Single Model Metadata ---
     .get('/models-meta/:id', async ({ params: { id }, set }: ElysiaCtx) => {
-        const [row] = await sql`SELECT * FROM model_metadata WHERE id = ${Number(id)} LIMIT 1`;
+        const [row] = await db.select().from(modelMetadata).where(eq(modelMetadata.id, Number(id))).limit(1);
         if (!row) { set.status = 404; return { success: false, message: 'Not found' }; }
         return row;
     })
@@ -30,11 +30,13 @@ export const modelsAdminRouter = new Elysia()
     .post('/models-meta', async ({ body, set }: ElysiaCtx) => {
         const b = body as Record<string, any>;
         try {
-            const [result] = await sql`
-                INSERT INTO model_metadata (model_name, type, endpoint, display_name, tags)
-                VALUES (${b.modelName}, ${b.type || 'chat'}, ${b.endpoint || null}, ${b.displayName || null}, ${b.tags || []})
-                RETURNING *
-            `;
+            const [result] = await db.insert(modelMetadata).values({
+                modelName: b.modelName,
+                type: b.type || 'chat',
+                endpoint: b.endpoint || null,
+                displayName: b.displayName || null,
+                tags: b.tags || [],
+            }).returning();
             return result;
         } catch (e: unknown) {
             set.status = 500;
@@ -46,17 +48,15 @@ export const modelsAdminRouter = new Elysia()
     .put('/models-meta/:id', async ({ params: { id }, body, set }: ElysiaCtx) => {
         const b = body as Record<string, any>;
         try {
-            const [result] = await sql`
-                UPDATE model_metadata
-                SET model_name = COALESCE(${b.modelName}, model_name),
-                    type = COALESCE(${b.type}, type),
-                    endpoint = COALESCE(${b.endpoint}, endpoint),
-                    display_name = COALESCE(${b.displayName}, display_name),
-                    tags = COALESCE(${b.tags}, tags),
-                    updated_at = NOW()
-                WHERE id = ${Number(id)}
-                RETURNING *
-            `;
+            const setValues: Record<string, any> = { updatedAt: new Date() };
+            if (b.modelName !== undefined) setValues.modelName = b.modelName;
+            if (b.type !== undefined) setValues.type = b.type;
+            if (b.endpoint !== undefined) setValues.endpoint = b.endpoint;
+            if (b.displayName !== undefined) setValues.displayName = b.displayName;
+            if (b.tags !== undefined) setValues.tags = b.tags;
+
+            const [result] = await db.update(modelMetadata).set(setValues)
+                .where(eq(modelMetadata.id, Number(id))).returning();
             if (!result) { set.status = 404; return { success: false, message: 'Not found' }; }
             await refreshAllCaches();
             return result;
@@ -68,7 +68,7 @@ export const modelsAdminRouter = new Elysia()
 
     // --- Delete Model Metadata ---
     .delete('/models-meta/:id', async ({ params: { id }, set }: ElysiaCtx) => {
-        const [result] = await sql`DELETE FROM model_metadata WHERE id = ${Number(id)} RETURNING id`;
+        const [result] = await db.delete(modelMetadata).where(eq(modelMetadata.id, Number(id))).returning();
         if (!result) { set.status = 404; return { success: false, message: 'Not found' }; }
         await refreshAllCaches();
         return { success: true };
@@ -76,7 +76,12 @@ export const modelsAdminRouter = new Elysia()
 
     // --- Missing Models Detection ---
     .get('/models-meta/missing', async () => {
-        const rows = await sql`
+        const rows = await db.selectDistinct({ modelName: modelMetadata.modelName })
+            .from(modelMetadata)
+            .where(drizzleSql`${modelMetadata.createdAt} > NOW() - INTERVAL '7 days'`);
+        // Use raw SQL for the EXCEPT query since Drizzle doesn't have a native EXCEPT
+        const { sql } = await import('@elygate/db');
+        const missingRows = await sql`
             SELECT DISTINCT model_name FROM (
                 SELECT model_name FROM logs
                 WHERE created_at > NOW() - INTERVAL '7 days'
@@ -85,12 +90,11 @@ export const modelsAdminRouter = new Elysia()
             ) sub
             ORDER BY model_name
         `;
-        return { success: true, missing: rows.map((r: any) => r.model_name), count: rows.length };
+        return { success: true, missing: missingRows.map((r: any) => r.model_name), count: missingRows.length };
     })
 
     // --- Ratio Sync: Preview upstream ratios ---
     .get('/ratio-sync/preview', async ({ query }: ElysiaCtx) => {
-        // Show current model ratios from option cache
         const { optionCache } = await import('../../services/optionCache');
         const modelRatio = optionCache.get('ModelRatio', {}) as Record<string, number>;
         const completionRatio = optionCache.get('CompletionRatio', {}) as Record<string, number>;
@@ -111,13 +115,16 @@ export const modelsAdminRouter = new Elysia()
         const b = body as Record<string, any>;
         try {
             if (b.modelRatio) {
-                await sql`INSERT INTO options (key, value) VALUES ('ModelRatio', ${JSON.stringify(b.modelRatio)}) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
+                await db.insert(options).values({ key: 'ModelRatio', value: JSON.stringify(b.modelRatio) })
+                    .onConflictDoUpdate({ target: options.key, set: { value: JSON.stringify(b.modelRatio) } });
             }
             if (b.completionRatio) {
-                await sql`INSERT INTO options (key, value) VALUES ('CompletionRatio', ${JSON.stringify(b.completionRatio)}) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
+                await db.insert(options).values({ key: 'CompletionRatio', value: JSON.stringify(b.completionRatio) })
+                    .onConflictDoUpdate({ target: options.key, set: { value: JSON.stringify(b.completionRatio) } });
             }
             if (b.groupRatio) {
-                await sql`INSERT INTO options (key, value) VALUES ('GroupRatio', ${JSON.stringify(b.groupRatio)}) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
+                await db.insert(options).values({ key: 'GroupRatio', value: JSON.stringify(b.groupRatio) })
+                    .onConflictDoUpdate({ target: options.key, set: { value: JSON.stringify(b.groupRatio) } });
             }
             await refreshAllCaches();
             return { success: true };

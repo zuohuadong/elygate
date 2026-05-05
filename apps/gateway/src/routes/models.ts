@@ -144,4 +144,14 @@ export const modelsRouter = new Elysia()
             root: model,
             parent: null,
         };
+    })
+    .delete('/models/:model', ({ set }: ElysiaCtx) => {
+        set.status = 501;
+        return {
+            error: {
+                message: 'Model deletion is not implemented. This endpoint exists for OpenAI client compatibility.',
+                type: 'not_implemented',
+                code: 'NOT_IMPLEMENTED'
+            }
+        };
     });

@@ -23,6 +23,13 @@ import { MistralApiHandler } from './mistral';
 import { OllamaApiHandler } from './ollama';
 import { MoonshotApiHandler } from './moonshot';
 import { SiliconFlowApiHandler } from './siliconflow';
+import { AwsBedrockApiHandler } from './aws';
+import { TencentHunyuanApiHandler } from './tencent';
+import { VolcEngineApiHandler } from './volcengine';
+import { CloudflareApiHandler } from './cloudflare';
+import { DifyApiHandler } from './dify';
+import { CozeApiHandler } from './coze';
+import { CodexApiHandler } from './codex';
 
 export function getProviderHandler(type: number, baseUrl?: string): ProviderHandler {
     switch (type) {
@@ -48,22 +55,38 @@ export function getProviderHandler(type: number, baseUrl?: string): ProviderHand
         case ChannelType.OLLAMA: return OllamaApiHandler;
         case ChannelType.MOONSHOT: return MoonshotApiHandler;
         case ChannelType.SILICONFLOW: return SiliconFlowApiHandler;
+        case ChannelType.AWS: return AwsBedrockApiHandler;
+        case ChannelType.TENCENT: return TencentHunyuanApiHandler;
+        case ChannelType.VOLCENGINE: return VolcEngineApiHandler;
+        case ChannelType.DOUBAO_VIDEO: return VolcEngineApiHandler;
+        case ChannelType.CLOUDFLARE: return CloudflareApiHandler;
+        case ChannelType.DIFY: return DifyApiHandler;
+        case ChannelType.COZE: return CozeApiHandler;
+        case ChannelType.CODEX: return CodexApiHandler;
         case ChannelType.XAI: return OpenAIApiHandler;
         case ChannelType.PERPLEXITY: return OpenAIApiHandler;
         case ChannelType.MINIMAX: return OpenAIApiHandler;
-        case ChannelType.DIFY: return OpenAIApiHandler;
-        case ChannelType.CLOUDFLARE: return OpenAIApiHandler;
         case ChannelType.VERTEX_AI: return GeminiApiHandler;
-        case ChannelType.VOLCENGINE: return OpenAIApiHandler;
         case ChannelType.BAIDU_V2: return BaiduApiHandler;
-        case ChannelType.COZE: return OpenAIApiHandler;
         case ChannelType.KLING: return KlingApiHandler;
         case ChannelType.JIMENG: return OpenAIApiHandler;
         case ChannelType.VIDU: return OpenAIApiHandler;
         case ChannelType.SORA: return OpenAIApiHandler;
         case ChannelType.REPLICATE: return OpenAIApiHandler;
-        case ChannelType.CODEX: return OpenAIApiHandler;
-        case ChannelType.TENCENT: return OpenAIApiHandler;
+        case ChannelType.OPENAI_MAX:
+        case ChannelType.OH_MY_GPT:
+        case ChannelType.AILS:
+        case ChannelType.AI_PROXY:
+        case ChannelType.API2GPT:
+        case ChannelType.AIGC2D:
+        case ChannelType.QIHOO_360:
+        case ChannelType.AI_PROXY_LIBRARY:
+        case ChannelType.FASTGPT:
+        case ChannelType.LINGYI_WANWU:
+        case ChannelType.MOKA_AI:
+        case ChannelType.XINFERENCE:
+        case ChannelType.SUBMODEL:
+            return OpenAIApiHandler;
         case ChannelType.OPENAI:
         default: {
             if (baseUrl?.includes('bigmodel.cn')) {
@@ -98,3 +121,10 @@ export * from './mistral';
 export * from './ollama';
 export * from './moonshot';
 export * from './siliconflow';
+export * from './aws';
+export * from './tencent';
+export * from './volcengine';
+export * from './cloudflare';
+export * from './dify';
+export * from './coze';
+export * from './codex';

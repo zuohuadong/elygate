@@ -44,3 +44,12 @@ describe("Token Bucket & Rate Limiter Security", () => {
     // Here, we could actually use Bun's mock timers or jest.useFakeTimers equivalent implementations to simulate time window sliding.
     // But for the sake of simplicity, we will not delve into that for now, and only test the core counting boundaries.
 });
+
+describe("Model request rate limiter semantics", () => {
+    test("success limit uses the same post-response counter key", async () => {
+        const source = await Bun.file(new URL("../src/services/modelRateLimit.ts", import.meta.url)).text();
+
+        expect(source).toContain("model_req_success:${userId}:${group}");
+        expect(source).not.toContain("model_req_success_check");
+    });
+});

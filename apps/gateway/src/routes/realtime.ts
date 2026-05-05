@@ -2,13 +2,94 @@ import type { ElysiaCtx } from '../types';
 import { Elysia } from 'elysia';
 import { log } from '../services/logger';
 import { memoryCache } from '../services/cache';
+import { optionCache } from '../services/optionCache';
 import { sql } from '@elygate/db';
 import { calculateCost } from '../services/ratio';
 import type { TokenRecord, UserRecord } from '../types';
+import { getProviderHandler } from '../providers';
+import { getChannelKeys } from '../services/encryption';
 
-function notImplemented(set: Record<string, any>, msg: string) {
-    set.status = 501;
-    return { error: { message: msg, type: 'not_implemented' } };
+function normalizeObject(value: unknown): Record<string, any> {
+    if (!value) return {};
+    if (typeof value === 'string') {
+        try {
+            const parsed = JSON.parse(value);
+            return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+        } catch {
+            return {};
+        }
+    }
+    return typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {};
+}
+
+function setHeader(headers: Headers, key: string, value: unknown) {
+    if (value !== undefined && value !== null) headers.set(key, String(value));
+}
+
+function getRealtimeModel(input?: Record<string, any> | URL): string {
+    if (input instanceof URL) {
+        return input.searchParams.get('model') || 'gpt-4o-realtime';
+    }
+    return input?.model || input?.session?.model || 'gpt-4o-realtime';
+}
+
+function chooseRealtimeChannel(user: UserRecord, token: TokenRecord, model: string) {
+    const explicitGroup = token.tokenGroup || user.group;
+    const groups = explicitGroup === 'auto'
+        ? (optionCache.get('AutoGroups', ['default']) as string[])
+        : [explicitGroup || 'default'];
+
+    for (const group of groups) {
+        const candidates = memoryCache.selectChannels(model, group);
+        if (candidates?.length > 0) return { channel: candidates[0], group };
+    }
+
+    const fallback = memoryCache.selectChannels('gpt-4o-realtime', user.group || 'default');
+    return fallback?.[0] ? { channel: fallback[0], group: user.group || 'default' } : null;
+}
+
+function buildRealtimeHeaders(channel: Record<string, any>, activeKey: string) {
+    const handler = getProviderHandler(channel.type, channel.baseUrl);
+    const headers = handler.buildHeaders(activeKey);
+    setHeader(headers, 'OpenAI-Beta', 'realtime=v1');
+    if (channel.openaiOrganization) setHeader(headers, 'OpenAI-Organization', channel.openaiOrganization);
+    const overrides = normalizeObject(channel.headerOverride);
+    for (const [key, value] of Object.entries(overrides)) setHeader(headers, key, value);
+    return headers;
+}
+
+async function proxyRealtimeSession(kind: 'sessions' | 'transcription_sessions', ctx: ElysiaCtx) {
+    const { body, user, token, set } = ctx;
+    const model = getRealtimeModel(body as Record<string, any>);
+    const selected = chooseRealtimeChannel(user as UserRecord, token as TokenRecord, model);
+    if (!selected) {
+        set.status = 503;
+        return { error: { message: `No available realtime channel for ${model}`, type: 'server_error' } };
+    }
+
+    const keys = getChannelKeys(selected.channel.key);
+    const activeKey = keys[0] || '';
+    const baseUrl = selected.channel.baseUrl.replace(/\/+$/, '');
+    const upstreamUrl = `${baseUrl}/v1/realtime/${kind}`;
+    const headers = buildRealtimeHeaders(selected.channel, activeKey);
+
+    try {
+        const res = await fetch(upstreamUrl, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(body || { model })
+        });
+        const text = await res.text();
+        set.status = res.status;
+        try {
+            return JSON.parse(text);
+        } catch {
+            return text;
+        }
+    } catch (error: unknown) {
+        set.status = 502;
+        return { error: { message: error instanceof Error ? error.message : String(error), type: 'upstream_error' } };
+    }
 }
 
 export const realtimeRouter = new Elysia()
@@ -39,23 +120,18 @@ export const realtimeRouter = new Elysia()
                     const u = await memoryCache.getUserFromDB(t.userId);
                     if (!u) { ws.close(4003, 'User not found'); return; }
 
-                    const channels = memoryCache.selectChannels('gpt-4o-realtime', u.group);
-                    const channel = channels?.[0];
-                    if (!channel) { ws.close(4004, 'No available channel for realtime'); return; }
+                    const model = getRealtimeModel(url);
+                    const selected = chooseRealtimeChannel(u, t, model);
+                    if (!selected) { ws.close(4004, 'No available channel for realtime'); return; }
+                    const { channel, group } = selected;
 
                     const baseUrl = channel.baseUrl.replace(/\/+$/, '').replace(/^http/, 'ws');
-                    const upstreamUrl = `${baseUrl}/v1/realtime`;
-                    const model = 'gpt-4o-realtime';
+                    const upstreamUrl = `${baseUrl}/v1/realtime?model=${encodeURIComponent(model)}`;
 
                     log.info(`[Realtime/WS] UserID: ${u.id}, Channel: ${channel.name}, Upstream: ${upstreamUrl}`);
 
-                    const upstreamHeaders: Record<string, string> = {
-                        'Authorization': `Bearer ${channel.key.split('\n')[0]}`,
-                        'OpenAI-Beta': 'realtime=v1',
-                    };
-                    if (channel.openaiOrganization) {
-                        upstreamHeaders['OpenAI-Organization'] = channel.openaiOrganization;
-                    }
+                    const keys = getChannelKeys(channel.key);
+                    const upstreamHeaders = buildRealtimeHeaders(channel, keys[0] || '');
 
                     // Bun WebSocket constructor: new WebSocket(url, protocols?, options?)
                     const upstreamWs = new WebSocket(upstreamUrl, { headers: upstreamHeaders } as any);
@@ -80,7 +156,7 @@ export const realtimeRouter = new Elysia()
                     upstreamWs.onclose = (event: CloseEvent) => {
                         const elapsed = Date.now() - startTime;
                         const estimatedTokens = messageCount * 50;
-                        const cost = calculateCost(model, u.group, estimatedTokens, 0);
+                        const cost = calculateCost(model, group, estimatedTokens, 0);
                         if (cost > 0) {
                             sql`UPDATE users SET used_quota = used_quota + ${cost} WHERE id = ${u.id}`.catch(() => {});
                             sql`UPDATE tokens SET used_quota = used_quota + ${cost}, accessed_at = NOW() WHERE id = ${t.id}`.catch(() => {});
@@ -109,5 +185,5 @@ export const realtimeRouter = new Elysia()
             if (upstream) { try { upstream.close(code, reason); } catch {} }
         },
     })
-    .post('/realtime/sessions', async ({ set }: ElysiaCtx) => notImplemented(set, 'Realtime session creation is not implemented. Use WebSocket connection directly.'))
-    .post('/realtime/transcription_sessions', async ({ set }: ElysiaCtx) => notImplemented(set, 'Realtime transcription sessions are not implemented. Use WebSocket connection directly.'));
+    .post('/realtime/sessions', async (ctx: ElysiaCtx) => proxyRealtimeSession('sessions', ctx))
+    .post('/realtime/transcription_sessions', async (ctx: ElysiaCtx) => proxyRealtimeSession('transcription_sessions', ctx));

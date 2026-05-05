@@ -1,17 +1,17 @@
 import type { ElysiaCtx } from '../../types';
 import { Elysia, t } from 'elysia';
 import { getErrorMessage } from '../../utils/error';
-import { sql } from '@elygate/db';
-import { memoryCache } from '../../services/cache';
+import { db, schema } from '@elygate/db';
+import { userGroups, users } from '@elygate/db/schema';
+import { eq, desc } from 'drizzle-orm';
 import { refreshAllCaches } from './index';
 
 export const groupsRouter = new Elysia()
     .get('/user-groups', async () => {
-        const groups = await sql`SELECT * FROM user_groups ORDER BY created_at DESC`;
-        return groups;
+        return await db.select().from(userGroups).orderBy(desc(userGroups.createdAt));
     })
     .get('/user-groups/:key', async ({ params: { key }, set }: ElysiaCtx) => {
-        const [group] = await sql`SELECT * FROM user_groups WHERE key = ${key} LIMIT 1`;
+        const [group] = await db.select().from(userGroups).where(eq(userGroups.key, key)).limit(1);
         if (!group) {
             set.status = 404;
             return { success: false, message: 'Group not found' };
@@ -21,11 +21,17 @@ export const groupsRouter = new Elysia()
     .post('/user-groups', async ({ body, set }: ElysiaCtx) => {
         try {
             const b = body as Record<string, any>;
-            const [result] = await sql`
-                INSERT INTO user_groups (key, name, description, allowed_channel_types, denied_channel_types, allowed_models, denied_models, allowed_packages, status)
-                VALUES (${b.key}, ${b.name}, ${b.description || ''}, ${b.allowedChannelTypes || []}, ${b.deniedChannelTypes || []}, ${b.allowedModels || []}, ${b.deniedModels || []}, ${b.allowedPackages || []}, ${b.status || 1})
-                RETURNING *
-            `;
+            const [result] = await db.insert(userGroups).values({
+                key: b.key,
+                name: b.name,
+                description: b.description || '',
+                allowedChannelTypes: b.allowedChannelTypes || [],
+                deniedChannelTypes: b.deniedChannelTypes || [],
+                allowedModels: b.allowedModels || [],
+                deniedModels: b.deniedModels || [],
+                allowedPackages: b.allowedPackages || [],
+                status: b.status || 1,
+            }).returning();
             await refreshAllCaches();
             return result;
         } catch (e: unknown) {
@@ -48,26 +54,23 @@ export const groupsRouter = new Elysia()
     .put('/user-groups/:key', async ({ params: { key }, body, set }: ElysiaCtx) => {
         try {
             const b = body as Record<string, any>;
-            const [oldGroup] = await sql`SELECT * FROM user_groups WHERE key = ${key} LIMIT 1`;
+            const [oldGroup] = await db.select().from(userGroups).where(eq(userGroups.key, key)).limit(1);
             if (!oldGroup) {
                 set.status = 404;
                 return { success: false, message: 'Group not found' };
             }
 
-            const [result] = await sql`
-                UPDATE user_groups 
-                SET name = ${b.name ?? oldGroup.name},
-                    description = ${b.description ?? oldGroup.description},
-                    allowed_channel_types = ${b.allowedChannelTypes || oldGroup.allowed_channel_types},
-                    denied_channel_types = ${b.deniedChannelTypes || oldGroup.denied_channel_types},
-                    allowed_models = ${b.allowedModels || oldGroup.allowed_models},
-                    denied_models = ${b.deniedModels || oldGroup.denied_models},
-                    allowed_packages = ${b.allowedPackages || oldGroup.allowed_packages},
-                    status = ${b.status ?? oldGroup.status},
-                    updated_at = NOW()
-                WHERE key = ${key}
-                RETURNING *
-            `;
+            const [result] = await db.update(userGroups).set({
+                name: b.name ?? oldGroup.name,
+                description: b.description ?? oldGroup.description,
+                allowedChannelTypes: b.allowedChannelTypes || oldGroup.allowedChannelTypes,
+                deniedChannelTypes: b.deniedChannelTypes || oldGroup.deniedChannelTypes,
+                allowedModels: b.allowedModels || oldGroup.allowedModels,
+                deniedModels: b.deniedModels || oldGroup.deniedModels,
+                allowedPackages: b.allowedPackages || oldGroup.allowedPackages,
+                status: b.status ?? oldGroup.status,
+                updatedAt: new Date(),
+            }).where(eq(userGroups.key, key)).returning();
             await refreshAllCaches();
             return result;
         } catch (e: unknown) {
@@ -81,12 +84,12 @@ export const groupsRouter = new Elysia()
                 set.status = 400;
                 return { success: false, message: 'Cannot delete system default groups' };
             }
-            const [userDep] = await sql`SELECT id FROM users WHERE "group" = ${key} LIMIT 1`;
+            const [userDep] = await db.select({ id: users.id }).from(users).where(eq(users.group, key)).limit(1);
             if (userDep) {
                 set.status = 400;
                 return { success: false, message: 'Cannot delete group with active users' };
             }
-            await sql`DELETE FROM user_groups WHERE key = ${key}`;
+            await db.delete(userGroups).where(eq(userGroups.key, key));
             await refreshAllCaches();
             return { success: true };
         } catch (e: unknown) {

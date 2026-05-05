@@ -1,38 +1,31 @@
 import type { ElysiaCtx } from '../../types';
 import { Elysia, t } from 'elysia';
-import { sql } from '@elygate/db';
-import { log } from '../../services/logger';
+import { db } from '@elygate/db';
+import { vendors } from '@elygate/db/schema';
+import { eq, sql as drizzleSql, asc } from 'drizzle-orm';
 import { getErrorMessage } from '../../utils/error';
-import { refreshAllCaches } from './index';
 
-/**
- * Vendor metadata management.
- * Vendors are provider-level metadata entries (name, type, base_url, logo, description)
- * used for display and organization in admin UI.
- */
 export const vendorsRouter = new Elysia()
     .get('/vendors', async () => {
-        const rows = await sql`
-            SELECT id, name, type, base_url, logo_url, description, config, created_at, updated_at
-            FROM vendors
-            ORDER BY name ASC
-        `;
-        return rows;
+        return await db.select().from(vendors).orderBy(asc(vendors.name));
     })
     .get('/vendors/search', async ({ query }: ElysiaCtx) => {
         const keyword = (query?.keyword || '').trim();
         if (!keyword) return [];
-        return await sql`
-            SELECT id, name, type, base_url, logo_url, description
-            FROM vendors
-            WHERE name ILIKE ${'%' + keyword + '%'} OR type::text ILIKE ${'%' + keyword + '%'}
-            ORDER BY name ASC LIMIT 50
-        `;
+        return await db.select({
+            id: vendors.id,
+            name: vendors.name,
+            type: vendors.type,
+            baseUrl: vendors.baseUrl,
+            logoUrl: vendors.logoUrl,
+            description: vendors.description,
+        }).from(vendors)
+            .where(drizzleSql`${vendors.name} ILIKE ${'%' + keyword + '%'} OR ${vendors.type}::text ILIKE ${'%' + keyword + '%'}`)
+            .orderBy(asc(vendors.name))
+            .limit(50);
     })
     .get('/vendors/:id', async ({ params: { id }, set }: ElysiaCtx) => {
-        const [row] = await sql`
-            SELECT * FROM vendors WHERE id = ${Number(id)} LIMIT 1
-        `;
+        const [row] = await db.select().from(vendors).where(eq(vendors.id, Number(id))).limit(1);
         if (!row) {
             set.status = 404;
             return { success: false, message: 'Vendor not found' };
@@ -42,11 +35,14 @@ export const vendorsRouter = new Elysia()
     .post('/vendors', async ({ body, set }: ElysiaCtx) => {
         try {
             const b = body as Record<string, any>;
-            const [result] = await sql`
-                INSERT INTO vendors (name, type, base_url, logo_url, description, config)
-                VALUES (${b.name}, ${b.type || 0}, ${b.baseUrl || ''}, ${b.logoUrl || ''}, ${b.description || ''}, ${b.config || '{}'})
-                RETURNING *
-            `;
+            const [result] = await db.insert(vendors).values({
+                name: b.name,
+                type: b.type || 0,
+                baseUrl: b.baseUrl || '',
+                logoUrl: b.logoUrl || '',
+                description: b.description || '',
+                config: b.config || {},
+            }).returning();
             return result;
         } catch (e: unknown) {
             set.status = 500;
@@ -69,23 +65,20 @@ export const vendorsRouter = new Elysia()
                 set.status = 400;
                 return { success: false, message: 'id is required' };
             }
-            const [existing] = await sql`SELECT * FROM vendors WHERE id = ${Number(b.id)} LIMIT 1`;
+            const [existing] = await db.select().from(vendors).where(eq(vendors.id, Number(b.id))).limit(1);
             if (!existing) {
                 set.status = 404;
                 return { success: false, message: 'Vendor not found' };
             }
-            const [result] = await sql`
-                UPDATE vendors
-                SET name = ${b.name ?? existing.name},
-                    type = ${b.type ?? existing.type},
-                    base_url = ${b.baseUrl ?? existing.base_url},
-                    logo_url = ${b.logoUrl ?? existing.logo_url},
-                    description = ${b.description ?? existing.description},
-                    config = ${b.config ?? existing.config},
-                    updated_at = NOW()
-                WHERE id = ${Number(b.id)}
-                RETURNING *
-            `;
+            const [result] = await db.update(vendors).set({
+                name: b.name ?? existing.name,
+                type: b.type ?? existing.type,
+                baseUrl: b.baseUrl ?? existing.baseUrl,
+                logoUrl: b.logoUrl ?? existing.logoUrl,
+                description: b.description ?? existing.description,
+                config: b.config ?? existing.config,
+                updatedAt: new Date(),
+            }).where(eq(vendors.id, Number(b.id))).returning();
             return result;
         } catch (e: unknown) {
             set.status = 500;
@@ -104,7 +97,7 @@ export const vendorsRouter = new Elysia()
     })
     .delete('/vendors/:id', async ({ params: { id }, set }: ElysiaCtx) => {
         try {
-            await sql`DELETE FROM vendors WHERE id = ${Number(id)}`;
+            await db.delete(vendors).where(eq(vendors.id, Number(id)));
             return { success: true };
         } catch (e: unknown) {
             set.status = 500;

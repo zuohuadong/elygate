@@ -1,6 +1,10 @@
 import { describe, test, expect } from 'bun:test';
+import { getProviderHandler } from '../src/providers';
 import { DeepSeekApiHandler } from '../src/providers/deepseek';
+import { CohereApiHandler } from '../src/providers/cohere';
+import { MistralApiHandler } from '../src/providers/mistral';
 import { SunoApiHandler } from '../src/providers/suno';
+import { ChannelType } from '../src/providers/types';
 
 describe('DeepSeek Provider Tests', () => {
     const handler = DeepSeekApiHandler;
@@ -218,5 +222,20 @@ describe('Suno Provider Tests', () => {
         
         expect(usage.promptTokens).toBe(0);
         expect(usage.completionTokens).toBe(0);
+    });
+});
+
+describe('ChannelType compatibility', () => {
+    test('New API type numbers do not resolve to legacy Elygate providers', () => {
+        expect(ChannelType.COHERE).toBe(34);
+        expect(ChannelType.MINIMAX).toBe(35);
+        expect(ChannelType.MISTRAL).toBe(42);
+        expect(ChannelType.FLUX).toBe(1002);
+        expect(ChannelType.UDIO).toBe(1003);
+        expect(ChannelType.DAKKA).toBe(1004);
+
+        expect(getProviderHandler(34)).toBe(CohereApiHandler);
+        expect(getProviderHandler(35).buildHeaders('k').get('Authorization')).toBe('Bearer k');
+        expect(getProviderHandler(42)).toBe(MistralApiHandler);
     });
 });

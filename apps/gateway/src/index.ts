@@ -54,6 +54,7 @@ async function init() {
   const { realtimeRouter } = await import('./routes/realtime');
   const { openaiEnterpriseRouter } = await import('./routes/openai-enterprise');
   const { fineTuneRouter } = await import('./routes/fine-tune');
+  const { newApiCompatAdminRouter } = await import('./routes/admin/newApiCompat');
 
   const app = new Elysia()
     .use(cors({
@@ -101,10 +102,15 @@ async function init() {
       .group("/auth", (app) => app.use(authRouter))
       .use(paymentRouter)
       .group("/admin", (app) => app.use(adminRouter))
+      .use(newApiCompatAdminRouter)
       .group("/stats", (app) => app.use(statsRouter))
       .group("/redemptions", (app) => app.use(authPlugin).use(redemptionsRouter))
       .use(userStatsRouter)
       .use(mjRouter)
+    )
+    .group("/pg", (app) =>
+      app.use(authPlugin)
+        .use(chatRouter)
     )
     .group("/v1", (app) =>
       app.use(authPlugin)
@@ -129,6 +135,10 @@ async function init() {
         .use(realtimeRouter)
         .use(openaiEnterpriseRouter)
         .use(fineTuneRouter)
+    )
+    .group("/v1beta/openai", (app) =>
+      app.use(authPlugin)
+        .use(modelsRouter)
     )
     .use(geminiRouter)
     .use(aliRouter)   // Ali often uses /api/v1/...
