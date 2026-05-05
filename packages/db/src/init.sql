@@ -439,6 +439,63 @@ CREATE TABLE IF NOT EXISTS workflow_templates (
 CREATE INDEX IF NOT EXISTS idx_workflow_templates_name ON workflow_templates(name);
 CREATE INDEX IF NOT EXISTS idx_workflow_templates_group ON workflow_templates(group_name);
 
+
+-- ============================================================
+-- Model Metadata (type, tags, display name, pricing metadata)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS model_metadata (
+    id SERIAL PRIMARY KEY,
+    model_name TEXT NOT NULL UNIQUE,
+    type TEXT NOT NULL DEFAULT 'chat',  -- chat, image, video, audio, embedding, rerank, moderation
+    endpoint TEXT,                      -- /v1/chat/completions etc.
+    display_name TEXT,
+    tags JSONB DEFAULT '[]',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_model_metadata_type ON model_metadata(type);
+CREATE INDEX IF NOT EXISTS idx_model_metadata_name_trgm ON model_metadata USING gin (model_name gin_trgm_ops);
+
+
+-- ============================================================
+-- User Checkin
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS user_checkins (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    checkin_date DATE NOT NULL,
+    reward BIGINT NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (user_id, checkin_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_checkins_user ON user_checkins(user_id, checkin_date DESC);
+
+-- ============================================================
+-- User Affiliate / Invite
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS user_aff (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+    code TEXT NOT NULL UNIQUE,
+    reward BIGINT NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS user_aff_rewards (
+    id SERIAL PRIMARY KEY,
+    referrer_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    referee_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    reward BIGINT NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_aff_rewards_referrer ON user_aff_rewards(referrer_id);
+
 CREATE TABLE IF NOT EXISTS options (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL DEFAULT ''
@@ -778,7 +835,26 @@ INSERT INTO options (key, value) VALUES
     ('CIRCUIT_BREAKER_RECOVERY_THRESHOLD', '3'),
     ('LATENCY_THRESHOLD_MS', '30000'),
     ('HEALTH_CHECK_INTERVAL', '60000'),
-    ('ChannelSelectionStrategy', 'priority')
+    ('ChannelSelectionStrategy', 'priority'),
+    ('AutoGroups', '["vip","premium","default"]'),
+    ('ChannelAffinityEnabled', 'false'),
+    ('ModelRequestRateLimitEnabled', 'false'),
+    ('ModelRequestRateLimitCount', '0'),
+    ('ModelRequestRateLimitSuccessCount', '0'),
+    ('ModelRequestRateLimitDurationMinutes', '1'),
+    ('GroupModelRateLimits', '{}'),
+    ('CheckinEnabled', 'false'),
+    ('CheckinReward', '100000'),
+    ('Notice', 'Welcome to Elygate AI Gateway.'),
+    ('About', ''),
+    ('PrivacyPolicy', ''),
+    ('UserAgreement', ''),
+    ('HomePageContent', ''),
+    ('FAQ', ''),
+    ('PricingContent', ''),
+    ('Favicon', ''),
+    ('DisplayInCurrency', 'false'),
+    ('QuotaPerUnit', '500000')
 ON CONFLICT (key) DO NOTHING;
 
 -- ============================================================
@@ -787,3 +863,5 @@ ON CONFLICT (key) DO NOTHING;
 CREATE INDEX IF NOT EXISTS idx_channels_tag ON channels(tag) WHERE tag IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_channels_status ON channels(status);
 CREATE INDEX IF NOT EXISTS idx_channels_type ON channels(type);
+
+CREATE INDEX IF NOT EXISTS idx_tokens_user_id ON tokens(user_id);

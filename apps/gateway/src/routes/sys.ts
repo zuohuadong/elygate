@@ -59,6 +59,37 @@ export const sysRouter = new Elysia({ prefix: '/api' })
             data: optionCache.get('Notice', 'Welcome to Elygate AI Gateway.')
         };
     })
+    .get('/about', () => {
+        return { success: true, message: '', data: optionCache.get('About', '') };
+    })
+    .get('/privacy-policy', () => {
+        return { success: true, message: '', data: optionCache.get('PrivacyPolicy', '') };
+    })
+    .get('/user-agreement', () => {
+        return { success: true, message: '', data: optionCache.get('UserAgreement', '') };
+    })
+    .get('/pricing', () => {
+        const modelRatio = optionCache.get('ModelRatio', {}) as Record<string, number>;
+        const completionRatio = optionCache.get('CompletionRatio', {}) as Record<string, number>;
+        const groupRatio = optionCache.get('GroupRatio', {}) as Record<string, number>;
+        const fixedCostModels = optionCache.get('FixedCostModels', {}) as Record<string, number>;
+        return {
+            success: true, message: '', data: {
+                modelRatio, completionRatio, groupRatio, fixedCostModels,
+                content: optionCache.get('PricingContent', ''),
+                currencySymbol: optionCache.get('CurrencySymbol', '$'),
+                quotaPerUnit: Number(optionCache.get('QuotaPerUnit', 500000)),
+                exchangeRate: Number(optionCache.get('ExchangeRate', 7.2)),
+            }
+        };
+    })
+    .get('/home_page_content', () => {
+        return { success: true, message: '', data: optionCache.get('HomePageContent', '') };
+    })
+    .get('/groups', () => {
+        // Public: list available user groups (for registration page)
+        return { success: true, message: '', data: [{ key: 'default', name: 'Default Group' }] };
+    })
     .get('/option', () => {
         return {
             success: true,

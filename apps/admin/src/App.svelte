@@ -13,6 +13,9 @@
   import CustomShowPage from './pages/CustomShowPage.svelte';
   import CustomAutoTable from './components/CustomAutoTable.svelte';
   import CustomLoginPage from './pages/CustomLoginPage.svelte';
+  import ContentManagement from './pages/ContentManagement.svelte';
+  import PricingEditor from './pages/PricingEditor.svelte';
+  import PerformanceMonitor from './pages/PerformanceMonitor.svelte';
 
   const baseDataProvider = createElysiaDataProvider({
     apiUrl: '/api/admin',
@@ -85,7 +88,11 @@
     { label: '套餐', icon: 'package', href: '/packages' },
     { label: '兑换码', icon: 'gift', href: '/redemptions' },
     { label: '限流策略', icon: 'shield', href: '/rate-limits' },
-    { label: '模型状态', icon: 'cpu', href: '/models' },
+    { label: '模型管理', icon: 'cpu', href: '/models-meta' },
+    { label: '倍率管理', icon: 'coins', href: '/pricing-editor' },
+    { label: '日志', icon: 'scroll-text', href: '/logs' },
+    { label: '内容管理', icon: 'file-text', href: '/content-management' },
+    { label: '性能监控', icon: 'activity', href: '/performance-monitor' },
     { label: 'API 测试', icon: 'play', href: '/playground' },
     { label: '系统设置', icon: 'settings', href: '/system-options' },
   ];
@@ -105,6 +112,11 @@
   {menu}
   title="Elygate"
   locale="zh-CN"
+  customPages={{
+    'content-management': ContentManagement,
+    'pricing-editor': PricingEditor,
+    'performance-monitor': PerformanceMonitor,
+  }}
   components={{
     AutoTable: CustomAutoTable,
     ShowPage: CustomShowPage,

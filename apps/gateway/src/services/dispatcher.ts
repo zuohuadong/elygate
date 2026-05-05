@@ -12,6 +12,8 @@ import { getChannelKeys } from './encryption';
 import { isRateLimited, isPackageRateLimited, waitForPackageConcurrency, packageConcurrencyMap, releasePackageConcurrency, getPackageLockId } from './ratelimit';
 import { buildUpstreamUrl } from '../utils/url';
 import { matchPattern } from '../utils/pattern';
+import { getAffinityChannel, setAffinityChannel } from './channelAffinity';
+import { isModelRequestRateLimited, recordModelRequestSuccess } from './modelRateLimit';
 import { ContentFilter, cleanResponseTokens, cleanModelTokens } from './filter';
 import { notifier } from './notifier';
 import { WebSearchPlugin } from './plugins/search';
@@ -67,6 +69,22 @@ async function waitForConcurrencyRelease(lockId: string, limit: number, maxWaitM
         await new Promise(resolve => setTimeout(resolve, 100));
     }
     return false; // Timed out waiting for slot
+}
+
+
+function isRetryableError(error: Error): boolean {
+    const msg = error.message || '';
+    // Auth/param errors: not retryable
+    if (msg.includes('HTTP 401') || msg.includes('HTTP 402') || msg.includes('HTTP 403')) return false;
+    if (msg.includes('Status 400') || msg.includes('Status 404') || msg.includes('Status 422')) return false;
+    // Rate limits, server errors, timeouts: retryable
+    if (msg.includes('HTTP 429') || msg.includes('Status 429')) return true;
+    if (msg.includes('Status 5')) return true;
+    if (msg.includes('timeout') || msg.includes('Timeout') || msg.includes('AbortError')) return true;
+    // Network errors without status: retryable
+    if (!msg.includes('Status')) return true;
+    // Default: other 4xx not retryable
+    return false;
 }
 
 // UnifiedDispatcher — functional module
@@ -289,8 +307,50 @@ export async function dispatch(options: DispatchOptions) {
             }
         }
 
-        let candidateChannels = memoryCache.selectChannels(model, user.group);
-        
+        // --- Effective Group Selection (token_group > user.group) ---
+        const autoGroups: string[] = optionCache.get('AutoGroups', []);
+        let effectiveGroup = user.group;
+        const tokenGroup = token.tokenGroup;
+
+        if (tokenGroup && tokenGroup !== '' && tokenGroup !== user.group) {
+            if (tokenGroup === 'auto') {
+                // Auto: pick the first group that has channels for this model
+                if (autoGroups.length === 0) {
+                    throw new Error('Auto groups not configured. Set AutoGroups option.');
+                }
+                let found = false;
+                for (const ag of autoGroups) {
+                    const test = memoryCache.selectChannels(model, ag);
+                    if (test && test.length > 0) { effectiveGroup = ag; found = true; break; }
+                }
+                if (!found) effectiveGroup = autoGroups[0];
+            } else {
+                effectiveGroup = tokenGroup;
+            }
+        }
+
+        // --- Model Request Rate Limit (PG-backed, group-level) ---
+        if (await isModelRequestRateLimited(user.id, effectiveGroup)) {
+            throw new Error('HTTP 429 Too Many Requests: Model request rate limit exceeded for your group');
+        }
+
+        // --- Channel Affinity Lookup ---
+        let affinityChannelId: number | null = null;
+        if (optionCache.get('ChannelAffinityEnabled', false)) {
+            affinityChannelId = getAffinityChannel(user.id, model, body);
+        }
+
+        let candidateChannels = memoryCache.selectChannels(model, effectiveGroup);
+
+        // Reorder: move affinity-pinned channel to front if present and valid
+        if (affinityChannelId !== null && candidateChannels.length > 0) {
+            const idx = candidateChannels.findIndex(ch => ch.id === affinityChannelId);
+            if (idx > 0) {
+                const [pinned] = candidateChannels.splice(idx, 1);
+                candidateChannels.unshift(pinned);
+            }
+        }
+
         // 0.6 Provider Company Interception (Channel Type)
         if (!isPackageFree && groupPolicy && candidateChannels?.length > 0) {
             if (groupPolicy.deniedChannelTypes && groupPolicy.deniedChannelTypes.length > 0) {
@@ -302,8 +362,25 @@ export async function dispatch(options: DispatchOptions) {
         }
 
         if (!candidateChannels || candidateChannels.length === 0) {
-            throw new Error(`No available or authorized channel found for model: ${model}`);
+            // Cross-group retry for auto tokens: try next groups
+            if (tokenGroup === 'auto' && token.crossGroupRetry && autoGroups.length > 0) {
+                for (const ag of autoGroups) {
+                    if (ag === effectiveGroup) continue;
+                    const nextCandidates = memoryCache.selectChannels(model, ag);
+                    if (nextCandidates && nextCandidates.length > 0) {
+                        effectiveGroup = ag;
+                        candidateChannels = nextCandidates;
+                        break;
+                    }
+                }
+            }
+            if (!candidateChannels || candidateChannels.length === 0) {
+                throw new Error(`No available or authorized channel found for model: ${model}`);
+            }
         }
+
+        // Track groups tried for cross-group retry on errors
+        const groupsTried = new Set<string>([effectiveGroup]);
 
         let lastError: Error | null = null;
         const channels = candidateChannels as ChannelConfig[];
@@ -535,7 +612,7 @@ export async function dispatch(options: DispatchOptions) {
                     userId: user.id,
                     tokenId: token.id,
                     modelName: model,
-                    userGroup: user.group,
+                    userGroup: effectiveGroup,
                     maxTokens,
                     isPackageFree
                 });
@@ -593,11 +670,18 @@ export async function dispatch(options: DispatchOptions) {
                 const latencyMs = Date.now() - startTime;
                 circuitBreaker.recordSuccess(channelConfig.id, latencyMs);
 
+                // Record channel affinity for future requests
+                if (optionCache.get('ChannelAffinityEnabled', false)) {
+                    setAffinityChannel(user.id, model, body, channelConfig.id, effectiveGroup);
+                }
+                // Record model request success for rate limiting
+                await recordModelRequestSuccess(user.id, effectiveGroup).catch(() => {});
+
                 // 5. Handle Response
 
                 if (isStream && response.body) {
                     const [clientStream, billingStream] = response.body.tee();
-                    handleStreamBilling(billingStream, body, user, token, channelConfig, model, preDeducted, lockId, isPackageFree, packageLockId, response.status, traceId, forwardBody, effectiveIdempotencyKey, externalTaskId, externalUserId, externalWorkspaceId, externalFeatureType);
+                    handleStreamBilling(billingStream, body, user, token, channelConfig, model, preDeducted, lockId, isPackageFree, packageLockId, response.status, traceId, forwardBody, effectiveIdempotencyKey, externalTaskId, externalUserId, externalWorkspaceId, externalFeatureType, effectiveGroup);
 
                     // Create a TransformStream to clean model internal tokens from stream
                     const cleanStream = new TransformStream({
@@ -648,7 +732,7 @@ export async function dispatch(options: DispatchOptions) {
                         promptTokens = (body as Record<string, any>).n || 1;
                     }
 
-                    const actualCost = calculateCost(model, user.group, promptTokens, completionTokens);
+                    const actualCost = calculateCost(model, effectiveGroup, promptTokens, completionTokens);
 
                     // 6. Post-process (Success Billing)
                     await reconcileQuota({
@@ -665,7 +749,7 @@ export async function dispatch(options: DispatchOptions) {
                         modelName: model,
                         promptTokens,
                         completionTokens,
-                        userGroup: user.group,
+                        userGroup: effectiveGroup,
                         isStream: false,
                         isPackageFree,
                         statusCode: response.status,
@@ -814,7 +898,7 @@ export async function dispatch(options: DispatchOptions) {
                     // Usage extraction and billing
                     let { promptTokens, completionTokens } = handler.extractUsage(rawData || {});
 
-                    const actualCost = calculateCost(model, user.group, promptTokens, completionTokens);
+                    const actualCost = calculateCost(model, effectiveGroup, promptTokens, completionTokens);
 
                     await reconcileQuota({
                         userId: user.id,
@@ -830,7 +914,7 @@ export async function dispatch(options: DispatchOptions) {
                         modelName: model,
                         promptTokens,
                         completionTokens,
-                        userGroup: user.group,
+                        userGroup: effectiveGroup,
                         isStream: false,
                         isPackageFree,
                         statusCode: response.status,
@@ -881,7 +965,7 @@ export async function dispatch(options: DispatchOptions) {
 
                     // Default audio billing if not JSON (approx 1 unit per request as fallback)
                     let promptTokens = endpointType.startsWith('audio') ? ((body as Record<string, any>).input?.length || 1) : 1000;
-                    const actualCost = calculateCost(model, user.group, promptTokens, 0);
+                    const actualCost = calculateCost(model, effectiveGroup, promptTokens, 0);
 
                     await reconcileQuota({ userId: user.id, tokenId: token.id, preDeducted, actualCost });
                     await billAndLog({
@@ -891,7 +975,7 @@ export async function dispatch(options: DispatchOptions) {
                         modelName: model,
                         promptTokens,
                         completionTokens: 0,
-                        userGroup: user.group,
+                        userGroup: effectiveGroup,
                         isStream: false,
                         isPackageFree,
                         statusCode: response.status,
@@ -930,6 +1014,23 @@ export async function dispatch(options: DispatchOptions) {
                 }
                 lastError = e instanceof Error ? e : new Error(String(e));
 
+                // Cross-group retry: if token uses auto group with cross_group_retry,
+                // and the error is retryable, try the next group
+                if (tokenGroup === 'auto' && token.crossGroupRetry && isRetryableError(lastError)) {
+                    for (const ag of autoGroups) {
+                        if (groupsTried.has(ag)) continue;
+                        const nextCandidates = memoryCache.selectChannels(model, ag);
+                        if (nextCandidates && nextCandidates.length > 0) {
+                            groupsTried.add(ag);
+                            effectiveGroup = ag;
+                            log.info(`[Dispatcher] Cross-group retry: switching to group ${ag} for model ${model}`);
+                            // Reset the channel loop with new candidates
+                            // We'll handle this by continuing the outer retry
+                            break;
+                        }
+                    }
+                }
+
                 // Transparent Error Logging (Logged with $0.00 cost)
                 await billAndLog({
                     userId: user.id,
@@ -938,7 +1039,7 @@ export async function dispatch(options: DispatchOptions) {
                     modelName: model,
                     promptTokens: 0,
                     completionTokens: 0,
-                    userGroup: user.group,
+                    userGroup: effectiveGroup,
                     isStream,
                     isPackageFree,
                     statusCode: getErrorMessage(e)?.startsWith('Status') ? parseInt(getErrorMessage(e).split(' ')[1]) : 500,
@@ -1041,7 +1142,8 @@ function handleStreamBilling(
         externalTaskId?: string,
         externalUserId?: string,
         externalWorkspaceId?: string,
-        externalFeatureType?: string
+        externalFeatureType?: string,
+        userGroup?: string
     ) {
         (async () => {
             try {
@@ -1100,7 +1202,7 @@ function handleStreamBilling(
                     finalPromptTokens = estimate(promptText);
                 }
 
-                const actualCost = calculateCost(model, user.group, finalPromptTokens, finalCompletionTokens);
+                const actualCost = calculateCost(model, userGroup || user.group, finalPromptTokens, finalCompletionTokens);
                 await reconcileQuota({ userId: user.id, tokenId: token.id, preDeducted, actualCost });
                 await billAndLog({
                     userId: user.id,
@@ -1109,7 +1211,7 @@ function handleStreamBilling(
                     modelName: model,
                     promptTokens: finalPromptTokens,
                     completionTokens: finalCompletionTokens,
-                    userGroup: user.group,
+                    userGroup: userGroup || user.group,
                     isStream: true,
                     isPackageFree,
                     statusCode: statusCode,

@@ -40,6 +40,18 @@
     WebhookURL: '',
     Notify_On_Channel_Offline: 'true',
     ChannelSelectionStrategy: 'priority',
+    AutoGroups: '["vip","premium","default"]',
+    ChannelAffinityEnabled: 'false',
+    ModelRequestRateLimitEnabled: 'false',
+    ModelRequestRateLimitCount: '0',
+    ModelRequestRateLimitSuccessCount: '0',
+    ModelRequestRateLimitDurationMinutes: '1',
+    GroupModelRateLimits: '{}',
+    UPSTREAM_TIMEOUT_MS: '30000',
+    HEALTH_CHECK_INTERVAL: '60000',
+    HEALTH_CHECK_USE_PROMPT: 'false',
+    HEALTH_CHECK_PROMPT: 'Hi',
+    HEALTH_CHECK_TIMEOUT: '10000',
   });
 
   let loading = $state(true);
@@ -216,6 +228,42 @@
         { key: 'SemanticCacheThreshold', label: '语义相似度阈值', type: 'number', description: '0-1，越高越严格' },
         { key: 'SemanticCacheTTLHours', label: '缓存有效期 (小时)', type: 'number' },
         { key: 'SemanticCacheEmbeddingModel', label: 'Embedding 模型', type: 'text' },
+      ],
+    },
+    {
+      title: '渠道选择与亲和',
+      fields: [
+        { key: 'AutoGroups', label: 'Auto 分组列表', type: 'text', description: 'JSON 数组，如 ["vip","premium","default"]' },
+        { key: 'ChannelAffinityEnabled', label: '渠道亲和', type: 'select', options: [
+          { label: '启用', value: 'true' },
+          { label: '禁用', value: 'false' },
+        ], description: '同一用户/会话固定到同一渠道' },
+      ],
+    },
+    {
+      title: '模型请求限流',
+      fields: [
+        { key: 'ModelRequestRateLimitEnabled', label: '启用限流', type: 'select', options: [
+          { label: '启用', value: 'true' },
+          { label: '禁用', value: 'false' },
+        ]},
+        { key: 'ModelRequestRateLimitCount', label: '总请求数/窗口', type: 'number', description: '0 = 不限' },
+        { key: 'ModelRequestRateLimitSuccessCount', label: '成功请求数/窗口', type: 'number', description: '0 = 不限' },
+        { key: 'ModelRequestRateLimitDurationMinutes', label: '窗口时长(分钟)', type: 'number' },
+        { key: 'GroupModelRateLimits', label: '分组限流覆盖', type: 'text', description: 'JSON，如 {"vip":{"total":100,"success":80}}' },
+      ],
+    },
+    {
+      title: '上游超时与健康检查',
+      fields: [
+        { key: 'UPSTREAM_TIMEOUT_MS', label: '上游超时(ms)', type: 'number' },
+        { key: 'HEALTH_CHECK_INTERVAL', label: '健康检查间隔(ms)', type: 'number' },
+        { key: 'HEALTH_CHECK_USE_PROMPT', label: '健康检查用Prompt', type: 'select', options: [
+          { label: '启用', value: 'true' },
+          { label: '禁用', value: 'false' },
+        ]},
+        { key: 'HEALTH_CHECK_PROMPT', label: '健康检查Prompt', type: 'text' },
+        { key: 'HEALTH_CHECK_TIMEOUT', label: '健康检查超时(ms)', type: 'number' },
       ],
     },
     {

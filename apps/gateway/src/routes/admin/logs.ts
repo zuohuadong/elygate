@@ -251,4 +251,118 @@ export const logsRouter = new Elysia()
             page,
             limit
         };
+    })
+    // --- Log Statistics (Admin) ---
+    .get('/logs/stat', async ({ query }: ElysiaCtx) => {
+        const hours = Number(query?.hours) || 24;
+        const stats = await sql`
+            SELECT 
+                COUNT(*) as total_requests,
+                COUNT(CASE WHEN status_code < 400 THEN 1 END) as success_count,
+                COUNT(CASE WHEN status_code >= 400 THEN 1 END) as error_count,
+                SUM(quota_cost) as total_cost,
+                SUM(prompt_tokens) as total_prompt_tokens,
+                SUM(completion_tokens) as total_completion_tokens,
+                AVG(CASE WHEN status_code < 400 THEN elapsed_ms END)::int as avg_latency_ms,
+                COUNT(DISTINCT user_id) as unique_users,
+                COUNT(DISTINCT model_name) as unique_models
+            FROM logs 
+            WHERE created_at > NOW() - (${hours}::int * INTERVAL '1 hour')
+        `;
+        return stats[0];
+    })
+
+    // --- Self Log Statistics (User) ---
+    .get('/logs/self/stat', async ({ user, query }: ElysiaCtx) => {
+        if (!user) return { success: false, message: 'Not authenticated' };
+        const hours = Number(query?.hours) || 24;
+        const stats = await sql`
+            SELECT 
+                COUNT(*) as total_requests,
+                COUNT(CASE WHEN status_code < 400 THEN 1 END) as success_count,
+                SUM(quota_cost) as total_cost,
+                SUM(prompt_tokens + completion_tokens) as total_tokens,
+                COUNT(DISTINCT model_name) as unique_models
+            FROM logs 
+            WHERE user_id = ${user.id} AND created_at > NOW() - (${hours}::int * INTERVAL '1 hour')
+        `;
+        return stats[0];
+    })
+
+    // --- Self Logs (User's own logs) ---
+    .get('/logs/self', async ({ user, query }: ElysiaCtx) => {
+        if (!user) return { success: false, message: 'Not authenticated' };
+        const page = Number(query?.page) || 1;
+        const limit = Number(query?.limit) || 50;
+        const offset = (page - 1) * limit;
+        const [countRow] = await sql`SELECT COUNT(*) as total FROM logs WHERE user_id = ${user.id}`;
+        const data = await sql`
+            SELECT id, model_name, prompt_tokens, completion_tokens, quota_cost, status_code,
+                   is_stream, created_at, channel_id, error_message, elapsed_ms
+            FROM logs 
+            WHERE user_id = ${user.id}
+            ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}
+        `;
+        return { data, total: countRow.total, page, limit };
+    })
+
+    // --- Self Log Search (User's own logs) ---
+    .get('/logs/self/search', async ({ user, query }: ElysiaCtx) => {
+        if (!user) return { success: false, message: 'Not authenticated' };
+        const keyword = (query?.keyword || '').trim();
+        const model = query?.model;
+        const page = Number(query?.page) || 1;
+        const limit = Number(query?.limit) || 50;
+        const offset = (page - 1) * limit;
+        if (!keyword && !model) return { success: false, message: 'Provide keyword or model' };
+
+        const [countRow] = await sql`
+            SELECT COUNT(*) as total FROM logs 
+            WHERE user_id = ${user.id}
+              AND (${keyword || null} IS NULL OR model_name ILIKE ${'%' + keyword + '%'})
+              AND (${model || null} IS NULL OR model_name = ${model})
+        `;
+        const data = await sql`
+            SELECT id, model_name, prompt_tokens, completion_tokens, quota_cost, status_code,
+                   is_stream, created_at, error_message, elapsed_ms
+            FROM logs 
+            WHERE user_id = ${user.id}
+              AND (${keyword || null} IS NULL OR model_name ILIKE ${'%' + keyword + '%'})
+              AND (${model || null} IS NULL OR model_name = ${model})
+            ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}
+        `;
+        return { data, total: countRow.total, page, limit };
+    })
+
+    // --- Token Read-Only Logs ---
+    .get('/logs/token', async ({ query, request, set }: ElysiaCtx) => {
+        const authHeader = request.headers.get('authorization');
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            set.status = 401;
+            return { success: false, message: 'Missing Authorization header' };
+        }
+        const apiKey = authHeader.substring(7);
+        const [tokenRow] = await sql`SELECT id, user_id FROM tokens WHERE key = ${apiKey} AND status = 1 LIMIT 1`;
+        if (!tokenRow) { set.status = 401; return { success: false, message: 'Invalid token' }; }
+
+        const page = Number(query?.page) || 1;
+        const limit = Number(query?.limit) || 50;
+        const offset = (page - 1) * limit;
+        const [countRow] = await sql`SELECT COUNT(*) as total FROM logs WHERE token_id = ${tokenRow.id}`;
+        const data = await sql`
+            SELECT id, model_name, prompt_tokens, completion_tokens, quota_cost, status_code,
+                   is_stream, created_at, elapsed_ms
+            FROM logs 
+            WHERE token_id = ${tokenRow.id}
+            ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}
+        `;
+        return { data, total: countRow.total, page, limit };
+    })
+
+    // --- Delete Old Logs ---
+    .delete('/logs/history', async ({ query }: ElysiaCtx) => {
+        const days = Number(query?.days) || 30;
+        const result = await sql`DELETE FROM logs WHERE created_at < NOW() - (${days}::int * INTERVAL '1 day')`;
+        return { success: true, deleted: result.count || 0, olderThanDays: days };
     });
+

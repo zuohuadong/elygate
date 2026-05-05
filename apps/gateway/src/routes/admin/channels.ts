@@ -652,4 +652,196 @@ export const channelsRouter = new Elysia()
             await refreshAllCaches();
             return { success: true, modelsCount: upstreamModels.length };
         } catch (e: unknown) { set.status = 500; return { success: false, message: getErrorMessage(e) }; }
+    })
+    // --- Channel Search ---
+    .get('/channels/search', async ({ query }: ElysiaCtx) => {
+        const keyword = (query?.keyword || '').trim();
+        const tag = query?.tag;
+        const type = query?.type;
+        const status = query?.status;
+        let whereParts = [];
+        let params: any[] = [];
+        if (keyword) {
+            const results = await sql`
+                SELECT id, name, type, base_url AS "baseUrl", models, status, tag, priority, weight, created_at
+                FROM channels
+                WHERE name ILIKE ${'%' + keyword + '%'} OR CAST(id AS TEXT) ILIKE ${'%' + keyword + '%'}
+                ORDER BY id DESC LIMIT 100
+            `;
+            return results;
+        }
+        // Filter in SQL
+        const rows = await sql`
+            SELECT id, name, type, base_url AS "baseUrl", models, status, tag, priority, weight, created_at
+            FROM channels
+            WHERE (${keyword || undefined} IS NULL OR name ILIKE ${'%' + (keyword || '') + '%'})
+              AND (${tag || null} IS NULL OR tag = ${tag || ''})
+              AND (${type ?? null} IS NULL OR type = ${Number(type) || 0})
+              AND (${status ?? null} IS NULL OR status = ${Number(status) || 0})
+            ORDER BY id DESC LIMIT 200
+        `;
+        return rows;
+    })
+
+    // --- Batch Delete Channels ---
+    .post('/channels/batch/delete', async ({ body, set }: ElysiaCtx) => {
+        const ids: number[] = (body as any).ids || [];
+        if (ids.length === 0) return { success: false, message: 'No IDs provided' };
+        if (ids.length > 500) return { success: false, message: 'Max 500 channels at once' };
+        await sql`DELETE FROM channels WHERE id IN ${sql(ids)}`;
+        await refreshAllCaches();
+        return { success: true, deleted: ids.length };
+    }, { body: t.Object({ ids: t.Array(t.Number()) }) })
+
+    // --- Delete All Disabled Channels ---
+    .delete('/channels/disabled', async () => {
+        const result = await sql`DELETE FROM channels WHERE status = 2 OR status = 3`;
+        await refreshAllCaches();
+        return { success: true, deleted: result.count };
+    })
+
+    // --- Get Tag Models (union of all models across channels with this tag) ---
+    .get('/channels/tag/:tag/models', async ({ params: { tag } }: ElysiaCtx) => {
+        const rows = await sql`
+            SELECT models FROM channels WHERE tag = ${tag} AND status = 1
+        `;
+        const modelSet = new Set<string>();
+        for (const row of rows) {
+            const models: string[] = Array.isArray(row.models) ? row.models : (typeof row.models === 'string' ? JSON.parse(row.models || '[]') : []);
+            for (const m of models) modelSet.add(m);
+        }
+        return { success: true, tag, models: Array.from(modelSet).sort(), count: modelSet.size };
+    })
+
+    // --- Enabled Models List (all models with at least one active channel) ---
+    .get('/channels/enabled-models', async () => {
+        const rows = await sql`
+            SELECT models FROM channels WHERE status = 1
+        `;
+        const modelSet = new Set<string>();
+        for (const row of rows) {
+            const models: string[] = Array.isArray(row.models) ? row.models : (typeof row.models === 'string' ? JSON.parse(row.models || '[]') : []);
+            for (const m of models) modelSet.add(m);
+        }
+        return { success: true, models: Array.from(modelSet).sort(), count: modelSet.size };
+    })
+
+    // --- Multi-Key Batch Manage ---
+    .post('/channels/:id/keys/manage', async ({ params: { id }, body, set }: ElysiaCtx) => {
+        const b = body as Record<string, any>;
+        const [channel] = await sql`SELECT key, key_status, channel_info FROM channels WHERE id = ${Number(id)} LIMIT 1`;
+        if (!channel) { set.status = 404; return { success: false, message: 'Channel not found' }; }
+
+        let keys = channel.key.split('\n').map((k: string) => k.trim()).filter(Boolean);
+        const statusMap = (typeof channel.key_status === 'string' ? JSON.parse(channel.key_status) : channel.key_status) || {};
+        const info = (typeof channel.channel_info === 'string' ? JSON.parse(channel.channel_info) : channel.channel_info) || {};
+
+        if (b.action === 'add' && Array.isArray(b.keys)) {
+            // Add new keys
+            keys = [...keys, ...b.keys.map((k: string) => k.trim()).filter(Boolean)];
+        } else if (b.action === 'remove' && Array.isArray(b.keyIndices)) {
+            // Remove keys by index (descending to preserve indices)
+            const toRemove = new Set(b.keyIndices.map((i: number) => Number(i)));
+            keys = keys.filter((_: string, i: number) => !toRemove.has(i));
+            // Clean status map
+            const newStatusMap: Record<string, string> = {};
+            for (const k of keys) {
+                if (statusMap[k]) newStatusMap[k] = statusMap[k];
+            }
+            Object.assign(statusMap, newStatusMap);
+        } else if (b.action === 'replace' && typeof b.keys === 'string') {
+            // Replace all keys
+            keys = b.keys.split('\n').map((k: string) => k.trim()).filter(Boolean);
+        } else {
+            return { success: false, message: 'Invalid action. Use: add, remove, replace' };
+        }
+
+        const encryptedKey = encryptChannelKeys(keys.join('\n'));
+        info.isMultiKey = keys.length > 1;
+        info.multiKeySize = keys.length;
+
+        await sql`UPDATE channels SET key = ${encryptedKey}, key_status = ${statusMap}, channel_info = ${info}, updated_at = NOW() WHERE id = ${Number(id)}`;
+        await refreshAllCaches();
+        return { success: true, keyCount: keys.length };
+    }, { body: t.Object({ action: t.String(), keys: t.Optional(t.Any()), keyIndices: t.Optional(t.Array(t.Number())) }) })
+
+    // --- Per-Key Test ---
+    .post('/channels/:id/keys/:keyIndex/test', async ({ params: { id, keyIndex }, set }: ElysiaCtx) => {
+        const idx = Number(keyIndex);
+        const [channel] = await sql`SELECT * FROM channels WHERE id = ${Number(id)} LIMIT 1`;
+        if (!channel) { set.status = 404; return { success: false, message: 'Channel not found' }; }
+
+        const keys = getChannelKeys(channel.key);
+        if (idx < 0 || idx >= keys.length) {
+            return { success: false, message: `Key index ${idx} out of range (0-${keys.length - 1})` };
+        }
+
+        const testKey = keys[idx];
+        const modelsOpt = typeof channel.models === 'string' ? JSON.parse(channel.models) : channel.models;
+        const testModel = channel.test_model || (Array.isArray(modelsOpt) && modelsOpt.length > 0 ? modelsOpt[0] : 'gpt-3.5-turbo');
+
+        const handler = getProviderHandler(channel.type);
+        const bodyPayload = { model: testModel, messages: [{ role: 'user', content: 'hi' }], max_tokens: 1 };
+        const transformedBody = handler.transformRequest(bodyPayload, testModel);
+
+        const baseUrl = (channel.base_url || (apiUrls as any).openaiDefault).replace(/\/+$/, '');
+        const testUrl = buildTestUrl(baseUrl, channel.type, testModel);
+
+        const startTime = Date.now();
+        try {
+            const res = await fetch(testUrl, {
+                method: 'POST',
+                headers: handler.buildHeaders(testKey),
+                body: JSON.stringify(transformedBody)
+            });
+            const latency = Date.now() - startTime;
+            const result: Record<string, any> = { keyIndex: idx, latency, success: res.ok };
+            if (!res.ok) {
+                const text = await res.text().catch(() => '');
+                result.status = res.status;
+                result.error = text.substring(0, 200);
+            }
+            return result;
+        } catch (e: unknown) {
+            return { keyIndex: idx, latency: Date.now() - startTime, success: false, error: e instanceof Error ? e.message : String(e) };
+        }
+    })
+
+    // --- Multi-Key Status Detail ---
+    .get('/channels/:id/keys/status', async ({ params: { id }, set }: ElysiaCtx) => {
+        const [channel] = await sql`SELECT key, key_status, channel_info FROM channels WHERE id = ${Number(id)} LIMIT 1`;
+        if (!channel) { set.status = 404; return { success: false, message: 'Channel not found' }; }
+
+        const keys = channel.key.split('\n').map((k: string) => k.trim()).filter(Boolean);
+        const statusMap = (typeof channel.key_status === 'string' ? JSON.parse(channel.key_status) : channel.key_status) || {};
+        const info = (typeof channel.channel_info === 'string' ? JSON.parse(channel.channel_info) : channel.channel_info) || {};
+        const mkStatusList: Record<number, number> = info.multiKeyStatusList || {};
+        const mkDisabledReason: Record<number, string> = info.multiKeyDisabledReason || {};
+        const mkDisabledTime: Record<number, number> = info.multiKeyDisabledTime || {};
+
+        return {
+            success: true,
+            totalKeys: keys.length,
+            keys: keys.map((k: string, i: number) => ({
+                index: i,
+                masked: k.substring(0, 8) + '...' + k.substring(k.length - 4),
+                status: statusMap[k]?.status || statusMap[k] || (mkStatusList[i] === 0 ? 'disabled' : 'active'),
+                reason: mkDisabledReason[i] || statusMap[k]?.reason || null,
+                disabledAt: mkDisabledTime[i] ? new Date(mkDisabledTime[i]).toISOString() : null,
+            }))
+        };
+    })
+
+    // --- Channel Affinity Stats ---
+    .get('/channels/affinity/stats', async () => {
+        const { getAffinityStats } = await import('../../services/channelAffinity');
+        return getAffinityStats();
+    })
+
+    // --- Clear Channel Affinity ---
+    .delete('/channels/affinity', async () => {
+        const { clearAffinityCache } = await import('../../services/channelAffinity');
+        const cleared = clearAffinityCache();
+        return { success: true, cleared };
     });
+

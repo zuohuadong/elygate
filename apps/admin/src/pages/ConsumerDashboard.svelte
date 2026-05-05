@@ -9,6 +9,11 @@
   let topupCode = $state('');
   let redeeming = $state(false);
   let message = $state({ type: '', text: '' });
+  let checkinStatus = $state({ enabled: false, checkedIn: false, reward: 0 });
+  let affInfo = $state({ code: '', inviteCount: 0, totalReward: 0 });
+  let tokens = $state<any[]>([]);
+  let newTokenName = $state('');
+  let creatingToken = $state(false);
 
   const quotaPerUnit = 500000; // 1 USD = 500000 quota units
 
@@ -23,15 +28,21 @@
       const headers: Record<string, string> = {};
       if (token) headers['Authorization'] = `Bearer ${token}`;
 
-      const [infoRes, logsRes] = await Promise.all([
+      const [infoRes, logsRes, checkinRes, affRes, tokensRes] = await Promise.all([
         fetch('/api/auth/user/info', { credentials: 'include', headers }),
         fetch('/api/auth/user/logs?limit=5', { credentials: 'include', headers }),
+        fetch('/api/admin/self/checkin', { credentials: 'include', headers }).catch(() => null),
+        fetch('/api/admin/self/aff', { credentials: 'include', headers }).catch(() => null),
+        fetch('/api/admin/self/tokens', { credentials: 'include', headers }).catch(() => null),
       ]);
       if (infoRes.ok) userInfo = await infoRes.json();
       if (logsRes.ok) {
         const data = await logsRes.json();
         logs = data.data || (Array.isArray(data) ? data : []);
       }
+      if (checkinRes?.ok) { const d = await checkinRes.json(); if (d.success) checkinStatus = d.data; }
+      if (affRes?.ok) { const d = await affRes.json(); if (d.success) affInfo = d.data; }
+      if (tokensRes?.ok) { const d = await tokensRes.json(); tokens = d.data || []; }
     } catch (e) {
       console.error('Failed to load user data', e);
     } finally {
@@ -68,6 +79,55 @@
     } finally {
       redeeming = false;
     }
+  }
+
+  async function handleCheckin() {
+    try {
+      const token = localStorage.getItem('auth_token');
+      const res = await fetch('/api/admin/self/checkin', {
+        method: 'POST', credentials: 'include',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      const data = await res.json();
+      if (data.success) {
+        message = { type: 'success', text: data.message };
+        checkinStatus = { ...checkinStatus, checkedIn: true };
+        await loadData();
+        setTimeout(() => message = { type: '', text: '' }, 3000);
+      } else {
+        message = { type: 'error', text: data.message };
+      }
+    } catch (e: any) { message = { type: 'error', text: e.message }; }
+  }
+
+  async function handleCreateToken() {
+    if (!newTokenName.trim()) return;
+    creatingToken = true;
+    try {
+      const token = localStorage.getItem('auth_token');
+      const res = await fetch('/api/admin/self/tokens', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ name: newTokenName }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        newTokenName = '';
+        await loadData();
+      }
+    } catch (e: any) { message = { type: 'error', text: e.message }; }
+    finally { creatingToken = false; }
+  }
+
+  async function handleDeleteToken(id: number) {
+    try {
+      const token = localStorage.getItem('auth_token');
+      await fetch(`/api/admin/self/tokens/${id}`, {
+        method: 'DELETE', credentials: 'include',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      await loadData();
+    } catch (e: any) { message = { type: 'error', text: e.message }; }
   }
 
   const balanceUsd = $derived(userInfo ? (userInfo.quota / quotaPerUnit) : 0);
@@ -155,5 +215,58 @@
         </div>
       </Card.Content>
     </Card.Root>
+
+    <!-- Checkin, Aff & Tokens row -->
+    <div class="grid gap-6 lg:grid-cols-3">
+      <!-- Checkin -->
+      <Card.Root>
+        <Card.Header><Card.Title>每日签到</Card.Title></Card.Header>
+        <Card.Content>
+          {#if checkinStatus.enabled}
+            <Button class="w-full" disabled={checkinStatus.checkedIn} onclick={handleCheckin}>
+              {checkinStatus.checkedIn ? '已签到' : `签到 (+${checkinStatus.reward} 额度)`}
+            </Button>
+          {:else}
+            <p class="text-sm text-muted-foreground">签到功能未启用</p>
+          {/if}
+        </Card.Content>
+      </Card.Root>
+
+      <!-- Affiliate -->
+      <Card.Root>
+        <Card.Header><Card.Title>邀请返利</Card.Title></Card.Header>
+        <Card.Content class="space-y-2">
+          {#if affInfo.code}
+            <div class="font-mono text-sm bg-muted p-2 rounded select-all">{affInfo.code}</div>
+            <p class="text-xs text-muted-foreground">已邀请 {affInfo.inviteCount} 人，累计奖励 {affInfo.totalReward}</p>
+          {:else}
+            <p class="text-sm text-muted-foreground">暂无邀请码</p>
+          {/if}
+        </Card.Content>
+      </Card.Root>
+
+      <!-- Create Token -->
+      <Card.Root>
+        <Card.Header><Card.Title>快速创建令牌</Card.Title></Card.Header>
+        <Card.Content>
+          <div class="flex gap-2">
+            <input bind:value={newTokenName} placeholder="令牌名称" class="flex-1 h-8 rounded border px-2 text-sm" />
+            <Button size="sm" disabled={creatingToken} onclick={handleCreateToken}>
+              {creatingToken ? '...' : '创建'}
+            </Button>
+          </div>
+          {#if tokens.length > 0}
+            <div class="mt-3 space-y-1 max-h-32 overflow-y-auto">
+              {#each tokens.slice(0, 5) as tk}
+                <div class="flex items-center justify-between text-xs py-1">
+                  <span class="font-mono truncate">{tk.name}: {tk.key}</span>
+                  <button class="text-destructive" onclick={() => handleDeleteToken(tk.id)}>X</button>
+                </div>
+              {/each}
+            </div>
+          {/if}
+        </Card.Content>
+      </Card.Root>
+    </div>
   {/if}
 </div>

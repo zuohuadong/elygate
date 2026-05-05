@@ -1,9 +1,19 @@
 import type { ElysiaCtx } from '../../types';
-import { Elysia } from 'elysia';
+import { Elysia, t } from 'elysia';
 import { getErrorMessage } from '../../utils/error';
 import { sql } from '@elygate/db';
 import { optionCache } from '../../services/optionCache';
 import { getLangFromHeader } from '../../utils/i18n';
+
+
+function maskTokenKey(t: Record<string, any>): Record<string, any> {
+    if (!t.key) return t;
+    const k = String(t.key);
+    return {
+        ...t,
+        key: k.length > 12 ? k.substring(0, 8) + '...' + k.substring(k.length - 4) : '***'
+    };
+}
 
 export const usersRouter = new Elysia()
     // --- Token Management ---
@@ -16,7 +26,7 @@ export const usersRouter = new Elysia()
             LEFT JOIN users u ON t.user_id = u.id
             ORDER BY t.id DESC
         `;
-        return tokens.map((t: Record<string, any>) => ({
+        return tokens.map((t: Record<string, any>) => maskTokenKey({
             id: t.id,
             name: t.name,
             key: t.key,
@@ -269,4 +279,76 @@ export const usersRouter = new Elysia()
 
         await sql`DELETE FROM users WHERE id = ${Number(id)}`;
         return { success: true, message: lang === 'zh' ? '删除成功' : 'Deleted successfully' };
+    })
+    // --- Token Search ---
+    .get('/tokens/search', async ({ query }: ElysiaCtx) => {
+        const keyword = (query?.keyword || '').trim();
+        const userId = query?.user_id;
+        const status = query?.status;
+        if (!keyword && !userId && status === undefined) {
+            return { success: false, message: 'Provide keyword, user_id, or status' };
+        }
+        const rows = await sql`
+            SELECT t.id, t.name, t.key, t.status, t.remain_quota, t.used_quota, t.created_at, t.models,
+                   t.subnet, t.allow_ips, t.rate_limit, t.expired_at, t.unlimited_quota, t.model_limits_enabled,
+                   t.token_group, t.cross_group_retry, t.accessed_at, t.user_id, u.username as creator_name
+            FROM tokens t
+            LEFT JOIN users u ON t.user_id = u.id
+            WHERE (${keyword || null} IS NULL OR t.name ILIKE ${'%' + keyword + '%'})
+              AND (${userId || null} IS NULL OR t.user_id = ${Number(userId) || 0})
+              AND (${status ?? null} IS NULL OR t.status = ${Number(status) || 0})
+            ORDER BY t.id DESC LIMIT 100
+        `;
+        return rows.map(maskTokenKey);
+    })
+
+    // --- Token Batch Delete ---
+    .post('/tokens/batch/delete', async ({ body, set }: ElysiaCtx) => {
+        const ids: number[] = (body as any).ids || [];
+        if (ids.length === 0) return { success: false, message: 'No IDs provided' };
+        if (ids.length > 100) return { success: false, message: 'Max 100 tokens at once' };
+        const result = await sql`DELETE FROM tokens WHERE id IN ${sql(ids)}`;
+        return { success: true, deleted: result.count || ids.length };
+    }, { body: t.Object({ ids: t.Array(t.Number()) }) })
+
+    // --- Token Batch Get Keys ---
+    .post('/tokens/batch/keys', async ({ body, user, set }: ElysiaCtx) => {
+        const ids: number[] = (body as any).ids || [];
+        if (ids.length === 0) return { success: false, message: 'No IDs provided' };
+        if (ids.length > 100) return { success: false, message: 'Max 100 tokens at once' };
+        const rows = await sql`
+            SELECT id, key FROM tokens WHERE id IN ${sql(ids)}
+        `;
+        const keysMap: Record<number, string> = {};
+        for (const r of rows) keysMap[r.id] = r.key;
+        return { success: true, keys: keysMap };
+    }, { body: t.Object({ ids: t.Array(t.Number()) }) })
+
+    // --- Single Token Usage ---
+    .get('/tokens/:id/usage', async ({ params: { id }, set }: ElysiaCtx) => {
+        const [token] = await sql`SELECT id, name, remain_quota, used_quota, unlimited_quota FROM tokens WHERE id = ${Number(id)} LIMIT 1`;
+        if (!token) { set.status = 404; return { success: false, message: 'Token not found' }; }
+        
+        const [stats] = await sql`
+            SELECT 
+                COUNT(*) as total_requests,
+                SUM(quota_cost) as total_cost,
+                SUM(prompt_tokens) as total_prompt_tokens,
+                SUM(completion_tokens) as total_completion_tokens,
+                MAX(created_at) as last_used
+            FROM logs WHERE token_id = ${Number(id)}
+        `;
+        return { token, stats };
+    })
+
+    // --- Regenerate Token Key ---
+    .post('/tokens/:id/regenerate', async ({ params: { id }, set }: ElysiaCtx) => {
+        const [oldToken] = await sql`SELECT * FROM tokens WHERE id = ${Number(id)} LIMIT 1`;
+        if (!oldToken) { set.status = 404; return { success: false, message: 'Token not found' }; }
+        const newKey = `sk-${Bun.randomUUIDv7('hex')}`;
+        const [result] = await sql`
+            UPDATE tokens SET key = ${newKey}, updated_at = NOW() WHERE id = ${Number(id)} RETURNING *
+        `;
+        return { success: true, token: maskTokenKey(result) };
     });
+
