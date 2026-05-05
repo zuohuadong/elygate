@@ -865,3 +865,20 @@ CREATE INDEX IF NOT EXISTS idx_channels_status ON channels(status);
 CREATE INDEX IF NOT EXISTS idx_channels_type ON channels(type);
 
 CREATE INDEX IF NOT EXISTS idx_tokens_user_id ON tokens(user_id);
+
+-- ============================================================
+-- Vendors table (New API parity)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS vendors (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    type INTEGER DEFAULT 0,
+    base_url TEXT DEFAULT '',
+    logo_url TEXT DEFAULT '',
+    description TEXT DEFAULT '',
+    config JSONB DEFAULT '{}',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_vendors_type ON vendors(type);

@@ -17,6 +17,12 @@ import { NvidiaApiHandler } from './nvidia';
 import { ComfyUIProviderHandler } from './comfyui';
 import { DakkaApiHandler } from './dakka';
 import { ZhipuProvider } from './zhipu';
+import { OpenRouterApiHandler } from './openrouter';
+import { CohereApiHandler } from './cohere';
+import { MistralApiHandler } from './mistral';
+import { OllamaApiHandler } from './ollama';
+import { MoonshotApiHandler } from './moonshot';
+import { SiliconFlowApiHandler } from './siliconflow';
 
 export function getProviderHandler(type: number, baseUrl?: string): ProviderHandler {
     switch (type) {
@@ -27,6 +33,7 @@ export function getProviderHandler(type: number, baseUrl?: string): ProviderHand
         case ChannelType.ALI: return AliApiHandler;
         case ChannelType.XUNFEI: return XunfeiApiHandler;
         case ChannelType.MIDJOURNEY: return MidjourneyApiHandler;
+        case ChannelType.MIDJOURNEY_PLUS: return MidjourneyApiHandler;
         case ChannelType.DEEPSEEK: return DeepSeekApiHandler;
         case ChannelType.SUNO: return SunoApiHandler;
         case ChannelType.FLUX: return FluxApiHandler;
@@ -35,9 +42,28 @@ export function getProviderHandler(type: number, baseUrl?: string): ProviderHand
         case ChannelType.NVIDIA: return NvidiaApiHandler;
         case ChannelType.DAKKA: return DakkaApiHandler;
         case ChannelType.COMFYUI: return ComfyUIProviderHandler;
-        // We can safely route everything else (including OpenAI standard) to OpenAIApiHandler.
-        // Kling can be managed in video router specifically if it doesn't have a unique enum,
-        // but default handles standard passthrough.
+        case ChannelType.OPENROUTER: return OpenRouterApiHandler;
+        case ChannelType.COHERE: return CohereApiHandler;
+        case ChannelType.MISTRAL: return MistralApiHandler;
+        case ChannelType.OLLAMA: return OllamaApiHandler;
+        case ChannelType.MOONSHOT: return MoonshotApiHandler;
+        case ChannelType.SILICONFLOW: return SiliconFlowApiHandler;
+        case ChannelType.XAI: return OpenAIApiHandler;
+        case ChannelType.PERPLEXITY: return OpenAIApiHandler;
+        case ChannelType.MINIMAX: return OpenAIApiHandler;
+        case ChannelType.DIFY: return OpenAIApiHandler;
+        case ChannelType.CLOUDFLARE: return OpenAIApiHandler;
+        case ChannelType.VERTEX_AI: return GeminiApiHandler;
+        case ChannelType.VOLCENGINE: return OpenAIApiHandler;
+        case ChannelType.BAIDU_V2: return BaiduApiHandler;
+        case ChannelType.COZE: return OpenAIApiHandler;
+        case ChannelType.KLING: return KlingApiHandler;
+        case ChannelType.JIMENG: return OpenAIApiHandler;
+        case ChannelType.VIDU: return OpenAIApiHandler;
+        case ChannelType.SORA: return OpenAIApiHandler;
+        case ChannelType.REPLICATE: return OpenAIApiHandler;
+        case ChannelType.CODEX: return OpenAIApiHandler;
+        case ChannelType.TENCENT: return OpenAIApiHandler;
         case ChannelType.OPENAI:
         default: {
             if (baseUrl?.includes('bigmodel.cn')) {
@@ -66,3 +92,9 @@ export * from './udio';
 export * from './nvidia';
 export * from './dakka';
 export * from './zhipu';
+export * from './openrouter';
+export * from './cohere';
+export * from './mistral';
+export * from './ollama';
+export * from './moonshot';
+export * from './siliconflow';

@@ -53,6 +53,7 @@ async function init() {
   const { editsRouter } = await import('./routes/edits');
   const { realtimeRouter } = await import('./routes/realtime');
   const { openaiEnterpriseRouter } = await import('./routes/openai-enterprise');
+  const { fineTuneRouter } = await import('./routes/fine-tune');
 
   const app = new Elysia()
     .use(cors({
@@ -127,6 +128,7 @@ async function init() {
         .use(editsRouter)
         .use(realtimeRouter)
         .use(openaiEnterpriseRouter)
+        .use(fineTuneRouter)
     )
     .use(geminiRouter)
     .use(aliRouter)   // Ali often uses /api/v1/...

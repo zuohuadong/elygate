@@ -87,6 +87,7 @@
     { label: '分组', icon: 'folder', href: '/user-groups' },
     { label: '套餐', icon: 'package', href: '/packages' },
     { label: '兑换码', icon: 'gift', href: '/redemptions' },
+    { label: '供应商', icon: 'building', href: '/vendors' },
     { label: '限流策略', icon: 'shield', href: '/rate-limits' },
     { label: '模型管理', icon: 'cpu', href: '/models-meta' },
     { label: '倍率管理', icon: 'coins', href: '/pricing-editor' },

@@ -14,6 +14,7 @@ import { modelsAdminRouter } from './models';
 import { contentRouter } from './content';
 import { userSelfServiceRouter } from './userSelfService';
 import { performanceRouter } from './performance';
+import { vendorsRouter } from './vendors';
 
 /**
  * Refresh both memory cache and option cache.
@@ -48,4 +49,5 @@ export const adminRouter = new Elysia()
     .use(modelsAdminRouter)
     .use(contentRouter)
     .use(userSelfServiceRouter)
-    .use(performanceRouter);
+    .use(performanceRouter)
+    .use(vendorsRouter);

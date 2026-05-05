@@ -843,5 +843,256 @@ export const channelsRouter = new Elysia()
         const { clearAffinityCache } = await import('../../services/channelAffinity');
         const cleared = clearAffinityCache();
         return { success: true, cleared };
-    });
+    })
 
+    // --- Test All Channels ---
+    .get('/channels/test', async () => {
+        const channels = await sql`SELECT id, name, type, base_url, key, models, test_model, endpoint_type FROM channels WHERE status = 1`;
+        const results = [];
+        for (const ch of channels) {
+            const handler = getProviderHandler(ch.type);
+            const keys = getChannelKeys(ch.key);
+            if (keys.length === 0) { results.push({ id: ch.id, name: ch.name, success: false, message: 'No keys' }); continue; }
+            const testKey = keys[0];
+            const modelsOpt = typeof ch.models === 'string' ? JSON.parse(ch.models) : ch.models;
+            const testModel = ch.test_model || (Array.isArray(modelsOpt) && modelsOpt.length > 0 ? modelsOpt[0] : 'gpt-3.5-turbo');
+            const bodyPayload = { model: testModel, messages: [{ role: 'user', content: 'hi' }], max_tokens: 1 };
+            const baseUrl = (ch.base_url || '').replace(/\/+$/, '');
+            const testUrl = buildTestUrl(baseUrl, ch.type, testModel);
+            const startTime = Date.now();
+            try {
+                const res = await fetch(testUrl, { method: 'POST', headers: handler.buildHeaders(testKey), body: JSON.stringify(handler.transformRequest(bodyPayload, testModel)) });
+                results.push({ id: ch.id, name: ch.name, success: res.ok, latency: Date.now() - startTime, status: res.status });
+            } catch (e: unknown) {
+                results.push({ id: ch.id, name: ch.name, success: false, latency: Date.now() - startTime, message: e instanceof Error ? e.message : String(e) });
+            }
+        }
+        return { success: true, tested: results.length, results };
+    })
+
+    // --- Test Single Channel (GET compat with New API) ---
+    .get('/channels/test/:id', async ({ params: { id } }: ElysiaCtx) => {
+        const [channel] = await sql`SELECT * FROM channels WHERE id = ${Number(id)} LIMIT 1`;
+        if (!channel) throw new Error("Channel not found");
+        const handler = getProviderHandler(channel.type);
+        const keys = getChannelKeys(channel.key);
+        const testKey = keys[0] || '';
+        const modelsOpt = typeof channel.models === 'string' ? JSON.parse(channel.models) : channel.models;
+        const testModel = channel.test_model || (Array.isArray(modelsOpt) && modelsOpt.length > 0 ? modelsOpt[0] : 'gpt-3.5-turbo');
+        const bodyPayload = { model: testModel, messages: [{ role: 'user', content: 'hi' }], max_tokens: 1 };
+        const baseUrl = (channel.base_url || '').replace(/\/+$/, '');
+        const testUrl = buildTestUrl(baseUrl, channel.type, testModel);
+        const startTime = Date.now();
+        try {
+            const res = await fetch(testUrl, { method: 'POST', headers: handler.buildHeaders(testKey), body: JSON.stringify(handler.transformRequest(bodyPayload, testModel)) });
+            const latency = Date.now() - startTime;
+            if (!res.ok) {
+                const text = await res.text().catch(() => '');
+                return { success: false, latency, message: `Status ${res.status}: ${text.substring(0, 200)}` };
+            }
+            await sql`UPDATE channels SET test_at = NOW() WHERE id = ${Number(id)}`;
+            return { success: true, latency };
+        } catch (e: unknown) {
+            return { success: false, latency: Date.now() - startTime, message: e instanceof Error ? e.message : String(e) };
+        }
+    })
+
+    // --- Update All Channel Balances ---
+    .get('/channels/update_balance', async () => {
+        const channels = await sql`SELECT id, name, type, base_url, key FROM channels WHERE status = 1`;
+        const results = [];
+        for (const ch of channels) {
+            try {
+                const handler = getProviderHandler(ch.type);
+                const keys = getChannelKeys(ch.key);
+                if (keys.length === 0) continue;
+                const baseUrl = (ch.base_url || '').replace(/\/+$/, '');
+                let balanceUrl = baseUrl + '/dashboard/billing/credit_grants';
+                if (ch.type === ChannelType.AZURE) balanceUrl = baseUrl + '/status';
+                const res = await fetch(balanceUrl, { headers: handler.buildHeaders(keys[0]) }).catch(() => null);
+                if (res?.ok) {
+                    const data = await res.json().catch(() => ({}));
+                    const balance = data.total_available ?? data.total_granted ?? data.balance ?? 0;
+                    await sql`UPDATE channels SET balance = ${Number(balance)}, balance_updated_at = NOW() WHERE id = ${ch.id}`;
+                    results.push({ id: ch.id, name: ch.name, balance });
+                } else {
+                    results.push({ id: ch.id, name: ch.name, balance: null, message: 'Balance endpoint not supported' });
+                }
+            } catch (e: unknown) {
+                results.push({ id: ch.id, name: ch.name, balance: null, message: e instanceof Error ? e.message : 'Error' });
+            }
+        }
+        return { success: true, checked: results.length, results };
+    })
+
+    // --- Update Single Channel Balance ---
+    .get('/channels/update_balance/:id', async ({ params: { id }, set }: ElysiaCtx) => {
+        const [channel] = await sql`SELECT * FROM channels WHERE id = ${Number(id)} LIMIT 1`;
+        if (!channel) { set.status = 404; return { success: false, message: 'Channel not found' }; }
+        const handler = getProviderHandler(channel.type);
+        const keys = getChannelKeys(channel.key);
+        if (keys.length === 0) return { success: false, message: 'No keys configured' };
+        const baseUrl = (channel.base_url || '').replace(/\/+$/, '');
+        let balanceUrl = baseUrl + '/dashboard/billing/credit_grants';
+        try {
+            const res = await fetch(balanceUrl, { headers: handler.buildHeaders(keys[0]) });
+            if (!res.ok) return { success: false, message: `Balance endpoint returned ${res.status}` };
+            const data = await res.json();
+            const balance = data.total_available ?? data.total_granted ?? data.balance ?? 0;
+            await sql`UPDATE channels SET balance = ${Number(balance)}, balance_updated_at = NOW() WHERE id = ${Number(id)}`;
+            return { success: true, balance };
+        } catch (e: unknown) {
+            set.status = 500;
+            return { success: false, message: getErrorMessage(e) };
+        }
+    })
+
+    // --- Fetch Models for Single Channel ---
+    .get('/channels/fetch_models/:id', async ({ params: { id }, set }: ElysiaCtx) => {
+        const [channel] = await sql`SELECT * FROM channels WHERE id = ${Number(id)} LIMIT 1`;
+        if (!channel) { set.status = 404; return { success: false, message: 'Channel not found' }; }
+        const handler = getProviderHandler(channel.type);
+        const keys = getChannelKeys(channel.key);
+        const testKey = keys[0] || '';
+        const baseUrl = (channel.base_url || '').replace(/\/+$/, '');
+        const modelsUrl = buildModelsUrl(baseUrl, channel.type);
+        try {
+            const res = await fetch(modelsUrl, { headers: handler.buildHeaders(testKey) });
+            if (!res.ok) return { success: false, message: `Upstream error: ${res.status}` };
+            const data = await res.json();
+            let models: string[] = [];
+            if (channel.type === ChannelType.GEMINI) {
+                models = data.models?.map((m: any) => m.name?.replace('models/', '') || m.displayName).filter(Boolean) || [];
+            } else if (data.data) {
+                models = data.data.map((m: any) => m.id).filter(Boolean);
+            } else if (Array.isArray(data)) {
+                models = data.map((m: any) => m.id || m.name).filter(Boolean);
+            }
+            return { success: true, models, total: models.length };
+        } catch (e: unknown) {
+            set.status = 500;
+            return { success: false, message: getErrorMessage(e) };
+        }
+    })
+
+    // --- Fix Channel Abilities ---
+    .post('/channels/fix', async () => {
+        const channels = await sql`SELECT id, models FROM channels`;
+        let fixed = 0;
+        for (const ch of channels) {
+            const models: string[] = Array.isArray(ch.models) ? ch.models : (typeof ch.models === 'string' ? JSON.parse(ch.models || '[]') : []);
+            if (models.length > 0) {
+                await sql`UPDATE channels SET models = ${models} WHERE id = ${ch.id} AND (models IS NULL OR models = '[]'::jsonb)`;
+                fixed++;
+            }
+        }
+        await refreshAllCaches();
+        return { success: true, fixed, total: channels.length };
+    })
+
+    // --- Ollama: Pull Model ---
+    .post('/channels/ollama/pull', async ({ body, set }: ElysiaCtx) => {
+        const b = body as Record<string, any>;
+        const { channelId, model } = b;
+        if (!channelId || !model) { set.status = 400; return { success: false, message: 'channelId and model required' }; }
+        const [channel] = await sql`SELECT base_url FROM channels WHERE id = ${Number(channelId)} AND type = 4 LIMIT 1`;
+        if (!channel) { set.status = 404; return { success: false, message: 'Ollama channel not found' }; }
+        const baseUrl = channel.base_url.replace(/\/+$/, '');
+        try {
+            const res = await fetch(baseUrl + '/api/pull', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: model, stream: false }) });
+            if (!res.ok) { const text = await res.text(); return { success: false, message: text.substring(0, 200) }; }
+            const data = await res.json();
+            return { success: true, status: data.status || 'ok' };
+        } catch (e: unknown) { set.status = 500; return { success: false, message: getErrorMessage(e) }; }
+    }, { body: t.Object({ channelId: t.Number(), model: t.String() }) })
+
+    // --- Ollama: Delete Model ---
+    .delete('/channels/ollama/delete', async ({ body, set }: ElysiaCtx) => {
+        const b = body as Record<string, any>;
+        const { channelId, model } = b;
+        if (!channelId || !model) { set.status = 400; return { success: false, message: 'channelId and model required' }; }
+        const [channel] = await sql`SELECT base_url FROM channels WHERE id = ${Number(channelId)} AND type = 4 LIMIT 1`;
+        if (!channel) { set.status = 404; return { success: false, message: 'Ollama channel not found' }; }
+        const baseUrl = channel.base_url.replace(/\/+$/, '');
+        try {
+            const res = await fetch(baseUrl + '/api/delete', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: model }) });
+            return { success: res.ok, status: res.status };
+        } catch (e: unknown) { set.status = 500; return { success: false, message: getErrorMessage(e) }; }
+    }, { body: t.Object({ channelId: t.Number(), model: t.String() }) })
+
+    // --- Ollama: Version ---
+    .get('/channels/ollama/version/:id', async ({ params: { id }, set }: ElysiaCtx) => {
+        const [channel] = await sql`SELECT base_url FROM channels WHERE id = ${Number(id)} AND type = 4 LIMIT 1`;
+        if (!channel) { set.status = 404; return { success: false, message: 'Ollama channel not found' }; }
+        const baseUrl = channel.base_url.replace(/\/+$/, '');
+        try {
+            const res = await fetch(baseUrl + '/api/version');
+            if (!res.ok) return { success: false, message: `Version endpoint returned ${res.status}` };
+            const data = await res.json();
+            return { success: true, version: data.version || 'unknown' };
+        } catch (e: unknown) { set.status = 500; return { success: false, message: getErrorMessage(e) }; }
+    })
+
+    // --- Detect Upstream Models for All Channels ---
+    .post('/channels/upstream/detect_all', async () => {
+        const channels = await sql`SELECT id, name, type, base_url, key, models FROM channels WHERE status = 1`;
+        const results = [];
+        for (const ch of channels) {
+            try {
+                const handler = getProviderHandler(ch.type);
+                const keys = getChannelKeys(ch.key);
+                if (keys.length === 0) continue;
+                const baseUrl = (ch.base_url || '').replace(/\/+$/, '');
+                const modelsUrl = buildModelsUrl(baseUrl, ch.type);
+                const res = await fetch(modelsUrl, { headers: handler.buildHeaders(keys[0]) });
+                if (!res.ok) { results.push({ id: ch.id, name: ch.name, error: `HTTP ${res.status}` }); continue; }
+                const data = await res.json();
+                let upstreamModels: string[] = [];
+                if (data.data) upstreamModels = data.data.map((m: any) => m.id).filter(Boolean);
+                else if (Array.isArray(data)) upstreamModels = data.map((m: any) => m.id || m.name).filter(Boolean);
+                const oldModels: string[] = Array.isArray(ch.models) ? ch.models : (typeof ch.models === 'string' ? JSON.parse(ch.models) : []);
+                const added = upstreamModels.filter((m: string) => !oldModels.includes(m));
+                const removed = oldModels.filter((m: string) => !upstreamModels.includes(m));
+                results.push({ id: ch.id, name: ch.name, currentCount: oldModels.length, upstreamCount: upstreamModels.length, added, removed });
+            } catch (e: unknown) {
+                results.push({ id: ch.id, name: ch.name, error: e instanceof Error ? e.message : 'Error' });
+            }
+        }
+        return { success: true, checked: results.length, results };
+    })
+
+    // --- Apply Upstream Model Updates for All Channels ---
+    .post('/channels/upstream/apply_all', async () => {
+        const channels = await sql`SELECT id, name, type, base_url, key, models FROM channels WHERE status = 1`;
+        const results = [];
+        for (const ch of channels) {
+            try {
+                const handler = getProviderHandler(ch.type);
+                const keys = getChannelKeys(ch.key);
+                if (keys.length === 0) continue;
+                const baseUrl = (ch.base_url || '').replace(/\/+$/, '');
+                const modelsUrl = buildModelsUrl(baseUrl, ch.type);
+                const res = await fetch(modelsUrl, { headers: handler.buildHeaders(keys[0]) });
+                if (!res.ok) { results.push({ id: ch.id, name: ch.name, applied: false, error: `HTTP ${res.status}` }); continue; }
+                const data = await res.json();
+                let upstreamModels: string[] = [];
+                if (data.data) upstreamModels = data.data.map((m: any) => m.id).filter(Boolean);
+                else if (Array.isArray(data)) upstreamModels = data.map((m: any) => m.id || m.name).filter(Boolean);
+                await sql`UPDATE channels SET models = ${upstreamModels}, updated_at = NOW() WHERE id = ${ch.id}`;
+                results.push({ id: ch.id, name: ch.name, applied: true, modelsCount: upstreamModels.length });
+            } catch (e: unknown) {
+                results.push({ id: ch.id, name: ch.name, applied: false, error: e instanceof Error ? e.message : 'Error' });
+            }
+        }
+        await refreshAllCaches();
+        return { success: true, applied: results.filter(r => r.applied).length, total: results.length, results };
+    })
+
+    // --- Get Channel Key (root-only) ---
+    .post('/channels/:id/key', async ({ params: { id }, set, user }: ElysiaCtx) => {
+        if (user?.role !== 10) { set.status = 403; return { success: false, message: 'Root access required' }; }
+        const [channel] = await sql`SELECT key FROM channels WHERE id = ${Number(id)} LIMIT 1`;
+        if (!channel) { set.status = 404; return { success: false, message: 'Channel not found' }; }
+        const decryptedKey = decryptChannelKeys(channel.key);
+        return { success: true, key: decryptedKey };
+    });
