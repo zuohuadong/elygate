@@ -5,11 +5,8 @@ import { memoryCache } from '../services/cache';
 
 export const audioRouter = new Elysia()
     .post('/audio/speech', async (ctx) => handleAudio(ctx, 'audio/speech'))
-    .post('/v1/audio/speech', async (ctx) => handleAudio(ctx, 'audio/speech'))
     .post('/audio/transcriptions', async (ctx) => handleAudio(ctx, 'audio/transcriptions'))
-    .post('/v1/audio/transcriptions', async (ctx) => handleAudio(ctx, 'audio/transcriptions'))
-    .post('/audio/translations', async (ctx) => handleAudio(ctx, 'audio/translations'))
-    .post('/v1/audio/translations', async (ctx) => handleAudio(ctx, 'audio/translations'));
+    .post('/audio/translations', async (ctx) => handleAudio(ctx, 'audio/translations'));
 
 async function handleAudio({ body, headers, params, request, query }: Record<string, any>, endpointType: string) {
     const apiKey = query?.access_token || request.headers.get('Authorization')?.replace('Bearer ', '');

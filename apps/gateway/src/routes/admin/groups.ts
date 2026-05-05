@@ -10,6 +10,14 @@ export const groupsRouter = new Elysia()
         const groups = await sql`SELECT * FROM user_groups ORDER BY created_at DESC`;
         return groups;
     })
+    .get('/user-groups/:key', async ({ params: { key }, set }: ElysiaCtx) => {
+        const [group] = await sql`SELECT * FROM user_groups WHERE key = ${key} LIMIT 1`;
+        if (!group) {
+            set.status = 404;
+            return { success: false, message: 'Group not found' };
+        }
+        return group;
+    })
     .post('/user-groups', async ({ body, set }: ElysiaCtx) => {
         try {
             const b = body as Record<string, any>;

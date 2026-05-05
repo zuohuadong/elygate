@@ -49,6 +49,52 @@ export const aliRouter = new Elysia()
                 headers: { 'Content-Type': 'application/json' }
             });
         }
+    })
+    // Ali DashScope multimodal embedding
+    .post('/api/v1/services/aigc/multimodal-embedding/generation', async ({ body, request, query }: ElysiaCtx) => {
+        const apiKey = query?.access_token || request.headers.get('Authorization')?.replace('Bearer ', '') || request.headers.get('x-dashscope-api-key');
+        if (!apiKey) return new Response(JSON.stringify({ error: 'Missing API key' }), { status: 401 });
+        const t = await memoryCache.getTokenFromCache(apiKey);
+        if (!t || t.status !== 1) return new Response(JSON.stringify({ error: 'Invalid API key' }), { status: 401 });
+        const u = await memoryCache.getUserFromDB(t.userId);
+        if (!u) return new Response(JSON.stringify({ error: 'User not found' }), { status: 401 });
+
+        const converter = getConverter('/aigc/multimodal-embedding/');
+        const internalReq = converter.convertRequest(body);
+        const model = internalReq.model || body.model;
+        const ip = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown';
+        const ua = request.headers.get('user-agent') || 'unknown';
+
+        try {
+            const result = await dispatch({ model, body: internalReq, user: u, token: t, endpointType: 'embeddings', stream: false, ip, ua });
+            if (result && !(result instanceof Response)) return converter.convertResponse(result as any);
+            return result;
+        } catch (error: unknown) {
+            return new Response(JSON.stringify(converter.convertError(error)), { status: 500, headers: { 'Content-Type': 'application/json' } });
+        }
+    })
+    // Ali DashScope image synthesis
+    .post('/api/v1/services/aigc/text2image/image-synthesis', async ({ body, request, query }: ElysiaCtx) => {
+        const apiKey = query?.access_token || request.headers.get('Authorization')?.replace('Bearer ', '') || request.headers.get('x-dashscope-api-key');
+        if (!apiKey) return new Response(JSON.stringify({ error: 'Missing API key' }), { status: 401 });
+        const t = await memoryCache.getTokenFromCache(apiKey);
+        if (!t || t.status !== 1) return new Response(JSON.stringify({ error: 'Invalid API key' }), { status: 401 });
+        const u = await memoryCache.getUserFromDB(t.userId);
+        if (!u) return new Response(JSON.stringify({ error: 'User not found' }), { status: 401 });
+
+        const converter = getConverter('/aigc/text2image/');
+        const internalReq = converter.convertRequest(body);
+        const model = internalReq.model || body.model;
+        const ip = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown';
+        const ua = request.headers.get('user-agent') || 'unknown';
+
+        try {
+            const result = await dispatch({ model, body: internalReq, user: u, token: t, endpointType: 'images', stream: false, ip, ua });
+            if (result && !(result instanceof Response)) return converter.convertResponse(result as any);
+            return result;
+        } catch (error: unknown) {
+            return new Response(JSON.stringify(converter.convertError(error)), { status: 500, headers: { 'Content-Type': 'application/json' } });
+        }
     });
 
 async function convertStreamToAli(response: Response, converter: Record<string, any>): Promise<Response> {
@@ -78,12 +124,12 @@ async function convertStreamToAli(response: Response, converter: Record<string, 
                                     const chunk = JSON.parse(data);
                                     const aliChunk = converter.convertStreamChunk(chunk);
                                     if (aliChunk) controller.enqueue(encoder.encode(aliChunk));
-                                } catch { /* stream chunk parse error — skip */ }
+                                } catch { /* stream chunk parse error */ }
                             }
                         }
                     }
                 }
-            } catch { /* stream complete — expected */ }
+            } catch { /* stream complete */ }
             controller.close();
         }
     });

@@ -5,13 +5,9 @@ import { memoryCache } from '../services/cache';
 
 export const embeddingsRouter = new Elysia()
     .post('/embeddings', async (ctx) => handleEmbeddings(ctx, '/v1/embeddings'))
-    .post('/v1/embeddings', async (ctx) => handleEmbeddings(ctx, '/v1/embeddings'))
-    // Gemini
-    .post('/v1/models/:model:embedContent', async (ctx) => handleEmbeddings(ctx, ':embedContent'))
-    // Ali
-    .post('/api/v1/services/aigc/multimodal-embedding/generation', async (ctx) => handleEmbeddings(ctx, '/aigc/multimodal-embedding/'))
-    // Baidu
-    .post('/rpc/2.0/ai_custom/v1/wenxinworkshop/embeddings/:model', async (ctx) => handleEmbeddings(ctx, '/wenxinworkshop/embeddings/'));
+    .post('/engines/:model/embeddings', async (ctx) => handleEmbeddings(ctx, '/v1/embeddings'))
+    // Gemini embedding
+    .post('/models/:model:embedContent', async (ctx) => handleEmbeddings(ctx, ':embedContent'));
 
 async function handleEmbeddings({ body, headers, params, request, query }: any, pathType: string) {
     const apiKey = query?.access_token || request.headers.get('Authorization')?.replace('Bearer ', '') || request.headers.get('x-dashscope-api-key');

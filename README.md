@@ -255,6 +255,7 @@ elygate
 
 - **🛡️ Apache 2.0**: Open-source and enterprise-ready.
 - **☁️ Zero Shell Dependencies**: Unlike New API which requires Redis for high-concurrency rate limiting, Elygate is **Redis-free**. All logic is handled by Bun + PostgreSQL, simplifying your stack.
+- **🧭 New API Parity**: Responses, Completions, Files metadata, Batches metadata, Images edits/variations, channel health fields, and token-level controls are available without adding Redis.
 - **🔐 Secure Cookie Session**: HttpOnly Cookie-based authentication with server-side session management. Supports multi-device login, server-side logout, and automatic session expiration.
 
 ---
@@ -269,6 +270,8 @@ elygate
 | **Semantic Cache** | Built-in (Vector) | Not Integrated | 🧠 Cost Saving |
 | **Authentication** | Cookie Session (HttpOnly) | localStorage Token | 🔐 XSS Protection |
 | **Tech Stack** | Svelte 5 + Tailwind 4 | React / Vue | 💎 Premium UI/UX |
+| **API Compat** | OpenAI Responses/Chat/Completions/Files/Batches + Anthropic + Gemini + Ali + Baidu | OpenAI + Anthropic | 🌐 Multi-Provider Native |
+| **Admin Controls** | Channel health, request overrides, token model/IP/RPM/expiry controls | Mature ops panel | 🧩 New API-compatible operations |
 | **License** | Apache 2.0 | GPL-3.0 | 🛡️ Commercial Friendly |
 
 ---
@@ -501,6 +504,7 @@ elygate
 
 - **🛡️ Apache 2.0**: 协议友好，支持商业化二次开发。
 - **☁️ 极简无依赖**: 相比 New API 在高并发下必须依赖 Redis 进行限流和缓存，Elygate 实现了 **Redis-free（无 Redis 依赖）**。所有逻辑均由 Bun + PostgreSQL 承载，大幅简化了部署运维复杂度。
+- **🧭 New API 对齐**: 已补齐 Responses、Completions、Files 元数据、Batches 元数据、图片 edits/variations、渠道健康字段与令牌维度控制，并保持无 Redis 架构。
 - **🔐 安全 Cookie 会话**: 基于 HttpOnly Cookie 的服务端会话认证，支持多端登录、服务端注销和自动会话过期，有效防止 XSS 攻击。
 
 ---
@@ -515,6 +519,8 @@ elygate
 | **语义缓存** | 原生内置 (向量检索) | 无此功能 | 🧠 显著降低 Token 成本 |
 | **认证安全** | Cookie 会话 (HttpOnly) | localStorage Token | 🔐 防止 XSS 攻击 |
 | **前端架构** | Svelte 5 + Tailwind 4 | React / Vue | 💎 极致流畅的交互体验 |
+| **API 兼容** | OpenAI Responses/Chat/Completions/Files/Batches + Anthropic + Gemini + 阿里 + 百度 | OpenAI + Anthropic | 🌐 原生多协议支持 |
+| **管理能力** | 渠道健康、请求覆盖、令牌模型/IP/RPM/过期控制 | 成熟运营后台 | 🧩 对齐 New API 常用运营能力 |
 | **开源协议** | Apache 2.0 | GPL-3.0 | 🛡️ 商业二次开发更友好 |
 
 ---

@@ -46,12 +46,19 @@ async function init() {
   const { moderationsRouter } = await import("./routes/moderations");
   const { capabilitiesRouter } = await import("./routes/capabilities");
   const { workflowsRouter } = await import("./routes/workflows");
+  const { responsesRouter } = await import('./routes/responses');
+  const { completionsRouter } = await import('./routes/completions');
+  const { filesRouter } = await import('./routes/files');
+  const { batchesRouter } = await import('./routes/batches');
+  const { editsRouter } = await import('./routes/edits');
+  const { realtimeRouter } = await import('./routes/realtime');
+  const { openaiEnterpriseRouter } = await import('./routes/openai-enterprise');
 
   const app = new Elysia()
     .use(cors({
       origin: true,
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'Accept', 'X-Request-ID', 'Cookie'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'Accept', 'X-Request-ID', 'Cookie', 'OpenAI-Organization', 'x-api-key', 'anthropic-version', 'x-goog-api-key'],
       exposeHeaders: ['Set-Cookie'],
       credentials: true
     }))
@@ -90,7 +97,7 @@ async function init() {
         for (const r of rows) info[r.key] = r.value;
         return { success: true, data: info };
       })
-      .use(authRouter)
+      .group("/auth", (app) => app.use(authRouter))
       .use(paymentRouter)
       .group("/admin", (app) => app.use(adminRouter))
       .group("/stats", (app) => app.use(statsRouter))
@@ -113,6 +120,13 @@ async function init() {
         .use(moderationsRouter)
         .use(capabilitiesRouter)
         .use(workflowsRouter)
+        .use(responsesRouter)
+        .use(completionsRouter)
+        .use(filesRouter)
+        .use(batchesRouter)
+        .use(editsRouter)
+        .use(realtimeRouter)
+        .use(openaiEnterpriseRouter)
     )
     .use(geminiRouter)
     .use(aliRouter)   // Ali often uses /api/v1/...

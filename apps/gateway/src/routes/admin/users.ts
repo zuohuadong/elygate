@@ -9,7 +9,9 @@ export const usersRouter = new Elysia()
     // --- Token Management ---
     .get('/tokens', async () => {
         const tokens = await sql`
-            SELECT t.id, t.name, t.key, t.status, t.remain_quota, t.used_quota, t.created_at, t.models, t.user_id, u.username as creator_name
+            SELECT t.id, t.name, t.key, t.status, t.remain_quota, t.used_quota, t.created_at, t.updated_at, t.models,
+                   t.subnet, t.allow_ips, t.rate_limit, t.expired_at, t.unlimited_quota, t.model_limits_enabled,
+                   t.token_group, t.cross_group_retry, t.accessed_at, t.user_id, u.username as creator_name
             FROM tokens t
             LEFT JOIN users u ON t.user_id = u.id
             ORDER BY t.id DESC
@@ -22,10 +24,58 @@ export const usersRouter = new Elysia()
             remainQuota: t.remain_quota,
             usedQuota: t.used_quota,
             models: t.models,
+            subnet: t.subnet,
+            allowIps: t.allow_ips,
+            rateLimit: t.rate_limit,
+            expiredAt: t.expired_at,
+            unlimitedQuota: t.unlimited_quota,
+            modelLimitsEnabled: t.model_limits_enabled,
+            tokenGroup: t.token_group,
+            crossGroupRetry: t.cross_group_retry,
+            accessedAt: t.accessed_at,
             createdAt: t.created_at,
+            updatedAt: t.updated_at,
             userId: t.user_id,
             creatorName: t.creator_name
         }));
+    })
+
+    .get('/tokens/:id', async ({ params: { id }, set }: ElysiaCtx) => {
+        const [token] = await sql`
+            SELECT t.id, t.name, t.key, t.status, t.remain_quota, t.used_quota, t.created_at, t.updated_at, t.models,
+                   t.subnet, t.allow_ips, t.rate_limit, t.expired_at, t.unlimited_quota, t.model_limits_enabled,
+                   t.token_group, t.cross_group_retry, t.accessed_at, t.user_id, u.username as creator_name
+            FROM tokens t
+            LEFT JOIN users u ON t.user_id = u.id
+            WHERE t.id = ${Number(id)}
+            LIMIT 1
+        `;
+        if (!token) {
+            set.status = 404;
+            return { success: false, message: 'Token not found' };
+        }
+        return {
+            id: token.id,
+            name: token.name,
+            key: token.key,
+            status: token.status,
+            remainQuota: token.remain_quota,
+            usedQuota: token.used_quota,
+            models: token.models,
+            subnet: token.subnet,
+            allowIps: token.allow_ips,
+            rateLimit: token.rate_limit,
+            expiredAt: token.expired_at,
+            unlimitedQuota: token.unlimited_quota,
+            modelLimitsEnabled: token.model_limits_enabled,
+            tokenGroup: token.token_group,
+            crossGroupRetry: token.cross_group_retry,
+            accessedAt: token.accessed_at,
+            createdAt: token.created_at,
+            updatedAt: token.updated_at,
+            userId: token.user_id,
+            creatorName: token.creator_name
+        };
     })
 
     .post('/tokens', async ({ body, user, set }: ElysiaCtx) => {
@@ -33,8 +83,16 @@ export const usersRouter = new Elysia()
             const b = body as Record<string, any>;
             const newKey = `sk-${Bun.randomUUIDv7('hex')}`;
             const [result] = await sql`
-                INSERT INTO tokens (user_id, name, key, status, remain_quota, models)
-                VALUES (${b.userId || user.id}, ${b.name}, ${newKey}, 1, ${b.remainQuota || -1}, ${Array.isArray(b.models) ? JSON.stringify(b.models) : JSON.stringify(b.models || [])})
+                INSERT INTO tokens (
+                    user_id, name, key, status, remain_quota, models, subnet, allow_ips, rate_limit, expired_at,
+                    unlimited_quota, model_limits_enabled, token_group, cross_group_retry
+                )
+                VALUES (
+                    ${b.userId || user.id}, ${b.name}, ${newKey}, ${b.status || 1}, ${b.remainQuota ?? -1},
+                    ${Array.isArray(b.models) ? JSON.stringify(b.models) : JSON.stringify(b.models || [])},
+                    ${b.subnet || b.allowIps || null}, ${b.allowIps || b.subnet || null}, ${b.rateLimit || 0}, ${b.expiredAt || null},
+                    ${Boolean(b.unlimitedQuota)}, ${Boolean(b.modelLimitsEnabled)}, ${b.tokenGroup || null}, ${Boolean(b.crossGroupRetry)}
+                )
                 RETURNING *
             `;
             return result;
@@ -63,7 +121,16 @@ export const usersRouter = new Elysia()
                 SET name = ${b.name ?? oldToken.name},
                     status = ${b.status ?? oldToken.status},
                     remain_quota = ${b.remainQuota ?? oldToken.remain_quota},
-                    models = ${finalModels}
+                    models = ${finalModels},
+                    subnet = ${b.subnet ?? oldToken.subnet},
+                    allow_ips = ${b.allowIps ?? oldToken.allow_ips},
+                    rate_limit = ${b.rateLimit ?? oldToken.rate_limit},
+                    expired_at = ${b.expiredAt ?? oldToken.expired_at},
+                    unlimited_quota = ${b.unlimitedQuota ?? oldToken.unlimited_quota},
+                    model_limits_enabled = ${b.modelLimitsEnabled ?? oldToken.model_limits_enabled},
+                    token_group = ${b.tokenGroup ?? oldToken.token_group},
+                    cross_group_retry = ${b.crossGroupRetry ?? oldToken.cross_group_retry},
+                    updated_at = NOW()
                 WHERE id = ${Number(id)}
                 RETURNING *
             `;
@@ -116,6 +183,20 @@ export const usersRouter = new Elysia()
             ORDER BY id DESC
         `;
         return users;
+    })
+
+    .get('/users/:id', async ({ params: { id }, set }: ElysiaCtx) => {
+        const [user] = await sql`
+            SELECT id, username, role, quota, used_quota as "usedQuota", status, created_at, updated_at
+            FROM users 
+            WHERE id = ${Number(id)}
+            LIMIT 1
+        `;
+        if (!user) {
+            set.status = 404;
+            return { success: false, message: 'User not found' };
+        }
+        return user;
     })
 
     .post('/users', async ({ body, set }: ElysiaCtx) => {

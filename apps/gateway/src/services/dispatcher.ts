@@ -38,6 +38,24 @@ export interface DispatchOptions {
 // Global in-memory concurrency tracker: Map<"channelId_keyIndex", currentActiveRequests>
 const keyConcurrencyMap = new Map<string, number>();
 
+function normalizeObject(value: unknown): Record<string, any> {
+    if (!value) return {};
+    if (typeof value === 'string') {
+        try {
+            const parsed = JSON.parse(value);
+            return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+        } catch {
+            return {};
+        }
+    }
+    return typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {};
+}
+
+function setHeader(headers: Headers, key: string, value: unknown): void {
+    if (value === undefined || value === null) return;
+    headers.set(key, String(value));
+}
+
 async function waitForConcurrencyRelease(lockId: string, limit: number, maxWaitMs: number = 15000): Promise<boolean> {
     if (limit <= 0) return true; // 0 = unlimited
 
@@ -309,13 +327,37 @@ export async function dispatch(options: DispatchOptions) {
             }
 
             let activeKeyIndex = 0;
-            if (channelConfig.keyStrategy === 1) {
-                // Sequential: just pick the first available
-            } else {
-                // Random load balance
-                activeKeyIndex = Math.floor(Math.random() * availableKeys.length);
+            const channelInfo = channelConfig.channelInfo || {};
+            const mkStatusList: Record<number, number> = channelInfo.multiKeyStatusList || {};
+            const mkMode: string = channelInfo.multiKeyMode || '';
+
+            // Filter out disabled keys per multi-key status
+            const enabledKeys = availableKeys.filter((_: string, i: number) => !mkStatusList[i] || mkStatusList[i] !== 0);
+
+            if (enabledKeys.length === 0) {
+                log.warn(`[Dispatcher] Channel ${channelConfig.id} all keys disabled in channel_info`);
+                continue;
             }
-            const activeKey = availableKeys[activeKeyIndex];
+
+            if (mkMode === 'polling' && channelInfo.isMultiKey) {
+                // Polling: start from saved index, find next enabled key
+                let start = typeof channelInfo.multiKeyPollingIndex === 'number' ? channelInfo.multiKeyPollingIndex : 0;
+                if (start < 0 || start >= enabledKeys.length) start = 0;
+                activeKeyIndex = start;
+                // Persist next index back to DB asynchronously
+                const nextIndex = (start + 1) % enabledKeys.length;
+                const updatedInfo = { ...channelInfo, multiKeyPollingIndex: nextIndex };
+                sql`UPDATE channels SET channel_info = ${updatedInfo} WHERE id = ${channelConfig.id}`.catch(() => {});
+            } else if (mkMode === 'random' && channelInfo.isMultiKey) {
+                activeKeyIndex = Math.floor(Math.random() * enabledKeys.length);
+            } else if (channelConfig.keyStrategy === 1) {
+                // Sequential: first enabled key
+                activeKeyIndex = 0;
+            } else {
+                // Default random load balance
+                activeKeyIndex = Math.floor(Math.random() * enabledKeys.length);
+            }
+            const activeKey = enabledKeys[activeKeyIndex];
 
             // 1.2 Channel-Specific Rate Limiting (e.g., NVIDIA 40 RPM limit)
             if (channelConfig.type === ChannelType.NVIDIA) {
@@ -343,6 +385,13 @@ export async function dispatch(options: DispatchOptions) {
 
             // 2. Prepare Upstream Request
             const fetchHeaders = handler.buildHeaders(activeKey);
+            if (channelConfig.openaiOrganization) {
+                setHeader(fetchHeaders, 'OpenAI-Organization', channelConfig.openaiOrganization);
+            }
+            const headerOverride = normalizeObject(channelConfig.headerOverride);
+            for (const [headerName, headerValue] of Object.entries(headerOverride)) {
+                setHeader(fetchHeaders, headerName, headerValue);
+            }
             let upstreamModel = model;
             if (channelConfig.modelMapping) {
                 // Support wildcard matching in model mapping
@@ -428,16 +477,20 @@ export async function dispatch(options: DispatchOptions) {
                 }
             } else {
                 let sourceBody = body as Record<string, any>;
+                const paramOverride = normalizeObject(channelConfig.paramOverride);
+                if (Object.keys(paramOverride).length > 0) {
+                    sourceBody = { ...sourceBody, ...paramOverride };
+                }
                 
-                // Translation: Convert SiliconFlow video prompt into OpenAI Chat Completion messages
-                if (channelConfig.endpointType === 'chat' && endpointType === 'video') {
+                // Translation: Convert SiliconFlow video prompt or DALL-E image prompt into OpenAI Chat Completion messages
+                if (channelConfig.endpointType === 'chat' && (endpointType === 'video' || endpointType === 'images')) {
                     const prompt = sourceBody.prompt || '';
                     sourceBody = {
                         model: upstreamModel,
                         messages: [{ role: 'user', content: prompt }],
-                        stream: true
+                        stream: isStream
                     };
-                    log.info(`[Dispatcher] 🔄 Translating video/submit payload into chat/completions payload for channel ${channelConfig.id}`);
+                    log.info(`[Dispatcher] 🔄 Translating ${endpointType} payload into chat/completions payload for channel ${channelConfig.id}`);
                 }
 
                 const transformedBody = skipTransform ? sourceBody : handler.transformRequest(sourceBody, upstreamModel);
@@ -524,15 +577,17 @@ export async function dispatch(options: DispatchOptions) {
 
                 if (!response.ok) {
                     const errorText = await response.text();
-                    await circuitBreaker.recordError(channelConfig.id, response.status);
+                    const statusCodeMapping = normalizeObject(channelConfig.statusCodeMapping);
+                    const mappedStatus = Number(statusCodeMapping[String(response.status)] || response.status);
+                    await circuitBreaker.recordError(channelConfig.id, mappedStatus);
                     // Enhanced diagnostics for empty error bodies (CF/proxy rejections)
                     if (!errorText || errorText.trim() === '') {
                         const cfRay = response.headers.get('cf-ray') || 'N/A';
                         const server = response.headers.get('server') || 'N/A';
                         const contentLength = response.headers.get('content-length') || 'N/A';
-                        throw new Error(`Status ${response.status} (empty body) — cf-ray: ${cfRay}, server: ${server}, content-length: ${contentLength}, body-size: ${bodySize}B`);
+                        throw new Error(`Status ${mappedStatus} (upstream ${response.status}, empty body) — cf-ray: ${cfRay}, server: ${server}, content-length: ${contentLength}, body-size: ${bodySize}B`);
                     }
-                    throw new Error(`Status ${response.status}: ${errorText}`);
+                    throw new Error(`Status ${mappedStatus} (upstream ${response.status}): ${errorText}`);
                 }
 
                 const latencyMs = Date.now() - startTime;
@@ -642,26 +697,42 @@ export async function dispatch(options: DispatchOptions) {
                     const cleanedData = cleanResponseTokens(rawData);
                     let result = skipTransform ? cleanedData : await handler.transformResponse(cleanedData, { baseUrl: channelConfig.baseUrl, apiKey: activeKey, model: upstreamModel });
 
-                    // Translation: Map Chat Completion video response back into SiliconFlow video API format
-                    if (channelConfig.endpointType === 'chat' && endpointType === 'video') {
-                        const content = result?.choices?.[0]?.message?.content || result?.message?.content || '';
-                        
-                        let url = '';
-                        // Robustly extract the first https:// or http:// url until a quote, space, or HTML tag is encountered
-                        const robustMatch = content.match(/https?:\/\/[^\s'"><]+/);
-                        if (robustMatch && robustMatch[0]) {
-                            url = robustMatch[0].trim();
-                        }
-                        
-                        if (url) {
-                            result = {
-                                id: result.id || `video-${Date.now()}`,
-                                model: upstreamModel,
-                                videos: [{ url, cover_url: '' }]
-                            };
-                            log.info(`[Dispatcher] 🔄 Translating chat response back to video/submit format`);
-                        } else {
-                            log.warn(`[Dispatcher] ⚠️ Failed to extract video URL from chat response: ${content.substring(0, 100)}...`);
+                    // Translation: Map Chat Completion responses back into correct API formats
+                    if (channelConfig.endpointType === 'chat') {
+                        if (endpointType === 'video') {
+                            const content = result?.choices?.[0]?.message?.content || result?.message?.content || '';
+                            let url = '';
+                            const robustMatch = content.match(/https?:\/\/[^\s'"><]+/);
+                            if (robustMatch && robustMatch[0]) {
+                                url = robustMatch[0].trim();
+                            }
+                            if (url) {
+                                result = {
+                                    id: result.id || `video-${Date.now()}`,
+                                    model: upstreamModel,
+                                    videos: [{ url, cover_url: '' }]
+                                };
+                                log.info(`[Dispatcher] 🔄 Translating chat response back to video/submit format`);
+                            } else {
+                                log.warn(`[Dispatcher] ⚠️ Failed to extract video URL from chat response: ${content.substring(0, 100)}...`);
+                            }
+                        } else if (endpointType === 'images') {
+                            const content = result?.choices?.[0]?.message?.content || result?.message?.content || '';
+                            let url = '';
+                            // Find the first URL containing common image extensions, or just any URL if no extension matches.
+                            const robustMatch = content.match(/https?:\/\/[^\s'"><]+?(?:\.png|\.jpg|\.jpeg|\.webp|\.gif)|https?:\/\/[^\s'"><]+/);
+                            if (robustMatch && robustMatch[0]) {
+                                url = robustMatch[0].trim();
+                            }
+                            if (url) {
+                                result = {
+                                    created: Math.floor(Date.now() / 1000),
+                                    data: [{ url }]
+                                };
+                                log.info(`[Dispatcher] 🔄 Translating chat response back to images/generations format`);
+                            } else {
+                                log.warn(`[Dispatcher] ⚠️ Failed to extract image URL from chat response: ${content.substring(0, 100)}...`);
+                            }
                         }
                     }
 
@@ -718,7 +789,10 @@ export async function dispatch(options: DispatchOptions) {
                     for (const line of lines) {
                         const trimmedLine = line.trim();
                         if (trimmedLine.startsWith('data:')) {
-                            lastDataLine = trimmedLine.slice(5).trim();
+                            const dataPayload = trimmedLine.slice(5).trim();
+                            if (dataPayload !== '[DONE]') {
+                                lastDataLine = dataPayload;
+                            }
                         }
                     }
 
@@ -726,7 +800,7 @@ export async function dispatch(options: DispatchOptions) {
                         try {
                             rawData = JSON.parse(lastDataLine);
                         } catch {
-                            throw new Error('Failed to parse SSE response as JSON');
+                            throw new Error(`Failed to parse SSE response as JSON. Payload snippet: ${lastDataLine.substring(0, 500)}`);
                         }
                     } else {
                         // No data: prefix found, try direct JSON parse

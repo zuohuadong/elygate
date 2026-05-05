@@ -296,7 +296,10 @@ export const authRouter = new Elysia()
                 .get('/tokens', async ({ user }: ElysiaCtx) => {
                     const userRow = user as UserRecord;
                     const data = await sql`
-                        SELECT id, name, key, status, remain_quota as "remainQuota", used_quota as "usedQuota", created_at as "createdAt", models
+                        SELECT id, name, key, status, remain_quota as "remainQuota", used_quota as "usedQuota", created_at as "createdAt",
+                               models, subnet, allow_ips as "allowIps", rate_limit as "rateLimit", expired_at as "expiredAt",
+                               unlimited_quota as "unlimitedQuota", model_limits_enabled as "modelLimitsEnabled",
+                               token_group as "tokenGroup", cross_group_retry as "crossGroupRetry", accessed_at as "accessedAt"
                         FROM tokens WHERE user_id = ${userRow.id} ORDER BY id DESC
                     `;
                     return [...data];
@@ -322,8 +325,15 @@ export const authRouter = new Elysia()
                     const b = body as Record<string, any>;
                     const newKey = `sk-${Bun.randomUUIDv7('hex')}`;
                     const [result] = await sql`
-                        INSERT INTO tokens (user_id, name, key, status, remain_quota, models)
-                        VALUES (${userRow.id}, ${b.name}, ${newKey}, 1, ${b.remainQuota || -1}, ${b.models || []})
+                        INSERT INTO tokens (
+                            user_id, name, key, status, remain_quota, models, subnet, allow_ips, rate_limit, expired_at,
+                            unlimited_quota, model_limits_enabled
+                        )
+                        VALUES (
+                            ${userRow.id}, ${b.name}, ${newKey}, 1, ${b.remainQuota || -1}, ${b.models || []},
+                            ${b.subnet || b.allowIps || null}, ${b.allowIps || b.subnet || null}, ${b.rateLimit || 0}, ${b.expiredAt || null},
+                            ${Boolean(b.unlimitedQuota)}, ${Boolean(b.modelLimitsEnabled)}
+                        )
                         RETURNING *
                     `;
                     return result;
@@ -333,7 +343,18 @@ export const authRouter = new Elysia()
                     const [existing] = await sql`SELECT id FROM tokens WHERE id = ${Number(id)} AND user_id = ${userRow.id}`;
                     if (!existing) { set.status = 403; throw new Error('Forbidden'); }
                     const [result] = await sql`
-                        UPDATE tokens SET name = COALESCE(${body.name}, name), status = COALESCE(${body.status}, status), remain_quota = COALESCE(${body.remainQuota}, remain_quota), models = COALESCE(${body.models || null}, models)
+                        UPDATE tokens SET
+                            name = COALESCE(${body.name}, name),
+                            status = COALESCE(${body.status}, status),
+                            remain_quota = COALESCE(${body.remainQuota}, remain_quota),
+                            models = COALESCE(${body.models || null}, models),
+                            subnet = COALESCE(${body.subnet || body.allowIps || null}, subnet),
+                            allow_ips = COALESCE(${body.allowIps || body.subnet || null}, allow_ips),
+                            rate_limit = COALESCE(${body.rateLimit}, rate_limit),
+                            expired_at = COALESCE(${body.expiredAt}, expired_at),
+                            unlimited_quota = COALESCE(${body.unlimitedQuota}, unlimited_quota),
+                            model_limits_enabled = COALESCE(${body.modelLimitsEnabled}, model_limits_enabled),
+                            updated_at = NOW()
                         WHERE id = ${Number(id)} AND user_id = ${userRow.id} RETURNING *
                     `;
                     return result;

@@ -520,4 +520,136 @@ export const channelsRouter = new Elysia()
             set.status = 500;
             return { success: false, message: getErrorMessage(e) };
         }
+    })
+    .post('/channels/:id/keys/status', async ({ params: { id }, body, set }: ElysiaCtx) => {
+        try {
+            const b = body as Record<string, any>;
+            const keyIndex = Number(b.keyIndex);
+            const enabled = b.status === 'enabled';
+            const reason = b.reason || null;
+            const [channel] = await sql`SELECT channel_info, status, key FROM channels WHERE id = ${Number(id)} LIMIT 1`;
+            if (!channel) { set.status = 404; return { success: false, message: 'Channel not found' }; }
+            const info = typeof channel.channel_info === 'string' ? JSON.parse(channel.channel_info) : (channel.channel_info || {});
+            info.multiKeyStatusList = info.multiKeyStatusList || {};
+            info.multiKeyDisabledReason = info.multiKeyDisabledReason || {};
+            info.multiKeyDisabledTime = info.multiKeyDisabledTime || {};
+            if (enabled) {
+                delete info.multiKeyStatusList[keyIndex];
+                delete info.multiKeyDisabledReason[keyIndex];
+                delete info.multiKeyDisabledTime[keyIndex];
+            } else {
+                info.multiKeyStatusList[keyIndex] = 0;
+                if (reason) info.multiKeyDisabledReason[keyIndex] = reason;
+                info.multiKeyDisabledTime[keyIndex] = Date.now();
+            }
+            const allKeys = channel.key.split('\n').filter((k: string) => k.trim());
+            const enabledCount = allKeys.filter((_: string, i: number) => !info.multiKeyStatusList[i] || info.multiKeyStatusList[i] !== 0).length;
+            let newChannelStatus = channel.status;
+            if (enabledCount === 0 && channel.status === 1) newChannelStatus = 3;
+            else if (enabledCount > 0 && channel.status === 3) newChannelStatus = 1;
+            await sql`UPDATE channels SET channel_info = ${info}, status = ${newChannelStatus}, updated_at = NOW() WHERE id = ${Number(id)}`;
+            await refreshAllCaches();
+            return { success: true, channelInfo: info, channelStatus: newChannelStatus };
+        } catch (e: unknown) { set.status = 500; return { success: false, message: getErrorMessage(e) }; }
+    }, { body: t.Object({ keyIndex: t.Number(), status: t.String(), reason: t.Optional(t.String()) }) })
+    .post('/channels/:id/keys/mode', async ({ params: { id }, body, set }: ElysiaCtx) => {
+        try {
+            const b = body as Record<string, any>;
+            const mode = b.mode || 'random';
+            const [channel] = await sql`SELECT channel_info, key_strategy FROM channels WHERE id = ${Number(id)} LIMIT 1`;
+            if (!channel) { set.status = 404; return { success: false, message: 'Channel not found' }; }
+            const info = typeof channel.channel_info === 'string' ? JSON.parse(channel.channel_info) : (channel.channel_info || {});
+            info.isMultiKey = true;
+            info.multiKeyMode = mode;
+            info.multiKeySize = channel.key.split('\n').filter((k: string) => k.trim()).length;
+            const keyStrategy = mode === 'sequential' ? 1 : 0;
+            await sql`UPDATE channels SET channel_info = ${info}, key_strategy = ${keyStrategy}, updated_at = NOW() WHERE id = ${Number(id)}`;
+            await refreshAllCaches();
+            return { success: true, channelInfo: info };
+        } catch (e: unknown) { set.status = 500; return { success: false, message: getErrorMessage(e) }; }
+    }, { body: t.Object({ mode: t.String() }) })
+    .post('/channels/:id/tag', async ({ params: { id }, body, set }: ElysiaCtx) => {
+        try {
+            const b = body as Record<string, any>;
+            await sql`UPDATE channels SET tag = ${b.tag || null}, updated_at = NOW() WHERE id = ${Number(id)}`;
+            await refreshAllCaches();
+            return { success: true };
+        } catch (e: unknown) { set.status = 500; return { success: false, message: getErrorMessage(e) }; }
+    }, { body: t.Object({ tag: t.Nullable(t.String()) }) })
+    .get('/channels/tags', async () => {
+        const rows = await sql`SELECT tag, COUNT(*)::int as count FROM channels WHERE tag IS NOT NULL AND tag != '' GROUP BY tag ORDER BY count DESC`;
+        return rows;
+    })
+    .post('/channels/tag/:tag/enable', async ({ params: { tag } }: ElysiaCtx) => {
+        await sql`UPDATE channels SET status = 1, updated_at = NOW() WHERE tag = ${tag}`;
+        await refreshAllCaches();
+        return { success: true };
+    })
+    .post('/channels/tag/:tag/disable', async ({ params: { tag } }: ElysiaCtx) => {
+        await sql`UPDATE channels SET status = 3, updated_at = NOW() WHERE tag = ${tag}`;
+        await refreshAllCaches();
+        return { success: true };
+    })
+    .post('/channels/batch/tag', async ({ body }: ElysiaCtx) => {
+        const b = body as Record<string, any>;
+        const ids: number[] = b.channelIds || [];
+        const tag: string | null = b.tag || null;
+        if (ids.length === 0) return { success: false, message: 'No channel IDs provided' };
+        await sql`UPDATE channels SET tag = ${tag}, updated_at = NOW() WHERE id IN ${sql(ids)}`;
+        await refreshAllCaches();
+        return { success: true, updated: ids.length };
+    }, { body: t.Object({ channelIds: t.Array(t.Number()), tag: t.String() }) })
+    .post('/channels/copy/:id', async ({ params: { id }, set }: ElysiaCtx) => {
+        try {
+            const [source] = await sql`SELECT * FROM channels WHERE id = ${Number(id)} LIMIT 1`;
+            if (!source) { set.status = 404; return { success: false, message: 'Channel not found' }; }
+            const [result] = await sql`
+                INSERT INTO channels (name, type, key, base_url, models, model_mapping, priority, weight, status, key_strategy, key_status, price_ratio, key_concurrency_limit, endpoint_type, groups)
+                VALUES (${'[Copy] ' + source.name}, ${source.type}, ${source.key}, ${source.base_url}, ${source.models}, ${source.model_mapping}, ${source.priority}, ${source.weight}, 3, ${source.key_strategy}, ${source.key_status}, ${source.price_ratio}, ${source.key_concurrency_limit}, ${source.endpoint_type}, ${source.groups})
+                RETURNING id, name
+            `;
+            await refreshAllCaches();
+            return { success: true, channel: result };
+        } catch (e: unknown) { set.status = 500; return { success: false, message: getErrorMessage(e) }; }
+    })
+    .post('/channels/:id/upstream/detect', async ({ params: { id }, set }: ElysiaCtx) => {
+        const [channel] = await sql`SELECT * FROM channels WHERE id = ${Number(id)} LIMIT 1`;
+        if (!channel) { set.status = 404; return { success: false, message: 'Channel not found' }; }
+        const handler = getProviderHandler(channel.type);
+        const keys = getChannelKeys(channel.key);
+        const testKey = keys[0] || '';
+        const baseUrl = (channel.base_url || '').replace(/\/+$/, '');
+        const modelsUrl = buildModelsUrl(baseUrl, channel.type);
+        try {
+            const res = await fetch(modelsUrl, { headers: handler.buildHeaders(testKey) });
+            if (!res.ok) return { success: false, message: `Upstream error: ${res.status}` };
+            const data = await res.json();
+            let upstreamModels: string[] = [];
+            if (data.data) upstreamModels = data.data.map((m: any) => m.id).filter(Boolean);
+            else if (Array.isArray(data)) upstreamModels = data.map((m: any) => m.id || m.name).filter(Boolean);
+            const oldModels: string[] = Array.isArray(channel.models) ? channel.models : (typeof channel.models === 'string' ? JSON.parse(channel.models) : []);
+            const added = upstreamModels.filter((m: string) => !oldModels.includes(m));
+            const removed = oldModels.filter((m: string) => !upstreamModels.includes(m));
+            return { success: true, currentCount: oldModels.length, upstreamCount: upstreamModels.length, added, removed };
+        } catch (e: unknown) { set.status = 500; return { success: false, message: getErrorMessage(e) }; }
+    })
+    .post('/channels/:id/upstream/apply', async ({ params: { id }, set }: ElysiaCtx) => {
+        try {
+            const [channel] = await sql`SELECT * FROM channels WHERE id = ${Number(id)} LIMIT 1`;
+            if (!channel) { set.status = 404; return { success: false, message: 'Channel not found' }; }
+            const handler = getProviderHandler(channel.type);
+            const keys = getChannelKeys(channel.key);
+            const testKey = keys[0] || '';
+            const baseUrl = (channel.base_url || '').replace(/\/+$/, '');
+            const modelsUrl = buildModelsUrl(baseUrl, channel.type);
+            const res = await fetch(modelsUrl, { headers: handler.buildHeaders(testKey) });
+            if (!res.ok) return { success: false, message: `Upstream error: ${res.status}` };
+            const data = await res.json();
+            let upstreamModels: string[] = [];
+            if (data.data) upstreamModels = data.data.map((m: any) => m.id).filter(Boolean);
+            else if (Array.isArray(data)) upstreamModels = data.map((m: any) => m.id || m.name).filter(Boolean);
+            await sql`UPDATE channels SET models = ${upstreamModels}, updated_at = NOW() WHERE id = ${Number(id)}`;
+            await refreshAllCaches();
+            return { success: true, modelsCount: upstreamModels.length };
+        } catch (e: unknown) { set.status = 500; return { success: false, message: getErrorMessage(e) }; }
     });

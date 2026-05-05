@@ -98,13 +98,20 @@ CREATE TABLE IF NOT EXISTS tokens (
     used_quota BIGINT NOT NULL DEFAULT 0,
     models JSONB,                           -- allowed models (null = all)
     subnet TEXT,                            -- IP whitelist
+    allow_ips TEXT,                         -- New API compatible IP whitelist alias
     rate_limit INTEGER NOT NULL DEFAULT 0,  -- RPM limit
+    unlimited_quota BOOLEAN NOT NULL DEFAULT FALSE,
+    model_limits_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    token_group TEXT,
+    cross_group_retry BOOLEAN NOT NULL DEFAULT FALSE,
+    accessed_at TIMESTAMPTZ,
     expired_at TIMESTAMPTZ,
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_tokens_org_id ON tokens(org_id);
+CREATE INDEX IF NOT EXISTS idx_tokens_accessed_at ON tokens(accessed_at);
 
 CREATE UNLOGGED TABLE IF NOT EXISTS rate_limits (
     key VARCHAR(255) PRIMARY KEY,
@@ -132,10 +139,84 @@ CREATE TABLE IF NOT EXISTS channels (
     key_concurrency_limit INTEGER NOT NULL DEFAULT 0, -- 0=unlimited
     endpoint_type TEXT NOT NULL DEFAULT 'auto', -- 'auto'|'chat'|'images'|'video'|'draw'
     price_ratio DECIMAL(10, 4) DEFAULT 1.0, -- price multiplier for dual currency support
+    test_model TEXT,
+    openai_organization TEXT,
+    balance DECIMAL(20, 8),
+    response_time INTEGER,
+    status_code_mapping JSONB NOT NULL DEFAULT '{}'::jsonb,
+    auto_ban INTEGER NOT NULL DEFAULT 1,
+    tag TEXT,
+    setting JSONB NOT NULL DEFAULT '{}'::jsonb,
+    param_override JSONB NOT NULL DEFAULT '{}'::jsonb,
+    header_override JSONB NOT NULL DEFAULT '{}'::jsonb,
+    remark TEXT,
+    channel_info JSONB NOT NULL DEFAULT '{}'::jsonb,
     test_at TIMESTAMPTZ,
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS api_files (
+    id TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_id INTEGER REFERENCES tokens(id) ON DELETE SET NULL,
+    object TEXT NOT NULL DEFAULT 'file',
+    bytes BIGINT NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    filename TEXT NOT NULL,
+    purpose TEXT NOT NULL DEFAULT 'assistants',
+    status TEXT NOT NULL DEFAULT 'processed',
+    status_details JSONB NOT NULL DEFAULT '{}'::jsonb,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS idx_api_files_user_id ON api_files(user_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS api_batches (
+    id TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_id INTEGER REFERENCES tokens(id) ON DELETE SET NULL,
+    object TEXT NOT NULL DEFAULT 'batch',
+    endpoint TEXT NOT NULL,
+    input_file_id TEXT REFERENCES api_files(id) ON DELETE SET NULL,
+    completion_window TEXT NOT NULL DEFAULT '24h',
+    status TEXT NOT NULL DEFAULT 'validating',
+    output_file_id TEXT REFERENCES api_files(id) ON DELETE SET NULL,
+    error_file_id TEXT REFERENCES api_files(id) ON DELETE SET NULL,
+    request_counts JSONB NOT NULL DEFAULT '{"total":0,"completed":0,"failed":0}'::jsonb,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    errors JSONB,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    in_progress_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    failed_at TIMESTAMPTZ,
+    expired_at TIMESTAMPTZ,
+    cancelling_at TIMESTAMPTZ,
+    cancelled_at TIMESTAMPTZ,
+    finalizing_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_api_batches_user_id ON api_batches(user_id, created_at DESC);
+
+ALTER TABLE tokens ADD COLUMN IF NOT EXISTS allow_ips TEXT;
+ALTER TABLE tokens ADD COLUMN IF NOT EXISTS unlimited_quota BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE tokens ADD COLUMN IF NOT EXISTS model_limits_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE tokens ADD COLUMN IF NOT EXISTS token_group TEXT;
+ALTER TABLE tokens ADD COLUMN IF NOT EXISTS cross_group_retry BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE tokens ADD COLUMN IF NOT EXISTS accessed_at TIMESTAMPTZ;
+
+ALTER TABLE channels ADD COLUMN IF NOT EXISTS test_model TEXT;
+ALTER TABLE channels ADD COLUMN IF NOT EXISTS openai_organization TEXT;
+ALTER TABLE channels ADD COLUMN IF NOT EXISTS balance DECIMAL(20, 8);
+ALTER TABLE channels ADD COLUMN IF NOT EXISTS response_time INTEGER;
+ALTER TABLE channels ADD COLUMN IF NOT EXISTS status_code_mapping JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE channels ADD COLUMN IF NOT EXISTS auto_ban INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE channels ADD COLUMN IF NOT EXISTS tag TEXT;
+ALTER TABLE channels ADD COLUMN IF NOT EXISTS setting JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE channels ADD COLUMN IF NOT EXISTS param_override JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE channels ADD COLUMN IF NOT EXISTS header_override JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE channels ADD COLUMN IF NOT EXISTS remark TEXT;
+ALTER TABLE channels ADD COLUMN IF NOT EXISTS channel_info JSONB NOT NULL DEFAULT '{}'::jsonb;
 
 -- ============================================================
 -- Packages & Subscriptions
@@ -699,3 +780,10 @@ INSERT INTO options (key, value) VALUES
     ('HEALTH_CHECK_INTERVAL', '60000'),
     ('ChannelSelectionStrategy', 'priority')
 ON CONFLICT (key) DO NOTHING;
+
+-- ============================================================
+-- Channel indexes for tag/status/group queries (New API parity)
+-- ============================================================
+CREATE INDEX IF NOT EXISTS idx_channels_tag ON channels(tag) WHERE tag IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_channels_status ON channels(status);
+CREATE INDEX IF NOT EXISTS idx_channels_type ON channels(type);

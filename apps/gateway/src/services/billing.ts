@@ -43,8 +43,13 @@ export async function preCheckAndDecrement(ctx: {
 
         const [token] = await tx`
             UPDATE tokens
-            SET remain_quota = CASE WHEN remain_quota > 0 THEN remain_quota - ${estimatedCost} ELSE remain_quota END
-            WHERE id = ${ctx.tokenId} AND (remain_quota = -1 OR remain_quota >= ${estimatedCost})
+            SET remain_quota = CASE
+                WHEN unlimited_quota THEN remain_quota
+                WHEN remain_quota > 0 THEN remain_quota - ${estimatedCost}
+                ELSE remain_quota
+            END
+            WHERE id = ${ctx.tokenId}
+              AND (unlimited_quota OR remain_quota = -1 OR remain_quota >= ${estimatedCost})
             RETURNING id
         `;
         return !!token;
@@ -67,7 +72,15 @@ export async function reconcileQuota(ctx: {
 
     await sql.begin(async (tx: any) => {
         await tx`UPDATE users SET quota = quota + ${diff} WHERE id = ${ctx.userId}`;
-        await tx`UPDATE tokens SET remain_quota = CASE WHEN remain_quota >= 0 THEN remain_quota + ${diff} ELSE remain_quota END WHERE id = ${ctx.tokenId}`;
+        await tx`
+            UPDATE tokens
+            SET remain_quota = CASE
+                WHEN unlimited_quota THEN remain_quota
+                WHEN remain_quota >= 0 THEN remain_quota + ${diff}
+                ELSE remain_quota
+            END
+            WHERE id = ${ctx.tokenId}
+        `;
     });
 }
 

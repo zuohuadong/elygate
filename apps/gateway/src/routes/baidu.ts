@@ -48,19 +48,41 @@ export const baiduRouter = new Elysia()
         } catch (error: unknown) {
             const baiduError = converter.convertError(error);
             return new Response(JSON.stringify(baiduError), {
-                status: 200, // Baidu often returns 200 with error_code
+                status: 200,
                 headers: { 'Content-Type': 'application/json' }
             });
+        }
+    })
+    // Baidu Wenxin embeddings
+    .post('/rpc/2.0/ai_custom/v1/wenxinworkshop/embeddings/:model', async ({ body, params, request, query }: ElysiaCtx) => {
+        const model = params.model;
+        const apiKey = query.access_token || request.headers.get('Authorization')?.replace('Bearer ', '');
+        if (!apiKey) return new Response(JSON.stringify({ error_code: 1, error_msg: 'Missing access_token' }), { status: 401 });
+        const t = await memoryCache.getTokenFromCache(apiKey);
+        if (!t || t.status !== 1) return new Response(JSON.stringify({ error_code: 1, error_msg: 'Invalid access_token' }), { status: 401 });
+        const u = await memoryCache.getUserFromDB(t.userId);
+        if (!u) return new Response(JSON.stringify({ error_code: 1, error_msg: 'User not found' }), { status: 401 });
+
+        const converter = getConverter('/wenxinworkshop/embeddings/');
+        const internalReq = converter.convertRequest(body);
+        internalReq.model = model;
+        const ip = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown';
+        const ua = request.headers.get('user-agent') || 'unknown';
+
+        try {
+            const result = await dispatch({ model, body: internalReq, user: u, token: t, endpointType: 'embeddings', stream: false, ip, ua });
+            if (result && !(result instanceof Response)) return converter.convertResponse(result as any);
+            return result;
+        } catch (error: unknown) {
+            return new Response(JSON.stringify(converter.convertError(error)), { status: 200, headers: { 'Content-Type': 'application/json' } });
         }
     });
 
 async function convertStreamToBaidu(response: Response, converter: Record<string, any>): Promise<Response> {
     const reader = response.body?.getReader();
     if (!reader) return response;
-    
     const encoder = new TextEncoder();
     const decoder = new TextDecoder();
-    
     const stream = new ReadableStream({
         async start(controller) {
             let buffer = '';
@@ -68,11 +90,9 @@ async function convertStreamToBaidu(response: Response, converter: Record<string
                 while (true) {
                     const { done, value } = await reader.read();
                     if (done) break;
-                    
                     buffer += decoder.decode(value);
                     const lines = buffer.split('\n');
                     buffer = lines.pop() || '';
-                    
                     for (const line of lines) {
                         if (line.startsWith('data: ')) {
                             const data = line.slice(6);
@@ -81,16 +101,15 @@ async function convertStreamToBaidu(response: Response, converter: Record<string
                                     const chunk = JSON.parse(data);
                                     const baiduChunk = converter.convertStreamChunk(chunk);
                                     if (baiduChunk) controller.enqueue(encoder.encode(baiduChunk));
-                                } catch { /* stream chunk parse error — skip */ }
+                                } catch { /* skip */ }
                             }
                         }
                     }
                 }
-            } catch { /* stream complete — expected */ }
+            } catch { /* stream complete */ }
             controller.close();
         }
     });
-    
     return new Response(stream, {
         headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' }
     });
