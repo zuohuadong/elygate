@@ -1,6 +1,8 @@
 import type { ElysiaCtx } from '../../types';
 import { Elysia, t } from 'elysia';
-import { sql } from '@elygate/db';
+import { db } from '@elygate/db';
+import { users, tokens, logs, redemptions, userCheckins, userAff, userAffRewards } from '@elygate/db/schema';
+import { eq, and, desc, count, sum, sql as drizzleSql } from 'drizzle-orm';
 import { authPlugin } from '../../middleware/auth';
 import { optionCache } from '../../services/optionCache';
 import { calculateCost } from '../../services/ratio';
@@ -13,21 +15,38 @@ export const userSelfServiceRouter = new Elysia()
     // --- User Self: Get own info ---
     .get('/self/info', async ({ user }: ElysiaCtx) => {
         if (!user) return { success: false, message: 'Not authenticated' };
-        const [row] = await sql`
-            SELECT id, username, role, quota, used_quota, "group", status, currency, created_at
-            FROM users WHERE id = ${user.id}
-        `;
+        const [row] = await db.select({
+            id: users.id,
+            username: users.username,
+            role: users.role,
+            quota: users.quota,
+            usedQuota: users.usedQuota,
+            group: users.group,
+            status: users.status,
+            currency: users.currency,
+            createdAt: users.createdAt,
+        }).from(users).where(eq(users.id, user.id));
         return { success: true, data: row };
     })
 
     // --- User Self: Get own tokens ---
     .get('/self/tokens', async ({ user }: ElysiaCtx) => {
         if (!user) return { success: false, message: 'Not authenticated' };
-        const rows = await sql`
-            SELECT id, name, key, status, remain_quota, used_quota, models, rate_limit,
-                   unlimited_quota, model_limits_enabled, expired_at, created_at, accessed_at
-            FROM tokens WHERE user_id = ${user.id} ORDER BY id DESC
-        `;
+        const rows = await db.select({
+            id: tokens.id,
+            name: tokens.name,
+            key: tokens.key,
+            status: tokens.status,
+            remainQuota: tokens.remainQuota,
+            usedQuota: tokens.usedQuota,
+            models: tokens.models,
+            rateLimit: tokens.rateLimit,
+            unlimitedQuota: tokens.unlimitedQuota,
+            modelLimitsEnabled: tokens.modelLimitsEnabled,
+            expiredAt: tokens.expiredAt,
+            createdAt: tokens.createdAt,
+            accessedAt: tokens.accessedAt,
+        }).from(tokens).where(eq(tokens.userId, user.id)).orderBy(desc(tokens.id));
         // Mask keys
         return {
             success: true,
@@ -44,13 +63,24 @@ export const userSelfServiceRouter = new Elysia()
         const b = body as Record<string, any>;
         const newKey = `sk-${Bun.randomUUIDv7('hex')}`;
         try {
-            const [result] = await sql`
-                INSERT INTO tokens (user_id, name, key, remain_quota, models, subnet, rate_limit, unlimited_quota, model_limits_enabled)
-                VALUES (${user.id}, ${b.name || 'My Token'}, ${newKey}, ${b.remainQuota ?? -1},
-                    ${JSON.stringify(b.models || [])}, ${b.subnet || null}, ${b.rateLimit || 0},
-                    ${Boolean(b.unlimitedQuota)}, ${Boolean(b.modelLimitsEnabled)})
-                RETURNING id, name, key, status, remain_quota, created_at
-            `;
+            const [result] = await db.insert(tokens).values({
+                userId: user.id,
+                name: b.name || 'My Token',
+                key: newKey,
+                remainQuota: b.remainQuota ?? -1,
+                models: b.models || [],
+                subnet: b.subnet || null,
+                rateLimit: b.rateLimit || 0,
+                unlimitedQuota: Boolean(b.unlimitedQuota),
+                modelLimitsEnabled: Boolean(b.modelLimitsEnabled),
+            }).returning({
+                id: tokens.id,
+                name: tokens.name,
+                key: tokens.key,
+                status: tokens.status,
+                remainQuota: tokens.remainQuota,
+                createdAt: tokens.createdAt,
+            });
             return { success: true, data: result };
         } catch (e: unknown) {
             set.status = 500;
@@ -61,8 +91,8 @@ export const userSelfServiceRouter = new Elysia()
     // --- User Self: Delete own token ---
     .delete('/self/tokens/:id', async ({ user, params: { id }, set }: ElysiaCtx) => {
         if (!user) return { success: false, message: 'Not authenticated' };
-        const result = await sql`DELETE FROM tokens WHERE id = ${Number(id)} AND user_id = ${user.id}`;
-        if (result.count === 0) { set.status = 404; return { success: false, message: 'Token not found' }; }
+        const result = await db.delete(tokens).where(and(eq(tokens.id, Number(id)), eq(tokens.userId, user.id))).returning({ id: tokens.id });
+        if (result.length === 0) { set.status = 404; return { success: false, message: 'Token not found' }; }
         return { success: true };
     })
 
@@ -70,21 +100,22 @@ export const userSelfServiceRouter = new Elysia()
     .get('/self/usage', async ({ user, query }: ElysiaCtx) => {
         if (!user) return { success: false, message: 'Not authenticated' };
         const days = Number(query?.days) || 30;
-        const [stats] = await sql`
-            SELECT
-                COUNT(*) as total_requests,
-                COUNT(CASE WHEN status_code < 400 THEN 1 END) as success_count,
-                SUM(quota_cost) as total_cost,
-                SUM(prompt_tokens + completion_tokens) as total_tokens,
-                COUNT(DISTINCT model_name) as unique_models
-            FROM logs WHERE user_id = ${user.id} AND created_at > NOW() - (${days}::int * INTERVAL '1 day')
-        `;
+        const cutoff = drizzleSql`NOW() - (${drizzleSql.raw(String(days))} * INTERVAL '1 day')`;
+        const [stats] = await db.select({
+            totalRequests: count(),
+            successCount: count(drizzleSql`CASE WHEN ${logs.statusCode} < 400 THEN 1 END`),
+            totalCost: sum(logs.quotaCost).mapWith(Number),
+            totalTokens: sum(drizzleSql`${logs.promptTokens} + ${logs.completionTokens}`).mapWith(Number),
+            uniqueModels: count(drizzleSql`DISTINCT ${logs.modelName}`),
+        }).from(logs).where(and(eq(logs.userId, user.id), drizzleSql`created_at > ${cutoff}`));
         // Daily breakdown
-        const daily = await sql`
-            SELECT DATE(created_at) as date, COUNT(*) as requests, SUM(quota_cost) as cost
-            FROM logs WHERE user_id = ${user.id} AND created_at > NOW() - (${days}::int * INTERVAL '1 day')
-            GROUP BY DATE(created_at) ORDER BY date
-        `;
+        const daily = await db.select({
+            date: drizzleSql`DATE(${logs.createdAt})`.as('date'),
+            requests: count(),
+            cost: sum(logs.quotaCost).mapWith(Number),
+        }).from(logs).where(and(eq(logs.userId, user.id), drizzleSql`created_at > ${cutoff}`))
+          .groupBy(drizzleSql`DATE(${logs.createdAt})`)
+          .orderBy(drizzleSql`DATE(${logs.createdAt})`);
         return { success: true, data: { stats, daily } };
     })
 
@@ -94,13 +125,22 @@ export const userSelfServiceRouter = new Elysia()
         const page = Number(query?.page) || 1;
         const limit = Number(query?.limit) || 50;
         const offset = (page - 1) * limit;
-        const [countRow] = await sql`SELECT COUNT(*) as total FROM logs WHERE user_id = ${user.id}`;
-        const data = await sql`
-            SELECT id, model_name, prompt_tokens, completion_tokens, quota_cost, status_code,
-                   is_stream, created_at, elapsed_ms, error_message
-            FROM logs WHERE user_id = ${user.id}
-            ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}
-        `;
+        const [countRow] = await db.select({ total: count() }).from(logs).where(eq(logs.userId, user.id));
+        const data = await db.select({
+            id: logs.id,
+            modelName: logs.modelName,
+            promptTokens: logs.promptTokens,
+            completionTokens: logs.completionTokens,
+            quotaCost: logs.quotaCost,
+            statusCode: logs.statusCode,
+            isStream: logs.isStream,
+            createdAt: logs.createdAt,
+            elapsedMs: logs.elapsedMs,
+            errorMessage: logs.errorMessage,
+        }).from(logs).where(eq(logs.userId, user.id))
+          .orderBy(desc(logs.createdAt))
+          .limit(limit)
+          .offset(offset);
         return { data, total: countRow.total, page, limit };
     })
 
@@ -114,13 +154,12 @@ export const userSelfServiceRouter = new Elysia()
         const today = new Date().toISOString().split('T')[0];
 
         // Check if already checked in today
-        const [existing] = await sql`
-            SELECT id FROM user_checkins WHERE user_id = ${user.id} AND checkin_date = ${today}
-        `;
+        const [existing] = await db.select({ id: userCheckins.id }).from(userCheckins)
+            .where(and(eq(userCheckins.userId, user.id), eq(userCheckins.checkinDate, today)));
         if (existing) { set.status = 409; return { success: false, message: 'Already checked in today' }; }
 
-        await sql`INSERT INTO user_checkins (user_id, checkin_date, reward) VALUES (${user.id}, ${today}, ${reward})`;
-        await sql`UPDATE users SET quota = quota + ${reward} WHERE id = ${user.id}`;
+        await db.insert(userCheckins).values({ userId: user.id, checkinDate: today, reward });
+        await db.update(users).set({ quota: drizzleSql`${users.quota} + ${reward}` }).where(eq(users.id, user.id));
 
         return { success: true, reward, message: `Checked in! +${reward} quota` };
     })
@@ -129,10 +168,12 @@ export const userSelfServiceRouter = new Elysia()
     .get('/self/checkin', async ({ user }: ElysiaCtx) => {
         if (!user) return { success: false, message: 'Not authenticated' };
         const today = new Date().toISOString().split('T')[0];
-        const [row] = await sql`
-            SELECT id, checkin_date, reward FROM user_checkins
-            WHERE user_id = ${user.id} AND checkin_date = ${today}
-        `;
+        const [row] = await db.select({
+            id: userCheckins.id,
+            checkinDate: userCheckins.checkinDate,
+            reward: userCheckins.reward,
+        }).from(userCheckins)
+            .where(and(eq(userCheckins.userId, user.id), eq(userCheckins.checkinDate, today)));
         const checkinEnabled = String(optionCache.get('CheckinEnabled', 'false')) === 'true';
         const reward = Number(optionCache.get('CheckinReward', 100000));
         return {
@@ -141,7 +182,7 @@ export const userSelfServiceRouter = new Elysia()
                 enabled: checkinEnabled,
                 checkedIn: !!row,
                 reward,
-                lastCheckin: row?.checkin_date || null,
+                lastCheckin: row?.checkinDate || null,
             }
         };
     })
@@ -149,18 +190,18 @@ export const userSelfServiceRouter = new Elysia()
     // --- Aff/Invite ---
     .get('/self/aff', async ({ user }: ElysiaCtx) => {
         if (!user) return { success: false, message: 'Not authenticated' };
-        let [aff] = await sql`SELECT code, reward FROM user_aff WHERE user_id = ${user.id}`;
+        let [aff] = await db.select({ code: userAff.code, reward: userAff.reward }).from(userAff).where(eq(userAff.userId, user.id));
         if (!aff) {
             const code = Bun.randomUUIDv7('hex').substring(0, 12);
-            await sql`INSERT INTO user_aff (user_id, code) VALUES (${user.id}, ${code})`;
+            await db.insert(userAff).values({ userId: user.id, code });
             aff = { code, reward: 0 };
         }
         // Count invites
-        const [stats] = await sql`
-            SELECT COUNT(*) as invite_count, COALESCE(SUM(reward), 0) as total_reward
-            FROM user_aff_rewards WHERE referrer_id = ${user.id}
-        `;
-        return { success: true, data: { code: aff.code, inviteCount: stats?.invite_count || 0, totalReward: stats?.total_reward || 0 } };
+        const [stats] = await db.select({
+            inviteCount: count().as('invite_count'),
+            totalReward: drizzleSql`COALESCE(${sum(userAffRewards.reward)}, 0)`.mapWith(Number),
+        }).from(userAffRewards).where(eq(userAffRewards.referrerId, user.id));
+        return { success: true, data: { code: aff.code, inviteCount: stats?.inviteCount || 0, totalReward: stats?.totalReward || 0 } };
     })
 
     // --- Topup (redemption code) ---
@@ -169,13 +210,12 @@ export const userSelfServiceRouter = new Elysia()
         const { key } = body as { key: string };
         if (!key) { set.status = 400; return { success: false, message: 'Key is required' }; }
 
-        const [redemption] = await sql`
-            SELECT * FROM redemptions WHERE key = ${key} AND status = 1 AND used_count < count
-        `;
+        const [redemption] = await db.select().from(redemptions)
+            .where(and(eq(redemptions.key, key), eq(redemptions.status, 1), drizzleSql`${redemptions.usedCount} < ${redemptions.count}`));
         if (!redemption) { set.status = 404; return { success: false, message: 'Invalid or exhausted redemption code' }; }
 
-        await sql`UPDATE redemptions SET used_count = used_count + 1 WHERE id = ${redemption.id}`;
-        await sql`UPDATE users SET quota = quota + ${redemption.quota} WHERE id = ${user.id}`;
+        await db.update(redemptions).set({ usedCount: drizzleSql`${redemptions.usedCount} + 1` }).where(eq(redemptions.id, redemption.id));
+        await db.update(users).set({ quota: drizzleSql`${users.quota} + ${redemption.quota}` }).where(eq(users.id, user.id));
 
         return { success: true, quota: redemption.quota, message: `Redeemed ${redemption.quota} quota` };
     }, { body: t.Object({ key: t.String() }) });

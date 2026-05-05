@@ -1,25 +1,23 @@
-import { sql } from '$lib/server/db';
+import { db, sql } from '$lib/server/db';
 import { requireOrgManager, requirePortalMember } from '$lib/server/portalAuth';
-import type { PageServerLoad } from './$types';
-
-type PolicyRow = {
-    allowed_models: string[] | null;
-    denied_models: string[] | null;
-    allowed_subnets: string | null;
-    alert_threshold_pct: number | null;
-    alert_webhook_url: string | null;
-};
+import { organizations, channels } from '@elygate/db/schema';
+import { eq } from '@elygate/db/operators';
+import type { PageServerLoad, Actions } from './$types';
 
 export const load: PageServerLoad = async ({ locals }) => {
     const { org } = requirePortalMember(locals);
     
-    const [policy] = await sql`
-        SELECT allowed_models, denied_models, allowed_subnets, alert_threshold_pct, alert_webhook_url
-        FROM organizations
-        WHERE id = ${org.id}
-    ` as PolicyRow[];
+    const [policy] = await db.select({
+        allowedModels: organizations.allowedModels,
+        deniedModels: organizations.deniedModels,
+        allowedSubnets: organizations.allowedSubnets,
+        alertThresholdPct: organizations.alertThresholdPct,
+        alertWebhookUrl: organizations.alertWebhookUrl,
+    })
+    .from(organizations)
+    .where(eq(organizations.id, org.id));
 
-    // Fetch available models in the system for selection
+    // jsonb_array_elements_text requires raw SQL
     const availableModels = await sql`
         SELECT DISTINCT jsonb_array_elements_text(models) as model
         FROM channels
@@ -28,18 +26,18 @@ export const load: PageServerLoad = async ({ locals }) => {
 
     return {
         policy: {
-            allowedModels: policy?.allowed_models ?? [],
-            deniedModels: policy?.denied_models ?? [],
-            allowedSubnets: policy?.allowed_subnets ?? '',
-            alertThresholdPct: Number(policy?.alert_threshold_pct ?? 80),
-            alertWebhookUrl: policy?.alert_webhook_url ?? ''
+            allowedModels: policy?.allowedModels ?? [],
+            deniedModels: policy?.deniedModels ?? [],
+            allowedSubnets: policy?.allowedSubnets ?? '',
+            alertThresholdPct: Number(policy?.alertThresholdPct ?? 80),
+            alertWebhookUrl: policy?.alertWebhookUrl ?? ''
         },
         availableModels: availableModels.map((modelRow) => modelRow.model)
     };
 };
 
 export const actions = {
-    updatePolicy: async ({ request, locals }) => {
+    updatePolicy: async ({ request, locals }: { request: Request; locals: App.Locals }) => {
         const { org } = requireOrgManager(locals);
         const formData = await request.formData();
         
@@ -49,17 +47,16 @@ export const actions = {
         const allowedModels = JSON.parse(formData.get('allowedModels') as string);
         const deniedModels = JSON.parse(formData.get('deniedModels') as string);
 
-        await sql`
-            UPDATE organizations
-            SET 
-                allowed_subnets = ${allowedSubnets},
-                alert_threshold_pct = ${alertThresholdPct},
-                alert_webhook_url = ${alertWebhookUrl},
-                allowed_models = ${JSON.stringify(allowedModels)},
-                denied_models = ${JSON.stringify(deniedModels)},
-                updated_at = NOW()
-            WHERE id = ${org.id}
-        `;
+        await db.update(organizations)
+            .set({ 
+                allowedSubnets,
+                alertThresholdPct,
+                alertWebhookUrl,
+                allowedModels,
+                deniedModels,
+                updatedAt: new Date(),
+            })
+            .where(eq(organizations.id, org.id));
 
         return { success: true };
     }

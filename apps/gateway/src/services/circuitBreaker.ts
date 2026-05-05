@@ -1,5 +1,7 @@
 import { log } from '../services/logger';
-import { sql } from '@elygate/db';
+import { db, sql } from '@elygate/db';
+import { channels } from '@elygate/db/schema';
+import { eq, and, ne, isNotNull, sql as drizzleSql } from 'drizzle-orm';
 import { memoryCache } from './cache';
 import { notificationService } from './notifier';
 import { optionCache } from './optionCache';
@@ -113,7 +115,11 @@ class CircuitBreaker {
             const latencyThreshold = parseInt(optionCache.get('LATENCY_THRESHOLD_MS', '30000'));
             if (newAvg > latencyThreshold) {
                 log.warn(`[CircuitBreaker] Channel ${channelId} high latency (${Math.round(newAvg)}ms). Marking as Busy.`);
-                await sql`UPDATE channels SET status = 5, status_message = 'High Latency', updated_at = NOW() WHERE id = ${channelId}`;
+                await db.update(channels).set({
+                    status: 5,
+                    statusMessage: 'High Latency',
+                    updatedAt: drizzleSql`NOW()`,
+                }).where(eq(channels.id, channelId));
                 await memoryCache.refresh();
             }
         }
@@ -126,7 +132,11 @@ class CircuitBreaker {
 
             if (count >= threshold) {
                 log.info(`[CircuitBreaker] Channel ${channelId} recovered to Online.`);
-                await sql`UPDATE channels SET status = 1, status_message = NULL, updated_at = NOW() WHERE id = ${channelId}`;
+                await db.update(channels).set({
+                    status: 1,
+                    statusMessage: null,
+                    updatedAt: drizzleSql`NOW()`,
+                }).where(eq(channels.id, channelId));
                 await memoryCache.refresh();
                 this.successCounts.delete(channelId);
             } else {
@@ -154,7 +164,11 @@ class CircuitBreaker {
         }
         if (status === 403) {
             log.warn(`[CircuitBreaker] Channel ${channelId} received 403. Marking as Busy.`);
-            await sql`UPDATE channels SET status = 5, status_message = ${'Upstream 403: ' + (message || '').substring(0, 100)}, updated_at = NOW() WHERE id = ${channelId}`;
+            await db.update(channels).set({
+                status: 5,
+                statusMessage: 'Upstream 403: ' + (message || '').substring(0, 100),
+                updatedAt: drizzleSql`NOW()`,
+            }).where(eq(channels.id, channelId));
             await memoryCache.refresh();
             return;
         }
@@ -162,7 +176,11 @@ class CircuitBreaker {
         // 2. Mark as Busy for Rate Limits (429)
         if (status === 429) {
             log.warn(`[CircuitBreaker] Channel ${channelId} Rate Limited (429). Marking as Busy.`);
-            await sql`UPDATE channels SET status = 5, status_message = 'Rate Limited (429)', updated_at = NOW() WHERE id = ${channelId}`;
+            await db.update(channels).set({
+                status: 5,
+                statusMessage: 'Rate Limited (429)',
+                updatedAt: drizzleSql`NOW()`,
+            }).where(eq(channels.id, channelId));
             await memoryCache.refresh();
             return;
         }
@@ -192,13 +210,17 @@ class CircuitBreaker {
     private async markKeyExhausted(channelId: number, key: string, status: number, message?: string) {
         try {
             // Fetch current channel state
-            const [ch] = await sql`SELECT key, key_status FROM channels WHERE id = ${channelId}`;
+            const chRows = await db.select({
+                key: channels.key,
+                keyStatus: channels.keyStatus,
+            }).from(channels).where(eq(channels.id, channelId));
+            const ch = chRows[0];
             if (!ch) return;
 
             const allKeys = ch.key.split('\n').map((k: string) => k.trim()).filter(Boolean);
-            const statusMap: Record<string, any> = (typeof ch.key_status === 'string'
-                ? JSON.parse(ch.key_status)
-                : ch.key_status) || {};
+            const statusMap: Record<string, any> = (typeof ch.keyStatus === 'string'
+                ? JSON.parse(ch.keyStatus as unknown as string)
+                : ch.keyStatus) || {};
 
             // Mark this key with reason details
             const reason = status === 401 ? 'invalid' : 'exhausted';
@@ -207,7 +229,10 @@ class CircuitBreaker {
             log.warn(`[CircuitBreaker] Channel ${channelId} key ${key.substring(0, 8)}... marked as ${reason} (${status}). ${shortMsg}`);
 
             // Update key_status in DB
-            await sql`UPDATE channels SET key_status = ${statusMap}, updated_at = NOW() WHERE id = ${channelId}`;
+            await db.update(channels).set({
+                keyStatus: statusMap,
+                updatedAt: drizzleSql`NOW()`,
+            }).where(eq(channels.id, channelId));
 
             // Check if ALL keys are now exhausted/invalid
             const isKeyBad = (v: any) => {
@@ -238,11 +263,13 @@ class CircuitBreaker {
 
     private async disableChannel(channelId: number, reason?: string) {
         try {
-            await sql`
-                UPDATE channels
-                SET status = 3, status_message = ${reason || null}, updated_at = NOW()
-                WHERE id = ${channelId} AND status != 2
-            `;
+            await db.update(channels).set({
+                status: 3,
+                statusMessage: reason || null,
+                updatedAt: drizzleSql`NOW()`,
+            }).where(
+                and(eq(channels.id, channelId), ne(channels.status, 2))
+            );
             await memoryCache.refresh();
             // Clear events and counters for this channel
             this.events.delete(channelId);
@@ -273,59 +300,95 @@ class CircuitBreaker {
             let changed = false;
 
             // 1. Auto-recover Status 5 (Busy) after 1 minute cooldown
-            const busyChannels = await sql`
-                SELECT id FROM channels WHERE status = 5 AND updated_at < NOW() - INTERVAL '1 minute'
-            `;
+            const busyChannels = await db.select({
+                id: channels.id,
+            }).from(channels).where(
+                and(
+                    eq(channels.status, 5),
+                    drizzleSql`${channels.updatedAt} < NOW() - INTERVAL '1 minute'`
+                )
+            );
             for (const ch of busyChannels) {
                 log.info(`[HealthCheck] Auto-recovering Busy channel ${ch.id} to Online.`);
-                await sql`UPDATE channels SET status = 1, status_message = NULL, updated_at = NOW() WHERE id = ${ch.id}`;
+                await db.update(channels).set({
+                    status: 1,
+                    statusMessage: null,
+                    updatedAt: drizzleSql`NOW()`,
+                }).where(eq(channels.id, ch.id));
                 changed = true;
             }
 
             // 2. Auto-recover Status 4 (Testing Recovery) after 2 minutes — no re-ping needed
             //    The initial ping that moved it from status=3→4 already proved connectivity.
             //    Re-pinging can cause false negatives (e.g. /v1/models returns 404 but chat works).
-            const testingChannels = await sql`
-                SELECT id FROM channels 
-                WHERE status = 4 AND updated_at < NOW() - INTERVAL '2 minutes'
-            `;
+            const testingChannels = await db.select({
+                id: channels.id,
+            }).from(channels).where(
+                and(
+                    eq(channels.status, 4),
+                    drizzleSql`${channels.updatedAt} < NOW() - INTERVAL '2 minutes'`
+                )
+            );
             for (const ch of testingChannels) {
                 log.info(`[HealthCheck] Auto-recovering Testing Recovery channel ${ch.id} to Online (cooldown passed).`);
-                await sql`UPDATE channels SET status = 1, status_message = NULL, updated_at = NOW() WHERE id = ${ch.id}`;
+                await db.update(channels).set({
+                    status: 1,
+                    statusMessage: null,
+                    updatedAt: drizzleSql`NOW()`,
+                }).where(eq(channels.id, ch.id));
                 changed = true;
             }
 
             // 3. Try to recover Status 3 (Disabled) channels — ping to check if they're back
             //    Skip channels disabled for Auth Error (401) — those need manual key fix
-            const disabledChannels = await sql`
-                SELECT id, base_url AS "baseUrl", key, type FROM channels 
-                WHERE status = 3 
-                  AND (status_message IS NULL OR status_message NOT LIKE 'Auth Error: 401%')
-                  AND updated_at < NOW() - INTERVAL '2 minutes'
-            `;
+            const disabledChannels = await db.select({
+                id: channels.id,
+                baseUrl: channels.baseUrl,
+                key: channels.key,
+                type: channels.type,
+            }).from(channels).where(
+                and(
+                    eq(channels.status, 3),
+                    drizzleSql`(${channels.statusMessage} IS NULL OR ${channels.statusMessage} NOT LIKE 'Auth Error: 401%')`,
+                    drizzleSql`${channels.updatedAt} < NOW() - INTERVAL '2 minutes'`
+                )
+            );
             
             for (const ch of disabledChannels) {
                 const isHealthy = await this.pingChannel(ch);
                 if (isHealthy) {
                     log.info(`[HealthCheck] Disabled channel ${ch.id} ping succeeded. Moving to Testing Recovery.`);
-                    await sql`UPDATE channels SET status = 4, status_message = 'Testing Recovery', updated_at = NOW() WHERE id = ${ch.id}`;
+                    await db.update(channels).set({
+                        status: 4,
+                        statusMessage: 'Testing Recovery',
+                        updatedAt: drizzleSql`NOW()`,
+                    }).where(eq(channels.id, ch.id));
                     changed = true;
                 }
             }
 
             // 4. Auto-recover exhausted keys — probe each exhausted key to see if balance is back
             //    Reference: New API relay_controller pattern — periodic key re-validation
-            const channelsWithExhaustedKeys = await sql`
-                SELECT id, base_url AS "baseUrl", key, key_status, type, status, models
-                FROM channels
-                WHERE key_status != '{}' AND key_status IS NOT NULL
-                  AND updated_at < NOW() - INTERVAL '5 minutes'
-            `;
+            const channelsWithExhaustedKeys = await db.select({
+                id: channels.id,
+                baseUrl: channels.baseUrl,
+                key: channels.key,
+                keyStatus: channels.keyStatus,
+                type: channels.type,
+                status: channels.status,
+                models: channels.models,
+            }).from(channels).where(
+                and(
+                    drizzleSql`${channels.keyStatus}::text != '{}'`,
+                    isNotNull(channels.keyStatus),
+                    drizzleSql`${channels.updatedAt} < NOW() - INTERVAL '5 minutes'`
+                )
+            );
 
             for (const ch of channelsWithExhaustedKeys) {
-                const statusMap: Record<string, any> = (typeof ch.key_status === 'string'
-                    ? JSON.parse(ch.key_status)
-                    : ch.key_status) || {};
+                const statusMap: Record<string, any> = (typeof ch.keyStatus === 'string'
+                    ? JSON.parse(ch.keyStatus as unknown as string)
+                    : ch.keyStatus) || {};
 
                 const isKeyBad = (v: any) => {
                     if (typeof v === 'string') return v === 'exhausted' || v === 'invalid';
@@ -349,7 +412,10 @@ class CircuitBreaker {
                 }
 
                 if (restoredCount > 0) {
-                    await sql`UPDATE channels SET key_status = ${statusMap}, updated_at = NOW() WHERE id = ${ch.id}`;
+                    await db.update(channels).set({
+                        keyStatus: statusMap,
+                        updatedAt: drizzleSql`NOW()`,
+                    }).where(eq(channels.id, ch.id));
                     changed = true;
 
                     // If channel was disabled due to all keys exhausted, bring it back online
@@ -358,7 +424,11 @@ class CircuitBreaker {
                         const stillBad = allKeys.filter((k: string) => statusMap[k] && isKeyBad(statusMap[k]));
                         if (stillBad.length < allKeys.length) {
                             log.info(`[HealthCheck] Channel ${ch.id} has ${allKeys.length - stillBad.length} healthy keys. Restoring to Online.`);
-                            await sql`UPDATE channels SET status = 1, status_message = NULL, updated_at = NOW() WHERE id = ${ch.id}`;
+                            await db.update(channels).set({
+                                status: 1,
+                                statusMessage: null,
+                                updatedAt: drizzleSql`NOW()`,
+                            }).where(eq(channels.id, ch.id));
                         }
                     }
                 }

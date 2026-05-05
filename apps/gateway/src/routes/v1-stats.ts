@@ -1,5 +1,7 @@
 import { Elysia } from 'elysia';
-import { sql } from '@elygate/db';
+import { db, sql } from '@elygate/db';
+import { logs } from '@elygate/db/schema';
+import { eq, and, gte, sql as drizzleSql, count } from 'drizzle-orm';
 import type { ElysiaCtx } from '../types';
 
 export const v1StatsRouter = new Elysia()
@@ -8,18 +10,19 @@ export const v1StatsRouter = new Elysia()
             throw new Error('Unauthorized');
         }
 
-        const [todayStats] = await sql`
-            SELECT 
-                COUNT(*)::int as todayTasks,
-                COUNT(CASE WHEN status != 1 THEN 1 END)::int as failedTasks
-            FROM logs 
-            WHERE created_at >= CURRENT_DATE
-            AND user_id = ${user.id}
-        `;
+        const [todayStats] = await db.select({
+            todayTasks: count().as('todayTasks'),
+            failedTasks: drizzleSql`count(case when ${logs.statusCode} != 1 then 1 end)::int`.as('failedTasks'),
+        })
+        .from(logs)
+        .where(and(
+            gte(logs.createdAt, drizzleSql`CURRENT_DATE`),
+            eq(logs.userId, user.id),
+        ));
 
         return {
             message: 'success',
-            todayTasks: todayStats?.todaytasks || todayStats?.todayTasks || 0,
-            failedTasks: todayStats?.failedtasks || todayStats?.failedTasks || 0
+            todayTasks: todayStats?.todayTasks || 0,
+            failedTasks: todayStats?.failedTasks || 0
         };
     });

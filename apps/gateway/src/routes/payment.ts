@@ -3,7 +3,9 @@ import { config, apiUrls } from '../config';
 import { log } from '../services/logger';
 import { getErrorMessage } from '../utils/error';
 import { Elysia, t } from 'elysia';
-import { sql } from '@elygate/db';
+import { db, sql } from '@elygate/db';
+import { options, users, paymentOrders } from '@elygate/db/schema';
+import { eq, and, desc, sql as drizzleSql } from 'drizzle-orm';
 import { authPlugin } from '../middleware/auth';
 import { optionCache } from '../services/optionCache';
 
@@ -16,11 +18,9 @@ const EPAY_GATEWAY = config.epay.gateway || 'https://api.epay.com';
 export const paymentRouter = new Elysia({ prefix: '/payment' })
     .use(authPlugin)
 
-    // Create a new payment order (authenticated: userId comes from token, not request body)
     .post('/create-order', async ({ body, user, set }: ElysiaCtx) => {
         try {
-            // Safeguard: Check if payment is enabled first
-            const [paymentEnabled] = await sql`SELECT value FROM options WHERE key = 'PaymentEnabled'`;
+            const [paymentEnabled] = await db.select().from(options).where(eq(options.key, 'PaymentEnabled'));
             if (paymentEnabled && paymentEnabled.value === 'false') {
                 set.status = 403;
                 return { success: false, message: 'Self-recharge is currently disabled' };
@@ -33,14 +33,14 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
                 return { success: false, message: 'Invalid amount' };
             }
 
-            // Use authenticated user's ID — never trust client-provided userId
             const userId = user.id;
 
-            const [order] = await sql`
-                INSERT INTO payment_orders (user_id, amount, payment_method, status)
-                VALUES (${userId}, ${amount}, ${paymentMethod}, 0)
-                RETURNING *
-            `;
+            const [order] = await db.insert(paymentOrders).values({
+                userId,
+                amount,
+                paymentMethod,
+                status: 0,
+            }).returning();
 
             let paymentUrl = '';
 
@@ -71,7 +71,6 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
                 }
                 paymentUrl = session.url;
             } else if (paymentMethod === 'epay' && EPAY_APP_ID && EPAY_APP_SECRET) {
-                // Store orderId in out_trade_no with a simpler, parseable format: ELY{orderId}
                 const outTradeNo = `ELY${order.id}`;
                 const params = new URLSearchParams({
                     pid: EPAY_APP_ID,
@@ -83,7 +82,6 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
                     money: (amount / 100).toFixed(2)
                 });
 
-                // Sort params as required by EPay spec
                 const sortedParams = new URLSearchParams([...params.entries()].sort());
                 const sign = await generateEPaySign(sortedParams.toString(), EPAY_APP_SECRET);
                 paymentUrl = `${EPAY_GATEWAY}/submit.php?${sortedParams}&sign=${sign}&sign_type=MD5`;
@@ -106,10 +104,8 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
         })
     })
 
-    // Stripe webhook callback — verify Stripe-Signature header
     .post('/stripe/callback', async ({ body, request, set }: ElysiaCtx) => {
         try {
-            // Verify Stripe webhook signature if webhook secret is configured
             if (STRIPE_WEBHOOK_SECRET) {
                 const sigHeader = request.headers.get('stripe-signature');
                 if (!sigHeader) {
@@ -127,7 +123,6 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
                 const timestamp = parts['t'];
                 const receivedSig = parts['v1'];
 
-                // HMAC-SHA256 verification via Bun native API
                 const expectedSig = new Bun.CryptoHasher('sha256', STRIPE_WEBHOOK_SECRET)
                     .update(`${timestamp}.${rawBody}`)
                     .digest('hex');
@@ -146,25 +141,22 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
                 return { success: false, message: 'Invalid callback data' };
             }
 
-            // Atomic: update order status AND add quota in single transaction
-            await sql.begin(async (tx: any) => {
-                const [order] = await tx`
+            // Atomic transaction: update order + add quota
+            await db.transaction(async (tx) => {
+                const updatedRows = await tx.execute(sql`
                     UPDATE payment_orders
                     SET status = 1, transaction_id = ${data.object.id}, updated_at = NOW()
                     WHERE id = ${Number(orderId)} AND status = 0
                     RETURNING *
-                `;
+                `);
+                const order = updatedRows[0] as { amount: number; user_id: number } | undefined;
 
-                if (!order) return; // Already processed (idempotent)
+                if (!order) return;
 
                 const quotaPerUnit = Number(optionCache.get('QuotaPerUnit') || 500000);
                 const quotaToAdd = Math.floor((order.amount / 100) * quotaPerUnit);
 
-                await tx`
-                    UPDATE users 
-                    SET quota = quota + ${quotaToAdd}
-                    WHERE id = ${order.user_id}
-                `;
+                await tx.execute(sql`UPDATE users SET quota = quota + ${quotaToAdd} WHERE id = ${order.user_id}`);
 
                 log.info(`[Payment] Stripe success: Order ${orderId}, User ${order.user_id}, Amount ${order.amount}, QuotaAdded ${quotaToAdd}`);
             });
@@ -177,7 +169,6 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
         }
     })
 
-    // EPay async callback
     .post('/epay/callback', async ({ query, set }: ElysiaCtx) => {
         try {
             const params = new URLSearchParams(query);
@@ -186,7 +177,6 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
             params.delete('sign');
             params.delete('sign_type');
 
-            // Sort params before verifying signature (EPay spec requirement)
             const sortedParams = new URLSearchParams([...params.entries()].sort());
             const expectedSign = await generateEPaySign(sortedParams.toString(), EPAY_APP_SECRET);
 
@@ -196,7 +186,6 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
                 return 'fail';
             }
 
-            // Parse orderId from out_trade_no (format: ELY{orderId})
             const outTradeNo = params.get('out_trade_no') || '';
             const orderId = parseInt(outTradeNo.replace(/^ELY/, ''), 10);
 
@@ -205,25 +194,21 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
                 return 'fail';
             }
 
-            // Atomic: update order status AND add quota in single transaction
-            await sql.begin(async (tx: any) => {
-                const [order] = await tx`
+            await db.transaction(async (tx) => {
+                const updatedRows = await tx.execute(sql`
                     UPDATE payment_orders
                     SET status = 1, transaction_id = ${params.get('trade_no')}, updated_at = NOW()
                     WHERE id = ${orderId} AND status = 0
                     RETURNING *
-                `;
+                `);
+                const order = updatedRows[0] as { amount: number; user_id: number } | undefined;
 
-                if (!order) return; // Already processed (idempotent)
+                if (!order) return;
 
                 const quotaPerUnit = Number(optionCache.get('QuotaPerUnit') || 500000);
                 const quotaToAdd = Math.floor((order.amount / 100) * quotaPerUnit);
 
-                await tx`
-                    UPDATE users 
-                    SET quota = quota + ${quotaToAdd}
-                    WHERE id = ${order.user_id}
-                `;
+                await tx.execute(sql`UPDATE users SET quota = quota + ${quotaToAdd} WHERE id = ${order.user_id}`);
 
                 log.info(`[Payment] EPay success: Order ${orderId}, User ${order.user_id}, Amount ${order.amount}, QuotaAdded ${quotaToAdd}`);
             });
@@ -235,15 +220,13 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
         }
     })
 
-    // Get orders for the authenticated user only
     .get('/orders', async ({ user, set }: ElysiaCtx) => {
         try {
-            const orders = await sql`
-                SELECT * FROM payment_orders 
-                WHERE user_id = ${user.id}
-                ORDER BY created_at DESC
-                LIMIT 50
-            `;
+            const orders = await db.select()
+                .from(paymentOrders)
+                .where(eq(paymentOrders.userId, user.id))
+                .orderBy(desc(paymentOrders.createdAt))
+                .limit(50);
             return orders;
         } catch (e: unknown) {
             set.status = 500;
@@ -252,15 +235,12 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
     })
 
     .get('/options', async () => {
-        const rows = await sql`SELECT key, value FROM options`;
+        const rows = await db.select().from(options);
         const settings: Record<string, string> = {};
         for (const r of rows) settings[r.key] = r.value;
         return settings;
     });
 
-/**
- * Generate EPay MD5 signature using Bun native CryptoHasher.
- */
 function generateEPaySign(params: string, secret: string): string {
     return new Bun.CryptoHasher('md5').update(params + secret).digest('hex');
 }

@@ -1,10 +1,10 @@
 import { log } from '../services/logger';
-import { sql } from '@elygate/db';
+import { db, sql } from '@elygate/db';
+import { semanticCache } from '@elygate/db/schema';
 import { optionCache } from './optionCache';
 import { decryptChannelKeys } from './encryption';
 
-// Default configuration - can be overridden via 'options' table in the database
-const DEFAULT_SIMILARITY_THRESHOLD = 0.95; // Cosine similarity threshold (0.0-1.0, higher = more strict)
+const DEFAULT_SIMILARITY_THRESHOLD = 0.95;
 const DEFAULT_CACHE_TTL_HOURS = 24;
 const DEFAULT_ENABLED = true;
 
@@ -22,16 +22,11 @@ function getConfig(): SemanticCacheConfig {
     };
 }
 
-/**
- * Generates a text embedding vector via an OpenAI-compatible embeddings endpoint.
- */
 async function generateEmbedding(text: string, embeddingChannel: Record<string, any>, embeddingModel?: string): Promise<number[] | null> {
-    // Decrypt the API key
     const decryptedKeys = decryptChannelKeys(embeddingChannel.key);
     const keys = decryptedKeys.split('\n').map((k: string) => k.trim()).filter(Boolean);
     const activeKey = keys[Math.floor(Math.random() * keys.length)];
 
-    // Use the specified embedding model, or find one from the channel's models
     const model = embeddingModel || embeddingChannel.models.find((m: string) => 
         m.toLowerCase().includes('embedding') || 
         m.toLowerCase().includes('bge-m3') ||
@@ -40,7 +35,6 @@ async function generateEmbedding(text: string, embeddingChannel: Record<string, 
 
     log.info(`[SemanticCache] Generating embedding with model: ${model}`);
 
-    // Smart URL handling: avoid duplicate /v1 prefix
     let baseUrl = (embeddingChannel.baseUrl || '').replace(/\/+$/, '');
     let embeddingsUrl: string;
     
@@ -70,13 +64,7 @@ async function generateEmbedding(text: string, embeddingChannel: Record<string, 
 }
 
 /**
- * Retrieves a semantically similar cached response for the given query.
- * Returns the cached response if found within the similarity threshold, otherwise null.
- * 
- * Configurable via options:
- * - SemanticCacheEnabled (bool, default: true)
- * - SemanticCacheThreshold (float, default: 0.92)
- * - SemanticCacheTTLHours (int, default: 24)
+ * Vector similarity lookup requires raw SQL (pgvector <=> operator).
  */
 export async function lookupSemanticCache(
     prompt: string,
@@ -94,18 +82,15 @@ export async function lookupSemanticCache(
 
     const vectorLiteral = `[${embedding.join(',')}]`;
     
-    // Policy: Isolated mode (only hits cache created by this user)
     const isolationClause = (policy?.mode === 'isolated' && userId) 
         ? sql`AND created_by = ${userId}` 
         : sql``;
 
-    // Policy: Smart Refresh (Prefer others' cache, or own cache if very recent)
-    // Avoids "cold joke repetition" by forcing refresh if the user repeats their own prompt,
-    // unless it was just a page refresh/retry (within 2 minutes).
     const smartClause = (policy?.mode === 'smart' && userId)
         ? sql`AND (created_by != ${userId} OR created_at > NOW() - INTERVAL '2 minutes')`
         : sql``;
 
+    // Vector similarity search requires raw SQL (pgvector <=> operator)
     const rows = await sql`
         SELECT id, response, created_by, 1 - (embedding <=> ${vectorLiteral}::vector) AS similarity
         FROM semantic_cache
@@ -119,7 +104,6 @@ export async function lookupSemanticCache(
 
     if (rows.length > 0 && rows[0].similarity >= config.similarityThreshold) {
         log.info(`[SemanticCache] HIT! Similarity: ${rows[0].similarity.toFixed(4)} Mode: ${policy?.mode || 'default'}`);
-        // Ensure response is an object, not a string
         const response = rows[0].response;
         if (typeof response === 'string') {
             try {
@@ -136,7 +120,7 @@ export async function lookupSemanticCache(
 }
 
 /**
- * Stores a new response in the semantic cache for future lookups.
+ * Store requires raw SQL for vector literal and ON CONFLICT with embedding update.
  */
 export async function storeSemanticCache(
     prompt: string,
@@ -153,7 +137,6 @@ export async function storeSemanticCache(
     const embedding = await generateEmbedding(prompt, embeddingChannel, embeddingModel);
     if (!embedding) return;
 
-    // Use Bun native CryptoHasher for md5 - faster than delegating to SQL
     const promptHash = new Bun.CryptoHasher('md5').update(prompt).digest('hex');
     const vectorLiteral = `[${embedding.join(',')}]`;
     await sql`

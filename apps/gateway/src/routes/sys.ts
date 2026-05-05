@@ -1,7 +1,8 @@
 import { log } from '../services/logger';
 import { config } from '../config';
 import { Elysia } from 'elysia';
-import { sql } from '@elygate/db';
+import { db, sql } from '@elygate/db';
+import { users } from '@elygate/db/schema';
 import { memoryCache } from '../services/cache';
 import { optionCache } from '../services/optionCache';
 
@@ -10,6 +11,35 @@ import { optionCache } from '../services/optionCache';
  * These are required by New-API / One-API frontend panels to fetch initial configuration.
  */
 export const sysRouter = new Elysia({ prefix: '/api' })
+    .get('/setup', async () => {
+        const [{ total }] = await db.select({ total: sql<number>`count(*)::int` }).from(users);
+        return {
+            success: true,
+            data: {
+                initialized: Number(total || 0) > 0,
+                needsSetup: Number(total || 0) === 0,
+            }
+        };
+    })
+    .post('/setup', async ({ body, set }) => {
+        const [{ total }] = await db.select({ total: sql<number>`count(*)::int` }).from(users);
+        if (Number(total || 0) > 0) {
+            set.status = 409;
+            return { success: false, message: 'System already initialized' };
+        }
+        const payload = (body || {}) as Record<string, any>;
+        if (!payload.username || !payload.password) {
+            set.status = 400;
+            return { success: false, message: 'username and password are required' };
+        }
+        const passwordHash = await Bun.password.hash(String(payload.password));
+        const [admin] = await sql`
+            INSERT INTO users (username, password_hash, role, quota, status, currency)
+            VALUES (${payload.username}, ${passwordHash}, 10, 100000000, 1, 'USD')
+            RETURNING id, username
+        `;
+        return { success: true, data: admin };
+    })
     .get('/status', async () => {
         let dbStatus = 'ok';
         try { await sql`SELECT 1`; } catch { dbStatus = 'error'; }
@@ -22,7 +52,7 @@ export const sysRouter = new Elysia({ prefix: '/api' })
                 status: dbStatus === 'ok' ? 'running' : 'degraded',
                 db: dbStatus,
                 cache: memoryCache.lastUpdated > 0 ? 'ok' : 'initializing',
-                start_time: Math.floor(Date.now() / 1000 - 3600), // mock uptime
+                start_time: Math.floor(Date.now() / 1000 - 3600),
                 quota_per_unit: Number(optionCache.get('QuotaPerUnit', 500000)),
                 rmb_quota_per_unit: Number(optionCache.get('QuotaPerUnit', 500000)) / Number(optionCache.get('ExchangeRate', 7.2)),
                 exchange_rate: Number(optionCache.get('ExchangeRate', 7.2)),
@@ -49,6 +79,16 @@ export const sysRouter = new Elysia({ prefix: '/api' })
                 database: dbCheck.ok ? 'up' : 'down',
                 cache: memoryCache.lastUpdated > 0 ? 'up' : 'down',
                 channels: channelStats
+            }
+        };
+    })
+    .get('/uptime/status', async () => {
+        const [dbCheck] = await sql`SELECT 1 as ok`.catch(() => [{ ok: 0 }]);
+        return {
+            success: true,
+            data: {
+                status: dbCheck.ok ? 'up' : 'down',
+                uptime: Math.floor(process.uptime()),
             }
         };
     })
@@ -83,11 +123,22 @@ export const sysRouter = new Elysia({ prefix: '/api' })
             }
         };
     })
+    .get('/ratio_config', () => {
+        return {
+            success: true,
+            data: {
+                modelRatio: optionCache.get('ModelRatio', {}),
+                completionRatio: optionCache.get('CompletionRatio', {}),
+                groupRatio: optionCache.get('GroupRatio', {}),
+                fixedCostModels: optionCache.get('FixedCostModels', {}),
+                cacheRatio: Number(optionCache.get('CacheRatio', 0.5)),
+            }
+        };
+    })
     .get('/home_page_content', () => {
         return { success: true, message: '', data: optionCache.get('HomePageContent', '') };
     })
     .get('/groups', () => {
-        // Public: list available user groups (for registration page)
         return { success: true, message: '', data: [{ key: 'default', name: 'Default Group' }] };
     })
     .get('/option', () => {
@@ -123,4 +174,54 @@ export const sysRouter = new Elysia({ prefix: '/api' })
                 WeChatOAuthEnabled: String(optionCache.get('WeChatOAuthEnabled', 'false')) === 'true',
             }
         };
+    })
+    .get('/oauth/state', () => {
+        return { success: true, data: { state: Bun.randomUUIDv7('hex') } };
+    })
+    .get('/oauth/:provider', ({ params, set, request }) => {
+        const url = new URL(request.url);
+        const query = url.search || '';
+        const provider = String(params.provider || '');
+        if (provider === 'github' || provider === 'discord') {
+            set.redirect = `/api/auth/${provider}${query}`;
+            return;
+        }
+        if (provider === 'telegram') {
+            set.redirect = `/api/auth/telegram${query}`;
+            return;
+        }
+        set.status = 501;
+        return { success: false, message: `OAuth provider '${provider}' is not implemented` };
+    })
+    .get('/oauth/telegram/login', ({ set, request }) => {
+        const url = new URL(request.url);
+        set.redirect = `/api/auth/telegram${url.search}`;
+    })
+    .post('/oauth/email/bind', ({ set }) => {
+        set.status = 501;
+        return { success: false, message: 'Email bind is not implemented' };
+    })
+    .get('/oauth/wechat', ({ set }) => {
+        set.status = 501;
+        return { success: false, message: 'WeChat OAuth is not implemented' };
+    })
+    .post('/oauth/wechat/bind', ({ set }) => {
+        set.status = 501;
+        return { success: false, message: 'WeChat bind is not implemented' };
+    })
+    .get('/verification', ({ set }) => {
+        set.status = 501;
+        return { success: false, message: 'Email verification is not implemented' };
+    })
+    .get('/reset_password', ({ set }) => {
+        set.status = 501;
+        return { success: false, message: 'Password reset email is not implemented' };
+    })
+    .post('/user/reset', ({ set }) => {
+        set.status = 501;
+        return { success: false, message: 'Password reset is not implemented' };
+    })
+    .post('/verify', ({ set }) => {
+        set.status = 501;
+        return { success: false, message: 'Universal verification is not implemented' };
     });

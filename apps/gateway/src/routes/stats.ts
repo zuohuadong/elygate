@@ -1,7 +1,9 @@
 import type { ElysiaCtx } from '../types';
 import { Elysia, t } from 'elysia';
 import { getErrorMessage } from '../utils/error';
-import { sql } from '@elygate/db';
+import { db, sql } from '@elygate/db';
+import { logs, dailyStats, modelStats, channels } from '@elygate/db/schema';
+import { eq, and, desc, count, sum, sql as drizzleSql } from 'drizzle-orm';
 import { adminGuard } from '../middleware/auth';
 
 // Stats Router - prefix will be applied in index.ts
@@ -12,40 +14,36 @@ export const statsRouter = new Elysia()
             SELECT * FROM mv_system_overview LIMIT 1
         `;
 
-        const [dynamic24h] = await sql`
-            SELECT 
-                COUNT(*)::int as requests_24h,
-                COALESCE(SUM(quota_cost), 0)::bigint as cost_24h
-            FROM logs 
-            WHERE created_at >= NOW() - INTERVAL '24 hours'
-        `;
+        const [dynamic24h] = await db.select({
+            requests24h: drizzleSql<number>`count(*)::int`,
+            cost24h: drizzleSql<string>`coalesce(sum(${logs.quotaCost}), 0)::bigint`,
+        }).from(logs).where(
+            drizzleSql`${logs.createdAt} >= NOW() - INTERVAL '24 hours'`
+        );
 
-        const [todayStats] = await sql`
-            SELECT 
-                COUNT(*)::int as request_count,
-                COALESCE(SUM(quota_cost), 0)::bigint as total_cost,
-                COALESCE(SUM(prompt_tokens + completion_tokens), 0)::bigint as total_tokens,
-                COUNT(CASE WHEN is_stream = true THEN 1 END)::int as stream_count
-            FROM logs 
-            WHERE created_at >= CURRENT_DATE
-        `;
+        const [todayStats] = await db.select({
+            request_count: drizzleSql<number>`count(*)::int`,
+            total_cost: drizzleSql<string>`coalesce(sum(${logs.quotaCost}), 0)::bigint`,
+            total_tokens: drizzleSql<string>`coalesce(sum(${logs.promptTokens} + ${logs.completionTokens}), 0)::bigint`,
+            stream_count: drizzleSql<number>`count(case when ${logs.isStream} = true then 1 end)::int`,
+        }).from(logs).where(
+            drizzleSql`${logs.createdAt} >= CURRENT_DATE`
+        );
 
-        const hourlyStats = await sql`
-            SELECT 
-                EXTRACT(HOUR FROM created_at)::int as hour,
-                COUNT(*)::int as request_count,
-                COALESCE(SUM(quota_cost), 0)::bigint as total_cost
-            FROM logs 
-            WHERE created_at >= NOW() - INTERVAL '24 hours'
-            GROUP BY EXTRACT(HOUR FROM created_at)
-            ORDER BY hour
-        `;
+        const hourlyStats = await db.select({
+            hour: drizzleSql<number>`extract(hour from ${logs.createdAt})::int`,
+            request_count: drizzleSql<number>`count(*)::int`,
+            total_cost: drizzleSql<string>`coalesce(sum(${logs.quotaCost}), 0)::bigint`,
+        }).from(logs).where(
+            drizzleSql`${logs.createdAt} >= NOW() - INTERVAL '24 hours'`
+        ).groupBy(drizzleSql`extract(hour from ${logs.createdAt})`)
+         .orderBy(drizzleSql`extract(hour from ${logs.createdAt})`);
 
         return {
             overview: {
                 ...overviewMV,
-                requests_24h: dynamic24h?.requests_24h || 0,
-                cost_24h: dynamic24h?.cost_24h || 0
+                requests_24h: dynamic24h?.requests24h || 0,
+                cost_24h: dynamic24h?.cost24h || 0
             },
             today: todayStats,
             hourly: hourlyStats
@@ -53,103 +51,93 @@ export const statsRouter = new Elysia()
     })
 
     .get('/users/:userId', async ({ params: { userId } }: ElysiaCtx) => {
-        const dailyStats = await sql`
-            SELECT 
-                stat_date,
-                request_count,
-                total_tokens,
-                total_cost,
-                success_count,
-                error_count,
-                ROUND((success_count::NUMERIC / NULLIF(request_count, 0)) * 100, 2) as success_rate
-            FROM daily_stats
-            WHERE user_id = ${Number(userId)}
-            ORDER BY stat_date DESC
-            LIMIT 30
-        `;
+        const numUserId = Number(userId);
 
-        const modelUsage = await sql`
-            SELECT 
-                model_name,
-                request_count,
-                total_tokens,
-                total_cost,
-                avg_tokens_per_request,
-                last_used_at
-            FROM model_stats
-            WHERE user_id = ${Number(userId)}
-            ORDER BY last_used_at DESC
-            LIMIT 20
-        `;
+        const dailyStatsRows = await db.select({
+            stat_date: dailyStats.statDate,
+            request_count: dailyStats.requestCount,
+            total_tokens: dailyStats.totalTokens,
+            total_cost: dailyStats.totalCost,
+            success_count: dailyStats.successCount,
+            error_count: dailyStats.errorCount,
+            success_rate: drizzleSql<string>`round((${dailyStats.successCount}::numeric / nullif(${dailyStats.requestCount}, 0)) * 100, 2)`,
+        }).from(dailyStats).where(eq(dailyStats.userId, numUserId))
+          .orderBy(desc(dailyStats.statDate))
+          .limit(30);
 
-        const [summary] = await sql`
-            SELECT 
-                SUM(request_count) as total_requests,
-                SUM(total_tokens) as total_tokens,
-                SUM(total_cost) as total_cost,
-                AVG(success_count::NUMERIC / NULLIF(request_count, 0) * 100) as avg_success_rate
-            FROM daily_stats
-            WHERE user_id = ${Number(userId)}
-        `;
+        const modelUsage = await db.select({
+            model_name: modelStats.modelName,
+            request_count: modelStats.requestCount,
+            total_tokens: modelStats.totalTokens,
+            total_cost: modelStats.totalCost,
+            avg_tokens_per_request: modelStats.avgTokensPerRequest,
+            last_used_at: modelStats.lastUsedAt,
+        }).from(modelStats).where(eq(modelStats.userId, numUserId))
+          .orderBy(desc(modelStats.lastUsedAt))
+          .limit(20);
+
+        const [summary] = await db.select({
+            total_requests: drizzleSql<string>`sum(${dailyStats.requestCount})`,
+            total_tokens: drizzleSql<string>`sum(${dailyStats.totalTokens})`,
+            total_cost: drizzleSql<string>`sum(${dailyStats.totalCost})`,
+            avg_success_rate: drizzleSql<string>`avg(${dailyStats.successCount}::numeric / nullif(${dailyStats.requestCount}, 0) * 100)`,
+        }).from(dailyStats).where(eq(dailyStats.userId, numUserId));
 
         return {
-            daily: dailyStats,
+            daily: dailyStatsRows,
             models: modelUsage,
             summary
         };
     })
 
     .get('/models', async () => {
-        const modelStats = await sql`
+        const modelStatsRows = await sql`
             SELECT * FROM mv_model_usage_stats
             ORDER BY total_requests DESC
             LIMIT 50
         `;
 
-        const trendingModels = await sql`
-            SELECT 
-                model_name,
-                COUNT(*) as request_count,
-                SUM(quota_cost) as total_cost,
-                SUM(prompt_tokens + completion_tokens) as total_tokens
-            FROM logs
-            WHERE created_at >= NOW() - INTERVAL '7 days'
-            GROUP BY model_name
-            ORDER BY request_count DESC
-            LIMIT 10
-        `;
+        const trendingModels = await db.select({
+            model_name: logs.modelName,
+            request_count: count(),
+            total_cost: sum(logs.quotaCost),
+            total_tokens: drizzleSql<string>`sum(${logs.promptTokens} + ${logs.completionTokens})`,
+        }).from(logs).where(
+            drizzleSql`${logs.createdAt} >= NOW() - INTERVAL '7 days'`
+        ).groupBy(logs.modelName)
+         .orderBy(desc(count()))
+         .limit(10);
 
         return {
-            all: modelStats,
+            all: modelStatsRows,
             trending: trendingModels
         };
     })
 
     .get('/channels/:channelId', async ({ params: { channelId } }: ElysiaCtx) => {
-        const channelStats = await sql`
-            SELECT 
-                DATE(created_at) as date,
-                COUNT(*) as request_count,
-                SUM(quota_cost) as total_cost,
-                SUM(prompt_tokens + completion_tokens) as total_tokens,
-                COUNT(DISTINCT user_id) as unique_users
-            FROM logs
-            WHERE channel_id = ${Number(channelId)}
-            AND created_at >= NOW() - INTERVAL '30 days'
-            GROUP BY DATE(created_at)
-            ORDER BY date DESC
-        `;
+        const numChannelId = Number(channelId);
 
-        const [summary] = await sql`
-            SELECT 
-                COUNT(*) as total_requests,
-                SUM(quota_cost) as total_cost,
-                COUNT(DISTINCT user_id) as unique_users,
-                COUNT(DISTINCT model_name) as unique_models
-            FROM logs
-            WHERE channel_id = ${Number(channelId)}
-            AND created_at >= NOW() - INTERVAL '30 days'
-        `;
+        const channelStats = await db.select({
+            date: drizzleSql<string>`date(${logs.createdAt})`,
+            request_count: count(),
+            total_cost: sum(logs.quotaCost),
+            total_tokens: drizzleSql<string>`sum(${logs.promptTokens} + ${logs.completionTokens})`,
+            unique_users: drizzleSql<number>`count(distinct ${logs.userId})`,
+        }).from(logs).where(and(
+            eq(logs.channelId, numChannelId),
+            drizzleSql`${logs.createdAt} >= NOW() - INTERVAL '30 days'`,
+        )).groupBy(drizzleSql`date(${logs.createdAt})`)
+          .orderBy(drizzleSql`date(${logs.createdAt}) desc`);
+
+        const [summary] = await db.select({
+            total_requests: count(),
+            total_cost: sum(logs.quotaCost),
+            unique_users: drizzleSql<number>`count(distinct ${logs.userId})`,
+            unique_models: drizzleSql<number>`count(distinct ${logs.modelName})`,
+        }).from(logs).where(and(
+            eq(logs.channelId, numChannelId),
+            drizzleSql`${logs.createdAt} >= NOW() - INTERVAL '30 days'`,
+        ));
 
         return {
             daily: channelStats,
@@ -158,63 +146,61 @@ export const statsRouter = new Elysia()
     })
 
     .get('/heatmap', async () => {
-        const heatmapData = await sql`
-            SELECT 
-                EXTRACT(HOUR FROM created_at) as hour,
-                EXTRACT(DOW FROM created_at) as day_of_week,
-                COUNT(*) as request_count,
-                AVG(quota_cost) as avg_cost
-            FROM logs
-            WHERE created_at >= NOW() - INTERVAL '30 days'
-            GROUP BY EXTRACT(HOUR FROM created_at), EXTRACT(DOW FROM created_at)
-            ORDER BY day_of_week, hour
-        `;
+        const heatmapData = await db.select({
+            hour: drizzleSql<number>`extract(hour from ${logs.createdAt})`,
+            day_of_week: drizzleSql<number>`extract(dow from ${logs.createdAt})`,
+            request_count: count(),
+            avg_cost: drizzleSql<string>`avg(${logs.quotaCost})`,
+        }).from(logs).where(
+            drizzleSql`${logs.createdAt} >= NOW() - INTERVAL '30 days'`
+        ).groupBy(
+            drizzleSql`extract(hour from ${logs.createdAt})`,
+            drizzleSql`extract(dow from ${logs.createdAt})`,
+        ).orderBy(
+            drizzleSql`extract(dow from ${logs.createdAt})`,
+            drizzleSql`extract(hour from ${logs.createdAt})`,
+        );
 
         return heatmapData;
     })
 
     .get('/errors', async () => {
-        const errorStats = await sql`
-            SELECT 
-                model_name,
-                COUNT(*) as error_count,
-                COUNT(*) * 100.0 / SUM(COUNT(*)) OVER() as error_percentage
-            FROM logs
-            WHERE created_at >= NOW() - INTERVAL '24 hours'
-            AND quota_cost = 0
-            GROUP BY model_name
-            ORDER BY error_count DESC
-            LIMIT 10
-        `;
+        const errorStats = await db.select({
+            model_name: logs.modelName,
+            error_count: count(),
+            error_percentage: drizzleSql<string>`count(*) * 100.0 / sum(count(*)) over()`,
+        }).from(logs).where(and(
+            drizzleSql`${logs.createdAt} >= NOW() - INTERVAL '24 hours'`,
+            eq(logs.quotaCost, 0),
+        )).groupBy(logs.modelName)
+          .orderBy(desc(count()))
+          .limit(10);
 
         return errorStats;
     })
 
     .get('/realtime', async () => {
-        const realtimeStats = await sql`
-            SELECT 
-                COUNT(*)::int as requests_per_minute,
-                COALESCE(SUM(quota_cost), 0)::bigint as cost_per_minute,
-                COALESCE(SUM(prompt_tokens + completion_tokens), 0)::bigint as tokens_per_minute,
-                COUNT(DISTINCT user_id)::int as active_users,
-                COUNT(DISTINCT model_name)::int as active_models
-            FROM logs
-            WHERE created_at >= NOW() - INTERVAL '1 minute'
-        `;
+        const [realtimeStats] = await db.select({
+            requests_per_minute: drizzleSql<number>`count(*)::int`,
+            cost_per_minute: drizzleSql<string>`coalesce(sum(${logs.quotaCost}), 0)::bigint`,
+            tokens_per_minute: drizzleSql<string>`coalesce(sum(${logs.promptTokens} + ${logs.completionTokens}), 0)::bigint`,
+            active_users: drizzleSql<number>`count(distinct ${logs.userId})::int`,
+            active_models: drizzleSql<number>`count(distinct ${logs.modelName})::int`,
+        }).from(logs).where(
+            drizzleSql`${logs.createdAt} >= NOW() - INTERVAL '1 minute'`
+        );
 
-        const topModels = await sql`
-            SELECT 
-                model_name,
-                COUNT(*) as request_count
-            FROM logs
-            WHERE created_at >= NOW() - INTERVAL '5 minutes'
-            GROUP BY model_name
-            ORDER BY request_count DESC
-            LIMIT 5
-        `;
+        const topModels = await db.select({
+            model_name: logs.modelName,
+            request_count: count(),
+        }).from(logs).where(
+            drizzleSql`${logs.createdAt} >= NOW() - INTERVAL '5 minutes'`
+        ).groupBy(logs.modelName)
+         .orderBy(desc(count()))
+         .limit(5);
 
         return {
-            stats: realtimeStats[0] || {
+            stats: realtimeStats || {
                 requests_per_minute: 0,
                 cost_per_minute: 0,
                 tokens_per_minute: 0,

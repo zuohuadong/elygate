@@ -1,4 +1,4 @@
-import { sql } from '$lib/server/db';
+import { db, sql } from '$lib/server/db';
 import type { PageServerLoad } from './$types';
 
 type LogRow = {
@@ -20,13 +20,12 @@ type LogRow = {
 export const load: PageServerLoad = async ({ locals, url }) => {
     const { org } = locals as Record<string, any>;
     
-    // Simple pagination and filtering
     const page = Number(url.searchParams.get('page') || '1');
     const limit = 20;
     const offset = (page - 1) * limit;
     
-    // Fetch logs with a flag indicating if details exist
-    const logs = await sql`
+    // Complex JOIN with EXISTS subquery — use raw SQL
+    const logRows = await sql`
         SELECT l.id, l.user_id, u.username, l.token_id, l.model_name, l.prompt_tokens, l.completion_tokens, 
                l.quota_cost, l.status_code, l.created_at, l.ip_address, l.trace_id,
                EXISTS(SELECT 1 FROM log_details ld WHERE ld.log_id = l.id) as has_details
@@ -38,7 +37,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     ` as LogRow[];
 
     return {
-        logs: logs.map((log) => ({
+        logs: logRows.map((log) => ({
             id: log.id,
             userId: log.user_id,
             username: log.username,

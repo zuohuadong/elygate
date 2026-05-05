@@ -1,5 +1,7 @@
 import { log } from '../services/logger';
-import { sql } from '@elygate/db';
+import { db, sql } from '@elygate/db';
+import { users, userSubscriptions, packages } from '@elygate/db/schema';
+import { eq, and, lte, gt, inArray, sql as drizzleSql } from 'drizzle-orm';
 
 export type CycleUnit = 'hour' | 'day' | 'week' | 'month';
 
@@ -9,22 +11,22 @@ export type CycleUnit = 'hour' | 'day' | 'week' | 'month';
  * after their cycle reset period has passed.
  */
 export async function checkAndResetSubscriptionQuota(userId: number): Promise<void> {
-    // 1. Fetch active subscriptions with cycle configuration
-    const activeSubs = await sql`
-        SELECT 
-            us.id, 
-            us.last_reset_at,
-            p.cycle_quota, 
-            p.cycle_interval, 
-            p.cycle_unit
-        FROM user_subscriptions us
-        JOIN packages p ON us.package_id = p.id
-        WHERE us.user_id = ${userId}
-          AND us.status = 1
-          AND us.start_time <= NOW()
-          AND us.end_time > NOW()
-          AND p.cycle_quota > 0
-    `;
+    const activeSubs = await db.select({
+        id: userSubscriptions.id,
+        lastResetAt: userSubscriptions.lastResetAt,
+        cycleQuota: packages.cycleQuota,
+        cycleInterval: packages.cycleInterval,
+        cycleUnit: packages.cycleUnit,
+    })
+    .from(userSubscriptions)
+    .innerJoin(packages, eq(userSubscriptions.packageId, packages.id))
+    .where(and(
+        eq(userSubscriptions.userId, userId),
+        eq(userSubscriptions.status, 1),
+        lte(userSubscriptions.startTime, drizzleSql`NOW()`),
+        gt(userSubscriptions.endTime, drizzleSql`NOW()`),
+        gt(packages.cycleQuota, 0),
+    ));
 
     if (activeSubs.length === 0) return;
 
@@ -33,15 +35,14 @@ export async function checkAndResetSubscriptionQuota(userId: number): Promise<vo
     const resetSubIds: number[] = [];
 
     for (const sub of activeSubs) {
-        const lastReset = new Date(sub.last_reset_at);
-        const nextReset = calculateNextReset(lastReset, sub.cycle_interval, sub.cycle_unit as CycleUnit);
+        const lastReset = new Date(sub.lastResetAt!);
+        const nextReset = calculateNextReset(lastReset, sub.cycleInterval!, sub.cycleUnit as CycleUnit);
 
         if (now >= nextReset) {
-            // How many cycles have passed? (In case of long inactivity)
-            const cyclesPassed = calculateCyclesPassed(lastReset, now, sub.cycle_interval, sub.cycle_unit as CycleUnit);
+            const cyclesPassed = calculateCyclesPassed(lastReset, now, sub.cycleInterval!, sub.cycleUnit as CycleUnit);
             
             if (cyclesPassed > 0) {
-                totalRefill += Number(sub.cycle_quota); // Refill for the current cycle
+                totalRefill += Number(sub.cycleQuota);
                 resetSubIds.push(sub.id);
             }
         }
@@ -50,23 +51,18 @@ export async function checkAndResetSubscriptionQuota(userId: number): Promise<vo
     if (resetSubIds.length > 0) {
         log.info(`[Subscription] Refilling quota for User ${userId}. Total: ${totalRefill}. Subs: ${resetSubIds.join(',')}`);
         
-        await sql.begin(async (tx: import('bun').SQL) => {
-            // Refill user quota
-            await tx`UPDATE users SET quota = quota + ${totalRefill} WHERE id = ${userId}`;
+        await db.transaction(async (tx) => {
+            await tx.update(users)
+                .set({ quota: drizzleSql`${users.quota} + ${totalRefill}` })
+                .where(eq(users.id, userId));
             
-            // Update last_reset_at for all processed subscriptions
-            await tx`
-                UPDATE user_subscriptions 
-                SET last_reset_at = NOW() 
-                WHERE id IN ${sql(resetSubIds)}
-            `;
+            await tx.update(userSubscriptions)
+                .set({ lastResetAt: new Date() })
+                .where(inArray(userSubscriptions.id, resetSubIds));
         });
     }
 }
 
-/**
- * Calculates when the next reset should occur based on the last reset time.
- */
 function calculateNextReset(lastReset: Date, interval: number, unit: CycleUnit): Date {
     const next = new Date(lastReset);
     switch (unit) {
@@ -86,11 +82,6 @@ function calculateNextReset(lastReset: Date, interval: number, unit: CycleUnit):
     return next;
 }
 
-/**
- * Determines how many full cycles have passed since the last reset.
- * We primarily refill once even if multiple cycles passed (standard practice for "use it or lose it" cycles),
- * but we return the count for future flexibility.
- */
 function calculateCyclesPassed(lastReset: Date, now: Date, interval: number, unit: CycleUnit): number {
     const diffMs = now.getTime() - lastReset.getTime();
     let cycleMs = 0;
@@ -106,8 +97,6 @@ function calculateCyclesPassed(lastReset: Date, now: Date, interval: number, uni
             cycleMs = interval * 7 * 24 * 60 * 60 * 1000;
             break;
         case 'month':
-            // Approximate if month, or use more complex calendar math if needed.
-            // For monthly cycles, we usually just care if the month-day match has passed.
             const monthsDiff = (now.getFullYear() - lastReset.getFullYear()) * 12 + (now.getMonth() - lastReset.getMonth());
             return Math.floor(monthsDiff / interval);
     }

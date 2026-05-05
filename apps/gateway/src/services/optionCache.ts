@@ -1,5 +1,6 @@
 import { log } from '../services/logger';
-import { sql } from '@elygate/db';
+import { db, sql } from '@elygate/db';
+import { options } from '@elygate/db/schema';
 
 export const optionCache = {
     options: new Map<string, any>(),
@@ -8,7 +9,7 @@ export const optionCache = {
     async refresh() {
         try {
             log.info('[OptionCache] Refreshing system options from DB...');
-            const results = await sql`SELECT key, value FROM options`;
+            const results = await db.select().from(options);
 
             const newOptions = new Map<string, any>();
             for (const row of results) {

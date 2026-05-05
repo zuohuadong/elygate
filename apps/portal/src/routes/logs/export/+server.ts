@@ -1,5 +1,7 @@
-import { sql } from '$lib/server/db';
+import { db, sql } from '$lib/server/db';
 import { requireOrgManager } from '$lib/server/portalAuth';
+import { logs, users } from '@elygate/db/schema';
+import { eq, desc } from '@elygate/db/operators';
 import type { RequestHandler } from './$types';
 
 type ExportLogRow = {
@@ -17,8 +19,8 @@ type ExportLogRow = {
 export const GET: RequestHandler = async ({ locals }) => {
     const { org } = requireOrgManager(locals);
     
-    // Fetch logs strictly scoped to the organization
-    const logs = await sql`
+    // Complex JOIN with ORDER BY — use raw SQL for the JOIN
+    const logRows = await sql`
         SELECT 
             l.created_at, 
             l.model_name, 
@@ -48,7 +50,7 @@ export const GET: RequestHandler = async ({ locals }) => {
         'Trace ID'
     ];
 
-    const rows = logs.map((log) => [
+    const rows = logRows.map((log) => [
         new Date(log.created_at).toISOString(),
         log.username,
         log.model_name,

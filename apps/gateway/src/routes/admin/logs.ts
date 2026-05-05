@@ -1,6 +1,8 @@
 import type { ElysiaCtx } from '../../types';
 import { Elysia } from 'elysia';
-import { sql } from '@elygate/db';
+import { db, sql } from '@elygate/db';
+import { logs, users, tokens, channels, healthLogs } from '@elygate/db/schema';
+import { eq, and, or, ilike, desc, count, sum, sql as drizzleSql } from 'drizzle-orm';
 import { quotaToUSD, quotaToRMB } from '../../services/ratio';
 import { getAuditLogs } from '../../services/auditLog';
 import { memoryCache } from '../../services/cache';
@@ -17,39 +19,64 @@ export const logsRouter = new Elysia()
         const statusCode = query?.status_code;
         const search = query?.keyword;
 
-        let whereClause = sql`WHERE 1=1`;
-        if (userId) whereClause = sql`${whereClause} AND user_id = ${Number(userId)}`;
-        if (channelId) whereClause = sql`${whereClause} AND channel_id = ${Number(channelId)}`;
-        if (modelName) whereClause = sql`${whereClause} AND model_name = ${modelName}`;
-        if (statusCode) whereClause = sql`${whereClause} AND status_code = ${Number(statusCode)}`;
-        if (search) whereClause = sql`${whereClause} AND (prompt ILIKE ${'%' + search + '%'} OR response ILIKE ${'%' + search + '%'} OR error_message ILIKE ${'%' + search + '%'})`;
+        const conditions = [drizzleSql`1=1`];
+        if (userId) conditions.push(eq(logs.userId, Number(userId)));
+        if (channelId) conditions.push(eq(logs.channelId, Number(channelId)));
+        if (modelName) conditions.push(eq(logs.modelName, modelName as string));
+        if (statusCode) conditions.push(eq(logs.statusCode, Number(statusCode)));
+        if (search) conditions.push(or(
+            ilike(logs.errorMessage, '%' + search + '%'),
+        )!);
 
-        const [countRow] = await sql`SELECT COUNT(*) as total FROM logs ${whereClause}`;
-        const data = await sql`
-            SELECT 
-                l.*, 
-                u.username as creator_name,
-                c.name as channel_name
-            FROM logs l
-            LEFT JOIN users u ON l.user_id = u.id
-            LEFT JOIN channels c ON l.channel_id = c.id
-            ${whereClause}
-            ORDER BY l.created_at DESC 
-            LIMIT ${limit} OFFSET ${offset}
-        `;
+        const whereClause = and(...conditions);
+
+        const [countRow] = await db.select({ total: count() }).from(logs).where(whereClause);
+
+        const data = await db.select({
+            id: logs.id,
+            userId: logs.userId,
+            tokenId: logs.tokenId,
+            channelId: logs.channelId,
+            modelName: logs.modelName,
+            quotaCost: logs.quotaCost,
+            promptTokens: logs.promptTokens,
+            completionTokens: logs.completionTokens,
+            cachedTokens: logs.cachedTokens,
+            elapsedMs: logs.elapsedMs,
+            isStream: logs.isStream,
+            errorMessage: logs.errorMessage,
+            statusCode: logs.statusCode,
+            ipAddress: logs.ipAddress,
+            userAgent: logs.userAgent,
+            traceId: logs.traceId,
+            orgId: logs.orgId,
+            externalTaskId: logs.externalTaskId,
+            externalUserId: logs.externalUserId,
+            externalWorkspaceId: logs.externalWorkspaceId,
+            externalFeatureType: logs.externalFeatureType,
+            createdAt: logs.createdAt,
+            creatorName: users.username,
+            channelName: channels.name,
+        }).from(logs)
+          .leftJoin(users, eq(logs.userId, users.id))
+          .leftJoin(channels, eq(logs.channelId, channels.id))
+          .where(whereClause)
+          .orderBy(desc(logs.createdAt))
+          .limit(limit)
+          .offset(offset);
 
         return {
             data: data.map((l: Record<string, any>) => ({
                 ...l,
-                channel_name: l.channel_id === -1 
+                channel_name: l.channelId === -1
                     ? (query?.lang === 'zh' ? '系统精确缓存' : 'Exact Match Cache')
-                    : l.channel_id === 0 
-                        ? (query?.lang === 'zh' ? '系统语义缓存' : 'Semantic Cache') 
-                        : (l.channel_name || `Unknown (${l.channel_id})`),
-                cost_usd: quotaToUSD(l.quota_cost),
-                cost_rmb: quotaToRMB(l.quota_cost),
-                cached_tokens: l.cached_tokens || 0,
-                elapsed_ms: l.elapsed_ms || 0
+                    : l.channelId === 0
+                        ? (query?.lang === 'zh' ? '系统语义缓存' : 'Semantic Cache')
+                        : (l.channelName || `Unknown (${l.channelId})`),
+                cost_usd: quotaToUSD(l.quotaCost),
+                cost_rmb: quotaToRMB(l.quotaCost),
+                cached_tokens: l.cachedTokens || 0,
+                elapsed_ms: l.elapsedMs || 0
             })),
             total: countRow.total,
             page,
@@ -65,48 +92,65 @@ export const logsRouter = new Elysia()
         const search = query?.keyword;
         const format = query?.format || 'csv';
 
-        let whereClause = sql`WHERE 1=1`;
-        if (userId) whereClause = sql`${whereClause} AND user_id = ${Number(userId)}`;
-        if (channelId) whereClause = sql`${whereClause} AND channel_id = ${Number(channelId)}`;
-        if (modelName) whereClause = sql`${whereClause} AND model_name = ${modelName}`;
-        if (statusCode) whereClause = sql`${whereClause} AND status_code = ${Number(statusCode)}`;
-        if (search) whereClause = sql`${whereClause} AND (prompt ILIKE ${'%' + search + '%'} OR response ILIKE ${'%' + search + '%'} OR error_message ILIKE ${'%' + search + '%'})`;
+        const conditions = [drizzleSql`1=1`];
+        if (userId) conditions.push(eq(logs.userId, Number(userId)));
+        if (channelId) conditions.push(eq(logs.channelId, Number(channelId)));
+        if (modelName) conditions.push(eq(logs.modelName, modelName as string));
+        if (statusCode) conditions.push(eq(logs.statusCode, Number(statusCode)));
+        if (search) conditions.push(or(
+            ilike(logs.errorMessage, '%' + search + '%'),
+        )!);
 
-        const data = await sql`
-            SELECT l.*, u.username as creator_name
-            FROM logs l
-            LEFT JOIN users u ON l.user_id = u.id
-            ${whereClause}
-            ORDER BY l.created_at DESC 
-            LIMIT 10000
-        `;
+        const whereClause = and(...conditions);
 
-        const logs = data.map((l: Record<string, any>) => ({
+        const data = await db.select({
+            id: logs.id,
+            userId: logs.userId,
+            channelId: logs.channelId,
+            modelName: logs.modelName,
+            quotaCost: logs.quotaCost,
+            promptTokens: logs.promptTokens,
+            completionTokens: logs.completionTokens,
+            cachedTokens: logs.cachedTokens,
+            elapsedMs: logs.elapsedMs,
+            isStream: logs.isStream,
+            errorMessage: logs.errorMessage,
+            statusCode: logs.statusCode,
+            ipAddress: logs.ipAddress,
+            createdAt: logs.createdAt,
+            creatorName: users.username,
+        }).from(logs)
+          .leftJoin(users, eq(logs.userId, users.id))
+          .where(whereClause)
+          .orderBy(desc(logs.createdAt))
+          .limit(10000);
+
+        const exportLogs = data.map((l: Record<string, any>) => ({
             id: l.id,
-            created_at: l.created_at,
-            user_id: l.user_id,
-            username: l.creator_name || '',
-            channel_id: l.channel_id,
-            model_name: l.model_name,
-            prompt_tokens: l.prompt_tokens,
-            completion_tokens: l.completion_tokens,
-            cached_tokens: l.cached_tokens || 0,
-            total_tokens: (l.prompt_tokens || 0) + (l.completion_tokens || 0),
-            quota_cost: l.quota_cost,
-            cost_usd: quotaToUSD(l.quota_cost),
-            cost_rmb: quotaToRMB(l.quota_cost),
-            status_code: l.status_code,
-            latency_ms: l.latency_ms,
-            ip: l.ip,
-            prompt: l.prompt || '',
-            response: l.response || '',
-            error_message: l.error_message || ''
+            created_at: l.createdAt,
+            user_id: l.userId,
+            username: l.creatorName || '',
+            channel_id: l.channelId,
+            model_name: l.modelName,
+            prompt_tokens: l.promptTokens,
+            completion_tokens: l.completionTokens,
+            cached_tokens: l.cachedTokens || 0,
+            total_tokens: (l.promptTokens || 0) + (l.completionTokens || 0),
+            quota_cost: l.quotaCost,
+            cost_usd: quotaToUSD(l.quotaCost),
+            cost_rmb: quotaToRMB(l.quotaCost),
+            status_code: l.statusCode,
+            latency_ms: l.elapsedMs,
+            ip: l.ipAddress,
+            prompt: '',
+            response: '',
+            error_message: l.errorMessage || ''
         }));
 
         if (format === 'json') {
             set.headers['Content-Type'] = 'application/json';
             set.headers['Content-Disposition'] = 'attachment; filename="logs_export.json"';
-            return JSON.stringify(logs, null, 2);
+            return JSON.stringify(exportLogs, null, 2);
         }
 
         const csvHeaders = [
@@ -116,7 +160,7 @@ export const logsRouter = new Elysia()
             'Prompt', 'Response', 'Error Message'
         ].join(',');
 
-        const csvRows = logs.map((l: Record<string, any>) => [
+        const csvRows = exportLogs.map((l: Record<string, any>) => [
             l.id,
             l.created_at,
             l.user_id,
@@ -145,8 +189,8 @@ export const logsRouter = new Elysia()
     })
 
     .get('/circuit-breaker/status', async () => {
-        const channels = Array.from(memoryCache.channels.values());
-        return channels.map(ch => ({
+        const channelList = Array.from(memoryCache.channels.values());
+        return channelList.map(ch => ({
             id: ch.id,
             name: ch.name,
             status: ch.status,
@@ -160,30 +204,39 @@ export const logsRouter = new Elysia()
         const limit = Number(query?.limit) || 50;
         const offset = (page - 1) * limit;
 
-        let whereClause = sql`WHERE 1=1`;
-        if (channelId) whereClause = sql`${whereClause} AND hl.channel_id = ${Number(channelId)}`;
+        const conditions = [];
+        if (channelId) conditions.push(eq(healthLogs.channelId, Number(channelId)));
+        const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
-        const [countRow] = await sql`SELECT COUNT(*) as total FROM health_logs hl ${whereClause}`;
-        const data = await sql`
-            SELECT hl.*, c.name as channel_name, c.type as channel_type
-            FROM health_logs hl
-            LEFT JOIN channels c ON hl.channel_id = c.id
-            ${whereClause}
-            ORDER BY hl.created_at DESC 
-            LIMIT ${limit} OFFSET ${offset}
-        `;
+        const [countRow] = await db.select({ total: count() }).from(healthLogs).where(whereClause);
+
+        const data = await db.select({
+            id: healthLogs.id,
+            channelId: healthLogs.channelId,
+            channelName: channels.name,
+            channelType: channels.type,
+            status: healthLogs.status,
+            latency: healthLogs.latency,
+            errorMessage: healthLogs.errorMessage,
+            createdAt: healthLogs.createdAt,
+        }).from(healthLogs)
+          .leftJoin(channels, eq(healthLogs.channelId, channels.id))
+          .where(whereClause)
+          .orderBy(desc(healthLogs.createdAt))
+          .limit(limit)
+          .offset(offset);
 
         return {
             data: data.map((l: Record<string, any>) => ({
                 id: l.id,
-                channel_id: l.channel_id,
-                channel_name: l.channel_name || 'Unknown',
-                channel_type: l.channel_type,
+                channel_id: l.channelId,
+                channel_name: l.channelName || 'Unknown',
+                channel_type: l.channelType,
                 status: l.status,
                 status_text: l.status === 1 ? 'Healthy' : 'Failed',
                 latency: l.latency,
-                error_message: l.error_message,
-                created_at: l.created_at
+                error_message: l.errorMessage,
+                created_at: l.createdAt
             })),
             total: countRow.total,
             page,
@@ -192,29 +245,30 @@ export const logsRouter = new Elysia()
     })
 
     .get('/health-summary', async () => {
-        const summary = await sql`
-            SELECT 
-                c.id,
-                c.name,
-                c.type,
-                c.status,
-                c.test_errors,
-                c.test_at,
-                COUNT(hl.id) as total_checks,
-                COUNT(CASE WHEN hl.status = 1 THEN 1 END) as successful_checks,
-                COUNT(CASE WHEN hl.status = 0 THEN 1 END) as failed_checks,
-                AVG(CASE WHEN hl.status = 1 THEN hl.latency END) as avg_latency,
-                MAX(hl.created_at) as last_check
-            FROM channels c
-            LEFT JOIN health_logs hl ON c.id = hl.channel_id
-            WHERE hl.created_at >= NOW() - INTERVAL '24 hours' OR hl.id IS NULL
-            GROUP BY c.id, c.name, c.type, c.status, c.test_errors, c.test_at
-            ORDER BY c.id
-        `;
+        const summary = await db.select({
+            id: channels.id,
+            name: channels.name,
+            type: channels.type,
+            status: channels.status,
+            testErrors: channels.testErrors,
+            testAt: channels.testAt,
+            totalChecks: drizzleSql<number>`count(${healthLogs.id})`,
+            successfulChecks: drizzleSql<number>`count(case when ${healthLogs.status} = 1 then 1 end)`,
+            failedChecks: drizzleSql<number>`count(case when ${healthLogs.status} = 0 then 1 end)`,
+            avgLatency: drizzleSql<string | null>`avg(case when ${healthLogs.status} = 1 then ${healthLogs.latency} end)`,
+            lastCheck: drizzleSql<Date | null>`max(${healthLogs.createdAt})`,
+        }).from(channels)
+          .leftJoin(healthLogs, and(
+              eq(channels.id, healthLogs.channelId),
+              drizzleSql`${healthLogs.createdAt} >= NOW() - INTERVAL '24 hours' OR ${healthLogs.id} IS NULL`,
+          ))
+          .groupBy(channels.id, channels.name, channels.type, channels.status, channels.testErrors, channels.testAt)
+          .orderBy(channels.id);
+
         return summary.map((s: Record<string, any>) => ({
             ...s,
-            success_rate: s.total_checks > 0 ? ((s.successful_checks / s.total_checks) * 100).toFixed(1) : 'N/A',
-            avg_latency: s.avg_latency ? Math.round(s.avg_latency) : null
+            success_rate: s.totalChecks > 0 ? ((s.successfulChecks / s.totalChecks) * 100).toFixed(1) : 'N/A',
+            avg_latency: s.avgLatency ? Math.round(Number(s.avgLatency)) : null
         }));
     })
 
@@ -255,38 +309,37 @@ export const logsRouter = new Elysia()
     // --- Log Statistics (Admin) ---
     .get('/logs/stat', async ({ query }: ElysiaCtx) => {
         const hours = Number(query?.hours) || 24;
-        const stats = await sql`
-            SELECT 
-                COUNT(*) as total_requests,
-                COUNT(CASE WHEN status_code < 400 THEN 1 END) as success_count,
-                COUNT(CASE WHEN status_code >= 400 THEN 1 END) as error_count,
-                SUM(quota_cost) as total_cost,
-                SUM(prompt_tokens) as total_prompt_tokens,
-                SUM(completion_tokens) as total_completion_tokens,
-                AVG(CASE WHEN status_code < 400 THEN elapsed_ms END)::int as avg_latency_ms,
-                COUNT(DISTINCT user_id) as unique_users,
-                COUNT(DISTINCT model_name) as unique_models
-            FROM logs 
-            WHERE created_at > NOW() - (${hours}::int * INTERVAL '1 hour')
-        `;
-        return stats[0];
+        const [stats] = await db.select({
+            total_requests: drizzleSql<number>`count(*)`,
+            success_count: drizzleSql<number>`count(case when ${logs.statusCode} < 400 then 1 end)`,
+            error_count: drizzleSql<number>`count(case when ${logs.statusCode} >= 400 then 1 end)`,
+            total_cost: drizzleSql<string>`sum(${logs.quotaCost})`,
+            total_prompt_tokens: drizzleSql<string>`sum(${logs.promptTokens})`,
+            total_completion_tokens: drizzleSql<string>`sum(${logs.completionTokens})`,
+            avg_latency_ms: drizzleSql<number>`avg(case when ${logs.statusCode} < 400 then ${logs.elapsedMs} end)::int`,
+            unique_users: drizzleSql<number>`count(distinct ${logs.userId})`,
+            unique_models: drizzleSql<number>`count(distinct ${logs.modelName})`,
+        }).from(logs).where(
+            drizzleSql`${logs.createdAt} > NOW() - (${hours}::int * INTERVAL '1 hour')`
+        );
+        return stats;
     })
 
     // --- Self Log Statistics (User) ---
     .get('/logs/self/stat', async ({ user, query }: ElysiaCtx) => {
         if (!user) return { success: false, message: 'Not authenticated' };
         const hours = Number(query?.hours) || 24;
-        const stats = await sql`
-            SELECT 
-                COUNT(*) as total_requests,
-                COUNT(CASE WHEN status_code < 400 THEN 1 END) as success_count,
-                SUM(quota_cost) as total_cost,
-                SUM(prompt_tokens + completion_tokens) as total_tokens,
-                COUNT(DISTINCT model_name) as unique_models
-            FROM logs 
-            WHERE user_id = ${user.id} AND created_at > NOW() - (${hours}::int * INTERVAL '1 hour')
-        `;
-        return stats[0];
+        const [stats] = await db.select({
+            total_requests: drizzleSql<number>`count(*)`,
+            success_count: drizzleSql<number>`count(case when ${logs.statusCode} < 400 then 1 end)`,
+            total_cost: drizzleSql<string>`sum(${logs.quotaCost})`,
+            total_tokens: drizzleSql<string>`sum(${logs.promptTokens} + ${logs.completionTokens})`,
+            unique_models: drizzleSql<number>`count(distinct ${logs.modelName})`,
+        }).from(logs).where(and(
+            eq(logs.userId, user.id),
+            drizzleSql`${logs.createdAt} > NOW() - (${hours}::int * INTERVAL '1 hour')`,
+        ));
+        return stats;
     })
 
     // --- Self Logs (User's own logs) ---
@@ -295,14 +348,26 @@ export const logsRouter = new Elysia()
         const page = Number(query?.page) || 1;
         const limit = Number(query?.limit) || 50;
         const offset = (page - 1) * limit;
-        const [countRow] = await sql`SELECT COUNT(*) as total FROM logs WHERE user_id = ${user.id}`;
-        const data = await sql`
-            SELECT id, model_name, prompt_tokens, completion_tokens, quota_cost, status_code,
-                   is_stream, created_at, channel_id, error_message, elapsed_ms
-            FROM logs 
-            WHERE user_id = ${user.id}
-            ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}
-        `;
+
+        const [countRow] = await db.select({ total: count() }).from(logs).where(eq(logs.userId, user.id));
+
+        const data = await db.select({
+            id: logs.id,
+            model_name: logs.modelName,
+            prompt_tokens: logs.promptTokens,
+            completion_tokens: logs.completionTokens,
+            quota_cost: logs.quotaCost,
+            status_code: logs.statusCode,
+            is_stream: logs.isStream,
+            created_at: logs.createdAt,
+            channel_id: logs.channelId,
+            error_message: logs.errorMessage,
+            elapsed_ms: logs.elapsedMs,
+        }).from(logs).where(eq(logs.userId, user.id))
+          .orderBy(desc(logs.createdAt))
+          .limit(limit)
+          .offset(offset);
+
         return { data, total: countRow.total, page, limit };
     })
 
@@ -316,21 +381,30 @@ export const logsRouter = new Elysia()
         const offset = (page - 1) * limit;
         if (!keyword && !model) return { success: false, message: 'Provide keyword or model' };
 
-        const [countRow] = await sql`
-            SELECT COUNT(*) as total FROM logs 
-            WHERE user_id = ${user.id}
-              AND (${keyword || null} IS NULL OR model_name ILIKE ${'%' + keyword + '%'})
-              AND (${model || null} IS NULL OR model_name = ${model})
-        `;
-        const data = await sql`
-            SELECT id, model_name, prompt_tokens, completion_tokens, quota_cost, status_code,
-                   is_stream, created_at, error_message, elapsed_ms
-            FROM logs 
-            WHERE user_id = ${user.id}
-              AND (${keyword || null} IS NULL OR model_name ILIKE ${'%' + keyword + '%'})
-              AND (${model || null} IS NULL OR model_name = ${model})
-            ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}
-        `;
+        const conditions = [eq(logs.userId, user.id)];
+        if (keyword) conditions.push(ilike(logs.modelName, '%' + keyword + '%'));
+        if (model) conditions.push(eq(logs.modelName, model as string));
+
+        const whereClause = and(...conditions);
+
+        const [countRow] = await db.select({ total: count() }).from(logs).where(whereClause);
+
+        const data = await db.select({
+            id: logs.id,
+            model_name: logs.modelName,
+            prompt_tokens: logs.promptTokens,
+            completion_tokens: logs.completionTokens,
+            quota_cost: logs.quotaCost,
+            status_code: logs.statusCode,
+            is_stream: logs.isStream,
+            created_at: logs.createdAt,
+            error_message: logs.errorMessage,
+            elapsed_ms: logs.elapsedMs,
+        }).from(logs).where(whereClause)
+          .orderBy(desc(logs.createdAt))
+          .limit(limit)
+          .offset(offset);
+
         return { data, total: countRow.total, page, limit };
     })
 
@@ -342,27 +416,42 @@ export const logsRouter = new Elysia()
             return { success: false, message: 'Missing Authorization header' };
         }
         const apiKey = authHeader.substring(7);
-        const [tokenRow] = await sql`SELECT id, user_id FROM tokens WHERE key = ${apiKey} AND status = 1 LIMIT 1`;
+        const [tokenRow] = await db.select({
+            id: tokens.id,
+            userId: tokens.userId,
+        }).from(tokens).where(and(eq(tokens.key, apiKey), eq(tokens.status, 1))).limit(1);
+
         if (!tokenRow) { set.status = 401; return { success: false, message: 'Invalid token' }; }
 
         const page = Number(query?.page) || 1;
         const limit = Number(query?.limit) || 50;
         const offset = (page - 1) * limit;
-        const [countRow] = await sql`SELECT COUNT(*) as total FROM logs WHERE token_id = ${tokenRow.id}`;
-        const data = await sql`
-            SELECT id, model_name, prompt_tokens, completion_tokens, quota_cost, status_code,
-                   is_stream, created_at, elapsed_ms
-            FROM logs 
-            WHERE token_id = ${tokenRow.id}
-            ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}
-        `;
+
+        const [countRow] = await db.select({ total: count() }).from(logs).where(eq(logs.tokenId, tokenRow.id));
+
+        const data = await db.select({
+            id: logs.id,
+            model_name: logs.modelName,
+            prompt_tokens: logs.promptTokens,
+            completion_tokens: logs.completionTokens,
+            quota_cost: logs.quotaCost,
+            status_code: logs.statusCode,
+            is_stream: logs.isStream,
+            created_at: logs.createdAt,
+            elapsed_ms: logs.elapsedMs,
+        }).from(logs).where(eq(logs.tokenId, tokenRow.id))
+          .orderBy(desc(logs.createdAt))
+          .limit(limit)
+          .offset(offset);
+
         return { data, total: countRow.total, page, limit };
     })
 
     // --- Delete Old Logs ---
     .delete('/logs/history', async ({ query }: ElysiaCtx) => {
         const days = Number(query?.days) || 30;
-        const result = await sql`DELETE FROM logs WHERE created_at < NOW() - (${days}::int * INTERVAL '1 day')`;
-        return { success: true, deleted: result.count || 0, olderThanDays: days };
+        const result = await db.delete(logs).where(
+            drizzleSql`${logs.createdAt} < NOW() - (${days}::int * INTERVAL '1 day')`
+        );
+        return { success: true, deleted: (result as any).count || result.length || 0, olderThanDays: days };
     });
-

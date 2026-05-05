@@ -1,10 +1,7 @@
 import { log } from '../services/logger';
-import { sql } from '@elygate/db';
-
-/**
- * Audit Log Service
- * Records sensitive operations for security and compliance
- */
+import { db, sql } from '@elygate/db';
+import { auditLogs } from '@elygate/db/schema';
+import { eq, desc, count, sql as drizzleSql } from 'drizzle-orm';
 
 export type AuditAction =
     | 'user.create'
@@ -41,33 +38,24 @@ export interface AuditLog {
     createdAt?: Date;
 }
 
-/**
- * Record an audit log entry
- */
 export async function recordAuditLog(entry: Omit<AuditLog, 'id' | 'createdAt'>): Promise<void> {
     try {
-        await sql`
-            INSERT INTO audit_logs (user_id, username, action, resource, resource_id, details, ip_address, user_agent, created_at)
-            VALUES (
-                ${entry.userId},
-                ${entry.username},
-                ${entry.action},
-                ${entry.resource},
-                ${entry.resourceId || null},
-                ${entry.details || null},
-                ${entry.ipAddress || null},
-                ${entry.userAgent || null},
-                NOW()
-            )
-        `;
+        await db.insert(auditLogs).values({
+            userId: entry.userId,
+            username: entry.username,
+            action: entry.action,
+            resource: entry.resource,
+            resourceId: entry.resourceId || null,
+            details: entry.details || null,
+            ipAddress: entry.ipAddress || null,
+            userAgent: entry.userAgent || null,
+            createdAt: new Date(),
+        });
     } catch (error: unknown) {
         log.error('[AuditLog] Failed to record audit log:', error);
     }
 }
 
-/**
- * Get audit logs with pagination
- */
 export async function getAuditLogs(
     options: {
         userId?: number;
@@ -79,64 +67,47 @@ export async function getAuditLogs(
 ): Promise<{ logs: Record<string, any>[]; total: number }> {
     const { userId, action, resource, limit = 50, offset = 0 } = options;
 
-    let whereClause = 'WHERE 1=1';
-    const params: any[] = [];
+    const conditions = [];
+    if (userId) conditions.push(eq(auditLogs.userId, userId));
+    if (action) conditions.push(eq(auditLogs.action, action));
+    if (resource) conditions.push(eq(auditLogs.resource, resource));
 
-    if (userId) {
-        whereClause += ` AND user_id = $${params.length + 1}`;
-        params.push(userId);
-    }
+    const whereClause = conditions.length > 0
+        ? drizzleSql.join(conditions, drizzleSql` AND `)
+        : undefined;
 
-    if (action) {
-        whereClause += ` AND action = $${params.length + 1}`;
-        params.push(action);
-    }
+    const [countResult] = await db.select({ total: count() })
+        .from(auditLogs)
+        .where(whereClause);
 
-    if (resource) {
-        whereClause += ` AND resource = $${params.length + 1}`;
-        params.push(resource);
-    }
-
-    const [countResult] = await sql.unsafe(`
-        SELECT COUNT(*) as total FROM audit_logs ${whereClause}
-    `, params);
-
-    const logs = await sql.unsafe(`
-        SELECT * FROM audit_logs ${whereClause}
-        ORDER BY created_at DESC
-        LIMIT $${params.length + 1} OFFSET $${params.length + 2}
-    `, [...params, limit, offset]);
+    const rows = await db.select()
+        .from(auditLogs)
+        .where(whereClause)
+        .orderBy(desc(auditLogs.createdAt))
+        .limit(limit)
+        .offset(offset);
 
     return {
-        logs,
-        total: Number(countResult.total)
+        logs: rows,
+        total: countResult?.total || 0
     };
 }
 
-/**
- * Get audit logs for a specific user
- */
 export async function getUserAuditLogs(
     userId: number,
     limit: number = 50
 ): Promise<any[]> {
-    return await sql`
-        SELECT * FROM audit_logs
-        WHERE user_id = ${userId}
-        ORDER BY created_at DESC
-        LIMIT ${limit}
-    `;
+    return await db.select()
+        .from(auditLogs)
+        .where(eq(auditLogs.userId, userId))
+        .orderBy(desc(auditLogs.createdAt))
+        .limit(limit);
 }
 
-/**
- * Clean old audit logs (older than retention days)
- */
 export async function cleanOldAuditLogs(retentionDays: number = 90): Promise<number> {
-    const result = await sql`
-        DELETE FROM audit_logs
-        WHERE created_at < NOW() - INTERVAL '1 day' * ${retentionDays}
-        RETURNING id
-    `;
+    const result = await db.delete(auditLogs)
+        .where(drizzleSql`${auditLogs.createdAt} < NOW() - INTERVAL '1 day' * ${retentionDays}`)
+        .returning({ id: auditLogs.id });
 
     return result.length;
 }

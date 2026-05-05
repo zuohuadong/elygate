@@ -1,4 +1,4 @@
-import { sql } from '$lib/server/db';
+import { db, sql } from '$lib/server/db';
 import { error } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 
@@ -22,6 +22,7 @@ type LogDetailRow = {
 export const load: PageServerLoad = async ({ params, locals }) => {
     const { org } = locals as Record<string, any>;
     
+    // Complex JOIN with LEFT JOIN — use raw SQL
     const [log] = await sql`
         SELECT l.*, ld.request_body, ld.response_body, u.username
         FROM logs l

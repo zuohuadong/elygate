@@ -2,7 +2,9 @@ import type { ElysiaCtx } from '../../types';
 import { log } from '../../services/logger';
 import { getErrorMessage } from '../../utils/error';
 import { Elysia } from 'elysia';
-import { sql } from '@elygate/db';
+import { db, sql } from '@elygate/db';
+import { options, packages, userSubscriptions, users } from '@elygate/db/schema';
+import { eq } from 'drizzle-orm';
 import { memoryCache } from '../../services/cache';
 import { decryptChannelKeys, getChannelKeys } from '../../services/encryption';
 import { refreshAllCaches } from './index';
@@ -11,10 +13,10 @@ import { checkAndResetSubscriptionQuota } from '../../services/subscription';
 export const settingsRouter = new Elysia()
     // --- System Options ---
     .get('/options', async () => {
-        const rows = await sql`SELECT key, value FROM options`;
-        const options: Record<string, string> = {};
-        for (const r of rows) options[r.key] = r.value;
-        return options;
+        const rows = await db.select({ key: options.key, value: options.value }).from(options);
+        const result: Record<string, string> = {};
+        for (const r of rows) result[r.key] = r.value;
+        return result;
     })
 
     .put('/options', async ({ body }: ElysiaCtx) => {
@@ -56,11 +58,8 @@ export const settingsRouter = new Elysia()
         }
         
         for (const [key, value] of Object.entries(payload)) {
-            await sql`
-                INSERT INTO options (key, value)
-                VALUES (${key}, ${value})
-                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
-            `;
+            await db.insert(options).values({ key, value })
+                .onConflictDoUpdate({ target: options.key, set: { value } });
         }
         refreshAllCaches().catch((e: unknown) => log.error("[Async]", e));
         return { success: true };
@@ -152,21 +151,29 @@ export const settingsRouter = new Elysia()
 
     .get('/test-cycle-reset', async ({ user }: ElysiaCtx) => {
         try {
-            const [pkg] = await sql`
-                INSERT INTO packages (name, description, price, duration_days, cycle_quota, cycle_interval, cycle_unit, is_public)
-                VALUES ('Test Cycle Pkg', 'Debug reset logic', 0, 30, 1000000, 1, 'hour', false)
-                RETURNING id
-            `;
+            const [pkg] = await db.insert(packages).values({
+                name: 'Test Cycle Pkg',
+                description: 'Debug reset logic',
+                price: '0',
+                durationDays: 30,
+                cycleQuota: 1000000,
+                cycleInterval: 1,
+                cycleUnit: 'hour',
+                isPublic: false,
+            }).returning({ id: packages.id });
 
-            const [sub] = await sql`
-                INSERT INTO user_subscriptions (user_id, package_id, start_time, end_time, status, last_reset_at)
-                VALUES (${user.id}, ${pkg.id}, NOW() - INTERVAL '2 hours', NOW() + INTERVAL '30 days', 1, NOW() - INTERVAL '2 hours')
-                RETURNING id
-            `;
+            const [sub] = await db.insert(userSubscriptions).values({
+                userId: user.id,
+                packageId: pkg.id,
+                startTime: new Date(Date.now() - 2 * 3600000),
+                endTime: new Date(Date.now() + 30 * 86400000),
+                status: 1,
+                lastResetAt: new Date(Date.now() - 2 * 3600000),
+            }).returning({ id: userSubscriptions.id });
 
             await checkAndResetSubscriptionQuota(user.id);
 
-            const [updatedUser] = await sql`SELECT quota FROM users WHERE id = ${user.id}`;
+            const [updatedUser] = await db.select({ quota: users.quota }).from(users).where(eq(users.id, user.id));
 
             return { 
                 success: true, 

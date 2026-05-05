@@ -1,6 +1,8 @@
 import { log } from '../services/logger';
 import { getErrorMessage } from '../utils/error';
-import { sql } from '@elygate/db';
+import { db } from '@elygate/db';
+import { idempotencyKeys, channels as channelsTable } from '@elygate/db/schema';
+import { eq, and, gt, sql as drizzleSql } from 'drizzle-orm';
 import { memoryCache } from './cache';
 import { circuitBreaker } from './circuitBreaker';
 import { optionCache } from './optionCache';
@@ -128,10 +130,10 @@ export async function dispatch(options: DispatchOptions) {
             const cryptoHash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${user.id}_${effectiveIdempotencyKey}`))))
                 .map(b => b.toString(16).padStart(2, '0')).join('');
 
-            const [existing] = await sql`SELECT response_code, response_body FROM idempotency_keys WHERE key_hash = ${cryptoHash} AND user_id = ${user.id} AND expires_at > NOW()`;
+            const [existing] = await db.select({ responseCode: idempotencyKeys.responseCode, responseBody: idempotencyKeys.responseBody }).from(idempotencyKeys).where(and(eq(idempotencyKeys.keyHash, cryptoHash), eq(idempotencyKeys.userId, user.id), gt(idempotencyKeys.expiresAt, drizzleSql`NOW()`)));
             if (existing) {
                 log.info(`[Dispatcher] Idempotency hit for key ${effectiveIdempotencyKey}, returning cached response.`);
-                const respBody = existing.response_body;
+                const respBody = existing.responseBody as Record<string, any>;
                 const cleanedRespBody = cleanResponseTokens(respBody);
                 if (isStream) {
                     // For stream, we can't easily replay the exact stream, but we can return the full text as a single event or an error.
@@ -142,7 +144,7 @@ export async function dispatch(options: DispatchOptions) {
                         headers: { 'Content-Type': 'text/event-stream' }
                     });
                 }
-                return skipTransform ? cleanedRespBody : await getProviderHandler(ChannelType.OPENAI).transformResponse(cleanedRespBody); // Fallback to OpenAI transform if type unknown
+                return skipTransform ? cleanedRespBody : await getProviderHandler(ChannelType.OPENAI).transformResponse(cleanedRespBody as Record<string, any>); // Fallback to OpenAI transform if type unknown
             }
         }
 
@@ -424,7 +426,7 @@ export async function dispatch(options: DispatchOptions) {
                 // Persist next index back to DB asynchronously
                 const nextIndex = (start + 1) % enabledKeys.length;
                 const updatedInfo = { ...channelInfo, multiKeyPollingIndex: nextIndex };
-                sql`UPDATE channels SET channel_info = ${updatedInfo} WHERE id = ${channelConfig.id}`.catch(() => {});
+                db.update(channelsTable).set({ channelInfo: updatedInfo }).where(eq(channelsTable.id, channelConfig.id)).catch(() => {});
             } else if (mkMode === 'random' && channelInfo.isMultiKey) {
                 activeKeyIndex = Math.floor(Math.random() * enabledKeys.length);
             } else if (channelConfig.keyStrategy === 1) {
@@ -768,11 +770,13 @@ export async function dispatch(options: DispatchOptions) {
                     if (effectiveIdempotencyKey) {
                         const cryptoHash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${user.id}_${effectiveIdempotencyKey}`))))
                             .map(b => b.toString(16).padStart(2, '0')).join('');
-                        await sql`
-                            INSERT INTO idempotency_keys (key_hash, user_id, response_code, response_body, expires_at)
-                            VALUES (${cryptoHash}, ${user.id}, ${response.status}, ${rawData}, NOW() + INTERVAL '24 hours')
-                            ON CONFLICT (key_hash) DO NOTHING
-                        `.catch((e: unknown) => log.warn('[Async] Suppressed:', e));
+                        await db.insert(idempotencyKeys).values({
+                            keyHash: cryptoHash,
+                            userId: user.id,
+                            responseCode: response.status,
+                            responseBody: rawData,
+                            expiresAt: drizzleSql`NOW() + INTERVAL '24 hours'`,
+                        }).onConflictDoNothing().catch((e: unknown) => log.warn('[Async] Suppressed:', e));
                     }
 
                     const currentActive = keyConcurrencyMap.get(lockId);
@@ -935,11 +939,13 @@ export async function dispatch(options: DispatchOptions) {
                     if (effectiveIdempotencyKey) {
                         const cryptoHash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${user.id}_${effectiveIdempotencyKey}`))))
                             .map(b => b.toString(16).padStart(2, '0')).join('');
-                        await sql`
-                            INSERT INTO idempotency_keys (key_hash, user_id, response_code, response_body, expires_at)
-                            VALUES (${cryptoHash}, ${user.id}, ${response.status}, ${rawData}, NOW() + INTERVAL '24 hours')
-                            ON CONFLICT (key_hash) DO NOTHING
-                        `.catch((e: unknown) => log.warn('[Async] Suppressed:', e));
+                        await db.insert(idempotencyKeys).values({
+                            keyHash: cryptoHash,
+                            userId: user.id,
+                            responseCode: response.status,
+                            responseBody: rawData,
+                            expiresAt: drizzleSql`NOW() + INTERVAL '24 hours'`,
+                        }).onConflictDoNothing().catch((e: unknown) => log.warn('[Async] Suppressed:', e));
                     }
 
                     const currentActive = keyConcurrencyMap.get(lockId);
@@ -1237,11 +1243,13 @@ function handleStreamBilling(
                         .map(b => b.toString(16).padStart(2, '0')).join('');
                     // Reconstruct a standard response format if possible, or just the completion
                     const mockResponse = { choices: [{ message: { content: completionText } }], usage: usageData };
-                    await sql`
-                        INSERT INTO idempotency_keys (key_hash, user_id, response_code, response_body, expires_at)
-                        VALUES (${cryptoHash}, ${user.id}, ${statusCode}, ${mockResponse}, NOW() + INTERVAL '24 hours')
-                        ON CONFLICT (key_hash) DO NOTHING
-                    `.catch((e: unknown) => log.warn('[Async] Suppressed:', e));
+                    await db.insert(idempotencyKeys).values({
+                        keyHash: cryptoHash,
+                        userId: user.id,
+                        responseCode: statusCode,
+                        responseBody: mockResponse,
+                        expiresAt: drizzleSql`NOW() + INTERVAL '24 hours'`,
+                    }).onConflictDoNothing().catch((e: unknown) => log.warn('[Async] Suppressed:', e));
                 }
             } catch (e: unknown) {
                 log.error("[Stream Billing Error]", e);

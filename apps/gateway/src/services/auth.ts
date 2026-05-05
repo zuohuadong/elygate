@@ -1,6 +1,8 @@
 import { config } from '../config';
 import { log } from '../services/logger';
-import { sql } from '@elygate/db';
+import { db, sql } from '@elygate/db';
+import { users, tokens } from '@elygate/db/schema';
+import { eq, asc } from 'drizzle-orm';
 
 const INITIAL_QUOTA = Number(String(config.initialQuota)) || 500000;
 
@@ -13,27 +15,46 @@ export const authService = {
         // For this demo, we'll use 'github:' prefix in username.
         const internalUsername = `github:${githubId}`;
 
-        let [user] = await sql`
-            SELECT id, username, role, quota, status 
-            FROM users 
-            WHERE username = ${internalUsername}
-            LIMIT 1
-        `;
+        let [user] = await db
+            .select({
+                id: users.id,
+                username: users.username,
+                role: users.role,
+                quota: users.quota,
+                status: users.status,
+            })
+            .from(users)
+            .where(eq(users.username, internalUsername))
+            .limit(1);
 
         if (!user) {
             log.info(`[Auth] Creating new GitHub user: ${username} (${githubId})`);
-            [user] = await sql`
-                INSERT INTO users (username, password_hash, role, quota, status)
-                VALUES (${internalUsername}, 'oauth-no-password', 1, ${INITIAL_QUOTA}, 1)
-                RETURNING id, username, role, quota, status
-            `;
+            [user] = await db
+                .insert(users)
+                .values({
+                    username: internalUsername,
+                    passwordHash: 'oauth-no-password',
+                    role: 1,
+                    quota: INITIAL_QUOTA,
+                    status: 1,
+                })
+                .returning({
+                    id: users.id,
+                    username: users.username,
+                    role: users.role,
+                    quota: users.quota,
+                    status: users.status,
+                });
 
             // Generate default API key using Bun native UUID v7 (time-ordered, faster)
             const defaultTokenKey = `sk-${Bun.randomUUIDv7('hex')}`;
-            await sql`
-                INSERT INTO tokens (user_id, name, key, status, remain_quota)
-                VALUES (${user.id}, 'Default API Key', ${defaultTokenKey}, 1, -1)
-            `;
+            await db.insert(tokens).values({
+                userId: user.id,
+                name: 'Default API Key',
+                key: defaultTokenKey,
+                status: 1,
+                remainQuota: -1,
+            });
         }
 
         return user;
@@ -46,20 +67,26 @@ export const authService = {
      */
     async generateSessionToken(userId: number) {
         // Look up existing active token
-        let [token] = await sql`
-            SELECT key FROM tokens
-            WHERE user_id = ${userId} AND status = 1
-            ORDER BY id ASC LIMIT 1
-        `;
+        let [token] = await db
+            .select({ key: tokens.key })
+            .from(tokens)
+            .where(eq(tokens.userId, userId))
+            .orderBy(asc(tokens.id))
+            .limit(1);
 
         // No token yet: create a default one
         if (!token) {
             const newKey = `sk-${Bun.randomUUIDv7('hex')}`;
-            [token] = await sql`
-                INSERT INTO tokens (user_id, name, key, status, remain_quota)
-                VALUES (${userId}, 'Default API Key', ${newKey}, 1, -1)
-                RETURNING key
-            `;
+            [token] = await db
+                .insert(tokens)
+                .values({
+                    userId,
+                    name: 'Default API Key',
+                    key: newKey,
+                    status: 1,
+                    remainQuota: -1,
+                })
+                .returning({ key: tokens.key });
         }
 
         return token.key;

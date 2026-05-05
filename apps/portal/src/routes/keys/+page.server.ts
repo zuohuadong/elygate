@@ -1,6 +1,8 @@
-import { sql } from '$lib/server/db';
+import { db, sql } from '$lib/server/db';
 import { fail } from '@sveltejs/kit';
 import { requireOrgManager } from '$lib/server/portalAuth';
+import { tokens, users, logs } from '@elygate/db/schema';
+import { eq, desc, and, sql as drizzleSql, inArray } from '@elygate/db/operators';
 import type { PageServerLoad, Actions } from './$types';
 
 type TokenRow = {
@@ -16,8 +18,8 @@ type TokenRow = {
 export const load: PageServerLoad = async ({ locals }) => {
     const { org } = requireOrgManager(locals);
 
-    // Fetch all tokens for the org, joining with users to see owners
-    const tokens = await sql`
+    // Complex JOIN with GROUP BY and aggregate — use raw SQL
+    const tokenRows = await sql`
         SELECT 
             t.id,
             t.name,
@@ -35,9 +37,8 @@ export const load: PageServerLoad = async ({ locals }) => {
     ` as TokenRow[];
 
     return {
-        tokens: tokens.map((token) => ({
+        tokens: tokenRows.map((token) => ({
             ...token,
-            // Mask the token hash for security, just show a preview
             tokenPreview: token.tokenPreview ? `${token.tokenPreview}...` : 'N/A'
         }))
     };
@@ -52,12 +53,14 @@ export const actions: Actions = {
         if (!tokenId) return fail(400, { message: 'Token ID is required' });
 
         try {
-            // Verify the token belongs to a member of THIS org before deleting
-            await sql`
-                DELETE FROM tokens 
-                WHERE id = ${tokenId as string} 
-                AND user_id IN (SELECT id FROM users WHERE org_id = ${org.id})
-            `;
+            // Find org member user IDs, then delete token belonging to one of them
+            const orgUsers = await db.select({ id: users.id })
+                .from(users)
+                .where(eq(users.orgId, org.id));
+            const orgUserIds = orgUsers.map(u => u.id);
+
+            await db.delete(tokens)
+                .where(and(eq(tokens.id, Number(tokenId)), inArray(tokens.userId, orgUserIds)));
             return { success: true };
         } catch (err) {
             console.error('Failed to revoke token:', err);

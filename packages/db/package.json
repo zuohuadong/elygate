@@ -11,6 +11,10 @@
         "./schema": {
             "types": "./src/schema.ts",
             "import": "./src/schema.ts"
+        },
+        "./operators": {
+            "types": "./src/operators.ts",
+            "import": "./src/operators.ts"
         }
     },
     "types": "./src/index.ts",

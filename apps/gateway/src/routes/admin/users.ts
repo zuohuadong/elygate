@@ -1,7 +1,9 @@
 import type { ElysiaCtx } from '../../types';
 import { Elysia, t } from 'elysia';
 import { getErrorMessage } from '../../utils/error';
-import { sql } from '@elygate/db';
+import { db, sql } from '@elygate/db';
+import { users, tokens, logs } from '@elygate/db/schema';
+import { eq, and, desc, inArray, count, sum, max, ilike, or, sql as drizzleSql } from 'drizzle-orm';
 import { optionCache } from '../../services/optionCache';
 import { getLangFromHeader } from '../../utils/i18n';
 
@@ -18,93 +20,86 @@ function maskTokenKey(t: Record<string, any>): Record<string, any> {
 export const usersRouter = new Elysia()
     // --- Token Management ---
     .get('/tokens', async () => {
-        const tokens = await sql`
-            SELECT t.id, t.name, t.key, t.status, t.remain_quota, t.used_quota, t.created_at, t.updated_at, t.models,
-                   t.subnet, t.allow_ips, t.rate_limit, t.expired_at, t.unlimited_quota, t.model_limits_enabled,
-                   t.token_group, t.cross_group_retry, t.accessed_at, t.user_id, u.username as creator_name
-            FROM tokens t
-            LEFT JOIN users u ON t.user_id = u.id
-            ORDER BY t.id DESC
-        `;
-        return tokens.map((t: Record<string, any>) => maskTokenKey({
-            id: t.id,
-            name: t.name,
-            key: t.key,
-            status: t.status,
-            remainQuota: t.remain_quota,
-            usedQuota: t.used_quota,
-            models: t.models,
-            subnet: t.subnet,
-            allowIps: t.allow_ips,
-            rateLimit: t.rate_limit,
-            expiredAt: t.expired_at,
-            unlimitedQuota: t.unlimited_quota,
-            modelLimitsEnabled: t.model_limits_enabled,
-            tokenGroup: t.token_group,
-            crossGroupRetry: t.cross_group_retry,
-            accessedAt: t.accessed_at,
-            createdAt: t.created_at,
-            updatedAt: t.updated_at,
-            userId: t.user_id,
-            creatorName: t.creator_name
-        }));
+        const tokenRows = await db.select({
+            id: tokens.id,
+            name: tokens.name,
+            key: tokens.key,
+            status: tokens.status,
+            remainQuota: tokens.remainQuota,
+            usedQuota: tokens.usedQuota,
+            createdAt: tokens.createdAt,
+            updatedAt: tokens.updatedAt,
+            models: tokens.models,
+            subnet: tokens.subnet,
+            allowIps: tokens.allowIps,
+            rateLimit: tokens.rateLimit,
+            expiredAt: tokens.expiredAt,
+            unlimitedQuota: tokens.unlimitedQuota,
+            modelLimitsEnabled: tokens.modelLimitsEnabled,
+            tokenGroup: tokens.tokenGroup,
+            crossGroupRetry: tokens.crossGroupRetry,
+            accessedAt: tokens.accessedAt,
+            userId: tokens.userId,
+            creatorName: users.username,
+        }).from(tokens)
+            .leftJoin(users, eq(tokens.userId, users.id))
+            .orderBy(desc(tokens.id));
+        return tokenRows.map((t: Record<string, any>) => maskTokenKey(t));
     })
 
     .get('/tokens/:id', async ({ params: { id }, set }: ElysiaCtx) => {
-        const [token] = await sql`
-            SELECT t.id, t.name, t.key, t.status, t.remain_quota, t.used_quota, t.created_at, t.updated_at, t.models,
-                   t.subnet, t.allow_ips, t.rate_limit, t.expired_at, t.unlimited_quota, t.model_limits_enabled,
-                   t.token_group, t.cross_group_retry, t.accessed_at, t.user_id, u.username as creator_name
-            FROM tokens t
-            LEFT JOIN users u ON t.user_id = u.id
-            WHERE t.id = ${Number(id)}
-            LIMIT 1
-        `;
+        const [token] = await db.select({
+            id: tokens.id,
+            name: tokens.name,
+            key: tokens.key,
+            status: tokens.status,
+            remainQuota: tokens.remainQuota,
+            usedQuota: tokens.usedQuota,
+            createdAt: tokens.createdAt,
+            updatedAt: tokens.updatedAt,
+            models: tokens.models,
+            subnet: tokens.subnet,
+            allowIps: tokens.allowIps,
+            rateLimit: tokens.rateLimit,
+            expiredAt: tokens.expiredAt,
+            unlimitedQuota: tokens.unlimitedQuota,
+            modelLimitsEnabled: tokens.modelLimitsEnabled,
+            tokenGroup: tokens.tokenGroup,
+            crossGroupRetry: tokens.crossGroupRetry,
+            accessedAt: tokens.accessedAt,
+            userId: tokens.userId,
+            creatorName: users.username,
+        }).from(tokens)
+            .leftJoin(users, eq(tokens.userId, users.id))
+            .where(eq(tokens.id, Number(id)))
+            .limit(1);
         if (!token) {
             set.status = 404;
             return { success: false, message: 'Token not found' };
         }
-        return {
-            id: token.id,
-            name: token.name,
-            key: token.key,
-            status: token.status,
-            remainQuota: token.remain_quota,
-            usedQuota: token.used_quota,
-            models: token.models,
-            subnet: token.subnet,
-            allowIps: token.allow_ips,
-            rateLimit: token.rate_limit,
-            expiredAt: token.expired_at,
-            unlimitedQuota: token.unlimited_quota,
-            modelLimitsEnabled: token.model_limits_enabled,
-            tokenGroup: token.token_group,
-            crossGroupRetry: token.cross_group_retry,
-            accessedAt: token.accessed_at,
-            createdAt: token.created_at,
-            updatedAt: token.updated_at,
-            userId: token.user_id,
-            creatorName: token.creator_name
-        };
+        return token;
     })
 
     .post('/tokens', async ({ body, user, set }: ElysiaCtx) => {
         try {
             const b = body as Record<string, any>;
             const newKey = `sk-${Bun.randomUUIDv7('hex')}`;
-            const [result] = await sql`
-                INSERT INTO tokens (
-                    user_id, name, key, status, remain_quota, models, subnet, allow_ips, rate_limit, expired_at,
-                    unlimited_quota, model_limits_enabled, token_group, cross_group_retry
-                )
-                VALUES (
-                    ${b.userId || user.id}, ${b.name}, ${newKey}, ${b.status || 1}, ${b.remainQuota ?? -1},
-                    ${Array.isArray(b.models) ? JSON.stringify(b.models) : JSON.stringify(b.models || [])},
-                    ${b.subnet || b.allowIps || null}, ${b.allowIps || b.subnet || null}, ${b.rateLimit || 0}, ${b.expiredAt || null},
-                    ${Boolean(b.unlimitedQuota)}, ${Boolean(b.modelLimitsEnabled)}, ${b.tokenGroup || null}, ${Boolean(b.crossGroupRetry)}
-                )
-                RETURNING *
-            `;
+            const [result] = await db.insert(tokens).values({
+                userId: b.userId || user.id,
+                name: b.name,
+                key: newKey,
+                status: b.status || 1,
+                remainQuota: b.remainQuota ?? -1,
+                models: Array.isArray(b.models) ? b.models : b.models || [],
+                subnet: b.subnet || b.allowIps || null,
+                allowIps: b.allowIps || b.subnet || null,
+                rateLimit: b.rateLimit || 0,
+                expiredAt: b.expiredAt || null,
+                unlimitedQuota: Boolean(b.unlimitedQuota),
+                modelLimitsEnabled: Boolean(b.modelLimitsEnabled),
+                tokenGroup: b.tokenGroup || null,
+                crossGroupRetry: Boolean(b.crossGroupRetry),
+            }).returning();
             return result;
         } catch (e: unknown) {
             set.status = 500;
@@ -115,7 +110,7 @@ export const usersRouter = new Elysia()
     .put('/tokens/:id', async ({ params: { id }, body, set }: ElysiaCtx) => {
         try {
             const b = body as Record<string, any>;
-            const [oldToken] = await sql`SELECT * FROM tokens WHERE id = ${Number(id)} LIMIT 1`;
+            const [oldToken] = await db.select().from(tokens).where(eq(tokens.id, Number(id))).limit(1);
             if (!oldToken) {
                 set.status = 404;
                 return { success: false, message: 'Token not found' };
@@ -123,27 +118,24 @@ export const usersRouter = new Elysia()
 
             let finalModels = oldToken.models;
             if (b.models !== undefined) {
-                finalModels = Array.isArray(b.models) ? JSON.stringify(b.models) : b.models;
+                finalModels = Array.isArray(b.models) ? b.models : b.models;
             }
 
-            const [result] = await sql`
-                UPDATE tokens 
-                SET name = ${b.name ?? oldToken.name},
-                    status = ${b.status ?? oldToken.status},
-                    remain_quota = ${b.remainQuota ?? oldToken.remain_quota},
-                    models = ${finalModels},
-                    subnet = ${b.subnet ?? oldToken.subnet},
-                    allow_ips = ${b.allowIps ?? oldToken.allow_ips},
-                    rate_limit = ${b.rateLimit ?? oldToken.rate_limit},
-                    expired_at = ${b.expiredAt ?? oldToken.expired_at},
-                    unlimited_quota = ${b.unlimitedQuota ?? oldToken.unlimited_quota},
-                    model_limits_enabled = ${b.modelLimitsEnabled ?? oldToken.model_limits_enabled},
-                    token_group = ${b.tokenGroup ?? oldToken.token_group},
-                    cross_group_retry = ${b.crossGroupRetry ?? oldToken.cross_group_retry},
-                    updated_at = NOW()
-                WHERE id = ${Number(id)}
-                RETURNING *
-            `;
+            const [result] = await db.update(tokens).set({
+                name: b.name ?? oldToken.name,
+                status: b.status ?? oldToken.status,
+                remainQuota: b.remainQuota ?? oldToken.remainQuota,
+                models: finalModels,
+                subnet: b.subnet ?? oldToken.subnet,
+                allowIps: b.allowIps ?? oldToken.allowIps,
+                rateLimit: b.rateLimit ?? oldToken.rateLimit,
+                expiredAt: b.expiredAt ?? oldToken.expiredAt,
+                unlimitedQuota: b.unlimitedQuota ?? oldToken.unlimitedQuota,
+                modelLimitsEnabled: b.modelLimitsEnabled ?? oldToken.modelLimitsEnabled,
+                tokenGroup: b.tokenGroup ?? oldToken.tokenGroup,
+                crossGroupRetry: b.crossGroupRetry ?? oldToken.crossGroupRetry,
+                updatedAt: new Date(),
+            }).where(eq(tokens.id, Number(id))).returning();
             return result;
         } catch (e: unknown) {
             set.status = 500;
@@ -153,20 +145,17 @@ export const usersRouter = new Elysia()
 
     .post('/tokens/:id/regenerate', async ({ params: { id }, set }: ElysiaCtx) => {
         try {
-            const [oldToken] = await sql`SELECT * FROM tokens WHERE id = ${Number(id)} LIMIT 1`;
+            const [oldToken] = await db.select().from(tokens).where(eq(tokens.id, Number(id))).limit(1);
             if (!oldToken) {
                 set.status = 404;
                 return { success: false, message: 'Token not found' };
             }
 
             const newKey = `sk-${Bun.randomUUIDv7('hex')}`;
-            const [result] = await sql`
-                UPDATE tokens 
-                SET key = ${newKey},
-                    updated_at = NOW()
-                WHERE id = ${Number(id)}
-                RETURNING *
-            `;
+            const [result] = await db.update(tokens).set({
+                key: newKey,
+                updatedAt: new Date(),
+            }).where(eq(tokens.id, Number(id))).returning();
 
             return { success: true, message: 'Token key regenerated successfully', token: result };
         } catch (e: unknown) {
@@ -177,7 +166,7 @@ export const usersRouter = new Elysia()
 
     .delete('/tokens/:id', async ({ params: { id }, set }: ElysiaCtx) => {
         try {
-            await sql`DELETE FROM tokens WHERE id = ${Number(id)}`;
+            await db.delete(tokens).where(eq(tokens.id, Number(id)));
             return { success: true };
         } catch (e: unknown) {
             set.status = 500;
@@ -187,21 +176,29 @@ export const usersRouter = new Elysia()
 
     // --- User Management ---
     .get('/users', async () => {
-        const users = await sql`
-            SELECT id, username, role, quota, used_quota as "usedQuota", status, created_at, updated_at
-            FROM users 
-            ORDER BY id DESC
-        `;
-        return users;
+        return await db.select({
+            id: users.id,
+            username: users.username,
+            role: users.role,
+            quota: users.quota,
+            usedQuota: users.usedQuota,
+            status: users.status,
+            createdAt: users.createdAt,
+            updatedAt: users.updatedAt,
+        }).from(users).orderBy(desc(users.id));
     })
 
     .get('/users/:id', async ({ params: { id }, set }: ElysiaCtx) => {
-        const [user] = await sql`
-            SELECT id, username, role, quota, used_quota as "usedQuota", status, created_at, updated_at
-            FROM users 
-            WHERE id = ${Number(id)}
-            LIMIT 1
-        `;
+        const [user] = await db.select({
+            id: users.id,
+            username: users.username,
+            role: users.role,
+            quota: users.quota,
+            usedQuota: users.usedQuota,
+            status: users.status,
+            createdAt: users.createdAt,
+            updatedAt: users.updatedAt,
+        }).from(users).where(eq(users.id, Number(id))).limit(1);
         if (!user) {
             set.status = 404;
             return { success: false, message: 'User not found' };
@@ -214,11 +211,21 @@ export const usersRouter = new Elysia()
             const b = body as Record<string, any>;
             const passwordHash = await Bun.password.hash(b.password);
             const defaultCurrency = optionCache.get('CurrencyName', 'USD');
-            const [result] = await sql`
-                INSERT INTO users (username, password_hash, role, quota, status, currency)
-                VALUES (${b.username}, ${passwordHash}, ${b.role || 1}, ${b.quota || 0}, 1, ${defaultCurrency})
-                RETURNING id, username, role, quota, status, currency
-            `;
+            const [result] = await db.insert(users).values({
+                username: b.username,
+                passwordHash,
+                role: b.role || 1,
+                quota: b.quota || 0,
+                status: 1,
+                currency: defaultCurrency,
+            }).returning({
+                id: users.id,
+                username: users.username,
+                role: users.role,
+                quota: users.quota,
+                status: users.status,
+                currency: users.currency,
+            });
             return result;
         } catch (e: unknown) {
             set.status = 500;
@@ -229,28 +236,36 @@ export const usersRouter = new Elysia()
     .put('/users/:id', async ({ params: { id }, body, set }: ElysiaCtx) => {
         try {
             const b = body as Record<string, any>;
-            let passwordClause = sql``;
+            const updateData: Record<string, any> = {
+                username: b.username ?? undefined,
+                role: b.role ?? undefined,
+                quota: b.quota ?? undefined,
+                currency: b.currency ?? undefined,
+                status: b.status ?? undefined,
+                updatedAt: new Date(),
+            };
+            // Remove undefined keys (COALESCE semantics: only update if provided)
+            for (const key of Object.keys(updateData)) {
+                if (updateData[key] === undefined) delete updateData[key];
+            }
             if (b.password) {
-                const hash = await Bun.password.hash(b.password);
-                passwordClause = sql`, password_hash = ${hash}`;
+                updateData.passwordHash = await Bun.password.hash(b.password);
             }
 
-            const [result] = await sql`
-                UPDATE users 
-                SET username = COALESCE(${b.username}, username),
-                    role = COALESCE(${b.role}, role),
-                    quota = COALESCE(${b.quota}, quota),
-                    currency = COALESCE(${b.currency}, currency),
-                    status = COALESCE(${b.status}, status),
-                    updated_at = NOW()
-                    ${passwordClause}
-                WHERE id = ${Number(id)}
-                RETURNING id, username, role, quota, currency, status
-            `;
+            const [result] = await db.update(users).set(updateData)
+                .where(eq(users.id, Number(id)))
+                .returning({
+                    id: users.id,
+                    username: users.username,
+                    role: users.role,
+                    quota: users.quota,
+                    currency: users.currency,
+                    status: users.status,
+                });
 
             // Notify auth cache to flush tokens for this user
-            const tokens = await sql`SELECT key FROM tokens WHERE user_id = ${Number(id)}`;
-            for (const t of tokens) {
+            const tokenRows = await db.select({ key: tokens.key }).from(tokens).where(eq(tokens.userId, Number(id)));
+            for (const t of tokenRows) {
                 await sql`SELECT pg_notify('auth_update', ${t.key})`;
             }
 
@@ -269,15 +284,15 @@ export const usersRouter = new Elysia()
             return { success: false, message: lang === 'zh' ? '不能删除自己的账户' : 'Cannot delete your own account' };
         }
 
-        const [adminCount] = await sql`SELECT COUNT(*) as count FROM users WHERE role >= 10 AND status = 1`;
-        const [targetUser] = await sql`SELECT role FROM users WHERE id = ${Number(id)}`;
+        const [adminCount] = await db.select({ count: count() }).from(users).where(and(drizzleSql`${users.role} >= 10`, eq(users.status, 1)));
+        const [targetUser] = await db.select({ role: users.role }).from(users).where(eq(users.id, Number(id)));
 
         if (targetUser && targetUser.role >= 10 && Number(adminCount.count) <= 1) {
             set.status = 400;
             return { success: false, message: lang === 'zh' ? '不能删除最后一个管理员账户' : 'Cannot delete the last admin account' };
         }
 
-        await sql`DELETE FROM users WHERE id = ${Number(id)}`;
+        await db.delete(users).where(eq(users.id, Number(id)));
         return { success: true, message: lang === 'zh' ? '删除成功' : 'Deleted successfully' };
     })
     // --- Token Search ---
@@ -288,17 +303,36 @@ export const usersRouter = new Elysia()
         if (!keyword && !userId && status === undefined) {
             return { success: false, message: 'Provide keyword, user_id, or status' };
         }
-        const rows = await sql`
-            SELECT t.id, t.name, t.key, t.status, t.remain_quota, t.used_quota, t.created_at, t.models,
-                   t.subnet, t.allow_ips, t.rate_limit, t.expired_at, t.unlimited_quota, t.model_limits_enabled,
-                   t.token_group, t.cross_group_retry, t.accessed_at, t.user_id, u.username as creator_name
-            FROM tokens t
-            LEFT JOIN users u ON t.user_id = u.id
-            WHERE (${keyword || null} IS NULL OR t.name ILIKE ${'%' + keyword + '%'})
-              AND (${userId || null} IS NULL OR t.user_id = ${Number(userId) || 0})
-              AND (${status ?? null} IS NULL OR t.status = ${Number(status) || 0})
-            ORDER BY t.id DESC LIMIT 100
-        `;
+        const conditions = [];
+        if (keyword) conditions.push(ilike(tokens.name, '%' + keyword + '%'));
+        if (userId) conditions.push(eq(tokens.userId, Number(userId) || 0));
+        if (status !== undefined) conditions.push(eq(tokens.status, Number(status) || 0));
+
+        const rows = await db.select({
+            id: tokens.id,
+            name: tokens.name,
+            key: tokens.key,
+            status: tokens.status,
+            remainQuota: tokens.remainQuota,
+            usedQuota: tokens.usedQuota,
+            createdAt: tokens.createdAt,
+            models: tokens.models,
+            subnet: tokens.subnet,
+            allowIps: tokens.allowIps,
+            rateLimit: tokens.rateLimit,
+            expiredAt: tokens.expiredAt,
+            unlimitedQuota: tokens.unlimitedQuota,
+            modelLimitsEnabled: tokens.modelLimitsEnabled,
+            tokenGroup: tokens.tokenGroup,
+            crossGroupRetry: tokens.crossGroupRetry,
+            accessedAt: tokens.accessedAt,
+            userId: tokens.userId,
+            creatorName: users.username,
+        }).from(tokens)
+            .leftJoin(users, eq(tokens.userId, users.id))
+            .where(conditions.length > 0 ? and(...conditions) : undefined)
+            .orderBy(desc(tokens.id))
+            .limit(100);
         return rows.map(maskTokenKey);
     })
 
@@ -307,8 +341,8 @@ export const usersRouter = new Elysia()
         const ids: number[] = (body as any).ids || [];
         if (ids.length === 0) return { success: false, message: 'No IDs provided' };
         if (ids.length > 100) return { success: false, message: 'Max 100 tokens at once' };
-        const result = await sql`DELETE FROM tokens WHERE id IN ${sql(ids)}`;
-        return { success: true, deleted: result.count || ids.length };
+        const result = await db.delete(tokens).where(inArray(tokens.id, ids)).returning({ id: tokens.id });
+        return { success: true, deleted: result.length || ids.length };
     }, { body: t.Object({ ids: t.Array(t.Number()) }) })
 
     // --- Token Batch Get Keys ---
@@ -316,9 +350,7 @@ export const usersRouter = new Elysia()
         const ids: number[] = (body as any).ids || [];
         if (ids.length === 0) return { success: false, message: 'No IDs provided' };
         if (ids.length > 100) return { success: false, message: 'Max 100 tokens at once' };
-        const rows = await sql`
-            SELECT id, key FROM tokens WHERE id IN ${sql(ids)}
-        `;
+        const rows = await db.select({ id: tokens.id, key: tokens.key }).from(tokens).where(inArray(tokens.id, ids));
         const keysMap: Record<number, string> = {};
         for (const r of rows) keysMap[r.id] = r.key;
         return { success: true, keys: keysMap };
@@ -326,29 +358,30 @@ export const usersRouter = new Elysia()
 
     // --- Single Token Usage ---
     .get('/tokens/:id/usage', async ({ params: { id }, set }: ElysiaCtx) => {
-        const [token] = await sql`SELECT id, name, remain_quota, used_quota, unlimited_quota FROM tokens WHERE id = ${Number(id)} LIMIT 1`;
+        const [token] = await db.select({
+            id: tokens.id,
+            name: tokens.name,
+            remainQuota: tokens.remainQuota,
+            usedQuota: tokens.usedQuota,
+            unlimitedQuota: tokens.unlimitedQuota,
+        }).from(tokens).where(eq(tokens.id, Number(id))).limit(1);
         if (!token) { set.status = 404; return { success: false, message: 'Token not found' }; }
         
-        const [stats] = await sql`
-            SELECT 
-                COUNT(*) as total_requests,
-                SUM(quota_cost) as total_cost,
-                SUM(prompt_tokens) as total_prompt_tokens,
-                SUM(completion_tokens) as total_completion_tokens,
-                MAX(created_at) as last_used
-            FROM logs WHERE token_id = ${Number(id)}
-        `;
+        const [stats] = await db.select({
+            totalRequests: count(),
+            totalCost: sum(logs.quotaCost),
+            totalPromptTokens: sum(logs.promptTokens),
+            totalCompletionTokens: sum(logs.completionTokens),
+            lastUsed: max(logs.createdAt),
+        }).from(logs).where(eq(logs.tokenId, Number(id)));
         return { token, stats };
     })
 
     // --- Regenerate Token Key ---
     .post('/tokens/:id/regenerate', async ({ params: { id }, set }: ElysiaCtx) => {
-        const [oldToken] = await sql`SELECT * FROM tokens WHERE id = ${Number(id)} LIMIT 1`;
+        const [oldToken] = await db.select().from(tokens).where(eq(tokens.id, Number(id))).limit(1);
         if (!oldToken) { set.status = 404; return { success: false, message: 'Token not found' }; }
         const newKey = `sk-${Bun.randomUUIDv7('hex')}`;
-        const [result] = await sql`
-            UPDATE tokens SET key = ${newKey}, updated_at = NOW() WHERE id = ${Number(id)} RETURNING *
-        `;
+        const [result] = await db.update(tokens).set({ key: newKey, updatedAt: new Date() }).where(eq(tokens.id, Number(id))).returning();
         return { success: true, token: maskTokenKey(result) };
     });
-

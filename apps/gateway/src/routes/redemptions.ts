@@ -1,12 +1,12 @@
 import type { ElysiaCtx } from '../types';
 import { Elysia } from 'elysia';
-import { sql } from '@elygate/db';
+import { db, sql } from '@elygate/db';
 import { authPlugin } from '../middleware/auth';
 
 /**
  * Redemptions Router
  * Allows registered users to redeem CDKs for quota.
- * Prefix and authPlugin are applied in index.ts
+ * Uses raw SQL CTE for atomicity (Drizzle cannot express this as a query builder).
  */
 export const redemptionsRouter = new Elysia()
     .post('/redeem', async ({ body, user }: ElysiaCtx) => {
@@ -16,7 +16,7 @@ export const redemptionsRouter = new Elysia()
             throw new Error("Missing 'key' in request body");
         }
 
-        // Atomic CDK redemption using CTE to prevent race conditions
+        // Atomic CDK redemption using CTE — cannot be expressed in Drizzle query builder
         const result = await sql`
             WITH claimed AS (
                 UPDATE redemptions 

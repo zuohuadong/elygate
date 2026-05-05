@@ -1,7 +1,9 @@
 import { config } from '../config';
 import { log } from '../services/logger';
 import { getErrorMessage } from '../utils/error';
-import { sql } from "@elygate/db";
+import { db, sql } from "@elygate/db";
+import { channels, healthLogs } from '@elygate/db/schema';
+import { eq, and, gt, sql as drizzleSql } from 'drizzle-orm';
 import { memoryCache } from "./cache";
 
 /**
@@ -19,23 +21,24 @@ class HealthChecker {
         try {
             log.info("[HealthCheck] Starting proactive channel verification...");
 
-            // Fetch all currently active channels
-            const channels = await sql`
-                SELECT id, type, base_url, key, test_errors
-                FROM channels
-                WHERE status = 1
-            `;
+            const activeChannels = await db.select({
+                id: channels.id,
+                type: channels.type,
+                baseUrl: channels.baseUrl,
+                key: channels.key,
+                testErrors: channels.testErrors,
+            })
+            .from(channels)
+            .where(eq(channels.status, 1));
 
-            for (const ch of channels) {
-                // In a full implementation, you'd use the provider-specific handler here.
-                // For proxy/OpenAI standard channels, we do a simple models endpoint ping.
-                const testUrl = `${ch.base_url}/v1/models`;
+            for (const ch of activeChannels) {
+                const testUrl = `${ch.baseUrl}/v1/models`;
                 const keys = ch.key.split('\n').map((k: string) => k.trim()).filter(Boolean);
                 const activeKey = keys[0];
 
                 try {
                     const controller = new AbortController();
-                    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+                    const timeoutId = setTimeout(() => controller.abort(), 10000);
 
                     const startTime = Date.now();
                     const res = await fetch(testUrl, {
@@ -47,31 +50,41 @@ class HealthChecker {
                     clearTimeout(timeoutId);
 
                     if (res.ok) {
-                        // Record health log
-                        await sql`INSERT INTO health_logs (channel_id, status, latency) VALUES (${ch.id}, 1, ${latency})`;
+                        await db.insert(healthLogs).values({
+                            channelId: ch.id,
+                            status: 1,
+                            latency,
+                        });
 
-                        // Reset error count on success
-                        if (ch.test_errors > 0) {
-                            await sql`UPDATE channels SET test_errors = 0, test_at = NOW() WHERE id = ${ch.id}`;
+                        if (ch.testErrors > 0) {
+                            await db.update(channels)
+                                .set({ testErrors: 0, testAt: new Date() })
+                                .where(eq(channels.id, ch.id));
                         } else {
-                            await sql`UPDATE channels SET test_at = NOW() WHERE id = ${ch.id}`;
+                            await db.update(channels)
+                                .set({ testAt: new Date() })
+                                .where(eq(channels.id, ch.id));
                         }
                     } else {
                         throw new Error(`HTTP ${res.status}`);
                     }
                 } catch (e: unknown) {
-                    const newErrors = ch.test_errors + 1;
+                    const newErrors = ch.testErrors + 1;
                     log.warn(`[HealthCheck] Channel ${ch.id} failed ping (${newErrors}/${this.MAX_ERRORS}). Error:`, getErrorMessage(e));
 
-                    // Record failure health log
-                    await sql`INSERT INTO health_logs (channel_id, status, error_message) VALUES (${ch.id}, 0, ${getErrorMessage(e)})`;
+                    await db.insert(healthLogs).values({
+                        channelId: ch.id,
+                        status: 0,
+                        errorMessage: getErrorMessage(e),
+                    });
 
                     if (newErrors >= this.MAX_ERRORS) {
                         log.error(`[HealthCheck] Channel ${ch.id} auto-disabled due to consecutive failures.`);
-                        await sql`UPDATE channels SET status = 3, test_errors = ${newErrors}, test_at = NOW() WHERE id = ${ch.id}`;
+                        await db.update(channels)
+                            .set({ status: 3, testErrors: newErrors, testAt: new Date() })
+                            .where(eq(channels.id, ch.id));
                         memoryCache.refresh().catch((e: unknown) => log.error("[Async]", e));
 
-                        // Also notify admin and trigger webhook (similar to circuit breaker)
                         try {
                             const { notificationService } = await import('./notifier');
                             const { webhookService } = await import('./webhook');
@@ -84,7 +97,9 @@ class HealthChecker {
                             log.error('[HealthCheck] Failed to send notification:', err);
                         }
                     } else {
-                        await sql`UPDATE channels SET test_errors = ${newErrors}, test_at = NOW() WHERE id = ${ch.id}`;
+                        await db.update(channels)
+                            .set({ testErrors: newErrors, testAt: new Date() })
+                            .where(eq(channels.id, ch.id));
                     }
                 }
             }
@@ -98,11 +113,8 @@ class HealthChecker {
 
 export const healthCheckService = new HealthChecker();
 
-// Start background cron job to run every 10 minutes
 setInterval(() => {
-    // Only run if the environment specifically enables proactive testing
-    // to save dummy request costs, or if optionCache defines it
     if (String(config.enableHealthCheck) === 'true') {
         healthCheckService.checkAllChannels();
     }
-}, 10 * 60 * 1000); // 10 minutes
+}, 10 * 60 * 1000);

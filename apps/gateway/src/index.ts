@@ -12,13 +12,12 @@ import { jwt } from "@elysiajs/jwt";
 import { join } from "path";
 import "./services/health";
 
-// Startup readiness check
 async function init() {
-  // 0. Initialize environment and secrets (MUST be first)
   await initEnv();
 
-  // 1. Dynamically import environment-dependent modules
-  const { sql } = await import("@elygate/db");
+  const { db, sql } = await import("@elygate/db");
+  const { channels, users, options } = await import("@elygate/db/schema");
+  const drizzleOrm = await import("drizzle-orm");
   const { memoryCache } = await import("./services/cache");
   const { authPlugin } = await import("./middleware/auth");
   const { staticFileHandler } = await import("./middleware/static");
@@ -55,7 +54,7 @@ async function init() {
   const { openaiEnterpriseRouter } = await import('./routes/openai-enterprise');
   const { fineTuneRouter } = await import('./routes/fine-tune');
   const { newApiCompatAdminRouter, newApiCompatSelfRouter } = await import('./routes/admin/newApiCompat');
-  const { newApiUserAdminRouter, newApiUserSelfRouter } = await import('./routes/admin/newApiUserCompat');
+  const { newApiUserAdminRouter, newApiUserSelfRouter, newApiUserPublicRouter } = await import('./routes/admin/newApiUserCompat');
 
   const app = new Elysia()
     .use(cors({
@@ -86,16 +85,19 @@ async function init() {
     .use(sysRouter)
     .group("/api", (app) =>
       app.get('/status', async () => {
-        const rows = await sql`
-          SELECT name, type, status, status_message AS "statusMessage", updated_at AS "updatedAt"
-          FROM channels
-          ORDER BY priority DESC, weight DESC
-        `;
+        const rows = await db.select({
+          name: channels.name,
+          type: channels.type,
+          status: channels.status,
+          statusMessage: channels.statusMessage,
+          updatedAt: channels.updatedAt,
+        }).from(channels)
+          .orderBy(drizzleOrm.desc(channels.priority), drizzleOrm.desc(channels.weight));
         return rows;
       })
       .get('/info', async () => {
         const keys = ['ServerName', 'SEO_Title', 'SEO_Description', 'SEO_Keywords', 'Logo_URL', 'Footer_HTML', 'Custom_CSS', 'Custom_JS'];
-        const rows = await sql`SELECT key, value FROM options WHERE key IN ${sql(keys)}`;
+        const rows = await db.select().from(options).where(drizzleOrm.inArray(options.key, keys));
         const info: Record<string, string> = {};
         for (const r of rows) info[r.key] = r.value;
         return { success: true, data: info };
@@ -103,6 +105,7 @@ async function init() {
       .group("/auth", (app) => app.use(authRouter))
       .use(paymentRouter)
       .group("/admin", (app) => app.use(adminRouter))
+      .use(newApiUserPublicRouter)
       .use(newApiCompatSelfRouter)
       .use(newApiUserSelfRouter)
       .use(newApiCompatAdminRouter)
@@ -145,8 +148,8 @@ async function init() {
         .use(modelsRouter)
     )
     .use(geminiRouter)
-    .use(aliRouter)   // Ali often uses /api/v1/...
-    .use(baiduRouter) // Baidu uses /rpc/2.0/...
+    .use(aliRouter)
+    .use(baiduRouter)
     .get("*", async ({ request, set }) => {
       const url = new URL(request.url);
       if (!url.pathname.startsWith('/api') && !url.pathname.startsWith('/v1')) {
@@ -181,21 +184,23 @@ async function init() {
   if (adminPassword) {
     try {
       const passwordHash = await Bun.password.hash(adminPassword);
-      const [updated] = await sql`
-        UPDATE users 
-        SET password_hash = ${passwordHash}, updated_at = NOW() 
-        WHERE username = 'admin' AND role = 10
-        RETURNING id
-      `;
+      const [updated] = await db.update(users)
+        .set({ passwordHash, updatedAt: new Date() })
+        .where(drizzleOrm.and(drizzleOrm.eq(users.username, 'admin'), drizzleOrm.eq(users.role, 10)))
+        .returning({ id: users.id });
+
       if (updated) {
         log.info("💎 Admin password synchronized from environment.");
       } else {
-        await sql`
-          INSERT INTO users (username, password_hash, role, quota)
-          VALUES ('admin', ${passwordHash}, 10, 100000000)
-          ON CONFLICT (username) DO UPDATE 
-          SET password_hash = ${passwordHash}, updated_at = NOW()
-        `;
+        await db.insert(users).values({
+          username: 'admin',
+          passwordHash,
+          role: 10,
+          quota: 100000000,
+        }).onConflictDoUpdate({
+          target: users.username,
+          set: { passwordHash, updatedAt: new Date() },
+        });
         log.info("💎 Admin user initialized/synced from environment.");
       }
     } catch (e: unknown) {
@@ -206,10 +211,10 @@ async function init() {
   memoryCache.startCleanupTask();
   memoryCache.startDiscoverySyncTask();
 
-  // Start async task worker (LISTEN/NOTIFY + fallback scan)
   const { startTaskWorker } = await import('./services/task-service');
   startTaskWorker();
 
+  // REFRESH MATERIALIZED VIEW — must use raw SQL
   const refreshMaterializedViews = async () => {
     try {
       await sql`REFRESH MATERIALIZED VIEW mv_system_overview`;

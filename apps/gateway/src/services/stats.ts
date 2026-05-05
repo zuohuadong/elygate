@@ -1,4 +1,6 @@
-import { sql } from '@elygate/db';
+import { db, sql } from '@elygate/db';
+import { channels, logs } from '@elygate/db/schema';
+import { eq, count, sql as drizzleSql } from 'drizzle-orm';
 
 /**
  * Statistics Service
@@ -6,29 +8,27 @@ import { sql } from '@elygate/db';
  */
 export const statsService = {
     async getLatencyHeatmap() {
-        // Return 24-hour latency data for active channels
-        const rows = await sql`
-            SELECT channel_id as "channelId", 
-                   EXTRACT(HOUR FROM created_at) as hour,
-                   AVG(latency) as latency
-            FROM logs
-            WHERE created_at > NOW() - INTERVAL '24 hours'
-              AND latency > 0
-            GROUP BY channel_id, hour
-            ORDER BY hour ASC
-        `;
+        const rows = await db.select({
+            channelId: logs.channelId,
+            hour: drizzleSql`EXTRACT(HOUR FROM ${logs.createdAt})`.as('hour'),
+            latency: drizzleSql`AVG(${logs.elapsedMs})`.as('latency'),
+        })
+        .from(logs)
+        .where(drizzleSql`${logs.createdAt} > NOW() - INTERVAL '24 hours' AND ${logs.elapsedMs} > 0`)
+        .groupBy(logs.channelId, drizzleSql`EXTRACT(HOUR FROM ${logs.createdAt})`)
+        .orderBy(drizzleSql`hour ASC`);
         return rows;
     },
 
     async getSystemHealth() {
-        const [total] = await sql`SELECT count(*) FROM channels WHERE status = 1`;
-        const [down] = await sql`SELECT count(*) FROM channels WHERE status = 3`;
-        const [busy] = await sql`SELECT count(*) FROM channels WHERE status = 5`;
+        const [total] = await db.select({ count: count() }).from(channels).where(eq(channels.status, 1));
+        const [down] = await db.select({ count: count() }).from(channels).where(eq(channels.status, 3));
+        const [busy] = await db.select({ count: count() }).from(channels).where(eq(channels.status, 5));
         
         return {
-            online: parseInt(total.count),
-            offline: parseInt(down.count),
-            busy: parseInt(busy.count)
+            online: total.count,
+            offline: down.count,
+            busy: busy.count
         };
     }
 };

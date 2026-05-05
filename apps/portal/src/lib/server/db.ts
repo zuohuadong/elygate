@@ -1,1 +1,1 @@
-export { sql } from '@elygate/db';
+export { db, sql } from '@elygate/db';

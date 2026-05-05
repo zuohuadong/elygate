@@ -1,9 +1,11 @@
 import type { ElysiaCtx } from '../types';
 import { Elysia, t } from 'elysia';
-import { sql } from '@elygate/db';
+import { db, sql } from '@elygate/db';
+import { workflowTemplates } from '@elygate/db/schema';
+import { eq, or, isNull, desc, sql as drizzleSql } from 'drizzle-orm';
 import { authPlugin } from '../middleware/auth';
 import { dispatch } from '../services/dispatcher';
-import { ChannelType  } from '../providers/types';
+import { ChannelType } from '../providers/types';
 
 export const workflowsRouter = new Elysia({ prefix: '/workflows' })
     .use(authPlugin)
@@ -15,46 +17,41 @@ export const workflowsRouter = new Elysia({ prefix: '/workflows' })
             return { success: false, error: "template_id is required" };
         }
 
-        // 1. Fetch template from DB
-        const [template] = await sql`
-            SELECT id, template_json, input_parameters, provider_type
-            FROM workflow_templates
-            WHERE id = ${template_id}
-        `;
+        const [template] = await db.select({
+            id: workflowTemplates.id,
+            templateJson: workflowTemplates.templateJson,
+            inputParameters: workflowTemplates.inputParameters,
+            providerType: workflowTemplates.providerType,
+        })
+        .from(workflowTemplates)
+        .where(eq(workflowTemplates.id, template_id));
 
         if (!template) {
             set.status = 404;
             return { success: false, error: "Template not found" };
         }
 
-        // 2. Inject parameters into template_json
-        // For simplicity, we assume template_json has strings like {{param_name}} 
-        // OR we use the input_parameters mapping to target specific JSON paths.
-        let workflowString = JSON.stringify(template.template_json);
+        let workflowString = JSON.stringify(template.templateJson);
         const params = parameters || {};
         
         for (const [key, value] of Object.entries(params)) {
-            // Simple string replacement for now
             const placeholder = `{{${key}}}`;
             workflowString = workflowString.replaceAll(placeholder, String(value));
         }
 
         const resolvedWorkflow = JSON.parse(workflowString);
 
-        // 3. Dispatch via dispatch
-        // We override the body with the resolved workflow
         return await dispatch({
             model: model || 'comfyui-default',
             body: { 
                 ...body, 
                 workflow: resolvedWorkflow,
-                template_id: template.id // Keep reference
+                template_id: template.id
             },
             user,
             token,
-            endpointType: 'images', // ComfyUI is primarily image-based for now
+            endpointType: 'images',
             skipTransform: false,
-            // Pass through metadata from previous phase
             idempotencyKey: body.idempotency_key,
             externalTaskId: body.external_task_id,
             externalUserId: body.external_user_id,
@@ -66,7 +63,6 @@ export const workflowsRouter = new Elysia({ prefix: '/workflows' })
             template_id: t.String(),
             parameters: t.Optional(t.Record(t.String(), t.Any())),
             model: t.Optional(t.String()),
-            // Standard metadata fields
             idempotency_key: t.Optional(t.String()),
             external_task_id: t.Optional(t.String()),
             external_user_id: t.Optional(t.String()),
@@ -75,11 +71,16 @@ export const workflowsRouter = new Elysia({ prefix: '/workflows' })
         })
     })
     .get('/templates', async () => {
-        const templates = await sql`
-            SELECT id, name, description, group_name, input_parameters, created_at
-            FROM workflow_templates
-            WHERE is_public = true OR user_id IS NULL
-            ORDER BY created_at DESC
-        `;
+        const templates = await db.select({
+            id: workflowTemplates.id,
+            name: workflowTemplates.name,
+            description: workflowTemplates.description,
+            groupName: workflowTemplates.groupName,
+            inputParameters: workflowTemplates.inputParameters,
+            createdAt: workflowTemplates.createdAt,
+        })
+        .from(workflowTemplates)
+        .where(or(eq(workflowTemplates.isPublic, true), isNull(workflowTemplates.userId)))
+        .orderBy(desc(workflowTemplates.createdAt));
         return { success: true, data: templates };
     });

@@ -1,5 +1,7 @@
 import { log } from '../services/logger';
-import { sql } from '@elygate/db';
+import { db, sql } from '@elygate/db';
+import { users, budgetAlerts } from '@elygate/db/schema';
+import { eq, and, gt, desc, sql as drizzleSql } from 'drizzle-orm';
 
 /**
  * Budget Alert Service
@@ -17,33 +19,34 @@ export interface BudgetAlert {
 }
 
 export interface AlertThreshold {
-    warning: number;    // e.g., 0.5 (50%)
-    critical: number;   // e.g., 0.8 (80%)
-    exhausted: number;  // e.g., 0.9 (90%)
+    warning: number;
+    critical: number;
+    exhausted: number;
 }
 
 const DEFAULT_THRESHOLDS: AlertThreshold = {
-    warning: 0.5,    // 50%
-    critical: 0.8,   // 80%
-    exhausted: 0.9   // 90%
+    warning: 0.5,
+    critical: 0.8,
+    exhausted: 0.9
 };
 
-/**
- * Check user quota usage and determine if alert is needed
- */
 export async function checkQuotaUsage(
     userId: number,
     thresholds: AlertThreshold = DEFAULT_THRESHOLDS
 ): Promise<BudgetAlert | null> {
-    const [user] = await sql`
-        SELECT id, username, email, quota, used_quota
-        FROM users
-        WHERE id = ${userId}
-    `;
+    const [user] = await db.select({
+        id: users.id,
+        username: users.username,
+        email: users.email,
+        quota: users.quota,
+        usedQuota: users.usedQuota,
+    })
+    .from(users)
+    .where(eq(users.id, userId));
 
     if (!user || user.quota <= 0) return null;
 
-    const usagePercent = user.used_quota / user.quota;
+    const usagePercent = user.usedQuota / user.quota;
 
     let alertLevel: BudgetAlert['alertLevel'] | null = null;
     if (usagePercent >= thresholds.exhausted) {
@@ -59,27 +62,28 @@ export async function checkQuotaUsage(
     return {
         userId: user.id,
         username: user.username,
-        email: user.email,
+        email: user.email ?? undefined,
         quota: user.quota,
-        usedQuota: user.used_quota,
+        usedQuota: user.usedQuota,
         usagePercent,
         alertLevel
     };
 }
 
-/**
- * Check all users for quota alerts
- */
 export async function checkAllUsersQuota(): Promise<BudgetAlert[]> {
     const alerts: BudgetAlert[] = [];
 
-    const users = await sql`
-        SELECT id, username, email, quota, used_quota
-        FROM users
-        WHERE quota > 0 AND status = 1
-    `;
+    const allUsers = await db.select({
+        id: users.id,
+        username: users.username,
+        email: users.email,
+        quota: users.quota,
+        usedQuota: users.usedQuota,
+    })
+    .from(users)
+    .where(and(gt(users.quota, 0), eq(users.status, 1)));
 
-    for (const user of users) {
+    for (const user of allUsers) {
         const alert = await checkQuotaUsage(user.id);
         if (alert) {
             alerts.push(alert);
@@ -89,37 +93,27 @@ export async function checkAllUsersQuota(): Promise<BudgetAlert[]> {
     return alerts;
 }
 
-/**
- * Record budget alert in database
- */
 export async function recordBudgetAlert(alert: BudgetAlert): Promise<void> {
-    await sql`
-        INSERT INTO budget_alerts (user_id, username, quota, used_quota, usage_percent, alert_level, created_at)
-        VALUES (${alert.userId}, ${alert.username}, ${alert.quota}, ${alert.usedQuota}, ${alert.usagePercent}, ${alert.alertLevel}, NOW())
-        ON CONFLICT (user_id, alert_level, DATE(created_at))
-        DO NOTHING
-    `;
+    await db.insert(budgetAlerts).values({
+        userId: alert.userId,
+        username: alert.username,
+        quota: alert.quota,
+        usedQuota: alert.usedQuota,
+        usagePercent: String(alert.usagePercent),
+        alertLevel: alert.alertLevel,
+        createdAt: new Date(),
+    })
+    .onConflictDoNothing();
 }
 
-/**
- * Get budget alerts for a user
- */
 export async function getUserBudgetAlerts(userId: number): Promise<any[]> {
-    return await sql`
-        SELECT * FROM budget_alerts
-        WHERE user_id = ${userId}
-        ORDER BY created_at DESC
-        LIMIT 10
-    `;
+    return await db.select()
+        .from(budgetAlerts)
+        .where(eq(budgetAlerts.userId, userId))
+        .orderBy(desc(budgetAlerts.createdAt))
+        .limit(10);
 }
 
-/**
- * Send budget alert notification (placeholder for email/webhook integration)
- */
 export async function sendBudgetAlertNotification(alert: BudgetAlert): Promise<void> {
     log.info(`[BudgetAlert] User ${alert.username} has reached ${Math.round(alert.usagePercent * 100)}% quota usage`);
-
-    // TODO: Implement email notification
-    // TODO: Implement webhook notification
-    // TODO: Implement in-app notification
 }

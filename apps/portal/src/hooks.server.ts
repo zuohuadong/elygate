@@ -1,12 +1,10 @@
 import type { Handle } from '@sveltejs/kit';
-import { sql } from '$lib/server/db';
+import { db, sql } from '$lib/server/db';
 
-// Basic in-memory rate limiter with periodic cleanup to prevent memory leaks
 const rateLimits = new Map<string, { count: number, lastReset: number }>();
-const LIMIT = 100; // requests
-const WINDOW = 60 * 1000; // 1 minute
+const LIMIT = 100;
+const WINDOW = 60 * 1000;
 
-// Cleanup interval to prevent memory leak
 if (typeof setInterval !== 'undefined') {
     setInterval(() => {
         const now = Date.now();
@@ -15,11 +13,10 @@ if (typeof setInterval !== 'undefined') {
                 rateLimits.delete(ip);
             }
         }
-    }, WINDOW * 5); // Clean up every 5 minutes
+    }, WINDOW * 5);
 }
 
 export const handle: Handle = async ({ event, resolve }) => {
-    // 1. Rate Limiting
     const ip = event.getClientAddress();
     const now = Date.now();
     const bucket = rateLimits.get(ip) || { count: 0, lastReset: now };
@@ -36,9 +33,9 @@ export const handle: Handle = async ({ event, resolve }) => {
         return new Response('Too Many Requests', { status: 429 });
     }
 
-    // 2. Session / Context
     const sessionToken = event.cookies.get('auth_session');
     if (sessionToken) {
+        // Complex JOIN across session + users + organizations — use raw SQL
         const [session] = await sql`
             SELECT s.user_id, u.username, u.role, u.org_id, o.name as org_name
             FROM session s
@@ -65,7 +62,6 @@ export const handle: Handle = async ({ event, resolve }) => {
 
     const response = await resolve(event);
 
-    // 3. Security Headers
     response.headers.set('X-Frame-Options', 'DENY');
     response.headers.set('X-Content-Type-Options', 'nosniff');
     response.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');

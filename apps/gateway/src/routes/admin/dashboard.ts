@@ -1,7 +1,9 @@
 import type { ElysiaCtx } from '../../types';
 import { log } from '../../services/logger';
 import { Elysia } from 'elysia';
-import { sql } from '@elygate/db';
+import { db, sql } from '@elygate/db';
+import { logs, users, channels, healthLogs } from '@elygate/db/schema';
+import { eq, and, desc, count, sum, isNotNull, gte, lt, sql as drizzleSql } from 'drizzle-orm';
 import { memoryCache } from '../../services/cache';
 import { modelConfig } from './channels';
 import { statsService } from '../../services/stats';
@@ -10,30 +12,35 @@ export const dashboardRouter = new Elysia()
     .get('/dashboard/health', () => statsService.getSystemHealth())
     .get('/dashboard/latency-heatmap', () => statsService.getLatencyHeatmap())
     .get('/dashboard/stats', async () => {
-        const [stats] = await sql`
-            SELECT 
-                (SELECT count(*) FROM users)::int as "totalUsers",
-                (SELECT count(*) FROM channels WHERE status = 1)::int as "activeChannels",
-                (SELECT COALESCE(sum(quota), 0) FROM users)::bigint as "totalQuota",
-                (SELECT COALESCE(sum(used_quota), 0) FROM users)::bigint as "usedQuota",
-                (SELECT COALESCE(sum(quota_cost), 0) FROM logs WHERE created_at >= CURRENT_DATE)::bigint as "todayQuota"
-        `;
-        return stats;
+        const [totalUsersRow] = await db.select({ count: count() }).from(users);
+        const [activeChannelsRow] = await db.select({ count: count() }).from(channels).where(eq(channels.status, 1));
+        const [totalQuotaRow] = await db.select({ total: drizzleSql<string>`coalesce(sum(${users.quota}), 0)` }).from(users);
+        const [usedQuotaRow] = await db.select({ total: drizzleSql<string>`coalesce(sum(${users.usedQuota}), 0)` }).from(users);
+        const [todayQuotaRow] = await db.select({ total: drizzleSql<string>`coalesce(sum(${logs.quotaCost}), 0)` }).from(logs).where(
+            drizzleSql`${logs.createdAt} >= CURRENT_DATE`
+        );
+
+        return {
+            totalUsers: totalUsersRow.count,
+            activeChannels: activeChannelsRow.count,
+            totalQuota: totalQuotaRow.total,
+            usedQuota: usedQuotaRow.total,
+            todayQuota: todayQuotaRow.total,
+        };
     })
 
     .get('/dashboard/errors', async () => {
-        const errorLogs = await sql`
-            SELECT 
-                COALESCE(error_message, 'Unknown Error') as title,
-                ip,
-                COUNT(*) as count
-            FROM logs
-            WHERE status_code >= 400
-            AND created_at >= NOW() - INTERVAL '24 hours'
-            GROUP BY error_message, ip
-            ORDER BY count DESC
-            LIMIT 5
-        `;
+        const errorLogs = await db.select({
+            title: drizzleSql<string>`coalesce(${logs.errorMessage}, 'Unknown Error')`,
+            ip: logs.ipAddress,
+            count: count(),
+        }).from(logs).where(and(
+            gte(logs.statusCode, 400),
+            drizzleSql`${logs.createdAt} >= NOW() - INTERVAL '24 hours'`,
+        )).groupBy(logs.errorMessage, logs.ipAddress)
+          .orderBy(desc(count()))
+          .limit(5);
+
         return errorLogs;
     })
 
@@ -42,27 +49,25 @@ export const dashboardRouter = new Elysia()
         const startDate = start ? new Date(start) : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
         const endDate = end ? new Date(end) : new Date();
 
-        let groupByClause = sql`DATE(created_at)`;
-        if (group_by === 'model') groupByClause = sql`model_name`;
+        const groupByExpr = group_by === 'model' ? logs.modelName : drizzleSql`date(${logs.createdAt})`;
 
-        const stats = await sql`
-            SELECT 
-                ${groupByClause} as label,
-                SUM(prompt_tokens) as prompt_tokens,
-                SUM(completion_tokens) as completion_tokens,
-                COUNT(*) as count
-            FROM logs
-            WHERE created_at BETWEEN ${startDate} AND ${endDate}
-            GROUP BY 1
-            ORDER BY 1 ASC
-        `;
+        const stats = await db.select({
+            label: groupByExpr,
+            prompt_tokens: sum(logs.promptTokens),
+            completion_tokens: sum(logs.completionTokens),
+            count: count(),
+        }).from(logs).where(
+            drizzleSql`${logs.createdAt} BETWEEN ${startDate} AND ${endDate}`
+        ).groupBy(groupByExpr)
+         .orderBy(groupByExpr);
+
         return stats;
     })
 
     .get('/dashboard/period_stats', async ({ query }: ElysiaCtx) => {
         const { period, timezone } = query as Record<string, string>;
         const tz = timezone || 'UTC';
-        
+
         let startDate = new Date();
         startDate.setHours(0, 0, 0, 0);
 
@@ -82,29 +87,29 @@ export const dashboardRouter = new Elysia()
                 break;
         }
 
-        const condition = period === 'yesterday'
-            ? sql`created_at >= ${startDate} AND created_at < ${new Date(new Date().setHours(0, 0, 0, 0))}`
-            : sql`created_at >= ${startDate}`;
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
 
-        const [overview] = await sql`
-            SELECT 
-                COUNT(*)::int as total_requests,
-                COALESCE(SUM(quota_cost), 0)::bigint as total_cost,
-                COALESCE(SUM(prompt_tokens), 0)::bigint as total_prompt_tokens,
-                COALESCE(SUM(completion_tokens), 0)::bigint as total_completion_tokens,
-                ROUND(COALESCE(AVG(CASE WHEN elapsed_ms > 0 THEN elapsed_ms ELSE NULL END), 0))::int as avg_latency,
-                COUNT(CASE WHEN channel_id = 0 THEN 1 END)::int as semantic_hits,
-                COALESCE(SUM(CASE WHEN channel_id = 0 THEN quota_cost ELSE 0 END), 0)::bigint as semantic_profit_quota,
-                COALESCE(SUM(CASE WHEN channel_id = 0 THEN prompt_tokens + completion_tokens ELSE 0 END), 0)::bigint as semantic_tokens,
-                COUNT(CASE WHEN channel_id = -1 THEN 1 END)::int as exact_hits,
-                COALESCE(SUM(CASE WHEN channel_id = -1 THEN quota_cost ELSE 0 END), 0)::bigint as exact_profit_quota,
-                COALESCE(SUM(CASE WHEN channel_id = -1 THEN prompt_tokens + completion_tokens ELSE 0 END), 0)::bigint as exact_tokens,
-                COUNT(CASE WHEN channel_id IN (0, -1) THEN 1 END)::int as cache_hits,
-                COALESCE(SUM(CASE WHEN channel_id IN (0, -1) THEN quota_cost ELSE 0 END), 0)::bigint as cache_profit_quota,
-                COALESCE(SUM(CASE WHEN channel_id IN (0, -1) THEN prompt_tokens + completion_tokens ELSE 0 END), 0)::bigint as cached_tokens
-            FROM logs
-            WHERE ${condition}
-        `;
+        const conditions = period === 'yesterday'
+            ? and(gte(logs.createdAt, startDate), lt(logs.createdAt, todayStart))
+            : gte(logs.createdAt, startDate);
+
+        const [overview] = await db.select({
+            total_requests: drizzleSql<number>`count(*)::int`,
+            total_cost: drizzleSql<string>`coalesce(sum(${logs.quotaCost}), 0)::bigint`,
+            total_prompt_tokens: drizzleSql<string>`coalesce(sum(${logs.promptTokens}), 0)::bigint`,
+            total_completion_tokens: drizzleSql<string>`coalesce(sum(${logs.completionTokens}), 0)::bigint`,
+            avg_latency: drizzleSql<number>`round(coalesce(avg(case when ${logs.elapsedMs} > 0 then ${logs.elapsedMs} else null end), 0))::int`,
+            semantic_hits: drizzleSql<number>`count(case when ${logs.channelId} = 0 then 1 end)::int`,
+            semantic_profit_quota: drizzleSql<string>`coalesce(sum(case when ${logs.channelId} = 0 then ${logs.quotaCost} else 0 end), 0)::bigint`,
+            semantic_tokens: drizzleSql<string>`coalesce(sum(case when ${logs.channelId} = 0 then ${logs.promptTokens} + ${logs.completionTokens} else 0 end), 0)::bigint`,
+            exact_hits: drizzleSql<number>`count(case when ${logs.channelId} = -1 then 1 end)::int`,
+            exact_profit_quota: drizzleSql<string>`coalesce(sum(case when ${logs.channelId} = -1 then ${logs.quotaCost} else 0 end), 0)::bigint`,
+            exact_tokens: drizzleSql<string>`coalesce(sum(case when ${logs.channelId} = -1 then ${logs.promptTokens} + ${logs.completionTokens} else 0 end), 0)::bigint`,
+            cache_hits: drizzleSql<number>`count(case when ${logs.channelId} in (0, -1) then 1 end)::int`,
+            cache_profit_quota: drizzleSql<string>`coalesce(sum(case when ${logs.channelId} in (0, -1) then ${logs.quotaCost} else 0 end), 0)::bigint`,
+            cached_tokens: drizzleSql<string>`coalesce(sum(case when ${logs.channelId} in (0, -1) then ${logs.promptTokens} + ${logs.completionTokens} else 0 end), 0)::bigint`,
+        }).from(logs).where(conditions);
 
         let semantic_cache_size = 0;
         let semantic_cache_count = 0;
@@ -125,67 +130,58 @@ export const dashboardRouter = new Elysia()
             log.warn('[Admin] Failed to read cache sizes:', e);
         }
 
-        const models_user = await sql`
-            SELECT 
-                model_name,
-                COUNT(*)::int as requests,
-                COALESCE(SUM(prompt_tokens + completion_tokens), 0)::bigint as tokens,
-                COALESCE(SUM(quota_cost), 0)::bigint as cost,
-                ROUND((COUNT(CASE WHEN status_code < 400 THEN 1 END)::numeric / NULLIF(COUNT(*), 0)) * 100, 1)::float as success_rate
-            FROM logs
-            WHERE ${condition}
-            GROUP BY model_name
-            ORDER BY cost DESC
-            LIMIT 20
-        `;
+        const models_user = await db.select({
+            model_name: logs.modelName,
+            requests: drizzleSql<number>`count(*)::int`,
+            tokens: drizzleSql<string>`coalesce(sum(${logs.promptTokens} + ${logs.completionTokens}), 0)::bigint`,
+            cost: drizzleSql<string>`coalesce(sum(${logs.quotaCost}), 0)::bigint`,
+            success_rate: drizzleSql<number>`round((count(case when ${logs.statusCode} < 400 then 1 end)::numeric / nullif(count(*), 0)) * 100, 1)::float`,
+        }).from(logs).where(conditions)
+          .groupBy(logs.modelName)
+          .orderBy(desc(drizzleSql`coalesce(sum(${logs.quotaCost}), 0)`))
+          .limit(20);
 
         const totalUserCost = Number(overview.total_cost || 1);
         models_user.forEach((m: Record<string, any>) => {
             m.cost_percentage = Number(((Number(m.cost) / totalUserCost) * 100).toFixed(1));
         });
 
-        const models_channel = await sql`
-            SELECT 
-                model_name,
-                COUNT(*)::int as requests,
-                COALESCE(SUM(prompt_tokens + completion_tokens), 0)::bigint as tokens,
-                COALESCE(SUM(quota_cost), 0)::bigint as cost,
-                ROUND((COUNT(CASE WHEN status_code < 400 THEN 1 END)::numeric / NULLIF(COUNT(*), 0)) * 100, 1)::float as success_rate
-            FROM logs
-            WHERE ${condition} AND channel_id IS NOT NULL
-            GROUP BY model_name
-            ORDER BY cost DESC
-            LIMIT 20
-        `;
+        const models_channel = await db.select({
+            model_name: logs.modelName,
+            requests: drizzleSql<number>`count(*)::int`,
+            tokens: drizzleSql<string>`coalesce(sum(${logs.promptTokens} + ${logs.completionTokens}), 0)::bigint`,
+            cost: drizzleSql<string>`coalesce(sum(${logs.quotaCost}), 0)::bigint`,
+            success_rate: drizzleSql<number>`round((count(case when ${logs.statusCode} < 400 then 1 end)::numeric / nullif(count(*), 0)) * 100, 1)::float`,
+        }).from(logs).where(and(
+            conditions,
+            isNotNull(logs.channelId),
+        ))
+          .groupBy(logs.modelName)
+          .orderBy(desc(drizzleSql`coalesce(sum(${logs.quotaCost}), 0)`))
+          .limit(20);
 
-        const totalChannelCost = models_channel.reduce((sum: number, m: Record<string, any>) => sum + Number(m.cost), 0) || 1;
+        const totalChannelCost = models_channel.reduce((acc: number, m: Record<string, any>) => acc + Number(m.cost), 0) || 1;
         models_channel.forEach((m: Record<string, any>) => {
             m.cost_percentage = Number(((Number(m.cost) / totalChannelCost) * 100).toFixed(1));
         });
-        
+
         let timeSeries;
         if (period === '7d' || period === '30d') {
-            timeSeries = await sql`
-                SELECT 
-                    DATE(created_at AT TIME ZONE 'UTC' AT TIME ZONE ${tz}) as date,
-                    COUNT(*)::int as requests,
-                    COALESCE(SUM(quota_cost), 0)::bigint as cost
-                FROM logs
-                WHERE ${condition}
-                GROUP BY 1
-                ORDER BY date ASC
-            `;
+            timeSeries = await db.select({
+                date: drizzleSql<string>`date(${logs.createdAt} at time zone 'UTC' at time zone ${tz})`,
+                requests: drizzleSql<number>`count(*)::int`,
+                cost: drizzleSql<string>`coalesce(sum(${logs.quotaCost}), 0)::bigint`,
+            }).from(logs).where(conditions)
+              .groupBy(drizzleSql`date(${logs.createdAt} at time zone 'UTC' at time zone ${tz})`)
+              .orderBy(drizzleSql`date(${logs.createdAt} at time zone 'UTC' at time zone ${tz}) asc`);
         } else {
-            timeSeries = await sql`
-                SELECT 
-                    EXTRACT(HOUR FROM created_at AT TIME ZONE 'UTC' AT TIME ZONE ${tz}) as hour,
-                    COUNT(*)::int as requests,
-                    COALESCE(SUM(quota_cost), 0)::bigint as cost
-                FROM logs
-                WHERE ${condition}
-                GROUP BY 1
-                ORDER BY hour ASC
-            `;
+            timeSeries = await db.select({
+                hour: drizzleSql<number>`extract(hour from ${logs.createdAt} at time zone 'UTC' at time zone ${tz})`,
+                requests: drizzleSql<number>`count(*)::int`,
+                cost: drizzleSql<string>`coalesce(sum(${logs.quotaCost}), 0)::bigint`,
+            }).from(logs).where(conditions)
+              .groupBy(drizzleSql`extract(hour from ${logs.createdAt} at time zone 'UTC' at time zone ${tz})`)
+              .orderBy(drizzleSql`extract(hour from ${logs.createdAt} at time zone 'UTC' at time zone ${tz}) asc`);
         }
 
         return {
@@ -237,30 +233,36 @@ export const dashboardRouter = new Elysia()
             }
         }
 
-        const metrics = await sql`
-            SELECT channel_id, AVG(latency) as avg_latency
-            FROM (
-                SELECT channel_id, latency
-                FROM health_logs
-                WHERE status = 1
-                ORDER BY created_at DESC
-                LIMIT 1000
-            ) t
-            GROUP BY channel_id
-        `;
+        const recentHealthRows = await db.select({
+            channelId: healthLogs.channelId,
+            latency: healthLogs.latency,
+        }).from(healthLogs)
+          .where(eq(healthLogs.status, 1))
+          .orderBy(desc(healthLogs.createdAt))
+          .limit(1000);
+
         const channelLatencyMap = new Map<number, number>();
-        metrics.forEach((m: Record<string, any>) => channelLatencyMap.set(m.channel_id, Number(m.avg_latency)));
+        const channelLatencies = new Map<number, number[]>();
+        for (const row of recentHealthRows) {
+            const arr = channelLatencies.get(row.channelId) || [];
+            arr.push(row.latency ?? 0);
+            channelLatencies.set(row.channelId, arr);
+        }
+        for (const [chId, lats] of channelLatencies) {
+            const avg = lats.reduce((a, b) => a + b, 0) / lats.length;
+            channelLatencyMap.set(chId, avg);
+        }
 
         return Array.from(allModelIds).map(modelId => {
             const meta = metaMap.get(modelId);
-            const channels = modelToChannels.get(modelId) || [];
+            const channelList = modelToChannels.get(modelId) || [];
 
-            const activeChannels = channels.filter(ch => ch.status === 1 || ch.status === 4);
-            const isOnline = activeChannels.length > 0;
+            const activeChannelList = channelList.filter(ch => ch.status === 1 || ch.status === 4);
+            const isOnline = activeChannelList.length > 0;
 
             let avgLatency = 0;
             if (isOnline) {
-                const latencies = activeChannels
+                const latencies = activeChannelList
                     .map(ch => channelLatencyMap.get(ch.id))
                     .filter((l): l is number => l !== undefined && l > 0);
                 if (latencies.length > 0) {

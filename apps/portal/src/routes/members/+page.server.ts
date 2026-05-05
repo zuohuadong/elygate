@@ -1,38 +1,35 @@
-import { sql } from '$lib/server/db';
+import { db, sql } from '$lib/server/db';
 import { fail } from '@sveltejs/kit';
 import { requireOrgManager, requirePortalMember } from '$lib/server/portalAuth';
+import { users } from '@elygate/db/schema';
+import { eq, desc, and, count } from '@elygate/db/operators';
 import type { PageServerLoad, Actions } from './$types';
-
-type MemberRow = {
-    id: number;
-    username: string;
-    role: number;
-    quota: number | string;
-    used_quota: number | string;
-    status: number;
-    created_at: string;
-};
 
 export const load: PageServerLoad = async ({ locals }) => {
     const { org } = requirePortalMember(locals);
     
-    // Fetch members and their quotas, scoped to the current org
-    const members = await sql`
-        SELECT id, username, role, quota, used_quota, status, created_at
-        FROM users
-        WHERE org_id = ${org.id}
-        ORDER BY created_at DESC
-    ` as MemberRow[];
+    const members = await db.select({
+        id: users.id,
+        username: users.username,
+        role: users.role,
+        quota: users.quota,
+        usedQuota: users.usedQuota,
+        status: users.status,
+        createdAt: users.createdAt,
+    })
+    .from(users)
+    .where(eq(users.orgId, org.id))
+    .orderBy(desc(users.createdAt));
 
     return {
-        members: members.map((m: MemberRow) => ({
+        members: members.map((m) => ({
             id: m.id,
             username: m.username,
             role: m.role,
             quota: Number(m.quota),
-            usedQuota: Number(m.used_quota),
+            usedQuota: Number(m.usedQuota),
             status: m.status,
-            createdAt: m.created_at
+            createdAt: m.createdAt
         }))
     };
 };
@@ -51,10 +48,14 @@ export const actions: Actions = {
 
         try {
             const passwordHash = await Bun.password.hash(password);
-            await sql`
-                INSERT INTO users (username, role, quota, used_quota, org_id, password_hash)
-                VALUES (${username}, ${role}, ${quota}, 0, ${org.id}, ${passwordHash})
-            `;
+            await db.insert(users).values({
+                username,
+                role,
+                quota,
+                usedQuota: 0,
+                orgId: org.id,
+                passwordHash,
+            });
             return { success: true };
         } catch (err) {
             console.error('Failed to add member:', err);
@@ -70,11 +71,9 @@ export const actions: Actions = {
         const quota = parseInt(data.get('quota') as string);
         const status = parseInt(data.get('status') as string);
 
-        await sql`
-            UPDATE users
-            SET role = ${role}, quota = ${quota}, status = ${status}
-            WHERE id = ${id as string} AND org_id = ${org.id}
-        `;
+        await db.update(users)
+            .set({ role, quota, status })
+            .where(and(eq(users.id, Number(id)), eq(users.orgId, org.id)));
         return { success: true };
     },
 
@@ -83,24 +82,19 @@ export const actions: Actions = {
         const data = await request.formData();
         const id = data.get('id');
 
-        // Safety: Check if deleting the last owner of the organization
-        const [{ count: ownerCount }] = await sql`
-            SELECT COUNT(*) FROM users 
-            WHERE role = 10 AND status = 1 AND org_id = ${org.id}
-        `;
-        const [targetMember] = await sql`
-            SELECT role FROM users 
-            WHERE id = ${id as string} AND org_id = ${org.id}
-        `;
+        const [{ count: ownerCount }] = await db.select({ count: count() })
+            .from(users)
+            .where(and(eq(users.role, 10), eq(users.status, 1), eq(users.orgId, org.id)));
+        const [targetMember] = await db.select({ role: users.role })
+            .from(users)
+            .where(and(eq(users.id, Number(id)), eq(users.orgId, org.id)));
 
         if (Number(ownerCount) <= 1 && targetMember?.role === 10) {
             return fail(400, { error: 'Cannot remove the last Organization Owner' });
         }
 
-        await sql`
-            DELETE FROM users 
-            WHERE id = ${id as string} AND org_id = ${org.id}
-        `;
+        await db.delete(users)
+            .where(and(eq(users.id, Number(id)), eq(users.orgId, org.id)));
         return { success: true };
     }
 };

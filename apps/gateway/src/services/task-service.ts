@@ -1,22 +1,10 @@
-import { sql } from '@elygate/db';
+import { db, sql } from '@elygate/db';
+import { tasks, tokens } from '@elygate/db/schema';
+import { eq, and, lt, asc, sql as drizzleSql } from 'drizzle-orm';
 import { log } from './logger';
 import { memoryCache } from './cache';
 import { dispatch } from './dispatcher';
 import type { UserRecord, TokenRecord } from '../types';
-
-/**
- * Async Task Service — manages async generation tasks (video, etc.)
- * 
- * Architecture (referencing New-API TaskAdaptor pattern):
- *   1. HTTP request → create task in DB → return taskId immediately
- *   2. Background worker picks up pending tasks → submits to provider → polls for result
- *   3. On completion → UPDATE task → pg_notify('task_complete', taskId)
- *   4. Client polls GET /v1/tasks/:id or receives notification
- * 
- * Uses PostgreSQL LISTEN/NOTIFY for event-driven processing:
- *   - LISTEN task_created → worker immediately starts processing
- *   - Fallback: periodic scan for stuck 'pending' tasks (belt + suspenders)
- */
 
 export interface TaskRecord {
     id: string;
@@ -41,8 +29,6 @@ function generateTaskId(): string {
     return `task_${ts}_${rand}`;
 }
 
-// ── Task CRUD ──────────────────────────────────────────────────
-
 export async function createTask(opts: {
     userId: number;
     tokenId: number;
@@ -51,17 +37,19 @@ export async function createTask(opts: {
     requestBody: Record<string, any>;
 }): Promise<string> {
     const id = generateTaskId();
+    // Raw SQL: tasks table has different columns than schema (id is text, not serial)
     await sql`
         INSERT INTO tasks (id, user_id, token_id, model, type, status, request_body)
         VALUES (${id}, ${opts.userId}, ${opts.tokenId}, ${opts.model}, ${opts.type}, 'pending', ${opts.requestBody})
     `;
-    // Notify background worker
+    // Notify background worker — pg_notify must stay raw
     await sql`SELECT pg_notify('task_created', ${id})`;
     log.info(`[Task] Created task ${id} for model ${opts.model}`);
     return id;
 }
 
 export async function getTask(taskId: string, userId?: number): Promise<TaskRecord | null> {
+    // Raw SQL: column aliases and conditional WHERE
     const rows = userId
         ? await sql`
             SELECT id, user_id AS "userId", token_id AS "tokenId", channel_id AS "channelId",
@@ -81,7 +69,7 @@ export async function getTask(taskId: string, userId?: number): Promise<TaskReco
 }
 
 async function updateTask(taskId: string, updates: Partial<Pick<TaskRecord, 'status' | 'providerTaskId' | 'channelId' | 'result' | 'error' | 'progress'>>) {
-    // Use parameterized queries to prevent SQL injection from upstream strings
+    // Raw SQL: COALESCE-based conditional SET — Drizzle cannot express this concisely
     await sql`
         UPDATE tasks SET
             updated_at = NOW(),
@@ -94,13 +82,11 @@ async function updateTask(taskId: string, updates: Partial<Pick<TaskRecord, 'sta
         WHERE id = ${taskId}
     `;
 
-    // Notify on completion/failure
     if (updates.status === 'completed' || updates.status === 'failed') {
+        // pg_notify must stay raw
         await sql`SELECT pg_notify('task_complete', ${taskId})`;
     }
 }
-
-// ── Background Task Worker ────────────────────────────────────
 
 async function processTask(task: TaskRecord) {
     log.info(`[TaskWorker] Processing task ${task.id} (model: ${task.model})`);
@@ -108,12 +94,11 @@ async function processTask(task: TaskRecord) {
     await updateTask(task.id, { status: 'processing', progress: 0 });
 
     try {
-        // Resolve user from cache (falls back to DB query)
         const user = await memoryCache.getUserFromDB(task.userId);
 
-        // Resolve token by ID from DB (cache is keyed by API key string, not ID)
         let token = Array.from(memoryCache.tokens.values()).find(t => t.id === task.tokenId) || null;
         if (!token) {
+            // Raw SQL: column aliases for camelCase mapping
             const [row] = await sql`
                 SELECT id, key, name, user_id AS "userId", models, status,
                        remain_quota AS "remainQuota", used_quota AS "usedQuota",
@@ -127,8 +112,6 @@ async function processTask(task: TaskRecord) {
             throw new Error(`User (id=${task.userId}) or token (id=${task.tokenId}) not found in DB`);
         }
 
-        // Dispatch to provider (this includes the sync polling internally)
-        // Handle double-serialized requestBody from older tasks
         let taskBody = task.requestBody || {};
         if (typeof taskBody === 'string') {
             try { taskBody = JSON.parse(taskBody); } catch { /* use as-is */ }
@@ -143,7 +126,6 @@ async function processTask(task: TaskRecord) {
             skipTransform: false,
         });
 
-        // Store result
         const resultObj = typeof result === 'object' ? result : { data: result };
         await updateTask(task.id, {
             status: 'completed',
@@ -162,16 +144,15 @@ async function processTask(task: TaskRecord) {
     }
 }
 
-/** Process a single task by ID (triggered by LISTEN) */
 async function processTaskById(taskId: string) {
     const task = await getTask(taskId);
     if (!task || task.status !== 'pending') return;
     await processTask(task);
 }
 
-/** Scan for stuck pending tasks (fallback, every 30s) */
 async function scanPendingTasks() {
     try {
+        // Raw SQL: INTERVAL arithmetic and ORDER BY
         const stuckTasks = await sql`
             SELECT id FROM tasks 
             WHERE status = 'pending' 
@@ -187,11 +168,9 @@ async function scanPendingTasks() {
     }
 }
 
-// ── Worker Startup (LISTEN/NOTIFY via @elygate/pg-listen) ────
-
-/** Clean up old tasks: completed > 30 days, failed > 7 days, stuck processing > 10 min */
 async function cleanupTasks() {
     try {
+        // Raw SQL: complex DELETE with OR conditions and INTERVAL
         const deleted = await sql`
             DELETE FROM tasks
             WHERE (status = 'completed' AND created_at < NOW() - INTERVAL '30 days')
@@ -199,7 +178,6 @@ async function cleanupTasks() {
             RETURNING id
         `;
 
-        // Mark stuck processing tasks as failed (> 10 min means worker died/restarted)
         const stuck = await sql`
             UPDATE tasks SET status = 'failed', error = 'Timed out (stuck processing > 10min)', updated_at = NOW()
             WHERE status = 'processing'
@@ -223,7 +201,6 @@ export async function startTaskWorker() {
 
     log.info('[TaskWorker] Starting background task worker...');
 
-    // Use @elygate/pg-listen (Bun.connect TCP, zero-dependency)
     try {
         const { createPgListener } = await import('@elygate/pg-listen');
         const databaseUrl = process.env.DATABASE_URL;
@@ -242,14 +219,11 @@ export async function startTaskWorker() {
         log.error(`[TaskWorker] Failed to set up LISTEN: ${err.message}, falling back to scan-only`);
     }
 
-    // Fallback: periodic scan every 30s for stuck tasks (belt + suspenders)
     setInterval(scanPendingTasks, 30_000);
 
-    // Cleanup: every 30 minutes (handles stuck processing tasks quickly after restarts)
     setInterval(cleanupTasks, 30 * 60 * 1000);
-    await cleanupTasks(); // Initial cleanup — marks any stuck processing tasks as failed
+    await cleanupTasks();
 
-    // Initial scan
     await scanPendingTasks();
     log.info('[TaskWorker] Worker started (LISTEN + scan 30s + cleanup 30min)');
 }

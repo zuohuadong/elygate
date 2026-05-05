@@ -8,11 +8,10 @@ import { memoryCache } from '../services/cache';
 import { circuitBreaker } from '../services/circuitBreaker';
 import { billAndLog, preCheckAndDecrement, reconcileQuota } from '../services/billing';
 import { MidjourneyApiHandler } from '../providers/mj';
-import { sql } from '@elygate/db';
+import { db, sql } from '@elygate/db';
+import { mjTasks } from '@elygate/db/schema';
+import { eq, and } from 'drizzle-orm';
 
-/**
- * Generates a random MJ-like taskId
- */
 function generateTaskId() {
     return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
 }
@@ -20,7 +19,6 @@ function generateTaskId() {
 export const mjRouter = new Elysia()
     .use(authPlugin)
 
-    // --- Submit Imagine (Text to Image) ---
     .post('/mj/submit/imagine', async ({ body, token, user, set }: ElysiaCtx) => {
         const { prompt, base64Array, notifyHook, state } = body as Record<string, any>;
 
@@ -29,22 +27,18 @@ export const mjRouter = new Elysia()
             return { code: 4, description: "Prompt required" };
         }
 
-        // MJ models are usually defined like "mj-chat" or "midjourney" in the channel
         const targetModel = 'mj-chat';
 
-        // Deduct 1 MJ action cost synchronously before forwarding
-        // (Assuming 1 command = 1 credit or handled via FixedCostModels)
         const costToDeduct = await preCheckAndDecrement({
             userId: user.id,
             tokenId: token.id,
             modelName: targetModel,
             userGroup: user.group,
-            maxTokens: 1 // For MJ, completion counts as 1 action
+            maxTokens: 1
         });
 
         const candidateChannels = memoryCache.selectChannels(targetModel);
         if (!candidateChannels || candidateChannels.length === 0) {
-            // Refund on failure
             await reconcileQuota({
                 userId: user.id, tokenId: token.id, preDeducted: costToDeduct, actualCost: 0
             });
@@ -52,14 +46,12 @@ export const mjRouter = new Elysia()
             return { code: 4, description: "No MJ channels available" };
         }
 
-        const channelConfig = candidateChannels[0]; // Just take first
+        const channelConfig = candidateChannels[0];
         const handler = MidjourneyApiHandler;
         const keys = channelConfig.key.split('\n').map((k: string) => k.trim()).filter(Boolean);
         const activeKey = keys[Math.floor(Math.random() * keys.length)];
 
         const fetchHeaders = handler.buildHeaders(activeKey);
-
-        // Keep the original mj-proxy body
         const upstreamBody = { ...body };
         const upstreamUrl = `${channelConfig.baseUrl}/mj/submit/imagine`;
 
@@ -72,24 +64,25 @@ export const mjRouter = new Elysia()
 
             const rawData = await response.json();
 
-            // Expected Success from MJ Proxy: { "code": 1, "description": "Submit success", "result": "uuid-1234..." }
             if (response.ok && rawData.code === 1) {
-                // Record task locally
                 const taskId = rawData.result;
 
-                await sql`
-                    INSERT INTO mj_tasks (user_id, uuid, action, prompt, status, progress)
-                    VALUES (${user.id}, ${taskId}, 'IMAGINE', ${prompt}, 'SUBMITTED', '0%')
-                `;
+                await db.insert(mjTasks).values({
+                    userId: user.id,
+                    uuid: taskId,
+                    action: 'IMAGINE',
+                    prompt,
+                    status: 'SUBMITTED',
+                    progress: '0%',
+                });
 
-                // Log final usage
                 await billAndLog({
                     userId: user.id,
                     tokenId: token.id,
                     channelId: channelConfig.id,
                     modelName: targetModel,
                     promptTokens: 0,
-                    completionTokens: 1, // 1 Action
+                    completionTokens: 1,
                     userGroup: user.group,
                     isStream: false
                 });
@@ -99,7 +92,6 @@ export const mjRouter = new Elysia()
                 throw new Error(`Upstream MJ Failed: ${JSON.stringify(rawData)}`);
             }
         } catch (e: unknown) {
-            // Refund quota if submit failed
             await reconcileQuota({
                 userId: user.id, tokenId: token.id, preDeducted: costToDeduct, actualCost: 0
             });
@@ -108,7 +100,6 @@ export const mjRouter = new Elysia()
         }
     })
 
-    // --- Submit Action (U1, V2, Reroll) ---
     .post('/mj/submit/action', async ({ body, token, user, set }: ElysiaCtx) => {
         const { customId, taskId, state } = body as Record<string, any>;
 
@@ -116,8 +107,6 @@ export const mjRouter = new Elysia()
 
         const targetModel = 'mj-chat';
 
-        // Action is cheaper or same as imagine, handled by proxy. 
-        // We will charge it as 1 action as well.
         const costToDeduct = await preCheckAndDecrement({
             userId: user.id,
             tokenId: token.id,
@@ -151,15 +140,19 @@ export const mjRouter = new Elysia()
 
             if (response.ok && rawData.code === 1) {
                 const newTaskId = rawData.result;
-                // Look up original prompt if available to save
-                const [original] = await sql`SELECT prompt FROM mj_tasks WHERE uuid = ${taskId}`;
+                const [original] = await db.select({ prompt: mjTasks.prompt })
+                    .from(mjTasks)
+                    .where(eq(mjTasks.uuid, taskId));
 
-                await sql`
-                    INSERT INTO mj_tasks (user_id, uuid, action, prompt, status, progress)
-                    VALUES (${user.id}, ${newTaskId}, 'ACTION', ${original ? original.prompt : 'Action'}, 'SUBMITTED', '0%')
-                `;
+                await db.insert(mjTasks).values({
+                    userId: user.id,
+                    uuid: newTaskId,
+                    action: 'ACTION',
+                    prompt: original ? original.prompt : 'Action',
+                    status: 'SUBMITTED',
+                    progress: '0%',
+                });
 
-                // Log Usage
                 await billAndLog({
                     userId: user.id, tokenId: token.id, channelId: channelConfig.id,
                     modelName: targetModel, promptTokens: 0, completionTokens: 1, userGroup: user.group, isStream: false
@@ -177,16 +170,15 @@ export const mjRouter = new Elysia()
         }
     })
 
-    // --- Task Fetch (Polling) ---
     .get('/mj/task/:id/fetch', async ({ params: { id }, token, user }: ElysiaCtx) => {
-        // Find task in local DB
-        const [task] = await sql`SELECT * FROM mj_tasks WHERE uuid = ${id} AND user_id = ${user.id}`;
+        const [task] = await db.select()
+            .from(mjTasks)
+            .where(and(eq(mjTasks.uuid, id), eq(mjTasks.userId, user.id)));
 
         if (!task) {
             return { code: 4, description: "Task not found." };
         }
 
-        // Check if finished locally already (via webhook)
         if (task.status === 'SUCCESS' || task.status === 'FAILED') {
             return {
                 id: task.uuid,
@@ -194,12 +186,11 @@ export const mjRouter = new Elysia()
                 prompt: task.prompt,
                 status: task.status,
                 progress: task.progress,
-                imageUrl: task.image_url,
-                failReason: task.fail_reason
+                imageUrl: task.imageUrl,
+                failReason: task.failReason
             };
         }
 
-        // If still in progress, we proxy the fetch to upstream to poll the actual state
         const targetModel = 'mj-chat';
         const candidateChannels = memoryCache.selectChannels(targetModel);
         if (candidateChannels && candidateChannels[0]) {
@@ -215,15 +206,14 @@ export const mjRouter = new Elysia()
 
                 if (response.ok) {
                     const upstreamData = await response.json();
-                    // Update local db with current status
-                    await sql`
-                        UPDATE mj_tasks 
-                        SET status = ${upstreamData.status || 'IN_PROGRESS'},
-                            progress = ${upstreamData.progress || '50%'},
-                            image_url = ${upstreamData.imageUrl || null},
-                            fail_reason = ${upstreamData.failReason || null}
-                        WHERE uuid = ${id}
-                    `;
+                    await db.update(mjTasks)
+                        .set({
+                            status: upstreamData.status || 'IN_PROGRESS',
+                            progress: upstreamData.progress || '50%',
+                            imageUrl: upstreamData.imageUrl || null,
+                            failReason: upstreamData.failReason || null,
+                        })
+                        .where(eq(mjTasks.uuid, id));
                     return upstreamData;
                 }
             } catch (e: unknown) {
@@ -231,20 +221,17 @@ export const mjRouter = new Elysia()
             }
         }
 
-        // Fallback to Return local db state
         return {
             id: task.uuid,
             action: task.action,
             prompt: task.prompt,
             status: task.status,
             progress: task.progress,
-            imageUrl: task.image_url
+            imageUrl: task.imageUrl
         };
     })
 
-    // --- Webhook Consumer (Upstream posts here when done) ---
     .post('/mj/webhook', async ({ body, request, set }: ElysiaCtx) => {
-        // Verify webhook secret to prevent unauthorized callbacks
         const webhookSecret = config.mjWebhookSecret;
         if (webhookSecret) {
             const authHeader = request.headers.get('authorization') || '';
@@ -254,19 +241,18 @@ export const mjRouter = new Elysia()
             }
         }
 
-        // MJ Proxy upstream sends result here
         const { id, status, imageUrl, progress, failReason } = body as Record<string, any>;
         if (!id) return { success: false };
 
-        await sql`
-            UPDATE mj_tasks 
-            SET status = ${status},
-                progress = ${progress},
-                image_url = ${imageUrl},
-                fail_reason = ${failReason},
-                finish_time = CURRENT_TIMESTAMP
-            WHERE uuid = ${id}
-        `;
+        await db.update(mjTasks)
+            .set({
+                status,
+                progress,
+                imageUrl,
+                failReason,
+                finishTime: new Date(),
+            })
+            .where(eq(mjTasks.uuid, id));
 
         log.info(`[MJ Webhook] Task ${id} updated -> ${status}`);
         return { success: true };

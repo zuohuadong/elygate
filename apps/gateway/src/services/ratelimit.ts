@@ -1,9 +1,13 @@
-import { sql } from '@elygate/db';
+import { db, sql } from '@elygate/db';
+import { rateLimits } from '@elygate/db/schema';
+import { sql as drizzleSql, lt } from 'drizzle-orm';
 
 /**
  * PostgreSQL-backed fixed-window rate limiter.
- * Elygate intentionally avoids Redis; the UNLOGGED rate_limits table provides
- * cross-process atomic counters while keeping write amplification low.
+ * Uses the UNLOGGED rate_limits table for cross-process atomic counters.
+ * 
+ * The UPSERT logic (INSERT ... ON CONFLICT ... DO UPDATE) requires raw SQL
+ * because Drizzle query builder cannot express the conditional count reset.
  */
 
 const MAX_REQUESTS_PER_WINDOW = 300;
@@ -11,10 +15,6 @@ const RATE_LIMIT_CLEANUP_INTERVAL_MS = 60_000;
 let lastRateLimitCleanup = 0;
 const localFallbackWindows = new Map<string, { count: number; expiresAt: number }>();
 
-/**
- * Consume one request from a fixed window. Returns true when the request should
- * be blocked.
- */
 async function consumeWindow(key: string, limit: number, windowMs: number): Promise<boolean> {
     if (!limit || limit <= 0) return false;
 
@@ -63,24 +63,17 @@ async function cleanupExpiredRateLimits(): Promise<void> {
     if (now - lastRateLimitCleanup < RATE_LIMIT_CLEANUP_INTERVAL_MS) return;
     lastRateLimitCleanup = now;
     try {
-        await sql`DELETE FROM rate_limits WHERE expired_at < NOW()`;
+        await db.delete(rateLimits).where(lt(rateLimits.expiredAt, drizzleSql`NOW()`));
     } catch {
         // Cleanup is opportunistic; failed cleanup must not block requests.
     }
 }
 
-/**
- * Check if the given identifier triggers RPM limiting.
- */
 export async function isRateLimited(identifier: string | number, limit: number = 0): Promise<boolean> {
     const maxAllowed = limit > 0 ? limit : MAX_REQUESTS_PER_WINDOW;
     return consumeWindow(`token:${identifier}:rpm`, maxAllowed, 60_000);
 }
 
-/**
- * Check if the given User ID is rate limited by the provided Package Rule.
- * Key is scoped to (userId, ruleId) so different packages use independent counters.
- */
 export async function isPackageRateLimited(userId: number, rule: Record<string, any>): Promise<boolean> {
    if (!rule) return false;
    const { rpm, rph } = rule;
@@ -94,12 +87,8 @@ export async function isPackageRateLimited(userId: number, rule: Record<string, 
 
 export const packageConcurrencyMap = new Map<string, number>();
 
-// Event-driven concurrency wait queue: lockId -> resolve callbacks
 const concurrencyWaiters = new Map<string, (() => void)[]>();
 
-/**
- * Notify waiters that a concurrency slot has been freed.
- */
 function notifyConcurrencyRelease(lockId: string) {
     const queue = concurrencyWaiters.get(lockId);
     if (queue && queue.length > 0) {
@@ -109,10 +98,6 @@ function notifyConcurrencyRelease(lockId: string) {
     }
 }
 
-/**
- * Wait for package concurrency using event-driven notifications instead of busy-wait polling.
- * The lockId now includes ruleId so different packages use separate concurrency pools.
- */
 export async function waitForPackageConcurrency(userId: number, ruleId: number, limit: number, maxWaitMs = 15000): Promise<boolean> {
     if (!limit || limit <= 0) return true;
     const lockId = `user_pkg_wait_${userId}_rule_${ruleId}`;
@@ -120,10 +105,8 @@ export async function waitForPackageConcurrency(userId: number, ruleId: number, 
     const current = packageConcurrencyMap.get(lockId) || 0;
     if (current < limit) return true;
     
-    // Wait for a slot to open via event notification
     return new Promise<boolean>((resolve) => {
         const timer = setTimeout(() => {
-            // Timeout: remove ourselves from the queue
             const queue = concurrencyWaiters.get(lockId);
             if (queue) {
                 const idx = queue.indexOf(onRelease);
@@ -143,16 +126,10 @@ export async function waitForPackageConcurrency(userId: number, ruleId: number, 
     });
 }
 
-/**
- * Build the concurrency lock ID for a given user+rule combination.
- */
 export function getPackageLockId(userId: number, ruleId: number): string {
     return `user_pkg_wait_${userId}_rule_${ruleId}`;
 }
 
-/**
- * Release a package concurrency slot and notify waiting requests.
- */
 export function releasePackageConcurrency(lockId: string): void {
     const current = packageConcurrencyMap.get(lockId);
     if (current) {

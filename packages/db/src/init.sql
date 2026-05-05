@@ -263,6 +263,8 @@ CREATE TABLE IF NOT EXISTS user_subscriptions (
     start_time TIMESTAMPTZ DEFAULT NOW(),
     end_time TIMESTAMPTZ NOT NULL,
     status INTEGER DEFAULT 1, -- 1: active, 2: expired, 3: disabled
+    quota_granted BIGINT DEFAULT 0,
+    quota_used BIGINT DEFAULT 0,
     last_reset_at TIMESTAMPTZ DEFAULT NOW(),
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -270,6 +272,25 @@ CREATE TABLE IF NOT EXISTS user_subscriptions (
 
 CREATE INDEX IF NOT EXISTS idx_user_subscriptions_user_id ON user_subscriptions(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_subscriptions_end_time ON user_subscriptions(end_time);
+
+ALTER TABLE user_subscriptions ADD COLUMN IF NOT EXISTS quota_granted BIGINT DEFAULT 0;
+ALTER TABLE user_subscriptions ADD COLUMN IF NOT EXISTS quota_used BIGINT DEFAULT 0;
+
+-- Invite codes
+CREATE TABLE IF NOT EXISTS invite_codes (
+    id SERIAL PRIMARY KEY,
+    code TEXT NOT NULL UNIQUE,
+    max_uses INTEGER NOT NULL DEFAULT 1,
+    used_count INTEGER NOT NULL DEFAULT 0,
+    gift_quota BIGINT NOT NULL DEFAULT 0,
+    status INTEGER NOT NULL DEFAULT 1,
+    expires_at TIMESTAMPTZ,
+    created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_invite_codes_status ON invite_codes(status, created_at DESC);
 
 -- Login attempts tracking table
 CREATE TABLE IF NOT EXISTS login_attempts (

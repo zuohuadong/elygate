@@ -3,7 +3,9 @@ import { Elysia } from 'elysia';
 import { log } from '../services/logger';
 import { memoryCache } from '../services/cache';
 import { optionCache } from '../services/optionCache';
-import { sql } from '@elygate/db';
+import { db, sql } from '@elygate/db';
+import { users, tokens } from '@elygate/db/schema';
+import { eq, sql as drizzleSql } from 'drizzle-orm';
 import { calculateCost } from '../services/ratio';
 import type { TokenRecord, UserRecord } from '../types';
 import { getProviderHandler } from '../providers';
@@ -133,7 +135,6 @@ export const realtimeRouter = new Elysia()
                     const keys = getChannelKeys(channel.key);
                     const upstreamHeaders = buildRealtimeHeaders(channel, keys[0] || '');
 
-                    // Bun WebSocket constructor: new WebSocket(url, protocols?, options?)
                     const upstreamWs = new WebSocket(upstreamUrl, { headers: upstreamHeaders } as any);
 
                     let startTime = Date.now();
@@ -158,8 +159,8 @@ export const realtimeRouter = new Elysia()
                         const estimatedTokens = messageCount * 50;
                         const cost = calculateCost(model, group, estimatedTokens, 0);
                         if (cost > 0) {
-                            sql`UPDATE users SET used_quota = used_quota + ${cost} WHERE id = ${u.id}`.catch(() => {});
-                            sql`UPDATE tokens SET used_quota = used_quota + ${cost}, accessed_at = NOW() WHERE id = ${t.id}`.catch(() => {});
+                            db.update(users).set({ usedQuota: drizzleSql`${users.usedQuota} + ${cost}` }).where(eq(users.id, u.id)).catch(() => {});
+                            db.update(tokens).set({ usedQuota: drizzleSql`${tokens.usedQuota} + ${cost}`, accessedAt: new Date() }).where(eq(tokens.id, t.id)).catch(() => {});
                         }
                         log.info(`[Realtime/WS] Session ended: ${elapsed}ms, ${messageCount} messages`);
                         try { ws.close(event.code, event.reason); } catch {}

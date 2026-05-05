@@ -1,21 +1,19 @@
 import { log } from '../services/logger';
 import { getErrorMessage } from '../utils/error';
-import { existsSync, writeFileSync, readFileSync, appendFileSync } from 'fs';
+import { existsSync, writeFileSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { randomBytes } from 'crypto';
-import { sql } from '@elygate/db';
+import { db, sql } from '@elygate/db';
+import { channels } from '@elygate/db/schema';
+import { eq } from 'drizzle-orm';
 import { decrypt, encrypt, isEncrypted } from './encryption';
 
 const ENV_PATH = join(process.cwd(), '.env');
 
-// Hardcoded defaults to migrate from
 const OLD_ENCRYPTION_SECRET = 'elygate-default-encryption-secret-key';
 const OLD_ENCRYPTION_SALT = 'elygate-default-salt';
 const OLD_JWT_SECRET = 'super-secret-elygate-jwt-key';
 
-/**
- * Parse .env file and return key-value pairs
- */
 function parseEnvFile(content: string): Record<string, string> {
     const result: Record<string, string> = {};
     const lines = content.split('\n');
@@ -31,20 +29,15 @@ function parseEnvFile(content: string): Record<string, string> {
     return result;
 }
 
-/**
- * Initialize environment variables and perform one-time migration if needed
- */
 export async function initEnv(): Promise<void> {
     let needsMigration = false;
     let envVars: Record<string, string> = {};
     
-    // Check if .env exists and parse it
     if (existsSync(ENV_PATH)) {
         log.info('✅ Environment configuration (.env) found.');
         const content = readFileSync(ENV_PATH, 'utf-8');
         envVars = parseEnvFile(content);
         
-        // Check if encryption keys are missing
         if (!envVars.ENCRYPTION_SECRET || !envVars.ENCRYPTION_SALT) {
             log.info('⚠️  Missing encryption keys in .env. Will generate new ones and migrate data...');
             needsMigration = true;
@@ -54,19 +47,15 @@ export async function initEnv(): Promise<void> {
         needsMigration = true;
     }
     
-    // If no migration needed, return early
     if (!needsMigration) {
         return;
     }
     
-    // Generate new secrets
     const newEncryptionSecret = envVars.ENCRYPTION_SECRET || randomBytes(32).toString('hex');
     const newEncryptionSalt = envVars.ENCRYPTION_SALT || randomBytes(16).toString('hex');
     const newJwtSecret = envVars.JWT_SECRET || randomBytes(32).toString('hex');
 
-    // 1. Database Migration: Re-encrypt existing keys if they were encrypted with defaults
     try {
-        // Wait for DB to be ready before migration
         let retries = 0;
         const maxRetries = 10;
         let connected = false;
@@ -82,25 +71,29 @@ export async function initEnv(): Promise<void> {
         }
 
         if (connected) {
-            const channels = await sql`SELECT id, key FROM channels`;
-            if (channels.length > 0) {
-                log.info(`📦 Found ${channels.length} channels. Migrating encryption...`);
+            const allChannels = await db.select({
+                id: channels.id,
+                key: channels.key,
+            }).from(channels);
+
+            if (allChannels.length > 0) {
+                log.info(`📦 Found ${allChannels.length} channels. Migrating encryption...`);
                 
-                for (const channel of channels) {
+                for (const channel of allChannels) {
                     if (channel.key && isEncrypted(channel.key)) {
-                        // Ensure defaults are set for decryption
                         process.env.ENCRYPTION_SECRET = OLD_ENCRYPTION_SECRET;
                         process.env.ENCRYPTION_SALT = OLD_ENCRYPTION_SALT;
                         
                         const decrypted = decrypt(channel.key);
                         
-                        // Temporarily set new secrets to re-encrypt
                         process.env.ENCRYPTION_SECRET = newEncryptionSecret;
                         process.env.ENCRYPTION_SALT = newEncryptionSalt;
                         
                         const reEncrypted = encrypt(decrypted);
                         
-                        await sql`UPDATE channels SET key = ${reEncrypted} WHERE id = ${channel.id}`;
+                        await db.update(channels)
+                            .set({ key: reEncrypted })
+                            .where(eq(channels.id, channel.id));
                     }
                 }
                 log.info('✅ Successfully migrated channel encryption.');
@@ -110,7 +103,6 @@ export async function initEnv(): Promise<void> {
         log.error('❌ Migration failed:', getErrorMessage(err));
     }
 
-    // 2. Update or create .env file
     const newEnvVars = {
         ...envVars,
         ENCRYPTION_SECRET: newEncryptionSecret,
@@ -138,7 +130,6 @@ export async function initEnv(): Promise<void> {
         writeFileSync(ENV_PATH, envContent);
         log.info(`✅ Generated new .env file at: ${ENV_PATH}`);
         
-        // Update current process env
         process.env.ENCRYPTION_SECRET = newEncryptionSecret;
         process.env.ENCRYPTION_SALT = newEncryptionSalt;
         process.env.JWT_SECRET = newJwtSecret;

@@ -1,6 +1,8 @@
 import type { ElysiaCtx } from '../../types';
 import { Elysia } from 'elysia';
-import { sql } from '@elygate/db';
+import { db, sql } from '@elygate/db';
+import { options, channels, tokens, users, logs } from '@elygate/db/schema';
+import { eq, and, desc, sql as drizzleSql, count } from 'drizzle-orm';
 import { memoryCache } from '../../services/cache';
 import { getAffinityStats, clearAffinityCache } from '../../services/channelAffinity';
 import { circuitBreaker } from '../../services/circuitBreaker';
@@ -17,6 +19,7 @@ export const performanceRouter = new Elysia()
         const cbStats = circuitBreaker.getStats();
         const affinityStats = getAffinityStats();
 
+        // Complex aggregate query with subqueries — use raw SQL
         const [dbSize] = await sql`
             SELECT
                 pg_database_size(current_database()) as db_bytes,
@@ -56,17 +59,12 @@ export const performanceRouter = new Elysia()
 
     // --- Clear caches ---
     .delete('/performance/caches', async () => {
-        // Clear response cache
+        // DELETE whole tables — raw SQL is simpler for cache tables not in schema
         await sql`DELETE FROM response_cache`;
-        // Clear semantic cache
         await sql`DELETE FROM semantic_cache`;
-        // Clear token cache
         await sql`DELETE FROM token_cache`;
-        // Clear user quota cache
         await sql`DELETE FROM user_quota_cache`;
-        // Clear affinity
         const affinityCleared = clearAffinityCache();
-        // Refresh memory
         await memoryCache.refresh();
 
         return {
@@ -108,10 +106,11 @@ export const performanceRouter = new Elysia()
         if (b.fixedCostModels !== undefined) updates.FixedCostModels = b.fixedCostModels;
 
         for (const [key, value] of Object.entries(updates)) {
-            await sql`
-                INSERT INTO options (key, value) VALUES (${key}, ${JSON.stringify(value)})
-                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
-            `;
+            await db.insert(options).values({ key, value: JSON.stringify(value) })
+                .onConflictDoUpdate({
+                    target: options.key,
+                    set: { value: JSON.stringify(value) },
+                });
         }
         await memoryCache.refresh();
         await optionCache.refresh();
@@ -121,14 +120,12 @@ export const performanceRouter = new Elysia()
     // --- Missing models from pricing ---
     .get('/ratio-config/missing', async () => {
         const modelRatio = optionCache.get('ModelRatio', {}) as Record<string, number>;
-        // Get all models that are active but not in ratio config
-        const rows = await sql`
-            SELECT DISTINCT model_name FROM logs
-            WHERE created_at > NOW() - INTERVAL '7 days'
-            ORDER BY model_name
-        `;
+        const rows = await db.selectDistinct({ modelName: logs.modelName })
+            .from(logs)
+            .where(drizzleSql`${logs.createdAt} > NOW() - INTERVAL '7 days'`)
+            .orderBy(logs.modelName);
         const missing = rows
-            .map((r: Record<string, any>) => r.model_name)
+            .map((r) => r.modelName)
             .filter((m: string) => !modelRatio[m]);
         return { success: true, data: missing, count: missing.length };
     });

@@ -1,11 +1,13 @@
-import { sql } from '$lib/server/db';
+import { db, sql } from '$lib/server/db';
 import { requirePortalMember } from '$lib/server/portalAuth';
+import { logs, users } from '@elygate/db/schema';
+import { eq, and, gte, desc, sql as drizzleSql, count } from '@elygate/db/operators';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals }) => {
     const { org } = requirePortalMember(locals);
 
-    // 1. Fetch usage vs error trend for the last 24 hours
+    // Complex aggregate with FILTER — use raw SQL
     const trendData = await sql`
         SELECT 
             TO_CHAR(created_at, 'HH24:00') as label,
@@ -19,7 +21,6 @@ export const load: PageServerLoad = async ({ locals }) => {
         ORDER BY label ASC
     `;
 
-    // 2. Error distribution by category
     const errorStats = await sql`
         SELECT 
             status_code,
@@ -32,24 +33,19 @@ export const load: PageServerLoad = async ({ locals }) => {
         ORDER BY count DESC
     `;
 
-    // 2. Fetch model distribution
-    const modelDistribution = await sql`
-        SELECT 
-            model_name as name,
-            COUNT(*) as value
-        FROM logs
-        WHERE org_id = ${org.id}
-          AND created_at > NOW() - INTERVAL '30 days'
-        GROUP BY name
-        ORDER BY value DESC
-        LIMIT 5
-    `;
+    const modelDistribution = await db.select({
+        name: logs.modelName,
+        value: count(),
+    })
+    .from(logs)
+    .where(and(eq(logs.orgId, org.id), gte(logs.createdAt, drizzleSql`NOW() - INTERVAL '30 days'`)))
+    .groupBy(logs.modelName)
+    .orderBy(desc(count()))
+    .limit(5);
 
-    // 3. Fetch active member count
-    const [{ count: activeMembers }] = await sql`
-        SELECT COUNT(*) FROM users
-        WHERE org_id = ${org.id} AND status = 1
-    `;
+    const [{ count: activeMembers }] = await db.select({ count: count() })
+        .from(users)
+        .where(and(eq(users.orgId, org.id), eq(users.status, 1)));
 
     return {
         analytics: {
@@ -59,7 +55,7 @@ export const load: PageServerLoad = async ({ locals }) => {
                 errors: Number(row.error_count),
                 latency: Math.round(Number(row.avg_latency || 0))
             })),
-            modelDistribution: modelDistribution.map((row: Record<string, any>) => ({
+            modelDistribution: modelDistribution.map((row) => ({
                 name: row.name,
                 value: Number(row.value)
             })),

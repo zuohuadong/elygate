@@ -1,6 +1,8 @@
 import { log } from '../services/logger';
 import { getErrorMessage } from '../utils/error';
-import { sql } from '@elygate/db';
+import { db, sql } from '@elygate/db';
+import { users, tokens, channels, logs, organizations, logDetails, healthLogs } from '@elygate/db/schema';
+import { eq, and, gte, inArray, sql as drizzleSql } from 'drizzle-orm';
 import type { BillingContext } from '../types';
 import { calculateCost } from './ratio';
 import { webhookService } from './webhook';
@@ -32,16 +34,14 @@ export async function preCheckAndDecrement(ctx: {
     if (ctx.isPackageFree) return 0;
     const estimatedCost = calculateCost(ctx.modelName, ctx.userGroup, 0, ctx.maxTokens || 4096);
 
-    const result = await sql.begin(async (tx: any) => {
-        const [user] = await tx`
-            UPDATE users 
-            SET quota = quota - ${estimatedCost}
-            WHERE id = ${ctx.userId} AND quota >= ${estimatedCost}
-            RETURNING id
-        `;
+    const result = await db.transaction(async (tx) => {
+        // CASE-based conditional UPDATE requires raw SQL
+        const [user] = await tx.update(users).set({
+            quota: drizzleSql`quota - ${estimatedCost}`,
+        }).where(and(eq(users.id, ctx.userId), gte(users.quota, estimatedCost))).returning({ id: users.id });
         if (!user) return false;
 
-        const [token] = await tx`
+        const [token] = await tx.execute(drizzleSql`
             UPDATE tokens
             SET remain_quota = CASE
                 WHEN unlimited_quota THEN remain_quota
@@ -51,7 +51,7 @@ export async function preCheckAndDecrement(ctx: {
             WHERE id = ${ctx.tokenId}
               AND (unlimited_quota OR remain_quota = -1 OR remain_quota >= ${estimatedCost})
             RETURNING id
-        `;
+        `);
         return !!token;
     });
 
@@ -70,9 +70,9 @@ export async function reconcileQuota(ctx: {
     const diff = ctx.preDeducted - ctx.actualCost;
     if (diff === 0) return;
 
-    await sql.begin(async (tx: any) => {
-        await tx`UPDATE users SET quota = quota + ${diff} WHERE id = ${ctx.userId}`;
-        await tx`
+    await db.transaction(async (tx) => {
+        await tx.update(users).set({ quota: drizzleSql`quota + ${diff}` }).where(eq(users.id, ctx.userId));
+        await tx.execute(drizzleSql`
             UPDATE tokens
             SET remain_quota = CASE
                 WHEN unlimited_quota THEN remain_quota
@@ -80,7 +80,7 @@ export async function reconcileQuota(ctx: {
                 ELSE remain_quota
             END
             WHERE id = ${ctx.tokenId}
-        `;
+        `);
     });
 }
 
@@ -146,13 +146,15 @@ async function flushBillingQueue(retryCount = 0) {
         const uniqueChannelIds = [...new Set(tasks.map((t: Record<string, any>) => t.channelId).filter(Boolean))];
         const channelRatios: Record<number, number> = {};
         if (uniqueChannelIds.length > 0) {
-            const channels = await sql`SELECT id, price_ratio FROM channels WHERE id IN ${sql(uniqueChannelIds)}`;
-            for (const ch of channels) {
-                channelRatios[ch.id] = Number(ch.price_ratio) || 1.0;
+            const chRows = await db.select({ id: channels.id, priceRatio: channels.priceRatio })
+                .from(channels)
+                .where(inArray(channels.id, uniqueChannelIds));
+            for (const ch of chRows) {
+                channelRatios[ch.id] = Number(ch.priceRatio) || 1.0;
             }
         }
 
-        await sql.begin(async (tx: any) => {
+        await db.transaction(async (tx) => {
             const correctedUserAgg: Record<number, number> = {};
             const correctedTokenAgg: Record<number, number> = {};
             const correctedOrgAgg: Record<number, number> = {};
@@ -185,58 +187,81 @@ async function flushBillingQueue(retryCount = 0) {
                 if (log) log.quotaCost = finalCost;
             }
 
+            // Batch UPDATEs — use raw SQL for += operations
             for (const [id, cost] of Object.entries(correctedTokenAgg)) {
-                await tx`UPDATE tokens SET used_quota = used_quota + ${cost} WHERE id = ${Number(id)}`;
+                await tx.update(tokens).set({ usedQuota: drizzleSql`used_quota + ${cost}` }).where(eq(tokens.id, Number(id)));
             }
             for (const [id, cost] of Object.entries(correctedUserAgg)) {
-                await tx`UPDATE users SET used_quota = used_quota + ${cost} WHERE id = ${Number(id)}`;
+                await tx.update(users).set({ usedQuota: drizzleSql`used_quota + ${cost}` }).where(eq(users.id, Number(id)));
             }
             for (const [id, cost] of Object.entries(correctedOrgAgg)) {
-                await tx`UPDATE organizations SET used_quota = used_quota + ${cost} WHERE id = ${Number(id)}`;
+                await tx.update(organizations).set({ usedQuota: drizzleSql`used_quota + ${cost}` }).where(eq(organizations.id, Number(id)));
             }
             for (const log of logInserts) {
-                const [inserted] = await tx`
-                    INSERT INTO logs (user_id, token_id, channel_id, model_name, prompt_tokens, completion_tokens, cached_tokens, quota_cost, is_stream, status_code, error_message, elapsed_ms, ip_address, user_agent, trace_id, org_id, external_task_id, external_user_id, external_workspace_id, external_feature_type)
-                    VALUES (${log.userId}, ${log.tokenId ?? null}, ${log.channelId !== undefined ? log.channelId : null}, ${log.modelName}, ${log.promptTokens}, ${log.completionTokens}, ${log.cachedTokens}, ${log.quotaCost}, ${log.isStream}, ${log.statusCode}, ${log.errorMessage}, ${log.elapsedMs}, ${log.ip}, ${log.ua}, ${log.traceId}, ${log.orgId}, ${log.externalTaskId}, ${log.externalUserId}, ${log.externalWorkspaceId}, ${log.externalFeatureType})
-                    RETURNING id, created_at
-                `;
+                const [inserted] = await tx.insert(logs).values({
+                    userId: log.userId,
+                    tokenId: log.tokenId ?? null,
+                    channelId: log.channelId !== undefined ? log.channelId : null,
+                    modelName: log.modelName,
+                    promptTokens: log.promptTokens,
+                    completionTokens: log.completionTokens,
+                    cachedTokens: log.cachedTokens,
+                    quotaCost: log.quotaCost,
+                    isStream: log.isStream,
+                    statusCode: log.statusCode,
+                    errorMessage: log.errorMessage,
+                    elapsedMs: log.elapsedMs,
+                    ipAddress: log.ip,
+                    userAgent: log.ua,
+                    traceId: log.traceId,
+                    orgId: log.orgId,
+                    externalTaskId: log.externalTaskId,
+                    externalUserId: log.externalUserId,
+                    externalWorkspaceId: log.externalWorkspaceId,
+                    externalFeatureType: log.externalFeatureType,
+                }).returning({ id: logs.id, createdAt: logs.createdAt });
 
                 if (inserted && (log.requestBody || log.responseBody)) {
-                    await tx`
+                    await tx.execute(drizzleSql`
                         INSERT INTO log_details (log_id, log_created_at, request_body, response_body)
-                        VALUES (${inserted.id}, ${inserted.created_at}, ${log.requestBody}, ${log.responseBody})
+                        VALUES (${inserted.id}, ${inserted.createdAt}, ${log.requestBody}, ${log.responseBody})
                         ON CONFLICT (log_id) DO UPDATE
                         SET log_created_at = EXCLUDED.log_created_at,
                             request_body = EXCLUDED.request_body,
                             response_body = EXCLUDED.response_body
-                    `;
+                    `);
                 }
             }
         });
 
-        // 5. Organization-level Quota Alerts
+        // Organization-level Quota Alerts
         const uniqueOrgIds = [...new Set(tasks.map((t: Record<string, any>) => t.orgId).filter(Boolean))];
         if (uniqueOrgIds.length > 0) {
-            const orgs = await sql`
-                SELECT id, name, quota, used_quota, alert_webhook_url, alert_threshold_pct, last_alert_at
-                FROM organizations
-                WHERE id IN ${sql(uniqueOrgIds)}
-            `;
+            // Complex SELECT with multiple columns — raw SQL for the org-specific fields
+            const orgs = await db.select({
+                id: organizations.id,
+                name: organizations.name,
+                quota: organizations.quota,
+                usedQuota: organizations.usedQuota,
+                alertWebhookUrl: organizations.alertWebhookUrl,
+                alertThresholdPct: organizations.alertThresholdPct,
+                lastAlertAt: organizations.lastAlertAt,
+            }).from(organizations).where(inArray(organizations.id, uniqueOrgIds as number[]));
 
             for (const org of orgs) {
-                if (!org.alert_webhook_url) continue;
+                if (!org.alertWebhookUrl) continue;
 
-                const threshold = org.alert_threshold_pct || 80;
-                const usagePct = (Number(org.used_quota) / Math.max(Number(org.quota), 1)) * 100;
+                const threshold = org.alertThresholdPct || 80;
+                const usagePct = (Number(org.usedQuota) / Math.max(Number(org.quota), 1)) * 100;
 
                 if (usagePct >= threshold) {
-                    const lastAlert = org.last_alert_at ? new Date(org.last_alert_at).getTime() : 0;
+                    const lastAlert = org.lastAlertAt ? new Date(org.lastAlertAt).getTime() : 0;
                     const oneDay = 24 * 60 * 60 * 1000;
 
                     if (Date.now() - lastAlert > oneDay) {
                         try {
                             log.info(`[Billing/Alert] Sending quota alert for organization: ${org.name}`);
-                            await fetch(org.alert_webhook_url, {
+                            await fetch(org.alertWebhookUrl, {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({
@@ -249,11 +274,7 @@ async function flushBillingQueue(retryCount = 0) {
                                 })
                             });
 
-                            await sql`
-                                UPDATE organizations 
-                                SET last_alert_at = NOW() 
-                                WHERE id = ${org.id}
-                            `;
+                            await db.update(organizations).set({ lastAlertAt: new Date() }).where(eq(organizations.id, org.id));
                         } catch (err: unknown) {
                             log.error(`[Billing/Error] Failed to send webhook alert for org ${org.id}:`, getErrorMessage(err));
                         }
@@ -287,8 +308,8 @@ async function rotateLogs() {
     const days = optionCache.get('LogRetentionDays', 7);
     log.info(`[Billing/Rotation] Cleaning up logs older than ${days} days...`);
     try {
-        await sql`DELETE FROM logs WHERE created_at < NOW() - (${days} * INTERVAL '1 day')`;
-        await sql`DELETE FROM health_logs WHERE created_at < NOW() - (${days} * INTERVAL '1 day')`;
+        await db.delete(logs).where(drizzleSql`created_at < NOW() - ${days} * INTERVAL '1 day'`);
+        await db.delete(healthLogs).where(drizzleSql`created_at < NOW() - ${days} * INTERVAL '1 day'`);
     } catch (e: unknown) {
         log.error('[Billing/Rotation] Failed:', e);
     }

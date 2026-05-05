@@ -2,7 +2,9 @@ import { config } from '../config';
 import { log } from '../services/logger';
 import { Elysia } from 'elysia';
 import { cors } from '@elysiajs/cors';
-import { sql } from '@elygate/db';
+import { db, sql } from '@elygate/db';
+import { users, tokens, sessions, organizations, userSubscriptions, packages as packagesTable } from '@elygate/db/schema';
+import { eq, and, lte, gt, desc, sql as drizzleSql } from 'drizzle-orm';
 import { isRateLimited } from '../services/ratelimit';
 import type { TokenRecord,  UserRecord  } from '../types';
 import { memoryCache } from '../services/cache';
@@ -112,13 +114,24 @@ export const authPlugin = new Elysia({ name: 'auth' })
                 throw new Error('Missing or invalid Authorization header / Session cookie');
             }
 
-            const [sessionRow] = await sql`
-                SELECT s.user_id, s.expires_at, u.id, u.username, u."group", u.role, u.quota, u.status, u.org_id, u.used_quota
-                FROM session s
-                JOIN users u ON s.user_id = u.id
-                WHERE s.token = ${auth_session.value}
-                LIMIT 1
-            `;
+            const [sessionRow] = await db
+                .select({
+                    user_id: sessions.userId,
+                    expires_at: sessions.expiresAt,
+                    id: users.id,
+                    username: users.username,
+                    group: users.group,
+                    role: users.role,
+                    quota: users.quota,
+                    status: users.status,
+                    org_id: users.orgId,
+                    used_quota: users.usedQuota,
+                    currency: users.currency,
+                })
+                .from(sessions)
+                .innerJoin(users, eq(sessions.userId, users.id))
+                .where(eq(sessions.token, auth_session.value))
+                .limit(1);
 
             if (!sessionRow) {
                 set.status = 401;
@@ -126,7 +139,7 @@ export const authPlugin = new Elysia({ name: 'auth' })
             }
 
             if (new Date(sessionRow.expires_at) < new Date()) {
-                await sql`DELETE FROM session WHERE token = ${auth_session.value}`;
+                await db.delete(sessions).where(eq(sessions.token, auth_session.value));
                 set.status = 401;
                 throw new Error('Session has expired');
             }
@@ -152,14 +165,14 @@ export const authPlugin = new Elysia({ name: 'auth' })
                 modelLimitsEnabled: false,
                 crossGroupRetry: false,
                 accessedAt: null,
-                orgId: sessionRow.org_id
+                orgId: sessionRow.org_id ?? undefined
             };
 
             const userRecord: UserRecord = {
                 id: sessionRow.id,
                 username: sessionRow.username,
                 group: sessionRow.group || 'default',
-                orgId: sessionRow.org_id,
+                orgId: sessionRow.org_id ?? undefined,
                 role: sessionRow.role,
                 quota: Number(sessionRow.quota),
                 usedQuota: Number(sessionRow.used_quota || 0),
@@ -184,25 +197,48 @@ export const authPlugin = new Elysia({ name: 'auth' })
                 throw new Error('Too Many Requests');
             }
             if (cached.token.id > 0) {
-                sql`UPDATE tokens SET accessed_at = NOW() WHERE id = ${cached.token.id}`.catch((e: unknown) => log.error('[Auth] Failed updating accessed_at:', e));
+                db.update(tokens).set({ accessedAt: drizzleSql`NOW()` }).where(eq(tokens.id, cached.token.id)).catch((e: unknown) => log.error('[Auth] Failed updating accessed_at:', e));
             }
             return cached;
         }
 
         // 3. Cache Miss: Perform DB Query
-        // Use Bun SQL template for high-speed parameterized queries (pre-compiled)
-        const rows = await sql`
-            SELECT 
-                t.id AS token_id, t.name, t.key, t.remain_quota, t.used_quota, t.status AS token_status, t.expired_at, t.models AS token_models,
-                t.subnet, t.allow_ips, t.rate_limit, t.unlimited_quota, t.model_limits_enabled, t.token_group, t.cross_group_retry, t.accessed_at, t.org_id AS token_org_id,
-                u.id AS user_id, u.username, u.group, u.role, u.quota, u.status AS user_status, u.org_id AS user_org_id, u.currency,
-                o.allowed_models AS org_allowed_models, o.denied_models AS org_denied_models, o.allowed_subnets AS org_allowed_subnets
-            FROM tokens t
-            INNER JOIN users u ON t.user_id = u.id
-            LEFT JOIN organizations o ON u.org_id = o.id
-            WHERE t.key = ${apiKey}
-            LIMIT 1
-        `;
+        const rows = await db
+            .select({
+                token_id: tokens.id,
+                name: tokens.name,
+                key: tokens.key,
+                remain_quota: tokens.remainQuota,
+                used_quota: tokens.usedQuota,
+                token_status: tokens.status,
+                expired_at: tokens.expiredAt,
+                token_models: tokens.models,
+                subnet: tokens.subnet,
+                allow_ips: tokens.allowIps,
+                rate_limit: tokens.rateLimit,
+                unlimited_quota: tokens.unlimitedQuota,
+                model_limits_enabled: tokens.modelLimitsEnabled,
+                token_group: tokens.tokenGroup,
+                cross_group_retry: tokens.crossGroupRetry,
+                accessed_at: tokens.accessedAt,
+                token_org_id: tokens.orgId,
+                user_id: users.id,
+                username: users.username,
+                group: users.group,
+                role: users.role,
+                quota: users.quota,
+                user_status: users.status,
+                user_org_id: users.orgId,
+                currency: users.currency,
+                org_allowed_models: organizations.allowedModels,
+                org_denied_models: organizations.deniedModels,
+                org_allowed_subnets: organizations.allowedSubnets,
+            })
+            .from(tokens)
+            .innerJoin(users, eq(tokens.userId, users.id))
+            .leftJoin(organizations, eq(users.orgId, organizations.id))
+            .where(eq(tokens.key, apiKey))
+            .limit(1);
 
         log.info(`[Auth] API Key: ${apiKey.substring(0, 5)}..., Result rows: ${rows?.length || 0}`);
 
@@ -233,14 +269,14 @@ export const authPlugin = new Elysia({ name: 'auth' })
             tokenGroup: raw.token_group || undefined,
             crossGroupRetry: Boolean(raw.cross_group_retry),
             accessedAt: raw.accessed_at ? new Date(raw.accessed_at) : null,
-            orgId: raw.token_org_id
+            orgId: raw.token_org_id ?? undefined
         };
 
         const userRecord: UserRecord = {
             id: raw.user_id,
             username: raw.username,
             group: raw.group,
-            orgId: raw.user_org_id || raw.token_org_id,
+            orgId: raw.user_org_id ?? raw.token_org_id ?? undefined,
             role: raw.role,
             quota: Number(raw.quota),
             usedQuota: Number(raw.used_quota || 0),
@@ -248,7 +284,7 @@ export const authPlugin = new Elysia({ name: 'auth' })
             currency: raw.currency || 'USD',
             orgAllowedModels: Array.isArray(raw.org_allowed_models) ? raw.org_allowed_models : (typeof raw.org_allowed_models === 'string' ? JSON.parse(raw.org_allowed_models || '[]') : []),
             orgDeniedModels: Array.isArray(raw.org_denied_models) ? raw.org_denied_models : (typeof raw.org_denied_models === 'string' ? JSON.parse(raw.org_denied_models || '[]') : []),
-            orgAllowedSubnets: raw.org_allowed_subnets
+            orgAllowedSubnets: raw.org_allowed_subnets ?? undefined
         };
 
         if (tokenRecord.status !== 1) { // 1-normal, 2-disabled
@@ -284,15 +320,22 @@ export const authPlugin = new Elysia({ name: 'auth' })
         }
 
         // Check active subscriptions
-        const subs = await sql`
-            SELECT p.models, p.default_rate_limit_id, p.model_rate_limits
-            FROM user_subscriptions us
-            JOIN packages p ON us.package_id = p.id
-            WHERE us.user_id = ${userRecord.id}
-              AND us.status = 1
-              AND us.start_time <= NOW()
-              AND us.end_time > NOW()
-        `;
+        const subs = await db
+            .select({
+                models: packagesTable.models,
+                default_rate_limit_id: packagesTable.defaultRateLimitId,
+                model_rate_limits: packagesTable.modelRateLimits,
+            })
+            .from(userSubscriptions)
+            .innerJoin(packagesTable, eq(userSubscriptions.packageId, packagesTable.id))
+            .where(
+                and(
+                    eq(userSubscriptions.userId, userRecord.id),
+                    eq(userSubscriptions.status, 1),
+                    lte(userSubscriptions.startTime, drizzleSql`NOW()`),
+                    gt(userSubscriptions.endTime, drizzleSql`NOW()`),
+                )
+            );
 
         userRecord.activePackages = subs.map((s: Record<string, any>) => ({
             models: Array.isArray(s.models) ? s.models : (typeof s.models === 'string' ? JSON.parse(s.models || '[]') : []),
@@ -322,7 +365,7 @@ export const authPlugin = new Elysia({ name: 'auth' })
             throw new Error('Too Many Requests');
         }
 
-        sql`UPDATE tokens SET accessed_at = NOW() WHERE id = ${tokenRecord.id}`.catch((e: unknown) => log.error('[Auth] Failed updating accessed_at:', e));
+        db.update(tokens).set({ accessedAt: drizzleSql`NOW()` }).where(eq(tokens.id, tokenRecord.id)).catch((e: unknown) => log.error('[Auth] Failed updating accessed_at:', e));
 
         // Attach validated token and user data to the context for downstream routes
         const result = {

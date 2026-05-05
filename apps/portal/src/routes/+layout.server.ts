@@ -1,5 +1,7 @@
-import { sql } from '$lib/server/db';
+import { db, sql } from '$lib/server/db';
 import { error, redirect } from '@sveltejs/kit';
+import { sessions, users, organizations } from '@elygate/db/schema';
+import { eq, and, gt } from '@elygate/db/operators';
 import type { LayoutServerLoad } from './$types';
 
 type SessionRow = {
@@ -19,10 +21,10 @@ export const load: LayoutServerLoad = async ({ cookies, url }) => {
         if (url.pathname === '/login') {
             return { user: null, org: null };
         }
-        // In a real app, redirect to login. For now, we assume user comes from main app.
         throw redirect(302, '/login'); 
     }
 
+    // Complex JOIN across session + users + organizations — use raw SQL
     const [session] = await sql`
         SELECT s.user_id, u.username, u.role, u.org_id, o.name as org_name, o.quota as org_total_quota, o.used_quota as org_used_quota
         FROM session s
@@ -40,7 +42,6 @@ export const load: LayoutServerLoad = async ({ cookies, url }) => {
         throw redirect(302, '/login');
     }
 
-    // If already logged in and trying to access login page, redirect to dashboard
     if (url.pathname === '/login') {
         throw redirect(302, '/');
     }

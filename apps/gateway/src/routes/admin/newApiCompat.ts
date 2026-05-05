@@ -9,7 +9,7 @@ import { optionCache } from '../../services/optionCache';
 import { getProviderHandler } from '../../providers';
 import { ChannelType } from '../../types';
 import { buildModelsUrl } from '../../utils/url';
-import { and, asc, count, desc, eq, ilike, inArray, isNotNull, ne, or, sql as drizzleSql } from 'drizzle-orm';
+import { and, asc, avg, count, desc, eq, ilike, inArray, isNotNull, max, ne, or, sum, sql as drizzleSql } from 'drizzle-orm';
 
 function notImplemented(set: Record<string, any>, message: string) {
     set.status = 501;
@@ -994,20 +994,19 @@ export const newApiCompatAdminRouter = new Elysia()
     })
     .delete('/log', async ({ query }: ElysiaCtx) => {
         const days = Number(query?.days) || 30;
-        const result = await sql`DELETE FROM logs WHERE created_at < NOW() - (${days}::int * INTERVAL '1 day')`;
-        return { success: true, deleted: result.count || 0, olderThanDays: days };
+        const result = await db.delete(logs).where(drizzleSql`created_at < NOW() - ${days}::int * INTERVAL '1 day'`);
+        return { success: true, deleted: result.length || 0, olderThanDays: days };
     })
     .get('/log/stat', async ({ query }: ElysiaCtx) => {
         const hours = Number(query?.hours) || 24;
-        const [stats] = await sql`
-            SELECT COUNT(*) AS "totalRequests",
-                   COALESCE(SUM(quota_cost), 0) AS "totalCost",
-                   COALESCE(SUM(prompt_tokens), 0) AS "promptTokens",
-                   COALESCE(SUM(completion_tokens), 0) AS "completionTokens",
-                   COALESCE(AVG(elapsed_ms), 0) AS "avgLatency"
-            FROM logs
-            WHERE created_at > NOW() - (${hours}::int * INTERVAL '1 hour')
-        `;
+        const [stats] = await db.select({
+            totalRequests: count(),
+            totalCost: drizzleSql`COALESCE(SUM(${logs.quotaCost}), 0)`,
+            promptTokens: drizzleSql`COALESCE(SUM(${logs.promptTokens}), 0)`,
+            completionTokens: drizzleSql`COALESCE(SUM(${logs.completionTokens}), 0)`,
+            avgLatency: drizzleSql`COALESCE(AVG(${logs.elapsedMs}), 0)`,
+        }).from(logs)
+            .where(drizzleSql`created_at > NOW() - ${hours}::int * INTERVAL '1 hour'`);
         return stats || {};
     })
     .get('/log/search', async ({ query }: ElysiaCtx) => {
@@ -1018,25 +1017,31 @@ export const newApiCompatAdminRouter = new Elysia()
         const page = Number(query?.page) || 1;
         const limit = Math.min(Number(query?.limit) || 50, 200);
         const offset = (page - 1) * limit;
-        const [countRow] = await sql`
-            SELECT COUNT(*) AS total FROM logs
-            WHERE (${keyword || null} IS NULL OR model_name ILIKE ${'%' + keyword + '%'} OR error_message ILIKE ${'%' + keyword + '%'})
-              AND (${model || null} IS NULL OR model_name = ${model})
-              AND (${userId || null} IS NULL OR user_id = ${Number(userId) || 0})
-              AND (${tokenId || null} IS NULL OR token_id = ${Number(tokenId) || 0})
-        `;
-        const rows = await sql`
-            SELECT id, user_id AS "userId", token_id AS "tokenId", channel_id AS "channelId", model_name AS "modelName",
-                   quota_cost AS "quotaCost", prompt_tokens AS "promptTokens", completion_tokens AS "completionTokens",
-                   status_code AS "statusCode", error_message AS "errorMessage", elapsed_ms AS "elapsedMs", created_at AS "createdAt"
-            FROM logs
-            WHERE (${keyword || null} IS NULL OR model_name ILIKE ${'%' + keyword + '%'} OR error_message ILIKE ${'%' + keyword + '%'})
-              AND (${model || null} IS NULL OR model_name = ${model})
-              AND (${userId || null} IS NULL OR user_id = ${Number(userId) || 0})
-              AND (${tokenId || null} IS NULL OR token_id = ${Number(tokenId) || 0})
-            ORDER BY created_at DESC
-            LIMIT ${limit} OFFSET ${offset}
-        `;
+        const conditions = [] as any[];
+        if (keyword) conditions.push(or(ilike(logs.modelName, `%${keyword}%`), ilike(logs.errorMessage, `%${keyword}%`)));
+        if (model) conditions.push(eq(logs.modelName, model));
+        if (userId) conditions.push(eq(logs.userId, Number(userId) || 0));
+        if (tokenId) conditions.push(eq(logs.tokenId, Number(tokenId) || 0));
+        const [countRow] = await db.select({ total: count() }).from(logs)
+            .where(conditions.length ? and(...conditions) : undefined);
+        const rows = await db.select({
+            id: logs.id,
+            userId: logs.userId,
+            tokenId: logs.tokenId,
+            channelId: logs.channelId,
+            modelName: logs.modelName,
+            quotaCost: logs.quotaCost,
+            promptTokens: logs.promptTokens,
+            completionTokens: logs.completionTokens,
+            statusCode: logs.statusCode,
+            errorMessage: logs.errorMessage,
+            elapsedMs: logs.elapsedMs,
+            createdAt: logs.createdAt,
+        }).from(logs)
+            .where(conditions.length ? and(...conditions) : undefined)
+            .orderBy(desc(logs.createdAt))
+            .limit(limit)
+            .offset(offset);
         return { data: rows, total: Number(countRow?.total || 0), page, limit };
     })
     .get('/log/channel_affinity_usage_cache', async () => {
@@ -1099,7 +1104,7 @@ export const newApiCompatAdminRouter = new Elysia()
             .limit(100);
     })
     .get('/models/missing', async () => {
-        const rows = await sql`
+        const rows: any[] = await db.execute(drizzleSql`
             SELECT DISTINCT model_name FROM (
                 SELECT model_name FROM logs
                 WHERE created_at > NOW() - INTERVAL '7 days'
@@ -1107,7 +1112,7 @@ export const newApiCompatAdminRouter = new Elysia()
                 SELECT model_name FROM model_metadata
             ) sub
             ORDER BY model_name
-        `;
+        `);
         return { success: true, missing: rows.map((row: any) => row.model_name), count: rows.length };
     })
     .get('/models/sync_upstream/preview', async () => {
@@ -1532,14 +1537,13 @@ export const newApiCompatSelfRouter = new Elysia()
             unlimitedQuota: tokens.unlimitedQuota,
             accessedAt: tokens.accessedAt,
         }).from(tokens).where(eq(tokens.id, token.id)).limit(1);
-        const [stats] = await sql`
-            SELECT COUNT(*) AS "totalRequests",
-                   COALESCE(SUM(quota_cost), 0) AS "totalCost",
-                   COALESCE(SUM(prompt_tokens), 0) AS "promptTokens",
-                   COALESCE(SUM(completion_tokens), 0) AS "completionTokens",
-                   MAX(created_at) AS "lastUsed"
-            FROM logs WHERE token_id = ${token.id}
-        `;
+        const [stats] = await db.select({
+            totalRequests: count(),
+            totalCost: drizzleSql`COALESCE(SUM(${logs.quotaCost}), 0)`,
+            promptTokens: drizzleSql`COALESCE(SUM(${logs.promptTokens}), 0)`,
+            completionTokens: drizzleSql`COALESCE(SUM(${logs.completionTokens}), 0)`,
+            lastUsed: max(logs.createdAt),
+        }).from(logs).where(eq(logs.tokenId, token.id));
         return { success: true, token: row, stats };
     })
     .get('/log/self/stat', async ({ user, query, set }: ElysiaCtx) => {
@@ -1548,15 +1552,14 @@ export const newApiCompatSelfRouter = new Elysia()
             return { success: false, message: 'Authentication required' };
         }
         const hours = Number(query?.hours) || 24;
-        const [stats] = await sql`
-            SELECT COUNT(*) AS "totalRequests",
-                   COUNT(CASE WHEN status_code < 400 THEN 1 END) AS "successCount",
-                   COALESCE(SUM(quota_cost), 0) AS "totalCost",
-                   COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS "totalTokens",
-                   COUNT(DISTINCT model_name) AS "uniqueModels"
-            FROM logs
-            WHERE user_id = ${user.id} AND created_at > NOW() - (${hours}::int * INTERVAL '1 hour')
-        `;
+        const [stats] = await db.select({
+            totalRequests: count(),
+            successCount: drizzleSql`COUNT(CASE WHEN ${logs.statusCode} < 400 THEN 1 END)`,
+            totalCost: drizzleSql`COALESCE(SUM(${logs.quotaCost}), 0)`,
+            totalTokens: drizzleSql`COALESCE(SUM(${logs.promptTokens} + ${logs.completionTokens}), 0)`,
+            uniqueModels: drizzleSql`COUNT(DISTINCT ${logs.modelName})`,
+        }).from(logs)
+            .where(and(eq(logs.userId, user.id), drizzleSql`created_at > NOW() - ${hours}::int * INTERVAL '1 hour'`));
         return stats || {};
     })
     .get('/log/self', async ({ user, query, set }: ElysiaCtx) => {
@@ -1593,22 +1596,27 @@ export const newApiCompatSelfRouter = new Elysia()
         const page = Number(query?.page) || 1;
         const limit = Math.min(Number(query?.limit) || 50, 200);
         const offset = (page - 1) * limit;
-        const [countRow] = await sql`
-            SELECT COUNT(*) AS total FROM logs
-            WHERE user_id = ${user.id}
-              AND (${keyword || null} IS NULL OR model_name ILIKE ${'%' + keyword + '%'})
-              AND (${model || null} IS NULL OR model_name = ${model})
-        `;
-        const data = await sql`
-            SELECT id, model_name AS "modelName", prompt_tokens AS "promptTokens", completion_tokens AS "completionTokens",
-                   quota_cost AS "quotaCost", status_code AS "statusCode", is_stream AS "isStream",
-                   created_at AS "createdAt", error_message AS "errorMessage", elapsed_ms AS "elapsedMs"
-            FROM logs
-            WHERE user_id = ${user.id}
-              AND (${keyword || null} IS NULL OR model_name ILIKE ${'%' + keyword + '%'})
-              AND (${model || null} IS NULL OR model_name = ${model})
-            ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}
-        `;
+        const selfSearchConditions = [eq(logs.userId, user.id)];
+        if (keyword) selfSearchConditions.push(ilike(logs.modelName, `%${keyword}%`));
+        if (model) selfSearchConditions.push(eq(logs.modelName, model));
+        const [countRow] = await db.select({ total: count() }).from(logs)
+            .where(and(...selfSearchConditions));
+        const data = await db.select({
+            id: logs.id,
+            modelName: logs.modelName,
+            promptTokens: logs.promptTokens,
+            completionTokens: logs.completionTokens,
+            quotaCost: logs.quotaCost,
+            statusCode: logs.statusCode,
+            isStream: logs.isStream,
+            createdAt: logs.createdAt,
+            errorMessage: logs.errorMessage,
+            elapsedMs: logs.elapsedMs,
+        }).from(logs)
+            .where(and(...selfSearchConditions))
+            .orderBy(desc(logs.createdAt))
+            .limit(limit)
+            .offset(offset);
         return { data, total: Number(countRow?.total || 0), page, limit };
     })
     .get('/log/token', async ({ token, query, set }: ElysiaCtx) => {

@@ -1,6 +1,8 @@
 import { config } from '../config';
 import { log } from '../services/logger';
-import { sql } from '@elygate/db';
+import { db, sql } from '@elygate/db';
+import { channels, modelMetadata, rateLimitRules, userGroups, tokens, tokenCache, userQuotaCache, users, sessions } from '@elygate/db/schema';
+import { eq, and, ne, isNull, sql as drizzleSql } from 'drizzle-orm';
 import type { ChannelConfig, TokenRecord, UserRecord } from '../types';
 import { optionCache } from './optionCache';
 
@@ -64,21 +66,45 @@ export const memoryCache = {
     async refresh(skipBroadcast = false) {
         try {
             log.info('[Cache] Refreshing channel routes and rate limits from DB...');
-            const allChannels = await sql`
-                SELECT id, type, name, base_url AS "baseUrl", key, models, model_mapping AS "modelMapping", weight, priority, groups, status,
-                       key_strategy AS "keyStrategy", key_status AS "keyStatus", key_concurrency_limit AS "keyConcurrencyLimit", price_ratio AS "priceRatio",
-                       endpoint_type AS "endpointType", test_model AS "testModel", openai_organization AS "openaiOrganization",
-                       balance, response_time AS "responseTime", status_code_mapping AS "statusCodeMapping", auto_ban AS "autoBan",
-                       tag, setting, param_override AS "paramOverride", header_override AS "headerOverride", remark, channel_info AS "channelInfo"
-                FROM channels 
-                WHERE status != 0
-            `;
+            const allChannels = await db.select({
+                id: channels.id,
+                type: channels.type,
+                name: channels.name,
+                baseUrl: channels.baseUrl,
+                key: channels.key,
+                models: channels.models,
+                modelMapping: channels.modelMapping,
+                weight: channels.weight,
+                priority: channels.priority,
+                groups: channels.groups,
+                status: channels.status,
+                keyStrategy: channels.keyStrategy,
+                keyStatus: channels.keyStatus,
+                keyConcurrencyLimit: channels.keyConcurrencyLimit,
+                priceRatio: channels.priceRatio,
+                endpointType: channels.endpointType,
+                testModel: channels.testModel,
+                openaiOrganization: channels.openaiOrganization,
+                balance: channels.balance,
+                responseTime: channels.responseTime,
+                statusCodeMapping: channels.statusCodeMapping,
+                autoBan: channels.autoBan,
+                tag: channels.tag,
+                setting: channels.setting,
+                paramOverride: channels.paramOverride,
+                headerOverride: channels.headerOverride,
+                remark: channels.remark,
+                channelInfo: channels.channelInfo,
+            }).from(channels).where(ne(channels.status, 0));
 
             // Load model metadata
-            const allModelMeta = await sql`
-                SELECT model_name AS "modelName", type, endpoint, display_name AS "displayName", tags
-                FROM model_metadata
-            `;
+            const allModelMeta = await db.select({
+                modelName: modelMetadata.modelName,
+                type: modelMetadata.type,
+                endpoint: modelMetadata.endpoint,
+                displayName: modelMetadata.displayName,
+                tags: modelMetadata.tags,
+            }).from(modelMetadata);
             const newMetaMap = new Map<string, ModelMeta>();
             for (const m of allModelMeta) {
                 newMetaMap.set(m.modelName, {
@@ -90,9 +116,13 @@ export const memoryCache = {
             }
             this.modelMetadata = newMetaMap;
 
-            const allRules = await sql`
-                SELECT id, name, rpm, rph, concurrent FROM rate_limit_rules
-            `;
+            const allRules = await db.select({
+                id: rateLimitRules.id,
+                name: rateLimitRules.name,
+                rpm: rateLimitRules.rpm,
+                rph: rateLimitRules.rph,
+                concurrent: rateLimitRules.concurrent,
+            }).from(rateLimitRules);
             const newRulesMap = new Map<number, any>();
             for (const rule of allRules) {
                 newRulesMap.set(rule.id, rule);
@@ -100,16 +130,15 @@ export const memoryCache = {
             this.rateLimitRules = newRulesMap;
 
             // Load User Groups
-            const allGroups = await sql`
-                SELECT key, name, 
-                    allowed_channel_types AS "allowedChannelTypes",
-                    denied_channel_types AS "deniedChannelTypes",
-                    allowed_models AS "allowedModels",
-                    denied_models AS "deniedModels",
-                    allowed_packages AS "allowedPackages"
-                FROM user_groups
-                WHERE status = 1
-            `;
+            const allGroups = await db.select({
+                key: userGroups.key,
+                name: userGroups.name,
+                allowedChannelTypes: userGroups.allowedChannelTypes,
+                deniedChannelTypes: userGroups.deniedChannelTypes,
+                allowedModels: userGroups.allowedModels,
+                deniedModels: userGroups.deniedModels,
+                allowedPackages: userGroups.allowedPackages,
+            }).from(userGroups).where(eq(userGroups.status, 1));
             const newGroupsMap = new Map<string, any>();
             for (const group of allGroups) {
                 const parseArray = (val: unknown) => {
@@ -131,7 +160,24 @@ export const memoryCache = {
             const newRoutes = new Map<string, ChannelConfig[]>();
             const newChannelsMap = new Map<number, ChannelConfig>();
 
-            for (const channel of allChannels) {
+            for (const rawChannel of allChannels) {
+                const channel = {
+                    ...(rawChannel as Record<string, unknown>),
+                    groups: Array.isArray(rawChannel.groups) ? rawChannel.groups : [],
+                    modelMapping: rawChannel.modelMapping || {},
+                    keyStatus: rawChannel.keyStatus || {},
+                    priceRatio: rawChannel.priceRatio != null ? Number(rawChannel.priceRatio) : undefined,
+                    balance: rawChannel.balance != null ? Number(rawChannel.balance) : null,
+                    responseTime: rawChannel.responseTime ?? null,
+                    statusCodeMapping: rawChannel.statusCodeMapping || {},
+                    autoBan: rawChannel.autoBan ?? undefined,
+                    setting: rawChannel.setting || {},
+                    paramOverride: rawChannel.paramOverride || {},
+                    headerOverride: rawChannel.headerOverride || {},
+                    remark: rawChannel.remark ?? null,
+                    channelInfo: rawChannel.channelInfo || {},
+                } as ChannelConfig;
+
                 newChannelsMap.set(channel.id, channel);
 
                 // Only add to routes if status is Active (1) or Half-Open (4)
@@ -318,13 +364,16 @@ export const memoryCache = {
         if (cached) return cached;
 
         const keyHash = new Bun.CryptoHasher('sha256').update(key).digest('hex');
-        const cacheRows = await sql`
-            SELECT token_data FROM token_cache
-            WHERE key_hash = ${keyHash} AND (expired_at IS NULL OR expired_at > NOW())
-            LIMIT 1
-        `;
+        const cacheRows = await db.select({
+            tokenData: tokenCache.tokenData,
+        }).from(tokenCache).where(
+            and(
+                eq(tokenCache.keyHash, keyHash),
+                drizzleSql`${tokenCache.expiredAt} IS NULL OR ${tokenCache.expiredAt} > NOW()`
+            )
+        ).limit(1);
         if (cacheRows.length > 0) {
-            const tokenData = cacheRows[0].token_data;
+            const tokenData = cacheRows[0].tokenData;
             if (typeof tokenData === 'string') {
                 try {
                     const token = JSON.parse(tokenData);
@@ -332,8 +381,9 @@ export const memoryCache = {
                     return token;
                 } catch { /* channel config parse error — skip */ }
             } else {
-                this.setToken(key, tokenData);
-                return tokenData;
+                const token = tokenData as unknown as TokenRecord;
+                this.setToken(key, token);
+                return token;
             }
         }
 
@@ -341,19 +391,26 @@ export const memoryCache = {
     },
 
     async getTokenFromDB(key: string): Promise<TokenRecord | null> {
-        const rows = await sql`
-            SELECT t.id, t.name, t.key, t.remain_quota as "remainQuota", t.used_quota as "usedQuota", 
-                   t.status, t.expired_at as "expiredAt", t.models, t.subnet, t.rate_limit as "rateLimit",
-                   t.user_id as "userId"
-            FROM tokens t
-            WHERE t.key = ${key} AND t.status = 1
-            LIMIT 1
-        `;
+        const rows = await db.select({
+            id: tokens.id,
+            name: tokens.name,
+            key: tokens.key,
+            remainQuota: tokens.remainQuota,
+            usedQuota: tokens.usedQuota,
+            status: tokens.status,
+            expiredAt: tokens.expiredAt,
+            models: tokens.models,
+            subnet: tokens.subnet,
+            rateLimit: tokens.rateLimit,
+            userId: tokens.userId,
+        }).from(tokens).where(
+            and(eq(tokens.key, key), eq(tokens.status, 1))
+        ).limit(1);
         if (rows.length > 0) {
-            const token = rows[0];
+            const token = rows[0] as TokenRecord;
             if (typeof token.models === 'string') {
                 try {
-                    token.models = JSON.parse(token.models);
+                    token.models = JSON.parse(token.models as unknown as string);
                 } catch {
                     token.models = [];
                 }
@@ -368,14 +425,19 @@ export const memoryCache = {
     async setTokenToCache(key: string, token: TokenRecord): Promise<void> {
         const keyHash = new Bun.CryptoHasher('sha256').update(key).digest('hex');
         const expiredAt = token.expiredAt ? new Date(token.expiredAt) : new Date(Date.now() + 24 * 60 * 60 * 1000);
-        await sql`
-            INSERT INTO token_cache (key_hash, token_data, user_id, expired_at)
-            VALUES (${keyHash}, ${token}, ${token.userId}, ${expiredAt})
-            ON CONFLICT (key_hash) DO UPDATE
-            SET token_data = EXCLUDED.token_data,
-                updated_at = NOW(),
-                expired_at = EXCLUDED.expired_at
-        `;
+        await db.insert(tokenCache).values({
+            keyHash,
+            tokenData: token as unknown as Record<string, unknown>,
+            userId: token.userId,
+            expiredAt,
+        }).onConflictDoUpdate({
+            target: tokenCache.keyHash,
+            set: {
+                tokenData: token as unknown as Record<string, unknown>,
+                updatedAt: drizzleSql`NOW()`,
+                expiredAt,
+            },
+        });
     },
 
     setToken(key: string, token: TokenRecord): void {
@@ -389,7 +451,7 @@ export const memoryCache = {
     async invalidateTokenCache(key: string): Promise<void> {
         this.deleteToken(key);
         const keyHash = new Bun.CryptoHasher('sha256').update(key).digest('hex');
-        await sql`DELETE FROM token_cache WHERE key_hash = ${keyHash}`;
+        await db.delete(tokenCache).where(eq(tokenCache.keyHash, keyHash));
     },
 
     getUserQuota(userId: number): UserQuotaCache | null {
@@ -406,12 +468,10 @@ export const memoryCache = {
         const cached = this.getUserQuota(userId);
         if (cached) return cached;
 
-        const cacheRows = await sql`
-            SELECT quota, used_quota as "usedQuota"
-            FROM user_quota_cache
-            WHERE user_id = ${userId}
-            LIMIT 1
-        `;
+        const cacheRows = await db.select({
+            quota: userQuotaCache.quota,
+            usedQuota: userQuotaCache.usedQuota,
+        }).from(userQuotaCache).where(eq(userQuotaCache.userId, userId)).limit(1);
         if (cacheRows.length > 0) {
             const { quota, usedQuota } = cacheRows[0];
             this.setUserQuota(userId, quota, usedQuota);
@@ -422,12 +482,10 @@ export const memoryCache = {
     },
 
     async getUserQuotaFromDB(userId: number): Promise<UserQuotaCache | null> {
-        const rows = await sql`
-            SELECT quota, used_quota as "usedQuota"
-            FROM users
-            WHERE id = ${userId}
-            LIMIT 1
-        `;
+        const rows = await db.select({
+            quota: users.quota,
+            usedQuota: users.usedQuota,
+        }).from(users).where(eq(users.id, userId)).limit(1);
         if (rows.length > 0) {
             const { quota, usedQuota } = rows[0];
             this.setUserQuota(userId, quota, usedQuota);
@@ -442,23 +500,30 @@ export const memoryCache = {
     },
 
     async setUserQuotaToCache(userId: number, quota: number, usedQuota: number): Promise<void> {
-        await sql`
-            INSERT INTO user_quota_cache (user_id, quota, used_quota)
-            VALUES (${userId}, ${quota}, ${usedQuota})
-            ON CONFLICT (user_id) DO UPDATE
-            SET quota = EXCLUDED.quota,
-                used_quota = EXCLUDED.used_quota,
-                updated_at = NOW()
-        `;
+        await db.insert(userQuotaCache).values({
+            userId,
+            quota,
+            usedQuota,
+        }).onConflictDoUpdate({
+            target: userQuotaCache.userId,
+            set: {
+                quota,
+                usedQuota,
+                updatedAt: drizzleSql`NOW()`,
+            },
+        });
     },
 
     async updateUserQuotaInDB(userId: number, deltaQuota: number): Promise<boolean> {
         try {
-            const result = await sql`
-                UPDATE users
-                SET used_quota = used_quota + ${deltaQuota}
-                WHERE id = ${userId} AND used_quota + ${deltaQuota} <= quota
-            `;
+            const result = await db.update(users).set({
+                usedQuota: drizzleSql`${users.usedQuota} + ${deltaQuota}`,
+            }).where(
+                and(
+                    eq(users.id, userId),
+                    drizzleSql`${users.usedQuota} + ${deltaQuota} <= ${users.quota}`
+                )
+            ).returning();
             if (result.length > 0) {
                 const current = this.userQuotas.get(userId);
                 if (current) {
@@ -477,7 +542,7 @@ export const memoryCache = {
 
     async invalidateUserQuotaCache(userId: number): Promise<void> {
         this.userQuotas.delete(userId);
-        await sql`DELETE FROM user_quota_cache WHERE user_id = ${userId}`;
+        await db.delete(userQuotaCache).where(eq(userQuotaCache.userId, userId));
     },
 
     getUser(userId: number): UserRecord | null {
@@ -488,15 +553,18 @@ export const memoryCache = {
         const cached = this.getUser(userId);
         if (cached) return cached;
 
-        const rows = await sql`
-            SELECT id, username, "group", role, quota, used_quota as "usedQuota", 
-                   status, currency
-            FROM users
-            WHERE id = ${userId}
-            LIMIT 1
-        `;
+        const rows = await db.select({
+            id: users.id,
+            username: users.username,
+            group: users.group,
+            role: users.role,
+            quota: users.quota,
+            usedQuota: users.usedQuota,
+            status: users.status,
+            currency: users.currency,
+        }).from(users).where(eq(users.id, userId)).limit(1);
         if (rows.length > 0) {
-            const user = rows[0];
+            const user = rows[0] as UserRecord;
             user.activePackages = [];
             this.setUser(userId, user);
             return user;
@@ -580,14 +648,15 @@ export const memoryCache = {
             // Get admin session token from DB for internal API auth
             let sessionToken = '';
             try {
-                const [session] = await sql`
-                    SELECT s.token FROM session s
-                    JOIN users u ON s.user_id = u.id
-                    WHERE u.role >= 10 AND s.expires_at > NOW()
-                    ORDER BY s.expires_at DESC
-                    LIMIT 1
-                `;
-                sessionToken = session?.token || '';
+                const sessionRows = await db.select({
+                    token: sessions.token,
+                }).from(sessions).innerJoin(users, eq(sessions.userId, users.id)).where(
+                    and(
+                        drizzleSql`${users.role} >= 10`,
+                        drizzleSql`${sessions.expiresAt} > NOW()`
+                    )
+                ).orderBy(drizzleSql`${sessions.expiresAt} DESC`).limit(1);
+                sessionToken = sessionRows[0]?.token || '';
             } catch (e: unknown) {
                 log.error('[Discovery] Failed to get admin session:', e);
                 return;
