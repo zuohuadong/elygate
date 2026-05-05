@@ -22,16 +22,6 @@ transformRequest(body: Record<string, any>, model: string) {
             };
         }
 
-        // Disable thinking mode for -F suffix models (Qwen3.5 style)
-        // Only set enable_thinking: false when model has -F suffix
-        // Otherwise, use default behavior (don't set the parameter)
-        if (model.endsWith('-F')) {
-            transformed.chat_template_kwargs = {
-                ...(body.chat_template_kwargs || {}),
-                enable_thinking: false
-            };
-        }
-
         return transformed;
     },
 

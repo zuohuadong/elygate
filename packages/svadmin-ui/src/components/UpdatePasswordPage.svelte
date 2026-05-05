@@ -6,7 +6,7 @@
   import * as Card from './ui/card/index.js';
   import * as Alert from './ui/alert/index.js';
   import PasswordInput from './PasswordInput.svelte';
-  import { ShieldCheck, Loader2, AlertCircle } from 'lucide-svelte';
+  import { ShieldCheck, Loader2, AlertCircle } from '@lucide/svelte';
 
   let { title = 'Admin' } = $props<{
     title?: string;

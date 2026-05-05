@@ -15,6 +15,8 @@ import { matchPattern } from '../utils/pattern';
 import { ContentFilter, cleanResponseTokens, cleanModelTokens } from './filter';
 import { notifier } from './notifier';
 import { WebSearchPlugin } from './plugins/search';
+import { lookupResponseCache, storeResponseCache } from './responseCache';
+import { lookupSemanticCache, storeSemanticCache } from './semanticCache';
 
 export interface DispatchOptions {
     model: string;
@@ -36,6 +38,24 @@ export interface DispatchOptions {
 // Global in-memory concurrency tracker: Map<"channelId_keyIndex", currentActiveRequests>
 const keyConcurrencyMap = new Map<string, number>();
 
+function normalizeObject(value: unknown): Record<string, any> {
+    if (!value) return {};
+    if (typeof value === 'string') {
+        try {
+            const parsed = JSON.parse(value);
+            return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+        } catch {
+            return {};
+        }
+    }
+    return typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {};
+}
+
+function setHeader(headers: Headers, key: string, value: unknown): void {
+    if (value === undefined || value === null) return;
+    headers.set(key, String(value));
+}
+
 async function waitForConcurrencyRelease(lockId: string, limit: number, maxWaitMs: number = 15000): Promise<boolean> {
     if (limit <= 0) return true; // 0 = unlimited
 
@@ -55,14 +75,6 @@ export async function dispatch(options: DispatchOptions) {
         let model = options.model;
         const isStream = options.stream || body.stream || false;
         const isFormData = body instanceof FormData || (body && typeof body === 'object' && !Array.isArray(body) && Object.values(body).some(v => v instanceof File || v instanceof Blob));
-
-        // 0. Handle -F suffix (Non-Thinking Model)
-        // Models with -F suffix will have enable_thinking: false
-        const originalModel = model; // Keep original model name for transformRequest
-        const skipThinking = model.endsWith('-F');
-        if (skipThinking) {
-            model = model.slice(0, -2); // Remove -F suffix for routing
-        }
 
         // 0. Check Package Bypass (Contractual Exemption)
         let isPackageFree = false;
@@ -143,6 +155,140 @@ export async function dispatch(options: DispatchOptions) {
             notifier.notify('Low Quota Warning', `User ${user.username} has used ${Math.round(user.usedQuota / user.quota * 100)}% of their quota.`);
         }
 
+        // 0.59 Dynamic Aspect, Resolution, and Modality Mapping for Google Ultra Models
+        if (model && (model.toLowerCase().includes('veo') || model.toLowerCase().includes('gemini') || model.toLowerCase().includes('imagen'))) {
+            // Normalize deprecated aliases
+            const aliasMap: Record<string, string> = {
+                "veo3.1-fast": "veo_3_1_t2v_fast",
+                "veo3.1-pro": "veo_3_1_t2v"
+            };
+            if (aliasMap[model]) model = aliasMap[model];
+
+            const aspectParam = (body.aspect_ratio || body.aspectRatio || body.generationConfig?.imageConfig?.aspectRatio)?.toLowerCase();
+            const sizeParam = (body.resolution || body.image_size || body.imageSize || body.generationConfig?.imageConfig?.imageSize)?.toUpperCase();
+
+            // Count images for Modality Auto-Adaptation (T2V vs I2V vs R2V)
+            let imageCount = 0;
+            if (body.messages && Array.isArray(body.messages)) {
+                for (const m of body.messages) {
+                    if (Array.isArray(m.content)) {
+                        imageCount += m.content.filter((c: any) => c.type === 'image_url' || c.type === 'image').length;
+                    }
+                }
+            } else if (body.contents && Array.isArray(body.contents)) {
+                for (const c of body.contents) {
+                    if (Array.isArray(c.parts)) {
+                        imageCount += c.parts.filter((p: any) => p.inlineData || p.fileData).length;
+                    }
+                }
+            } else if (body.image) {
+                imageCount = 1;
+            }
+
+            const separator = (model.toLowerCase().startsWith('gemini') || model.toLowerCase().startsWith('imagen')) ? '-' : '_';
+            
+            // --- Reassembly Engine ---
+            let base = model;
+            let hasUltra = false, hasFl = false, hasRelaxed = false;
+            let currentAspect = '', currentSize = '';
+
+            const strip = (m: string, needle: string) => {
+                if (m.includes(`_${needle}`) || m.includes(`-${needle}`)) return m.replace(new RegExp(`_${needle}|-${needle}`, 'g'), '');
+                return m;
+            };
+
+            if (base.includes('_ultra') || base.includes('-ultra')) { hasUltra = true; base = strip(base, 'ultra'); }
+            if (base.includes('_fl') || base.includes('-fl')) { hasFl = true; base = strip(base, 'fl'); }
+            if (base.includes('_relaxed') || base.includes('-relaxed')) { hasRelaxed = true; base = strip(base, 'relaxed'); }
+            
+            ['landscape', 'portrait', 'square', 'four-three', 'three-four'].forEach(a => {
+                if (base.includes(`_${a}`) || base.includes(`-${a}`)) { currentAspect = a; base = strip(base, a); }
+            });
+            ['4k', '2k', '1080p'].forEach(s => {
+                const sLower = s.toLowerCase();
+                if (base.includes(`_${sLower}`) || base.includes(`-${sLower}`)) { currentSize = sLower; base = strip(base, sLower); }
+            });
+
+            // Modality Upgrades
+            if (base.includes('t2v') && imageCount > 0) {
+                base = imageCount <= 2 ? base.replace('t2v', 'i2v_s') : base.replace('t2v', 'r2v');
+                if (imageCount <= 2 && base.includes('fast')) hasFl = true;
+            } else if ((base.includes('i2v') || base.includes('r2v')) && imageCount === 0) {
+                base = base.replace('i2v_s', 't2v').replace('r2v', 't2v');
+                hasFl = false;
+            }
+
+            // Param Overrides
+            if (aspectParam) {
+                if (['16:9', 'landscape'].includes(aspectParam)) currentAspect = 'landscape';
+                else if (['9:16', 'portrait'].includes(aspectParam)) currentAspect = 'portrait';
+                else if (['1:1', 'square'].includes(aspectParam)) currentAspect = 'square';
+                else if (aspectParam === '4:3') currentAspect = 'four-three';
+                else if (aspectParam === '3:4') currentAspect = 'three-four';
+            }
+            if (sizeParam) {
+                if (sizeParam.includes('4K')) currentSize = '4k';
+                else if (sizeParam.includes('2K')) currentSize = '2k';
+                else if (sizeParam.includes('1080P')) currentSize = '1080p';
+            }
+
+            // Reassemble
+            let newModel = base;
+            if (currentAspect) newModel += `${separator}${currentAspect}`;
+            if (hasUltra) newModel += `${separator}ultra`;
+            if (hasRelaxed) newModel += `${separator}relaxed`;
+            if (hasFl) newModel += `${separator}fl`;
+            if (currentSize) newModel += `${separator}${currentSize}`;
+
+            model = newModel;
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // 🧠 DUAL-MODE CACHE LOOKUP (Exact Match ⚡ + Semantic Match 🍃)
+        // Only for chat/embeddings non-streaming requests.
+        // Architecture: Client → Cache{Hit?} → Upstream{Miss}
+        // ═══════════════════════════════════════════════════════════
+        const isCacheable = (endpointType === 'chat' || endpointType === 'embeddings') && !isStream && !isFormData;
+        if (isCacheable) {
+            const messages = (body as Record<string, any>).messages || [];
+
+            // Layer 1: ⚡ Exact Match (hash-based, O(1), zero cost)
+            try {
+                const exactHit = await lookupResponseCache(model, messages, user.id);
+                if (exactHit) {
+                    log.info(`[Dispatcher] ⚡ ResponseCache HIT for model=${model}, user=${user.id}`);
+                    return exactHit;
+                }
+            } catch (e: unknown) {
+                log.warn('[Dispatcher] ResponseCache lookup failed (non-fatal):', getErrorMessage(e));
+            }
+
+            // Layer 2: 🍃 Semantic Match (vector similarity, requires embedding channel)
+            try {
+                const embeddingChannels = memoryCache.selectChannels('bge-m3', user.group)
+                    || memoryCache.selectChannels('text-embedding-3-small', user.group)
+                    || memoryCache.selectChannels('embedding', user.group);
+                const embeddingChannel = embeddingChannels?.[0];
+
+                if (embeddingChannel) {
+                    const lastMessage = messages[messages.length - 1];
+                    const prompt = typeof lastMessage?.content === 'string'
+                        ? lastMessage.content
+                        : JSON.stringify(lastMessage?.content || '');
+
+                    if (prompt && prompt.length > 0 && prompt.length < 2000) {
+                        const semanticHit = await lookupSemanticCache(prompt, model, embeddingChannel);
+                        if (semanticHit) {
+                            log.info(`[Dispatcher] 🍃 SemanticCache HIT for model=${model}, user=${user.id}`);
+                            return semanticHit;
+                        }
+                    }
+                }
+            } catch (e: unknown) {
+                log.warn('[Dispatcher] SemanticCache lookup failed (non-fatal):', getErrorMessage(e));
+            }
+        }
+
         let candidateChannels = memoryCache.selectChannels(model, user.group);
         
         // 0.6 Provider Company Interception (Channel Type)
@@ -164,7 +310,7 @@ export async function dispatch(options: DispatchOptions) {
 
         for (const channelConfig of channels) {
             const traceId = (body as Record<string, any>).trace_id || `tr_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-            const handler = getProviderHandler(channelConfig.type);
+            const handler = getProviderHandler(channelConfig.type, channelConfig.baseUrl);
 
             // 1. Key Selection
             const allKeys = getChannelKeys(channelConfig.key);
@@ -181,13 +327,37 @@ export async function dispatch(options: DispatchOptions) {
             }
 
             let activeKeyIndex = 0;
-            if (channelConfig.keyStrategy === 1) {
-                // Sequential: just pick the first available
-            } else {
-                // Random load balance
-                activeKeyIndex = Math.floor(Math.random() * availableKeys.length);
+            const channelInfo = channelConfig.channelInfo || {};
+            const mkStatusList: Record<number, number> = channelInfo.multiKeyStatusList || {};
+            const mkMode: string = channelInfo.multiKeyMode || '';
+
+            // Filter out disabled keys per multi-key status
+            const enabledKeys = availableKeys.filter((_: string, i: number) => !mkStatusList[i] || mkStatusList[i] !== 0);
+
+            if (enabledKeys.length === 0) {
+                log.warn(`[Dispatcher] Channel ${channelConfig.id} all keys disabled in channel_info`);
+                continue;
             }
-            const activeKey = availableKeys[activeKeyIndex];
+
+            if (mkMode === 'polling' && channelInfo.isMultiKey) {
+                // Polling: start from saved index, find next enabled key
+                let start = typeof channelInfo.multiKeyPollingIndex === 'number' ? channelInfo.multiKeyPollingIndex : 0;
+                if (start < 0 || start >= enabledKeys.length) start = 0;
+                activeKeyIndex = start;
+                // Persist next index back to DB asynchronously
+                const nextIndex = (start + 1) % enabledKeys.length;
+                const updatedInfo = { ...channelInfo, multiKeyPollingIndex: nextIndex };
+                sql`UPDATE channels SET channel_info = ${updatedInfo} WHERE id = ${channelConfig.id}`.catch(() => {});
+            } else if (mkMode === 'random' && channelInfo.isMultiKey) {
+                activeKeyIndex = Math.floor(Math.random() * enabledKeys.length);
+            } else if (channelConfig.keyStrategy === 1) {
+                // Sequential: first enabled key
+                activeKeyIndex = 0;
+            } else {
+                // Default random load balance
+                activeKeyIndex = Math.floor(Math.random() * enabledKeys.length);
+            }
+            const activeKey = enabledKeys[activeKeyIndex];
 
             // 1.2 Channel-Specific Rate Limiting (e.g., NVIDIA 40 RPM limit)
             if (channelConfig.type === ChannelType.NVIDIA) {
@@ -215,6 +385,13 @@ export async function dispatch(options: DispatchOptions) {
 
             // 2. Prepare Upstream Request
             const fetchHeaders = handler.buildHeaders(activeKey);
+            if (channelConfig.openaiOrganization) {
+                setHeader(fetchHeaders, 'OpenAI-Organization', channelConfig.openaiOrganization);
+            }
+            const headerOverride = normalizeObject(channelConfig.headerOverride);
+            for (const [headerName, headerValue] of Object.entries(headerOverride)) {
+                setHeader(fetchHeaders, headerName, headerValue);
+            }
             let upstreamModel = model;
             if (channelConfig.modelMapping) {
                 // Support wildcard matching in model mapping
@@ -248,13 +425,41 @@ export async function dispatch(options: DispatchOptions) {
                     }
                 }
             }
+
+            // 2.1 Dynamic Multimodal Suffix Mapping (Aspect Ratio / Quality)
+            // Bridges the gap between elegant parameter-based layout routing and upstream suffix-based legacy gateways
+            // IMPORTANT: We ONLY apply this hack if we are routing to an OPENAI-compatible proxy (like 029110).
+            // If the channel is a Native Gemini channel, we leave the model pure so the official SDK works natively!
+            if (channelConfig.type === ChannelType.OPENAI && (upstreamModel.startsWith('veo') || upstreamModel.startsWith('imagen') || upstreamModel.startsWith('sora') || upstreamModel.startsWith('gemini'))) {
+                const sourceBody = (body as Record<string, any>) || {};
+                const aspectRatio = sourceBody.aspect_ratio || sourceBody.generationConfig?.aspectRatio;
+                const quality = sourceBody.quality || sourceBody.generationConfig?.quality;
+                
+                // Dynamic Aspect Ratio Suffix mapping
+                if (aspectRatio && !upstreamModel.includes('_landscape') && !upstreamModel.includes('_portrait') && !upstreamModel.includes('-landscape') && !upstreamModel.includes('-portrait')) {
+                    if (aspectRatio === '16:9') {
+                        upstreamModel += upstreamModel.includes('_') ? '_landscape' : '-landscape';
+                    } else if (aspectRatio === '9:16') {
+                        upstreamModel += upstreamModel.includes('_') ? '_portrait' : '-portrait';
+                    }
+                }
+                
+                // Dynamic Quality Suffix mapping
+                if (quality && !upstreamModel.includes('_hq') && !upstreamModel.includes('-hq') && !upstreamModel.includes('_hd') && !upstreamModel.includes('-hd')) {
+                     if (quality === 'hq' || quality === 'hd') {
+                         upstreamModel += upstreamModel.includes('_') ? '_hq' : '-hq';
+                     }
+                }
+            }
             if (body && typeof body === 'object' && !Array.isArray(body) && !(body instanceof FormData)) {
                 if (!body.model) {
                     body.model = model;
                 }
             }
 
-            const upstreamUrl = buildUpstreamUrl(channelConfig, upstreamModel, endpointType, isStream);
+            const upstreamUrl = handler.overrideRequestUrl
+                ? handler.overrideRequestUrl(channelConfig.baseUrl, upstreamModel, endpointType) || buildUpstreamUrl(channelConfig, upstreamModel, endpointType, isStream)
+                : buildUpstreamUrl(channelConfig, upstreamModel, endpointType, isStream);
             log.info(`[Dispatcher] Selected channel: ${channelConfig.name} (id=${channelConfig.id}), upstream: ${upstreamUrl}, model: ${upstreamModel}`);
 
             // 2.5 Prepare Body & Headers
@@ -271,9 +476,24 @@ export async function dispatch(options: DispatchOptions) {
                     else forwardBody.append(key, sourceBody[key]);
                 }
             } else {
-                // Pass original model name (with -F suffix) to transformRequest for enable_thinking handling
-                // but use upstreamModel for the actual model field in the request
-                const transformedBody = skipTransform ? body : handler.transformRequest(body, originalModel);
+                let sourceBody = body as Record<string, any>;
+                const paramOverride = normalizeObject(channelConfig.paramOverride);
+                if (Object.keys(paramOverride).length > 0) {
+                    sourceBody = { ...sourceBody, ...paramOverride };
+                }
+                
+                // Translation: Convert SiliconFlow video prompt or DALL-E image prompt into OpenAI Chat Completion messages
+                if (channelConfig.endpointType === 'chat' && (endpointType === 'video' || endpointType === 'images')) {
+                    const prompt = sourceBody.prompt || '';
+                    sourceBody = {
+                        model: upstreamModel,
+                        messages: [{ role: 'user', content: prompt }],
+                        stream: isStream
+                    };
+                    log.info(`[Dispatcher] 🔄 Translating ${endpointType} payload into chat/completions payload for channel ${channelConfig.id}`);
+                }
+
+                const transformedBody = skipTransform ? sourceBody : handler.transformRequest(sourceBody, upstreamModel);
                 if (!Array.isArray(transformedBody)) {
                     transformedBody.model = upstreamModel; // Override model with mapped name
                 }
@@ -357,15 +577,17 @@ export async function dispatch(options: DispatchOptions) {
 
                 if (!response.ok) {
                     const errorText = await response.text();
-                    await circuitBreaker.recordError(channelConfig.id, response.status);
+                    const statusCodeMapping = normalizeObject(channelConfig.statusCodeMapping);
+                    const mappedStatus = Number(statusCodeMapping[String(response.status)] || response.status);
+                    await circuitBreaker.recordError(channelConfig.id, mappedStatus);
                     // Enhanced diagnostics for empty error bodies (CF/proxy rejections)
                     if (!errorText || errorText.trim() === '') {
                         const cfRay = response.headers.get('cf-ray') || 'N/A';
                         const server = response.headers.get('server') || 'N/A';
                         const contentLength = response.headers.get('content-length') || 'N/A';
-                        throw new Error(`Status ${response.status} (empty body) — cf-ray: ${cfRay}, server: ${server}, content-length: ${contentLength}, body-size: ${bodySize}B`);
+                        throw new Error(`Status ${mappedStatus} (upstream ${response.status}, empty body) — cf-ray: ${cfRay}, server: ${server}, content-length: ${contentLength}, body-size: ${bodySize}B`);
                     }
-                    throw new Error(`Status ${response.status}: ${errorText}`);
+                    throw new Error(`Status ${mappedStatus} (upstream ${response.status}): ${errorText}`);
                 }
 
                 const latencyMs = Date.now() - startTime;
@@ -475,13 +697,83 @@ export async function dispatch(options: DispatchOptions) {
                     const cleanedData = cleanResponseTokens(rawData);
                     let result = skipTransform ? cleanedData : await handler.transformResponse(cleanedData, { baseUrl: channelConfig.baseUrl, apiKey: activeKey, model: upstreamModel });
 
+                    // Translation: Map Chat Completion responses back into correct API formats
+                    if (channelConfig.endpointType === 'chat') {
+                        if (endpointType === 'video') {
+                            const content = result?.choices?.[0]?.message?.content || result?.message?.content || '';
+                            let url = '';
+                            const robustMatch = content.match(/https?:\/\/[^\s'"><]+/);
+                            if (robustMatch && robustMatch[0]) {
+                                url = robustMatch[0].trim();
+                            }
+                            if (url) {
+                                result = {
+                                    id: result.id || `video-${Date.now()}`,
+                                    model: upstreamModel,
+                                    videos: [{ url, cover_url: '' }]
+                                };
+                                log.info(`[Dispatcher] 🔄 Translating chat response back to video/submit format`);
+                            } else {
+                                log.warn(`[Dispatcher] ⚠️ Failed to extract video URL from chat response: ${content.substring(0, 100)}...`);
+                            }
+                        } else if (endpointType === 'images') {
+                            const content = result?.choices?.[0]?.message?.content || result?.message?.content || '';
+                            let url = '';
+                            // Find the first URL containing common image extensions, or just any URL if no extension matches.
+                            const robustMatch = content.match(/https?:\/\/[^\s'"><]+?(?:\.png|\.jpg|\.jpeg|\.webp|\.gif)|https?:\/\/[^\s'"><]+/);
+                            if (robustMatch && robustMatch[0]) {
+                                url = robustMatch[0].trim();
+                            }
+                            if (url) {
+                                result = {
+                                    created: Math.floor(Date.now() / 1000),
+                                    data: [{ url }]
+                                };
+                                log.info(`[Dispatcher] 🔄 Translating chat response back to images/generations format`);
+                            } else {
+                                log.warn(`[Dispatcher] ⚠️ Failed to extract image URL from chat response: ${content.substring(0, 100)}...`);
+                            }
+                        }
+                    }
+
                     // Async video polling: if video channel returned a task/request ID, poll for the actual result
                     const isVideoRoute = endpointType === 'video' || channelConfig.endpointType === 'video';
                     if (isVideoRoute && result && typeof result === 'object') {
                         const asyncId = result.requestId || result.request_id || (result.data?.requestId);
                         if (asyncId) {
-                            result = await pollVideoResult(asyncId, channelConfig.baseUrl, activeKey);
+                            if (handler.pollAsyncResult) {
+                                result = await handler.pollAsyncResult(asyncId, channelConfig.baseUrl, activeKey);
+                            } else {
+                                result = await pollVideoResult(asyncId, channelConfig.baseUrl, activeKey);
+                            }
                         }
+                    }
+                    // 🧠 Cache Store: save successful non-streaming responses for future hits
+                    if (isCacheable && result && typeof result === 'object' && !isVideoRoute) {
+                        const messages = (body as Record<string, any>).messages || [];
+                        const usage = rawData?.usage || result?.usage || {};
+
+                        // ⚡ Exact Match store (fire-and-forget)
+                        storeResponseCache(model, messages, result, usage, user.id)
+                            .catch((e: unknown) => log.warn('[Async] ResponseCache store failed:', getErrorMessage(e)));
+
+                        // 🍃 Semantic Match store (fire-and-forget, only if embedding channel available)
+                        try {
+                            const embeddingChannels = memoryCache.selectChannels('bge-m3', user.group)
+                                || memoryCache.selectChannels('text-embedding-3-small', user.group)
+                                || memoryCache.selectChannels('embedding', user.group);
+                            const embeddingChannel = embeddingChannels?.[0];
+                            if (embeddingChannel) {
+                                const lastMessage = messages[messages.length - 1];
+                                const prompt = typeof lastMessage?.content === 'string'
+                                    ? lastMessage.content
+                                    : JSON.stringify(lastMessage?.content || '');
+                                if (prompt && prompt.length > 0 && prompt.length < 2000) {
+                                    storeSemanticCache(prompt, model, result, embeddingChannel, undefined, user.id)
+                                        .catch((e: unknown) => log.warn('[Async] SemanticCache store failed:', getErrorMessage(e)));
+                                }
+                            }
+                        } catch (_) { /* embedding channel unavailable, skip semantic store */ }
                     }
                     return result;
                 } else if (contentType.includes('text/event-stream') || contentType.includes('text/plain')) {
@@ -497,7 +789,10 @@ export async function dispatch(options: DispatchOptions) {
                     for (const line of lines) {
                         const trimmedLine = line.trim();
                         if (trimmedLine.startsWith('data:')) {
-                            lastDataLine = trimmedLine.slice(5).trim();
+                            const dataPayload = trimmedLine.slice(5).trim();
+                            if (dataPayload !== '[DONE]') {
+                                lastDataLine = dataPayload;
+                            }
                         }
                     }
 
@@ -505,7 +800,7 @@ export async function dispatch(options: DispatchOptions) {
                         try {
                             rawData = JSON.parse(lastDataLine);
                         } catch {
-                            throw new Error('Failed to parse SSE response as JSON');
+                            throw new Error(`Failed to parse SSE response as JSON. Payload snippet: ${lastDataLine.substring(0, 500)}`);
                         }
                     } else {
                         // No data: prefix found, try direct JSON parse
@@ -572,7 +867,11 @@ export async function dispatch(options: DispatchOptions) {
                     if (isVideoRoute && result && typeof result === 'object') {
                         const asyncId = result.requestId || result.request_id || (result.data?.requestId);
                         if (asyncId) {
-                            result = await pollVideoResult(asyncId, channelConfig.baseUrl, activeKey);
+                            if (handler.pollAsyncResult) {
+                                result = await handler.pollAsyncResult(asyncId, channelConfig.baseUrl, activeKey);
+                            } else {
+                                result = await pollVideoResult(asyncId, channelConfig.baseUrl, activeKey);
+                            }
                         }
                     }
                     return result;

@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { Users, UserPlus, Shield, TrendingDown, MoreVertical, Search, Filter, Edit2, Trash2, X, CheckCircle2, AlertTriangle } from 'lucide-svelte';
+    import { Users, UserPlus, Shield, TrendingDown, MoreVertical, Search, Filter, Edit2, Trash2, X, CheckCircle2, AlertTriangle } from '@lucide/svelte';
     import { enhance } from '$app/forms';
     import type { PortalMember } from '$lib/types';
 

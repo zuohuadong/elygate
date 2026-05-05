@@ -36,7 +36,13 @@ export interface TokenRecord {
     expiredAt: Date | null;
     models: string[];
     subnet: string;
+    allowIps?: string;
     rateLimit: number;
+    unlimitedQuota?: boolean;
+    modelLimitsEnabled?: boolean;
+    tokenGroup?: string;
+    crossGroupRetry?: boolean;
+    accessedAt?: Date | null;
     orgId?: number;
 }
 // ChannelType values matching New-API/One-API spec — defined in providers/types.ts
@@ -58,6 +64,19 @@ export interface ChannelConfig {
     keyStrategy: number;         // 0=Load balance, 1=Sequential
     keyStatus: Record<string, string>; // { "sk-xxx": "exhausted" | "active" }
     endpointType: string;        // 'auto' | 'chat' | 'images' | 'video' | 'draw'
+    priceRatio?: number;
+    testModel?: string;
+    openaiOrganization?: string;
+    balance?: number | null;
+    responseTime?: number | null;
+    statusCodeMapping?: Record<string, number>;
+    autoBan?: number;
+    tag?: string | null;
+    setting?: Record<string, any>;
+    paramOverride?: Record<string, any>;
+    headerOverride?: Record<string, any>;
+    remark?: string | null;
+    channelInfo?: Record<string, any>;
 }
 
 export interface UsageInfo {

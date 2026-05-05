@@ -4,7 +4,7 @@
   import TooltipButton from './TooltipButton.svelte';
   import { Label } from './ui/label/index.js';
   import { Progress } from './ui/progress/index.js';
-  import { Lock, Eye, EyeOff } from 'lucide-svelte';
+  import { Lock, Eye, EyeOff } from '@lucide/svelte';
   import { t } from '@svadmin/core/i18n';
 
   interface Props {
@@ -72,7 +72,7 @@
       size="icon"
       type="button"
       class="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7 z-[1]"
-      onclick={() => showPassword = !showPassword}
+      onclick={(e) => { e.preventDefault(); showPassword = !showPassword; }}
       tabindex={-1}
     >
       {#if showPassword}

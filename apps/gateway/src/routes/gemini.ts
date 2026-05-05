@@ -15,46 +15,28 @@ import type { TokenRecord,  UserRecord  } from '../types';
  * so we use a wildcard approach with custom parsing.
  */
 
-export const geminiRouter = new Elysia()
-    .all('/models/*', async ({ request, params }: ElysiaCtx) => {
+const geminiHandler = async ({ request, params }: ElysiaCtx) => {
         const url = new URL(request.url);
-        const pathname = url.pathname;
+        const actionParam = params.action as string;
         
+        if (!actionParam) return;
+
         // Check if this is a Gemini generateContent request
-        // Pattern: /v1/models/{model}:generateContent or /v1/models/{model}:streamGenerateContent
-        const match = pathname.match(/\/v1\/models\/([^:]+):(generateContent|streamGenerateContent)$/);
-        if (!match) {
-            return new Response(JSON.stringify({ 
-                error: { 
-                    code: 404, 
-                    message: 'Not found. Use /v1/models/{model}:generateContent', 
-                    status: 'NOT_FOUND' 
-                } 
-            }), {
-                status: 404, 
-                headers: { 'Content-Type': 'application/json' }
-            });
-        }
+        // Pattern: {model}:generateContent or {model}:streamGenerateContent
+        const match = actionParam.match(/^([^:]+):(generateContent|streamGenerateContent)$/);
+        if (!match) return; // Not a Gemini generateContent request, fall through
         
         const model = match[1];
         const isStream = match[2] === 'streamGenerateContent';
         
-        // Only allow POST for generateContent
-        if (request.method !== 'POST') {
-            return new Response(JSON.stringify({ 
-                error: { 
-                    code: 405, 
-                    message: 'Method not allowed. Use POST.', 
-                    status: 'METHOD_NOT_ALLOWED' 
-                } 
-            }), {
-                status: 405, 
-                headers: { 'Content-Type': 'application/json' }
-            });
+        // Support Authorization: Bearer, x-goog-api-key header, and ?key= query param
+        let apiKey = request.headers.get('x-goog-api-key') || url.searchParams.get('key');
+        if (!apiKey) {
+            const authHeader = request.headers.get('authorization');
+            if (authHeader && authHeader.toLowerCase().startsWith('bearer ')) {
+                apiKey = authHeader.substring(7).trim();
+            }
         }
-        
-        // Support both x-goog-api-key header and ?key= query param
-        const apiKey = request.headers.get('x-goog-api-key') || url.searchParams.get('key');
 
         if (!apiKey) {
             return new Response(JSON.stringify({ 
@@ -154,4 +136,9 @@ export const geminiRouter = new Elysia()
         }
 
         return result;
-    });
+};
+
+export const geminiRouter = new Elysia()
+    .post('/models/:action', geminiHandler)
+    .post('/v1/models/:action', geminiHandler)
+    .post('/v1beta/models/:action', geminiHandler);

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { useExport, useCan, t } from '@svadmin/core';
   import { Button } from '../ui/button/index.js';
-  import { Download } from 'lucide-svelte';
+  import { Download } from '@lucide/svelte';
 
   let { resource, hideText = false, accessControl = { enabled: true, hideIfUnauthorized: true }, class: className = '' } = $props<{
     resource: string;

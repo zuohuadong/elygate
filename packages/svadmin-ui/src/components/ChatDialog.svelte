@@ -6,7 +6,7 @@
   import { fly, fade, scale } from 'svelte/transition';
   import { Button } from './ui/button/index.js';
   import TooltipButton from './TooltipButton.svelte';
-  import { MessageCircle, X, Minus, Send, Loader2, Bot, Trash2, ShieldCheck, ShieldX, Wrench, LayoutDashboard } from 'lucide-svelte';
+  import { MessageCircle, X, Minus, Send, Loader2, Bot, Trash2, ShieldCheck, ShieldX, Wrench, LayoutDashboard } from '@lucide/svelte';
 
   interface Props {
     /** localStorage key for chat history persistence. Set to '' to disable. */

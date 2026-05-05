@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { ShieldCheck, Globe, Cpu, Bell, Save, AlertTriangle, CheckCircle2 } from 'lucide-svelte';
+    import { ShieldCheck, Globe, Cpu, Bell, Save, AlertTriangle, CheckCircle2 } from '@lucide/svelte';
     import { enhance } from '$app/forms';
     import type { PortalOrg, PortalPolicy } from '$lib/types';
 

@@ -11,7 +11,30 @@ transformRequest(body: Record<string, any>, model: string) {
             const parts = typeof msg.content === 'string'
                 ? [{ text: msg.content }]
                 : Array.isArray(msg.content)
-                    ? msg.content.map((c: Record<string, any>) => c.type === 'text' ? { text: c.text } : { text: c.image_url?.url || '' })
+                    ? msg.content.map((c: Record<string, any>) => {
+                        if (c.type === 'text') {
+                            return { text: c.text };
+                        } else if (c.type === 'image_url' || c.type === 'image') {
+                            const urlStr = c.image_url?.url || c.url || '';
+                            if (urlStr.startsWith('data:')) {
+                                const match = urlStr.match(/^data:([^;]+);base64,(.+)$/);
+                                if (match) {
+                                    return {
+                                        inlineData: {
+                                            mimeType: match[1],
+                                            data: match[2]
+                                        }
+                                    };
+                                }
+                            }
+                            return {
+                                fileData: {
+                                    fileUri: urlStr
+                                }
+                            };
+                        }
+                        return { text: String(c.text || JSON.stringify(c)) };
+                    })
                     : [{ text: String(msg.content) }];
             return { role, parts };
         });
@@ -21,8 +44,10 @@ transformRequest(body: Record<string, any>, model: string) {
             maxOutputTokens: body.max_tokens,
             topP: body.top_p,
             topK: body.top_k,
+            ...body.generationConfig, // Forward specific Gemini config if any
         };
         
+        if (body.modalities) generationConfig.responseModalities = body.modalities.map((m: string) => m.toUpperCase());
         if (body.stop) generationConfig.stopSequences = Array.isArray(body.stop) ? body.stop : [body.stop];
 
         const result: Record<string, any> = { contents, generationConfig };

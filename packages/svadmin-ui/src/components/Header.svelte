@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Moon, Sun, Search } from 'lucide-svelte';
+  import { Moon, Sun, Search } from '@lucide/svelte';
   import { Button } from './ui/button';
   import TooltipButton from './TooltipButton.svelte';
   import { getResolvedTheme, toggleTheme } from '@svadmin/core';

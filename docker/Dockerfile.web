@@ -5,26 +5,26 @@ WORKDIR /app
 # Install all deps (including dev) for build
 COPY package.json bun.lock* bun.lockb* ./
 COPY apps/gateway/package.json ./apps/gateway/
-COPY apps/web/package.json ./apps/web/
+COPY apps/portal/package.json ./apps/portal/
+COPY apps/admin/package.json ./apps/admin/
 COPY packages/db/package.json ./packages/db/
 
 RUN bun install
 
 # Copy source and build
-COPY apps/web ./apps/web
+COPY apps/portal ./apps/portal
 COPY packages/db ./packages/db
 
-WORKDIR /app/apps/web
+WORKDIR /app/apps/portal
 RUN bun run build
 
 # ─── Production runtime ─────────────────────────────────────
 FROM oven/bun:1-alpine AS runner
 WORKDIR /app
 
-COPY --from=builder /app/apps/web/build ./build
-COPY apps/web/server.js ./server.js
+COPY --from=builder /app/apps/portal/build ./build
 
 EXPOSE 3001
 ENV NODE_ENV=production PORT=3001
 
-CMD PORT=3001 bun server.js
+CMD PORT=3001 bun build/index.js

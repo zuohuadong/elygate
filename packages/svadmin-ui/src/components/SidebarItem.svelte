@@ -7,7 +7,7 @@
   import {
     LayoutDashboard, FileText, Users, Settings, Home,
     ChevronDown, Folder, ExternalLink, type Icon as LucideIcon,
-  } from 'lucide-svelte';
+  } from '@lucide/svelte';
 
   let { item, currentPath, collapsed = false, depth = 0 }: {
     item: MenuItem;

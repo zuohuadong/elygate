@@ -5,7 +5,7 @@ import { authPlugin } from '../middleware/auth';
 import { ChannelType  } from '../providers/types';
 import { buildUpstreamUrl } from '../utils/url';
 
-export const capabilitiesRouter = new Elysia({ prefix: '/v1' })
+export const capabilitiesRouter = new Elysia()
     .use(authPlugin)
     .get('/capabilities', async () => {
         // Collect all available models and their capabilities

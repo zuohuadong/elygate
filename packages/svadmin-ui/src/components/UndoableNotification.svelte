@@ -3,7 +3,7 @@
   import { Progress } from './ui/progress/index.js';
   import { t } from '@svadmin/core/i18n';
   import { slide } from 'svelte/transition';
-  import { X, Undo2 } from 'lucide-svelte';
+  import { X, Undo2 } from '@lucide/svelte';
 
   let { message, duration = 5000, onUndo, onTimeout } = $props<{
     message: string;

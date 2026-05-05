@@ -9,7 +9,7 @@
   import * as Card from './ui/card/index.js';
   import { Badge } from './ui/badge/index.js';
   import { Progress } from './ui/progress/index.js';
-  import { Save, ArrowLeft, ArrowRight, Check, Loader2 } from 'lucide-svelte';
+  import { Save, ArrowLeft, ArrowRight, Check, Loader2 } from '@lucide/svelte';
   import FieldRenderer from './FieldRenderer.svelte';
 
   interface StepDef {

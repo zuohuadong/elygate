@@ -1,7 +1,7 @@
 <script lang="ts">
   import { useNavigation, t } from '@svadmin/core';
   import { Button } from '../ui/button/index.js';
-  import { List } from 'lucide-svelte';
+  import { List } from '@lucide/svelte';
 
   let { resource, hideText = false, class: className = '' } = $props<{
     resource: string;

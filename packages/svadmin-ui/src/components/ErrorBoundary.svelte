@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
-  import { AlertTriangle } from 'lucide-svelte';
+  import { AlertTriangle } from '@lucide/svelte';
   import { Button } from './ui/button/index.js';
   import * as Alert from './ui/alert/index.js';
   import { t } from '@svadmin/core/i18n';

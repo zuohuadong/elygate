@@ -71,7 +71,7 @@ export function assertModelAccess(user: UserRecord, token: TokenRecord, modelNam
     }
 
     // 3. Token Level Policy (Most specific)
-    if (token.models && token.models.length > 0 && !token.models.includes(modelName)) {
+    if (token.modelLimitsEnabled && token.models && token.models.length > 0 && !token.models.includes(modelName)) {
         set.status = 403;
         throw new Error(`Your API key is not allowed to use model '${modelName}'`);
     }
@@ -148,6 +148,10 @@ export const authPlugin = new Elysia({ name: 'auth' })
                 models: [],
                 subnet: '',
                 rateLimit: 0,
+                unlimitedQuota: true,
+                modelLimitsEnabled: false,
+                crossGroupRetry: false,
+                accessedAt: null,
                 orgId: sessionRow.org_id
             };
 
@@ -179,6 +183,9 @@ export const authPlugin = new Elysia({ name: 'auth' })
                 set.status = 429;
                 throw new Error('Too Many Requests');
             }
+            if (cached.token.id > 0) {
+                sql`UPDATE tokens SET accessed_at = NOW() WHERE id = ${cached.token.id}`.catch((e: unknown) => log.error('[Auth] Failed updating accessed_at:', e));
+            }
             return cached;
         }
 
@@ -186,7 +193,8 @@ export const authPlugin = new Elysia({ name: 'auth' })
         // Use Bun SQL template for high-speed parameterized queries (pre-compiled)
         const rows = await sql`
             SELECT 
-                t.id AS token_id, t.name, t.key, t.remain_quota, t.used_quota, t.status AS token_status, t.expired_at, t.models AS token_models, t.subnet, t.rate_limit, t.org_id AS token_org_id,
+                t.id AS token_id, t.name, t.key, t.remain_quota, t.used_quota, t.status AS token_status, t.expired_at, t.models AS token_models,
+                t.subnet, t.allow_ips, t.rate_limit, t.unlimited_quota, t.model_limits_enabled, t.token_group, t.cross_group_retry, t.accessed_at, t.org_id AS token_org_id,
                 u.id AS user_id, u.username, u.group, u.role, u.quota, u.status AS user_status, u.org_id AS user_org_id, u.currency,
                 o.allowed_models AS org_allowed_models, o.denied_models AS org_denied_models, o.allowed_subnets AS org_allowed_subnets
             FROM tokens t
@@ -218,7 +226,13 @@ export const authPlugin = new Elysia({ name: 'auth' })
             expiredAt: raw.expired_at ? new Date(raw.expired_at) : null,
             models: Array.isArray(raw.token_models) ? raw.token_models : [],
             subnet: raw.subnet || '',
+            allowIps: raw.allow_ips || raw.subnet || '',
             rateLimit: Number(raw.rate_limit || 0),
+            unlimitedQuota: Boolean(raw.unlimited_quota),
+            modelLimitsEnabled: Boolean(raw.model_limits_enabled),
+            tokenGroup: raw.token_group || undefined,
+            crossGroupRetry: Boolean(raw.cross_group_retry),
+            accessedAt: raw.accessed_at ? new Date(raw.accessed_at) : null,
             orgId: raw.token_org_id
         };
 
@@ -255,8 +269,9 @@ export const authPlugin = new Elysia({ name: 'auth' })
         }
 
         // Token Level Check
-        if (tokenRecord.subnet) {
-            const allowedSubnets = tokenRecord.subnet.split(',').map((s: string) => s.trim()).filter(Boolean);
+        const tokenIpPolicy = tokenRecord.allowIps || tokenRecord.subnet;
+        if (tokenIpPolicy) {
+            const allowedSubnets = tokenIpPolicy.split(',').map((s: string) => s.trim()).filter(Boolean);
             if (allowedSubnets.length > 0 && !allowedSubnets.includes(clientIp)) {
                 set.status = 403;
                 throw new Error(`IP Origin ${clientIp} is not whitelisted for this API key.`);
@@ -296,7 +311,7 @@ export const authPlugin = new Elysia({ name: 'auth' })
             set.status = 403;
             throw new Error(translateErrorBilingual('Insufficient user quota'));
         }
-        if (tokenRecord.remainQuota !== -1 && tokenRecord.remainQuota <= 0) {
+        if (!tokenRecord.unlimitedQuota && tokenRecord.remainQuota !== -1 && tokenRecord.remainQuota <= 0) {
             set.status = 403;
             throw new Error(translateErrorBilingual('Insufficient token quota'));
         }
@@ -306,6 +321,8 @@ export const authPlugin = new Elysia({ name: 'auth' })
             set.status = 429;
             throw new Error('Too Many Requests');
         }
+
+        sql`UPDATE tokens SET accessed_at = NOW() WHERE id = ${tokenRecord.id}`.catch((e: unknown) => log.error('[Auth] Failed updating accessed_at:', e));
 
         // Attach validated token and user data to the context for downstream routes
         const result = {

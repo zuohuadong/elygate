@@ -16,7 +16,7 @@
   import TooltipButton from './TooltipButton.svelte';
   import ComboboxField from './ComboboxField.svelte';
   import ArrayField from './fields/ArrayField.svelte';
-  import { Plus, X } from 'lucide-svelte';
+  import { Plus, X } from '@lucide/svelte';
   import type { Snippet } from 'svelte';
   import { getRichTextEditor } from '../editor-config.svelte.js';
 

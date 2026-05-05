@@ -1,6 +1,6 @@
 <script lang="ts">
   import { getChatProvider, getChatContext } from '@svadmin/core';
-  import { Sparkles, X, ChevronRight, Check, RefreshCcw } from 'lucide-svelte';
+  import { Sparkles, X, ChevronRight, Check, RefreshCcw } from '@lucide/svelte';
   import { fade, slide } from 'svelte/transition';
   import { Button } from './ui/button/index.js';
   import MarkdownRenderer from './MarkdownRenderer.svelte';

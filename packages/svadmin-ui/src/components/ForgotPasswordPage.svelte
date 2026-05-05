@@ -7,7 +7,7 @@
   import { Label } from './ui/label/index.js';
   import * as Card from './ui/card/index.js';
   import * as Alert from './ui/alert/index.js';
-  import { KeyRound, User, ArrowLeft, CheckCircle, Loader2, AlertCircle } from 'lucide-svelte';
+  import { KeyRound, User, ArrowLeft, CheckCircle, Loader2, AlertCircle } from '@lucide/svelte';
 
   let { title = 'Admin' } = $props<{
     title?: string;

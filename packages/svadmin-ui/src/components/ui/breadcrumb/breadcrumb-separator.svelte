@@ -2,7 +2,7 @@
   import { cn } from '../../../utils.js';
   import type { Snippet } from 'svelte';
   import type { HTMLLiAttributes } from 'svelte/elements';
-  import { ChevronRight } from 'lucide-svelte';
+  import { ChevronRight } from '@lucide/svelte';
 
   let { class: className, children, ...restProps }: HTMLLiAttributes & { children?: Snippet } = $props();
 </script>

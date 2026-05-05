@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { ChevronLeft, Terminal, Server, Clock, Cpu, Copy, Check } from 'lucide-svelte';
+    import { ChevronLeft, Terminal, Server, Clock, Cpu, Copy, Check } from '@lucide/svelte';
     import type { PortalLogDetail } from '$lib/types';
     
     type LogDetailPageData = {

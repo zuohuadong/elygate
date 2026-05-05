@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { Key, User, Calendar, ShieldAlert, Trash2, ExternalLink } from 'lucide-svelte';
+    import { Key, User, Calendar, ShieldAlert, Trash2, ExternalLink } from '@lucide/svelte';
     import { enhance } from '$app/forms';
     import { fade } from 'svelte/transition';
 

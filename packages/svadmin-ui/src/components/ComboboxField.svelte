@@ -7,7 +7,7 @@
   import { Badge } from './ui/badge/index.js';
   import { Command } from 'cmdk-sv';
   import { Skeleton } from './ui/skeleton/index.js';
-  import { ChevronsUpDown, Check, X, Search } from 'lucide-svelte';
+  import { ChevronsUpDown, Check, X, Search } from '@lucide/svelte';
 
   interface Props {
     resource: string;

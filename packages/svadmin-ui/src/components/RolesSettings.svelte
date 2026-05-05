@@ -2,8 +2,10 @@
   import { t } from '@svadmin/core/i18n';
   import { getAuthProvider, getResources } from '@svadmin/core';
   import type { Role } from '@svadmin/core';
-  import PermissionMatrix, { type RoleInfo, type ResourceInfo, type ActionInfo } from './PermissionMatrix.svelte';
+  import PermissionMatrix from './PermissionMatrix.svelte';
+  import type { RoleInfo, ResourceInfo, ActionInfo } from '../types.js';
   import { toast } from '@svadmin/core/toast';
+  import { AlertCircle } from 'lucide-svelte';
 
   const authProvider = getAuthProvider();
   const rawResources = getResources();
@@ -42,7 +44,7 @@
     }
     try {
       const fetchedRoles = await authProvider.getRoles();
-      roles = fetchedRoles.map(r => ({ code: r.id, name: r.name, ...r }));
+      roles = fetchedRoles.map(r => ({ code: r.id, ...r }));
       if (roles.length > 0 && !selectedRoleCode) {
         selectedRoleCode = roles[0].code;
       }

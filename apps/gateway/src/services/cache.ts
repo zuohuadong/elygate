@@ -67,7 +67,9 @@ export const memoryCache = {
             const allChannels = await sql`
                 SELECT id, type, name, base_url AS "baseUrl", key, models, model_mapping AS "modelMapping", weight, priority, groups, status,
                        key_strategy AS "keyStrategy", key_status AS "keyStatus", key_concurrency_limit AS "keyConcurrencyLimit", price_ratio AS "priceRatio",
-                       endpoint_type AS "endpointType"
+                       endpoint_type AS "endpointType", test_model AS "testModel", openai_organization AS "openaiOrganization",
+                       balance, response_time AS "responseTime", status_code_mapping AS "statusCodeMapping", auto_ban AS "autoBan",
+                       tag, setting, param_override AS "paramOverride", header_override AS "headerOverride", remark, channel_info AS "channelInfo"
                 FROM channels 
                 WHERE status != 0
             `;
@@ -671,4 +673,3 @@ export const memoryCache = {
 
 // Start synchronization listener safely
 memoryCache.initSync().catch(e => log.error('[Cache] Failed to init sync:', e));
-

@@ -17,7 +17,7 @@ async function init() {
   // 0. Initialize environment and secrets (MUST be first)
   await initEnv();
 
-  // 1. Dyamically import environment-dependent modules
+  // 1. Dynamically import environment-dependent modules
   const { sql } = await import("@elygate/db");
   const { memoryCache } = await import("./services/cache");
   const { authPlugin } = await import("./middleware/auth");
@@ -39,12 +39,26 @@ async function init() {
   const { userStatsRouter } = await import("./routes/userStats");
   const { modelsRouter } = await import("./routes/models");
   const { v1StatsRouter } = await import("./routes/v1-stats");
+  const { geminiRouter } = await import("./routes/gemini");
+  const { aliRouter } = await import("./routes/ali");
+  const { baiduRouter } = await import("./routes/baidu");
+  const { anthropicRouter } = await import("./routes/anthropic");
+  const { moderationsRouter } = await import("./routes/moderations");
+  const { capabilitiesRouter } = await import("./routes/capabilities");
+  const { workflowsRouter } = await import("./routes/workflows");
+  const { responsesRouter } = await import('./routes/responses');
+  const { completionsRouter } = await import('./routes/completions');
+  const { filesRouter } = await import('./routes/files');
+  const { batchesRouter } = await import('./routes/batches');
+  const { editsRouter } = await import('./routes/edits');
+  const { realtimeRouter } = await import('./routes/realtime');
+  const { openaiEnterpriseRouter } = await import('./routes/openai-enterprise');
 
   const app = new Elysia()
     .use(cors({
       origin: true,
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'Accept', 'X-Request-ID', 'Cookie'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'Accept', 'X-Request-ID', 'Cookie', 'OpenAI-Organization', 'x-api-key', 'anthropic-version', 'x-goog-api-key'],
       exposeHeaders: ['Set-Cookie'],
       credentials: true
     }))
@@ -62,16 +76,10 @@ async function init() {
         }
       }
     }))
-    .onParse(async ({ request, contentType }) => {
-      if (contentType === 'application/json') {
-        const txt = await request.text();
-        try { return JSON.parse(txt); } catch { /* parse fallback */ return {}; }
-      }
-    })
     .onError(({ error }) => {
       return { success: false, message: error instanceof Error ? getErrorMessage(error) : String(error) };
     })
-    
+    .onBeforeHandle(staticFileHandler() as any)
     .use(sysRouter)
     .group("/api", (app) =>
       app.get('/status', async () => {
@@ -89,7 +97,7 @@ async function init() {
         for (const r of rows) info[r.key] = r.value;
         return { success: true, data: info };
       })
-      .use(authRouter)
+      .group("/auth", (app) => app.use(authRouter))
       .use(paymentRouter)
       .group("/admin", (app) => app.use(adminRouter))
       .group("/stats", (app) => app.use(statsRouter))
@@ -108,11 +116,25 @@ async function init() {
         .use(videoRouter)
         .use(tasksRouter)
         .use(v1StatsRouter)
+        .use(anthropicRouter)
+        .use(moderationsRouter)
+        .use(capabilitiesRouter)
+        .use(workflowsRouter)
+        .use(responsesRouter)
+        .use(completionsRouter)
+        .use(filesRouter)
+        .use(batchesRouter)
+        .use(editsRouter)
+        .use(realtimeRouter)
+        .use(openaiEnterpriseRouter)
     )
+    .use(geminiRouter)
+    .use(aliRouter)   // Ali often uses /api/v1/...
+    .use(baiduRouter) // Baidu uses /rpc/2.0/...
     .get("*", async ({ request, set }) => {
       const url = new URL(request.url);
       if (!url.pathname.startsWith('/api') && !url.pathname.startsWith('/v1')) {
-        const fallback = join(process.cwd(), 'apps/web/build/index.html');
+        const fallback = join(process.cwd(), 'apps/portal/build/index.html');
         const file = Bun.file(fallback);
         if (await file.exists()) {
           return file;
@@ -136,8 +158,6 @@ async function init() {
       await new Promise(resolve => setTimeout(resolve, 2000));
     }
   }
-
-
 
   memoryCache.refresh().catch((e: unknown) => log.error("[Async]", e));
 
@@ -186,7 +206,6 @@ async function init() {
   
   refreshMaterializedViews();
   setInterval(refreshMaterializedViews, 5 * 60 * 1000);
-
 
   app.listen({
     port: 3000,

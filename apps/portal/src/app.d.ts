@@ -1,6 +1,12 @@
 // See https://svelte.dev/docs/kit/types#app.d.ts
 // for information about these interfaces
 declare global {
+	const Bun: {
+		password: {
+			hash(password: string): Promise<string>;
+		};
+	};
+
 	namespace App {
 		// interface Error {}
 		// interface Locals {}

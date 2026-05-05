@@ -2,7 +2,7 @@
   import { getAuditLogProvider, t } from '@svadmin/core';
   import type { AuditEntry } from '@svadmin/core';
   import * as Sheet from './ui/sheet/index.js';
-  import { History, Loader2 } from 'lucide-svelte';
+  import { History, Loader2 } from '@lucide/svelte';
 
   let { open = $bindable(false), resource, recordId } = $props<{
     open: boolean;

@@ -6,7 +6,8 @@ WORKDIR /app
 # Install only production deps first (layer cache)
 COPY package.json bun.lock* bun.lockb* ./
 COPY apps/gateway/package.json ./apps/gateway/
-COPY apps/web/package.json ./apps/web/
+COPY apps/portal/package.json ./apps/portal/
+COPY apps/admin/package.json ./apps/admin/
 COPY packages/db/package.json ./packages/db/
 COPY packages/pg-listen/package.json ./packages/pg-listen/
 

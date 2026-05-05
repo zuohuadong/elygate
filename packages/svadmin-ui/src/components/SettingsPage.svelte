@@ -2,7 +2,7 @@
   import { t } from '@svadmin/core/i18n';
   import { navigate } from '@svadmin/core/router';
   import { currentPath } from '@svadmin/core/router';
-  import { User, Palette, Info, Shield, FileSearch } from 'lucide-svelte';
+  import { User, Palette, Info, Shield, FileSearch } from '@lucide/svelte';
   import ProfilePage from './ProfilePage.svelte';
   import AppearanceSettings from './AppearanceSettings.svelte';
   import AboutSettings from './AboutSettings.svelte';

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Download } from 'lucide-svelte';
+  import { Download } from '@lucide/svelte';
   interface Props { value: string | null | undefined; title?: string }
   let { value, title }: Props = $props();
   const fileName = $derived(value ? value.split('/').pop() ?? value : null);

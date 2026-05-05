@@ -5,7 +5,7 @@ import { authPlugin } from '../middleware/auth';
 import { dispatch } from '../services/dispatcher';
 import { ChannelType  } from '../providers/types';
 
-export const workflowsRouter = new Elysia({ prefix: '/v1/workflows' })
+export const workflowsRouter = new Elysia({ prefix: '/workflows' })
     .use(authPlugin)
     .post('/execute', async ({ body, user, token, set }: ElysiaCtx) => {
         const { template_id, parameters, model } = body;

@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
-  import { Loader2, CheckCircle2, XCircle, Clock, Download, X, ListTodo } from 'lucide-svelte';
+  import { Loader2, CheckCircle2, XCircle, Clock, Download, X, ListTodo } from '@lucide/svelte';
   import { Button } from './ui/button/index.js';
   import { Badge } from './ui/badge/index.js';
   import type { BackgroundTask, TaskStatus } from '../types.js';

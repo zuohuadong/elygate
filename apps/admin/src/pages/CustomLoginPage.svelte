@@ -25,6 +25,9 @@
         const result = await login.mutate({ email: username, username, password });
         if (!result.success) {
             error = result.error?.message ?? t('common.loginFailed');
+        } else {
+            // Login successful!
+            window.location.href = '/';
         }
     }
     

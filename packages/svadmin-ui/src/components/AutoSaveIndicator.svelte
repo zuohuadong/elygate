@@ -1,6 +1,6 @@
 <script lang="ts">
   import { fade, fly } from 'svelte/transition';
-  import { Loader2, Check, X, Cloud } from 'lucide-svelte';
+  import { Loader2, Check, X, Cloud } from '@lucide/svelte';
   import { t } from '@svadmin/core/i18n';
 
   let {

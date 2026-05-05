@@ -18,6 +18,16 @@ export interface ProviderHandler {
      * (Optional) Different providers may have specific Headers requirements.
      */
     buildHeaders(apiKey: string): Headers;
+
+    /**
+     * (Optional) Dynamically overrides the generated upstream URL if the endpoint requires specific paths.
+     */
+    overrideRequestUrl?(baseUrl: string, model: string, endpointType: string): string | undefined;
+
+    /**
+     * (Optional) Custom async polling logic for providers that don't follow the default SiliconFlow video/status protocol.
+     */
+    pollAsyncResult?(taskId: string, baseUrl: string, apiKey: string): Promise<Record<string, any>>;
 }
 
 // Channel Type Constants (Compatible with New-API/One-API Definitions)

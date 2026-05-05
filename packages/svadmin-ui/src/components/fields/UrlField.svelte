@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ExternalLink } from 'lucide-svelte';
+  import { ExternalLink } from '@lucide/svelte';
   interface Props { value: string | null | undefined; label?: string }
   let { value, label }: Props = $props();
   const display = $derived(label ?? value ?? '');

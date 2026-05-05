@@ -7,7 +7,7 @@
   import TooltipButton from './TooltipButton.svelte';
   import * as Card from './ui/card/index.js';
   import { Badge } from './ui/badge/index.js';
-  import { Save, ArrowLeft, Loader2, AlertCircle } from 'lucide-svelte';
+  import { Save, ArrowLeft, Loader2, AlertCircle } from '@lucide/svelte';
   import FieldRenderer from './FieldRenderer.svelte';
   import * as Alert from './ui/alert/index.js';
   import { Skeleton } from './ui/skeleton/index.js';

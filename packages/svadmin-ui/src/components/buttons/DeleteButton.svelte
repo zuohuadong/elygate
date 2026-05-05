@@ -1,7 +1,7 @@
 <script lang="ts">
   import { useDelete, useCan, t } from '@svadmin/core';
   import { Button } from '../ui/button/index.js';
-  import { Trash2 } from 'lucide-svelte';
+  import { Trash2 } from '@lucide/svelte';
 
   let {
     resource, recordItemId, hideText = false,

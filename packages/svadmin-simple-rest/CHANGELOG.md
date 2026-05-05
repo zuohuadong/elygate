@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.9.3](https://github.com/zuohuadong/svadmin/compare/simple-rest-v0.9.2...simple-rest-v0.9.3) (2026-04-03)
+
+
+### 🐛 Bug Fixes
+
+* **ui:** fix unclosed string literal in ConfigErrorScreen ternary ([#85](https://github.com/zuohuadong/svadmin/issues/85)) ([cee2db1](https://github.com/zuohuadong/svadmin/commit/cee2db17c87b314f8cbf7f1822b63bb57645f87d))
+
+## [0.9.2](https://github.com/zuohuadong/svadmin/compare/simple-rest-v0.9.1...simple-rest-v0.9.2) (2026-03-31)
+
+
+### 🔧 Miscellaneous Chores
+
+* **release:** decouple workspace versions for local dev and use dynamic npm publishing ([a54fbe7](https://github.com/zuohuadong/svadmin/commit/a54fbe7270a1afd2b482bdae2684de3139379784))
+
+## [0.9.1](https://github.com/zuohuadong/svadmin/compare/simple-rest-v0.9.0...simple-rest-v0.9.1) (2026-03-31)
+
+
+### 🐛 Bug Fixes
+
+* **build:** resolve playwright error and preserve semver strings for npm publish using node-workspace ([67e71d4](https://github.com/zuohuadong/svadmin/commit/67e71d4946430122fe1eea7ac06bc40cf9441a85))
+
+## [0.9.0](https://github.com/zuohuadong/svadmin/compare/simple-rest-v0.8.0...simple-rest-v0.9.0) (2026-03-30)
+
+
+### ⚠ BREAKING CHANGES
+
+* Deprecated legacy useHasPermission API. usePermissions now returns immediate .has() and .can() methods and drops .data envelope. AutoTable drops global cellRenderer prop in favor of columns definitions map. Sidebar now defaults to SvelteKit path routing instead of hash-based (#).
+
+### Code Refactoring
+
+* modernize enterprise architecture and resolve technical debt ([860ae60](https://github.com/zuohuadong/svadmin/commit/860ae607b1d3002e3318c51047d6219bc073050f))
+
 ## [0.8.0](https://github.com/zuohuadong/svadmin/compare/simple-rest-v0.7.0...simple-rest-v0.8.0) (2026-03-28)
 
 

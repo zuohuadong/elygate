@@ -1,7 +1,7 @@
 <script lang="ts">
   import { useInvalidate, t } from '@svadmin/core';
   import { Button } from '../ui/button/index.js';
-  import { RefreshCw } from 'lucide-svelte';
+  import { RefreshCw } from '@lucide/svelte';
 
   let { resource, hideText = false, class: className = '' } = $props<{
     resource: string;

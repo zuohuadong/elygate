@@ -12,10 +12,13 @@ type SessionRow = {
 	org_used_quota: number | string | null;
 };
 
-export const load: LayoutServerLoad = async ({ cookies }) => {
+export const load: LayoutServerLoad = async ({ cookies, url }) => {
     const sessionToken = cookies.get('auth_session');
     
     if (!sessionToken) {
+        if (url.pathname === '/login') {
+            return { user: null, org: null };
+        }
         // In a real app, redirect to login. For now, we assume user comes from main app.
         throw redirect(302, '/login'); 
     }
@@ -31,10 +34,18 @@ export const load: LayoutServerLoad = async ({ cookies }) => {
 
     if (!session) {
         cookies.delete('auth_session', { path: '/' });
+        if (url.pathname === '/login') {
+            return { user: null, org: null };
+        }
         throw redirect(302, '/login');
     }
 
-    if (!session.org_id) {
+    // If already logged in and trying to access login page, redirect to dashboard
+    if (url.pathname === '/login') {
+        throw redirect(302, '/');
+    }
+
+    if (!session.org_id && session.role !== 10) {
         throw error(403, 'This portal is for enterprise members only.');
     }
 

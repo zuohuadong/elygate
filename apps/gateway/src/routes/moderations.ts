@@ -5,8 +5,7 @@ import { getConverter } from '../services/converters';
 import { memoryCache } from '../services/cache';
 
 export const moderationsRouter = new Elysia()
-    .post('/moderations', async (ctx) => handleModeration(ctx))
-    .post('/v1/moderations', async (ctx) => handleModeration(ctx));
+    .post('/moderations', async (ctx) => handleModeration(ctx));
 
 async function handleModeration({ body, headers, params, request, query }: ElysiaCtx) {
     const apiKey = query?.access_token || request.headers.get('Authorization')?.replace('Bearer ', '');

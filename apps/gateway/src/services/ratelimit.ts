@@ -1,76 +1,81 @@
-import { memoryCache } from './cache';
+import { sql } from '@elygate/db';
 
 /**
- * High-Performance In-Memory Rate Limiter
- * Powered by Bun + PostgreSQL — no Redis dependency.
- * Uses a sliding fixed-window algorithm with O(1) lookup via Map.
- * Periodic GC prevents unbounded memory growth on high-cardinality keys.
+ * PostgreSQL-backed fixed-window rate limiter.
+ * Elygate intentionally avoids Redis; the UNLOGGED rate_limits table provides
+ * cross-process atomic counters while keeping write amplification low.
  */
 
 const MAX_REQUESTS_PER_WINDOW = 300;
+const RATE_LIMIT_CLEANUP_INTERVAL_MS = 60_000;
+let lastRateLimitCleanup = 0;
+const localFallbackWindows = new Map<string, { count: number; expiresAt: number }>();
 
 /**
- * Token Bucket Rate Limiter
- * Provides smoother traffic flow and allows for short bursts.
+ * Consume one request from a fixed window. Returns true when the request should
+ * be blocked.
  */
-class TokenBucket {
-    private tokens: number;
-    private lastRefill: number;
-    private readonly capacity: number;
-    private readonly refillRate: number; // Tokens per ms
+async function consumeWindow(key: string, limit: number, windowMs: number): Promise<boolean> {
+    if (!limit || limit <= 0) return false;
 
-    constructor(capacity: number, refillRatePerMin: number) {
-        this.capacity = capacity;
-        this.tokens = capacity;
-        this.refillRate = refillRatePerMin / 60000;
-        this.lastRefill = Date.now();
+    try {
+        const rows = await sql`
+            INSERT INTO rate_limits (key, count, expired_at)
+            VALUES (${key}, 1, NOW() + (${windowMs}::int * INTERVAL '1 millisecond'))
+            ON CONFLICT (key) DO UPDATE SET
+                count = CASE
+                    WHEN rate_limits.expired_at <= NOW() THEN 1
+                    ELSE rate_limits.count + 1
+                END,
+                expired_at = CASE
+                    WHEN rate_limits.expired_at <= NOW() THEN EXCLUDED.expired_at
+                    ELSE rate_limits.expired_at
+                END
+            RETURNING count
+        `;
+
+        void cleanupExpiredRateLimits();
+        return Number(rows[0]?.count || 0) > limit;
+    } catch {
+        return consumeLocalFallbackWindow(key, limit, windowMs);
     }
+}
 
-    consume(amount: number = 1): boolean {
-        this.refill();
-        if (this.tokens >= amount) {
-            this.tokens -= amount;
-            return true;
-        }
+function consumeLocalFallbackWindow(key: string, limit: number, windowMs: number): boolean {
+    const now = Date.now();
+    const current = localFallbackWindows.get(key);
+    if (!current || current.expiresAt <= now) {
+        localFallbackWindows.set(key, { count: 1, expiresAt: now + windowMs });
         return false;
     }
 
-    private refill() {
-        const now = Date.now();
-        const delta = now - this.lastRefill;
-        const refillAmount = delta * this.refillRate;
-        this.tokens = Math.min(this.capacity, this.tokens + refillAmount);
-        this.lastRefill = now;
-    }
-}
-
-const buckets = new Map<string, TokenBucket>();
-
-/**
- * Check if the given identifier triggers rate limiting using Token Bucket.
- */
-export async function isRateLimited(identifier: string | number, limit: number = 0): Promise<boolean> {
-    const key = `${identifier}`;
-    const maxAllowed = limit > 0 ? limit : MAX_REQUESTS_PER_WINDOW;
-    
-    let bucket = buckets.get(key);
-    if (!bucket) {
-        // Burst capacity default to 10% of limit or at least 5
-        const burst = Math.max(5, Math.floor(maxAllowed * 0.1));
-        bucket = new TokenBucket(maxAllowed + burst, maxAllowed);
-        buckets.set(key, bucket);
-
-        // Memory safety GC
-        if (buckets.size > 10000) {
-            // Very simple cleanup: clear all if too big
-            buckets.clear();
+    current.count += 1;
+    if (localFallbackWindows.size > 10_000) {
+        for (const [windowKey, value] of localFallbackWindows.entries()) {
+            if (value.expiresAt <= now) localFallbackWindows.delete(windowKey);
         }
     }
-
-    return !bucket.consume(1);
+    return current.count > limit;
 }
 
-const packageLimitCache = new Map<string, { rpmCount: number, rpmWindow: number, rphCount: number, rphWindow: number }>();
+async function cleanupExpiredRateLimits(): Promise<void> {
+    const now = Date.now();
+    if (now - lastRateLimitCleanup < RATE_LIMIT_CLEANUP_INTERVAL_MS) return;
+    lastRateLimitCleanup = now;
+    try {
+        await sql`DELETE FROM rate_limits WHERE expired_at < NOW()`;
+    } catch {
+        // Cleanup is opportunistic; failed cleanup must not block requests.
+    }
+}
+
+/**
+ * Check if the given identifier triggers RPM limiting.
+ */
+export async function isRateLimited(identifier: string | number, limit: number = 0): Promise<boolean> {
+    const maxAllowed = limit > 0 ? limit : MAX_REQUESTS_PER_WINDOW;
+    return consumeWindow(`token:${identifier}:rpm`, maxAllowed, 60_000);
+}
 
 /**
  * Check if the given User ID is rate limited by the provided Package Rule.
@@ -80,32 +85,10 @@ export async function isPackageRateLimited(userId: number, rule: Record<string, 
    if (!rule) return false;
    const { rpm, rph } = rule;
    if ((!rpm || rpm <= 0) && (!rph || rph <= 0)) return false;
-   
-   const now = Date.now();
-   const minWindow = Math.floor(now / 60000) * 60000;
-   const hrWindow = Math.floor(now / 3600000) * 3600000;
-   const key = `user_pkg_${userId}_rule_${rule.id}`;
-   
-   let bucket = packageLimitCache.get(key);
-   if (!bucket) {
-       bucket = { rpmCount: 0, rpmWindow: minWindow, rphCount: 0, rphWindow: hrWindow };
-       packageLimitCache.set(key, bucket);
-   }
-   
-   if (bucket.rpmWindow !== minWindow) {
-       bucket.rpmCount = 0;
-       bucket.rpmWindow = minWindow;
-   }
-   if (bucket.rphWindow !== hrWindow) {
-       bucket.rphCount = 0;
-       bucket.rphWindow = hrWindow;
-   }
-   
-   if (rpm > 0 && bucket.rpmCount >= rpm) return true;
-   if (rph > 0 && bucket.rphCount >= rph) return true;
-   
-   bucket.rpmCount++;
-   bucket.rphCount++;
+
+   const ruleId = rule.id || 'default';
+   if (rpm > 0 && await consumeWindow(`pkg:${userId}:${ruleId}:rpm`, rpm, 60_000)) return true;
+   if (rph > 0 && await consumeWindow(`pkg:${userId}:${ruleId}:rph`, rph, 3_600_000)) return true;
    return false;
 }
 

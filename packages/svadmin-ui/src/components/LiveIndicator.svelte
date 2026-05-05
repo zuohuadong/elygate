@@ -1,6 +1,6 @@
 <script lang="ts">
   import { fade } from 'svelte/transition';
-  import { Wifi, WifiOff, Loader2 } from 'lucide-svelte';
+  import { Wifi, WifiOff, Loader2 } from '@lucide/svelte';
   import { Badge } from './ui/badge/index.js';
 
   let {

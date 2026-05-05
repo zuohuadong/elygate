@@ -6,7 +6,7 @@
   import { t } from '@svadmin/core/i18n';
   import { Skeleton } from './ui/skeleton/index.js';
   import { Button } from './ui/button/index.js';
-  import { Loader2 } from 'lucide-svelte';
+  import { Loader2 } from '@lucide/svelte';
   import { intersect } from '../actions.js';
 
   interface Props<T extends BaseRecord = BaseRecord> {
