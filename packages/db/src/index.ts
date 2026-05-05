@@ -1,4 +1,8 @@
-// In Bun, SQL is a global, but can also be imported. 
+import { createDrizzleDataProvider } from '@svadmin/drizzle';
+import { drizzle } from 'drizzle-orm/bun-sql';
+import { schema } from './schema';
+
+// In Bun, SQL is a global, but can also be imported.
 // Using a runtime check to avoid build-time resolution errors in Vite/Node.
 const BunSQL = (globalThis as any).Bun?.SQL;
 const allowMissingDatabaseUrl = process.env.SKIP_DB_ENV_VALIDATION === '1';
@@ -38,4 +42,29 @@ const poolConfig = {
  * Explicitly passing the URL and pool config to ensure the Bun native driver uses optimal settings.
  */
 export const sql = new (BunSQL || class { unsafe() { throw new Error("Bun.SQL not available"); } })(finalizedUrl, poolConfig);
+
+export const db = drizzle({
+    connection: {
+        url: finalizedUrl,
+        ...poolConfig,
+    },
+});
+
+export async function createSvadminDataProvider() {
+    return createDrizzleDataProvider({
+        connection: db,
+        schema,
+        casing: 'camelCase',
+        security: {
+            allowedTables: Object.keys(schema),
+            hiddenFields: {
+                tokens: ['key'],
+                users: ['passwordHash'],
+            },
+            maxLimit: 500,
+        },
+    });
+}
+
+export { schema };
 export * from "./types";

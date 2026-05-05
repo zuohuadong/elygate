@@ -17,7 +17,6 @@ export default defineConfig({
     },
   },
   optimizeDeps: {
-    exclude: ['@svadmin/core', '@svadmin/ui', '@svadmin/elysia', '@svadmin/simple-rest'],
     include: [
       '@tanstack/svelte-query',
     ],

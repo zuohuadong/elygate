@@ -9,5 +9,10 @@
             "import": "./src/index.ts"
         }
     },
-    "types": "./src/index.ts"
+    "types": "./src/index.ts",
+    "dependencies": {
+        "@svadmin/drizzle": "0.11.0",
+        "drizzle-orm": "1.0.0-rc.2-63dd281",
+        "refine-sqlx": "0.10.3"
+    }
 }

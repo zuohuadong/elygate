@@ -10,13 +10,14 @@
     "check": "svelte-check --tsconfig ./tsconfig.json"
   },
   "dependencies": {
-    "@svadmin/core": "workspace:*",
-    "@svadmin/elysia": "workspace:*",
-    "@svadmin/simple-rest": "workspace:*",
-    "@svadmin/ui": "workspace:*",
+    "@lucide/svelte": "^1.7.0",
+    "@refinedev/simple-rest": "^5.0.0",
+    "@svadmin/core": "0.25.3",
+    "@svadmin/elysia": "0.10.6",
+    "@svadmin/simple-rest": "0.9.7",
+    "@svadmin/ui": "0.34.6",
     "@tanstack/svelte-query": "^6.0.0",
-    "tw-animate-css": "^1.4.0",
-    "@lucide/svelte": "^1.7.0"
+    "tw-animate-css": "^1.4.0"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
