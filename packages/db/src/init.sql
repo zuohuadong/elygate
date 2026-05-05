@@ -872,6 +872,16 @@ CREATE INDEX IF NOT EXISTS idx_tokens_user_id ON tokens(user_id);
 -- ============================================================
 -- Vendors table (New API parity)
 -- ============================================================
+-- Announcements (New API parity)
+CREATE TABLE IF NOT EXISTS announcements (
+    id SERIAL PRIMARY KEY,
+    title TEXT NOT NULL,
+    content TEXT NOT NULL DEFAULT '',
+    tag TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS vendors (
     id SERIAL PRIMARY KEY,
     name TEXT NOT NULL,
