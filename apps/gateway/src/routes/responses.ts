@@ -5,6 +5,22 @@ import { memoryCache } from '../services/cache';
 import { dispatch } from '../services/dispatcher';
 import { assertModelAccess } from '../middleware/auth';
 import type { TokenRecord, UserRecord } from '../types';
+import { ChannelType } from '../providers/types';
+
+function selectResponseChannels(model: string, user: UserRecord, token: TokenRecord) {
+    const group = token.tokenGroup && token.tokenGroup !== 'auto' ? token.tokenGroup : user.group;
+    return memoryCache.selectChannels(model, group || 'default') || [];
+}
+
+function ensureCompactSupported(model: string, user: UserRecord, token: TokenRecord, set: ElysiaCtx['set']) {
+    const candidates = selectResponseChannels(model, user, token);
+    if (candidates.length === 0) return;
+    const supported = candidates.some((channel) => channel.type === ChannelType.OPENAI || channel.type === ChannelType.CODEX);
+    if (!supported) {
+        set.status = 400;
+        throw new Error('/v1/responses/compact is only supported by OpenAI/Codex-compatible channels');
+    }
+}
 
 export const responsesRouter = new Elysia()
     .post('/responses', async ({ body, token, user, request, set }: ElysiaCtx) => {
@@ -51,6 +67,7 @@ export const responsesRouter = new Elysia()
         if (!model) throw new Error("Missing 'model' field in request body");
 
         assertModelAccess(user, token, model, set);
+        ensureCompactSupported(model, u, t, set);
 
         const ip = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown';
         const ua = request.headers.get('user-agent') || 'unknown';
@@ -86,6 +103,7 @@ export const responsesRouter = new Elysia()
         if (!model) throw new Error("Missing 'model' field in request body");
 
         assertModelAccess(user, token, model, set);
+        ensureCompactSupported(model, u, t, set);
 
         const ip = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown';
         const ua = request.headers.get('user-agent') || 'unknown';

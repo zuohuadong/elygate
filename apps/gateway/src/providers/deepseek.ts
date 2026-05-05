@@ -53,10 +53,11 @@ function transformResponse(data: Record<string, any>): Record<string, any> {
         return data;
     }
 
-function extractUsage(data: Record<string, any>): { promptTokens: number; completionTokens: number } {
+function extractUsage(data: Record<string, any>): { promptTokens: number; completionTokens: number; cachedTokens?: number } {
         return {
             promptTokens: data.usage?.prompt_tokens || 0,
-            completionTokens: data.usage?.completion_tokens || 0
+            completionTokens: data.usage?.completion_tokens || 0,
+            cachedTokens: data.usage?.prompt_tokens_details?.cached_tokens || 0
         };
     }
 

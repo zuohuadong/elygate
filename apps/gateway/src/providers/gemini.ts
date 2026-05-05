@@ -90,6 +90,7 @@ extractUsage(data: Record<string, any>) {
         return {
             promptTokens: data?.usage?.__prompt_tokens || data?.usageMetadata?.promptTokenCount || 0,
             completionTokens: data?.usage?.__completion_tokens || data?.usageMetadata?.candidatesTokenCount || 0,
+            cachedTokens: data?.usageMetadata?.cachedContentTokenCount || 0,
         };
     },
 

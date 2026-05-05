@@ -142,6 +142,7 @@ CREATE TABLE IF NOT EXISTS channels (
     test_model TEXT,
     openai_organization TEXT,
     balance DECIMAL(20, 8),
+    balance_updated_at TIMESTAMPTZ,
     response_time INTEGER,
     status_code_mapping JSONB NOT NULL DEFAULT '{}'::jsonb,
     auto_ban INTEGER NOT NULL DEFAULT 1,
@@ -208,6 +209,7 @@ ALTER TABLE tokens ADD COLUMN IF NOT EXISTS accessed_at TIMESTAMPTZ;
 ALTER TABLE channels ADD COLUMN IF NOT EXISTS test_model TEXT;
 ALTER TABLE channels ADD COLUMN IF NOT EXISTS openai_organization TEXT;
 ALTER TABLE channels ADD COLUMN IF NOT EXISTS balance DECIMAL(20, 8);
+ALTER TABLE channels ADD COLUMN IF NOT EXISTS balance_updated_at TIMESTAMPTZ;
 ALTER TABLE channels ADD COLUMN IF NOT EXISTS response_time INTEGER;
 ALTER TABLE channels ADD COLUMN IF NOT EXISTS status_code_mapping JSONB NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE channels ADD COLUMN IF NOT EXISTS auto_ban INTEGER NOT NULL DEFAULT 1;
@@ -854,7 +856,8 @@ INSERT INTO options (key, value) VALUES
     ('PricingContent', ''),
     ('Favicon', ''),
     ('DisplayInCurrency', 'false'),
-    ('QuotaPerUnit', '500000')
+    ('QuotaPerUnit', '500000'),
+    ('CacheRatio', '0.5')
 ON CONFLICT (key) DO NOTHING;
 
 -- ============================================================

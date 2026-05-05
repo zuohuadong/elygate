@@ -54,7 +54,7 @@ async function init() {
   const { realtimeRouter } = await import('./routes/realtime');
   const { openaiEnterpriseRouter } = await import('./routes/openai-enterprise');
   const { fineTuneRouter } = await import('./routes/fine-tune');
-  const { newApiCompatAdminRouter } = await import('./routes/admin/newApiCompat');
+  const { newApiCompatAdminRouter, newApiCompatSelfRouter } = await import('./routes/admin/newApiCompat');
 
   const app = new Elysia()
     .use(cors({
@@ -102,6 +102,7 @@ async function init() {
       .group("/auth", (app) => app.use(authRouter))
       .use(paymentRouter)
       .group("/admin", (app) => app.use(adminRouter))
+      .use(newApiCompatSelfRouter)
       .use(newApiCompatAdminRouter)
       .group("/stats", (app) => app.use(statsRouter))
       .group("/redemptions", (app) => app.use(authPlugin).use(redemptionsRouter))

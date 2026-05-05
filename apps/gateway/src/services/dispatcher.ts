@@ -725,14 +725,16 @@ export async function dispatch(options: DispatchOptions) {
                     }
 
                     // Usage extraction and billing
-                    let { promptTokens, completionTokens } = handler.extractUsage(rawData);
+                    const usageResult = handler.extractUsage(rawData);
+                    let { promptTokens, completionTokens } = usageResult;
+                    const cachedTokensFromUsage = usageResult.cachedTokens || 0;
 
                     // Fallback for image models if usage is not provided by upstream (common for OpenAI DALL-E)
                     if (endpointType === 'images' && promptTokens === 0 && completionTokens === 0) {
                         promptTokens = (body as Record<string, any>).n || 1;
                     }
 
-                    const actualCost = calculateCost(model, effectiveGroup, promptTokens, completionTokens);
+                    const actualCost = calculateCost(model, effectiveGroup, promptTokens, completionTokens, cachedTokensFromUsage);
 
                     // 6. Post-process (Success Billing)
                     await reconcileQuota({
@@ -896,9 +898,11 @@ export async function dispatch(options: DispatchOptions) {
                     }
 
                     // Usage extraction and billing
-                    let { promptTokens, completionTokens } = handler.extractUsage(rawData || {});
+                    const _usageResult2 = handler.extractUsage(rawData || {});
+                    let { promptTokens, completionTokens } = _usageResult2;
+                    const cachedTokensFromUsage2 = _usageResult2.cachedTokens || 0;
 
-                    const actualCost = calculateCost(model, effectiveGroup, promptTokens, completionTokens);
+                    const actualCost = calculateCost(model, effectiveGroup, promptTokens, completionTokens, cachedTokensFromUsage2);
 
                     await reconcileQuota({
                         userId: user.id,
@@ -1188,9 +1192,11 @@ function handleStreamBilling(
                 // Process usage and bill
                 let finalPromptTokens = 0;
                 let finalCompletionTokens = 0;
+                let finalCachedTokens = 0;
 
                 if (usageData) {
                     finalPromptTokens = usageData.prompt_tokens || 0;
+                    finalCachedTokens = usageData.cached_tokens || usageData.prompt_tokens_details?.cached_tokens || 0;
                     finalCompletionTokens = usageData.completion_tokens || 0;
                 } else {
                     const estimate = (text: string): number => {
@@ -1202,7 +1208,7 @@ function handleStreamBilling(
                     finalPromptTokens = estimate(promptText);
                 }
 
-                const actualCost = calculateCost(model, userGroup || user.group, finalPromptTokens, finalCompletionTokens);
+                const actualCost = calculateCost(model, userGroup || user.group, finalPromptTokens, finalCompletionTokens, finalCachedTokens);
                 await reconcileQuota({ userId: user.id, tokenId: token.id, preDeducted, actualCost });
                 await billAndLog({
                     userId: user.id,

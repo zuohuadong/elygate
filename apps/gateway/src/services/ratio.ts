@@ -2,25 +2,30 @@ import { optionCache } from './optionCache';
 
 /**
  * Multiplier/Ratio System Core (Inspired by New-API)
- * Formula: Cost = (PromptTokens + CompletionTokens * CompletionRatio) * ModelRatio * GroupRatio
+ * Formula: Cost = (PromptTokens * CacheDiscount + CompletionTokens * CompletionRatio) * ModelRatio * GroupRatio
+ *
+ * CacheDiscount: When cachedTokens > 0, prompt tokens get a discount.
+ *   Effective prompt cost = (promptTokens - cachedTokens) + cachedTokens * CacheRatio
+ *   Default CacheRatio = 0.5 (50% discount on cached tokens)
  */
 
 export function calculateCost(
     modelName: string,
     groupName: string,
     promptTokens: number,
-    completionTokens: number
+    completionTokens: number,
+    cachedTokens?: number,
 ): number {
     const ModelRatio = optionCache.get('ModelRatio', { 'gpt-3.5-turbo': 1 }) as Record<string, number>;
     const CompletionRatio = optionCache.get('CompletionRatio', { 'gpt-3.5-turbo': 1.33 }) as Record<string, number>;
     const GroupRatio = optionCache.get('GroupRatio', { 'default': 1 }) as Record<string, number>;
-    const GroupModelRatio = optionCache.get('GroupModelRatio', {}) as Record<string, Record<string, number>>; // { "vip": { "gpt-4": 0.8 } }
-    const FixedCostModels = optionCache.get('FixedCostModels', { 'flux': 50000, 'udio': 100000 }) as Record<string, number>; // Cost per request
+    const GroupModelRatio = optionCache.get('GroupModelRatio', {}) as Record<string, Record<string, number>>;
+    const FixedCostModels = optionCache.get('FixedCostModels', { 'flux': 50000, 'udio': 100000 }) as Record<string, number>;
+    const CacheRatio = optionCache.get('CacheRatio', 0.5) as number;
 
     // Check for fixed cost models first
     if (FixedCostModels[modelName] !== undefined) {
         const gRatio = GroupRatio[groupName] || 1;
-        // In endpoints like images, completionTokens carries the 'n' count
         const count = Math.max(1, promptTokens + completionTokens);
         return Math.ceil(FixedCostModels[modelName] * count * gRatio);
     }
@@ -29,21 +34,20 @@ export function calculateCost(
     const cRatio = CompletionRatio[modelName] !== undefined ? CompletionRatio[modelName] : 1;
     const gRatio = GroupRatio[groupName] !== undefined ? GroupRatio[groupName] : 1;
 
-    // Check for group-specific model ratio overrides
     let gmRatio = 1;
     if (GroupModelRatio[groupName] && GroupModelRatio[groupName][modelName]) {
         gmRatio = GroupModelRatio[groupName][modelName];
     }
 
-    const baseCost = promptTokens + (completionTokens * cRatio);
+    // Apply cache discount: cached tokens cost CacheRatio instead of full price
+    const effectiveCached = Math.min(cachedTokens || 0, promptTokens);
+    const effectivePrompt = (promptTokens - effectiveCached) + (effectiveCached * CacheRatio);
+
+    const baseCost = effectivePrompt + (completionTokens * cRatio);
 
     return Math.ceil(baseCost * mRatio * gRatio * gmRatio);
 }
 
-/**
- * Quota to Currency conversion
- * Default: 500,000 Quota = $1.00
- */
 export function quotaToUSD(quota: number): number {
     return quota / 500000;
 }

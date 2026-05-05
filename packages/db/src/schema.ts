@@ -123,6 +123,7 @@ export const channels = pgTable('channels', {
     testModel: text('test_model'),
     openaiOrganization: text('openai_organization'),
     balance: decimal('balance', { precision: 20, scale: 8 }),
+    balanceUpdatedAt: timestamp('balance_updated_at', { withTimezone: true }),
     responseTime: integer('response_time'),
     statusCodeMapping: jsonb('status_code_mapping').$type<Record<string, unknown>>().notNull().default({}),
     autoBan: integer('auto_ban').notNull().default(1),
