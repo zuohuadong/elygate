@@ -1,7 +1,7 @@
 import type { ElysiaCtx } from '../../types';
 import { Elysia } from 'elysia';
-import { db, sql } from '@elygate/db';
-import { options, channels, tokens, users, logs } from '@elygate/db/schema';
+import { db } from '@elygate/db';
+import { options, channels, tokens, users, logs, responseCache, semanticCache, tokenCache, userQuotaCache } from '@elygate/db/schema';
 import { eq, and, desc, sql as drizzleSql, count } from 'drizzle-orm';
 import { memoryCache } from '../../services/cache';
 import { getAffinityStats, clearAffinityCache } from '../../services/channelAffinity';
@@ -19,15 +19,14 @@ export const performanceRouter = new Elysia()
         const cbStats = circuitBreaker.getStats();
         const affinityStats = getAffinityStats();
 
-        // Complex aggregate query with subqueries — use raw SQL
-        const [dbSize] = await sql`
+        const [dbSize] = await db.execute(drizzleSql`
             SELECT
                 pg_database_size(current_database()) as db_bytes,
                 (SELECT COUNT(*) FROM logs) as total_logs,
                 (SELECT COUNT(*) FROM channels) as total_channels,
                 (SELECT COUNT(*) FROM tokens WHERE status = 1) as active_tokens,
                 (SELECT COUNT(*) FROM users) as total_users
-        `;
+        `) as any[];
 
         return {
             success: true,
@@ -59,11 +58,10 @@ export const performanceRouter = new Elysia()
 
     // --- Clear caches ---
     .delete('/performance/caches', async () => {
-        // DELETE whole tables — raw SQL is simpler for cache tables not in schema
-        await sql`DELETE FROM response_cache`;
-        await sql`DELETE FROM semantic_cache`;
-        await sql`DELETE FROM token_cache`;
-        await sql`DELETE FROM user_quota_cache`;
+        await db.delete(responseCache);
+        await db.delete(semanticCache);
+        await db.delete(tokenCache);
+        await db.delete(userQuotaCache);
         const affinityCleared = clearAffinityCache();
         await memoryCache.refresh();
 

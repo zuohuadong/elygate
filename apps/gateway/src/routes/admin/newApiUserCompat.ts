@@ -1,7 +1,7 @@
 import type { ElysiaCtx, TokenRecord, UserRecord } from '../../types';
 import { Elysia } from 'elysia';
 import { db } from '@elygate/db';
-import { users, packages, userSubscriptions, announcements, logs, channels, userGroups, paymentOrders, options, oauthAccounts } from '@elygate/db/schema';
+import { users, packages, userSubscriptions, announcements, logs, channels, userGroups, paymentOrders, options, oauthAccounts, customOAuthProviders, twoFactorLoginChallenges, tokens, sessions } from '@elygate/db/schema';
 import { eq, and, desc, or, ilike, count, sum, inArray, sql as drizzleSql } from 'drizzle-orm';
 import { adminGuard, authPlugin } from '../../middleware/auth';
 import { optionCache } from '../../services/optionCache';
@@ -11,6 +11,8 @@ import { buildModelsUrl } from '../../utils/url';
 import { decryptChannelKeys, getChannelKeys } from '../../services/encryption';
 import { getProviderHandler } from '../../providers';
 import { config, apiUrls } from '../../config';
+import { buildOtpAuthUrl, consumeBackupCode, generateBackupCodes, generateTwoFactorSecret, hashBackupCodes, verifyTotp } from '../../services/twoFactor';
+import { authService } from '../../services/auth';
 
 /**
  * New API compatible user/subscription/announcement/ollama routes.
@@ -39,13 +41,36 @@ function getUserVisibleModels(user: UserRecord, token: TokenRecord | undefined):
     return [...new Set(models)].sort();
 }
 
-function notImplemented(set: ElysiaCtx['set'], message: string) {
-    set.status = 501;
-    return { success: false, message };
-}
-
 function generateEPaySign(params: string, secret: string): string {
     return new Bun.CryptoHasher('md5').update(params + secret).digest('hex');
+}
+
+function normalizeDiscoveryUrl(body: Record<string, any>): string | null {
+    const explicit = typeof body.discoveryUrl === 'string' ? body.discoveryUrl.trim() : typeof body.discovery_url === 'string' ? body.discovery_url.trim() : '';
+    if (explicit) return explicit;
+    const issuer = typeof body.issuer === 'string' ? body.issuer.trim().replace(/\/+$/, '') : '';
+    if (issuer) return `${issuer}/.well-known/openid-configuration`;
+    return null;
+}
+
+async function fetchOAuthDiscovery(body: Record<string, any>) {
+    const discoveryUrl = normalizeDiscoveryUrl(body);
+    if (!discoveryUrl) throw new Error('issuer or discoveryUrl is required');
+    const res = await fetch(discoveryUrl, { headers: { Accept: 'application/json' } });
+    if (!res.ok) {
+        throw new Error(`Discovery endpoint returned ${res.status}`);
+    }
+    const data = await res.json() as Record<string, any>;
+    return {
+        discoveryUrl,
+        issuer: typeof data.issuer === 'string' ? data.issuer : body.issuer || null,
+        authorizationEndpoint: typeof data.authorization_endpoint === 'string' ? data.authorization_endpoint : null,
+        tokenEndpoint: typeof data.token_endpoint === 'string' ? data.token_endpoint : null,
+        userinfoEndpoint: typeof data.userinfo_endpoint === 'string' ? data.userinfo_endpoint : null,
+        jwksUri: typeof data.jwks_uri === 'string' ? data.jwks_uri : null,
+        scopes: Array.isArray(data.scopes_supported) ? data.scopes_supported.filter((v): v is string => typeof v === 'string') : [],
+        metadata: data,
+    };
 }
 
 async function createTopupPaymentOrder(userId: number, amount: number, paymentMethod: string) {
@@ -111,6 +136,192 @@ async function createTopupPaymentOrder(userId: number, amount: number, paymentMe
         orderId: order.id,
         paymentUrl,
     };
+}
+
+function parsePackagePriceToCents(value: unknown): number {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) return 0;
+    return Math.floor(numeric * 100);
+}
+
+async function createSubscriptionPaymentOrder(userId: number, packageId: number, paymentMethod: string) {
+    const [paymentEnabled] = await db.select().from(options).where(eq(options.key, 'PaymentEnabled'));
+    if (paymentEnabled && paymentEnabled.value === 'false') {
+        throw new Error('Self-recharge is currently disabled');
+    }
+    if (!packageId) throw new Error('packageId is required');
+
+    const [pkg] = await db.select({
+        id: packages.id,
+        name: packages.name,
+        price: packages.price,
+        durationDays: packages.durationDays,
+        cycleQuota: packages.cycleQuota,
+        isPublic: packages.isPublic,
+    }).from(packages).where(eq(packages.id, packageId)).limit(1);
+    if (!pkg || pkg.isPublic === false) throw new Error('Package not found');
+
+    const amount = parsePackagePriceToCents(pkg.price);
+    if (amount <= 0) throw new Error('Invalid package price');
+
+    const [order] = await db.insert(paymentOrders).values({
+        userId,
+        amount,
+        paymentMethod,
+        orderType: 'subscription',
+        targetType: 'package',
+        targetId: packageId,
+        metadata: {
+            packageName: pkg.name,
+            durationDays: Number(pkg.durationDays || 30),
+            cycleQuota: Number(pkg.cycleQuota || 0),
+        },
+        status: 0,
+    }).returning();
+
+    let paymentUrl = '';
+    if (paymentMethod === 'stripe' && config.stripe.secretKey) {
+        const stripeResponse = await fetch(apiUrls.stripe + '/v1/checkout/sessions', {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${config.stripe.secretKey}`,
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: new URLSearchParams({
+                'payment_method_types[]': 'card',
+                'line_items[0][price_data][currency]': 'usd',
+                'line_items[0][price_data][product_data][name]': `Elygate Subscription - ${pkg.name}`,
+                'line_items[0][price_data][unit_amount]': String(amount),
+                'line_items[0][quantity]': '1',
+                mode: 'payment',
+                success_url: `${config.webUrl}/payment/success?order_id=${order.id}`,
+                cancel_url: `${config.webUrl}/payment/cancel?order_id=${order.id}`,
+                'metadata[order_id]': String(order.id),
+                'metadata[user_id]': String(userId),
+                'metadata[order_type]': 'subscription',
+                'metadata[package_id]': String(packageId),
+            }),
+        });
+        const session = await stripeResponse.json() as Record<string, any>;
+        if (!session.url) {
+            throw new Error(`Stripe error: ${session.error?.message || 'Unknown error'}`);
+        }
+        paymentUrl = session.url;
+    } else if (paymentMethod === 'epay' && config.epay.appId && config.epay.appSecret) {
+        const outTradeNo = `ELY${order.id}`;
+        const params = new URLSearchParams({
+            pid: config.epay.appId,
+            type: 'alipay',
+            out_trade_no: outTradeNo,
+            notify_url: `${config.gatewayUrl}/api/payment/epay/callback`,
+            return_url: `${config.webUrl}/payment/success?order_id=${order.id}`,
+            name: `Elygate Subscription - ${pkg.name}`,
+            money: (amount / 100).toFixed(2),
+        });
+        const sortedParams = new URLSearchParams([...params.entries()].sort());
+        const sign = generateEPaySign(sortedParams.toString(), config.epay.appSecret);
+        paymentUrl = `${config.epay.gateway}/submit.php?${sortedParams}&sign=${sign}&sign_type=MD5`;
+    }
+
+    return {
+        success: true,
+        orderId: order.id,
+        paymentUrl,
+        data: {
+            packageId: pkg.id,
+            packageName: pkg.name,
+            amount,
+        },
+    };
+}
+
+const PASSKEY_PROVIDER_PREFIX = 'passkey:';
+const PASSKEY_CHALLENGE_TTL_MS = 5 * 60 * 1000;
+const passkeyChallenges = new Map<string, { action: 'register' | 'verify' | 'login'; userId: number; expiresAt: number }>();
+
+function parsePasskeyMetadata(value: unknown): Record<string, any> {
+    if (!value) return {};
+    if (typeof value === 'string') {
+        try {
+            const parsed = JSON.parse(value);
+            return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+        } catch {
+            return {};
+        }
+    }
+    return typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {};
+}
+
+function getPasskeyRpId() {
+    const fallback = 'localhost';
+    for (const raw of [config.webUrl, config.gatewayUrl]) {
+        if (!raw) continue;
+        try {
+            const host = new URL(raw).hostname;
+            if (host) return host;
+        } catch {
+            continue;
+        }
+    }
+    return fallback;
+}
+
+function cleanupPasskeyChallenges() {
+    const now = Date.now();
+    for (const [token, challenge] of passkeyChallenges.entries()) {
+        if (challenge.expiresAt <= now) passkeyChallenges.delete(token);
+    }
+}
+
+function createPasskeyChallenge(action: 'register' | 'verify' | 'login', userId: number) {
+    cleanupPasskeyChallenges();
+    const challengeToken = `pkc_${Bun.randomUUIDv7('hex')}`;
+    const challenge = Bun.randomUUIDv7('hex');
+    passkeyChallenges.set(challengeToken, { action, userId, expiresAt: Date.now() + PASSKEY_CHALLENGE_TTL_MS });
+    return { challengeToken, challenge };
+}
+
+function consumePasskeyChallenge(token: string, action: 'register' | 'verify' | 'login') {
+    cleanupPasskeyChallenges();
+    const challenge = passkeyChallenges.get(token);
+    if (!challenge || challenge.action !== action || challenge.expiresAt <= Date.now()) return null;
+    passkeyChallenges.delete(token);
+    return challenge;
+}
+
+function extractCredentialId(payload: Record<string, any>) {
+    const direct = payload.credentialId || payload.credential_id;
+    if (typeof direct === 'string' && direct.trim()) return direct.trim();
+    const credential = payload.credential;
+    if (credential && typeof credential === 'object') {
+        const nested = (credential as Record<string, any>).id || (credential as Record<string, any>).rawId;
+        if (typeof nested === 'string' && nested.trim()) return nested.trim();
+    }
+    return '';
+}
+
+async function listUserPasskeys(userId: number) {
+    const rows = await db.select({
+        id: oauthAccounts.id,
+        credentialId: oauthAccounts.providerUserId,
+        metadata: oauthAccounts.accessToken,
+        createdAt: oauthAccounts.createdAt,
+    }).from(oauthAccounts)
+        .where(and(eq(oauthAccounts.userId, userId), ilike(oauthAccounts.provider, `${PASSKEY_PROVIDER_PREFIX}%`)))
+        .orderBy(desc(oauthAccounts.id));
+
+    return rows.map((row) => {
+        const metadata = parsePasskeyMetadata(row.metadata);
+        const transports = Array.isArray(metadata.transports) ? metadata.transports.filter((item): item is string => typeof item === 'string') : [];
+        return {
+            id: row.id,
+            credentialId: row.credentialId,
+            name: String(metadata.name || metadata.deviceName || ''),
+            transports,
+            createdAt: row.createdAt,
+            metadata,
+        };
+    });
 }
 
 export const newApiUserAdminRouter = new Elysia()
@@ -292,17 +503,144 @@ export const newApiUserAdminRouter = new Elysia()
     .get('/group', async () => {
         return await db.select().from(userGroups).orderBy(desc(userGroups.createdAt));
     })
-    .post('/custom-oauth-provider/discovery', ({ set }: ElysiaCtx) => notImplemented(set, 'Custom OAuth discovery is not implemented'))
+    .post('/custom-oauth-provider/discovery', async ({ body, set }: ElysiaCtx) => {
+        try {
+            const discovery = await fetchOAuthDiscovery((body || {}) as Record<string, any>);
+            return { success: true, data: discovery };
+        } catch (e: unknown) {
+            set.status = 400;
+            return { success: false, message: e instanceof Error ? e.message : String(e) };
+        }
+    })
     .get('/custom-oauth-provider', async () => {
-        return { success: true, data: [] };
+        const rows = await db.select({
+            id: customOAuthProviders.id,
+            name: customOAuthProviders.name,
+            issuer: customOAuthProviders.issuer,
+            discoveryUrl: customOAuthProviders.discoveryUrl,
+            clientId: customOAuthProviders.clientId,
+            authorizationEndpoint: customOAuthProviders.authorizationEndpoint,
+            tokenEndpoint: customOAuthProviders.tokenEndpoint,
+            userinfoEndpoint: customOAuthProviders.userinfoEndpoint,
+            jwksUri: customOAuthProviders.jwksUri,
+            scopes: customOAuthProviders.scopes,
+            enabled: customOAuthProviders.enabled,
+            metadata: customOAuthProviders.metadata,
+            createdAt: customOAuthProviders.createdAt,
+            updatedAt: customOAuthProviders.updatedAt,
+        }).from(customOAuthProviders).orderBy(desc(customOAuthProviders.id));
+        return { success: true, data: rows };
     })
-    .get('/custom-oauth-provider/:id', ({ params, set }: ElysiaCtx) => {
-        set.status = 404;
-        return { success: false, message: `Custom OAuth provider '${params.id}' not found` };
+    .get('/custom-oauth-provider/:id', async ({ params, set }: ElysiaCtx) => {
+        const [row] = await db.select({
+            id: customOAuthProviders.id,
+            name: customOAuthProviders.name,
+            issuer: customOAuthProviders.issuer,
+            discoveryUrl: customOAuthProviders.discoveryUrl,
+            clientId: customOAuthProviders.clientId,
+            clientSecret: customOAuthProviders.clientSecret,
+            authorizationEndpoint: customOAuthProviders.authorizationEndpoint,
+            tokenEndpoint: customOAuthProviders.tokenEndpoint,
+            userinfoEndpoint: customOAuthProviders.userinfoEndpoint,
+            jwksUri: customOAuthProviders.jwksUri,
+            scopes: customOAuthProviders.scopes,
+            enabled: customOAuthProviders.enabled,
+            metadata: customOAuthProviders.metadata,
+            createdAt: customOAuthProviders.createdAt,
+            updatedAt: customOAuthProviders.updatedAt,
+        }).from(customOAuthProviders).where(eq(customOAuthProviders.id, Number(params.id))).limit(1);
+        if (!row) {
+            set.status = 404;
+            return { success: false, message: `Custom OAuth provider '${params.id}' not found` };
+        }
+        return { success: true, data: row };
     })
-    .post('/custom-oauth-provider', ({ set }: ElysiaCtx) => notImplemented(set, 'Custom OAuth provider management is not implemented'))
-    .put('/custom-oauth-provider/:id', ({ set }: ElysiaCtx) => notImplemented(set, 'Custom OAuth provider management is not implemented'))
-    .delete('/custom-oauth-provider/:id', ({ set }: ElysiaCtx) => notImplemented(set, 'Custom OAuth provider management is not implemented'))
+    .post('/custom-oauth-provider', async ({ body, set }: ElysiaCtx) => {
+        const b = (body || {}) as Record<string, any>;
+        if (!b.name) {
+            set.status = 400;
+            return { success: false, message: 'name is required' };
+        }
+        try {
+            const discovery = (b.discoveryUrl || b.discovery_url || b.issuer) ? await fetchOAuthDiscovery(b) : null;
+            const [row] = await db.insert(customOAuthProviders).values({
+                name: String(b.name),
+                issuer: discovery?.issuer ?? b.issuer ?? null,
+                discoveryUrl: discovery?.discoveryUrl ?? b.discoveryUrl ?? b.discovery_url ?? null,
+                clientId: b.clientId ?? b.client_id ?? null,
+                clientSecret: b.clientSecret ?? b.client_secret ?? null,
+                authorizationEndpoint: discovery?.authorizationEndpoint ?? b.authorizationEndpoint ?? b.authorization_endpoint ?? null,
+                tokenEndpoint: discovery?.tokenEndpoint ?? b.tokenEndpoint ?? b.token_endpoint ?? null,
+                userinfoEndpoint: discovery?.userinfoEndpoint ?? b.userinfoEndpoint ?? b.userinfo_endpoint ?? null,
+                jwksUri: discovery?.jwksUri ?? b.jwksUri ?? b.jwks_uri ?? null,
+                scopes: discovery?.scopes ?? (Array.isArray(b.scopes) ? b.scopes : []),
+                enabled: b.enabled ?? true,
+                metadata: discovery?.metadata ?? (b.metadata || {}),
+            }).returning({
+                id: customOAuthProviders.id,
+                name: customOAuthProviders.name,
+                issuer: customOAuthProviders.issuer,
+                discoveryUrl: customOAuthProviders.discoveryUrl,
+                enabled: customOAuthProviders.enabled,
+                createdAt: customOAuthProviders.createdAt,
+            });
+            return { success: true, data: row };
+        } catch (e: unknown) {
+            set.status = 400;
+            return { success: false, message: e instanceof Error ? e.message : String(e) };
+        }
+    })
+    .put('/custom-oauth-provider/:id', async ({ params, body, set }: ElysiaCtx) => {
+        const id = Number(params.id);
+        if (!id) {
+            set.status = 400;
+            return { success: false, message: 'invalid id' };
+        }
+        const [old] = await db.select().from(customOAuthProviders).where(eq(customOAuthProviders.id, id)).limit(1);
+        if (!old) {
+            set.status = 404;
+            return { success: false, message: 'Custom OAuth provider not found' };
+        }
+        const b = (body || {}) as Record<string, any>;
+        try {
+            const shouldRefreshDiscovery = Boolean(b.discoveryUrl || b.discovery_url || b.issuer);
+            const discovery = shouldRefreshDiscovery ? await fetchOAuthDiscovery(b) : null;
+            const [row] = await db.update(customOAuthProviders).set({
+                name: b.name ?? old.name,
+                issuer: discovery?.issuer ?? b.issuer ?? old.issuer,
+                discoveryUrl: discovery?.discoveryUrl ?? b.discoveryUrl ?? b.discovery_url ?? old.discoveryUrl,
+                clientId: b.clientId ?? b.client_id ?? old.clientId,
+                clientSecret: b.clientSecret ?? b.client_secret ?? old.clientSecret,
+                authorizationEndpoint: discovery?.authorizationEndpoint ?? b.authorizationEndpoint ?? b.authorization_endpoint ?? old.authorizationEndpoint,
+                tokenEndpoint: discovery?.tokenEndpoint ?? b.tokenEndpoint ?? b.token_endpoint ?? old.tokenEndpoint,
+                userinfoEndpoint: discovery?.userinfoEndpoint ?? b.userinfoEndpoint ?? b.userinfo_endpoint ?? old.userinfoEndpoint,
+                jwksUri: discovery?.jwksUri ?? b.jwksUri ?? b.jwks_uri ?? old.jwksUri,
+                scopes: discovery?.scopes ?? (Array.isArray(b.scopes) ? b.scopes : old.scopes),
+                enabled: b.enabled ?? old.enabled,
+                metadata: discovery?.metadata ?? b.metadata ?? old.metadata,
+                updatedAt: new Date(),
+            }).where(eq(customOAuthProviders.id, id)).returning({
+                id: customOAuthProviders.id,
+                name: customOAuthProviders.name,
+                issuer: customOAuthProviders.issuer,
+                discoveryUrl: customOAuthProviders.discoveryUrl,
+                enabled: customOAuthProviders.enabled,
+                updatedAt: customOAuthProviders.updatedAt,
+            });
+            return { success: true, data: row };
+        } catch (e: unknown) {
+            set.status = 400;
+            return { success: false, message: e instanceof Error ? e.message : String(e) };
+        }
+    })
+    .delete('/custom-oauth-provider/:id', async ({ params, set }: ElysiaCtx) => {
+        const rows = await db.delete(customOAuthProviders).where(eq(customOAuthProviders.id, Number(params.id))).returning({ id: customOAuthProviders.id });
+        if (rows.length === 0) {
+            set.status = 404;
+            return { success: false, message: 'Custom OAuth provider not found' };
+        }
+        return { success: true, deleted: rows[0].id };
+    })
     .get('/data', async () => {
         return await db.select({
             date: drizzleSql<string>`DATE(${logs.createdAt})`,
@@ -625,21 +963,281 @@ export const newApiUserSelfRouter = new Elysia()
         const [row] = await db.select({ code: drizzleSql<string>`code`, reward: drizzleSql<number>`reward` }).from(drizzleSql`user_aff`).where(drizzleSql`user_id = ${currentUser.id}`) as any;
         return { success: true, data: row || null };
     })
-    .get('/user/2fa/status', () => {
-        return { success: true, data: { enabled: false, backupCodesRemaining: 0 } };
+    .get('/user/2fa/status', async ({ user, set }: ElysiaCtx) => {
+        const currentUser = user as UserRecord | undefined;
+        if (!currentUser) { set.status = 401; return { success: false, message: 'Authentication required' }; }
+        const [row] = await db.select({
+            twoFactorEnabled: users.twoFactorEnabled,
+            twoFactorBackupCodes: users.twoFactorBackupCodes,
+            twoFactorPendingSecret: users.twoFactorPendingSecret,
+        }).from(users).where(eq(users.id, currentUser.id)).limit(1);
+        const backupCodes = Array.isArray(row?.twoFactorBackupCodes) ? row!.twoFactorBackupCodes : [];
+        return {
+            success: true,
+            data: {
+                enabled: Boolean(row?.twoFactorEnabled),
+                pending: Boolean(row?.twoFactorPendingSecret),
+                backupCodesRemaining: backupCodes.length,
+            }
+        };
     })
-    .post('/user/2fa/setup', ({ set }: ElysiaCtx) => notImplemented(set, '2FA setup is not implemented'))
-    .post('/user/2fa/enable', ({ set }: ElysiaCtx) => notImplemented(set, '2FA enable is not implemented'))
-    .post('/user/2fa/disable', ({ set }: ElysiaCtx) => notImplemented(set, '2FA disable is not implemented'))
-    .post('/user/2fa/backup_codes', ({ set }: ElysiaCtx) => notImplemented(set, '2FA backup code regeneration is not implemented'))
-    .get('/user/passkey', () => {
-        return { success: true, data: { enabled: false, registered: false, verified: false } };
+    .post('/user/2fa/setup', async ({ user, set }: ElysiaCtx) => {
+        const currentUser = user as UserRecord | undefined;
+        if (!currentUser) { set.status = 401; return { success: false, message: 'Authentication required' }; }
+        const secret = generateTwoFactorSecret();
+        const backupCodes = generateBackupCodes();
+        const issuer = String(optionCache.get('SystemName', 'Elygate'));
+        await db.update(users).set({
+            twoFactorPendingSecret: secret,
+            twoFactorPendingBackupCodes: hashBackupCodes(backupCodes),
+            updatedAt: new Date(),
+        }).where(eq(users.id, currentUser.id));
+        return {
+            success: true,
+            data: {
+                secret,
+                otpauthUrl: buildOtpAuthUrl(secret, currentUser.username, issuer),
+                backupCodes,
+            }
+        };
     })
-    .post('/user/passkey/register/begin', ({ set }: ElysiaCtx) => notImplemented(set, 'Passkey registration is not implemented'))
-    .post('/user/passkey/register/finish', ({ set }: ElysiaCtx) => notImplemented(set, 'Passkey registration is not implemented'))
-    .post('/user/passkey/verify/begin', ({ set }: ElysiaCtx) => notImplemented(set, 'Passkey verification is not implemented'))
-    .post('/user/passkey/verify/finish', ({ set }: ElysiaCtx) => notImplemented(set, 'Passkey verification is not implemented'))
-    .delete('/user/passkey', ({ set }: ElysiaCtx) => notImplemented(set, 'Passkey deletion is not implemented'))
+    .post('/user/2fa/enable', async ({ user, body, set }: ElysiaCtx) => {
+        const currentUser = user as UserRecord | undefined;
+        if (!currentUser) { set.status = 401; return { success: false, message: 'Authentication required' }; }
+        const code = String((body as Record<string, any>).code || '');
+        const [row] = await db.select({
+            pendingSecret: users.twoFactorPendingSecret,
+            pendingCodes: users.twoFactorPendingBackupCodes,
+        }).from(users).where(eq(users.id, currentUser.id)).limit(1);
+        if (!row?.pendingSecret) { set.status = 400; return { success: false, message: 'No pending 2FA setup' }; }
+        if (!verifyTotp(row.pendingSecret, code)) { set.status = 401; return { success: false, message: 'Invalid 2FA code' }; }
+        await db.update(users).set({
+            twoFactorEnabled: true,
+            twoFactorSecret: row.pendingSecret,
+            twoFactorBackupCodes: Array.isArray(row.pendingCodes) ? row.pendingCodes : [],
+            twoFactorPendingSecret: null,
+            twoFactorPendingBackupCodes: [],
+            updatedAt: new Date(),
+        }).where(eq(users.id, currentUser.id));
+        return { success: true };
+    })
+    .post('/user/2fa/disable', async ({ user, body, set }: ElysiaCtx) => {
+        const currentUser = user as UserRecord | undefined;
+        if (!currentUser) { set.status = 401; return { success: false, message: 'Authentication required' }; }
+        const code = String((body as Record<string, any>).code || '');
+        const backupCode = String((body as Record<string, any>).backupCode || (body as Record<string, any>).backup_code || '');
+        const [row] = await db.select({
+            enabled: users.twoFactorEnabled,
+            secret: users.twoFactorSecret,
+            backupCodes: users.twoFactorBackupCodes,
+        }).from(users).where(eq(users.id, currentUser.id)).limit(1);
+        if (!row?.enabled || !row.secret) { set.status = 400; return { success: false, message: '2FA is not enabled' }; }
+        const storedCodes = Array.isArray(row.backupCodes) ? row.backupCodes : [];
+        const totpValid = code ? verifyTotp(row.secret, code) : false;
+        const backupResult = !totpValid && backupCode ? consumeBackupCode(backupCode, storedCodes) : { valid: false, remaining: storedCodes };
+        if (!totpValid && !backupResult.valid) { set.status = 401; return { success: false, message: 'Invalid 2FA code' }; }
+        await db.update(users).set({
+            twoFactorEnabled: false,
+            twoFactorSecret: null,
+            twoFactorBackupCodes: [],
+            twoFactorPendingSecret: null,
+            twoFactorPendingBackupCodes: [],
+            updatedAt: new Date(),
+        }).where(eq(users.id, currentUser.id));
+        return { success: true };
+    })
+    .post('/user/2fa/backup_codes', async ({ user, body, set }: ElysiaCtx) => {
+        const currentUser = user as UserRecord | undefined;
+        if (!currentUser) { set.status = 401; return { success: false, message: 'Authentication required' }; }
+        const code = String((body as Record<string, any>).code || '');
+        const [row] = await db.select({
+            enabled: users.twoFactorEnabled,
+            secret: users.twoFactorSecret,
+        }).from(users).where(eq(users.id, currentUser.id)).limit(1);
+        if (!row?.enabled || !row.secret) { set.status = 400; return { success: false, message: '2FA is not enabled' }; }
+        if (!verifyTotp(row.secret, code)) { set.status = 401; return { success: false, message: 'Invalid 2FA code' }; }
+        const backupCodes = generateBackupCodes();
+        await db.update(users).set({
+            twoFactorBackupCodes: hashBackupCodes(backupCodes),
+            updatedAt: new Date(),
+        }).where(eq(users.id, currentUser.id));
+        return { success: true, data: { backupCodes } };
+    })
+    .get('/user/passkey', async ({ user, set }: ElysiaCtx) => {
+        const currentUser = user as UserRecord | undefined;
+        if (!currentUser) { set.status = 401; return { success: false, message: 'Authentication required' }; }
+        const passkeys = await listUserPasskeys(currentUser.id);
+        return {
+            success: true,
+            data: {
+                enabled: passkeys.length > 0,
+                registered: passkeys.length > 0,
+                verified: passkeys.some((item) => item.metadata.verified === true),
+                passkeys: passkeys.map((item) => ({
+                    id: item.id,
+                    credentialId: item.credentialId,
+                    name: item.name || 'Passkey',
+                    transports: item.transports,
+                    createdAt: item.createdAt,
+                    verified: item.metadata.verified === true,
+                    lastUsedAt: item.metadata.lastUsedAt || null,
+                })),
+            }
+        };
+    })
+    .post('/user/passkey/register/begin', async ({ user, body, set }: ElysiaCtx) => {
+        const currentUser = user as UserRecord | undefined;
+        if (!currentUser) { set.status = 401; return { success: false, message: 'Authentication required' }; }
+        const payload = body as Record<string, any>;
+        const displayName = String(payload.displayName || payload.display_name || currentUser.username || 'User');
+        const passkeys = await listUserPasskeys(currentUser.id);
+        const { challengeToken, challenge } = createPasskeyChallenge('register', currentUser.id);
+        const rpId = getPasskeyRpId();
+        return {
+            success: true,
+            data: {
+                challengeToken,
+                publicKey: {
+                    challenge,
+                    rp: { id: rpId, name: String(optionCache.get('SystemName', 'Elygate')) },
+                    user: {
+                        id: String(currentUser.id),
+                        name: currentUser.username,
+                        displayName,
+                    },
+                    pubKeyCredParams: [
+                        { type: 'public-key', alg: -7 },
+                        { type: 'public-key', alg: -257 },
+                    ],
+                    authenticatorSelection: { userVerification: 'preferred' },
+                    timeout: 60000,
+                    excludeCredentials: passkeys.map((item) => ({
+                        id: item.credentialId,
+                        type: 'public-key',
+                        transports: item.transports.length > 0 ? item.transports : ['internal'],
+                    })),
+                }
+            }
+        };
+    })
+    .post('/user/passkey/register/finish', async ({ user, body, set }: ElysiaCtx) => {
+        const currentUser = user as UserRecord | undefined;
+        if (!currentUser) { set.status = 401; return { success: false, message: 'Authentication required' }; }
+        const payload = body as Record<string, any>;
+        const challengeToken = String(payload.challengeToken || payload.challenge_token || '');
+        if (!challengeToken) { set.status = 400; return { success: false, message: 'challengeToken is required' }; }
+        const challenge = consumePasskeyChallenge(challengeToken, 'register');
+        if (!challenge || challenge.userId !== currentUser.id) {
+            set.status = 401;
+            return { success: false, message: 'Invalid or expired challenge' };
+        }
+        const credentialId = extractCredentialId(payload);
+        if (!credentialId) { set.status = 400; return { success: false, message: 'credentialId is required' }; }
+
+        const transports = Array.isArray(payload.transports)
+            ? payload.transports.filter((item): item is string => typeof item === 'string')
+            : ['internal'];
+        const metadata = {
+            name: String(payload.name || payload.deviceName || payload.device_name || 'Passkey'),
+            transports,
+            verified: false,
+            registeredAt: new Date().toISOString(),
+        };
+
+        const [existing] = await db.select({ id: oauthAccounts.id }).from(oauthAccounts)
+            .where(and(eq(oauthAccounts.userId, currentUser.id), eq(oauthAccounts.providerUserId, credentialId)))
+            .limit(1);
+        if (existing) {
+            await db.update(oauthAccounts).set({
+                accessToken: JSON.stringify(metadata),
+            }).where(eq(oauthAccounts.id, existing.id));
+        } else {
+            await db.insert(oauthAccounts).values({
+                userId: currentUser.id,
+                provider: `${PASSKEY_PROVIDER_PREFIX}${credentialId}`,
+                providerUserId: credentialId,
+                accessToken: JSON.stringify(metadata),
+            });
+        }
+        return { success: true, data: { credentialId, registered: true } };
+    })
+    .post('/user/passkey/verify/begin', async ({ user, body, set }: ElysiaCtx) => {
+        const currentUser = user as UserRecord | undefined;
+        if (!currentUser) { set.status = 401; return { success: false, message: 'Authentication required' }; }
+        const payload = body as Record<string, any>;
+        const credentialId = String(payload.credentialId || payload.credential_id || '');
+        const passkeys = await listUserPasskeys(currentUser.id);
+        if (passkeys.length === 0) { set.status = 400; return { success: false, message: 'No passkey registered' }; }
+        const targetCredentialId = credentialId || passkeys[0].credentialId;
+        if (!passkeys.some((item) => item.credentialId === targetCredentialId)) {
+            set.status = 404;
+            return { success: false, message: 'Passkey not found' };
+        }
+        const { challengeToken, challenge } = createPasskeyChallenge('verify', currentUser.id);
+        return {
+            success: true,
+            data: {
+                challengeToken,
+                credentialId: targetCredentialId,
+                publicKey: {
+                    challenge,
+                    rpId: getPasskeyRpId(),
+                    timeout: 60000,
+                    userVerification: 'preferred',
+                    allowCredentials: [{
+                        id: targetCredentialId,
+                        type: 'public-key',
+                    }],
+                }
+            }
+        };
+    })
+    .post('/user/passkey/verify/finish', async ({ user, body, set }: ElysiaCtx) => {
+        const currentUser = user as UserRecord | undefined;
+        if (!currentUser) { set.status = 401; return { success: false, message: 'Authentication required' }; }
+        const payload = body as Record<string, any>;
+        const challengeToken = String(payload.challengeToken || payload.challenge_token || '');
+        if (!challengeToken) { set.status = 400; return { success: false, message: 'challengeToken is required' }; }
+        const challenge = consumePasskeyChallenge(challengeToken, 'verify');
+        if (!challenge || challenge.userId !== currentUser.id) {
+            set.status = 401;
+            return { success: false, message: 'Invalid or expired challenge' };
+        }
+        const credentialId = extractCredentialId(payload);
+        if (!credentialId) { set.status = 400; return { success: false, message: 'credentialId is required' }; }
+        const [passkey] = await db.select({
+            id: oauthAccounts.id,
+            metadata: oauthAccounts.accessToken,
+        }).from(oauthAccounts)
+            .where(and(eq(oauthAccounts.userId, currentUser.id), eq(oauthAccounts.providerUserId, credentialId), ilike(oauthAccounts.provider, `${PASSKEY_PROVIDER_PREFIX}%`)))
+            .limit(1);
+        if (!passkey) { set.status = 404; return { success: false, message: 'Passkey not found' }; }
+
+        const metadata = parsePasskeyMetadata(passkey.metadata);
+        metadata.verified = true;
+        metadata.lastVerifiedAt = new Date().toISOString();
+        await db.update(oauthAccounts).set({
+            accessToken: JSON.stringify(metadata),
+        }).where(eq(oauthAccounts.id, passkey.id));
+        return { success: true, data: { credentialId, verified: true } };
+    })
+    .delete('/user/passkey', async ({ user, body, set }: ElysiaCtx) => {
+        const currentUser = user as UserRecord | undefined;
+        if (!currentUser) { set.status = 401; return { success: false, message: 'Authentication required' }; }
+        const payload = (body || {}) as Record<string, any>;
+        const credentialId = String(payload.credentialId || payload.credential_id || '').trim();
+        if (credentialId) {
+            const rows = await db.delete(oauthAccounts)
+                .where(and(eq(oauthAccounts.userId, currentUser.id), eq(oauthAccounts.providerUserId, credentialId), ilike(oauthAccounts.provider, `${PASSKEY_PROVIDER_PREFIX}%`)))
+                .returning({ id: oauthAccounts.id });
+            if (rows.length === 0) { set.status = 404; return { success: false, message: 'Passkey not found' }; }
+            return { success: true, deleted: rows.length };
+        }
+        const rows = await db.delete(oauthAccounts)
+            .where(and(eq(oauthAccounts.userId, currentUser.id), ilike(oauthAccounts.provider, `${PASSKEY_PROVIDER_PREFIX}%`)))
+            .returning({ id: oauthAccounts.id });
+        return { success: true, deleted: rows.length };
+    })
     .get('/user/oauth/bindings', async ({ user, set }: ElysiaCtx) => {
         const currentUser = user as UserRecord | undefined;
         if (!currentUser) { set.status = 401; return { success: false, message: 'Authentication required' }; }
@@ -730,9 +1328,32 @@ export const newApiUserSelfRouter = new Elysia()
         const quotaPerUnit = Number(optionCache.get('QuotaPerUnit', 500000));
         return { success: true, data: { amount, quota: Math.floor((amount / 100) * quotaPerUnit), provider: 'stripe' } };
     })
-    .post('/user/creem/pay', ({ set }: ElysiaCtx) => notImplemented(set, 'Creem pay is not implemented'))
-    .post('/user/waffo/pay', ({ set }: ElysiaCtx) => notImplemented(set, 'Waffo pay is not implemented'))
-    .post('/user/waffo/amount', ({ set }: ElysiaCtx) => notImplemented(set, 'Waffo amount is not implemented'))
+    .post('/user/creem/pay', async ({ user, body, set }: ElysiaCtx) => {
+        const currentUser = user as UserRecord | undefined;
+        if (!currentUser) { set.status = 401; return { success: false, message: 'Authentication required' }; }
+        try {
+            return await createTopupPaymentOrder(currentUser.id, Number((body as Record<string, any>).amount), 'creem');
+        } catch (e: unknown) {
+            set.status = 500;
+            return { success: false, message: e instanceof Error ? e.message : String(e) };
+        }
+    })
+    .post('/user/waffo/pay', async ({ user, body, set }: ElysiaCtx) => {
+        const currentUser = user as UserRecord | undefined;
+        if (!currentUser) { set.status = 401; return { success: false, message: 'Authentication required' }; }
+        try {
+            return await createTopupPaymentOrder(currentUser.id, Number((body as Record<string, any>).amount), 'waffo');
+        } catch (e: unknown) {
+            set.status = 500;
+            return { success: false, message: e instanceof Error ? e.message : String(e) };
+        }
+    })
+    .post('/user/waffo/amount', async ({ body, set }: ElysiaCtx) => {
+        const amount = Number((body as Record<string, any>).amount || 0);
+        if (!amount || amount <= 0) { set.status = 400; return { success: false, message: 'Invalid amount' }; }
+        const quotaPerUnit = Number(optionCache.get('QuotaPerUnit', 500000));
+        return { success: true, data: { amount, quota: Math.floor((amount / 100) * quotaPerUnit), provider: 'waffo' } };
+    })
     .post('/user/topup', async ({ user, body, set }: ElysiaCtx) => {
         const currentUser = user as UserRecord | undefined;
         if (!currentUser) { set.status = 401; return { success: false, message: 'Authentication required' }; }
@@ -744,9 +1365,48 @@ export const newApiUserSelfRouter = new Elysia()
         await db.update(users).set({ quota: drizzleSql`${users.quota} + ${redemption.quota}` }).where(eq(users.id, currentUser.id));
         return { success: true, quota: redemption.quota };
     })
-    .post('/subscription/epay/pay', ({ set }: ElysiaCtx) => notImplemented(set, 'Subscription EPay flow is not implemented'))
-    .post('/subscription/stripe/pay', ({ set }: ElysiaCtx) => notImplemented(set, 'Subscription Stripe flow is not implemented'))
-    .post('/subscription/creem/pay', ({ set }: ElysiaCtx) => notImplemented(set, 'Subscription Creem flow is not implemented'))
+    .post('/subscription/epay/pay', async ({ user, body, set }: ElysiaCtx) => {
+        const currentUser = user as UserRecord | undefined;
+        if (!currentUser) { set.status = 401; return { success: false, message: 'Authentication required' }; }
+        const payload = body as Record<string, any>;
+        const packageId = Number(payload.packageId || payload.package_id || payload.id);
+        if (!packageId) { set.status = 400; return { success: false, message: 'packageId is required' }; }
+        try {
+            return await createSubscriptionPaymentOrder(currentUser.id, packageId, 'epay');
+        } catch (e: unknown) {
+            const message = e instanceof Error ? e.message : String(e);
+            set.status = message.includes('not found') || message.includes('required') || message.includes('Invalid') ? 400 : 500;
+            return { success: false, message };
+        }
+    })
+    .post('/subscription/stripe/pay', async ({ user, body, set }: ElysiaCtx) => {
+        const currentUser = user as UserRecord | undefined;
+        if (!currentUser) { set.status = 401; return { success: false, message: 'Authentication required' }; }
+        const payload = body as Record<string, any>;
+        const packageId = Number(payload.packageId || payload.package_id || payload.id);
+        if (!packageId) { set.status = 400; return { success: false, message: 'packageId is required' }; }
+        try {
+            return await createSubscriptionPaymentOrder(currentUser.id, packageId, 'stripe');
+        } catch (e: unknown) {
+            const message = e instanceof Error ? e.message : String(e);
+            set.status = message.includes('not found') || message.includes('required') || message.includes('Invalid') ? 400 : 500;
+            return { success: false, message };
+        }
+    })
+    .post('/subscription/creem/pay', async ({ user, body, set }: ElysiaCtx) => {
+        const currentUser = user as UserRecord | undefined;
+        if (!currentUser) { set.status = 401; return { success: false, message: 'Authentication required' }; }
+        const payload = body as Record<string, any>;
+        const packageId = Number(payload.packageId || payload.package_id || payload.id);
+        if (!packageId) { set.status = 400; return { success: false, message: 'packageId is required' }; }
+        try {
+            return await createSubscriptionPaymentOrder(currentUser.id, packageId, 'creem');
+        } catch (e: unknown) {
+            const message = e instanceof Error ? e.message : String(e);
+            set.status = message.includes('not found') || message.includes('required') || message.includes('Invalid') ? 400 : 500;
+            return { success: false, message };
+        }
+    })
     // User self-service announcements (public readable)
     .get('/announcement/public', async () => {
         const rows = await db.select({
@@ -760,6 +1420,188 @@ export const newApiUserSelfRouter = new Elysia()
     });
 
 export const newApiUserPublicRouter = new Elysia()
-    .post('/user/login/2fa', ({ set }: ElysiaCtx) => notImplemented(set, '2FA login is not implemented'))
-    .post('/user/passkey/login/begin', ({ set }: ElysiaCtx) => notImplemented(set, 'Passkey login is not implemented'))
-    .post('/user/passkey/login/finish', ({ set }: ElysiaCtx) => notImplemented(set, 'Passkey login is not implemented'));
+    .post('/user/login/2fa', async ({ body, set, request, cookie: { auth_session } }: ElysiaCtx) => {
+        const payload = body as Record<string, any>;
+        const challengeToken = String(payload.challengeToken || payload.challenge_token || '');
+        const code = String(payload.code || payload.totp || '');
+        const backupCode = String(payload.backupCode || payload.backup_code || '');
+        if (!challengeToken) {
+            set.status = 400;
+            return { success: false, message: 'challengeToken is required' };
+        }
+        if (!code && !backupCode) {
+            set.status = 400;
+            return { success: false, message: 'code or backupCode is required' };
+        }
+
+        const [challenge] = await db.select().from(twoFactorLoginChallenges)
+            .where(and(eq(twoFactorLoginChallenges.id, challengeToken), drizzleSql`${twoFactorLoginChallenges.expiresAt} > NOW()`))
+            .limit(1);
+        if (!challenge) {
+            set.status = 401;
+            return { success: false, message: 'Invalid or expired challenge' };
+        }
+
+        const [currentUser] = await db.select({
+            id: users.id,
+            username: users.username,
+            role: users.role,
+            currency: users.currency,
+            twoFactorEnabled: users.twoFactorEnabled,
+            twoFactorSecret: users.twoFactorSecret,
+            twoFactorBackupCodes: users.twoFactorBackupCodes,
+        }).from(users).where(eq(users.id, challenge.userId)).limit(1);
+        if (!currentUser || !currentUser.twoFactorEnabled || !currentUser.twoFactorSecret) {
+            set.status = 401;
+            return { success: false, message: '2FA is not enabled for this account' };
+        }
+
+        const storedCodes = Array.isArray(currentUser.twoFactorBackupCodes) ? currentUser.twoFactorBackupCodes : [];
+        const totpValid = code ? verifyTotp(currentUser.twoFactorSecret, code) : false;
+        const backupResult = !totpValid && backupCode ? consumeBackupCode(backupCode, storedCodes) : { valid: false, remaining: storedCodes };
+        if (!totpValid && !backupResult.valid) {
+            set.status = 401;
+            return { success: false, message: 'Invalid 2FA code' };
+        }
+
+        if (backupResult.valid) {
+            await db.update(users).set({
+                twoFactorBackupCodes: backupResult.remaining,
+                updatedAt: new Date(),
+            }).where(eq(users.id, currentUser.id));
+        }
+
+        await db.delete(twoFactorLoginChallenges).where(eq(twoFactorLoginChallenges.id, challengeToken));
+        const { sessionToken } = await authService.createWebSession(
+            currentUser.id,
+            request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown',
+            request.headers.get('user-agent') || 'unknown'
+        );
+        auth_session.set({
+            value: sessionToken,
+            httpOnly: true,
+            secure: request.headers.get('x-forwarded-proto') === 'https',
+            sameSite: 'lax',
+            maxAge: 7 * 86400,
+            path: '/'
+        });
+        const tokenKey = await authService.ensureDefaultApiKey(currentUser.id);
+        return {
+            success: true,
+            token: tokenKey,
+            username: currentUser.username,
+            role: currentUser.role,
+            currency: currentUser.currency || 'USD',
+        };
+    })
+    .post('/user/passkey/login/begin', async ({ body, set }: ElysiaCtx) => {
+        const payload = body as Record<string, any>;
+        const username = String(payload.username || payload.user || '').trim();
+        if (!username) {
+            set.status = 400;
+            return { success: false, message: 'username is required' };
+        }
+        const [targetUser] = await db.select({
+            id: users.id,
+            username: users.username,
+            role: users.role,
+            currency: users.currency,
+            status: users.status,
+        }).from(users).where(eq(users.username, username)).limit(1);
+        if (!targetUser || targetUser.status !== 1) {
+            set.status = 401;
+            return { success: false, message: 'Invalid credentials' };
+        }
+        const passkeys = await listUserPasskeys(targetUser.id);
+        if (passkeys.length === 0) {
+            set.status = 400;
+            return { success: false, message: 'Passkey login is not available for this account' };
+        }
+        const { challengeToken, challenge } = createPasskeyChallenge('login', targetUser.id);
+        return {
+            success: true,
+            data: {
+                challengeToken,
+                username: targetUser.username,
+                publicKey: {
+                    challenge,
+                    rpId: getPasskeyRpId(),
+                    timeout: 60000,
+                    userVerification: 'preferred',
+                    allowCredentials: passkeys.map((item) => ({
+                        id: item.credentialId,
+                        type: 'public-key',
+                        transports: item.transports.length > 0 ? item.transports : ['internal'],
+                    })),
+                },
+            }
+        };
+    })
+    .post('/user/passkey/login/finish', async ({ body, set, request, cookie: { auth_session } }: ElysiaCtx) => {
+        const payload = body as Record<string, any>;
+        const challengeToken = String(payload.challengeToken || payload.challenge_token || '');
+        if (!challengeToken) {
+            set.status = 400;
+            return { success: false, message: 'challengeToken is required' };
+        }
+        const challenge = consumePasskeyChallenge(challengeToken, 'login');
+        if (!challenge) {
+            set.status = 401;
+            return { success: false, message: 'Invalid or expired challenge' };
+        }
+        const credentialId = extractCredentialId(payload);
+        if (!credentialId) {
+            set.status = 400;
+            return { success: false, message: 'credentialId is required' };
+        }
+        const [binding] = await db.select({
+            id: oauthAccounts.id,
+            userId: oauthAccounts.userId,
+            metadata: oauthAccounts.accessToken,
+        }).from(oauthAccounts)
+            .where(and(eq(oauthAccounts.userId, challenge.userId), eq(oauthAccounts.providerUserId, credentialId), ilike(oauthAccounts.provider, `${PASSKEY_PROVIDER_PREFIX}%`)))
+            .limit(1);
+        if (!binding) {
+            set.status = 401;
+            return { success: false, message: 'Invalid passkey credential' };
+        }
+
+        const [currentUser] = await db.select({
+            id: users.id,
+            username: users.username,
+            role: users.role,
+            currency: users.currency,
+            status: users.status,
+        }).from(users).where(eq(users.id, binding.userId)).limit(1);
+        if (!currentUser || currentUser.status !== 1) {
+            set.status = 401;
+            return { success: false, message: 'Account is unavailable' };
+        }
+
+        const metadata = parsePasskeyMetadata(binding.metadata);
+        metadata.verified = true;
+        metadata.lastUsedAt = new Date().toISOString();
+        await db.update(oauthAccounts).set({ accessToken: JSON.stringify(metadata) }).where(eq(oauthAccounts.id, binding.id));
+
+        const { sessionToken } = await authService.createWebSession(
+            currentUser.id,
+            request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown',
+            request.headers.get('user-agent') || 'unknown'
+        );
+        auth_session.set({
+            value: sessionToken,
+            httpOnly: true,
+            secure: request.headers.get('x-forwarded-proto') === 'https',
+            sameSite: 'lax',
+            maxAge: 7 * 86400,
+            path: '/'
+        });
+        const tokenKey = await authService.ensureDefaultApiKey(currentUser.id);
+        return {
+            success: true,
+            token: tokenKey,
+            username: currentUser.username,
+            role: currentUser.role,
+            currency: currentUser.currency || 'USD',
+        };
+    });

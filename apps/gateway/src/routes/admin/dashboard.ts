@@ -117,13 +117,13 @@ export const dashboardRouter = new Elysia()
         let exact_cache_count = 0;
 
         try {
-            const [semSize] = await sql`SELECT pg_total_relation_size('semantic_cache') as size`;
-            const [semCount] = await sql`SELECT COUNT(*) as cnt FROM semantic_cache`;
+            const [semSize] = await db.execute(drizzleSql`SELECT pg_total_relation_size('semantic_cache') as size`) as any[];
+            const [semCount] = await db.execute(drizzleSql`SELECT COUNT(*) as cnt FROM semantic_cache`) as any[];
             semantic_cache_size = Number(semSize?.size || 0);
             semantic_cache_count = Number(semCount?.cnt || 0);
 
-            const [exSize] = await sql`SELECT pg_total_relation_size('response_cache') as size`;
-            const [exCount] = await sql`SELECT COUNT(*) as cnt FROM response_cache`;
+            const [exSize] = await db.execute(drizzleSql`SELECT pg_total_relation_size('response_cache') as size`) as any[];
+            const [exCount] = await db.execute(drizzleSql`SELECT COUNT(*) as cnt FROM response_cache`) as any[];
             exact_cache_size = Number(exSize?.size || 0);
             exact_cache_count = Number(exCount?.cnt || 0);
         } catch (e: unknown) {

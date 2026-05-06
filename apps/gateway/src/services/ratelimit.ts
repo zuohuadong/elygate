@@ -1,4 +1,4 @@
-import { db, sql } from '@elygate/db';
+import { db } from '@elygate/db';
 import { rateLimits } from '@elygate/db/schema';
 import { sql as drizzleSql, lt } from 'drizzle-orm';
 
@@ -19,20 +19,20 @@ async function consumeWindow(key: string, limit: number, windowMs: number): Prom
     if (!limit || limit <= 0) return false;
 
     try {
-        const rows = await sql`
-            INSERT INTO rate_limits (key, count, expired_at)
-            VALUES (${key}, 1, NOW() + (${windowMs}::int * INTERVAL '1 millisecond'))
-            ON CONFLICT (key) DO UPDATE SET
-                count = CASE
-                    WHEN rate_limits.expired_at <= NOW() THEN 1
-                    ELSE rate_limits.count + 1
-                END,
-                expired_at = CASE
-                    WHEN rate_limits.expired_at <= NOW() THEN EXCLUDED.expired_at
-                    ELSE rate_limits.expired_at
-                END
-            RETURNING count
-        `;
+        const rows = await db.insert(rateLimits)
+            .values({
+                key,
+                count: 1,
+                expiredAt: drizzleSql`NOW() + ${windowMs}::int * INTERVAL '1 millisecond'`,
+            })
+            .onConflictDoUpdate({
+                target: rateLimits.key,
+                set: {
+                    count: drizzleSql`CASE WHEN ${rateLimits.expiredAt} <= NOW() THEN 1 ELSE ${rateLimits.count} + 1 END`,
+                    expiredAt: drizzleSql`CASE WHEN ${rateLimits.expiredAt} <= NOW() THEN EXCLUDED.expired_at ELSE ${rateLimits.expiredAt} END`,
+                },
+            })
+            .returning({ count: rateLimits.count });
 
         void cleanupExpiredRateLimits();
         return Number(rows[0]?.count || 0) > limit;

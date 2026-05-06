@@ -1,7 +1,7 @@
 import type { ElysiaCtx } from '../types';
 import { Elysia, t } from 'elysia';
 import { getErrorMessage } from '../utils/error';
-import { db, sql } from '@elygate/db';
+import { db } from '@elygate/db';
 import { logs, dailyStats, modelStats, channels } from '@elygate/db/schema';
 import { eq, and, desc, count, sum, sql as drizzleSql } from 'drizzle-orm';
 import { adminGuard } from '../middleware/auth';
@@ -10,9 +10,9 @@ import { adminGuard } from '../middleware/auth';
 export const statsRouter = new Elysia()
     .use(adminGuard)
     .get('/overview', async () => {
-        const [overviewMV] = await sql`
+        const [overviewMV] = await db.execute(drizzleSql`
             SELECT * FROM mv_system_overview LIMIT 1
-        `;
+        `) as any[];
 
         const [dynamic24h] = await db.select({
             requests24h: drizzleSql<number>`count(*)::int`,
@@ -91,11 +91,11 @@ export const statsRouter = new Elysia()
     })
 
     .get('/models', async () => {
-        const modelStatsRows = await sql`
+        const modelStatsRows = await db.execute(drizzleSql`
             SELECT * FROM mv_model_usage_stats
             ORDER BY total_requests DESC
             LIMIT 50
-        `;
+        `) as any[];
 
         const trendingModels = await db.select({
             model_name: logs.modelName,
@@ -213,7 +213,7 @@ export const statsRouter = new Elysia()
 
     .post('/refresh', async ({ set }: ElysiaCtx) => {
         try {
-            await sql`SELECT refresh_materialized_views()`;
+            await db.execute(drizzleSql`SELECT refresh_materialized_views()`);
             return { success: true, message: 'Materialized views refreshed' };
         } catch (e: unknown) {
             set.status = 500;

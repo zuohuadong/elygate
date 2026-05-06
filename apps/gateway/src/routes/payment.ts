@@ -3,9 +3,9 @@ import { config, apiUrls } from '../config';
 import { log } from '../services/logger';
 import { getErrorMessage } from '../utils/error';
 import { Elysia, t } from 'elysia';
-import { db, sql } from '@elygate/db';
-import { options, users, paymentOrders } from '@elygate/db/schema';
-import { eq, and, desc, sql as drizzleSql } from 'drizzle-orm';
+import { db } from '@elygate/db';
+import { options, users, paymentOrders, packages, userSubscriptions } from '@elygate/db/schema';
+import { eq, and, desc, sql as drizzleSql, gt } from 'drizzle-orm';
 import { authPlugin } from '../middleware/auth';
 import { optionCache } from '../services/optionCache';
 
@@ -14,6 +14,90 @@ const STRIPE_WEBHOOK_SECRET = config.stripe.webhookSecret || '';
 const EPAY_APP_ID = config.epay.appId || '';
 const EPAY_APP_SECRET = config.epay.appSecret || '';
 const EPAY_GATEWAY = config.epay.gateway || 'https://api.epay.com';
+
+function parsePackagePriceToCents(value: unknown): number {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) return 0;
+    return Math.floor(numeric * 100);
+}
+
+async function fulfillPaymentOrder(
+    tx: any,
+    order: {
+        id: number;
+        amount: number;
+        userId: number;
+        orderType: string;
+        targetType: string | null;
+        targetId: number | null;
+    }
+) {
+    if (order.orderType === 'subscription' && order.targetType === 'package' && order.targetId) {
+        const [pkg] = await tx.select({
+            id: packages.id,
+            price: packages.price,
+            durationDays: packages.durationDays,
+            cycleQuota: packages.cycleQuota,
+        }).from(packages).where(eq(packages.id, order.targetId)).limit(1);
+        if (!pkg) {
+            log.warn(`[Payment] Subscription package missing for order ${order.id}, package ${order.targetId}`);
+            return;
+        }
+        const expectedAmount = parsePackagePriceToCents(pkg.price);
+        if (expectedAmount > 0 && expectedAmount !== order.amount) {
+            log.warn(`[Payment] Subscription amount mismatch for order ${order.id}: expected ${expectedAmount}, actual ${order.amount}`);
+        }
+
+        const now = new Date();
+        const [activeSub] = await tx.select({
+            id: userSubscriptions.id,
+            endTime: userSubscriptions.endTime,
+        }).from(userSubscriptions).where(and(
+            eq(userSubscriptions.userId, order.userId),
+            eq(userSubscriptions.packageId, pkg.id),
+            eq(userSubscriptions.status, 1),
+            gt(userSubscriptions.endTime, now),
+        )).orderBy(desc(userSubscriptions.endTime)).limit(1);
+
+        const durationDays = Number(pkg.durationDays || 30);
+        if (activeSub) {
+            const extendedEnd = new Date(activeSub.endTime);
+            extendedEnd.setDate(extendedEnd.getDate() + durationDays);
+            await tx.update(userSubscriptions).set({
+                endTime: extendedEnd,
+                updatedAt: new Date(),
+            }).where(eq(userSubscriptions.id, activeSub.id));
+        } else {
+            const endTime = new Date(now);
+            endTime.setDate(endTime.getDate() + durationDays);
+            await tx.insert(userSubscriptions).values({
+                userId: order.userId,
+                packageId: pkg.id,
+                startTime: now,
+                endTime,
+                status: 1,
+                quotaGranted: Number(pkg.cycleQuota || 0),
+                lastResetAt: now,
+            });
+        }
+
+        const cycleQuota = Number(pkg.cycleQuota || 0);
+        if (cycleQuota > 0) {
+            await tx.update(users)
+                .set({ quota: drizzleSql`${users.quota} + ${cycleQuota}` })
+                .where(eq(users.id, order.userId));
+        }
+        log.info(`[Payment] Subscription success: Order ${order.id}, User ${order.userId}, Package ${pkg.id}, QuotaAdded ${cycleQuota}`);
+        return;
+    }
+
+    const quotaPerUnit = Number(optionCache.get('QuotaPerUnit') || 500000);
+    const quotaToAdd = Math.floor((order.amount / 100) * quotaPerUnit);
+    await tx.update(users)
+        .set({ quota: drizzleSql`${users.quota} + ${quotaToAdd}` })
+        .where(eq(users.id, order.userId));
+    log.info(`[Payment] Top-up success: Order ${order.id}, User ${order.userId}, Amount ${order.amount}, QuotaAdded ${quotaToAdd}`);
+}
 
 export const paymentRouter = new Elysia({ prefix: '/payment' })
     .use(authPlugin)
@@ -143,22 +227,20 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
 
             // Atomic transaction: update order + add quota
             await db.transaction(async (tx) => {
-                const updatedRows = await tx.execute(sql`
-                    UPDATE payment_orders
-                    SET status = 1, transaction_id = ${data.object.id}, updated_at = NOW()
-                    WHERE id = ${Number(orderId)} AND status = 0
-                    RETURNING *
-                `);
-                const order = updatedRows[0] as { amount: number; user_id: number } | undefined;
+                const [order] = await tx.update(paymentOrders)
+                    .set({ status: 1, transactionId: data.object.id, updatedAt: new Date() })
+                    .where(and(eq(paymentOrders.id, Number(orderId)), eq(paymentOrders.status, 0)))
+                    .returning({
+                        id: paymentOrders.id,
+                        amount: paymentOrders.amount,
+                        userId: paymentOrders.userId,
+                        orderType: paymentOrders.orderType,
+                        targetType: paymentOrders.targetType,
+                        targetId: paymentOrders.targetId,
+                    });
 
                 if (!order) return;
-
-                const quotaPerUnit = Number(optionCache.get('QuotaPerUnit') || 500000);
-                const quotaToAdd = Math.floor((order.amount / 100) * quotaPerUnit);
-
-                await tx.execute(sql`UPDATE users SET quota = quota + ${quotaToAdd} WHERE id = ${order.user_id}`);
-
-                log.info(`[Payment] Stripe success: Order ${orderId}, User ${order.user_id}, Amount ${order.amount}, QuotaAdded ${quotaToAdd}`);
+                await fulfillPaymentOrder(tx, order);
             });
 
             return { success: true };
@@ -195,22 +277,20 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
             }
 
             await db.transaction(async (tx) => {
-                const updatedRows = await tx.execute(sql`
-                    UPDATE payment_orders
-                    SET status = 1, transaction_id = ${params.get('trade_no')}, updated_at = NOW()
-                    WHERE id = ${orderId} AND status = 0
-                    RETURNING *
-                `);
-                const order = updatedRows[0] as { amount: number; user_id: number } | undefined;
+                const [order] = await tx.update(paymentOrders)
+                    .set({ status: 1, transactionId: params.get('trade_no'), updatedAt: new Date() })
+                    .where(and(eq(paymentOrders.id, orderId), eq(paymentOrders.status, 0)))
+                    .returning({
+                        id: paymentOrders.id,
+                        amount: paymentOrders.amount,
+                        userId: paymentOrders.userId,
+                        orderType: paymentOrders.orderType,
+                        targetType: paymentOrders.targetType,
+                        targetId: paymentOrders.targetId,
+                    });
 
                 if (!order) return;
-
-                const quotaPerUnit = Number(optionCache.get('QuotaPerUnit') || 500000);
-                const quotaToAdd = Math.floor((order.amount / 100) * quotaPerUnit);
-
-                await tx.execute(sql`UPDATE users SET quota = quota + ${quotaToAdd} WHERE id = ${order.user_id}`);
-
-                log.info(`[Payment] EPay success: Order ${orderId}, User ${order.user_id}, Amount ${order.amount}, QuotaAdded ${quotaToAdd}`);
+                await fulfillPaymentOrder(tx, order);
             });
 
             return 'success';

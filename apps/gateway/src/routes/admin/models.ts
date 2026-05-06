@@ -1,6 +1,6 @@
 import type { ElysiaCtx } from '../../types';
 import { Elysia, t } from 'elysia';
-import { db, sql } from '@elygate/db';
+import { db } from '@elygate/db';
 import { modelMetadata, options } from '@elygate/db/schema';
 import { eq, asc, sql as drizzleSql } from 'drizzle-orm';
 import { getErrorMessage } from '../../utils/error';
@@ -79,8 +79,7 @@ export const modelsAdminRouter = new Elysia()
         const rows = await db.selectDistinct({ modelName: modelMetadata.modelName })
             .from(modelMetadata)
             .where(drizzleSql`${modelMetadata.createdAt} > NOW() - INTERVAL '7 days'`);
-        // EXCEPT query — Drizzle cannot express this natively
-        const missingRows = await sql`
+        const missingRows = await db.execute(drizzleSql`
             SELECT DISTINCT model_name FROM (
                 SELECT model_name FROM logs
                 WHERE created_at > NOW() - INTERVAL '7 days'
@@ -88,7 +87,7 @@ export const modelsAdminRouter = new Elysia()
                 SELECT model_name FROM model_metadata
             ) sub
             ORDER BY model_name
-        `;
+        `) as any[];
         return { success: true, missing: missingRows.map((r: any) => r.model_name), count: missingRows.length };
     })
 

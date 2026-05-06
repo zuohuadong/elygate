@@ -1,4 +1,4 @@
-import { db, sql } from '$lib/server/db';
+import { db } from '$lib/server/db';
 import { requirePortalMember } from '$lib/server/portalAuth';
 import { logs, users } from '@elygate/db/schema';
 import { eq, and, gte, desc, sql as drizzleSql, count } from '@elygate/db/operators';
@@ -7,31 +7,26 @@ import type { PageServerLoad } from './$types';
 export const load: PageServerLoad = async ({ locals }) => {
     const { org } = requirePortalMember(locals);
 
-    // Complex aggregate with FILTER — use raw SQL
-    const trendData = await sql`
-        SELECT 
-            TO_CHAR(created_at, 'HH24:00') as label,
-            SUM(quota_cost) as cost_value,
-            COUNT(*) FILTER (WHERE status_code >= 400) as error_count,
-            AVG(elapsed_ms) as avg_latency
-        FROM logs
-        WHERE org_id = ${org.id} 
-          AND created_at > NOW() - INTERVAL '24 hours'
-        GROUP BY label
-        ORDER BY label ASC
-    `;
+    const hourLabel = drizzleSql<string>`TO_CHAR(${logs.createdAt}, 'HH24:00')`;
+    const trendData = await db.select({
+        label: hourLabel,
+        costValue: drizzleSql<number>`SUM(${logs.quotaCost})`,
+        errorCount: drizzleSql<number>`COUNT(*) FILTER (WHERE ${logs.statusCode} >= 400)`,
+        avgLatency: drizzleSql<number>`AVG(${logs.elapsedMs})`,
+    })
+    .from(logs)
+    .where(and(eq(logs.orgId, org.id), gte(logs.createdAt, drizzleSql`NOW() - INTERVAL '24 hours'`)))
+    .groupBy(hourLabel)
+    .orderBy(hourLabel);
 
-    const errorStats = await sql`
-        SELECT 
-            status_code,
-            COUNT(*) as count
-        FROM logs
-        WHERE org_id = ${org.id}
-          AND status_code >= 400
-          AND created_at > NOW() - INTERVAL '24 hours'
-        GROUP BY status_code
-        ORDER BY count DESC
-    `;
+    const errorStats = await db.select({
+        statusCode: logs.statusCode,
+        count: count(),
+    })
+    .from(logs)
+    .where(and(eq(logs.orgId, org.id), gte(logs.statusCode, 400), gte(logs.createdAt, drizzleSql`NOW() - INTERVAL '24 hours'`)))
+    .groupBy(logs.statusCode)
+    .orderBy(desc(count()));
 
     const modelDistribution = await db.select({
         name: logs.modelName,
@@ -51,16 +46,16 @@ export const load: PageServerLoad = async ({ locals }) => {
         analytics: {
             usageTrend: trendData.map((row: Record<string, any>) => ({
                 label: row.label,
-                cost: Number(row.cost_value),
-                errors: Number(row.error_count),
-                latency: Math.round(Number(row.avg_latency || 0))
+                cost: Number(row.costValue),
+                errors: Number(row.errorCount),
+                latency: Math.round(Number(row.avgLatency || 0))
             })),
             modelDistribution: modelDistribution.map((row) => ({
                 name: row.name,
                 value: Number(row.value)
             })),
             errorStats: errorStats.map((row: Record<string, any>) => ({
-                code: row.status_code,
+                code: row.statusCode,
                 count: Number(row.count)
             })),
             activeMembers: Number(activeMembers)

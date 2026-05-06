@@ -612,7 +612,7 @@ export const memoryCache = {
         this.cleanupInterval = setInterval(async () => {
             log.info('[Cache] Running cleanup task...');
             try {
-                await sql`CALL expire_cache_rows('7 days'::INTERVAL)`;
+                await db.execute(drizzleSql`CALL expire_cache_rows('7 days'::INTERVAL)`);
                 log.info('[Cache] Cleanup completed.');
             } catch (e: unknown) {
                 log.error('[Cache] Cleanup failed:', e);

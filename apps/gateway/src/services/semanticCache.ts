@@ -1,6 +1,7 @@
 import { log } from '../services/logger';
-import { db, sql } from '@elygate/db';
+import { db } from '@elygate/db';
 import { semanticCache } from '@elygate/db/schema';
+import { sql as drizzleSql } from 'drizzle-orm';
 import { optionCache } from './optionCache';
 import { decryptChannelKeys } from './encryption';
 
@@ -83,24 +84,24 @@ export async function lookupSemanticCache(
     const vectorLiteral = `[${embedding.join(',')}]`;
     
     const isolationClause = (policy?.mode === 'isolated' && userId) 
-        ? sql`AND created_by = ${userId}` 
-        : sql``;
+        ? drizzleSql`AND created_by = ${userId}` 
+        : drizzleSql``;
 
     const smartClause = (policy?.mode === 'smart' && userId)
-        ? sql`AND (created_by != ${userId} OR created_at > NOW() - INTERVAL '2 minutes')`
-        : sql``;
+        ? drizzleSql`AND (created_by != ${userId} OR created_at > NOW() - INTERVAL '2 minutes')`
+        : drizzleSql``;
 
     // Vector similarity search requires raw SQL (pgvector <=> operator)
-    const rows = await sql`
+    const rows = await db.execute(drizzleSql`
         SELECT id, response, created_by, 1 - (embedding <=> ${vectorLiteral}::vector) AS similarity
         FROM semantic_cache
         WHERE model_name = ${model}
           AND created_at > NOW() - make_interval(hours => ${config.ttlHours})
           ${isolationClause}
-          ${smartClause}
+        ${smartClause}
         ORDER BY embedding <=> ${vectorLiteral}::vector
         LIMIT 1
-    `;
+    `) as any[];
 
     if (rows.length > 0 && rows[0].similarity >= config.similarityThreshold) {
         log.info(`[SemanticCache] HIT! Similarity: ${rows[0].similarity.toFixed(4)} Mode: ${policy?.mode || 'default'}`);
@@ -139,7 +140,7 @@ export async function storeSemanticCache(
 
     const promptHash = new Bun.CryptoHasher('md5').update(prompt).digest('hex');
     const vectorLiteral = `[${embedding.join(',')}]`;
-    await sql`
+    await db.execute(drizzleSql`
         INSERT INTO semantic_cache (model_name, prompt_hash, prompt, embedding, response, created_by)
         VALUES (${model}, ${promptHash}, ${prompt}, ${vectorLiteral}::vector, ${response}, ${createdBy || null})
         ON CONFLICT (model_name, prompt_hash) DO UPDATE
@@ -147,5 +148,5 @@ export async function storeSemanticCache(
             embedding = EXCLUDED.embedding,
             created_by = EXCLUDED.created_by,
             created_at = NOW()
-    `;
+    `);
 }

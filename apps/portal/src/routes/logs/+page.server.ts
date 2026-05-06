@@ -1,4 +1,6 @@
-import { db, sql } from '$lib/server/db';
+import { db } from '$lib/server/db';
+import { logs, users } from '@elygate/db/schema';
+import { desc, eq, sql as drizzleSql } from '@elygate/db/operators';
 import type { PageServerLoad } from './$types';
 
 type LogRow = {
@@ -24,17 +26,27 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     const limit = 20;
     const offset = (page - 1) * limit;
     
-    // Complex JOIN with EXISTS subquery — use raw SQL
-    const logRows = await sql`
-        SELECT l.id, l.user_id, u.username, l.token_id, l.model_name, l.prompt_tokens, l.completion_tokens, 
-               l.quota_cost, l.status_code, l.created_at, l.ip_address, l.trace_id,
-               EXISTS(SELECT 1 FROM log_details ld WHERE ld.log_id = l.id) as has_details
-        FROM logs l
-        JOIN users u ON l.user_id = u.id
-        WHERE l.org_id = ${org.id}
-        ORDER BY l.created_at DESC
-        LIMIT ${limit} OFFSET ${offset}
-    ` as LogRow[];
+    const logRows = await db.select({
+        id: logs.id,
+        user_id: logs.userId,
+        username: users.username,
+        token_id: logs.tokenId,
+        model_name: logs.modelName,
+        prompt_tokens: logs.promptTokens,
+        completion_tokens: logs.completionTokens,
+        quota_cost: logs.quotaCost,
+        status_code: logs.statusCode,
+        created_at: logs.createdAt,
+        ip_address: logs.ipAddress,
+        trace_id: logs.traceId,
+        has_details: drizzleSql<boolean>`EXISTS(SELECT 1 FROM log_details ld WHERE ld.log_id = ${logs.id})`,
+    })
+    .from(logs)
+    .innerJoin(users, eq(logs.userId, users.id))
+    .where(eq(logs.orgId, org.id))
+    .orderBy(desc(logs.createdAt))
+    .limit(limit)
+    .offset(offset) as LogRow[];
 
     return {
         logs: logRows.map((log) => ({

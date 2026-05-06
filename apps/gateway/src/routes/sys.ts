@@ -1,8 +1,9 @@
 import { log } from '../services/logger';
 import { config } from '../config';
 import { Elysia } from 'elysia';
-import { db, sql } from '@elygate/db';
+import { db } from '@elygate/db';
 import { users } from '@elygate/db/schema';
+import { count, sql as drizzleSql } from 'drizzle-orm';
 import { memoryCache } from '../services/cache';
 import { optionCache } from '../services/optionCache';
 
@@ -12,7 +13,7 @@ import { optionCache } from '../services/optionCache';
  */
 export const sysRouter = new Elysia({ prefix: '/api' })
     .get('/setup', async () => {
-        const [{ total }] = await db.select({ total: sql<number>`count(*)::int` }).from(users);
+        const [{ total }] = await db.select({ total: count() }).from(users);
         return {
             success: true,
             data: {
@@ -22,7 +23,7 @@ export const sysRouter = new Elysia({ prefix: '/api' })
         };
     })
     .post('/setup', async ({ body, set }) => {
-        const [{ total }] = await db.select({ total: sql<number>`count(*)::int` }).from(users);
+        const [{ total }] = await db.select({ total: count() }).from(users);
         if (Number(total || 0) > 0) {
             set.status = 409;
             return { success: false, message: 'System already initialized' };
@@ -33,16 +34,19 @@ export const sysRouter = new Elysia({ prefix: '/api' })
             return { success: false, message: 'username and password are required' };
         }
         const passwordHash = await Bun.password.hash(String(payload.password));
-        const [admin] = await sql`
-            INSERT INTO users (username, password_hash, role, quota, status, currency)
-            VALUES (${payload.username}, ${passwordHash}, 10, 100000000, 1, 'USD')
-            RETURNING id, username
-        `;
+        const [admin] = await db.insert(users).values({
+            username: payload.username,
+            passwordHash,
+            role: 10,
+            quota: 100000000,
+            status: 1,
+            currency: 'USD',
+        }).returning({ id: users.id, username: users.username });
         return { success: true, data: admin };
     })
     .get('/status', async () => {
         let dbStatus = 'ok';
-        try { await sql`SELECT 1`; } catch { dbStatus = 'error'; }
+        try { await db.execute(drizzleSql`SELECT 1`); } catch { dbStatus = 'error'; }
 
         return {
             success: true,
@@ -64,7 +68,7 @@ export const sysRouter = new Elysia({ prefix: '/api' })
         };
     })
     .get('/health', async () => {
-        const [dbCheck] = await sql`SELECT 1 as ok`.catch((e: unknown) => { log.warn("[Fallback]", e); return [{ ok: 0 }]; });
+        const [dbCheck] = await db.execute(drizzleSql`SELECT 1 as ok`).catch((e: unknown) => { log.warn("[Fallback]", e); return [{ ok: 0 }]; });
         const channelStats = {
             total: memoryCache.channels.size,
             active: Array.from(memoryCache.channels.values()).filter(c => c.status === 1).length,
@@ -83,7 +87,7 @@ export const sysRouter = new Elysia({ prefix: '/api' })
         };
     })
     .get('/uptime/status', async () => {
-        const [dbCheck] = await sql`SELECT 1 as ok`.catch(() => [{ ok: 0 }]);
+        const [dbCheck] = await db.execute(drizzleSql`SELECT 1 as ok`).catch(() => [{ ok: 0 }]);
         return {
             success: true,
             data: {

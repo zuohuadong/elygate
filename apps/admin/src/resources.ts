@@ -285,6 +285,16 @@ export const resources: ResourceDefinition[] = [
     fields: [],
   },
   {
+    name: 'feature-console',
+    label: '新增功能',
+    icon: 'sparkles',
+    canCreate: false,
+    canEdit: false,
+    canDelete: false,
+    canShow: false,
+    fields: [],
+  },
+  {
     name: 'vendors',
     label: '供应商',
     icon: 'building',

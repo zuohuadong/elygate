@@ -5,7 +5,7 @@ import { db, sql } from '@elygate/db';
 import {
     users, tokens, sessions, inviteCodes, loginAttempts,
     logs as logsTable, packages as packagesTable,
-    userSubscriptions, oauthAccounts,
+    userSubscriptions, oauthAccounts, twoFactorLoginChallenges,
 } from '@elygate/db/schema';
 import {
     eq, and, desc, asc, count, sql as drizzleSql
@@ -17,6 +17,7 @@ import type { UserRecord  } from '../types';
 import { getLangFromHeader } from '../utils/i18n';
 import { optionCache } from '../services/optionCache';
 import { memoryCache } from '../services/cache';
+import { buildOtpAuthUrl, consumeBackupCode, generateBackupCodes, generateTwoFactorSecret, hashBackupCodes, verifyTotp } from '../services/twoFactor';
 
 const GITHUB_CLIENT_ID = config.github.clientId || '';
 const GITHUB_CLIENT_SECRET = config.github.clientSecret || '';
@@ -220,6 +221,7 @@ export const authRouter = new Elysia()
                     status: users.status,
                     lockedUntil: users.lockedUntil,
                     currency: users.currency,
+                    twoFactorEnabled: users.twoFactorEnabled,
                 })
                 .from(users)
                 .where(eq(users.username, username))
@@ -251,16 +253,28 @@ export const authRouter = new Elysia()
             }
 
             await db.delete(loginAttempts).where(eq(loginAttempts.username, username));
-            const sessionToken = `sess_${Bun.randomUUIDv7('hex')}${Bun.randomUUIDv7('hex')}`;
-            const expiresAt = new Date(Date.now() + 7 * 86400 * 1000);
-            await db.insert(sessions).values({
-                id: Bun.randomUUIDv7('hex'),
-                userId: user.id,
-                token: sessionToken,
-                expiresAt,
-                ipAddress: clientIP,
-                userAgent: request.headers.get('user-agent') || 'unknown',
-            });
+
+            if (user.twoFactorEnabled) {
+                const challengeId = `tfa_${Bun.randomUUIDv7('hex')}`;
+                const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+                await db.insert(twoFactorLoginChallenges).values({
+                    id: challengeId,
+                    userId: user.id,
+                    expiresAt,
+                });
+                return {
+                    success: true,
+                    requires2FA: true,
+                    challengeToken: challengeId,
+                    username: user.username,
+                };
+            }
+
+            const { sessionToken } = await authService.createWebSession(
+                user.id,
+                clientIP,
+                request.headers.get('user-agent') || 'unknown'
+            );
 
             auth_session.set({
                 value: sessionToken,
@@ -271,25 +285,80 @@ export const authRouter = new Elysia()
                 path: '/'
             });
 
-            let [tokenRow] = await db
-                .select({ key: tokens.key })
-                .from(tokens)
-                .where(and(eq(tokens.userId, user.id), eq(tokens.status, 1)))
-                .orderBy(asc(tokens.id))
-                .limit(1);
-            if (!tokenRow) {
-                const newKey = `sk-${Bun.randomUUIDv7('hex')}`;
-                [tokenRow] = await db
-                    .insert(tokens)
-                    .values({ userId: user.id, name: 'Default API Key', key: newKey, status: 1, remainQuota: -1 })
-                    .returning({ key: tokens.key });
-            }
-
-            return { success: true, token: tokenRow.key, username: user.username, role: user.role, currency: user.currency || 'USD' };
+            const tokenKey = await authService.ensureDefaultApiKey(user.id);
+            return { success: true, token: tokenKey, username: user.username, role: user.role, currency: user.currency || 'USD' };
         } catch (e: unknown) {
             set.status = 500;
             return { success: false, message: (e as any)?.message || 'Internal server error' };
         }
+    })
+    .post('/login/2fa', async ({ body, set, request, cookie: { auth_session } }: ElysiaCtx) => {
+        const payload = body as Record<string, any>;
+        const challengeToken = String(payload.challengeToken || payload.challenge_token || '');
+        const code = String(payload.code || payload.totp || '');
+        const backupCode = String(payload.backupCode || payload.backup_code || '');
+        if (!challengeToken) {
+            set.status = 400;
+            return { success: false, message: 'challengeToken is required' };
+        }
+        if (!code && !backupCode) {
+            set.status = 400;
+            return { success: false, message: 'code or backupCode is required' };
+        }
+
+        const [challenge] = await db.select().from(twoFactorLoginChallenges)
+            .where(and(eq(twoFactorLoginChallenges.id, challengeToken), drizzleSql`${twoFactorLoginChallenges.expiresAt} > NOW()`))
+            .limit(1);
+        if (!challenge) {
+            set.status = 401;
+            return { success: false, message: 'Invalid or expired challenge' };
+        }
+
+        const [user] = await db.select({
+            id: users.id,
+            username: users.username,
+            role: users.role,
+            currency: users.currency,
+            twoFactorEnabled: users.twoFactorEnabled,
+            twoFactorSecret: users.twoFactorSecret,
+            twoFactorBackupCodes: users.twoFactorBackupCodes,
+        }).from(users).where(eq(users.id, challenge.userId)).limit(1);
+        if (!user || !user.twoFactorEnabled || !user.twoFactorSecret) {
+            set.status = 401;
+            return { success: false, message: '2FA is not enabled for this account' };
+        }
+
+        let backupCodes = Array.isArray(user.twoFactorBackupCodes) ? user.twoFactorBackupCodes : [];
+        const totpValid = code ? verifyTotp(user.twoFactorSecret, code) : false;
+        const backupResult = !totpValid && backupCode ? consumeBackupCode(backupCode, backupCodes) : { valid: false, remaining: backupCodes };
+        if (!totpValid && !backupResult.valid) {
+            set.status = 401;
+            return { success: false, message: 'Invalid 2FA code' };
+        }
+
+        if (backupResult.valid) {
+            await db.update(users).set({
+                twoFactorBackupCodes: backupResult.remaining,
+                updatedAt: new Date(),
+            }).where(eq(users.id, user.id));
+        }
+
+        await db.delete(twoFactorLoginChallenges).where(eq(twoFactorLoginChallenges.id, challengeToken));
+        const { sessionToken } = await authService.createWebSession(
+            user.id,
+            request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown',
+            request.headers.get('user-agent') || 'unknown'
+        );
+        auth_session.set({
+            value: sessionToken,
+            httpOnly: true,
+            secure: request.headers.get('x-forwarded-proto') === 'https',
+            sameSite: 'lax',
+            maxAge: 7 * 86400,
+            path: '/'
+        });
+        const tokenKey = await authService.ensureDefaultApiKey(user.id);
+        return { success: true, token: tokenKey, username: user.username, role: user.role, currency: user.currency || 'USD' };
     })
     .post('/logout', async ({ cookie: { auth_session } }: ElysiaCtx) => {
         if (auth_session.value) { await db.delete(sessions).where(eq(sessions.token, auth_session.value)); }

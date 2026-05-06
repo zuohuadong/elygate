@@ -1,7 +1,7 @@
 import { config } from '../config';
 import { log } from '../services/logger';
 import { db, sql } from '@elygate/db';
-import { users, tokens } from '@elygate/db/schema';
+import { users, tokens, sessions } from '@elygate/db/schema';
 import { eq, asc } from 'drizzle-orm';
 
 const INITIAL_QUOTA = Number(String(config.initialQuota)) || 500000;
@@ -90,5 +90,44 @@ export const authService = {
         }
 
         return token.key;
+    },
+
+    async ensureDefaultApiKey(userId: number) {
+        let [token] = await db
+            .select({ key: tokens.key })
+            .from(tokens)
+            .where(eq(tokens.userId, userId))
+            .orderBy(asc(tokens.id))
+            .limit(1);
+
+        if (!token) {
+            const newKey = `sk-${Bun.randomUUIDv7('hex')}`;
+            [token] = await db
+                .insert(tokens)
+                .values({
+                    userId,
+                    name: 'Default API Key',
+                    key: newKey,
+                    status: 1,
+                    remainQuota: -1,
+                })
+                .returning({ key: tokens.key });
+        }
+
+        return token.key;
+    },
+
+    async createWebSession(userId: number, clientIP: string, userAgent: string) {
+        const sessionToken = `sess_${Bun.randomUUIDv7('hex')}${Bun.randomUUIDv7('hex')}`;
+        const expiresAt = new Date(Date.now() + 7 * 86400 * 1000);
+        await db.insert(sessions).values({
+            id: Bun.randomUUIDv7('hex'),
+            userId,
+            token: sessionToken,
+            expiresAt,
+            ipAddress: clientIP,
+            userAgent,
+        });
+        return { sessionToken, expiresAt };
     }
 };

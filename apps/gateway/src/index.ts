@@ -15,9 +15,10 @@ import "./services/health";
 async function init() {
   await initEnv();
 
-  const { db, sql } = await import("@elygate/db");
+  const { db } = await import("@elygate/db");
   const { channels, users, options } = await import("@elygate/db/schema");
   const drizzleOrm = await import("drizzle-orm");
+  const drizzleSql = drizzleOrm.sql;
   const { memoryCache } = await import("./services/cache");
   const { authPlugin } = await import("./middleware/auth");
   const { staticFileHandler } = await import("./middleware/static");
@@ -168,7 +169,7 @@ async function init() {
   const maxRetries = 15;
   while (retries < maxRetries) {
     try {
-      await sql`SELECT 1`;
+      await db.execute(drizzleSql`SELECT 1`);
       log.info("✅ Database is ready.");
       break;
     } catch (err: unknown) {
@@ -214,11 +215,10 @@ async function init() {
   const { startTaskWorker } = await import('./services/task-service');
   startTaskWorker();
 
-  // REFRESH MATERIALIZED VIEW — must use raw SQL
   const refreshMaterializedViews = async () => {
     try {
-      await sql`REFRESH MATERIALIZED VIEW mv_system_overview`;
-      await sql`REFRESH MATERIALIZED VIEW mv_model_usage_stats`;
+      await db.execute(drizzleSql`REFRESH MATERIALIZED VIEW mv_system_overview`);
+      await db.execute(drizzleSql`REFRESH MATERIALIZED VIEW mv_model_usage_stats`);
       log.info('[MV] Materialized views refreshed');
     } catch (e: unknown) {
       log.error('[MV] Failed to refresh materialized views:', getErrorMessage(e));

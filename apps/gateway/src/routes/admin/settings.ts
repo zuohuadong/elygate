@@ -2,9 +2,9 @@ import type { ElysiaCtx } from '../../types';
 import { log } from '../../services/logger';
 import { getErrorMessage } from '../../utils/error';
 import { Elysia } from 'elysia';
-import { db, sql } from '@elygate/db';
-import { options, packages, userSubscriptions, users } from '@elygate/db/schema';
-import { eq } from 'drizzle-orm';
+import { db } from '@elygate/db';
+import { options, packages, semanticCache, userSubscriptions, users } from '@elygate/db/schema';
+import { eq, sql as drizzleSql } from 'drizzle-orm';
 import { memoryCache } from '../../services/cache';
 import { decryptChannelKeys, getChannelKeys } from '../../services/encryption';
 import { refreshAllCaches } from './index';
@@ -44,10 +44,10 @@ export const settingsRouter = new Elysia()
                         const dimension = data?.data?.[0]?.embedding?.length;
                         
                         if (dimension) {
-                            await sql`DELETE FROM semantic_cache`;
+                            await db.delete(semanticCache);
                             log.info('[SemanticCache] Cleared old cache data');
                             
-                            await sql`ALTER TABLE semantic_cache ALTER COLUMN embedding TYPE vector(${dimension})`;
+                            await db.execute(drizzleSql`ALTER TABLE semantic_cache ALTER COLUMN embedding TYPE vector(${dimension})`);
                             log.info(`[SemanticCache] Updated embedding dimension to ${dimension}`);
                         }
                     }
@@ -135,13 +135,13 @@ export const settingsRouter = new Elysia()
     // --- Schema Migrations ---
     .get('/migrate-cycles', async () => {
         try {
-            await sql`ALTER TABLE packages ADD COLUMN IF NOT EXISTS cycle_quota BIGINT DEFAULT 0`;
-            await sql`ALTER TABLE packages ADD COLUMN IF NOT EXISTS cycle_interval INTEGER DEFAULT 1`;
-            await sql`ALTER TABLE packages ADD COLUMN IF NOT EXISTS cycle_unit TEXT DEFAULT 'day'`;
-            await sql`ALTER TABLE user_subscriptions ADD COLUMN IF NOT EXISTS last_reset_at TIMESTAMPTZ DEFAULT NOW()`;
+            await db.execute(drizzleSql`ALTER TABLE packages ADD COLUMN IF NOT EXISTS cycle_quota BIGINT DEFAULT 0`);
+            await db.execute(drizzleSql`ALTER TABLE packages ADD COLUMN IF NOT EXISTS cycle_interval INTEGER DEFAULT 1`);
+            await db.execute(drizzleSql`ALTER TABLE packages ADD COLUMN IF NOT EXISTS cycle_unit TEXT DEFAULT 'day'`);
+            await db.execute(drizzleSql`ALTER TABLE user_subscriptions ADD COLUMN IF NOT EXISTS last_reset_at TIMESTAMPTZ DEFAULT NOW()`);
             
-            await sql`ALTER TABLE packages ADD COLUMN IF NOT EXISTS cache_policy JSONB DEFAULT '{"mode": "default"}'`;
-            await sql`ALTER TABLE semantic_cache ADD COLUMN IF NOT EXISTS created_by INTEGER REFERENCES users(id) ON DELETE SET NULL`;
+            await db.execute(drizzleSql`ALTER TABLE packages ADD COLUMN IF NOT EXISTS cache_policy JSONB DEFAULT '{"mode": "default"}'`);
+            await db.execute(drizzleSql`ALTER TABLE semantic_cache ADD COLUMN IF NOT EXISTS created_by INTEGER REFERENCES users(id) ON DELETE SET NULL`);
             
             return { success: true, message: 'Schema updated for subscription cycles & semantic cache' };
         } catch (e: unknown) {
