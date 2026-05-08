@@ -145,7 +145,7 @@ Inspired by New-API, Elygate provides pre-compiled single-file binaries. No Node
 
 For high-performance production use without Docker:
 
-**Requirements:** Bun 1.3+ and Node.js 24+. Node.js 24 is also used by the GitHub Actions build pipeline.
+**Requirements:** Bun 1.3+. Node.js does not need to be installed separately for source deployment; Bun runs the build and server commands. GitHub Actions still pins Node.js 24 for the CI runner environment.
 
 #### One-Command Start
 ```bash
@@ -175,7 +175,7 @@ This will start:
 
 If you prefer to run services manually on your host machine:
 
-**Requirements:** Bun 1.3+, Node.js 24+, and PostgreSQL 15+.
+**Requirements:** Bun 1.3+ and PostgreSQL 15+. Node.js does not need to be installed separately when using Bun.
 
 #### One-Command Dev Start
 ```bash
@@ -433,7 +433,7 @@ chmod +x scripts/deploy-optimizations.sh
 
 如果您希望在宿主机以最佳性能运行（非 Docker 环境）：
 
-**依赖要求：** Bun 1.3+、Node.js 24+。GitHub Actions 构建流水线也统一使用 Node.js 24。
+**依赖要求：** Bun 1.3+。源码部署不需要单独安装 Node.js，构建和启动命令都由 Bun 执行；GitHub Actions 仍会固定使用 Node.js 24 作为 CI runner 环境。
 
 #### 一键启动
 ```bash
@@ -463,7 +463,7 @@ bun run start
 
 如果您希望在宿主机手动运行各项服务：
 
-**依赖要求：** Bun 1.3+、Node.js 24+、PostgreSQL 15+。
+**依赖要求：** Bun 1.3+、PostgreSQL 15+。使用 Bun 运行时不需要单独安装 Node.js。
 
 #### 一键开发启动
 ```bash
