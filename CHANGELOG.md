@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/zuohuadong/elygate/compare/elygate-v0.8.0...elygate-v0.8.1) (2026-05-08)
+
+
+### Chores
+
+* enable dependabot updates ([60d9943](https://github.com/zuohuadong/elygate/commit/60d99438c94d449ee54b75a03045e5bf8fc817df))
+
 ## [0.8.0](https://github.com/zuohuadong/elygate/compare/elygate-v0.7.1...elygate-v0.8.0) (2026-05-08)
 
 
