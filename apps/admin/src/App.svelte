@@ -3,7 +3,7 @@
   import { createElysiaDataProvider } from '@svadmin/elysia';
   import { createSimpleRestAuthProvider } from '@svadmin/simple-rest';
   import { setAccessControlProvider } from '@svadmin/core';
-  import type { MenuItem } from '@svadmin/core';
+  import type { DataProvider, MenuItem } from '@svadmin/core';
   import { resources } from './resources';
   import { createRoleBasedAccessControl } from './providers/accessControl';
 
@@ -13,15 +13,21 @@
   import CustomShowPage from './pages/CustomShowPage.svelte';
   import CustomAutoTable from './components/CustomAutoTable.svelte';
   import CustomLoginPage from './pages/CustomLoginPage.svelte';
-  import ContentManagement from './pages/ContentManagement.svelte';
-  import PricingEditor from './pages/PricingEditor.svelte';
-  import PerformanceMonitor from './pages/PerformanceMonitor.svelte';
-  import FeatureConsole from './pages/FeatureConsole.svelte';
+
+  const virtualResources = new Set([
+    'system-options',
+    'models',
+    'playground',
+    'feature-console',
+    'content-management',
+    'pricing-editor',
+    'performance-monitor',
+  ]);
 
   const baseDataProvider = createElysiaDataProvider({
     apiUrl: '/api/admin',
     withCredentials: true,
-    headers: () => {
+    headers: (): Record<string, string> => {
       const token = localStorage.getItem('auth_token');
       return token ? { Authorization: `Bearer ${token}` } : {};
     },
@@ -40,13 +46,13 @@
   const dataProvider = {
     ...baseDataProvider,
     getList: async (params: any) => {
-      if (['system-options', 'models', 'playground', 'feature-console'].includes(params.resource)) {
+      if (virtualResources.has(params.resource)) {
         return { data: [], total: 0 };
       }
       return baseDataProvider.getList(params);
     },
     getOne: async (params: any) => {
-      if (['system-options', 'models', 'playground', 'feature-console'].includes(params.resource)) {
+      if (virtualResources.has(params.resource)) {
         return { data: { id: params.id } as any };
       }
       try {
@@ -67,7 +73,7 @@
         throw err;
       }
     }
-  };
+  } as DataProvider;
 
   const authProvider = createSimpleRestAuthProvider({
     loginUrl: '/api/auth/login',
@@ -81,23 +87,23 @@
 
   // Full menu (admin view — ACL will hide items for consumers)
   const menu: MenuItem[] = [
-    { label: '仪表盘', icon: 'layout-dashboard', href: '/' },
-    { label: '渠道管理', icon: 'radio', href: '/channels' },
-    { label: '用户管理', icon: 'users', href: '/users' },
-    { label: '令牌管理', icon: 'key', href: '/tokens' },
-    { label: '分组', icon: 'folder', href: '/user-groups' },
-    { label: '套餐', icon: 'package', href: '/packages' },
-    { label: '兑换码', icon: 'gift', href: '/redemptions' },
-    { label: '供应商', icon: 'building', href: '/vendors' },
-    { label: '限流策略', icon: 'shield', href: '/rate-limits' },
-    { label: '模型管理', icon: 'cpu', href: '/models-meta' },
-    { label: '倍率管理', icon: 'coins', href: '/pricing-editor' },
-    { label: '日志', icon: 'scroll-text', href: '/logs' },
-    { label: '内容管理', icon: 'file-text', href: '/content-management' },
-    { label: '新增功能', icon: 'sparkles', href: '/feature-console' },
-    { label: '性能监控', icon: 'activity', href: '/performance-monitor' },
-    { label: 'API 测试', icon: 'play', href: '/playground' },
-    { label: '系统设置', icon: 'settings', href: '/system-options' },
+    { name: 'dashboard', label: '仪表盘', icon: 'layout-dashboard', href: '/' },
+    { name: 'channels', label: '渠道管理', icon: 'radio', href: '/channels' },
+    { name: 'users', label: '用户管理', icon: 'users', href: '/users' },
+    { name: 'tokens', label: '令牌管理', icon: 'key', href: '/tokens' },
+    { name: 'user-groups', label: '分组', icon: 'folder', href: '/user-groups' },
+    { name: 'packages', label: '套餐', icon: 'package', href: '/packages' },
+    { name: 'redemptions', label: '兑换码', icon: 'gift', href: '/redemptions' },
+    { name: 'vendors', label: '供应商', icon: 'building', href: '/vendors' },
+    { name: 'rate-limits', label: '限流策略', icon: 'shield', href: '/rate-limits' },
+    { name: 'models-meta', label: '模型管理', icon: 'cpu', href: '/models-meta' },
+    { name: 'pricing-editor', label: '倍率管理', icon: 'coins', href: '/pricing-editor' },
+    { name: 'logs', label: '日志', icon: 'scroll-text', href: '/logs' },
+    { name: 'content-management', label: '内容管理', icon: 'file-text', href: '/content-management' },
+    { name: 'feature-console', label: '新增功能', icon: 'sparkles', href: '/feature-console' },
+    { name: 'performance-monitor', label: '性能监控', icon: 'activity', href: '/performance-monitor' },
+    { name: 'playground', label: 'API 测试', icon: 'play', href: '/playground' },
+    { name: 'system-options', label: '系统设置', icon: 'settings', href: '/system-options' },
   ];
 
   // Determine dashboard variant by identity role
@@ -115,12 +121,6 @@
   {menu}
   title="Elygate"
   locale="zh-CN"
-  customPages={{
-    'content-management': ContentManagement,
-    'pricing-editor': PricingEditor,
-    'performance-monitor': PerformanceMonitor,
-    'feature-console': FeatureConsole,
-  }}
   components={{
     AutoTable: CustomAutoTable,
     ShowPage: CustomShowPage,

@@ -11,6 +11,8 @@ const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 16;
 const AUTH_TAG_LENGTH = 16;
 const SALT_LENGTH = 32;
+let cachedKey: Buffer | undefined;
+let cachedKeyMaterial: string | undefined;
 
 /**
  * Get encryption key from environment or generate one
@@ -23,8 +25,13 @@ function getEncryptionKey(): Buffer {
         throw new Error('[Encryption] Critical: ENCRYPTION_SECRET or ENCRYPTION_SALT is not set in environment.');
     }
     
-    // Derive a 32-byte key using scrypt
-    return scryptSync(secret, salt, 32);
+    const keyMaterial = `${secret}:${salt}`;
+    if (!cachedKey || cachedKeyMaterial !== keyMaterial) {
+        cachedKey = scryptSync(secret, salt, 32);
+        cachedKeyMaterial = keyMaterial;
+    }
+
+    return cachedKey;
 }
 
 /**

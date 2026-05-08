@@ -6,6 +6,10 @@ services:
     container_name: elygate-db
     restart: always
     privileged: true
+    environment:
+      POSTGRES_USER: dbuser_dba
+      POSTGRES_PASSWORD: ${ELYGATE_DB_PASSWORD:-elygate_change_me}
+      POSTGRES_DB: postgres
     ports:
       - "5432:5432"
     volumes:
@@ -22,7 +26,7 @@ services:
     restart: always
     env_file: .env
     environment:
-      DATABASE_URL: postgresql://dbuser_dba:YOUR_DB_PASSWORD@db:5432/postgres
+      DATABASE_URL: postgresql://dbuser_dba:${ELYGATE_DB_PASSWORD:-elygate_change_me}@db:5432/postgres
     ports:
       - "3000:3000"
     depends_on:

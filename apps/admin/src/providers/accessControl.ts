@@ -1,5 +1,5 @@
 import { getAuthProvider } from '@svadmin/core';
-import type { AccessControlProvider } from '@svadmin/core';
+import type { AccessControlProvider, CanParams, CanResult } from '@svadmin/core';
 
 /**
  * Role-based access control for Elygate:
@@ -7,35 +7,43 @@ import type { AccessControlProvider } from '@svadmin/core';
  * - role === 1:  Consumer — access to consumer-facing resources only
  */
 export function createRoleBasedAccessControl(): AccessControlProvider {
-  return {
-    can: async ({ resource, action }) => {
-      if (!resource) return { can: true };
+  async function checkAccess({ resource }: CanParams): Promise<CanResult> {
+    if (!resource) return { can: true };
 
-      const authProvider = getAuthProvider();
-      if (!authProvider?.getIdentity) return { can: true };
+    const authProvider = getAuthProvider();
+    if (!authProvider?.getIdentity) return { can: true };
 
-      try {
-        const identity = await authProvider.getIdentity();
-        const role = (identity as Record<string, unknown>)?.role;
+    try {
+      const identity = await authProvider.getIdentity();
+      const role = (identity as Record<string, unknown>)?.role;
 
-        // Super Admin — full access
-        if (role === 10) return { can: true };
+      // Super Admin — full access
+      if (role === 10) return { can: true };
 
-        // Regular user — restricted to consumer resources
-        if (role === 1) {
-          const consumerResources = [
-            'tokens',  // User can manage their own API keys
-          ];
-          if (consumerResources.includes(resource)) {
-            return { can: true };
-          }
-          return { can: false, reason: '权限不足' };
+      // Regular user — restricted to consumer resources
+      if (role === 1) {
+        const consumerResources = [
+          'tokens',  // User can manage their own API keys
+        ];
+        if (consumerResources.includes(resource)) {
+          return { can: true };
         }
-
-        return { can: false, reason: '未授权' };
-      } catch {
-        return { can: false, reason: '权限校验失败' };
+        return { can: false, reason: '权限不足' };
       }
+
+      return { can: false, reason: '未授权' };
+    } catch {
+      return { can: false, reason: '权限校验失败' };
+    }
+  }
+
+  return {
+    can: async (params) => {
+      if (Array.isArray(params)) {
+        return Promise.all(params.map(checkAccess));
+      }
+
+      return checkAccess(params);
     },
     options: {
       buttons: {

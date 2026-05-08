@@ -13,7 +13,7 @@
   const query = useShow({ get resource() { return resourceName; }, get id() { return id; } });
 
   const notify = useNotification();
-  const dataProvider = useDataProvider();
+  const dataProvider = useDataProvider()();
 
   let syncing = $state(false);
 
@@ -22,10 +22,10 @@
     try {
       syncing = true;
       await dataProvider.custom?.({ url: `/channels/${id}/models/sync`, method: 'post' });
-      notify({ message: '模型同步成功', type: 'success' });
-      query.query.refetch(); // Refresh after sync
+      notify.success('模型同步成功');
+      query.refetch();
     } catch (e: any) {
-      notify({ message: e.message || '模型同步失败', type: 'error' });
+      notify.error(e.message || '模型同步失败');
     } finally {
       syncing = false;
     }
@@ -35,10 +35,11 @@
     if (resourceName !== 'channels') return;
     try {
       const res = await dataProvider.custom?.({ url: `/channels/${id}/test`, method: 'post' });
-      const latencyStr = res?.data?.latency ? ` (延迟: ${res.data.latency}ms)` : '';
-      notify({ message: `测试成功${latencyStr}`, type: 'success' });
+      const result = res?.data as { latency?: number } | undefined;
+      const latencyStr = result?.latency ? ` (延迟: ${result.latency}ms)` : '';
+      notify.success(`测试成功${latencyStr}`);
     } catch (e: any) {
-      notify({ message: e.message || '测试失败', type: 'error' });
+      notify.error(e.message || '测试失败');
     }
   }
 </script>
@@ -66,7 +67,7 @@
     {/snippet}
   </PageHeader>
 
-  {#if query.query.isLoading}
+  {#if query.isLoading}
     <Card.Root>
       <Card.Content class="divide-y divide-border p-0">
         {#each showFields.slice(0, 6) as _}
@@ -77,11 +78,11 @@
         {/each}
       </Card.Content>
     </Card.Root>
-  {:else if query.query.data?.data}
+  {:else if query.data?.data}
     <Card.Root>
       <Card.Content class="divide-y divide-border p-0">
         {#each showFields as field}
-          {@const value = (query.query.data!.data as Record<string, unknown>)[field.key]}
+          {@const value = (query.data!.data as Record<string, unknown>)[field.key]}
           {@const DisplayComponent = getDisplayComponent(field.type)}
           <div class="flex flex-col sm:flex-row px-4 sm:px-6 py-3 sm:py-4">
             <div class="sm:w-1/3 text-xs sm:text-sm font-medium text-muted-foreground mb-1 sm:mb-0">{field.label}</div>

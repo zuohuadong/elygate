@@ -62,12 +62,7 @@ jobs:
         run: bun run build
 
       - name: Build Binary
-        run: |
-          if [ "${{ matrix.target }}" = "bun-windows-x64" ]; then
-            bun build apps/gateway/src/index.ts --compile --minify --target=${{ matrix.target }} --outfile=elygate-${{ matrix.target }}.exe
-          else
-            bun build apps/gateway/src/index.ts --compile --minify --target=${{ matrix.target }} --outfile=elygate-${{ matrix.target }}
-          fi
+        run: bun run scripts/build-binary.ts ${{ matrix.target }}
         shell: bash
 
       - name: Upload Artifact

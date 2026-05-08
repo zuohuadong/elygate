@@ -334,9 +334,10 @@
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             {#each section.fields as field}
               <div class="space-y-1.5">
-                <label class="text-sm font-medium text-muted-foreground">{field.label}</label>
+                <label for={`setting-${field.key}`} class="text-sm font-medium text-muted-foreground">{field.label}</label>
                 {#if field.type === 'select' && field.options}
                   <select
+                    id={`setting-${field.key}`}
                     bind:value={settings[field.key]}
                     class="w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
                   >
@@ -346,6 +347,7 @@
                   </select>
                 {:else if field.type === 'textarea'}
                   <textarea
+                    id={`setting-${field.key}`}
                     bind:value={settings[field.key]}
                     rows="3"
                     placeholder={field.placeholder}
@@ -353,12 +355,14 @@
                   ></textarea>
                 {:else if field.type === 'number'}
                   <input
+                    id={`setting-${field.key}`}
                     type="number"
                     bind:value={settings[field.key]}
                     class="w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
                   />
                 {:else}
                   <input
+                    id={`setting-${field.key}`}
                     type="text"
                     bind:value={settings[field.key]}
                     placeholder={field.placeholder}

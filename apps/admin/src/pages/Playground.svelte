@@ -133,8 +133,9 @@
       <Card.Root>
         <Card.Content class="pt-6 space-y-4">
           <div class="space-y-1.5">
-            <label class="text-sm font-medium text-muted-foreground">模型</label>
+            <label for="playground-model" class="text-sm font-medium text-muted-foreground">模型</label>
             <select
+              id="playground-model"
               bind:value={selectedModel}
               class="w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
             >
@@ -145,12 +146,12 @@
           </div>
           <div class="grid grid-cols-2 gap-4">
             <div class="space-y-1.5">
-              <label class="text-sm font-medium text-muted-foreground">Temperature: {temperature}</label>
-              <input type="range" min="0" max="2" step="0.1" bind:value={temperature} class="w-full" />
+              <label for="playground-temperature" class="text-sm font-medium text-muted-foreground">Temperature: {temperature}</label>
+              <input id="playground-temperature" type="range" min="0" max="2" step="0.1" bind:value={temperature} class="w-full" />
             </div>
             <div class="space-y-1.5">
-              <label class="text-sm font-medium text-muted-foreground">Max Tokens</label>
-              <input type="number" bind:value={maxTokens} min="1" max="32000" class="w-full h-9 rounded-md border border-input bg-background px-3 text-sm" />
+              <label for="playground-max-tokens" class="text-sm font-medium text-muted-foreground">Max Tokens</label>
+              <input id="playground-max-tokens" type="number" bind:value={maxTokens} min="1" max="32000" class="w-full h-9 rounded-md border border-input bg-background px-3 text-sm" />
             </div>
           </div>
         </Card.Content>

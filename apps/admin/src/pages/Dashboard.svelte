@@ -32,7 +32,7 @@
         url: '/api/admin/dashboard/stats',
         method: 'get'
       }).then((res) => {
-        if (res && res.data) stats = res.data;
+        if (res && res.data) stats = res.data as typeof stats;
       }).catch(e => console.error('Failed to load stats', e))
         .finally(() => loading = false);
 
@@ -40,7 +40,7 @@
       dataProvider.getList({
         resource: 'logs',
         pagination: { current: 1, pageSize: 6 },
-        sort: { field: 'id', order: 'desc' }
+        sorters: [{ field: 'id', order: 'desc' }]
       }).then((res) => {
         if (res && res.data) recentLogs = res.data;
       }).catch(e => console.error('Failed to load logs', e))
@@ -76,7 +76,6 @@
       label="总用户数"
       value={stats.totalUsers.toString()}
       icon={Users}
-      description="系统注册用户"
       class="glass-card"
       {loading}
     />
@@ -84,7 +83,6 @@
       label="活跃渠道数"
       value={stats.activeChannels.toString()}
       icon={Radio}
-      description="当前在线可用渠道"
       class="glass-card"
       {loading}
     />
@@ -92,7 +90,6 @@
       label="今日消耗额度"
       value={formatCompactNumber(stats.todayQuota)}
       icon={Activity}
-      description="今日系统总请求消耗"
       class="glass-card"
       {loading}
     />
@@ -100,7 +97,6 @@
       label="总消耗额度"
       value={formatCompactNumber(stats.usedQuota)}
       icon={Database}
-      description="历史总消耗"
       class="glass-card"
       {loading}
     />

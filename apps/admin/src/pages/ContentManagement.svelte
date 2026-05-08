@@ -79,15 +79,17 @@
       {#each fields as field}
         <Card.Root>
           <Card.Content class="pt-6 space-y-2">
-            <label class="text-sm font-medium text-muted-foreground">{field.label}</label>
+            <label for={`content-${field.key}`} class="text-sm font-medium text-muted-foreground">{field.label}</label>
             {#if field.type === 'textarea'}
               <textarea
+                id={`content-${field.key}`}
                 bind:value={content[field.key]}
                 rows="6"
                 class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono resize-y"
               ></textarea>
             {:else}
               <input
+                id={`content-${field.key}`}
                 type="text"
                 bind:value={content[field.key]}
                 class="w-full h-9 rounded-md border border-input bg-background px-3 text-sm"

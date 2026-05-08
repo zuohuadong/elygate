@@ -95,6 +95,9 @@ Launch the entire stack (Database, Gateway, and Web UI) with one command.
 ```bash
 git clone https://github.com/zuohuadong/elygate.git && cd elygate
 cp .env.example .env
+
+# Change this before the first Docker startup
+sed -i 's/ELYGATE_DB_PASSWORD=elygate_change_me/ELYGATE_DB_PASSWORD=replace-with-a-strong-password/' .env
 ```
 
 #### 2. Run (Pre-built Images)
@@ -349,6 +352,9 @@ claude
 ```bash
 git clone https://github.com/zuohuadong/elygate.git && cd elygate
 cp .env.example .env
+
+# 首次启动 Docker 前请改掉默认数据库密码
+sed -i 's/ELYGATE_DB_PASSWORD=elygate_change_me/ELYGATE_DB_PASSWORD=replace-with-a-strong-password/' .env
 ```
 
 #### 2. 一键启动 (预编译镜像部署)

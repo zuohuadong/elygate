@@ -13,12 +13,15 @@
 在根目录下创建 `.env` 文件，可参考以下配置：
 
 ```bash
-DATABASE_URL=postgresql://dbuser_dba:DBUser.DBA@db:5432/postgres
-AUTH_SECRET=your-random-secret
+ELYGATE_DB_PASSWORD=replace-with-a-strong-password
+DATABASE_URL=postgresql://dbuser_dba:replace-with-a-strong-password@db:5432/postgres
+JWT_SECRET=your-random-secret
 ORG_NAME="你的企业名称"
 ADMIN_USER="admin"
-ADMIN_PASS="password123"
+ADMIN_PASSWORD="replace-with-a-strong-admin-password"
 ```
+
+请在首次 Docker 启动前设置 `ELYGATE_DB_PASSWORD`。已有 PostgreSQL 数据卷会保留初始化时的旧密码。
 
 ## 2. 启动服务
 
@@ -42,11 +45,11 @@ docker exec -it elygate-gateway bun run packages/db/src/onboard.ts
 
 ## 4. 访问门户
 
-- **用户工作台**: `http://localhost:3001` (终端用户使用)
-- **企业管理后台**: `http://localhost:3000` (组织管理与策略管控)
+- **管理控制台**: `http://localhost:3001` (系统管理员使用)
+- **企业门户 / API 网关**: `http://localhost:3000`
 - **API 网关**: `http://localhost:3003`
 
-使用环境配置文件中定义的 `ADMIN_USER` 和 `ADMIN_PASS` 登录企业管理后台。
+使用环境配置文件中定义的 `ADMIN_USER` 和 `ADMIN_PASSWORD` 登录管理控制台。
 
 ## 5. 成员管理
 

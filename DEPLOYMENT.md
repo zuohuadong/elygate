@@ -13,12 +13,15 @@ This guide provides step-by-step instructions to deploy Elygate in a private ent
 Create a `.env` file in the root directory based on `.env.example`:
 
 ```bash
-DATABASE_URL=postgresql://dbuser_dba:DBUser.DBA@db:5432/postgres
-AUTH_SECRET=your-random-secret
+ELYGATE_DB_PASSWORD=replace-with-a-strong-password
+DATABASE_URL=postgresql://dbuser_dba:replace-with-a-strong-password@db:5432/postgres
+JWT_SECRET=your-random-secret
 ORG_NAME="Your Company Name"
 ADMIN_USER="admin"
-ADMIN_PASS="password123"
+ADMIN_PASSWORD="replace-with-a-strong-admin-password"
 ```
+
+Set `ELYGATE_DB_PASSWORD` before the first Docker startup. Existing PostgreSQL volumes keep the password they were initialized with.
 
 ## 2. Start Services
 
@@ -42,11 +45,11 @@ docker exec -it elygate-gateway bun run packages/db/src/onboard.ts
 
 ## 4. Accessing the Portal
 
-- **User Portal**: `http://localhost:3001` (for standard users)
-- **Enterprise Portal**: `http://localhost:3000` (for organization management)
+- **Admin Console**: `http://localhost:3001` (for system administrators)
+- **Enterprise Portal / API Gateway**: `http://localhost:3000`
 - **API Gateway**: `http://localhost:3003`
 
-Log in to the Enterprise Portal with the `ADMIN_USER` and `ADMIN_PASS` defined in your environment.
+Log in to the admin console with the `ADMIN_USER` and `ADMIN_PASSWORD` defined in your environment.
 
 ## 5. Member Management
 

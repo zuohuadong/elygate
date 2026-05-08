@@ -21,6 +21,22 @@ export default defineConfig({
       '@tanstack/svelte-query',
     ],
   },
+  build: {
+    chunkSizeWarningLimit: 600,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined;
+          if (id.includes('@svadmin/ui')) return 'svadmin-ui';
+          if (id.includes('@svadmin/core')) return 'svadmin-core';
+          if (id.includes('@svadmin/')) return 'svadmin-providers';
+          if (id.includes('@tanstack/')) return 'tanstack';
+          if (id.includes('/svelte/')) return 'svelte';
+          return undefined;
+        },
+      },
+    },
+  },
   resolve: {
     dedupe: ['svelte', '@tanstack/svelte-query'],
   },

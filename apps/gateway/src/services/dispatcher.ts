@@ -60,6 +60,10 @@ function setHeader(headers: Headers, key: string, value: unknown): void {
     headers.set(key, String(value));
 }
 
+function idempotencyHash(userId: number, key: string): string {
+    return new Bun.CryptoHasher('sha256').update(`${userId}_${key}`).digest('hex');
+}
+
 async function waitForConcurrencyRelease(lockId: string, limit: number, maxWaitMs: number = 15000): Promise<boolean> {
     if (limit <= 0) return true; // 0 = unlimited
 
@@ -125,10 +129,7 @@ export async function dispatch(options: DispatchOptions) {
         // 0.57 Idempotency Check (The "No Double Dip" Enforcer)
         const effectiveIdempotencyKey = idempotencyKey || body.idempotency_key || (body.metadata?.idempotency_key);
         if (effectiveIdempotencyKey) {
-            const keyHash = Bun.password.hashSync(effectiveIdempotencyKey, { algorithm: "argon2id" }).split('$').pop(); // Simple stable hash or just use the key if it's already a safe string
-            // Let's just use the string if it's short, or a crypto hash.
-            const cryptoHash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${user.id}_${effectiveIdempotencyKey}`))))
-                .map(b => b.toString(16).padStart(2, '0')).join('');
+            const cryptoHash = idempotencyHash(user.id, effectiveIdempotencyKey);
 
             const [existing] = await db.select({ responseCode: idempotencyKeys.responseCode, responseBody: idempotencyKeys.responseBody }).from(idempotencyKeys).where(and(eq(idempotencyKeys.keyHash, cryptoHash), eq(idempotencyKeys.userId, user.id), gt(idempotencyKeys.expiresAt, drizzleSql`NOW()`)));
             if (existing) {
@@ -768,8 +769,7 @@ export async function dispatch(options: DispatchOptions) {
 
                     // Save idempotency key
                     if (effectiveIdempotencyKey) {
-                        const cryptoHash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${user.id}_${effectiveIdempotencyKey}`))))
-                            .map(b => b.toString(16).padStart(2, '0')).join('');
+                        const cryptoHash = idempotencyHash(user.id, effectiveIdempotencyKey);
                         await db.insert(idempotencyKeys).values({
                             keyHash: cryptoHash,
                             userId: user.id,
@@ -937,8 +937,7 @@ export async function dispatch(options: DispatchOptions) {
 
                     // Save idempotency key
                     if (effectiveIdempotencyKey) {
-                        const cryptoHash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${user.id}_${effectiveIdempotencyKey}`))))
-                            .map(b => b.toString(16).padStart(2, '0')).join('');
+                        const cryptoHash = idempotencyHash(user.id, effectiveIdempotencyKey);
                         await db.insert(idempotencyKeys).values({
                             keyHash: cryptoHash,
                             userId: user.id,
@@ -1239,8 +1238,7 @@ function handleStreamBilling(
 
                 // Save idempotency key for stream
                 if (idempotencyKey) {
-                    const cryptoHash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${user.id}_${idempotencyKey}`))))
-                        .map(b => b.toString(16).padStart(2, '0')).join('');
+                    const cryptoHash = idempotencyHash(user.id, idempotencyKey);
                     // Reconstruct a standard response format if possible, or just the completion
                     const mockResponse = { choices: [{ message: { content: completionText } }], usage: usageData };
                     await db.insert(idempotencyKeys).values({

@@ -8,6 +8,9 @@
   import ModelsStatus from '../pages/ModelsStatus.svelte';
   import Playground from '../pages/Playground.svelte';
   import FeatureConsole from '../pages/FeatureConsole.svelte';
+  import ContentManagement from '../pages/ContentManagement.svelte';
+  import PricingEditor from '../pages/PricingEditor.svelte';
+  import PerformanceMonitor from '../pages/PerformanceMonitor.svelte';
 
   let { resourceName, ...rest }: { resourceName: string; [key: string]: any } = $props();
 
@@ -17,6 +20,9 @@
     models: ModelsStatus,
     playground: Playground,
     'feature-console': FeatureConsole,
+    'content-management': ContentManagement,
+    'pricing-editor': PricingEditor,
+    'performance-monitor': PerformanceMonitor,
   };
 
   const CustomPage = $derived(customPages[resourceName]);

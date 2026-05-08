@@ -11,7 +11,8 @@ echo "============================"
 # Configuration
 DEPLOY_DIR="/opt/elygate"
 SERVER="elygate"
-ADMIN_PASSWORD="zz123qwe"
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-$(openssl rand -base64 24)}"
+DATABASE_URL="${DATABASE_URL:?Set DATABASE_URL before running scripts/deploy.sh}"
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -55,8 +56,8 @@ echo "⚙️  Step 2: Creating environment configuration..."
 ssh ${SERVER} "cat > ${DEPLOY_DIR}/.env << 'EOF'
 # Elygate Production Configuration
 
-# Database (using Pigsty PostgreSQL 18.3)
-DATABASE_URL=postgresql://dbuser_dba:efl62UnYeByXDTjsNjsMQ9vb3Wx0z4dp@localhost:5432/postgres
+# Database
+DATABASE_URL=${DATABASE_URL}
 
 # Connection Pool
 DB_POOL_SIZE=20

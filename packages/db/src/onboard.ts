@@ -3,7 +3,7 @@ import { sql } from './index';
 async function onboard() {
     const orgName = process.env.ORG_NAME || 'Default Enterprise';
     const adminUser = process.env.ADMIN_USER || 'admin';
-    const adminPass = process.env.ADMIN_PASS || 'password123';
+    const adminPass = process.env.ADMIN_PASSWORD || process.env.ADMIN_PASS || 'password123';
 
     console.log(`[Onboard] Initializing system for ${orgName}...`);
 

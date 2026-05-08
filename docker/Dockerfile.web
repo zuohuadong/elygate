@@ -1,4 +1,4 @@
-# ─── Production Web (SvelteKit) Dockerfile ────────────────────
+# ─── Production Web Admin (Svelte + Vite) Dockerfile ───────────
 FROM oven/bun:1-alpine AS builder
 WORKDIR /app
 
@@ -17,20 +17,21 @@ COPY packages/svadmin-ui/package.json ./packages/svadmin-ui/
 
 RUN bun install
 
-# Copy source and build
-COPY apps/portal ./apps/portal
+# Copy source and build the admin console
+COPY apps/admin ./apps/admin
 COPY packages ./packages
 
-WORKDIR /app/apps/portal
+WORKDIR /app/apps/admin
 RUN bun run build
 
 # ─── Production runtime ─────────────────────────────────────
 FROM oven/bun:1-alpine AS runner
 WORKDIR /app
 
-COPY --from=builder /app/apps/portal/build ./build
+COPY --from=builder /app/apps/admin/dist ./dist
+COPY docker/serve-static.ts ./serve-static.ts
 
 EXPOSE 3001
 ENV NODE_ENV=production PORT=3001
 
-CMD PORT=3001 bun build/index.js
+CMD ["bun", "serve-static.ts"]

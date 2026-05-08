@@ -9,12 +9,15 @@ services:
     container_name: elygate-db
     restart: always
     privileged: true
+    environment:
+      POSTGRES_USER: dbuser_dba
+      POSTGRES_PASSWORD: ${ELYGATE_DB_PASSWORD:-elygate_change_me}
+      POSTGRES_DB: postgres
     ports:
       - "5432:5432"
     volumes:
       - /sys/fs/cgroup:/sys/fs/cgroup:ro
       - pgdata:/data
-    # Pigsty default admin password is DBUser.DBA, default connection database can be postgres
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U dbuser_dba -d postgres" ]
       interval: 10s
@@ -30,7 +33,7 @@ services:
     restart: always
     env_file: .env
     environment:
-      DATABASE_URL: postgresql://dbuser_dba:YOUR_DB_PASSWORD@db:5432/postgres
+      DATABASE_URL: postgresql://dbuser_dba:${ELYGATE_DB_PASSWORD:-elygate_change_me}@db:5432/postgres
     ports:
       - "3003:3000"
     depends_on:
@@ -39,7 +42,7 @@ services:
     networks:
       - elygate-network
 
-  # ──── Web Admin Panel (SvelteKit + Bun) ──────────────────
+  # ──── Web Admin Panel (Svelte + Bun) ─────────────────────
   web:
     build:
       context: .
@@ -56,7 +59,7 @@ services:
     networks:
       - elygate-network
 
-  # ──── Portal Admin Panel (SvelteKit + Node) ──────────
+  # ──── Enterprise Portal (SvelteKit + Bun) ────────────────
   portal:
     build:
       context: .
@@ -64,7 +67,7 @@ services:
     container_name: elygate-portal
     restart: always
     environment:
-      DATABASE_URL: postgresql://dbuser_dba:YOUR_DB_PASSWORD@db:5432/postgres
+      DATABASE_URL: postgresql://dbuser_dba:${ELYGATE_DB_PASSWORD:-elygate_change_me}@db:5432/postgres
     ports:
       - "3000:3000"
     depends_on:
