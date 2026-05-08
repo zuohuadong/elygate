@@ -8,12 +8,18 @@ COPY apps/gateway/package.json ./apps/gateway/
 COPY apps/portal/package.json ./apps/portal/
 COPY apps/admin/package.json ./apps/admin/
 COPY packages/db/package.json ./packages/db/
+COPY packages/pg-listen/package.json ./packages/pg-listen/
+COPY packages/svadmin-core/package.json ./packages/svadmin-core/
+COPY packages/svadmin-editor/package.json ./packages/svadmin-editor/
+COPY packages/svadmin-elysia/package.json ./packages/svadmin-elysia/
+COPY packages/svadmin-simple-rest/package.json ./packages/svadmin-simple-rest/
+COPY packages/svadmin-ui/package.json ./packages/svadmin-ui/
 
 RUN bun install
 
 # Copy source and build
 COPY apps/portal ./apps/portal
-COPY packages/db ./packages/db
+COPY packages ./packages
 
 WORKDIR /app/apps/portal
 RUN bun run build

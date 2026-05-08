@@ -10,13 +10,17 @@ COPY apps/portal/package.json ./apps/portal/
 COPY apps/admin/package.json ./apps/admin/
 COPY packages/db/package.json ./packages/db/
 COPY packages/pg-listen/package.json ./packages/pg-listen/
+COPY packages/svadmin-core/package.json ./packages/svadmin-core/
+COPY packages/svadmin-editor/package.json ./packages/svadmin-editor/
+COPY packages/svadmin-elysia/package.json ./packages/svadmin-elysia/
+COPY packages/svadmin-simple-rest/package.json ./packages/svadmin-simple-rest/
+COPY packages/svadmin-ui/package.json ./packages/svadmin-ui/
 
 RUN bun install
 
 # Copy source
 COPY apps/gateway ./apps/gateway
-COPY packages/db ./packages/db
-COPY packages/pg-listen ./packages/pg-listen
+COPY packages ./packages
 
 EXPOSE 3000
 ENV NODE_ENV=production
