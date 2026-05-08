@@ -11,6 +11,11 @@
     ExchangeRate: '7.2',
     PaymentEnabled: 'true',
     PaymentMethods: 'redemption',
+    QuotaPerUnit: '500000',
+    CheckinEnabled: 'false',
+    CheckinReward: '100000',
+    EnableTwoFactorLogin: 'true',
+    PasskeyLoginEnabled: 'true',
     PasswordLoginEnabled: 'true',
     GitHubOAuthEnabled: 'false',
     GitHubClientId: '',
@@ -163,6 +168,7 @@
           { label: '在线支付', value: 'online' },
           { label: '两者皆有', value: 'both' },
         ]},
+        { key: 'QuotaPerUnit', label: '每单位充值额度', type: 'number' },
       ],
     },
     {
@@ -172,12 +178,30 @@
           { label: '启用', value: 'true' },
           { label: '禁用', value: 'false' },
         ]},
+        { key: 'EnableTwoFactorLogin', label: '二步验证登录', type: 'select', options: [
+          { label: '启用', value: 'true' },
+          { label: '禁用', value: 'false' },
+        ]},
+        { key: 'PasskeyLoginEnabled', label: 'Passkey 登录', type: 'select', options: [
+          { label: '启用', value: 'true' },
+          { label: '禁用', value: 'false' },
+        ]},
         { key: 'GitHubOAuthEnabled', label: 'GitHub OAuth', type: 'select', options: [
           { label: '启用', value: 'true' },
           { label: '禁用', value: 'false' },
         ]},
         { key: 'GitHubClientId', label: 'GitHub Client ID', type: 'text' },
         { key: 'GitHubClientSecret', label: 'GitHub Client Secret', type: 'text' },
+      ],
+    },
+    {
+      title: '签到与用户增长',
+      fields: [
+        { key: 'CheckinEnabled', label: '每日签到', type: 'select', options: [
+          { label: '启用', value: 'true' },
+          { label: '禁用', value: 'false' },
+        ]},
+        { key: 'CheckinReward', label: '签到奖励额度', type: 'number' },
       ],
     },
     {

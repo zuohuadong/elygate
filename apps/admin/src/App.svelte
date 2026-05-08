@@ -16,6 +16,7 @@
   import ContentManagement from './pages/ContentManagement.svelte';
   import PricingEditor from './pages/PricingEditor.svelte';
   import PerformanceMonitor from './pages/PerformanceMonitor.svelte';
+  import FeatureConsole from './pages/FeatureConsole.svelte';
 
   const baseDataProvider = createElysiaDataProvider({
     apiUrl: '/api/admin',
@@ -39,13 +40,13 @@
   const dataProvider = {
     ...baseDataProvider,
     getList: async (params: any) => {
-      if (['system-options', 'models', 'playground'].includes(params.resource)) {
+      if (['system-options', 'models', 'playground', 'feature-console'].includes(params.resource)) {
         return { data: [], total: 0 };
       }
       return baseDataProvider.getList(params);
     },
     getOne: async (params: any) => {
-      if (['system-options', 'models', 'playground'].includes(params.resource)) {
+      if (['system-options', 'models', 'playground', 'feature-console'].includes(params.resource)) {
         return { data: { id: params.id } as any };
       }
       try {
@@ -93,6 +94,7 @@
     { label: '倍率管理', icon: 'coins', href: '/pricing-editor' },
     { label: '日志', icon: 'scroll-text', href: '/logs' },
     { label: '内容管理', icon: 'file-text', href: '/content-management' },
+    { label: '新增功能', icon: 'sparkles', href: '/feature-console' },
     { label: '性能监控', icon: 'activity', href: '/performance-monitor' },
     { label: 'API 测试', icon: 'play', href: '/playground' },
     { label: '系统设置', icon: 'settings', href: '/system-options' },
@@ -117,6 +119,7 @@
     'content-management': ContentManagement,
     'pricing-editor': PricingEditor,
     'performance-monitor': PerformanceMonitor,
+    'feature-console': FeatureConsole,
   }}
   components={{
     AutoTable: CustomAutoTable,

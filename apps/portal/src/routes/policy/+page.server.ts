@@ -1,7 +1,7 @@
-import { db, sql } from '$lib/server/db';
+import { db } from '$lib/server/db';
 import { requireOrgManager, requirePortalMember } from '$lib/server/portalAuth';
-import { organizations, channels } from '@elygate/db/schema';
-import { eq } from '@elygate/db/operators';
+import { organizations } from '@elygate/db/schema';
+import { eq, sql as drizzleSql } from '@elygate/db/operators';
 import type { PageServerLoad, Actions } from './$types';
 
 export const load: PageServerLoad = async ({ locals }) => {
@@ -17,12 +17,11 @@ export const load: PageServerLoad = async ({ locals }) => {
     .from(organizations)
     .where(eq(organizations.id, org.id));
 
-    // jsonb_array_elements_text requires raw SQL
-    const availableModels = await sql`
+    const availableModels = await db.execute(drizzleSql`
         SELECT DISTINCT jsonb_array_elements_text(models) as model
         FROM channels
         ORDER BY model ASC
-    ` as { model: string }[];
+    `) as { model: string }[];
 
     return {
         policy: {

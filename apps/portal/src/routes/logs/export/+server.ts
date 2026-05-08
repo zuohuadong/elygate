@@ -1,4 +1,4 @@
-import { db, sql } from '$lib/server/db';
+import { db } from '$lib/server/db';
 import { requireOrgManager } from '$lib/server/portalAuth';
 import { logs, users } from '@elygate/db/schema';
 import { eq, desc } from '@elygate/db/operators';
@@ -19,24 +19,22 @@ type ExportLogRow = {
 export const GET: RequestHandler = async ({ locals }) => {
     const { org } = requireOrgManager(locals);
     
-    // Complex JOIN with ORDER BY — use raw SQL for the JOIN
-    const logRows = await sql`
-        SELECT 
-            l.created_at, 
-            l.model_name, 
-            l.prompt_tokens, 
-            l.completion_tokens, 
-            l.quota_cost, 
-            l.status_code, 
-            l.ip_address,
-            l.trace_id,
-            u.username
-        FROM logs l
-        JOIN users u ON l.user_id = u.id
-        WHERE l.org_id = ${org.id}
-        ORDER BY l.created_at DESC
-        LIMIT 5000
-    ` as ExportLogRow[];
+    const logRows = await db.select({
+        created_at: logs.createdAt,
+        model_name: logs.modelName,
+        prompt_tokens: logs.promptTokens,
+        completion_tokens: logs.completionTokens,
+        quota_cost: logs.quotaCost,
+        status_code: logs.statusCode,
+        ip_address: logs.ipAddress,
+        trace_id: logs.traceId,
+        username: users.username,
+    })
+    .from(logs)
+    .innerJoin(users, eq(logs.userId, users.id))
+    .where(eq(logs.orgId, org.id))
+    .orderBy(desc(logs.createdAt))
+    .limit(5000) as ExportLogRow[];
 
     const headers = [
         'Timestamp',

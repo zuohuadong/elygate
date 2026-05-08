@@ -7,6 +7,7 @@
   import Settings from '../pages/Settings.svelte';
   import ModelsStatus from '../pages/ModelsStatus.svelte';
   import Playground from '../pages/Playground.svelte';
+  import FeatureConsole from '../pages/FeatureConsole.svelte';
 
   let { resourceName, ...rest }: { resourceName: string; [key: string]: any } = $props();
 
@@ -15,6 +16,7 @@
     'system-options': Settings,
     models: ModelsStatus,
     playground: Playground,
+    'feature-console': FeatureConsole,
   };
 
   const CustomPage = $derived(customPages[resourceName]);

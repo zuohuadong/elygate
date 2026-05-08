@@ -303,10 +303,25 @@ CREATE TABLE IF NOT EXISTS login_attempts (
 
 -- Add locked_until to users table
 ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_enabled BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_secret TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_pending_secret TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_backup_codes JSONB DEFAULT '[]';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_pending_backup_codes JSONB DEFAULT '[]';
 
 -- Create indexes for login attempts
 CREATE INDEX IF NOT EXISTS idx_login_attempts_username ON login_attempts(username, created_at);
 CREATE INDEX IF NOT EXISTS idx_login_attempts_ip ON login_attempts(ip_address, created_at);
+
+CREATE TABLE IF NOT EXISTS two_factor_login_challenges (
+    id TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_two_factor_login_challenges_user_id ON two_factor_login_challenges(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_two_factor_login_challenges_expires_at ON two_factor_login_challenges(expires_at);
 
 -- Budget alerts table
 CREATE TABLE IF NOT EXISTS budget_alerts (
@@ -529,10 +544,21 @@ CREATE TABLE IF NOT EXISTS payment_orders (
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     amount BIGINT NOT NULL,
     payment_method TEXT NOT NULL,
+    order_type TEXT NOT NULL DEFAULT 'topup',
+    target_type TEXT,
+    target_id INTEGER,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
     transaction_id TEXT UNIQUE,
     status INTEGER NOT NULL DEFAULT 1,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS order_type TEXT NOT NULL DEFAULT 'topup';
+ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS target_type TEXT;
+ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS target_id INTEGER;
+ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
 
 CREATE TABLE IF NOT EXISTS oauth_accounts (
     id SERIAL PRIMARY KEY,
@@ -546,6 +572,26 @@ CREATE TABLE IF NOT EXISTS oauth_accounts (
     UNIQUE (user_id, provider),
     UNIQUE (provider, provider_user_id)
 );
+
+CREATE TABLE IF NOT EXISTS custom_oauth_providers (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    issuer TEXT,
+    discovery_url TEXT,
+    client_id TEXT,
+    client_secret TEXT,
+    authorization_endpoint TEXT,
+    token_endpoint TEXT,
+    userinfo_endpoint TEXT,
+    jwks_uri TEXT,
+    scopes JSONB DEFAULT '[]',
+    enabled BOOLEAN NOT NULL DEFAULT true,
+    metadata JSONB DEFAULT '{}',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_custom_oauth_providers_enabled ON custom_oauth_providers(enabled, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS daily_stats (
     id SERIAL PRIMARY KEY,
@@ -878,7 +924,11 @@ INSERT INTO options (key, value) VALUES
     ('Favicon', ''),
     ('DisplayInCurrency', 'false'),
     ('QuotaPerUnit', '500000'),
-    ('CacheRatio', '0.5')
+    ('CacheRatio', '0.5'),
+    ('model_deployment.ionet.enabled', 'false'),
+    ('model_deployment.ionet.api_key', ''),
+    ('model_deployment.ionet.public_base_url', 'https://api.io.solutions/v1/io-cloud/caas'),
+    ('model_deployment.ionet.enterprise_base_url', 'https://api.io.solutions/enterprise/v1/io-cloud/caas')
 ON CONFLICT (key) DO NOTHING;
 
 -- ============================================================

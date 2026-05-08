@@ -37,11 +37,11 @@ export async function createTask(opts: {
     requestBody: Record<string, any>;
 }): Promise<string> {
     const id = generateTaskId();
-    // Raw SQL: tasks table has different columns than schema (id is text, not serial)
-    await sql`
+    // tasks runtime table has different columns than the admin tasks schema.
+    await db.execute(drizzleSql`
         INSERT INTO tasks (id, user_id, token_id, model, type, status, request_body)
         VALUES (${id}, ${opts.userId}, ${opts.tokenId}, ${opts.model}, ${opts.type}, 'pending', ${opts.requestBody})
-    `;
+    `);
     // Notify background worker — pg_notify must stay raw
     await sql`SELECT pg_notify('task_created', ${id})`;
     log.info(`[Task] Created task ${id} for model ${opts.model}`);
@@ -49,28 +49,26 @@ export async function createTask(opts: {
 }
 
 export async function getTask(taskId: string, userId?: number): Promise<TaskRecord | null> {
-    // Raw SQL: column aliases and conditional WHERE
     const rows = userId
-        ? await sql`
+        ? await db.execute(drizzleSql`
             SELECT id, user_id AS "userId", token_id AS "tokenId", channel_id AS "channelId",
                    model, type, status, provider_task_id AS "providerTaskId",
                    request_body AS "requestBody", result, error, progress,
                    created_at AS "createdAt", updated_at AS "updatedAt"
             FROM tasks WHERE id = ${taskId} AND user_id = ${userId}
-          `
-        : await sql`
+          `) as any[]
+        : await db.execute(drizzleSql`
             SELECT id, user_id AS "userId", token_id AS "tokenId", channel_id AS "channelId",
                    model, type, status, provider_task_id AS "providerTaskId",
                    request_body AS "requestBody", result, error, progress,
                    created_at AS "createdAt", updated_at AS "updatedAt"
             FROM tasks WHERE id = ${taskId}
-          `;
+          `) as any[];
     return (rows[0] as TaskRecord) || null;
 }
 
 async function updateTask(taskId: string, updates: Partial<Pick<TaskRecord, 'status' | 'providerTaskId' | 'channelId' | 'result' | 'error' | 'progress'>>) {
-    // Raw SQL: COALESCE-based conditional SET — Drizzle cannot express this concisely
-    await sql`
+    await db.execute(drizzleSql`
         UPDATE tasks SET
             updated_at = NOW(),
             status = COALESCE(${updates.status || null}, status),
@@ -80,7 +78,7 @@ async function updateTask(taskId: string, updates: Partial<Pick<TaskRecord, 'sta
             error = COALESCE(${updates.error || null}, error),
             progress = COALESCE(${updates.progress !== undefined ? updates.progress : null}, progress)
         WHERE id = ${taskId}
-    `;
+    `);
 
     if (updates.status === 'completed' || updates.status === 'failed') {
         // pg_notify must stay raw
@@ -98,13 +96,12 @@ async function processTask(task: TaskRecord) {
 
         let token = Array.from(memoryCache.tokens.values()).find(t => t.id === task.tokenId) || null;
         if (!token) {
-            // Raw SQL: column aliases for camelCase mapping
-            const [row] = await sql`
+            const [row] = await db.execute(drizzleSql`
                 SELECT id, key, name, user_id AS "userId", models, status,
                        remain_quota AS "remainQuota", used_quota AS "usedQuota",
                        expired_at AS "expiredAt"
                 FROM tokens WHERE id = ${task.tokenId} AND status = 1
-            `;
+            `) as any[];
             token = row as TokenRecord || null;
         }
 
@@ -152,14 +149,13 @@ async function processTaskById(taskId: string) {
 
 async function scanPendingTasks() {
     try {
-        // Raw SQL: INTERVAL arithmetic and ORDER BY
-        const stuckTasks = await sql`
+        const stuckTasks = await db.execute(drizzleSql`
             SELECT id FROM tasks 
             WHERE status = 'pending' 
             AND created_at < NOW() - INTERVAL '10 seconds'
             ORDER BY created_at ASC
             LIMIT 5
-        `;
+        `) as any[];
         for (const row of stuckTasks) {
             await processTaskById(row.id);
         }
@@ -170,20 +166,19 @@ async function scanPendingTasks() {
 
 async function cleanupTasks() {
     try {
-        // Raw SQL: complex DELETE with OR conditions and INTERVAL
-        const deleted = await sql`
+        const deleted = await db.execute(drizzleSql`
             DELETE FROM tasks
             WHERE (status = 'completed' AND created_at < NOW() - INTERVAL '30 days')
                OR (status = 'failed' AND created_at < NOW() - INTERVAL '7 days')
             RETURNING id
-        `;
+        `) as any[];
 
-        const stuck = await sql`
+        const stuck = await db.execute(drizzleSql`
             UPDATE tasks SET status = 'failed', error = 'Timed out (stuck processing > 10min)', updated_at = NOW()
             WHERE status = 'processing'
             AND updated_at < NOW() - INTERVAL '10 minutes'
             RETURNING id
-        `;
+        `) as any[];
 
         if (deleted.length > 0 || stuck.length > 0) {
             log.info(`[TaskCleanup] Deleted ${deleted.length} old tasks, marked ${stuck.length} stuck tasks as failed`);

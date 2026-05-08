@@ -63,6 +63,11 @@ export const users = pgTable('users', {
     status: integer('status').notNull().default(1),
     currency: text('currency').notNull().default('USD'),
     githubId: text('github_id'),
+    twoFactorEnabled: boolean('two_factor_enabled').notNull().default(false),
+    twoFactorSecret: text('two_factor_secret'),
+    twoFactorPendingSecret: text('two_factor_pending_secret'),
+    twoFactorBackupCodes: jsonb('two_factor_backup_codes').$type<string[]>().default([]),
+    twoFactorPendingBackupCodes: jsonb('two_factor_pending_backup_codes').$type<string[]>().default([]),
     lockedUntil: timestamp('locked_until', { withTimezone: true }),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
@@ -406,6 +411,10 @@ export const paymentOrders = pgTable('payment_orders', {
     userId: integer('user_id').notNull(),
     amount: integer('amount').notNull(),
     paymentMethod: text('payment_method').notNull(),
+    orderType: text('order_type').notNull().default('topup'),
+    targetType: text('target_type'),
+    targetId: integer('target_id'),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
     status: integer('status').notNull().default(0),
     transactionId: text('transaction_id'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
@@ -515,6 +524,24 @@ export const oauthAccounts = pgTable('oauth_accounts', {
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 
+export const customOAuthProviders = pgTable('custom_oauth_providers', {
+    id: serial('id').primaryKey(),
+    name: text('name').notNull(),
+    issuer: text('issuer'),
+    discoveryUrl: text('discovery_url'),
+    clientId: text('client_id'),
+    clientSecret: text('client_secret'),
+    authorizationEndpoint: text('authorization_endpoint'),
+    tokenEndpoint: text('token_endpoint'),
+    userinfoEndpoint: text('userinfo_endpoint'),
+    jwksUri: text('jwks_uri'),
+    scopes: jsonb('scopes').$type<string[]>().default([]),
+    enabled: boolean('enabled').notNull().default(true),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+});
+
 export const loginAttempts = pgTable('login_attempts', {
     id: serial('id').primaryKey(),
     username: text('username').notNull(),
@@ -522,6 +549,14 @@ export const loginAttempts = pgTable('login_attempts', {
     success: boolean('success').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
+
+export const twoFactorLoginChallenges = pgTable('two_factor_login_challenges', {
+    id: text('id').primaryKey(),
+    userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+});
+
 export const schema = {
     channels,
     logs,
@@ -547,7 +582,11 @@ export const schema = {
     'invite-codes': inviteCodes,
     announcements,
     'user-aff': userAff,
-    'user-aff-rewards': userAffRewards,    oauthAccounts,    loginAttempts,
+    'user-aff-rewards': userAffRewards,
+    oauthAccounts,
+    'custom-oauth-providers': customOAuthProviders,
+    loginAttempts,
+    'two-factor-login-challenges': twoFactorLoginChallenges,
 };
 
 export type DatabaseSchema = typeof schema;

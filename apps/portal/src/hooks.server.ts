@@ -1,5 +1,7 @@
 import type { Handle } from '@sveltejs/kit';
-import { db, sql } from '$lib/server/db';
+import { db } from '$lib/server/db';
+import { organizations, sessions, users } from '@elygate/db/schema';
+import { and, eq, gt, sql as drizzleSql } from '@elygate/db/operators';
 
 const rateLimits = new Map<string, { count: number, lastReset: number }>();
 const LIMIT = 100;
@@ -35,15 +37,18 @@ export const handle: Handle = async ({ event, resolve }) => {
 
     const sessionToken = event.cookies.get('auth_session');
     if (sessionToken) {
-        // Complex JOIN across session + users + organizations — use raw SQL
-        const [session] = await sql`
-            SELECT s.user_id, u.username, u.role, u.org_id, o.name as org_name
-            FROM session s
-            JOIN users u ON s.user_id = u.id
-            LEFT JOIN organizations o ON u.org_id = o.id
-            WHERE s.token = ${sessionToken} AND s.expires_at > NOW()
-            LIMIT 1
-        `;
+        const [session] = await db.select({
+            user_id: sessions.userId,
+            username: users.username,
+            role: users.role,
+            org_id: users.orgId,
+            org_name: organizations.name,
+        })
+        .from(sessions)
+        .innerJoin(users, eq(sessions.userId, users.id))
+        .leftJoin(organizations, eq(users.orgId, organizations.id))
+        .where(and(eq(sessions.token, sessionToken), gt(sessions.expiresAt, drizzleSql`NOW()`)))
+        .limit(1);
 
     if (session) {
         (event.locals as Record<string, any>).user = {

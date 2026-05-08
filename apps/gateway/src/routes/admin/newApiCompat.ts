@@ -67,6 +67,199 @@ async function refreshRuntimeCaches() {
     await Promise.allSettled([memoryCache.refresh(), optionCache.refresh()]);
 }
 
+const IO_DEFAULT_PUBLIC_BASE_URL = 'https://api.io.solutions/v1/io-cloud/caas';
+const IO_DEFAULT_ENTERPRISE_BASE_URL = 'https://api.io.solutions/enterprise/v1/io-cloud/caas';
+
+type IoDeploymentSettings = {
+    enabled: boolean;
+    apiKey: string;
+    publicBaseUrl: string;
+    enterpriseBaseUrl: string;
+};
+
+function parseBooleanOption(value: unknown): boolean {
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'number') return value !== 0;
+    if (typeof value === 'string') return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
+    return false;
+}
+
+function sanitizeBaseUrl(value: unknown, fallback: string): string {
+    const raw = String(value || '').trim();
+    const target = raw || fallback;
+    try {
+        const parsed = new URL(target);
+        return `${parsed.origin}${parsed.pathname}`.replace(/\/+$/, '');
+    } catch {
+        return fallback;
+    }
+}
+
+function getIoDeploymentSettings(): IoDeploymentSettings {
+    return {
+        enabled: parseBooleanOption(optionCache.get('model_deployment.ionet.enabled', false)),
+        apiKey: String(optionCache.get('model_deployment.ionet.api_key', '') || '').trim(),
+        publicBaseUrl: sanitizeBaseUrl(optionCache.get('model_deployment.ionet.public_base_url', IO_DEFAULT_PUBLIC_BASE_URL), IO_DEFAULT_PUBLIC_BASE_URL),
+        enterpriseBaseUrl: sanitizeBaseUrl(optionCache.get('model_deployment.ionet.enterprise_base_url', IO_DEFAULT_ENTERPRISE_BASE_URL), IO_DEFAULT_ENTERPRISE_BASE_URL),
+    };
+}
+
+function normalizeTimestampSeconds(value: unknown): number {
+    if (value instanceof Date && !Number.isNaN(value.getTime())) return Math.floor(value.getTime() / 1000);
+    if (typeof value === 'number' && Number.isFinite(value)) return value > 1e12 ? Math.floor(value / 1000) : Math.floor(value);
+    if (typeof value === 'string' && value.trim()) {
+        const numeric = Number(value);
+        if (Number.isFinite(numeric)) return numeric > 1e12 ? Math.floor(numeric / 1000) : Math.floor(numeric);
+        const parsed = Date.parse(value);
+        if (!Number.isNaN(parsed)) return Math.floor(parsed / 1000);
+    }
+    return Math.floor(Date.now() / 1000);
+}
+
+function parseIoApiError(payload: unknown, fallback: string): string {
+    if (!payload || typeof payload !== 'object') return fallback;
+    const data = payload as Record<string, any>;
+    if (typeof data.detail === 'string' && data.detail.trim()) return data.detail.trim();
+    if (typeof data.message === 'string' && data.message.trim()) return data.message.trim();
+    if (typeof data.error === 'string' && data.error.trim()) return data.error.trim();
+    if (data.error && typeof data.error === 'object') {
+        const nestedMessage = data.error.message;
+        if (typeof nestedMessage === 'string' && nestedMessage.trim()) return nestedMessage.trim();
+    }
+    return fallback;
+}
+
+function unwrapIoData(payload: unknown): any {
+    if (payload && typeof payload === 'object' && !Array.isArray(payload) && 'data' in (payload as Record<string, any>)) {
+        return (payload as Record<string, any>).data;
+    }
+    return payload;
+}
+
+function buildQueryParams(query: Record<string, unknown>) {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) {
+        if (value === undefined || value === null || value === '') continue;
+        if (Array.isArray(value)) {
+            if (value.length === 0) continue;
+            params.set(key, JSON.stringify(value));
+            continue;
+        }
+        params.set(key, String(value));
+    }
+    const encoded = params.toString();
+    return encoded ? `?${encoded}` : '';
+}
+
+async function upsertOption(key: string, value: unknown) {
+    const nextValue = typeof value === 'string' ? value : JSON.stringify(value);
+    await db.insert(options).values({ key, value: nextValue }).onConflictDoUpdate({
+        target: options.key,
+        set: { value: nextValue },
+    });
+}
+
+async function callIoApi({
+    path,
+    method = 'GET',
+    body,
+    query = {},
+    enterprise = true,
+    apiKeyOverride,
+    requireEnabled = true,
+}: {
+    path: string;
+    method?: string;
+    body?: unknown;
+    query?: Record<string, unknown>;
+    enterprise?: boolean;
+    apiKeyOverride?: string;
+    requireEnabled?: boolean;
+}) {
+    const settings = getIoDeploymentSettings();
+    if (requireEnabled && !settings.enabled) {
+        return { ok: false, status: 400, payload: { detail: 'io.net model deployment is not enabled' }, settings };
+    }
+    const apiKey = String(apiKeyOverride || settings.apiKey || '').trim();
+    if (!apiKey) {
+        return { ok: false, status: 400, payload: { detail: 'api_key is required' }, settings };
+    }
+    const baseUrl = enterprise ? settings.enterpriseBaseUrl : settings.publicBaseUrl;
+    const url = `${baseUrl}${path}${buildQueryParams(query)}`;
+    try {
+        const response = await fetch(url, {
+            method,
+            headers: {
+                'x-api-key': apiKey,
+                'content-type': 'application/json',
+            },
+            body: body === undefined ? undefined : JSON.stringify(body),
+        });
+        const raw = await response.text();
+        let payload: unknown = {};
+        if (raw.trim()) {
+            try {
+                payload = JSON.parse(raw);
+            } catch {
+                payload = { detail: raw };
+            }
+        }
+        return { ok: response.ok, status: response.status, payload, settings };
+    } catch (error) {
+        return { ok: false, status: 502, payload: { detail: error instanceof Error ? error.message : 'Network error' }, settings };
+    }
+}
+
+function toDeploymentSummary(row: Record<string, any>) {
+    const status = String(row.status || '').toLowerCase();
+    const computeRemaining = Number(row.compute_minutes_remaining ?? row.computeMinutesRemaining ?? 0);
+    const createdAt = normalizeTimestampSeconds(row.created_at ?? row.createdAt);
+    const updatedAt = normalizeTimestampSeconds(row.updated_at ?? row.updatedAt ?? row.created_at ?? row.createdAt);
+    const hours = Math.floor(computeRemaining / 60);
+    const minutes = computeRemaining % 60;
+    const timeRemaining = computeRemaining <= 0 ? 'completed' : (hours > 0 ? `${hours} hour ${minutes} minutes` : `${minutes} minutes`);
+    return {
+        id: row.id,
+        deployment_name: row.name || row.deployment_name || row.id,
+        container_name: row.name || row.deployment_name || row.id,
+        status,
+        type: 'Container',
+        time_remaining: timeRemaining,
+        time_remaining_minutes: computeRemaining,
+        hardware_info: `${row.brand_name || row.brandName || ''} ${row.hardware_name || row.hardwareName || ''} x${Number(row.hardware_quantity ?? row.hardwareQuantity ?? 0)}`.trim(),
+        hardware_name: row.hardware_name || row.hardwareName || '',
+        brand_name: row.brand_name || row.brandName || '',
+        hardware_quantity: Number(row.hardware_quantity ?? row.hardwareQuantity ?? 0),
+        completed_percent: Number(row.completed_percent ?? row.completedPercent ?? 0),
+        compute_minutes_served: Number(row.compute_minutes_served ?? row.computeMinutesServed ?? 0),
+        compute_minutes_remaining: computeRemaining,
+        created_at: createdAt,
+        updated_at: updatedAt,
+        model_name: '',
+        model_version: '',
+        instance_count: Number(row.hardware_quantity ?? row.hardwareQuantity ?? 0),
+        resource_config: {
+            cpu: '',
+            memory: '',
+            gpu: String(Number(row.hardware_quantity ?? row.hardwareQuantity ?? 0)),
+        },
+        description: '',
+        provider: 'io.net',
+    };
+}
+
+function computeDeploymentStatusCounts(items: Record<string, any>[]) {
+    const counts: Record<string, number> = { all: items.length };
+    for (const status of ['running', 'completed', 'failed', 'deployment requested', 'termination requested', 'destroyed']) {
+        counts[status] = 0;
+    }
+    for (const item of items) {
+        const status = String(item.status || '').toLowerCase();
+        counts[status] = (counts[status] || 0) + 1;
+    }
+    return counts;
+}
+
 const channelListSelection = {
     id: channels.id,
     name: channels.name,
@@ -1322,26 +1515,323 @@ export const newApiCompatAdminRouter = new Elysia()
         return { success: true, deleted: row.id };
     })
 
-    // New API: /api/deployments/* minimal compatibility
-    .get('/deployments', ({ set }: ElysiaCtx) => notImplemented(set, 'Deployment management is not implemented.'))
-    .get('/deployments/settings', ({ set }: ElysiaCtx) => notImplemented(set, 'Deployment management is not implemented.'))
-    .post('/deployments/settings/test-connection', ({ set }: ElysiaCtx) => notImplemented(set, 'Deployment management is not implemented.'))
-    .get('/deployments/search', ({ set }: ElysiaCtx) => notImplemented(set, 'Deployment management is not implemented.'))
-    .post('/deployments/test-connection', ({ set }: ElysiaCtx) => notImplemented(set, 'Deployment management is not implemented.'))
-    .get('/deployments/hardware-types', ({ set }: ElysiaCtx) => notImplemented(set, 'Deployment management is not implemented.'))
-    .get('/deployments/locations', ({ set }: ElysiaCtx) => notImplemented(set, 'Deployment management is not implemented.'))
-    .get('/deployments/available-replicas', ({ set }: ElysiaCtx) => notImplemented(set, 'Deployment management is not implemented.'))
-    .post('/deployments/price-estimation', ({ set }: ElysiaCtx) => notImplemented(set, 'Deployment management is not implemented.'))
-    .get('/deployments/check-name', ({ set }: ElysiaCtx) => notImplemented(set, 'Deployment management is not implemented.'))
-    .post('/deployments', ({ set }: ElysiaCtx) => notImplemented(set, 'Deployment management is not implemented.'))
-    .get('/deployments/:id', ({ set }: ElysiaCtx) => notImplemented(set, 'Deployment management is not implemented.'))
-    .get('/deployments/:id/logs', ({ set }: ElysiaCtx) => notImplemented(set, 'Deployment management is not implemented.'))
-    .get('/deployments/:id/containers', ({ set }: ElysiaCtx) => notImplemented(set, 'Deployment management is not implemented.'))
-    .get('/deployments/:id/containers/:container_id', ({ set }: ElysiaCtx) => notImplemented(set, 'Deployment management is not implemented.'))
-    .put('/deployments/:id', ({ set }: ElysiaCtx) => notImplemented(set, 'Deployment management is not implemented.'))
-    .put('/deployments/:id/name', ({ set }: ElysiaCtx) => notImplemented(set, 'Deployment management is not implemented.'))
-    .post('/deployments/:id/extend', ({ set }: ElysiaCtx) => notImplemented(set, 'Deployment management is not implemented.'))
-    .delete('/deployments/:id', ({ set }: ElysiaCtx) => notImplemented(set, 'Deployment management is not implemented.'));
+    // New API: /api/deployments/* backed by io.net CAAS
+    .get('/deployments/settings', async () => {
+        const settings = getIoDeploymentSettings();
+        return {
+            success: true,
+            data: {
+                enabled: settings.enabled,
+                apiKeyConfigured: Boolean(settings.apiKey),
+                publicBaseUrl: settings.publicBaseUrl,
+                enterpriseBaseUrl: settings.enterpriseBaseUrl,
+            },
+        };
+    })
+    .put('/deployments/settings', async ({ body }: ElysiaCtx) => {
+        const b = body as Record<string, any>;
+        if ('enabled' in b) await upsertOption('model_deployment.ionet.enabled', parseBooleanOption(b.enabled));
+        if ('apiKey' in b || 'api_key' in b) await upsertOption('model_deployment.ionet.api_key', String(b.apiKey ?? b.api_key ?? '').trim());
+        if ('publicBaseUrl' in b || 'public_base_url' in b) {
+            await upsertOption('model_deployment.ionet.public_base_url', sanitizeBaseUrl(b.publicBaseUrl ?? b.public_base_url, IO_DEFAULT_PUBLIC_BASE_URL));
+        }
+        if ('enterpriseBaseUrl' in b || 'enterprise_base_url' in b) {
+            await upsertOption('model_deployment.ionet.enterprise_base_url', sanitizeBaseUrl(b.enterpriseBaseUrl ?? b.enterprise_base_url, IO_DEFAULT_ENTERPRISE_BASE_URL));
+        }
+        await refreshRuntimeCaches();
+        const settings = getIoDeploymentSettings();
+        return {
+            success: true,
+            data: {
+                enabled: settings.enabled,
+                apiKeyConfigured: Boolean(settings.apiKey),
+                publicBaseUrl: settings.publicBaseUrl,
+                enterpriseBaseUrl: settings.enterpriseBaseUrl,
+            },
+        };
+    })
+    .post('/deployments/settings/test-connection', async ({ body, set }: ElysiaCtx) => {
+        const b = (body || {}) as Record<string, any>;
+        const connection = await callIoApi({
+            path: '/deployments',
+            method: 'GET',
+            enterprise: true,
+            requireEnabled: false,
+            apiKeyOverride: b.apiKey || b.api_key,
+            query: { page: 1, page_size: 1 },
+        });
+        if (!connection.ok) {
+            set.status = connection.status;
+            return { success: false, message: parseIoApiError(connection.payload, 'Failed to connect to io.net') };
+        }
+        return { success: true, message: 'Connection successful' };
+    })
+    .post('/deployments/test-connection', async ({ body, set }: ElysiaCtx) => {
+        const b = (body || {}) as Record<string, any>;
+        const connection = await callIoApi({
+            path: '/deployments',
+            method: 'GET',
+            enterprise: true,
+            requireEnabled: false,
+            apiKeyOverride: b.apiKey || b.api_key,
+            query: { page: 1, page_size: 1 },
+        });
+        if (!connection.ok) {
+            set.status = connection.status;
+            return { success: false, message: parseIoApiError(connection.payload, 'Failed to connect to io.net') };
+        }
+        return { success: true, message: 'Connection successful' };
+    })
+    .get('/deployments', async ({ query, set }: ElysiaCtx) => {
+        const page = Math.max(Number(query?.p ?? query?.page ?? 1) || 1, 1);
+        const pageSize = Math.min(Math.max(Number(query?.page_size ?? query?.pageSize ?? 20) || 20, 1), 200);
+        const statusQuery = typeof query?.status === 'string' && query.status.trim() ? query.status.trim() : undefined;
+        const response = await callIoApi({
+            path: '/deployments',
+            method: 'GET',
+            enterprise: true,
+            query: {
+                status: statusQuery,
+                page,
+                page_size: pageSize,
+                sort_by: query?.sort_by || 'created_at',
+                sort_order: query?.sort_order || 'desc',
+            },
+        });
+        if (!response.ok) {
+            set.status = response.status;
+            return { success: false, message: parseIoApiError(response.payload, 'Failed to list deployments') };
+        }
+        const payload = unwrapIoData(response.payload) || {};
+        const rawItems = Array.isArray(payload.deployments) ? payload.deployments : (Array.isArray(payload) ? payload : []);
+        const items = rawItems.map((row: Record<string, any>) => toDeploymentSummary(row));
+        const keyword = typeof query?.keyword === 'string' ? query.keyword.trim().toLowerCase() : '';
+        const filtered = keyword
+            ? items.filter((item: Record<string, any>) => String(item.deployment_name || '').toLowerCase().includes(keyword) || String(item.id || '').toLowerCase().includes(keyword))
+            : items;
+        return {
+            success: true,
+            data: filtered,
+            total: Number(payload.total || filtered.length),
+            p: page,
+            page_size: pageSize,
+            statusCount: computeDeploymentStatusCounts(items),
+        };
+    })
+    .get('/deployments/search', async ({ query, set }: ElysiaCtx) => {
+        const page = Math.max(Number(query?.p ?? query?.page ?? 1) || 1, 1);
+        const pageSize = Math.min(Math.max(Number(query?.page_size ?? query?.pageSize ?? 20) || 20, 1), 200);
+        const response = await callIoApi({
+            path: '/deployments',
+            method: 'GET',
+            enterprise: true,
+            query: {
+                status: query?.status,
+                page,
+                page_size: pageSize,
+                sort_by: query?.sort_by || 'created_at',
+                sort_order: query?.sort_order || 'desc',
+            },
+        });
+        if (!response.ok) {
+            set.status = response.status;
+            return { success: false, message: parseIoApiError(response.payload, 'Failed to search deployments') };
+        }
+        const payload = unwrapIoData(response.payload) || {};
+        const rawItems = Array.isArray(payload.deployments) ? payload.deployments : (Array.isArray(payload) ? payload : []);
+        const items = rawItems.map((row: Record<string, any>) => toDeploymentSummary(row));
+        const keyword = typeof query?.keyword === 'string' ? query.keyword.trim().toLowerCase() : '';
+        const filtered = keyword
+            ? items.filter((item: Record<string, any>) => String(item.deployment_name || '').toLowerCase().includes(keyword) || String(item.id || '').toLowerCase().includes(keyword))
+            : items;
+        return { success: true, data: filtered, total: filtered.length, p: page, page_size: pageSize };
+    })
+    .get('/deployments/hardware-types', async ({ set }: ElysiaCtx) => {
+        const response = await callIoApi({ path: '/hardware/max-gpus-per-container', method: 'GET', enterprise: true });
+        if (!response.ok) {
+            set.status = response.status;
+            return { success: false, message: parseIoApiError(response.payload, 'Failed to list hardware types') };
+        }
+        const payload = unwrapIoData(response.payload) || {};
+        const rows = Array.isArray(payload.hardware) ? payload.hardware : [];
+        const data = rows.map((row: Record<string, any>) => ({
+            id: Number(row.hardware_id || 0),
+            name: row.hardware_name || `Hardware ${row.hardware_id || ''}`.trim(),
+            brand_name: row.brand_name || '',
+            max_gpus_per_container: Number(row.max_gpus_per_container || 0),
+            available: Number(row.available || 0),
+        }));
+        return { success: true, data, total: Number(payload.total || data.length) };
+    })
+    .get('/deployments/locations', async ({ set }: ElysiaCtx) => {
+        const response = await callIoApi({ path: '/locations', method: 'GET', enterprise: true });
+        if (!response.ok) {
+            set.status = response.status;
+            return { success: false, message: parseIoApiError(response.payload, 'Failed to list locations') };
+        }
+        const payload = unwrapIoData(response.payload) || {};
+        const data = Array.isArray(payload.locations) ? payload.locations : (Array.isArray(payload) ? payload : []);
+        return { success: true, data, total: Number(payload.total || data.length) };
+    })
+    .get('/deployments/available-replicas', async ({ query, set }: ElysiaCtx) => {
+        const hardwareId = Number(query?.hardware_id || query?.hardwareId || 0);
+        const hardwareQty = Number(query?.hardware_qty || query?.hardwareQty || query?.gpu_count || 1);
+        if (!hardwareId) {
+            set.status = 400;
+            return { success: false, message: 'hardware_id is required' };
+        }
+        const response = await callIoApi({
+            path: '/available-replicas',
+            method: 'GET',
+            enterprise: true,
+            query: { hardware_id: hardwareId, hardware_qty: Math.max(hardwareQty, 1) },
+        });
+        if (!response.ok) {
+            set.status = response.status;
+            return { success: false, message: parseIoApiError(response.payload, 'Failed to get available replicas') };
+        }
+        const payload = unwrapIoData(response.payload) || [];
+        const data = Array.isArray(payload) ? payload : [];
+        return { success: true, data };
+    })
+    .post('/deployments/price-estimation', async ({ body, set }: ElysiaCtx) => {
+        const b = (body || {}) as Record<string, any>;
+        const response = await callIoApi({
+            path: '/price',
+            method: 'GET',
+            enterprise: true,
+            query: {
+                location_ids: normalizeIdList(b.location_ids ?? b.locationIds),
+                hardware_id: Number((b.hardware_id ?? b.hardwareId) || 0),
+                hardware_qty: Number(b.hardware_qty ?? b.hardwareQty ?? b.gpus_per_container ?? b.gpusPerContainer ?? 1),
+                gpus_per_container: Number(b.gpus_per_container ?? b.gpusPerContainer ?? 1),
+                duration_type: b.duration_type ?? b.durationType ?? 'hourly',
+                duration_qty: Number(b.duration_qty ?? b.durationQty ?? 1),
+                duration_hours: Number(b.duration_hours ?? b.durationHours ?? 1),
+                replica_count: Number(b.replica_count ?? b.replicaCount ?? 1),
+                currency: b.currency ?? 'usdc',
+            },
+        });
+        if (!response.ok) {
+            set.status = response.status;
+            return { success: false, message: parseIoApiError(response.payload, 'Failed to get price estimation') };
+        }
+        return { success: true, data: unwrapIoData(response.payload) };
+    })
+    .get('/deployments/check-name', async ({ query, set }: ElysiaCtx) => {
+        const clusterName = String(query?.cluster_name || query?.name || '').trim();
+        if (!clusterName) {
+            set.status = 400;
+            return { success: false, message: 'cluster_name is required' };
+        }
+        const response = await callIoApi({
+            path: '/clusters/check_cluster_name_availability',
+            method: 'GET',
+            enterprise: true,
+            query: { cluster_name: clusterName },
+        });
+        if (!response.ok) {
+            set.status = response.status;
+            return { success: false, message: parseIoApiError(response.payload, 'Failed to check cluster name') };
+        }
+        const payload = unwrapIoData(response.payload);
+        const available = typeof payload === 'boolean' ? payload : parseBooleanOption(payload);
+        return { success: true, available };
+    })
+    .post('/deployments', async ({ body, set }: ElysiaCtx) => {
+        const b = (body || {}) as Record<string, any>;
+        const response = await callIoApi({ path: '/deploy', method: 'POST', enterprise: true, body: b });
+        if (!response.ok) {
+            set.status = response.status;
+            return { success: false, message: parseIoApiError(response.payload, 'Failed to create deployment') };
+        }
+        return { success: true, data: unwrapIoData(response.payload) };
+    })
+    .get('/deployments/:id', async ({ params: { id }, set }: ElysiaCtx) => {
+        const response = await callIoApi({ path: `/deployment/${id}`, method: 'GET', enterprise: true });
+        if (!response.ok) {
+            set.status = response.status;
+            return { success: false, message: parseIoApiError(response.payload, 'Failed to get deployment detail') };
+        }
+        return { success: true, data: unwrapIoData(response.payload) };
+    })
+    .get('/deployments/:id/logs', async ({ params: { id }, query, set }: ElysiaCtx) => {
+        const containerId = String(query?.container_id || query?.containerId || '').trim();
+        if (!containerId) {
+            set.status = 400;
+            return { success: false, message: 'container_id is required' };
+        }
+        const response = await callIoApi({
+            path: `/deployment/${id}/log/${containerId}`,
+            method: 'GET',
+            enterprise: true,
+            query: {
+                level: query?.level,
+                stream: query?.stream,
+                limit: query?.limit,
+                cursor: query?.cursor,
+                follow: query?.follow,
+                start_time: query?.start_time,
+                end_time: query?.end_time,
+            },
+        });
+        if (!response.ok) {
+            set.status = response.status;
+            return { success: false, message: parseIoApiError(response.payload, 'Failed to get deployment logs') };
+        }
+        return { success: true, data: unwrapIoData(response.payload) };
+    })
+    .get('/deployments/:id/containers', async ({ params: { id }, set }: ElysiaCtx) => {
+        const response = await callIoApi({ path: `/deployment/${id}/containers`, method: 'GET', enterprise: true });
+        if (!response.ok) {
+            set.status = response.status;
+            return { success: false, message: parseIoApiError(response.payload, 'Failed to list containers') };
+        }
+        return { success: true, data: unwrapIoData(response.payload) };
+    })
+    .get('/deployments/:id/containers/:container_id', async ({ params: { id, container_id }, set }: ElysiaCtx) => {
+        const response = await callIoApi({ path: `/deployment/${id}/container/${container_id}`, method: 'GET', enterprise: true });
+        if (!response.ok) {
+            set.status = response.status;
+            return { success: false, message: parseIoApiError(response.payload, 'Failed to get container details') };
+        }
+        return { success: true, data: unwrapIoData(response.payload) };
+    })
+    .put('/deployments/:id', async ({ params: { id }, body, set }: ElysiaCtx) => {
+        const b = (body || {}) as Record<string, any>;
+        const response = await callIoApi({ path: `/deployment/${id}`, method: 'PATCH', enterprise: true, body: b });
+        if (!response.ok) {
+            set.status = response.status;
+            return { success: false, message: parseIoApiError(response.payload, 'Failed to update deployment') };
+        }
+        return { success: true, data: unwrapIoData(response.payload) };
+    })
+    .put('/deployments/:id/name', async ({ params: { id }, body, set }: ElysiaCtx) => {
+        const b = (body || {}) as Record<string, any>;
+        const response = await callIoApi({ path: `/clusters/${id}/update-name`, method: 'PUT', enterprise: true, body: { name: b.name } });
+        if (!response.ok) {
+            set.status = response.status;
+            return { success: false, message: parseIoApiError(response.payload, 'Failed to update deployment name') };
+        }
+        return { success: true, data: unwrapIoData(response.payload) };
+    })
+    .post('/deployments/:id/extend', async ({ params: { id }, body, set }: ElysiaCtx) => {
+        const b = (body || {}) as Record<string, any>;
+        const response = await callIoApi({ path: `/deployment/${id}/extend`, method: 'POST', enterprise: true, body: b });
+        if (!response.ok) {
+            set.status = response.status;
+            return { success: false, message: parseIoApiError(response.payload, 'Failed to extend deployment') };
+        }
+        return { success: true, data: unwrapIoData(response.payload) };
+    })
+    .delete('/deployments/:id', async ({ params: { id }, set }: ElysiaCtx) => {
+        const response = await callIoApi({ path: `/deployment/${id}`, method: 'DELETE', enterprise: true });
+        if (!response.ok) {
+            set.status = response.status;
+            return { success: false, message: parseIoApiError(response.payload, 'Failed to delete deployment') };
+        }
+        return { success: true, data: unwrapIoData(response.payload) };
+    });
 
 export const newApiCompatSelfRouter = new Elysia()
     .use(authPlugin)

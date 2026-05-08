@@ -1,7 +1,7 @@
-import { db, sql } from '$lib/server/db';
+import { db } from '$lib/server/db';
 import { error, redirect } from '@sveltejs/kit';
 import { sessions, users, organizations } from '@elygate/db/schema';
-import { eq, and, gt } from '@elygate/db/operators';
+import { eq, and, gt, sql as drizzleSql } from '@elygate/db/operators';
 import type { LayoutServerLoad } from './$types';
 
 type SessionRow = {
@@ -24,15 +24,20 @@ export const load: LayoutServerLoad = async ({ cookies, url }) => {
         throw redirect(302, '/login'); 
     }
 
-    // Complex JOIN across session + users + organizations — use raw SQL
-    const [session] = await sql`
-        SELECT s.user_id, u.username, u.role, u.org_id, o.name as org_name, o.quota as org_total_quota, o.used_quota as org_used_quota
-        FROM session s
-        JOIN users u ON s.user_id = u.id
-        LEFT JOIN organizations o ON u.org_id = o.id
-        WHERE s.token = ${sessionToken} AND s.expires_at > NOW()
-        LIMIT 1
-    ` as SessionRow[];
+    const [session] = await db.select({
+        user_id: sessions.userId,
+        username: users.username,
+        role: users.role,
+        org_id: users.orgId,
+        org_name: organizations.name,
+        org_total_quota: organizations.quota,
+        org_used_quota: organizations.usedQuota,
+    })
+    .from(sessions)
+    .innerJoin(users, eq(sessions.userId, users.id))
+    .leftJoin(organizations, eq(users.orgId, organizations.id))
+    .where(and(eq(sessions.token, sessionToken), gt(sessions.expiresAt, drizzleSql`NOW()`)))
+    .limit(1) as SessionRow[];
 
     if (!session) {
         cookies.delete('auth_session', { path: '/' });

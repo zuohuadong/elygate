@@ -1,8 +1,8 @@
-import { db, sql } from '$lib/server/db';
+import { db } from '$lib/server/db';
 import { fail } from '@sveltejs/kit';
 import { requireOrgManager } from '$lib/server/portalAuth';
 import { tokens, users, logs } from '@elygate/db/schema';
-import { eq, desc, and, sql as drizzleSql, inArray } from '@elygate/db/operators';
+import { eq, desc, and, sql as drizzleSql, inArray, max } from '@elygate/db/operators';
 import type { PageServerLoad, Actions } from './$types';
 
 type TokenRow = {
@@ -18,23 +18,21 @@ type TokenRow = {
 export const load: PageServerLoad = async ({ locals }) => {
     const { org } = requireOrgManager(locals);
 
-    // Complex JOIN with GROUP BY and aggregate — use raw SQL
-    const tokenRows = await sql`
-        SELECT 
-            t.id,
-            t.name,
-            LEFT(t.key, 8) as "tokenPreview",
-            t.created_at as "createdAt",
-            MAX(l.created_at) as "lastUsedAt",
-            u.username as "ownerName",
-            u.role as "ownerRole"
-        FROM tokens t
-        JOIN users u ON t.user_id = u.id
-        LEFT JOIN logs l ON l.token_id = t.id
-        WHERE u.org_id = ${org.id}
-        GROUP BY t.id, t.name, t.key, t.created_at, u.username, u.role
-        ORDER BY t.created_at DESC
-    ` as TokenRow[];
+    const tokenRows = await db.select({
+        id: tokens.id,
+        name: tokens.name,
+        tokenPreview: drizzleSql<string>`LEFT(${tokens.key}, 8)`,
+        createdAt: tokens.createdAt,
+        lastUsedAt: max(logs.createdAt),
+        ownerName: users.username,
+        ownerRole: users.role,
+    })
+    .from(tokens)
+    .innerJoin(users, eq(tokens.userId, users.id))
+    .leftJoin(logs, eq(logs.tokenId, tokens.id))
+    .where(eq(users.orgId, org.id))
+    .groupBy(tokens.id, tokens.name, tokens.key, tokens.createdAt, users.username, users.role)
+    .orderBy(desc(tokens.createdAt)) as TokenRow[];
 
     return {
         tokens: tokenRows.map((token) => ({

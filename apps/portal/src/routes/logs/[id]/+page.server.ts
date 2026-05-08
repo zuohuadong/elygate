@@ -1,5 +1,7 @@
-import { db, sql } from '$lib/server/db';
+import { db } from '$lib/server/db';
 import { error } from '@sveltejs/kit';
+import { logDetails, logs, users } from '@elygate/db/schema';
+import { and, eq } from '@elygate/db/operators';
 import type { PageServerLoad } from './$types';
 
 type LogDetailRow = {
@@ -22,15 +24,27 @@ type LogDetailRow = {
 export const load: PageServerLoad = async ({ params, locals }) => {
     const { org } = locals as Record<string, any>;
     
-    // Complex JOIN with LEFT JOIN — use raw SQL
-    const [log] = await sql`
-        SELECT l.*, ld.request_body, ld.response_body, u.username
-        FROM logs l
-        JOIN users u ON l.user_id = u.id
-        LEFT JOIN log_details ld ON l.id = ld.log_id
-        WHERE l.id = ${params.id} AND l.org_id = ${org.id}
-        LIMIT 1
-    ` as LogDetailRow[];
+    const [log] = await db.select({
+        id: logs.id,
+        user_id: logs.userId,
+        username: users.username,
+        token_id: logs.tokenId,
+        model_name: logs.modelName,
+        prompt_tokens: logs.promptTokens,
+        completion_tokens: logs.completionTokens,
+        quota_cost: logs.quotaCost,
+        status_code: logs.statusCode,
+        created_at: logs.createdAt,
+        elapsed_ms: logs.elapsedMs,
+        trace_id: logs.traceId,
+        request_body: logDetails.requestBody,
+        response_body: logDetails.responseBody,
+    })
+    .from(logs)
+    .innerJoin(users, eq(logs.userId, users.id))
+    .leftJoin(logDetails, eq(logs.id, logDetails.logId))
+    .where(and(eq(logs.id, Number(params.id)), eq(logs.orgId, org.id)))
+    .limit(1) as LogDetailRow[];
 
     if (!log) {
         throw error(404, 'Log entry not found or access denied');

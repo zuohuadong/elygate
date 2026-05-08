@@ -1,12 +1,12 @@
 import type { ElysiaCtx } from '../types';
 import { Elysia } from 'elysia';
-import { db, sql } from '@elygate/db';
-import { authPlugin } from '../middleware/auth';
+import { db } from '@elygate/db';
+import { redemptions, users } from '@elygate/db/schema';
+import { and, eq, sql as drizzleSql } from 'drizzle-orm';
 
 /**
  * Redemptions Router
  * Allows registered users to redeem CDKs for quota.
- * Uses raw SQL CTE for atomicity (Drizzle cannot express this as a query builder).
  */
 export const redemptionsRouter = new Elysia()
     .post('/redeem', async ({ body, user }: ElysiaCtx) => {
@@ -16,20 +16,22 @@ export const redemptionsRouter = new Elysia()
             throw new Error("Missing 'key' in request body");
         }
 
-        // Atomic CDK redemption using CTE — cannot be expressed in Drizzle query builder
-        const result = await sql`
-            WITH claimed AS (
-                UPDATE redemptions 
-                SET used_count = used_count + 1,
-                    status = CASE WHEN used_count + 1 >= count THEN 2 ELSE 1 END
-                WHERE key = ${key} AND status = 1 
-                RETURNING quota
-            )
-            UPDATE users 
-            SET quota = quota + (SELECT quota FROM claimed)
-            WHERE id = ${user.id} AND EXISTS (SELECT 1 FROM claimed)
-            RETURNING quota as "newQuota", (SELECT quota FROM claimed) as "addedQuota"
-        `;
+        const result = await db.transaction(async (tx) => {
+            const [claimed] = await tx.update(redemptions)
+                .set({
+                    usedCount: drizzleSql`${redemptions.usedCount} + 1`,
+                    status: drizzleSql`CASE WHEN ${redemptions.usedCount} + 1 >= ${redemptions.count} THEN 2 ELSE 1 END`,
+                })
+                .where(and(eq(redemptions.key, key), eq(redemptions.status, 1)))
+                .returning({ quota: redemptions.quota });
+
+            if (!claimed) return [];
+
+            return await tx.update(users)
+                .set({ quota: drizzleSql`${users.quota} + ${claimed.quota}` })
+                .where(eq(users.id, user.id))
+                .returning({ newQuota: users.quota, addedQuota: drizzleSql`${claimed.quota}` });
+        });
 
         if (!result || result.length === 0) {
             throw new Error("Invalid or already used redemption code.");

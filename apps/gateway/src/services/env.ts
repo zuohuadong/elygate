@@ -3,9 +3,9 @@ import { getErrorMessage } from '../utils/error';
 import { existsSync, writeFileSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { randomBytes } from 'crypto';
-import { db, sql } from '@elygate/db';
+import { db } from '@elygate/db';
 import { channels } from '@elygate/db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, sql as drizzleSql } from 'drizzle-orm';
 import { decrypt, encrypt, isEncrypted } from './encryption';
 
 const ENV_PATH = join(process.cwd(), '.env');
@@ -61,7 +61,7 @@ export async function initEnv(): Promise<void> {
         let connected = false;
         while (retries < maxRetries) {
             try {
-                await sql`SELECT 1`;
+                await db.execute(drizzleSql`SELECT 1`);
                 connected = true;
                 break;
             } catch {
