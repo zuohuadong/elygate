@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@lucide/svelte": "^1.7.0",
-    "@refinedev/simple-rest": "^5.0.0",
+    "@refinedev/simple-rest": "^6.0.1",
     "@svadmin/core": "0.25.3",
     "@svadmin/elysia": "0.10.6",
     "@svadmin/simple-rest": "0.9.7",
