@@ -10,6 +10,9 @@ on:
         description: 'Release version (e.g., v1.0.0)'
         required: true
 
+env:
+  NODE_VERSION: '24'
+
 jobs:
   build:
     name: Build ${{ matrix.target }}
@@ -34,6 +37,11 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2.2.0
@@ -78,6 +86,11 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: Download All Artifacts
         uses: actions/download-artifact@v8
