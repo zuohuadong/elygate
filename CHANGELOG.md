@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.8.2](https://github.com/zuohuadong/elygate/compare/elygate-v0.8.1...elygate-v0.8.2) (2026-05-08)
+
+
+### Chores
+
+* **deps-dev:** bump vite from 6.4.2 to 8.0.11 ([#8](https://github.com/zuohuadong/elygate/issues/8)) ([65623bd](https://github.com/zuohuadong/elygate/commit/65623bd603b84ebd886d0e6f42a816c1cbc7bbc3))
+* **deps:** bump @refinedev/simple-rest from 5.0.11 to 6.0.1 ([#7](https://github.com/zuohuadong/elygate/issues/7)) ([31830d3](https://github.com/zuohuadong/elygate/commit/31830d32ec26838eadc8e0ba0c5a31fd48dc36b0))
+* **deps:** bump actions/github-script from 7 to 9 ([#5](https://github.com/zuohuadong/elygate/issues/5)) ([ee46f61](https://github.com/zuohuadong/elygate/commit/ee46f61579c563c41ca0e513acf3da2c89d06fc8))
+* **deps:** bump drizzle-orm from 1.0.0-rc.2-63dd281 to 1.0.0-rc.2 ([#6](https://github.com/zuohuadong/elygate/issues/6)) ([fe2593c](https://github.com/zuohuadong/elygate/commit/fe2593c6214eeed870598a61c62f5f8d2ddc04d2))
+* **deps:** bump googleapis/release-please-action from 4 to 5 ([#4](https://github.com/zuohuadong/elygate/issues/4)) ([325c1db](https://github.com/zuohuadong/elygate/commit/325c1db6eb40e16a8a791021a5e0c9179bcbb64a))
+
 ## [0.8.1](https://github.com/zuohuadong/elygate/compare/elygate-v0.8.0...elygate-v0.8.1) (2026-05-08)
 
 
