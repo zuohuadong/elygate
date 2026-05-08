@@ -89,6 +89,8 @@ claude
 
 Launch the entire stack (Database, Gateway, and Web UI) with one command.
 
+**Requirements:** Docker Engine with Compose support. Node.js and Bun are not required when you use the pre-built images.
+
 #### 1. Configuration
 ```bash
 git clone https://github.com/zuohuadong/elygate.git && cd elygate
@@ -128,8 +130,8 @@ Inspired by New-API, Elygate provides pre-compiled single-file binaries. No Node
 3. **Run**:
    - **Linux / macOS**:
      ```bash
-     chmod +x elygate-linux-amd64
-     ./elygate-linux-amd64
+     chmod +x elygate-bun-linux-x64
+     ./elygate-bun-linux-x64
      ```
    - **Windows**:
      ```cmd
@@ -143,8 +145,13 @@ Inspired by New-API, Elygate provides pre-compiled single-file binaries. No Node
 
 For high-performance production use without Docker:
 
+**Requirements:** Bun 1.3+ and Node.js 24+. Node.js 24 is also used by the GitHub Actions build pipeline.
+
 #### One-Command Start
 ```bash
+# Install dependencies
+bun install
+
 # Build the web application
 bun run build
 
@@ -167,6 +174,8 @@ This will start:
 ### 💻 Manual Installation (Development)
 
 If you prefer to run services manually on your host machine:
+
+**Requirements:** Bun 1.3+, Node.js 24+, and PostgreSQL 15+.
 
 #### One-Command Dev Start
 ```bash
@@ -334,6 +343,8 @@ claude
 
 只需简单几步，即可一键启动全栈环境。
 
+**依赖要求：** 服务器只需要 Docker Engine 和 Docker Compose 支持。使用预编译镜像部署时，不需要安装 Node.js 或 Bun。
+
 #### 1. 环境准备
 ```bash
 git clone https://github.com/zuohuadong/elygate.git && cd elygate
@@ -378,8 +389,8 @@ docker compose -f docker-compose.prod.yml up -d
 3. **运行**:
    - **Linux / Mac**:
      ```bash
-     chmod +x elygate-linux-amd64
-     ./elygate-linux-amd64
+     chmod +x elygate-bun-linux-x64
+     ./elygate-bun-linux-x64
      ```
    - **Windows**:
      直接双击运行下载好的 `.exe` 软件，或通过 CMD 执行：
@@ -422,8 +433,13 @@ chmod +x scripts/deploy-optimizations.sh
 
 如果您希望在宿主机以最佳性能运行（非 Docker 环境）：
 
+**依赖要求：** Bun 1.3+、Node.js 24+。GitHub Actions 构建流水线也统一使用 Node.js 24。
+
 #### 一键启动
 ```bash
+# 安装依赖
+bun install
+
 # 构建 Web 应用
 bun run build
 
@@ -446,6 +462,8 @@ bun run start
 ### 💻 手动安装 (开发模式)
 
 如果您希望在宿主机手动运行各项服务：
+
+**依赖要求：** Bun 1.3+、Node.js 24+、PostgreSQL 15+。
 
 #### 一键开发启动
 ```bash
