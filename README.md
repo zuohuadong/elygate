@@ -142,6 +142,8 @@ Inspired by New-API, Elygate provides pre-compiled single-file binaries. No Node
      ```
    *The binary embeds both the Gateway API engine and the Svelte Admin Panel.*
 
+Release versions are managed automatically with Release Please. Use Conventional Commits such as `feat:`, `fix:`, `perf:`, `refactor:`, `docs:`, or `chore:`; merging the generated release PR creates the GitHub Release and triggers binary publishing.
+
 ---
 
 ### 🚀 Manual Production Deployment (Bare Metal)
@@ -403,6 +405,8 @@ docker compose -f docker-compose.prod.yml up -d
      ```cmd
      elygate-bun-windows-x64.exe
      ```
+
+版本发布已接入 Release Please 自动管理。后续提交请使用 `feat:`、`fix:`、`perf:`、`refactor:`、`docs:`、`chore:` 等 Conventional Commits；合并自动生成的 release PR 后会创建 GitHub Release，并触发二进制发布。
 
 ---
 

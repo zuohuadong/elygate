@@ -1,11 +1,6 @@
 name: Build Binary
 
 on:
-  push:
-    branches:
-      - main
-    tags:
-      - 'v*'
   workflow_dispatch:
     inputs:
       version:
@@ -111,34 +106,6 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.version.outputs.version }}
-          name: Release ${{ steps.version.outputs.version }}
-          body: |
-            # Elygate ${{ steps.version.outputs.version }}
-            
-            ## 📦 Downloads
-            
-            | Platform | Architecture | Download |
-            |----------|--------------|----------|
-            | Linux | x64 | `elygate-bun-linux-x64` |
-            | Linux | ARM64 | `elygate-bun-linux-arm64` |
-            | macOS | x64 | `elygate-bun-darwin-x64` |
-            | macOS | ARM64 | `elygate-bun-darwin-arm64` |
-            | Windows | x64 | `elygate-bun-windows-x64.exe` |
-            
-            ## 🚀 Quick Start
-            
-            ```bash
-            # Download and run
-            chmod +x elygate-*
-            ./elygate-*
-            ```
-            
-            ## 📋 Requirements
-            
-            - PostgreSQL 15+
-            - Environment variables configured
-            
-            See [documentation](https://github.com/${{ github.repository }}/blob/main/BINARY_BUILD.md) for details.
           files: |
             artifacts/elygate-bun-linux-x64/elygate-bun-linux-x64
             artifacts/elygate-bun-linux-arm64/elygate-bun-linux-arm64

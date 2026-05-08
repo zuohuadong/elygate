@@ -1,0 +1,47 @@
+name: Release Please
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write
+  actions: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      releases_created: ${{ steps.release.outputs.releases_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - name: Create or update release PR
+        id: release
+        uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  publish-binaries:
+    needs: release-please
+    if: needs.release-please.outputs.releases_created == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger binary publishing workflow
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const version = '${{ needs.release-please.outputs.tag_name }}';
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'build-binary.yml',
+              ref: 'main',
+              inputs: version ? { version } : {},
+            });
+            console.log(`Triggered build-binary.yml${version ? ` for ${version}` : ''}`);
