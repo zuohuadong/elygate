@@ -2,7 +2,7 @@ import type { ElysiaCtx } from '../types';
 import { Elysia } from 'elysia';
 import { log } from '../services/logger';
 import { assertModelAccess } from '../middleware/auth';
-import { createTask } from '../services/task-service';
+import { createTask, getTask } from '../services/task-service';
 import type { UserRecord, TokenRecord } from '../types';
 
 /**
@@ -18,7 +18,23 @@ import type { UserRecord, TokenRecord } from '../types';
  *   GET  /v1/tasks/task_...    → { status: "completed", result: {...} }
  */
 export const videoRouter = new Elysia()
-    .post('/video/generations', async ({ body, token, user, set }: ElysiaCtx) => {
+    .post('/video/generations', async (ctx: ElysiaCtx) => {
+        return await createVideoTaskResponse(ctx);
+    })
+    .get('/video/generations/:taskId', async (ctx: ElysiaCtx) => {
+        return await getVideoTaskResponse(ctx);
+    })
+    .post('/videos', async (ctx: ElysiaCtx) => {
+        return await createVideoTaskResponse(ctx);
+    })
+    .get('/videos/:taskId', async (ctx: ElysiaCtx) => {
+        return await getVideoTaskResponse(ctx);
+    })
+    .post('/videos/:videoId/remix', async (ctx: ElysiaCtx) => {
+        return await createVideoTaskResponse(ctx, { sourceVideoId: ctx.params?.videoId, action: 'remix' });
+    });
+
+async function createVideoTaskResponse({ body, token, user, set }: ElysiaCtx, metadata: Record<string, unknown> = {}) {
         const model = (body.model) as string;
 
         if (!model) {
@@ -44,7 +60,7 @@ export const videoRouter = new Elysia()
             tokenId: t.id,
             model,
             type: 'video',
-            requestBody: body,
+            requestBody: { ...body, ...metadata },
         });
 
         set.status = 202; // Accepted
@@ -55,4 +71,31 @@ export const videoRouter = new Elysia()
             status: 'pending',
             message: 'Video generation task created. Poll GET /v1/tasks/{id} for status.',
         };
-    });
+}
+
+async function getVideoTaskResponse({ params, user, set }: ElysiaCtx) {
+    if (!user) {
+        set.status = 401;
+        return { success: false, message: 'Unauthorized' };
+    }
+
+    const u = user as UserRecord;
+    const task = await getTask(params.taskId, u.id);
+    if (!task) {
+        set.status = 404;
+        return { error: { message: 'Task not found', type: 'not_found' } };
+    }
+
+    const response: Record<string, any> = {
+        id: task.id,
+        object: 'video',
+        model: task.model,
+        status: task.status,
+        progress: task.progress,
+        created_at: Math.floor(new Date(task.createdAt).getTime() / 1000),
+        updated_at: Math.floor(new Date(task.updatedAt).getTime() / 1000),
+    };
+    if (task.status === 'completed' && task.result) response.result = task.result;
+    if (task.status === 'failed' && task.error) response.error = { message: task.error, type: 'generation_failed' };
+    return response;
+}

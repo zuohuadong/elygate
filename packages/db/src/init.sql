@@ -818,6 +818,79 @@ CREATE TABLE IF NOT EXISTS task_logs (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- ============================================================
+-- Subscription / Billing Feature Parity
+-- ============================================================
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS billing_preference TEXT NOT NULL DEFAULT 'subscription_first';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS quota_display_type TEXT NOT NULL DEFAULT 'USD';
+
+ALTER TABLE packages ADD COLUMN IF NOT EXISTS subtitle TEXT;
+ALTER TABLE packages ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'USD';
+ALTER TABLE packages ADD COLUMN IF NOT EXISTS duration_unit TEXT NOT NULL DEFAULT 'day';
+ALTER TABLE packages ADD COLUMN IF NOT EXISTS duration_value INTEGER NOT NULL DEFAULT 30;
+ALTER TABLE packages ADD COLUMN IF NOT EXISTS custom_seconds BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE packages ADD COLUMN IF NOT EXISTS total_amount BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE packages ADD COLUMN IF NOT EXISTS quota_reset_period TEXT NOT NULL DEFAULT 'never';
+ALTER TABLE packages ADD COLUMN IF NOT EXISTS quota_reset_custom_seconds BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE packages ADD COLUMN IF NOT EXISTS enabled BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE packages ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE packages ADD COLUMN IF NOT EXISTS stripe_price_id TEXT;
+ALTER TABLE packages ADD COLUMN IF NOT EXISTS creem_product_id TEXT;
+ALTER TABLE packages ADD COLUMN IF NOT EXISTS waffo_pancake_product_id TEXT;
+ALTER TABLE packages ADD COLUMN IF NOT EXISTS max_purchase_per_user INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE packages ADD COLUMN IF NOT EXISTS upgrade_group TEXT;
+
+ALTER TABLE user_subscriptions ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'order';
+ALTER TABLE user_subscriptions ADD COLUMN IF NOT EXISTS amount_total BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE user_subscriptions ADD COLUMN IF NOT EXISTS amount_used BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE user_subscriptions ADD COLUMN IF NOT EXISTS next_reset_at TIMESTAMPTZ;
+ALTER TABLE user_subscriptions ADD COLUMN IF NOT EXISTS upgrade_group TEXT;
+ALTER TABLE user_subscriptions ADD COLUMN IF NOT EXISTS prev_user_group TEXT;
+
+ALTER TABLE redemptions ADD COLUMN IF NOT EXISTS created_by INTEGER REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE redemptions ADD COLUMN IF NOT EXISTS used_by INTEGER REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE redemptions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
+ALTER TABLE redemptions ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+
+CREATE TABLE IF NOT EXISTS subscription_orders (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    package_id INTEGER NOT NULL REFERENCES packages(id) ON DELETE CASCADE,
+    amount INTEGER NOT NULL DEFAULT 0,
+    currency TEXT NOT NULL DEFAULT 'USD',
+    money DECIMAL(10,2) NOT NULL DEFAULT 0,
+    trade_no TEXT NOT NULL UNIQUE,
+    payment_method TEXT NOT NULL,
+    payment_provider TEXT NOT NULL DEFAULT '',
+    transaction_id TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    provider_payload TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    completed_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_subscription_orders_user_id ON subscription_orders(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_subscription_orders_status ON subscription_orders(status, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS topup_logs (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    payment_order_id INTEGER REFERENCES payment_orders(id) ON DELETE SET NULL,
+    subscription_order_id INTEGER REFERENCES subscription_orders(id) ON DELETE SET NULL,
+    action TEXT NOT NULL,
+    payment_method TEXT,
+    payment_provider TEXT,
+    amount BIGINT NOT NULL DEFAULT 0,
+    money DECIMAL(10,2) NOT NULL DEFAULT 0,
+    details JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_topup_logs_user_id ON topup_logs(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_packages_enabled_sort ON packages(enabled, sort_order DESC, id DESC);
+
 CREATE INDEX IF NOT EXISTS idx_task_logs_task_id ON task_logs(task_id, created_at DESC);
 
 CREATE OR REPLACE FUNCTION refresh_materialized_views()
@@ -1001,3 +1074,83 @@ WHERE type = 42
     OR models::text ILIKE '%nano-banana%'
     OR models::text ILIKE '%veo%'
   );
+
+-- ============================================================
+-- Enterprise Team / Project / Member
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS teams (
+    id SERIAL PRIMARY KEY,
+    org_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    name VARCHAR(120) NOT NULL,
+    slug VARCHAR(80),
+    description TEXT,
+    leader_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    budget BIGINT NOT NULL DEFAULT 0,
+    used_budget BIGINT NOT NULL DEFAULT 0,
+    allowed_models JSONB NOT NULL DEFAULT '[]',
+    denied_models JSONB NOT NULL DEFAULT '[]',
+    status INTEGER NOT NULL DEFAULT 1,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    deleted_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_teams_org_id ON teams(org_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_teams_slug_org ON teams(slug, org_id) WHERE slug IS NOT NULL AND deleted_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS projects (
+    id SERIAL PRIMARY KEY,
+    org_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    team_id INTEGER REFERENCES teams(id) ON DELETE SET NULL,
+    name VARCHAR(120) NOT NULL,
+    slug VARCHAR(80),
+    description TEXT,
+    budget BIGINT NOT NULL DEFAULT 0,
+    used_budget BIGINT NOT NULL DEFAULT 0,
+    allowed_models JSONB NOT NULL DEFAULT '[]',
+    denied_models JSONB NOT NULL DEFAULT '[]',
+    status INTEGER NOT NULL DEFAULT 1,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    deleted_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_projects_org_id ON projects(org_id);
+CREATE INDEX IF NOT EXISTS idx_projects_team_id ON projects(team_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_slug_org ON projects(slug, org_id) WHERE slug IS NOT NULL AND deleted_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS team_members (
+    id SERIAL PRIMARY KEY,
+    team_id INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role VARCHAR(30) NOT NULL DEFAULT 'member',
+    joined_at TIMESTAMPTZ DEFAULT NOW(),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_team_members_unique ON team_members(team_id, user_id);
+
+-- ============================================================
+-- Soft-delete support for organizations and tokens
+-- ============================================================
+
+ALTER TABLE organizations ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+ALTER TABLE tokens ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+
+-- ============================================================
+-- Deleted Records (Recycle Bin)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS deleted_records (
+    id SERIAL PRIMARY KEY,
+    resource_type VARCHAR(60) NOT NULL,
+    resource_id INTEGER NOT NULL,
+    snapshot JSONB NOT NULL,
+    deleted_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    restored_at TIMESTAMPTZ,
+    restored_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    purge_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_deleted_records_type ON deleted_records(resource_type);
+CREATE INDEX IF NOT EXISTS idx_deleted_records_purge ON deleted_records(purge_at) WHERE restored_at IS NULL;

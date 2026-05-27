@@ -9,6 +9,7 @@ import { optionCache } from '../../services/optionCache';
 import { getProviderHandler } from '../../providers';
 import { ChannelType } from '../../types';
 import { buildModelsUrl } from '../../utils/url';
+import { assertSafeExternalUrl } from '../../utils/safeExternalUrl';
 import { and, asc, avg, count, desc, eq, ilike, inArray, isNotNull, max, ne, or, sum, sql as drizzleSql } from 'drizzle-orm';
 
 function notImplemented(set: Record<string, any>, message: string) {
@@ -185,7 +186,7 @@ async function callIoApi({
         return { ok: false, status: 400, payload: { detail: 'api_key is required' }, settings };
     }
     const baseUrl = enterprise ? settings.enterpriseBaseUrl : settings.publicBaseUrl;
-    const url = `${baseUrl}${path}${buildQueryParams(query)}`;
+    const url = assertSafeExternalUrl(`${baseUrl}${path}${buildQueryParams(query)}`).toString();
     try {
         const response = await fetch(url, {
             method,

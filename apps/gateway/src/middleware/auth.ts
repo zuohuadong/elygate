@@ -12,6 +12,7 @@ import { LRUCache } from 'lru-cache';
 import { jwt } from '@elysiajs/jwt';
 import { checkAndResetSubscriptionQuota } from '../services/subscription';
 import { translateErrorBilingual } from '../services/i18n';
+import { getClientIpFromHeaders, isIpAllowed } from '../utils/ipAccess';
 
 // High-performance LRU cache for auth context (Token + User)
 // Reduces DB pressure by 90%+ for repeated requests from the same API key.
@@ -209,7 +210,7 @@ export const authPlugin = new Elysia({ name: 'auth' })
                 name: tokens.name,
                 key: tokens.key,
                 remain_quota: tokens.remainQuota,
-                used_quota: tokens.usedQuota,
+                token_used_quota: tokens.usedQuota,
                 token_status: tokens.status,
                 expired_at: tokens.expiredAt,
                 token_models: tokens.models,
@@ -227,16 +228,20 @@ export const authPlugin = new Elysia({ name: 'auth' })
                 group: users.group,
                 role: users.role,
                 quota: users.quota,
+                user_used_quota: users.usedQuota,
                 user_status: users.status,
                 user_org_id: users.orgId,
                 currency: users.currency,
+                org_quota: organizations.quota,
+                org_used_quota: organizations.usedQuota,
+                org_status: organizations.status,
                 org_allowed_models: organizations.allowedModels,
                 org_denied_models: organizations.deniedModels,
                 org_allowed_subnets: organizations.allowedSubnets,
             })
             .from(tokens)
             .innerJoin(users, eq(tokens.userId, users.id))
-            .leftJoin(organizations, eq(users.orgId, organizations.id))
+            .leftJoin(organizations, drizzleSql`${organizations.id} = COALESCE(${tokens.orgId}, ${users.orgId})`)
             .where(eq(tokens.key, apiKey))
             .limit(1);
 
@@ -257,7 +262,7 @@ export const authPlugin = new Elysia({ name: 'auth' })
             key: raw.key,
             userId: raw.user_id,
             remainQuota: Number(raw.remain_quota),
-            usedQuota: Number(raw.used_quota),
+            usedQuota: Number(raw.token_used_quota),
             status: raw.token_status,
             expiredAt: raw.expired_at ? new Date(raw.expired_at) : null,
             models: Array.isArray(raw.token_models) ? raw.token_models : [],
@@ -276,12 +281,15 @@ export const authPlugin = new Elysia({ name: 'auth' })
             id: raw.user_id,
             username: raw.username,
             group: raw.group,
-            orgId: raw.user_org_id ?? raw.token_org_id ?? undefined,
+            orgId: raw.token_org_id ?? raw.user_org_id ?? undefined,
             role: raw.role,
             quota: Number(raw.quota),
-            usedQuota: Number(raw.used_quota || 0),
+            usedQuota: Number(raw.user_used_quota || 0),
             status: raw.user_status,
             currency: raw.currency || 'USD',
+            orgQuota: raw.org_quota === null || raw.org_quota === undefined ? undefined : Number(raw.org_quota),
+            orgUsedQuota: raw.org_used_quota === null || raw.org_used_quota === undefined ? undefined : Number(raw.org_used_quota),
+            orgStatus: raw.org_status === null || raw.org_status === undefined ? undefined : Number(raw.org_status),
             orgAllowedModels: Array.isArray(raw.org_allowed_models) ? raw.org_allowed_models : (typeof raw.org_allowed_models === 'string' ? JSON.parse(raw.org_allowed_models || '[]') : []),
             orgDeniedModels: Array.isArray(raw.org_denied_models) ? raw.org_denied_models : (typeof raw.org_denied_models === 'string' ? JSON.parse(raw.org_denied_models || '[]') : []),
             orgAllowedSubnets: raw.org_allowed_subnets ?? undefined
@@ -293,12 +301,11 @@ export const authPlugin = new Elysia({ name: 'auth' })
         }
 
         // --- IP Whitelist Validation (Token Level + Org Level) ---
-        const clientIp = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || '127.0.0.1';
+        const clientIp = getClientIpFromHeaders(request.headers);
         
         // Org Level Check
         if (raw.org_allowed_subnets) {
-            const orgSubnets = raw.org_allowed_subnets.split(',').map((s: string) => s.trim()).filter(Boolean);
-            if (orgSubnets.length > 0 && !orgSubnets.includes(clientIp)) {
+            if (!isIpAllowed(clientIp, raw.org_allowed_subnets)) {
                 set.status = 403;
                 throw new Error(`Your organization policies restricted access for IP ${clientIp}`);
             }
@@ -307,8 +314,7 @@ export const authPlugin = new Elysia({ name: 'auth' })
         // Token Level Check
         const tokenIpPolicy = tokenRecord.allowIps || tokenRecord.subnet;
         if (tokenIpPolicy) {
-            const allowedSubnets = tokenIpPolicy.split(',').map((s: string) => s.trim()).filter(Boolean);
-            if (allowedSubnets.length > 0 && !allowedSubnets.includes(clientIp)) {
+            if (!isIpAllowed(clientIp, tokenIpPolicy)) {
                 set.status = 403;
                 throw new Error(`IP Origin ${clientIp} is not whitelisted for this API key.`);
             }
@@ -317,6 +323,20 @@ export const authPlugin = new Elysia({ name: 'auth' })
         if (userRecord.status !== 1) {
             set.status = 403;
             throw new Error('User account is disabled');
+        }
+
+        if (userRecord.orgId && userRecord.orgStatus !== undefined && userRecord.orgStatus !== 1) {
+            set.status = 403;
+            throw new Error('Organization is disabled');
+        }
+
+        if (
+            userRecord.orgId &&
+            Number(userRecord.orgQuota || 0) > 0 &&
+            Number(userRecord.orgUsedQuota || 0) >= Number(userRecord.orgQuota || 0)
+        ) {
+            set.status = 403;
+            throw new Error(translateErrorBilingual('Insufficient organization quota'));
         }
 
         // Check active subscriptions

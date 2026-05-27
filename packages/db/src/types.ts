@@ -12,6 +12,8 @@ export interface User {
     group: string;        // e.g., 'vip', 'default'
     status: number;       // 1-Active, 2-Bans
     currency: 'USD' | 'RMB';
+    billingPreference?: string;
+    quotaDisplayType?: string;
     createdAt: Date;
 }
 
@@ -88,13 +90,32 @@ export interface RateLimitRule {
 export interface Package {
     id: number;
     name: string;
+    subtitle?: string | null;
     description: string;
     price: number | string; // DECIMAL handles as string/number in JS
+    currency?: string;
     durationDays: number;
+    durationUnit?: string;
+    durationValue?: number;
+    customSeconds?: number;
     models: any; // JSONB
     defaultRateLimitId: number | null;
     modelRateLimits: any; // JSONB
+    cycleQuota?: number;
+    cycleInterval?: number;
+    cycleUnit?: string;
+    totalAmount?: number;
+    quotaResetPeriod?: string;
+    quotaResetCustomSeconds?: number;
+    enabled?: boolean;
     isPublic: boolean;
+    sortOrder?: number;
+    stripePriceId?: string | null;
+    creemProductId?: string | null;
+    waffoPancakeProductId?: string | null;
+    maxPurchasePerUser?: number;
+    upgradeGroup?: string | null;
+    allowedGroups?: string[];
     addedBy: number | null;
     updatedAt: Date;
     createdAt: Date;
@@ -107,6 +128,15 @@ export interface UserSubscription {
     startTime: Date;
     endTime: Date;
     status: number; // 1: active, 2: expired, 3: disabled
+    source?: string;
+    amountTotal?: number;
+    amountUsed?: number;
+    quotaGranted?: number;
+    quotaUsed?: number;
+    lastResetAt?: Date | null;
+    nextResetAt?: Date | null;
+    upgradeGroup?: string | null;
+    prevUserGroup?: string | null;
     createdAt: Date;
     updatedAt: Date;
 }

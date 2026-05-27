@@ -54,6 +54,7 @@ async function init() {
   const { realtimeRouter } = await import('./routes/realtime');
   const { openaiEnterpriseRouter } = await import('./routes/openai-enterprise');
   const { fineTuneRouter } = await import('./routes/fine-tune');
+  const { dashboardBillingRouter } = await import('./routes/dashboard-billing');
   const { newApiCompatAdminRouter, newApiCompatSelfRouter } = await import('./routes/admin/newApiCompat');
   const { newApiUserAdminRouter, newApiUserSelfRouter, newApiUserPublicRouter } = await import('./routes/admin/newApiUserCompat');
 
@@ -83,6 +84,7 @@ async function init() {
       return { success: false, message: error instanceof Error ? getErrorMessage(error) : String(error) };
     })
     .onBeforeHandle(staticFileHandler() as any)
+    .use(dashboardBillingRouter)
     .use(sysRouter)
     .group("/api", (app) =>
       app.get('/status', async () => {
@@ -211,6 +213,13 @@ async function init() {
   
   memoryCache.startCleanupTask();
   memoryCache.startDiscoverySyncTask();
+
+  try {
+    const { startJobQueueWorkers } = await import('./services/jobQueue');
+    await startJobQueueWorkers();
+  } catch (e: unknown) {
+    log.error('[JobQueue] Failed to start pg-boss workers:', getErrorMessage(e));
+  }
 
   const { startTaskWorker } = await import('./services/task-service');
   startTaskWorker();

@@ -5,7 +5,7 @@ import { db, sql } from '@elygate/db';
 import { packages, rateLimitRules, redemptions, inviteCodes, userSubscriptions, users } from '@elygate/db/schema';
 import { eq, and, desc, inArray, count, gt } from 'drizzle-orm';
 import { refreshAllCaches } from './index';
-import { checkAndResetSubscriptionQuota } from '../../services/subscription';
+import { bindSubscriptionToUser, cancelSubscription, checkAndResetSubscriptionQuota } from '../../services/subscription';
 
 export const packagesRouter = new Elysia()
     // --- Redemptions (CDK) ---
@@ -261,17 +261,32 @@ export const packagesRouter = new Elysia()
         return await db.select({
             id: packages.id,
             name: packages.name,
+            subtitle: packages.subtitle,
             description: packages.description,
             price: packages.price,
+            currency: packages.currency,
             durationDays: packages.durationDays,
+            durationUnit: packages.durationUnit,
+            durationValue: packages.durationValue,
+            customSeconds: packages.customSeconds,
             models: packages.models,
             defaultRateLimitId: packages.defaultRateLimitId,
             modelRateLimits: packages.modelRateLimits,
             cycleQuota: packages.cycleQuota,
             cycleInterval: packages.cycleInterval,
             cycleUnit: packages.cycleUnit,
+            totalAmount: packages.totalAmount,
+            quotaResetPeriod: packages.quotaResetPeriod,
+            quotaResetCustomSeconds: packages.quotaResetCustomSeconds,
             cachePolicy: packages.cachePolicy,
+            enabled: packages.enabled,
             isPublic: packages.isPublic,
+            sortOrder: packages.sortOrder,
+            stripePriceId: packages.stripePriceId,
+            creemProductId: packages.creemProductId,
+            waffoPancakeProductId: packages.waffoPancakeProductId,
+            maxPurchasePerUser: packages.maxPurchasePerUser,
+            upgradeGroup: packages.upgradeGroup,
             allowedGroups: packages.allowedGroups,
             addedBy: packages.addedBy,
             updatedAt: packages.updatedAt,
@@ -286,17 +301,33 @@ export const packagesRouter = new Elysia()
             const b = body as Record<string, any>;
             const [result] = await db.insert(packages).values({
                 name: b.name,
+                subtitle: b.subtitle || null,
                 description: b.description || '',
                 price: b.price || 0,
+                currency: b.currency || 'USD',
                 durationDays: b.durationDays || 30,
+                durationUnit: b.durationUnit || 'day',
+                durationValue: b.durationValue || b.durationDays || 30,
+                customSeconds: b.customSeconds || 0,
                 models: b.models || [],
                 defaultRateLimitId: b.defaultRateLimitId || null,
                 modelRateLimits: b.modelRateLimits || {},
                 cycleQuota: b.cycleQuota || 0,
                 cycleInterval: b.cycleInterval || 1,
                 cycleUnit: b.cycleUnit || 'day',
+                totalAmount: b.totalAmount || 0,
+                quotaResetPeriod: b.quotaResetPeriod || 'never',
+                quotaResetCustomSeconds: b.quotaResetCustomSeconds || 0,
                 cachePolicy: b.cachePolicy || null,
+                enabled: b.enabled ?? true,
                 isPublic: b.isPublic ?? true,
+                sortOrder: b.sortOrder || 0,
+                stripePriceId: b.stripePriceId || null,
+                creemProductId: b.creemProductId || null,
+                waffoPancakeProductId: b.waffoPancakeProductId || null,
+                maxPurchasePerUser: b.maxPurchasePerUser || 0,
+                upgradeGroup: b.upgradeGroup || null,
+                allowedGroups: b.allowedGroups || [],
                 addedBy: user.id,
             }).returning();
             return { success: true, data: result };
@@ -309,17 +340,33 @@ export const packagesRouter = new Elysia()
             const b = body as Record<string, any>;
             const [result] = await db.update(packages).set({
                 ...(b.name !== undefined && { name: b.name }),
+                ...(b.subtitle !== undefined && { subtitle: b.subtitle }),
                 ...(b.description !== undefined && { description: b.description }),
                 ...(b.price !== undefined && { price: b.price }),
+                ...(b.currency !== undefined && { currency: b.currency }),
                 ...(b.durationDays !== undefined && { durationDays: b.durationDays }),
+                ...(b.durationUnit !== undefined && { durationUnit: b.durationUnit }),
+                ...(b.durationValue !== undefined && { durationValue: b.durationValue }),
+                ...(b.customSeconds !== undefined && { customSeconds: b.customSeconds }),
                 ...(b.models !== undefined && { models: b.models || null }),
                 ...(b.defaultRateLimitId !== undefined && { defaultRateLimitId: b.defaultRateLimitId }),
                 ...(b.modelRateLimits !== undefined && { modelRateLimits: b.modelRateLimits || null }),
                 ...(b.cycleQuota !== undefined && { cycleQuota: b.cycleQuota }),
                 ...(b.cycleInterval !== undefined && { cycleInterval: b.cycleInterval }),
                 ...(b.cycleUnit !== undefined && { cycleUnit: b.cycleUnit }),
+                ...(b.totalAmount !== undefined && { totalAmount: b.totalAmount }),
+                ...(b.quotaResetPeriod !== undefined && { quotaResetPeriod: b.quotaResetPeriod }),
+                ...(b.quotaResetCustomSeconds !== undefined && { quotaResetCustomSeconds: b.quotaResetCustomSeconds }),
                 ...(b.cachePolicy !== undefined && { cachePolicy: b.cachePolicy || null }),
+                ...(b.enabled !== undefined && { enabled: b.enabled }),
                 ...(b.isPublic !== undefined && { isPublic: b.isPublic }),
+                ...(b.sortOrder !== undefined && { sortOrder: b.sortOrder }),
+                ...(b.stripePriceId !== undefined && { stripePriceId: b.stripePriceId }),
+                ...(b.creemProductId !== undefined && { creemProductId: b.creemProductId }),
+                ...(b.waffoPancakeProductId !== undefined && { waffoPancakeProductId: b.waffoPancakeProductId }),
+                ...(b.maxPurchasePerUser !== undefined && { maxPurchasePerUser: b.maxPurchasePerUser }),
+                ...(b.upgradeGroup !== undefined && { upgradeGroup: b.upgradeGroup }),
+                ...(b.allowedGroups !== undefined && { allowedGroups: b.allowedGroups }),
                 updatedAt: new Date(),
             }).where(eq(packages.id, Number(id))).returning();
             return { success: true, data: result };
@@ -348,6 +395,12 @@ export const packagesRouter = new Elysia()
             quotaGranted: userSubscriptions.quotaGranted,
             quotaUsed: userSubscriptions.quotaUsed,
             lastResetAt: userSubscriptions.lastResetAt,
+            nextResetAt: userSubscriptions.nextResetAt,
+            amountTotal: userSubscriptions.amountTotal,
+            amountUsed: userSubscriptions.amountUsed,
+            source: userSubscriptions.source,
+            upgradeGroup: userSubscriptions.upgradeGroup,
+            prevUserGroup: userSubscriptions.prevUserGroup,
             createdAt: userSubscriptions.createdAt,
             updatedAt: userSubscriptions.updatedAt,
             username: users.username,
@@ -369,6 +422,12 @@ export const packagesRouter = new Elysia()
             quotaGranted: userSubscriptions.quotaGranted,
             quotaUsed: userSubscriptions.quotaUsed,
             lastResetAt: userSubscriptions.lastResetAt,
+            nextResetAt: userSubscriptions.nextResetAt,
+            amountTotal: userSubscriptions.amountTotal,
+            amountUsed: userSubscriptions.amountUsed,
+            source: userSubscriptions.source,
+            upgradeGroup: userSubscriptions.upgradeGroup,
+            prevUserGroup: userSubscriptions.prevUserGroup,
             createdAt: userSubscriptions.createdAt,
             updatedAt: userSubscriptions.updatedAt,
             packageName: packages.name,
@@ -382,51 +441,13 @@ export const packagesRouter = new Elysia()
     .post('/users/:id/subscriptions', async ({ params: { id }, body, set }: ElysiaCtx) => {
         try {
             const b = body as Record<string, any>;
-            const [pkg] = await db.select({ durationDays: packages.durationDays }).from(packages).where(eq(packages.id, b.packageId));
-            if (!pkg) {
-                set.status = 404; return { success: false, message: 'Package not found' };
-            }
-
-            const durationMs = Number(pkg.durationDays) * 24 * 60 * 60 * 1000;
-
-            const [existingSub] = await db.select({
-                id: userSubscriptions.id,
-                endTime: userSubscriptions.endTime,
-            }).from(userSubscriptions)
-                .where(and(
-                    eq(userSubscriptions.userId, Number(id)),
-                    eq(userSubscriptions.packageId, b.packageId),
-                    eq(userSubscriptions.status, 1),
-                    gt(userSubscriptions.endTime, new Date()),
-                ))
-                .orderBy(desc(userSubscriptions.endTime))
-                .limit(1);
-
-            let result;
-            if (existingSub) {
-                const newEndTime = new Date(existingSub.endTime!.getTime() + durationMs);
-                const [updated] = await db.update(userSubscriptions).set({
-                    endTime: newEndTime,
-                    updatedAt: new Date(),
-                }).where(eq(userSubscriptions.id, existingSub.id)).returning();
-                result = updated;
-            } else {
-                const newEndTime = new Date(Date.now() + durationMs);
-                const [inserted] = await db.insert(userSubscriptions).values({
-                    userId: Number(id),
-                    packageId: b.packageId,
-                    startTime: new Date(),
-                    endTime: newEndTime,
-                    status: 1,
-                }).returning();
-                result = inserted;
-            }
-
+            const result = await bindSubscriptionToUser(Number(id), Number(b.packageId), 'admin');
             await sql`NOTIFY auth_update, ${String(id)}`;
-
             return { success: true, data: result };
         } catch (e: unknown) {
-            set.status = 500; return { success: false, message: getErrorMessage(e) };
+            const message = getErrorMessage(e);
+            set.status = message.includes('not found') ? 404 : 400;
+            return { success: false, message };
         }
     })
     .put('/subscriptions/:id', async ({ params: { id }, body, set }: ElysiaCtx) => {
@@ -441,5 +462,15 @@ export const packagesRouter = new Elysia()
             return { success: true, data: result };
         } catch (e: unknown) {
             set.status = 500; return { success: false, message: getErrorMessage(e) };
+        }
+    })
+    .delete('/subscriptions/:id', async ({ params: { id }, query, set }: ElysiaCtx) => {
+        try {
+            await cancelSubscription(Number(id), String(query?.hard || 'false') === 'true');
+            return { success: true };
+        } catch (e: unknown) {
+            const message = getErrorMessage(e);
+            set.status = message.includes('not found') ? 404 : 400;
+            return { success: false, message };
         }
     });

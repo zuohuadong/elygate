@@ -1,7 +1,7 @@
 import type { ElysiaCtx, TokenRecord, UserRecord } from '../../types';
 import { Elysia } from 'elysia';
 import { db } from '@elygate/db';
-import { users, packages, userSubscriptions, announcements, logs, channels, userGroups, paymentOrders, options, oauthAccounts, customOAuthProviders, twoFactorLoginChallenges, tokens, sessions } from '@elygate/db/schema';
+import { users, packages, userSubscriptions, announcements, logs, channels, userGroups, paymentOrders, subscriptionOrders, options, oauthAccounts, customOAuthProviders, twoFactorLoginChallenges, tokens, sessions, redemptions, inviteCodes, loginAttempts, userAff } from '@elygate/db/schema';
 import { eq, and, desc, or, ilike, count, sum, inArray, sql as drizzleSql } from 'drizzle-orm';
 import { adminGuard, authPlugin } from '../../middleware/auth';
 import { optionCache } from '../../services/optionCache';
@@ -13,6 +13,10 @@ import { getProviderHandler } from '../../providers';
 import { config, apiUrls } from '../../config';
 import { buildOtpAuthUrl, consumeBackupCode, generateBackupCodes, generateTwoFactorSecret, hashBackupCodes, verifyTotp } from '../../services/twoFactor';
 import { authService } from '../../services/auth';
+import { bindSubscriptionToUser, cancelSubscription } from '../../services/subscription';
+import { newApiPlanToPackageValues, normalizeBillingPreference, resolveSubscriptionPlanId, wrapNewApiSubscriptionPlan } from '../../services/newApiSubscriptionCompat';
+import { safeExternalFetch } from '../../utils/safeExternalUrl';
+import { handleEPayPaymentCallback, handleStripePaymentCallback } from '../payment';
 
 /**
  * New API compatible user/subscription/announcement/ollama routes.
@@ -56,7 +60,7 @@ function normalizeDiscoveryUrl(body: Record<string, any>): string | null {
 async function fetchOAuthDiscovery(body: Record<string, any>) {
     const discoveryUrl = normalizeDiscoveryUrl(body);
     if (!discoveryUrl) throw new Error('issuer or discoveryUrl is required');
-    const res = await fetch(discoveryUrl, { headers: { Accept: 'application/json' } });
+    const res = await safeExternalFetch(discoveryUrl, { headers: { Accept: 'application/json' } });
     if (!res.ok) {
         throw new Error(`Discovery endpoint returned ${res.status}`);
     }
@@ -154,53 +158,63 @@ async function createSubscriptionPaymentOrder(userId: number, packageId: number,
     const [pkg] = await db.select({
         id: packages.id,
         name: packages.name,
+        subtitle: packages.subtitle,
         price: packages.price,
+        currency: packages.currency,
         durationDays: packages.durationDays,
         cycleQuota: packages.cycleQuota,
+        stripePriceId: packages.stripePriceId,
+        creemProductId: packages.creemProductId,
+        waffoPancakeProductId: packages.waffoPancakeProductId,
         isPublic: packages.isPublic,
+        enabled: packages.enabled,
     }).from(packages).where(eq(packages.id, packageId)).limit(1);
-    if (!pkg || pkg.isPublic === false) throw new Error('Package not found');
+    if (!pkg || pkg.isPublic === false || pkg.enabled === false) throw new Error('Package not found');
 
     const amount = parsePackagePriceToCents(pkg.price);
     if (amount <= 0) throw new Error('Invalid package price');
 
-    const [order] = await db.insert(paymentOrders).values({
+    const tradeNo = `ELYSUB${Date.now()}${Math.floor(Math.random() * 1000)}`;
+    const [order] = await db.insert(subscriptionOrders).values({
         userId,
+        packageId,
         amount,
+        currency: String(pkg.currency || 'USD'),
+        money: (amount / 100).toFixed(2),
+        tradeNo,
         paymentMethod,
-        orderType: 'subscription',
-        targetType: 'package',
-        targetId: packageId,
-        metadata: {
-            packageName: pkg.name,
-            durationDays: Number(pkg.durationDays || 30),
-            cycleQuota: Number(pkg.cycleQuota || 0),
-        },
-        status: 0,
+        paymentProvider: paymentMethod,
+        status: 'pending',
     }).returning();
 
     let paymentUrl = '';
     if (paymentMethod === 'stripe' && config.stripe.secretKey) {
+        const body = new URLSearchParams({
+            'payment_method_types[]': 'card',
+            mode: 'payment',
+            success_url: `${config.webUrl}/payment/success?order_id=${order.id}`,
+            cancel_url: `${config.webUrl}/payment/cancel?order_id=${order.id}`,
+            'metadata[order_id]': String(order.id),
+            'metadata[user_id]': String(userId),
+            'metadata[order_kind]': 'subscription',
+            'metadata[package_id]': String(packageId),
+        });
+        if (pkg.stripePriceId) {
+            body.set('line_items[0][price]', pkg.stripePriceId);
+            body.set('line_items[0][quantity]', '1');
+        } else {
+            body.set('line_items[0][price_data][currency]', String(pkg.currency || 'USD').toLowerCase());
+            body.set('line_items[0][price_data][product_data][name]', `Elygate Subscription - ${pkg.name}`);
+            body.set('line_items[0][price_data][unit_amount]', String(amount));
+            body.set('line_items[0][quantity]', '1');
+        }
         const stripeResponse = await fetch(apiUrls.stripe + '/v1/checkout/sessions', {
             method: 'POST',
             headers: {
                 Authorization: `Bearer ${config.stripe.secretKey}`,
                 'Content-Type': 'application/x-www-form-urlencoded',
             },
-            body: new URLSearchParams({
-                'payment_method_types[]': 'card',
-                'line_items[0][price_data][currency]': 'usd',
-                'line_items[0][price_data][product_data][name]': `Elygate Subscription - ${pkg.name}`,
-                'line_items[0][price_data][unit_amount]': String(amount),
-                'line_items[0][quantity]': '1',
-                mode: 'payment',
-                success_url: `${config.webUrl}/payment/success?order_id=${order.id}`,
-                cancel_url: `${config.webUrl}/payment/cancel?order_id=${order.id}`,
-                'metadata[order_id]': String(order.id),
-                'metadata[user_id]': String(userId),
-                'metadata[order_type]': 'subscription',
-                'metadata[package_id]': String(packageId),
-            }),
+            body,
         });
         const session = await stripeResponse.json() as Record<string, any>;
         if (!session.url) {
@@ -208,11 +222,10 @@ async function createSubscriptionPaymentOrder(userId: number, packageId: number,
         }
         paymentUrl = session.url;
     } else if (paymentMethod === 'epay' && config.epay.appId && config.epay.appSecret) {
-        const outTradeNo = `ELY${order.id}`;
         const params = new URLSearchParams({
             pid: config.epay.appId,
             type: 'alipay',
-            out_trade_no: outTradeNo,
+            out_trade_no: order.tradeNo,
             notify_url: `${config.gatewayUrl}/api/payment/epay/callback`,
             return_url: `${config.webUrl}/payment/success?order_id=${order.id}`,
             name: `Elygate Subscription - ${pkg.name}`,
@@ -233,6 +246,178 @@ async function createSubscriptionPaymentOrder(userId: number, packageId: number,
             amount,
         },
     };
+}
+
+function apiSuccess(data: unknown = null, message = '') {
+    return { success: true, message, data };
+}
+
+function providerUnsupported(provider: string) {
+    return {
+        success: false,
+        disabled: true,
+        provider,
+        message: `${provider} payment webhook is not configured in Elygate core compatibility mode`,
+    };
+}
+
+function getMoneyAmount(payload: Record<string, any>): number {
+    const raw = payload.amount ?? payload.money ?? payload.total ?? 0;
+    return Number(raw);
+}
+
+function topupAmountPreview(amount: number, provider: string) {
+    const quotaPerUnit = Number(optionCache.get('QuotaPerUnit', 500000));
+    return {
+        success: true,
+        data: {
+            amount,
+            quota: Math.floor((amount / 100) * quotaPerUnit),
+            provider,
+        }
+    };
+}
+
+async function listUserSubscriptionSummaries(userId: number) {
+    return await db.select({
+        id: userSubscriptions.id,
+        userId: userSubscriptions.userId,
+        packageId: userSubscriptions.packageId,
+        packageName: packages.name,
+        startTime: userSubscriptions.startTime,
+        endTime: userSubscriptions.endTime,
+        status: userSubscriptions.status,
+        source: userSubscriptions.source,
+        amountTotal: userSubscriptions.amountTotal,
+        amountUsed: userSubscriptions.amountUsed,
+        quotaGranted: userSubscriptions.quotaGranted,
+        quotaUsed: userSubscriptions.quotaUsed,
+        lastResetAt: userSubscriptions.lastResetAt,
+        nextResetAt: userSubscriptions.nextResetAt,
+        upgradeGroup: userSubscriptions.upgradeGroup,
+        prevUserGroup: userSubscriptions.prevUserGroup,
+        createdAt: userSubscriptions.createdAt,
+        updatedAt: userSubscriptions.updatedAt,
+    }).from(userSubscriptions)
+        .leftJoin(packages, eq(userSubscriptions.packageId, packages.id))
+        .where(eq(userSubscriptions.userId, userId))
+        .orderBy(desc(userSubscriptions.id));
+}
+
+async function registerCompatUser(payload: Record<string, any>) {
+    const username = String(payload.username || '').trim();
+    const password = String(payload.password || '');
+    if (!username || !password) throw new Error('username and password are required');
+
+    const registerMode = String(optionCache.get('RegisterMode', 'open'));
+    if (registerMode === 'closed') throw new Error('Registration is currently disabled');
+
+    const inviteCode = String(payload.inviteCode || payload.invite_code || '').trim();
+    let giftQuota = 0;
+    let inviteCodeId: number | null = null;
+    if (inviteCode) {
+        const [codeRecord] = await db.select().from(inviteCodes).where(eq(inviteCodes.code, inviteCode)).limit(1);
+        if (!codeRecord || codeRecord.status !== 1 || (codeRecord.expiresAt && new Date(codeRecord.expiresAt) < new Date()) || codeRecord.usedCount >= codeRecord.maxUses) {
+            throw new Error('Invalid invite code');
+        }
+        giftQuota = Number(codeRecord.giftQuota || 0);
+        inviteCodeId = codeRecord.id;
+    } else if (registerMode === 'invite') {
+        throw new Error('Invite code is required for registration');
+    }
+
+    const passwordHash = await Bun.password.hash(password);
+    const defaultQuota = Number(optionCache.get('SignRegisterQuota', 500000));
+    return await db.transaction(async (tx) => {
+        const [row] = await tx.insert(users).values({
+            username,
+            email: payload.email || null,
+            name: payload.name || null,
+            passwordHash,
+            role: 1,
+            quota: defaultQuota + giftQuota,
+            status: 1,
+            currency: payload.currency || 'USD',
+        }).returning({
+            id: users.id,
+            username: users.username,
+            role: users.role,
+            quota: users.quota,
+            currency: users.currency,
+        });
+
+        const key = `sk-${Bun.randomUUIDv7('hex')}`;
+        await tx.insert(tokens).values({
+            userId: row.id,
+            name: 'Default API Key',
+            key,
+            status: 1,
+            remainQuota: -1,
+        });
+        if (inviteCodeId) {
+            await tx.update(inviteCodes).set({
+                usedCount: drizzleSql`${inviteCodes.usedCount} + 1`,
+                updatedAt: new Date(),
+            }).where(eq(inviteCodes.id, inviteCodeId));
+        }
+        return { ...row, token: key, giftQuota };
+    });
+}
+
+async function loginCompatUser(payload: Record<string, any>, request: Request, authSession: { set: (value: any) => void }) {
+    const username = String(payload.username || '').trim();
+    const password = String(payload.password || '');
+    if (!username || !password) throw new Error('username and password are required');
+    const clientIP = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown';
+
+    const [row] = await db.select({
+        id: users.id,
+        username: users.username,
+        passwordHash: users.passwordHash,
+        role: users.role,
+        status: users.status,
+        lockedUntil: users.lockedUntil,
+        currency: users.currency,
+        twoFactorEnabled: users.twoFactorEnabled,
+    }).from(users).where(eq(users.username, username)).limit(1);
+
+    if (!row || row.status !== 1 || (row.lockedUntil && new Date(row.lockedUntil) > new Date())) {
+        await db.insert(loginAttempts).values({ username, ipAddress: clientIP, success: false });
+        throw new Error('Invalid username or password');
+    }
+
+    const valid = await Bun.password.verify(password, row.passwordHash).catch(() => false);
+    if (!valid) {
+        await db.insert(loginAttempts).values({ username, ipAddress: clientIP, success: false });
+        throw new Error('Invalid username or password');
+    }
+
+    await db.delete(loginAttempts).where(eq(loginAttempts.username, username));
+    if (row.twoFactorEnabled) {
+        const challengeId = `tfa_${Bun.randomUUIDv7('hex')}`;
+        await db.insert(twoFactorLoginChallenges).values({
+            id: challengeId,
+            userId: row.id,
+            expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+        });
+        return { success: true, requires2FA: true, challengeToken: challengeId, username: row.username };
+    }
+
+    const { sessionToken } = await authService.createWebSession(
+        row.id,
+        clientIP,
+        request.headers.get('user-agent') || 'unknown'
+    );
+    authSession.set({
+        value: sessionToken,
+        httpOnly: true,
+        secure: request.headers.get('x-forwarded-proto') === 'https',
+        sameSite: 'lax',
+        maxAge: 7 * 86400,
+        path: '/'
+    });
+    const tokenKey = await authService.ensureDefaultApiKey(row.id);
+    return { success: true, token: tokenKey, username: row.username, role: row.role, currency: row.currency || 'USD' };
 }
 
 const PASSKEY_PROVIDER_PREFIX = 'passkey:';
@@ -449,6 +634,49 @@ export const newApiUserAdminRouter = new Elysia()
             .orderBy(desc(users.id))
             .limit(100);
     })
+    .get('/user/topup', async ({ query }: ElysiaCtx) => {
+        const userId = Number(query?.user_id || query?.userId || 0);
+        const rows = await db.select({
+            id: paymentOrders.id,
+            userId: paymentOrders.userId,
+            username: users.username,
+            amount: paymentOrders.amount,
+            paymentMethod: paymentOrders.paymentMethod,
+            orderType: paymentOrders.orderType,
+            targetType: paymentOrders.targetType,
+            targetId: paymentOrders.targetId,
+            status: paymentOrders.status,
+            transactionId: paymentOrders.transactionId,
+            createdAt: paymentOrders.createdAt,
+            updatedAt: paymentOrders.updatedAt,
+        }).from(paymentOrders)
+            .leftJoin(users, eq(paymentOrders.userId, users.id))
+            .where(userId ? eq(paymentOrders.userId, userId) : undefined)
+            .orderBy(desc(paymentOrders.id))
+            .limit(200);
+        return apiSuccess(rows);
+    })
+    .post('/user/topup/complete', async ({ body, set }: ElysiaCtx) => {
+        const b = body as Record<string, any>;
+        const orderId = Number(b.id || b.order_id || b.orderId);
+        if (!orderId) { set.status = 400; return { success: false, message: 'order id is required' }; }
+        const quotaPerUnit = Number(optionCache.get('QuotaPerUnit', 500000));
+        const [order] = await db.update(paymentOrders)
+            .set({ status: 1, transactionId: b.transaction_id || b.transactionId || `admin_${orderId}`, updatedAt: new Date() })
+            .where(and(eq(paymentOrders.id, orderId), eq(paymentOrders.status, 0)))
+            .returning({
+                id: paymentOrders.id,
+                userId: paymentOrders.userId,
+                amount: paymentOrders.amount,
+                paymentMethod: paymentOrders.paymentMethod,
+            });
+        if (!order) return apiSuccess(null, 'order already completed or not found');
+        const quotaToAdd = Math.floor((Number(order.amount) / 100) * quotaPerUnit);
+        await db.update(users)
+            .set({ quota: drizzleSql`${users.quota} + ${quotaToAdd}` })
+            .where(eq(users.id, order.userId));
+        return apiSuccess({ ...order, quotaAdded: quotaToAdd });
+    })
 
     // Subscription management (New API: /api/subscription)
     .get('/subscription', async () => {
@@ -476,29 +704,102 @@ export const newApiUserAdminRouter = new Elysia()
         const userId = Number(b.userId || b.user_id);
         const packageId = Number(b.packageId || b.package_id);
         if (!userId || !packageId) { set.status = 400; return { success: false, message: 'userId and packageId required' }; }
-        const [pkg] = await db.select().from(packages).where(eq(packages.id, packageId)).limit(1);
-        if (!pkg) { set.status = 404; return { success: false, message: 'Package not found' }; }
-        const startTime = new Date();
-        const endTime = new Date(Date.now() + (pkg.durationDays || 30) * 86400000);
-        const [row] = await db.insert(userSubscriptions).values({
-            userId,
-            packageId,
-            startTime,
-            endTime,
-            status: 1,
-            quotaGranted: pkg.cycleQuota || Number(pkg.price) || 0,
-        }).returning({
-            id: userSubscriptions.id,
-            userId: userSubscriptions.userId,
-            packageId: userSubscriptions.packageId,
-            startTime: userSubscriptions.startTime,
-            endTime: userSubscriptions.endTime,
-            status: userSubscriptions.status,
-        });
-        if (pkg.cycleQuota) {
-            await db.update(users).set({ quota: drizzleSql`${users.quota} + ${pkg.cycleQuota}` }).where(eq(users.id, userId));
+        try {
+            const row = await bindSubscriptionToUser(userId, packageId, 'admin');
+            return { success: true, data: row };
+        } catch (e: unknown) {
+            const message = e instanceof Error ? e.message : String(e);
+            set.status = message.includes('not found') ? 404 : 400;
+            return { success: false, message };
         }
-        return { success: true, data: row };
+    })
+    .get('/subscription/admin/plans', async () => {
+        const rows = await db.select().from(packages).orderBy(desc(packages.sortOrder), desc(packages.id));
+        return apiSuccess(rows.map(wrapNewApiSubscriptionPlan));
+    })
+    .post('/subscription/admin/plans', async ({ body, user, set }: ElysiaCtx) => {
+        const values = newApiPlanToPackageValues((body || {}) as Record<string, any>);
+        if (!values.name) { set.status = 400; return { success: false, message: 'plan.title is required' }; }
+        const [row] = await db.insert(packages).values({
+            ...values,
+            addedBy: (user as UserRecord | undefined)?.id || null,
+        }).returning();
+        return apiSuccess(wrapNewApiSubscriptionPlan(row));
+    })
+    .put('/subscription/admin/plans/:id', async ({ params, body, set }: ElysiaCtx) => {
+        const id = Number(params.id);
+        if (!id) { set.status = 400; return { success: false, message: 'invalid plan id' }; }
+        const [old] = await db.select().from(packages).where(eq(packages.id, id)).limit(1);
+        if (!old) { set.status = 404; return { success: false, message: 'Subscription plan not found' }; }
+        const values = newApiPlanToPackageValues((body || {}) as Record<string, any>);
+        if (!values.name) { set.status = 400; return { success: false, message: 'plan.title is required' }; }
+        const [row] = await db.update(packages).set({
+            ...values,
+            updatedAt: new Date(),
+        }).where(eq(packages.id, id)).returning();
+        return apiSuccess(wrapNewApiSubscriptionPlan(row));
+    })
+    .patch('/subscription/admin/plans/:id', async ({ params, body, set }: ElysiaCtx) => {
+        const id = Number(params.id);
+        const enabled = (body as Record<string, any>)?.enabled;
+        if (!id || typeof enabled !== 'boolean') { set.status = 400; return { success: false, message: 'id and boolean enabled are required' }; }
+        const [row] = await db.update(packages).set({ enabled, updatedAt: new Date() })
+            .where(eq(packages.id, id))
+            .returning();
+        if (!row) { set.status = 404; return { success: false, message: 'Subscription plan not found' }; }
+        return apiSuccess(wrapNewApiSubscriptionPlan(row));
+    })
+    .post('/subscription/admin/bind', async ({ body, set }: ElysiaCtx) => {
+        const b = body as Record<string, any>;
+        const userId = Number(b.user_id || b.userId);
+        const packageId = resolveSubscriptionPlanId(b);
+        if (!userId || !packageId) { set.status = 400; return { success: false, message: 'user_id and plan_id are required' }; }
+        try {
+            const row = await bindSubscriptionToUser(userId, packageId, 'admin');
+            return apiSuccess(row);
+        } catch (e: unknown) {
+            const message = e instanceof Error ? e.message : String(e);
+            set.status = message.includes('not found') ? 404 : 400;
+            return { success: false, message };
+        }
+    })
+    .get('/subscription/admin/users/:id/subscriptions', async ({ params, set }: ElysiaCtx) => {
+        const userId = Number(params.id);
+        if (!userId) { set.status = 400; return { success: false, message: 'invalid user id' }; }
+        return apiSuccess(await listUserSubscriptionSummaries(userId));
+    })
+    .post('/subscription/admin/users/:id/subscriptions', async ({ params, body, set }: ElysiaCtx) => {
+        const userId = Number(params.id);
+        const packageId = resolveSubscriptionPlanId((body || {}) as Record<string, any>);
+        if (!userId || !packageId) { set.status = 400; return { success: false, message: 'user id and plan_id are required' }; }
+        try {
+            const row = await bindSubscriptionToUser(userId, packageId, 'admin');
+            return apiSuccess(row);
+        } catch (e: unknown) {
+            const message = e instanceof Error ? e.message : String(e);
+            set.status = message.includes('not found') ? 404 : 400;
+            return { success: false, message };
+        }
+    })
+    .post('/subscription/admin/user_subscriptions/:id/invalidate', async ({ params, set }: ElysiaCtx) => {
+        try {
+            await cancelSubscription(Number(params.id), false);
+            return apiSuccess(null);
+        } catch (e: unknown) {
+            const message = e instanceof Error ? e.message : String(e);
+            set.status = message.includes('not found') ? 404 : 400;
+            return { success: false, message };
+        }
+    })
+    .delete('/subscription/admin/user_subscriptions/:id', async ({ params, set }: ElysiaCtx) => {
+        try {
+            await cancelSubscription(Number(params.id), true);
+            return apiSuccess(null);
+        } catch (e: unknown) {
+            const message = e instanceof Error ? e.message : String(e);
+            set.status = message.includes('not found') ? 404 : 400;
+            return { success: false, message };
+        }
     })
     .get('/group', async () => {
         return await db.select().from(userGroups).orderBy(desc(userGroups.createdAt));
@@ -721,6 +1022,76 @@ export const newApiUserAdminRouter = new Elysia()
         if (!row) { set.status = 404; return { success: false, message: 'Not found' }; }
         return { success: true, deleted: row.id };
     })
+    .get('/redemption', async () => {
+        return apiSuccess(await db.select().from(redemptions).where(drizzleSql`${redemptions.deletedAt} IS NULL`).orderBy(desc(redemptions.id)).limit(200));
+    })
+    .get('/redemption/search', async ({ query }: ElysiaCtx) => {
+        const keyword = String(query?.keyword || query?.q || '').trim();
+        const pattern = `%${keyword}%`;
+        const rows = await db.select().from(redemptions)
+            .where(and(
+                drizzleSql`${redemptions.deletedAt} IS NULL`,
+                or(ilike(redemptions.name, pattern), ilike(redemptions.key, pattern))
+            ))
+            .orderBy(desc(redemptions.id))
+            .limit(100);
+        return apiSuccess(rows);
+    })
+    .get('/redemption/:id', async ({ params, set }: ElysiaCtx) => {
+        const [row] = await db.select().from(redemptions).where(eq(redemptions.id, Number(params.id))).limit(1);
+        if (!row || row.deletedAt) { set.status = 404; return { success: false, message: 'Redemption not found' }; }
+        return apiSuccess(row);
+    })
+    .post('/redemption', async ({ body, user, set }: ElysiaCtx) => {
+        const b = body as Record<string, any>;
+        if (!b.name) { set.status = 400; return { success: false, message: 'name is required' }; }
+        const key = b.key || `cdk-${Bun.randomUUIDv7('hex')}`;
+        const [row] = await db.insert(redemptions).values({
+            name: b.name,
+            key,
+            quota: Number(b.quota || 0),
+            count: Number(b.count || 1),
+            status: Number(b.status || 1),
+            expiresAt: b.expiredTime || b.expired_time || b.expiresAt || null,
+            createdBy: (user as UserRecord | undefined)?.id || null,
+        }).returning();
+        return apiSuccess(row);
+    })
+    .put('/redemption', async ({ body, set }: ElysiaCtx) => {
+        const b = body as Record<string, any>;
+        const id = Number(b.id);
+        if (!id) { set.status = 400; return { success: false, message: 'id is required' }; }
+        const [row] = await db.update(redemptions).set({
+            ...(b.name !== undefined && { name: b.name }),
+            ...(b.key !== undefined && { key: b.key }),
+            ...(b.quota !== undefined && { quota: Number(b.quota) }),
+            ...(b.count !== undefined && { count: Number(b.count) }),
+            ...(b.status !== undefined && { status: Number(b.status) }),
+            ...(b.expiredTime !== undefined && { expiresAt: b.expiredTime }),
+            ...(b.expired_time !== undefined && { expiresAt: b.expired_time }),
+            ...(b.expiresAt !== undefined && { expiresAt: b.expiresAt }),
+        }).where(eq(redemptions.id, id)).returning();
+        if (!row) { set.status = 404; return { success: false, message: 'Redemption not found' }; }
+        return apiSuccess(row);
+    })
+    .delete('/redemption/invalid', async () => {
+        const rows = await db.update(redemptions)
+            .set({ deletedAt: new Date(), status: 2 })
+            .where(or(
+                drizzleSql`${redemptions.usedCount} >= ${redemptions.count}`,
+                drizzleSql`${redemptions.expiresAt} IS NOT NULL AND ${redemptions.expiresAt} < NOW()`
+            ))
+            .returning({ id: redemptions.id });
+        return apiSuccess({ deleted: rows.length });
+    })
+    .delete('/redemption/:id', async ({ params, set }: ElysiaCtx) => {
+        const [row] = await db.update(redemptions)
+            .set({ deletedAt: new Date(), status: 2 })
+            .where(eq(redemptions.id, Number(params.id)))
+            .returning({ id: redemptions.id });
+        if (!row) { set.status = 404; return { success: false, message: 'Redemption not found' }; }
+        return apiSuccess({ deleted: row.id });
+    })
 
     // Log cleanup (New API: /api/log/clean)
     .delete('/log/clean', async ({ query, set }: ElysiaCtx) => {
@@ -877,29 +1248,36 @@ export const newApiUserSelfRouter = new Elysia()
     .get('/subscription/plans', async ({ user }: ElysiaCtx) => {
         const currentUser = user as UserRecord | undefined;
         if (!currentUser) return { success: false, message: 'Authentication required' };
-        const rows = await db.select().from(packages).where(eq(packages.isPublic, true)).orderBy(packages.price);
-        return rows.filter((pkg) => {
+        const rows = await db.select().from(packages)
+            .where(and(eq(packages.isPublic, true), eq(packages.enabled, true)))
+            .orderBy(desc(packages.sortOrder), packages.price);
+        return apiSuccess(rows.filter((pkg) => {
             const allowedGroups = Array.isArray(pkg.allowedGroups) ? pkg.allowedGroups : [];
             return allowedGroups.length === 0 || allowedGroups.includes(currentUser.group || 'default');
-        });
+        }).map(wrapNewApiSubscriptionPlan));
     })
     .get('/subscription/self', async ({ user }: ElysiaCtx) => {
         const currentUser = user as UserRecord | undefined;
         if (!currentUser) return { success: false, message: 'Authentication required' };
-        return await db.select({
-            id: userSubscriptions.id,
-            packageId: userSubscriptions.packageId,
-            packageName: packages.name,
-            startTime: userSubscriptions.startTime,
-            endTime: userSubscriptions.endTime,
-            status: userSubscriptions.status,
-            quotaGranted: userSubscriptions.quotaGranted,
-            quotaUsed: userSubscriptions.quotaUsed,
-            lastResetAt: userSubscriptions.lastResetAt,
-        }).from(userSubscriptions)
-            .leftJoin(packages, eq(userSubscriptions.packageId, packages.id))
-            .where(eq(userSubscriptions.userId, currentUser.id))
-            .orderBy(desc(userSubscriptions.id));
+        const [userRow] = await db.select({ billingPreference: users.billingPreference }).from(users).where(eq(users.id, currentUser.id)).limit(1);
+        const allSubscriptions = await listUserSubscriptionSummaries(currentUser.id);
+        const now = Date.now();
+        const activeSubscriptions = allSubscriptions.filter((sub) => {
+            const endTime = sub.endTime ? new Date(sub.endTime).getTime() : 0;
+            return Number(sub.status) === 1 && endTime > now;
+        });
+        return apiSuccess({
+            billing_preference: normalizeBillingPreference(userRow?.billingPreference),
+            subscriptions: activeSubscriptions,
+            all_subscriptions: allSubscriptions,
+        });
+    })
+    .put('/subscription/self/preference', async ({ user, body, set }: ElysiaCtx) => {
+        const currentUser = user as UserRecord | undefined;
+        if (!currentUser) { set.status = 401; return { success: false, message: 'Authentication required' }; }
+        const preference = normalizeBillingPreference((body as Record<string, any>).billing_preference ?? (body as Record<string, any>).billingPreference);
+        await db.update(users).set({ billingPreference: preference, updatedAt: new Date() }).where(eq(users.id, currentUser.id));
+        return apiSuccess({ billing_preference: preference });
     })
     .get('/data/self', async ({ user }: ElysiaCtx) => {
         const currentUser = user as UserRecord | undefined;
@@ -929,6 +1307,8 @@ export const newApiUserSelfRouter = new Elysia()
             group: users.group,
             status: users.status,
             currency: users.currency,
+            billingPreference: users.billingPreference,
+            quotaDisplayType: users.quotaDisplayType,
             createdAt: users.createdAt,
         }).from(users).where(eq(users.id, currentUser.id)).limit(1);
         return row || { success: false, message: 'User not found' };
@@ -941,6 +1321,8 @@ export const newApiUserSelfRouter = new Elysia()
             email: b.email,
             name: b.name,
             currency: b.currency,
+            billingPreference: b.billingPreference,
+            quotaDisplayType: b.quotaDisplayType,
             updatedAt: new Date(),
         }).where(eq(users.id, currentUser.id)).returning({
             id: users.id,
@@ -948,9 +1330,33 @@ export const newApiUserSelfRouter = new Elysia()
             email: users.email,
             name: users.name,
             currency: users.currency,
+            billingPreference: users.billingPreference,
+            quotaDisplayType: users.quotaDisplayType,
             updatedAt: users.updatedAt,
         });
         return { success: true, data: row };
+    })
+    .put('/user/setting', async ({ user, body, set }: ElysiaCtx) => {
+        const currentUser = user as UserRecord | undefined;
+        if (!currentUser) { set.status = 401; return { success: false, message: 'Authentication required' }; }
+        const payload = (body || {}) as Record<string, any>;
+        const preference = payload.billing_preference ?? payload.billingPreference;
+        const quotaDisplayType = payload.quota_display_type ?? payload.quotaDisplayType;
+        const [row] = await db.update(users).set({
+            ...(preference !== undefined && { billingPreference: normalizeBillingPreference(preference) }),
+            ...(quotaDisplayType !== undefined && { quotaDisplayType: String(quotaDisplayType) }),
+            ...(payload.currency !== undefined && { currency: String(payload.currency) }),
+            ...(payload.name !== undefined && { name: payload.name }),
+            updatedAt: new Date(),
+        }).where(eq(users.id, currentUser.id)).returning({
+            id: users.id,
+            billingPreference: users.billingPreference,
+            quotaDisplayType: users.quotaDisplayType,
+            currency: users.currency,
+            name: users.name,
+            updatedAt: users.updatedAt,
+        });
+        return apiSuccess(row);
     })
     .get('/user/models', async ({ user, token }: ElysiaCtx) => {
         const currentUser = user as UserRecord | undefined;
@@ -962,6 +1368,26 @@ export const newApiUserSelfRouter = new Elysia()
         if (!currentUser) { set.status = 401; return { success: false, message: 'Authentication required' }; }
         const [row] = await db.select({ code: drizzleSql<string>`code`, reward: drizzleSql<number>`reward` }).from(drizzleSql`user_aff`).where(drizzleSql`user_id = ${currentUser.id}`) as any;
         return { success: true, data: row || null };
+    })
+    .post('/user/aff_transfer', async ({ user, body, set }: ElysiaCtx) => {
+        const currentUser = user as UserRecord | undefined;
+        if (!currentUser) { set.status = 401; return { success: false, message: 'Authentication required' }; }
+        const quota = Number((body as Record<string, any>).quota || 0);
+        if (quota <= 0) { set.status = 400; return { success: false, message: 'quota is required' }; }
+        const result = await db.transaction(async (tx) => {
+            const [aff] = await tx.update(userAff)
+                .set({ reward: drizzleSql`${userAff.reward} - ${quota}` })
+                .where(and(eq(userAff.userId, currentUser.id), drizzleSql`${userAff.reward} >= ${quota}`))
+                .returning({ reward: userAff.reward });
+            if (!aff) return null;
+            const [updatedUser] = await tx.update(users)
+                .set({ quota: drizzleSql`${users.quota} + ${quota}` })
+                .where(eq(users.id, currentUser.id))
+                .returning({ quota: users.quota });
+            return { remainingAffQuota: aff.reward, quota: updatedUser.quota };
+        });
+        if (!result) { set.status = 400; return { success: false, message: 'Insufficient affiliate quota' }; }
+        return apiSuccess(result);
     })
     .get('/user/2fa/status', async ({ user, set }: ElysiaCtx) => {
         const currentUser = user as UserRecord | undefined;
@@ -1264,13 +1690,19 @@ export const newApiUserSelfRouter = new Elysia()
         if (!currentUser) { set.status = 401; return { success: false, message: 'Authentication required' }; }
         const today = new Date().toISOString().split('T')[0];
         const [row] = await db.select({ id: drizzleSql<number>`id` }).from(drizzleSql`user_checkins`).where(drizzleSql`user_id = ${currentUser.id} AND checkin_date = ${today}`) as any;
-        return { success: true, data: { enabled: String(optionCache.get('CheckinEnabled', 'false')) === 'true', checkedIn: !!row, reward: Number(optionCache.get('CheckinReward', 100000)) } };
+        const rewardMin = Number(optionCache.get('CheckinRewardMin', optionCache.get('CheckinReward', 100000)));
+        const rewardMax = Number(optionCache.get('CheckinRewardMax', optionCache.get('CheckinReward', 100000)));
+        return { success: true, data: { enabled: String(optionCache.get('CheckinEnabled', 'false')) === 'true', checkedIn: !!row, rewardMin, rewardMax } };
     })
     .post('/user/checkin', async ({ user, set }: ElysiaCtx) => {
         const currentUser = user as UserRecord | undefined;
         if (!currentUser) { set.status = 401; return { success: false, message: 'Authentication required' }; }
         if (String(optionCache.get('CheckinEnabled', 'false')) !== 'true') { set.status = 403; return { success: false, message: 'Checkin is disabled' }; }
-        const reward = Number(optionCache.get('CheckinReward', 100000));
+        const rewardMin = Number(optionCache.get('CheckinRewardMin', optionCache.get('CheckinReward', 100000)));
+        const rewardMax = Number(optionCache.get('CheckinRewardMax', optionCache.get('CheckinReward', 100000)));
+        const rewardFloor = Math.min(rewardMin, rewardMax);
+        const rewardCeil = Math.max(rewardMin, rewardMax);
+        const reward = rewardFloor + Math.floor(Math.random() * Math.max(rewardCeil - rewardFloor + 1, 1));
         const today = new Date().toISOString().split('T')[0];
         const [existing] = await db.select({ id: drizzleSql<number>`id` }).from(drizzleSql`user_checkins`).where(drizzleSql`user_id = ${currentUser.id} AND checkin_date = ${today}`) as any;
         if (existing) { set.status = 409; return { success: false, message: 'Already checked in today' }; }
@@ -1279,6 +1711,8 @@ export const newApiUserSelfRouter = new Elysia()
         return { success: true, reward };
     })
     .get('/user/topup/info', async () => {
+        const amountOptions = String(optionCache.get('AmountOptions', ''));
+        const amountDiscount = String(optionCache.get('AmountDiscount', '{}'));
         return {
             success: true,
             data: {
@@ -1286,6 +1720,10 @@ export const newApiUserSelfRouter = new Elysia()
                 methods: optionCache.get('PaymentMethods', 'redemption'),
                 quotaPerUnit: Number(optionCache.get('QuotaPerUnit', 500000)),
                 exchangeRate: Number(optionCache.get('ExchangeRate', 7.2)),
+                amountOptions,
+                amountDiscount,
+                paymentComplianceConfirmed: String(optionCache.get('PaymentComplianceConfirmed', 'false')) === 'true',
+                paymentComplianceTermsVersion: String(optionCache.get('PaymentComplianceTermsVersion', '')),
             }
         };
     })
@@ -1354,6 +1792,15 @@ export const newApiUserSelfRouter = new Elysia()
         const quotaPerUnit = Number(optionCache.get('QuotaPerUnit', 500000));
         return { success: true, data: { amount, quota: Math.floor((amount / 100) * quotaPerUnit), provider: 'waffo' } };
     })
+    .post('/user/waffo-pancake/amount', async ({ body, set }: ElysiaCtx) => {
+        const amount = getMoneyAmount((body || {}) as Record<string, any>);
+        if (!amount || amount <= 0) { set.status = 400; return { success: false, message: 'Invalid amount' }; }
+        return topupAmountPreview(amount, 'waffo-pancake');
+    })
+    .post('/user/waffo-pancake/pay', async ({ set }: ElysiaCtx) => {
+        set.status = 400;
+        return { success: false, disabled: true, provider: 'waffo-pancake', message: 'Waffo-Pancake payment is not configured in Elygate core compatibility mode' };
+    })
     .post('/user/topup', async ({ user, body, set }: ElysiaCtx) => {
         const currentUser = user as UserRecord | undefined;
         if (!currentUser) { set.status = 401; return { success: false, message: 'Authentication required' }; }
@@ -1407,6 +1854,10 @@ export const newApiUserSelfRouter = new Elysia()
             return { success: false, message };
         }
     })
+    .post('/subscription/waffo-pancake/pay', async ({ set }: ElysiaCtx) => {
+        set.status = 400;
+        return { success: false, disabled: true, provider: 'waffo-pancake', message: 'Waffo-Pancake subscription payment is not configured in Elygate core compatibility mode' };
+    })
     // User self-service announcements (public readable)
     .get('/announcement/public', async () => {
         const rows = await db.select({
@@ -1420,6 +1871,49 @@ export const newApiUserSelfRouter = new Elysia()
     });
 
 export const newApiUserPublicRouter = new Elysia()
+    .post('/user/register', async ({ body, set }: ElysiaCtx) => {
+        try {
+            const row = await registerCompatUser((body || {}) as Record<string, any>);
+            return apiSuccess(row, 'Registration successful');
+        } catch (e: unknown) {
+            set.status = 400;
+            return { success: false, message: e instanceof Error ? e.message : String(e) };
+        }
+    })
+    .post('/user/login', async ({ body, set, request, cookie: { auth_session } }: ElysiaCtx) => {
+        try {
+            return await loginCompatUser((body || {}) as Record<string, any>, request, auth_session);
+        } catch (e: unknown) {
+            set.status = 401;
+            return { success: false, message: e instanceof Error ? e.message : String(e) };
+        }
+    })
+    .get('/user/logout', async ({ cookie: { auth_session } }: ElysiaCtx) => {
+        if (auth_session.value) {
+            await db.delete(sessions).where(eq(sessions.token, auth_session.value));
+        }
+        auth_session.remove();
+        return { success: true, message: 'Logged out successfully' };
+    })
+    .post('/user/logout', async ({ cookie: { auth_session } }: ElysiaCtx) => {
+        if (auth_session.value) {
+            await db.delete(sessions).where(eq(sessions.token, auth_session.value));
+        }
+        auth_session.remove();
+        return { success: true, message: 'Logged out successfully' };
+    })
+    .get('/user/groups', async () => {
+        const rows = await db.select().from(userGroups).where(eq(userGroups.status, 1)).orderBy(desc(userGroups.createdAt));
+        return apiSuccess(rows);
+    })
+    .post('/stripe/webhook', handleStripePaymentCallback)
+    .post('/creem/webhook', () => providerUnsupported('creem'))
+    .post('/waffo/webhook', () => providerUnsupported('waffo'))
+    .post('/waffo-pancake/webhook/:env', ({ params }: ElysiaCtx) => ({ ...providerUnsupported('waffo-pancake'), env: params.env }))
+    .post('/subscription/epay/notify', handleEPayPaymentCallback)
+    .get('/subscription/epay/notify', handleEPayPaymentCallback)
+    .post('/subscription/epay/return', handleEPayPaymentCallback)
+    .get('/subscription/epay/return', handleEPayPaymentCallback)
     .post('/user/login/2fa', async ({ body, set, request, cookie: { auth_session } }: ElysiaCtx) => {
         const payload = body as Record<string, any>;
         const challengeToken = String(payload.challengeToken || payload.challenge_token || '');

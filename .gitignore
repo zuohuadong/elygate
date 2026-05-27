@@ -23,3 +23,15 @@ servers.local.md
 .mailbox/
 .agents/state/
 AGENTS.md
+
+.cursorrules
+CLAUDE.md
+HERMES.md
+OPENCODE.md
+.goosehints
+.roomodes
+.roo/
+.zed/CONVENTIONS.md
+tasks.md
+.agents/automations/
+*.bak

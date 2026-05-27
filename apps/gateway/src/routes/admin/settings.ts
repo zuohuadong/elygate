@@ -9,6 +9,7 @@ import { memoryCache } from '../../services/cache';
 import { decryptChannelKeys, getChannelKeys } from '../../services/encryption';
 import { refreshAllCaches } from './index';
 import { checkAndResetSubscriptionQuota } from '../../services/subscription';
+import { safeExternalFetch } from '../../utils/safeExternalUrl';
 
 export const settingsRouter = new Elysia()
     // --- System Options ---
@@ -30,7 +31,7 @@ export const settingsRouter = new Elysia()
                     const keys = getChannelKeys(channel.key);
                     const activeKey = keys[Math.floor(Math.random() * keys.length)];
                     
-                    const response = await fetch(`${channel.baseUrl}/v1/embeddings`, {
+                    const response = await safeExternalFetch(`${channel.baseUrl}/v1/embeddings`, {
                         method: 'POST',
                         headers: {
                             'Authorization': `Bearer ${activeKey}`,
@@ -85,7 +86,7 @@ export const settingsRouter = new Elysia()
             const keys = getChannelKeys(channel.key);
             const activeKey = keys[Math.floor(Math.random() * keys.length)];
 
-            const response = await fetch(`${channel.baseUrl}/v1/embeddings`, {
+            const response = await safeExternalFetch(`${channel.baseUrl}/v1/embeddings`, {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${activeKey}`,

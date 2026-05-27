@@ -21,9 +21,29 @@ export type AuditAction =
     | 'channel.test'
     | 'channel.enable'
     | 'channel.disable'
+    | 'organization.create'
+    | 'organization.update'
+    | 'organization.delete'
+    | 'organization.quota'
     | 'system.config'
     | 'system.backup'
-    | 'system.restore';
+    | 'system.restore'
+    | 'team.create'
+    | 'team.update'
+    | 'team.delete'
+    | 'team.member.add'
+    | 'team.member.remove'
+    | 'project.create'
+    | 'project.update'
+    | 'project.delete'
+    | 'token.restore'
+    | 'token.purge'
+    | 'organization.restore'
+    | 'organization.purge'
+    | 'team.restore'
+    | 'team.purge'
+    | 'project.restore'
+    | 'project.purge';
 
 export interface AuditLog {
     id?: number;

@@ -1,9 +1,9 @@
-import { db, sql } from '@elygate/db';
-import { tasks, tokens } from '@elygate/db/schema';
-import { eq, and, lt, asc, sql as drizzleSql } from 'drizzle-orm';
+import { db } from '@elygate/db';
+import { sql as drizzleSql } from 'drizzle-orm';
 import { log } from './logger';
 import { memoryCache } from './cache';
 import { dispatch } from './dispatcher';
+import { enqueueLongTask } from './jobQueue';
 import type { UserRecord, TokenRecord } from '../types';
 
 export interface TaskRecord {
@@ -42,8 +42,13 @@ export async function createTask(opts: {
         INSERT INTO tasks (id, user_id, token_id, model, type, status, request_body)
         VALUES (${id}, ${opts.userId}, ${opts.tokenId}, ${opts.model}, ${opts.type}, 'pending', ${opts.requestBody})
     `);
-    // Notify background worker — pg_notify must stay raw
-    await sql`SELECT pg_notify('task_created', ${id})`;
+
+    try {
+        await enqueueLongTask(id);
+    } catch (err: any) {
+        log.error(`[Task] Created task ${id}, but failed to enqueue pg-boss job: ${err?.message || String(err)}`);
+    }
+
     log.info(`[Task] Created task ${id} for model ${opts.model}`);
     return id;
 }
@@ -79,11 +84,6 @@ async function updateTask(taskId: string, updates: Partial<Pick<TaskRecord, 'sta
             progress = COALESCE(${updates.progress !== undefined ? updates.progress : null}, progress)
         WHERE id = ${taskId}
     `);
-
-    if (updates.status === 'completed' || updates.status === 'failed') {
-        // pg_notify must stay raw
-        await sql`SELECT pg_notify('task_complete', ${taskId})`;
-    }
 }
 
 async function processTask(task: TaskRecord) {
@@ -141,7 +141,7 @@ async function processTask(task: TaskRecord) {
     }
 }
 
-async function processTaskById(taskId: string) {
+export async function processTaskById(taskId: string) {
     const task = await getTask(taskId);
     if (!task || task.status !== 'pending') return;
     await processTask(task);
@@ -156,8 +156,17 @@ async function scanPendingTasks() {
             ORDER BY created_at ASC
             LIMIT 5
         `) as any[];
+        let enqueued = 0;
         for (const row of stuckTasks) {
-            await processTaskById(row.id);
+            try {
+                const jobId = await enqueueLongTask(row.id);
+                if (jobId) enqueued++;
+            } catch (err: any) {
+                log.error(`[TaskWorker] Failed to enqueue pending task ${row.id}: ${err?.message || String(err)}`);
+            }
+        }
+        if (enqueued > 0) {
+            log.info(`[TaskWorker] Enqueued ${enqueued} pending tasks via pg-boss`);
         }
     } catch (err: any) {
         log.error(`[TaskWorker] Scan error: ${err.message}`);
@@ -196,29 +205,11 @@ export async function startTaskWorker() {
 
     log.info('[TaskWorker] Starting background task worker...');
 
-    try {
-        const { createPgListener } = await import('@elygate/pg-listen');
-        const databaseUrl = process.env.DATABASE_URL;
-        if (!databaseUrl) {
-            throw new Error('DATABASE_URL not set');
-        }
-
-        createPgListener(databaseUrl, ['task_created'], (_channel, payload) => {
-            log.info(`[TaskWorker] LISTEN: received task_created → ${payload}`);
-            processTaskById(payload).catch(err => {
-                log.error(`[TaskWorker] Error processing task ${payload}: ${err.message}`);
-            });
-        });
-        log.info('[TaskWorker] LISTEN task_created registered via pg-listen (Bun TCP)');
-    } catch (err: any) {
-        log.error(`[TaskWorker] Failed to set up LISTEN: ${err.message}, falling back to scan-only`);
-    }
-
     setInterval(scanPendingTasks, 30_000);
 
     setInterval(cleanupTasks, 30 * 60 * 1000);
     await cleanupTasks();
 
     await scanPendingTasks();
-    log.info('[TaskWorker] Worker started (LISTEN + scan 30s + cleanup 30min)');
+    log.info('[TaskWorker] Maintenance started (pg-boss enqueue scan 30s + cleanup 30min)');
 }

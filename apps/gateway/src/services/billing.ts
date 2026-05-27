@@ -1,11 +1,11 @@
 import { log } from '../services/logger';
 import { getErrorMessage } from '../utils/error';
-import { db, sql } from '@elygate/db';
-import { users, tokens, channels, logs, organizations, logDetails, healthLogs } from '@elygate/db/schema';
+import { db } from '@elygate/db';
+import { users, tokens, channels, logs, organizations, healthLogs } from '@elygate/db/schema';
 import { eq, and, gte, inArray, sql as drizzleSql } from 'drizzle-orm';
 import type { BillingContext } from '../types';
 import { calculateCost } from './ratio';
-import { webhookService } from './webhook';
+import { enqueueBillingFlush, enqueueWebhookDelivery } from './jobQueue';
 
 const billingQueue: BillingContext[] = [];
 let isFlushing = false;
@@ -85,6 +85,17 @@ export async function reconcileQuota(ctx: {
 }
 
 export async function billAndLog(ctx: BillingContext): Promise<void> {
+    try {
+        await enqueueBillingFlush(ctx);
+        return;
+    } catch (err: unknown) {
+        log.error('[Billing/Error] Failed to enqueue pg-boss billing job, using local fallback:', getErrorMessage(err));
+    }
+
+    enqueueFallbackBilling(ctx);
+}
+
+function enqueueFallbackBilling(ctx: BillingContext): void {
     if (billingQueue.length >= MAX_QUEUE_SIZE) {
         log.error(`[Billing/Warning] Queue is full (${billingQueue.length}/${MAX_QUEUE_SIZE}), dropping oldest entry`);
         billingQueue.shift();
@@ -102,8 +113,28 @@ async function flushBillingQueue(retryCount = 0) {
 
     const tasks = billingQueue.splice(0, billingQueue.length);
 
-    const userAgg: Record<number, number> = {};
-    const tokenAgg: Record<number, number> = {};
+    try {
+        await processBillingJobs(tasks);
+    } catch (e: unknown) {
+        log.error(`[Billing/Error] Failed to flush fallback queue (attempt ${retryCount + 1}/${MAX_RETRY_COUNT}). Error:`, getErrorMessage(e));
+
+        if (retryCount < MAX_RETRY_COUNT - 1) {
+            billingQueue.unshift(...tasks);
+            isFlushing = false;
+            setTimeout(() => flushBillingQueue(retryCount + 1), 100 * (retryCount + 1));
+            return;
+        } else {
+            log.error(`[Billing/Error] Max retries reached, keeping ${tasks.length} fallback tasks for next flush`);
+            billingQueue.push(...tasks);
+        }
+    } finally {
+        isFlushing = false;
+    }
+}
+
+export async function processBillingJobs(tasks: BillingContext[]): Promise<void> {
+    if (tasks.length === 0) return;
+
     const logInserts: Record<string, any>[] = [];
 
     for (const task of tasks) {
@@ -114,8 +145,6 @@ async function flushBillingQueue(retryCount = 0) {
             task.completionTokens
         );
 
-        userAgg[task.userId] = (userAgg[task.userId] || 0) + cost;
-        tokenAgg[task.tokenId] = (tokenAgg[task.tokenId] || 0) + cost;
         logInserts.push({
             userId: task.userId,
             tokenId: task.tokenId,
@@ -142,163 +171,140 @@ async function flushBillingQueue(retryCount = 0) {
         });
     }
 
-    try {
-        const uniqueChannelIds = [...new Set(tasks.map((t: Record<string, any>) => t.channelId).filter(Boolean))];
-        const channelRatios: Record<number, number> = {};
-        if (uniqueChannelIds.length > 0) {
-            const chRows = await db.select({ id: channels.id, priceRatio: channels.priceRatio })
-                .from(channels)
-                .where(inArray(channels.id, uniqueChannelIds));
-            for (const ch of chRows) {
-                channelRatios[ch.id] = Number(ch.priceRatio) || 1.0;
+    const uniqueChannelIds = [...new Set(tasks.map((t: Record<string, any>) => t.channelId).filter(Boolean))];
+    const channelRatios: Record<number, number> = {};
+    if (uniqueChannelIds.length > 0) {
+        const chRows = await db.select({ id: channels.id, priceRatio: channels.priceRatio })
+            .from(channels)
+            .where(inArray(channels.id, uniqueChannelIds));
+        for (const ch of chRows) {
+            channelRatios[ch.id] = Number(ch.priceRatio) || 1.0;
+        }
+    }
+
+    await db.transaction(async (tx) => {
+        const correctedUserAgg: Record<number, number> = {};
+        const correctedTokenAgg: Record<number, number> = {};
+        const correctedOrgAgg: Record<number, number> = {};
+
+        for (const [index, task] of tasks.entries()) {
+            const baseCost = task.isPackageFree ? 0 : calculateCost(
+                task.modelName,
+                task.userGroup,
+                task.promptTokens,
+                task.completionTokens
+            );
+            const ratio = task.channelId ? (channelRatios[task.channelId] || 1.0) : 1.0;
+            const finalCost = Math.ceil(baseCost * ratio);
+
+            correctedUserAgg[task.userId] = (correctedUserAgg[task.userId] || 0) + finalCost;
+            correctedTokenAgg[task.tokenId] = (correctedTokenAgg[task.tokenId] || 0) + finalCost;
+            if (task.orgId) {
+                correctedOrgAgg[task.orgId] = (correctedOrgAgg[task.orgId] || 0) + finalCost;
             }
+
+            logInserts[index].quotaCost = finalCost;
         }
 
-        await db.transaction(async (tx) => {
-            const correctedUserAgg: Record<number, number> = {};
-            const correctedTokenAgg: Record<number, number> = {};
-            const correctedOrgAgg: Record<number, number> = {};
+        // Batch UPDATEs — use raw SQL for += operations
+        for (const [id, cost] of Object.entries(correctedTokenAgg)) {
+            await tx.update(tokens).set({ usedQuota: drizzleSql`used_quota + ${cost}` }).where(eq(tokens.id, Number(id)));
+        }
+        for (const [id, cost] of Object.entries(correctedUserAgg)) {
+            await tx.update(users).set({ usedQuota: drizzleSql`used_quota + ${cost}` }).where(eq(users.id, Number(id)));
+        }
+        for (const [id, cost] of Object.entries(correctedOrgAgg)) {
+            await tx.update(organizations).set({ usedQuota: drizzleSql`used_quota + ${cost}` }).where(eq(organizations.id, Number(id)));
+        }
+        for (const log of logInserts) {
+            const [inserted] = await tx.insert(logs).values({
+                userId: log.userId,
+                tokenId: log.tokenId ?? null,
+                channelId: log.channelId !== undefined ? log.channelId : null,
+                modelName: log.modelName,
+                promptTokens: log.promptTokens,
+                completionTokens: log.completionTokens,
+                cachedTokens: log.cachedTokens,
+                quotaCost: log.quotaCost,
+                isStream: log.isStream,
+                statusCode: log.statusCode,
+                errorMessage: log.errorMessage,
+                elapsedMs: log.elapsedMs,
+                ipAddress: log.ip,
+                userAgent: log.ua,
+                traceId: log.traceId,
+                orgId: log.orgId,
+                externalTaskId: log.externalTaskId,
+                externalUserId: log.externalUserId,
+                externalWorkspaceId: log.externalWorkspaceId,
+                externalFeatureType: log.externalFeatureType,
+            }).returning({ id: logs.id, createdAt: logs.createdAt });
 
-            for (const task of tasks) {
-                const baseCost = task.isPackageFree ? 0 : calculateCost(
-                    task.modelName,
-                    task.userGroup,
-                    task.promptTokens,
-                    task.completionTokens
-                );
-                const ratio = task.channelId ? (channelRatios[task.channelId] || 1.0) : 1.0;
-                const finalCost = Math.ceil(baseCost * ratio);
-
-                correctedUserAgg[task.userId] = (correctedUserAgg[task.userId] || 0) + finalCost;
-                correctedTokenAgg[task.tokenId] = (correctedTokenAgg[task.tokenId] || 0) + finalCost;
-                if (task.orgId) {
-                    correctedOrgAgg[task.orgId] = (correctedOrgAgg[task.orgId] || 0) + finalCost;
-                }
-
-                const log = logInserts.find(l =>
-                    l.userId === task.userId &&
-                    l.tokenId === task.tokenId &&
-                    l.channelId === task.channelId &&
-                    l.modelName === task.modelName &&
-                    l.promptTokens === task.promptTokens &&
-                    l.completionTokens === task.completionTokens &&
-                    l.isStream === task.isStream
-                );
-                if (log) log.quotaCost = finalCost;
+            if (inserted && (log.requestBody || log.responseBody)) {
+                await tx.execute(drizzleSql`
+                    INSERT INTO log_details (log_id, log_created_at, request_body, response_body)
+                    VALUES (${inserted.id}, ${inserted.createdAt}, ${log.requestBody}, ${log.responseBody})
+                    ON CONFLICT (log_id) DO UPDATE
+                    SET log_created_at = EXCLUDED.log_created_at,
+                        request_body = EXCLUDED.request_body,
+                        response_body = EXCLUDED.response_body
+                `);
             }
+        }
+    });
 
-            // Batch UPDATEs — use raw SQL for += operations
-            for (const [id, cost] of Object.entries(correctedTokenAgg)) {
-                await tx.update(tokens).set({ usedQuota: drizzleSql`used_quota + ${cost}` }).where(eq(tokens.id, Number(id)));
-            }
-            for (const [id, cost] of Object.entries(correctedUserAgg)) {
-                await tx.update(users).set({ usedQuota: drizzleSql`used_quota + ${cost}` }).where(eq(users.id, Number(id)));
-            }
-            for (const [id, cost] of Object.entries(correctedOrgAgg)) {
-                await tx.update(organizations).set({ usedQuota: drizzleSql`used_quota + ${cost}` }).where(eq(organizations.id, Number(id)));
-            }
-            for (const log of logInserts) {
-                const [inserted] = await tx.insert(logs).values({
-                    userId: log.userId,
-                    tokenId: log.tokenId ?? null,
-                    channelId: log.channelId !== undefined ? log.channelId : null,
-                    modelName: log.modelName,
-                    promptTokens: log.promptTokens,
-                    completionTokens: log.completionTokens,
-                    cachedTokens: log.cachedTokens,
-                    quotaCost: log.quotaCost,
-                    isStream: log.isStream,
-                    statusCode: log.statusCode,
-                    errorMessage: log.errorMessage,
-                    elapsedMs: log.elapsedMs,
-                    ipAddress: log.ip,
-                    userAgent: log.ua,
-                    traceId: log.traceId,
-                    orgId: log.orgId,
-                    externalTaskId: log.externalTaskId,
-                    externalUserId: log.externalUserId,
-                    externalWorkspaceId: log.externalWorkspaceId,
-                    externalFeatureType: log.externalFeatureType,
-                }).returning({ id: logs.id, createdAt: logs.createdAt });
+    // Organization-level Quota Alerts
+    const uniqueOrgIds = [...new Set(tasks.map((t: Record<string, any>) => t.orgId).filter(Boolean))];
+    if (uniqueOrgIds.length > 0) {
+        // Complex SELECT with multiple columns — raw SQL for the org-specific fields
+        const orgs = await db.select({
+            id: organizations.id,
+            name: organizations.name,
+            quota: organizations.quota,
+            usedQuota: organizations.usedQuota,
+            alertWebhookUrl: organizations.alertWebhookUrl,
+            alertThresholdPct: organizations.alertThresholdPct,
+            lastAlertAt: organizations.lastAlertAt,
+        }).from(organizations).where(inArray(organizations.id, uniqueOrgIds as number[]));
 
-                if (inserted && (log.requestBody || log.responseBody)) {
-                    await tx.execute(drizzleSql`
-                        INSERT INTO log_details (log_id, log_created_at, request_body, response_body)
-                        VALUES (${inserted.id}, ${inserted.createdAt}, ${log.requestBody}, ${log.responseBody})
-                        ON CONFLICT (log_id) DO UPDATE
-                        SET log_created_at = EXCLUDED.log_created_at,
-                            request_body = EXCLUDED.request_body,
-                            response_body = EXCLUDED.response_body
-                    `);
-                }
-            }
-        });
+        for (const org of orgs) {
+            if (!org.alertWebhookUrl) continue;
 
-        // Organization-level Quota Alerts
-        const uniqueOrgIds = [...new Set(tasks.map((t: Record<string, any>) => t.orgId).filter(Boolean))];
-        if (uniqueOrgIds.length > 0) {
-            // Complex SELECT with multiple columns — raw SQL for the org-specific fields
-            const orgs = await db.select({
-                id: organizations.id,
-                name: organizations.name,
-                quota: organizations.quota,
-                usedQuota: organizations.usedQuota,
-                alertWebhookUrl: organizations.alertWebhookUrl,
-                alertThresholdPct: organizations.alertThresholdPct,
-                lastAlertAt: organizations.lastAlertAt,
-            }).from(organizations).where(inArray(organizations.id, uniqueOrgIds as number[]));
+            const threshold = org.alertThresholdPct || 80;
+            const usagePct = (Number(org.usedQuota) / Math.max(Number(org.quota), 1)) * 100;
 
-            for (const org of orgs) {
-                if (!org.alertWebhookUrl) continue;
+            if (usagePct >= threshold) {
+                const lastAlert = org.lastAlertAt ? new Date(org.lastAlertAt).getTime() : 0;
+                const oneDay = 24 * 60 * 60 * 1000;
 
-                const threshold = org.alertThresholdPct || 80;
-                const usagePct = (Number(org.usedQuota) / Math.max(Number(org.quota), 1)) * 100;
+                if (Date.now() - lastAlert > oneDay) {
+                    try {
+                        log.info(`[Billing/Alert] Queueing quota alert for organization: ${org.name}`);
+                        await enqueueWebhookDelivery({
+                            event: 'org.quota_alert',
+                            url: org.alertWebhookUrl,
+                            body: {
+                                event: 'org.quota_alert',
+                                orgId: org.id,
+                                orgName: org.name,
+                                usagePct: usagePct.toFixed(1),
+                                thresholdPct: threshold,
+                                timestamp: new Date().toISOString()
+                            },
+                            headers: { 'Content-Type': 'application/json' },
+                            logLabel: `org quota alert ${org.id}`,
+                        });
 
-                if (usagePct >= threshold) {
-                    const lastAlert = org.lastAlertAt ? new Date(org.lastAlertAt).getTime() : 0;
-                    const oneDay = 24 * 60 * 60 * 1000;
-
-                    if (Date.now() - lastAlert > oneDay) {
-                        try {
-                            log.info(`[Billing/Alert] Sending quota alert for organization: ${org.name}`);
-                            await fetch(org.alertWebhookUrl, {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
-                                    event: 'org.quota_alert',
-                                    orgId: org.id,
-                                    orgName: org.name,
-                                    usagePct: usagePct.toFixed(1),
-                                    thresholdPct: threshold,
-                                    timestamp: new Date().toISOString()
-                                })
-                            });
-
-                            await db.update(organizations).set({ lastAlertAt: new Date() }).where(eq(organizations.id, org.id));
-                        } catch (err: unknown) {
-                            log.error(`[Billing/Error] Failed to send webhook alert for org ${org.id}:`, getErrorMessage(err));
-                        }
+                        await db.update(organizations).set({ lastAlertAt: new Date() }).where(eq(organizations.id, org.id));
+                    } catch (err: unknown) {
+                        log.error(`[Billing/Error] Failed to enqueue webhook alert for org ${org.id}:`, getErrorMessage(err));
                     }
                 }
             }
         }
-
-        log.info(`[Billing/Flush] Merged & Ingested ${tasks.length} logs successfully.`);
-    } catch (e: unknown) {
-        log.error(`[Billing/Error] Failed to flush queue (attempt ${retryCount + 1}/${MAX_RETRY_COUNT}). Error:`, getErrorMessage(e));
-        
-        if (retryCount < MAX_RETRY_COUNT - 1) {
-            billingQueue.unshift(...tasks);
-            isFlushing = false;
-            setTimeout(() => flushBillingQueue(retryCount + 1), 100 * (retryCount + 1));
-            return;
-        } else {
-            log.error(`[Billing/Error] Max retries reached, dropping ${tasks.length} tasks`);
-            billingQueue.push(...tasks);
-        }
-    } finally {
-        isFlushing = false;
     }
+
+    log.info(`[Billing/Flush] Merged & Ingested ${tasks.length} logs successfully.`);
 }
 
 setInterval(flushBillingQueue, FLUSH_INTERVAL_MS);

@@ -43,6 +43,7 @@ export const organizations = pgTable('organizations', {
     lastAlertAt: timestamp('last_alert_at', { withTimezone: true }),
     status: integer('status').notNull().default(1),
     metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 });
@@ -62,6 +63,8 @@ export const users = pgTable('users', {
     group: text('group').notNull().default('default'),
     status: integer('status').notNull().default(1),
     currency: text('currency').notNull().default('USD'),
+    billingPreference: text('billing_preference').notNull().default('subscription_first'),
+    quotaDisplayType: text('quota_display_type').notNull().default('USD'),
     githubId: text('github_id'),
     twoFactorEnabled: boolean('two_factor_enabled').notNull().default(false),
     twoFactorSecret: text('two_factor_secret'),
@@ -103,6 +106,7 @@ export const tokens = pgTable('tokens', {
     crossGroupRetry: boolean('cross_group_retry').notNull().default(false),
     accessedAt: timestamp('accessed_at', { withTimezone: true }),
     expiredAt: timestamp('expired_at', { withTimezone: true }),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
@@ -156,17 +160,32 @@ export const rateLimitRules = pgTable('rate_limit_rules', {
 export const packages = pgTable('packages', {
     id: serial('id').primaryKey(),
     name: varchar('name', { length: 100 }).notNull(),
+    subtitle: text('subtitle'),
     description: text('description'),
     price: decimal('price', { precision: 10, scale: 2 }).notNull(),
+    currency: text('currency').notNull().default('USD'),
     durationDays: integer('duration_days').notNull().default(30),
+    durationUnit: text('duration_unit').notNull().default('day'),
+    durationValue: integer('duration_value').notNull().default(30),
+    customSeconds: bigint('custom_seconds', { mode: 'number' }).notNull().default(0),
     models: jsonb('models').$type<string[]>().default([]),
     defaultRateLimitId: integer('default_rate_limit_id').references(() => rateLimitRules.id, { onDelete: 'set null' }),
     modelRateLimits: jsonb('model_rate_limits').$type<Record<string, unknown>>().default({}),
     cycleQuota: bigint('cycle_quota', { mode: 'number' }).default(0),
     cycleInterval: integer('cycle_interval').default(1),
     cycleUnit: text('cycle_unit').default('day'),
+    totalAmount: bigint('total_amount', { mode: 'number' }).notNull().default(0),
+    quotaResetPeriod: text('quota_reset_period').notNull().default('never'),
+    quotaResetCustomSeconds: bigint('quota_reset_custom_seconds', { mode: 'number' }).notNull().default(0),
     cachePolicy: jsonb('cache_policy').$type<Record<string, unknown>>().default({ mode: 'default' }),
+    enabled: boolean('enabled').notNull().default(true),
     isPublic: boolean('is_public').default(true),
+    sortOrder: integer('sort_order').notNull().default(0),
+    stripePriceId: text('stripe_price_id'),
+    creemProductId: text('creem_product_id'),
+    waffoPancakeProductId: text('waffo_pancake_product_id'),
+    maxPurchasePerUser: integer('max_purchase_per_user').notNull().default(0),
+    upgradeGroup: text('upgrade_group'),
     allowedGroups: jsonb('allowed_groups').$type<string[]>().default([]),
     addedBy: integer('added_by').references(() => users.id, { onDelete: 'set null' }),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
@@ -181,6 +200,10 @@ export const redemptions = pgTable('redemptions', {
     count: integer('count').notNull().default(1),
     usedCount: integer('used_count').notNull().default(0),
     status: integer('status').notNull().default(1),
+    createdBy: integer('created_by').references(() => users.id, { onDelete: 'set null' }),
+    usedBy: integer('used_by').references(() => users.id, { onDelete: 'set null' }),
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 
@@ -421,6 +444,38 @@ export const paymentOrders = pgTable('payment_orders', {
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 });
 
+export const subscriptionOrders = pgTable('subscription_orders', {
+    id: serial('id').primaryKey(),
+    userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    packageId: integer('package_id').notNull().references(() => packages.id, { onDelete: 'cascade' }),
+    amount: integer('amount').notNull().default(0),
+    currency: text('currency').notNull().default('USD'),
+    money: decimal('money', { precision: 10, scale: 2 }).notNull().default('0'),
+    tradeNo: text('trade_no').notNull().unique(),
+    paymentMethod: text('payment_method').notNull(),
+    paymentProvider: text('payment_provider').notNull().default(''),
+    transactionId: text('transaction_id'),
+    status: text('status').notNull().default('pending'),
+    providerPayload: text('provider_payload'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+});
+
+export const topupLogs = pgTable('topup_logs', {
+    id: serial('id').primaryKey(),
+    userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    paymentOrderId: integer('payment_order_id').references(() => paymentOrders.id, { onDelete: 'set null' }),
+    subscriptionOrderId: integer('subscription_order_id').references(() => subscriptionOrders.id, { onDelete: 'set null' }),
+    action: text('action').notNull(),
+    paymentMethod: text('payment_method'),
+    paymentProvider: text('payment_provider'),
+    amount: bigint('amount', { mode: 'number' }).notNull().default(0),
+    money: decimal('money', { precision: 10, scale: 2 }).notNull().default('0'),
+    details: jsonb('details').$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+});
+
 export const idempotencyKeys = pgTable('idempotency_keys', {
     keyHash: text('key_hash').primaryKey(),
     userId: integer('user_id').notNull(),
@@ -465,11 +520,17 @@ export const userSubscriptions = pgTable('user_subscriptions', {
     userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
     packageId: integer('package_id').notNull().references(() => packages.id, { onDelete: 'cascade' }),
     status: integer('status').notNull().default(1),
+    source: text('source').notNull().default('order'),
     startTime: timestamp('start_time', { withTimezone: true }).defaultNow(),
     endTime: timestamp('end_time', { withTimezone: true }).notNull(),
+    amountTotal: bigint('amount_total', { mode: 'number' }).notNull().default(0),
+    amountUsed: bigint('amount_used', { mode: 'number' }).notNull().default(0),
     quotaGranted: bigint('quota_granted', { mode: 'number' }).default(0),
     quotaUsed: bigint('quota_used', { mode: 'number' }).default(0),
     lastResetAt: timestamp('last_reset_at', { withTimezone: true }).defaultNow(),
+    nextResetAt: timestamp('next_reset_at', { withTimezone: true }),
+    upgradeGroup: text('upgrade_group'),
+    prevUserGroup: text('prev_user_group'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 });
@@ -557,6 +618,68 @@ export const twoFactorLoginChallenges = pgTable('two_factor_login_challenges', {
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 
+
+// ─── Enterprise Team / Project / Member ──────────────────────
+
+export const teams = pgTable('teams', {
+    id: serial('id').primaryKey(),
+    orgId: integer('org_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
+    name: varchar('name', { length: 120 }).notNull(),
+    slug: varchar('slug', { length: 80 }),
+    description: text('description'),
+    leaderId: integer('leader_id').references(() => users.id, { onDelete: 'set null' }),
+    budget: bigint('budget', { mode: 'number' }).notNull().default(0),
+    usedBudget: bigint('used_budget', { mode: 'number' }).notNull().default(0),
+    allowedModels: jsonb('allowed_models').$type<string[]>().notNull().default([]),
+    deniedModels: jsonb('denied_models').$type<string[]>().notNull().default([]),
+    status: integer('status').notNull().default(1),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+});
+
+export const projects = pgTable('projects', {
+    id: serial('id').primaryKey(),
+    orgId: integer('org_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
+    teamId: integer('team_id').references(() => teams.id, { onDelete: 'set null' }),
+    name: varchar('name', { length: 120 }).notNull(),
+    slug: varchar('slug', { length: 80 }),
+    description: text('description'),
+    budget: bigint('budget', { mode: 'number' }).notNull().default(0),
+    usedBudget: bigint('used_budget', { mode: 'number' }).notNull().default(0),
+    allowedModels: jsonb('allowed_models').$type<string[]>().notNull().default([]),
+    deniedModels: jsonb('denied_models').$type<string[]>().notNull().default([]),
+    status: integer('status').notNull().default(1),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+});
+
+export const teamMembers = pgTable('team_members', {
+    id: serial('id').primaryKey(),
+    teamId: integer('team_id').notNull().references(() => teams.id, { onDelete: 'cascade' }),
+    userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    role: varchar('role', { length: 30 }).notNull().default('member'),
+    joinedAt: timestamp('joined_at', { withTimezone: true }).defaultNow(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+});
+
+// ─── Soft-Delete Recovery (recycle bin) ──────────────────────
+
+export const deletedRecords = pgTable('deleted_records', {
+    id: serial('id').primaryKey(),
+    resourceType: varchar('resource_type', { length: 60 }).notNull(),
+    resourceId: integer('resource_id').notNull(),
+    snapshot: jsonb('snapshot').$type<Record<string, unknown>>().notNull(),
+    deletedBy: integer('deleted_by').references(() => users.id, { onDelete: 'set null' }),
+    restoredAt: timestamp('restored_at', { withTimezone: true }),
+    restoredBy: integer('restored_by').references(() => users.id, { onDelete: 'set null' }),
+    purgeAt: timestamp('purge_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+});
+
 export const schema = {
     channels,
     logs,
@@ -578,7 +701,21 @@ export const schema = {
     'workflow-templates': workflowTemplates,
     'health-logs': healthLogs,
     'daily-stats': dailyStats,
-    'model-stats': modelStats,    'rate-limits-table': rateLimits,    'response-cache': responseCache,    'semantic-cache': semanticCache,    'api-files': apiFiles,    'api-batches': apiBatches,    'mj-tasks': mjTasks,    'payment-orders': paymentOrders,    'idempotency-keys': idempotencyKeys,    'log-details': logDetails,    'budget-alerts': budgetAlerts,    'audit-logs': auditLogs,    'user-subscriptions': userSubscriptions,
+    'model-stats': modelStats,
+    'rate-limits-table': rateLimits,
+    'response-cache': responseCache,
+    'semantic-cache': semanticCache,
+    'api-files': apiFiles,
+    'api-batches': apiBatches,
+    'mj-tasks': mjTasks,
+    'payment-orders': paymentOrders,
+    'subscription-orders': subscriptionOrders,
+    'topup-logs': topupLogs,
+    'idempotency-keys': idempotencyKeys,
+    'log-details': logDetails,
+    'budget-alerts': budgetAlerts,
+    'audit-logs': auditLogs,
+    'user-subscriptions': userSubscriptions,
     'invite-codes': inviteCodes,
     announcements,
     'user-aff': userAff,
@@ -587,6 +724,10 @@ export const schema = {
     'custom-oauth-providers': customOAuthProviders,
     loginAttempts,
     'two-factor-login-challenges': twoFactorLoginChallenges,
+    teams,
+    projects,
+    'team-members': teamMembers,
+    'deleted-records': deletedRecords,
 };
 
 export type DatabaseSchema = typeof schema;

@@ -116,14 +116,30 @@ export const sysRouter = new Elysia({ prefix: '/api' })
         const modelRatio = optionCache.get('ModelRatio', {}) as Record<string, number>;
         const completionRatio = optionCache.get('CompletionRatio', {}) as Record<string, number>;
         const groupRatio = optionCache.get('GroupRatio', {}) as Record<string, number>;
+        const groupGroupRatio = optionCache.get('GroupGroupRatio', {}) as Record<string, Record<string, number>>;
         const fixedCostModels = optionCache.get('FixedCostModels', {}) as Record<string, number>;
+        const imageRatio = optionCache.get('ImageRatio', {}) as Record<string, number>;
+        const audioRatio = optionCache.get('AudioRatio', {}) as Record<string, number>;
+        const audioCompletionRatio = optionCache.get('AudioCompletionRatio', {}) as Record<string, number>;
+        const createCacheRatio = optionCache.get('CreateCacheRatio', {}) as Record<string, number>;
+        const cacheRatio = Number(optionCache.get('CacheRatio', 0.5));
         return {
             success: true, message: '', data: {
-                modelRatio, completionRatio, groupRatio, fixedCostModels,
+                modelRatio,
+                completionRatio,
+                groupRatio,
+                groupGroupRatio,
+                fixedCostModels,
+                imageRatio,
+                audioRatio,
+                audioCompletionRatio,
+                createCacheRatio,
+                cacheRatio,
                 content: optionCache.get('PricingContent', ''),
                 currencySymbol: optionCache.get('CurrencySymbol', '$'),
                 quotaPerUnit: Number(optionCache.get('QuotaPerUnit', 500000)),
                 exchangeRate: Number(optionCache.get('ExchangeRate', 7.2)),
+                quotaDisplayType: String(optionCache.get('QuotaDisplayType', 'USD')),
             }
         };
     })
@@ -134,8 +150,13 @@ export const sysRouter = new Elysia({ prefix: '/api' })
                 modelRatio: optionCache.get('ModelRatio', {}),
                 completionRatio: optionCache.get('CompletionRatio', {}),
                 groupRatio: optionCache.get('GroupRatio', {}),
+                groupGroupRatio: optionCache.get('GroupGroupRatio', {}),
                 fixedCostModels: optionCache.get('FixedCostModels', {}),
                 cacheRatio: Number(optionCache.get('CacheRatio', 0.5)),
+                imageRatio: optionCache.get('ImageRatio', {}),
+                audioRatio: optionCache.get('AudioRatio', {}),
+                audioCompletionRatio: optionCache.get('AudioCompletionRatio', {}),
+                createCacheRatio: optionCache.get('CreateCacheRatio', {}),
             }
         };
     })

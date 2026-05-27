@@ -9,6 +9,10 @@ const errorMessages: Record<string, Record<Language, string>> = {
         en: 'Insufficient token quota',
         zh: 'Token 额度不足'
     },
+    'Insufficient organization quota': {
+        en: 'Insufficient organization quota',
+        zh: '组织额度不足'
+    },
     'API key has expired': {
         en: 'API key has expired',
         zh: 'API 密钥已过期'

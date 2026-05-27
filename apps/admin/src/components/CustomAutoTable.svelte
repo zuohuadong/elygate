@@ -11,6 +11,7 @@
   import ContentManagement from '../pages/ContentManagement.svelte';
   import PricingEditor from '../pages/PricingEditor.svelte';
   import PerformanceMonitor from '../pages/PerformanceMonitor.svelte';
+  import EnterpriseConsole from '../pages/EnterpriseConsole.svelte';
 
   let { resourceName, ...rest }: { resourceName: string; [key: string]: any } = $props();
 
@@ -23,6 +24,7 @@
     'content-management': ContentManagement,
     'pricing-editor': PricingEditor,
     'performance-monitor': PerformanceMonitor,
+    'enterprise-console': EnterpriseConsole,
   };
 
   const CustomPage = $derived(customPages[resourceName]);

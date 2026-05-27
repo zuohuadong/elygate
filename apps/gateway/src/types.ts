@@ -8,6 +8,11 @@ export interface UserRecord {
     usedQuota: number;
     status: number;
     currency?: string;
+    billingPreference?: string;
+    quotaDisplayType?: string;
+    orgQuota?: number;
+    orgUsedQuota?: number;
+    orgStatus?: number;
     activePackages?: Record<string, any>[]; // [{ models, defaultRateLimitId, modelRateLimits }]
     orgAllowedModels?: string[];
     orgDeniedModels?: string[];
