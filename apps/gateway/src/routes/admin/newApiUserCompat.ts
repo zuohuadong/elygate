@@ -11,12 +11,15 @@ import { buildModelsUrl } from '../../utils/url';
 import { decryptChannelKeys, getChannelKeys } from '../../services/encryption';
 import { getProviderHandler } from '../../providers';
 import { config, apiUrls } from '../../config';
+import { createCreemCheckoutSession, verifyCreemWebhookSignature, parseCreemWebhookEvent } from '../../services/creem';
+import { createWaffoCheckoutSession, verifyWaffoWebhookSignature, parseWaffoWebhookEvent } from '../../services/waffo';
 import { buildOtpAuthUrl, consumeBackupCode, generateBackupCodes, generateTwoFactorSecret, hashBackupCodes, verifyTotp } from '../../services/twoFactor';
 import { authService } from '../../services/auth';
 import { bindSubscriptionToUser, cancelSubscription } from '../../services/subscription';
 import { newApiPlanToPackageValues, normalizeBillingPreference, resolveSubscriptionPlanId, wrapNewApiSubscriptionPlan } from '../../services/newApiSubscriptionCompat';
 import { safeExternalFetch } from '../../utils/safeExternalUrl';
 import { handleEPayPaymentCallback, handleStripePaymentCallback } from '../payment';
+import { completePendingTopupPaymentOrderTx } from '../../services/paymentCallback';
 
 /**
  * New API compatible user/subscription/announcement/ollama routes.
@@ -133,6 +136,29 @@ async function createTopupPaymentOrder(userId: number, amount: number, paymentMe
         const sortedParams = new URLSearchParams([...params.entries()].sort());
         const sign = generateEPaySign(sortedParams.toString(), config.epay.appSecret);
         paymentUrl = `${config.epay.gateway}/submit.php?${sortedParams}&sign=${sign}&sign_type=MD5`;
+    } else if (paymentMethod === 'creem' && config.creem.apiKey) {
+        try {
+            paymentUrl = await createCreemCheckoutSession({
+                amount,
+                productName: `Elygate Top-up - $${(amount / 100).toFixed(2)}`,
+                orderId: String(order.id),
+                userId,
+                successUrl: `${config.webUrl}/payment/success?order_id=${order.id}`,
+                cancelUrl: `${config.webUrl}/payment/cancel?order_id=${order.id}`,
+            });
+        } catch (e) { throw new Error(`Creem error: ${e instanceof Error ? e.message : String(e)}`); }
+    } else if (paymentMethod === 'waffo' && config.waffo.apiKey) {
+        try {
+            paymentUrl = await createWaffoCheckoutSession({
+                amount,
+                productName: `Elygate Top-up - $${(amount / 100).toFixed(2)}`,
+                orderId: String(order.id),
+                userId,
+                successUrl: `${config.webUrl}/payment/success?order_id=${order.id}`,
+                cancelUrl: `${config.webUrl}/payment/cancel?order_id=${order.id}`,
+                notifyUrl: `${config.gatewayUrl}/api/admin/waffo/webhook`,
+            });
+        } catch (e) { throw new Error(`Waffo error: ${e instanceof Error ? e.message : String(e)}`); }
     }
 
     return {
@@ -234,6 +260,30 @@ async function createSubscriptionPaymentOrder(userId: number, packageId: number,
         const sortedParams = new URLSearchParams([...params.entries()].sort());
         const sign = generateEPaySign(sortedParams.toString(), config.epay.appSecret);
         paymentUrl = `${config.epay.gateway}/submit.php?${sortedParams}&sign=${sign}&sign_type=MD5`;
+    } else if (paymentMethod === 'creem' && config.creem.apiKey) {
+        try {
+            paymentUrl = await createCreemCheckoutSession({
+                amount,
+                productName: `Elygate Subscription - ${pkg.name}`,
+                orderId: String(order.id),
+                userId,
+                successUrl: `${config.webUrl}/payment/success?order_id=${order.id}`,
+                cancelUrl: `${config.webUrl}/payment/cancel?order_id=${order.id}`,
+                productId: pkg.creemProductId || undefined,
+            });
+        } catch (e) { throw new Error(`Creem error: ${e instanceof Error ? e.message : String(e)}`); }
+    } else if (paymentMethod === 'waffo' && config.waffo.apiKey) {
+        try {
+            paymentUrl = await createWaffoCheckoutSession({
+                amount,
+                productName: `Elygate Subscription - ${pkg.name}`,
+                orderId: String(order.id),
+                userId,
+                successUrl: `${config.webUrl}/payment/success?order_id=${order.id}`,
+                cancelUrl: `${config.webUrl}/payment/cancel?order_id=${order.id}`,
+                notifyUrl: `${config.gatewayUrl}/api/admin/waffo/webhook`,
+            });
+        } catch (e) { throw new Error(`Waffo error: ${e instanceof Error ? e.message : String(e)}`); }
     }
 
     return {
@@ -1907,8 +1957,52 @@ export const newApiUserPublicRouter = new Elysia()
         return apiSuccess(rows);
     })
     .post('/stripe/webhook', handleStripePaymentCallback)
-    .post('/creem/webhook', () => providerUnsupported('creem'))
-    .post('/waffo/webhook', () => providerUnsupported('waffo'))
+    .post('/creem/webhook', async ({ body, request, set }: ElysiaCtx) => {
+        if (!config.creem.webhookSecret) return providerUnsupported('creem');
+        const rawBody = typeof body === 'string' ? body : JSON.stringify(body || {});
+        const signature = request.headers.get('creem-signature') || '';
+        if (!verifyCreemWebhookSignature(rawBody, signature)) {
+            set.status = 401; return { success: false, message: 'Invalid Creem signature' };
+        }
+        const parsed = parseCreemWebhookEvent(body as Record<string, any>);
+        if (!parsed) { set.status = 400; return { success: false, message: 'Missing order_id' }; }
+        if (parsed.eventType === 'checkout.session.completed' || parsed.eventType === 'payment.completed') {
+            const orderId = Number(parsed.orderId);
+            if (Number.isFinite(orderId)) {
+                await db.transaction(async (tx) => {
+                    await completePendingTopupPaymentOrderTx(tx, orderId, parsed.transactionId, async (t, order) => {
+                        const quotaPerUnit = Number(optionCache.get('QuotaPerUnit', 500000));
+                        const quota = Math.floor((order.amount / 100) * quotaPerUnit);
+                        await t.update(users).set({ quota: drizzleSql`${users.quota} + ${quota}` }).where(eq(users.id, order.userId));
+                    });
+                });
+            }
+        }
+        return { success: true };
+    })
+    .post('/waffo/webhook', async ({ body, query, request, set }: ElysiaCtx) => {
+        if (!config.waffo.webhookSecret) return providerUnsupported('waffo');
+        const rawBody = typeof body === 'string' ? body : JSON.stringify(body || {});
+        const signature = request.headers.get('waffo-signature') || '';
+        if (!verifyWaffoWebhookSignature(rawBody, signature)) {
+            set.status = 401; return { success: false, message: 'Invalid Waffo signature' };
+        }
+        const parsed = parseWaffoWebhookEvent(query || {}, body as Record<string, any>);
+        if (!parsed) { set.status = 400; return { success: false, message: 'Missing order_id' }; }
+        if (parsed.status === 'success' || parsed.status === 'completed' || parsed.status === 'paid') {
+            const orderId = Number(parsed.orderId);
+            if (Number.isFinite(orderId)) {
+                await db.transaction(async (tx) => {
+                    await completePendingTopupPaymentOrderTx(tx, orderId, parsed.transactionId, async (t, order) => {
+                        const quotaPerUnit = Number(optionCache.get('QuotaPerUnit', 500000));
+                        const quota = Math.floor((order.amount / 100) * quotaPerUnit);
+                        await t.update(users).set({ quota: drizzleSql`${users.quota} + ${quota}` }).where(eq(users.id, order.userId));
+                    });
+                });
+            }
+        }
+        return { success: true };
+    })
     .post('/waffo-pancake/webhook/:env', ({ params }: ElysiaCtx) => ({ ...providerUnsupported('waffo-pancake'), env: params.env }))
     .post('/subscription/epay/notify', handleEPayPaymentCallback)
     .get('/subscription/epay/notify', handleEPayPaymentCallback)

@@ -672,6 +672,39 @@ CREATE INDEX IF NOT EXISTS idx_response_cache_expired ON response_cache (expired
 CREATE INDEX IF NOT EXISTS idx_response_cache_last_read ON response_cache (last_read_at);
 
 -- ============================================================
+-- Agent Memory Table (pgvector) - durable long-term memory
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS agent_memories (
+    id TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_id INTEGER REFERENCES tokens(id) ON DELETE CASCADE,
+    org_id INTEGER REFERENCES organizations(id) ON DELETE CASCADE,
+    thread_id TEXT,
+    scope TEXT NOT NULL DEFAULT 'user',
+    kind TEXT NOT NULL DEFAULT 'fact',
+    content TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    embedding VECTOR(1024),
+    confidence DECIMAL(5,4) NOT NULL DEFAULT 1.0000,
+    source_trace_id TEXT,
+    metadata JSONB NOT NULL DEFAULT '{}',
+    expires_at TIMESTAMPTZ,
+    deleted_at TIMESTAMPTZ,
+    last_read_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (user_id, scope, kind, content_hash)
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_memories_user_scope ON agent_memories (user_id, scope, deleted_at, expires_at);
+CREATE INDEX IF NOT EXISTS idx_agent_memories_token ON agent_memories (token_id);
+CREATE INDEX IF NOT EXISTS idx_agent_memories_org ON agent_memories (org_id);
+CREATE INDEX IF NOT EXISTS idx_agent_memories_thread ON agent_memories (thread_id);
+CREATE INDEX IF NOT EXISTS idx_agent_memories_content_tsv ON agent_memories USING gin (to_tsvector('simple', content));
+CREATE INDEX IF NOT EXISTS idx_agent_memories_embedding ON agent_memories USING hnsw (embedding vector_cosine_ops);
+
+-- ============================================================
 -- Token Cache Table - UNLOGGED for performance
 -- ============================================================
 
@@ -961,6 +994,13 @@ INSERT INTO options (key, value) VALUES
     ('SemanticCacheEnabled', 'true'),
     ('SemanticCacheThreshold', '0.95'),
     ('SemanticCacheTTLHours', '24'),
+    ('MemoryEnabled', 'false'),
+    ('MemoryReadDefault', 'false'),
+    ('MemoryWriteDefault', 'false'),
+    ('MemoryMaxInjectedItems', '6'),
+    ('MemoryMinWriteChars', '24'),
+    ('MemoryScope', 'user'),
+    ('MemoryEmbeddingModel', ''),
     ('LogRetentionDays', '7'),
     ('Logo_URL', ''),
     ('Footer_HTML', ''),
@@ -1154,3 +1194,154 @@ CREATE TABLE IF NOT EXISTS deleted_records (
 );
 CREATE INDEX IF NOT EXISTS idx_deleted_records_type ON deleted_records(resource_type);
 CREATE INDEX IF NOT EXISTS idx_deleted_records_purge ON deleted_records(purge_at) WHERE restored_at IS NULL;
+
+-- ============================================================
+-- Email Verification / Password Reset Codes
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS verification_codes (
+    id SERIAL PRIMARY KEY,
+    type VARCHAR(40) NOT NULL,
+    target TEXT NOT NULL,
+    code VARCHAR(64) NOT NULL,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    ip_address TEXT,
+    consumed BOOLEAN NOT NULL DEFAULT FALSE,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_verification_codes_target ON verification_codes(type, target) WHERE consumed = FALSE;
+CREATE INDEX IF NOT EXISTS idx_verification_codes_user ON verification_codes(user_id) WHERE user_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_verification_codes_expiry ON verification_codes(expires_at);
+
+-- ============================================================
+-- Assistants / Threads / Vector Stores / Fine-tuning
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS assistants (
+    id TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_id INTEGER,
+    object VARCHAR(30) DEFAULT 'assistant',
+    name TEXT,
+    description TEXT,
+    model TEXT NOT NULL,
+    instructions TEXT,
+    tools JSONB DEFAULT '[]',
+    file_ids JSONB DEFAULT '[]',
+    metadata JSONB DEFAULT '{}',
+    temperature DECIMAL(5,2),
+    top_p DECIMAL(5,4),
+    status VARCHAR(20) DEFAULT 'active',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS threads (
+    id TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_id INTEGER,
+    object VARCHAR(30) DEFAULT 'thread',
+    metadata JSONB DEFAULT '{}',
+    tool_resources JSONB DEFAULT '{}',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS thread_messages (
+    id TEXT PRIMARY KEY,
+    thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL,
+    object VARCHAR(30) DEFAULT 'thread.message',
+    role VARCHAR(20) NOT NULL DEFAULT 'user',
+    content JSONB DEFAULT '[]',
+    assistant_id TEXT,
+    run_id TEXT,
+    attachments JSONB DEFAULT '[]',
+    metadata JSONB DEFAULT '{}',
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_thread_messages_thread ON thread_messages(thread_id);
+
+CREATE TABLE IF NOT EXISTS thread_runs (
+    id TEXT PRIMARY KEY,
+    thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+    assistant_id TEXT,
+    user_id INTEGER NOT NULL,
+    object VARCHAR(30) DEFAULT 'thread.run',
+    status VARCHAR(30) NOT NULL DEFAULT 'queued',
+    model TEXT,
+    instructions TEXT,
+    tools JSONB DEFAULT '[]',
+    metadata JSONB DEFAULT '{}',
+    temperature DECIMAL(5,2),
+    top_p DECIMAL(5,4),
+    max_prompt_tokens INTEGER,
+    max_completion_tokens INTEGER,
+    truncation_strategy JSONB,
+    tool_choice JSONB,
+    response_format JSONB,
+    required_action JSONB,
+    last_error JSONB,
+    usage JSONB,
+    started_at TIMESTAMPTZ,
+    expires_at TIMESTAMPTZ,
+    cancelled_at TIMESTAMPTZ,
+    failed_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_thread_runs_thread ON thread_runs(thread_id);
+CREATE INDEX IF NOT EXISTS idx_thread_runs_status ON thread_runs(status);
+
+CREATE TABLE IF NOT EXISTS vector_stores (
+    id TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_id INTEGER,
+    object VARCHAR(30) DEFAULT 'vector_store',
+    name TEXT,
+    file_counts JSONB DEFAULT '{"in_progress":0,"completed":0,"failed":0,"cancelled":0,"total":0}',
+    status VARCHAR(20) DEFAULT 'completed',
+    usage_bytes BIGINT NOT NULL DEFAULT 0,
+    metadata JSONB DEFAULT '{}',
+    expires_after JSONB,
+    expires_at TIMESTAMPTZ,
+    last_active_at TIMESTAMPTZ DEFAULT NOW(),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS vector_store_files (
+    id TEXT PRIMARY KEY,
+    vector_store_id TEXT NOT NULL REFERENCES vector_stores(id) ON DELETE CASCADE,
+    file_id TEXT,
+    object VARCHAR(30) DEFAULT 'vector_store.file',
+    status VARCHAR(20) DEFAULT 'completed',
+    usage_bytes BIGINT NOT NULL DEFAULT 0,
+    last_error JSONB,
+    chunking_strategy JSONB,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_vs_files_store ON vector_store_files(vector_store_id);
+
+CREATE TABLE IF NOT EXISTS fine_tuning_jobs (
+    id TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_id INTEGER,
+    object VARCHAR(30) DEFAULT 'fine_tuning.job',
+    model TEXT NOT NULL,
+    training_file TEXT,
+    validation_file TEXT,
+    hyperparameters JSONB DEFAULT '{}',
+    status VARCHAR(40) NOT NULL DEFAULT 'validating_files',
+    fine_tuned_model TEXT,
+    organization_id TEXT,
+    result_files JSONB DEFAULT '[]',
+    trained_tokens INTEGER,
+    error JSONB,
+    epochs INTEGER,
+    suffix TEXT,
+    integrations JSONB DEFAULT '[]',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    finished_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);

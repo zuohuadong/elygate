@@ -4,18 +4,14 @@ import { db, sql } from '@elygate/db';
 import { channels, logs, modelMetadata, options, tokens, vendors } from '@elygate/db/schema';
 import { adminGuard, authPlugin } from '../../middleware/auth';
 import { memoryCache } from '../../services/cache';
-import { encryptChannelKeys, getChannelKeys } from '../../services/encryption';
+import { encryptChannelKeys, decryptChannelKeys, getChannelKeys } from '../../services/encryption';
+import { createCodexOAuthStartUrl, exchangeCodexOAuthCode, refreshCodexToken, getCodexUsage, isCodexOAuthConfigured } from '../../services/codexOAuth';
 import { optionCache } from '../../services/optionCache';
 import { getProviderHandler } from '../../providers';
 import { ChannelType } from '../../types';
 import { buildModelsUrl } from '../../utils/url';
 import { assertSafeExternalUrl } from '../../utils/safeExternalUrl';
 import { and, asc, avg, count, desc, eq, ilike, inArray, isNotNull, max, ne, or, sum, sql as drizzleSql } from 'drizzle-orm';
-
-function notImplemented(set: Record<string, any>, message: string) {
-    set.status = 501;
-    return { error: { message, type: 'not_implemented', code: 'NOT_IMPLEMENTED' } };
-}
 
 function maskKey(value?: string | null) {
     if (!value) return value;
@@ -1086,12 +1082,90 @@ export const newApiCompatAdminRouter = new Elysia()
         await refreshRuntimeCaches();
         return { success: true, applied: results.filter((result) => result.success).length, total: results.length, results };
     })
-    .post('/channel/codex/oauth/start', ({ set }: ElysiaCtx) => notImplemented(set, 'Codex OAuth is not implemented.'))
-    .post('/channel/codex/oauth/complete', ({ set }: ElysiaCtx) => notImplemented(set, 'Codex OAuth is not implemented.'))
-    .post('/channel/:id/codex/oauth/start', ({ set }: ElysiaCtx) => notImplemented(set, 'Codex OAuth is not implemented.'))
-    .post('/channel/:id/codex/oauth/complete', ({ set }: ElysiaCtx) => notImplemented(set, 'Codex OAuth is not implemented.'))
-    .post('/channel/:id/codex/refresh', ({ set }: ElysiaCtx) => notImplemented(set, 'Codex credential refresh is not implemented.'))
-    .get('/channel/:id/codex/usage', ({ set }: ElysiaCtx) => notImplemented(set, 'Codex usage is not implemented.'))
+    .post('/channel/codex/oauth/start', ({ set }: ElysiaCtx) => {
+        if (!isCodexOAuthConfigured()) { set.status = 503; return { success: false, message: 'Codex OAuth is not configured (set CODEX_OAUTH_CLIENT_ID and CODEX_OAUTH_CLIENT_SECRET)' }; }
+        const state = Bun.randomUUIDv7('hex');
+        const result = createCodexOAuthStartUrl(state);
+        if (!result) { set.status = 500; return { success: false, message: 'Failed to generate OAuth URL' }; }
+        return { success: true, data: { url: result.url, state } };
+    })
+    .post('/channel/codex/oauth/complete', async ({ body, set }: ElysiaCtx) => {
+        const payload = (body || {}) as Record<string, any>;
+        const code = String(payload.code || '');
+        if (!code) { set.status = 400; return { success: false, message: 'Authorization code is required' }; }
+        const tokens = await exchangeCodexOAuthCode(code);
+        if (!tokens) { set.status = 400; return { success: false, message: 'Failed to exchange authorization code for tokens' }; }
+        return { success: true, data: { access_token: tokens.accessToken, refresh_token: tokens.refreshToken, expires_in: tokens.expiresIn, scope: tokens.scope } };
+    })
+    .post('/channel/:id/codex/oauth/start', ({ params: { id }, set }: ElysiaCtx) => {
+        if (!isCodexOAuthConfigured()) { set.status = 503; return { success: false, message: 'Codex OAuth is not configured' }; }
+        const state = `${id}:${Bun.randomUUIDv7('hex')}`;
+        const result = createCodexOAuthStartUrl(state);
+        if (!result) { set.status = 500; return { success: false, message: 'Failed to generate OAuth URL' }; }
+        return { success: true, data: { url: result.url, state, channelId: Number(id) } };
+    })
+    .post('/channel/:id/codex/oauth/complete', async ({ params: { id }, body, set }: ElysiaCtx) => {
+        const payload = (body || {}) as Record<string, any>;
+        const code = String(payload.code || '');
+        if (!code) { set.status = 400; return { success: false, message: 'Authorization code is required' }; }
+
+        const tokens = await exchangeCodexOAuthCode(code);
+        if (!tokens) { set.status = 400; return { success: false, message: 'Failed to exchange authorization code' }; }
+
+        // 将 OAuth token 存入 channel 的 key 中
+        const [ch] = await db.select().from(channels).where(eq(channels.id, Number(id))).limit(1);
+        if (!ch) { set.status = 404; return { success: false, message: 'Channel not found' }; }
+
+        const existingKeys = decryptChannelKeys(ch.key).split('\n').filter(Boolean);
+        const newKey = tokens.accessToken;
+        const allKeys = existingKeys.length > 0 ? [...existingKeys, newKey] : [newKey];
+        await db.update(channels).set({ key: encryptChannelKeys(allKeys.join('\n')) }).where(eq(channels.id, Number(id)));
+
+        // 存储 refresh_token 到 channelInfo
+        const info = { ...(ch.channelInfo as Record<string, any> || {}) };
+        info.codexRefreshToken = tokens.refreshToken;
+        info.codexTokenExpiresAt = new Date(Date.now() + tokens.expiresIn * 1000).toISOString();
+        info.lastCodexToken = newKey;
+        await db.update(channels).set({ channelInfo: info }).where(eq(channels.id, Number(id)));
+
+        return { success: true, data: { access_token: tokens.accessToken, expires_in: tokens.expiresIn } };
+    })
+    .post('/channel/:id/codex/refresh', async ({ params: { id }, set }: ElysiaCtx) => {
+        const [ch] = await db.select().from(channels).where(eq(channels.id, Number(id))).limit(1);
+        if (!ch) { set.status = 404; return { success: false, message: 'Channel not found' }; }
+
+        const info = { ...(ch.channelInfo as Record<string, any> || {}) };
+        const refreshToken = String(info.codexRefreshToken || '');
+        if (!refreshToken) { set.status = 400; return { success: false, message: 'No refresh token stored for this channel' }; }
+
+        const tokens = await refreshCodexToken(refreshToken);
+        if (!tokens) { set.status = 400; return { success: false, message: 'Failed to refresh token' }; }
+
+        // 更新 channel key：替换旧 token 为新 token
+        const existingKeys = decryptChannelKeys(ch.key).split('\n').filter(Boolean);
+        const oldToken = String(info.lastCodexToken || '');
+        const updatedKeys = existingKeys.map(k => k === oldToken ? tokens.accessToken : k);
+        await db.update(channels).set({ key: encryptChannelKeys(updatedKeys.join('\n')) }).where(eq(channels.id, Number(id)));
+
+        // 更新 channelInfo
+        info.codexRefreshToken = tokens.refreshToken;
+        info.codexTokenExpiresAt = new Date(Date.now() + tokens.expiresIn * 1000).toISOString();
+        info.lastCodexToken = tokens.accessToken;
+        await db.update(channels).set({ channelInfo: info }).where(eq(channels.id, Number(id)));
+
+        return { success: true, data: { access_token: tokens.accessToken, expires_in: tokens.expiresIn } };
+    })
+    .get('/channel/:id/codex/usage', async ({ params: { id }, set }: ElysiaCtx) => {
+        const [ch] = await db.select().from(channels).where(eq(channels.id, Number(id))).limit(1);
+        if (!ch) { set.status = 404; return { success: false, message: 'Channel not found' }; }
+
+        const keys = getChannelKeys(ch.key);
+        if (!keys || keys.length === 0) { set.status = 400; return { success: false, message: 'No API key for this channel' }; }
+
+        const usage = await getCodexUsage(keys[0]);
+        if (!usage) { set.status = 502; return { success: false, message: 'Failed to fetch usage from io.net' }; }
+        return { success: true, data: usage };
+    })
 
     // New API: /api/token/*
     .get('/token/search', async ({ query }: ElysiaCtx) => {

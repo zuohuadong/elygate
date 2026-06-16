@@ -1,6 +1,7 @@
 import { PgBoss, type Job, type Queue } from 'pg-boss';
 import { config } from '../config';
 import type { BillingContext } from '../types';
+import type { MemoryRememberJobPayload } from './memory';
 import { getErrorMessage } from '../utils/error';
 import { log } from './logger';
 
@@ -8,6 +9,7 @@ export const JOB_QUEUE_NAMES = {
     billingFlush: 'billing.flush',
     webhookDeliver: 'webhook.deliver',
     longTaskProcess: 'long-task.process',
+    memoryRemember: 'memory.remember',
 } as const;
 
 export interface WebhookDeliveryJobPayload {
@@ -70,6 +72,17 @@ async function ensureQueues(boss: PgBoss): Promise<void> {
         deleteAfterSeconds: 24 * 60 * 60,
         heartbeatSeconds: 60,
         warningQueueSize: envNumber('PG_BOSS_TASK_WARNING_SIZE', 1000),
+    });
+
+    await ensureQueue(boss, JOB_QUEUE_NAMES.memoryRemember, {
+        retryLimit: envNumber('PG_BOSS_MEMORY_RETRY_LIMIT', 3),
+        retryDelay: 10,
+        retryBackoff: true,
+        retryDelayMax: 5 * 60,
+        expireInSeconds: 10 * 60,
+        retentionSeconds: 3 * 24 * 60 * 60,
+        deleteAfterSeconds: 24 * 60 * 60,
+        warningQueueSize: envNumber('PG_BOSS_MEMORY_WARNING_SIZE', 1000),
     });
 }
 
@@ -134,6 +147,13 @@ export async function enqueueLongTask(taskId: string): Promise<string | null> {
     return jobId;
 }
 
+export async function enqueueMemoryRemember(payload: MemoryRememberJobPayload): Promise<string> {
+    const boss = await getJobQueue();
+    const jobId = await boss.send(JOB_QUEUE_NAMES.memoryRemember, payload);
+    if (!jobId) throw new Error('pg-boss did not enqueue memory job');
+    return jobId;
+}
+
 async function startBillingWorker(boss: PgBoss): Promise<void> {
     await boss.work<BillingContext>(
         JOB_QUEUE_NAMES.billingFlush,
@@ -190,6 +210,25 @@ async function startLongTaskWorker(boss: PgBoss): Promise<void> {
     );
 }
 
+async function startMemoryWorker(boss: PgBoss): Promise<void> {
+    await boss.work<MemoryRememberJobPayload>(
+        JOB_QUEUE_NAMES.memoryRemember,
+        {
+            batchSize: envNumber('PG_BOSS_MEMORY_BATCH_SIZE', 10),
+            pollingIntervalSeconds: 1,
+            localConcurrency: envNumber('PG_BOSS_MEMORY_CONCURRENCY', 2),
+            orderByCreatedOn: true,
+        },
+        async (jobs: Job<MemoryRememberJobPayload>[]) => {
+            const { processMemoryRememberJob } = await import('./memory');
+            for (const job of jobs) {
+                await processMemoryRememberJob(job.data);
+            }
+            return { processed: jobs.length };
+        }
+    );
+}
+
 export function startJobQueueWorkers(): Promise<void> {
     if (!workersPromise) {
         workersPromise = (async () => {
@@ -197,6 +236,7 @@ export function startJobQueueWorkers(): Promise<void> {
             await startBillingWorker(boss);
             await startWebhookWorker(boss);
             await startLongTaskWorker(boss);
+            await startMemoryWorker(boss);
             log.info('[JobQueue] Workers registered');
         })().catch((err) => {
             workersPromise = null;

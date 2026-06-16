@@ -17,6 +17,8 @@ import { performanceRouter } from './performance';
 import { vendorsRouter } from './vendors';
 import { enterpriseRouter } from './enterprise';
 import { enterpriseTeamsRouter } from './enterpriseTeams';
+import { dataRouter } from './data';
+import { memoryAdminRouter } from './memory';
 
 /**
  * Refresh both memory cache and option cache.
@@ -54,4 +56,6 @@ export const adminRouter = new Elysia()
     .use(performanceRouter)
     .use(vendorsRouter)
     .use(enterpriseRouter)
-    .use(enterpriseTeamsRouter);
+    .use(enterpriseTeamsRouter)
+    .use(dataRouter)
+    .use(memoryAdminRouter);

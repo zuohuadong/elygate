@@ -661,4 +661,180 @@ export const authRouter = new Elysia()
         const sessionToken = await authService.generateSessionToken(user.id);
         const targetUrl = config.webUrl || 'http://localhost:5173';
         set.redirect = `${targetUrl}/auth/callback?token=${sessionToken}&username=${user.username}&role=${user.role}`;
+    })
+
+    // ─── Google OAuth ───
+    .get('/google', ({ set }) => {
+        if (!config.google.clientId) throw new Error('Google OAuth is not configured');
+        const params = new URLSearchParams({
+            client_id: config.google.clientId,
+            redirect_uri: config.google.redirectUri,
+            response_type: 'code',
+            scope: 'openid email profile',
+            access_type: 'offline',
+            prompt: 'consent',
+        });
+        set.redirect = `${apiUrls.google.authorize}?${params.toString()}`;
+    })
+    .get('/google/callback', async ({ query, set }) => {
+        const code = String((query as Record<string, any>)?.code || '');
+        if (!code) throw new Error('No code provided');
+
+        const tokenRes = await fetch(apiUrls.google.token, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+                client_id: config.google.clientId,
+                client_secret: config.google.clientSecret,
+                grant_type: 'authorization_code',
+                code,
+                redirect_uri: config.google.redirectUri,
+            }),
+        });
+        const tokenData = await tokenRes.json() as Record<string, any>;
+        if (tokenData.error) throw new Error(tokenData.error_description || 'Google auth failed');
+
+        const userRes = await fetch(apiUrls.google.user, { headers: { 'Authorization': `Bearer ${tokenData.access_token}` } });
+        const googleUser = await userRes.json() as Record<string, any>;
+
+        const providerUserId = String(googleUser.id || googleUser.sub || '');
+
+        const [existingOAuth] = await db.select({ userId: oauthAccounts.userId })
+            .from(oauthAccounts)
+            .where(and(eq(oauthAccounts.provider, 'google'), eq(oauthAccounts.providerUserId, providerUserId)))
+            .limit(1);
+        let user;
+        if (existingOAuth) {
+            const [userRow] = await db.select({ id: users.id, username: users.username, role: users.role }).from(users).where(eq(users.id, existingOAuth.userId)).limit(1);
+            user = userRow;
+        } else {
+            const username = `google:${googleUser.email || providerUserId}`;
+            const [newUser] = await db.insert(users).values({
+                username, passwordHash: 'oauth-no-password', role: 1, quota: 500000, status: 1,
+                email: googleUser.email || null,
+            }).returning({ id: users.id, username: users.username, role: users.role });
+            user = newUser;
+            await db.insert(oauthAccounts).values({
+                userId: user.id, provider: 'google', providerUserId,
+                accessToken: tokenData.access_token, refreshToken: tokenData.refresh_token,
+                expiresAt: drizzleSql`NOW() + (${Number(tokenData.expires_in) || 3600} * INTERVAL '1 second')`,
+            });
+            const newKey = `sk-${Bun.randomUUIDv7('hex')}`;
+            await db.insert(tokens).values({ userId: user.id, name: 'Default API Key', key: newKey, status: 1, remainQuota: -1 });
+        }
+        const sessionToken = await authService.generateSessionToken(user.id);
+        const targetUrl = config.webUrl || 'http://localhost:5173';
+        set.redirect = `${targetUrl}/auth/callback?token=${sessionToken}&username=${user.username}&role=${user.role}`;
+    })
+
+    // ─── LinuxDo OAuth ───
+    .get('/linuxdo', ({ set }) => {
+        if (!config.linuxdo.clientId) throw new Error('LinuxDo OAuth is not configured');
+        const params = new URLSearchParams({
+            client_id: config.linuxdo.clientId,
+            redirect_uri: config.linuxdo.redirectUri,
+            response_type: 'code',
+        });
+        set.redirect = `${apiUrls.linuxdo.authorize}?${params.toString()}`;
+    })
+    .get('/linuxdo/callback', async ({ query, set }) => {
+        const code = String((query as Record<string, any>)?.code || '');
+        if (!code) throw new Error('No code provided');
+
+        const tokenRes = await fetch(apiUrls.linuxdo.token, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+                client_id: config.linuxdo.clientId,
+                client_secret: config.linuxdo.clientSecret,
+                grant_type: 'authorization_code',
+                code,
+                redirect_uri: config.linuxdo.redirectUri,
+            }),
+        });
+        const tokenData = await tokenRes.json() as Record<string, any>;
+        if (tokenData.error) throw new Error(tokenData.error_description || 'LinuxDo auth failed');
+
+        const userRes = await fetch(apiUrls.linuxdo.user, { headers: { 'Authorization': `Bearer ${tokenData.access_token}` } });
+        const ldUser = await userRes.json() as Record<string, any>;
+        const providerUserId = String(ldUser.id || '');
+
+        const [existingOAuth] = await db.select({ userId: oauthAccounts.userId })
+            .from(oauthAccounts)
+            .where(and(eq(oauthAccounts.provider, 'linuxdo'), eq(oauthAccounts.providerUserId, providerUserId)))
+            .limit(1);
+        let user;
+        if (existingOAuth) {
+            const [userRow] = await db.select({ id: users.id, username: users.username, role: users.role }).from(users).where(eq(users.id, existingOAuth.userId)).limit(1);
+            user = userRow;
+        } else {
+            const username = `linuxdo:${ldUser.username || ldUser.login || providerUserId}`;
+            const [newUser] = await db.insert(users).values({
+                username, passwordHash: 'oauth-no-password', role: 1, quota: 500000, status: 1,
+                email: ldUser.email || null,
+            }).returning({ id: users.id, username: users.username, role: users.role });
+            user = newUser;
+            await db.insert(oauthAccounts).values({
+                userId: user.id, provider: 'linuxdo', providerUserId,
+                accessToken: tokenData.access_token,
+            });
+            const newKey = `sk-${Bun.randomUUIDv7('hex')}`;
+            await db.insert(tokens).values({ userId: user.id, name: 'Default API Key', key: newKey, status: 1, remainQuota: -1 });
+        }
+        const sessionToken = await authService.generateSessionToken(user.id);
+        const targetUrl = config.webUrl || 'http://localhost:5173';
+        set.redirect = `${targetUrl}/auth/callback?token=${sessionToken}&username=${user.username}&role=${user.role}`;
+    })
+
+    // ─── WeChat OAuth ───
+    .get('/wechat', ({ set }) => {
+        if (!config.wechat.appId) throw new Error('WeChat OAuth is not configured');
+        const params = new URLSearchParams({
+            appid: config.wechat.appId,
+            redirect_uri: config.wechat.redirectUri,
+            response_type: 'code',
+            scope: 'snsapi_login',
+        });
+        set.redirect = `${apiUrls.wechat.authorize}?${params.toString()}#wechat_redirect`;
+    })
+    .get('/wechat/callback', async ({ query, set }) => {
+        const code = String((query as Record<string, any>)?.code || '');
+        if (!code) throw new Error('No code provided');
+
+        // 获取 access_token
+        const tokenUrl = `${apiUrls.wechat.token}?appid=${config.wechat.appId}&secret=${config.wechat.appSecret}&code=${code}&grant_type=authorization_code`;
+        const tokenRes = await fetch(tokenUrl);
+        const tokenData = await tokenRes.json() as Record<string, any>;
+        if (tokenData.errcode) throw new Error(`WeChat auth failed: ${tokenData.errmsg}`);
+
+        // 获取用户信息
+        const userUrl = `${apiUrls.wechat.user}?access_token=${tokenData.access_token}&openid=${tokenData.openid}`;
+        const userRes = await fetch(userUrl);
+        const wxUser = await userRes.json() as Record<string, any>;
+        const providerUserId = String(tokenData.openid || wxUser.openid || '');
+
+        const [existingOAuth] = await db.select({ userId: oauthAccounts.userId })
+            .from(oauthAccounts)
+            .where(and(eq(oauthAccounts.provider, 'wechat'), eq(oauthAccounts.providerUserId, providerUserId)))
+            .limit(1);
+        let user;
+        if (existingOAuth) {
+            const [userRow] = await db.select({ id: users.id, username: users.username, role: users.role }).from(users).where(eq(users.id, existingOAuth.userId)).limit(1);
+            user = userRow;
+        } else {
+            const username = `wechat:${wxUser.nickname || providerUserId}`;
+            const [newUser] = await db.insert(users).values({
+                username, passwordHash: 'oauth-no-password', role: 1, quota: 500000, status: 1,
+            }).returning({ id: users.id, username: users.username, role: users.role });
+            user = newUser;
+            await db.insert(oauthAccounts).values({
+                userId: user.id, provider: 'wechat', providerUserId,
+                accessToken: tokenData.access_token, refreshToken: tokenData.refresh_token,
+            });
+            const newKey = `sk-${Bun.randomUUIDv7('hex')}`;
+            await db.insert(tokens).values({ userId: user.id, name: 'Default API Key', key: newKey, status: 1, remainQuota: -1 });
+        }
+        const sessionToken = await authService.generateSessionToken(user.id);
+        const targetUrl = config.webUrl || 'http://localhost:5173';
+        set.redirect = `${targetUrl}/auth/callback?token=${sessionToken}&username=${user.username}&role=${user.role}`;
     });

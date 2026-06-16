@@ -36,6 +36,21 @@ export const config = {
     telegram: {
         botToken: process.env.TELEGRAM_BOT_TOKEN || '',
     },
+    google: {
+        clientId: process.env.GOOGLE_CLIENT_ID || '',
+        clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
+        redirectUri: process.env.GOOGLE_REDIRECT_URI || 'http://localhost:3000/api/auth/google/callback',
+    },
+    linuxdo: {
+        clientId: process.env.LINUXDO_CLIENT_ID || '',
+        clientSecret: process.env.LINUXDO_CLIENT_SECRET || '',
+        redirectUri: process.env.LINUXDO_REDIRECT_URI || 'http://localhost:3000/api/auth/linuxdo/callback',
+    },
+    wechat: {
+        appId: process.env.WECHAT_APP_ID || '',
+        appSecret: process.env.WECHAT_APP_SECRET || '',
+        redirectUri: process.env.WECHAT_REDIRECT_URI || 'http://localhost:3000/api/auth/wechat/callback',
+    },
 
     // --- Payment ---
     stripe: {
@@ -46,6 +61,16 @@ export const config = {
         appId: process.env.EPAY_APP_ID || '',
         appSecret: process.env.EPAY_APP_SECRET || '',
         gateway: process.env.EPAY_GATEWAY || 'https://api.epay.com',
+    },
+    creem: {
+        apiKey: process.env.CREEM_API_KEY || '',
+        webhookSecret: process.env.CREEM_WEBHOOK_SECRET || '',
+        productId: process.env.CREEM_PRODUCT_ID || '',
+    },
+    waffo: {
+        apiKey: process.env.WAFFO_API_KEY || '',
+        webhookSecret: process.env.WAFFO_WEBHOOK_SECRET || '',
+        merchantId: process.env.WAFFO_MERCHANT_ID || '',
     },
 
     // --- Encryption ---
@@ -70,6 +95,9 @@ export const isProduction = config.nodeEnv === 'production';
 export const oauthEnabled = {
     github: !!config.github.clientId,
     discord: !!config.discord.clientId,
+    google: !!config.google.clientId,
+    linuxdo: !!config.linuxdo.clientId,
+    wechat: !!config.wechat.appId,
     telegram: !!config.telegram.botToken,
 } as const;
 
@@ -85,10 +113,27 @@ export const apiUrls = {
         token: 'https://discord.com/api/oauth2/token',
         user: 'https://discord.com/api/users/@me',
     },
+    google: {
+        authorize: 'https://accounts.google.com/o/oauth2/v2/auth',
+        token: 'https://oauth2.googleapis.com/token',
+        user: 'https://www.googleapis.com/oauth2/v2/userinfo',
+    },
+    linuxdo: {
+        authorize: 'https://connect.linux.do/oauth2/authorize',
+        token: 'https://connect.linux.do/oauth2/token',
+        user: 'https://connect.linux.do/api/user',
+    },
+    wechat: {
+        authorize: 'https://open.weixin.qq.com/connect/qrconnect',
+        token: 'https://api.weixin.qq.com/sns/oauth2/access_token',
+        user: 'https://api.weixin.qq.com/sns/userinfo',
+    },
     /** Default fallback when channel has no base_url configured */
     openaiDefault: 'https://api.openai.com',
     geminiDefault: 'https://generativelanguage.googleapis.com',
     stripe: 'https://api.stripe.com',
+    creem: 'https://api.creem.io',
+    waffo: 'https://api.waffo.dev',
     search: {
         serper: 'https://google.serper.dev/search',
         brave: 'https://api.search.brave.com/res/v1/web/search',

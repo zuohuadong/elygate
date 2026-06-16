@@ -285,6 +285,16 @@ export const resources: ResourceDefinition[] = [
     fields: [],
   },
   {
+    name: 'memory-management',
+    label: 'Agent Memory',
+    icon: 'brain',
+    canCreate: false,
+    canEdit: false,
+    canDelete: false,
+    canShow: false,
+    fields: [],
+  },
+  {
     name: 'feature-console',
     label: '新增功能',
     icon: 'sparkles',

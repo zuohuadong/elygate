@@ -1,18 +1,16 @@
 import { log } from '../services/logger';
 import { optionCache } from './optionCache';
 import { webhookService } from './webhook';
+import { sendMail } from './mail';
 
 /**
- * Unified Notification Service
- * Supports Email (SMTP), Telegram Bot, and Webhook notifications.
- * Configuration is fetched dynamically from the options table.
- * 
- * Merged from legacy notification.ts + notifier.ts into a single module.
+ * 统一通知服务
+ * 支持邮件（SMTP）、Telegram 机器人、Webhook 三种渠道。
+ * 配置从 options 表动态读取。
  */
 export const notifier = {
     /**
-     * Send a notification via all enabled channels.
-     * Also exported as `notificationService.send()` for backward compatibility.
+     * 通过所有已启用的渠道发送通知。
      */
     async notify(subject: string, message: string, payload?: Record<string, unknown>) {
         log.info(`[Notifier] ${subject}: ${message}`);
@@ -22,17 +20,17 @@ export const notifier = {
 
         const methods = optionCache.get<string[]>('NotificationMethods', ['email']);
 
-        // 1. Email via SMTP
+        // 1. 邮件（SMTP）
         if (methods.includes('email')) {
             await this.sendEmail(subject, message);
         }
 
-        // 2. Telegram Bot
+        // 2. Telegram 机器人
         if (methods.includes('telegram')) {
             await this.sendTelegram(subject, message);
         }
 
-        // 3. Webhook / Robot
+        // 3. Webhook
         const webhookEnabled = optionCache.get<string>('WEBHOOK_ENABLED', 'false') === 'true';
         if (webhookEnabled) {
             await webhookService.trigger('system.alert', { subject, message, ...payload });
@@ -40,20 +38,19 @@ export const notifier = {
     },
 
     async sendEmail(subject: string, message: string) {
-        const config = optionCache.get('SMTPConfig', {} as Record<string, any>);
-        if (!config.host) {
-            log.warn('[Notifier] SMTP not configured.');
+        const cfg = optionCache.get<Record<string, any>>('SMTPConfig', {});
+        const to = cfg.adminEmail || cfg.to;
+        if (!cfg.host || !to) {
+            log.warn('[Notifier] SMTP not configured or missing recipient.');
             return;
         }
-
-        // Implementation with nodemailer would go here
-        log.info(`[Notifier/Email] To: ${config.adminEmail || config.to}, Subject: ${subject}`);
+        await sendMail({ to, subject, text: message, html: `<pre>${message}</pre>` });
     },
 
     async sendTelegram(subject: string, message: string) {
-        const config = optionCache.get('TelegramConfig', {} as Record<string, any>);
+        const config = optionCache.get<Record<string, any>>('TelegramConfig', {});
         if (!config.token || !config.chatId) {
-            return; // Silently skip if not configured
+            return;
         }
 
         try {
@@ -75,8 +72,7 @@ export const notifier = {
 };
 
 /**
- * Backward-compatible alias for code that imports `notificationService`.
- * Maps `.send()` to the unified `.notify()` method.
+ * 向后兼容别名
  */
 export const notificationService = {
     send: (subject: string, message: string) => notifier.notify(subject, message),

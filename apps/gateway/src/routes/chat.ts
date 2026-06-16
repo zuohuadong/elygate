@@ -13,12 +13,13 @@ import { dispatch } from '../services/dispatcher';
 import type { TokenRecord,  UserRecord  } from '../types';
 import { removeNullFields } from '../utils/transform';
 import { translateErrorBilingual } from '../services/i18n';
+import { buildMemorySystemMessage, extractMemoryTextFromMessages, rememberAsync, shouldReadMemory, shouldRememberContent, shouldWriteMemory } from '../services/memory';
 
 /**
  * Filter thinking content from response for -F suffix models.
  * Removes reasoning_content and thinking process text from the response.
  */
-function filterThinkingContent(response: Response): Record<string, any> {
+function filterThinkingContent(response: Record<string, any>): Record<string, any> {
     const filtered = JSON.parse(JSON.stringify(response));
     
     if (filtered.choices) {
@@ -331,9 +332,27 @@ export const chatRouter = new Elysia()
         }
 
         // --- 3. Cache Miss: Dispatch to upstream via dispatch ---
+        const dispatchBody = { ...body };
+        if (shouldReadMemory(body as Record<string, any>) && Array.isArray(messages) && !isVisionRequest) {
+            const memoryPrompt = extractMemoryTextFromMessages(messages);
+            const memoryMessage = await buildMemorySystemMessage({
+                user: u,
+                token: t,
+                query: memoryPrompt || userPrompt,
+                embeddingChannel,
+                embeddingModel
+            }).catch((error: unknown) => {
+                log.warn('[Memory] lookup failed:', error instanceof Error ? error.message : String(error));
+                return null;
+            });
+            if (memoryMessage) {
+                dispatchBody.messages = [memoryMessage, ...messages];
+            }
+        }
+
         const result = await dispatch({
             model,
-            body,
+            body: dispatchBody,
             user: u,
             token: t,
             endpointType: 'chat',
@@ -345,6 +364,22 @@ export const chatRouter = new Elysia()
         // --- 4. Async cache storage for non-stream responses ---
         if (!stream && result && !(result instanceof Response) && !isVisionRequest) {
             const formattedData = result as Record<string, any>;
+
+            if (shouldWriteMemory(body as Record<string, any>)) {
+                const memoryContent = extractMemoryTextFromMessages(messages);
+                if (shouldRememberContent(memoryContent)) {
+                    rememberAsync({
+                        user: u,
+                        token: t,
+                        content: memoryContent,
+                        kind: 'summary',
+                        sourceTraceId: traceId,
+                        metadata: { model, endpoint: 'chat' },
+                        embeddingChannel,
+                        embeddingModel
+                    });
+                }
+            }
 
             storeResponseCache(model, messages, formattedData, formattedData.usage, u.id).catch((err: Error) => {
                 log.error('[ResponseCache] Store Error:', err.message);

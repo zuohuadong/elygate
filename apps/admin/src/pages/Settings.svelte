@@ -35,6 +35,13 @@
     SemanticCacheThreshold: '0.95',
     SemanticCacheTTLHours: '24',
     SemanticCacheEmbeddingModel: 'text-embedding-3-small',
+    MemoryEnabled: 'false',
+    MemoryReadDefault: 'false',
+    MemoryWriteDefault: 'false',
+    MemoryMaxInjectedItems: '6',
+    MemoryMinWriteChars: '24',
+    MemoryScope: 'user',
+    MemoryEmbeddingModel: '',
     SEO_Title: 'Elygate',
     SEO_Description: '',
     SEO_Keywords: '',
@@ -255,6 +262,31 @@
       ],
     },
     {
+      title: 'Agent Memory',
+      fields: [
+        { key: 'MemoryEnabled', label: '记忆能力', type: 'select', options: [
+          { label: '启用', value: 'true' },
+          { label: '禁用', value: 'false' },
+        ]},
+        { key: 'MemoryReadDefault', label: '默认读取记忆', type: 'select', options: [
+          { label: '启用', value: 'true' },
+          { label: '禁用', value: 'false' },
+        ], description: '请求未显式声明 memory 时是否检索并注入记忆' },
+        { key: 'MemoryWriteDefault', label: '默认写入记忆', type: 'select', options: [
+          { label: '启用', value: 'true' },
+          { label: '禁用', value: 'false' },
+        ], description: '请求未显式声明 memory 时是否异步写入记忆' },
+        { key: 'MemoryMaxInjectedItems', label: '最大注入条数', type: 'number' },
+        { key: 'MemoryMinWriteChars', label: '最小写入字符数', type: 'number' },
+        { key: 'MemoryScope', label: '默认 Scope', type: 'select', options: [
+          { label: '用户', value: 'user' },
+          { label: '组织', value: 'org' },
+          { label: '线程', value: 'thread' },
+        ]},
+        { key: 'MemoryEmbeddingModel', label: 'Memory Embedding 模型', type: 'text', description: '需返回 1024 维向量；留空时自动选择 bge-m3 兼容渠道' },
+      ],
+    },
+    {
       title: '渠道选择与亲和',
       fields: [
         { key: 'AutoGroups', label: 'Auto 分组列表', type: 'text', description: 'JSON 数组，如 ["vip","premium","default"]' },
@@ -325,14 +357,14 @@
       <div class="h-8 w-8 animate-spin rounded-full border-4 border-muted border-t-primary"></div>
     </div>
   {:else}
-    {#each sections as section}
+    {#each sections as section (section.title)}
       <Card.Root>
         <Card.Header>
           <Card.Title>{section.title}</Card.Title>
         </Card.Header>
         <Card.Content>
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {#each section.fields as field}
+            {#each section.fields as field (field.key)}
               <div class="space-y-1.5">
                 <label for={`setting-${field.key}`} class="text-sm font-medium text-muted-foreground">{field.label}</label>
                 {#if field.type === 'select' && field.options}
@@ -341,7 +373,7 @@
                     bind:value={settings[field.key]}
                     class="w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
                   >
-                    {#each field.options as opt}
+                    {#each field.options as opt (opt.value)}
                       <option value={opt.value}>{opt.label}</option>
                     {/each}
                   </select>

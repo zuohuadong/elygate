@@ -45,15 +45,28 @@
 ### Cohere API Standards
 - ✅ `/v1/rerank` - Cohere Rerank API
 
+## Implemented (Previously Missing)
+
+### OpenAI Enterprise API (Full State Machine)
+- ✅ `/v1/assistants` - Assistants API CRUD (create, list, retrieve, modify, delete)
+- ✅ `/v1/assistants/{id}` - Per-assistant operations
+- ✅ `/v1/threads` - Threads API CRUD
+- ✅ `/v1/threads/{id}/messages` - Thread Messages API
+- ✅ `/v1/threads/{id}/runs` - Runs API (create, list, retrieve, cancel)
+- ✅ `/v1/vector_stores` - Vector Stores API CRUD
+- ✅ `/v1/vector_stores/{id}/files` - Vector Store Files API
+- ✅ `/v1/fine_tuning/jobs` - Fine-tuning Jobs API (create, list, retrieve, cancel)
+
+### Files & Batches (Full Binary Storage)
+- ✅ `/v1/files` - Files API with PostgreSQL bytea binary content storage
+- ✅ `/v1/files/{id}/content` - Binary file content retrieval
+- ✅ `/v1/batches` - Batch API with async executor (pg-boss powered)
+
 ## Not Yet Implemented
 
-### OpenAI Missing Endpoints
-- ⚠️ `/v1/assistants` - Compatibility routes present; state machine not implemented
-- ⚠️ `/v1/threads` - Compatibility routes present; state machine not implemented
-- ⚠️ `/v1/threads/{id}/runs` - Compatibility routes present; state machine not implemented
-- ⚠️ `/v1/fine_tuning/jobs` - Compatibility routes present; training executor not implemented
-- ⚠️ `/v1/vector_stores` - Compatibility routes present; vector-store file indexing not implemented
-- ⚠️ Realtime API (HTTP session routes only; WebSocket/WebRTC bridge not implemented)
+### Legacy / Deprecated
+- ⚠️ `/v1/fine-tunes` - Legacy fine-tunes API (deprecated by OpenAI, replaced by fine_tuning/jobs)
+- ⚠️ Realtime API WebRTC bridge (WebSocket proxy is implemented)
 
 ## New API Operational Parity
 
@@ -65,6 +78,19 @@
 - ✅ Channel tag management: batch tag assignment, enable/disable by tag, tag listing with counts.
 - ✅ Channel copy and upstream model sync: detect/apply upstream model changes per channel.
 - ✅ Admin frontend: channel and token resource definitions expose all management fields (model limits, IP whitelist, RPM, groups, tags, overrides, etc.).
+- ✅ Email system: SMTP-based email sending (nodemailer), email verification, password reset, email binding, universal verification codes.
+- ✅ Captcha / human verification: Cloudflare Turnstile, reCAPTCHA, hCaptcha support for registration, login, and password reset.
+- ✅ OAuth providers: GitHub, Discord, Telegram, Google, LinuxDo, WeChat, Custom OAuth/OIDC.
+- ✅ Payment providers: Stripe, EPay (Alipay), Creem, Waffo - all with webhook verification.
+- ✅ Codex OAuth: full start/complete/refresh/usage flow for io.net integration.
+- ✅ Data export/import: full config export (channels, options, user groups, vendors) and import via admin API.
+- ✅ Database backup status: table row count statistics endpoint.
+- ✅ Assistants API: full CRUD state machine backed by PostgreSQL.
+- ✅ Threads API: full CRUD with messages and runs.
+- ✅ Vector Stores API: full CRUD with file management.
+- ✅ Fine-tuning Jobs API: full CRUD with cancel support.
+- ✅ Files API: full binary content storage and retrieval via PostgreSQL bytea.
+- ✅ Batches API: async executor powered by pg-boss, processes JSONL input files.
 
 ## Provider Support
 

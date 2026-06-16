@@ -1,3 +1,4 @@
+import type { ElysiaCtx } from '../types';
 import { log } from '../services/logger';
 import { config } from '../config';
 import { Elysia } from 'elysia';
@@ -6,6 +7,11 @@ import { users } from '@elygate/db/schema';
 import { count, sql as drizzleSql } from 'drizzle-orm';
 import { memoryCache } from '../services/cache';
 import { optionCache } from '../services/optionCache';
+import { isSmtpConfigured } from '../services/mail';
+import { isCaptchaEnabled, verifyCaptcha, getCaptchaConfig } from '../services/captcha';
+import { createAndSendVerification, consumeVerification } from '../services/verification';
+import { eq } from 'drizzle-orm';
+import { getUserFromCookie } from '../middleware/auth';
 
 /**
  * System APIs (/api/status, /api/notice, /api/option)
@@ -63,7 +69,12 @@ export const sysRouter = new Elysia({ prefix: '/api' })
                 display_in_currency: String(optionCache.get('DisplayInCurrency', 'false')) === 'true',
                 github_oauth: !!config.github.clientId,
                 discord_oauth: !!config.discord.clientId,
-                telegram_oauth: !!config.telegram.botToken
+                telegram_oauth: !!config.telegram.botToken,
+                google_oauth: !!config.google.clientId,
+                linuxdo_oauth: !!config.linuxdo.clientId,
+                wechat_oauth: !!config.wechat.appId,
+                captcha_enabled: isCaptchaEnabled(),
+                captcha_provider: getCaptchaConfig().provider,
             }
         };
     })
@@ -197,6 +208,9 @@ export const sysRouter = new Elysia({ prefix: '/api' })
                 PasswordLoginEnabled: String(optionCache.get('PasswordLoginEnabled', 'true')) === 'true',
                 GitHubOAuthEnabled: String(optionCache.get('GitHubOAuthEnabled', 'false')) === 'true',
                 WeChatOAuthEnabled: String(optionCache.get('WeChatOAuthEnabled', 'false')) === 'true',
+                CaptchaEnabled: isCaptchaEnabled(),
+                CaptchaProvider: getCaptchaConfig().provider,
+                CaptchaSiteKey: getCaptchaConfig().siteKey,
             }
         };
     })
@@ -207,7 +221,7 @@ export const sysRouter = new Elysia({ prefix: '/api' })
         const url = new URL(request.url);
         const query = url.search || '';
         const provider = String(params.provider || '');
-        if (provider === 'github' || provider === 'discord') {
+        if (provider === 'github' || provider === 'discord' || provider === 'google' || provider === 'linuxdo' || provider === 'wechat') {
             set.redirect = `/api/auth/${provider}${query}`;
             return;
         }
@@ -216,37 +230,102 @@ export const sysRouter = new Elysia({ prefix: '/api' })
             return;
         }
         set.status = 501;
-        return { success: false, message: `OAuth provider '${provider}' is not implemented` };
+        return { success: false, message: `OAuth provider '${provider}' is not supported` };
     })
     .get('/oauth/telegram/login', ({ set, request }) => {
         const url = new URL(request.url);
         set.redirect = `/api/auth/telegram${url.search}`;
     })
-    .post('/oauth/email/bind', ({ set }) => {
-        set.status = 501;
-        return { success: false, message: 'Email bind is not implemented' };
+    // ─── 邮箱绑定验证码 ───
+    .post('/oauth/email/bind', async ({ body, set, request, cookie }: ElysiaCtx) => {
+        const authUser = await getUserFromCookie(cookie?.auth_session);
+        if (!authUser) { set.status = 401; return { success: false, message: '请先登录' }; }
+        const payload = (body || {}) as Record<string, any>;
+        const email = String(payload.email || '').trim().toLowerCase();
+        if (!email) { set.status = 400; return { success: false, message: '邮箱不能为空' }; }
+
+        const captchaOk = await verifyCaptcha(payload.captcha, request.headers.get('x-real-ip') || request.headers.get('x-forwarded-for') || undefined);
+        if (!captchaOk) { set.status = 400; return { success: false, message: '人机验证失败' }; }
+
+        const [existing] = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
+        if (existing && existing.id !== authUser.id) { set.status = 409; return { success: false, message: '该邮箱已被使用' }; }
+
+        const result = await createAndSendVerification({
+            type: 'email_bind',
+            target: email,
+            userId: authUser.id,
+            ipAddress: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || undefined,
+        });
+        if (!result.success) set.status = 400;
+        return { success: result.success, message: result.message };
     })
+    // ─── 微信 OAuth（配置占位） ───
     .get('/oauth/wechat', ({ set }) => {
-        set.status = 501;
-        return { success: false, message: 'WeChat OAuth is not implemented' };
+        if (!config.wechat.appId) { set.status = 501; return { success: false, message: 'WeChat OAuth is not configured' }; }
+        set.redirect = '/api/auth/wechat';
     })
     .post('/oauth/wechat/bind', ({ set }) => {
+        if (!config.wechat.appId) { set.status = 501; return { success: false, message: 'WeChat OAuth is not configured' }; }
+        // 微信绑定需要前端配合完成 OAuth 流程后调用此端点
         set.status = 501;
-        return { success: false, message: 'WeChat bind is not implemented' };
+        return { success: false, message: 'Please use /api/auth/wechat to start WeChat OAuth flow' };
     })
-    .get('/verification', ({ set }) => {
-        set.status = 501;
-        return { success: false, message: 'Email verification is not implemented' };
+    // ─── 邮箱验证码发送 ───
+    .get('/verification', async ({ query, set, request }: ElysiaCtx) => {
+        if (!isSmtpConfigured()) { set.status = 503; return { success: false, message: 'SMTP 未配置，无法发送邮件' }; }
+        const email = String((query as Record<string, any>)?.email || '').trim().toLowerCase();
+        if (!email) { set.status = 400; return { success: false, message: '邮箱不能为空' }; }
+
+        const result = await createAndSendVerification({
+            type: 'email_verification',
+            target: email,
+            ipAddress: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || undefined,
+        });
+        if (!result.success) set.status = 429;
+        return { success: result.success, message: result.message };
     })
-    .get('/reset_password', ({ set }) => {
-        set.status = 501;
-        return { success: false, message: 'Password reset email is not implemented' };
+    // ─── 密码重置验证码发送 ───
+    .get('/reset_password', async ({ query, set, request }: ElysiaCtx) => {
+        if (!isSmtpConfigured()) { set.status = 503; return { success: false, message: 'SMTP 未配置，无法发送邮件' }; }
+        const email = String((query as Record<string, any>)?.email || '').trim().toLowerCase();
+        if (!email) { set.status = 400; return { success: false, message: '邮箱不能为空' }; }
+
+        const [u] = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
+        if (!u) { set.status = 404; return { success: false, message: '该邮箱未注册' }; }
+
+        const result = await createAndSendVerification({
+            type: 'password_reset',
+            target: email,
+            userId: u.id,
+            ipAddress: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || undefined,
+        });
+        if (!result.success) set.status = 429;
+        return { success: result.success, message: result.message };
     })
-    .post('/user/reset', ({ set }) => {
-        set.status = 501;
-        return { success: false, message: 'Password reset is not implemented' };
+    // ─── 密码重置（提交新密码 + 验证码） ───
+    .post('/user/reset', async ({ body, set }: ElysiaCtx) => {
+        const payload = (body || {}) as Record<string, any>;
+        const email = String(payload.email || '').trim().toLowerCase();
+        const code = String(payload.code || '').trim();
+        const newPassword = String(payload.new_password || payload.password || '').trim();
+        if (!email || !code || !newPassword) { set.status = 400; return { success: false, message: '邮箱、验证码和新密码不能为空' }; }
+
+        const verify = await consumeVerification({ type: 'password_reset', target: email, code });
+        if (!verify.valid) { set.status = 400; return { success: false, message: verify.message }; }
+
+        const passwordHash = await Bun.password.hash(newPassword);
+        await db.update(users).set({ passwordHash }).where(eq(users.email, email));
+        return { success: true, message: '密码重置成功' };
     })
-    .post('/verify', ({ set }) => {
-        set.status = 501;
-        return { success: false, message: 'Universal verification is not implemented' };
+    // ─── 通用验证码校验 ───
+    .post('/verify', async ({ body, set }: ElysiaCtx) => {
+        const payload = (body || {}) as Record<string, any>;
+        const email = String(payload.email || '').trim().toLowerCase();
+        const code = String(payload.code || '').trim();
+        const type = String(payload.type || 'universal') as any;
+        if (!email || !code) { set.status = 400; return { success: false, message: '邮箱和验证码不能为空' }; }
+
+        const verify = await consumeVerification({ type, target: email, code });
+        if (!verify.valid) { set.status = 400; return { success: false, message: verify.message }; }
+        return { success: true, message: '验证成功' };
     });

@@ -402,6 +402,38 @@ export const authPlugin = new Elysia({ name: 'auth' })
  * Admin-only Authentication Guard
  * Same as authPlugin but strictly requires role = 10 (Admin)
  */
+
+/**
+ * 轻量级 session 解析：从 cookie 中提取用户信息，不抛异常。
+ * 用于需要可选认证的路由（如 sys 路由中的邮箱绑定）。
+ */
+export async function getUserFromCookie(authSessionValue: string | undefined): Promise<UserRecord | null> {
+    if (!authSessionValue) return null;
+    try {
+        const [sessionRow] = await db
+            .select({
+                id: users.id,
+                username: users.username,
+                group: users.group,
+                role: users.role,
+                quota: users.quota,
+                status: users.status,
+                org_id: users.orgId,
+                used_quota: users.usedQuota,
+                currency: users.currency,
+            })
+            .from(sessions)
+            .innerJoin(users, eq(sessions.userId, users.id))
+            .where(eq(sessions.token, authSessionValue))
+            .limit(1);
+        if (!sessionRow) return null;
+        if (sessionRow.status !== 1) return null;
+        return sessionRow as unknown as UserRecord;
+    } catch {
+        return null;
+    }
+}
+
 export const adminGuard = new Elysia({ name: 'admin-guard' })
     .use(authPlugin)
     .onBeforeHandle(({ user, set }: any) => {

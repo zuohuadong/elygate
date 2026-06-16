@@ -235,6 +235,7 @@ chmod +x scripts/deploy-optimizations.sh
 - ✅ **Connection Pool**: 20 connections with optimized lifecycle
 - ✅ **Performance Indexes**: 20+ indexes for query optimization
 - ✅ **Semantic Cache**: Built-in vector similarity caching
+- ✅ **Agent Memory**: PostgreSQL-native long-term memory with pgvector recall and pg-boss async writes
 
 #### Performance Gains
 | Metric | Improvement |
@@ -270,6 +271,7 @@ elygate
 - **🛡️ Apache 2.0**: Open-source and enterprise-ready.
 - **☁️ Zero Shell Dependencies**: Unlike New API which requires Redis for high-concurrency rate limiting, Elygate is **Redis-free**. All logic is handled by Bun + PostgreSQL, simplifying your stack.
 - **🧭 New API Parity**: Responses, Completions, Files metadata, Batches metadata, Images edits/variations, channel health fields, and token-level controls are available without adding Redis.
+- **🧠 Elygate Memory**: Optional Postgres-native Agent Memory with user/token isolation, admin governance, and provider extension points for external memory backends.
 - **🔐 Secure Cookie Session**: HttpOnly Cookie-based authentication with server-side session management. Supports multi-device login, server-side logout, and automatic session expiration.
 
 ---
@@ -282,6 +284,7 @@ elygate
 | **Dependencies** | **PostgreSQL Only** | MySQL + **Redis** | 🔋 Zero Redis Setup |
 | **Billing** | O(1) Atomic Batch | Continuous SQL Hits | 💾 No Lock Contention |
 | **Semantic Cache** | Built-in (Vector) | Not Integrated | 🧠 Cost Saving |
+| **Agent Memory** | Optional Postgres-native memory | Not Integrated | 🧠 Stateful Agents |
 | **Authentication** | Cookie Session (HttpOnly) | localStorage Token | 🔐 XSS Protection |
 | **Tech Stack** | Svelte 5 + Tailwind 4 | React / Vue | 💎 Premium UI/UX |
 | **API Compat** | OpenAI Responses/Chat/Completions/Files/Batches + Anthropic + Gemini + Ali + Baidu | OpenAI + Anthropic | 🌐 Multi-Provider Native |
@@ -560,6 +563,22 @@ elygate
 INSERT INTO options (key, value) VALUES ('SemanticCacheThreshold', '0.96')
 ON CONFLICT (key) DO UPDATE SET value = '0.96';
 ```
+
+### 🧠 Agent Memory
+Agent Memory 默认关闭，启用后会按用户/令牌隔离长期记忆，写入通过 pg-boss 异步执行，管理员可在后台查看、软删除、清理过期或永久清空已删除记录。
+
+```sql
+INSERT INTO options (key, value) VALUES
+  ('MemoryEnabled', 'true'),
+  ('MemoryReadDefault', 'false'),
+  ('MemoryWriteDefault', 'false'),
+  ('MemoryMaxInjectedItems', '6'),
+  ('MemoryMinWriteChars', '24'),
+  ('MemoryScope', 'user')
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
+```
+
+单次请求也可以使用 `memory` 字段显式控制：`off`、`read`、`write`、`read_write`。内置 pgvector 表固定使用 1024 维向量，默认选择 bge-m3 兼容 embedding 渠道；显式配置其他维度模型时会降级为纯文本检索。TencentDB Agent Memory、Mem0、Zep、Qdrant 等外部后端保留为未来 provider 插件，不作为默认依赖。
 
 ## 🛡️ License & Acknowledgements
 Deep gratitude to the [New-API] community for their pioneering exploration.

@@ -1,5 +1,6 @@
 import {
     bigint,
+    bytea,
     boolean,
     date,
     decimal,
@@ -378,6 +379,27 @@ export const semanticCache = pgTable('semantic_cache', {
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 
+export const agentMemories = pgTable('agent_memories', {
+    id: text('id').primaryKey(),
+    userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    tokenId: integer('token_id').references(() => tokens.id, { onDelete: 'cascade' }),
+    orgId: integer('org_id').references(() => organizations.id, { onDelete: 'cascade' }),
+    threadId: text('thread_id'),
+    scope: text('scope').notNull().default('user'),
+    kind: text('kind').notNull().default('fact'),
+    content: text('content').notNull(),
+    contentHash: text('content_hash').notNull(),
+    embedding: text('embedding'),
+    confidence: decimal('confidence', { precision: 5, scale: 4 }).notNull().default('1.0000'),
+    sourceTraceId: text('source_trace_id'),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    lastReadAt: timestamp('last_read_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+});
+
 export const apiFiles = pgTable('api_files', {
     id: text('id').primaryKey(),
     userId: integer('user_id').notNull(),
@@ -388,6 +410,7 @@ export const apiFiles = pgTable('api_files', {
     purpose: text('purpose').notNull(),
     status: text('status').default('processed'),
     statusDetails: text('status_details'),
+    content: bytea('content'),
     metadata: jsonb('metadata').$type<Record<string, unknown>>().default({}),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
@@ -603,6 +626,144 @@ export const customOAuthProviders = pgTable('custom_oauth_providers', {
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 });
 
+export const verificationCodes = pgTable('verification_codes', {
+    id: serial('id').primaryKey(),
+    type: text('type').notNull(),
+    target: text('target').notNull(),
+    code: text('code').notNull(),
+    userId: integer('user_id').references(() => users.id, { onDelete: 'cascade' }),
+    ipAddress: text('ip_address'),
+    consumed: boolean('consumed').notNull().default(false),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+});
+
+
+// ─── Assistants / Threads / Vector Stores ─────────────────────────────────
+export const assistants = pgTable('assistants', {
+    id: text('id').primaryKey(),
+    userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    tokenId: integer('token_id'),
+    object: text('object').default('assistant'),
+    name: text('name'),
+    description: text('description'),
+    model: text('model').notNull(),
+    instructions: text('instructions'),
+    tools: jsonb('tools').$type<Record<string, any>[]>().default([]),
+    fileIds: jsonb('file_ids').$type<string[]>().default([]),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().default({}),
+    temperature: decimal('temperature', { precision: 5, scale: 2 }),
+    topP: decimal('top_p', { precision: 5, scale: 4 }),
+    status: text('status').default('active'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+});
+
+export const threads = pgTable('threads', {
+    id: text('id').primaryKey(),
+    userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    tokenId: integer('token_id'),
+    object: text('object').default('thread'),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().default({}),
+    toolResources: jsonb('tool_resources').$type<Record<string, unknown>>().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+});
+
+export const threadMessages = pgTable('thread_messages', {
+    id: text('id').primaryKey(),
+    threadId: text('thread_id').notNull().references(() => threads.id, { onDelete: 'cascade' }),
+    userId: integer('user_id').notNull(),
+    object: text('object').default('thread.message'),
+    role: text('role').notNull().default('user'),
+    content: jsonb('content').$type<Record<string, any>[]>().default([]),
+    assistantId: text('assistant_id'),
+    runId: text('run_id'),
+    attachments: jsonb('attachments').$type<Record<string, any>[]>().default([]),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+});
+
+export const threadRuns = pgTable('thread_runs', {
+    id: text('id').primaryKey(),
+    threadId: text('thread_id').notNull().references(() => threads.id, { onDelete: 'cascade' }),
+    assistantId: text('assistant_id'),
+    userId: integer('user_id').notNull(),
+    object: text('object').default('thread.run'),
+    status: text('status').notNull().default('queued'),
+    model: text('model'),
+    instructions: text('instructions'),
+    tools: jsonb('tools').$type<Record<string, any>[]>().default([]),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().default({}),
+    temperature: decimal('temperature', { precision: 5, scale: 2 }),
+    topP: decimal('top_p', { precision: 5, scale: 4 }),
+    maxPromptTokens: integer('max_prompt_tokens'),
+    maxCompletionTokens: integer('max_completion_tokens'),
+    truncationStrategy: jsonb('truncation_strategy').$type<Record<string, unknown>>(),
+    toolChoice: jsonb('tool_choice'),
+    responseFormat: jsonb('response_format'),
+    requiredAction: jsonb('required_action').$type<Record<string, unknown>>(),
+    lastError: jsonb('last_error').$type<Record<string, unknown>>(),
+    usage: jsonb('usage').$type<Record<string, unknown>>(),
+    startedAt: timestamp('started_at', { withTimezone: true }),
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
+    cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+    failedAt: timestamp('failed_at', { withTimezone: true }),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+});
+
+export const vectorStores = pgTable('vector_stores', {
+    id: text('id').primaryKey(),
+    userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    tokenId: integer('token_id'),
+    object: text('object').default('vector_store'),
+    name: text('name'),
+    fileCounts: jsonb('file_counts').$type<Record<string, number>>().default({ in_progress: 0, completed: 0, failed: 0, cancelled: 0, total: 0 }),
+    status: text('status').default('completed'),
+    usageBytes: bigint('usage_bytes', { mode: 'number' }).notNull().default(0),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().default({}),
+    expiresAfter: jsonb('expires_after').$type<Record<string, unknown>>(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
+    lastActiveAt: timestamp('last_active_at', { withTimezone: true }).defaultNow(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+});
+
+export const vectorStoreFiles = pgTable('vector_store_files', {
+    id: text('id').primaryKey(),
+    vectorStoreId: text('vector_store_id').notNull().references(() => vectorStores.id, { onDelete: 'cascade' }),
+    fileId: text('file_id'),
+    object: text('object').default('vector_store.file'),
+    status: text('status').default('completed'),
+    usageBytes: bigint('usage_bytes', { mode: 'number' }).notNull().default(0),
+    lastError: jsonb('last_error').$type<Record<string, unknown>>(),
+    chunkingStrategy: jsonb('chunking_strategy').$type<Record<string, unknown>>(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+});
+
+export const fineTuningJobs = pgTable('fine_tuning_jobs', {
+    id: text('id').primaryKey(),
+    userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    tokenId: integer('token_id'),
+    object: text('object').default('fine_tuning.job'),
+    model: text('model').notNull(),
+    trainingFileId: text('training_file'),
+    validationFileId: text('validation_file'),
+    hyperparameters: jsonb('hyperparameters').$type<Record<string, unknown>>().default({}),
+    status: text('status').notNull().default('validating_files'),
+    fineTunedModel: text('fine_tuned_model'),
+    organizationId: text('organization_id'),
+    resultFiles: jsonb('result_files').$type<string[]>().default([]),
+    trainedTokens: integer('trained_tokens'),
+    error: jsonb('error').$type<Record<string, unknown>>(),
+    epochs: integer('epochs'),
+    suffix: text('suffix'),
+    integrations: jsonb('integrations').$type<Record<string, unknown>[]>().default([]),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+});
+
 export const loginAttempts = pgTable('login_attempts', {
     id: serial('id').primaryKey(),
     username: text('username').notNull(),
@@ -705,6 +866,7 @@ export const schema = {
     'rate-limits-table': rateLimits,
     'response-cache': responseCache,
     'semantic-cache': semanticCache,
+    'agent-memories': agentMemories,
     'api-files': apiFiles,
     'api-batches': apiBatches,
     'mj-tasks': mjTasks,
@@ -722,6 +884,14 @@ export const schema = {
     'user-aff-rewards': userAffRewards,
     oauthAccounts,
     'custom-oauth-providers': customOAuthProviders,
+    assistants,
+    threads,
+    'thread-messages': threadMessages,
+    'thread-runs': threadRuns,
+    'vector-stores': vectorStores,
+    'vector-store-files': vectorStoreFiles,
+    'fine-tuning-jobs': fineTuningJobs,
+    'verification-codes': verificationCodes,
     loginAttempts,
     'two-factor-login-challenges': twoFactorLoginChallenges,
     teams,

@@ -224,6 +224,9 @@ async function init() {
   const { startTaskWorker } = await import('./services/task-service');
   startTaskWorker();
 
+  const { startBatchExecutor } = await import('./services/batchExecutor');
+  startBatchExecutor();
+
   const refreshMaterializedViews = async () => {
     try {
       await db.execute(drizzleSql`REFRESH MATERIALIZED VIEW mv_system_overview`);
