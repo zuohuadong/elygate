@@ -35,3 +35,4 @@ OPENCODE.md
 tasks.md
 .agents/automations/
 *.bak
+.agents/goal-forge/runs/
