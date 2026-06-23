@@ -1,6 +1,6 @@
 import type { ElysiaCtx } from '../../types';
 import { Elysia } from 'elysia';
-import { adminGuard } from '../../middleware/auth';
+import { authPlugin } from '../../middleware/auth';
 import { memoryCache } from '../../services/cache';
 import { optionCache } from '../../services/optionCache';
 import { channelsRouter } from './channels';
@@ -15,8 +15,6 @@ import { contentRouter } from './content';
 import { userSelfServiceRouter } from './userSelfService';
 import { performanceRouter } from './performance';
 import { vendorsRouter } from './vendors';
-import { enterpriseRouter } from './enterprise';
-import { enterpriseTeamsRouter } from './enterpriseTeams';
 import { dataRouter } from './data';
 import { memoryAdminRouter } from './memory';
 
@@ -33,8 +31,7 @@ export async function refreshAllCaches(): Promise<void> {
  * Admin Router - aggregates all admin sub-routes.
  * Prefix will be applied in the main index.ts.
  */
-export const adminRouter = new Elysia()
-    .use(adminGuard)
+const adminOnlyRouter = new Elysia()
     .guard({
         beforeHandle: ({ user, set }: ElysiaCtx) => {
             if (!user || user.role < 10) {
@@ -52,10 +49,12 @@ export const adminRouter = new Elysia()
     .use(settingsRouter)
     .use(modelsAdminRouter)
     .use(contentRouter)
-    .use(userSelfServiceRouter)
     .use(performanceRouter)
     .use(vendorsRouter)
-    .use(enterpriseRouter)
-    .use(enterpriseTeamsRouter)
     .use(dataRouter)
     .use(memoryAdminRouter);
+
+export const adminRouter = new Elysia()
+    .use(authPlugin)
+    .use(userSelfServiceRouter)
+    .use(adminOnlyRouter);

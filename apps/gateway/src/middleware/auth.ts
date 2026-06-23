@@ -89,7 +89,7 @@ export const authPlugin = new Elysia({ name: 'auth' })
         name: 'jwt',
         secret: config.jwtSecret!
     }))
-    .derive({ as: 'global' }, async ({ request, set, jwt, cookie: { auth_session } }: any) => {
+    .derive({ as: 'scoped' }, async ({ request, set, jwt, cookie: { auth_session } }: any) => {
         let authHeader = request.headers.get('authorization');
 
         // --- Support Anthropic API x-api-key header ---
@@ -445,4 +445,5 @@ export const adminGuard = new Elysia({ name: 'admin-guard' })
             set.status = 403;
             throw new Error('Forbidden: Admin privileges required');
         }
-    });
+    })
+    .as('scoped');

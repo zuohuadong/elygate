@@ -3,12 +3,19 @@
   "version": "0.3.20",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
+    "test:enterprise": "bun test src/enterprise/*.test.ts",
+    "test:postgresx": "bun test src/services/postgresxInfra.test.ts",
+    "smoke:enterprise:db": "bun src/enterprise/dbSmoke.ts",
     "check": "tsc --noEmit -p tsconfig.json",
     "dev": "bun run --watch src/index.ts",
     "start": "NODE_ENV=production bun src/index.ts"
   },
   "dependencies": {
+    "@elygate/enterprise-adapter": "workspace:*",
+    "@elygate/enterprise-authz": "workspace:*",
+    "@elygate/enterprise-contracts": "workspace:*",
     "@elygate/pg-listen": "workspace:*",
+    "@postgresx/noredis": "^0.5.2",
     "@elysiajs/cors": "^1.4.2",
     "@elysiajs/jwt": "^1.4.2",
     "@elysiajs/static": "^1.4.10",

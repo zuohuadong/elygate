@@ -5,11 +5,9 @@ import { memoryCache } from '../services/cache';
 
 export const embeddingsRouter = new Elysia()
     .post('/embeddings', async (ctx) => handleEmbeddings(ctx, '/v1/embeddings'))
-    .post('/engines/:model/embeddings', async (ctx) => handleEmbeddings(ctx, '/v1/embeddings'))
-    // Gemini embedding
-    .post('/models/:model:embedContent', async (ctx) => handleEmbeddings(ctx, ':embedContent'));
+    .post('/engines/:model/embeddings', async (ctx) => handleEmbeddings(ctx, '/v1/embeddings'));
 
-async function handleEmbeddings({ body, headers, params, request, query }: any, pathType: string) {
+export async function handleEmbeddings({ body, params, request, query }: any, pathType: string) {
     const apiKey = query?.access_token || request.headers.get('Authorization')?.replace('Bearer ', '') || request.headers.get('x-dashscope-api-key');
     
     if (!apiKey) return new Response(JSON.stringify({ error: 'Missing API key' }), { status: 401 });
@@ -24,7 +22,8 @@ async function handleEmbeddings({ body, headers, params, request, query }: any, 
     const internalReq = converter.convertRequest(body);
     
     // Model resolution
-    const model = params?.model || internalReq.model || body.model;
+    const modelFromGeminiAction = typeof params?.action === 'string' ? params.action.split(':')[0] : undefined;
+    const model = params?.model || modelFromGeminiAction || internalReq.model || body.model;
 
     const ip = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown';
     const ua = request.headers.get('user-agent') || 'unknown';

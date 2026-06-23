@@ -21,6 +21,8 @@ import { notifier } from './notifier';
 import { WebSearchPlugin } from './plugins/search';
 import { lookupResponseCache, storeResponseCache } from './responseCache';
 import { lookupSemanticCache, storeSemanticCache } from './semanticCache';
+import { enforceRuntimeGovernanceGuard, recordRuntimeGovernanceUsage } from './runtimeGovernance';
+import type { RuntimeGovernanceSession } from './runtimeGovernance';
 
 export interface DispatchOptions {
     model: string;
@@ -99,6 +101,9 @@ export async function dispatch(options: DispatchOptions) {
         let model = options.model;
         const isStream = options.stream || body.stream || false;
         const isFormData = body instanceof FormData || (body && typeof body === 'object' && !Array.isArray(body) && Object.values(body).some(v => v instanceof File || v instanceof Blob));
+        const autoGroups: string[] = optionCache.get('AutoGroups', []);
+        let effectiveGroup = user.group;
+        const tokenGroup = token.tokenGroup;
 
         // 0. Check Package Bypass (Contractual Exemption)
         let isPackageFree = false;
@@ -125,6 +130,24 @@ export async function dispatch(options: DispatchOptions) {
                 }
             }
         }
+
+        // 0.56 Enterprise Runtime Guard (optional data-plane governance)
+        const guardGroup = tokenGroup && tokenGroup !== 'auto' ? tokenGroup : user.group;
+        const guardMaxTokens = estimateMaxTokens(body, endpointType);
+        const runtimeGovernanceSession = await enforceRuntimeGovernanceGuard({
+            model,
+            endpointType,
+            user,
+            token,
+            userGroup: guardGroup,
+            requestedQuota: calculateCost(model, guardGroup, 0, guardMaxTokens),
+            ip: options.ip,
+            ua: options.ua,
+            externalTaskId,
+            externalUserId,
+            externalWorkspaceId,
+            externalFeatureType,
+        });
         
         // 0.57 Idempotency Check (The "No Double Dip" Enforcer)
         const effectiveIdempotencyKey = idempotencyKey || body.idempotency_key || (body.metadata?.idempotency_key);
@@ -311,10 +334,6 @@ export async function dispatch(options: DispatchOptions) {
         }
 
         // --- Effective Group Selection (token_group > user.group) ---
-        const autoGroups: string[] = optionCache.get('AutoGroups', []);
-        let effectiveGroup = user.group;
-        const tokenGroup = token.tokenGroup;
-
         if (tokenGroup && tokenGroup !== '' && tokenGroup !== user.group) {
             if (tokenGroup === 'auto') {
                 // Auto: pick the first group that has channels for this model
@@ -684,7 +703,7 @@ export async function dispatch(options: DispatchOptions) {
 
                 if (isStream && response.body) {
                     const [clientStream, billingStream] = response.body.tee();
-                    handleStreamBilling(billingStream, body, user, token, channelConfig, model, preDeducted, lockId, isPackageFree, packageLockId, response.status, traceId, forwardBody, effectiveIdempotencyKey, externalTaskId, externalUserId, externalWorkspaceId, externalFeatureType, effectiveGroup);
+                    handleStreamBilling(billingStream, body, user, token, channelConfig, model, preDeducted, lockId, isPackageFree, packageLockId, response.status, traceId, forwardBody, effectiveIdempotencyKey, externalTaskId, externalUserId, externalWorkspaceId, externalFeatureType, effectiveGroup, runtimeGovernanceSession);
 
                     // Create a TransformStream to clean model internal tokens from stream
                     const cleanStream = new TransformStream({
@@ -754,6 +773,7 @@ export async function dispatch(options: DispatchOptions) {
                         modelName: model,
                         promptTokens,
                         completionTokens,
+                        cachedTokens: cachedTokensFromUsage,
                         userGroup: effectiveGroup,
                         isStream: false,
                         isPackageFree,
@@ -766,6 +786,16 @@ export async function dispatch(options: DispatchOptions) {
                         externalWorkspaceId,
                         externalFeatureType
                     });
+                    await recordRuntimeGovernanceUsage(runtimeGovernanceSession, {
+                        actualQuota: actualCost,
+                        promptTokens,
+                        completionTokens,
+                        cachedTokens: cachedTokensFromUsage,
+                        statusCode: response.status,
+                        channelId: channelConfig.id,
+                        traceId,
+                        isStream: false,
+                    }).catch((e: unknown) => log.warn('[RuntimeGovernance] Usage record failed:', getErrorMessage(e)));
 
                     // Save idempotency key
                     if (effectiveIdempotencyKey) {
@@ -922,6 +952,7 @@ export async function dispatch(options: DispatchOptions) {
                         modelName: model,
                         promptTokens,
                         completionTokens,
+                        cachedTokens: cachedTokensFromUsage2,
                         userGroup: effectiveGroup,
                         isStream: false,
                         isPackageFree,
@@ -934,6 +965,16 @@ export async function dispatch(options: DispatchOptions) {
                         externalWorkspaceId,
                         externalFeatureType
                     });
+                    await recordRuntimeGovernanceUsage(runtimeGovernanceSession, {
+                        actualQuota: actualCost,
+                        promptTokens,
+                        completionTokens,
+                        cachedTokens: cachedTokensFromUsage2,
+                        statusCode: response.status,
+                        channelId: channelConfig.id,
+                        traceId,
+                        isStream: false,
+                    }).catch((e: unknown) => log.warn('[RuntimeGovernance] Usage record failed:', getErrorMessage(e)));
 
                     // Save idempotency key
                     if (effectiveIdempotencyKey) {
@@ -997,6 +1038,15 @@ export async function dispatch(options: DispatchOptions) {
                         externalWorkspaceId,
                         externalFeatureType
                     });
+                    await recordRuntimeGovernanceUsage(runtimeGovernanceSession, {
+                        actualQuota: actualCost,
+                        promptTokens,
+                        completionTokens: 0,
+                        statusCode: response.status,
+                        channelId: channelConfig.id,
+                        traceId,
+                        isStream: false,
+                    }).catch((e: unknown) => log.warn('[RuntimeGovernance] Usage record failed:', getErrorMessage(e)));
 
                     const currentActive = keyConcurrencyMap.get(lockId);
                     if (currentActive) keyConcurrencyMap.set(lockId, Math.max(0, currentActive - 1));
@@ -1152,7 +1202,8 @@ function handleStreamBilling(
         externalUserId?: string,
         externalWorkspaceId?: string,
         externalFeatureType?: string,
-        userGroup?: string
+        userGroup?: string,
+        runtimeGovernanceSession?: RuntimeGovernanceSession | null
     ) {
         (async () => {
             try {
@@ -1235,6 +1286,16 @@ function handleStreamBilling(
                     externalWorkspaceId,
                     externalFeatureType
                 });
+                await recordRuntimeGovernanceUsage(runtimeGovernanceSession, {
+                    actualQuota: actualCost,
+                    promptTokens: finalPromptTokens,
+                    completionTokens: finalCompletionTokens,
+                    cachedTokens: finalCachedTokens,
+                    statusCode,
+                    channelId: channelConfig.id,
+                    traceId,
+                    isStream: true,
+                }).catch((e: unknown) => log.warn('[RuntimeGovernance] Usage record failed:', getErrorMessage(e)));
 
                 // Save idempotency key for stream
                 if (idempotencyKey) {

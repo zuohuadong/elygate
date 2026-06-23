@@ -152,7 +152,7 @@ export const dataRouter = new Elysia()
         const stats: Record<string, number> = {};
         for (const table of tables) {
             try {
-                const [row] = await db.execute(sql`SELECT count(*) as cnt FROM ${sql.raw(table)}`);
+                const [row] = await sql.unsafe(`SELECT count(*)::int as cnt FROM "${table}"`);
                 stats[table] = Number((row as Record<string, any>)?.cnt || 0);
             } catch {
                 stats[table] = -1;

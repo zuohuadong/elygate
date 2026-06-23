@@ -34,6 +34,20 @@ graph TD
     DB --> Stats[Real-time Stats Engine]
 ```
 
+### 🧩 Three-Layer Product Model
+
+Elygate is organized as a three-layer monorepo product:
+
+- **Elygate Basic Gateway**: OpenAI-compatible proxy, provider adapters, routing, rate limits, billing, logs, cache, and Agent Memory.
+- **Elygate Panel**: general-purpose management UI for channels, models, API keys, usage, logs, and system settings. It remains usable for single-node, private, and lightweight team deployments.
+- **Elygate Enterprise**: SupaCloud + SupAuth + svadmin powered enterprise layer for IAM, gateway app lifecycle, tenant isolation, enterprise policy, audit, and control-plane operations.
+
+Enterprise control-plane APIs live under `/api/enterprise/*`. Gateway `sk-*` keys remain data-plane credentials for `/v1`; SupAuth JWT/service tokens are required for enterprise control-plane APIs. In enterprise mode, the data plane can install an optional runtime governance hook that reads gateway instance, policy, and budget projections before cache/upstream dispatch, lazily rolls over due budget periods, then records successful request quota back into the matched enterprise budget projections. The basic dispatcher only depends on a neutral hook interface. The enterprise console is built as a separate app and is served from `/enterprise/` in production builds.
+
+Initial enterprise resources include SupaCloud install/uninstall lifecycle callbacks, gateway instance projections, provider channels, model routes, gateway API keys, request logs, Agent Memory, identity policies, policy evaluations, usage attribution, budgets, budget evaluations, and audit events. The enterprise console can update instance status, create identity policies, evaluate enterprise policies, create/update budgets, evaluate budget enforcement, inspect gateway resources, review usage attribution, and inspect audit trails without coupling `apps/admin` to SupaCloud/SupAuth.
+
+Architecture decisions for the three-layer boundary, enterprise resource projection semantics, and the `@postgresx/noredis` pilot gate are tracked in `docs/ARCHITECTURE_DECISIONS.md`.
+
 ---
 
 ### 📖 API Usage Guide
@@ -254,10 +268,15 @@ See [Performance Optimization Guide](./PERFORMANCE_OPTIMIZATION.md) for details.
 ```text
 elygate
 ├── apps
-│   ├── gateway    # Gateway engine (Elysia.js, billing, auth)
-│   └── web        # Admin Panel (Svelte 5 + Tailwind 4)
+│   ├── gateway              # Basic gateway + optional enterprise route composition
+│   ├── admin                # Elygate Panel (general management UI)
+│   ├── portal               # End-user portal
+│   └── enterprise-console   # Elygate Enterprise console
 ├── packages
-│   └── db         # Database schema, init SQL and types
+│   ├── db                   # Database schema, init SQL and types
+│   ├── enterprise-contracts # Stable claims, scopes, events, manifest
+│   ├── enterprise-authz     # SupAuth JWT/scope verification helpers
+│   └── enterprise-adapter   # SupaCloud install/event projection helpers
 ├── Dockerfile.gateway
 ├── Dockerfile.web
 ├── Dockerfile.postgres
@@ -489,12 +508,38 @@ bun run dev
 
 这将启动：
 - **网关 API** - 端口 3000（支持热重载）
-- **Web 管理后台** - 端口 5173（支持热重载）
+- **Elygate Panel** - 端口 5173（支持热重载）
+- **Elygate Enterprise Console** - 端口 5175（支持热重载）
 
 #### 数据库准备
 1. 确保已安装 PostgreSQL 15+
 2. 执行 `packages/db/src/init.sql` 初始化表结构
 3. 在 `.env` 中正确配置 `DATABASE_URL`
+
+#### 企业层环境变量
+
+```bash
+ELYGATE_LAYER=enterprise
+ELYGATE_APP_INSTANCE_ID=agi_xxx
+ELYGATE_TENANT_ID=tenant_xxx
+ELYGATE_ORG_ID=org_xxx
+ELYGATE_PUBLIC_BASE_URL=https://gateway.example.com
+ELYGATE_ADMIN_BASE_URL=https://gateway.example.com/enterprise/
+SUPAUTH_ISSUER_URL=https://auth.example.com
+SUPAUTH_JWKS_URL=https://auth.example.com/.well-known/jwks.json
+SUPAUTH_AUDIENCE=http://localhost:3000
+```
+
+生产环境必须配置 `SUPAUTH_JWKS_URL`。仅在非生产环境且 `ENTERPRISE_AUTH_MODE` 不是 `strict` 时，Elygate 才允许使用包含平台 claims 的未签名开发 JWT。
+企业层会通过 migration 创建 `enterprise_gateway_instances`、`enterprise_identity_policies`、`enterprise_budgets`、`enterprise_audit_events` 四张投影表，用于承接 SupaCloud App 生命周期、SupAuth 授权上下文、预算策略和审计事件。
+
+可用真实 Postgres 验证企业迁移与 CRUD：
+
+```bash
+bun run smoke:enterprise:db
+```
+
+该命令会从项目根 `.env` 读取 `DATABASE_URL`，在 gateway 的企业组合层内执行 migration、实例安装投影、实例状态更新、策略创建、预算创建、到期预算周期重置、平台事件投影、审计查询和过滤导出。默认会清理 smoke 数据；如需保留可设置 `KEEP_ENTERPRISE_SMOKE_DATA=1`。
 
 ---
 
@@ -519,15 +564,41 @@ Express (JS)   █                                   113,117    (慢 21 倍)
 ```text
 elygate
 ├── apps
-│   ├── gateway    # 网关核心引擎 (Elysia.js, 计费, 鉴权)
-│   └── web        # 管理后台 (Svelte 5 + Tailwind 4)
+│   ├── gateway              # 基础网关 + 可选企业路由组合层
+│   ├── admin                # Elygate Panel 通用管理面板
+│   ├── portal               # 用户门户
+│   └── enterprise-console   # Elygate Enterprise 企业控制台
 ├── packages
-│   └── db         # 数据库 Schema, 初始化 SQL 及类型定义
+│   ├── db                   # 数据库 Schema、初始化 SQL 及类型定义
+│   ├── enterprise-contracts # 稳定 claims、scope、事件、manifest
+│   ├── enterprise-authz     # SupAuth JWT/scope 验证工具
+│   └── enterprise-adapter   # SupaCloud 安装和事件投影工具
 ├── Dockerfile.gateway
 ├── Dockerfile.web
 ├── Dockerfile.postgres
 └── docker-compose.yml
 ```
+
+### 🧩 三层产品模型
+
+Elygate 保持三层 monorepo 隔离：
+
+- **Elygate Basic Gateway**：OpenAI-compatible proxy、provider adapter、路由、限流、计量、日志、缓存、Agent Memory。
+- **Elygate Panel**：通用管理面板，负责渠道、模型、API Key、用量、日志、系统设置，可用于单机、私有化和轻量团队。
+- **Elygate Enterprise**：基于 SupaCloud + SupAuth + svadmin，负责企业 IAM、App 生命周期、租户隔离、企业策略、审计和控制面操作。
+
+企业控制面 API 位于 `/api/enterprise/*`；`sk-*` 仍是 `/v1` 数据面请求凭证，不允许访问企业控制面。企业模式下，数据面会通过基础层的 runtime governance hook 接入企业守卫，在缓存和上游转发前读取实例、策略和预算投影执行拦截，懒执行到期预算周期重置，并在成功计费后把实际 quota cost 回写到命中的企业预算投影；基础 dispatcher 只依赖中立 hook，不直接依赖 SupaCloud/SupAuth 企业包。企业控制台是独立应用，生产构建后由 gateway 从 `/enterprise/` 提供静态页面。
+
+首批企业控制面资源：
+
+- `/api/enterprise/install`、`/api/enterprise/uninstall`、`/api/enterprise/events`：SupaCloud App 生命周期和平台事件投影。
+- `/api/enterprise/gateway-instances`：SupaCloud 安装投影、实例状态、域名与 entitlements 版本。
+- `/api/enterprise/provider-channels`、`/api/enterprise/model-routes`、`/api/enterprise/gateway-api-keys`、`/api/enterprise/request-logs`、`/api/enterprise/agent-memories`：企业治理视角下的网关资源只读视图。
+- `/api/enterprise/identity-and-policy`、`/api/enterprise/identity-policies` 与 `/api/enterprise/policy-evaluations`：SupAuth claims、角色、scope、企业策略和 deny-overrides 策略决策。
+- `/api/enterprise/usage-and-budget`、`/api/enterprise/usage-attribution`、`/api/enterprise/budgets` 与 `/api/enterprise/budget-evaluations`：identity-aware budget、7 日用量归因、预算执行状态和预算执行决策。
+- `/api/enterprise/audit-events` 与 `/api/enterprise/audit-events/export`：实例、平台事件、策略和预算变更审计，支持按 actor/action/resource/app instance/时间窗口过滤并导出 CSV。
+
+企业控制台支持实例状态更新、策略创建、策略评估、预算创建/启停、预算评估、网关资源治理查看、用量归因查看和审计查看。通用 `apps/admin` 不再承载企业 IAM、SupaCloud 生命周期或租户隔离页面。
 
 ---
 

@@ -4,6 +4,7 @@ import { dispatch } from '../services/dispatcher';
 import { getConverter } from '../services/converters';
 import { memoryCache } from '../services/cache';
 import type { TokenRecord,  UserRecord  } from '../types';
+import { handleEmbeddings } from './embeddings';
 
 /**
  * Gemini API Compatible Endpoint
@@ -15,17 +16,19 @@ import type { TokenRecord,  UserRecord  } from '../types';
  * so we use a wildcard approach with custom parsing.
  */
 
-const geminiHandler = async ({ request, params }: ElysiaCtx) => {
+const geminiHandler = async (ctx: ElysiaCtx) => {
+        const { request, params } = ctx;
         const url = new URL(request.url);
-        const actionParam = params.action as string;
-        
+        const actionParam = params.action as string | undefined;
         if (!actionParam) return;
 
-        // Check if this is a Gemini generateContent request
-        // Pattern: {model}:generateContent or {model}:streamGenerateContent
-        const match = actionParam.match(/^([^:]+):(generateContent|streamGenerateContent)$/);
-        if (!match) return; // Not a Gemini generateContent request, fall through
-        
+        const match = actionParam.match(/^([^:]+):(generateContent|streamGenerateContent|embedContent)$/);
+        if (!match) return;
+
+        if (match[2] === 'embedContent') {
+            return handleEmbeddings(ctx, ':embedContent');
+        }
+
         const model = match[1];
         const isStream = match[2] === 'streamGenerateContent';
         

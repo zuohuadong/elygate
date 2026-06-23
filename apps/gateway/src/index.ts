@@ -9,8 +9,14 @@ import { Elysia } from "elysia";
 import { cors } from "@elysiajs/cors";
 import { swagger } from "@elysiajs/swagger";
 import { jwt } from "@elysiajs/jwt";
-import { join } from "path";
+import { workspacePath } from "./utils/paths";
 import "./services/health";
+
+async function installEnterpriseRuntimeGuardIfEnabled(enterpriseRuntimeConfig: { readonly enabled: boolean }) {
+  if (!enterpriseRuntimeConfig.enabled) return;
+  const { installEnterpriseRuntimeGuard } = await import('./enterprise/runtimeGuard');
+  installEnterpriseRuntimeGuard();
+}
 
 async function init() {
   await initEnv();
@@ -57,6 +63,10 @@ async function init() {
   const { dashboardBillingRouter } = await import('./routes/dashboard-billing');
   const { newApiCompatAdminRouter, newApiCompatSelfRouter } = await import('./routes/admin/newApiCompat');
   const { newApiUserAdminRouter, newApiUserSelfRouter, newApiUserPublicRouter } = await import('./routes/admin/newApiUserCompat');
+  const { enterpriseRouter } = await import('./enterprise/router');
+  const { enterpriseRuntimeConfig } = await import('./enterprise/config');
+
+  await installEnterpriseRuntimeGuardIfEnabled(enterpriseRuntimeConfig);
 
   const app = new Elysia()
     .use(cors({
@@ -106,6 +116,7 @@ async function init() {
         return { success: true, data: info };
       })
       .group("/auth", (app) => app.use(authRouter))
+      .group("/enterprise", (app) => app.use(enterpriseRouter))
       .use(paymentRouter)
       .group("/admin", (app) => app.use(adminRouter))
       .use(newApiUserPublicRouter)
@@ -156,7 +167,7 @@ async function init() {
     .get("*", async ({ request, set }) => {
       const url = new URL(request.url);
       if (!url.pathname.startsWith('/api') && !url.pathname.startsWith('/v1')) {
-        const fallback = join(process.cwd(), 'apps/portal/build/index.html');
+        const fallback = workspacePath('apps/portal/build/index.html');
         const file = Bun.file(fallback);
         if (await file.exists()) {
           return file;
@@ -166,53 +177,85 @@ async function init() {
       return { error: 'Not Found' };
     });
 
+  await waitForDatabaseReady(() => db.execute(drizzleSql`SELECT 1`));
+
+  memoryCache.refresh().catch((e: unknown) => log.error("[Async]", e));
+
+  await syncAdminPassword(async (passwordHash) => {
+    const [updated] = await db.update(users)
+      .set({ passwordHash, updatedAt: new Date() })
+      .where(drizzleOrm.and(drizzleOrm.eq(users.username, 'admin'), drizzleOrm.eq(users.role, 10)))
+      .returning({ id: users.id });
+
+    if (updated) return 'updated';
+
+    await db.insert(users).values({
+      username: 'admin',
+      passwordHash,
+      role: 10,
+      quota: 100000000,
+    }).onConflictDoUpdate({
+      target: users.username,
+      set: { passwordHash, updatedAt: new Date() },
+    });
+    return 'created';
+  });
+
+  await startBackgroundServices({
+    startCacheTasks: () => {
+      memoryCache.startCleanupTask();
+      memoryCache.startDiscoverySyncTask();
+    },
+    refreshMaterializedViews: async () => {
+      await db.execute(drizzleSql`REFRESH MATERIALIZED VIEW mv_system_overview`);
+      await db.execute(drizzleSql`REFRESH MATERIALIZED VIEW mv_model_usage_stats`);
+    },
+  });
+
+  app.listen({
+    port: config.port,
+    hostname: "0.0.0.0"
+  });
+  log.info(`🦊 AI API Gateway is running at ${app.server?.hostname}:${app.server?.port}`);
+}
+
+async function waitForDatabaseReady(ping: () => Promise<unknown>) {
   log.info("⏳ Waiting for database readiness...");
   let retries = 0;
   const maxRetries = 15;
   while (retries < maxRetries) {
     try {
-      await db.execute(drizzleSql`SELECT 1`);
+      await ping();
       log.info("✅ Database is ready.");
-      break;
+      return;
     } catch (err: unknown) {
       retries++;
       log.info(`[DB] Retry ${retries}/${maxRetries}: ${getErrorMessage(err)}`);
       await new Promise(resolve => setTimeout(resolve, 2000));
     }
   }
+}
 
-  memoryCache.refresh().catch((e: unknown) => log.error("[Async]", e));
-
+async function syncAdminPassword(sync: (passwordHash: string) => Promise<'updated' | 'created'>) {
   const adminPassword = config.adminPassword;
-  if (adminPassword) {
-    try {
-      const passwordHash = await Bun.password.hash(adminPassword);
-      const [updated] = await db.update(users)
-        .set({ passwordHash, updatedAt: new Date() })
-        .where(drizzleOrm.and(drizzleOrm.eq(users.username, 'admin'), drizzleOrm.eq(users.role, 10)))
-        .returning({ id: users.id });
+  if (!adminPassword) return;
 
-      if (updated) {
-        log.info("💎 Admin password synchronized from environment.");
-      } else {
-        await db.insert(users).values({
-          username: 'admin',
-          passwordHash,
-          role: 10,
-          quota: 100000000,
-        }).onConflictDoUpdate({
-          target: users.username,
-          set: { passwordHash, updatedAt: new Date() },
-        });
-        log.info("💎 Admin user initialized/synced from environment.");
-      }
-    } catch (e: unknown) {
-      log.error("❌ Failed to sync admin password:", getErrorMessage(e));
-    }
+  try {
+    const passwordHash = await Bun.password.hash(adminPassword);
+    const result = await sync(passwordHash);
+    log.info(result === 'updated'
+      ? "💎 Admin password synchronized from environment."
+      : "💎 Admin user initialized/synced from environment.");
+  } catch (e: unknown) {
+    log.error("❌ Failed to sync admin password:", getErrorMessage(e));
   }
-  
-  memoryCache.startCleanupTask();
-  memoryCache.startDiscoverySyncTask();
+}
+
+async function startBackgroundServices(options: {
+  readonly startCacheTasks: () => void;
+  readonly refreshMaterializedViews: () => Promise<void>;
+}) {
+  options.startCacheTasks();
 
   try {
     const { startJobQueueWorkers } = await import('./services/jobQueue');
@@ -229,22 +272,15 @@ async function init() {
 
   const refreshMaterializedViews = async () => {
     try {
-      await db.execute(drizzleSql`REFRESH MATERIALIZED VIEW mv_system_overview`);
-      await db.execute(drizzleSql`REFRESH MATERIALIZED VIEW mv_model_usage_stats`);
+      await options.refreshMaterializedViews();
       log.info('[MV] Materialized views refreshed');
     } catch (e: unknown) {
       log.error('[MV] Failed to refresh materialized views:', getErrorMessage(e));
     }
   };
-  
+
   refreshMaterializedViews();
   setInterval(refreshMaterializedViews, 5 * 60 * 1000);
-
-  app.listen({
-    port: 3000,
-    hostname: "0.0.0.0"
-  });
-  log.info(`🦊 AI API Gateway is running at ${app.server?.hostname}:${app.server?.port}`);
 }
 
 init();

@@ -15,3 +15,7 @@ bun run dev
 - **Data**: Simple REST DataProvider
 - **Auth**: JWT
 - **State**: TanStack Query v6
+
+## Boundary
+
+`apps/admin` is the Elygate Panel for general gateway management. Enterprise IAM, SupaCloud lifecycle, tenant isolation, and audit surfaces live in `apps/enterprise-console` and `/api/enterprise/*`.

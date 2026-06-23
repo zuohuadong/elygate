@@ -305,16 +305,6 @@ export const resources: ResourceDefinition[] = [
     fields: [],
   },
   {
-    name: 'enterprise-console',
-    label: '企业内控后台',
-    icon: 'shield',
-    canCreate: false,
-    canEdit: false,
-    canDelete: false,
-    canShow: false,
-    fields: [],
-  },
-  {
     name: 'vendors',
     label: '供应商',
     icon: 'building',

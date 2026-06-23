@@ -827,6 +827,81 @@ export const teamMembers = pgTable('team_members', {
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 
+// ─── Elygate Enterprise Control Plane Projections ─────────────
+
+export const enterpriseGatewayInstances = pgTable('enterprise_gateway_instances', {
+    id: serial('id').primaryKey(),
+    tenantId: text('tenant_id').notNull(),
+    orgId: text('org_id').notNull(),
+    appId: text('app_id').notNull(),
+    appInstanceId: text('app_instance_id').notNull(),
+    projectId: text('project_id'),
+    status: varchar('status', { length: 30 }).notNull().default('provisioning'),
+    publicBaseUrl: text('public_base_url'),
+    adminBaseUrl: text('admin_base_url'),
+    databaseUrlSecretName: text('database_url_secret_name'),
+    supauthIssuerUrl: text('supauth_issuer_url'),
+    supauthJwksUrl: text('supauth_jwks_url'),
+    supauthAudience: text('supauth_audience'),
+    entitlementsVersion: integer('entitlements_version').notNull().default(0),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+});
+
+export const enterpriseIdentityPolicies = pgTable('enterprise_identity_policies', {
+    id: serial('id').primaryKey(),
+    tenantId: text('tenant_id').notNull(),
+    orgId: text('org_id').notNull(),
+    appInstanceId: text('app_instance_id').notNull(),
+    name: text('name').notNull(),
+    targetKind: varchar('target_kind', { length: 40 }).notNull().default('org'),
+    targetId: text('target_id'),
+    effect: varchar('effect', { length: 20 }).notNull().default('allow'),
+    rules: jsonb('rules').$type<Record<string, unknown>>().notNull().default({}),
+    status: varchar('status', { length: 30 }).notNull().default('active'),
+    createdBy: text('created_by'),
+    updatedBy: text('updated_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+});
+
+export const enterpriseBudgets = pgTable('enterprise_budgets', {
+    id: serial('id').primaryKey(),
+    tenantId: text('tenant_id').notNull(),
+    orgId: text('org_id').notNull(),
+    appInstanceId: text('app_instance_id').notNull(),
+    subjectKind: varchar('subject_kind', { length: 40 }).notNull().default('org'),
+    subjectId: text('subject_id'),
+    period: varchar('period', { length: 30 }).notNull().default('monthly'),
+    limitQuota: bigint('limit_quota', { mode: 'number' }).notNull().default(0),
+    usedQuota: bigint('used_quota', { mode: 'number' }).notNull().default(0),
+    alertThresholdPct: integer('alert_threshold_pct').notNull().default(80),
+    resetAt: timestamp('reset_at', { withTimezone: true }),
+    status: varchar('status', { length: 30 }).notNull().default('active'),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+    createdBy: text('created_by'),
+    updatedBy: text('updated_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+});
+
+export const enterpriseAuditEvents = pgTable('enterprise_audit_events', {
+    id: serial('id').primaryKey(),
+    tenantId: text('tenant_id').notNull(),
+    orgId: text('org_id').notNull(),
+    appInstanceId: text('app_instance_id').notNull(),
+    actorType: varchar('actor_type', { length: 40 }).notNull().default('user'),
+    actorId: text('actor_id'),
+    action: text('action').notNull(),
+    resource: text('resource').notNull(),
+    resourceId: text('resource_id'),
+    details: jsonb('details').$type<Record<string, unknown>>().notNull().default({}),
+    ipAddress: text('ip_address'),
+    userAgent: text('user_agent'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+});
+
 // ─── Soft-Delete Recovery (recycle bin) ──────────────────────
 
 export const deletedRecords = pgTable('deleted_records', {
@@ -897,6 +972,10 @@ export const schema = {
     teams,
     projects,
     'team-members': teamMembers,
+    'enterprise-gateway-instances': enterpriseGatewayInstances,
+    'enterprise-identity-policies': enterpriseIdentityPolicies,
+    'enterprise-budgets': enterpriseBudgets,
+    'enterprise-audit-events': enterpriseAuditEvents,
     'deleted-records': deletedRecords,
 };
 

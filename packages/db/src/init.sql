@@ -152,6 +152,7 @@ CREATE TABLE IF NOT EXISTS channels (
     header_override JSONB NOT NULL DEFAULT '{}'::jsonb,
     remark TEXT,
     channel_info JSONB NOT NULL DEFAULT '{}'::jsonb,
+    test_errors INTEGER NOT NULL DEFAULT 0,
     test_at TIMESTAMPTZ,
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     created_at TIMESTAMPTZ DEFAULT NOW()
@@ -219,6 +220,7 @@ ALTER TABLE channels ADD COLUMN IF NOT EXISTS param_override JSONB NOT NULL DEFA
 ALTER TABLE channels ADD COLUMN IF NOT EXISTS header_override JSONB NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE channels ADD COLUMN IF NOT EXISTS remark TEXT;
 ALTER TABLE channels ADD COLUMN IF NOT EXISTS channel_info JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE channels ADD COLUMN IF NOT EXISTS test_errors INTEGER NOT NULL DEFAULT 0;
 
 -- ============================================================
 -- Packages & Subscriptions
@@ -338,7 +340,7 @@ CREATE TABLE IF NOT EXISTS budget_alerts (
 -- Create indexes for budget alerts
 CREATE INDEX IF NOT EXISTS idx_budget_alerts_user_id ON budget_alerts(user_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_budget_alerts_level ON budget_alerts(alert_level, created_at);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_budget_alerts_unique ON budget_alerts(user_id, alert_level, DATE(created_at));
+CREATE UNIQUE INDEX IF NOT EXISTS idx_budget_alerts_unique ON budget_alerts(user_id, alert_level, ((created_at AT TIME ZONE 'UTC')::date));
 
 CREATE TABLE IF NOT EXISTS org_budget_alerts (
     id SERIAL PRIMARY KEY,
@@ -351,7 +353,7 @@ CREATE TABLE IF NOT EXISTS org_budget_alerts (
 );
 
 CREATE INDEX IF NOT EXISTS idx_org_budget_alerts_org_id ON org_budget_alerts(org_id, created_at);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_org_budget_alerts_unique ON org_budget_alerts(org_id, alert_level, DATE(created_at));
+CREATE UNIQUE INDEX IF NOT EXISTS idx_org_budget_alerts_unique ON org_budget_alerts(org_id, alert_level, ((created_at AT TIME ZONE 'UTC')::date));
 
 -- Audit logs table
 CREATE TABLE IF NOT EXISTS audit_logs (
@@ -1169,6 +1171,88 @@ CREATE TABLE IF NOT EXISTS team_members (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_team_members_unique ON team_members(team_id, user_id);
+
+-- ============================================================
+-- Elygate Enterprise Control Plane Projections
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS enterprise_gateway_instances (
+    id SERIAL PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    org_id TEXT NOT NULL,
+    app_id TEXT NOT NULL,
+    app_instance_id TEXT NOT NULL,
+    project_id TEXT,
+    status VARCHAR(30) NOT NULL DEFAULT 'provisioning',
+    public_base_url TEXT,
+    admin_base_url TEXT,
+    database_url_secret_name TEXT,
+    supauth_issuer_url TEXT,
+    supauth_jwks_url TEXT,
+    supauth_audience TEXT,
+    entitlements_version INTEGER NOT NULL DEFAULT 0,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_enterprise_gateway_instances_unique ON enterprise_gateway_instances(tenant_id, org_id, app_instance_id);
+CREATE INDEX IF NOT EXISTS idx_enterprise_gateway_instances_scope ON enterprise_gateway_instances(tenant_id, org_id, status);
+
+CREATE TABLE IF NOT EXISTS enterprise_identity_policies (
+    id SERIAL PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    org_id TEXT NOT NULL,
+    app_instance_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    target_kind VARCHAR(40) NOT NULL DEFAULT 'org',
+    target_id TEXT,
+    effect VARCHAR(20) NOT NULL DEFAULT 'allow',
+    rules JSONB NOT NULL DEFAULT '{}'::jsonb,
+    status VARCHAR(30) NOT NULL DEFAULT 'active',
+    created_by TEXT,
+    updated_by TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_enterprise_identity_policies_scope ON enterprise_identity_policies(tenant_id, org_id, app_instance_id, status);
+
+CREATE TABLE IF NOT EXISTS enterprise_budgets (
+    id SERIAL PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    org_id TEXT NOT NULL,
+    app_instance_id TEXT NOT NULL,
+    subject_kind VARCHAR(40) NOT NULL DEFAULT 'org',
+    subject_id TEXT,
+    period VARCHAR(30) NOT NULL DEFAULT 'monthly',
+    limit_quota BIGINT NOT NULL DEFAULT 0,
+    used_quota BIGINT NOT NULL DEFAULT 0,
+    alert_threshold_pct INTEGER NOT NULL DEFAULT 80,
+    reset_at TIMESTAMPTZ,
+    status VARCHAR(30) NOT NULL DEFAULT 'active',
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_by TEXT,
+    updated_by TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_enterprise_budgets_scope ON enterprise_budgets(tenant_id, org_id, app_instance_id, status);
+
+CREATE TABLE IF NOT EXISTS enterprise_audit_events (
+    id SERIAL PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    org_id TEXT NOT NULL,
+    app_instance_id TEXT NOT NULL,
+    actor_type VARCHAR(40) NOT NULL DEFAULT 'user',
+    actor_id TEXT,
+    action TEXT NOT NULL,
+    resource TEXT NOT NULL,
+    resource_id TEXT,
+    details JSONB NOT NULL DEFAULT '{}'::jsonb,
+    ip_address TEXT,
+    user_agent TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_enterprise_audit_events_scope ON enterprise_audit_events(tenant_id, org_id, app_instance_id, created_at DESC);
 
 -- ============================================================
 -- Soft-delete support for organizations and tokens

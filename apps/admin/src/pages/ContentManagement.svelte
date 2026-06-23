@@ -28,9 +28,17 @@
     { key: 'GithubUrl', label: 'GitHub URL', type: 'text' },
   ];
 
+  function authHeaders(extra: Record<string, string> = {}) {
+    const token = localStorage.getItem('auth_token');
+    return {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...extra,
+    };
+  }
+
   onMount(async () => {
     try {
-      const res = await fetch('/api/admin/content', { credentials: 'include' });
+      const res = await fetch('/api/admin/content', { credentials: 'include', headers: authHeaders() });
       if (res.ok) {
         const json = await res.json();
         content = json.data || {};
@@ -45,7 +53,7 @@
     try {
       const res = await fetch('/api/admin/content', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
         credentials: 'include',
         body: JSON.stringify(content),
       });
@@ -76,7 +84,7 @@
     <div class="flex justify-center py-12"><div class="h-8 w-8 animate-spin rounded-full border-4 border-muted border-t-primary"></div></div>
   {:else}
     <div class="grid gap-6 lg:grid-cols-2">
-      {#each fields as field}
+      {#each fields as field (field.key)}
         <Card.Root>
           <Card.Content class="pt-6 space-y-2">
             <label for={`content-${field.key}`} class="text-sm font-medium text-muted-foreground">{field.label}</label>

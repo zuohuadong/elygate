@@ -70,9 +70,20 @@
   let saving = $state(false);
   let message = $state({ type: '', text: '' });
 
+  function adminHeaders(contentType?: string): Record<string, string> {
+    const token = localStorage.getItem('auth_token');
+    return {
+      ...(contentType ? { 'Content-Type': contentType } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    };
+  }
+
   onMount(async () => {
     try {
-      const res = await fetch('/api/admin/options', { credentials: 'include' });
+      const res = await fetch('/api/admin/options', {
+        credentials: 'include',
+        headers: adminHeaders(),
+      });
       if (res.ok) {
         const data = await res.json();
         settings = { ...settings, ...data };
@@ -90,7 +101,7 @@
     try {
       const res = await fetch('/api/admin/options', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: adminHeaders('application/json'),
         credentials: 'include',
         body: JSON.stringify(settings),
       });
@@ -111,7 +122,7 @@
     try {
       const res = await fetch('/api/admin/check-embedding', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: adminHeaders('application/json'),
         credentials: 'include',
         body: JSON.stringify({ model: settings.SemanticCacheEmbeddingModel }),
       });
