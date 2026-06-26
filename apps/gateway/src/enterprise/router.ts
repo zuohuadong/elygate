@@ -172,6 +172,110 @@ export function createEnterpriseRouter(controlPlane: EnterpriseControlPlane = po
             return errorResponse(set, error);
         }
     })
+    .get('/members-and-access', async ({ query, request, set }) => {
+        try {
+            const { claims } = await requireEnterpriseClaims(request.headers.get('authorization'), [AI_GATEWAY_SCOPES.policyManage]);
+            return ok(await controlPlane.getMembersAndAccess(claims, query));
+        } catch (error) {
+            return errorResponse(set, error);
+        }
+    })
+    .get('/memberships', async ({ query, request, set }) => {
+        try {
+            const { claims } = await requireEnterpriseClaims(request.headers.get('authorization'), [AI_GATEWAY_SCOPES.policyManage]);
+            return ok(await controlPlane.listMemberships(claims, query));
+        } catch (error) {
+            return errorResponse(set, error);
+        }
+    })
+    .post('/memberships', async ({ body, request, set }) => {
+        try {
+            const { claims } = await requireEnterpriseClaims(request.headers.get('authorization'), [AI_GATEWAY_SCOPES.policyManage]);
+            return ok(await controlPlane.upsertMembership(claims, body, requestMetaFromHeaders(request.headers)));
+        } catch (error) {
+            return errorResponse(set, error);
+        }
+    })
+    .put('/memberships/:id', async ({ params, body, request, set }) => {
+        try {
+            const { claims } = await requireEnterpriseClaims(request.headers.get('authorization'), [AI_GATEWAY_SCOPES.policyManage]);
+            return ok(await controlPlane.updateMembership(claims, params.id, body, requestMetaFromHeaders(request.headers)));
+        } catch (error) {
+            return errorResponse(set, error);
+        }
+    })
+    .get('/org-entitlements', async ({ request, set }) => {
+        try {
+            const { claims } = await requireEnterpriseClaims(request.headers.get('authorization'), [AI_GATEWAY_SCOPES.gatewayRead]);
+            return ok(await controlPlane.getOrgEntitlements(claims));
+        } catch (error) {
+            return errorResponse(set, error);
+        }
+    })
+    .put('/org-entitlements', async ({ body, request, set }) => {
+        try {
+            const { claims } = await requireEnterpriseClaims(request.headers.get('authorization'), [AI_GATEWAY_SCOPES.policyManage]);
+            return ok(await controlPlane.updateOrgEntitlements(claims, body, requestMetaFromHeaders(request.headers)));
+        } catch (error) {
+            return errorResponse(set, error);
+        }
+    })
+    .get('/usage-efficiency', async ({ query, request, set }) => {
+        try {
+            const { claims } = await requireEnterpriseClaims(request.headers.get('authorization'), [AI_GATEWAY_SCOPES.usageRead]);
+            return ok(await controlPlane.getUsageEfficiency(claims, query));
+        } catch (error) {
+            return errorResponse(set, error);
+        }
+    })
+    .get('/billing-and-invoices', async ({ query, request, set }) => {
+        try {
+            const { claims } = await requireEnterpriseClaims(request.headers.get('authorization'), [AI_GATEWAY_SCOPES.usageRead]);
+            return ok(await controlPlane.getBillingAndInvoices(claims, query));
+        } catch (error) {
+            return errorResponse(set, error);
+        }
+    })
+    .get('/invoices', async ({ query, request, set }) => {
+        try {
+            const { claims } = await requireEnterpriseClaims(request.headers.get('authorization'), [AI_GATEWAY_SCOPES.usageRead]);
+            return ok(await controlPlane.listInvoices(claims, query));
+        } catch (error) {
+            return errorResponse(set, error);
+        }
+    })
+    .post('/billing-account', async ({ body, request, set }) => {
+        try {
+            const { claims } = await requireEnterpriseClaims(request.headers.get('authorization'), [AI_GATEWAY_SCOPES.gatewayAdmin]);
+            return ok(await controlPlane.upsertBillingAccount(claims, body, requestMetaFromHeaders(request.headers)));
+        } catch (error) {
+            return errorResponse(set, error);
+        }
+    })
+    .post('/invoices', async ({ body, request, set }) => {
+        try {
+            const { claims } = await requireEnterpriseClaims(request.headers.get('authorization'), [AI_GATEWAY_SCOPES.gatewayAdmin]);
+            return ok(await controlPlane.createInvoice(claims, body, requestMetaFromHeaders(request.headers)));
+        } catch (error) {
+            return errorResponse(set, error);
+        }
+    })
+    .get('/data-governance', async ({ query, request, set }) => {
+        try {
+            const { claims } = await requireEnterpriseClaims(request.headers.get('authorization'), [AI_GATEWAY_SCOPES.policyManage]);
+            return ok(await controlPlane.getDataGovernance(claims, query));
+        } catch (error) {
+            return errorResponse(set, error);
+        }
+    })
+    .post('/provider-compliance', async ({ body, request, set }) => {
+        try {
+            const { claims } = await requireEnterpriseClaims(request.headers.get('authorization'), [AI_GATEWAY_SCOPES.policyManage]);
+            return ok(await controlPlane.upsertProviderCompliance(claims, body, requestMetaFromHeaders(request.headers)));
+        } catch (error) {
+            return errorResponse(set, error);
+        }
+    })
     .get('/audit-events/export', async ({ query, request, set }) => {
         try {
             const { claims } = await requireEnterpriseClaims(request.headers.get('authorization'), [AI_GATEWAY_SCOPES.auditRead]);

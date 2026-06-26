@@ -6,6 +6,10 @@
   import GatewayResources from '../pages/GatewayResources.svelte';
   import IdentityAndPolicy from '../pages/IdentityAndPolicy.svelte';
   import UsageAndBudget from '../pages/UsageAndBudget.svelte';
+  import MembersAndAccess from '../pages/MembersAndAccess.svelte';
+  import UsageEfficiency from '../pages/UsageEfficiency.svelte';
+  import BillingAndInvoices from '../pages/BillingAndInvoices.svelte';
+  import DataGovernance from '../pages/DataGovernance.svelte';
   import AuditEvents from '../pages/AuditEvents.svelte';
 
   let { resourceName, ...rest }: { resourceName: string; [key: string]: unknown } = $props();
@@ -14,8 +18,12 @@
     'enterprise-overview': EnterpriseHome,
     'gateway-instances': GatewayInstances,
     'gateway-resources': GatewayResources,
+    'members-and-access': MembersAndAccess,
     'identity-and-policy': IdentityAndPolicy,
     'usage-and-budget': UsageAndBudget,
+    'usage-efficiency': UsageEfficiency,
+    'billing-and-invoices': BillingAndInvoices,
+    'data-governance': DataGovernance,
     'audit-events': AuditEvents,
   };
 
