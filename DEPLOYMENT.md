@@ -2,6 +2,8 @@
 
 This guide provides step-by-step instructions to deploy Elygate in a private enterprise environment using Docker.
 
+> For the current three-layer Enterprise deployment gate, SupAuth/SupaCloud variables, control-plane smoke checks, and rollback flow, read [Elygate Enterprise Deployment Runbook](docs/ENTERPRISE_DEPLOYMENT_RUNBOOK.md) first.
+
 ## Prerequisites
 
 - Docker and Docker Compose
@@ -50,6 +52,16 @@ docker exec -it elygate-gateway bun run packages/db/src/onboard.ts
 - **API Gateway**: `http://localhost:3003`
 
 Log in to the admin console with the `ADMIN_USER` and `ADMIN_PASSWORD` defined in your environment.
+
+## Enterprise Three-Layer Model
+
+Current Elygate Enterprise deployments have three layers:
+
+- **Basic Gateway**: `/v1/*` AI data plane using `sk-*` API keys.
+- **Elygate Panel**: general admin panel for channels, models, API keys, usage, logs, and settings.
+- **Elygate Enterprise**: `/api/enterprise/*` control plane and `/enterprise/` console, powered by SupaCloud + SupAuth + svadmin.
+
+Production enterprise mode must set `SUPAUTH_JWKS_URL` and `ENTERPRISE_AUTH_MODE=strict`. Gateway `sk-*` keys are not accepted by enterprise control-plane APIs.
 
 ## 5. Member Management
 

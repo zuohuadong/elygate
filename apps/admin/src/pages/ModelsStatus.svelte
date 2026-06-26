@@ -14,9 +14,17 @@
   let loading = $state(true);
   let filter = $state('all');
 
+  function authHeaders(extra: Record<string, string> = {}) {
+    const token = localStorage.getItem('auth_token');
+    return {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...extra,
+    };
+  }
+
   onMount(async () => {
     try {
-      const res = await fetch('/api/admin/models', { credentials: 'include' });
+      const res = await fetch('/api/admin/models', { credentials: 'include', headers: authHeaders() });
       if (res.ok) models = await res.json();
     } catch (e) {
       console.error('Failed to load models', e);

@@ -40,6 +40,14 @@
   const page = $derived(Math.floor(offset / limit) + 1);
   const pageCount = $derived(Math.max(1, Math.ceil(total / limit)));
 
+  function authHeaders(extra: Record<string, string> = {}) {
+    const token = localStorage.getItem('auth_token');
+    return {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...extra,
+    };
+  }
+
   onMount(async () => {
     await refreshAll();
   });
@@ -62,14 +70,14 @@
   }
 
   async function loadStats() {
-    const res = await fetch('/api/admin/memory/stats', { credentials: 'include' });
+    const res = await fetch('/api/admin/memory/stats', { credentials: 'include', headers: authHeaders() });
     const json = await res.json();
     if (!res.ok || !json.success) throw new Error(json.message || 'Failed to load memory stats');
     stats = json.data;
   }
 
   async function loadMemories() {
-    const res = await fetch(`/api/admin/memory?${buildQuery()}`, { credentials: 'include' });
+    const res = await fetch(`/api/admin/memory?${buildQuery()}`, { credentials: 'include', headers: authHeaders() });
     const json = await res.json();
     if (!res.ok || !json.success) throw new Error(json.message || 'Failed to load memories');
     memories = json.data || [];
@@ -93,7 +101,7 @@
   }
 
   async function deleteMemory(id: string) {
-    const res = await fetch(`/api/admin/memory/${id}`, { method: 'DELETE', credentials: 'include' });
+    const res = await fetch(`/api/admin/memory/${id}`, { method: 'DELETE', credentials: 'include', headers: authHeaders() });
     const json = await res.json();
     if (!res.ok || !json.success) {
       showMessage('error', json.message || '删除失败');
@@ -104,7 +112,7 @@
   }
 
   async function cleanupExpired() {
-    const res = await fetch('/api/admin/memory/cleanup-expired', { method: 'POST', credentials: 'include' });
+    const res = await fetch('/api/admin/memory/cleanup-expired', { method: 'POST', credentials: 'include', headers: authHeaders() });
     const json = await res.json();
     if (!res.ok || !json.success) {
       showMessage('error', json.message || '清理失败');
@@ -115,7 +123,7 @@
   }
 
   async function purgeDeleted() {
-    const res = await fetch('/api/admin/memory/deleted', { method: 'DELETE', credentials: 'include' });
+    const res = await fetch('/api/admin/memory/deleted', { method: 'DELETE', credentials: 'include', headers: authHeaders() });
     const json = await res.json();
     if (!res.ok || !json.success) {
       showMessage('error', json.message || '清空失败');

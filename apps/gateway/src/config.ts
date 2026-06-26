@@ -7,6 +7,8 @@
 export const config = {
     /** Node environment */
     nodeEnv: process.env.NODE_ENV || 'development',
+    /** Gateway listen port */
+    port: Number(process.env.PORT) || 3000,
     /** JWT signing secret */
     jwtSecret: process.env.JWT_SECRET!,
     /** Admin panel password */

@@ -167,7 +167,8 @@ export async function processBillingJobs(tasks: BillingContext[]): Promise<void>
             externalWorkspaceId: task.externalWorkspaceId || null,
             externalFeatureType: task.externalFeatureType || null,
             requestBody: task.requestBody || null,
-            responseBody: task.responseBody || null
+            responseBody: task.responseBody || null,
+            createdAt: new Date()
         });
     }
 
@@ -238,12 +239,13 @@ export async function processBillingJobs(tasks: BillingContext[]): Promise<void>
                 externalUserId: log.externalUserId,
                 externalWorkspaceId: log.externalWorkspaceId,
                 externalFeatureType: log.externalFeatureType,
-            }).returning({ id: logs.id, createdAt: logs.createdAt });
+                createdAt: log.createdAt,
+            }).returning({ id: logs.id });
 
             if (inserted && (log.requestBody || log.responseBody)) {
                 await tx.execute(drizzleSql`
                     INSERT INTO log_details (log_id, log_created_at, request_body, response_body)
-                    VALUES (${inserted.id}, ${inserted.createdAt}, ${log.requestBody}, ${log.responseBody})
+                    VALUES (${inserted.id}, ${log.createdAt}, ${log.requestBody}, ${log.responseBody})
                     ON CONFLICT (log_id) DO UPDATE
                     SET log_created_at = EXCLUDED.log_created_at,
                         request_body = EXCLUDED.request_body,

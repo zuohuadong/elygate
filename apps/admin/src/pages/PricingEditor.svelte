@@ -15,9 +15,17 @@
   let newGroupKey = $state('');
   let newGroupRatio = $state(1);
 
+  function authHeaders(extra: Record<string, string> = {}) {
+    const token = localStorage.getItem('auth_token');
+    return {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...extra,
+    };
+  }
+
   onMount(async () => {
     try {
-      const res = await fetch('/api/admin/performance/ratio-config', { credentials: 'include' });
+      const res = await fetch('/api/admin/performance/ratio-config', { credentials: 'include', headers: authHeaders() });
       if (res.ok) {
         const json = await res.json();
         modelRatio = json.data?.modelRatio || {};
@@ -25,7 +33,7 @@
         groupRatio = json.data?.groupRatio || {};
         fixedCostModels = json.data?.fixedCostModels || {};
       }
-      const missRes = await fetch('/api/admin/performance/ratio-config/missing', { credentials: 'include' });
+      const missRes = await fetch('/api/admin/performance/ratio-config/missing', { credentials: 'include', headers: authHeaders() });
       if (missRes.ok) {
         const json = await missRes.json();
         missing = json.data || [];
@@ -40,7 +48,7 @@
     try {
       const res = await fetch('/api/admin/performance/ratio-config', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
         credentials: 'include',
         body: JSON.stringify({ modelRatio, completionRatio, groupRatio, fixedCostModels }),
       });
@@ -98,7 +106,7 @@
         <Card.Header><Card.Title>缺失倍率的模型 ({missing.length})</Card.Title></Card.Header>
         <Card.Content>
           <div class="flex flex-wrap gap-2">
-            {#each missing as m}
+            {#each missing as m (m)}
               <button class="px-2 py-1 text-xs rounded border hover:bg-muted" onclick={() => addMissing(m)}>
                 {m} +
               </button>
@@ -120,7 +128,7 @@
             </div>
           </div>
           <div class="max-h-96 overflow-y-auto space-y-1">
-            {#each Object.entries(modelRatio).sort(([a], [b]) => a.localeCompare(b)) as [key, val]}
+            {#each Object.entries(modelRatio).sort(([a], [b]) => a.localeCompare(b)) as [key, val] (key)}
               <div class="flex items-center justify-between py-1 px-2 rounded hover:bg-muted text-sm">
                 <span class="font-mono text-xs truncate flex-1">{key}</span>
                 <input type="number" bind:value={modelRatio[key]} step="0.01" class="w-20 h-7 rounded border px-1 text-xs text-right" />
@@ -140,7 +148,7 @@
               <input type="number" bind:value={newGroupRatio} step="0.01" class="w-24 h-8 rounded border px-2 text-sm" />
               <button class="px-3 py-1 text-xs rounded bg-primary text-primary-foreground" onclick={addGroup}>添加</button>
             </div>
-            {#each Object.entries(groupRatio) as [key, val]}
+            {#each Object.entries(groupRatio) as [key, val] (key)}
               <div class="flex items-center justify-between py-1 px-2 rounded hover:bg-muted text-sm">
                 <span class="font-mono text-xs">{key}</span>
                 <input type="number" bind:value={groupRatio[key]} step="0.01" class="w-20 h-7 rounded border px-1 text-xs text-right" />
@@ -154,7 +162,7 @@
           <Card.Header><Card.Title>补全倍率 ({Object.keys(completionRatio).length})</Card.Title></Card.Header>
           <Card.Content>
             <div class="max-h-64 overflow-y-auto space-y-1">
-              {#each Object.entries(completionRatio).sort(([a], [b]) => a.localeCompare(b)) as [key, val]}
+              {#each Object.entries(completionRatio).sort(([a], [b]) => a.localeCompare(b)) as [key, val] (key)}
                 <div class="flex items-center justify-between py-1 px-2 rounded hover:bg-muted text-sm">
                   <span class="font-mono text-xs truncate flex-1">{key}</span>
                   <input type="number" bind:value={completionRatio[key]} step="0.01" class="w-20 h-7 rounded border px-1 text-xs text-right" />

@@ -34,17 +34,25 @@
   // Get user's token from cookie-based session
   let userToken = $state('');
 
+  function authHeaders(extra: Record<string, string> = {}) {
+    const token = localStorage.getItem('auth_token');
+    return {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...extra,
+    };
+  }
+
   onMount(async () => {
     try {
       // Load models
-      const res = await fetch('/api/v1/models', { credentials: 'include' });
+      const res = await fetch('/v1/models', { credentials: 'include', headers: authHeaders() });
       if (res.ok) {
         const data = await res.json();
         models = data.data || [];
         if (models.length > 0) selectedModel = models[0].id;
       }
       // Load user token for API calls
-      const tokenRes = await fetch('/api/auth/user/tokens', { credentials: 'include' });
+      const tokenRes = await fetch('/api/auth/user/tokens', { credentials: 'include', headers: authHeaders() });
       if (tokenRes.ok) {
         const tokens = await tokenRes.json();
         const arr = Array.isArray(tokens) ? tokens : tokens.data || [];
@@ -61,6 +69,14 @@
 
   function removeMessage(i: number) {
     messages = messages.filter((_, idx) => idx !== i);
+  }
+
+  function updateMessageRole(index: number, role: string) {
+    messages = messages.map((message, idx) => idx === index ? { ...message, role } : message);
+  }
+
+  function updateMessageContent(index: number, content: string) {
+    messages = messages.map((message, idx) => idx === index ? { ...message, content } : message);
   }
 
   async function sendRequest() {
@@ -139,7 +155,7 @@
               bind:value={selectedModel}
               class="w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
             >
-              {#each models as model}
+              {#each models as model (model.id)}
                 <option value={model.id}>{model.id}</option>
               {/each}
             </select>
@@ -165,11 +181,11 @@
             <button onclick={addMessage} class="text-xs text-primary hover:underline">+ 添加消息</button>
           </div>
           <div class="space-y-3">
-            {#each messages as msg, i}
+            {#each messages as msg, i (msg)}
               <div class="flex gap-2 items-start">
                 <select
                   value={msg.role}
-                  onchange={(e) => { messages[i] = { ...msg, role: e.currentTarget.value }; messages = messages; }}
+                  onchange={(e) => updateMessageRole(i, e.currentTarget.value)}
                   class="h-9 rounded-md border border-input bg-background px-2 text-xs"
                 >
                   <option value="system">system</option>
@@ -178,7 +194,7 @@
                 </select>
                 <textarea
                   value={msg.content}
-                  oninput={(e) => { messages[i] = { ...msg, content: e.currentTarget.value }; messages = messages; }}
+                  oninput={(e) => updateMessageContent(i, e.currentTarget.value)}
                   placeholder="输入消息..."
                   rows="2"
                   class="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm resize-none"

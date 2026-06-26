@@ -1,6 +1,7 @@
 import type { BunFile } from 'bun';
 import { join } from 'path';
 import { embeddedAdminAssets } from '../generated/admin-assets';
+import { workspacePath } from '../utils/paths';
 
 /**
  * Static file serving middleware for SvelteKit build output.
@@ -42,36 +43,39 @@ function embeddedResponse(path: string, set: { headers?: Record<string, string> 
     });
 }
 
+async function staticFileFromBuild(buildPath: string, path: string, set: { headers?: Record<string, string> }, prefix = '') {
+    const withoutPrefix = prefix && path.startsWith(prefix) ? path.slice(prefix.length) || '/' : path;
+    const normalizedPath = withoutPrefix === '/' ? '/index.html' : withoutPrefix;
+    const isAsset = withoutPrefix.includes('.');
+    const fullPath = join(buildPath, normalizedPath);
+    const file = Bun.file(fullPath);
+    if (await file.exists()) {
+        setStaticHeaders(normalizedPath, set);
+        return file;
+    }
+
+    if (!isAsset) {
+        const indexFile = Bun.file(join(buildPath, 'index.html'));
+        if (await indexFile.exists()) {
+            setStaticHeaders('/index.html', set, 'text/html; charset=utf-8');
+            return indexFile;
+        }
+    }
+}
+
 export function staticFileHandler(): (ctx: { path: string; set: { status?: number; headers?: Record<string, string> } }) => Promise<BunFile | Response | undefined> {
     return async ({ path, set }: { path: string; set: { status?: number; headers?: Record<string, string> } }) => {
         if (path.startsWith('/api') || path.startsWith('/v1')) return;
 
-        const buildPath = join(process.cwd(), 'apps/admin/dist');
-        const normalizedPath = path === '/' ? '/index.html' : path;
-        const isAsset = path.includes('.');
-
-        const searchPaths = [
-            join(buildPath, normalizedPath)
-        ];
-
-        for (const fullPath of searchPaths) {
-            const file = Bun.file(fullPath);
-            if (await file.exists()) {
-                setStaticHeaders(path, set);
-                return file;
-            }
+        if (path === '/enterprise' || path.startsWith('/enterprise/')) {
+            const enterprise = await staticFileFromBuild(workspacePath('apps/enterprise-console/dist'), path, set, '/enterprise');
+            if (enterprise) return enterprise;
         }
 
+        const buildPath = workspacePath('apps/admin/dist');
+        const admin = await staticFileFromBuild(buildPath, path, set);
+        if (admin) return admin;
         const embedded = embeddedResponse(path, set);
         if (embedded) return embedded;
-
-        // SPA Fallback
-        if (!isAsset) {
-            const indexFile = Bun.file(join(buildPath, 'index.html'));
-            if (await indexFile.exists()) {
-                setStaticHeaders('/index.html', set, 'text/html; charset=utf-8');
-                return indexFile;
-            }
-        }
     };
 }

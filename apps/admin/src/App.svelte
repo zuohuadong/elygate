@@ -1,9 +1,10 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { AdminApp } from '@svadmin/ui';
-  import { createElysiaDataProvider } from '@svadmin/elysia';
   import { createSimpleRestAuthProvider } from '@svadmin/simple-rest';
   import { setAccessControlProvider } from '@svadmin/core';
-  import type { DataProvider, MenuItem } from '@svadmin/core';
+  import { createElygateDataProvider } from '@elygate/svadmin-helpers';
+  import type { Identity, MenuItem } from '@svadmin/core';
   import { resources } from './resources';
   import { createRoleBasedAccessControl } from './providers/accessControl';
 
@@ -22,10 +23,9 @@
     'content-management',
     'pricing-editor',
     'performance-monitor',
-    'enterprise-console',
   ]);
 
-  const baseDataProvider = createElysiaDataProvider({
+  const dataProvider = createElygateDataProvider({
     apiUrl: '/api/admin',
     withCredentials: true,
     headers: (): Record<string, string> => {
@@ -42,39 +42,9 @@
       'user-groups': 'user-groups',
       'rate-limits': 'rate-limits',
     },
+    virtualResources,
+    fallbackGetOneFromList: true,
   });
-
-  const dataProvider = {
-    ...baseDataProvider,
-    getList: async (params: any) => {
-      if (virtualResources.has(params.resource)) {
-        return { data: [], total: 0 };
-      }
-      return baseDataProvider.getList(params);
-    },
-    getOne: async (params: any) => {
-      if (virtualResources.has(params.resource)) {
-        return { data: { id: params.id } as any };
-      }
-      try {
-        return await baseDataProvider.getOne(params);
-      } catch (err: any) {
-        // Fallback for missing GET /:id backend endpoints (very common in legacy Elygate).
-        // If it throws a 404 or fails, we fallback to requesting the list and extracting the item.
-        if (err.message && (err.message.includes('404') || err.message.includes('Not Found'))) {
-          const list = await baseDataProvider.getList({ 
-            resource: params.resource, 
-            pagination: { current: 1, pageSize: 1000 } // Request a large page to ensure it's found
-          });
-          const found = list.data.find((item: any) => String(item.id) === String(params.id));
-          if (found) {
-            return { data: found };
-          }
-        }
-        throw err;
-      }
-    }
-  } as DataProvider;
 
   const authProvider = createSimpleRestAuthProvider({
     loginUrl: '/api/auth/login',
@@ -87,9 +57,9 @@
   setAccessControlProvider(createRoleBasedAccessControl());
 
   // Determine dashboard variant by identity role
-  let identity = $state<Record<string, any> | null>(null);
-  $effect(() => {
-    authProvider.getIdentity?.().then((id: any) => { identity = id; }).catch(() => {});
+  let identity = $state<Identity | null>(null);
+  onMount(() => {
+    authProvider.getIdentity?.().then((id) => { identity = id; }).catch(() => {});
   });
   const isAdmin = $derived(identity?.role === 10);
 
@@ -105,7 +75,7 @@
       { name: 'dashboard', label: '仪表盘', icon: 'dashboard', href: '/' },
       {
         name: 'new-api-layer',
-        label: 'New API 兼容后台',
+        label: 'Elygate 面板',
         icon: 'folder',
         children: [
           { name: 'channels', label: '渠道管理', icon: 'radio', href: '/channels' },
@@ -124,14 +94,6 @@
           { name: 'performance-monitor', label: '性能监控', icon: 'activity', href: '/performance-monitor' },
           { name: 'playground', label: 'API 测试', icon: 'play', href: '/playground' },
           { name: 'system-options', label: '系统设置', icon: 'settings', href: '/system-options' },
-        ],
-      },
-      {
-        name: 'enterprise-layer',
-        label: '企业内控后台',
-        icon: 'folder',
-        children: [
-          { name: 'enterprise-console', label: '企业控制台', icon: 'shield', href: '/enterprise-console' },
         ],
       },
     ];

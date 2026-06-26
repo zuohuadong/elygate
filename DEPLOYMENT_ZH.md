@@ -2,6 +2,8 @@
 
 本指南提供了在企业私有环境中使用 Docker 部署 Elygate 的详细步骤。
 
+> 三层 Enterprise 架构的发布前验证、SupAuth/SupaCloud 环境变量、控制面 smoke 与回滚流程，请先阅读 [Elygate Enterprise 部署验证 Runbook](docs/ENTERPRISE_DEPLOYMENT_RUNBOOK.md)。
+
 ## 环境要求
 
 - Docker 和 Docker Compose
@@ -50,6 +52,16 @@ docker exec -it elygate-gateway bun run packages/db/src/onboard.ts
 - **API 网关**: `http://localhost:3003`
 
 使用环境配置文件中定义的 `ADMIN_USER` 和 `ADMIN_PASSWORD` 登录管理控制台。
+
+## Enterprise 三层架构说明
+
+当前 Elygate 企业级形态分为三层：
+
+- **Basic Gateway**：`/v1/*` AI 数据面，继续使用 `sk-*` API Key。
+- **Elygate Panel**：通用管理面板，用于渠道、模型、API Key、用量、日志和系统设置。
+- **Elygate Enterprise**：`/api/enterprise/*` 控制面和 `/enterprise/` 企业控制台，基于 SupaCloud + SupAuth + svadmin。
+
+生产企业模式必须配置 `SUPAUTH_JWKS_URL` 和 `ENTERPRISE_AUTH_MODE=strict`。`sk-*` 不允许访问企业控制面。
 
 ## 5. 成员管理
 

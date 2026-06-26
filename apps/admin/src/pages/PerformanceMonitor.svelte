@@ -6,6 +6,14 @@
   let loading = $state(true);
   let message = $state({ type: '', text: '' });
 
+  function authHeaders(extra: Record<string, string> = {}) {
+    const token = localStorage.getItem('auth_token');
+    return {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...extra,
+    };
+  }
+
   onMount(async () => {
     await loadStats();
   });
@@ -13,7 +21,7 @@
   async function loadStats() {
     loading = true;
     try {
-      const res = await fetch('/api/admin/performance/stats', { credentials: 'include' });
+      const res = await fetch('/api/admin/performance/stats', { credentials: 'include', headers: authHeaders() });
       if (res.ok) stats = (await res.json()).data;
     } catch (e) { console.error(e); }
     finally { loading = false; }
@@ -21,7 +29,7 @@
 
   async function clearCaches() {
     try {
-      const res = await fetch('/api/admin/performance/caches', { method: 'DELETE', credentials: 'include' });
+      const res = await fetch('/api/admin/performance/caches', { method: 'DELETE', credentials: 'include', headers: authHeaders() });
       if (res.ok) {
         message = { type: 'success', text: '缓存已清理' };
         setTimeout(() => message = { type: '', text: '' }, 3000);
@@ -32,7 +40,7 @@
 
   async function triggerGc() {
     try {
-      const res = await fetch('/api/admin/performance/gc', { method: 'POST', credentials: 'include' });
+      const res = await fetch('/api/admin/performance/gc', { method: 'POST', credentials: 'include', headers: authHeaders() });
       if (res.ok) {
         const json = await res.json();
         message = { type: 'success', text: `GC done. RSS: ${formatBytes(json.memory?.rss)}` };

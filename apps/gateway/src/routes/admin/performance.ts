@@ -80,7 +80,7 @@ export const performanceRouter = new Elysia()
     })
 
     // --- Ratio config (for pricing page) ---
-    .get('/ratio-config', async () => {
+    .get('/performance/ratio-config', async () => {
         const modelRatio = optionCache.get('ModelRatio', {}) as Record<string, number>;
         const completionRatio = optionCache.get('CompletionRatio', {}) as Record<string, number>;
         const groupRatio = optionCache.get('GroupRatio', {}) as Record<string, number>;
@@ -94,7 +94,7 @@ export const performanceRouter = new Elysia()
     })
 
     // --- Update ratio config ---
-    .put('/ratio-config', async ({ body, set }: ElysiaCtx) => {
+    .put('/performance/ratio-config', async ({ body, set }: ElysiaCtx) => {
         const b = body as Record<string, any>;
         const updates: Record<string, any> = {};
         if (b.modelRatio !== undefined) updates.ModelRatio = b.modelRatio;
@@ -116,7 +116,7 @@ export const performanceRouter = new Elysia()
     })
 
     // --- Missing models from pricing ---
-    .get('/ratio-config/missing', async () => {
+    .get('/performance/ratio-config/missing', async () => {
         const modelRatio = optionCache.get('ModelRatio', {}) as Record<string, number>;
         const rows = await db.selectDistinct({ modelName: logs.modelName })
             .from(logs)
