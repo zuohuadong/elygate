@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 export const ENTERPRISE_SMOKE_POSTGRES_BIN_DIR = process.env.POSTGRES_BIN_DIR || '/opt/homebrew/opt/postgresql@18/bin';
 export const ENTERPRISE_SMOKE_DB_USER = process.env.ENTERPRISE_SMOKE_DB_USER || 'postgres';
@@ -67,9 +67,11 @@ export function databaseUrlForPort(port: number): string {
 async function writePostgresConfig(dataDir: string, port: number): Promise<void> {
     const configPath = join(dataDir, 'postgresql.conf');
     const existing = await Bun.file(configPath).text().catch(() => '');
+    const socketDir = dirname(dataDir).replaceAll("'", "''");
     await Bun.write(configPath, `${existing}${existing.endsWith('\n') || existing.length === 0 ? '' : '\n'}${[
         `listen_addresses = '127.0.0.1'`,
         `port = ${port}`,
+        `unix_socket_directories = '${socketDir}'`,
         `shared_preload_libraries = 'pg_cron'`,
         `cron.database_name = 'postgres'`,
         '',
@@ -122,10 +124,11 @@ export async function startPostgresWithDependencies(dependencies: StartPostgresD
         const port = explicitPort ?? await dependencies.allocatePort();
         const dir = await dependencies.makeTempDir();
         const dataDir = join(dir, 'data');
+        const logPath = join(dir, 'postgres.log');
         try {
             await dependencies.runCommand(initdb, ['-D', dataDir, '-A', 'trust', '-U', ENTERPRISE_SMOKE_DB_USER, '--locale=C', '-E', 'UTF8']);
             await dependencies.writePostgresConfig(dataDir, port);
-            await dependencies.runCommand(pgCtl, ['-D', dataDir, '-l', join(dir, 'postgres.log'), '-w', 'start']);
+            await dependencies.runCommand(pgCtl, ['-D', dataDir, '-l', logPath, '-w', 'start']);
             return {
                 dir,
                 port,
@@ -133,6 +136,10 @@ export async function startPostgresWithDependencies(dependencies: StartPostgresD
             };
         } catch (error) {
             lastError = error;
+            const postgresLog = await Bun.file(logPath).text().catch(() => '');
+            if (postgresLog.trim()) {
+                dependencies.warn(`[enterprise-smoke-postgres] postgres log for attempt ${attempt}/${maxAttempts}:\n${postgresLog.trim()}`);
+            }
             await dependencies.removeDir(dir);
             if (explicitPort || attempt === maxAttempts) break;
             dependencies.warn(`[enterprise-smoke-postgres] start retry ${attempt}/${maxAttempts}: ${error instanceof Error ? error.message : String(error)}`);
