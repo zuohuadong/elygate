@@ -66,7 +66,7 @@
 ## Not Yet Implemented
 
 ### Legacy / Deprecated
-- ⚠️ `/v1/fine-tunes` - Legacy fine-tunes API (deprecated by OpenAI, replaced by fine_tuning/jobs)
+- ✅ `/v1/fine-tunes` - Legacy fine-tunes compatibility API backed by PostgreSQL `fine_tuning/jobs` state
 - ⚠️ Realtime API WebRTC bridge is a documented non-goal for the current pinned route-parity target; Elygate implements the public WebSocket/session surface tracked in `docs/new-api-route-parity.matrix.json`.
 
 ## New API Operational Parity

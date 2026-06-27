@@ -69,12 +69,17 @@ export function useSubscription(options: UseSubscriptionOptions): void {
 
 // ─── usePublish — publish custom events ─────────────────────────
 
+export function publishLiveEvent(liveProvider: LiveProvider, event: LiveEvent): boolean {
+  if (liveProvider.publish) {
+    liveProvider.publish(event);
+    return true;
+  }
+  console.warn('[svadmin] LiveProvider.publish() not implemented');
+  return false;
+}
+
 export function usePublish(liveProvider: LiveProvider) {
   return (event: LiveEvent) => {
-    if (liveProvider.publish) {
-      liveProvider.publish(event);
-    } else {
-      console.warn('[svadmin] LiveProvider.publish() not implemented');
-    }
+    return publishLiveEvent(liveProvider, event);
   };
 }

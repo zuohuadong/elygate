@@ -4,6 +4,7 @@
  */
 import { describe, test, expect, mock } from 'bun:test';
 import type { LiveProvider, LiveEvent } from './live.svelte';
+import { publishLiveEvent } from './live.svelte';
 
 // Helper: create a minimal in-memory LiveProvider for testing subscription logic
 function createMockLiveProvider(): LiveProvider & { emit: (event: LiveEvent) => void } {
@@ -130,5 +131,34 @@ describe('LiveProvider subscription', () => {
 
     expect(received1.length).toBe(0);
     expect(received2.length).toBe(1);
+  });
+});
+
+describe('LiveProvider publish', () => {
+  test('publishes through provider when available', () => {
+    const published: LiveEvent[] = [];
+    const provider: LiveProvider = {
+      subscribe: () => () => {},
+      publish: (event) => published.push(event),
+    };
+    const event: LiveEvent = { type: 'UPDATE', resource: 'posts', payload: { id: 1 } };
+
+    expect(publishLiveEvent(provider, event)).toBe(true);
+    expect(published).toEqual([event]);
+  });
+
+  test('returns false and warns when publish is not implemented', () => {
+    const warn = console.warn;
+    const warnings: unknown[][] = [];
+    console.warn = (...args: unknown[]) => { warnings.push(args); };
+    try {
+      const provider: LiveProvider = { subscribe: () => () => {} };
+      const event: LiveEvent = { type: 'UPDATE', resource: 'posts', payload: { id: 1 } };
+
+      expect(publishLiveEvent(provider, event)).toBe(false);
+      expect(warnings[0]?.[0]).toBe('[svadmin] LiveProvider.publish() not implemented');
+    } finally {
+      console.warn = warn;
+    }
   });
 });

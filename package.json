@@ -8,6 +8,7 @@
     "check:layers": "bun run scripts/check-layer-boundaries.ts",
     "check:cache-dependencies": "bun run scripts/check-cache-dependencies.ts",
     "check:no-redis-runtime": "bun run scripts/check-no-redis-runtime.ts",
+    "check:docker-workspaces": "bun run scripts/check-docker-workspaces.ts",
     "check:new-api-absorption": "bun run scripts/check-new-api-absorption.ts",
     "check:new-api-route-parity": "bun run scripts/check-new-api-route-parity.ts",
     "check:new-api-route-parity-strict": "bun run scripts/check-new-api-route-parity.ts --strict",
@@ -23,7 +24,8 @@
     "smoke:new-api:task-route-db": "bun run scripts/smoke-new-api-task-route-db.ts",
     "smoke:new-api:enterprise-route-db": "bun run scripts/smoke-openai-enterprise-route-db.ts",
     "smoke:new-api:admin-channel-route-db": "bun run scripts/smoke-admin-channel-route-db.ts",
-    "check": "bun run check:layers && bun run check:cache-dependencies && bun run check:no-redis-runtime && bun run check:new-api-absorption && bun run check:new-api-route-parity-strict && bun run check:new-api-dashboard-routes && bun run check:new-api-deployment-evidence && bun run check:new-api-production-readiness && bun run test:enterprise:smoke && bun --cwd packages/enterprise-contracts check && bun --cwd packages/enterprise-authz check && bun --cwd packages/enterprise-authz test && bun --cwd packages/enterprise-adapter check && bun --cwd packages/svadmin-helpers check && bun --cwd apps/gateway check && bun --cwd apps/gateway test:enterprise && bun --cwd apps/gateway test:protocol && bun --cwd apps/gateway test:compat && bun --cwd apps/gateway test:routing && bun --cwd apps/gateway test:providers && bun --cwd apps/gateway test:postgresx && bun --cwd apps/portal check && bun --cwd apps/admin check && bun --cwd apps/enterprise-console check && bun run smoke:new-api:protocol-db && bun run smoke:new-api:enterprise-route-db && bun run smoke:new-api:task-route-db && bun run smoke:new-api:admin-channel-route-db && bun run smoke:enterprise:db && bun run smoke:enterprise:runtime",
+    "security:audit": "bun audit",
+    "check": "bun run check:layers && bun run check:cache-dependencies && bun run check:no-redis-runtime && bun run check:docker-workspaces && bun run check:new-api-absorption && bun run check:new-api-route-parity-strict && bun run check:new-api-dashboard-routes && bun run check:new-api-deployment-evidence && bun run check:new-api-production-readiness && bun run test:enterprise:smoke && bun --cwd packages/enterprise-contracts check && bun --cwd packages/enterprise-authz check && bun --cwd packages/enterprise-authz test && bun --cwd packages/enterprise-adapter check && bun --cwd packages/svadmin-helpers check && bun --cwd apps/gateway check && bun --cwd apps/gateway test:enterprise && bun --cwd apps/gateway test:protocol && bun --cwd apps/gateway test:compat && bun --cwd apps/gateway test:routing && bun --cwd apps/gateway test:providers && bun --cwd apps/gateway test:postgresx && bun --cwd apps/portal check && bun --cwd apps/admin check && bun --cwd apps/enterprise-console check && bun run smoke:new-api:protocol-db && bun run smoke:new-api:enterprise-route-db && bun run smoke:new-api:task-route-db && bun run smoke:new-api:admin-channel-route-db && bun run smoke:enterprise:db && bun run smoke:enterprise:runtime",
     "build": "bun --cwd apps/portal build && bun --cwd apps/admin build && bun --cwd apps/enterprise-console build",
     "db:generate": "cd packages/db && bun run db:generate",
     "db:migrate": "cd packages/db && bun run db:migrate",
@@ -50,5 +52,18 @@
     "@types/nodemailer": "^8.0.1",
     "bun-types": "^1.3.14",
     "playwright": "^1.61.0"
+  },
+  "overrides": {
+    "cookie": "^0.7.2",
+    "devalue": "^5.8.1",
+    "drizzle-orm": "1.0.0-rc.4-273829f",
+    "esbuild": "^0.25.12",
+    "form-data": "^4.0.6",
+    "linkify-it": "^5.0.1",
+    "markdown-it": "^14.2.0",
+    "nodemailer": "^9.0.1",
+    "qs": "^6.15.3",
+    "svelte": "^5.56.4",
+    "vite": "^8.1.0"
   }
 }

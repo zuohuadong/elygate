@@ -4,7 +4,7 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "test:enterprise": "bun test src/enterprise/*.test.ts",
-    "test:protocol": "bun test src/routes/protocol-golden.test.ts src/routes/newApiRelayCompat.test.ts src/routes/responsesRoute.test.ts src/routes/imagesRoute.test.ts src/routes/protocolRouteFamilies.test.ts src/routes/realtimeRoute.test.ts src/routes/realtimeBilling.test.ts src/routes/openaiEnterpriseState.test.ts src/services/protocolBilling.test.ts && bun test src/routes/chatRoute.test.ts",
+    "test:protocol": "bun test src/routes/protocol-golden.test.ts src/routes/newApiRelayCompat.test.ts src/routes/responsesRoute.test.ts src/routes/imagesRoute.test.ts src/routes/protocolRouteFamilies.test.ts src/routes/realtimeRoute.test.ts src/routes/realtimeBilling.test.ts src/routes/openaiEnterpriseState.test.ts src/routes/fineTuneRoute.test.ts src/services/protocolBilling.test.ts && bun test src/routes/chatRoute.test.ts",
     "test:compat": "bun test src/services/captcha.test.ts src/services/twoFactor.test.ts src/services/identitySecurity.test.ts src/services/newApiSubscriptionCompat.test.ts src/services/subscriptionLifecycle.test.ts src/services/paymentCallback.test.ts src/services/paymentProviders.test.ts src/services/dispatcherCachePolicy.test.ts src/services/ratelimit.test.ts",
     "test:routing": "bun test src/services/cacheRouting.test.ts src/services/circuitBreakerPolicy.test.ts src/routes/admin/channelsOperations.test.ts",
     "test:providers": "bun test src/providers/providerContracts.test.ts",
@@ -24,9 +24,9 @@
     "@elysiajs/static": "^1.4.10",
     "@elysiajs/swagger": "^1.3.1",
     "@postgresx/noredis": "^0.6.0",
-    "drizzle-orm": "1.0.0-rc.2-63dd281",
+    "drizzle-orm": "1.0.0-rc.4-273829f",
     "elysia": "^1.4.28",
-    "nodemailer": "^8.0.11",
+    "nodemailer": "^9.0.1",
     "pg-boss": "^12.18.2"
   },
   "devDependencies": {

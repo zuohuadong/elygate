@@ -2,6 +2,8 @@ import { createDrizzleDataProvider } from '@svadmin/drizzle';
 import { drizzle } from 'drizzle-orm/bun-sql';
 import { schema } from './schema';
 
+type SvadminDrizzleProviderOptions = Parameters<typeof createDrizzleDataProvider>[0];
+
 // In Bun, SQL is a global, but can also be imported.
 // Using a runtime check to avoid build-time resolution errors in Vite/Node.
 const BunSQL = (globalThis as any).Bun?.SQL;
@@ -52,7 +54,7 @@ export const db = drizzle({
 
 export async function createSvadminDataProvider() {
     return createDrizzleDataProvider({
-        connection: db,
+        connection: db as unknown as SvadminDrizzleProviderOptions['connection'],
         schema,
         casing: 'camelCase',
         security: {

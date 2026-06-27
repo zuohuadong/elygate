@@ -18,7 +18,7 @@ jobs:
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Setup Bun Environment
         uses: oven-sh/setup-bun@v2.2.0
@@ -30,8 +30,23 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
+      - name: Install PostgreSQL smoke dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ca-certificates postgresql-common
+          yes | sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh
+          sudo apt-get update
+          sudo apt-get install -y postgresql-18 postgresql-18-cron postgresql-18-pgvector
+          echo "POSTGRES_BIN_DIR=/usr/lib/postgresql/18/bin" >> "$GITHUB_ENV"
+
       - name: Install Dependencies
         run: bun install
+
+      - name: Verify Dependency Audit
+        run: bun run security:audit
+
+      - name: Verify Full Readiness Gate
+        run: bun run check
 
       - name: Verify Web UI Build
         run: bun run build

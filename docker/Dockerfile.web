@@ -7,11 +7,16 @@ COPY package.json bun.lock* bun.lockb* ./
 COPY apps/gateway/package.json ./apps/gateway/
 COPY apps/portal/package.json ./apps/portal/
 COPY apps/admin/package.json ./apps/admin/
+COPY apps/enterprise-console/package.json ./apps/enterprise-console/
 COPY packages/db/package.json ./packages/db/
+COPY packages/enterprise-adapter/package.json ./packages/enterprise-adapter/
+COPY packages/enterprise-authz/package.json ./packages/enterprise-authz/
+COPY packages/enterprise-contracts/package.json ./packages/enterprise-contracts/
 COPY packages/pg-listen/package.json ./packages/pg-listen/
 COPY packages/svadmin-core/package.json ./packages/svadmin-core/
 COPY packages/svadmin-editor/package.json ./packages/svadmin-editor/
 COPY packages/svadmin-elysia/package.json ./packages/svadmin-elysia/
+COPY packages/svadmin-helpers/package.json ./packages/svadmin-helpers/
 COPY packages/svadmin-simple-rest/package.json ./packages/svadmin-simple-rest/
 COPY packages/svadmin-ui/package.json ./packages/svadmin-ui/
 
