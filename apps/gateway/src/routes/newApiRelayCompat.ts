@@ -1,7 +1,8 @@
 import type { ElysiaCtx, TokenRecord, UserRecord } from '../types';
+import type { TaskRecord } from '../services/task-service';
 import { Elysia } from 'elysia';
 import { authPlugin, assertModelAccess } from '../middleware/auth';
-import { createTask, getTask } from '../services/task-service';
+import * as taskService from '../services/task-service';
 
 function taskModel(body: Record<string, any>, fallback: string): string {
     return String(body.model || body.model_name || body.modelName || fallback);
@@ -27,7 +28,7 @@ export async function createCompatTask(
     const t = token as TokenRecord;
     assertModelAccess(u, t, model, set);
 
-    const id = await createTask({
+    const id = await taskService.createTask({
         userId: u.id,
         tokenId: t.id,
         model,
@@ -66,7 +67,7 @@ export async function createMidjourneyCompatTask(ctx: ElysiaCtx, action: string)
     };
 }
 
-function taskResponse(task: Awaited<ReturnType<typeof getTask>>) {
+function taskResponse(task: TaskRecord | null) {
     if (!task) return null;
     return {
         id: task.id,
@@ -85,7 +86,7 @@ function taskResponse(task: Awaited<ReturnType<typeof getTask>>) {
 
 export async function getCompatTask({ params, user, set }: ElysiaCtx, idParam = 'task_id') {
     const taskId = params[idParam] || params.id || params.taskId;
-    const task = await getTask(String(taskId), user?.id);
+    const task = await taskService.getTask(String(taskId), user?.id);
     const response = taskResponse(task);
     if (!response) {
         set.status = 404;
@@ -161,7 +162,7 @@ export const newApiRelayCompatRouter = new Elysia()
     .post('/:mode/mj/insight-face/swap', async (ctx: ElysiaCtx) => createMidjourneyCompatTask(ctx, `${ctx.params.mode}_insight-face-swap`))
     .post('/:mode/mj/submit/upload-discord-images', async (ctx: ElysiaCtx) => createMidjourneyCompatTask(ctx, `${ctx.params.mode}_upload-discord-images`))
     .get('/v1/videos/:taskId/content', async (ctx: ElysiaCtx) => {
-        const task = await getTask(String(ctx.params.taskId), ctx.user?.id);
+        const task = await taskService.getTask(String(ctx.params.taskId), ctx.user?.id);
         if (!task) {
             ctx.set.status = 404;
             return { error: { message: 'Task not found', type: 'not_found' } };

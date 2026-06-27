@@ -29,6 +29,9 @@ const failures: string[] = [];
 for (const dockerfile of dockerfiles) {
     const path = join(workspaceRoot, dockerfile);
     const text = await Bun.file(path).text();
+    if (!/^COPY\s+.*\btsconfig\.json\b.*\s+\.\//m.test(text)) {
+        failures.push(`${dockerfile} must copy root tsconfig.json before bun install/build`);
+    }
     for (const manifest of manifests) {
         const copyPattern = new RegExp(`^COPY\\s+${manifest.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+`, 'm');
         if (!copyPattern.test(text)) {
