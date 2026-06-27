@@ -1,7 +1,7 @@
 import type { ElysiaCtx, TokenRecord, UserRecord } from '../types';
 import type { TaskRecord } from '../services/task-service';
 import { Elysia } from 'elysia';
-import { authPlugin, assertModelAccess } from '../middleware/auth';
+import * as auth from '../middleware/auth';
 import * as taskService from '../services/task-service';
 
 function taskModel(body: Record<string, any>, fallback: string): string {
@@ -26,7 +26,7 @@ export async function createCompatTask(
 
     const u = user as UserRecord;
     const t = token as TokenRecord;
-    assertModelAccess(u, t, model, set);
+    auth.assertModelAccess(u, t, model, set);
 
     const id = await taskService.createTask({
         userId: u.id,
@@ -103,7 +103,7 @@ function firstString(...values: unknown[]): string | null {
 }
 
 export const newApiRelayCompatRouter = new Elysia()
-    .use(authPlugin)
+    .use(auth.authPlugin)
     .get('/mj/image/:id', async ({ params }: ElysiaCtx) => ({
         code: 1,
         description: 'success',
