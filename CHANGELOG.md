@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.9.0](https://github.com/zuohuadong/elygate/compare/elygate-v0.8.2...elygate-v0.9.0) (2026-06-27)
+
+
+### Features
+
+* add agent memory and enterprise APIs ([0053cd3](https://github.com/zuohuadong/elygate/commit/0053cd31b843712beaa0fffeede40160b4f057b8))
+* add postgres-backed billing and infra ([a0997f6](https://github.com/zuohuadong/elygate/commit/a0997f64cdcdfade0f343fe958b47ab712d7319c))
+* expand enterprise and new api parity ([74524fd](https://github.com/zuohuadong/elygate/commit/74524fde4b9645a4ea2d27bff153899abce518d4))
+* implement enterprise monorepo architecture ([#15](https://github.com/zuohuadong/elygate/issues/15)) ([06c1481](https://github.com/zuohuadong/elygate/commit/06c1481398091416a7813356fcbfab8010141365))
+
+
+### Chores
+
+* sync agent-team framework to latest deploy ([1954665](https://github.com/zuohuadong/elygate/commit/1954665f386b73bf77aa5a66394eb526cd83cbe5))
+
 ## [0.8.2](https://github.com/zuohuadong/elygate/compare/elygate-v0.8.1...elygate-v0.8.2) (2026-05-08)
 
 
