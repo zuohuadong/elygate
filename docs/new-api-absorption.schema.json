@@ -1,0 +1,162 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Elygate New API Absorption Matrix",
+  "type": "object",
+  "required": [
+    "version",
+    "decision",
+    "sourceSnapshot",
+    "elygateEvidence",
+    "acceptanceGates",
+    "domains"
+  ],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 1
+    },
+    "decision": {
+      "type": "object",
+      "required": [
+        "kernel",
+        "newApiRole",
+        "apiCompatibilityPolicy",
+        "runtimeCompatibilityPolicy",
+        "redisPolicy",
+        "postgresPolicy"
+      ],
+      "properties": {
+        "kernel": {
+          "type": "string"
+        },
+        "newApiRole": {
+          "type": "string"
+        },
+        "apiCompatibilityPolicy": {
+          "type": "string"
+        },
+        "runtimeCompatibilityPolicy": {
+          "type": "string"
+        },
+        "redisPolicy": {
+          "type": "string"
+        },
+        "postgresPolicy": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "sourceSnapshot": {
+      "type": "object",
+      "required": [
+        "project",
+        "commit",
+        "checkedAt",
+        "evidence"
+      ],
+      "properties": {
+        "project": {
+          "type": "string"
+        },
+        "commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{7,40}$"
+        },
+        "checkedAt": {
+          "type": "string"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "elygateEvidence": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "acceptanceGates": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "domains": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "priority",
+          "newApiSignals",
+          "elygateStatus",
+          "elygateEvidence",
+          "nextActions",
+          "postgresNativePlan",
+          "redisFreeGate"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "integer"
+          },
+          "newApiSignals": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1
+          },
+          "elygateStatus": {
+            "type": "string",
+            "enum": [
+              "implemented",
+              "mostly-implemented",
+              "partial",
+              "not-started",
+              "blocked"
+            ]
+          },
+          "elygateEvidence": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1
+          },
+          "nextActions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1
+          },
+          "postgresNativePlan": {
+            "type": "string"
+          },
+          "redisFreeGate": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "minItems": 1
+    }
+  },
+  "additionalProperties": false
+}

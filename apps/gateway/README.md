@@ -5,7 +5,7 @@ This is the high-performance API gateway for the Elygate project, built with [El
 ## Features
 
 - **Blazing Fast**: Leverages Bun's native asynchronous I/O and Elysia's optimized routing.
-- **Semantic Caching**: Integrated vector similarity search using `pgvector` to deduplicate and cache expensive AI requests.
+- **Exact Response Caching**: Deterministic request hashing deduplicates identical non-streaming requests without reusing answers across similar prompts.
 - **Atomic Billing**: O(1) batch processing eliminates SQL lock contention for high-throughput accounting.
 - **Enterprise Control Plane**: optional `/api/enterprise/*` routes for SupaCloud install/uninstall callbacks, SupAuth claims, app manifest, lifecycle events, resources, and health. Gateway `sk-*` keys remain data-plane only, with an enterprise runtime guard registered through the basic runtime governance hook when enterprise instance identity is configured.
 
@@ -88,9 +88,11 @@ and migration-alias experiments.
 
 Current boundaries:
 
+- `@postgresx/noredis` is the only allowed third-party cache dependency.
 - It is not enabled on the request hot path.
 - It does not create new PostgreSQL tables during startup.
 - `bun --cwd apps/gateway test:postgresx` verifies package import, Bun SQL adapter wiring, Elygate namespace/table prefix defaults, and L1 cache settings.
 - Production rollout should be gated by a real `DATABASE_URL` benchmark and a feature flag before replacing existing auth, rate-limit, billing, or cache paths.
+- Missing cache primitives should be added upstream to `@postgresx/noredis` instead of adding another cache library.
 
 The full replacement gate is tracked in `../../docs/ARCHITECTURE_DECISIONS.md`.

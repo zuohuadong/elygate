@@ -1,6 +1,5 @@
 import { log } from '../services/logger';
 import { getErrorMessage } from '../utils/error';
-import { existsSync, writeFileSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { randomBytes } from 'crypto';
 import { db } from '@elygate/db';
@@ -33,9 +32,10 @@ export async function initEnv(): Promise<void> {
     let needsMigration = false;
     let envVars: Record<string, string> = {};
     
-    if (existsSync(ENV_PATH)) {
+    const envFile = Bun.file(ENV_PATH);
+    if (await envFile.exists()) {
         log.info('✅ Environment configuration (.env) found.');
-        const content = readFileSync(ENV_PATH, 'utf-8');
+        const content = await envFile.text();
         envVars = parseEnvFile(content);
         
         if (!envVars.ENCRYPTION_SECRET || !envVars.ENCRYPTION_SALT) {
@@ -127,7 +127,7 @@ export async function initEnv(): Promise<void> {
     ].join('\n');
 
     try {
-        writeFileSync(ENV_PATH, envContent);
+        await Bun.write(ENV_PATH, envContent);
         log.info(`✅ Generated new .env file at: ${ENV_PATH}`);
         
         process.env.ENCRYPTION_SECRET = newEncryptionSecret;

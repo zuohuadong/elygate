@@ -18,8 +18,6 @@ interface CacheStats {
     tokenMisses: number;
     userQuotaHits: number;
     userQuotaMisses: number;
-    semanticCacheHits: number;
-    semanticCacheMisses: number;
     responseCacheHits: number;
     responseCacheMisses: number;
 }
@@ -51,8 +49,6 @@ export const memoryCache = {
         tokenMisses: 0,
         userQuotaHits: 0,
         userQuotaMisses: 0,
-        semanticCacheHits: 0,
-        semanticCacheMisses: 0,
         responseCacheHits: 0,
         responseCacheMisses: 0
     } as CacheStats,
@@ -600,8 +596,6 @@ export const memoryCache = {
             tokenMisses: 0,
             userQuotaHits: 0,
             userQuotaMisses: 0,
-            semanticCacheHits: 0,
-            semanticCacheMisses: 0,
             responseCacheHits: 0,
             responseCacheMisses: 0
         };

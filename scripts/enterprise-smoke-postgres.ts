@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -65,13 +65,15 @@ export function databaseUrlForPort(port: number): string {
 }
 
 async function writePostgresConfig(dataDir: string, port: number): Promise<void> {
-    await writeFile(join(dataDir, 'postgresql.conf'), [
+    const configPath = join(dataDir, 'postgresql.conf');
+    const existing = await Bun.file(configPath).text().catch(() => '');
+    await Bun.write(configPath, `${existing}${existing.endsWith('\n') || existing.length === 0 ? '' : '\n'}${[
         `listen_addresses = '127.0.0.1'`,
         `port = ${port}`,
         `shared_preload_libraries = 'pg_cron'`,
         `cron.database_name = 'postgres'`,
         '',
-    ].join('\n'), { flag: 'a' });
+    ].join('\n')}`);
 }
 
 export async function run(command: string, args: readonly string[], options: { env?: Record<string, string>; cwd?: string } = {}): Promise<string> {

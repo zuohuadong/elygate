@@ -13,6 +13,11 @@ import {
     completePendingTopupPaymentOrderTx,
 } from '../services/paymentCallback';
 import { bindSubscriptionToUserTx } from '../services/subscription';
+import { isPublicRechargeEnabled } from '../services/paymentPolicy';
+import {
+    generateEPaySign as generateEPaySignWithSecret,
+    verifyStripeWebhookSignature as verifyStripeWebhookSignatureWithSecret,
+} from '../services/paymentSignatures';
 
 const STRIPE_SECRET_KEY = config.stripe.secretKey || '';
 const STRIPE_WEBHOOK_SECRET = config.stripe.webhookSecret || '';
@@ -99,7 +104,7 @@ const authenticatedPaymentRouter = new Elysia()
     .post('/create-order', async ({ body, user, set }: ElysiaCtx) => {
         try {
             const [paymentEnabled] = await db.select().from(options).where(eq(options.key, 'PaymentEnabled'));
-            if (paymentEnabled && paymentEnabled.value === 'false') {
+            if (!isPublicRechargeEnabled(paymentEnabled?.value)) {
                 set.status = 403;
                 return { success: false, message: 'Self-recharge is currently disabled' };
             }
@@ -198,17 +203,7 @@ export async function handleStripePaymentCallback({ body, request, set }: Elysia
                 }
 
                 const rawBody = await request.text().catch(() => '');
-                const parts = sigHeader.split(',').reduce((acc: Record<string, string>, part: string) => {
-                    const [k, v] = part.split('=');
-                    acc[k] = v;
-                    return acc;
-                }, {});
-
-                const expectedSig = new Bun.CryptoHasher('sha256', STRIPE_WEBHOOK_SECRET)
-                    .update(`${parts.t}.${rawBody}`)
-                    .digest('hex');
-
-                if (expectedSig !== parts.v1) {
+                if (!verifyStripeWebhookSignature(rawBody, sigHeader)) {
                     set.status = 400;
                     return { success: false, message: 'Invalid Stripe signature' };
                 }
@@ -295,6 +290,10 @@ export const paymentRouter = new Elysia({ prefix: '/payment' })
     .post('/epay/callback', handleEPayPaymentCallback)
     .use(authenticatedPaymentRouter);
 
-function generateEPaySign(params: string, secret: string): string {
-    return new Bun.CryptoHasher('md5').update(params + secret).digest('hex');
+export function verifyStripeWebhookSignature(rawBody: string, signatureHeader: string, secret = STRIPE_WEBHOOK_SECRET): boolean {
+    return verifyStripeWebhookSignatureWithSecret(rawBody, signatureHeader, secret);
+}
+
+export function generateEPaySign(params: string, secret: string): string {
+    return generateEPaySignWithSecret(params, secret);
 }

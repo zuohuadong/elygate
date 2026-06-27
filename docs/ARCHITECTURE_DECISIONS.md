@@ -25,11 +25,15 @@ This avoids claiming stronger isolation than the current schema can prove. Org-s
 
 Enterprise runtime governance is intentionally fail-closed when enterprise mode is fully configured. If the gateway can build data-plane claims but cannot read the enterprise projection tables, requests fail with HTTP 503 instead of bypassing policy or budget checks. Production rollout must therefore run enterprise migrations and the control-plane smoke before routing traffic to an enterprise-enabled gateway.
 
-## ADR-2026-06-23-03: Keep `@postgresx/noredis` as a Pilot
+## ADR-2026-06-23-03: Standardize Cache Dependencies on `@postgresx/noredis`
 
 Status: accepted
 
-`@postgresx/noredis` is present as a narrow gateway bridge in `apps/gateway/src/services/postgresxInfra.ts`. It must not replace authentication, rate limit, billing, response cache, semantic cache, pg-boss jobs, or LISTEN/NOTIFY paths until all gates pass:
+Cache-related third-party runtime dependencies must converge on `@postgresx/noredis`.
+Do not add `lru-cache`, Redis clients, cache-manager adapters, or other cache libraries to runtime packages.
+If Elygate needs a missing cache primitive, add it upstream to `@postgresx/noredis` first and then consume the released package.
+
+`@postgresx/noredis` is present as a narrow gateway bridge in `apps/gateway/src/services/postgresxInfra.ts`. It must not replace authentication, rate limit, billing, response cache, pg-boss jobs, or LISTEN/NOTIFY paths until all gates pass:
 
 - benchmark against the existing PostgreSQL-native implementation on a representative `DATABASE_URL`;
 - feature parity check for TTL, cleanup, invalidation, concurrency, queue behavior, and failure semantics;
@@ -38,3 +42,4 @@ Status: accepted
 - rollback note and `bun run check` evidence.
 
 Until those gates pass, the existing PostgreSQL-native code remains the production hot path.
+Local in-memory business indexes are still allowed when they are not external dependencies and remain derived from PostgreSQL state.

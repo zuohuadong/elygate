@@ -178,7 +178,6 @@ export const packages = pgTable('packages', {
     totalAmount: bigint('total_amount', { mode: 'number' }).notNull().default(0),
     quotaResetPeriod: text('quota_reset_period').notNull().default('never'),
     quotaResetCustomSeconds: bigint('quota_reset_custom_seconds', { mode: 'number' }).notNull().default(0),
-    cachePolicy: jsonb('cache_policy').$type<Record<string, unknown>>().default({ mode: 'default' }),
     enabled: boolean('enabled').notNull().default(true),
     isPublic: boolean('is_public').default(true),
     sortOrder: integer('sort_order').notNull().default(0),
@@ -278,20 +277,18 @@ export const vendors = pgTable('vendors', {
 });
 
 export const tasks = pgTable('tasks', {
-    id: serial('id').primaryKey(),
+    id: text('id').primaryKey(),
+    userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    tokenId: integer('token_id').references(() => tokens.id, { onDelete: 'set null' }),
+    channelId: integer('channel_id').references(() => channels.id, { onDelete: 'set null' }),
+    model: text('model').notNull(),
     type: varchar('type', { length: 50 }).notNull(),
-    name: text('name').notNull(),
-    description: text('description'),
-    status: integer('status').notNull().default(0),
-    priority: integer('priority').notNull().default(0),
-    progress: integer('progress').notNull().default(0),
-    totalItems: integer('total_items').default(0),
-    processedItems: integer('processed_items').default(0),
+    status: varchar('status', { length: 30 }).notNull().default('pending'),
+    providerTaskId: text('provider_task_id'),
+    requestBody: jsonb('request_body').$type<Record<string, unknown>>().notNull().default({}),
     result: jsonb('result').$type<Record<string, unknown>>(),
-    errorMessage: text('error_message'),
-    createdBy: integer('created_by').references(() => users.id, { onDelete: 'set null' }),
-    startedAt: timestamp('started_at', { withTimezone: true }),
-    completedAt: timestamp('completed_at', { withTimezone: true }),
+    error: text('error'),
+    progress: integer('progress').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 });
@@ -366,17 +363,6 @@ export const responseCache = pgTable('response_cache', {
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
     lastReadAt: timestamp('last_read_at', { withTimezone: true }),
     expiredAt: timestamp('expired_at', { withTimezone: true }),
-});
-
-export const semanticCache = pgTable('semantic_cache', {
-    id: serial('id').primaryKey(),
-    modelName: text('model_name').notNull(),
-    promptHash: text('prompt_hash').notNull(),
-    prompt: text('prompt'),
-    embedding: text('embedding'),
-    response: jsonb('response').$type<unknown>(),
-    createdBy: integer('created_by'),
-    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 
 export const agentMemories = pgTable('agent_memories', {
@@ -1075,7 +1061,6 @@ export const schema = {
     'model-stats': modelStats,
     'rate-limits-table': rateLimits,
     'response-cache': responseCache,
-    'semantic-cache': semanticCache,
     'agent-memories': agentMemories,
     'api-files': apiFiles,
     'api-batches': apiBatches,

@@ -1,7 +1,7 @@
 import type { ElysiaCtx } from '../../types';
 import { Elysia } from 'elysia';
 import { db } from '@elygate/db';
-import { options, channels, tokens, users, logs, responseCache, semanticCache, tokenCache, userQuotaCache } from '@elygate/db/schema';
+import { options, channels, tokens, users, logs, responseCache, tokenCache, userQuotaCache } from '@elygate/db/schema';
 import { eq, and, desc, sql as drizzleSql, count } from 'drizzle-orm';
 import { memoryCache } from '../../services/cache';
 import { getAffinityStats, clearAffinityCache } from '../../services/channelAffinity';
@@ -59,7 +59,6 @@ export const performanceRouter = new Elysia()
     // --- Clear caches ---
     .delete('/performance/caches', async () => {
         await db.delete(responseCache);
-        await db.delete(semanticCache);
         await db.delete(tokenCache);
         await db.delete(userQuotaCache);
         const affinityCleared = clearAffinityCache();

@@ -7,6 +7,7 @@ import { assertModelAccess } from '../middleware/auth';
 import type { TokenRecord, UserRecord } from '../types';
 import { ChannelType } from '../providers/types';
 import { buildMemorySystemMessage, rememberAsync, shouldReadMemory, shouldRememberContent, shouldWriteMemory } from '../services/memory';
+import { extractResponseInputText } from './protocolShapes';
 
 function selectResponseChannels(model: string, user: UserRecord, token: TokenRecord) {
     const group = token.tokenGroup && token.tokenGroup !== 'auto' ? token.tokenGroup : user.group;
@@ -37,21 +38,6 @@ function resolveEmbeddingChannel(): { channel: Record<string, any> | null; model
     }
 
     return { channel: null, model: undefined };
-}
-
-function extractResponseInputText(input: unknown): string {
-    if (typeof input === 'string') return input.trim();
-    if (!Array.isArray(input)) return '';
-    return input.map((item) => {
-        if (typeof item === 'string') return item;
-        if (!item || typeof item !== 'object') return '';
-        const value = item as Record<string, any>;
-        if (typeof value.content === 'string') return value.content;
-        if (Array.isArray(value.content)) {
-            return value.content.map((part: Record<string, any>) => part.text || '').filter(Boolean).join('\n');
-        }
-        return '';
-    }).filter(Boolean).join('\n').trim();
 }
 
 export const responsesRouter = new Elysia()
@@ -127,7 +113,6 @@ export const responsesRouter = new Elysia()
         }
     })
     .post('/responses/compact', async ({ body, token, user, request, set }: ElysiaCtx) => {
-        // Compact route: same as /responses but signals compaction intent to upstream.
         const u = user as UserRecord;
         const t = token as TokenRecord;
         const b = body as Record<string, any>;
@@ -152,6 +137,7 @@ export const responsesRouter = new Elysia()
                 token: t,
                 endpointType: 'responses',
                 stream,
+                upstreamPath: '/responses/compact',
                 ip,
                 ua
             });
@@ -162,14 +148,15 @@ export const responsesRouter = new Elysia()
             return { error: { message: msg, type: 'server_error' } };
         }
     })
-    .post('/responses/:response_id/compact', async ({ body, token, user, request, set }: ElysiaCtx) => {
-        // Per-response-ID compat route (New API supports this pattern).
+    .post('/responses/:response_id/compact', async ({ body, params, token, user, request, set }: ElysiaCtx) => {
         const u = user as UserRecord;
         const t = token as TokenRecord;
         const b = body as Record<string, any>;
+        const responseId = String(params.response_id || '').trim();
         const model = b.model;
 
         if (!model) throw new Error("Missing 'model' field in request body");
+        if (!responseId) throw new Error("Missing 'response_id' path parameter");
 
         assertModelAccess(user, token, model, set);
         ensureCompactSupported(model, u, t, set);
@@ -186,6 +173,7 @@ export const responsesRouter = new Elysia()
                 token: t,
                 endpointType: 'responses',
                 stream,
+                upstreamPath: `/responses/${encodeURIComponent(responseId)}/compact`,
                 ip,
                 ua
             });

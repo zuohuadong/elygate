@@ -65,7 +65,6 @@ export type EnterpriseResourceName =
   | 'usage_attribution'
   | 'request_logs'
   | 'response_cache'
-  | 'semantic_cache'
   | 'agent_memories'
   | 'audit_events';
 
@@ -250,7 +249,6 @@ export const ELYGATE_ENTERPRISE_MANIFEST: ElygateEnterpriseManifest = {
     'usage_attribution',
     'request_logs',
     'response_cache',
-    'semantic_cache',
     'agent_memories',
     'audit_events',
   ],

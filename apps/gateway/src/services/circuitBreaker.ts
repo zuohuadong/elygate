@@ -6,6 +6,7 @@ import { memoryCache } from './cache';
 import { notificationService } from './notifier';
 import { optionCache } from './optionCache';
 import { webhookService } from './webhook';
+import { classifyChannelError } from './circuitBreakerPolicy';
 
 interface RequestEvent {
     timestamp: number;
@@ -152,17 +153,19 @@ class CircuitBreaker {
         const channel = memoryCache.channels.get(channelId);
         if (!channel) return;
 
+        const action = classifyChannelError(status, Boolean(activeKey));
+
         // 1. Auth/Balance errors (401/403) → mark individual KEY, not entire channel
-        if ((status === 401 || status === 403) && activeKey) {
-            return this.markKeyExhausted(channelId, activeKey, status, message);
+        if (action === 'mark-key' && activeKey) {
+            return this.markKeyExhausted(channelId, activeKey, status ?? 500, message);
         }
         // Fallback if no activeKey provided — legacy behavior
-        if (status === 401) {
+        if (action === 'disable-channel') {
             log.error(`[CircuitBreaker] Channel ${channelId} Auth Error (401). Disabling.`);
             await this.disableChannel(channelId, `Auth Error: 401 ${message || ""}`);
             return;
         }
-        if (status === 403) {
+        if (status === 403 && action === 'mark-busy') {
             log.warn(`[CircuitBreaker] Channel ${channelId} received 403. Marking as Busy.`);
             await db.update(channels).set({
                 status: 5,
@@ -174,7 +177,7 @@ class CircuitBreaker {
         }
 
         // 2. Mark as Busy for Rate Limits (429)
-        if (status === 429) {
+        if (status === 429 && action === 'mark-busy') {
             log.warn(`[CircuitBreaker] Channel ${channelId} Rate Limited (429). Marking as Busy.`);
             await db.update(channels).set({
                 status: 5,
@@ -186,7 +189,7 @@ class CircuitBreaker {
         }
 
         // 3. Skip client errors (4xx) — they're user mistakes, not channel problems
-        if (status && status >= 400 && status < 500) return;
+        if (action === 'ignore-client-error') return;
 
         // 4. For recovering/busy channels, don't disable on a single failure.
         //    Let them use the same time-window failure rate check as normal channels.

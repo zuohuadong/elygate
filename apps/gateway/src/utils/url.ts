@@ -60,6 +60,21 @@ export function buildUpstreamUrl(
     }
 }
 
+export function buildUpstreamProtocolUrl(config: ChannelConfig, path: string): string {
+    let base = config.baseUrl.replace(/\/+$/, '');
+    const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+
+    if (base.endsWith('/v1')) {
+        base = base.slice(0, -3);
+    }
+
+    if (normalizedPath.match(/^\/v[1-9](\.[0-9]+)?\//) || normalizedPath.startsWith('/v1beta/')) {
+        return `${base}${normalizedPath}`;
+    }
+
+    return `${base}/v1${normalizedPath}`;
+}
+
 /**
  * Build URL for fetching model list from upstream provider.
  * Replaces 4+ duplicated blocks in admin.ts.

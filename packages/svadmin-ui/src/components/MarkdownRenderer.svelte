@@ -3,8 +3,6 @@
   import * as markedHighlightPkg from "marked-highlight";
   import * as hljsPkg from "highlight.js";
   import * as DOMPurifyPkg from "isomorphic-dompurify";
-  import { Check, Copy } from '@lucide/svelte';
-  import { Button } from "./ui/button/index.js";
 
   const Marked = markedPkg.Marked;
   const markedHighlight = markedHighlightPkg.markedHighlight;
@@ -74,42 +72,50 @@
   // Inject copy buttons into the HTML after rendering
   // We do this via action instead of raw string manipulation for safety
   function enhanceCodeBlocks(node: HTMLElement, _: string) {
+    function enhance() {
+      // Find all pre > code blocks that don't have wrappers yet
+      const pres = node.querySelectorAll("pre:not(.enhanced)");
+      pres.forEach((pre) => {
+        pre.classList.add("enhanced");
+        const wrapper = document.createElement("div");
+        wrapper.className =
+          "code-block-wrapper group relative my-4 rounded-md bg-foreground/95";
+
+        const header = document.createElement("div");
+        header.className =
+          "flex items-center justify-between px-4 py-2 text-xs text-zinc-400 border-b border-zinc-800";
+
+        const lang =
+          Array.from(pre.querySelector("code")?.classList || [])
+            .find((c) => c.startsWith("language-"))
+            ?.replace("language-", "") || "Code";
+
+        const label = document.createElement("span");
+        label.textContent = lang;
+
+        const button = document.createElement("button");
+        button.className = "copy-btn hover:text-white transition-colors flex items-center gap-1";
+        button.type = "button";
+        button.setAttribute("aria-label", "Copy code");
+        button.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>';
+
+        header.append(label, button);
+        pre.replaceWith(wrapper);
+        wrapper.appendChild(header);
+
+        const scrollContainer = document.createElement("div");
+        scrollContainer.className = "overflow-x-auto p-4";
+        scrollContainer.appendChild(pre);
+        wrapper.appendChild(scrollContainer);
+      });
+    }
+
+    node.addEventListener("click", handleCopy);
+    queueMicrotask(enhance);
+
     return {
-      update(newHtml: string) {
-        // Find all pre > code blocks that don't have wrappers yet
-        const pres = node.querySelectorAll("pre:not(.enhanced)");
-        pres.forEach((pre) => {
-          pre.classList.add("enhanced");
-          const wrapper = document.createElement("div");
-          wrapper.className =
-            "code-block-wrapper group relative my-4 rounded-md bg-foreground/95";
-
-          const header = document.createElement("div");
-          header.className =
-            "flex items-center justify-between px-4 py-2 text-xs text-zinc-400 border-b border-zinc-800";
-
-          const lang =
-            Array.from(pre.querySelector("code")?.classList || [])
-              .find((c) => c.startsWith("language-"))
-              ?.replace("language-", "") || "Code";
-          header.innerHTML = `
-            <span>${lang}</span>
-            <button class="copy-btn hover:text-white transition-colors flex items-center gap-1">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
-            </button>
-          `;
-
-          pre.replaceWith(wrapper);
-          wrapper.appendChild(header);
-
-          const scrollContainer = document.createElement("div");
-          scrollContainer.className = "overflow-x-auto p-4";
-          scrollContainer.appendChild(pre);
-          wrapper.appendChild(scrollContainer);
-        });
-
-        // Add event listener for copy buttons
-        node.addEventListener("click", handleCopy);
+      update() {
+        queueMicrotask(enhance);
       },
       destroy() {
         node.removeEventListener("click", handleCopy);

@@ -58,6 +58,7 @@ export const ZhipuProvider: ProviderHandler = {
         for (let attempt = 1; attempt <= 120; attempt++) {
             await new Promise(r => setTimeout(r, 5000)); // Poll every 5s
 
+            let data: Record<string, any>;
             try {
                 const res = await fetch(statusUrl, {
                     method: 'GET',
@@ -69,30 +70,31 @@ export const ZhipuProvider: ProviderHandler = {
                     continue;
                 }
 
-                const data = await res.json();
-                
-                // Zhipu async format usually puts status in task_status and results in video_result
-                if (data.task_status === 'SUCCESS' || data.task_status === 'COMPLETED') {
-                    const videoResult = data.video_result || [];
-                    const url = videoResult[0]?.url || data.url || '';
-                    return {
-                        id: taskId,
-                        model: data.model || 'cogvideox-3',
-                        videos: [{ 
-                            url, 
-                            cover_url: videoResult[0]?.cover_image_url || '' 
-                        }]
-                    };
-                }
-
-                if (data.task_status === 'FAIL' || data.task_status === 'FAILED') {
-                    throw new Error(`Task failed: ${JSON.stringify(data)}`);
-                }
-                
-                // Keep polling if status is PROCESSING
+                data = await res.json();
             } catch (err: any) {
                 log.error(`[Zhipu Video] Polling Error: ${err.message}`);
+                continue;
             }
+
+            // Zhipu async format usually puts status in task_status and results in video_result
+            if (data.task_status === 'SUCCESS' || data.task_status === 'COMPLETED') {
+                const videoResult = data.video_result || [];
+                const url = videoResult[0]?.url || data.url || '';
+                return {
+                    id: taskId,
+                    model: data.model || 'cogvideox-3',
+                    videos: [{
+                        url,
+                        cover_url: videoResult[0]?.cover_image_url || ''
+                    }]
+                };
+            }
+
+            if (data.task_status === 'FAIL' || data.task_status === 'FAILED') {
+                throw new Error(`Task failed: ${JSON.stringify(data)}`);
+            }
+
+            // Keep polling if status is PROCESSING
         }
         throw new Error(`Video polling timed out after 120 attempts`);
     }

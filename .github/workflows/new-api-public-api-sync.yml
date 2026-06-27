@@ -1,0 +1,70 @@
+name: New API Public API Sync
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: QuantumNous/new-api ref to inspect
+        required: false
+        default: HEAD
+      allow_pinned_commit_drift:
+        description: Allow upstream commit drift when all public routes are still covered
+        required: false
+        type: boolean
+        default: true
+  schedule:
+    # 02:20 Asia/Shanghai. The workflow is read-only and uploads a route report artifact.
+    - cron: '20 18 * * *'
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '24'
+
+jobs:
+  sync-public-api:
+    name: Sync New API Public Routes
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Setup Bun Environment
+        uses: oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version: latest
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Dependencies
+        run: bun install
+
+      - name: Verify Pinned Route Matrix
+        run: bun run check:new-api-route-parity
+
+      - name: Fetch New API Public Route Snapshot
+        env:
+          NEW_API_REF: ${{ inputs.ref || 'HEAD' }}
+          ALLOW_PINNED_COMMIT_DRIFT: ${{ github.event_name != 'workflow_dispatch' || inputs.allow_pinned_commit_drift }}
+          REPORT_PATH: artifacts/new-api/public-api-sync-report.json
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "$REPORT_PATH")"
+          args=(--ref "$NEW_API_REF" --report-path "$REPORT_PATH")
+          if [ "$ALLOW_PINNED_COMMIT_DRIFT" = "true" ]; then
+            args+=(--allow-newer-commit)
+          fi
+          bun run scripts/check-new-api-upstream-routes.ts "${args[@]}"
+
+      - name: Upload Public API Sync Report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: new-api-public-api-sync-report
+          path: artifacts/new-api/public-api-sync-report.json
+          if-no-files-found: warn

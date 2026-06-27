@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 
 function timestamp() {
@@ -19,11 +19,11 @@ const safeName = rawName.replace(/[^a-zA-Z0-9-_]+/g, '-').replace(/-+/g, '-').re
 const folderName = `${timestamp()}_${safeName}`;
 const target = join(import.meta.dir, '..', 'drizzle', folderName);
 
-if (existsSync(target)) {
+if (await stat(target).then(() => true, () => false)) {
     throw new Error(`Migration folder already exists: ${folderName}`);
 }
 
-mkdirSync(target, { recursive: true });
-writeFileSync(join(target, 'migration.sql'), '--> statement-breakpoint\n');
+await mkdir(target, { recursive: true });
+await Bun.write(join(target, 'migration.sql'), '--> statement-breakpoint\n');
 
 console.log(`[db:generate] created ${folderName}`);

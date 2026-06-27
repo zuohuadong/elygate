@@ -8,18 +8,15 @@ import { eq, and, lte, gt, desc, sql as drizzleSql } from 'drizzle-orm';
 import { isRateLimited } from '../services/ratelimit';
 import type { TokenRecord,  UserRecord  } from '../types';
 import { memoryCache } from '../services/cache';
-import { LRUCache } from 'lru-cache';
+import { LocalTtlCache } from '../services/localTtlCache';
 import { jwt } from '@elysiajs/jwt';
 import { checkAndResetSubscriptionQuota } from '../services/subscription';
 import { translateErrorBilingual } from '../services/i18n';
 import { getClientIpFromHeaders, isIpAllowed } from '../utils/ipAccess';
 
-// High-performance LRU cache for auth context (Token + User)
+// Local hot-path cache for auth context (Token + User)
 // Reduces DB pressure by 90%+ for repeated requests from the same API key.
-const authCache = new LRUCache<string, { token: TokenRecord, user: UserRecord }>({
-    max: 10000,
-    ttl: 1000 * 60, // 1 minute TTL
-});
+const authCache = new LocalTtlCache<string, { token: TokenRecord, user: UserRecord }>(10_000, 1000 * 60);
 
 let authSyncPromise: Promise<void> | null = null;
 /**
@@ -82,7 +79,7 @@ export function assertModelAccess(user: UserRecord, token: TokenRecord, modelNam
 /**
  * Bearer Token Authentication Middleware
  * Parses "Authorization: Bearer sk-xxx" from OpenAI protocol
- * and validates the corresponding key in the database (with LRU Cache).
+ * and validates the corresponding key in the database (with local TTL cache).
  */
 export const authPlugin = new Elysia({ name: 'auth' })
     .use(jwt({

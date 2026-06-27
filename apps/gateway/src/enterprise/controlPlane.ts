@@ -30,7 +30,7 @@ import {
 import type { ProjectionAction } from '@elygate/enterprise-adapter';
 import { evaluateEnterpriseBudgets, evaluateEnterprisePolicies } from '@elygate/enterprise-authz';
 import type { EnterpriseBudgetRecord, EnterprisePolicyRecord } from '@elygate/enterprise-authz';
-import { and, count, desc, eq, gte, isNotNull, lte, ne, sql as drizzleSql, sum } from 'drizzle-orm';
+import { and, count, desc, eq, gte, isNotNull, lte, ne, or, sql as drizzleSql, sum } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 import { nextEnterpriseBudgetResetAt, rolloverDueEnterpriseBudgets } from './budgetRollover';
 import { enterpriseRuntimeConfig } from './config';
@@ -725,10 +725,19 @@ function numericOrgId(claims: PlatformClaims): number | null {
     return Number.isInteger(orgId) && orgId > 0 ? orgId : null;
 }
 
+function projectedWorkspaceIds(claims: PlatformClaims): readonly string[] {
+    return [claims.project_id, claims.app_instance_id].filter((value): value is string => Boolean(value));
+}
+
 function usageWindowWhere(claims: PlatformClaims, since: Date): SQL {
+    const scopeFilters: SQL[] = [];
     const orgId = numericOrgId(claims);
-    if (!orgId) return drizzleSql`false`;
-    return and(eq(logs.orgId, orgId), gte(logs.createdAt, since)) ?? drizzleSql`false`;
+    if (orgId) scopeFilters.push(eq(logs.orgId, orgId));
+    for (const workspaceId of projectedWorkspaceIds(claims)) {
+        scopeFilters.push(eq(logs.externalWorkspaceId, workspaceId));
+    }
+    const scoped = scopeFilters.length ? or(...scopeFilters) : undefined;
+    return scoped ? and(scoped, gte(logs.createdAt, since)) ?? drizzleSql`false` : drizzleSql`false`;
 }
 
 function mapUsageAttribution(row: UsageAttributionMetricRow, dimension: UsageAttributionDimension, fallbackLabel: string) {

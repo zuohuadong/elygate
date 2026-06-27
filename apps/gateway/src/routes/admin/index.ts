@@ -1,8 +1,6 @@
 import type { ElysiaCtx } from '../../types';
 import { Elysia } from 'elysia';
 import { authPlugin } from '../../middleware/auth';
-import { memoryCache } from '../../services/cache';
-import { optionCache } from '../../services/optionCache';
 import { channelsRouter } from './channels';
 import { groupsRouter } from './groups';
 import { usersRouter } from './users';
@@ -17,15 +15,7 @@ import { performanceRouter } from './performance';
 import { vendorsRouter } from './vendors';
 import { dataRouter } from './data';
 import { memoryAdminRouter } from './memory';
-
-/**
- * Refresh both memory cache and option cache.
- * Shared across admin sub-modules.
- */
-export async function refreshAllCaches(): Promise<void> {
-    await memoryCache.refresh();
-    await optionCache.refresh();
-}
+export { refreshAllCaches } from './cacheRefresh';
 
 /**
  * Admin Router - aggregates all admin sub-routes.

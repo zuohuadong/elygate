@@ -1,5 +1,4 @@
 import type { EnterpriseBudgetEvaluationResult, EnterprisePolicyEvaluationResult, PlatformClaims } from '@elygate/enterprise-contracts';
-import { readFile } from 'node:fs/promises';
 import { db, sql as rawSql } from '@elygate/db';
 import {
     enterpriseAuditEvents,
@@ -54,7 +53,7 @@ async function bootstrapFreshDatabaseIfNeeded(): Promise<void> {
     if (await hasBaseSchema()) return;
 
     const initSqlPath = new URL('../../../../packages/db/src/init.sql', import.meta.url);
-    const initSql = await readFile(initSqlPath, 'utf8');
+    const initSql = await Bun.file(initSqlPath).text();
     console.log('[enterprise-db-smoke] base schema missing; applying packages/db/src/init.sql');
     await rawSql.unsafe(initSql);
     console.log('[enterprise-db-smoke] base schema bootstrap applied');

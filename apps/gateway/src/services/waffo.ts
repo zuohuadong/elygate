@@ -52,9 +52,9 @@ export async function createWaffoCheckoutSession(params: WaffoCheckoutParams): P
 /**
  * 验证 Waffo webhook 签名
  */
-export function verifyWaffoWebhookSignature(rawBody: string, signature: string): boolean {
-    if (!config.waffo.webhookSecret) return false;
-    const expected = new Bun.CryptoHasher('sha256', config.waffo.webhookSecret)
+export function verifyWaffoWebhookSignature(rawBody: string, signature: string, secret = config.waffo.webhookSecret): boolean {
+    if (!secret) return false;
+    const expected = new Bun.CryptoHasher('sha256', secret)
         .update(rawBody)
         .digest('hex');
     return expected === signature;

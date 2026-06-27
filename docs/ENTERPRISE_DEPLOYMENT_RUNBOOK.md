@@ -100,6 +100,23 @@ bun --version
 - PostgreSQL 备份或快照。
 - 上一个可运行的 `apps/admin/dist`、`apps/enterprise-console/dist` 和 gateway artifact。
 
+备份恢复演练：
+
+```bash
+pg_dump --format=custom --file=/secure-backups/elygate-predeploy.dump "$DATABASE_URL"
+pg_restore --list /secure-backups/elygate-predeploy.dump | head
+createdb elygate_restore_drill
+pg_restore --dbname=elygate_restore_drill --clean --if-exists /secure-backups/elygate-predeploy.dump
+DATABASE_URL=postgresql://... bun --cwd apps/gateway src/enterprise/dbSmoke.ts
+```
+
+验收点：
+
+- 备份文件由生产密钥系统或安全备份目录管理，不提交到仓库。
+- `pg_restore --list` 能读取备份目录。
+- staging/临时库 restore 后，`smoke:enterprise:db` 能完成企业投影、审计导出和卸载回调。
+- `/api/admin/data/backup/status` 能返回核心表行数统计，用于发布前后快速对照。
+
 ### 2. 构建
 
 ```bash

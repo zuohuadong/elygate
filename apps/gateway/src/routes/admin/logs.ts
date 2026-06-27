@@ -70,9 +70,7 @@ export const logsRouter = new Elysia()
                 ...l,
                 channel_name: l.channelId === -1
                     ? (query?.lang === 'zh' ? '系统精确缓存' : 'Exact Match Cache')
-                    : l.channelId === 0
-                        ? (query?.lang === 'zh' ? '系统语义缓存' : 'Semantic Cache')
-                        : (l.channelName || `Unknown (${l.channelId})`),
+                    : (l.channelName || `Unknown (${l.channelId})`),
                 cost_usd: quotaToUSD(l.quotaCost),
                 cost_rmb: quotaToRMB(l.quotaCost),
                 cached_tokens: l.cachedTokens || 0,

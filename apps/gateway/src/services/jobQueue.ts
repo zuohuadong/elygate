@@ -10,6 +10,7 @@ export const JOB_QUEUE_NAMES = {
     webhookDeliver: 'webhook.deliver',
     longTaskProcess: 'long-task.process',
     memoryRemember: 'memory.remember',
+    batchProcess: 'batch.process',
 } as const;
 
 export interface WebhookDeliveryJobPayload {
@@ -24,6 +25,10 @@ export interface WebhookDeliveryJobPayload {
 
 export interface LongTaskJobPayload {
     taskId: string;
+}
+
+export interface BatchJobPayload {
+    batchId: string;
 }
 
 let bossPromise: Promise<PgBoss> | null = null;
@@ -83,6 +88,19 @@ async function ensureQueues(boss: PgBoss): Promise<void> {
         retentionSeconds: 3 * 24 * 60 * 60,
         deleteAfterSeconds: 24 * 60 * 60,
         warningQueueSize: envNumber('PG_BOSS_MEMORY_WARNING_SIZE', 1000),
+    });
+
+    await ensureQueue(boss, JOB_QUEUE_NAMES.batchProcess, {
+        policy: 'key_strict_fifo',
+        retryLimit: envNumber('PG_BOSS_BATCH_RETRY_LIMIT', 2),
+        retryDelay: 30,
+        retryBackoff: true,
+        retryDelayMax: 10 * 60,
+        expireInSeconds: 60 * 60,
+        retentionSeconds: 7 * 24 * 60 * 60,
+        deleteAfterSeconds: 24 * 60 * 60,
+        heartbeatSeconds: 60,
+        warningQueueSize: envNumber('PG_BOSS_BATCH_WARNING_SIZE', 1000),
     });
 }
 
@@ -152,6 +170,18 @@ export async function enqueueMemoryRemember(payload: MemoryRememberJobPayload): 
     const jobId = await boss.send(JOB_QUEUE_NAMES.memoryRemember, payload);
     if (!jobId) throw new Error('pg-boss did not enqueue memory job');
     return jobId;
+}
+
+export async function enqueueBatchProcess(batchId: string): Promise<string | null> {
+    const boss = await getJobQueue();
+    return await boss.send(
+        JOB_QUEUE_NAMES.batchProcess,
+        { batchId } satisfies BatchJobPayload,
+        {
+            singletonKey: batchId,
+            singletonSeconds: envNumber('PG_BOSS_BATCH_SINGLETON_SECONDS', 24 * 60 * 60),
+        }
+    );
 }
 
 async function startBillingWorker(boss: PgBoss): Promise<void> {
@@ -229,6 +259,26 @@ async function startMemoryWorker(boss: PgBoss): Promise<void> {
     );
 }
 
+async function startBatchWorker(boss: PgBoss): Promise<void> {
+    await boss.work<BatchJobPayload>(
+        JOB_QUEUE_NAMES.batchProcess,
+        {
+            batchSize: 1,
+            pollingIntervalSeconds: 1,
+            localConcurrency: envNumber('PG_BOSS_BATCH_CONCURRENCY', 2),
+            heartbeatRefreshSeconds: 30,
+            orderByCreatedOn: true,
+        },
+        async (jobs: Job<BatchJobPayload>[]) => {
+            const { processBatch } = await import('./batchExecutor');
+            for (const job of jobs) {
+                await processBatch(job.data.batchId);
+            }
+            return { processed: jobs.length };
+        }
+    );
+}
+
 export function startJobQueueWorkers(): Promise<void> {
     if (!workersPromise) {
         workersPromise = (async () => {
@@ -237,6 +287,7 @@ export function startJobQueueWorkers(): Promise<void> {
             await startWebhookWorker(boss);
             await startLongTaskWorker(boss);
             await startMemoryWorker(boss);
+            await startBatchWorker(boss);
             log.info('[JobQueue] Workers registered');
         })().catch((err) => {
             workersPromise = null;

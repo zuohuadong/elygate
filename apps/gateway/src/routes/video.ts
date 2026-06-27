@@ -1,5 +1,5 @@
 import type { ElysiaCtx } from '../types';
-import { Elysia } from 'elysia';
+import { Elysia, t } from 'elysia';
 import { log } from '../services/logger';
 import { assertModelAccess } from '../middleware/auth';
 import { createTask, getTask } from '../services/task-service';
@@ -17,22 +17,38 @@ import type { UserRecord, TokenRecord } from '../types';
  *   GET  /v1/tasks/task_...    → { status: "processing", progress: 50 }
  *   GET  /v1/tasks/task_...    → { status: "completed", result: {...} }
  */
+const videoGenerationBodySchema = t.Object({
+    model: t.String(),
+    prompt: t.String(),
+}, { additionalProperties: true });
+
+const taskIdParamsSchema = t.Object({
+    taskId: t.String(),
+});
+
+const videoIdParamsSchema = t.Object({
+    videoId: t.String(),
+});
+
 export const videoRouter = new Elysia()
     .post('/video/generations', async (ctx: ElysiaCtx) => {
         return await createVideoTaskResponse(ctx);
-    })
+    }, { body: videoGenerationBodySchema })
     .get('/video/generations/:taskId', async (ctx: ElysiaCtx) => {
         return await getVideoTaskResponse(ctx);
-    })
+    }, { params: taskIdParamsSchema })
     .post('/videos', async (ctx: ElysiaCtx) => {
         return await createVideoTaskResponse(ctx);
-    })
+    }, { body: videoGenerationBodySchema })
+    .get('/videos/:taskId/content', async (ctx: ElysiaCtx) => {
+        return await getVideoContentResponse(ctx);
+    }, { params: taskIdParamsSchema })
     .get('/videos/:taskId', async (ctx: ElysiaCtx) => {
         return await getVideoTaskResponse(ctx);
-    })
+    }, { params: taskIdParamsSchema })
     .post('/videos/:videoId/remix', async (ctx: ElysiaCtx) => {
         return await createVideoTaskResponse(ctx, { sourceVideoId: ctx.params?.videoId, action: 'remix' });
-    });
+    }, { params: videoIdParamsSchema, body: videoGenerationBodySchema });
 
 async function createVideoTaskResponse({ body, token, user, set }: ElysiaCtx, metadata: Record<string, unknown> = {}) {
         const model = (body.model) as string;
@@ -98,4 +114,33 @@ async function getVideoTaskResponse({ params, user, set }: ElysiaCtx) {
     if (task.status === 'completed' && task.result) response.result = task.result;
     if (task.status === 'failed' && task.error) response.error = { message: task.error, type: 'generation_failed' };
     return response;
+}
+
+async function getVideoContentResponse({ params, user, set }: ElysiaCtx) {
+    if (!user) {
+        set.status = 401;
+        return { success: false, message: 'Unauthorized' };
+    }
+
+    const task = await getTask(params.taskId, (user as UserRecord).id);
+    if (!task) {
+        set.status = 404;
+        return { error: { message: 'Task not found', type: 'not_found' } };
+    }
+    if (task.status !== 'completed') {
+        set.status = 409;
+        return { error: { message: `Task is ${task.status}`, type: 'task_not_ready' } };
+    }
+
+    const result = task.result || {};
+    const url = result.url || result.video_url || result.videoUrl || result.output_url || result.outputUrl || (Array.isArray(result.data) ? result.data[0]?.url : null);
+    if (typeof url === 'string' && url) return Response.redirect(url, 302);
+
+    const base64 = result.b64_json || result.base64 || result.content;
+    if (typeof base64 === 'string' && base64) {
+        return new Response(Buffer.from(base64, 'base64'), { headers: { 'Content-Type': 'video/mp4' } });
+    }
+
+    set.status = 404;
+    return { error: { message: 'Task result does not include downloadable video content', type: 'content_not_found' } };
 }

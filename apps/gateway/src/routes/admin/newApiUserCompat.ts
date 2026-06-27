@@ -20,6 +20,11 @@ import { newApiPlanToPackageValues, normalizeBillingPreference, resolveSubscript
 import { safeExternalFetch } from '../../utils/safeExternalUrl';
 import { handleEPayPaymentCallback, handleStripePaymentCallback } from '../payment';
 import { completePendingTopupPaymentOrderTx } from '../../services/paymentCallback';
+import { buildAuthSessionCookieOptions } from '../../services/sessionCookie';
+import { createPasskeyChallenge, consumePasskeyChallenge } from '../../services/passkeyChallenge';
+import { revokeAuthSession } from '../../services/sessionRevocation';
+import { buildCopiedChannelValues } from './channelOperations';
+import { assertPublicRechargeEnabled, isPublicRechargeEnabled } from '../../services/paymentPolicy';
 
 /**
  * New API compatible user/subscription/announcement/ollama routes.
@@ -82,9 +87,7 @@ async function fetchOAuthDiscovery(body: Record<string, any>) {
 
 async function createTopupPaymentOrder(userId: number, amount: number, paymentMethod: string) {
     const [paymentEnabled] = await db.select().from(options).where(eq(options.key, 'PaymentEnabled'));
-    if (paymentEnabled && paymentEnabled.value === 'false') {
-        throw new Error('Self-recharge is currently disabled');
-    }
+    assertPublicRechargeEnabled(paymentEnabled?.value);
     if (!amount || amount <= 0) {
         throw new Error('Invalid amount');
     }
@@ -176,9 +179,7 @@ function parsePackagePriceToCents(value: unknown): number {
 
 async function createSubscriptionPaymentOrder(userId: number, packageId: number, paymentMethod: string) {
     const [paymentEnabled] = await db.select().from(options).where(eq(options.key, 'PaymentEnabled'));
-    if (paymentEnabled && paymentEnabled.value === 'false') {
-        throw new Error('Self-recharge is currently disabled');
-    }
+    assertPublicRechargeEnabled(paymentEnabled?.value);
     if (!packageId) throw new Error('packageId is required');
 
     const [pkg] = await db.select({
@@ -458,21 +459,12 @@ async function loginCompatUser(payload: Record<string, any>, request: Request, a
         clientIP,
         request.headers.get('user-agent') || 'unknown'
     );
-    authSession.set({
-        value: sessionToken,
-        httpOnly: true,
-        secure: request.headers.get('x-forwarded-proto') === 'https',
-        sameSite: 'lax',
-        maxAge: 7 * 86400,
-        path: '/'
-    });
+    authSession.set(buildAuthSessionCookieOptions(sessionToken, request));
     const tokenKey = await authService.ensureDefaultApiKey(row.id);
     return { success: true, token: tokenKey, username: row.username, role: row.role, currency: row.currency || 'USD' };
 }
 
 const PASSKEY_PROVIDER_PREFIX = 'passkey:';
-const PASSKEY_CHALLENGE_TTL_MS = 5 * 60 * 1000;
-const passkeyChallenges = new Map<string, { action: 'register' | 'verify' | 'login'; userId: number; expiresAt: number }>();
 
 function parsePasskeyMetadata(value: unknown): Record<string, any> {
     if (!value) return {};
@@ -499,29 +491,6 @@ function getPasskeyRpId() {
         }
     }
     return fallback;
-}
-
-function cleanupPasskeyChallenges() {
-    const now = Date.now();
-    for (const [token, challenge] of passkeyChallenges.entries()) {
-        if (challenge.expiresAt <= now) passkeyChallenges.delete(token);
-    }
-}
-
-function createPasskeyChallenge(action: 'register' | 'verify' | 'login', userId: number) {
-    cleanupPasskeyChallenges();
-    const challengeToken = `pkc_${Bun.randomUUIDv7('hex')}`;
-    const challenge = Bun.randomUUIDv7('hex');
-    passkeyChallenges.set(challengeToken, { action, userId, expiresAt: Date.now() + PASSKEY_CHALLENGE_TTL_MS });
-    return { challengeToken, challenge };
-}
-
-function consumePasskeyChallenge(token: string, action: 'register' | 'verify' | 'login') {
-    cleanupPasskeyChallenges();
-    const challenge = passkeyChallenges.get(token);
-    if (!challenge || challenge.action !== action || challenge.expiresAt <= Date.now()) return null;
-    passkeyChallenges.delete(token);
-    return challenge;
 }
 
 function extractCredentialId(payload: Record<string, any>) {
@@ -1246,23 +1215,7 @@ export const newApiUserAdminRouter = new Elysia()
     .post('/channel/copy/:id', async ({ params: { id }, set }: ElysiaCtx) => {
         const [source] = await db.select().from(channels).where(eq(channels.id, Number(id))).limit(1);
         if (!source) { set.status = 404; return { success: false, message: 'Channel not found' }; }
-        const [result] = await db.insert(channels).values({
-            name: `[Copy] ${source.name}`,
-            type: source.type,
-            key: source.key,
-            baseUrl: source.baseUrl,
-            models: source.models,
-            modelMapping: source.modelMapping,
-            priority: source.priority,
-            weight: source.weight,
-            status: 3,
-            keyStrategy: source.keyStrategy,
-            keyStatus: source.keyStatus,
-            priceRatio: source.priceRatio,
-            keyConcurrencyLimit: source.keyConcurrencyLimit,
-            endpointType: source.endpointType,
-            groups: source.groups,
-        }).returning({ id: channels.id, name: channels.name });
+        const [result] = await db.insert(channels).values(buildCopiedChannelValues(source)).returning({ id: channels.id, name: channels.name });
         return { success: true, channel: result };
     })
     .post('/channel/:id/key', async ({ params: { id }, set, user }: ElysiaCtx) => {
@@ -1766,7 +1719,7 @@ export const newApiUserSelfRouter = new Elysia()
         return {
             success: true,
             data: {
-                enabled: String(optionCache.get('PaymentEnabled', 'true')) === 'true',
+                enabled: isPublicRechargeEnabled(optionCache.get('PaymentEnabled', 'false')),
                 methods: optionCache.get('PaymentMethods', 'redemption'),
                 quotaPerUnit: Number(optionCache.get('QuotaPerUnit', 500000)),
                 exchangeRate: Number(optionCache.get('ExchangeRate', 7.2)),
@@ -1939,18 +1892,10 @@ export const newApiUserPublicRouter = new Elysia()
         }
     })
     .get('/user/logout', async ({ cookie: { auth_session } }: ElysiaCtx) => {
-        if (auth_session.value) {
-            await db.delete(sessions).where(eq(sessions.token, auth_session.value));
-        }
-        auth_session.remove();
-        return { success: true, message: 'Logged out successfully' };
+        return revokeAuthSession(auth_session, (sessionToken) => db.delete(sessions).where(eq(sessions.token, sessionToken)));
     })
     .post('/user/logout', async ({ cookie: { auth_session } }: ElysiaCtx) => {
-        if (auth_session.value) {
-            await db.delete(sessions).where(eq(sessions.token, auth_session.value));
-        }
-        auth_session.remove();
-        return { success: true, message: 'Logged out successfully' };
+        return revokeAuthSession(auth_session, (sessionToken) => db.delete(sessions).where(eq(sessions.token, sessionToken)));
     })
     .get('/user/groups', async () => {
         const rows = await db.select().from(userGroups).where(eq(userGroups.status, 1)).orderBy(desc(userGroups.createdAt));
@@ -2065,14 +2010,7 @@ export const newApiUserPublicRouter = new Elysia()
             request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown',
             request.headers.get('user-agent') || 'unknown'
         );
-        auth_session.set({
-            value: sessionToken,
-            httpOnly: true,
-            secure: request.headers.get('x-forwarded-proto') === 'https',
-            sameSite: 'lax',
-            maxAge: 7 * 86400,
-            path: '/'
-        });
+        auth_session.set(buildAuthSessionCookieOptions(sessionToken, request));
         const tokenKey = await authService.ensureDefaultApiKey(currentUser.id);
         return {
             success: true,
@@ -2176,14 +2114,7 @@ export const newApiUserPublicRouter = new Elysia()
             request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown',
             request.headers.get('user-agent') || 'unknown'
         );
-        auth_session.set({
-            value: sessionToken,
-            httpOnly: true,
-            secure: request.headers.get('x-forwarded-proto') === 'https',
-            sameSite: 'lax',
-            maxAge: 7 * 86400,
-            path: '/'
-        });
+        auth_session.set(buildAuthSessionCookieOptions(sessionToken, request));
         const tokenKey = await authService.ensureDefaultApiKey(currentUser.id);
         return {
             success: true,

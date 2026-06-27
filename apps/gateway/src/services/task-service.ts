@@ -13,7 +13,7 @@ export interface TaskRecord {
     channelId?: number;
     model: string;
     type: string;
-    status: 'pending' | 'processing' | 'completed' | 'failed';
+    status: 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
     providerTaskId?: string;
     requestBody?: Record<string, any>;
     result?: Record<string, any>;
@@ -37,7 +37,6 @@ export async function createTask(opts: {
     requestBody: Record<string, any>;
 }): Promise<string> {
     const id = generateTaskId();
-    // tasks runtime table has different columns than the admin tasks schema.
     await db.execute(drizzleSql`
         INSERT INTO tasks (id, user_id, token_id, model, type, status, request_body)
         VALUES (${id}, ${opts.userId}, ${opts.tokenId}, ${opts.model}, ${opts.type}, 'pending', ${opts.requestBody})
@@ -84,6 +83,67 @@ async function updateTask(taskId: string, updates: Partial<Pick<TaskRecord, 'sta
             progress = COALESCE(${updates.progress !== undefined ? updates.progress : null}, progress)
         WHERE id = ${taskId}
     `);
+}
+
+export async function cancelTask(taskId: string, userId: number): Promise<TaskRecord | null> {
+    const [row] = await db.execute(drizzleSql`
+        UPDATE tasks
+        SET status = 'cancelled',
+            progress = CASE WHEN progress < 100 THEN progress ELSE 100 END,
+            updated_at = NOW()
+        WHERE id = ${taskId}
+          AND user_id = ${userId}
+          AND status IN ('pending', 'processing')
+        RETURNING id, user_id AS "userId", token_id AS "tokenId", channel_id AS "channelId",
+                  model, type, status, provider_task_id AS "providerTaskId",
+                  request_body AS "requestBody", result, error, progress,
+                  created_at AS "createdAt", updated_at AS "updatedAt"
+    `) as any[];
+    return (row as TaskRecord) || null;
+}
+
+function callbackStatus(status: string | undefined, hasResult: boolean): TaskRecord['status'] {
+    const normalized = (status || '').toLowerCase();
+    if (['cancelled', 'canceled'].includes(normalized)) return 'cancelled';
+    if (['failed', 'fail', 'error'].includes(normalized)) return 'failed';
+    if (['processing', 'running', 'pending', 'queued'].includes(normalized)) return 'processing';
+    if (['completed', 'complete', 'success', 'succeeded'].includes(normalized) || hasResult) return 'completed';
+    return 'processing';
+}
+
+export async function applyTaskCallback(input: {
+    taskId?: string;
+    providerTaskId?: string;
+    userId?: number;
+    status?: string;
+    result?: Record<string, any>;
+    error?: string;
+    progress?: number;
+}): Promise<TaskRecord | null> {
+    if (!input.taskId && !input.providerTaskId) {
+        throw new Error('taskId or providerTaskId is required');
+    }
+
+    const nextStatus = callbackStatus(input.status, Boolean(input.result));
+    const nextProgress = input.progress ?? (nextStatus === 'completed' ? 100 : undefined);
+    const [row] = await db.execute(drizzleSql`
+        UPDATE tasks
+        SET status = ${nextStatus},
+            result = COALESCE(${input.result || null}, result),
+            error = COALESCE(${input.error || null}, error),
+            progress = COALESCE(${nextProgress ?? null}, progress),
+            updated_at = NOW()
+        WHERE (
+            (${input.taskId || null}::text IS NOT NULL AND id = ${input.taskId || null})
+            OR (${input.providerTaskId || null}::text IS NOT NULL AND provider_task_id = ${input.providerTaskId || null})
+        )
+        AND (${input.userId || null}::int IS NULL OR user_id = ${input.userId || null})
+        RETURNING id, user_id AS "userId", token_id AS "tokenId", channel_id AS "channelId",
+                  model, type, status, provider_task_id AS "providerTaskId",
+                  request_body AS "requestBody", result, error, progress,
+                  created_at AS "createdAt", updated_at AS "updatedAt"
+    `) as any[];
+    return (row as TaskRecord) || null;
 }
 
 async function processTask(task: TaskRecord) {
@@ -179,6 +239,7 @@ async function cleanupTasks() {
             DELETE FROM tasks
             WHERE (status = 'completed' AND created_at < NOW() - INTERVAL '30 days')
                OR (status = 'failed' AND created_at < NOW() - INTERVAL '7 days')
+               OR (status = 'cancelled' AND created_at < NOW() - INTERVAL '7 days')
             RETURNING id
         `) as any[];
 

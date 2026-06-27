@@ -54,12 +54,9 @@ Elygate manages a persistent connection pool. You can tune this in your `.env`:
 - `DB_POOL_SIZE`: Set to 20 per gateway instance.
 - `DB_MAX_PIPELINE`: Enabled by default to batch requests.
 
-### Semantic Cache
+### Exact Response Cache
 
-Enable the vector-based semantic cache to reduce LLM costs and latency:
-
-- **Config**: Set `SEMANTIC_CACHE_ENABLED=true` in `.env`.
-- **Threshold**: Tune similarity in the `options` table (default `0.95`).
+Use the built-in exact response cache for repeated, identical non-streaming requests. It avoids upstream calls without returning cached answers for merely similar prompts.
 
 ## 4. Monitoring Performance
 
