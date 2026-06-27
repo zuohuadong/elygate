@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.9.0](https://github.com/zuohuadong/elygate/compare/elygate-v0.8.2...elygate-v0.9.0) (2026-06-27)
+
+
+### Features
+
+* add agent memory and enterprise APIs ([0053cd3](https://github.com/zuohuadong/elygate/commit/0053cd31b843712beaa0fffeede40160b4f057b8))
+* add postgres-backed billing and infra ([a0997f6](https://github.com/zuohuadong/elygate/commit/a0997f64cdcdfade0f343fe958b47ab712d7319c))
+* expand enterprise and new api parity ([74524fd](https://github.com/zuohuadong/elygate/commit/74524fde4b9645a4ea2d27bff153899abce518d4))
+* implement enterprise monorepo architecture ([#15](https://github.com/zuohuadong/elygate/issues/15)) ([06c1481](https://github.com/zuohuadong/elygate/commit/06c1481398091416a7813356fcbfab8010141365))
+
+
+### Bug Fixes
+
+* harden postgres smoke startup ([09ffb84](https://github.com/zuohuadong/elygate/commit/09ffb84043b88410e7c81bd338f448f0bf939745))
+* resolve release readiness debt ([1315d8f](https://github.com/zuohuadong/elygate/commit/1315d8fea346ec94176485984cad597080896564))
+* stabilize new api relay mocks ([4bbd0cf](https://github.com/zuohuadong/elygate/commit/4bbd0cf06151fa5735a0332d67c68ce9f1533948))
+* stabilize release readiness checks ([ff90412](https://github.com/zuohuadong/elygate/commit/ff90412c97fcbbf97b77eeb4b465aa734a4a0886))
+
+
+### Chores
+
+* sync agent-team framework to latest deploy ([1954665](https://github.com/zuohuadong/elygate/commit/1954665f386b73bf77aa5a66394eb526cd83cbe5))
+
 ## [0.8.2](https://github.com/zuohuadong/elygate/compare/elygate-v0.8.1...elygate-v0.8.2) (2026-05-08)
 
 
