@@ -3,6 +3,7 @@ import { apiBatches, apiFiles } from '@elygate/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { sql as drizzleSql } from 'drizzle-orm';
 import { log } from './logger';
+import { enqueueBatchProcess } from './jobQueue';
 
 /**
  * Batch 异步执行器
@@ -14,6 +15,8 @@ import { log } from './logger';
  */
 
 const BATCH_PROCESS_INTERVAL_MS = 5000; // 5 秒扫描一次 pending batches
+const BATCH_REQUEST_CONCURRENCY = Math.max(1, Number(process.env.BATCH_REQUEST_CONCURRENCY || 4));
+const BATCH_PROGRESS_UPDATE_EVERY = Math.max(1, Number(process.env.BATCH_PROGRESS_UPDATE_EVERY || 25));
 
 interface BatchLine {
     custom_id: string;
@@ -88,6 +91,12 @@ async function executeBatchRequest(
     }
 }
 
+async function updateBatchProgress(batchId: string, total: number, completed: number, failed: number): Promise<void> {
+    await db.update(apiBatches).set({
+        requestCounts: { total, completed, failed },
+    }).where(eq(apiBatches.id, batchId));
+}
+
 /**
  * 处理一个 batch job
  */
@@ -155,41 +164,47 @@ export async function processBatch(batchId: string): Promise<void> {
         requestCounts: { total: lines.length, completed: 0, failed: 0 },
     }).where(eq(apiBatches.id, batchId));
 
-    // 逐行执行
-    const outputLines: string[] = [];
+    // 有限并发执行，避免大 batch 串行阻塞，同时限制内部 gateway 压力。
+    const outputLines: Array<string | undefined> = new Array(lines.length);
     const errorLines: string[] = [];
     let completed = 0;
     let failed = 0;
 
-    for (const line of lines) {
-        const result = await executeBatchRequest(line, batchId, batch.userId);
-        if (result.error) {
-            failed++;
-            errorLines.push(JSON.stringify({
-                id: `batch_err_${crypto.randomUUID().replace(/-/g, '')}`,
-                input_index: completed + failed - 1,
-                code: 'request_failed',
-                message: result.error.message,
-                custom_id: result.custom_id,
-            }));
-        } else {
-            completed++;
-            outputLines.push(JSON.stringify({
-                id: `batch_req_${crypto.randomUUID().replace(/-/g, '')}`,
-                custom_id: result.custom_id,
-                response: result.response,
-                error: null,
-            }));
+    for (let offset = 0; offset < lines.length; offset += BATCH_REQUEST_CONCURRENCY) {
+        const chunk = lines.slice(offset, offset + BATCH_REQUEST_CONCURRENCY);
+        const results = await Promise.all(chunk.map((line, index) =>
+            executeBatchRequest(line, batchId, batch.userId).then((result) => ({ index: offset + index, result }))
+        ));
+
+        for (const { index, result } of results) {
+            if (result.error) {
+                failed++;
+                errorLines.push(JSON.stringify({
+                    id: `batch_err_${crypto.randomUUID().replace(/-/g, '')}`,
+                    input_index: index,
+                    code: 'request_failed',
+                    message: result.error.message,
+                    custom_id: result.custom_id,
+                }));
+            } else {
+                completed++;
+                outputLines[index] = JSON.stringify({
+                    id: `batch_req_${crypto.randomUUID().replace(/-/g, '')}`,
+                    custom_id: result.custom_id,
+                    response: result.response,
+                    error: null,
+                });
+            }
         }
 
-        // 更新进度
-        await db.update(apiBatches).set({
-            requestCounts: { total: lines.length, completed, failed },
-        }).where(eq(apiBatches.id, batchId));
+        const processed = completed + failed;
+        if (processed % BATCH_PROGRESS_UPDATE_EVERY === 0 || processed === lines.length) {
+            await updateBatchProgress(batchId, lines.length, completed, failed);
+        }
     }
 
     // 创建输出文件
-    const outputContent = Buffer.from(outputLines.join('\n'), 'utf-8');
+    const outputContent = Buffer.from(outputLines.filter((line): line is string => Boolean(line)).join('\n'), 'utf-8');
     const outputId = `file_${crypto.randomUUID().replace(/-/g, '')}`;
     await db.insert(apiFiles).values({
         id: outputId,
@@ -232,7 +247,7 @@ export async function processBatch(batchId: string): Promise<void> {
 }
 
 /**
- * 定时扫描 pending batches，将它们提交到 job queue
+ * 定时扫描 pending batches，将它们提交到 pg-boss job queue
  */
 export async function scanPendingBatches(): Promise<void> {
     try {
@@ -242,14 +257,18 @@ export async function scanPendingBatches(): Promise<void> {
             .limit(10);
 
         for (const batch of pending) {
-            // 标记为 queued 以避免重复处理
-            await db.update(apiBatches).set({ status: 'in_progress' })
+            const claimed = await db.update(apiBatches).set({ status: 'in_progress' })
                 .where(and(eq(apiBatches.id, batch.id), eq(apiBatches.status, 'validating')))
                 .returning({ id: apiBatches.id });
-            // 异步处理
-            processBatch(batch.id).catch(e => {
-                log.error(`[BatchExecutor] Batch ${batch.id} failed:`, e);
-            });
+            if (claimed.length === 0) continue;
+
+            try {
+                await enqueueBatchProcess(batch.id);
+            } catch (e: unknown) {
+                await db.update(apiBatches).set({ status: 'validating' })
+                    .where(eq(apiBatches.id, batch.id));
+                log.error(`[BatchExecutor] Failed to enqueue batch ${batch.id}:`, e);
+            }
         }
     } catch (e: unknown) {
         log.error('[BatchExecutor] Scan error:', e);

@@ -3,38 +3,10 @@ import { Elysia } from 'elysia';
 import { db, sql } from '@elygate/db';
 import { apiBatches, apiFiles } from '@elygate/db/schema';
 import { eq, and, desc, notInArray, sql as drizzleSql } from 'drizzle-orm';
+import { serializeBatch } from './protocolShapes';
 
 function createId(prefix: string): string {
     return `${prefix}_${crypto.randomUUID().replace(/-/g, '')}`;
-}
-
-function ts(value: unknown): number | null {
-    if (!value) return null;
-    return Math.floor(new Date(value as string).getTime() / 1000);
-}
-
-function serializeBatch(row: Record<string, any>) {
-    return {
-        id: row.id,
-        object: row.object || 'batch',
-        endpoint: row.endpoint,
-        input_file_id: row.inputFileId || row.input_file_id,
-        completion_window: row.completionWindow || row.completion_window || '24h',
-        status: row.status,
-        output_file_id: row.outputFileId || row.output_file_id || null,
-        error_file_id: row.errorFileId || row.error_file_id || null,
-        created_at: ts(row.createdAt || row.created_at),
-        in_progress_at: ts(row.inProgressAt || row.in_progress_at),
-        expires_at: ts(row.expiredAt || row.expired_at),
-        finalizing_at: ts(row.finalizingAt || row.finalizing_at),
-        completed_at: ts(row.completedAt || row.completed_at),
-        failed_at: ts(row.failedAt || row.failed_at),
-        cancelling_at: ts(row.cancellingAt || row.cancelling_at),
-        cancelled_at: ts(row.cancelledAt || row.cancelled_at),
-        request_counts: row.requestCounts || row.request_counts || { total: 0, completed: 0, failed: 0 },
-        metadata: row.metadata || {},
-        errors: row.errors || null
-    };
 }
 
 export const batchesRouter = new Elysia()

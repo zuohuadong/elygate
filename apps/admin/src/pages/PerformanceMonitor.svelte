@@ -109,7 +109,6 @@
           <div class="space-y-2 text-sm">
             <div class="flex justify-between"><span>渠道命中</span><span class="font-mono">{stats.cache?.channelHits} / {stats.cache?.channelMisses}</span></div>
             <div class="flex justify-between"><span>令牌命中</span><span class="font-mono">{stats.cache?.tokenHits} / {stats.cache?.tokenMisses}</span></div>
-            <div class="flex justify-between"><span>语义缓存命中</span><span class="font-mono">{stats.cache?.semanticCacheHits} / {stats.cache?.semanticCacheMisses}</span></div>
             <div class="flex justify-between"><span>精确缓存命中</span><span class="font-mono">{stats.cache?.responseCacheHits} / {stats.cache?.responseCacheMisses}</span></div>
             <div class="flex justify-between"><span>活跃模型数</span><span class="font-mono">{stats.cache?.modelCount}</span></div>
             <div class="flex justify-between"><span>活跃渠道数</span><span class="font-mono">{stats.cache?.channelCount}</span></div>

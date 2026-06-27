@@ -1,12 +1,11 @@
 import type { ElysiaCtx } from '../types';
 import { log } from '../services/logger';
-import { Elysia } from 'elysia';
+import { Elysia, t } from 'elysia';
 import { assertModelAccess } from '../middleware/auth';
 import { memoryCache } from '../services/cache';
 import { billAndLog, reconcileQuota } from '../services/billing';
 import { calculateCost } from '../services/ratio';
 import { optionCache } from '../services/optionCache';
-import { lookupSemanticCache, storeSemanticCache } from '../services/semanticCache';
 import { lookupResponseCache, storeResponseCache } from '../services/responseCache';
 import { getChannelKeys } from '../services/encryption';
 import { dispatch } from '../services/dispatcher';
@@ -112,9 +111,6 @@ function filterThinkingContent(response: Record<string, any>): Record<string, an
     return filtered;
 }
 
-/**
- * Resolve embedding channel and model for semantic cache lookups.
- */
 function resolveEmbeddingChannel(): { channel: Record<string, any> | null; model: string | undefined } {
     const configuredModel = optionCache.get('CHAT_CHANNEL_MODEL', '') as string;
 
@@ -148,7 +144,7 @@ function resolveEmbeddingChannel(): { channel: Record<string, any> | null; model
 }
 
 /**
- * Bill a cache hit (both exact and semantic cache).
+ * Bill an exact cache hit.
  */
 async function billCacheHit(
     response: Record<string, any>,
@@ -186,6 +182,14 @@ async function billCacheHit(
         responseBody: JSON.stringify(response)
     });
 }
+
+const chatCompletionBodySchema = t.Object({
+    model: t.String(),
+    messages: t.Optional(t.Array(t.Any())),
+    stream: t.Optional(t.Boolean()),
+    response_format: t.Optional(t.Any()),
+    trace_id: t.Optional(t.String()),
+}, { additionalProperties: true });
 
 export const chatRouter = new Elysia()
     .post('/chat/completions', async ({ body, token, user, request, set }: ElysiaCtx) => {
@@ -238,13 +242,7 @@ export const chatRouter = new Elysia()
             }
         }
 
-        // --- Cache Configuration ---
         const messages = body.messages as Record<string, any>[][];
-        const userPrompt = Array.isArray(messages)
-            ? messages.map((m: Record<string, any>) => m.content).join(' ')
-            : '';
-        const defaultMode = optionCache.get('SemanticCacheDefaultMode', 'default');
-        const cachePolicy = (u as Record<string, any>).activePackage?.cache_policy || { mode: defaultMode };
 
         // --- Vision/Multimodal Detection ---
         // Detect if any message contains image content (image_url type or base64 data)
@@ -289,56 +287,21 @@ export const chatRouter = new Elysia()
             }
         }
 
-        // --- 2. Semantic Cache Lookup (vector similarity) ---
-        const { channel: embeddingChannel, model: embeddingModel } = resolveEmbeddingChannel();
-        log.info(`[SemanticCache] Embedding channel found: ${embeddingChannel ? embeddingChannel.name : 'NONE'}, model: ${embeddingModel || 'N/A'}`);
+        const shouldUseMemory = (shouldReadMemory(body as Record<string, any>) || shouldWriteMemory(body as Record<string, any>))
+            && Array.isArray(messages)
+            && !isVisionRequest;
+        const { channel: embeddingChannel, model: embeddingModel } = shouldUseMemory
+            ? resolveEmbeddingChannel()
+            : { channel: null, model: undefined };
 
-        if (embeddingChannel && !stream && !isVisionRequest) {
-            const cachedResponse = await lookupSemanticCache(userPrompt, cacheModelKey, embeddingChannel, embeddingModel, u.id, cachePolicy);
-            if (cachedResponse) {
-                log.info(`[SemanticCache] HIT for model: ${cacheModelKey} (requested: ${model})`);
-                let correctedResponse = { ...cachedResponse, model };
-
-                // Filter thinking content if -F suffix was requested
-                if (skipThinking && correctedResponse.choices) {
-                    correctedResponse = filterThinkingContent(correctedResponse);
-                }
-
-                // Estimate tokens for semantic cache billing
-                let promptTokens = correctedResponse.usage?.prompt_tokens || 0;
-                let completionTokens = correctedResponse.usage?.completion_tokens || 0;
-                if (!correctedResponse.usage) {
-                    let completionText = '';
-                    if (correctedResponse.choices?.[0]?.message?.content) {
-                        completionText = correctedResponse.choices[0].message.content;
-                    }
-                    promptTokens = Math.ceil(userPrompt.length / 1.5);
-                    completionTokens = Math.ceil(completionText.length / 1.5);
-                }
-
-                const actualCost = calculateCost(model, u.group, promptTokens, completionTokens);
-                await reconcileQuota({ userId: u.id, tokenId: t.id, preDeducted: 0, actualCost }).catch((e: unknown) => log.warn('[Async] Suppressed:', e));
-                await billAndLog({
-                    userId: u.id, tokenId: t.id, channelId: 0, modelName: model,
-                    promptTokens, completionTokens, userGroup: u.group,
-                    isStream: false, elapsedMs: Date.now() - startTime, ip, ua,
-                    traceId, orgId: u.orgId,
-                    requestBody: JSON.stringify(body),
-                    responseBody: JSON.stringify(correctedResponse)
-                }).catch(e => log.error('[SemanticCache] Billing Error:', e.message));
-
-                return removeNullFields(correctedResponse);
-            }
-        }
-
-        // --- 3. Cache Miss: Dispatch to upstream via dispatch ---
+        // --- 2. Cache Miss: Dispatch to upstream via dispatch ---
         const dispatchBody = { ...body };
         if (shouldReadMemory(body as Record<string, any>) && Array.isArray(messages) && !isVisionRequest) {
             const memoryPrompt = extractMemoryTextFromMessages(messages);
             const memoryMessage = await buildMemorySystemMessage({
                 user: u,
                 token: t,
-                query: memoryPrompt || userPrompt,
+                query: memoryPrompt,
                 embeddingChannel,
                 embeddingModel
             }).catch((error: unknown) => {
@@ -361,7 +324,7 @@ export const chatRouter = new Elysia()
             ua
         });
 
-        // --- 4. Async cache storage for non-stream responses ---
+        // --- 3. Async cache storage for non-stream responses ---
         if (!stream && result && !(result instanceof Response) && !isVisionRequest) {
             const formattedData = result as Record<string, any>;
 
@@ -384,13 +347,7 @@ export const chatRouter = new Elysia()
             storeResponseCache(model, messages, formattedData, formattedData.usage, u.id).catch((err: Error) => {
                 log.error('[ResponseCache] Store Error:', err.message);
             });
-
-            if (embeddingChannel) {
-                storeSemanticCache(userPrompt, model, formattedData, embeddingChannel, embeddingModel, u.id, cachePolicy).catch((err: Error) => {
-                    log.error('[SemanticCache] Store Error:', err.message);
-                });
-            }
         }
 
         return result;
-    });
+    }, { body: chatCompletionBodySchema });

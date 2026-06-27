@@ -81,19 +81,6 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_tokens_expired
 ON tokens (expired_at) 
 WHERE expired_at IS NOT NULL;
 
--- ============================================================
--- Semantic Cache Indexes
--- ============================================================
-
--- Optimize semantic cache queries by model and time
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_semantic_cache_model_created 
-ON semantic_cache (model_name, created_at DESC);
-
--- Optimize semantic cache cleanup
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_semantic_cache_created 
-ON semantic_cache (created_at DESC);
-
--- ============================================================
 -- Payment and Billing Indexes
 -- ============================================================
 
@@ -162,7 +149,6 @@ ANALYZE logs;
 ANALYZE channels;
 ANALYZE users;
 ANALYZE tokens;
-ANALYZE semantic_cache;
 ANALYZE payment_orders;
 ANALYZE daily_stats;
 ANALYZE model_stats;

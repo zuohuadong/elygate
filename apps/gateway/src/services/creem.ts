@@ -55,9 +55,9 @@ export async function createCreemCheckoutSession(params: CreemCheckoutParams): P
 /**
  * 验证 Creem webhook 签名
  */
-export function verifyCreemWebhookSignature(rawBody: string, signature: string): boolean {
-    if (!config.creem.webhookSecret) return false;
-    const expected = new Bun.CryptoHasher('sha256', config.creem.webhookSecret)
+export function verifyCreemWebhookSignature(rawBody: string, signature: string, secret = config.creem.webhookSecret): boolean {
+    if (!secret) return false;
+    const expected = new Bun.CryptoHasher('sha256', secret)
         .update(rawBody)
         .digest('hex');
     return expected === signature;

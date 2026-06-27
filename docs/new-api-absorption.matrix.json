@@ -1,0 +1,220 @@
+{
+  "$schema": "./new-api-absorption.schema.json",
+  "version": 1,
+  "decision": {
+    "kernel": "elygate-postgres-native",
+    "newApiRole": "product-and-protocol-reference",
+    "apiCompatibilityPolicy": "required-full-public-api-surface-compatibility",
+    "runtimeCompatibilityPolicy": "forbidden-new-api-runtime-coupling",
+    "redisPolicy": "forbidden-runtime-dependency",
+    "postgresPolicy": "required-default-persistence"
+  },
+  "sourceSnapshot": {
+    "project": "QuantumNous/new-api",
+    "commit": "6c35e1ef2671be8bd3c230882e4ff5a885e89c57",
+    "checkedAt": "2026-06-27",
+    "evidence": [
+      "README.zh_CN.md:186-224",
+      "README.zh_CN.md:259-287",
+      "README.zh_CN.md:300-321",
+      "README.zh_CN.md:400-406"
+    ]
+  },
+  "elygateEvidence": [
+    "docs/API_STANDARDS.md",
+    "docs/ARCHITECTURE_DECISIONS.md",
+    "apps/gateway/src/routes",
+    "apps/gateway/src/routes/admin",
+    "packages/db/src/schema.ts"
+  ],
+  "acceptanceGates": [
+    "New API is used as a capability and behavior reference, not as the Elygate runtime kernel.",
+    "Every public New API route surface must either be implemented compatibly or tracked as a strict-gate blocker.",
+    "API compatibility must not require New API database, Redis, queue, cache, or runtime internals.",
+    "No Redis server, Redis client, or Redis cache package may become a default Elygate runtime dependency.",
+    "Each absorbed capability must be implemented with PostgreSQL-native storage or an explicitly feature-flagged, reversible adapter.",
+    "Hot-path replacement of auth, rate limit, billing, cache, queue, or LISTEN/NOTIFY requires benchmark, parity check, smoke test, rollback note, and bun run check evidence.",
+    "Protocol changes require route or handler tests that verify request shape, response shape, streaming behavior when applicable, and billing/logging side effects."
+  ],
+  "domains": [
+    {
+      "id": "protocol-openai-core",
+      "title": "OpenAI-compatible protocol surface",
+      "priority": 1,
+      "newApiSignals": [
+        "OpenAI-compatible chat/completions",
+        "OpenAI Responses",
+        "Realtime",
+        "Images",
+        "Audio",
+        "Embeddings",
+        "Rerank"
+      ],
+      "elygateStatus": "implemented",
+      "elygateEvidence": [
+        "docs/API_STANDARDS.md:5-26",
+        "apps/gateway/src/routes/chat.ts",
+        "apps/gateway/src/routes/responses.ts",
+        "apps/gateway/src/routes/realtime.ts",
+        "apps/gateway/src/routes/rerank.ts",
+        "apps/gateway/src/routes/protocol-golden.test.ts",
+        "apps/gateway/src/routes/protocolRouteFamilies.test.ts",
+        "apps/gateway/src/routes/responsesRoute.test.ts",
+        "apps/gateway/src/routes/realtimeRoute.test.ts",
+        "apps/gateway/src/services/protocolBilling.test.ts"
+      ],
+      "nextActions": [
+        "Keep strict route parity and protocol golden tests in root check.",
+        "Track WebRTC Realtime bridge separately from the current WebSocket proxy if product demand appears."
+      ],
+      "postgresNativePlan": "Protocol state, files, batches, logs, and billing stay in PostgreSQL-backed tables or pg-boss jobs.",
+      "redisFreeGate": "No Redis cache or queue may be added for protocol compatibility."
+    },
+    {
+      "id": "protocol-provider-breadth",
+      "title": "Provider and media/task breadth",
+      "priority": 2,
+      "newApiSignals": [
+        "Claude Messages",
+        "Gemini",
+        "Midjourney-Proxy",
+        "Suno-API",
+        "Dify",
+        "custom upstream"
+      ],
+      "elygateStatus": "implemented",
+      "elygateEvidence": [
+        "docs/API_STANDARDS.md:28-46",
+        "docs/API_STANDARDS.md:95-113",
+        "apps/gateway/src/routes/anthropic.ts",
+        "apps/gateway/src/routes/gemini.ts",
+        "apps/gateway/src/routes/mj.ts",
+        "apps/gateway/src/routes/video.ts",
+        "apps/gateway/src/routes/newApiRelayCompat.ts",
+        "apps/gateway/src/routes/newApiRelayCompat.test.ts",
+        "apps/gateway/src/providers/providerContracts.test.ts",
+        "apps/gateway/src/services/batchExecutor.test.ts"
+      ],
+      "nextActions": [
+        "Keep task-style media providers backed by PostgreSQL job state and pg-boss-compatible dispatch.",
+        "Rank any future provider additions by active customer need before adding adapters."
+      ],
+      "postgresNativePlan": "Async provider tasks use PostgreSQL job state and pg-boss, not Redis streams.",
+      "redisFreeGate": "Task polling, retry, and callback state must not require Redis."
+    },
+    {
+      "id": "operations-routing",
+      "title": "Routing, channel health, and admin operations",
+      "priority": 1,
+      "newApiSignals": [
+        "weighted channel routing",
+        "failure retry",
+        "user-level model rate limiting",
+        "channel test and status",
+        "model sync",
+        "ratio config"
+      ],
+      "elygateStatus": "implemented",
+      "elygateEvidence": [
+        "docs/API_STANDARDS.md:71-87",
+        "apps/gateway/src/routes/admin/channels.ts",
+        "apps/gateway/src/routes/admin/models.ts",
+        "apps/gateway/src/services/dispatcher.ts",
+        "packages/db/src/schema.ts",
+        "apps/gateway/src/routes/admin/channelsOperations.test.ts",
+        "apps/gateway/src/services/dispatcherCachePolicy.test.ts",
+        "apps/gateway/src/services/cacheRouting.test.ts",
+        "apps/gateway/src/services/circuitBreakerPolicy.test.ts",
+        "scripts/smoke-admin-channel-route-db.ts"
+      ],
+      "nextActions": [
+        "Keep channel copy, upstream model sync, key strategy, error mapping, retry group, and rate-limit regressions in root check.",
+        "Re-run admin channel DB smoke before release candidates."
+      ],
+      "postgresNativePlan": "Routing state, channel status, key status, and test history remain in PostgreSQL tables with in-process cache invalidation.",
+      "redisFreeGate": "Redis may not be introduced for channel affinity, status cache, or retry counters."
+    },
+    {
+      "id": "identity-billing-commerce",
+      "title": "Identity, billing, payment, and quota product features",
+      "priority": 2,
+      "newApiSignals": [
+        "Discord/LinuxDO/Telegram/OIDC login",
+        "internal recharge and quota allocation",
+        "Stripe and EPay",
+        "key usage lookup",
+        "subscription and redemption"
+      ],
+      "elygateStatus": "implemented",
+      "elygateEvidence": [
+        "docs/API_STANDARDS.md:81-85",
+        "apps/gateway/src/routes/payment.ts",
+        "apps/gateway/src/routes/redemptions.ts",
+        "apps/gateway/src/routes/admin/newApiUserCompat.ts",
+        "packages/db/src/schema.ts",
+        "apps/gateway/src/services/paymentCallback.test.ts",
+        "apps/gateway/src/services/paymentProviders.test.ts",
+        "apps/gateway/src/services/newApiSubscriptionCompat.test.ts",
+        "apps/gateway/src/services/subscriptionLifecycle.test.ts"
+      ],
+      "nextActions": [
+        "Keep public commerce features disabled unless explicit product and compliance configuration enables them.",
+        "Keep enterprise quota, subscription lifecycle, and webhook idempotency fixtures in the compat suite."
+      ],
+      "postgresNativePlan": "Quota, invoices, subscriptions, redemption codes, and webhook state use transactional PostgreSQL tables.",
+      "redisFreeGate": "Payment idempotency and webhook replay protection must be PostgreSQL-backed, with no Redis requirement."
+    },
+    {
+      "id": "security-compliance",
+      "title": "Security, verification, and compliance controls",
+      "priority": 2,
+      "newApiSignals": [
+        "captcha/human verification",
+        "email verification",
+        "passkey/two-factor security",
+        "audit and log retention",
+        "deployment compliance notices"
+      ],
+      "elygateStatus": "implemented",
+      "elygateEvidence": [
+        "docs/ENTERPRISE_DEPLOYMENT_RUNBOOK.md",
+        "apps/gateway/src/routes/admin/newApiUserCompat.ts",
+        "apps/gateway/src/routes/admin/logs.ts",
+        "apps/gateway/src/enterprise/controlPlane.ts",
+        "apps/gateway/src/services/captcha.test.ts",
+        "apps/gateway/src/services/twoFactor.test.ts",
+        "apps/gateway/src/services/identitySecurity.test.ts",
+        "apps/gateway/src/services/sessionRevocation.ts"
+      ],
+      "nextActions": [
+        "Keep Panel versus Enterprise ownership boundaries explicit when adding new security controls.",
+        "Keep email, captcha, OIDC, two-factor, passkey, audit, and log-retention checks backed by mocked secrets or temporary PostgreSQL state."
+      ],
+      "postgresNativePlan": "Security events, audit trails, and verification state remain in PostgreSQL with secret redaction in logs.",
+      "redisFreeGate": "Verification code TTL must be PostgreSQL-backed or local dev-only in-memory, never Redis-only."
+    },
+    {
+      "id": "redis-free-platform",
+      "title": "Redis-free platform boundary",
+      "priority": 0,
+      "newApiSignals": [
+        "Redis connection string is recommended for cache in New API",
+        "Redis shared deployments require a crypto secret"
+      ],
+      "elygateStatus": "implemented",
+      "elygateEvidence": [
+        "README.md:291-303",
+        "docs/ARCHITECTURE_DECISIONS.md:28-40",
+        "apps/gateway/src/services/postgresxInfra.ts",
+        "apps/gateway/src/services/postgresxInfra.test.ts",
+        "apps/gateway/src/services/ratelimit.ts"
+      ],
+      "nextActions": [
+        "Keep Redis absence as a release gate.",
+        "Use @postgresx/noredis only behind subsystem-specific flags and benchmarks."
+      ],
+      "postgresNativePlan": "PostgreSQL remains the only required external state service.",
+      "redisFreeGate": "Root package manifests and compose files must not add Redis runtime dependencies or services."
+    }
+  ]
+}

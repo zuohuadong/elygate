@@ -231,6 +231,11 @@ function createMemoryControlPlane(): EnterpriseControlPlane {
     const policies: PolicyRecord[] = [];
     const budgets: BudgetRecord[] = [];
     const audits: AuditRecord[] = [];
+    const memberships: JsonObject[] = [];
+    const invoices: JsonObject[] = [];
+    const providerCompliance: JsonObject[] = [];
+    let entitlements: JsonObject | null = null;
+    let billingAccount: JsonObject | null = null;
     const providerChannels = [
         {
             id: 1,
@@ -422,6 +427,45 @@ function createMemoryControlPlane(): EnterpriseControlPlane {
         );
     }
 
+    function currentEntitlements(claims: PlatformClaims): JsonObject {
+        const assignedSeats = memberships.filter((item) => item.seat_status === 'active' || item.seat_status === 'invited').length;
+        entitlements = {
+            id: 1,
+            tenant_id: claims.tenant_id,
+            org_id: claims.org_id,
+            app_instance_id: claims.app_instance_id,
+            seat_limit: Number(entitlements?.seat_limit ?? 5),
+            assigned_seats: assignedSeats,
+            available_seats: Math.max(0, Number(entitlements?.seat_limit ?? 5) - assignedSeats),
+            billing_mode: entitlements?.billing_mode ?? 'prepaid',
+            overage_enabled: Boolean(entitlements?.overage_enabled ?? false),
+            overage_unit_price_cents: Number(entitlements?.overage_unit_price_cents ?? 0),
+            budget_mode: entitlements?.budget_mode ?? 'hard_limit',
+            default_no_training: entitlements?.default_no_training ?? true,
+            data_retention_days: Number(entitlements?.data_retention_days ?? 30),
+            provider_compliance_mode: entitlements?.provider_compliance_mode ?? 'strict',
+            allowed_ip_policy: entitlements?.allowed_ip_policy ?? null,
+            status: entitlements?.status ?? 'active',
+        };
+        return entitlements;
+    }
+
+    function assignedSeatCount(excludeId?: number): number {
+        return memberships.filter((item) => {
+            if (excludeId && item.id === excludeId) return false;
+            return item.seat_status === 'active' || item.seat_status === 'invited';
+        }).length;
+    }
+
+    function assertSeatCapacity(claims: PlatformClaims, seatStatus: string, excludeId?: number): void {
+        const current = currentEntitlements(claims);
+        if ((seatStatus === 'active' || seatStatus === 'invited')
+            && assignedSeatCount(excludeId) >= Number(current.seat_limit)
+            && !current.overage_enabled) {
+            throw Object.assign(new Error('Seat limit reached and overage is disabled'), { statusCode: 402 });
+        }
+    }
+
     return {
         async getEnterpriseOverview(claims) {
             const scopedInstances = scoped(claims, instances);
@@ -598,6 +642,149 @@ function createMemoryControlPlane(): EnterpriseControlPlane {
             recordAudit(claims, 'budget.evaluate', 'budget_evaluation', result.decision, { ip_address: meta.ipAddress ?? null, decision: result.decision });
             return result;
         },
+        async getMembersAndAccess(claims, query) {
+            return {
+                entitlements: currentEntitlements(claims),
+                memberships: paginate(memberships, query),
+                policies: paginate(scoped(claims, policies), query),
+            };
+        },
+        async listMemberships(_claims, query) {
+            return paginate(memberships, query);
+        },
+        async upsertMembership(claims, value, meta) {
+            const payload = readObject(value);
+            const userId = readString(payload, 'user_id') || null;
+            const email = readString(payload, 'email') || null;
+            const existing = memberships.find((item) => (userId && item.user_id === userId) || (email && item.email === email));
+            const seatStatus = readString(payload, 'seat_status', userId ? 'active' : 'invited');
+            assertSeatCapacity(claims, seatStatus, existing?.id as number | undefined);
+            const record = {
+                id: existing?.id ?? memberships.length + 1,
+                tenant_id: claims.tenant_id,
+                org_id: claims.org_id,
+                app_instance_id: claims.app_instance_id,
+                user_id: userId,
+                email,
+                display_name: readString(payload, 'display_name') || null,
+                role: readString(payload, 'role', 'developer'),
+                scopes: Array.isArray(payload.scopes) ? payload.scopes : [],
+                seat_kind: readString(payload, 'seat_kind', 'human'),
+                seat_status: seatStatus,
+            };
+            if (existing) Object.assign(existing, record);
+            else memberships.push(record);
+            recordAudit(claims, existing ? 'membership.update' : 'membership.create', 'membership', String(record.id), { ip_address: meta.ipAddress ?? null });
+            return record;
+        },
+        async updateMembership(claims, id, value, meta) {
+            const record = memberships.find((item) => String(item.id) === id);
+            if (!record) throw Object.assign(new Error('Membership not found'), { statusCode: 404 });
+            const payload = readObject(value);
+            assertSeatCapacity(claims, readString(payload, 'seat_status', String(record.seat_status)), Number(record.id));
+            Object.assign(record, payload);
+            recordAudit(claims, 'membership.update', 'membership', id, { ip_address: meta.ipAddress ?? null });
+            return record;
+        },
+        async getOrgEntitlements(claims) {
+            return currentEntitlements(claims);
+        },
+        async updateOrgEntitlements(claims, value, meta) {
+            entitlements = { ...currentEntitlements(claims), ...readObject(value) };
+            recordAudit(claims, 'entitlements.update', 'org_entitlements', '1', { ip_address: meta.ipAddress ?? null });
+            return currentEntitlements(claims);
+        },
+        async getUsageEfficiency(claims, query) {
+            const attribution = usageAttribution(claims, query);
+            return {
+                scope: attribution.scope,
+                window: attribution.window,
+                totals: attribution.totals,
+                efficiency: {
+                    quota_per_request: 42,
+                    error_rate_pct: 0,
+                    cache_ratio_pct: 6.45,
+                    avg_elapsed_ms: 320,
+                },
+                dimensions: attribution.dimensions,
+            };
+        },
+        async getBillingAndInvoices(_claims, query) {
+            return {
+                billing_account: billingAccount,
+                invoices: paginate(invoices, query),
+                unbilled_usage: { quantity: 0, amount_cents: 0 },
+            };
+        },
+        async listInvoices(_claims, query) {
+            return paginate(invoices, query);
+        },
+        async upsertBillingAccount(claims, value, meta) {
+            const payload = readObject(value);
+            billingAccount = {
+                id: 1,
+                tenant_id: claims.tenant_id,
+                org_id: claims.org_id,
+                app_instance_id: claims.app_instance_id,
+                billing_name: readString(payload, 'billing_name', claims.org_id),
+                billing_email: readString(payload, 'billing_email') || null,
+                currency: readString(payload, 'currency', 'USD'),
+                status: readString(payload, 'status', 'active'),
+            };
+            recordAudit(claims, 'billing_account.create', 'billing_account', '1', { ip_address: meta.ipAddress ?? null });
+            return billingAccount;
+        },
+        async createInvoice(claims, value, meta) {
+            const payload = readObject(value);
+            const itemRows = Array.isArray(payload.items) ? payload.items.map(readObject) : [];
+            const total = itemRows.reduce((sum, item) => sum + readNumber(item, 'amount_cents', readNumber(item, 'quantity', 1) * readNumber(item, 'unit_amount_cents', 0)), 0);
+            const invoice = {
+                id: invoices.length + 1,
+                tenant_id: claims.tenant_id,
+                org_id: claims.org_id,
+                app_instance_id: claims.app_instance_id,
+                invoice_number: readString(payload, 'invoice_number', `ELY-${invoices.length + 1}`),
+                subtotal_cents: total,
+                tax_cents: readNumber(payload, 'tax_cents', 0),
+                total_cents: total + readNumber(payload, 'tax_cents', 0),
+                status: readString(payload, 'status', 'draft'),
+                items: itemRows,
+            };
+            invoices.push(invoice);
+            recordAudit(claims, 'invoice.create', 'invoice', String(invoice.id), { ip_address: meta.ipAddress ?? null });
+            return invoice;
+        },
+        async getDataGovernance(claims, query) {
+            const ent = currentEntitlements(claims);
+            return {
+                entitlements: ent,
+                providers: paginate(providerCompliance, query),
+                enforcement: {
+                    default_no_training: ent.default_no_training,
+                    provider_compliance_mode: ent.provider_compliance_mode,
+                    allowed_providers: providerCompliance.filter((item) => item.status === 'approved' && item.no_training),
+                    blocked_providers: providerCompliance.filter((item) => item.status !== 'approved' || !item.no_training),
+                },
+            };
+        },
+        async upsertProviderCompliance(claims, value, meta) {
+            const payload = readObject(value);
+            const record = {
+                id: providerCompliance.length + 1,
+                tenant_id: claims.tenant_id,
+                org_id: claims.org_id,
+                app_instance_id: claims.app_instance_id,
+                provider_kind: readString(payload, 'provider_kind', 'channel'),
+                provider_id: readString(payload, 'provider_id', 'provider_demo'),
+                display_name: readString(payload, 'display_name') || null,
+                no_training: Boolean(payload.no_training),
+                zero_retention: Boolean(payload.zero_retention),
+                status: readString(payload, 'status', 'review'),
+            };
+            providerCompliance.push(record);
+            recordAudit(claims, 'provider_compliance.create', 'provider_compliance', String(record.id), { ip_address: meta.ipAddress ?? null });
+            return record;
+        },
         async listAuditEvents(claims, query) {
             return paginate(filterAudits(claims, audits, query), query);
         },
@@ -770,6 +957,94 @@ describe('enterprise control-plane router', () => {
         expect(usage.status).toBe(200);
         expect((usage.body.data as { total: number }).total).toBe(1);
         expect((usage.body.data as { attribution: { dimensions: { models: Array<{ subject_id: string }> } } }).attribution.dimensions.models[0]?.subject_id).toBe('gpt-4.1');
+
+        const entitlements = await hit(app, '/org-entitlements', {
+            method: 'PUT',
+            headers: bearer(),
+            body: body({ seat_limit: 2, overage_enabled: true, budget_mode: 'overage', allowed_ip_policy: '203.0.113.7' }),
+        });
+        expect(entitlements.status).toBe(200);
+        expect((entitlements.body.data as { seat_limit: number; budget_mode: string }).seat_limit).toBe(2);
+        expect((entitlements.body.data as { budget_mode: string }).budget_mode).toBe('overage');
+
+        const member = await hit(app, '/memberships', {
+            method: 'POST',
+            headers: bearer(),
+            body: body({ email: 'dev@example.com', display_name: 'Dev User', role: 'developer' }),
+        });
+        expect(member.status).toBe(200);
+        expect((member.body.data as { email: string }).email).toBe('dev@example.com');
+
+        const members = await hit(app, '/members-and-access', { headers: bearer([AI_GATEWAY_SCOPES.policyManage]) });
+        expect(members.status).toBe(200);
+        expect((members.body.data as { memberships: { total: number } }).memberships.total).toBe(1);
+
+        const seatLimit = await hit(app, '/org-entitlements', {
+            method: 'PUT',
+            headers: bearer(),
+            body: body({ seat_limit: 1, overage_enabled: false }),
+        });
+        expect(seatLimit.status).toBe(200);
+
+        const updateExistingMember = await hit(app, '/memberships/1', {
+            method: 'PUT',
+            headers: bearer(),
+            body: body({ display_name: 'Updated Dev User' }),
+        });
+        expect(updateExistingMember.status).toBe(200);
+
+        const suspendedMember = await hit(app, '/memberships', {
+            method: 'POST',
+            headers: bearer(),
+            body: body({ email: 'suspended@example.com', seat_status: 'suspended' }),
+        });
+        expect(suspendedMember.status).toBe(200);
+
+        const activateOverLimit = await hit(app, '/memberships/2', {
+            method: 'PUT',
+            headers: bearer(),
+            body: body({ seat_status: 'active' }),
+        });
+        expect(activateOverLimit.status).toBe(402);
+
+        const createOverLimit = await hit(app, '/memberships', {
+            method: 'POST',
+            headers: bearer(),
+            body: body({ email: 'over-limit@example.com' }),
+        });
+        expect(createOverLimit.status).toBe(402);
+
+        const efficiency = await hit(app, '/usage-efficiency', { headers: bearer([AI_GATEWAY_SCOPES.usageRead]) });
+        expect(efficiency.status).toBe(200);
+        expect((efficiency.body.data as { efficiency: { quota_per_request: number } }).efficiency.quota_per_request).toBe(42);
+
+        const billing = await hit(app, '/billing-account', {
+            method: 'POST',
+            headers: bearer(),
+            body: body({ billing_name: 'Demo Org', billing_email: 'billing@example.com', currency: 'USD' }),
+        });
+        expect(billing.status).toBe(200);
+        expect((billing.body.data as { billing_name: string }).billing_name).toBe('Demo Org');
+
+        const invoice = await hit(app, '/invoices', {
+            method: 'POST',
+            headers: bearer(),
+            body: body({ items: [{ description: 'Seats', amount_cents: 1200 }] }),
+        });
+        expect(invoice.status).toBe(200);
+        expect((invoice.body.data as { total_cents: number }).total_cents).toBe(1200);
+
+        const provider = await hit(app, '/provider-compliance', {
+            method: 'POST',
+            headers: bearer(),
+            body: body({ provider_id: 'openai-enterprise', display_name: 'OpenAI Enterprise', no_training: true, status: 'approved' }),
+        });
+        expect(provider.status).toBe(200);
+        expect((provider.body.data as { no_training: boolean }).no_training).toBe(true);
+
+        const governance = await hit(app, '/data-governance', { headers: bearer([AI_GATEWAY_SCOPES.policyManage]) });
+        expect(governance.status).toBe(200);
+        expect((governance.body.data as { enforcement: { allowed_providers: unknown[] } }).enforcement.allowed_providers).toHaveLength(1);
 
         const event = await hit(app, '/events', {
             method: 'POST',

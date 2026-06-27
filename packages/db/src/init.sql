@@ -249,7 +249,6 @@ CREATE TABLE IF NOT EXISTS packages (
     cycle_quota BIGINT DEFAULT 0, -- amount to refill each cycle
     cycle_interval INTEGER DEFAULT 1, -- numeric interval
     cycle_unit TEXT DEFAULT 'day', -- hour, day, week, month
-    cache_policy JSONB DEFAULT '{"mode": "default"}', -- default, isolated, refresh_on_count, disabled
     is_public BOOLEAN DEFAULT true,
     allowed_groups JSONB DEFAULT '[]', -- Package visibility: empty means visible to all groups
     added_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
@@ -638,23 +637,6 @@ CREATE TABLE IF NOT EXISTS redemptions (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- ============================================================
--- Semantic Cache Table (pgvector) - UNLOGGED for performance
--- ============================================================
-
-CREATE UNLOGGED TABLE IF NOT EXISTS semantic_cache (
-    id SERIAL PRIMARY KEY,
-    model_name TEXT NOT NULL,
-    prompt_hash TEXT NOT NULL,
-    prompt TEXT NOT NULL,
-    embedding VECTOR(1024),
-    response JSONB NOT NULL,
-    created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE (model_name, prompt_hash)
-);
-
--- ============================================================
 -- Exact Match Response Cache Table - UNLOGGED for performance
 -- ============================================================
 
@@ -740,7 +722,6 @@ CREATE UNLOGGED TABLE IF NOT EXISTS user_quota_cache (
 CREATE OR REPLACE PROCEDURE expire_cache_rows(retention_period INTERVAL) AS $$
 BEGIN
     DELETE FROM response_cache WHERE expired_at < NOW();
-    DELETE FROM semantic_cache WHERE created_at < NOW() - retention_period;
     DELETE FROM token_cache WHERE expired_at < NOW();
     DELETE FROM idempotency_keys WHERE expires_at < NOW();
     COMMIT;
@@ -821,37 +802,25 @@ GROUP BY user_id, DATE(created_at);
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS tasks (
-    id SERIAL PRIMARY KEY,
-    type VARCHAR(50) NOT NULL, -- 'data_export', 'data_import', 'cache_clear', 'batch_operation'
-    name TEXT NOT NULL,
-    description TEXT,
-    status INTEGER NOT NULL DEFAULT 0, -- 0: pending, 1: running, 2: completed, 3: failed, 4: cancelled
-    priority INTEGER NOT NULL DEFAULT 0, -- higher = more important
-    progress INTEGER NOT NULL DEFAULT 0, -- 0-100
-    total_items INTEGER DEFAULT 0,
-    processed_items INTEGER DEFAULT 0,
+    id TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_id INTEGER REFERENCES tokens(id) ON DELETE SET NULL,
+    channel_id INTEGER REFERENCES channels(id) ON DELETE SET NULL,
+    model TEXT NOT NULL,
+    type VARCHAR(50) NOT NULL,
+    status VARCHAR(30) NOT NULL DEFAULT 'pending',
+    provider_task_id TEXT,
+    request_body JSONB NOT NULL DEFAULT '{}'::jsonb,
     result JSONB,
-    error_message TEXT,
-    created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
-    started_at TIMESTAMPTZ,
-    completed_at TIMESTAMPTZ,
+    error TEXT,
+    progress INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE INDEX IF NOT EXISTS idx_tasks_user_status ON tasks(user_id, status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_tasks_type ON tasks(type, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_tasks_created_by ON tasks(created_by, created_at DESC);
-
--- Task execution logs
-CREATE TABLE IF NOT EXISTS task_logs (
-    id SERIAL PRIMARY KEY,
-    task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-    level VARCHAR(20) NOT NULL, -- 'info', 'warning', 'error'
-    message TEXT NOT NULL,
-    details JSONB,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
 
 -- ============================================================
 -- Subscription / Billing Feature Parity
@@ -926,8 +895,6 @@ CREATE TABLE IF NOT EXISTS topup_logs (
 CREATE INDEX IF NOT EXISTS idx_topup_logs_user_id ON topup_logs(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_packages_enabled_sort ON packages(enabled, sort_order DESC, id DESC);
 
-CREATE INDEX IF NOT EXISTS idx_task_logs_task_id ON task_logs(task_id, created_at DESC);
-
 CREATE OR REPLACE FUNCTION refresh_materialized_views()
 RETURNS void AS $$
 BEGIN
@@ -949,9 +916,6 @@ CREATE INDEX IF NOT EXISTS idx_logs_user_id ON logs (user_id) INCLUDE (quota_cos
 CREATE INDEX IF NOT EXISTS idx_logs_model_trgm ON logs USING gin (model_name gin_trgm_ops);
 -- Tokens: lookup by key (hot path)
 CREATE INDEX IF NOT EXISTS idx_tokens_key ON tokens (key);
--- Semantic Cache: vector cosine similarity
-CREATE INDEX IF NOT EXISTS idx_semantic_cache_embedding ON semantic_cache
-    USING hnsw (embedding vector_cosine_ops);
 
 -- View Indexes (for concurrent refresh)
 CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_system_overview_dummy ON mv_system_overview (total_users, active_tokens, active_channels);
@@ -962,11 +926,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_user_daily_stats_user_date ON mv_user_d
 -- pg_cron Automated Jobs
 -- ============================================================
 
--- Job 1: Hourly cleanup of expired semantic cache entries
-SELECT cron.schedule('semantic-cache-cleanup', '0 * * * *',
-    'DELETE FROM semantic_cache WHERE created_at < NOW() - INTERVAL ''24 hours''');
-
--- Job 2: Auto-create next month''s log partition on the 20th at 01:00
+-- Job 1: Auto-create next month''s log partition on the 20th at 01:00
 SELECT cron.schedule('create-next-log-partition', '0 1 20 * *', $$
     DO $do$
     DECLARE
@@ -991,11 +951,8 @@ ON CONFLICT (username) DO NOTHING;
 INSERT INTO options (key, value) VALUES
     ('SystemName', 'Elygate API'),
     ('SEO_Title', 'Elygate - Smart AI API Gateway'),
-    ('SEO_Description', 'A powerful, high-performance AI API gateway with semantic caching, multi-channel load balancing, and advanced analytics.'),
-    ('SEO_Keywords', 'AI, API, Gateway, OpenAI, Claude, Gemini, Semantic Cache, LLM, Proxy'),
-    ('SemanticCacheEnabled', 'true'),
-    ('SemanticCacheThreshold', '0.95'),
-    ('SemanticCacheTTLHours', '24'),
+    ('SEO_Description', 'A powerful, high-performance AI API gateway with response caching, multi-channel load balancing, and advanced analytics.'),
+    ('SEO_Keywords', 'AI, API, Gateway, OpenAI, Claude, Response Cache, LLM, Proxy'),
     ('MemoryEnabled', 'false'),
     ('MemoryReadDefault', 'false'),
     ('MemoryWriteDefault', 'false'),
@@ -1010,7 +967,6 @@ INSERT INTO options (key, value) VALUES
     ('Custom_JS', ''),
     ('WebhookURL', ''),
     ('Notify_On_Channel_Offline', 'true'),
-    ('SemanticCacheDefaultMode', 'default'),
     ('Timezone', 'UTC'),
     ('UPSTREAM_TIMEOUT_MS', '30000'),
     ('CIRCUIT_BREAKER_WINDOW_MS', '300000'),

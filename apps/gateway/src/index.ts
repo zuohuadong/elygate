@@ -60,6 +60,7 @@ async function init() {
   const { realtimeRouter } = await import('./routes/realtime');
   const { openaiEnterpriseRouter } = await import('./routes/openai-enterprise');
   const { fineTuneRouter } = await import('./routes/fine-tune');
+  const { newApiRelayCompatRouter } = await import('./routes/newApiRelayCompat');
   const { dashboardBillingRouter } = await import('./routes/dashboard-billing');
   const { newApiCompatAdminRouter, newApiCompatSelfRouter } = await import('./routes/admin/newApiCompat');
   const { newApiUserAdminRouter, newApiUserSelfRouter, newApiUserPublicRouter } = await import('./routes/admin/newApiUserCompat');
@@ -96,6 +97,8 @@ async function init() {
     .onBeforeHandle(staticFileHandler() as any)
     .use(dashboardBillingRouter)
     .use(sysRouter)
+    .use(newApiRelayCompatRouter)
+    .use(mjRouter)
     .group("/api", (app) =>
       app.get('/status', async () => {
         const rows = await db.select({

@@ -13,7 +13,7 @@ function ts(value: unknown): number | null {
     return Math.floor(new Date(value as string).getTime() / 1000);
 }
 
-function serializeAssistant(row: Record<string, any>) {
+export function serializeAssistant(row: Record<string, any>) {
     return {
         id: row.id,
         object: row.object || 'assistant',
@@ -30,7 +30,7 @@ function serializeAssistant(row: Record<string, any>) {
     };
 }
 
-function serializeThread(row: Record<string, any>) {
+export function serializeThread(row: Record<string, any>) {
     return {
         id: row.id,
         object: row.object || 'thread',
@@ -40,7 +40,7 @@ function serializeThread(row: Record<string, any>) {
     };
 }
 
-function serializeMessage(row: Record<string, any>) {
+export function serializeMessage(row: Record<string, any>) {
     return {
         id: row.id,
         object: row.object || 'thread.message',
@@ -55,7 +55,7 @@ function serializeMessage(row: Record<string, any>) {
     };
 }
 
-function serializeRun(row: Record<string, any>) {
+export function serializeRun(row: Record<string, any>) {
     return {
         id: row.id,
         object: row.object || 'thread.run',
@@ -85,7 +85,7 @@ function serializeRun(row: Record<string, any>) {
     };
 }
 
-function serializeVectorStore(row: Record<string, any>) {
+export function serializeVectorStore(row: Record<string, any>) {
     return {
         id: row.id,
         object: row.object || 'vector_store',
@@ -101,7 +101,7 @@ function serializeVectorStore(row: Record<string, any>) {
     };
 }
 
-function serializeVectorStoreFile(row: Record<string, any>) {
+export function serializeVectorStoreFile(row: Record<string, any>) {
     return {
         id: row.id,
         object: row.object || 'vector_store.file',
@@ -114,7 +114,7 @@ function serializeVectorStoreFile(row: Record<string, any>) {
     };
 }
 
-function serializeFineTuningJob(row: Record<string, any>) {
+export function serializeFineTuningJob(row: Record<string, any>) {
     return {
         id: row.id,
         object: row.object || 'fine_tuning.job',

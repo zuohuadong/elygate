@@ -29,6 +29,14 @@ interface ConsumeOptions {
     code: string;
 }
 
+export function verificationExpiresAt(now = new Date()): Date {
+    return new Date(now.getTime() + VERIFICATION_EXPIRE_MINUTES * 60 * 1000);
+}
+
+export function isVerificationCodeUsable(row: { code: string; expiresAt: Date | string }, code: string, now = new Date()): boolean {
+    return new Date(row.expiresAt) >= now && row.code === code;
+}
+
 /**
  * 生成并存储验证码，同时发送邮件。
  */
@@ -52,7 +60,7 @@ export async function createAndSendVerification(opts: CreateOptions): Promise<{ 
     }
 
     const code = generateCode(6);
-    const expiresAt = new Date(Date.now() + VERIFICATION_EXPIRE_MINUTES * 60 * 1000);
+    const expiresAt = verificationExpiresAt();
 
     await db.insert(verificationCodes).values({
         type: opts.type,
@@ -109,8 +117,7 @@ export async function consumeVerification(opts: ConsumeOptions): Promise<{ valid
 
     const now = new Date();
     for (const row of rows) {
-        if (new Date(row.expiresAt) < now) continue;
-        if (row.code !== opts.code) continue;
+        if (!isVerificationCodeUsable(row, opts.code, now)) continue;
 
         await db.update(verificationCodes)
             .set({ consumed: true })

@@ -1,5 +1,5 @@
-import { LRUCache } from 'lru-cache';
 import { log } from './logger';
+import { LocalTtlCache } from './localTtlCache';
 
 interface AffinityEntry {
     channelId: number;
@@ -8,10 +8,8 @@ interface AffinityEntry {
     setAt: number;
 }
 
-const affinityCache = new LRUCache<string, AffinityEntry>({
-    max: 100_000,
-    ttl: 1000 * 60 * 60, // 1 hour
-});
+const AFFINITY_TTL_MS = 1000 * 60 * 60;
+const affinityCache = new LocalTtlCache<string, AffinityEntry>(100_000, AFFINITY_TTL_MS);
 
 function buildAffinityKey(userId: number, model: string, body: Record<string, any>): string {
     const convId = body.conversation_id || body.metadata?.conversation_id || '';
@@ -33,11 +31,7 @@ export function setAffinityChannel(userId: number, model: string, body: Record<s
 }
 
 export function getAffinityStats() {
-    return {
-        size: affinityCache.size,
-        max: affinityCache.max,
-        ttlMs: affinityCache.ttl,
-    };
+    return affinityCache.stats();
 }
 
 export function clearAffinityCache(): number {

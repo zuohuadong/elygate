@@ -12,7 +12,7 @@ import { ChannelType, getProviderHandler } from '../providers';
 import type { TokenRecord, UserRecord, ChannelConfig } from '../types';
 import { getChannelKeys } from './encryption';
 import { isRateLimited, isPackageRateLimited, waitForPackageConcurrency, packageConcurrencyMap, releasePackageConcurrency, getPackageLockId } from './ratelimit';
-import { buildUpstreamUrl } from '../utils/url';
+import { buildUpstreamProtocolUrl, buildUpstreamUrl } from '../utils/url';
 import { matchPattern } from '../utils/pattern';
 import { getAffinityChannel, setAffinityChannel } from './channelAffinity';
 import { isModelRequestRateLimited, recordModelRequestSuccess } from './modelRateLimit';
@@ -20,9 +20,9 @@ import { ContentFilter, cleanResponseTokens, cleanModelTokens } from './filter';
 import { notifier } from './notifier';
 import { WebSearchPlugin } from './plugins/search';
 import { lookupResponseCache, storeResponseCache } from './responseCache';
-import { lookupSemanticCache, storeSemanticCache } from './semanticCache';
 import { enforceRuntimeGovernanceGuard, recordRuntimeGovernanceUsage } from './runtimeGovernance';
 import type { RuntimeGovernanceSession } from './runtimeGovernance';
+import { buildProtocolBillingContext } from './protocolBilling';
 
 export interface DispatchOptions {
     model: string;
@@ -39,10 +39,18 @@ export interface DispatchOptions {
     externalUserId?: string;
     externalWorkspaceId?: string;
     externalFeatureType?: string;
+    upstreamPath?: string;
 }
 
 // Global in-memory concurrency tracker: Map<"channelId_keyIndex", currentActiveRequests>
 const keyConcurrencyMap = new Map<string, number>();
+const streamDecoder = new TextDecoder();
+const streamEncoder = new TextEncoder();
+const payloadSizeEncoder = new TextEncoder();
+
+function byteLengthUtf8(value: string): number {
+    return payloadSizeEncoder.encode(value).byteLength;
+}
 
 function normalizeObject(value: unknown): Record<string, any> {
     if (!value) return {};
@@ -80,7 +88,7 @@ async function waitForConcurrencyRelease(lockId: string, limit: number, maxWaitM
 }
 
 
-function isRetryableError(error: Error): boolean {
+export function isRetryableError(error: Error): boolean {
     const msg = error.message || '';
     // Auth/param errors: not retryable
     if (msg.includes('HTTP 401') || msg.includes('HTTP 402') || msg.includes('HTTP 403')) return false;
@@ -93,6 +101,52 @@ function isRetryableError(error: Error): boolean {
     if (!msg.includes('Status')) return true;
     // Default: other 4xx not retryable
     return false;
+}
+
+export function applyStatusCodeMapping(status: number, mapping: unknown): number {
+    const normalized = normalizeObject(mapping);
+    const mapped = Number(normalized[String(status)] || status);
+    return Number.isFinite(mapped) && mapped >= 100 ? mapped : status;
+}
+
+export function selectNextRetryGroup(
+    autoGroups: readonly string[],
+    groupsTried: Set<string>,
+    model: string,
+    selectChannels: (model: string, group: string) => ChannelConfig[] | undefined,
+): { group: string; channels: ChannelConfig[] } | null {
+    for (const group of autoGroups) {
+        if (groupsTried.has(group)) continue;
+        const nextCandidates = selectChannels(model, group);
+        if (nextCandidates && nextCandidates.length > 0) {
+            groupsTried.add(group);
+            return { group, channels: nextCandidates };
+        }
+    }
+    return null;
+}
+
+export function buildStreamingProxyResponse(source: ReadableStream, status = 200): Response {
+    const cleanStream = new TransformStream({
+        transform(chunk, controller) {
+            const text = streamDecoder.decode(chunk);
+            const cleanedText = cleanModelTokens(text);
+            controller.enqueue(streamEncoder.encode(cleanedText));
+        }
+    });
+
+    return new Response(source.pipeThrough(cleanStream), {
+        status,
+        headers: {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive'
+        }
+    });
+}
+
+export function isExactResponseCacheable(endpointType: DispatchOptions['endpointType'], isStream: boolean, isFormData: boolean): boolean {
+    return (endpointType === 'chat' || endpointType === 'embeddings') && !isStream && !isFormData;
 }
 
 // UnifiedDispatcher — functional module
@@ -287,16 +341,11 @@ export async function dispatch(options: DispatchOptions) {
             model = newModel;
         }
 
-        // ═══════════════════════════════════════════════════════════
-        // 🧠 DUAL-MODE CACHE LOOKUP (Exact Match ⚡ + Semantic Match 🍃)
-        // Only for chat/embeddings non-streaming requests.
-        // Architecture: Client → Cache{Hit?} → Upstream{Miss}
-        // ═══════════════════════════════════════════════════════════
-        const isCacheable = (endpointType === 'chat' || endpointType === 'embeddings') && !isStream && !isFormData;
+        // Exact cache lookup for non-streaming text requests.
+        const isCacheable = isExactResponseCacheable(endpointType, isStream, isFormData);
         if (isCacheable) {
             const messages = (body as Record<string, any>).messages || [];
 
-            // Layer 1: ⚡ Exact Match (hash-based, O(1), zero cost)
             try {
                 const exactHit = await lookupResponseCache(model, messages, user.id);
                 if (exactHit) {
@@ -305,31 +354,6 @@ export async function dispatch(options: DispatchOptions) {
                 }
             } catch (e: unknown) {
                 log.warn('[Dispatcher] ResponseCache lookup failed (non-fatal):', getErrorMessage(e));
-            }
-
-            // Layer 2: 🍃 Semantic Match (vector similarity, requires embedding channel)
-            try {
-                const embeddingChannels = memoryCache.selectChannels('bge-m3', user.group)
-                    || memoryCache.selectChannels('text-embedding-3-small', user.group)
-                    || memoryCache.selectChannels('embedding', user.group);
-                const embeddingChannel = embeddingChannels?.[0];
-
-                if (embeddingChannel) {
-                    const lastMessage = messages[messages.length - 1];
-                    const prompt = typeof lastMessage?.content === 'string'
-                        ? lastMessage.content
-                        : JSON.stringify(lastMessage?.content || '');
-
-                    if (prompt && prompt.length > 0 && prompt.length < 2000) {
-                        const semanticHit = await lookupSemanticCache(prompt, model, embeddingChannel);
-                        if (semanticHit) {
-                            log.info(`[Dispatcher] 🍃 SemanticCache HIT for model=${model}, user=${user.id}`);
-                            return semanticHit;
-                        }
-                    }
-                }
-            } catch (e: unknown) {
-                log.warn('[Dispatcher] SemanticCache lookup failed (non-fatal):', getErrorMessage(e));
             }
         }
 
@@ -405,7 +429,7 @@ export async function dispatch(options: DispatchOptions) {
         const groupsTried = new Set<string>([effectiveGroup]);
 
         let lastError: Error | null = null;
-        const channels = candidateChannels as ChannelConfig[];
+        const channels = [...candidateChannels] as ChannelConfig[];
 
         for (const channelConfig of channels) {
             const traceId = (body as Record<string, any>).trace_id || `tr_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
@@ -556,24 +580,29 @@ export async function dispatch(options: DispatchOptions) {
                 }
             }
 
-            const upstreamUrl = handler.overrideRequestUrl
-                ? handler.overrideRequestUrl(channelConfig.baseUrl, upstreamModel, endpointType) || buildUpstreamUrl(channelConfig, upstreamModel, endpointType, isStream)
-                : buildUpstreamUrl(channelConfig, upstreamModel, endpointType, isStream);
+            const upstreamUrl = options.upstreamPath
+                ? buildUpstreamProtocolUrl(channelConfig, options.upstreamPath)
+                : handler.overrideRequestUrl
+                    ? handler.overrideRequestUrl(channelConfig.baseUrl, upstreamModel, endpointType) || buildUpstreamUrl(channelConfig, upstreamModel, endpointType, isStream)
+                    : buildUpstreamUrl(channelConfig, upstreamModel, endpointType, isStream);
             log.info(`[Dispatcher] Selected channel: ${channelConfig.name} (id=${channelConfig.id}), upstream: ${upstreamUrl}, model: ${upstreamModel}`);
 
             // 2.5 Prepare Body & Headers
-            let forwardBody: Record<string, any>;
+            let forwardBody: BodyInit;
+            let requestBodyForLog = '[FormData]';
+            let payloadSizeBytes = 0;
             if (isFormData) {
                 if (fetchHeaders instanceof Headers) fetchHeaders.delete('Content-Type');
                 else delete (fetchHeaders as Record<string, string>)['Content-Type'];
 
-                forwardBody = new FormData();
+                const formBody = new FormData();
                 const sourceBody = body as Record<string, any>;
                 for (const key in sourceBody) {
-                    if (key === 'model') forwardBody.append(key, upstreamModel);
-                    else if (sourceBody[key] instanceof File) forwardBody.append(key, sourceBody[key], sourceBody[key].name);
-                    else forwardBody.append(key, sourceBody[key]);
+                    if (key === 'model') formBody.append(key, upstreamModel);
+                    else if (sourceBody[key] instanceof File) formBody.append(key, sourceBody[key], sourceBody[key].name);
+                    else formBody.append(key, sourceBody[key]);
                 }
+                forwardBody = formBody;
             } else {
                 let sourceBody = body as Record<string, any>;
                 const paramOverride = normalizeObject(channelConfig.paramOverride);
@@ -596,10 +625,11 @@ export async function dispatch(options: DispatchOptions) {
                 if (!Array.isArray(transformedBody)) {
                     transformedBody.model = upstreamModel; // Override model with mapped name
                 }
-                forwardBody = JSON.stringify(transformedBody) as any;
+                requestBodyForLog = JSON.stringify(transformedBody);
+                forwardBody = requestBodyForLog;
 
                 // Log payload size for multimodal diagnostics
-                const payloadSizeBytes = typeof forwardBody === 'string' ? new Blob([forwardBody]).size : 0;
+                payloadSizeBytes = byteLengthUtf8(requestBodyForLog);
                 if (payloadSizeBytes > 500_000) {
                     log.info(`[Dispatcher] ⚠️ Large payload: ${(payloadSizeBytes / 1024 / 1024).toFixed(2)} MB for model ${model}`);
                 }
@@ -646,7 +676,7 @@ export async function dispatch(options: DispatchOptions) {
                 // 4. Upstream Fetch (with dynamic timeout for large payloads)
                 let upstreamTimeoutMs = parseInt(optionCache.get('UPSTREAM_TIMEOUT_MS', '30000'));
                 // Scale timeout for large payloads: +5s per MB over 1MB
-                const bodySize = typeof forwardBody === 'string' ? (forwardBody as unknown as string).length : 0;
+                const bodySize = payloadSizeBytes;
                 if (bodySize > 1_000_000) {
                     const extraMs = Math.ceil((bodySize - 1_000_000) / 1_000_000) * 5000;
                     upstreamTimeoutMs += extraMs;
@@ -660,7 +690,7 @@ export async function dispatch(options: DispatchOptions) {
                     response = await fetch(upstreamUrl, {
                         method: 'POST',
                         headers: fetchHeaders,
-                        body: typeof forwardBody === 'object' && !(forwardBody instanceof FormData) ? JSON.stringify(forwardBody) : (forwardBody as BodyInit),
+                        body: forwardBody,
                         signal: abortCtl.signal
                     });
                 } catch (fetchErr: any) {
@@ -676,8 +706,7 @@ export async function dispatch(options: DispatchOptions) {
 
                 if (!response.ok) {
                     const errorText = await response.text();
-                    const statusCodeMapping = normalizeObject(channelConfig.statusCodeMapping);
-                    const mappedStatus = Number(statusCodeMapping[String(response.status)] || response.status);
+                    const mappedStatus = applyStatusCodeMapping(response.status, channelConfig.statusCodeMapping);
                     await circuitBreaker.recordError(channelConfig.id, mappedStatus);
                     // Enhanced diagnostics for empty error bodies (CF/proxy rejections)
                     if (!errorText || errorText.trim() === '') {
@@ -705,22 +734,7 @@ export async function dispatch(options: DispatchOptions) {
                     const [clientStream, billingStream] = response.body.tee();
                     handleStreamBilling(billingStream, body, user, token, channelConfig, model, preDeducted, lockId, isPackageFree, packageLockId, response.status, traceId, forwardBody, effectiveIdempotencyKey, externalTaskId, externalUserId, externalWorkspaceId, externalFeatureType, effectiveGroup, runtimeGovernanceSession);
 
-                    // Create a TransformStream to clean model internal tokens from stream
-                    const cleanStream = new TransformStream({
-                        transform(chunk, controller) {
-                            const text = new TextDecoder().decode(chunk);
-                            const cleanedText = cleanModelTokens(text);
-                            controller.enqueue(new TextEncoder().encode(cleanedText));
-                        }
-                    });
-
-                    return new Response(clientStream.pipeThrough(cleanStream), {
-                        headers: {
-                            'Content-Type': 'text/event-stream',
-                            'Cache-Control': 'no-cache',
-                            'Connection': 'keep-alive'
-                        }
-                    });
+                    return buildStreamingProxyResponse(clientStream, response.status);
                 }
 
                 const contentType = response.headers.get('content-type') || '';
@@ -746,15 +760,26 @@ export async function dispatch(options: DispatchOptions) {
                         throw new Error(`Upstream overload: ${JSON.stringify(rawData)}`);
                     }
 
-                    // Usage extraction and billing
-                    const usageResult = handler.extractUsage(rawData);
-                    let { promptTokens, completionTokens } = usageResult;
-                    const cachedTokensFromUsage = usageResult.cachedTokens || 0;
-
-                    // Fallback for image models if usage is not provided by upstream (common for OpenAI DALL-E)
-                    if (endpointType === 'images' && promptTokens === 0 && completionTokens === 0) {
-                        promptTokens = (body as Record<string, any>).n || 1;
-                    }
+                    const billingContext = buildProtocolBillingContext({
+                        userId: user.id,
+                        tokenId: token.id,
+                        channelId: channelConfig.id,
+                        modelName: model,
+                        userGroup: effectiveGroup,
+                        endpointType,
+                        requestBody: body,
+                        extractedUsage: handler.extractUsage(rawData),
+                        isPackageFree,
+                        statusCode: response.status,
+                        traceId,
+                        responseBodyForLog: rawData,
+                        orgId: user.orgId,
+                        externalTaskId,
+                        externalUserId,
+                        externalWorkspaceId,
+                        externalFeatureType
+                    });
+                    const { promptTokens, completionTokens, cachedTokens: cachedTokensFromUsage = 0 } = billingContext;
 
                     const actualCost = calculateCost(model, effectiveGroup, promptTokens, completionTokens, cachedTokensFromUsage);
 
@@ -766,26 +791,7 @@ export async function dispatch(options: DispatchOptions) {
                         actualCost
                     });
 
-                    await billAndLog({
-                        userId: user.id,
-                        tokenId: token.id,
-                        channelId: channelConfig.id,
-                        modelName: model,
-                        promptTokens,
-                        completionTokens,
-                        cachedTokens: cachedTokensFromUsage,
-                        userGroup: effectiveGroup,
-                        isStream: false,
-                        isPackageFree,
-                        statusCode: response.status,
-                        traceId,
-                        responseBody: JSON.stringify(rawData),
-                        orgId: user.orgId,
-                        externalTaskId,
-                        externalUserId,
-                        externalWorkspaceId,
-                        externalFeatureType
-                    });
+                    await billAndLog(billingContext);
                     await recordRuntimeGovernanceUsage(runtimeGovernanceSession, {
                         actualQuota: actualCost,
                         promptTokens,
@@ -868,32 +874,13 @@ export async function dispatch(options: DispatchOptions) {
                             }
                         }
                     }
-                    // 🧠 Cache Store: save successful non-streaming responses for future hits
+                    // Save successful non-streaming responses for future exact-cache hits.
                     if (isCacheable && result && typeof result === 'object' && !isVideoRoute) {
                         const messages = (body as Record<string, any>).messages || [];
                         const usage = rawData?.usage || result?.usage || {};
 
-                        // ⚡ Exact Match store (fire-and-forget)
                         storeResponseCache(model, messages, result, usage, user.id)
                             .catch((e: unknown) => log.warn('[Async] ResponseCache store failed:', getErrorMessage(e)));
-
-                        // 🍃 Semantic Match store (fire-and-forget, only if embedding channel available)
-                        try {
-                            const embeddingChannels = memoryCache.selectChannels('bge-m3', user.group)
-                                || memoryCache.selectChannels('text-embedding-3-small', user.group)
-                                || memoryCache.selectChannels('embedding', user.group);
-                            const embeddingChannel = embeddingChannels?.[0];
-                            if (embeddingChannel) {
-                                const lastMessage = messages[messages.length - 1];
-                                const prompt = typeof lastMessage?.content === 'string'
-                                    ? lastMessage.content
-                                    : JSON.stringify(lastMessage?.content || '');
-                                if (prompt && prompt.length > 0 && prompt.length < 2000) {
-                                    storeSemanticCache(prompt, model, result, embeddingChannel, undefined, user.id)
-                                        .catch((e: unknown) => log.warn('[Async] SemanticCache store failed:', getErrorMessage(e)));
-                                }
-                            }
-                        } catch (_) { /* embedding channel unavailable, skip semantic store */ }
                     }
                     return result;
                 } else if (contentType.includes('text/event-stream') || contentType.includes('text/plain')) {
@@ -931,10 +918,26 @@ export async function dispatch(options: DispatchOptions) {
                         }
                     }
 
-                    // Usage extraction and billing
-                    const _usageResult2 = handler.extractUsage(rawData || {});
-                    let { promptTokens, completionTokens } = _usageResult2;
-                    const cachedTokensFromUsage2 = _usageResult2.cachedTokens || 0;
+                    const billingContext = buildProtocolBillingContext({
+                        userId: user.id,
+                        tokenId: token.id,
+                        channelId: channelConfig.id,
+                        modelName: model,
+                        userGroup: effectiveGroup,
+                        endpointType,
+                        requestBody: body,
+                        extractedUsage: handler.extractUsage(rawData || {}),
+                        isPackageFree,
+                        statusCode: response.status,
+                        traceId,
+                        responseBodyForLog: rawData,
+                        orgId: user.orgId,
+                        externalTaskId,
+                        externalUserId,
+                        externalWorkspaceId,
+                        externalFeatureType
+                    });
+                    const { promptTokens, completionTokens, cachedTokens: cachedTokensFromUsage2 = 0 } = billingContext;
 
                     const actualCost = calculateCost(model, effectiveGroup, promptTokens, completionTokens, cachedTokensFromUsage2);
 
@@ -945,26 +948,7 @@ export async function dispatch(options: DispatchOptions) {
                         actualCost
                     });
 
-                    await billAndLog({
-                        userId: user.id,
-                        tokenId: token.id,
-                        channelId: channelConfig.id,
-                        modelName: model,
-                        promptTokens,
-                        completionTokens,
-                        cachedTokens: cachedTokensFromUsage2,
-                        userGroup: effectiveGroup,
-                        isStream: false,
-                        isPackageFree,
-                        statusCode: response.status,
-                        traceId,
-                        responseBody: JSON.stringify(rawData),
-                        orgId: user.orgId,
-                        externalTaskId,
-                        externalUserId,
-                        externalWorkspaceId,
-                        externalFeatureType
-                    });
+                    await billAndLog(billingContext);
                     await recordRuntimeGovernanceUsage(runtimeGovernanceSession, {
                         actualQuota: actualCost,
                         promptTokens,
@@ -1011,33 +995,33 @@ export async function dispatch(options: DispatchOptions) {
                     return result;
                 } else {
                     // Binary response (Audio, Image, Video blob)
-                    const buffer = await response.arrayBuffer();
+                    const binaryBody = response.body;
 
-                    // Default audio billing if not JSON (approx 1 unit per request as fallback)
-                    let promptTokens = endpointType.startsWith('audio') ? ((body as Record<string, any>).input?.length || 1) : 1000;
-                    const actualCost = calculateCost(model, effectiveGroup, promptTokens, 0);
-
-                    await reconcileQuota({ userId: user.id, tokenId: token.id, preDeducted, actualCost });
-                    await billAndLog({
+                    const billingContext = buildProtocolBillingContext({
                         userId: user.id,
                         tokenId: token.id,
                         channelId: channelConfig.id,
                         modelName: model,
-                        promptTokens,
-                        completionTokens: 0,
                         userGroup: effectiveGroup,
-                        isStream: false,
+                        endpointType,
+                        requestBody: body,
+                        binaryResponse: true,
+                        requestBodyForLog,
+                        responseBodyForLog: '[Binary Response]',
                         isPackageFree,
                         statusCode: response.status,
                         traceId,
-                        requestBody: typeof forwardBody === 'string' ? forwardBody : '[FormData]',
-                        responseBody: '[Binary Response]',
                         orgId: user.orgId,
                         externalTaskId,
                         externalUserId,
                         externalWorkspaceId,
                         externalFeatureType
                     });
+                    const { promptTokens } = billingContext;
+                    const actualCost = calculateCost(model, effectiveGroup, promptTokens, 0);
+
+                    await reconcileQuota({ userId: user.id, tokenId: token.id, preDeducted, actualCost });
+                    await billAndLog(billingContext);
                     await recordRuntimeGovernanceUsage(runtimeGovernanceSession, {
                         actualQuota: actualCost,
                         promptTokens,
@@ -1052,7 +1036,10 @@ export async function dispatch(options: DispatchOptions) {
                     if (currentActive) keyConcurrencyMap.set(lockId, Math.max(0, currentActive - 1));
                     if (packageLockId) releasePackageConcurrency(packageLockId);
 
-                    return new Response(buffer, { headers: { 'Content-Type': contentType } });
+                    return new Response(binaryBody, {
+                        status: response.status,
+                        headers: { 'Content-Type': contentType },
+                    });
                 }
 
             } catch (e: unknown) {
@@ -1076,17 +1063,16 @@ export async function dispatch(options: DispatchOptions) {
                 // Cross-group retry: if token uses auto group with cross_group_retry,
                 // and the error is retryable, try the next group
                 if (tokenGroup === 'auto' && token.crossGroupRetry && isRetryableError(lastError)) {
-                    for (const ag of autoGroups) {
-                        if (groupsTried.has(ag)) continue;
-                        const nextCandidates = memoryCache.selectChannels(model, ag);
-                        if (nextCandidates && nextCandidates.length > 0) {
-                            groupsTried.add(ag);
-                            effectiveGroup = ag;
-                            log.info(`[Dispatcher] Cross-group retry: switching to group ${ag} for model ${model}`);
-                            // Reset the channel loop with new candidates
-                            // We'll handle this by continuing the outer retry
-                            break;
-                        }
+                    const retryGroup = selectNextRetryGroup(
+                        autoGroups,
+                        groupsTried,
+                        model,
+                        (requestedModel, group) => memoryCache.selectChannels(requestedModel, group) as ChannelConfig[] | undefined,
+                    );
+                    if (retryGroup) {
+                        effectiveGroup = retryGroup.group;
+                        channels.push(...retryGroup.channels);
+                        log.info(`[Dispatcher] Cross-group retry: switching to group ${retryGroup.group} for model ${model}`);
                     }
                 }
 
@@ -1196,7 +1182,7 @@ function handleStreamBilling(
         packageLockId: string | null,
         statusCode: number = 200,
         traceId?: string,
-        requestBody?: Record<string, any>,
+        requestBody?: string | FormData | Record<string, any>,
         idempotencyKey?: string,
         externalTaskId?: string,
         externalUserId?: string,
@@ -1278,7 +1264,7 @@ function handleStreamBilling(
                     isPackageFree,
                     statusCode: statusCode,
                     traceId,
-                    requestBody: typeof requestBody === 'string' ? requestBody : (requestBody ? JSON.stringify(requestBody) : undefined),
+                    requestBody: typeof requestBody === 'string' ? requestBody : (requestBody instanceof FormData ? '[FormData]' : (requestBody ? JSON.stringify(requestBody) : undefined)),
                     responseBody: completionText || undefined,
                     orgId: user.orgId,
                     externalTaskId,

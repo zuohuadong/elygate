@@ -178,7 +178,6 @@ export const packages = pgTable('packages', {
     totalAmount: bigint('total_amount', { mode: 'number' }).notNull().default(0),
     quotaResetPeriod: text('quota_reset_period').notNull().default('never'),
     quotaResetCustomSeconds: bigint('quota_reset_custom_seconds', { mode: 'number' }).notNull().default(0),
-    cachePolicy: jsonb('cache_policy').$type<Record<string, unknown>>().default({ mode: 'default' }),
     enabled: boolean('enabled').notNull().default(true),
     isPublic: boolean('is_public').default(true),
     sortOrder: integer('sort_order').notNull().default(0),
@@ -278,20 +277,18 @@ export const vendors = pgTable('vendors', {
 });
 
 export const tasks = pgTable('tasks', {
-    id: serial('id').primaryKey(),
+    id: text('id').primaryKey(),
+    userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    tokenId: integer('token_id').references(() => tokens.id, { onDelete: 'set null' }),
+    channelId: integer('channel_id').references(() => channels.id, { onDelete: 'set null' }),
+    model: text('model').notNull(),
     type: varchar('type', { length: 50 }).notNull(),
-    name: text('name').notNull(),
-    description: text('description'),
-    status: integer('status').notNull().default(0),
-    priority: integer('priority').notNull().default(0),
-    progress: integer('progress').notNull().default(0),
-    totalItems: integer('total_items').default(0),
-    processedItems: integer('processed_items').default(0),
+    status: varchar('status', { length: 30 }).notNull().default('pending'),
+    providerTaskId: text('provider_task_id'),
+    requestBody: jsonb('request_body').$type<Record<string, unknown>>().notNull().default({}),
     result: jsonb('result').$type<Record<string, unknown>>(),
-    errorMessage: text('error_message'),
-    createdBy: integer('created_by').references(() => users.id, { onDelete: 'set null' }),
-    startedAt: timestamp('started_at', { withTimezone: true }),
-    completedAt: timestamp('completed_at', { withTimezone: true }),
+    error: text('error'),
+    progress: integer('progress').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 });
@@ -366,17 +363,6 @@ export const responseCache = pgTable('response_cache', {
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
     lastReadAt: timestamp('last_read_at', { withTimezone: true }),
     expiredAt: timestamp('expired_at', { withTimezone: true }),
-});
-
-export const semanticCache = pgTable('semantic_cache', {
-    id: serial('id').primaryKey(),
-    modelName: text('model_name').notNull(),
-    promptHash: text('prompt_hash').notNull(),
-    prompt: text('prompt'),
-    embedding: text('embedding'),
-    response: jsonb('response').$type<unknown>(),
-    createdBy: integer('created_by'),
-    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 
 export const agentMemories = pgTable('agent_memories', {
@@ -902,6 +888,141 @@ export const enterpriseAuditEvents = pgTable('enterprise_audit_events', {
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 
+export const enterpriseOrgEntitlements = pgTable('enterprise_org_entitlements', {
+    id: serial('id').primaryKey(),
+    tenantId: text('tenant_id').notNull(),
+    orgId: text('org_id').notNull(),
+    appInstanceId: text('app_instance_id').notNull(),
+    seatLimit: integer('seat_limit').notNull().default(5),
+    assignedSeats: integer('assigned_seats').notNull().default(0),
+    billingMode: varchar('billing_mode', { length: 30 }).notNull().default('prepaid'),
+    overageEnabled: boolean('overage_enabled').notNull().default(false),
+    overageUnitPriceCents: integer('overage_unit_price_cents').notNull().default(0),
+    budgetMode: varchar('budget_mode', { length: 30 }).notNull().default('hard_limit'),
+    defaultNoTraining: boolean('default_no_training').notNull().default(true),
+    dataRetentionDays: integer('data_retention_days').notNull().default(30),
+    providerComplianceMode: varchar('provider_compliance_mode', { length: 30 }).notNull().default('strict'),
+    allowedIpPolicy: text('allowed_ip_policy'),
+    status: varchar('status', { length: 30 }).notNull().default('active'),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+    createdBy: text('created_by'),
+    updatedBy: text('updated_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+});
+
+export const enterpriseMemberships = pgTable('enterprise_memberships', {
+    id: serial('id').primaryKey(),
+    tenantId: text('tenant_id').notNull(),
+    orgId: text('org_id').notNull(),
+    appInstanceId: text('app_instance_id').notNull(),
+    userId: text('user_id'),
+    email: text('email'),
+    displayName: text('display_name'),
+    role: varchar('role', { length: 40 }).notNull().default('developer'),
+    scopes: jsonb('scopes').$type<string[]>().notNull().default([]),
+    seatKind: varchar('seat_kind', { length: 30 }).notNull().default('human'),
+    seatStatus: varchar('seat_status', { length: 30 }).notNull().default('active'),
+    invitedBy: text('invited_by'),
+    joinedAt: timestamp('joined_at', { withTimezone: true }),
+    lastActiveAt: timestamp('last_active_at', { withTimezone: true }),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+});
+
+export const enterpriseBillingAccounts = pgTable('enterprise_billing_accounts', {
+    id: serial('id').primaryKey(),
+    tenantId: text('tenant_id').notNull(),
+    orgId: text('org_id').notNull(),
+    appInstanceId: text('app_instance_id').notNull(),
+    billingName: text('billing_name').notNull(),
+    billingEmail: text('billing_email'),
+    taxId: text('tax_id'),
+    currency: text('currency').notNull().default('USD'),
+    paymentTerms: varchar('payment_terms', { length: 40 }).notNull().default('net_30'),
+    status: varchar('status', { length: 30 }).notNull().default('active'),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+    createdBy: text('created_by'),
+    updatedBy: text('updated_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+});
+
+export const enterpriseInvoices = pgTable('enterprise_invoices', {
+    id: serial('id').primaryKey(),
+    tenantId: text('tenant_id').notNull(),
+    orgId: text('org_id').notNull(),
+    appInstanceId: text('app_instance_id').notNull(),
+    billingAccountId: integer('billing_account_id').references(() => enterpriseBillingAccounts.id, { onDelete: 'set null' }),
+    invoiceNumber: text('invoice_number').notNull(),
+    periodStart: timestamp('period_start', { withTimezone: true }).notNull(),
+    periodEnd: timestamp('period_end', { withTimezone: true }).notNull(),
+    currency: text('currency').notNull().default('USD'),
+    subtotalCents: bigint('subtotal_cents', { mode: 'number' }).notNull().default(0),
+    taxCents: bigint('tax_cents', { mode: 'number' }).notNull().default(0),
+    totalCents: bigint('total_cents', { mode: 'number' }).notNull().default(0),
+    status: varchar('status', { length: 30 }).notNull().default('draft'),
+    dueAt: timestamp('due_at', { withTimezone: true }),
+    issuedAt: timestamp('issued_at', { withTimezone: true }),
+    paidAt: timestamp('paid_at', { withTimezone: true }),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+});
+
+export const enterpriseInvoiceItems = pgTable('enterprise_invoice_items', {
+    id: serial('id').primaryKey(),
+    invoiceId: integer('invoice_id').notNull().references(() => enterpriseInvoices.id, { onDelete: 'cascade' }),
+    itemType: varchar('item_type', { length: 40 }).notNull(),
+    description: text('description').notNull(),
+    quantity: decimal('quantity', { precision: 20, scale: 4 }).notNull().default('1'),
+    unitAmountCents: bigint('unit_amount_cents', { mode: 'number' }).notNull().default(0),
+    amountCents: bigint('amount_cents', { mode: 'number' }).notNull().default(0),
+    sourceType: varchar('source_type', { length: 40 }),
+    sourceId: text('source_id'),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+});
+
+export const enterpriseMeteredUsage = pgTable('enterprise_metered_usage', {
+    id: serial('id').primaryKey(),
+    tenantId: text('tenant_id').notNull(),
+    orgId: text('org_id').notNull(),
+    appInstanceId: text('app_instance_id').notNull(),
+    subjectKind: varchar('subject_kind', { length: 40 }).notNull().default('org'),
+    subjectId: text('subject_id'),
+    metric: varchar('metric', { length: 40 }).notNull().default('quota'),
+    quantity: bigint('quantity', { mode: 'number' }).notNull().default(0),
+    unitAmountCents: integer('unit_amount_cents').notNull().default(0),
+    amountCents: bigint('amount_cents', { mode: 'number' }).notNull().default(0),
+    sourceLogId: integer('source_log_id'),
+    invoiceId: integer('invoice_id').references(() => enterpriseInvoices.id, { onDelete: 'set null' }),
+    occurredAt: timestamp('occurred_at', { withTimezone: true }).defaultNow(),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+});
+
+export const enterpriseProviderCompliance = pgTable('enterprise_provider_compliance', {
+    id: serial('id').primaryKey(),
+    tenantId: text('tenant_id').notNull(),
+    orgId: text('org_id').notNull(),
+    appInstanceId: text('app_instance_id').notNull(),
+    providerKind: varchar('provider_kind', { length: 60 }).notNull(),
+    providerId: text('provider_id').notNull(),
+    displayName: text('display_name'),
+    noTraining: boolean('no_training').notNull().default(false),
+    zeroRetention: boolean('zero_retention').notNull().default(false),
+    region: text('region'),
+    status: varchar('status', { length: 30 }).notNull().default('review'),
+    evidenceUrl: text('evidence_url'),
+    reviewedBy: text('reviewed_by'),
+    reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+});
+
 // ─── Soft-Delete Recovery (recycle bin) ──────────────────────
 
 export const deletedRecords = pgTable('deleted_records', {
@@ -940,7 +1061,6 @@ export const schema = {
     'model-stats': modelStats,
     'rate-limits-table': rateLimits,
     'response-cache': responseCache,
-    'semantic-cache': semanticCache,
     'agent-memories': agentMemories,
     'api-files': apiFiles,
     'api-batches': apiBatches,
@@ -976,6 +1096,13 @@ export const schema = {
     'enterprise-identity-policies': enterpriseIdentityPolicies,
     'enterprise-budgets': enterpriseBudgets,
     'enterprise-audit-events': enterpriseAuditEvents,
+    'enterprise-org-entitlements': enterpriseOrgEntitlements,
+    'enterprise-memberships': enterpriseMemberships,
+    'enterprise-billing-accounts': enterpriseBillingAccounts,
+    'enterprise-invoices': enterpriseInvoices,
+    'enterprise-invoice-items': enterpriseInvoiceItems,
+    'enterprise-metered-usage': enterpriseMeteredUsage,
+    'enterprise-provider-compliance': enterpriseProviderCompliance,
     'deleted-records': deletedRecords,
 };
 

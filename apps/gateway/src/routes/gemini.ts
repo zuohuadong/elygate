@@ -5,6 +5,7 @@ import { getConverter } from '../services/converters';
 import { memoryCache } from '../services/cache';
 import type { TokenRecord,  UserRecord  } from '../types';
 import { handleEmbeddings } from './embeddings';
+import { matchPattern } from '../utils/pattern';
 
 /**
  * Gemini API Compatible Endpoint
@@ -141,7 +142,53 @@ const geminiHandler = async (ctx: ElysiaCtx) => {
         return result;
 };
 
+async function geminiModelsHandler({ request, set }: ElysiaCtx) {
+        const url = new URL(request.url);
+        const apiKey = request.headers.get('x-goog-api-key') || url.searchParams.get('key') || request.headers.get('authorization')?.replace(/^Bearer\s+/i, '');
+        if (!apiKey) {
+            set.status = 401;
+            return { error: { code: 401, message: 'Missing API key', status: 'UNAUTHENTICATED' } };
+        }
+        const token = await memoryCache.getTokenFromCache(apiKey);
+        if (!token || token.status !== 1) {
+            set.status = 401;
+            return { error: { code: 401, message: 'Invalid or disabled API key', status: 'UNAUTHENTICATED' } };
+        }
+        const user = await memoryCache.getUserFromDB(token.userId);
+        if (!user) {
+            set.status = 401;
+            return { error: { code: 401, message: 'User not found', status: 'UNAUTHENTICATED' } };
+        }
+
+        let models = Array.from(memoryCache.channelRoutes.keys())
+            .filter((model) => memoryCache.selectChannels(model, user.group).length > 0);
+        if (token.models?.length) {
+            models = models.filter((model) => token.models.includes(model) || token.models.includes('*'));
+        }
+        const groupPolicy = memoryCache.userGroups.get(user.group);
+        if (groupPolicy) {
+            models = models.filter((model) => {
+                if (groupPolicy.allowedModels?.length && !matchPattern(model, groupPolicy.allowedModels)) return false;
+                if (matchPattern(model, groupPolicy.deniedModels)) return false;
+                return true;
+            });
+        }
+
+        return {
+            models: [...new Set(models)].map((model) => ({
+                name: `models/${model}`,
+                version: '001',
+                displayName: model,
+                description: `${model} via Elygate`,
+                inputTokenLimit: 1048576,
+                outputTokenLimit: 8192,
+                supportedGenerationMethods: ['generateContent', 'streamGenerateContent'],
+            })),
+        };
+}
+
 export const geminiRouter = new Elysia()
+    .get('/v1beta/models', geminiModelsHandler)
     .post('/models/:action', geminiHandler)
     .post('/v1/models/:action', geminiHandler)
     .post('/v1beta/models/:action', geminiHandler);

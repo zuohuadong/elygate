@@ -11,7 +11,7 @@
 
 - **🚀 Extreme Performance**: Powered by Bun & ElysiaJS, delivering 3.6x more throughput than Gin (Go).
 - **☁️ Redis-Free Architecture**: High-concurrency rate limiting and billing powered entirely by PostgreSQL 18.3, simplifying deployment.
-- **🧠 Dual-Mode Semantic Cache**: Features both **Exact Match** (instant lightning hits ⚡) and **Vector Semantic Match** (intelligent breeze hits 🍃) to save costs and reduce latency.
+- **⚡ Exact Response Cache**: Deterministic request hashing avoids repeated upstream calls without reusing answers across merely similar prompts.
 - **🔐 Enterprise-Grade Security**: HttpOnly Cookie sessions, server-side session management, and CSRF/XSS protection by default.
 - **💰 Robust Billing**: High-concurrency batch billing with support for dual-currency (USD/RMB) and dynamic price ratios.
 - **📊 Professional Analytics**: Real-time monitoring, 24h trends, interactive charts, and detailed latency tracking.
@@ -248,8 +248,8 @@ chmod +x scripts/deploy-optimizations.sh
 - ✅ **PostgreSQL 18.3 Async Commit**: 30-50% write performance boost
 - ✅ **Connection Pool**: 20 connections with optimized lifecycle
 - ✅ **Performance Indexes**: 20+ indexes for query optimization
-- ✅ **Semantic Cache**: Built-in vector similarity caching
 - ✅ **Agent Memory**: PostgreSQL-native long-term memory with pgvector recall and pg-boss async writes
+- ✅ **Exact Response Cache**: Deterministic request hashing for identical non-streaming requests
 
 #### Performance Gains
 | Metric | Improvement |
@@ -302,8 +302,8 @@ elygate
 | **Engine** | Bun + ElysiaJS | Go + Gin | 🚀 3.6x Throughput |
 | **Dependencies** | **PostgreSQL Only** | MySQL + **Redis** | 🔋 Zero Redis Setup |
 | **Billing** | O(1) Atomic Batch | Continuous SQL Hits | 💾 No Lock Contention |
-| **Semantic Cache** | Built-in (Vector) | Not Integrated | 🧠 Cost Saving |
 | **Agent Memory** | Optional Postgres-native memory | Not Integrated | 🧠 Stateful Agents |
+| **Exact Response Cache** | Built-in deterministic cache | Redis-backed cache recommended | ⚡ Repeat-request savings |
 | **Authentication** | Cookie Session (HttpOnly) | localStorage Token | 🔐 XSS Protection |
 | **Tech Stack** | Svelte 5 + Tailwind 4 | React / Vue | 💎 Premium UI/UX |
 | **API Compat** | OpenAI Responses/Chat/Completions/Files/Batches + Anthropic + Gemini + Ali + Baidu | OpenAI + Anthropic | 🌐 Multi-Provider Native |
@@ -447,7 +447,7 @@ chmod +x scripts/deploy-optimizations.sh
 - ✅ **PostgreSQL 18.3 异步提交**: 写入性能提升 30-50%
 - ✅ **连接池优化**: 20个连接，优化生命周期管理
 - ✅ **性能索引**: 20+ 个索引优化查询性能
-- ✅ **语义缓存**: 内置向量相似度缓存
+- ✅ **精确响应缓存**: 相同非流式请求使用确定性哈希命中，避免相似请求误复用答案
 
 #### 性能提升
 | 指标 | 提升幅度 |
@@ -618,7 +618,7 @@ Elygate 保持三层 monorepo 隔离：
 | **核心引擎** | Bun + ElysiaJS | Go + Gin | 🚀 3.6倍 绝对吞吐量 |
 | **外部依赖** | **仅需 PostgreSQL** | MySQL + **Redis** | 🔋 运维更简单 (无需Redis) |
 | **计费性能** | O(1) 原子批量更新 | 连续 SQL 写入 | 💾 彻底解决数据库锁竞争 |
-| **语义缓存** | 原生内置 (向量检索) | 无此功能 | 🧠 显著降低 Token 成本 |
+| **精确响应缓存** | 原生内置 (确定性哈希) | 推荐 Redis 缓存 | ⚡ 重复请求降本 |
 | **认证安全** | Cookie 会话 (HttpOnly) | localStorage Token | 🔐 防止 XSS 攻击 |
 | **前端架构** | Svelte 5 + Tailwind 4 | React / Vue | 💎 极致流畅的交互体验 |
 | **API 兼容** | OpenAI Responses/Chat/Completions/Files/Batches + Anthropic + Gemini + 阿里 + 百度 | OpenAI + Anthropic | 🌐 原生多协议支持 |
@@ -626,14 +626,6 @@ Elygate 保持三层 monorepo 隔离：
 | **开源协议** | Apache 2.0 | GPL-3.0 | 🛡️ 商业二次开发更友好 |
 
 ---
-
-### 🧩 语义缓存动态配置
-语义缓存默认开启，支持在数据库 `options` 表中实时调整：
-```sql
--- 调整相似度阈值 (默认 0.95，越高越严格)
-INSERT INTO options (key, value) VALUES ('SemanticCacheThreshold', '0.96')
-ON CONFLICT (key) DO UPDATE SET value = '0.96';
-```
 
 ### 🧠 Agent Memory
 Agent Memory 默认关闭，启用后会按用户/令牌隔离长期记忆，写入通过 pg-boss 异步执行，管理员可在后台查看、软删除、清理过期或永久清空已删除记录。

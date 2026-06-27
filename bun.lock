@@ -71,10 +71,9 @@
         "@elysiajs/jwt": "^1.4.2",
         "@elysiajs/static": "^1.4.10",
         "@elysiajs/swagger": "^1.3.1",
-        "@postgresx/noredis": "^0.5.2",
+        "@postgresx/noredis": "^0.6.0",
         "drizzle-orm": "1.0.0-rc.2-63dd281",
         "elysia": "^1.4.28",
-        "lru-cache": "^11.4.0",
         "nodemailer": "^8.0.11",
         "pg-boss": "^12.18.2",
       },
@@ -149,30 +148,9 @@
         "typescript": "^6.0.3",
       },
     },
-    "packages/pg-kv-cache": {
-      "name": "@elygate/pg-kv-cache",
-      "version": "0.1.0",
-      "devDependencies": {
-        "@types/bun": "^1.3.14",
-        "typescript": "^6.0.3",
-      },
-    },
     "packages/pg-listen": {
       "name": "@elygate/pg-listen",
       "version": "0.1.2",
-    },
-    "packages/pgredis": {
-      "name": "pgredis",
-      "version": "0.1.0",
-      "dependencies": {
-        "@elygate/pg-kv-cache": "workspace:*",
-        "@elygate/pg-listen": "workspace:*",
-        "pg-boss": "^12.18.2",
-      },
-      "devDependencies": {
-        "@types/bun": "^1.3.14",
-        "typescript": "^6.0.3",
-      },
     },
     "packages/svadmin-core": {
       "name": "@svadmin/core",
@@ -302,8 +280,6 @@
 
     "@elygate/gateway": ["@elygate/gateway@workspace:apps/gateway"],
 
-    "@elygate/pg-kv-cache": ["@elygate/pg-kv-cache@workspace:packages/pg-kv-cache"],
-
     "@elygate/pg-listen": ["@elygate/pg-listen@workspace:packages/pg-listen"],
 
     "@elygate/svadmin-helpers": ["@elygate/svadmin-helpers@workspace:packages/svadmin-helpers"],
@@ -408,7 +384,7 @@
 
     "@polka/url": ["@polka/url@1.0.0-next.29", "", {}, "sha512-wwQAWhWSuHaag8c4q/KN/vCoeOJYshAIvMQwD4GpSb3OiZklFfvAgmj0VCBBImRpuF/aFgIRzllXlVX93Jevww=="],
 
-    "@postgresx/noredis": ["@postgresx/noredis@0.5.2", "", {}, "sha512-mfOxCUCGrP9WBUfwFM4w/D80K0B/boxaBd4NbvFmqI6ndX8CaMG6eGH9nxxLV1KRFnI7j2cLL6FZtgzoLIKg3w=="],
+    "@postgresx/noredis": ["@postgresx/noredis@0.6.0", "", {}, "sha512-0TVIq6FDxssyECf9md6SoNxelLUDCtq7HKyBX7cSx0OgbZ3UvhWqzOAbrQidEKtD+CfEz1sA2qzZljD5CscEhQ=="],
 
     "@refinedev/core": ["@refinedev/core@4.58.0", "", { "dependencies": { "@refinedev/devtools-internal": "1.1.16", "@tanstack/react-query": "^4.10.1", "lodash": "^4.17.21", "lodash-es": "^4.17.21", "papaparse": "^5.3.0", "pluralize": "^8.0.0", "qs": "^6.10.1", "tslib": "^2.6.2", "warn-once": "^0.1.0" }, "peerDependencies": { "@types/react": "^17.0.0 || ^18.0.0", "@types/react-dom": "^17.0.0 || ^18.0.0", "react": "^17.0.0 || ^18.0.0", "react-dom": "^17.0.0 || ^18.0.0" } }, "sha512-54sNbU8jgGL9mUNB2DTq3CUBwjFxMXLcTE89m53Q+sp0eMgm+ocZJMTcXuatDM2iYZi+d94kmi4fmg/ruJzsTw=="],
 
@@ -848,8 +824,6 @@
 
     "lowlight": ["lowlight@3.3.0", "", { "dependencies": { "@types/hast": "^3.0.0", "devlop": "^1.0.0", "highlight.js": "~11.11.0" } }, "sha512-0JNhgFoPvP6U6lE/UdVsSq99tn6DhjjpAj5MxG49ewd2mOBVtwWYIT8ClyABhq198aXXODMU6Ox8DrGy/CpTZQ=="],
 
-    "lru-cache": ["lru-cache@11.4.0", "", {}, "sha512-W+R+kFL4HgVxONq2bhXPi3bGpzGe/yEhVOp233qw9wCRtgncJ15P3bC+e4zZMu4Cq7d+WAJjXGW0uUkifhcatA=="],
-
     "luxon": ["luxon@3.7.2", "", {}, "sha512-vtEhXh/gNjI9Yg1u4jX/0YVPMvxzHuGgCm6tC5kZyb08yjGWGnqAjGJvcXbqQR2P3MyMEFnRbpcdFS6PBcLqew=="],
 
     "lz-string": ["lz-string@1.5.0", "", { "bin": { "lz-string": "bin/bin.js" } }, "sha512-h5bgJWpxJNswbU7qCrV0tIKQCaS3blPDrqKWx+QxzuzL1zGUzij9XCWLrSLsJPu5t+eWA/ycetzYAO5IOMcWAQ=="],
@@ -911,8 +885,6 @@
     "pg-types": ["pg-types@2.2.0", "", { "dependencies": { "pg-int8": "1.0.1", "postgres-array": "~2.0.0", "postgres-bytea": "~1.0.0", "postgres-date": "~1.0.4", "postgres-interval": "^1.1.0" } }, "sha512-qTAAlrEsl8s4OiEQY69wDvcMIdQN6wdz5ojQiOy6YRMuynxenON0O5oCpJI6lshc6scgAY8qvJ2On/p+CXY0GA=="],
 
     "pgpass": ["pgpass@1.0.5", "", { "dependencies": { "split2": "^4.1.0" } }, "sha512-FdW9r/jQZhSeohs1Z3sI1yxFQNFvMcnmfuj4WBMUTxOrAyLMaTcE1aAMBiTlbMNaXvBCQuVi0R7hd8udDSP7ug=="],
-
-    "pgredis": ["pgredis@workspace:packages/pgredis"],
 
     "picocolors": ["picocolors@1.1.1", "", {}, "sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA=="],
 

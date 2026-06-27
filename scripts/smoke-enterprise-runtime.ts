@@ -18,6 +18,7 @@ const TENANT_ID = 'tenant_runtime_smoke';
 const ORG_ID = 'org_runtime_smoke';
 const APP_INSTANCE_ID = 'agi_runtime_smoke';
 const PROJECT_ID = 'project_runtime_smoke';
+const WORKSPACE_ID = PROJECT_ID;
 const APP_ID = 'elygate-ai-gateway';
 
 type JsonObject = Record<string, unknown>;
@@ -348,7 +349,7 @@ async function seedCoreGatewayData(): Promise<void> {
             )
             VALUES (
                 ${user.id}, ${token.id}, ${channel.id}, 'gpt-4.1', 42, 100, 24,
-                8, 320, 200, 'trace_runtime_smoke', 'external_runtime_user', 'workspace_runtime', 'chat'
+                8, 320, 200, 'trace_runtime_smoke', 'external_runtime_user', ${WORKSPACE_ID}, 'chat'
             )
         `;
         await sql`
@@ -707,7 +708,7 @@ async function verifyBasicGatewayDataPlane(): Promise<void> {
         messages: [{ role: 'user', content: 'Say runtime smoke.' }],
         max_tokens: 8,
         trace_id: traceId,
-        external_workspace_id: 'workspace_runtime',
+        external_workspace_id: WORKSPACE_ID,
         external_feature_type: 'chat',
     });
     const content = chatContent(json);
@@ -1318,7 +1319,7 @@ async function verifyEnterprisePages(token: string): Promise<void> {
             await waitForText(page, item.texts);
             if (item.path === 'usage-and-budget') {
                 await page.getByRole('tab', { name: /Workspace/ }).click();
-                await waitForText(page, ['workspace_runtime']);
+                await waitForText(page, [WORKSPACE_ID]);
             }
             await assertNoErrorText(page);
             console.log(`[enterprise-runtime-smoke] page ok ${item.path}`);

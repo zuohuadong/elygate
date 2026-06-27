@@ -1,5 +1,5 @@
-import { readdir, readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
+import { readText, walkFiles } from './lib/bun-io';
 
 type BoundaryRule = {
   readonly name: string;
@@ -50,14 +50,10 @@ const rules: readonly BoundaryRule[] = [
 
 async function listSourceFiles(root: string): Promise<string[]> {
   const absRoot = join(workspaceRoot, root);
-  const entries = await readdir(absRoot, { withFileTypes: true }).catch(() => []);
-  const files = await Promise.all(entries.map(async (entry) => {
-    const path = join(root, entry.name);
-    if (entry.isDirectory()) return listSourceFiles(path);
-    if (!/\.(ts|svelte)$/.test(entry.name)) return [];
-    return [path];
-  }));
-  return files.flat();
+  const files = await walkFiles(absRoot);
+  return files
+    .filter((file) => /\.(ts|svelte)$/.test(file))
+    .map((file) => relative(workspaceRoot, file));
 }
 
 function isAllowed(file: string, rule: BoundaryRule): boolean {
@@ -80,7 +76,7 @@ for (const rule of rules) {
   const files = await listSourceFiles(rule.root);
   for (const file of files) {
     if (isAllowed(file, rule)) continue;
-    const source = await readFile(join(workspaceRoot, file), 'utf8');
+    const source = await readText(join(workspaceRoot, file));
     const hits = findForbiddenImports(source, rule.forbiddenImports);
     for (const hit of hits) {
       violations.push(`${rule.name}: ${relative(workspaceRoot, join(workspaceRoot, file))} imports ${hit}`);

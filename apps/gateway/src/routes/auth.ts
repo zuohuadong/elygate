@@ -18,6 +18,9 @@ import { getLangFromHeader } from '../utils/i18n';
 import { optionCache } from '../services/optionCache';
 import { memoryCache } from '../services/cache';
 import { buildOtpAuthUrl, consumeBackupCode, generateBackupCodes, generateTwoFactorSecret, hashBackupCodes, verifyTotp } from '../services/twoFactor';
+import { buildAuthSessionCookieOptions } from '../services/sessionCookie';
+import { buildOAuthCallbackRedirect } from '../services/oauthCallback';
+import { revokeAuthSession } from '../services/sessionRevocation';
 
 const GITHUB_CLIENT_ID = config.github.clientId || '';
 const GITHUB_CLIENT_SECRET = config.github.clientSecret || '';
@@ -81,8 +84,7 @@ export const authRouter = new Elysia()
         // 4. Generate local session
         const sessionToken = await authService.generateSessionToken(user.id);
 
-        const targetUrl = config.webUrl || 'http://localhost:5173';
-        set.redirect = `${targetUrl}/auth/callback?token=${sessionToken}&username=${user.username}&role=${user.role}`;
+        set.redirect = buildOAuthCallbackRedirect({ webUrl: config.webUrl, token: sessionToken, username: user.username, role: user.role });
     })
     // User registration
     .post('/register', async ({ body, set, request }: ElysiaCtx) => {
@@ -276,14 +278,7 @@ export const authRouter = new Elysia()
                 request.headers.get('user-agent') || 'unknown'
             );
 
-            auth_session.set({
-                value: sessionToken,
-                httpOnly: true,
-                secure: request.headers.get('x-forwarded-proto') === 'https',
-                sameSite: 'lax',
-                maxAge: 7 * 86400,
-                path: '/'
-            });
+            auth_session.set(buildAuthSessionCookieOptions(sessionToken, request));
 
             const tokenKey = await authService.ensureDefaultApiKey(user.id);
             return { success: true, token: tokenKey, username: user.username, role: user.role, currency: user.currency || 'USD' };
@@ -349,21 +344,12 @@ export const authRouter = new Elysia()
             request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown',
             request.headers.get('user-agent') || 'unknown'
         );
-        auth_session.set({
-            value: sessionToken,
-            httpOnly: true,
-            secure: request.headers.get('x-forwarded-proto') === 'https',
-            sameSite: 'lax',
-            maxAge: 7 * 86400,
-            path: '/'
-        });
+        auth_session.set(buildAuthSessionCookieOptions(sessionToken, request));
         const tokenKey = await authService.ensureDefaultApiKey(user.id);
         return { success: true, token: tokenKey, username: user.username, role: user.role, currency: user.currency || 'USD' };
     })
     .post('/logout', async ({ cookie: { auth_session } }: ElysiaCtx) => {
-        if (auth_session.value) { await db.delete(sessions).where(eq(sessions.token, auth_session.value)); }
-        auth_session.remove();
-        return { success: true, message: 'Logged out successfully' };
+        return revokeAuthSession(auth_session, (sessionToken) => db.delete(sessions).where(eq(sessions.token, sessionToken)));
     })
 
     // --- Authenticated Consumer Endpoints ---
@@ -620,8 +606,7 @@ export const authRouter = new Elysia()
             await db.insert(tokens).values({ userId: user.id, name: 'Default API Key', key: newKey, status: 1, remainQuota: -1 });
          }
         const sessionToken = await authService.generateSessionToken(user.id);
-        const targetUrl = config.webUrl || 'http://localhost:5173';
-        set.redirect = `${targetUrl}/auth/callback?token=${sessionToken}&username=${user.username}&role=${user.role}`;
+        set.redirect = buildOAuthCallbackRedirect({ webUrl: config.webUrl, token: sessionToken, username: user.username, role: user.role });
     })
     .get('/telegram', async ({ query, set }) => {
         const { id, username, auth_date, hash } = query as Record<string, string>;
@@ -659,8 +644,7 @@ export const authRouter = new Elysia()
             await db.insert(tokens).values({ userId: user.id, name: 'Default Token', key: newKey, status: 1, remainQuota: -1 });
         }
         const sessionToken = await authService.generateSessionToken(user.id);
-        const targetUrl = config.webUrl || 'http://localhost:5173';
-        set.redirect = `${targetUrl}/auth/callback?token=${sessionToken}&username=${user.username}&role=${user.role}`;
+        set.redirect = buildOAuthCallbackRedirect({ webUrl: config.webUrl, token: sessionToken, username: user.username, role: user.role });
     })
 
     // ─── Google OAuth ───
@@ -723,8 +707,7 @@ export const authRouter = new Elysia()
             await db.insert(tokens).values({ userId: user.id, name: 'Default API Key', key: newKey, status: 1, remainQuota: -1 });
         }
         const sessionToken = await authService.generateSessionToken(user.id);
-        const targetUrl = config.webUrl || 'http://localhost:5173';
-        set.redirect = `${targetUrl}/auth/callback?token=${sessionToken}&username=${user.username}&role=${user.role}`;
+        set.redirect = buildOAuthCallbackRedirect({ webUrl: config.webUrl, token: sessionToken, username: user.username, role: user.role });
     })
 
     // ─── LinuxDo OAuth ───
@@ -782,8 +765,7 @@ export const authRouter = new Elysia()
             await db.insert(tokens).values({ userId: user.id, name: 'Default API Key', key: newKey, status: 1, remainQuota: -1 });
         }
         const sessionToken = await authService.generateSessionToken(user.id);
-        const targetUrl = config.webUrl || 'http://localhost:5173';
-        set.redirect = `${targetUrl}/auth/callback?token=${sessionToken}&username=${user.username}&role=${user.role}`;
+        set.redirect = buildOAuthCallbackRedirect({ webUrl: config.webUrl, token: sessionToken, username: user.username, role: user.role });
     })
 
     // ─── WeChat OAuth ───
@@ -835,6 +817,5 @@ export const authRouter = new Elysia()
             await db.insert(tokens).values({ userId: user.id, name: 'Default API Key', key: newKey, status: 1, remainQuota: -1 });
         }
         const sessionToken = await authService.generateSessionToken(user.id);
-        const targetUrl = config.webUrl || 'http://localhost:5173';
-        set.redirect = `${targetUrl}/auth/callback?token=${sessionToken}&username=${user.username}&role=${user.role}`;
+        set.redirect = buildOAuthCallbackRedirect({ webUrl: config.webUrl, token: sessionToken, username: user.username, role: user.role });
     });

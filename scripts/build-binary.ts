@@ -1,6 +1,4 @@
-import { join } from "path";
-import { spawnSync } from "child_process";
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "fs";
+import { join, relative } from "path";
 
 const targets = [
     "bun-linux-x64",
@@ -35,37 +33,25 @@ const contentTypes: Record<string, string> = {
     woff2: "font/woff2",
 };
 
-function walk(dir: string): string[] {
-    const entries = readdirSync(dir);
-    const files: string[] = [];
-    for (const entry of entries) {
-        const fullPath = join(dir, entry);
-        if (statSync(fullPath).isDirectory()) {
-            files.push(...walk(fullPath));
-        } else {
-            files.push(fullPath);
-        }
-    }
-    return files;
-}
-
-function generateEmbeddedAdminAssets() {
-    if (!existsSync(adminDist)) {
+async function generateEmbeddedAdminAssets() {
+    if (!await Bun.file(join(adminDist, "index.html")).exists()) {
         throw new Error("apps/admin/dist not found. Run `bun run build` before building binaries.");
     }
 
     const assets: Record<string, { contentType: string; base64: string }> = {};
-    for (const file of walk(adminDist)) {
-        const relative = file.slice(adminDist.length).replaceAll("\\", "/");
-        const route = relative.startsWith("/") ? relative : `/${relative}`;
+    const glob = new Bun.Glob("**/*");
+    for await (const file of glob.scan({ cwd: adminDist, absolute: true, onlyFiles: true })) {
+        const relativePath = relative(adminDist, file).replaceAll("\\", "/");
+        const route = relativePath.startsWith("/") ? relativePath : `/${relativePath}`;
         const ext = route.split(".").pop() || "";
+        const bytes = await Bun.file(file).bytes();
         assets[route] = {
             contentType: contentTypes[ext] || "application/octet-stream",
-            base64: readFileSync(file).toString("base64"),
+            base64: bytes.toBase64(),
         };
     }
 
-    writeFileSync(generatedAssetsFile, `export type EmbeddedAsset = {
+    await Bun.write(generatedAssetsFile, `export type EmbeddedAsset = {
   contentType: string;
   base64: string;
 };
@@ -75,8 +61,8 @@ export const embeddedAdminAssets: Record<string, EmbeddedAsset> = ${JSON.stringi
     console.log(`Embedded ${Object.keys(assets).length} admin assets into gateway binary source.`);
 }
 
-function resetEmbeddedAdminAssets() {
-    writeFileSync(generatedAssetsFile, emptyAssetsSource);
+async function resetEmbeddedAdminAssets() {
+    await Bun.write(generatedAssetsFile, emptyAssetsSource);
 }
 
 async function build(target: string) {
@@ -97,12 +83,15 @@ async function build(target: string) {
 
     console.log(`Running: bun ${args.join(" ")}`);
 
-    const result = spawnSync("bun", args, {
-        stdio: "inherit",
+    const result = Bun.spawn(["bun", ...args], {
+        stdin: "inherit",
+        stdout: "inherit",
+        stderr: "inherit",
         env: { ...process.env, NODE_ENV: "production" },
     });
+    const exitCode = await result.exited;
 
-    if (result.status !== 0) {
+    if (exitCode !== 0) {
         console.error(`❌ Build failed for ${target}`);
         throw new Error(`Build failed for ${target}`);
     }
@@ -114,7 +103,7 @@ async function main() {
     const arg = process.argv[2];
 
     try {
-        generateEmbeddedAdminAssets();
+        await generateEmbeddedAdminAssets();
 
         if (arg === "--all") {
             for (const target of targets) {
@@ -135,7 +124,7 @@ async function main() {
             await build(target);
         }
     } finally {
-        resetEmbeddedAdminAssets();
+        await resetEmbeddedAdminAssets();
     }
 }
 

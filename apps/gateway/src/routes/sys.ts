@@ -12,6 +12,7 @@ import { isCaptchaEnabled, verifyCaptcha, getCaptchaConfig } from '../services/c
 import { createAndSendVerification, consumeVerification } from '../services/verification';
 import { eq } from 'drizzle-orm';
 import { getUserFromCookie } from '../middleware/auth';
+import { isPublicRechargeEnabled } from '../services/paymentPolicy';
 
 /**
  * System APIs (/api/status, /api/notice, /api/option)
@@ -202,7 +203,7 @@ export const sysRouter = new Elysia({ prefix: '/api' })
                 CurrencyName: optionCache.get('CurrencyName', 'USD'),
                 ExchangeRate: optionCache.get('ExchangeRate', 7.2),
                 DisplayInCurrency: String(optionCache.get('DisplayInCurrency', 'false')) === 'true',
-                PaymentEnabled: String(optionCache.get('PaymentEnabled', 'true')) === 'true',
+                PaymentEnabled: isPublicRechargeEnabled(optionCache.get('PaymentEnabled', 'false')),
                 PaymentMethods: optionCache.get('PaymentMethods', 'redemption'),
                 LoginMethods: optionCache.get('LoginMethods', 'password'),
                 PasswordLoginEnabled: String(optionCache.get('PasswordLoginEnabled', 'true')) === 'true',

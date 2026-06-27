@@ -12,6 +12,8 @@ import {
     enterpriseBudgets,
     enterpriseGatewayInstances,
     enterpriseIdentityPolicies,
+    enterpriseMeteredUsage,
+    enterpriseOrgEntitlements,
 } from '@elygate/db/schema';
 import { evaluateEnterpriseBudgets, evaluateEnterprisePolicies } from '@elygate/enterprise-authz';
 import type { EnterpriseBudgetRecord, EnterprisePolicyRecord } from '@elygate/enterprise-authz';
@@ -20,6 +22,7 @@ import { log } from '../services/logger';
 import { setRuntimeGovernanceGuard } from '../services/runtimeGovernance';
 import type { RuntimeGovernanceSession, RuntimeGovernanceUsage } from '../services/runtimeGovernance';
 import type { TokenRecord, UserRecord } from '../types';
+import { isIpAllowed } from '../utils/ipAccess';
 import { rolloverDueEnterpriseBudgets } from './budgetRollover';
 import { enterpriseRuntimeConfig } from './config';
 
@@ -57,6 +60,16 @@ export type EnterpriseRuntimeProjection = {
     readonly instance: EnterpriseRuntimeGatewayInstance | null;
     readonly policies: readonly EnterprisePolicyRecord[];
     readonly budgets: readonly EnterpriseBudgetRecord[];
+    readonly entitlements?: EnterpriseRuntimeEntitlements | null;
+};
+
+export type EnterpriseRuntimeEntitlements = {
+    readonly overageEnabled: boolean;
+    readonly overageUnitPriceCents: number;
+    readonly budgetMode: string;
+    readonly defaultNoTraining: boolean;
+    readonly providerComplianceMode: string;
+    readonly allowedIpPolicy?: string | null;
 };
 
 export type EnterpriseRuntimeProjectionReader = (claims: PlatformClaims) => Promise<EnterpriseRuntimeProjection>;
@@ -192,6 +205,18 @@ function toBudgetRecord(row: typeof enterpriseBudgets.$inferSelect): EnterpriseB
     };
 }
 
+function toRuntimeEntitlements(row: typeof enterpriseOrgEntitlements.$inferSelect | null | undefined): EnterpriseRuntimeEntitlements | null {
+    if (!row) return null;
+    return {
+        overageEnabled: row.overageEnabled,
+        overageUnitPriceCents: row.overageUnitPriceCents,
+        budgetMode: row.budgetMode,
+        defaultNoTraining: row.defaultNoTraining,
+        providerComplianceMode: row.providerComplianceMode,
+        allowedIpPolicy: row.allowedIpPolicy,
+    };
+}
+
 export async function postgresEnterpriseRuntimeProjectionReader(claims: PlatformClaims): Promise<EnterpriseRuntimeProjection> {
     await rolloverDueEnterpriseBudgets(claims, {
         appInstanceOnly: true,
@@ -217,7 +242,7 @@ export async function postgresEnterpriseRuntimeProjectionReader(claims: Platform
         eq(enterpriseBudgets.appInstanceId, claims.app_instance_id),
     );
 
-    const [[instance], policyRows, budgetRows] = await Promise.all([
+    const [[instance], policyRows, budgetRows, [entitlements]] = await Promise.all([
         db.select({
             status: enterpriseGatewayInstances.status,
             projectId: enterpriseGatewayInstances.projectId,
@@ -234,12 +259,21 @@ export async function postgresEnterpriseRuntimeProjectionReader(claims: Platform
             .from(enterpriseBudgets)
             .where(budgetWhere)
             .orderBy(desc(enterpriseBudgets.updatedAt), desc(enterpriseBudgets.id)),
+        db.select()
+            .from(enterpriseOrgEntitlements)
+            .where(and(
+                eq(enterpriseOrgEntitlements.tenantId, claims.tenant_id),
+                eq(enterpriseOrgEntitlements.orgId, claims.org_id),
+                eq(enterpriseOrgEntitlements.appInstanceId, claims.app_instance_id),
+            ))
+            .limit(1),
     ]);
 
     return {
         instance: instance ?? null,
         policies: policyRows.map(toPolicyRecord),
         budgets: budgetRows.map(toBudgetRecord),
+        entitlements: toRuntimeEntitlements(entitlements),
     };
 }
 
@@ -330,6 +364,19 @@ export async function evaluateEnterpriseRuntimeGuard(
         };
     }
 
+    if (projection.entitlements?.allowedIpPolicy && input.ip && !isIpAllowed(input.ip, projection.entitlements.allowedIpPolicy)) {
+        const emptyPolicy = evaluateEnterprisePolicies(claims, policyInput(input), projection.policies, runtimeGuardScope(claims));
+        const emptyBudget = evaluateEnterpriseBudgets(claims, budgetInput(input), projection.budgets, runtimeGuardScope(claims));
+        return {
+            enabled: true,
+            decision: 'deny',
+            reason: `Enterprise IP policy restricted access for IP ${input.ip}`,
+            claims,
+            policy: emptyPolicy,
+            budget: emptyBudget,
+        };
+    }
+
     const policy = evaluateEnterprisePolicies(
         claims,
         policyInput(input),
@@ -353,11 +400,14 @@ export async function evaluateEnterpriseRuntimeGuard(
         projection.budgets,
         runtimeGuardScope(claims),
     );
+    const overageAllowed = budget.decision === 'deny'
+        && projection.entitlements?.overageEnabled
+        && projection.entitlements.budgetMode !== 'hard_limit';
 
     return {
         enabled: true,
-        decision: budget.decision === 'deny' ? 'deny' : budget.decision === 'warn' ? 'warn' : 'allow',
-        reason: budget.decision === 'allow' ? policy.reason : budget.reason,
+        decision: overageAllowed ? 'warn' : budget.decision === 'deny' ? 'deny' : budget.decision === 'warn' ? 'warn' : 'allow',
+        reason: overageAllowed ? `Allowed by enterprise overage policy: ${budget.reason}` : budget.decision === 'allow' ? policy.reason : budget.reason,
         claims,
         policy,
         budget,
@@ -397,6 +447,16 @@ export async function postgresEnterpriseRuntimeUsageWriter(record: EnterpriseRun
         updatedBy: `gateway-api-key:${record.input.token.id}`,
     });
 
+    const [entitlements] = await db.select()
+        .from(enterpriseOrgEntitlements)
+        .where(and(
+            eq(enterpriseOrgEntitlements.tenantId, record.claims.tenant_id),
+            eq(enterpriseOrgEntitlements.orgId, record.claims.org_id),
+            eq(enterpriseOrgEntitlements.appInstanceId, record.claims.app_instance_id),
+        ))
+        .limit(1);
+    const unitAmountCents = entitlements?.overageEnabled ? entitlements.overageUnitPriceCents : 0;
+
     await Promise.all(record.budgetIds.map((budgetId) => db.update(enterpriseBudgets)
         .set({
             usedQuota: drizzleSql`${enterpriseBudgets.usedQuota} + ${record.actualQuota}`,
@@ -409,6 +469,26 @@ export async function postgresEnterpriseRuntimeUsageWriter(record: EnterpriseRun
             eq(enterpriseBudgets.appInstanceId, record.claims.app_instance_id),
             eq(enterpriseBudgets.status, 'active'),
         ))));
+
+    await db.insert(enterpriseMeteredUsage).values({
+        tenantId: record.claims.tenant_id,
+        orgId: record.claims.org_id,
+        appInstanceId: record.claims.app_instance_id,
+        subjectKind: 'api_key',
+        subjectId: String(record.input.token.id),
+        metric: 'quota',
+        quantity: record.actualQuota,
+        unitAmountCents,
+        amountCents: unitAmountCents > 0 ? record.actualQuota * unitAmountCents : 0,
+        sourceLogId: undefined,
+        metadata: {
+            model: record.input.model,
+            endpoint_type: record.input.endpointType,
+            trace_id: record.usage.traceId ?? null,
+            user_id: record.input.user.id,
+            budget_ids: record.budgetIds,
+        },
+    });
 }
 
 async function recordEnterpriseRuntimeUsage(

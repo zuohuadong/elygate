@@ -3,13 +3,15 @@ import { Elysia } from 'elysia';
 import { log } from '../services/logger';
 import { memoryCache } from '../services/cache';
 import { optionCache } from '../services/optionCache';
-import { db, sql } from '@elygate/db';
-import { users, tokens } from '@elygate/db/schema';
-import { eq, sql as drizzleSql } from 'drizzle-orm';
+import { db } from '@elygate/db';
+import { tokens } from '@elygate/db/schema';
+import { eq } from 'drizzle-orm';
 import { calculateCost } from '../services/ratio';
 import type { TokenRecord, UserRecord } from '../types';
 import { getProviderHandler } from '../providers';
 import { getChannelKeys } from '../services/encryption';
+import { billAndLog } from '../services/billing';
+import type { BillingContext } from '../types';
 
 function normalizeObject(value: unknown): Record<string, any> {
     if (!value) return {};
@@ -58,6 +60,40 @@ function buildRealtimeHeaders(channel: Record<string, any>, activeKey: string) {
     const overrides = normalizeObject(channel.headerOverride);
     for (const [key, value] of Object.entries(overrides)) setHeader(headers, key, value);
     return headers;
+}
+
+export function estimateRealtimeUsage(messageCount: number): { promptTokens: number; completionTokens: number } {
+    return {
+        promptTokens: 0,
+        completionTokens: Math.max(messageCount, 0) * 50,
+    };
+}
+
+export function buildRealtimeBillingContext(input: {
+    user: UserRecord;
+    token: TokenRecord;
+    channelId: number;
+    model: string;
+    group: string;
+    messageCount: number;
+    elapsedMs: number;
+    statusCode?: number;
+}): BillingContext {
+    const usage = estimateRealtimeUsage(input.messageCount);
+    return {
+        userId: input.user.id,
+        tokenId: input.token.id,
+        channelId: input.channelId,
+        modelName: input.model,
+        promptTokens: usage.promptTokens,
+        completionTokens: usage.completionTokens,
+        userGroup: input.group,
+        isStream: true,
+        statusCode: input.statusCode ?? 101,
+        elapsedMs: input.elapsedMs,
+        orgId: input.user.orgId,
+        externalFeatureType: 'realtime',
+    };
 }
 
 async function proxyRealtimeSession(kind: 'sessions' | 'transcription_sessions', ctx: ElysiaCtx) {
@@ -156,11 +192,20 @@ export const realtimeRouter = new Elysia()
 
                     upstreamWs.onclose = (event: CloseEvent) => {
                         const elapsed = Date.now() - startTime;
-                        const estimatedTokens = messageCount * 50;
-                        const cost = calculateCost(model, group, estimatedTokens, 0);
+                        const { completionTokens } = estimateRealtimeUsage(messageCount);
+                        const cost = calculateCost(model, group, 0, completionTokens);
+                        billAndLog(buildRealtimeBillingContext({
+                            user: u,
+                            token: t,
+                            channelId: channel.id,
+                            model,
+                            group,
+                            messageCount,
+                            elapsedMs: elapsed,
+                            statusCode: event.code || 101,
+                        })).catch((error: unknown) => log.error(`[Realtime/WS] Billing error: ${error}`));
                         if (cost > 0) {
-                            db.update(users).set({ usedQuota: drizzleSql`${users.usedQuota} + ${cost}` }).where(eq(users.id, u.id)).catch(() => {});
-                            db.update(tokens).set({ usedQuota: drizzleSql`${tokens.usedQuota} + ${cost}`, accessedAt: new Date() }).where(eq(tokens.id, t.id)).catch(() => {});
+                            db.update(tokens).set({ accessedAt: new Date() }).where(eq(tokens.id, t.id)).catch(() => {});
                         }
                         log.info(`[Realtime/WS] Session ended: ${elapsed}ms, ${messageCount} messages`);
                         try { ws.close(event.code, event.reason); } catch {}

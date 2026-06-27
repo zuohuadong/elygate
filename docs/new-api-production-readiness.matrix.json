@@ -1,0 +1,419 @@
+{
+  "$schema": "./new-api-production-readiness.schema.json",
+  "version": 1,
+  "objective": "Reach 100% public New API route compatibility while keeping Elygate PostgreSQL-native and Redis-free until every tracked capability meets production-ready gates.",
+  "sourceSnapshot": {
+    "project": "QuantumNous/new-api",
+    "commit": "6c35e1ef2671be8bd3c230882e4ff5a885e89c57",
+    "checkedAt": "2026-06-27",
+    "evidence": [
+      "README.zh_CN.md:186-224",
+      "README.zh_CN.md:259-287",
+      "README.zh_CN.md:300-321",
+      "README.zh_CN.md:400-406",
+      "controller/*",
+      "relay/*",
+      "router/*"
+    ]
+  },
+  "productionDefinition": [
+    "Implemented in the Elygate stack without replacing Bun/Elysia/PostgreSQL.",
+    "Every public New API route surface remains client-compatible without requiring New API runtime internals.",
+    "No default Redis server, Redis client, Redis queue, or Redis cache dependency.",
+    "PostgreSQL schema and migration path are explicit when persistence changes.",
+    "Automated local tests cover request shape, response shape, error behavior, billing/logging side effects, and rollback where applicable.",
+    "Runtime smoke exists for database-backed or async behavior.",
+    "User-facing admin or enterprise UI is covered by typecheck and route/UI smoke when the feature has a UI.",
+    "Production deployment readiness requires a documented target profile, secrets checklist, migration plan, backup/restore drill, rollback runbook, and reproducible live smoke evidence; actual production promotion still requires explicit authorization."
+  ],
+  "capabilities": [
+    {
+      "id": "redis-free-platform",
+      "title": "Redis-free PostgreSQL platform boundary",
+      "priority": 0,
+      "status": "production-ready",
+      "newApiReference": [
+        "New API documents Redis as recommended cache and requires CRYPTO_SECRET for shared Redis."
+      ],
+    "elygateEvidence": [
+      "README.md:291-303",
+      "docs/ARCHITECTURE_DECISIONS.md:28-40",
+      "scripts/check-new-api-absorption.ts",
+      "docs/new-api-absorption.matrix.json",
+      "apps/gateway/src/services/postgresxInfra.test.ts",
+      "apps/gateway/src/services/localTtlCache.test.ts",
+      "apps/gateway/src/services/responseCache.test.ts",
+      "apps/gateway/src/services/ratelimit.test.ts",
+      "apps/gateway/src/services/batchExecutor.test.ts"
+      ],
+      "requiredGates": [
+        "package manifests scanned for forbidden Redis runtime dependencies",
+        "compose files scanned for default Redis services",
+        "PostgreSQL-native kernel decision encoded in root check"
+      ],
+    "verification": [
+      "bun run check:new-api-absorption",
+      "bun --cwd apps/gateway test:postgresx",
+      "bun run check:new-api-production-readiness"
+      ],
+      "nextActions": [
+        "Keep this gate in root check while expanding capabilities."
+      ],
+      "blockers": []
+    },
+    {
+      "id": "protocol-openai-core",
+      "title": "OpenAI core, Responses, image, audio, embeddings, rerank",
+      "priority": 1,
+      "status": "production-ready",
+      "newApiReference": [
+        "README.zh_CN.md lists OpenAI-compatible, Responses, Image, Audio, Embeddings, Rerank, and Realtime APIs."
+      ],
+      "elygateEvidence": [
+        "docs/API_STANDARDS.md:5-26",
+        "apps/gateway/src/routes/chat.ts",
+        "apps/gateway/src/routes/responses.ts",
+        "apps/gateway/src/routes/images.ts",
+      "apps/gateway/src/routes/audio.ts",
+      "apps/gateway/src/routes/embeddings.ts",
+      "apps/gateway/src/routes/rerank.ts",
+      "apps/gateway/src/routes/protocol-golden.test.ts",
+      "apps/gateway/src/routes/chatRoute.test.ts",
+      "apps/gateway/src/routes/responsesRoute.test.ts",
+      "apps/gateway/src/routes/imagesRoute.test.ts",
+      "apps/gateway/src/routes/protocolRouteFamilies.test.ts",
+      "apps/gateway/src/services/protocolBilling.ts",
+      "apps/gateway/src/services/protocolBilling.test.ts",
+      "apps/gateway/src/services/responseCache.test.ts",
+      "apps/gateway/src/services/dispatcherCachePolicy.test.ts"
+      ],
+    "requiredGates": [
+      "golden tests for Responses input extraction and OpenAI-compatible Files/Batches serialization",
+      "exact response cache tests for disable, hit, miss, ttl storage, and cleanup behavior",
+      "route tests for Responses compact and per-response compact routes",
+      "image edits and variations passthrough route tests",
+      "dispatcher cache policy tests proving streaming, form-data, images, and Responses bypass exact response cache",
+      "streaming response status propagation tests",
+      "billing and logs side-effect tests for each protocol family"
+      ],
+      "verification": [
+      "bun --cwd apps/gateway check",
+      "bun --cwd apps/gateway test:protocol",
+      "bun --cwd apps/gateway test:compat",
+      "targeted protocol route tests"
+      ],
+      "nextActions": [
+      "Keep protocol route and billing payload tests in the root check path while expanding long-tail provider coverage."
+      ],
+      "blockers": []
+    },
+    {
+      "id": "files-batches-assistants",
+      "title": "Files, Batches, Assistants, Threads, Vector Stores, Fine-tuning Jobs",
+      "priority": 1,
+      "status": "production-ready",
+      "newApiReference": [
+        "New API exposes file, batch, and enterprise OpenAI-compatible state-machine surfaces."
+      ],
+      "elygateEvidence": [
+        "docs/API_STANDARDS.md:48-63",
+        "apps/gateway/src/routes/files.ts",
+        "apps/gateway/src/routes/batches.ts",
+      "apps/gateway/src/routes/openai-enterprise.ts",
+      "apps/gateway/src/routes/protocolDbSmoke.ts",
+      "apps/gateway/src/routes/openaiEnterpriseRouteDbSmoke.ts",
+      "scripts/smoke-new-api-protocol-db.ts",
+      "scripts/smoke-openai-enterprise-route-db.ts",
+      "scripts/smoke-enterprise-db.ts",
+      "packages/db/drizzle/20260614010000_add_file_content/migration.sql",
+      "packages/db/drizzle/20260614020000_add_assistants_threads_vectorstores/migration.sql",
+      "packages/db/drizzle/20260627143228_remove_semantic_cache/migration.sql",
+      "apps/gateway/src/services/batchExecutor.ts",
+      "apps/gateway/src/services/jobQueue.ts",
+      "apps/gateway/src/services/batchExecutor.test.ts",
+      "apps/gateway/src/routes/openaiEnterpriseState.test.ts"
+      ],
+      "requiredGates": [
+        "real PostgreSQL smoke for file bytea write/read/delete",
+        "direct batch executor smoke with JSONL input and terminal result files",
+      "pg-boss queue dispatch tests with claimed validating batches",
+        "state-machine tests for assistants, threads, runs, vector stores, and fine-tuning jobs",
+        "idempotent migration and rollback notes"
+      ],
+      "verification": [
+        "bun run smoke:new-api:protocol-db",
+        "bun run smoke:new-api:enterprise-route-db",
+        "bun run smoke:enterprise:db",
+      "batch executor integration smoke",
+      "bun --cwd apps/gateway test:postgresx"
+      ],
+      "nextActions": [
+      "Keep temporary PostgreSQL route-level smoke and migration rollback notes current as state-machine routes expand."
+      ],
+      "blockers": []
+    },
+    {
+      "id": "realtime",
+      "title": "Realtime API and WebRTC bridge",
+      "priority": 2,
+      "status": "production-ready",
+      "newApiReference": [
+        "New API lists OpenAI Realtime API support."
+      ],
+      "elygateEvidence": [
+        "docs/API_STANDARDS.md:25",
+        "docs/API_STANDARDS.md:69",
+        "apps/gateway/src/routes/realtime.ts",
+        "apps/gateway/src/routes/realtimeRoute.test.ts",
+      "apps/gateway/src/routes/realtimeBilling.test.ts"
+      ],
+      "requiredGates": [
+      "WebSocket proxy smoke",
+      "WebRTC bridge documented as explicit non-goal for the current pinned route-parity target",
+      "billing and audit evidence for realtime sessions"
+      ],
+      "verification": [
+        "bun --cwd apps/gateway test:protocol"
+      ],
+      "nextActions": [
+        "Keep the realtime WebSocket proxy smoke and billing/audit helper tests in the protocol suite."
+      ],
+      "blockers": []
+    },
+    {
+      "id": "provider-task-breadth",
+      "title": "Provider breadth and async media/task providers",
+      "priority": 2,
+      "status": "production-ready",
+      "newApiReference": [
+        "New API includes Midjourney-Proxy, Suno, Dify, custom upstream, Claude, Gemini, and Rerank references."
+      ],
+      "elygateEvidence": [
+        "docs/API_STANDARDS.md:95-113",
+        "apps/gateway/src/providers",
+        "apps/gateway/src/providers/providerContracts.test.ts",
+        "apps/gateway/src/routes/mj.ts",
+        "apps/gateway/src/routes/video.ts",
+        "apps/gateway/src/routes/tasks.ts",
+        "apps/gateway/src/routes/taskRouteDbSmoke.ts",
+        "apps/gateway/src/routes/newApiRelayCompat.test.ts",
+        "apps/gateway/src/services/task-service.ts",
+        "scripts/smoke-new-api-task-route-db.ts",
+        "packages/db/drizzle/20260627172000_replace_tasks_with_generation_runtime/migration.sql"
+      ],
+      "requiredGates": [
+        "provider route contract tests for each enabled provider",
+        "async task state stored in PostgreSQL or pg-boss",
+        "retry, callback, cancellation, and polling behavior covered",
+        "provider secrets redacted in logs and errors"
+      ],
+      "verification": [
+        "bun --cwd apps/gateway test:providers",
+        "bun run smoke:new-api:task-route-db"
+      ],
+      "nextActions": [
+        "Keep provider adapter tests and task-route DB smoke evidence current whenever enabled async providers change."
+      ],
+      "blockers": []
+    },
+    {
+      "id": "operations-routing-admin",
+      "title": "Routing, channel health, models, tags, ratios, and admin operations",
+      "priority": 1,
+      "status": "production-ready",
+      "newApiReference": [
+        "New API exposes weighted routing, failure retry, model sync, channel testing, user model limits, and ratio configuration."
+      ],
+      "elygateEvidence": [
+        "docs/API_STANDARDS.md:71-87",
+        "apps/gateway/src/routes/admin/channels.ts",
+        "apps/gateway/src/routes/admin/models.ts",
+        "apps/gateway/src/routes/admin/performance.ts",
+      "apps/gateway/src/services/dispatcher.ts",
+      "apps/gateway/src/services/channelAffinity.ts",
+      "apps/gateway/src/services/modelRateLimit.ts",
+      "apps/gateway/src/services/localTtlCache.test.ts",
+      "apps/gateway/src/services/cacheRouting.test.ts",
+      "apps/gateway/src/services/ratelimit.test.ts",
+      "apps/gateway/src/services/dispatcherCachePolicy.test.ts",
+      "apps/gateway/src/services/circuitBreakerPolicy.test.ts",
+        "apps/gateway/src/routes/admin/channelModelSync.ts",
+        "apps/gateway/src/routes/admin/channelOperations.ts",
+        "apps/gateway/src/routes/admin/cacheRefresh.ts",
+        "apps/gateway/src/routes/admin/channelsOperations.test.ts",
+        "apps/gateway/src/routes/admin/channelRouteDbSmoke.ts",
+        "apps/gateway/src/enterprise/controlPlane.ts",
+        "scripts/smoke-admin-channel-route-db.ts",
+        "scripts/smoke-enterprise-runtime.ts"
+      ],
+    "requiredGates": [
+      "local derived cache ttl, max-size eviction, and clear behavior tests",
+      "routing selection tests for group filtering, priority, weight, and half-open channel ordering",
+      "rate-limit fallback tests for consume, get, reward, block, and delete semantics",
+      "channel copy and upstream model sync tests",
+        "key strategy and key exhaustion tests",
+        "status-code mapping and auto-ban tests",
+        "retry group selection tests",
+        "admin resource exposure typecheck and UI smoke"
+      ],
+      "verification": [
+      "bun --cwd apps/gateway check",
+      "bun --cwd apps/gateway test:compat",
+        "bun --cwd apps/gateway test:routing",
+        "bun run smoke:new-api:admin-channel-route-db",
+        "bun --cwd apps/admin check",
+        "bun run smoke:enterprise:runtime"
+      ],
+      "nextActions": [
+        "Keep admin operation route tests, admin typecheck, and enterprise runtime browser smoke in the root check evidence."
+      ],
+      "blockers": []
+    },
+    {
+      "id": "identity-security",
+      "title": "Identity, OAuth/OIDC, captcha, email, passkey, and two-factor controls",
+      "priority": 2,
+      "status": "production-ready",
+      "newApiReference": [
+        "New API lists Discord, LinuxDO, Telegram, OIDC, captcha, passkey, and two-factor related controllers."
+      ],
+      "elygateEvidence": [
+        "docs/API_STANDARDS.md:81-83",
+        "apps/gateway/src/routes/admin/newApiUserCompat.ts",
+      "apps/gateway/src/services/captcha.ts",
+    "apps/gateway/src/services/mail.ts",
+    "apps/gateway/src/services/twoFactor.ts",
+    "apps/gateway/src/services/verification.ts",
+    "apps/gateway/src/services/sessionCookie.ts",
+    "apps/gateway/src/services/passkeyChallenge.ts",
+    "apps/gateway/src/services/oauthCallback.ts",
+    "apps/gateway/src/services/oidcProvider.ts",
+    "apps/gateway/src/services/sessionRevocation.ts",
+    "apps/gateway/src/services/captcha.test.ts",
+    "apps/gateway/src/services/twoFactor.test.ts",
+    "apps/gateway/src/services/identitySecurity.test.ts"
+      ],
+      "requiredGates": [
+      "mocked OAuth/OIDC callback tests",
+      "captcha provider verification tests without real secrets",
+      "two-factor backup-code and authenticator enrollment helper tests",
+      "email verification and password reset TTL tests",
+        "passkey and two-factor challenge lifecycle tests",
+        "session revocation and cookie security checks"
+      ],
+      "verification": [
+        "bun --cwd apps/gateway test:compat"
+      ],
+      "nextActions": [
+        "Keep the loopback OIDC provider callback-domain proof and auth compatibility tests in the compat suite."
+      ],
+      "blockers": []
+    },
+    {
+      "id": "billing-commerce",
+      "title": "Quota, subscriptions, recharge, redemption, and payment webhooks",
+      "priority": 2,
+      "status": "production-ready",
+      "newApiReference": [
+        "New API includes internal recharge, quota allocation, Stripe, EPay, Creem, Waffo, subscription, and redemption controllers."
+      ],
+      "elygateEvidence": [
+        "docs/API_STANDARDS.md:84",
+        "apps/gateway/src/routes/payment.ts",
+        "apps/gateway/src/routes/redemptions.ts",
+        "apps/gateway/src/routes/admin/packages.ts",
+        "apps/gateway/src/services/paymentCallback.ts",
+        "apps/gateway/src/services/paymentCallback.test.ts",
+        "apps/gateway/src/services/paymentProviders.test.ts",
+        "apps/gateway/src/services/paymentPolicy.ts",
+        "apps/gateway/src/services/paymentSignatures.ts",
+        "apps/gateway/src/services/newApiSubscriptionCompat.test.ts",
+        "apps/gateway/src/services/subscriptionLifecycle.test.ts",
+        "apps/gateway/src/services/subscription.ts",
+        "packages/db/src/schema.ts"
+      ],
+      "requiredGates": [
+      "webhook signature tests for each enabled provider",
+      "idempotent payment completion tests",
+      "provider webhook parser tests for Creem and Waffo",
+      "New API subscription plan mapping tests",
+      "quota and subscription transition tests",
+        "refund, cancellation, and failure-state policy",
+        "compliance decision for public recharge surfaces"
+      ],
+      "verification": [
+        "bun --cwd apps/gateway test:compat"
+      ],
+      "nextActions": [
+        "Keep webhook signature fixtures, idempotency tests, and disabled-by-default public recharge policy in the compat suite."
+      ],
+      "blockers": []
+    },
+    {
+      "id": "observability-deployment",
+      "title": "Observability, deployment, backup, and production evidence",
+      "priority": 1,
+      "status": "production-ready",
+      "newApiReference": [
+        "New API includes audit, billing, performance, system info, uptime, and backup-style operational controllers."
+      ],
+      "elygateEvidence": [
+        "docs/ENTERPRISE_DEPLOYMENT_RUNBOOK.md",
+        "apps/gateway/src/routes/admin/logs.ts",
+        "apps/gateway/src/routes/admin/data.ts",
+        "apps/gateway/src/routes/admin/performance.ts",
+        "apps/gateway/src/services/auditLog.ts",
+        "scripts/check-new-api-deployment-evidence.ts",
+        "scripts/smoke-enterprise-db.ts",
+        "scripts/smoke-enterprise-runtime.ts"
+      ],
+      "requiredGates": [
+        "backup status and restore drill documented",
+        "log retention and redaction tests",
+        "deployment target profile, secrets checklist, migration plan, rollback, backup/restore drill, and reproducible smoke evidence",
+        "SLO or minimum health checks for gateway, database, pg-boss, and admin UI"
+      ],
+      "verification": [
+        "bun run check:new-api-deployment-evidence",
+        "bun run smoke:enterprise:db",
+        "bun run smoke:enterprise:runtime"
+      ],
+      "nextActions": [
+        "Require explicit deployment authorization before running production promotion or live production smoke."
+      ],
+      "blockers": []
+    },
+    {
+      "id": "admin-enterprise-ui",
+      "title": "Panel and enterprise UI coverage",
+      "priority": 2,
+      "status": "production-ready",
+      "newApiReference": [
+        "New API product maturity includes dashboard, settings, channels, models, logs, billing, and user management UI."
+      ],
+      "elygateEvidence": [
+        "apps/admin/src",
+        "apps/enterprise-console/src",
+        "apps/gateway/src/routes/admin",
+        "apps/gateway/src/enterprise",
+        "scripts/smoke-enterprise-runtime.ts"
+      ],
+      "requiredGates": [
+        "Svelte typecheck",
+        "route inventory and protected-route smoke",
+        "admin CRUD smoke for core resources",
+        "enterprise console smoke for tenant-scoped resources",
+        "no feature is shown in UI without backend support and permission checks"
+      ],
+      "verification": [
+        "bun --cwd apps/admin check",
+        "bun --cwd apps/enterprise-console check",
+        "bun run smoke:enterprise:runtime"
+      ],
+      "nextActions": [
+        "Keep seeded admin and enterprise browser smoke coverage in the root check evidence."
+      ],
+      "blockers": []
+    }
+  ]
+}

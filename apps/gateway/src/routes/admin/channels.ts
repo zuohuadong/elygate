@@ -9,9 +9,11 @@ import { getProviderHandler } from '../../providers';
 import { ChannelType  } from '../../types';
 import { encryptChannelKeys, decryptChannelKeys, getChannelKeys } from '../../services/encryption';
 import { buildModelsUrl, buildTestUrl } from '../../utils/url';
-import { refreshAllCaches } from './index';
+import { refreshAllCaches } from './cacheRefresh';
 import { apiUrls } from '../../config';
 import { and, asc, desc, eq, ilike, inArray, isNotNull, ne, or, sql as drizzleSql } from 'drizzle-orm';
+import { normalizeChannelModels, parseUpstreamModels, reconcileChannelModelSync } from './channelModelSync';
+import { buildCopiedChannelValues } from './channelOperations';
 
 // Load model configurations
 let modelConfig: Record<string, any> = { anthropic: { models: [] } };
@@ -27,6 +29,24 @@ try {
 }
 
 export { modelConfig };
+
+const ADMIN_CHANNEL_OPERATION_CONCURRENCY = Math.max(1, Number(process.env.ADMIN_CHANNEL_OPERATION_CONCURRENCY || 8));
+
+async function mapWithConcurrency<T, R>(
+    items: readonly T[],
+    concurrency: number,
+    mapper: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+    const results = new Array<R>(items.length);
+    for (let offset = 0; offset < items.length; offset += concurrency) {
+        const chunk = items.slice(offset, offset + concurrency);
+        const chunkResults = await Promise.all(chunk.map((item, index) => mapper(item, offset + index)));
+        for (let index = 0; index < chunkResults.length; index += 1) {
+            results[offset + index] = chunkResults[index];
+        }
+    }
+    return results;
+}
 
 const channelListSelection = {
     id: channels.id,
@@ -228,65 +248,12 @@ export const channelsRouter = new Elysia()
         if (!res.ok) return (set.status = 500, { success: false, message: `Failed: ${res.status}` });
 
         const data = await res.json();
-        const upstreamModels: string[] = channel.type === ChannelType.GEMINI
-            ? data.models?.map((m: Record<string, any>) => m.name?.replace('models/', '') || m.displayName).filter(Boolean) || []
-            : data.data?.map((m: Record<string, any>) => m.id).filter(Boolean) || data.map?.((m: Record<string, any>) => m.id || m.name).filter(Boolean) || [];
-
-        const upstreamSet = new Set(upstreamModels);
-
-        // --- Compare with current models ---
-        const oldModels: string[] = Array.isArray(channel.models)
-            ? channel.models
-            : (typeof channel.models === 'string' ? JSON.parse(channel.models) : []);
-        const removedModels = oldModels.filter((m: string) => !upstreamSet.has(m));
-        const newModels = upstreamModels.filter((m: string) => !oldModels.includes(m));
-
-        // --- Clean broken aliases from model_mapping ---
-        let modelMapping: Record<string, string> = typeof channel.modelMapping === 'string'
-            ? JSON.parse(channel.modelMapping || '{}')
-            : (channel.modelMapping || {});
-        const brokenAliases: string[] = [];
-        for (const [alias, target] of Object.entries(modelMapping)) {
-            if (!upstreamSet.has(target)) {
-                brokenAliases.push(alias);
-                delete modelMapping[alias];
-            }
-        }
-
-        // --- Auto-generate aliases for new models ---
-        // Strategy: strip provider prefix (e.g., "deepseek-ai/DeepSeek-V3" -> "DeepSeek-V3")
-        // Skip image/audio/embedding models and models without slash
-        const skipPatterns = /flux|image|sd|stable|draw|kolors|tts|speech|sovits|bge|rerank|embed|whisper/i;
-        const existingAliases = new Set(Object.keys(modelMapping));
-        const existingTargets = new Set(Object.values(modelMapping));
-        const generatedAliases: Record<string, string> = {};
-
-        for (const model of newModels) {
-            if (skipPatterns.test(model)) continue;
-            if (!model.includes('/')) continue;
-
-            let stripped = model;
-            // Remove "Pro/" prefix
-            if (stripped.toLowerCase().startsWith('pro/')) {
-                stripped = stripped.substring(4);
-            }
-            // Remove provider prefix (first segment)
-            if (stripped.includes('/')) {
-                const parts = stripped.split('/');
-                stripped = parts.slice(1).join('/');
-            }
-
-            // Only add if alias is unique and doesn't conflict
-            if (stripped && stripped !== model
-                && !existingAliases.has(stripped)
-                && !existingTargets.has(model)
-                && !upstreamSet.has(stripped)) {
-                modelMapping[stripped] = model;
-                generatedAliases[stripped] = model;
-                existingAliases.add(stripped);
-                existingTargets.add(model);
-            }
-        }
+        const upstreamModels = parseUpstreamModels(data, channel.type);
+        const { removedModels, newModels, modelMapping, brokenAliases, generatedAliases } = reconcileChannelModelSync({
+            currentModels: channel.models,
+            upstreamModels,
+            modelMapping: channel.modelMapping,
+        });
 
         // --- Update DB ---
         const [result] = await db.update(channels).set({ models: upstreamModels, modelMapping, updatedAt: new Date() }).where(eq(channels.id, Number(id))).returning();
@@ -467,14 +434,7 @@ export const channelsRouter = new Elysia()
             const data = await response.json();
             if (!data) throw new Error("Empty response from upstream");
 
-            let models: string[] = [];
-            if (channelType === ChannelType.GEMINI) {
-                models = data.models?.map((m: Record<string, any>) => m.name?.replace('models/', '') || m.displayName).filter(Boolean) || [];
-            } else if (data.data && Array.isArray(data.data)) {
-                models = data.data.map((m: Record<string, any>) => m.id).filter(Boolean);
-            } else if (Array.isArray(data)) {
-                models = data.map((m: Record<string, any>) => m.id || m.name).filter(Boolean);
-            }
+            const models = parseUpstreamModels(data, channelType);
 
             return { success: true, models, total: models.length };
         } catch (e: unknown) {
@@ -520,14 +480,7 @@ export const channelsRouter = new Elysia()
             const data = await response.json();
             if (!data) throw new Error("Empty response from upstream");
 
-            let models: string[] = [];
-            if (channel.type === ChannelType.GEMINI) {
-                models = data.models?.map((m: Record<string, any>) => m.name?.replace('models/', '') || m.displayName).filter(Boolean) || [];
-            } else if (data.data && Array.isArray(data.data)) {
-                models = data.data.map((m: Record<string, any>) => m.id).filter(Boolean);
-            } else if (Array.isArray(data)) {
-                models = data.map((m: Record<string, any>) => m.id || m.name).filter(Boolean);
-            }
+            const models = parseUpstreamModels(data, channel.type);
 
             return { success: true, models, total: models.length };
         } catch (e: unknown) {
@@ -622,23 +575,7 @@ export const channelsRouter = new Elysia()
         try {
             const [source] = await db.select().from(channels).where(eq(channels.id, Number(id))).limit(1);
             if (!source) { set.status = 404; return { success: false, message: 'Channel not found' }; }
-            const [result] = await db.insert(channels).values({
-                name: '[Copy] ' + source.name,
-                type: source.type,
-                key: source.key,
-                baseUrl: source.baseUrl,
-                models: source.models,
-                modelMapping: source.modelMapping,
-                priority: source.priority,
-                weight: source.weight,
-                status: 3,
-                keyStrategy: source.keyStrategy,
-                keyStatus: source.keyStatus,
-                priceRatio: source.priceRatio,
-                keyConcurrencyLimit: source.keyConcurrencyLimit,
-                endpointType: source.endpointType,
-                groups: source.groups,
-            }).returning({ id: channels.id, name: channels.name });
+            const [result] = await db.insert(channels).values(buildCopiedChannelValues(source)).returning({ id: channels.id, name: channels.name });
             await refreshAllCaches();
             return { success: true, channel: result };
         } catch (e: unknown) { set.status = 500; return { success: false, message: getErrorMessage(e) }; }
@@ -655,10 +592,8 @@ export const channelsRouter = new Elysia()
             const res = await fetch(modelsUrl, { headers: handler.buildHeaders(testKey) });
             if (!res.ok) return { success: false, message: `Upstream error: ${res.status}` };
             const data = await res.json();
-            let upstreamModels: string[] = [];
-            if (data.data) upstreamModels = data.data.map((m: any) => m.id).filter(Boolean);
-            else if (Array.isArray(data)) upstreamModels = data.map((m: any) => m.id || m.name).filter(Boolean);
-            const oldModels: string[] = Array.isArray(channel.models) ? channel.models : (typeof channel.models === 'string' ? JSON.parse(channel.models) : []);
+            const upstreamModels = parseUpstreamModels(data, channel.type);
+            const oldModels = normalizeChannelModels(channel.models);
             const added = upstreamModels.filter((m: string) => !oldModels.includes(m));
             const removed = oldModels.filter((m: string) => !upstreamModels.includes(m));
             return { success: true, currentCount: oldModels.length, upstreamCount: upstreamModels.length, added, removed };
@@ -676,9 +611,7 @@ export const channelsRouter = new Elysia()
             const res = await fetch(modelsUrl, { headers: handler.buildHeaders(testKey) });
             if (!res.ok) return { success: false, message: `Upstream error: ${res.status}` };
             const data = await res.json();
-            let upstreamModels: string[] = [];
-            if (data.data) upstreamModels = data.data.map((m: any) => m.id).filter(Boolean);
-            else if (Array.isArray(data)) upstreamModels = data.map((m: any) => m.id || m.name).filter(Boolean);
+            const upstreamModels = parseUpstreamModels(data, channel.type);
             await db.update(channels).set({ models: upstreamModels, updatedAt: new Date() }).where(eq(channels.id, Number(id)));
             await refreshAllCaches();
             return { success: true, modelsCount: upstreamModels.length };
@@ -878,11 +811,10 @@ export const channelsRouter = new Elysia()
     // --- Test All Channels ---
     .get('/channels/test', async () => {
         const channelList = await db.select({ id: channels.id, name: channels.name, type: channels.type, baseUrl: channels.baseUrl, key: channels.key, models: channels.models, testModel: channels.testModel, endpointType: channels.endpointType }).from(channels).where(eq(channels.status, 1));
-        const results = [];
-        for (const ch of channelList) {
+        const results = await mapWithConcurrency(channelList, ADMIN_CHANNEL_OPERATION_CONCURRENCY, async (ch) => {
             const handler = getProviderHandler(ch.type);
             const keys = getChannelKeys(ch.key);
-            if (keys.length === 0) { results.push({ id: ch.id, name: ch.name, success: false, message: 'No keys' }); continue; }
+            if (keys.length === 0) return { id: ch.id, name: ch.name, success: false, message: 'No keys' };
             const testKey = keys[0];
             const modelsOpt = typeof ch.models === 'string' ? JSON.parse(ch.models) : ch.models;
             const testModel = ch.testModel || (Array.isArray(modelsOpt) && modelsOpt.length > 0 ? modelsOpt[0] : 'gpt-3.5-turbo');
@@ -892,11 +824,11 @@ export const channelsRouter = new Elysia()
             const startTime = Date.now();
             try {
                 const res = await fetch(testUrl, { method: 'POST', headers: handler.buildHeaders(testKey), body: JSON.stringify(handler.transformRequest(bodyPayload, testModel)) });
-                results.push({ id: ch.id, name: ch.name, success: res.ok, latency: Date.now() - startTime, status: res.status });
+                return { id: ch.id, name: ch.name, success: res.ok, latency: Date.now() - startTime, status: res.status };
             } catch (e: unknown) {
-                results.push({ id: ch.id, name: ch.name, success: false, latency: Date.now() - startTime, message: e instanceof Error ? e.message : String(e) });
+                return { id: ch.id, name: ch.name, success: false, latency: Date.now() - startTime, message: e instanceof Error ? e.message : String(e) };
             }
-        }
+        });
         return { success: true, tested: results.length, results };
     })
 
@@ -930,12 +862,11 @@ export const channelsRouter = new Elysia()
     // --- Update All Channel Balances ---
     .get('/channels/update_balance', async () => {
         const channelList = await db.select({ id: channels.id, name: channels.name, type: channels.type, baseUrl: channels.baseUrl, key: channels.key }).from(channels).where(eq(channels.status, 1));
-        const results = [];
-        for (const ch of channelList) {
+        const results = await mapWithConcurrency(channelList, ADMIN_CHANNEL_OPERATION_CONCURRENCY, async (ch) => {
             try {
                 const handler = getProviderHandler(ch.type);
                 const keys = getChannelKeys(ch.key);
-                if (keys.length === 0) continue;
+                if (keys.length === 0) return { id: ch.id, name: ch.name, balance: null, message: 'No keys' };
                 const baseUrl = (ch.baseUrl || '').replace(/\/+$/, '');
                 let balanceUrl = baseUrl + '/dashboard/billing/credit_grants';
                 if (ch.type === ChannelType.AZURE) balanceUrl = baseUrl + '/status';
@@ -944,14 +875,14 @@ export const channelsRouter = new Elysia()
                     const data = await res.json().catch(() => ({}));
                     const balance = data.total_available ?? data.total_granted ?? data.balance ?? 0;
                     await db.update(channels).set({ balance: String(balance), balanceUpdatedAt: new Date() }).where(eq(channels.id, ch.id));
-                    results.push({ id: ch.id, name: ch.name, balance });
+                    return { id: ch.id, name: ch.name, balance };
                 } else {
-                    results.push({ id: ch.id, name: ch.name, balance: null, message: 'Balance endpoint not supported' });
+                    return { id: ch.id, name: ch.name, balance: null, message: 'Balance endpoint not supported' };
                 }
             } catch (e: unknown) {
-                results.push({ id: ch.id, name: ch.name, balance: null, message: e instanceof Error ? e.message : 'Error' });
+                return { id: ch.id, name: ch.name, balance: null, message: e instanceof Error ? e.message : 'Error' };
             }
-        }
+        });
         return { success: true, checked: results.length, results };
     })
 

@@ -22,6 +22,15 @@ const contentTypes: Record<string, string> = {
     woff2: 'font/woff2',
 };
 
+const embeddedBodyCache = new Map<string, ArrayBuffer>();
+
+function toArrayBuffer(body: Uint8Array): ArrayBuffer {
+    if (body.byteOffset === 0 && body.byteLength === body.buffer.byteLength && body.buffer instanceof ArrayBuffer) {
+        return body.buffer;
+    }
+    return body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength) as ArrayBuffer;
+}
+
 function setStaticHeaders(path: string, set: { headers?: Record<string, string> }, contentType?: string) {
     if (!set.headers) set.headers = {};
     set.headers['Cache-Control'] = path.includes('/assets/') || path.includes('/_app/immutable/')
@@ -38,7 +47,13 @@ function embeddedResponse(path: string, set: { headers?: Record<string, string> 
     if (!asset) return;
 
     setStaticHeaders(normalizedPath, set, asset.contentType);
-    return new Response(Buffer.from(asset.base64, 'base64'), {
+    let body = embeddedBodyCache.get(normalizedPath);
+    if (!body) {
+        const decoded = Uint8Array.fromBase64(asset.base64);
+        body = toArrayBuffer(decoded);
+        embeddedBodyCache.set(normalizedPath, body);
+    }
+    return new Response(body, {
         headers: set.headers,
     });
 }

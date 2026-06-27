@@ -100,28 +100,18 @@ export const dashboardRouter = new Elysia()
             total_prompt_tokens: drizzleSql<string>`coalesce(sum(${logs.promptTokens}), 0)::bigint`,
             total_completion_tokens: drizzleSql<string>`coalesce(sum(${logs.completionTokens}), 0)::bigint`,
             avg_latency: drizzleSql<number>`round(coalesce(avg(case when ${logs.elapsedMs} > 0 then ${logs.elapsedMs} else null end), 0))::int`,
-            semantic_hits: drizzleSql<number>`count(case when ${logs.channelId} = 0 then 1 end)::int`,
-            semantic_profit_quota: drizzleSql<string>`coalesce(sum(case when ${logs.channelId} = 0 then ${logs.quotaCost} else 0 end), 0)::bigint`,
-            semantic_tokens: drizzleSql<string>`coalesce(sum(case when ${logs.channelId} = 0 then ${logs.promptTokens} + ${logs.completionTokens} else 0 end), 0)::bigint`,
             exact_hits: drizzleSql<number>`count(case when ${logs.channelId} = -1 then 1 end)::int`,
             exact_profit_quota: drizzleSql<string>`coalesce(sum(case when ${logs.channelId} = -1 then ${logs.quotaCost} else 0 end), 0)::bigint`,
             exact_tokens: drizzleSql<string>`coalesce(sum(case when ${logs.channelId} = -1 then ${logs.promptTokens} + ${logs.completionTokens} else 0 end), 0)::bigint`,
-            cache_hits: drizzleSql<number>`count(case when ${logs.channelId} in (0, -1) then 1 end)::int`,
-            cache_profit_quota: drizzleSql<string>`coalesce(sum(case when ${logs.channelId} in (0, -1) then ${logs.quotaCost} else 0 end), 0)::bigint`,
-            cached_tokens: drizzleSql<string>`coalesce(sum(case when ${logs.channelId} in (0, -1) then ${logs.promptTokens} + ${logs.completionTokens} else 0 end), 0)::bigint`,
+            cache_hits: drizzleSql<number>`count(case when ${logs.channelId} = -1 then 1 end)::int`,
+            cache_profit_quota: drizzleSql<string>`coalesce(sum(case when ${logs.channelId} = -1 then ${logs.quotaCost} else 0 end), 0)::bigint`,
+            cached_tokens: drizzleSql<string>`coalesce(sum(case when ${logs.channelId} = -1 then ${logs.promptTokens} + ${logs.completionTokens} else 0 end), 0)::bigint`,
         }).from(logs).where(conditions);
 
-        let semantic_cache_size = 0;
-        let semantic_cache_count = 0;
         let exact_cache_size = 0;
         let exact_cache_count = 0;
 
         try {
-            const [semSize] = await db.execute(drizzleSql`SELECT pg_total_relation_size('semantic_cache') as size`) as any[];
-            const [semCount] = await db.execute(drizzleSql`SELECT COUNT(*) as cnt FROM semantic_cache`) as any[];
-            semantic_cache_size = Number(semSize?.size || 0);
-            semantic_cache_count = Number(semCount?.cnt || 0);
-
             const [exSize] = await db.execute(drizzleSql`SELECT pg_total_relation_size('response_cache') as size`) as any[];
             const [exCount] = await db.execute(drizzleSql`SELECT COUNT(*) as cnt FROM response_cache`) as any[];
             exact_cache_size = Number(exSize?.size || 0);
@@ -187,12 +177,10 @@ export const dashboardRouter = new Elysia()
         return {
             overview: {
                 ...overview,
-                semantic_cache_size,
-                semantic_cache_count,
                 exact_cache_size,
                 exact_cache_count,
-                cache_size_bytes: semantic_cache_size,
-                cache_record_count: semantic_cache_count
+                cache_size_bytes: exact_cache_size,
+                cache_record_count: exact_cache_count
             },
             models_user,
             models_channel,

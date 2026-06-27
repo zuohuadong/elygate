@@ -30,11 +30,7 @@
     CircuitBreakerThreshold: '5',
     CircuitBreakerRecoveryThreshold: '3',
     LogRetentionDays: '7',
-    SemanticCacheEnabled: 'true',
     ResponseCacheEnabled: 'true',
-    SemanticCacheThreshold: '0.95',
-    SemanticCacheTTLHours: '24',
-    SemanticCacheEmbeddingModel: 'text-embedding-3-small',
     MemoryEnabled: 'false',
     MemoryReadDefault: 'false',
     MemoryWriteDefault: 'false',
@@ -115,24 +111,6 @@
       message = { type: 'error', text: e.message || '保存失败' };
     } finally {
       saving = false;
-    }
-  }
-
-  async function checkEmbedding() {
-    try {
-      const res = await fetch('/api/admin/check-embedding', {
-        method: 'POST',
-        headers: adminHeaders('application/json'),
-        credentials: 'include',
-        body: JSON.stringify({ model: settings.SemanticCacheEmbeddingModel }),
-      });
-      const data = await res.json();
-      message = {
-        type: data.success ? 'success' : 'error',
-        text: data.message + (data.channel ? ` (${data.channel})` : ''),
-      };
-    } catch (e: any) {
-      message = { type: 'error', text: e.message || '检测失败' };
     }
   }
 
@@ -259,17 +237,10 @@
     {
       title: '缓存设置',
       fields: [
-        { key: 'SemanticCacheEnabled', label: '语义缓存', type: 'select', options: [
-          { label: '启用', value: 'true' },
-          { label: '禁用', value: 'false' },
-        ]},
         { key: 'ResponseCacheEnabled', label: '精确缓存', type: 'select', options: [
           { label: '启用', value: 'true' },
           { label: '禁用', value: 'false' },
         ]},
-        { key: 'SemanticCacheThreshold', label: '语义相似度阈值', type: 'number', description: '0-1，越高越严格' },
-        { key: 'SemanticCacheTTLHours', label: '缓存有效期 (小时)', type: 'number' },
-        { key: 'SemanticCacheEmbeddingModel', label: 'Embedding 模型', type: 'text' },
       ],
     },
     {
@@ -348,9 +319,6 @@
 <div class="space-y-6">
   <PageHeader title="系统设置" description="管理系统运行参数">
     {#snippet actions()}
-      <Button variant="outline" size="sm" onclick={checkEmbedding}>
-        检测 Embedding
-      </Button>
       <Button size="sm" disabled={saving} onclick={handleSave}>
         {saving ? '保存中...' : '保存设置'}
       </Button>

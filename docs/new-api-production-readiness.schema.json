@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Elygate New API Production Readiness Matrix",
+  "type": "object",
+  "required": [
+    "version",
+    "objective",
+    "sourceSnapshot",
+    "productionDefinition",
+    "capabilities"
+  ],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 1
+    },
+    "objective": {
+      "type": "string"
+    },
+    "sourceSnapshot": {
+      "type": "object",
+      "required": [
+        "project",
+        "commit",
+        "checkedAt",
+        "evidence"
+      ],
+      "properties": {
+        "project": {
+          "type": "string"
+        },
+        "commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{7,40}$"
+        },
+        "checkedAt": {
+          "type": "string"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "productionDefinition": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "priority",
+          "status",
+          "newApiReference",
+          "elygateEvidence",
+          "requiredGates",
+          "verification",
+          "nextActions",
+          "blockers"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "production-ready",
+              "partial",
+              "blocked",
+              "not-started"
+            ]
+          },
+          "newApiReference": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1
+          },
+          "elygateEvidence": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1
+          },
+          "requiredGates": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1
+          },
+          "verification": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1
+          },
+          "nextActions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1
+          },
+          "blockers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "minItems": 1
+    }
+  },
+  "additionalProperties": false
+}

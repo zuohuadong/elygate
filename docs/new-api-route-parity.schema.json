@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Elygate New API Route Parity Matrix",
+  "type": "object",
+  "required": ["version", "objective", "sourceSnapshot", "completionPolicy", "routeGroups"],
+  "properties": {
+    "version": { "type": "integer", "const": 1 },
+    "objective": { "type": "string" },
+    "sourceSnapshot": {
+      "type": "object",
+      "required": ["project", "commit", "checkedAt", "evidence"],
+      "properties": {
+        "project": { "type": "string" },
+        "commit": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+        "checkedAt": { "type": "string" },
+        "evidence": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+      },
+      "additionalProperties": false
+    },
+    "completionPolicy": {
+      "type": "object",
+      "required": ["routeCoverage", "redisPolicy", "strictCommand"],
+      "properties": {
+        "routeCoverage": { "type": "string" },
+        "redisPolicy": { "type": "string" },
+        "strictCommand": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "routeGroups": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "status", "source", "routes", "elygateEvidence", "blockers"],
+        "properties": {
+          "id": { "type": "string" },
+          "status": { "type": "string", "enum": ["implemented", "partial", "missing", "blocked"] },
+          "source": { "type": "string" },
+          "routes": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+          "elygateEvidence": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+          "blockers": { "type": "array", "items": { "type": "string" } }
+        },
+        "additionalProperties": false
+      },
+      "minItems": 1
+    }
+  },
+  "additionalProperties": false
+}

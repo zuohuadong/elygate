@@ -1,8 +1,9 @@
 import type { ElysiaCtx } from '../types';
-import { Elysia } from 'elysia';
+import { Elysia, t } from 'elysia';
 import { db, sql } from '@elygate/db';
 import { apiFiles } from '@elygate/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
+import { serializeFile } from './protocolShapes';
 
 const MAX_FILE_SIZE = Number(process.env.MAX_FILE_SIZE || 50) * 1024 * 1024; // 默认 50MB
 
@@ -10,18 +11,24 @@ function createId(prefix: string): string {
     return `${prefix}_${crypto.randomUUID().replace(/-/g, '')}`;
 }
 
-function serializeFile(row: Record<string, any>) {
-    return {
-        id: row.id,
-        object: row.object || 'file',
-        bytes: Number(row.bytes || 0),
-        created_at: Math.floor(new Date(row.createdAt || Date.now()).getTime() / 1000),
-        filename: row.filename,
-        purpose: row.purpose,
-        status: row.status || 'processed',
-        status_details: row.statusDetails || row.status_details || null
-    };
-}
+const listFilesQuerySchema = t.Object({
+    purpose: t.Optional(t.String()),
+}, { additionalProperties: true });
+
+const fileParamsSchema = t.Object({
+    file_id: t.String(),
+});
+
+const fileUploadBodySchema = t.Object({
+    file: t.Optional(t.Any()),
+    upload: t.Optional(t.Any()),
+    filename: t.Optional(t.String()),
+    purpose: t.Optional(t.String()),
+    content: t.Optional(t.String()),
+    body: t.Optional(t.Any()),
+    bytes: t.Optional(t.Union([t.Number(), t.String()])),
+    metadata: t.Optional(t.Record(t.String(), t.Any())),
+}, { additionalProperties: true });
 
 export const filesRouter = new Elysia()
     .get('/files', async ({ user, query }: ElysiaCtx) => {
@@ -44,7 +51,7 @@ export const filesRouter = new Elysia()
             .orderBy(desc(apiFiles.createdAt))
             .limit(100);
         return { object: 'list', data: rows.map(serializeFile) };
-    })
+    }, { query: listFilesQuerySchema })
     .post('/files', async ({ body, user, token, set }: ElysiaCtx) => {
         const payload = body || {};
         const uploaded = payload.file || payload.upload;
@@ -99,7 +106,7 @@ export const filesRouter = new Elysia()
             statusDetails: apiFiles.statusDetails,
         });
         return serializeFile(row!);
-    })
+    }, { body: fileUploadBodySchema })
     .get('/files/:file_id', async ({ params, user, set }: ElysiaCtx) => {
         const [row] = await db.select({
             id: apiFiles.id,
@@ -117,7 +124,7 @@ export const filesRouter = new Elysia()
         if (row) return serializeFile(row);
         set.status = 404;
         return { error: { message: 'File not found', type: 'not_found' } };
-    })
+    }, { params: fileParamsSchema })
     .delete('/files/:file_id', async ({ params, user, set }: ElysiaCtx) => {
         const [row] = await db.delete(apiFiles)
             .where(and(eq(apiFiles.id, params.file_id), eq(apiFiles.userId, user.id)))
@@ -125,7 +132,7 @@ export const filesRouter = new Elysia()
         if (row) return { id: row.id, object: 'file', deleted: true };
         set.status = 404;
         return { error: { message: 'File not found', type: 'not_found' } };
-    })
+    }, { params: fileParamsSchema })
     .get('/files/:file_id/content', async ({ params, user, set }: ElysiaCtx) => {
         const [row] = await db.select({
             id: apiFiles.id,
@@ -154,4 +161,4 @@ export const filesRouter = new Elysia()
                 'Content-Disposition': `attachment; filename="${row.filename}"`,
             }
         });
-    });
+    }, { params: fileParamsSchema });

@@ -23,7 +23,7 @@ function startOfNextMonth(date: Date) {
     return new Date(date.getFullYear(), date.getMonth() + 1, 1, 0, 0, 0, 0);
 }
 
-function durationEndFromPackage(pkg: PackageRow, now = new Date()) {
+export function durationEndFromPackage(pkg: PackageRow, now = new Date()) {
     const unit = String(pkg.durationUnit || '').trim() || 'day';
     const value = Number(pkg.durationValue || 0);
     const customSeconds = Number(pkg.customSeconds || 0);
@@ -52,7 +52,7 @@ function durationEndFromPackage(pkg: PackageRow, now = new Date()) {
     }
 }
 
-function resolveResetPolicy(pkg: PackageRow): { period: ResetPeriod; interval: number; customSeconds: number } {
+export function resolveResetPolicy(pkg: PackageRow): { period: ResetPeriod; interval: number; customSeconds: number } {
     const explicit = String(pkg.quotaResetPeriod || 'never').trim().toLowerCase();
     if (explicit === 'daily' || explicit === 'weekly' || explicit === 'monthly') {
         return { period: explicit, interval: 1, customSeconds: 0 };
@@ -74,7 +74,7 @@ function resolveResetPolicy(pkg: PackageRow): { period: ResetPeriod; interval: n
     return { period: 'never', interval: 1, customSeconds: 0 };
 }
 
-function calculateNextReset(base: Date, pkg: PackageRow, endTime?: Date | null) {
+export function calculateNextReset(base: Date, pkg: PackageRow, endTime?: Date | null) {
     const policy = resolveResetPolicy(pkg);
     if (policy.period === 'never') return null;
 
@@ -103,7 +103,7 @@ function calculateNextReset(base: Date, pkg: PackageRow, endTime?: Date | null) 
     return next;
 }
 
-function countResetCycles(lastResetAt: Date, now: Date, pkg: PackageRow) {
+export function countResetCycles(lastResetAt: Date, now: Date, pkg: PackageRow) {
     const policy = resolveResetPolicy(pkg);
     if (policy.period === 'never') return 0;
     if (policy.period === 'custom') {

@@ -155,6 +155,62 @@ describe('enterprise runtime guard', () => {
         }
     });
 
+    test('denies requests outside the enterprise IP policy', async () => {
+        const result = await evaluateEnterpriseRuntimeGuard(
+            { ...baseInput, ip: '198.51.100.9' },
+            reader(projection({
+                entitlements: {
+                    overageEnabled: false,
+                    overageUnitPriceCents: 0,
+                    budgetMode: 'hard_limit',
+                    defaultNoTraining: true,
+                    providerComplianceMode: 'strict',
+                    allowedIpPolicy: '203.0.113.7',
+                },
+            })),
+            activeConfig,
+        );
+
+        expect(result.enabled).toBe(true);
+        expect(result.decision).toBe('deny');
+        if (result.enabled) expect(result.reason).toContain('IP policy');
+    });
+
+    test('allows budget overage as a warning when org entitlements permit it', async () => {
+        const result = await evaluateEnterpriseRuntimeGuard(
+            { ...baseInput, requestedQuota: 250 },
+            reader(projection({
+                entitlements: {
+                    overageEnabled: true,
+                    overageUnitPriceCents: 2,
+                    budgetMode: 'overage',
+                    defaultNoTraining: true,
+                    providerComplianceMode: 'strict',
+                },
+                budgets: [
+                    {
+                        id: 11,
+                        subject_kind: 'api_key',
+                        subject_id: '99',
+                        period: 'monthly',
+                        limit_quota: 1000,
+                        used_quota: 900,
+                        alert_threshold_pct: 80,
+                        status: 'active',
+                    },
+                ],
+            })),
+            activeConfig,
+        );
+
+        expect(result.enabled).toBe(true);
+        expect(result.decision).toBe('warn');
+        if (result.enabled) {
+            expect(result.reason).toContain('overage');
+            expect(result.budget.blocking_budget_ids).toEqual([11]);
+        }
+    });
+
     test('creates a usage session that records actual quota to every matched active budget', async () => {
         const result = await evaluateEnterpriseRuntimeGuard(
             { ...baseInput, requestedQuota: 150 },

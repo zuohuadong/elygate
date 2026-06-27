@@ -4,10 +4,18 @@ import { db } from '@elygate/db';
 import {
     channels,
     enterpriseAuditEvents,
+    enterpriseBillingAccounts,
     enterpriseBudgets,
     enterpriseGatewayInstances,
     enterpriseIdentityPolicies,
+    enterpriseInvoiceItems,
+    enterpriseInvoices,
+    enterpriseMemberships,
+    enterpriseMeteredUsage,
+    enterpriseOrgEntitlements,
+    enterpriseProviderCompliance,
     logs,
+    organizations,
     tokens,
     users,
 } from '@elygate/db/schema';
@@ -22,7 +30,7 @@ import {
 import type { ProjectionAction } from '@elygate/enterprise-adapter';
 import { evaluateEnterpriseBudgets, evaluateEnterprisePolicies } from '@elygate/enterprise-authz';
 import type { EnterpriseBudgetRecord, EnterprisePolicyRecord } from '@elygate/enterprise-authz';
-import { and, count, desc, eq, gte, isNotNull, lte, sql as drizzleSql, sum } from 'drizzle-orm';
+import { and, count, desc, eq, gte, isNotNull, lte, ne, or, sql as drizzleSql, sum } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 import { nextEnterpriseBudgetResetAt, rolloverDueEnterpriseBudgets } from './budgetRollover';
 import { enterpriseRuntimeConfig } from './config';
@@ -60,6 +68,19 @@ export type EnterpriseControlPlane = {
     readonly createBudget: (claims: PlatformClaims, body: unknown, meta: EnterpriseRequestMeta) => Promise<unknown>;
     readonly updateBudget: (claims: PlatformClaims, id: string, body: unknown, meta: EnterpriseRequestMeta) => Promise<unknown>;
     readonly evaluateEnterpriseBudget: (claims: PlatformClaims, body: unknown, meta: EnterpriseRequestMeta) => Promise<unknown>;
+    readonly getMembersAndAccess: (claims: PlatformClaims, query?: ListQuery) => Promise<unknown>;
+    readonly listMemberships: (claims: PlatformClaims, query?: ListQuery) => Promise<unknown>;
+    readonly upsertMembership: (claims: PlatformClaims, body: unknown, meta: EnterpriseRequestMeta) => Promise<unknown>;
+    readonly updateMembership: (claims: PlatformClaims, id: string, body: unknown, meta: EnterpriseRequestMeta) => Promise<unknown>;
+    readonly getOrgEntitlements: (claims: PlatformClaims) => Promise<unknown>;
+    readonly updateOrgEntitlements: (claims: PlatformClaims, body: unknown, meta: EnterpriseRequestMeta) => Promise<unknown>;
+    readonly getUsageEfficiency: (claims: PlatformClaims, query?: ListQuery) => Promise<unknown>;
+    readonly getBillingAndInvoices: (claims: PlatformClaims, query?: ListQuery) => Promise<unknown>;
+    readonly listInvoices: (claims: PlatformClaims, query?: ListQuery) => Promise<unknown>;
+    readonly upsertBillingAccount: (claims: PlatformClaims, body: unknown, meta: EnterpriseRequestMeta) => Promise<unknown>;
+    readonly createInvoice: (claims: PlatformClaims, body: unknown, meta: EnterpriseRequestMeta) => Promise<unknown>;
+    readonly getDataGovernance: (claims: PlatformClaims, query?: ListQuery) => Promise<unknown>;
+    readonly upsertProviderCompliance: (claims: PlatformClaims, body: unknown, meta: EnterpriseRequestMeta) => Promise<unknown>;
     readonly listAuditEvents: (claims: PlatformClaims, query?: ListQuery) => Promise<unknown>;
     readonly exportAuditEvents: (claims: PlatformClaims, query?: ListQuery) => Promise<unknown>;
     readonly listProviderChannels: (claims: PlatformClaims, query?: ListQuery) => Promise<unknown>;
@@ -341,6 +362,157 @@ function mapAuditEvent(row: typeof enterpriseAuditEvents.$inferSelect) {
     };
 }
 
+function mapEntitlements(row: typeof enterpriseOrgEntitlements.$inferSelect) {
+    return {
+        id: row.id,
+        tenant_id: row.tenantId,
+        org_id: row.orgId,
+        app_instance_id: row.appInstanceId,
+        seat_limit: row.seatLimit,
+        assigned_seats: row.assignedSeats,
+        available_seats: Math.max(0, row.seatLimit - row.assignedSeats),
+        billing_mode: row.billingMode,
+        overage_enabled: row.overageEnabled,
+        overage_unit_price_cents: row.overageUnitPriceCents,
+        budget_mode: row.budgetMode,
+        default_no_training: row.defaultNoTraining,
+        data_retention_days: row.dataRetentionDays,
+        provider_compliance_mode: row.providerComplianceMode,
+        allowed_ip_policy: row.allowedIpPolicy,
+        status: row.status,
+        metadata: row.metadata,
+        created_by: row.createdBy,
+        updated_by: row.updatedBy,
+        created_at: row.createdAt?.toISOString(),
+        updated_at: row.updatedAt?.toISOString(),
+    };
+}
+
+function mapMembership(row: typeof enterpriseMemberships.$inferSelect) {
+    return {
+        id: row.id,
+        tenant_id: row.tenantId,
+        org_id: row.orgId,
+        app_instance_id: row.appInstanceId,
+        user_id: row.userId,
+        email: row.email,
+        display_name: row.displayName,
+        role: row.role,
+        scopes: stringArray(row.scopes),
+        seat_kind: row.seatKind,
+        seat_status: row.seatStatus,
+        invited_by: row.invitedBy,
+        joined_at: row.joinedAt?.toISOString(),
+        last_active_at: row.lastActiveAt?.toISOString(),
+        metadata: row.metadata,
+        created_at: row.createdAt?.toISOString(),
+        updated_at: row.updatedAt?.toISOString(),
+    };
+}
+
+function mapBillingAccount(row: typeof enterpriseBillingAccounts.$inferSelect) {
+    return {
+        id: row.id,
+        tenant_id: row.tenantId,
+        org_id: row.orgId,
+        app_instance_id: row.appInstanceId,
+        billing_name: row.billingName,
+        billing_email: row.billingEmail,
+        tax_id: row.taxId,
+        currency: row.currency,
+        payment_terms: row.paymentTerms,
+        status: row.status,
+        metadata: row.metadata,
+        created_by: row.createdBy,
+        updated_by: row.updatedBy,
+        created_at: row.createdAt?.toISOString(),
+        updated_at: row.updatedAt?.toISOString(),
+    };
+}
+
+function mapInvoice(row: typeof enterpriseInvoices.$inferSelect, items: readonly ReturnType<typeof mapInvoiceItem>[] = []) {
+    return {
+        id: row.id,
+        tenant_id: row.tenantId,
+        org_id: row.orgId,
+        app_instance_id: row.appInstanceId,
+        billing_account_id: row.billingAccountId,
+        invoice_number: row.invoiceNumber,
+        period_start: row.periodStart.toISOString(),
+        period_end: row.periodEnd.toISOString(),
+        currency: row.currency,
+        subtotal_cents: Number(row.subtotalCents || 0),
+        tax_cents: Number(row.taxCents || 0),
+        total_cents: Number(row.totalCents || 0),
+        status: row.status,
+        due_at: row.dueAt?.toISOString(),
+        issued_at: row.issuedAt?.toISOString(),
+        paid_at: row.paidAt?.toISOString(),
+        metadata: row.metadata,
+        items,
+        created_at: row.createdAt?.toISOString(),
+        updated_at: row.updatedAt?.toISOString(),
+    };
+}
+
+function mapInvoiceItem(row: typeof enterpriseInvoiceItems.$inferSelect) {
+    return {
+        id: row.id,
+        invoice_id: row.invoiceId,
+        item_type: row.itemType,
+        description: row.description,
+        quantity: String(row.quantity),
+        unit_amount_cents: Number(row.unitAmountCents || 0),
+        amount_cents: Number(row.amountCents || 0),
+        source_type: row.sourceType,
+        source_id: row.sourceId,
+        metadata: row.metadata,
+        created_at: row.createdAt?.toISOString(),
+    };
+}
+
+function mapMeteredUsage(row: typeof enterpriseMeteredUsage.$inferSelect) {
+    return {
+        id: row.id,
+        tenant_id: row.tenantId,
+        org_id: row.orgId,
+        app_instance_id: row.appInstanceId,
+        subject_kind: row.subjectKind,
+        subject_id: row.subjectId,
+        metric: row.metric,
+        quantity: Number(row.quantity || 0),
+        unit_amount_cents: row.unitAmountCents,
+        amount_cents: Number(row.amountCents || 0),
+        source_log_id: row.sourceLogId,
+        invoice_id: row.invoiceId,
+        occurred_at: row.occurredAt?.toISOString(),
+        metadata: row.metadata,
+        created_at: row.createdAt?.toISOString(),
+    };
+}
+
+function mapProviderCompliance(row: typeof enterpriseProviderCompliance.$inferSelect) {
+    return {
+        id: row.id,
+        tenant_id: row.tenantId,
+        org_id: row.orgId,
+        app_instance_id: row.appInstanceId,
+        provider_kind: row.providerKind,
+        provider_id: row.providerId,
+        display_name: row.displayName,
+        no_training: row.noTraining,
+        zero_retention: row.zeroRetention,
+        region: row.region,
+        status: row.status,
+        evidence_url: row.evidenceUrl,
+        reviewed_by: row.reviewedBy,
+        reviewed_at: row.reviewedAt?.toISOString(),
+        metadata: row.metadata,
+        created_at: row.createdAt?.toISOString(),
+        updated_at: row.updatedAt?.toISOString(),
+    };
+}
+
 function queryRecord(query?: ListQuery): JsonObject {
     const normalized = query ?? {};
     return isRecord(normalized) ? normalized : {};
@@ -548,6 +720,26 @@ const usageMetricSelection = {
 
 const usageCostOrder = desc(drizzleSql`coalesce(sum(${logs.quotaCost}), 0)`);
 
+function numericOrgId(claims: PlatformClaims): number | null {
+    const orgId = Number(claims.org_id);
+    return Number.isInteger(orgId) && orgId > 0 ? orgId : null;
+}
+
+function projectedWorkspaceIds(claims: PlatformClaims): readonly string[] {
+    return [claims.project_id, claims.app_instance_id].filter((value): value is string => Boolean(value));
+}
+
+function usageWindowWhere(claims: PlatformClaims, since: Date): SQL {
+    const scopeFilters: SQL[] = [];
+    const orgId = numericOrgId(claims);
+    if (orgId) scopeFilters.push(eq(logs.orgId, orgId));
+    for (const workspaceId of projectedWorkspaceIds(claims)) {
+        scopeFilters.push(eq(logs.externalWorkspaceId, workspaceId));
+    }
+    const scoped = scopeFilters.length ? or(...scopeFilters) : undefined;
+    return scoped ? and(scoped, gte(logs.createdAt, since)) ?? drizzleSql`false` : drizzleSql`false`;
+}
+
 function mapUsageAttribution(row: UsageAttributionMetricRow, dimension: UsageAttributionDimension, fallbackLabel: string) {
     const subjectId = row.subjectId === null || row.subjectId === undefined || row.subjectId === '' ? 'unknown' : String(row.subjectId);
     const label = row.subjectLabel?.trim() || fallbackLabel;
@@ -598,6 +790,95 @@ export async function recordEnterpriseAuditEvent(
         ipAddress: meta.ipAddress ?? null,
         userAgent: meta.userAgent ?? null,
     });
+}
+
+function orgScopeWhere(claims: PlatformClaims) {
+    return and(
+        eq(enterpriseOrgEntitlements.tenantId, claims.tenant_id),
+        eq(enterpriseOrgEntitlements.orgId, claims.org_id),
+        eq(enterpriseOrgEntitlements.appInstanceId, claims.app_instance_id),
+    );
+}
+
+function membershipScopeWhere(claims: PlatformClaims) {
+    return and(
+        eq(enterpriseMemberships.tenantId, claims.tenant_id),
+        eq(enterpriseMemberships.orgId, claims.org_id),
+        eq(enterpriseMemberships.appInstanceId, claims.app_instance_id),
+    );
+}
+
+function billingScopeWhere(claims: PlatformClaims) {
+    return and(
+        eq(enterpriseBillingAccounts.tenantId, claims.tenant_id),
+        eq(enterpriseBillingAccounts.orgId, claims.org_id),
+        eq(enterpriseBillingAccounts.appInstanceId, claims.app_instance_id),
+    );
+}
+
+function invoicesScopeWhere(claims: PlatformClaims) {
+    return and(
+        eq(enterpriseInvoices.tenantId, claims.tenant_id),
+        eq(enterpriseInvoices.orgId, claims.org_id),
+        eq(enterpriseInvoices.appInstanceId, claims.app_instance_id),
+    );
+}
+
+function providerComplianceScopeWhere(claims: PlatformClaims) {
+    return and(
+        eq(enterpriseProviderCompliance.tenantId, claims.tenant_id),
+        eq(enterpriseProviderCompliance.orgId, claims.org_id),
+        eq(enterpriseProviderCompliance.appInstanceId, claims.app_instance_id),
+    );
+}
+
+function isAssignedSeatStatus(status: string | null | undefined): boolean {
+    return status === 'active' || status === 'invited';
+}
+
+async function countAssignedSeats(claims: PlatformClaims, excludeMembershipId?: number): Promise<number> {
+    const filters = [
+        eq(enterpriseMemberships.tenantId, claims.tenant_id),
+        eq(enterpriseMemberships.orgId, claims.org_id),
+        eq(enterpriseMemberships.appInstanceId, claims.app_instance_id),
+        drizzleSql`${enterpriseMemberships.seatStatus} IN ('active', 'invited')`,
+    ];
+    if (excludeMembershipId) filters.push(ne(enterpriseMemberships.id, excludeMembershipId));
+    const [row] = await db.select({ total: count() })
+        .from(enterpriseMemberships)
+        .where(and(...filters));
+    return Number(row?.total || 0);
+}
+
+async function ensureOrgEntitlements(claims: PlatformClaims): Promise<typeof enterpriseOrgEntitlements.$inferSelect> {
+    const assignedSeats = await countAssignedSeats(claims);
+    const [existing] = await db.select().from(enterpriseOrgEntitlements).where(orgScopeWhere(claims)).limit(1);
+    if (existing) {
+        if (existing.assignedSeats !== assignedSeats) {
+            const [updated] = await db.update(enterpriseOrgEntitlements)
+                .set({ assignedSeats, updatedAt: new Date() })
+                .where(eq(enterpriseOrgEntitlements.id, existing.id))
+                .returning();
+            if (updated) return updated;
+        }
+        return existing;
+    }
+
+    const [created] = await db.insert(enterpriseOrgEntitlements).values({
+        tenantId: claims.tenant_id,
+        orgId: claims.org_id,
+        appInstanceId: claims.app_instance_id,
+        assignedSeats,
+        createdBy: actorId(claims),
+        updatedBy: actorId(claims),
+    }).returning();
+    return created;
+}
+
+function invoiceNumber(claims: PlatformClaims, date = new Date()): string {
+    const stamp = date.toISOString().slice(0, 10).replace(/-/g, '');
+    const suffix = `${claims.org_id}-${claims.app_instance_id}`.replace(/[^a-zA-Z0-9]/g, '').slice(0, 16).toUpperCase();
+    return `ELY-${stamp}-${suffix || 'ORG'}`;
 }
 
 export async function installEnterpriseGateway(body: unknown, claims: PlatformClaims, meta: EnterpriseRequestMeta) {
@@ -706,6 +987,7 @@ export async function getEnterpriseOverview(claims: PlatformClaims) {
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const instanceWhere = and(eq(enterpriseGatewayInstances.tenantId, claims.tenant_id), eq(enterpriseGatewayInstances.orgId, claims.org_id));
+    const recentUsageWhere = usageWindowWhere(claims, sevenDaysAgo);
     const [
         [instances],
         [activeInstances],
@@ -726,12 +1008,12 @@ export async function getEnterpriseOverview(claims: PlatformClaims) {
             eq(enterpriseAuditEvents.orgId, claims.org_id),
             gte(enterpriseAuditEvents.createdAt, dayAgo),
         )),
-        db.select({ total: count(), cost: sum(logs.quotaCost) }).from(logs).where(gte(logs.createdAt, sevenDaysAgo)),
+        db.select({ total: count(), cost: sum(logs.quotaCost) }).from(logs).where(recentUsageWhere),
         db.select({ total: count() }).from(tokens),
         db.select({ total: count() }).from(channels),
         db.select({ modelName: logs.modelName, requests: count(), cost: sum(logs.quotaCost) })
             .from(logs)
-            .where(gte(logs.createdAt, sevenDaysAgo))
+            .where(recentUsageWhere)
             .groupBy(logs.modelName)
             .orderBy(desc(count()))
             .limit(8),
@@ -866,7 +1148,7 @@ export async function listUsageAttribution(claims: PlatformClaims, query?: ListQ
     const { limit } = parsePagination(query);
     const until = new Date();
     const since = new Date(until.getTime() - days * 24 * 60 * 60 * 1000);
-    const windowWhere = gte(logs.createdAt, since);
+    const windowWhere = usageWindowWhere(claims, since);
 
     const [
         [totals],
@@ -1080,6 +1362,338 @@ export async function evaluateEnterpriseBudget(claims: PlatformClaims, body: unk
     return result;
 }
 
+export async function getOrgEntitlements(claims: PlatformClaims) {
+    return mapEntitlements(await ensureOrgEntitlements(claims));
+}
+
+export async function updateOrgEntitlements(claims: PlatformClaims, body: unknown, meta: EnterpriseRequestMeta) {
+    if (!isRecord(body)) throw new Error('Entitlements update body must be an object');
+    await ensureOrgEntitlements(claims);
+    const patch: Partial<typeof enterpriseOrgEntitlements.$inferInsert> = { updatedAt: new Date(), updatedBy: actorId(claims) };
+    if ('seat_limit' in body) patch.seatLimit = readNumber(body, 'seat_limit', 5);
+    if ('billing_mode' in body) patch.billingMode = readOptionalString(body, 'billing_mode') ?? 'prepaid';
+    if ('overage_enabled' in body) patch.overageEnabled = Boolean(body.overage_enabled);
+    if ('overage_unit_price_cents' in body) patch.overageUnitPriceCents = readNumber(body, 'overage_unit_price_cents', 0);
+    if ('budget_mode' in body) patch.budgetMode = readOptionalString(body, 'budget_mode') ?? 'hard_limit';
+    if ('default_no_training' in body) patch.defaultNoTraining = Boolean(body.default_no_training);
+    if ('data_retention_days' in body) patch.dataRetentionDays = readNumber(body, 'data_retention_days', 30);
+    if ('provider_compliance_mode' in body) patch.providerComplianceMode = readOptionalString(body, 'provider_compliance_mode') ?? 'strict';
+    if ('allowed_ip_policy' in body) patch.allowedIpPolicy = readOptionalString(body, 'allowed_ip_policy');
+    if ('status' in body) patch.status = readOptionalString(body, 'status') ?? 'active';
+    if ('metadata' in body) patch.metadata = readJsonObject(body, 'metadata');
+
+    const [row] = await db.update(enterpriseOrgEntitlements).set(patch).where(orgScopeWhere(claims)).returning();
+    if (!row) throw Object.assign(new Error('Org entitlements not found'), { statusCode: 404 });
+
+    const localOrgId = Number(claims.org_id);
+    if ('allowed_ip_policy' in body && Number.isInteger(localOrgId) && localOrgId > 0) {
+        await db.update(organizations)
+            .set({ allowedSubnets: patch.allowedIpPolicy ?? '', updatedAt: new Date() })
+            .where(eq(organizations.id, localOrgId));
+    }
+
+    await recordEnterpriseAuditEvent(claims, 'entitlements.update', 'org_entitlements', String(row.id), patch as JsonObject, meta);
+    return mapEntitlements(row);
+}
+
+export async function listMemberships(claims: PlatformClaims, query?: ListQuery) {
+    const { page, limit, offset } = parsePagination(query);
+    const where = membershipScopeWhere(claims);
+    const [{ total }] = await db.select({ total: count() }).from(enterpriseMemberships).where(where);
+    const rows = await db.select()
+        .from(enterpriseMemberships)
+        .where(where)
+        .orderBy(desc(enterpriseMemberships.updatedAt), desc(enterpriseMemberships.id))
+        .limit(limit)
+        .offset(offset);
+    return { data: rows.map(mapMembership), total: Number(total || 0), page, limit };
+}
+
+export async function getMembersAndAccess(claims: PlatformClaims, query?: ListQuery) {
+    const [entitlements, memberships, policies] = await Promise.all([
+        getOrgEntitlements(claims),
+        listMemberships(claims, query),
+        listIdentityPolicies(claims, query),
+    ]);
+    return { entitlements, memberships, policies };
+}
+
+export async function upsertMembership(claims: PlatformClaims, body: unknown, meta: EnterpriseRequestMeta) {
+    if (!isRecord(body)) throw new Error('Membership body must be an object');
+    const userId = readOptionalString(body, 'user_id');
+    const email = readOptionalString(body, 'email');
+    if (!userId && !email) throw Object.assign(new Error('Membership requires user_id or email'), { statusCode: 400 });
+    const entitlements = await ensureOrgEntitlements(claims);
+    const lookup = userId
+        ? eq(enterpriseMemberships.userId, userId)
+        : eq(enterpriseMemberships.email, email ?? '');
+    const filters = [
+        eq(enterpriseMemberships.tenantId, claims.tenant_id),
+        eq(enterpriseMemberships.orgId, claims.org_id),
+        eq(enterpriseMemberships.appInstanceId, claims.app_instance_id),
+        lookup,
+    ];
+    const [existing] = await db.select().from(enterpriseMemberships).where(and(...filters)).limit(1);
+    const seatStatus = readOptionalString(body, 'seat_status') ?? (userId ? 'active' : 'invited');
+    const assignedSeats = await countAssignedSeats(claims, existing?.id);
+    if (isAssignedSeatStatus(seatStatus) && assignedSeats >= entitlements.seatLimit && !entitlements.overageEnabled) {
+        throw Object.assign(new Error('Seat limit reached and overage is disabled'), { statusCode: 402 });
+    }
+    const values = {
+        tenantId: claims.tenant_id,
+        orgId: claims.org_id,
+        appInstanceId: claims.app_instance_id,
+        userId,
+        email,
+        displayName: readOptionalString(body, 'display_name'),
+        role: readOptionalString(body, 'role') ?? 'developer',
+        scopes: readUnknownStringArray(body.scopes) as string[],
+        seatKind: readOptionalString(body, 'seat_kind') ?? 'human',
+        seatStatus,
+        invitedBy: actorId(claims),
+        joinedAt: seatStatus === 'active' ? new Date() : null,
+        lastActiveAt: readDate(body, 'last_active_at'),
+        metadata: readJsonObject(body, 'metadata'),
+        updatedAt: new Date(),
+    };
+    const [row] = existing
+        ? await db.update(enterpriseMemberships).set(values).where(eq(enterpriseMemberships.id, existing.id)).returning()
+        : await db.insert(enterpriseMemberships).values(values).returning();
+    await ensureOrgEntitlements(claims);
+    await recordEnterpriseAuditEvent(claims, existing ? 'membership.update' : 'membership.create', 'membership', String(row.id), mapMembership(row), meta);
+    return mapMembership(row);
+}
+
+export async function updateMembership(claims: PlatformClaims, id: string, body: unknown, meta: EnterpriseRequestMeta) {
+    if (!isRecord(body)) throw new Error('Membership update body must be an object');
+    const membershipId = Number(id);
+    if (!Number.isInteger(membershipId) || membershipId <= 0) {
+        throw Object.assign(new Error('Membership not found'), { statusCode: 404 });
+    }
+    const [existing] = await db.select().from(enterpriseMemberships)
+        .where(and(eq(enterpriseMemberships.id, membershipId), membershipScopeWhere(claims)))
+        .limit(1);
+    if (!existing) throw Object.assign(new Error('Membership not found'), { statusCode: 404 });
+
+    const nextSeatStatus = 'seat_status' in body
+        ? readOptionalString(body, 'seat_status') ?? 'active'
+        : existing.seatStatus;
+    if (isAssignedSeatStatus(nextSeatStatus)) {
+        const [entitlements, assignedSeats] = await Promise.all([
+            ensureOrgEntitlements(claims),
+            countAssignedSeats(claims, membershipId),
+        ]);
+        if (assignedSeats >= entitlements.seatLimit && !entitlements.overageEnabled) {
+            throw Object.assign(new Error('Seat limit reached and overage is disabled'), { statusCode: 402 });
+        }
+    }
+
+    const patch: Partial<typeof enterpriseMemberships.$inferInsert> = { updatedAt: new Date() };
+    if ('display_name' in body) patch.displayName = readOptionalString(body, 'display_name');
+    if ('role' in body) patch.role = readOptionalString(body, 'role') ?? 'developer';
+    if ('scopes' in body) patch.scopes = readUnknownStringArray(body.scopes) as string[];
+    if ('seat_kind' in body) patch.seatKind = readOptionalString(body, 'seat_kind') ?? 'human';
+    if ('seat_status' in body) patch.seatStatus = readOptionalString(body, 'seat_status') ?? 'active';
+    if ('last_active_at' in body) patch.lastActiveAt = readDate(body, 'last_active_at');
+    if ('metadata' in body) patch.metadata = readJsonObject(body, 'metadata');
+    const [row] = await db.update(enterpriseMemberships)
+        .set(patch)
+        .where(and(eq(enterpriseMemberships.id, membershipId), membershipScopeWhere(claims)))
+        .returning();
+    await ensureOrgEntitlements(claims);
+    await recordEnterpriseAuditEvent(claims, 'membership.update', 'membership', String(row.id), patch as JsonObject, meta);
+    return mapMembership(row);
+}
+
+export async function getUsageEfficiency(claims: PlatformClaims, query?: ListQuery) {
+    const attribution = await listUsageAttribution(claims, query) as Awaited<ReturnType<typeof listUsageAttribution>>;
+    const totals = attribution.totals;
+    const requests = Math.max(1, numberValue(totals.requests));
+    const quotaCost = numberValue(totals.quota_cost);
+    return {
+        scope: attribution.scope,
+        window: attribution.window,
+        totals,
+        efficiency: {
+            quota_per_request: Math.round((quotaCost / requests) * 100) / 100,
+            error_rate_pct: Math.round((numberValue(totals.error_count) / requests) * 10000) / 100,
+            cache_ratio_pct: Math.round((numberValue(totals.cached_tokens) / Math.max(1, numberValue(totals.prompt_tokens) + numberValue(totals.completion_tokens))) * 10000) / 100,
+            avg_elapsed_ms: numberValue(totals.avg_elapsed_ms),
+        },
+        dimensions: attribution.dimensions,
+    };
+}
+
+export async function upsertBillingAccount(claims: PlatformClaims, body: unknown, meta: EnterpriseRequestMeta) {
+    if (!isRecord(body)) throw new Error('Billing account body must be an object');
+    const [existing] = await db.select().from(enterpriseBillingAccounts).where(billingScopeWhere(claims)).limit(1);
+    const values = {
+        tenantId: claims.tenant_id,
+        orgId: claims.org_id,
+        appInstanceId: claims.app_instance_id,
+        billingName: readOptionalString(body, 'billing_name') ?? claims.org_id,
+        billingEmail: readOptionalString(body, 'billing_email'),
+        taxId: readOptionalString(body, 'tax_id'),
+        currency: readOptionalString(body, 'currency') ?? 'USD',
+        paymentTerms: readOptionalString(body, 'payment_terms') ?? 'net_30',
+        status: readOptionalString(body, 'status') ?? 'active',
+        metadata: readJsonObject(body, 'metadata'),
+        createdBy: actorId(claims),
+        updatedBy: actorId(claims),
+        updatedAt: new Date(),
+    };
+    const [row] = existing
+        ? await db.update(enterpriseBillingAccounts).set({ ...values, createdBy: existing.createdBy }).where(eq(enterpriseBillingAccounts.id, existing.id)).returning()
+        : await db.insert(enterpriseBillingAccounts).values(values).returning();
+    await recordEnterpriseAuditEvent(claims, existing ? 'billing_account.update' : 'billing_account.create', 'billing_account', String(row.id), mapBillingAccount(row), meta);
+    return mapBillingAccount(row);
+}
+
+export async function listInvoices(claims: PlatformClaims, query?: ListQuery) {
+    const { page, limit, offset } = parsePagination(query);
+    const where = invoicesScopeWhere(claims);
+    const [{ total }] = await db.select({ total: count() }).from(enterpriseInvoices).where(where);
+    const rows = await db.select()
+        .from(enterpriseInvoices)
+        .where(where)
+        .orderBy(desc(enterpriseInvoices.periodStart), desc(enterpriseInvoices.id))
+        .limit(limit)
+        .offset(offset);
+    return { data: rows.map((row) => mapInvoice(row)), total: Number(total || 0), page, limit };
+}
+
+export async function createInvoice(claims: PlatformClaims, body: unknown, meta: EnterpriseRequestMeta) {
+    if (!isRecord(body)) throw new Error('Invoice body must be an object');
+    const [billingAccount] = await db.select().from(enterpriseBillingAccounts).where(billingScopeWhere(claims)).limit(1);
+    const periodStart = readDate(body, 'period_start') ?? new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1));
+    const periodEnd = readDate(body, 'period_end') ?? new Date(Date.UTC(periodStart.getUTCFullYear(), periodStart.getUTCMonth() + 1, 1));
+    const itemsInput = Array.isArray(body.items) ? body.items.filter(isRecord) : [];
+    const items = itemsInput.map((item) => {
+        const quantity = Math.max(0, readNumber(item, 'quantity', 1));
+        const unitAmountCents = readNumber(item, 'unit_amount_cents', 0);
+        return {
+            itemType: readOptionalString(item, 'item_type') ?? 'manual',
+            description: readOptionalString(item, 'description') ?? 'Enterprise service',
+            quantity: String(quantity),
+            unitAmountCents,
+            amountCents: 'amount_cents' in item ? readNumber(item, 'amount_cents', 0) : quantity * unitAmountCents,
+            sourceType: readOptionalString(item, 'source_type'),
+            sourceId: readOptionalString(item, 'source_id'),
+            metadata: readJsonObject(item, 'metadata'),
+        };
+    });
+    const subtotalCents = items.reduce((sumValue, item) => sumValue + Number(item.amountCents || 0), 0);
+    const taxCents = readNumber(body, 'tax_cents', 0);
+    const [invoice] = await db.insert(enterpriseInvoices).values({
+        tenantId: claims.tenant_id,
+        orgId: claims.org_id,
+        appInstanceId: claims.app_instance_id,
+        billingAccountId: billingAccount?.id ?? null,
+        invoiceNumber: readOptionalString(body, 'invoice_number') ?? invoiceNumber(claims),
+        periodStart,
+        periodEnd,
+        currency: readOptionalString(body, 'currency') ?? billingAccount?.currency ?? 'USD',
+        subtotalCents,
+        taxCents,
+        totalCents: subtotalCents + taxCents,
+        status: readOptionalString(body, 'status') ?? 'draft',
+        dueAt: readDate(body, 'due_at') ?? new Date(periodEnd.getTime() + 30 * 24 * 60 * 60 * 1000),
+        issuedAt: readDate(body, 'issued_at'),
+        paidAt: readDate(body, 'paid_at'),
+        metadata: readJsonObject(body, 'metadata'),
+    }).returning();
+    const createdItems = items.length
+        ? await db.insert(enterpriseInvoiceItems).values(items.map((item) => ({ invoiceId: invoice.id, ...item }))).returning()
+        : [];
+    await recordEnterpriseAuditEvent(claims, 'invoice.create', 'invoice', String(invoice.id), { invoice_number: invoice.invoiceNumber, total_cents: invoice.totalCents }, meta);
+    return mapInvoice(invoice, createdItems.map(mapInvoiceItem));
+}
+
+export async function getBillingAndInvoices(claims: PlatformClaims, query?: ListQuery) {
+    const [billingAccount] = await db.select().from(enterpriseBillingAccounts).where(billingScopeWhere(claims)).limit(1);
+    const [invoices, [unbilled]] = await Promise.all([
+        listInvoices(claims, query),
+        db.select({
+            quantity: drizzleSql<string>`coalesce(sum(${enterpriseMeteredUsage.quantity}), 0)::bigint`,
+            amountCents: drizzleSql<string>`coalesce(sum(${enterpriseMeteredUsage.amountCents}), 0)::bigint`,
+        })
+            .from(enterpriseMeteredUsage)
+            .where(and(
+                eq(enterpriseMeteredUsage.tenantId, claims.tenant_id),
+                eq(enterpriseMeteredUsage.orgId, claims.org_id),
+                eq(enterpriseMeteredUsage.appInstanceId, claims.app_instance_id),
+                drizzleSql`${enterpriseMeteredUsage.invoiceId} IS NULL`,
+            )),
+    ]);
+    return {
+        billing_account: billingAccount ? mapBillingAccount(billingAccount) : null,
+        invoices,
+        unbilled_usage: {
+            quantity: numberValue(unbilled?.quantity),
+            amount_cents: numberValue(unbilled?.amountCents),
+        },
+    };
+}
+
+export async function upsertProviderCompliance(claims: PlatformClaims, body: unknown, meta: EnterpriseRequestMeta) {
+    if (!isRecord(body)) throw new Error('Provider compliance body must be an object');
+    const providerKind = readOptionalString(body, 'provider_kind') ?? 'channel';
+    const providerId = readOptionalString(body, 'provider_id');
+    if (!providerId) throw Object.assign(new Error('Provider compliance requires provider_id'), { statusCode: 400 });
+    const [existing] = await db.select().from(enterpriseProviderCompliance).where(and(
+        providerComplianceScopeWhere(claims),
+        eq(enterpriseProviderCompliance.providerKind, providerKind),
+        eq(enterpriseProviderCompliance.providerId, providerId),
+    )).limit(1);
+    const values = {
+        tenantId: claims.tenant_id,
+        orgId: claims.org_id,
+        appInstanceId: claims.app_instance_id,
+        providerKind,
+        providerId,
+        displayName: readOptionalString(body, 'display_name'),
+        noTraining: Boolean(body.no_training),
+        zeroRetention: Boolean(body.zero_retention),
+        region: readOptionalString(body, 'region'),
+        status: readOptionalString(body, 'status') ?? 'review',
+        evidenceUrl: readOptionalString(body, 'evidence_url'),
+        reviewedBy: actorId(claims),
+        reviewedAt: new Date(),
+        metadata: readJsonObject(body, 'metadata'),
+        updatedAt: new Date(),
+    };
+    const [row] = existing
+        ? await db.update(enterpriseProviderCompliance).set(values).where(eq(enterpriseProviderCompliance.id, existing.id)).returning()
+        : await db.insert(enterpriseProviderCompliance).values(values).returning();
+    await recordEnterpriseAuditEvent(claims, existing ? 'provider_compliance.update' : 'provider_compliance.create', 'provider_compliance', String(row.id), mapProviderCompliance(row), meta);
+    return mapProviderCompliance(row);
+}
+
+export async function getDataGovernance(claims: PlatformClaims, query?: ListQuery) {
+    const { page, limit, offset } = parsePagination(query);
+    const [entitlements, [{ total }], rows] = await Promise.all([
+        getOrgEntitlements(claims),
+        db.select({ total: count() }).from(enterpriseProviderCompliance).where(providerComplianceScopeWhere(claims)),
+        db.select()
+            .from(enterpriseProviderCompliance)
+            .where(providerComplianceScopeWhere(claims))
+            .orderBy(desc(enterpriseProviderCompliance.updatedAt), desc(enterpriseProviderCompliance.id))
+            .limit(limit)
+            .offset(offset),
+    ]);
+    const providers = rows.map(mapProviderCompliance);
+    return {
+        entitlements,
+        providers: { data: providers, total: Number(total || 0), page, limit },
+        enforcement: {
+            default_no_training: (entitlements as ReturnType<typeof mapEntitlements>).default_no_training,
+            provider_compliance_mode: (entitlements as ReturnType<typeof mapEntitlements>).provider_compliance_mode,
+            allowed_providers: providers.filter((provider) => provider.status === 'approved' && provider.no_training),
+            blocked_providers: providers.filter((provider) => provider.status !== 'approved' || !provider.no_training),
+        },
+    };
+}
+
 export async function listAuditEvents(claims: PlatformClaims, query?: ListQuery) {
     const { page, limit, offset } = parsePagination(query);
     const where = auditEventWhere(claims, query);
@@ -1170,6 +1784,19 @@ export const postgresEnterpriseControlPlane = {
     createBudget,
     updateBudget,
     evaluateEnterpriseBudget,
+    getMembersAndAccess,
+    listMemberships,
+    upsertMembership,
+    updateMembership,
+    getOrgEntitlements,
+    updateOrgEntitlements,
+    getUsageEfficiency,
+    getBillingAndInvoices,
+    listInvoices,
+    upsertBillingAccount,
+    createInvoice,
+    getDataGovernance,
+    upsertProviderCompliance,
     listAuditEvents,
     exportAuditEvents,
     listProviderChannels,

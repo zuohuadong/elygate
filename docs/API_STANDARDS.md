@@ -20,6 +20,7 @@
 - ✅ `/v1/edits` - Legacy Text Edits API (translates to chat format)
 - ✅ `/v1/rerank` - Rerank API (Cohere compatible)
 - ✅ `/v1/video/generations` - Video Generation API
+- ✅ `/v1/videos/{id}/content` - Video task content retrieval (redirects or returns stored content when available)
 - ✅ `/v1/files` - Files API metadata storage (PostgreSQL-backed; binary content storage is not enabled)
 - ✅ `/v1/batches` - Batch API metadata storage and cancellation (PostgreSQL-backed; no async executor yet)
 - ✅ `/v1/realtime` - WebSocket bidirectional proxy (upstream forwarding with billing/audit)
@@ -66,7 +67,7 @@
 
 ### Legacy / Deprecated
 - ⚠️ `/v1/fine-tunes` - Legacy fine-tunes API (deprecated by OpenAI, replaced by fine_tuning/jobs)
-- ⚠️ Realtime API WebRTC bridge (WebSocket proxy is implemented)
+- ⚠️ Realtime API WebRTC bridge is a documented non-goal for the current pinned route-parity target; Elygate implements the public WebSocket/session surface tracked in `docs/new-api-route-parity.matrix.json`.
 
 ## New API Operational Parity
 
@@ -91,6 +92,7 @@
 - ✅ Fine-tuning Jobs API: full CRUD with cancel support.
 - ✅ Files API: full binary content storage and retrieval via PostgreSQL bytea.
 - ✅ Batches API: async executor powered by pg-boss, processes JSONL input files.
+- ✅ New API media task route aliases: `/suno/*`, `/kling/v1/*`, `/jimeng`, root `/mj/*`, and `/{mode}/mj/*` are routed without Redis through PostgreSQL-backed task state.
 
 ## Provider Support
 
