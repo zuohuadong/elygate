@@ -1276,24 +1276,36 @@ async function verifyPanelApiFunctions(token: string): Promise<void> {
 }
 
 async function waitForText(page: Page, texts: readonly string[]): Promise<void> {
-    try {
-        await page.waitForFunction((expectedTexts: readonly string[]) => {
-            const bodyText = document.body?.innerText || '';
-            return expectedTexts.every((text) => bodyText.includes(text));
-        }, texts, { timeout: 15_000 });
-    } catch (error) {
-        const bodyText = await page.locator('body').innerText({ timeout: 5_000 }).catch(() => '');
-        throw new Error([
-            error instanceof Error ? error.message : String(error),
-            `url=${page.url()}`,
-            `expected=${texts.join(' | ')}`,
-            `body=${bodyText.slice(0, 1000)}`,
-        ].join('\n'));
+    const deadline = Date.now() + 15_000;
+    let bodyText = '';
+    let lastError = '';
+    while (Date.now() < deadline) {
+        try {
+            bodyText = await withSmokeStepTimeout(
+                'read page body text',
+                async () => page.evaluate(() => document.body?.innerText || ''),
+                3_000,
+            );
+            if (texts.every((text) => bodyText.includes(text))) return;
+        } catch (error) {
+            lastError = error instanceof Error ? error.message : String(error);
+        }
+        await Bun.sleep(250);
     }
+    throw new Error([
+        `Timed out waiting for expected page text${lastError ? `: ${lastError}` : ''}`,
+        `url=${page.url()}`,
+        `expected=${texts.join(' | ')}`,
+        `body=${bodyText.slice(0, 1000)}`,
+    ].join('\n'));
 }
 
 async function assertNoErrorText(page: Page): Promise<void> {
-    const bodyText = await page.locator('body').innerText({ timeout: 5_000 });
+    const bodyText = await withSmokeStepTimeout(
+        'read page body text for errors',
+        async () => page.evaluate(() => document.body?.innerText || ''),
+        5_000,
+    );
     const forbidden = ['Gateway API keys are only valid', 'insufficient_scope', 'HTTP 401', 'HTTP 403', 'Cannot find module'];
     const found = forbidden.find((item) => bodyText.includes(item));
     if (found) throw new Error(`Page contains error text: ${found}`);
@@ -1355,13 +1367,15 @@ async function verifyEnterprisePages(token: string): Promise<void> {
 
         for (const item of pages) {
             console.log(`[enterprise-runtime-smoke] opening ${item.path}`);
-            await switchHashRoute(page, item.path, `enterprise ${item.path}`);
-            await waitForText(page, item.texts);
-            if (item.path === 'usage-and-budget') {
-                await page.getByRole('tab', { name: /Workspace/ }).click();
-                await waitForText(page, [WORKSPACE_ID]);
-            }
-            await assertNoErrorText(page);
+            await withSmokeStepTimeout(`enterprise page ${item.path}`, async () => {
+                await switchHashRoute(page, item.path, `enterprise ${item.path}`);
+                await waitForText(page, item.texts);
+                if (item.path === 'usage-and-budget') {
+                    await page.getByRole('tab', { name: /Workspace/ }).click({ timeout: 5_000 });
+                    await waitForText(page, [WORKSPACE_ID]);
+                }
+                await assertNoErrorText(page);
+            }, 30_000);
             console.log(`[enterprise-runtime-smoke] page ok ${item.path}`);
         }
 
@@ -1432,9 +1446,11 @@ async function verifyPanelPages(token: string): Promise<void> {
         for (const item of pages) {
             const errorOffset = consoleErrors.length;
             console.log(`[enterprise-runtime-smoke] opening panel ${item.path || 'dashboard'}`);
-            await switchHashRoute(page, item.path, `panel ${item.path || 'dashboard'}`);
-            await waitForText(page, item.texts);
-            await assertNoErrorText(page);
+            await withSmokeStepTimeout(`panel page ${item.path || 'dashboard'}`, async () => {
+                await switchHashRoute(page, item.path, `panel ${item.path || 'dashboard'}`);
+                await waitForText(page, item.texts);
+                await assertNoErrorText(page);
+            }, 30_000);
             const pageErrors = consoleErrors.slice(errorOffset);
             if (pageErrors.length > 0) {
                 throw new Error(`Panel console errors on ${item.path || 'dashboard'}:\n${pageErrors.join('\n')}`);
