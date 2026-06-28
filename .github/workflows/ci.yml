@@ -49,6 +49,7 @@ jobs:
         run: bun run security:audit
 
       - name: Verify Full Readiness Gate
+        timeout-minutes: 20
         run: bun run check
 
       - name: Verify Web UI Build

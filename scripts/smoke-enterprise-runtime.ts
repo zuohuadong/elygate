@@ -1290,6 +1290,8 @@ async function verifyEnterprisePages(token: string): Promise<void> {
     const consoleErrors: string[] = [];
     try {
         const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+        context.setDefaultTimeout(15_000);
+        context.setDefaultNavigationTimeout(20_000);
         await context.addInitScript((supauthToken: string) => {
             localStorage.setItem('supauth_token', supauthToken);
         }, token);
@@ -1315,7 +1317,7 @@ async function verifyEnterprisePages(token: string): Promise<void> {
 
         for (const item of pages) {
             console.log(`[enterprise-runtime-smoke] opening ${item.path}`);
-            await page.goto(`${gatewayUrl}/enterprise/#/${item.path}`, { waitUntil: 'networkidle' });
+            await page.goto(`${gatewayUrl}/enterprise/#/${item.path}`, { waitUntil: 'domcontentloaded', timeout: 20_000 });
             await waitForText(page, item.texts);
             if (item.path === 'usage-and-budget') {
                 await page.getByRole('tab', { name: /Workspace/ }).click();
@@ -1338,6 +1340,8 @@ async function verifyPanelPages(token: string): Promise<void> {
     const consoleErrors: string[] = [];
     try {
         const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+        context.setDefaultTimeout(15_000);
+        context.setDefaultNavigationTimeout(20_000);
         await context.addInitScript((adminToken: string) => {
             localStorage.setItem('auth_token', adminToken);
         }, token);
@@ -1389,7 +1393,7 @@ async function verifyPanelPages(token: string): Promise<void> {
             const url = item.path ? `${gatewayUrl}/#/${item.path}` : `${gatewayUrl}/`;
             const errorOffset = consoleErrors.length;
             console.log(`[enterprise-runtime-smoke] opening panel ${item.path || 'dashboard'}`);
-            await page.goto(url, { waitUntil: 'networkidle' });
+            await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20_000 });
             await waitForText(page, item.texts);
             await assertNoErrorText(page);
             const pageErrors = consoleErrors.slice(errorOffset);
