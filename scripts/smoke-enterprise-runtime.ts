@@ -581,6 +581,20 @@ function assertPanelRecord(condition: unknown, message: string): void {
     if (!condition) throw new Error(message);
 }
 
+async function withSmokeStepTimeout<T>(label: string, action: () => Promise<T>, timeoutMs: number): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+        return await Promise.race([
+            action(),
+            new Promise<never>((_, reject) => {
+                timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+            }),
+        ]);
+    } finally {
+        if (timer) clearTimeout(timer);
+    }
+}
+
 async function waitForCondition(label: string, predicate: () => Promise<boolean>, timeoutMs = 15_000): Promise<void> {
     const deadline = Date.now() + timeoutMs;
     let lastError = '';
@@ -1285,6 +1299,28 @@ async function assertNoErrorText(page: Page): Promise<void> {
     if (found) throw new Error(`Page contains error text: ${found}`);
 }
 
+async function openSmokePage(page: Page, url: string, label: string): Promise<void> {
+    await withSmokeStepTimeout(
+        `${label} navigation`,
+        async () => {
+            await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20_000 });
+        },
+        25_000,
+    );
+}
+
+async function switchHashRoute(page: Page, path: string, label: string): Promise<void> {
+    await withSmokeStepTimeout(
+        `${label} hash route switch`,
+        async () => {
+            await page.evaluate((routePath: string) => {
+                window.location.hash = routePath ? `/${routePath}` : '/';
+            }, path);
+        },
+        5_000,
+    );
+}
+
 async function verifyEnterprisePages(token: string): Promise<void> {
     const browser = await chromium.launch({ headless: true });
     const consoleErrors: string[] = [];
@@ -1306,6 +1342,8 @@ async function verifyEnterprisePages(token: string): Promise<void> {
             }
         });
 
+        await openSmokePage(page, `${gatewayUrl}/enterprise/`, 'enterprise console');
+
         const pages: ReadonlyArray<{ readonly path: string; readonly texts: readonly string[] }> = [
             { path: 'enterprise-overview', texts: ['Elygate Enterprise', TENANT_ID, '网关实例'] },
             { path: 'gateway-instances', texts: ['网关实例', '卸载回调', APP_INSTANCE_ID] },
@@ -1317,7 +1355,7 @@ async function verifyEnterprisePages(token: string): Promise<void> {
 
         for (const item of pages) {
             console.log(`[enterprise-runtime-smoke] opening ${item.path}`);
-            await page.goto(`${gatewayUrl}/enterprise/#/${item.path}`, { waitUntil: 'domcontentloaded', timeout: 20_000 });
+            await switchHashRoute(page, item.path, `enterprise ${item.path}`);
             await waitForText(page, item.texts);
             if (item.path === 'usage-and-budget') {
                 await page.getByRole('tab', { name: /Workspace/ }).click();
@@ -1367,6 +1405,8 @@ async function verifyPanelPages(token: string): Promise<void> {
             }
         });
 
+        await openSmokePage(page, `${gatewayUrl}/`, 'panel');
+
         const pages: ReadonlyArray<{ readonly path: string; readonly texts: readonly string[] }> = [
             { path: '', texts: ['仪表盘', 'Elygate 面板'] },
             { path: 'channels', texts: ['渠道', 'Runtime Smoke OpenAI'] },
@@ -1390,10 +1430,9 @@ async function verifyPanelPages(token: string): Promise<void> {
         ];
 
         for (const item of pages) {
-            const url = item.path ? `${gatewayUrl}/#/${item.path}` : `${gatewayUrl}/`;
             const errorOffset = consoleErrors.length;
             console.log(`[enterprise-runtime-smoke] opening panel ${item.path || 'dashboard'}`);
-            await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20_000 });
+            await switchHashRoute(page, item.path, `panel ${item.path || 'dashboard'}`);
             await waitForText(page, item.texts);
             await assertNoErrorText(page);
             const pageErrors = consoleErrors.slice(errorOffset);
