@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.1](https://github.com/zuohuadong/elygate/compare/elygate-v0.9.0...elygate-v0.9.1) (2026-06-28)
+
+
+### Chores
+
+* **deps:** bump actions/checkout from 6 to 7 ([#14](https://github.com/zuohuadong/elygate/issues/14)) ([0b78ffe](https://github.com/zuohuadong/elygate/commit/0b78ffee0389418916ea24fe4dfb7f2a722ff137))
+
 ## [0.9.0](https://github.com/zuohuadong/elygate/compare/elygate-v0.8.2...elygate-v0.9.0) (2026-06-27)
 
 
