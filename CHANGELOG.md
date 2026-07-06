@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.2](https://github.com/zuohuadong/elygate/compare/elygate-v0.9.1...elygate-v0.9.2) (2026-07-06)
+
+
+### Chores
+
+* **deps-dev:** bump @types/node from 25.9.4 to 26.1.0 ([#20](https://github.com/zuohuadong/elygate/issues/20)) ([0991beb](https://github.com/zuohuadong/elygate/commit/0991beb42c47d82819487282d905deb011590f65))
+* **deps:** bump drizzle-orm from 1.0.0-rc.4-273829f to 1.0.0-rc.4 ([#18](https://github.com/zuohuadong/elygate/issues/18)) ([a8e47c9](https://github.com/zuohuadong/elygate/commit/a8e47c9b1716bf23ecdd8e210bd781da95da7965))
+
 ## [0.9.1](https://github.com/zuohuadong/elygate/compare/elygate-v0.9.0...elygate-v0.9.1) (2026-06-28)
 
 
