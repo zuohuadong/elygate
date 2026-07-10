@@ -8,7 +8,7 @@ import {
 } from "@/components/ui/dropdownMenu";
 import { buildCSV, downloadCSV } from "@/lib/utils/csv";
 import { Download, FileSpreadsheet, FileText, Loader2 } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { type DashboardData, getCSVSections } from "../utils/exportUtils";
 
 const PDF_TAB_LABELS = [
@@ -32,11 +32,28 @@ interface ExportPopoverProps {
 
 export function ExportPopover({ getData, onPreloadData, onPdfExport, onPdfExportDone }: ExportPopoverProps) {
 	const [exporting, setExporting] = useState(false);
-	const [open, setOpen] = useState(false);
+	const [menuCycle, setMenuCycle] = useState(0);
+	const exportingRef = useRef(false);
 
-	const handleCsvExport = useCallback(async () => {
+	const runExport = useCallback(async (exportAction: () => Promise<void>) => {
+		if (exportingRef.current) return;
+
+		exportingRef.current = true;
 		setExporting(true);
 		try {
+			await exportAction();
+		} finally {
+			exportingRef.current = false;
+			setExporting(false);
+			// Radix can retain a completed selection cycle long enough to swallow an
+			// immediate second open. Remount the menu after each export so the next
+			// CSV/PDF action always starts from a clean interaction state.
+			setMenuCycle((cycle) => cycle + 1);
+		}
+	}, []);
+
+	const handleCsvExport = useCallback(async () => {
+		await runExport(async () => {
 			await onPreloadData();
 			const sections = getCSVSections(getData(), "all");
 			const parts: string[] = [];
@@ -49,43 +66,40 @@ export function ExportPopover({ getData, onPreloadData, onPdfExport, onPdfExport
 			if (parts.length > 0) {
 				downloadCSV(parts.join("\n"), "dashboard-export");
 			}
-		} finally {
-			setExporting(false);
-		}
-	}, [getData, onPreloadData]);
+		});
+	}, [getData, onPreloadData, runExport]);
 
 	const handlePdfExport = useCallback(async () => {
-		setExporting(true);
+		await runExport(async () => {
+			// Yield a frame so the spinner renders before heavy work starts
+			await new Promise((r) => requestAnimationFrame(r));
 
-		// Yield a frame so the spinner renders before heavy work starts
-		await new Promise((r) => requestAnimationFrame(r));
+			try {
+				const { generatePdf } = await import("@/lib/utils/pdf");
 
-		try {
-			const { generatePdf } = await import("@/lib/utils/pdf");
+				const elements = await onPdfExport();
 
-			const elements = await onPdfExport();
+				const sections = elements.map((element, i) => ({
+					element,
+					label: PDF_TAB_LABELS[i],
+				}));
 
-			const sections = elements.map((element, i) => ({
-				element,
-				label: PDF_TAB_LABELS[i],
-			}));
-
-			await generatePdf(sections, "dashboard-export", {
-				branding: {
-					logoSrc: "/elygate-logo.svg",
-					text: "Elygate",
-				},
-			});
-		} finally {
-			onPdfExportDone();
-			setExporting(false);
-		}
-	}, [onPdfExport, onPdfExportDone]);
+				await generatePdf(sections, "dashboard-export", {
+					branding: {
+						logoSrc: "/elygate-logo.svg",
+						text: "Elygate",
+					},
+				});
+			} finally {
+				onPdfExportDone();
+			}
+		});
+	}, [onPdfExport, onPdfExportDone, runExport]);
 
 	return (
-		<DropdownMenu open={open} onOpenChange={setOpen}>
+		<DropdownMenu key={menuCycle}>
 			<DropdownMenuTrigger asChild>
-				<Button variant="outline" size="default" disabled={exporting} data-testid="dashboard-export-trigger">
+				<Button variant="outline" size="default" aria-busy={exporting} data-testid="dashboard-export-trigger">
 					{exporting ? <Loader2 className="animate-spin" data-icon="inline-start" /> : <Download data-icon="inline-start" />}
 					{exporting ? "Exporting..." : "Export"}
 				</Button>
@@ -94,9 +108,9 @@ export function ExportPopover({ getData, onPreloadData, onPdfExport, onPdfExport
 				<DropdownMenuGroup>
 					<DropdownMenuItem
 						onSelect={() => {
-							setOpen(false);
 							void handleCsvExport();
 						}}
+						disabled={exporting}
 						data-testid="export-csv-item"
 					>
 						<FileSpreadsheet data-icon="inline-start" />
@@ -104,9 +118,9 @@ export function ExportPopover({ getData, onPreloadData, onPdfExport, onPdfExport
 					</DropdownMenuItem>
 					<DropdownMenuItem
 						onSelect={() => {
-							setOpen(false);
 							void handlePdfExport();
 						}}
+						disabled={exporting}
 						data-testid="export-pdf-item"
 					>
 						<FileText data-icon="inline-start" />

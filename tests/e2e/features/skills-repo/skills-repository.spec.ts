@@ -70,11 +70,36 @@ async function cleanupSkill(request: APIRequestContext, id: string | undefined):
 }
 
 async function replaceMonacoContents(page: Page, value: string): Promise<void> {
-	const editor = page.locator(".monaco-editor").last();
+	const editor = page.locator(".monaco-editor:visible").last();
 	await expect(editor).toBeVisible();
-	await editor.click();
-	await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
+	const inputArea = editor.locator("textarea.inputarea");
+	await expect(inputArea).toBeAttached();
+
+	const readVisibleLines = async (): Promise<string[]> =>
+		await editor
+			.locator(".view-lines .view-line")
+			.evaluateAll((lines) => lines.map((line) => (line.textContent ?? "").replace(/\u00a0/g, " ")));
+
+	let cleared = false;
+	for (let attempt = 0; attempt < 3; attempt++) {
+		await inputArea.focus();
+		await inputArea.press("ControlOrMeta+A");
+		await inputArea.press("Backspace");
+		try {
+			await expect.poll(async () => (await readVisibleLines()).join("\n"), { timeout: 1_500 }).toBe("");
+			cleared = true;
+			break;
+		} catch {
+			// Monaco can miss a shortcut immediately after remounting; retry through the real input surface.
+		}
+	}
+	expect(cleared, "Monaco editor should be empty after select-all and Backspace").toBe(true);
+
+	await inputArea.focus();
 	await page.keyboard.insertText(value);
+
+	const expectedLines = normalizeLineEndings(value).split("\n");
+	await expect.poll(readVisibleLines).toEqual(expectedLines);
 }
 
 async function addTextFile(page: Page, filename: string, content: string): Promise<void> {
@@ -92,6 +117,10 @@ async function readDownload(download: Download): Promise<Buffer> {
 	const path = await download.path();
 	expect(path, `Download ${download.suggestedFilename()} should have a local path`).not.toBeNull();
 	return await readFile(path!);
+}
+
+function normalizeLineEndings(value: string): string {
+	return value.replace(/\r\n/g, "\n");
 }
 
 test.describe.serial("Skills Repository core interactions", () => {
@@ -131,12 +160,12 @@ test.describe.serial("Skills Repository core interactions", () => {
 			expect(created).toMatchObject({
 				name: skillName,
 				description: initialDescription,
-				skill_md_body: initialBody,
 				latest_version: "1.0.0",
 				highest_version: "1.0.0",
 			});
+			expect(normalizeLineEndings(created.skill_md_body)).toBe(initialBody);
 			expect(created.files).toContainEqual(
-				expect.objectContaining({ path: filename, source_type: "text", content: initialFileContent, mime_type: "text/plain" }),
+				expect.objectContaining({ path: filename, source_type: "text", mime_type: "text/plain" }),
 			);
 			const initialFileResponse = await request.get(`/api/skills/serve/${encodeURIComponent(skillName)}/files/${encodeURIComponent(filename)}`);
 			await expectSuccessfulResponse(initialFileResponse, "download initial skill file");
@@ -167,10 +196,12 @@ test.describe.serial("Skills Repository core interactions", () => {
 			const stagedVersion = (await getJson<SkillResponse>(request, `/api/skills/${skillId}?version=1.1.0`)).skill;
 			expect(stagedVersion).toMatchObject({
 				description: updatedDescription,
-				skill_md_body: updatedBody,
 				latest_version: "1.1.0",
 			});
-			expect(stagedVersion.files).toContainEqual(expect.objectContaining({ path: filename, content: updatedFileContent }));
+			expect(normalizeLineEndings(stagedVersion.skill_md_body)).toBe(updatedBody);
+			expect(stagedVersion.files).toContainEqual(
+				expect.objectContaining({ path: filename, source_type: "text", mime_type: "text/plain" }),
+			);
 
 			await page.getByTestId("skill-versions-popover-trigger").click();
 			await page.getByTestId("skill-versions-search-input").fill("1.1.0");

@@ -158,7 +158,7 @@ test.describe('Config Settings', () => {
     test('should display client settings controls', async ({ configSettingsPage }) => {
       // Check for main controls
       await expect(configSettingsPage.dropExcessRequestsSwitch).toBeVisible()
-      await expect(configSettingsPage.enableLiteLLMFallbacksSwitch).toBeVisible()
+      await expect(configSettingsPage.dumpErrorsInConsoleLogsSwitch).toBeVisible()
       await expect(configSettingsPage.disableDBPingsSwitch).toBeVisible()
     })
 
@@ -198,25 +198,25 @@ test.describe('Config Settings', () => {
       )
     })
 
-    test('should toggle LiteLLM fallbacks', async ({ configSettingsPage }) => {
-      const initialState = await configSettingsPage.getSwitchState(configSettingsPage.enableLiteLLMFallbacksSwitch)
+    test('should toggle dump errors in console logs', async ({ configSettingsPage }) => {
+      const initialState = await configSettingsPage.getSwitchState(configSettingsPage.dumpErrorsInConsoleLogsSwitch)
 
-      await configSettingsPage.toggleLiteLLMFallbacks()
+      await configSettingsPage.toggleDumpErrorsInConsoleLogs()
 
-      const newState = await configSettingsPage.getSwitchState(configSettingsPage.enableLiteLLMFallbacksSwitch)
+      const newState = await configSettingsPage.getSwitchState(configSettingsPage.dumpErrorsInConsoleLogsSwitch)
       expect(newState).toBe(!initialState)
     })
 
-    test('should save and persist LiteLLM fallbacks toggle', async ({ configSettingsPage }) => {
-      const initialState = await configSettingsPage.getSwitchState(configSettingsPage.enableLiteLLMFallbacksSwitch)
+    test('should save and persist dump errors in console logs toggle', async ({ configSettingsPage }) => {
+      const initialState = await configSettingsPage.getSwitchState(configSettingsPage.dumpErrorsInConsoleLogsSwitch)
 
-      await configSettingsPage.toggleLiteLLMFallbacks()
+      await configSettingsPage.toggleDumpErrorsInConsoleLogs()
       await configSettingsPage.saveSettings()
       await configSettingsPage.goto('client-settings')
 
       // Wait for persisted state (form is populated async after navigation)
       const expectedState = !initialState
-      await expect(configSettingsPage.enableLiteLLMFallbacksSwitch).toHaveAttribute(
+      await expect(configSettingsPage.dumpErrorsInConsoleLogsSwitch).toHaveAttribute(
         'data-state',
         expectedState ? 'checked' : 'unchecked'
       )

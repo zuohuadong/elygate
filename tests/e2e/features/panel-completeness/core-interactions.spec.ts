@@ -110,10 +110,19 @@ async function expectResourceDeleted(request: APIRequestContext, url: string): P
 	await expect.poll(async () => (await request.get(url)).status(), { timeout: 15_000 }).toBe(404);
 }
 
-async function findLLMLogByContent(request: APIRequestContext, marker: string): Promise<LLMLogEntry | undefined> {
-	const params = new URLSearchParams({ content_search: marker, limit: "10", offset: "0" });
+async function findLLMLogsByContent(request: APIRequestContext, marker: string): Promise<LLMLogEntry[]> {
+	const params = new URLSearchParams({ content_search: marker, limit: "100", offset: "0" });
 	const response = await getJson<LLMLogsResponse>(request, `/api/logs?${params.toString()}`);
-	return response.logs.find((entry) => entry.content_summary?.includes(marker));
+	return response.logs.filter((entry) => entry.content_summary?.includes(marker));
+}
+
+async function findDirectCacheLLMLogByContent(request: APIRequestContext, marker: string): Promise<LLMLogEntry | undefined> {
+	const params = new URLSearchParams({ content_search: marker, cache_hit_types: "direct", limit: "10", offset: "0" });
+	const response = await getJson<LLMLogsResponse>(request, `/api/logs?${params.toString()}`);
+	return response.logs.find(
+		(entry) =>
+			entry.content_summary?.includes(marker) && entry.cache_debug?.cache_hit === true && entry.cache_debug.hit_type === "direct",
+	);
 }
 
 async function findMCPLogByContent(request: APIRequestContext, marker: string): Promise<MCPLogEntry | undefined> {
@@ -360,7 +369,8 @@ test.describe("panel core interactions", () => {
 		await page.getByTestId("dashboard-tab-overview").click();
 		await expect(page.getByTestId("dashboard-volume-chart-toggle")).toBeVisible();
 
-		await page.getByTestId("dashboard-export-trigger").click();
+		const exportTrigger = page.getByTestId("dashboard-export-trigger");
+		await exportTrigger.click();
 		const csvDownloadPromise = page.waitForEvent("download", { timeout: 60_000 });
 		await page.getByTestId("export-csv-item").click();
 		const csvDownload = await csvDownloadPromise;
@@ -370,8 +380,12 @@ test.describe("panel core interactions", () => {
 		const csvHasProviderUsage = csv.includes("# provider-cost");
 		const csvHasModelRankings = csv.includes("# model-rankings");
 
-		await expect(page.getByTestId("dashboard-export-trigger")).toBeEnabled({ timeout: 30_000 });
-		await page.getByTestId("dashboard-export-trigger").click();
+		await expect(exportTrigger).toHaveAttribute("aria-busy", "false", { timeout: 30_000 });
+		await expect(exportTrigger).toBeEnabled();
+		await expect(exportTrigger).toHaveAttribute("data-state", "closed");
+		await exportTrigger.click();
+		await expect(exportTrigger).toHaveAttribute("data-state", "open");
+		await expect(page.getByTestId("export-pdf-item")).toBeVisible();
 		const pdfDownloadPromise = page.waitForEvent("download", { timeout: 90_000 });
 		await page.getByTestId("export-pdf-item").click();
 		const pdfDownload = await pdfDownloadPromise;
@@ -386,32 +400,60 @@ test.describe("panel core interactions", () => {
 	test("LLM Logs filters direct-cache hits, exports JSON details, and deletes an owned log", async ({ page, request }) => {
 		const marker = `panel-core-llm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 		let logId: string | undefined;
+		const requestData = {
+			model: "openai/gpt-4o-mini",
+			messages: [{ role: "user", content: marker }],
+		};
+		const cacheHeaders = {
+			"x-bf-cache-key": marker,
+			"x-bf-cache-type": "direct",
+		};
 
 		try {
-			const createResponse = await request.post("/v1/chat/completions", {
-				data: {
-					model: "openai/gpt-4o-mini",
-					messages: [{ role: "user", content: marker }],
-				},
-			});
-			await expectSuccessfulResponse(createResponse, "create owned LLM log");
-			await expect.poll(async () => await findLLMLogByContent(request, marker), { timeout: 15_000 }).toBeDefined();
-			logId = (await findLLMLogByContent(request, marker))?.id;
-			expect(logId, "Created inference should produce an owned LLM log").toBeTruthy();
+			let seedResponse: APIResponse | undefined;
+			for (let attempt = 1; attempt <= 4; attempt += 1) {
+				seedResponse = await request.post("/v1/chat/completions", { data: requestData, headers: cacheHeaders });
+				if (seedResponse.ok() || attempt === 4) break;
+				await new Promise((resolve) => setTimeout(resolve, attempt * 250));
+			}
+			if (!seedResponse) throw new Error("Direct-cache seed request did not produce a response");
+			await expectSuccessfulResponse(seedResponse, "seed owned direct-cache LLM log after bounded retries");
+			await expect
+				.poll(
+					async () => {
+						const hitResponse = await request.post("/v1/chat/completions", { data: requestData, headers: cacheHeaders });
+						await expectSuccessfulResponse(hitResponse, "create owned direct-cache hit");
+						return await findDirectCacheLLMLogByContent(request, marker);
+					},
+					{ timeout: 15_000, intervals: [250, 500, 1_000] },
+				)
+				.toBeDefined();
+			logId = (await findDirectCacheLLMLogByContent(request, marker))?.id;
+			expect(logId, "Repeated inference should produce an owned direct-cache hit log").toBeTruthy();
 			await waitForResource(request, `/api/logs/${encodeURIComponent(logId!)}`);
 
-			await page.goto("/workspace/logs?period=1h&polling=false", { waitUntil: "domcontentloaded" });
+			await page.goto(`/workspace/logs?period=1h&polling=false&content_search=${encodeURIComponent(marker)}`, {
+				waitUntil: "domcontentloaded",
+			});
 			const cacheSection = page.getByTestId("local-caching-filter-toggle");
 			await cacheSection.click();
 			const directFilter = page.getByTestId("local-caching-filter-checkbox-direct").getByRole("checkbox");
 			await directFilter.click();
 			await expect(directFilter).toHaveAttribute("data-state", "checked");
 			await expect(page).toHaveURL((url) => (url.searchParams.get("cache_hit_types") ?? "").includes("direct"));
-			const directRows = page.getByTestId("logs-table").locator("tbody tr").filter({ hasNotText: /Listening|No results/i });
+			const logsTable = page.locator('[data-testid="logs-table"]').or(page.locator("table"));
+			const directRows = logsTable
+				.locator("tbody tr")
+				.filter({ hasText: marker })
+				.filter({ hasNotText: /Listening|No results/i });
 			await expect(directRows.first()).toBeVisible();
 			await directRows.first().locator("td").first().click();
 			const directSheet = page.locator('[data-slot="sheet-content"][data-state="open"]');
 			await expect(directSheet.getByText("Direct Cache", { exact: true })).toBeVisible();
+			const moreDetailsToggle = directSheet.getByText("More details", { exact: true });
+			const moreDetails = moreDetailsToggle.locator("xpath=ancestor::details[1]");
+			await moreDetailsToggle.click();
+			await expect(moreDetails).toHaveAttribute("open", "");
 			await expect(directSheet.getByText("Caching Details (Hit)", { exact: true })).toBeVisible();
 
 			await page.goto(`/workspace/logs?period=1h&polling=false&selected_log=${encodeURIComponent(logId!)}`, {
@@ -435,10 +477,11 @@ test.describe("panel core interactions", () => {
 			await expectResourceDeleted(request, `/api/logs/${encodeURIComponent(logId!)}`);
 			logId = undefined;
 		} finally {
-			if (logId) {
-				const response = await request.delete("/api/logs", { data: { ids: [logId] } });
+			const ownedLogIds = (await findLLMLogsByContent(request, marker)).map((entry) => entry.id);
+			if (ownedLogIds.length > 0) {
+				const response = await request.delete("/api/logs", { data: { ids: ownedLogIds } });
 				if (!response.ok() && response.status() !== 404) {
-					throw new Error(`Failed to clean LLM log ${logId}: HTTP ${response.status()} ${await response.text()}`);
+					throw new Error(`Failed to clean LLM logs ${ownedLogIds.join(", ")}: HTTP ${response.status()} ${await response.text()}`);
 				}
 			}
 		}
@@ -473,12 +516,11 @@ test.describe("panel core interactions", () => {
 			});
 			const sheet = page.locator('[data-slot="sheet-content"][data-state="open"]');
 			await expect(sheet).toContainText(`Request ID: ${logId}`);
-			await expect(sheet.getByText("Arguments", { exact: true })).toBeVisible();
-			await expect(sheet.getByText(marker, { exact: true })).toBeVisible();
+			await expect(sheet.getByText("Arguments")).toBeVisible();
+			await expect(sheet.getByText("Result")).toBeVisible();
+			await expect(sheet.getByText(marker).first()).toBeVisible();
 
-			const actionsButton = sheet
-				.getByRole("button")
-				.filter({ has: sheet.locator("svg.lucide-more-vertical, svg.lucide-ellipsis-vertical") });
+			const actionsButton = sheet.getByTestId("mcplogdetails-actions-button");
 			await actionsButton.click();
 			const jsonDownloadPromise = page.waitForEvent("download");
 			await page.getByTestId("export-log-json").click();

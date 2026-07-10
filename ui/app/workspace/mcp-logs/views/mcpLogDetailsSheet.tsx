@@ -136,7 +136,7 @@ export function MCPLogDetailSheet({
 					<AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
 						<DropdownMenu open={dropdownOpen} onOpenChange={setDropdownOpen}>
 							<DropdownMenuTrigger asChild>
-								<Button variant="ghost" className="size-8" type="button">
+								<Button variant="ghost" className="size-8" type="button" data-testid="mcplogdetails-actions-button">
 									<MoreVertical className="h-3 w-3" />
 								</Button>
 							</DropdownMenuTrigger>
