@@ -1,6 +1,7 @@
 package vectorstore
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"testing"
@@ -76,10 +77,16 @@ func TestPgvectorStore_Integration(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, store.Close(t.Context(), "")) })
 
 	namespace := "bifrost-pgvector-test-" + time.Now().UTC().Format("20060102150405.000000000")
+	require.ErrorContains(t, store.CreateNamespace(t.Context(), namespace+"-invalid", 0, nil), "greater than 0")
+
+	directNamespace := namespace + "-direct"
+	require.NoError(t, store.CreateNamespace(t.Context(), directNamespace, 1, nil))
+	t.Cleanup(func() { require.NoError(t, store.DeleteNamespace(context.Background(), directNamespace)) })
+
 	require.NoError(t, store.CreateNamespace(t.Context(), namespace, 3, map[string]VectorStoreProperties{
 		"cache_key": {DataType: VectorStorePropertyTypeString},
 	}))
-	t.Cleanup(func() { require.NoError(t, store.DeleteNamespace(t.Context(), namespace)) })
+	t.Cleanup(func() { require.NoError(t, store.DeleteNamespace(context.Background(), namespace)) })
 
 	require.NoError(t, store.Add(t.Context(), namespace, "first", []float32{1, 0, 0}, map[string]interface{}{"cache_key": "tenant-a"}))
 	chunk, err := store.GetChunk(t.Context(), namespace, "first")

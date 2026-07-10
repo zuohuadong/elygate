@@ -107,7 +107,7 @@ test.describe('MCP Log Detail Hydration', () => {
 
     await mcpLogsPage.goto()
     await expect(mcpLogsPage.logsTable).toBeVisible()
-    await expect(page.getByText('search_docs')).toBeVisible()
+    await expect(mcpLogsPage.logsTable.getByText('search_docs', { exact: true })).toBeVisible()
 
     await mcpLogsPage.viewLogDetails(0)
 
@@ -116,7 +116,7 @@ test.describe('MCP Log Detail Hydration', () => {
       .toBeGreaterThan(0)
     await expect(mcpLogsPage.logDetailSheet.getByText('Arguments')).toBeVisible()
     await expect(mcpLogsPage.logDetailSheet.getByText('Result')).toBeVisible()
-    await expect(page.getByText('hydrated-search-term')).toBeVisible()
-    await expect(page.getByText('hydrated-result-value')).toBeVisible()
+    await expect(mcpLogsPage.logDetailSheet.getByText('hydrated-search-term')).toBeVisible()
+    await expect(mcpLogsPage.logDetailSheet.getByText('hydrated-result-value')).toBeVisible()
   })
 })

@@ -37,19 +37,13 @@ export class LogsPage extends BasePage {
     this.logsTable = page.locator('[data-testid="logs-table"]').or(page.locator('table'))
     // The filters section is the container with search input and filters button
     this.filtersSection = page.locator('input[placeholder="Search logs"]').locator('..')
-    this.filtersButton = page.getByRole('button', { name: /Filters/i })
+    this.filtersButton = page.getByRole('button', { name: /Hide filters|Show filters/i })
     this.statsCards = page.locator('[data-testid="stats-cards"]').or(page.locator('text=Total Requests').locator('..').locator('..'))
 
     // Filter elements - filters are inside a popover opened by the Filters button
-    this.providerFilter = page.locator('[data-testid="filter-provider"]').or(
-      page.locator('button').filter({ hasText: /Provider/i })
-    )
-    this.modelFilter = page.locator('[data-testid="filter-model"]').or(
-      page.locator('button').filter({ hasText: /Model/i })
-    )
-    this.statusFilter = page.locator('[data-testid="filter-status"]').or(
-      page.locator('button').filter({ hasText: /Status/i })
-    )
+    this.providerFilter = page.getByTestId('providers-filter-toggle')
+    this.modelFilter = page.getByTestId('models-filter-toggle')
+    this.statusFilter = page.getByTestId('status-filter-toggle')
     this.searchInput = page.locator('[data-testid="filter-search"]').or(
       page.getByPlaceholder('Search logs')
     )
@@ -61,15 +55,19 @@ export class LogsPage extends BasePage {
     )
 
     // Table elements - exclude the "Listening for logs" row which is not a data row
-    this.tableRows = this.logsTable.locator('tbody tr').filter({ hasNot: page.locator('text=Listening for logs') }).filter({ hasNot: page.locator('text=Live updates paused') }).filter({ hasNot: page.locator('text=Not connected') }).filter({ hasNot: page.locator('text=No results found') })
+    this.tableRows = this.logsTable
+      .locator('tbody tr')
+      .filter({ hasNot: page.getByText(/Listening for logs|Waiting for new logs/i) })
+      .filter({ hasNot: page.getByText('Live updates paused') })
+      .filter({ hasNot: page.getByText('Not connected') })
+      .filter({ hasNot: page.getByText('No results found') })
     // LLM logs pagination (data-testid added to logsTable.tsx)
     this.paginationControls = page.getByTestId('pagination')
     this.nextPageBtn = page.getByTestId('next-page')
     this.prevPageBtn = page.getByTestId('prev-page')
 
-    // Log detail sheet - Sheet component with role="dialog"
-    this.logDetailSheet = page.locator('[role="dialog"]')
-    this.closeDetailSheetBtn = page.locator('[role="dialog"]').locator('button').filter({ has: page.locator('svg.lucide-x') })
+    this.logDetailSheet = page.locator('[data-slot="sheet-content"][data-state="open"]')
+    this.closeDetailSheetBtn = this.logDetailSheet.getByRole('button', { name: 'Close', exact: true })
   }
 
   /**
@@ -101,21 +99,13 @@ export class LogsPage extends BasePage {
    */
   async filterByProvider(provider: string): Promise<void> {
     await this.dismissToasts()
+    await this.ensureFilterSidebarExpanded()
     await this.providerFilter.first().waitFor({ state: 'visible' })
-    await this.providerFilter.first().click()
-    await this.page.waitForSelector('[role="listbox"]', { timeout: 5000 }).catch(() => {})
-
-    // Try to find the provider option
-    const option = this.page.getByRole('option', { name: new RegExp(provider, 'i') })
-    if (await option.count() > 0) {
-      await option.first().click()
-    } else {
-      // Close dropdown if option not found
-      await this.page.keyboard.press('Escape')
-    }
-
-    // Wait for dropdown to close and data to refresh
-    await this.page.waitForSelector('[role="listbox"]', { state: 'hidden', timeout: 5000 }).catch(() => {})
+    await this.ensureFilterSectionOpen(this.providerFilter)
+    const option = this.page.getByTestId(`providers-filter-checkbox-${provider}`)
+    await option.waitFor({ state: 'visible', timeout: 10000 })
+    await option.click()
+    await expect(option.getByRole('checkbox')).toHaveAttribute('data-state', 'checked')
     await waitForNetworkIdle(this.page)
   }
 
@@ -124,18 +114,16 @@ export class LogsPage extends BasePage {
    */
   async filterByModel(model: string): Promise<void> {
     await this.dismissToasts()
+    await this.ensureFilterSidebarExpanded()
     await this.modelFilter.first().waitFor({ state: 'visible' })
-    await this.modelFilter.first().click()
-    await this.page.waitForSelector('[role="listbox"]', { timeout: 5000 }).catch(() => {})
-
-    const option = this.page.getByRole('option', { name: new RegExp(model, 'i') })
-    if (await option.count() > 0) {
-      await option.first().click()
-    } else {
-      await this.page.keyboard.press('Escape')
-    }
-
-    await this.page.waitForSelector('[role="listbox"]', { state: 'hidden', timeout: 5000 }).catch(() => {})
+    await this.ensureFilterSectionOpen(this.modelFilter)
+    const search = this.page.getByTestId('models-filter-search')
+    await search.fill(model)
+    const existing = this.page.getByTestId(`models-filter-checkbox-${model}`)
+    const addCustom = this.page.getByTestId('models-filter-add-custom')
+    const target = existing.or(addCustom)
+    await target.first().waitFor({ state: 'visible', timeout: 10000 })
+    await target.first().click()
     await waitForNetworkIdle(this.page)
   }
 
@@ -144,19 +132,27 @@ export class LogsPage extends BasePage {
    */
   async filterByStatus(status: 'success' | 'error' | 'pending'): Promise<void> {
     await this.dismissToasts()
-    await this.filtersButton.first().waitFor({ state: 'visible' })
-    await this.filtersButton.first().click()
-    await this.page.waitForSelector('[role="listbox"], [data-slot="command-list"]', { timeout: 5000 }).catch(() => {})
-
-    const option = this.page.getByRole('option', { name: new RegExp(status, 'i') })
-    if (await option.count() > 0) {
-      await option.first().click()
-    } else {
-      await this.page.keyboard.press('Escape')
-    }
-
-    await this.page.waitForSelector('[role="listbox"]', { state: 'hidden', timeout: 5000 }).catch(() => {})
+    await this.ensureFilterSidebarExpanded()
+    await this.ensureFilterSectionOpen(this.statusFilter)
+    const option = this.page.getByTestId(`status-filter-checkbox-${status}`)
+    await option.waitFor({ state: 'visible', timeout: 5000 })
+    await option.click()
+    await expect(option.getByRole('checkbox')).toHaveAttribute('data-state', 'checked')
     await waitForNetworkIdle(this.page)
+  }
+
+  private async ensureFilterSidebarExpanded(): Promise<void> {
+    const showFilters = this.page.getByRole('button', { name: 'Show filters', exact: true })
+    if (await showFilters.isVisible().catch(() => false)) {
+      await showFilters.click()
+    }
+  }
+
+  private async ensureFilterSectionOpen(trigger: Locator): Promise<void> {
+    if ((await trigger.getAttribute('data-state')) !== 'open') {
+      await trigger.click()
+    }
+    await expect(trigger).toHaveAttribute('data-state', 'open')
   }
 
   /**
@@ -220,7 +216,10 @@ export class LogsPage extends BasePage {
     if (count <= rowIndex) {
       throw new Error(`Row index ${rowIndex} out of bounds (${count} rows available)`)
     }
-    await rows.nth(rowIndex).click()
+    const row = rows.nth(rowIndex)
+    const dataCell = row.locator('td').filter({ hasNot: this.page.getByTestId('log-actions-btn') }).first()
+    await dataCell.click()
+    await this.page.waitForURL(/selected_log=/, { timeout: 5000 })
     // Wait for detail sheet to appear
     await expect(this.logDetailSheet).toBeVisible({ timeout: 5000 })
   }

@@ -15,7 +15,7 @@ import {
 	useGetProvidersQuery,
 	useUpdatePluginMutation,
 } from "@/lib/store";
-import { CacheConfig, EditorCacheConfig, ModelProvider, ModelProviderName } from "@/lib/types/config";
+import { EditorCacheConfig, ModelProvider, ModelProviderName } from "@/lib/types/config";
 import { SEMANTIC_CACHE_PLUGIN } from "@/lib/types/plugins";
 import { cn } from "@/lib/utils";
 import { Loader2 } from "lucide-react";
@@ -27,6 +27,12 @@ import { toast } from "sonner";
 // caching. Semantic adds vector similarity on top, requiring an
 // embedding-capable provider and the model's real dimension.
 type CacheMode = "direct" | "semantic";
+
+type CachePluginPayload = Omit<EditorCacheConfig, "provider" | "embedding_model" | "dimension"> & {
+	provider?: ModelProviderName | "";
+	embedding_model?: string;
+	dimension: number;
+};
 
 // Embedding-capable providers gate the semantic mode. Built-in providers
 // are listed in EmbeddingSupportedProviders; custom providers expose
@@ -73,7 +79,7 @@ const inferMode = (config: EditorCacheConfig): CacheMode => {
 
 // Strip semantic-only fields when persisting a direct-only payload so the
 // server validator doesn't reject a stale provider choice.
-const buildPayload = (config: EditorCacheConfig, mode: CacheMode): CacheConfig => {
+const buildPayload = (config: EditorCacheConfig, mode: CacheMode): CachePluginPayload => {
 	const base = {
 		ttl: config.ttl ?? 0,
 		threshold: config.threshold ?? 0,
@@ -85,14 +91,16 @@ const buildPayload = (config: EditorCacheConfig, mode: CacheMode): CacheConfig =
 		default_cache_key: config.default_cache_key?.trim() || undefined,
 	};
 	if (mode === "direct") {
-		return { ...base, dimension: 1 } as CacheConfig;
+		// Plugin updates merge over the stored config. Explicit empty values are
+		// therefore required to clear a previously saved semantic provider/model.
+		return { ...base, provider: "", embedding_model: "", dimension: 1 };
 	}
 	return {
 		...base,
 		provider: config.provider as ModelProviderName,
 		embedding_model: config.embedding_model ?? "",
 		dimension: config.dimension ?? 0,
-	} as CacheConfig;
+	};
 };
 
 const validateForSave = (config: EditorCacheConfig, mode: CacheMode): string | null => {
@@ -157,19 +165,36 @@ export default function CachingView() {
 		}
 	}, [providersError]);
 
-	// Surface validation problems inline rather than only on Save click.
-	const validationError = useMemo(() => validateForSave(cacheConfig, mode), [cacheConfig, mode]);
-
 	// Only show the dimension/namespace heads-up when the user has actually
-	// touched a structural field. Showing it permanently in semantic mode
-	// trains users to ignore it; showing it on diff makes it land.
+	// changed the effective provider/model/dimension. Direct mode deliberately
+	// maps those fields to empty/empty/1, so switching from semantic to direct
+	// is also a structural change even though the editor retains the old values.
 	const hasStructuralChange = useMemo(() => {
+		const targetProvider = mode === "semantic" ? (cacheConfig.provider ?? "") : "";
+		const targetEmbeddingModel = mode === "semantic" ? (cacheConfig.embedding_model ?? "") : "";
+		const targetDimension = mode === "semantic" ? cacheConfig.dimension : 1;
 		return (
-			cacheConfig.provider !== serverCacheConfig.provider ||
-			cacheConfig.embedding_model !== serverCacheConfig.embedding_model ||
-			cacheConfig.dimension !== serverCacheConfig.dimension
+			targetProvider !== (serverCacheConfig.provider ?? "") ||
+			targetEmbeddingModel !== (serverCacheConfig.embedding_model ?? "") ||
+			targetDimension !== serverCacheConfig.dimension
 		);
-	}, [cacheConfig, serverCacheConfig]);
+	}, [cacheConfig.provider, cacheConfig.embedding_model, cacheConfig.dimension, mode, serverCacheConfig]);
+
+	const hasNamespaceChange = useMemo(
+		() => (cacheConfig.vector_store_namespace?.trim() ?? "") !== (serverCacheConfig.vector_store_namespace?.trim() ?? ""),
+		[cacheConfig.vector_store_namespace, serverCacheConfig.vector_store_namespace],
+	);
+
+	const structuralNamespaceError =
+		hasStructuralChange && !hasNamespaceChange
+			? "Changing cache mode, embedding provider, model, or dimension requires a fresh vector store namespace."
+			: null;
+
+	// Surface validation problems inline rather than only on Save click.
+	const validationError = useMemo(
+		() => validateForSave(cacheConfig, mode) ?? structuralNamespaceError,
+		[cacheConfig, mode, structuralNamespaceError],
+	);
 
 	const hasUnsavedConfigChanges = useMemo(() => {
 		const fields: (keyof EditorCacheConfig)[] = [
@@ -211,7 +236,7 @@ export default function CachingView() {
 				// No plugin row + user toggling off ⇒ nothing to disable.
 				// Bail before the success toast so we don't lie about the state.
 				if (!checked) return;
-				const err = validateForSave(cacheConfig, mode);
+				const err = validationError;
 				if (err) {
 					toast.error(err);
 					return;
@@ -231,7 +256,7 @@ export default function CachingView() {
 	};
 
 	const handleSave = async () => {
-		const err = validateForSave(cacheConfig, mode);
+		const err = validationError;
 		if (err) {
 			toast.error(err);
 			return;
@@ -265,7 +290,7 @@ export default function CachingView() {
 	return (
 		<div className="mx-auto w-full max-w-4xl space-y-6">
 			<div>
-				<h2 className="text-lg font-semibold tracking-tight">Local Cache</h2>
+				<h2 className="text-lg font-semibold tracking-tight">Caching</h2>
 				<p className="text-muted-foreground text-sm">
 					Cache responses locally with two complementary lookup paths: <b>direct</b> hash matching for exact replays, and <b>semantic</b>{" "}
 					similarity search for related content. Send the <b>x-bf-cache-key</b> header to scope cached responses to a tenant or feature.{" "}
@@ -276,8 +301,9 @@ export default function CachingView() {
 					)}
 				</p>
 				<div className="mt-3 rounded-sm border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
-					<b>Elygate default:</b> semantic caching is disabled. Use direct-only caching for exact replay. Enable semantic matching only after
-					isolated evaluation proves it is safe for the specific workload; do not use it for coding continuation or stateful conversations.
+					<b>Elygate default:</b> semantic caching is disabled. Use direct-only caching for exact replay. Enable semantic matching only
+					after isolated evaluation proves it is safe for the specific workload; do not use it for coding continuation or stateful
+					conversations.
 				</div>
 			</div>
 
@@ -370,19 +396,17 @@ export default function CachingView() {
 									</div>
 								)}
 
+								{hasStructuralChange && (
+									<div className="rounded-sm border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+										<b>Heads up:</b> a vector store namespace can only hold vectors of <em>one</em> dimension. Whenever you change the cache{" "}
+										<b>mode</b>, embedding <b>provider</b>, <b>model</b>, or <b>dimension</b>, use a fresh namespace. Existing namespaces
+										and data are never dropped or recreated automatically.
+									</div>
+								)}
+
 								{/* Provider/model/dimension only appear in semantic mode. */}
 								{mode === "semantic" && (
 									<>
-										{hasStructuralChange && (
-											<div className="rounded-sm border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
-												<b>Heads up:</b> a vector store namespace can only hold vectors of <em>one</em> dimension. Whenever you change the
-												embedding <b>provider</b>, <b>model</b>, or <b>dimension</b>, make sure the <b>dimension</b> still matches what the
-												model produces, otherwise writes to the existing namespace will fail and reads will silently miss. The namespace is{" "}
-												<em>not</em> recreated automatically; either use a fresh namespace or drop the existing class/index in your vector
-												store before saving.
-											</div>
-										)}
-
 										<div className="space-y-4">
 											<h3 className="text-sm font-medium">Embedding Provider &amp; Model</h3>
 											<div className="grid grid-cols-2 gap-4">
@@ -536,9 +560,8 @@ export default function CachingView() {
 												onChange={(e) => updateLocal({ vector_store_namespace: e.target.value })}
 											/>
 											<p className="text-muted-foreground text-xs">
-												Bucket/index name where cache entries live. Leave blank to use the built-in default.
-												Changing this points the plugin at a different (possibly empty) bucket. Old entries are not deleted, they just stop
-												being queried.
+												Bucket/index name where cache entries live. Leave blank to use the built-in default. Changing this points the plugin
+												at a different (possibly empty) bucket. Old entries are not deleted, they just stop being queried.
 											</p>
 										</div>
 										<div className="space-y-2">

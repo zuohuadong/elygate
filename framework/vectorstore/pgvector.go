@@ -75,8 +75,8 @@ func (s *PgvectorStore) Ping(ctx context.Context) error {
 }
 
 func (s *PgvectorStore) CreateNamespace(ctx context.Context, namespace string, dimension int, _ map[string]VectorStoreProperties) error {
-	if dimension <= 1 {
-		return fmt.Errorf("pgvector namespace dimension must be greater than 1")
+	if dimension <= 0 {
+		return fmt.Errorf("pgvector namespace dimension must be greater than 0")
 	}
 	table, err := s.qualifiedTable(namespace)
 	if err != nil {
@@ -92,7 +92,7 @@ func (s *PgvectorStore) CreateNamespace(ctx context.Context, namespace string, d
 	}
 
 	var existingDimension int
-	err = s.pool.QueryRow(ctx, `SELECT a.atttypmod - 4
+	err = s.pool.QueryRow(ctx, `SELECT a.atttypmod
 		FROM pg_attribute a
 		JOIN pg_class c ON c.oid = a.attrelid
 		JOIN pg_namespace n ON n.oid = c.relnamespace

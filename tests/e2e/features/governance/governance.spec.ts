@@ -49,8 +49,10 @@ test.describe('Governance - Teams', () => {
 
     await governancePage.createTeam(teamData)
 
-    const exists = await governancePage.teamExists(teamData.name)
-    expect(exists).toBe(true)
+    const row = governancePage.getTeamRow(teamData.name)
+    await expect(row).toBeVisible()
+    await expect(row).toContainText('$100.00')
+    await expect(row).toContainText('Monthly')
   })
 
   test('should edit a team', async ({ governancePage }) => {
@@ -60,8 +62,9 @@ test.describe('Governance - Teams', () => {
 
     await governancePage.editTeam(teamData.name, { budget: { maxLimit: 129 } })
 
-    const exists = await governancePage.teamExists(teamData.name)
-    expect(exists).toBe(true)
+    const row = governancePage.getTeamRow(teamData.name)
+    await expect(row).toBeVisible()
+    await expect(row).toContainText('$129.00')
   })
 
   test('should create team with customer assignment', async ({ governancePage }) => {
@@ -111,6 +114,7 @@ test.describe('Governance - Customers', () => {
   })
 
   test.afterEach(async ({ governancePage }) => {
+    await governancePage.closeCustomerDialog()
     for (const name of [...createdCustomers]) {
       try {
         const exists = await governancePage.customerExists(name)
@@ -136,8 +140,10 @@ test.describe('Governance - Customers', () => {
 
     await governancePage.createCustomer(customerData)
 
-    const exists = await governancePage.customerExists(customerData.name)
-    expect(exists).toBe(true)
+    const row = governancePage.getCustomerRow(customerData.name)
+    await expect(row).toBeVisible()
+    await expect(row).toContainText('$50.00')
+    await expect(row).toContainText('Daily')
   })
 
   test('should edit a customer', async ({ governancePage }) => {

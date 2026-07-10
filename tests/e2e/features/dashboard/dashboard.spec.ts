@@ -21,11 +21,7 @@ test.describe('Dashboard', () => {
     })
 
     test('should display date time picker', async ({ dashboardPage }) => {
-      // Date picker should be visible (may be a button with date text)
-      const datePicker = dashboardPage.page.locator('button').filter({ hasText: /Last/i }).or(
-        dashboardPage.page.locator('[data-testid="dashboard-date-picker"]')
-      )
-      await expect(datePicker.first()).toBeVisible()
+      await expect(dashboardPage.dateTimePicker).toBeVisible()
     })
   })
 
@@ -38,21 +34,27 @@ test.describe('Dashboard', () => {
       // Let initial chart load finish so the refetch we wait for is the one from the period change
       await dashboardPage.waitForChartsToLoad()
 
+      // Always choose a different preset. The dashboard currently defaults to Last hour,
+      // and selecting the active value correctly does not trigger another data request.
+      const initialLabel = await dashboardPage.getSelectedPeriodLabel()
+      const targetPeriod: '1h' | '7d' = initialLabel.includes(DashboardPage.PERIOD_LABELS['1h']) ? '7d' : '1h'
+      const targetLabel = DashboardPage.PERIOD_LABELS[targetPeriod]
+
       // Wait for the chart data request that fires when we change the period (proves filter is applied)
       const responsePromise = dashboardPage.page.waitForResponse(
         (res) => res.url().includes('/logs/histogram') && res.status() === 200,
         { timeout: 15000 }
       )
 
-      await dashboardPage.selectTimePeriod('1h')
+      await dashboardPage.selectTimePeriod(targetPeriod)
 
       // UI: trigger shows the selected period
       const label = await dashboardPage.getSelectedPeriodLabel()
-      expect(label).toContain('Last hour')
+      expect(label).toContain(targetLabel)
 
       // URL: selection is reflected in query state
       const url = dashboardPage.page.url()
-      expect(url).toMatch(/period=1h|start_time=\d+&end_time=\d+/)
+      expect(url).toMatch(new RegExp(`period=${targetPeriod}|start_time=\\d+&end_time=\\d+`))
 
       // Data: dashboard refetched with the new range
       await responsePromise
@@ -347,22 +349,20 @@ test.describe('Dashboard', () => {
     test('should open custom date range picker', async ({ dashboardPage }) => {
       await dashboardPage.waitForChartsToLoad()
 
-      // Look for date picker button
-      const datePicker = dashboardPage.page.getByRole('button').filter({ hasText: /Last|Custom/i }).first()
-      const isVisible = await datePicker.isVisible().catch(() => false)
+      const datePicker = dashboardPage.getDatePickerTrigger()
+      await expect(datePicker).toBeVisible()
+      await datePicker.click()
 
-      if (isVisible) {
-        await datePicker.click()
+      const popover = dashboardPage.getOpenDatePickerPopover()
+      await expect(popover).toBeVisible()
+      await expect(popover.getByRole('grid')).toHaveCount(2)
+      await expect(popover.getByText('From Time', { exact: true })).toBeVisible()
+      await expect(popover.getByText('To Time', { exact: true })).toBeVisible()
+      await expect(popover.getByRole('button', { name: 'Last hour', exact: true })).toBeVisible()
+      await expect(popover.getByText('Timezone', { exact: true })).toBeVisible()
 
-        // Should see date range options or calendar
-        const calendarVisible = await dashboardPage.page.locator('[role="dialog"], [role="listbox"]').isVisible().catch(() => false)
-        const optionsVisible = await dashboardPage.page.getByRole('option').first().isVisible().catch(() => false)
-
-        expect(calendarVisible || optionsVisible).toBe(true)
-
-        // Close the picker
-        await dashboardPage.page.keyboard.press('Escape')
-      }
+      await dashboardPage.page.keyboard.press('Escape')
+      await expect(popover).toBeHidden()
     })
 
     test('should handle empty data for custom range', async ({ dashboardPage }) => {
