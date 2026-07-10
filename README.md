@@ -1,648 +1,284 @@
-# Elygate 🚀
+# Bifrost AI Gateway
 
-[English](#english) | [简体中文](#chinese)
+[![Go Report Card](https://goreportcard.com/badge/github.com/maximhq/bifrost/core)](https://goreportcard.com/report/github.com/maximhq/bifrost/core)
+[![Discord badge](https://dcbadge.limes.pink/api/server/https://discord.gg/exN5KAydbU?style=flat)](https://discord.gg/exN5KAydbU)
+[![codecov](https://codecov.io/gh/maximhq/bifrost/branch/main/graph/badge.svg)](https://codecov.io/gh/maximhq/bifrost)
+![Docker Pulls](https://img.shields.io/docker/pulls/maximhq/bifrost)
+[<img src="https://run.pstmn.io/button.svg" alt="Run In Postman" style="width: 95px; height: 21px;">](https://app.getpostman.com/run-collection/31642484-2ba0e658-4dcd-49f4-845a-0c7ed745b916?action=collection%2Ffork&source=rip_markdown&collection-url=entityId%3D31642484-2ba0e658-4dcd-49f4-845a-0c7ed745b916%26entityType%3Dcollection%26workspaceId%3D63e853c8-9aec-477f-909c-7f02f543150e)
+[![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/bifrost)](https://artifacthub.io/packages/search?repo=bifrost)
+[![License](https://img.shields.io/github/license/maximhq/bifrost)](LICENSE)
 
----
+## The fastest way to build AI applications that never go down
 
-<a name="english"></a>
-## English
+Bifrost is a high-performance AI gateway that unifies access to 23+ providers (OpenAI, Anthropic, AWS Bedrock, Google Vertex, and more) through a single OpenAI-compatible API. Deploy in seconds with zero configuration and get automatic failover, load balancing, semantic caching, and enterprise-grade features.
 
-### ✨ Key Features
+## Quick Start
 
-- **🚀 Extreme Performance**: Powered by Bun & ElysiaJS, delivering 3.6x more throughput than Gin (Go).
-- **☁️ Redis-Free Architecture**: High-concurrency rate limiting and billing powered entirely by PostgreSQL 18.3, simplifying deployment.
-- **⚡ Exact Response Cache**: Deterministic request hashing avoids repeated upstream calls without reusing answers across merely similar prompts.
-- **🔐 Enterprise-Grade Security**: HttpOnly Cookie sessions, server-side session management, and CSRF/XSS protection by default.
-- **💰 Robust Billing**: High-concurrency batch billing with support for dual-currency (USD/RMB) and dynamic price ratios.
-- **📊 Professional Analytics**: Real-time monitoring, 24h trends, interactive charts, and detailed latency tracking.
-- **🌍 I18n Ready**: Full multi-language support (English/Chinese) with automatic browser locale detection.
+![Get started](./docs/media/getting-started.png)
 
-### 🏗️ Architecture Overview
+**Go from zero to production-ready AI gateway in under a minute.**
 
-Elygate is designed as a modern, unified gateway that consolidates billing, caching, and model management into a single high-performance engine.
-
-```mermaid
-graph TD
-    Client[Admin Panel / API Client] --> Gateway[Bun + ElysiaJS Gateway]
-    Gateway --> Auth[Session & JWT Auth]
-    Gateway --> Cache{Response Cache}
-    Cache -- Hit --> Exact[⚡ Exact Match]
-    Cache -- Hit --> Semantic[🍃 Semantic Match]
-    Cache -- Miss --> Models[Model Providers / Upstream]
-    Gateway --> DB[(PostgreSQL 18.3)]
-    DB --> Billing[Batch Billing logic]
-    DB --> Stats[Real-time Stats Engine]
-```
-
-### 🧩 Three-Layer Product Model
-
-Elygate is organized as a three-layer monorepo product:
-
-- **Elygate Basic Gateway**: OpenAI-compatible proxy, provider adapters, routing, rate limits, billing, logs, cache, and Agent Memory.
-- **Elygate Panel**: general-purpose management UI for channels, models, API keys, usage, logs, and system settings. It remains usable for single-node, private, and lightweight team deployments.
-- **Elygate Enterprise**: SupaCloud + SupAuth + svadmin powered enterprise layer for IAM, gateway app lifecycle, tenant isolation, enterprise policy, audit, and control-plane operations.
-
-Enterprise control-plane APIs live under `/api/enterprise/*`. Gateway `sk-*` keys remain data-plane credentials for `/v1`; SupAuth JWT/service tokens are required for enterprise control-plane APIs. In enterprise mode, the data plane can install an optional runtime governance hook that reads gateway instance, policy, and budget projections before cache/upstream dispatch, lazily rolls over due budget periods, then records successful request quota back into the matched enterprise budget projections. The basic dispatcher only depends on a neutral hook interface. The enterprise console is built as a separate app and is served from `/enterprise/` in production builds.
-
-Initial enterprise resources include SupaCloud install/uninstall lifecycle callbacks, gateway instance projections, provider channels, model routes, gateway API keys, request logs, Agent Memory, identity policies, policy evaluations, usage attribution, budgets, budget evaluations, and audit events. The enterprise console can update instance status, create identity policies, evaluate enterprise policies, create/update budgets, evaluate budget enforcement, inspect gateway resources, review usage attribution, and inspect audit trails without coupling `apps/admin` to SupaCloud/SupAuth.
-
-Architecture decisions for the three-layer boundary, enterprise resource projection semantics, and the `@postgresx/noredis` pilot gate are tracked in `docs/ARCHITECTURE_DECISIONS.md`.
-
----
-
-### 📖 API Usage Guide
-
-Elygate is fully compatible with both OpenAI and Anthropic API standards. You can use any library or tool designed for these services.
-
-![Workbench English](docs/assets/en_workbench.png)
-![Dashboard English](docs/assets/en_dashboard.png)
-
-#### 1. OpenAI Compatibility (Default)
-Most tools (NextChat, ChatBox, OpenAI SDK) work with the base URL.
-- **Base URL**: `http://your-elygate/v1`
-- **Key**: Your generated `sk-...` token.
-
-#### 2. Anthropic (Claude) Compatibility
-Works natively with the Anthropic SDK and **Claude Code**.
-- **Base URL**: `http://your-elygate/v1` (Note: the SDK appends `/messages` automatically)
-- **Key**: Your generated `sk-...` token.
-
-**Anthropic SDK Example (Node.js):**
-```javascript
-import Anthropic from '@anthropic-ai/sdk';
-
-const anthropic = new Anthropic({
-  apiKey: 'your-sk-token',
-  baseURL: 'http://your-elygate/v1' 
-});
-
-const msg = await anthropic.messages.create({
-  model: "claude-3-5-sonnet-20240620",
-  max_tokens: 1024,
-  messages: [{ role: "user", content: "Hello, Claude" }],
-});
-```
-
-#### 3. Using with Claude Code
-```bash
-export ANTHROPIC_BASE_URL=http://your-elygate/v1
-export ANTHROPIC_API_KEY=your-sk-token
-claude
-```
-
-#### 4. Using with OpenClaw
-- **Provider**: Select `Anthropic (Messages API)`
-- **Base URL**: `http://your-elygate/v1`
-- **API Key**: `your-sk-token`
-
----
-
-**High-performance AI Gateway. Build on Bun + PostgreSQL 18.**
-
-### 📦 Quick Start (Docker Compose) - Recommended
-
-Launch the entire stack (Database, Gateway, and Web UI) with one command.
-
-**Requirements:** Docker Engine with Compose support. Node.js and Bun are not required when you use the pre-built images.
-
-#### 1. Configuration
-```bash
-git clone https://github.com/zuohuadong/elygate.git && cd elygate
-cp .env.example .env
-
-# Change this before the first Docker startup
-sed -i 's/ELYGATE_DB_PASSWORD=elygate_change_me/ELYGATE_DB_PASSWORD=replace-with-a-strong-password/' .env
-```
-
-#### 2. Run (Pre-built Images)
-By default, this pulls images from `ghcr.io`. 
-*Note: If you are in Mainland China, see the Chinese README for mirror acceleration.*
+**Step 1:** Start Bifrost Gateway
 
 ```bash
-# Download the lightweight production compose file
-curl -O https://raw.githubusercontent.com/zuohuadong/elygate/main/docker-compose.prod.yml
+# Install and run locally
+npx -y @maximhq/bifrost
 
-# Check and restore "ghcr.io" if it was changed to a mirror
-sed -i 's/ghcr.nju.edu.cn/ghcr.io/g' docker-compose.prod.yml
-
-# Run the stack
-docker compose -f docker-compose.prod.yml up -d
+# Or use Docker
+docker run -p 8080:8080 maximhq/bifrost
 ```
 
-#### 3. Access
-| Service | URL | Default Credentials |
-| :--- | :--- | :--- |
-| **Admin Panel** | [http://localhost:3001](http://localhost:3001) | `admin` / `admin123` |
-| **API Endpoint** | [http://localhost:3000](http://localhost:3000) | Generate keys in Admin |
-| **Postgres** | `localhost:5432` | `root` / `password` |
+**Step 2:** Configure via Web UI
 
----
-
-### ⚡ Zero-Dependency Binary (Easiest)
-
-Inspired by New-API, Elygate provides pre-compiled single-file binaries. No Node.js, Bun, or Docker required.
-
-1. **Download**: Go to [Releases](../../releases) and download the binary for your OS.
-2. **Configure**: Create a `.env` file with your `DATABASE_URL`.
-3. **Run**:
-   - **Linux / macOS**:
-     ```bash
-     chmod +x elygate-bun-linux-x64
-     ./elygate-bun-linux-x64
-     ```
-   - **Windows**:
-     ```cmd
-     elygate-bun-windows-x64.exe
-     ```
-   *The binary embeds both the Gateway API engine and the Svelte Admin Panel.*
-
-Release versions are managed automatically with Release Please. Use Conventional Commits such as `feat:`, `fix:`, `perf:`, `refactor:`, `docs:`, or `chore:`; merging the generated release PR creates the GitHub Release and triggers binary publishing.
-
----
-
-### 🚀 Manual Production Deployment (Bare Metal)
-
-For high-performance production use without Docker:
-
-**Requirements:** Bun 1.3+. Node.js does not need to be installed separately for source deployment; Bun runs the build and server commands. GitHub Actions still pins Node.js 24 for the CI runner environment.
-
-#### One-Command Start
 ```bash
-# Install dependencies
-bun install
-
-# Build the web application
-bun run build
-
-# Start both Gateway and Web with one command
-bun run start
+# Open the built-in web interface
+open http://localhost:8080
 ```
 
-This will start:
-- **Gateway API** on port 3000
-- **Web Admin Panel** on port 3001
+**Step 3:** Make your first API call
 
-#### Access Points
-| Service | URL | Default Credentials |
-| :--- | :--- | :--- |
-| **Admin Panel** | [http://localhost:3001](http://localhost:3001) | `admin` / `admin123` |
-| **API Endpoint** | [http://localhost:3000](http://localhost:3000) | Generate keys in Admin |
-
----
-
-### 💻 Manual Installation (Development)
-
-If you prefer to run services manually on your host machine:
-
-**Requirements:** Bun 1.3+ and PostgreSQL 15+. Node.js does not need to be installed separately when using Bun.
-
-#### One-Command Dev Start
 ```bash
-# Install dependencies
-bun install
-
-# Start both Gateway and Web in development mode
-bun run dev
+curl -X POST http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "openai/gpt-4o-mini",
+    "messages": [{"role": "user", "content": "Hello, Bifrost!"}]
+  }'
 ```
 
-This will start:
-- **Gateway API** on port 3000 (with hot reload)
-- **Web Admin Panel** on port 5173 (with hot reload)
+**That's it!** Your AI gateway is running with a web interface for visual configuration, real-time monitoring, and analytics.
 
-#### Database Setup
-1. Ensure PostgreSQL 15+ is running
-2. Run `packages/db/src/init.sql` to initialize schema
-3. Configure `DATABASE_URL` in `.env`
+**Complete Setup Guides:**
+
+- [Gateway Setup](https://docs.getbifrost.ai/quickstart/gateway/setting-up) - HTTP API deployment
+- [Go SDK Setup](https://docs.getbifrost.ai/quickstart/go-sdk/setting-up) - Direct integration
 
 ---
 
-### ⚡ Performance Comparison
+## Enterprise Deployments
 
-We chose **Bun + Elysia.js** for its exceptional throughput. While Gin is highly efficient, Elysia leverages Bun's native asynchronous I/O to push boundaries.
+Bifrost supports enterprise-grade, private deployments for teams running production AI systems at scale.
+In addition to private networking, custom security controls, and governance, enterprise deployments unlock advanced capabilities including adaptive load balancing, clustering, guardrails, MCP gateway and and other features designed for enterprise-grade scale and reliability.
 
-#### 🚀 Framework Throughput (reqs/s)
+<img src=".github/assets/features.png" alt="Book a Demo" width="100%" style="margin-top:5px;"/>
+
+
+<div align="center" style="display: flex; flex-direction: column;">
+  <a href="https://calendly.com/maximai/bifrost-demo">
+    <img src=".github/assets/book-demo-button.png" alt="Book a Demo" width="170" style="margin-top:5px;"/>
+  </a>
+  <div>
+  <a href="https://www.getmaxim.ai/bifrost/enterprise" target="_blank" rel="noopener noreferrer">Explore enterprise capabilities</a>
+  </div>
+</div>
+
+---
+
+## Key Features
+
+### Core Infrastructure
+
+- **[Unified Interface](https://docs.getbifrost.ai/providers/supported-providers/overview)** - Single OpenAI-compatible API for all providers
+- **[Multi-Provider Support](https://docs.getbifrost.ai/quickstart/gateway/provider-configuration)** - OpenAI, Anthropic, AWS Bedrock, Google Vertex, Azure, Cerebras, Cohere, Mistral, Ollama, Groq, and more
+- **[Automatic Fallbacks](https://docs.getbifrost.ai/features/retries-and-fallbacks)** - Seamless failover between providers and models with zero downtime
+- **[Load Balancing](https://docs.getbifrost.ai/features/retries-and-fallbacks)** - Intelligent request distribution across multiple API keys and providers
+
+### Advanced Features
+
+- **[Model Context Protocol (MCP)](https://docs.getbifrost.ai/mcp/overview)** - Enable AI models to use external tools (filesystem, web search, databases)
+- **[Semantic Caching](https://docs.getbifrost.ai/features/semantic-caching)** - Intelligent response caching based on semantic similarity to reduce costs and latency
+- **[Multimodal Support](https://docs.getbifrost.ai/quickstart/gateway/streaming)** - Support for text,images, audio, and streaming, all behind a common interface.
+- **[Custom Plugins](https://docs.getbifrost.ai/enterprise/custom-plugins)** - Extensible middleware architecture for analytics, monitoring, and custom logic
+- **[Governance](https://docs.getbifrost.ai/features/governance/virtual-keys)** - Usage tracking, rate limiting, and fine-grained access control
+
+### Enterprise & Security
+
+- **[Budget Management](https://docs.getbifrost.ai/features/governance/budget-and-limits)** - Hierarchical cost control with virtual keys, teams, and customer budgets
+- **[User Provisioning (OIDC)](https://docs.getbifrost.ai/enterprise/user-provisioning)** - OAuth 2.0 / OIDC login with background directory sync for teams, roles, and business units
+- **[Observability](https://docs.getbifrost.ai/features/observability/default)** - Native Prometheus metrics, distributed tracing, and comprehensive logging
+- **[Secrets Management](https://docs.getbifrost.ai/deployment-guides/config-json#environment-variable-references)** - Secure API key management with environment variables and deployment secrets
+
+### Developer Experience
+
+- **[Zero-Config Startup](https://docs.getbifrost.ai/quickstart/gateway/setting-up)** - Start immediately with dynamic provider configuration
+- **[Drop-in Replacement](https://docs.getbifrost.ai/features/drop-in-replacement)** - Replace OpenAI/Anthropic/GenAI APIs with one line of code
+- **[SDK Integrations](https://docs.getbifrost.ai/integrations/what-is-an-integration)** - Native support for popular AI SDKs with zero code changes
+- **[Configuration Flexibility](https://docs.getbifrost.ai/quickstart/gateway/provider-configuration)** - Web UI, API-driven, or file-based configuration options
+
+---
+
+## Repository Structure
+
+Bifrost uses a modular architecture for maximum flexibility:
 
 ```text
-Elysia  (Bun)  ███████████████████████████████████ 2,454,631  (🥇 3.6x vs Gin)
-Gin     (Go)   █████████                           676,019
-Spring  (Java) ███████                             506,087
-Fastify (JS)   ██████                              415,600
-Express (JS)   █                                   113,117    (21x slower)
-```
-*Numbers based on standard TechEmpower-style plaintext benchmarks.*
-
----
-
-### 🔧 Performance Optimization
-
-Elygate comes with built-in performance optimizations for PostgreSQL 18.3:
-
-#### Quick Optimization
-```bash
-# Run automatic optimization script
-chmod +x scripts/deploy-optimizations.sh
-./scripts/deploy-optimizations.sh
-```
-
-#### Key Optimizations
-- ✅ **PostgreSQL 18.3 Async Commit**: 30-50% write performance boost
-- ✅ **Connection Pool**: 20 connections with optimized lifecycle
-- ✅ **Performance Indexes**: 20+ indexes for query optimization
-- ✅ **Agent Memory**: PostgreSQL-native long-term memory with pgvector recall and pg-boss async writes
-- ✅ **Exact Response Cache**: Deterministic request hashing for identical non-streaming requests
-
-#### Performance Gains
-| Metric | Improvement |
-|--------|-------------|
-| Database Writes | +30-50% |
-| Query Response | -20-40% |
-| Concurrency | +50-100% |
-| Memory Efficiency | +20-30% |
-
-See [Performance Optimization Guide](./PERFORMANCE_OPTIMIZATION.md) for details.
-
----
-
-### 📂 Project Structure (Monorepo)
-
-```text
-elygate
-├── apps
-│   ├── gateway              # Basic gateway + optional enterprise route composition
-│   ├── admin                # Elygate Panel (general management UI)
-│   ├── portal               # End-user portal
-│   └── enterprise-console   # Elygate Enterprise console
-├── packages
-│   ├── db                   # Database schema, init SQL and types
-│   ├── enterprise-contracts # Stable claims, scopes, events, manifest
-│   ├── enterprise-authz     # SupAuth JWT/scope verification helpers
-│   └── enterprise-adapter   # SupaCloud install/event projection helpers
-├── Dockerfile.gateway
-├── Dockerfile.web
-├── Dockerfile.postgres
-└── docker-compose.yml
+bifrost/
+├── npx/                 # NPX script for easy installation
+├── core/                # Core functionality and shared components
+│   ├── providers/       # Provider-specific implementations (OpenAI, Anthropic, etc.)
+│   ├── schemas/         # Interfaces and structs used throughout Bifrost
+│   └── bifrost.go       # Main Bifrost implementation
+├── framework/           # Framework components for data persistence
+│   ├── configstore/     # Configuration storages
+│   ├── logstore/        # Request logging storages
+│   └── vectorstore/     # Vector storages
+├── transports/          # HTTP gateway and other interface layers
+│   └── bifrost-http/    # HTTP transport implementation
+├── ui/                  # Web interface for HTTP gateway
+├── plugins/             # Extensible plugin system
+│   ├── governance/      # Budget management and access control
+│   ├── jsonparser/      # JSON parsing and manipulation utilities
+│   ├── logging/         # Request logging and analytics
+│   ├── maxim/           # Maxim's observability integration
+│   ├── mocker/          # Mock responses for testing and development
+│   ├── semanticcache/   # Intelligent response caching
+│   └── telemetry/       # Monitoring and observability
+├── docs/                # Documentation and guides
+└── tests/               # Comprehensive test suites
 ```
 
 ---
 
-### ✨ Core Innovations
+## Getting Started Options
 
-- **🛡️ Apache 2.0**: Open-source and enterprise-ready.
-- **☁️ Zero Shell Dependencies**: Unlike New API which requires Redis for high-concurrency rate limiting, Elygate is **Redis-free**. All logic is handled by Bun + PostgreSQL, simplifying your stack.
-- **🧭 New API Parity**: Responses, Completions, Files metadata, Batches metadata, Images edits/variations, channel health fields, and token-level controls are available without adding Redis.
-- **🧠 Elygate Memory**: Optional Postgres-native Agent Memory with user/token isolation, admin governance, and provider extension points for external memory backends.
-- **🔐 Secure Cookie Session**: HttpOnly Cookie-based authentication with server-side session management. Supports multi-device login, server-side logout, and automatic session expiration.
+Choose the deployment method that fits your needs:
 
----
+### 1. Gateway (HTTP API)
 
-### 📊 Comparison: Elygate vs. New API
-
-| Feature | Elygate (Bun + PG) | New API (Go + Redis) | Advantage |
-| :--- | :--- | :--- | :--- |
-| **Engine** | Bun + ElysiaJS | Go + Gin | 🚀 3.6x Throughput |
-| **Dependencies** | **PostgreSQL Only** | MySQL + **Redis** | 🔋 Zero Redis Setup |
-| **Billing** | O(1) Atomic Batch | Continuous SQL Hits | 💾 No Lock Contention |
-| **Agent Memory** | Optional Postgres-native memory | Not Integrated | 🧠 Stateful Agents |
-| **Exact Response Cache** | Built-in deterministic cache | Redis-backed cache recommended | ⚡ Repeat-request savings |
-| **Authentication** | Cookie Session (HttpOnly) | localStorage Token | 🔐 XSS Protection |
-| **Tech Stack** | Svelte 5 + Tailwind 4 | React / Vue | 💎 Premium UI/UX |
-| **API Compat** | OpenAI Responses/Chat/Completions/Files/Batches + Anthropic + Gemini + Ali + Baidu | OpenAI + Anthropic | 🌐 Multi-Provider Native |
-| **Admin Controls** | Channel health, request overrides, token model/IP/RPM/expiry controls | Mature ops panel | 🧩 New API-compatible operations |
-| **License** | Apache 2.0 | GPL-3.0 | 🛡️ Commercial Friendly |
-
----
-
----
-
-<a name="chinese"></a>
-## 简体中文
-
-### 📖 API 使用指南
-
-Elygate 同时兼容 OpenAI 和 Anthropic (Claude) 的 API 标准，您可以无缝对接现有的各类客户端和 SDK。
-
-![工作台 中文](docs/assets/zh_workbench.png)
-![仪表盘 中文](docs/assets/zh_dashboard.png)
-
-#### 1. OpenAI 标准接口 (默认)
-适用于大多数工具（如 NextChat, ChatBox, OpenAI SDK 等）。
-- **Base URL**: `http://your-elygate/v1`
-- **密钥 (Key)**: 后台生成的 `sk-...` 令牌。
-
-#### 2. Anthropic (Claude) 标准接口
-原生支持 Anthropic SDK 以及 **Claude Code** 命令行工具。
-- **Base URL**: `http://your-elygate/v1` (SDK 会自动拼接 `/messages`)
-- **密钥 (Key)**: 后台生成的 `sk-...` 令牌。
-
-**Anthropic SDK (Node.js) 调用示例:**
-```javascript
-import Anthropic from '@anthropic-ai/sdk';
-
-const anthropic = new Anthropic({
-  apiKey: '您的-sk-令牌',
-  baseURL: 'http://your-elygate/v1' 
-});
-
-const msg = await anthropic.messages.create({
-  model: "claude-3-5-sonnet-20240620",
-  max_tokens: 1024,
-  messages: [{ role: "user", content: "你好" }],
-});
-```
-
-#### 3. 对接 Claude Code
-```bash
-export ANTHROPIC_BASE_URL=http://your-elygate/v1
-export ANTHROPIC_API_KEY=您的-sk-令牌
-claude
-```
-
-#### 4. 对接 OpenClaw
-- **提供商**: 选择 `Anthropic (Messages API)`
-- **Base URL**: `http://your-elygate/v1`
-- **API Key**: `您的-sk-令牌`
-
----
-
-**高性能AI分发网关与计费系统。基于 Bun + PostgreSQL 18。**
-
-### 📦 快速部署 (Docker Compose) - 推荐
-
-只需简单几步，即可一键启动全栈环境。
-
-**依赖要求：** 服务器只需要 Docker Engine 和 Docker Compose 支持。使用预编译镜像部署时，不需要安装 Node.js 或 Bun。
-
-#### 1. 环境准备
-```bash
-git clone https://github.com/zuohuadong/elygate.git && cd elygate
-cp .env.example .env
-
-# 首次启动 Docker 前请改掉默认数据库密码
-sed -i 's/ELYGATE_DB_PASSWORD=elygate_change_me/ELYGATE_DB_PASSWORD=replace-with-a-strong-password/' .env
-```
-
-#### 2. 一键启动 (预编译镜像部署)
-
-得益于 GitHub Actions，您**无需在服务器编译**即可极速拉取并启动应用。
-
-**对于国内服务器（默认已开启南京大学 GHCR 镜像加速）：**
-```bash
-# 下载专为线上优化的轻量级编排文件
-curl -O https://raw.githubusercontent.com/zuohuadong/elygate/main/docker-compose.prod.yml
-
-# 一键启动（享受国内镜像高速拉取）
-docker compose -f docker-compose.prod.yml up -d
-```
-
-**对于海外服务器（需要换回官方源）：**
-```bash
-curl -O https://raw.githubusercontent.com/zuohuadong/elygate/main/docker-compose.prod.yml
-sed -i 's/ghcr.nju.edu.cn/ghcr.io/g' docker-compose.prod.yml
-docker compose -f docker-compose.prod.yml up -d
-```
-
-#### 3. 服务看板
-| 服务 | 访问地址 | 默认凭据 |
-| :--- | :--- | :--- |
-| **管理后台 (Web)** | [http://localhost:3001](http://localhost:3001) | `admin` / `admin123` |
-| **分发网关 (API)** | [http://localhost:3000](http://localhost:3000) | 使用后台生成的 sk- 密钥 |
-| **数据库 (DB)** | `localhost:5432` | `root` / `password` |
-
----
-
-### ⚡ 单文件预编译包部署 (极简无依赖)
-
-致敬 New-API，Elygate 在 Release 页面提供了包含了网关接口与 Svelte 后台的**跨平台单体二进制文件**。您不需要安装 Docker、Bun 或 Node.js 也能直接运行。
-
-1. **下载**: 访问 [Releases](../../releases) 页面，下载对应您的操作系统的文件。
-2. **配置**: 准备好 PostgreSQL 并同级目录下创建 `.env` 配置 `DATABASE_URL`。
-3. **运行**:
-   - **Linux / Mac**:
-     ```bash
-     chmod +x elygate-bun-linux-x64
-     ./elygate-bun-linux-x64
-     ```
-   - **Windows**:
-     直接双击运行下载好的 `.exe` 软件，或通过 CMD 执行：
-     ```cmd
-     elygate-bun-windows-x64.exe
-     ```
-
-版本发布已接入 Release Please 自动管理。后续提交请使用 `feat:`、`fix:`、`perf:`、`refactor:`、`docs:`、`chore:` 等 Conventional Commits；合并自动生成的 release PR 后会创建 GitHub Release，并触发二进制发布。
-
----
-
-### 🔧 性能优化
-
-Elygate 内置了针对 PostgreSQL 18.3 的性能优化配置：
-
-#### 快速优化
-```bash
-# 运行自动优化脚本
-chmod +x scripts/deploy-optimizations.sh
-./scripts/deploy-optimizations.sh
-```
-
-#### 核心优化项
-- ✅ **PostgreSQL 18.3 异步提交**: 写入性能提升 30-50%
-- ✅ **连接池优化**: 20个连接，优化生命周期管理
-- ✅ **性能索引**: 20+ 个索引优化查询性能
-- ✅ **精确响应缓存**: 相同非流式请求使用确定性哈希命中，避免相似请求误复用答案
-
-#### 性能提升
-| 指标 | 提升幅度 |
-|------|----------|
-| 数据库写入 | +30-50% |
-| 查询响应 | -20-40% |
-| 并发处理 | +50-100% |
-| 内存效率 | +20-30% |
-
-详见 [性能优化指南](./PERFORMANCE_OPTIMIZATION.md)。
-
----
-
-### 🚀 手动生产部署 (宿主机源代码运行)
-
-如果您希望在宿主机以最佳性能运行（非 Docker 环境）：
-
-**依赖要求：** Bun 1.3+。源码部署不需要单独安装 Node.js，构建和启动命令都由 Bun 执行；GitHub Actions 仍会固定使用 Node.js 24 作为 CI runner 环境。
-
-#### 一键启动
-```bash
-# 安装依赖
-bun install
-
-# 构建 Web 应用
-bun run build
-
-# 一键启动网关和管理后台
-bun run start
-```
-
-这将启动：
-- **网关 API** - 端口 3000
-- **Web 管理后台** - 端口 3001
-
-#### 访问地址
-| 服务 | 访问地址 | 默认凭据 |
-| :--- | :--- | :--- |
-| **管理后台** | [http://localhost:3001](http://localhost:3001) | `admin` / `admin123` |
-| **API 网关** | [http://localhost:3000](http://localhost:3000) | 使用后台生成的 sk- 密钥 |
-
----
-
-### 💻 手动安装 (开发模式)
-
-如果您希望在宿主机手动运行各项服务：
-
-**依赖要求：** Bun 1.3+、PostgreSQL 15+。使用 Bun 运行时不需要单独安装 Node.js。
-
-#### 一键开发启动
-```bash
-# 安装依赖
-bun install
-
-# 一键启动开发服务器
-bun run dev
-```
-
-这将启动：
-- **网关 API** - 端口 3000（支持热重载）
-- **Elygate Panel** - 端口 5173（支持热重载）
-- **Elygate Enterprise Console** - 端口 5175（支持热重载）
-
-#### 数据库准备
-1. 确保已安装 PostgreSQL 15+
-2. 执行 `packages/db/src/init.sql` 初始化表结构
-3. 在 `.env` 中正确配置 `DATABASE_URL`
-
-#### 企业层环境变量
+**Best for:** Language-agnostic integration, microservices, and production deployments
 
 ```bash
-ELYGATE_LAYER=enterprise
-ELYGATE_APP_INSTANCE_ID=agi_xxx
-ELYGATE_TENANT_ID=tenant_xxx
-ELYGATE_ORG_ID=org_xxx
-ELYGATE_PUBLIC_BASE_URL=https://gateway.example.com
-ELYGATE_ADMIN_BASE_URL=https://gateway.example.com/enterprise/
-SUPAUTH_ISSUER_URL=https://auth.example.com
-SUPAUTH_JWKS_URL=https://auth.example.com/.well-known/jwks.json
-SUPAUTH_AUDIENCE=http://localhost:3000
+# NPX - Get started in 30 seconds
+npx -y @maximhq/bifrost
+
+# Docker - Production ready
+docker run -p 8080:8080 -v $(pwd)/data:/app/data maximhq/bifrost
 ```
 
-生产环境必须配置 `SUPAUTH_JWKS_URL`。仅在非生产环境且 `ENTERPRISE_AUTH_MODE` 不是 `strict` 时，Elygate 才允许使用包含平台 claims 的未签名开发 JWT。
-企业层会通过 migration 创建 `enterprise_gateway_instances`、`enterprise_identity_policies`、`enterprise_budgets`、`enterprise_audit_events` 四张投影表，用于承接 SupaCloud App 生命周期、SupAuth 授权上下文、预算策略和审计事件。
+**Features:** Web UI, real-time monitoring, multi-provider management, zero-config startup
 
-可用真实 Postgres 验证企业迁移与 CRUD：
+**Learn More:** [Gateway Setup Guide](https://docs.getbifrost.ai/quickstart/gateway/setting-up)
+
+### 2. Go SDK
+
+**Best for:** Direct Go integration with maximum performance and control
 
 ```bash
-bun run smoke:enterprise:db
+go get github.com/maximhq/bifrost/core
 ```
 
-该命令会从项目根 `.env` 读取 `DATABASE_URL`，在 gateway 的企业组合层内执行 migration、实例安装投影、实例状态更新、策略创建、预算创建、到期预算周期重置、平台事件投影、审计查询和过滤导出。默认会清理 smoke 数据；如需保留可设置 `KEEP_ENTERPRISE_SMOKE_DATA=1`。
+**Features:** Native Go APIs, embedded deployment, custom middleware integration
 
----
+**Learn More:** [Go SDK Guide](https://docs.getbifrost.ai/quickstart/go-sdk/setting-up)
 
-### ⚡ 性能对比
+### 3. Drop-in Replacement
 
-选择 **Bun + Elysia.js** 是为了追求极致的吞吐量。虽然 Go (Gin) 已经非常高效，但 Elysia 利用 Bun 的原生异步 I/O 将 Web 性能提升到了新的高度。
+**Best for:** Migrating existing applications with zero code changes
 
-#### 🚀 框架绝对吞吐量对比 (reqs/s)
+```diff
+# OpenAI SDK
+- base_url = "https://api.openai.com"
++ base_url = "http://localhost:8080/openai"
 
-```text
-Elysia  (Bun)  ███████████████████████████████████ 2,454,631  (🥇 3.6倍于 Gin)
-Gin     (Go)   █████████                           676,019
-Spring  (Java) ███████                             506,087
-Fastify (JS)   ██████                              415,600
-Express (JS)   █                                   113,117    (慢 21 倍)
+# Anthropic SDK  
+- base_url = "https://api.anthropic.com"
++ base_url = "http://localhost:8080/anthropic"
+
+# Google GenAI SDK
+- api_endpoint = "https://generativelanguage.googleapis.com"
++ api_endpoint = "http://localhost:8080/genai"
 ```
 
----
-
-### 📂 项目目录结构 (Monorepo)
-
-```text
-elygate
-├── apps
-│   ├── gateway              # 基础网关 + 可选企业路由组合层
-│   ├── admin                # Elygate Panel 通用管理面板
-│   ├── portal               # 用户门户
-│   └── enterprise-console   # Elygate Enterprise 企业控制台
-├── packages
-│   ├── db                   # 数据库 Schema、初始化 SQL 及类型定义
-│   ├── enterprise-contracts # 稳定 claims、scope、事件、manifest
-│   ├── enterprise-authz     # SupAuth JWT/scope 验证工具
-│   └── enterprise-adapter   # SupaCloud 安装和事件投影工具
-├── Dockerfile.gateway
-├── Dockerfile.web
-├── Dockerfile.postgres
-└── docker-compose.yml
-```
-
-### 🧩 三层产品模型
-
-Elygate 保持三层 monorepo 隔离：
-
-- **Elygate Basic Gateway**：OpenAI-compatible proxy、provider adapter、路由、限流、计量、日志、缓存、Agent Memory。
-- **Elygate Panel**：通用管理面板，负责渠道、模型、API Key、用量、日志、系统设置，可用于单机、私有化和轻量团队。
-- **Elygate Enterprise**：基于 SupaCloud + SupAuth + svadmin，负责企业 IAM、App 生命周期、租户隔离、企业策略、审计和控制面操作。
-
-企业控制面 API 位于 `/api/enterprise/*`；`sk-*` 仍是 `/v1` 数据面请求凭证，不允许访问企业控制面。企业模式下，数据面会通过基础层的 runtime governance hook 接入企业守卫，在缓存和上游转发前读取实例、策略和预算投影执行拦截，懒执行到期预算周期重置，并在成功计费后把实际 quota cost 回写到命中的企业预算投影；基础 dispatcher 只依赖中立 hook，不直接依赖 SupaCloud/SupAuth 企业包。企业控制台是独立应用，生产构建后由 gateway 从 `/enterprise/` 提供静态页面。
-
-首批企业控制面资源：
-
-- `/api/enterprise/install`、`/api/enterprise/uninstall`、`/api/enterprise/events`：SupaCloud App 生命周期和平台事件投影。
-- `/api/enterprise/gateway-instances`：SupaCloud 安装投影、实例状态、域名与 entitlements 版本。
-- `/api/enterprise/provider-channels`、`/api/enterprise/model-routes`、`/api/enterprise/gateway-api-keys`、`/api/enterprise/request-logs`、`/api/enterprise/agent-memories`：企业治理视角下的网关资源只读视图。
-- `/api/enterprise/identity-and-policy`、`/api/enterprise/identity-policies` 与 `/api/enterprise/policy-evaluations`：SupAuth claims、角色、scope、企业策略和 deny-overrides 策略决策。
-- `/api/enterprise/usage-and-budget`、`/api/enterprise/usage-attribution`、`/api/enterprise/budgets` 与 `/api/enterprise/budget-evaluations`：identity-aware budget、7 日用量归因、预算执行状态和预算执行决策。
-- `/api/enterprise/audit-events` 与 `/api/enterprise/audit-events/export`：实例、平台事件、策略和预算变更审计，支持按 actor/action/resource/app instance/时间窗口过滤并导出 CSV。
-
-企业控制台支持实例状态更新、策略创建、策略评估、预算创建/启停、预算评估、网关资源治理查看、用量归因查看和审计查看。通用 `apps/admin` 不再承载企业 IAM、SupaCloud 生命周期或租户隔离页面。
+**Learn More:** [Integration Guides](https://docs.getbifrost.ai/integrations/what-is-an-integration)
 
 ---
 
-### 🛠️ 核心优势
+## Performance
 
-- **🛡️ Apache 2.0**: 协议友好，支持商业化二次开发。
-- **☁️ 极简无依赖**: 相比 New API 在高并发下必须依赖 Redis 进行限流和缓存，Elygate 实现了 **Redis-free（无 Redis 依赖）**。所有逻辑均由 Bun + PostgreSQL 承载，大幅简化了部署运维复杂度。
-- **🧭 New API 对齐**: 已补齐 Responses、Completions、Files 元数据、Batches 元数据、图片 edits/variations、渠道健康字段与令牌维度控制，并保持无 Redis 架构。
-- **🔐 安全 Cookie 会话**: 基于 HttpOnly Cookie 的服务端会话认证，支持多端登录、服务端注销和自动会话过期，有效防止 XSS 攻击。
+Bifrost adds virtually zero overhead to your AI requests. In sustained 5,000 RPS benchmarks, the gateway added only **11 µs** of overhead per request.
 
----
+| Metric | t3.medium | t3.xlarge | Improvement |
+|--------|-----------|-----------|-------------|
+| Added latency (Bifrost overhead) | 59 µs | **11 µs** | **-81%** |
+| Success rate @ 5k RPS | 100% | 100% | No failed requests |
+| Avg. queue wait time | 47 µs | **1.67 µs** | **-96%** |
+| Avg. request latency (incl. provider) | 2.12 s | **1.61 s** | **-24%** |
 
-### 📊 核心对比：Elygate vs. New API
+**Key Performance Highlights:**
 
-| 特性 | Elygate (Bun + PG) | New API (Go + Redis) | 优势说明 |
-| :--- | :--- | :--- | :--- |
-| **核心引擎** | Bun + ElysiaJS | Go + Gin | 🚀 3.6倍 绝对吞吐量 |
-| **外部依赖** | **仅需 PostgreSQL** | MySQL + **Redis** | 🔋 运维更简单 (无需Redis) |
-| **计费性能** | O(1) 原子批量更新 | 连续 SQL 写入 | 💾 彻底解决数据库锁竞争 |
-| **精确响应缓存** | 原生内置 (确定性哈希) | 推荐 Redis 缓存 | ⚡ 重复请求降本 |
-| **认证安全** | Cookie 会话 (HttpOnly) | localStorage Token | 🔐 防止 XSS 攻击 |
-| **前端架构** | Svelte 5 + Tailwind 4 | React / Vue | 💎 极致流畅的交互体验 |
-| **API 兼容** | OpenAI Responses/Chat/Completions/Files/Batches + Anthropic + Gemini + 阿里 + 百度 | OpenAI + Anthropic | 🌐 原生多协议支持 |
-| **管理能力** | 渠道健康、请求覆盖、令牌模型/IP/RPM/过期控制 | 成熟运营后台 | 🧩 对齐 New API 常用运营能力 |
-| **开源协议** | Apache 2.0 | GPL-3.0 | 🛡️ 商业二次开发更友好 |
+- **Perfect Success Rate** - 100% request success rate even at 5k RPS
+- **Minimal Overhead** - Less than 15 µs additional latency per request
+- **Efficient Queuing** - Sub-microsecond average wait times
+- **Fast Key Selection** - ~10 ns to pick weighted API keys
+
+**Complete Benchmarks:** [Performance Analysis](https://docs.getbifrost.ai/benchmarking/getting-started)
 
 ---
 
-### 🧠 Agent Memory
-Agent Memory 默认关闭，启用后会按用户/令牌隔离长期记忆，写入通过 pg-boss 异步执行，管理员可在后台查看、软删除、清理过期或永久清空已删除记录。
+## Documentation
 
-```sql
-INSERT INTO options (key, value) VALUES
-  ('MemoryEnabled', 'true'),
-  ('MemoryReadDefault', 'false'),
-  ('MemoryWriteDefault', 'false'),
-  ('MemoryMaxInjectedItems', '6'),
-  ('MemoryMinWriteChars', '24'),
-  ('MemoryScope', 'user')
-ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
-```
+**Complete Documentation:** [https://docs.getbifrost.ai](https://docs.getbifrost.ai)
 
-单次请求也可以使用 `memory` 字段显式控制：`off`、`read`、`write`、`read_write`。内置 pgvector 表固定使用 1024 维向量，默认选择 bge-m3 兼容 embedding 渠道；显式配置其他维度模型时会降级为纯文本检索。TencentDB Agent Memory、Mem0、Zep、Qdrant 等外部后端保留为未来 provider 插件，不作为默认依赖。
+### Quick Start
 
-## 🛡️ License & Acknowledgements
-Deep gratitude to the [New-API] community for their pioneering exploration.
-项目基于 Apache 2.0 协议开源，部分设计思路致敬 New-API 及其开源生态。
+- [Gateway Setup](https://docs.getbifrost.ai/quickstart/gateway/setting-up) - HTTP API deployment in 30 seconds
+- [Go SDK Setup](https://docs.getbifrost.ai/quickstart/go-sdk/setting-up) - Direct Go integration
+- [Provider Configuration](https://docs.getbifrost.ai/quickstart/gateway/provider-configuration) - Multi-provider setup
+
+### Features
+
+- [Multi-Provider Support](https://docs.getbifrost.ai/providers/supported-providers/overview) - Single API for all providers
+- [MCP Integration](https://docs.getbifrost.ai/mcp/overview) - External tool calling
+- [Semantic Caching](https://docs.getbifrost.ai/features/semantic-caching) - Intelligent response caching
+- [Fallbacks & Load Balancing](https://docs.getbifrost.ai/features/retries-and-fallbacks) - Reliability features
+- [Budget Management](https://docs.getbifrost.ai/features/governance/budget-and-limits) - Cost control and governance
+
+### Integrations
+
+- [OpenAI SDK](https://docs.getbifrost.ai/integrations/openai-sdk/overview) - Drop-in OpenAI replacement
+- [Anthropic SDK](https://docs.getbifrost.ai/integrations/anthropic-sdk/overview) - Drop-in Anthropic replacement
+- [AWS Bedrock SDK](https://docs.getbifrost.ai/integrations/bedrock-sdk/overview) - AWS Bedrock integration
+- [Google GenAI SDK](https://docs.getbifrost.ai/integrations/genai-sdk/overview) - Drop-in GenAI replacement
+- [LiteLLM SDK](https://docs.getbifrost.ai/integrations/litellm-sdk) - LiteLLM integration
+- [Langchain SDK](https://docs.getbifrost.ai/integrations/langchain-sdk) - Langchain integration
+
+### Enterprise
+
+- [Custom Plugins](https://docs.getbifrost.ai/enterprise/custom-plugins) - Extend functionality
+- [Clustering](https://docs.getbifrost.ai/enterprise/clustering) - Multi-node deployment
+- [Secrets Management](https://docs.getbifrost.ai/deployment-guides/config-json#environment-variable-references) - Secure key management
+- [Production Deployment](https://docs.getbifrost.ai/deployment-guides/k8s) - Scaling and monitoring
+
+---
+
+## Need Help?
+
+**[Join our Discord](https://discord.gg/exN5KAydbU)** for community support and discussions.
+
+Get help with:
+
+- Quick setup assistance and troubleshooting
+- Best practices and configuration tips  
+- Community discussions and support
+- Real-time help with integrations
+
+---
+
+## Contributing
+
+We welcome contributions of all kinds! See our [Contributing Guide](https://docs.getbifrost.ai/contributing/setting-up-repo) for:
+
+- Setting up the development environment
+- Code conventions and best practices
+- How to submit pull requests
+- Building and testing locally
+
+For development requirements and build instructions, see our [Development Setup Guide](https://docs.getbifrost.ai/contributing/setting-up-repo#development-environment-setup).
+
+---
+
+## License
+
+This project is licensed under the Apache 2.0 License - see the [LICENSE](LICENSE) file for details.
+
+Built with ❤️ by [Maxim](https://github.com/maximhq)
