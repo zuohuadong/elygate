@@ -526,7 +526,7 @@ test.describe('Config Settings', () => {
     })
 
     test('should display pricing config settings', async ({ configSettingsPage }) => {
-      await expect(configSettingsPage.page.getByRole('heading', { name: /Pricing/i })).toBeVisible()
+      await expect(configSettingsPage.page.getByRole('heading', { name: 'Model Settings', exact: true })).toBeVisible()
     })
   })
 

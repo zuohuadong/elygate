@@ -1,5 +1,5 @@
 import { useDebouncedValue } from "@/hooks/useDebounce";
-import { getErrorMessage, useGetOAuth2GrantsQuery, useRevokeOAuth2GrantMutation } from "@/lib/store";
+import { getErrorMessage, useGetCoreConfigQuery, useGetOAuth2GrantsQuery, useRevokeOAuth2GrantMutation } from "@/lib/store";
 import type { OAuth2GrantRow } from "@/lib/store/apis/oauth2SessionsApi";
 import { Loader2 } from "lucide-react";
 import { parseAsArrayOf, parseAsInteger, parseAsString, useQueryStates } from "nuqs";
@@ -10,6 +10,7 @@ import GrantsTable from "./views/grantsTable";
 import RevokeGrantDialog from "./views/revokeGrantDialog";
 
 const PAGE_SIZE = 50;
+const DEFAULT_ACCESS_TOKEN_TTL_SECONDS = 600;
 
 export default function OAuthGrantsPage() {
 	const [urlState, setUrlState] = useQueryStates(
@@ -29,6 +30,7 @@ export default function OAuthGrantsPage() {
 		limit: PAGE_SIZE,
 		offset: urlState.offset,
 	});
+	const { data: coreConfig } = useGetCoreConfigQuery({ fromDB: true });
 	const [revokeGrant, { isLoading: revoking }] = useRevokeOAuth2GrantMutation();
 
 	const [pendingDelete, setPendingDelete] = useState<OAuth2GrantRow | null>(null);
@@ -37,6 +39,11 @@ export default function OAuthGrantsPage() {
 	const page = data?.sessions ?? [];
 	const totalCount = data?.total_count ?? 0;
 	const hasActiveFilters = !!urlState.q || urlState.bf_mode.length > 0;
+	const configuredAccessTokenTtl = coreConfig?.client_config.oauth2_server_config?.access_token_ttl;
+	const accessTokenTtlSeconds =
+		typeof configuredAccessTokenTtl === "number" && Number.isFinite(configuredAccessTokenTtl) && configuredAccessTokenTtl > 0
+			? configuredAccessTokenTtl
+			: DEFAULT_ACCESS_TOKEN_TTL_SECONDS;
 
 	// Snap the offset back into range when the total shrinks past the current
 	// page (e.g. a revoke removes the last row on the last page). Without this
@@ -109,6 +116,7 @@ export default function OAuthGrantsPage() {
 			) : (
 				<GrantsTable
 					rows={page}
+					accessTokenTtlSeconds={accessTokenTtlSeconds}
 					totalCount={totalCount}
 					offset={urlState.offset}
 					pageSize={PAGE_SIZE}

@@ -27,6 +27,7 @@ import GrantActions from "./grantActions";
 
 interface GrantsTableProps {
 	rows: OAuth2GrantRow[];
+	accessTokenTtlSeconds: number;
 	totalCount: number;
 	offset: number;
 	pageSize: number;
@@ -40,6 +41,7 @@ interface GrantsTableProps {
 
 export default function GrantsTable({
 	rows,
+	accessTokenTtlSeconds,
 	totalCount,
 	offset,
 	pageSize,
@@ -102,7 +104,7 @@ export default function GrantsTable({
 										<BindingCell row={row} />
 									</TableCell>
 									<TableCell className="text-muted-foreground text-sm">
-										<AccessTokenExpiry row={row} />
+										<AccessTokenExpiry row={row} accessTokenTtlSeconds={accessTokenTtlSeconds} />
 									</TableCell>
 									<TableCell className="text-muted-foreground text-sm">
 										{formatRelativePast(row.created_at)}
@@ -194,16 +196,14 @@ function BindingCell({ row }: { row: OAuth2GrantRow }) {
 	);
 }
 
-function AccessTokenExpiry({ row }: { row: OAuth2GrantRow }) {
-	// Access token TTL is 10 min (600s default). Access tokens are stateless JWTs
-	// not stored server-side, so we approximate expiry from the grant's last
-	// activity (last_used_at, falling back to created_at). Anchoring to created_at
-	// alone would read as expired for any grant that has silently refreshed.
+function AccessTokenExpiry({ row, accessTokenTtlSeconds }: { row: OAuth2GrantRow; accessTokenTtlSeconds: number }) {
+	// Access tokens are stateless JWTs, so approximate expiry from the grant's
+	// latest activity using the same configured TTL as the issuing server.
 	const baseMs = new Date(row.last_used_at ?? row.created_at).getTime();
 	if (!Number.isFinite(baseMs)) {
 		return <span className="text-muted-foreground">Unknown</span>;
 	}
-	const expiryMs = baseMs + 600_000; // 10 min default
+	const expiryMs = baseMs + accessTokenTtlSeconds * 1_000;
 	const diffMs = expiryMs - Date.now();
 	if (diffMs < 0) {
 		return <span className="text-muted-foreground">Refreshes on next use</span>;
