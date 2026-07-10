@@ -142,6 +142,7 @@ export const baseApi = createApi({
 		"Providers",
 		"MCPClients",
 		"Config",
+		"VectorStoreConfig",
 		"CacheConfig",
 		"VirtualKeys",
 		"Teams",

@@ -2,19 +2,26 @@
  * Single global setup for all E2E tests.
  * 1. Builds test plugin (plugins) and copies to /tmp.
  * 2. Builds and starts MCP test servers (HTTP/SSE on 3001, STDIO test-tools-server).
- * 3. Ensures TestClient001 MCP client exists and is connected (create or reconnect as needed).
+ * 3. Creates a run-scoped TestClient001_* MCP client and waits for it to connect.
  * 4. Sends a POST /v1/responses request to validate the proxy with MCP.
- * Returns a teardown function that stops MCP servers.
+ * Returns a teardown function that deletes only this run's recorded client ID and stops MCP servers.
  */
-import { execFileSync, execSync, spawn, type ChildProcess } from 'child_process'
+import { execFileSync, spawn, type ChildProcess } from 'child_process'
+import { randomUUID } from 'crypto'
 import { existsSync } from 'fs'
 import * as http from 'http'
+import * as net from 'net'
 import * as os from 'os'
 import { join, resolve } from 'path'
 import { setTimeout } from 'timers/promises'
 
-const TEST_MCP_CLIENT_NAME = 'TestClient001'
+const TEST_MCP_CLIENT_PREFIX = 'TestClient001'
+const TEST_MCP_CLIENT_RUN_ID = `${Date.now()}_${process.pid}_${randomUUID().replace(/-/g, '')}`
+const TEST_MCP_CLIENT_NAME = `${TEST_MCP_CLIENT_PREFIX}_${TEST_MCP_CLIENT_RUN_ID}`
 const BIFROST_BASE_URL = process.env.BIFROST_BASE_URL ?? 'http://localhost:8080'
+const MOCK_PROVIDER_BASE_URL = process.env.BIFROST_E2E_MOCK_PROVIDER_BASE_URL ?? 'http://127.0.0.1:65535'
+const MOCK_PROVIDER_KEY = process.env.BIFROST_E2E_MOCK_PROVIDER_KEY ?? 'mock-key'
+const TEST_ANTHROPIC_KEY_NAME = 'bifrost-e2e-anthropic'
 
 const REPO_ROOT = resolve(__dirname, '../..')
 const TEST_PLUGIN_PATH = join(REPO_ROOT, 'tmp', 'bifrost-test-plugin.so')
@@ -23,8 +30,19 @@ const MCP_SERVERS: ChildProcess[] = []
 const isWindows = os.platform() === 'win32'
 const npmCommand = isWindows ? 'npm.cmd' : 'npm'
 const goCommand = isWindows ? 'go.exe' : 'go'
-const   httpServerBinaryName = isWindows ? 'http-server.exe' : 'http-server'
+const makeCommand = isWindows ? 'make.exe' : 'make'
+const httpServerBinaryName = isWindows ? 'http-server.exe' : 'http-server'
 const httpServerExec = isWindows ? 'http-server.exe' : './http-server'
+
+interface BifrostFixtureState {
+  mcpClientId?: string
+  anthropicProviderCreated: boolean
+  anthropicKeyId?: string
+}
+
+function createBifrostFixtureState(): BifrostFixtureState {
+  return { anthropicProviderCreated: false }
+}
 
 function runCommand(command: string, args: string[], options: { cwd?: string; env?: NodeJS.ProcessEnv } = {}) {
   execFileSync(command, args, {
@@ -72,6 +90,21 @@ async function checkServerReady(port: number, maxAttempts = 15): Promise<boolean
     await setTimeout(1000)
   }
   return false
+}
+
+async function isPortListening(port: number): Promise<boolean> {
+  return new Promise((resolvePort) => {
+    const socket = net.createConnection({ host: '127.0.0.1', port })
+    const finish = (listening: boolean) => {
+      socket.removeAllListeners()
+      socket.destroy()
+      resolvePort(listening)
+    }
+    socket.setTimeout(500)
+    socket.once('connect', () => finish(true))
+    socket.once('timeout', () => finish(false))
+    socket.once('error', () => finish(false))
+  })
 }
 
 interface HttpResult {
@@ -138,95 +171,215 @@ interface MCPClientItem {
   state: string
 }
 
-async function ensureTestClient001AndSendResponses(baseUrl: string): Promise<void> {
-  const clientsRes = await httpRequest(baseUrl, 'GET', '/api/mcp/clients')
+async function getMCPClientById(baseUrl: string, clientId: string): Promise<MCPClientItem | undefined> {
+  const clientsRes = await httpRequest(
+    baseUrl,
+    'GET',
+    `/api/mcp/clients?server=${encodeURIComponent(clientId)}&limit=1`
+  )
   if (clientsRes.statusCode !== 200) {
     throw new Error(`GET /api/mcp/clients failed: ${clientsRes.statusCode} ${clientsRes.body}`)
   }
-  let clients: MCPClientItem[]
   try {
     const parsed = JSON.parse(clientsRes.body) as { clients?: MCPClientItem[] } | MCPClientItem[]
-    clients = Array.isArray(parsed) ? parsed : (parsed.clients ?? [])
+    const clients = Array.isArray(parsed) ? parsed : (parsed.clients ?? [])
+    return clients.find((client) => client.config?.client_id === clientId)
   } catch {
     throw new Error('Invalid JSON from GET /api/mcp/clients')
   }
-  const existing = clients.find((c) => c.config?.name === TEST_MCP_CLIENT_NAME)
-  let clientId: string
+}
 
-  if (!existing) {
-    console.log(`Creating MCP client "${TEST_MCP_CLIENT_NAME}" via POST /api/mcp/client...`)
-    const createBody = JSON.stringify({
-      name: TEST_MCP_CLIENT_NAME,
-      is_code_mode_client: false,
-      is_ping_available: false,
-      connection_type: 'http',
-      connection_string: { value: 'http://localhost:3001/', env_var: '', from_env: false },
-      auth_type: 'none',
-      tools_to_execute: ['*'],
-      tools_to_auto_execute: ['*'],
+async function deleteMCPClient(baseUrl: string, clientId: string): Promise<void> {
+  const deleteRes = await httpRequest(baseUrl, 'DELETE', `/api/mcp/client/${encodeURIComponent(clientId)}`)
+  if (deleteRes.statusCode !== 404 && (deleteRes.statusCode < 200 || deleteRes.statusCode >= 300)) {
+    throw new Error(`DELETE /api/mcp/client/${clientId} failed: ${deleteRes.statusCode} ${deleteRes.body}`)
+  }
+}
+
+async function createRunScopedMCPClient(baseUrl: string, state: BifrostFixtureState): Promise<void> {
+  const requestedClientId = randomUUID()
+  console.log(`Creating MCP client "${TEST_MCP_CLIENT_NAME}" via POST /api/mcp/client...`)
+  const createBody = JSON.stringify({
+    client_id: requestedClientId,
+    name: TEST_MCP_CLIENT_NAME,
+    is_code_mode_client: false,
+    is_ping_available: false,
+    connection_type: 'http',
+    connection_string: { value: 'http://localhost:3001/', env_var: '', from_env: false },
+    auth_type: 'none',
+    tools_to_execute: ['*'],
+    tools_to_auto_execute: ['*'],
+  })
+  const createRes = await httpRequest(baseUrl, 'POST', '/api/mcp/client', { body: createBody })
+  if (createRes.statusCode < 200 || createRes.statusCode >= 300) {
+    throw new Error(`POST /api/mcp/client failed: ${createRes.statusCode} ${createRes.body}`)
+  }
+  // The POST supplied this run-scoped ID and succeeded, so teardown owns this
+  // exact client even if the subsequent connection-state polling fails.
+  state.mcpClientId = requestedClientId
+  console.log(`✓ Recorded POST-created run-scoped MCP client ID ${state.mcpClientId}`)
+
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const client = await getMCPClientById(baseUrl, requestedClientId)
+    if (client) {
+      if (client.config.name !== TEST_MCP_CLIENT_NAME) {
+        throw new Error(
+          `MCP client ID ${requestedClientId} belongs to unexpected client "${client.config.name}" instead of "${TEST_MCP_CLIENT_NAME}"`
+        )
+      }
+    }
+    if (client?.state === 'connected') {
+      console.log(`✓ MCP client "${TEST_MCP_CLIENT_NAME}" is connected`)
+      return
+    }
+    await setTimeout(250)
+  }
+
+  throw new Error(`MCP client "${TEST_MCP_CLIENT_NAME}" did not reach connected state after create`)
+}
+
+interface ProviderItem {
+  name: string
+}
+
+interface ProviderKeyItem {
+  id: string
+  name: string
+  enabled?: boolean
+}
+
+async function ensureMockAnthropicProviderAndKey(baseUrl: string, state: BifrostFixtureState): Promise<void> {
+  const providersRes = await httpRequest(baseUrl, 'GET', '/api/providers')
+  if (providersRes.statusCode !== 200) {
+    throw new Error(`GET /api/providers failed: ${providersRes.statusCode} ${providersRes.body}`)
+  }
+  const parsedProviders = JSON.parse(providersRes.body) as { providers?: ProviderItem[] }
+  const hasAnthropic = (parsedProviders.providers ?? []).some((provider) => provider.name === 'anthropic')
+
+  if (!hasAnthropic) {
+    const createProviderRes = await httpRequest(baseUrl, 'POST', '/api/providers', {
+      body: JSON.stringify({
+        provider: 'anthropic',
+        network_config: {
+          base_url: MOCK_PROVIDER_BASE_URL,
+          default_request_timeout_in_seconds: 2,
+          max_retries: 0,
+          retry_backoff_initial: 0,
+          retry_backoff_max: 0,
+          allow_private_network: true,
+        },
+      }),
     })
-    const createRes = await httpRequest(baseUrl, 'POST', '/api/mcp/client', { body: createBody })
-    if (createRes.statusCode < 200 || createRes.statusCode >= 300) {
-      throw new Error(`POST /api/mcp/client failed: ${createRes.statusCode} ${createRes.body}`)
+    if (createProviderRes.statusCode < 200 || createProviderRes.statusCode >= 300) {
+      throw new Error(`POST /api/providers failed: ${createProviderRes.statusCode} ${createProviderRes.body}`)
     }
+    state.anthropicProviderCreated = true
+    console.log('✓ Created mock Anthropic provider for serial E2E tests')
   }
 
-  const listResAfter = await httpRequest(baseUrl, 'GET', '/api/mcp/clients')
-  if (listResAfter.statusCode !== 200) {
-    throw new Error(`GET /api/mcp/clients failed after create: ${listResAfter.statusCode} ${listResAfter.body}`)
+  const keysRes = await httpRequest(baseUrl, 'GET', '/api/providers/anthropic/keys')
+  if (keysRes.statusCode !== 200) {
+    throw new Error(`GET /api/providers/anthropic/keys failed: ${keysRes.statusCode} ${keysRes.body}`)
   }
-  const parsedAfter = JSON.parse(listResAfter.body) as { clients?: MCPClientItem[] } | MCPClientItem[]
-  const listAfter = Array.isArray(parsedAfter) ? parsedAfter : (parsedAfter.clients ?? [])
-  const clientAfter = listAfter.find((c) => c.config?.name === TEST_MCP_CLIENT_NAME)
-  if (!clientAfter) {
-    throw new Error(`MCP client "${TEST_MCP_CLIENT_NAME}" not found after create.`)
-  }
-  clientId = clientAfter.config.client_id
-  if (clientAfter.state !== 'connected') {
-    console.log(`MCP client "${TEST_MCP_CLIENT_NAME}" not connected; reloading via POST /api/mcp/client/${clientId}/reconnect...`)
-    const reconnectRes = await httpRequest(baseUrl, 'POST', `/api/mcp/client/${encodeURIComponent(clientId)}/reconnect`)
-    if (reconnectRes.statusCode < 200 || reconnectRes.statusCode >= 300) {
-      throw new Error(
-        `POST /api/mcp/client/.../reconnect failed: ${reconnectRes.statusCode} ${reconnectRes.body}. Ensure MCP server is running and reload Bifrost if needed.`
-      )
-    }
-  }
+  const parsedKeys = JSON.parse(keysRes.body) as { keys?: ProviderKeyItem[] }
+  if ((parsedKeys.keys ?? []).some((key) => key.enabled !== false)) return
 
-  const listRes2 = await httpRequest(baseUrl, 'GET', '/api/mcp/clients')
-  if (listRes2.statusCode !== 200) {
-    throw new Error(`GET /api/mcp/clients failed after reconnect: ${listRes2.statusCode} ${listRes2.body}`)
+  const createKeyRes = await httpRequest(baseUrl, 'POST', '/api/providers/anthropic/keys', {
+    body: JSON.stringify({
+      name: TEST_ANTHROPIC_KEY_NAME,
+      value: { value: MOCK_PROVIDER_KEY, type: 'plain_text' },
+      models: ['*'],
+      blacklisted_models: [],
+      weight: 1,
+      enabled: true,
+      use_for_batch_api: false,
+    }),
+  })
+  if (createKeyRes.statusCode < 200 || createKeyRes.statusCode >= 300) {
+    throw new Error(`POST /api/providers/anthropic/keys failed: ${createKeyRes.statusCode} ${createKeyRes.body}`)
   }
-  const parsed2 = JSON.parse(listRes2.body) as { clients?: MCPClientItem[] } | MCPClientItem[]
-  const list2 = (Array.isArray(parsed2) ? parsed2 : (parsed2.clients ?? [])).filter((c) => c.config?.name === TEST_MCP_CLIENT_NAME)
-  const client = list2[0]
-  if (!client || client.state !== 'connected') {
-    throw new Error(
-      `MCP client "${TEST_MCP_CLIENT_NAME}" is not connected after create/reconnect. Reload the MCP server and ensure it is running, then re-run global setup.`
-    )
+  const createdKey = JSON.parse(createKeyRes.body) as ProviderKeyItem
+  if (!createdKey.id) {
+    throw new Error('POST /api/providers/anthropic/keys returned no key id')
   }
-  console.log(`✓ MCP client "${TEST_MCP_CLIENT_NAME}" is connected`)  
+  state.anthropicKeyId = createdKey.id
+  console.log('✓ Created mock Anthropic provider key for serial E2E tests')
 }
 
 async function runPluginSetup(): Promise<void> {
   console.log('Setting up test plugin for E2E tests...')
-  if (existsSync(TEST_PLUGIN_PATH)) {
-    console.log(`✓ Test plugin already exists at ${TEST_PLUGIN_PATH}`)
+  console.log('Rebuilding test plugin with the gateway-compatible E2E build flags...')
+  runCommand(makeCommand, ['build-test-plugin'], { cwd: REPO_ROOT })
+  if (!existsSync(TEST_PLUGIN_PATH)) {
+    throw new Error(`Plugin build reported success but file not found at ${TEST_PLUGIN_PATH}`)
+  }
+  console.log(`✓ Test plugin ready at ${TEST_PLUGIN_PATH}`)
+}
+
+async function waitForPort(port: number, maxAttempts = 20): Promise<boolean> {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (await isPortListening(port)) return true
+    await setTimeout(250)
+  }
+  return false
+}
+
+interface TestServerOptions {
+  label: string
+  command: string
+  cwd: string
+  port: number
+  ready: () => Promise<boolean>
+}
+
+async function startOrReuseTestServer(options: TestServerOptions): Promise<void> {
+  if (await isPortListening(options.port)) {
+    if (!(await options.ready())) {
+      throw new Error(`Port ${options.port} is already in use by a service that is not the expected ${options.label}`)
+    }
+    console.log(`✓ Reusing ${options.label} already listening on port ${options.port}`)
     return
   }
-  try {
-    console.log('Running make build-test-plugin from repo root...')
-    execSync('make build-test-plugin', { cwd: REPO_ROOT, stdio: 'inherit' })
-    if (existsSync(TEST_PLUGIN_PATH)) {
-      console.log(`✓ Test plugin ready at ${TEST_PLUGIN_PATH}`)
-    } else {
-      throw new Error(`Plugin build reported success but file not found at ${TEST_PLUGIN_PATH}`)
+
+  console.log(`Starting ${options.label} on port ${options.port}...`)
+  const server = spawn(options.command, [], {
+    cwd: options.cwd,
+    detached: true,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  let serverOutput = ''
+  let spawnError: Error | undefined
+  server.stdout?.on('data', (data) => {
+    const output = data.toString()
+    serverOutput += output
+    console.log(`[${options.label}] ${output.trim()}`)
+  })
+  server.stderr?.on('data', (data) => {
+    const output = data.toString()
+    serverOutput += output
+    console.error(`[${options.label} Error] ${output.trim()}`)
+  })
+  server.once('error', (error) => {
+    spawnError = error
+  })
+
+  const ready = await options.ready()
+  const exited = server.exitCode !== null || server.signalCode !== null
+  if (!ready || exited || spawnError || !server.pid) {
+    if (server.pid && !exited) {
+      try {
+        process.kill(-server.pid, 'SIGTERM')
+      } catch {
+        server.kill('SIGTERM')
+      }
     }
-  } catch (error: unknown) {
-    const errorMsg = error instanceof Error ? error.message : String(error)
-    console.error(`\n⚠️  Failed to build test plugin: ${errorMsg}`)
-    console.error('\nBuild manually from repo root: make build-test-plugin\n')
-    // Don't throw - allow tests to run and fail gracefully if plugin is missing
+    const reason = spawnError?.message ?? (exited ? `process exited with code ${server.exitCode}` : 'readiness check failed')
+    throw new Error(`${options.label} failed to start: ${reason}. Output: ${serverOutput || 'No output captured'}`)
   }
+
+  server.unref()
+  MCP_SERVERS.push(server)
+  console.log(`✓ ${options.label} is ready on port ${options.port} (PID: ${server.pid})`)
 }
 
 async function runMCPSetup(): Promise<void> {
@@ -245,65 +398,16 @@ async function runMCPSetup(): Promise<void> {
     console.log('✓ HTTP/SSE server binary already exists')
   }
 
-  console.log('Starting HTTP/SSE server on port 3001...')
   if (!existsSync(httpServerBinary)) {
     throw new Error(`HTTP server binary not found at ${httpServerBinary}`)
   }
-
-  const httpServer = spawn(httpServerExec, [], {
+  await startOrReuseTestServer({
+    label: 'HTTP/SSE server',
+    command: httpServerExec,
     cwd: httpServerDir,
-    detached: true,
-    stdio: ['ignore', 'pipe', 'pipe'],
+    port: 3001,
+    ready: () => checkServerReady(3001, 20),
   })
-
-  let serverOutput = ''
-  httpServer.stdout?.on('data', (data) => {
-    const output = data.toString()
-    serverOutput += output
-    console.log(`[HTTP Server] ${output.trim()}`)
-  })
-  httpServer.stderr?.on('data', (data) => {
-    const output = data.toString()
-    serverOutput += output
-    console.error(`[HTTP Server Error] ${output.trim()}`)
-  })
-  httpServer.on('exit', (code, signal) => {
-    if (code !== null && code !== 0) {
-      console.error(`HTTP server exited with code ${code}, signal ${signal}`)
-      console.error(`Server output: ${serverOutput}`)
-    }
-  })
-  httpServer.on('error', (err) => {
-    console.error(`Failed to spawn HTTP server: ${err.message}`)
-  })
-
-  if (!httpServer.pid) {
-    throw new Error('Failed to start HTTP server - no PID assigned')
-  }
-  console.log(`HTTP server started with PID: ${httpServer.pid}`)
-  httpServer.unref()
-  MCP_SERVERS.push(httpServer)
-
-  await setTimeout(2000)
-  console.log('Waiting for HTTP/SSE server to be ready...')
-  const isReady = await checkServerReady(3001, 20)
-  if (!isReady) {
-    if (httpServer.pid) {
-      try {
-        process.kill(httpServer.pid, 'SIGTERM')
-      } catch (e) {
-        console.error(`Failed to kill server: ${e}`)
-      }
-    }
-    throw new Error(`HTTP server failed to start on port 3001 after 20 attempts. Server output: ${serverOutput || 'No output captured'}`)
-  }
-
-  await setTimeout(1000)
-  const stillReady = await checkServerReady(3001, 2)
-  if (!stillReady) {
-    throw new Error('HTTP server started but then stopped immediately')
-  }
-  console.log('✓ HTTP/SSE server is ready on http://localhost:3001/')
 
   const stdioServerDir = join(REPO_ROOT, 'examples', 'mcps', 'test-tools-server')
   const stdioServerDist = join(stdioServerDir, 'dist', 'index.js')
@@ -332,20 +436,13 @@ async function runMCPSetup(): Promise<void> {
       console.log('✓ auth-demo-server binary already exists')
     }
 
-    console.log('Starting auth-demo-server on port 3002...')
-    const authServer = spawn(authServerExec, [], {
+    await startOrReuseTestServer({
+      label: 'auth-demo-server',
+      command: authServerExec,
       cwd: authServerDir,
-      detached: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      port: 3002,
+      ready: () => waitForPort(3002),
     })
-    authServer.stdout?.on('data', (data) => console.log(`[Auth Server] ${data.toString().trim()}`))
-    authServer.stderr?.on('data', (data) => console.error(`[Auth Server Error] ${data.toString().trim()}`))
-    if (authServer.pid) {
-      authServer.unref()
-      MCP_SERVERS.push(authServer)
-      await setTimeout(1000)
-      console.log('✓ auth-demo-server started on http://localhost:3002/')
-    }
   } catch (err) {
     console.warn(`⚠️  Failed to start auth-demo-server (header auth tests may skip): ${(err as Error).message}`)
   }
@@ -367,20 +464,13 @@ async function runMCPSetup(): Promise<void> {
       console.log('✓ oauth-demo-server binary already exists')
     }
 
-    console.log('Starting oauth-demo-server on port 3003...')
-    const oauthServer = spawn(oauthServerExec, [], {
+    await startOrReuseTestServer({
+      label: 'oauth-demo-server',
+      command: oauthServerExec,
       cwd: oauthServerDir,
-      detached: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      port: 3003,
+      ready: () => waitForPort(3003),
     })
-    oauthServer.stdout?.on('data', (data) => console.log(`[OAuth Server] ${data.toString().trim()}`))
-    oauthServer.stderr?.on('data', (data) => console.error(`[OAuth Server Error] ${data.toString().trim()}`))
-    if (oauthServer.pid) {
-      oauthServer.unref()
-      MCP_SERVERS.push(oauthServer)
-      await setTimeout(1000)
-      console.log('✓ oauth-demo-server started on http://localhost:3003/')
-    }
   } catch (err) {
     console.warn(`⚠️  Failed to start oauth-demo-server (OAuth tests may fail): ${(err as Error).message}`)
   }
@@ -435,7 +525,7 @@ async function seedLLMLogs(baseUrl: string, count = 5): Promise<void> {
   }
 }
 
-async function runBifrostMCPAndResponsesSetup(): Promise<void> {
+async function runBifrostMCPAndResponsesSetup(state: BifrostFixtureState): Promise<void> {
   if (!process.env.BIFROST_BASE_URL) {
     console.log('Skipping Bifrost MCP client and /v1/responses (BIFROST_BASE_URL not set)')
     return
@@ -443,8 +533,49 @@ async function runBifrostMCPAndResponsesSetup(): Promise<void> {
   console.log(`Waiting for Bifrost API at ${BIFROST_BASE_URL}...`)
   await waitForBifrostAPI(BIFROST_BASE_URL)
   console.log(`✓ Bifrost API ready`)
-  await ensureTestClient001AndSendResponses(BIFROST_BASE_URL)
+  await ensureMockAnthropicProviderAndKey(BIFROST_BASE_URL, state)
+  await createRunScopedMCPClient(BIFROST_BASE_URL, state)
   await seedLLMLogs(BIFROST_BASE_URL, 30)
+}
+
+async function runBifrostTeardown(state: BifrostFixtureState): Promise<void> {
+  if (!process.env.BIFROST_BASE_URL) return
+
+  const cleanupErrors: Error[] = []
+  try {
+    if (state.mcpClientId) {
+      await deleteMCPClient(BIFROST_BASE_URL, state.mcpClientId)
+      console.log(`✓ Deleted run-scoped MCP client "${TEST_MCP_CLIENT_NAME}" (${state.mcpClientId})`)
+    }
+  } catch (error: unknown) {
+    cleanupErrors.push(error instanceof Error ? error : new Error(String(error)))
+  }
+
+  try {
+    if (state.anthropicProviderCreated) {
+      const deleteProviderRes = await httpRequest(BIFROST_BASE_URL, 'DELETE', '/api/providers/anthropic')
+      if (deleteProviderRes.statusCode !== 404 && (deleteProviderRes.statusCode < 200 || deleteProviderRes.statusCode >= 300)) {
+        throw new Error(`DELETE /api/providers/anthropic failed: ${deleteProviderRes.statusCode} ${deleteProviderRes.body}`)
+      }
+      console.log('✓ Removed E2E-created Anthropic provider')
+    } else if (state.anthropicKeyId) {
+      const deleteKeyRes = await httpRequest(
+        BIFROST_BASE_URL,
+        'DELETE',
+        `/api/providers/anthropic/keys/${encodeURIComponent(state.anthropicKeyId)}`
+      )
+      if (deleteKeyRes.statusCode !== 404 && (deleteKeyRes.statusCode < 200 || deleteKeyRes.statusCode >= 300)) {
+        throw new Error(`DELETE Anthropic E2E key failed: ${deleteKeyRes.statusCode} ${deleteKeyRes.body}`)
+      }
+      console.log('✓ Removed E2E-created Anthropic provider key')
+    }
+  } catch (error: unknown) {
+    cleanupErrors.push(error instanceof Error ? error : new Error(String(error)))
+  }
+
+  if (cleanupErrors.length > 0) {
+    throw new Error(`Failed to clean up one or more Bifrost E2E fixtures: ${cleanupErrors.map((error) => error.message).join('; ')}`)
+  }
 }
 
 function runMCPTeardown(): void {
@@ -469,6 +600,7 @@ function runMCPTeardown(): void {
 }
 
 async function globalSetup(): Promise<() => Promise<void>> {
+  const fixtureState = createBifrostFixtureState()
   await runPluginSetup()
   try {
     await runMCPSetup()
@@ -482,16 +614,25 @@ async function globalSetup(): Promise<() => Promise<void>> {
     throw error
   }
   try {
-    await runBifrostMCPAndResponsesSetup()
+    await runBifrostMCPAndResponsesSetup(fixtureState)
   } catch (error: unknown) {
     const err = error as Error
     console.error(`\n❌ Bifrost MCP client / v1/responses setup failed: ${err?.message || String(error)}`)
     console.error(`   Ensure Bifrost is running at ${BIFROST_BASE_URL} and OPENAI_API_KEY is set for /v1/responses.`)
+    try {
+      await runBifrostTeardown(fixtureState)
+    } catch (cleanupError: unknown) {
+      console.error(`   Cleanup after failed setup also failed: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`)
+    }
     runMCPTeardown()
     throw error
   }
   return async () => {
-    runMCPTeardown()
+    try {
+      await runBifrostTeardown(fixtureState)
+    } finally {
+      runMCPTeardown()
+    }
   }
 }
 

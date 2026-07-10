@@ -118,17 +118,31 @@ test.describe.serial("panel configuration save, reload, and restore", () => {
 		}
 	});
 
-	test("Compatibility persists and restores a request-conversion toggle", async ({ page, request }) => {
+	test("Compatibility persists all four switches through refresh and restores the original state", async ({ page, request }) => {
 		const endpoint = "/api/config?from_db=true";
 		const updateEndpoint = "/api/config";
 		const original = await getJson<CoreConfigSnapshot>(request, endpoint);
-		const originalValue = original.client_config.compat.convert_text_to_chat;
-		const nextValue = !originalValue;
+		const originalCompat = original.client_config.compat;
+		const nextCompat: CompatConfigSnapshot = {
+			convert_text_to_chat: !originalCompat.convert_text_to_chat,
+			convert_chat_to_responses: !originalCompat.convert_chat_to_responses,
+			should_drop_params: !originalCompat.should_drop_params,
+			should_convert_params: !originalCompat.should_convert_params,
+		};
+		const controls = [
+			["compat-convert-text-to-chat", "convert_text_to_chat"],
+			["compat-convert-chat-to-responses", "convert_chat_to_responses"],
+			["compat-should-drop-params", "should_drop_params"],
+			["compat-should-convert-params", "should_convert_params"],
+		] as const;
 
 		try {
 			await page.goto("/workspace/config/compatibility", { waitUntil: "domcontentloaded" });
-			await expectCheckedState(page, "compat-convert-text-to-chat", originalValue);
-			await page.getByTestId("compat-convert-text-to-chat").click();
+			for (const [testId, field] of controls) {
+				await expectCheckedState(page, testId, originalCompat[field]);
+				await page.getByTestId(testId).click();
+				await expectCheckedState(page, testId, nextCompat[field]);
+			}
 
 			const saveButton = page.getByTestId("compat-save-button");
 			await expect(saveButton).toBeEnabled();
@@ -136,11 +150,15 @@ test.describe.serial("panel configuration save, reload, and restore", () => {
 			await expect(page.getByText("Compatibility settings updated successfully.", { exact: true })).toBeVisible();
 
 			await page.reload({ waitUntil: "domcontentloaded" });
-			await expectCheckedState(page, "compat-convert-text-to-chat", nextValue);
+			for (const [testId, field] of controls) {
+				await expectCheckedState(page, testId, nextCompat[field]);
+			}
+			const persisted = await getJson<CoreConfigSnapshot>(request, endpoint);
+			expect(persisted.client_config.compat).toEqual(nextCompat);
 		} finally {
 			await putJson(request, updateEndpoint, original);
 			const restored = await getJson<CoreConfigSnapshot>(request, endpoint);
-			expect(restored.client_config.compat).toEqual(original.client_config.compat);
+			expect(restored.client_config.compat).toEqual(originalCompat);
 		}
 	});
 });

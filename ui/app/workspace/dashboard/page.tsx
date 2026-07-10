@@ -238,6 +238,15 @@ export default function DashboardPage() {
 
 	const handlePreloadData = useCallback(async () => {
 		await Promise.all(allRefs.map((r) => r.current?.loadData()));
+
+		// Lazy query promises resolve when the store has the response, but the
+		// tab view refs are refreshed by React on the following render. Wait for
+		// that render before the exporter reads every tab's data.
+		await new Promise<void>((resolve) => {
+			requestAnimationFrame(() => {
+				requestAnimationFrame(() => resolve());
+			});
+		});
 	}, []);
 
 	// Tab change handler
@@ -523,7 +532,7 @@ export default function DashboardPage() {
 						</div>
 
 						{/* Overview Tab */}
-						<TabsContent value="overview" {...(pdfMode && { forceMount: true })}>
+						<TabsContent value="overview" forceMount>
 							<div id="dashboard-section-overview">
 								<OverviewTabView
 									ref={overviewRef}
@@ -550,7 +559,7 @@ export default function DashboardPage() {
 						</TabsContent>
 
 						{/* Provider Usage Tab */}
-						<TabsContent value="provider-usage" {...(pdfMode && { forceMount: true })}>
+						<TabsContent value="provider-usage" forceMount>
 							<div id="dashboard-section-provider-usage">
 								<ProviderUsageTabView
 									ref={providerRef}
@@ -575,7 +584,7 @@ export default function DashboardPage() {
 						</TabsContent>
 
 						{/* Model Rankings Tab */}
-						<TabsContent value="rankings" {...(pdfMode && { forceMount: true })}>
+						<TabsContent value="rankings" forceMount>
 							<div id="dashboard-section-rankings">
 								<ModelRankingsTabView
 									ref={modelRankingsRef}
@@ -588,7 +597,7 @@ export default function DashboardPage() {
 						</TabsContent>
 
 						{/* MCP Tab */}
-						<TabsContent value="mcp" {...(pdfMode && { forceMount: true })}>
+						<TabsContent value="mcp" forceMount>
 							<div id="dashboard-section-mcp">
 								<MCPTabView
 									ref={mcpRef}
@@ -605,7 +614,7 @@ export default function DashboardPage() {
 						</TabsContent>
 
 						{/* Team Rankings Tab */}
-						<TabsContent value="team-rankings" {...(pdfMode && { forceMount: true })}>
+						<TabsContent value="team-rankings" forceMount>
 							<div id="dashboard-section-team-rankings">
 								<DimensionRankingsTabView
 									ref={teamRankingsRef}
@@ -620,7 +629,7 @@ export default function DashboardPage() {
 						</TabsContent>
 
 						{/* Customer Rankings Tab */}
-						<TabsContent value="customer-rankings" {...(pdfMode && { forceMount: true })}>
+						<TabsContent value="customer-rankings" forceMount>
 							<div id="dashboard-section-customer-rankings">
 								<DimensionRankingsTabView
 									ref={customerRankingsRef}
@@ -635,7 +644,7 @@ export default function DashboardPage() {
 						</TabsContent>
 
 						{/* Business Unit Rankings Tab */}
-						<TabsContent value="bu-rankings" {...(pdfMode && { forceMount: true })}>
+						<TabsContent value="bu-rankings" forceMount>
 							<div id="dashboard-section-bu-rankings">
 								<DimensionRankingsTabView
 									ref={buRankingsRef}
@@ -650,7 +659,7 @@ export default function DashboardPage() {
 						</TabsContent>
 
 						{/* User Rankings Tab */}
-						<TabsContent value="user-rankings" {...(pdfMode && { forceMount: true })}>
+						<TabsContent value="user-rankings" forceMount>
 							<div id="dashboard-section-user-rankings">
 								<DimensionRankingsTabView
 									ref={userRankingsRef}
@@ -665,7 +674,7 @@ export default function DashboardPage() {
 						</TabsContent>
 
 						{/* Virtual Key Rankings Tab */}
-						<TabsContent value="virtual-key-rankings" {...(pdfMode && { forceMount: true })}>
+						<TabsContent value="virtual-key-rankings" forceMount>
 							<div id="dashboard-section-virtual-key-rankings">
 								<DimensionRankingsTabView
 									ref={virtualKeyRankingsRef}

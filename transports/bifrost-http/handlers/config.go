@@ -22,6 +22,7 @@ import (
 	configstoreTables "github.com/maximhq/bifrost/framework/configstore/tables"
 	"github.com/maximhq/bifrost/framework/encrypt"
 	"github.com/maximhq/bifrost/framework/modelcatalog"
+	"github.com/maximhq/bifrost/framework/vectorstore"
 	"github.com/maximhq/bifrost/plugins/compat"
 	"github.com/maximhq/bifrost/transports/bifrost-http/lib"
 	"github.com/valyala/fasthttp"
@@ -119,10 +120,250 @@ func (h *ConfigHandler) RegisterRoutes(r *router.Router, middlewares ...schemas.
 	r.GET("/api/config", lib.ChainMiddlewares(h.getConfig, middlewares...))
 	r.PUT("/api/config", lib.ChainMiddlewares(h.updateConfig, middlewares...))
 	r.POST("/api/config/metadata", lib.ChainMiddlewares(h.updateMetadata, middlewares...))
+	r.GET("/api/vector-store-config", lib.ChainMiddlewares(h.getVectorStoreConfig, middlewares...))
+	r.PUT("/api/vector-store-config", lib.ChainMiddlewares(h.updateVectorStoreConfig, middlewares...))
 	r.GET("/api/version", lib.ChainMiddlewares(h.getVersion, middlewares...))
 	r.GET("/api/proxy-config", lib.ChainMiddlewares(h.getProxyConfig, middlewares...))
 	r.PUT("/api/proxy-config", lib.ChainMiddlewares(h.updateProxyConfig, middlewares...))
 	r.POST("/api/pricing/force-sync", lib.ChainMiddlewares(h.forceSyncPricing, middlewares...))
+}
+
+// vectorStoreConfigResponse exposes persisted pgvector settings without
+// implying that the current process has already loaded them. Configuration
+// changes are restart-bound, so runtime_connected is reported independently.
+type vectorStoreConfigResponse struct {
+	Enabled           bool                        `json:"enabled"`
+	Type              vectorstore.VectorStoreType `json:"type"`
+	Config            any                         `json:"config"`
+	RuntimeConnected  bool                        `json:"runtime_connected"`
+	RestartRequired   bool                        `json:"restart_required"`
+	RestartReason     string                      `json:"restart_reason,omitempty"`
+	Editable          bool                        `json:"editable"`
+	ManagedBy         string                      `json:"managed_by"`
+	ManagementMessage string                      `json:"management_message,omitempty"`
+}
+
+const vectorStoreRestartReason = "Vector store configuration has been updated. A restart is required to load the saved pgvector settings."
+
+const vectorStoreConfigJSONManagementMessage = "Vector store configuration is managed by the vector_store section in config.json. Edit config.json and restart Elygate to apply changes."
+
+func vectorStoreManagementMetadata(config *lib.Config) (editable bool, managedBy, message string) {
+	if config != nil && config.VectorStoreConfigManagedByConfigJSON {
+		return false, lib.SourceOfTruthConfigJSON, vectorStoreConfigJSONManagementMessage
+	}
+	return true, "database", ""
+}
+
+func vectorStoreConfigMatchesRuntime(desired, active *vectorstore.Config) bool {
+	// Configuration details do not affect a process while both desired and
+	// active states are disabled.
+	if (desired == nil || !desired.Enabled) && (active == nil || !active.Enabled) {
+		return true
+	}
+	if desired == nil || active == nil || desired.Enabled != active.Enabled || desired.Type != active.Type {
+		return false
+	}
+	if desired.Type != vectorstore.VectorStoreTypePgvector {
+		return false
+	}
+	desiredPgvector, desiredOK := pgvectorConfigValue(desired.Config)
+	activePgvector, activeOK := pgvectorConfigValue(active.Config)
+	if !desiredOK || !activeOK {
+		return false
+	}
+	desiredSchema := desiredPgvector.Schema
+	if desiredSchema == "" {
+		desiredSchema = "bifrost_vectors"
+	}
+	activeSchema := activePgvector.Schema
+	if activeSchema == "" {
+		activeSchema = "bifrost_vectors"
+	}
+	return desiredSchema == activeSchema && desiredPgvector.ConnectionString.Equals(&activePgvector.ConnectionString)
+}
+
+func (h *ConfigHandler) updateVectorStoreRestartMarker(ctx context.Context, restartRequired bool) {
+	current, err := h.store.ConfigStore.GetRestartRequiredConfig(ctx)
+	if err != nil {
+		logger.Warn("failed to get restart required config: %v", err)
+		current = nil
+	}
+	if restartRequired {
+		reason := vectorStoreRestartReason
+		if current != nil && current.Required && current.Reason != "" && !strings.Contains(current.Reason, vectorStoreRestartReason) {
+			reason = current.Reason + " " + vectorStoreRestartReason
+		}
+		if err := h.store.ConfigStore.SetRestartRequiredConfig(ctx, &configstoreTables.RestartRequiredConfig{
+			Required: true,
+			Reason:   reason,
+		}); err != nil {
+			logger.Warn("failed to set restart required config: %v", err)
+		}
+		return
+	}
+	if current == nil || !current.Required || !strings.Contains(current.Reason, vectorStoreRestartReason) {
+		return
+	}
+	remainingReason := strings.TrimSpace(strings.ReplaceAll(current.Reason, vectorStoreRestartReason, ""))
+	if remainingReason == "" {
+		if err := h.store.ConfigStore.ClearRestartRequiredConfig(ctx); err != nil {
+			logger.Warn("failed to clear restart required config: %v", err)
+		}
+		return
+	}
+	if err := h.store.ConfigStore.SetRestartRequiredConfig(ctx, &configstoreTables.RestartRequiredConfig{
+		Required: true,
+		Reason:   remainingReason,
+	}); err != nil {
+		logger.Warn("failed to preserve restart required config: %v", err)
+	}
+}
+
+// getVectorStoreConfig handles GET /api/vector-store-config. The connection
+// string is always fully redacted by lib.Config before it reaches the response.
+func (h *ConfigHandler) getVectorStoreConfig(ctx *fasthttp.RequestCtx) {
+	if h.store.ConfigStore == nil {
+		SendError(ctx, fasthttp.StatusServiceUnavailable, "config store not available")
+		return
+	}
+
+	rawConfig, err := h.store.ConfigStore.GetVectorStoreConfig(ctx)
+	if err != nil {
+		SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("failed to get vector store config: %v", err))
+		return
+	}
+	if rawConfig != nil && rawConfig.Type != vectorstore.VectorStoreTypePgvector {
+		SendError(ctx, fasthttp.StatusConflict, "vector store panel only supports pgvector; manage the existing vector store type outside this panel")
+		return
+	}
+	config, err := h.store.GetVectorStoreConfigRedacted(ctx)
+	if err != nil {
+		SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("failed to get vector store config: %v", err))
+		return
+	}
+	if config == nil {
+		config = &vectorstore.Config{
+			Enabled: false,
+			Type:    vectorstore.VectorStoreTypePgvector,
+			Config: vectorstore.PgvectorConfig{
+				ConnectionString: *schemas.NewSecretVar(""),
+				Schema:           "bifrost_vectors",
+			},
+		}
+	}
+
+	restartRequired := !vectorStoreConfigMatchesRuntime(rawConfig, h.store.VectorStoreConfig)
+	restartReason := ""
+	if restartRequired {
+		restartReason = vectorStoreRestartReason
+	}
+	editable, managedBy, managementMessage := vectorStoreManagementMetadata(h.store)
+
+	SendJSON(ctx, vectorStoreConfigResponse{
+		Enabled:           config.Enabled,
+		Type:              config.Type,
+		Config:            config.Config,
+		RuntimeConnected:  h.store.VectorStore != nil,
+		RestartRequired:   restartRequired,
+		RestartReason:     restartReason,
+		Editable:          editable,
+		ManagedBy:         managedBy,
+		ManagementMessage: managementMessage,
+	})
+}
+
+func pgvectorConfigValue(config any) (vectorstore.PgvectorConfig, bool) {
+	switch configured := config.(type) {
+	case vectorstore.PgvectorConfig:
+		return configured, true
+	case *vectorstore.PgvectorConfig:
+		if configured != nil {
+			return *configured, true
+		}
+	}
+	return vectorstore.PgvectorConfig{}, false
+}
+
+// updateVectorStoreConfig handles PUT /api/vector-store-config. Vector-store
+// instances are constructed during process startup, so this endpoint persists
+// validated settings and records a restart requirement without mutating or
+// claiming to replace the currently loaded runtime store.
+func (h *ConfigHandler) updateVectorStoreConfig(ctx *fasthttp.RequestCtx) {
+	if h.store.ConfigStore == nil {
+		SendError(ctx, fasthttp.StatusServiceUnavailable, "config store not available")
+		return
+	}
+	if h.store.VectorStoreConfigManagedByConfigJSON {
+		SendError(ctx, fasthttp.StatusForbidden, vectorStoreConfigJSONManagementMessage)
+		return
+	}
+
+	var requested vectorstore.Config
+	if err := json.Unmarshal(ctx.PostBody(), &requested); err != nil {
+		SendError(ctx, fasthttp.StatusBadRequest, "Invalid request payload")
+		return
+	}
+	if requested.Type != vectorstore.VectorStoreTypePgvector {
+		SendError(ctx, fasthttp.StatusBadRequest, "vector store type must be pgvector")
+		return
+	}
+	pgvectorConfig, ok := pgvectorConfigValue(requested.Config)
+	if !ok {
+		SendError(ctx, fasthttp.StatusBadRequest, "invalid pgvector configuration")
+		return
+	}
+
+	existing, err := h.store.ConfigStore.GetVectorStoreConfig(ctx)
+	if err != nil {
+		SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("failed to get vector store config: %v", err))
+		return
+	}
+	if pgvectorConfig.ConnectionString.ShouldPreserveStored() {
+		var existingPgvector vectorstore.PgvectorConfig
+		var exists bool
+		if existing != nil && existing.Type == vectorstore.VectorStoreTypePgvector {
+			existingPgvector, exists = pgvectorConfigValue(existing.Config)
+		}
+		if exists {
+			pgvectorConfig.ConnectionString = existingPgvector.ConnectionString
+		} else {
+			pgvectorConfig.ConnectionString = *schemas.NewSecretVar("")
+		}
+	}
+	if pgvectorConfig.Schema == "" {
+		pgvectorConfig.Schema = "bifrost_vectors"
+	}
+	if err := vectorstore.ValidatePgvectorConfig(&pgvectorConfig, requested.Enabled); err != nil {
+		SendError(ctx, fasthttp.StatusBadRequest, err.Error())
+		return
+	}
+
+	requested.Config = pgvectorConfig
+	if err := h.store.ConfigStore.UpdateVectorStoreConfig(ctx, &requested); err != nil {
+		SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("failed to update vector store config: %v", err))
+		return
+	}
+	restartRequired := !vectorStoreConfigMatchesRuntime(&requested, h.store.VectorStoreConfig)
+	h.updateVectorStoreRestartMarker(ctx, restartRequired)
+	restartReason := ""
+	if restartRequired {
+		restartReason = vectorStoreRestartReason
+	}
+	editable, managedBy, managementMessage := vectorStoreManagementMetadata(h.store)
+
+	redacted := pgvectorConfig
+	redacted.ConnectionString = *redacted.ConnectionString.FullyRedacted()
+	SendJSON(ctx, vectorStoreConfigResponse{
+		Enabled:           requested.Enabled,
+		Type:              requested.Type,
+		Config:            redacted,
+		RuntimeConnected:  h.store.VectorStore != nil,
+		RestartRequired:   restartRequired,
+		RestartReason:     restartReason,
+		Editable:          editable,
+		ManagedBy:         managedBy,
+		ManagementMessage: managementMessage,
+	})
 }
 
 // getVersion handles GET /api/version - Get the current version

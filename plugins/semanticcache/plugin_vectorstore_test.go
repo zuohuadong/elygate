@@ -1,6 +1,7 @@
 package semanticcache
 
 import (
+	"context"
 	"os"
 	"strings"
 	"testing"
@@ -56,6 +57,132 @@ func getDefaultTestConfig() *Config {
 		Dimension:                    1536,
 		Threshold:                    0.8,
 		ConversationHistoryThreshold: DefaultConversationHistoryThreshold,
+	}
+}
+
+func newPgvectorSemanticCacheTestSetup(t *testing.T, dsn string) *TestSetup {
+	t.Helper()
+
+	logger := bifrost.NewDefaultLogger(schemas.LogLevelError)
+	store, err := vectorstore.NewVectorStore(t.Context(), &vectorstore.Config{
+		Enabled: true,
+		Type:    vectorstore.VectorStoreTypePgvector,
+		Config: vectorstore.PgvectorConfig{
+			ConnectionString: *schemas.NewSecretVar(dsn),
+		},
+	}, logger)
+	if err != nil {
+		t.Fatalf("initialize pgvector store: %v", err)
+	}
+
+	config := getDefaultTestConfig()
+	config.Dimension = 3
+	config.VectorStoreNamespace = "BifrostSemanticCachePluginPgvectorTest-" + uuid.NewString()
+	pluginInterface, err := Init(context.Background(), config, logger, store)
+	if err != nil {
+		_ = store.Close(context.Background(), "")
+		t.Fatalf("initialize semantic cache with pgvector: %v", err)
+	}
+	plugin := pluginInterface.(*Plugin)
+	plugin.SetEmbeddingRequestExecutor(func(_ *schemas.BifrostContext, _ *schemas.BifrostEmbeddingRequest) (*schemas.BifrostEmbeddingResponse, *schemas.BifrostError) {
+		return &schemas.BifrostEmbeddingResponse{Data: []schemas.EmbeddingData{{
+			Embedding: schemas.EmbeddingStruct{EmbeddingArray: []float64{1, 0, 0}},
+		}}}, nil
+	})
+
+	t.Cleanup(func() {
+		if err := plugin.Cleanup(); err != nil {
+			t.Errorf("cleanup pgvector semantic-cache plugin: %v", err)
+		}
+		if err := store.DeleteNamespace(context.Background(), config.VectorStoreNamespace); err != nil {
+			t.Errorf("delete pgvector test namespace: %v", err)
+		}
+		if err := store.Close(context.Background(), ""); err != nil {
+			t.Errorf("close pgvector test store: %v", err)
+		}
+	})
+
+	return &TestSetup{Logger: logger, Store: store, Plugin: plugin, Config: config}
+}
+
+// TestSemanticCache_Pgvector_MissHitAndDelete exercises the real pgvector
+// adapter through the semantic-cache plugin. It intentionally verifies the
+// complete lifecycle rather than treating successful initialization as proof
+// that cache reads and writes work.
+func TestSemanticCache_Pgvector_MissHitAndDelete(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("PGVECTOR_DSN"))
+	if dsn == "" {
+		t.Skip("set PGVECTOR_DSN to run the pgvector semantic-cache integration test")
+	}
+
+	setup := newPgvectorSemanticCacheTestSetup(t, dsn)
+
+	cacheKeySuffix := "pgvector-real-path-" + uuid.NewString()
+	request := &schemas.BifrostRequest{
+		RequestType: schemas.ChatCompletionRequest,
+		ChatRequest: CreateBasicChatRequest("pgvector semantic cache lifecycle", 0.2, 64),
+	}
+
+	missCtx := CreateContextWithCacheKey(t, cacheKeySuffix)
+	modifiedReq, shortCircuit, err := setup.Plugin.PreLLMHook(missCtx, request)
+	if err != nil {
+		t.Fatalf("first PreLLMHook failed: %v", err)
+	}
+	if modifiedReq == nil || shortCircuit != nil {
+		t.Fatalf("expected initial pgvector cache miss, modified=%v shortCircuit=%v", modifiedReq != nil, shortCircuit != nil)
+	}
+
+	response := &schemas.BifrostResponse{ChatResponse: &schemas.BifrostChatResponse{
+		ID: uuid.NewString(),
+		Choices: []schemas.BifrostResponseChoice{{
+			Index: 0,
+			ChatNonStreamResponseChoice: &schemas.ChatNonStreamResponseChoice{Message: &schemas.ChatMessage{
+				Role:    schemas.ChatMessageRoleAssistant,
+				Content: &schemas.ChatMessageContent{ContentStr: bifrost.Ptr("stored in pgvector")},
+			}},
+		}},
+		ExtraFields: schemas.BifrostResponseExtraFields{
+			Provider:               schemas.OpenAI,
+			OriginalModelRequested: "gpt-4o-mini",
+			RequestType:            schemas.ChatCompletionRequest,
+		},
+	}}
+
+	stored, _, err := setup.Plugin.PostLLMHook(missCtx, response, nil)
+	if err != nil {
+		t.Fatalf("PostLLMHook failed: %v", err)
+	}
+	WaitForCache(setup.Plugin)
+	cacheDebug := stored.GetExtraFields().CacheDebug
+	if cacheDebug == nil || cacheDebug.CacheID == nil || *cacheDebug.CacheID == "" {
+		t.Fatal("expected cache miss response to expose the stored pgvector cache ID")
+	}
+	cacheID := *cacheDebug.CacheID
+
+	hitCtx := CreateContextWithCacheKey(t, cacheKeySuffix)
+	_, hit, err := setup.Plugin.PreLLMHook(hitCtx, request)
+	if err != nil {
+		t.Fatalf("second PreLLMHook failed: %v", err)
+	}
+	if hit == nil || hit.Response == nil {
+		t.Fatal("expected identical request to hit the pgvector-backed semantic cache")
+	}
+	if got := hit.Response.GetExtraFields().CacheDebug; got == nil || !got.CacheHit || got.CacheID == nil || *got.CacheID != cacheID {
+		t.Fatalf("expected direct cache hit for %q, got %+v", cacheID, got)
+	}
+
+	plugin := setup.Plugin.(*Plugin)
+	if err := plugin.ClearCacheForCacheID(cacheID); err != nil {
+		t.Fatalf("ClearCacheForCacheID failed: %v", err)
+	}
+
+	afterDeleteCtx := CreateContextWithCacheKey(t, cacheKeySuffix)
+	_, afterDelete, err := setup.Plugin.PreLLMHook(afterDeleteCtx, request)
+	if err != nil {
+		t.Fatalf("PreLLMHook after delete failed: %v", err)
+	}
+	if afterDelete != nil {
+		t.Fatal("expected cache miss after deleting the pgvector entry")
 	}
 }
 

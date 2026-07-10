@@ -1,4 +1,6 @@
 import { expect, test } from '../../core/fixtures/base.fixture'
+import { resolve } from 'path'
+import { pathToFileURL } from 'url'
 import { ConfigSettingsState } from './pages/config-settings.page'
 
 test.describe('Config Settings', () => {
@@ -22,7 +24,7 @@ test.describe('Config Settings', () => {
     test('should navigate to logging config', async ({ configSettingsPage }) => {
       await configSettingsPage.goto('logging')
       await expect(configSettingsPage.saveBtn).toBeVisible()
-      await expect(configSettingsPage.page.getByRole('heading', { name: /Logging/i })).toBeVisible()
+      await expect(configSettingsPage.page.getByRole('heading', { name: 'Logs Settings' })).toBeVisible()
     })
 
     test('should navigate to security config', async ({ configSettingsPage }) => {
@@ -40,7 +42,7 @@ test.describe('Config Settings', () => {
     test('should navigate to pricing config', async ({ configSettingsPage }) => {
       await configSettingsPage.goto('pricing-config')
       await expect(configSettingsPage.saveBtn).toBeVisible()
-      await expect(configSettingsPage.page.getByRole('heading', { name: /Pricing/i })).toBeVisible()
+      await expect(configSettingsPage.page.getByRole('heading', { name: 'Model Settings' })).toBeVisible()
     })
 
     test('should navigate to MCP settings', async ({ configSettingsPage }) => {
@@ -98,7 +100,9 @@ test.describe('Config Settings', () => {
     })
 
     test('should set and save datasheet URL', async ({ configSettingsPage }) => {
-      const testUrl = 'https://example.com/pricing.json'
+      const testUrl = pathToFileURL(
+        resolve(__dirname, '../../../../examples/configs/withlocalpricingfiles/pricing.json')
+      ).toString()
       await configSettingsPage.setPricingDatasheetUrl(testUrl)
 
       const isSaveEnabled = await configSettingsPage.pricingSaveBtn.isDisabled().then((d) => !d)

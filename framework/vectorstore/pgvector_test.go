@@ -101,4 +101,9 @@ func TestPgvectorStore_Integration(t *testing.T) {
 	deleted, err := store.DeleteAll(t.Context(), namespace, []Query{{Field: "cache_key", Operator: QueryOperatorEqual, Value: "tenant-a"}})
 	require.NoError(t, err)
 	require.Len(t, deleted, 1)
+	require.Equal(t, "first", deleted[0].ID)
+	require.Equal(t, DeleteStatusSuccess, deleted[0].Status)
+
+	_, err = store.GetChunk(t.Context(), namespace, "first")
+	require.ErrorContains(t, err, "not found")
 }

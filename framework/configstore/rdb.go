@@ -2352,11 +2352,33 @@ func (s *RDBConfigStore) GetVectorStoreConfig(ctx context.Context) (*vectorstore
 		}
 		return nil, err
 	}
-	return &vectorstore.Config{
+
+	// Rehydrate the type-specific config instead of returning the raw JSON string
+	// stored in config_vector_store.config. Consumers such as vector-store
+	// initialization and redacted admin APIs require PgvectorConfig/RedisConfig/etc.
+	// so returning *string here makes a persisted configuration unusable after a
+	// restart.
+	rawConfig := json.RawMessage("null")
+	if vectorStoreTableConfig.Config != nil && strings.TrimSpace(*vectorStoreTableConfig.Config) != "" {
+		rawConfig = json.RawMessage(*vectorStoreTableConfig.Config)
+	}
+	payload, err := json.Marshal(struct {
+		Enabled bool                        `json:"enabled"`
+		Type    vectorstore.VectorStoreType `json:"type"`
+		Config  json.RawMessage             `json:"config"`
+	}{
 		Enabled: vectorStoreTableConfig.Enabled,
-		Config:  vectorStoreTableConfig.Config,
 		Type:    vectorstore.VectorStoreType(vectorStoreTableConfig.Type),
-	}, nil
+		Config:  rawConfig,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal vector store config: %w", err)
+	}
+	var config vectorstore.Config
+	if err := json.Unmarshal(payload, &config); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal vector store config: %w", err)
+	}
+	return &config, nil
 }
 
 // UpdateVectorStoreConfig updates the vector store configuration in the database.

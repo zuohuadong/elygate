@@ -530,6 +530,31 @@ export interface RestartRequiredConfig {
 	reason?: string;
 }
 
+export interface SecretValue {
+	value: string;
+	ref?: string;
+	type?: string;
+}
+
+export interface PgvectorConfig {
+	connection_string: SecretValue;
+	schema: string;
+}
+
+export interface VectorStoreConfig {
+	enabled: boolean;
+	type: "pgvector";
+	config: PgvectorConfig;
+	runtime_connected: boolean;
+	restart_required: boolean;
+	restart_reason?: string;
+	editable: boolean;
+	managed_by: "database" | "config.json";
+	management_message?: string;
+}
+
+export type UpdateVectorStoreConfig = Pick<VectorStoreConfig, "enabled" | "type" | "config">;
+
 // Bifrost Config
 export type PluginSpanFilterMode = "include" | "exclude";
 

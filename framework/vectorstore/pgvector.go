@@ -31,16 +31,34 @@ type PgvectorStore struct {
 
 var pgvectorIdentifier = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,62}$`)
 
-func newPgvectorStore(ctx context.Context, config *PgvectorConfig, _ schemas.Logger) (*PgvectorStore, error) {
-	if config == nil || strings.TrimSpace(config.ConnectionString.GetValue()) == "" {
-		return nil, fmt.Errorf("pgvector connection_string is required")
+// ValidatePgvectorConfig validates persisted pgvector settings without opening a
+// database connection. Management APIs use this before saving restart-bound
+// configuration; runtime initialization performs the same validation before
+// connecting.
+func ValidatePgvectorConfig(config *PgvectorConfig, requireConnectionString bool) error {
+	if config == nil {
+		return fmt.Errorf("pgvector config is required")
+	}
+	if requireConnectionString && strings.TrimSpace(config.ConnectionString.GetValue()) == "" && !config.ConnectionString.IsFromSecret() {
+		return fmt.Errorf("pgvector connection_string is required")
 	}
 	schema := config.Schema
 	if schema == "" {
 		schema = "bifrost_vectors"
 	}
 	if !pgvectorIdentifier.MatchString(schema) {
-		return nil, fmt.Errorf("pgvector schema must be a PostgreSQL identifier")
+		return fmt.Errorf("pgvector schema must be a PostgreSQL identifier")
+	}
+	return nil
+}
+
+func newPgvectorStore(ctx context.Context, config *PgvectorConfig, _ schemas.Logger) (*PgvectorStore, error) {
+	if err := ValidatePgvectorConfig(config, true); err != nil {
+		return nil, err
+	}
+	schema := config.Schema
+	if schema == "" {
+		schema = "bifrost_vectors"
 	}
 
 	pool, err := pgxpool.New(ctx, config.ConnectionString.GetValue())

@@ -2,6 +2,7 @@ import type { APIRequestContext, Locator, Page } from '@playwright/test'
 import { expect, test } from '../../core/fixtures/base.fixture'
 
 const CACHE_PLUGIN_PATH = '/api/plugins/semantic_cache'
+const VECTOR_STORE_CONFIG_PATH = '/api/vector-store-config'
 const liveCacheE2E = process.env.BIFROST_E2E_LIVE_CACHE === '1'
 const runId = `${Date.now()}-${process.pid}`
 
@@ -28,6 +29,26 @@ interface CachePlugin {
   }
 }
 
+interface SecretValue {
+  value: string
+  ref?: string
+  type?: string
+}
+
+interface PgvectorConfig {
+  connection_string: SecretValue
+  schema: string
+}
+
+interface VectorStoreConfig {
+  enabled: boolean
+  type: 'pgvector'
+  config: PgvectorConfig
+  runtime_connected: boolean
+  restart_required: boolean
+  restart_reason?: string
+}
+
 async function getCachePlugin(request: APIRequestContext): Promise<CachePlugin> {
   const response = await request.get(CACHE_PLUGIN_PATH)
   if (!response.ok()) {
@@ -49,6 +70,28 @@ async function restoreCachePlugin(request: APIRequestContext, plugin: CachePlugi
     },
   })
   expect(createResponse.ok(), `Failed to recreate semantic_cache: ${createResponse.status()} ${await createResponse.text()}`).toBe(true)
+}
+
+async function getVectorStoreConfig(request: APIRequestContext): Promise<VectorStoreConfig> {
+  const response = await request.get(VECTOR_STORE_CONFIG_PATH)
+  if (!response.ok()) {
+    throw new Error(`GET ${VECTOR_STORE_CONFIG_PATH} failed: ${response.status()} ${await response.text()}`)
+  }
+  return (await response.json()) as VectorStoreConfig
+}
+
+async function updateVectorStoreConfig(request: APIRequestContext, config: VectorStoreConfig): Promise<VectorStoreConfig> {
+  const response = await request.put(VECTOR_STORE_CONFIG_PATH, {
+    data: {
+      enabled: config.enabled,
+      type: config.type,
+      config: config.config,
+    },
+  })
+  if (!response.ok()) {
+    throw new Error(`PUT ${VECTOR_STORE_CONFIG_PATH} failed: ${response.status()} ${await response.text()}`)
+  }
+  return (await response.json()) as VectorStoreConfig
 }
 
 async function gotoCaching(page: Page): Promise<void> {
@@ -104,13 +147,26 @@ test.describe('Caching Settings (live vector store)', () => {
   test.setTimeout(90000)
 
   let originalPlugin: CachePlugin | undefined
+  let originalVectorStore: VectorStoreConfig | undefined
 
   test.beforeAll(async ({ request }) => {
     originalPlugin = await getCachePlugin(request)
     expect(originalPlugin.name).toBe('semantic_cache')
+    originalVectorStore = await getVectorStoreConfig(request)
+    expect(originalVectorStore.type).toBe('pgvector')
+    expect(originalVectorStore.config.connection_string.value).toBe('<REDACTED>')
   })
 
   test.afterAll(async ({ request }) => {
+    if (originalVectorStore) {
+      const restoredVectorStore = await updateVectorStoreConfig(request, originalVectorStore)
+      expect(restoredVectorStore.enabled).toBe(originalVectorStore.enabled)
+      expect(restoredVectorStore.type).toBe(originalVectorStore.type)
+      expect(restoredVectorStore.config.schema).toBe(originalVectorStore.config.schema)
+      expect(restoredVectorStore.config.connection_string.value).toBe('<REDACTED>')
+      expect(restoredVectorStore.restart_required).toBe(originalVectorStore.restart_required)
+    }
+
     if (!originalPlugin) return
 
     await restoreCachePlugin(request, originalPlugin)
@@ -137,6 +193,34 @@ test.describe('Caching Settings (live vector store)', () => {
     await expect(page.getByTestId('caching-cache-by-model-switch')).toBeVisible()
     await expect(page.getByTestId('caching-cache-by-provider-switch')).toBeVisible()
     await expect(page.getByTestId('caching-save-button')).toBeVisible()
+  })
+
+  test('saves pgvector settings, preserves the redacted connection string, and requires restart', async ({ page, request }) => {
+    const schema = `elygate_panel_e2e_${runId.split('-').join('_')}`
+    const enabledSwitch = page.getByTestId('caching-vector-store-enabled-switch')
+
+    await expect(page.getByTestId('caching-vector-store-type')).toHaveText('pgvector')
+    await expect(page.getByTestId('caching-vector-store-connection-string-input')).toHaveValue('<REDACTED>')
+    await setSwitch(enabledSwitch, true)
+    await page.getByTestId('caching-vector-store-schema-input').fill(schema)
+    await page.getByTestId('caching-vector-store-save-button').click()
+    await expect(
+      page.locator('[data-sonner-toast][data-type="success"]').filter({ hasText: 'Vector store configuration saved' }),
+    ).toBeVisible()
+
+    const stored = await getVectorStoreConfig(request)
+    expect(stored.enabled).toBe(true)
+    expect(stored.type).toBe('pgvector')
+    expect(stored.config.schema).toBe(schema)
+    expect(stored.config.connection_string.value).toBe('<REDACTED>')
+    expect(stored.restart_required).toBe(true)
+    expect(stored.runtime_connected).toBe(originalVectorStore?.runtime_connected ?? false)
+
+    await page.reload()
+    await expect(page.getByTestId('caching-vector-store-enabled-switch')).toHaveAttribute('data-state', 'checked')
+    await expect(page.getByTestId('caching-vector-store-connection-string-input')).toHaveValue('<REDACTED>')
+    await expect(page.getByTestId('caching-vector-store-schema-input')).toHaveValue(schema)
+    await expect(page.getByTestId('caching-vector-store-restart-required')).toContainText('Restart required')
   })
 
   test('saves direct-only fields and persists them after reload', async ({ page, request }) => {

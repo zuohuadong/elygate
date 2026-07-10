@@ -1,4 +1,7 @@
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ModelMultiselect } from "@/components/ui/modelMultiselect";
@@ -13,9 +16,11 @@ import {
 	useGetCoreConfigQuery,
 	useGetPluginsQuery,
 	useGetProvidersQuery,
+	useGetVectorStoreConfigQuery,
 	useUpdatePluginMutation,
+	useUpdateVectorStoreConfigMutation,
 } from "@/lib/store";
-import { EditorCacheConfig, ModelProvider, ModelProviderName } from "@/lib/types/config";
+import type { EditorCacheConfig, ModelProvider, ModelProviderName, VectorStoreConfig } from "@/lib/types/config";
 import { SEMANTIC_CACHE_PLUGIN } from "@/lib/types/plugins";
 import { cn } from "@/lib/utils";
 import { Loader2 } from "lucide-react";
@@ -27,6 +32,34 @@ import { toast } from "sonner";
 // caching. Semantic adds vector similarity on top, requiring an
 // embedding-capable provider and the model's real dimension.
 type CacheMode = "direct" | "semantic";
+
+interface VectorStoreEditorState {
+	enabled: boolean;
+	connectionString: string;
+	schema: string;
+}
+
+const defaultVectorStoreEditor: VectorStoreEditorState = {
+	enabled: false,
+	connectionString: "",
+	schema: "bifrost_vectors",
+};
+
+const vectorStoreEditorFromConfig = (config: VectorStoreConfig): VectorStoreEditorState => ({
+	enabled: config.enabled,
+	connectionString: config.config.connection_string.value || (config.config.connection_string.ref ? "<REDACTED>" : ""),
+	schema: config.config.schema || "bifrost_vectors",
+});
+
+const validateVectorStoreEditor = (config: VectorStoreEditorState): string | null => {
+	if (config.enabled && !config.connectionString.trim()) {
+		return "Connection string is required when pgvector is enabled.";
+	}
+	if (!/^[A-Za-z_][A-Za-z0-9_]{0,62}$/.test(config.schema.trim())) {
+		return "Schema must be a PostgreSQL identifier (letters, numbers, and underscores; no more than 63 characters).";
+	}
+	return null;
+};
 
 type CachePluginPayload = Omit<EditorCacheConfig, "provider" | "embedding_model" | "dimension"> & {
 	provider?: ModelProviderName | "";
@@ -127,6 +160,11 @@ const validateForSave = (config: EditorCacheConfig, mode: CacheMode): string | n
 export default function CachingView() {
 	const { data: bifrostConfig, isLoading: configLoading, error: configError } = useGetCoreConfigQuery({ fromDB: true });
 	const isVectorStoreEnabled = bifrostConfig?.is_cache_connected ?? false;
+	const { data: vectorStoreConfig, isLoading: vectorStoreLoading, error: vectorStoreError } = useGetVectorStoreConfigQuery();
+	const [updateVectorStoreConfig, { isLoading: isSavingVectorStore }] = useUpdateVectorStoreConfigMutation();
+	const [vectorStoreEditor, setVectorStoreEditor] = useState<VectorStoreEditorState>(defaultVectorStoreEditor);
+	const [serverVectorStoreEditor, setServerVectorStoreEditor] = useState<VectorStoreEditorState>(defaultVectorStoreEditor);
+	const isVectorStoreEditable = vectorStoreConfig?.editable ?? true;
 
 	// Local cache state lives on the plugin row keyed by SEMANTIC_CACHE_PLUGIN.
 	// No dedicated /local-cache-config endpoint exists — the plugins API is
@@ -147,6 +185,13 @@ export default function CachingView() {
 	const [serverCacheConfig, setServerCacheConfig] = useState<EditorCacheConfig>(defaultDirectConfig);
 	const [mode, setMode] = useState<CacheMode>("direct");
 
+	useEffect(() => {
+		if (!vectorStoreConfig) return;
+		const editor = vectorStoreEditorFromConfig(vectorStoreConfig);
+		setVectorStoreEditor(editor);
+		setServerVectorStoreEditor(editor);
+	}, [vectorStoreConfig]);
+
 	// Hydrate from the plugin row once it lands. If the plugin doesn't exist
 	// yet (first-time setup), keep the default direct-only seed so the user
 	// can start typing before any save.
@@ -164,6 +209,51 @@ export default function CachingView() {
 			toast.error(`Failed to load providers: ${getErrorMessage(providersError as any)}`);
 		}
 	}, [providersError]);
+
+	useEffect(() => {
+		if (vectorStoreError) {
+			toast.error(`Failed to load vector store configuration: ${getErrorMessage(vectorStoreError)}`);
+		}
+	}, [vectorStoreError]);
+
+	const vectorStoreValidationError = useMemo(() => validateVectorStoreEditor(vectorStoreEditor), [vectorStoreEditor]);
+	const hasUnsavedVectorStoreChanges = useMemo(
+		() =>
+			vectorStoreEditor.enabled !== serverVectorStoreEditor.enabled ||
+			vectorStoreEditor.connectionString !== serverVectorStoreEditor.connectionString ||
+			vectorStoreEditor.schema !== serverVectorStoreEditor.schema,
+		[serverVectorStoreEditor, vectorStoreEditor],
+	);
+
+	const handleVectorStoreSave = async () => {
+		if (vectorStoreValidationError || !vectorStoreConfig || !isVectorStoreEditable) {
+			if (vectorStoreValidationError) toast.error(vectorStoreValidationError);
+			if (vectorStoreConfig && !isVectorStoreEditable) {
+				toast.error(vectorStoreConfig.management_message || "Vector store configuration is managed by config.json.");
+			}
+			return;
+		}
+		const connectionString =
+			vectorStoreEditor.connectionString === serverVectorStoreEditor.connectionString
+				? vectorStoreConfig.config.connection_string
+				: { value: vectorStoreEditor.connectionString.trim() };
+		try {
+			const updated = await updateVectorStoreConfig({
+				enabled: vectorStoreEditor.enabled,
+				type: "pgvector",
+				config: {
+					connection_string: connectionString,
+					schema: vectorStoreEditor.schema.trim(),
+				},
+			}).unwrap();
+			const editor = vectorStoreEditorFromConfig(updated);
+			setVectorStoreEditor(editor);
+			setServerVectorStoreEditor(editor);
+			toast.success("Vector store configuration saved");
+		} catch (error) {
+			toast.error(`Failed to save vector store configuration: ${getErrorMessage(error)}`);
+		}
+	};
 
 	// Only show the dimension/namespace heads-up when the user has actually
 	// changed the effective provider/model/dimension. Direct mode deliberately
@@ -295,9 +385,7 @@ export default function CachingView() {
 					Cache responses locally with two complementary lookup paths: <b>direct</b> hash matching for exact replays, and <b>semantic</b>{" "}
 					similarity search for related content. Send the <b>x-bf-cache-key</b> header to scope cached responses to a tenant or feature.{" "}
 					{!isVectorStoreEnabled && (
-						<span className="text-destructive font-medium">
-							Requires a vector store to be configured and enabled in <code>config.json</code>.
-						</span>
+						<span className="text-destructive font-medium">Configure and enable pgvector below, then restart Elygate to load it.</span>
 					)}
 				</p>
 				<div className="mt-3 rounded-sm border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
@@ -306,6 +394,147 @@ export default function CachingView() {
 					conversations.
 				</div>
 			</div>
+
+			<Card data-testid="caching-vector-store-card">
+				<CardHeader className="border-b">
+					<CardTitle>Vector Store</CardTitle>
+					<CardDescription>
+						Persist the pgvector connection used by direct and semantic cache entries. Saving does not hot-swap the running store.
+					</CardDescription>
+					<CardAction>
+						<Badge variant={vectorStoreConfig?.runtime_connected ? "success" : "outline"}>
+							{vectorStoreConfig?.runtime_connected ? "Runtime store loaded" : "Runtime store not loaded"}
+						</Badge>
+					</CardAction>
+				</CardHeader>
+				<CardContent className="flex flex-col gap-4">
+					{vectorStoreLoading && (
+						<div className="flex items-center justify-center py-8">
+							<Loader2 className="text-muted-foreground animate-spin" />
+						</div>
+					)}
+					{Boolean(vectorStoreError) && (
+						<Alert variant="destructive">
+							<AlertTitle>Failed to load vector store configuration</AlertTitle>
+							<AlertDescription>{getErrorMessage(vectorStoreError)}</AlertDescription>
+						</Alert>
+					)}
+					{!vectorStoreLoading && !vectorStoreError && (
+						<>
+							{vectorStoreConfig && !isVectorStoreEditable && (
+								<Alert data-testid="caching-vector-store-config-json-managed">
+									<AlertTitle>Managed by config.json</AlertTitle>
+									<AlertDescription>
+										{vectorStoreConfig.management_message ||
+											"Edit the vector_store section in config.json and restart Elygate to apply changes."}
+									</AlertDescription>
+								</Alert>
+							)}
+							{vectorStoreConfig?.restart_required && (
+								<Alert variant="warning" data-testid="caching-vector-store-restart-required">
+									<AlertTitle>Restart required</AlertTitle>
+									<AlertDescription>
+										{vectorStoreConfig.restart_reason || "Restart Elygate to load the saved vector store configuration."}
+									</AlertDescription>
+								</Alert>
+							)}
+
+							<div className="flex items-center justify-between gap-4 rounded-sm border p-3">
+								<div className="flex flex-col gap-1">
+									<Label htmlFor="vector-store-enabled">Enable pgvector</Label>
+									<p className="text-muted-foreground text-xs">The saved setting becomes active only after a server restart.</p>
+								</div>
+								<Switch
+									id="vector-store-enabled"
+									data-testid="caching-vector-store-enabled-switch"
+									checked={vectorStoreEditor.enabled}
+									disabled={isSavingVectorStore || !isVectorStoreEditable}
+									onCheckedChange={(enabled) => setVectorStoreEditor((current) => ({ ...current, enabled }))}
+								/>
+							</div>
+
+							<div className="grid gap-4 md:grid-cols-2">
+								<div className="flex flex-col gap-2">
+									<p className="text-sm font-medium">Vector store type</p>
+									<div className="flex h-9 items-center rounded-sm border px-3">
+										<Badge variant="secondary" data-testid="caching-vector-store-type">
+											pgvector
+										</Badge>
+									</div>
+									<p className="text-muted-foreground text-xs">Elygate currently exposes the PostgreSQL pgvector adapter in this panel.</p>
+								</div>
+								<div className="flex flex-col gap-2">
+									<Label htmlFor="vector-store-schema">PostgreSQL schema</Label>
+									<Input
+										id="vector-store-schema"
+										data-testid="caching-vector-store-schema-input"
+										value={vectorStoreEditor.schema}
+										aria-invalid={Boolean(vectorStoreValidationError)}
+										disabled={isSavingVectorStore || !isVectorStoreEditable}
+										onChange={(event) =>
+											setVectorStoreEditor((current) => ({
+												...current,
+												schema: event.target.value,
+											}))
+										}
+									/>
+									<p className="text-muted-foreground text-xs">
+										Defaults to <code>bifrost_vectors</code>.
+									</p>
+								</div>
+							</div>
+
+							<div className="flex flex-col gap-2">
+								<Label htmlFor="vector-store-connection-string">PostgreSQL connection string</Label>
+								<Input
+									id="vector-store-connection-string"
+									data-testid="caching-vector-store-connection-string-input"
+									type="password"
+									autoComplete="new-password"
+									placeholder="postgres://user:password@host:5432/database"
+									value={vectorStoreEditor.connectionString}
+									aria-invalid={Boolean(vectorStoreValidationError)}
+									disabled={isSavingVectorStore || !isVectorStoreEditable}
+									onChange={(event) =>
+										setVectorStoreEditor((current) => ({
+											...current,
+											connectionString: event.target.value,
+										}))
+									}
+								/>
+								<p className="text-muted-foreground text-xs">
+									Saved credentials are returned as <code>&lt;REDACTED&gt;</code>. Leaving that placeholder unchanged preserves the stored
+									secret.
+								</p>
+							</div>
+
+							{vectorStoreValidationError && <p className="text-destructive text-sm">{vectorStoreValidationError}</p>}
+						</>
+					)}
+				</CardContent>
+				<CardFooter className="flex-col items-start justify-between gap-4 border-t sm:flex-row sm:items-center">
+					<p className="text-muted-foreground text-xs">
+						{isVectorStoreEditable
+							? "The badge reflects the current process, not the newly saved settings."
+							: "Dashboard editing is disabled while config.json owns the vector_store section."}
+					</p>
+					<Button
+						data-testid="caching-vector-store-save-button"
+						disabled={
+							vectorStoreLoading ||
+							Boolean(vectorStoreError) ||
+							!isVectorStoreEditable ||
+							!hasUnsavedVectorStoreChanges ||
+							Boolean(vectorStoreValidationError) ||
+							isSavingVectorStore
+						}
+						onClick={handleVectorStoreSave}
+					>
+						{isSavingVectorStore && <Loader2 data-icon="inline-start" className="animate-spin" />}
+						{isSavingVectorStore ? "Saving..." : "Save vector store"}
+					</Button>
+				</CardFooter>
+			</Card>
 
 			{configError !== undefined && (
 				<div className="border-destructive/50 bg-destructive/10 rounded-sm border p-4">

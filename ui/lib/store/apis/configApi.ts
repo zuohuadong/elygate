@@ -1,4 +1,4 @@
-import { BifrostConfig, GlobalProxyConfig } from "@/lib/types/config";
+import type { BifrostConfig, GlobalProxyConfig, UpdateVectorStoreConfig, VectorStoreConfig } from "@/lib/types/config";
 import { baseApi } from "./baseApi";
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
@@ -92,6 +92,22 @@ export const configApi = baseApi.injectEndpoints({
 				}
 			},
 		}),
+
+		getVectorStoreConfig: builder.query<VectorStoreConfig, void>({
+			query: () => ({
+				url: "/vector-store-config",
+			}),
+			providesTags: ["VectorStoreConfig"],
+		}),
+
+		updateVectorStoreConfig: builder.mutation<VectorStoreConfig, UpdateVectorStoreConfig>({
+			query: (data) => ({
+				url: "/vector-store-config",
+				method: "PUT",
+				body: data,
+			}),
+			invalidatesTags: ["Config", "VectorStoreConfig"],
+		}),
 	}),
 });
 
@@ -103,4 +119,6 @@ export const {
 	useForcePricingSyncMutation,
 	useUpdateClientMetadataMutation,
 	useLazyGetCoreConfigQuery,
+	useGetVectorStoreConfigQuery,
+	useUpdateVectorStoreConfigMutation,
 } = configApi;

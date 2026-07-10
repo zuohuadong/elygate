@@ -421,6 +421,66 @@ func NewMockConfigStore() *MockConfigStore {
 	}
 }
 
+func TestResolveVectorStoreConfigSplitPrefersPersistedDashboardConfig(t *testing.T) {
+	store := NewMockConfigStore()
+	persisted := &vectorstore.Config{
+		Enabled: true,
+		Type:    vectorstore.VectorStoreTypePgvector,
+		Config: vectorstore.PgvectorConfig{
+			ConnectionString: *schemas.NewSecretVar("env.PGVECTOR_DSN"),
+			Schema:           "dashboard_vectors",
+		},
+	}
+	store.vectorConfig = persisted
+	fileConfig := &vectorstore.Config{
+		Enabled: true,
+		Type:    vectorstore.VectorStoreTypePgvector,
+		Config: vectorstore.PgvectorConfig{
+			ConnectionString: *schemas.NewSecretVar("env.FILE_PGVECTOR_DSN"),
+			Schema:           "file_vectors",
+		},
+	}
+
+	configData := &ConfigData{
+		SourceOfTruth:     SourceOfTruthSplit,
+		VectorStoreConfig: fileConfig,
+	}
+	require.False(t, configData.vectorStoreManagedByConfigJSON())
+	resolved, err := resolveVectorStoreConfig(context.Background(), configData, store)
+	require.NoError(t, err)
+	require.Same(t, persisted, resolved)
+}
+
+func TestResolveVectorStoreConfigConfigJSONAuthorityPrefersPresentFileSection(t *testing.T) {
+	store := NewMockConfigStore()
+	store.vectorConfig = &vectorstore.Config{
+		Enabled: true,
+		Type:    vectorstore.VectorStoreTypePgvector,
+		Config: vectorstore.PgvectorConfig{
+			ConnectionString: *schemas.NewSecretVar("env.PGVECTOR_DSN"),
+			Schema:           "dashboard_vectors",
+		},
+	}
+	fileConfig := &vectorstore.Config{
+		Enabled: false,
+		Type:    vectorstore.VectorStoreTypePgvector,
+		Config: vectorstore.PgvectorConfig{
+			ConnectionString: *schemas.NewSecretVar("env.FILE_PGVECTOR_DSN"),
+			Schema:           "file_vectors",
+		},
+	}
+
+	configData := &ConfigData{
+		SourceOfTruth:     SourceOfTruthConfigJSON,
+		VectorStoreConfig: fileConfig,
+		presentSections:   map[string]bool{"vector_store": true},
+	}
+	require.True(t, configData.vectorStoreManagedByConfigJSON())
+	resolved, err := resolveVectorStoreConfig(context.Background(), configData, store)
+	require.NoError(t, err)
+	require.Same(t, fileConfig, resolved)
+}
+
 // Implement ConfigStore interface methods
 func (m *MockConfigStore) RefreshConnectionPool(ctx context.Context) error {
 	return nil

@@ -1,11 +1,27 @@
 import { Button } from "@/components/ui/button";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdownMenu";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuGroup,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdownMenu";
 import { buildCSV, downloadCSV } from "@/lib/utils/csv";
 import { Download, FileSpreadsheet, FileText, Loader2 } from "lucide-react";
 import { useCallback, useState } from "react";
 import { type DashboardData, getCSVSections } from "../utils/exportUtils";
 
-const PDF_TAB_LABELS = ["Overview", "Provider Usage", "Model Rankings", "MCP Usage"];
+const PDF_TAB_LABELS = [
+	"Overview",
+	"Provider Usage",
+	"Model Rankings",
+	"MCP Usage",
+	"Team Rankings",
+	"Customer Rankings",
+	"Business Unit Rankings",
+	"User Rankings",
+	"Virtual Key Rankings",
+];
 
 interface ExportPopoverProps {
 	getData: () => DashboardData;
@@ -16,6 +32,7 @@ interface ExportPopoverProps {
 
 export function ExportPopover({ getData, onPreloadData, onPdfExport, onPdfExportDone }: ExportPopoverProps) {
 	const [exporting, setExporting] = useState(false);
+	const [open, setOpen] = useState(false);
 
 	const handleCsvExport = useCallback(async () => {
 		setExporting(true);
@@ -66,22 +83,36 @@ export function ExportPopover({ getData, onPreloadData, onPdfExport, onPdfExport
 	}, [onPdfExport, onPdfExportDone]);
 
 	return (
-		<DropdownMenu>
+		<DropdownMenu open={open} onOpenChange={setOpen}>
 			<DropdownMenuTrigger asChild>
 				<Button variant="outline" size="default" disabled={exporting} data-testid="dashboard-export-trigger">
-					{exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+					{exporting ? <Loader2 className="animate-spin" data-icon="inline-start" /> : <Download data-icon="inline-start" />}
 					{exporting ? "Exporting..." : "Export"}
 				</Button>
 			</DropdownMenuTrigger>
 			<DropdownMenuContent align="end">
-				<DropdownMenuItem onClick={handleCsvExport} data-testid="export-csv-item">
-					<FileSpreadsheet className="h-4 w-4" />
-					CSV
-				</DropdownMenuItem>
-				<DropdownMenuItem onClick={handlePdfExport} data-testid="export-pdf-item">
-					<FileText className="h-4 w-4" />
-					PDF
-				</DropdownMenuItem>
+				<DropdownMenuGroup>
+					<DropdownMenuItem
+						onSelect={() => {
+							setOpen(false);
+							void handleCsvExport();
+						}}
+						data-testid="export-csv-item"
+					>
+						<FileSpreadsheet data-icon="inline-start" />
+						CSV
+					</DropdownMenuItem>
+					<DropdownMenuItem
+						onSelect={() => {
+							setOpen(false);
+							void handlePdfExport();
+						}}
+						data-testid="export-pdf-item"
+					>
+						<FileText data-icon="inline-start" />
+						PDF
+					</DropdownMenuItem>
+				</DropdownMenuGroup>
 			</DropdownMenuContent>
 		</DropdownMenu>
 	);

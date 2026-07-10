@@ -77,10 +77,10 @@ export class ConfigSettingsPage extends BasePage {
     this.observabilityToggles = page.locator('button[role="switch"]')
 
     // Pricing Config locators
-    this.pricingConfigView = page.getByTestId('pricing-config-view')
+    this.pricingConfigView = page.getByTestId('model-settings-view')
     this.pricingDatasheetUrlInput = page.getByTestId('pricing-datasheet-url-input')
     this.pricingForceSyncBtn = page.getByTestId('pricing-force-sync-btn')
-    this.pricingSaveBtn = page.getByTestId('pricing-save-btn')
+    this.pricingSaveBtn = page.getByTestId('model-settings-save-btn')
   }
 
   async goto(path: string): Promise<void> {
