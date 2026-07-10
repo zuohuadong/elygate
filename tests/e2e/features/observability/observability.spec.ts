@@ -1,18 +1,8 @@
 import { expect, test } from '../../core/fixtures/base.fixture'
-import { ObservabilityState } from './pages/observability.page'
 
 test.describe('Observability', () => {
-  let originalState: ObservabilityState
-
   test.beforeEach(async ({ observabilityPage }) => {
     await observabilityPage.goto()
-    // Capture original state for restoration
-    originalState = await observabilityPage.getCurrentState()
-  })
-
-  test.afterEach(async ({ observabilityPage }) => {
-    // Restore original state - disable all connectors that weren't enabled before
-    await observabilityPage.disableAllConnectors()
   })
 
   test.describe('Navigation', () => {
@@ -78,6 +68,10 @@ test.describe('Observability', () => {
       await expect
         .poll(async () => observabilityPage.isConnectorEnabled('otel'), { timeout: 3000 })
         .toBe(!initialState)
+
+      // Keep this stateful form test isolated: return the unsaved toggle to its original value.
+      await observabilityPage.toggleConnector('otel')
+      await expect.poll(async () => observabilityPage.isConnectorEnabled('otel')).toBe(initialState)
     })
 
     test('should display OTel delete button when connector is configured', async ({ observabilityPage }) => {
@@ -143,6 +137,9 @@ test.describe('Observability', () => {
 
       const newState = await observabilityPage.isConnectorEnabled('maxim')
       expect(newState).toBe(!initialState)
+
+      await observabilityPage.toggleConnector('maxim')
+      await expect.poll(async () => observabilityPage.isConnectorEnabled('maxim')).toBe(initialState)
     })
 
     test('should display Maxim configuration form', async ({ observabilityPage }) => {
@@ -179,126 +176,55 @@ test.describe('Observability', () => {
     })
 
     test('should display Prometheus configuration when available', async ({ observabilityPage }) => {
-      const isAvailable = await observabilityPage.isConnectorAvailable('prometheus')
-
-      if (!isAvailable) {
-        test.skip(true, 'Prometheus connector not available')
-        return
-      }
-
       await observabilityPage.selectConnector('prometheus')
 
-      const toggle = observabilityPage.getConnectorToggle('prometheus')
-      const isVisible = await toggle.isVisible().catch(() => false)
-      expect(isVisible).toBe(true)
+      await expect(observabilityPage.getPrometheusTab('pull')).toBeVisible()
+      await expect(observabilityPage.getPrometheusTab('push')).toBeVisible()
+      await expect(observabilityPage.getPrometheusMetricsToggle()).toBeVisible()
+      await expect(observabilityPage.page.getByText('Metrics Endpoint', { exact: true })).toBeVisible()
     })
 
-    test('should toggle Prometheus connector when available', async ({ observabilityPage }) => {
-      const isAvailable = await observabilityPage.isConnectorAvailable('prometheus')
-
-      if (!isAvailable) {
-        test.skip(true, 'Prometheus connector not available')
-        return
-      }
-
+    test('should toggle Prometheus pull metrics and restore the form state', async ({ observabilityPage }) => {
       await observabilityPage.selectConnector('prometheus')
 
-      const isToggleEnabled = await observabilityPage.isToggleEnabled('prometheus')
+      const toggle = observabilityPage.getPrometheusMetricsToggle()
+      await expect(toggle).toBeEnabled()
+      const initialState = await observabilityPage.isPrometheusMetricsEnabled()
 
-      if (!isToggleEnabled) {
-        test.skip(true, 'Prometheus toggle is disabled')
-        return
-      }
+      await observabilityPage.togglePrometheusMetrics()
+      await expect.poll(async () => observabilityPage.isPrometheusMetricsEnabled()).toBe(!initialState)
 
-      const initialState = await observabilityPage.isConnectorEnabled('prometheus')
-      const toggled = await observabilityPage.toggleConnector('prometheus')
-      expect(toggled).toBe(true)
-
-      const newState = await observabilityPage.isConnectorEnabled('prometheus')
-      expect(newState).toBe(!initialState)
+      await observabilityPage.togglePrometheusMetrics()
+      await expect.poll(async () => observabilityPage.isPrometheusMetricsEnabled()).toBe(initialState)
     })
 
-    test('should display Prometheus delete button when connector is configured', async ({ observabilityPage }) => {
-      const isAvailable = await observabilityPage.isConnectorAvailable('prometheus')
-
-      if (!isAvailable) {
-        test.skip(true, 'Prometheus connector not available')
-        return
-      }
-
+    test('should identify Prometheus as built-in telemetry rather than a deletable connector', async ({ observabilityPage }) => {
       await observabilityPage.selectConnector('prometheus')
 
-      const deleteBtn = observabilityPage.getConnectorDeleteBtn('prometheus')
-      const isVisible = await deleteBtn.isVisible().catch(() => false)
-
-      if (!isVisible) {
-        test.skip(true, 'Prometheus delete button not visible (connector may not be configured)')
-        return
-      }
-
-      await expect(deleteBtn).toBeVisible()
+      await expect(observabilityPage.getPrometheusMetricsToggle()).toBeVisible()
+      await expect(observabilityPage.getConnectorDeleteBtn('prometheus')).toHaveCount(0)
     })
   })
 
   test.describe('BigQuery Connector', () => {
-    test('should select BigQuery connector', async ({ observabilityPage }) => {
-      const isAvailable = await observabilityPage.isConnectorAvailable('bigquery')
-
-      if (!isAvailable) {
-        test.skip(true, 'BigQuery connector not available')
-        return
-      }
-
+    test('should show the OSS enterprise boundary for BigQuery', async ({ observabilityPage }) => {
       await observabilityPage.selectConnector('bigquery')
 
       const selected = await observabilityPage.getSelectedConnector()
       expect(selected).toContain('BigQuery')
+      await expect(observabilityPage.page.getByRole('heading', { name: 'Unlock native BigQuery data ingestion for analytics' })).toBeVisible()
+      await expect(observabilityPage.page.getByText('This capability requires the Elygate Enterprise source package and is not included in this OSS build.')).toBeVisible()
     })
   })
 
   test.describe('Datadog Connector', () => {
-    test('should select Datadog connector if available', async ({ observabilityPage }) => {
-      const isAvailable = await observabilityPage.isConnectorAvailable('datadog')
-
-      if (!isAvailable) {
-        test.skip(true, 'Datadog connector not available (enterprise feature)')
-        return
-      }
-
+    test('should show the OSS enterprise boundary for Datadog', async ({ observabilityPage }) => {
       await observabilityPage.selectConnector('datadog')
 
-      // Datadog view should be displayed
       const selected = await observabilityPage.getSelectedConnector()
       expect(selected).toContain('Datadog')
-    })
-
-    test('should toggle Datadog connector if available', async ({ observabilityPage }) => {
-      const isAvailable = await observabilityPage.isConnectorAvailable('datadog')
-
-      if (!isAvailable) {
-        test.skip(true, 'Datadog connector not available (enterprise feature)')
-        return
-      }
-
-      await observabilityPage.selectConnector('datadog')
-
-      const isToggleEnabled = await observabilityPage.isToggleEnabled('datadog')
-
-      if (!isToggleEnabled) {
-        test.skip(true, 'Datadog toggle is disabled')
-        return
-      }
-
-      const initialState = await observabilityPage.isConnectorEnabled('datadog')
-      const toggled = await observabilityPage.toggleConnector('datadog')
-
-      if (!toggled) {
-        test.skip(true, 'Datadog toggle could not be toggled')
-        return
-      }
-
-      const newState = await observabilityPage.isConnectorEnabled('datadog')
-      expect(newState).toBe(!initialState)
+      await expect(observabilityPage.page.getByRole('heading', { name: 'Unlock native Datadog data ingestion for better observability' })).toBeVisible()
+      await expect(observabilityPage.page.getByText('This capability requires the Elygate Enterprise source package and is not included in this OSS build.')).toBeVisible()
     })
   })
 

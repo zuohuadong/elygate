@@ -196,8 +196,7 @@ export default function LogsPage() {
 			// period mode `newFilters` carries no start/end, so only touch time when an
 			// explicit range is actually provided — otherwise we'd wipe the active period/range.
 			const hasExplicitTime = !!newFilters.start_time && !!newFilters.end_time;
-			const timeChanged =
-				hasExplicitTime && (newFilters.start_time !== filters.start_time || newFilters.end_time !== filters.end_time);
+			const timeChanged = hasExplicitTime && (newFilters.start_time !== filters.start_time || newFilters.end_time !== filters.end_time);
 			if (timeChanged) {
 				userModifiedTimeRange.current = true;
 			}
@@ -610,13 +609,13 @@ export default function LogsPage() {
 			{showEmptyState ? (
 				<EmptyState error={error ?? (logsError ? getErrorMessage(logsError as Parameters<typeof getErrorMessage>[0]) : null)} />
 			) : (
-				<div className="bg-background flex h-full w-full grow gap-3">
+				<div className="bg-background flex h-full w-full min-w-0 grow flex-col gap-2 overflow-hidden md:flex-row md:gap-3">
 					{/* Sidebar Filters */}
 					<LogsFilterSidebar filters={filters} onFiltersChange={setFilters} />
 
 					{/* Main Content */}
-					<div className="bg-card flex min-w-0 flex-1 flex-col gap-2 overflow-hidden rounded-l-md p-4 pb-2">
-						<div className="shrink-0">
+					<div className="bg-card flex min-h-0 w-full min-w-0 flex-1 flex-col gap-2 overflow-hidden rounded-md p-4 pb-2 md:rounded-l-md">
+						<div className="min-w-0 shrink-0 overflow-x-auto">
 							<LogsHeaderView
 								filters={filters}
 								onFiltersChange={setFilters}

@@ -28,6 +28,19 @@ export interface RuleFilterCondition {
   value: string
 }
 
+interface RoutingRuleRecord {
+  id: string
+  name: string
+  description: string
+  scope: string
+  scope_id?: string
+  priority: number
+}
+
+interface RoutingRulesResponse {
+  rules: RoutingRuleRecord[]
+}
+
 /**
  * Page object for the Routing Rules page
  */
@@ -37,6 +50,7 @@ export class RoutingRulesPage extends BasePage {
   /** View-level empty state (no table is rendered when there are 0 rules) */
   readonly emptyState: Locator
   readonly createBtn: Locator
+  readonly searchInput: Locator
 
   // Sheet elements
   readonly sheet: Locator
@@ -62,6 +76,7 @@ export class RoutingRulesPage extends BasePage {
     this.createBtn = page.locator('[data-testid="create-routing-rule-btn"]').or(
       page.getByRole('button', { name: /New Rule|Create First Rule/i }).first()
     )
+    this.searchInput = page.getByTestId('routing-rules-search-input')
 
     // Sheet elements
     this.sheet = page.locator('[role="dialog"]').or(page.locator('[data-testid="routing-rule-sheet"]'))
@@ -119,6 +134,64 @@ export class RoutingRulesPage extends BasePage {
     return this.table.locator('tbody tr').filter({ hasText: name }).first()
   }
 
+  private async getRoutingRules(search?: string): Promise<RoutingRuleRecord[]> {
+    const path = search
+      ? `/api/governance/routing-rules?${new URLSearchParams({ search }).toString()}`
+      : '/api/governance/routing-rules'
+    const response = await this.page.request.get(path)
+    if (!response.ok()) {
+      throw new Error(`Failed to list routing rules: ${response.status()} ${await response.text()}`)
+    }
+
+    const payload = (await response.json()) as RoutingRulesResponse
+    return payload.rules ?? []
+  }
+
+  private async getRoutingRuleByName(name: string): Promise<RoutingRuleRecord | undefined> {
+    const rules = await this.getRoutingRules(name)
+    return rules.find((rule) => rule.name === name)
+  }
+
+  private async getVisibleRuleRow(name: string): Promise<Locator> {
+    await this.searchInput.waitFor({ state: 'visible', timeout: 10000 })
+    await this.searchInput.fill(name)
+    const row = this.getRuleRow(name)
+    await expect(row).toBeVisible({ timeout: 10000 })
+    return row
+  }
+
+  async getAvailablePriority(
+    preferred: number = 0,
+    scope: RoutingRuleConfig['scope'] = 'global',
+    scopeId?: string,
+    excludeRuleId?: string
+  ): Promise<number> {
+    const rules = await this.getRoutingRules()
+    const normalizedScope = scope ?? 'global'
+    const normalizedScopeId = scopeId ?? ''
+    const used = new Set(
+      rules
+        .filter((rule) => rule.id !== excludeRuleId)
+        .filter((rule) => rule.scope === normalizedScope && (rule.scope_id ?? '') === normalizedScopeId)
+        .map((rule) => rule.priority)
+    )
+    const startingPriority = Math.min(1000, Math.max(0, Math.trunc(preferred)))
+
+    for (let offset = 0; offset <= 1000; offset++) {
+      const candidate = (startingPriority + offset) % 1001
+      if (!used.has(candidate)) return candidate
+    }
+
+    throw new Error(`No available routing rule priority for scope ${normalizedScope}`)
+  }
+
+  async fillAvailablePriority(preferred: number = 0): Promise<number> {
+    const priority = await this.getAvailablePriority(preferred)
+    await this.priorityInput.waitFor({ state: 'visible' })
+    await this.priorityInput.fill(String(priority))
+    return priority
+  }
+
   private async waitForToastAndAssertSuccess(action: string): Promise<void> {
     const toast = this.page.locator('[data-sonner-toast]:not([data-removed="true"])').first()
     await expect(toast).toBeVisible({ timeout: 10000 })
@@ -133,8 +206,7 @@ export class RoutingRulesPage extends BasePage {
    * Check if routing rule exists
    */
   async ruleExists(name: string): Promise<boolean> {
-    const row = this.getRuleRow(name)
-    return await row.count() > 0
+    return (await this.getRoutingRuleByName(name)) !== undefined
   }
 
   /**
@@ -182,12 +254,12 @@ export class RoutingRulesPage extends BasePage {
     // To add conditions, use the "Add Rule" button in the Rule Builder section
     // For basic tests, leaving the builder empty applies the rule to all requests
 
-    // Set priority if provided - clear first then fill
-    if (config.priority !== undefined) {
-      await this.priorityInput.waitFor({ state: 'visible' })
-      await this.priorityInput.clear()
-      await this.priorityInput.fill(String(config.priority))
-    }
+    // Priority is unique within a scope. Resolve against the live API so stale
+    // rows from another run cannot make a generated value collide.
+    const priority = await this.getAvailablePriority(config.priority ?? 0, config.scope ?? 'global', config.scopeId)
+    config.priority = priority
+    await this.priorityInput.waitFor({ state: 'visible' })
+    await this.priorityInput.fill(String(priority))
 
     // Set enabled state if explicitly specified
     if (config.enabled !== undefined) {
@@ -213,16 +285,15 @@ export class RoutingRulesPage extends BasePage {
   /**
    * Edit an existing routing rule
    */
-  async editRoutingRule(name: string, updates: Partial<RoutingRuleConfig>): Promise<void> {
+  async editRoutingRule(name: string, updates: Partial<RoutingRuleConfig>): Promise<number | undefined> {
     await this.dismissToasts()
-    const row = this.getRuleRow(name)
-    await row.scrollIntoViewIfNeeded()
+    const currentRule = await this.getRoutingRuleByName(name)
+    if (!currentRule) throw new Error(`Routing rule not found: ${name}`)
 
-    // Find edit button
-    const editBtn = row.locator('button').filter({ has: this.page.locator('svg.lucide-pencil') }).or(
-      row.getByRole('button', { name: /Edit/i })
-    )
-    await editBtn.waitFor({ state: 'visible' })
+    const row = await this.getVisibleRuleRow(name)
+    await row.getByRole('button', { name: `Actions for routing rule ${name}`, exact: true }).click()
+    const editBtn = this.page.getByRole('menuitem', { name: 'Edit', exact: true })
+    await expect(editBtn).toBeVisible()
     await editBtn.click()
 
     await expect(this.sheet).toBeVisible({ timeout: 5000 })
@@ -243,10 +314,17 @@ export class RoutingRulesPage extends BasePage {
       }
     }
 
+    let savedPriority: number | undefined
     if (updates.priority !== undefined) {
+      savedPriority = await this.getAvailablePriority(
+        updates.priority,
+        currentRule.scope as RoutingRuleConfig['scope'],
+        currentRule.scope_id,
+        currentRule.id
+      )
+      updates.priority = savedPriority
       await this.priorityInput.waitFor({ state: 'visible' })
-      await this.priorityInput.clear()
-      await this.priorityInput.fill(String(updates.priority))
+      await this.priorityInput.fill(String(savedPriority))
     }
 
     // Save
@@ -256,6 +334,8 @@ export class RoutingRulesPage extends BasePage {
     await this.waitForToastAndAssertSuccess('edit routing rule')
     await expect(this.sheet).not.toBeVisible({ timeout: 10000 })
     await waitForNetworkIdle(this.page)
+    await expect.poll(() => this.getRoutingRuleByName(updates.name ?? name), { timeout: 10000 }).not.toBeUndefined()
+    return savedPriority
   }
 
   /**
@@ -263,28 +343,48 @@ export class RoutingRulesPage extends BasePage {
    */
   async deleteRoutingRule(name: string): Promise<void> {
     await this.dismissToasts()
-    const row = this.getRuleRow(name)
-    await row.scrollIntoViewIfNeeded()
-
-    // Find delete button (may have lucide-trash or lucide-trash-2 icon)
-    const deleteBtn = row.locator('button').filter({
-      has: this.page.locator('svg.lucide-trash, svg.lucide-trash-2')
-    }).first()
-    await deleteBtn.waitFor({ state: 'visible' })
+    const row = await this.getVisibleRuleRow(name)
+    await row.getByRole('button', { name: `Actions for routing rule ${name}`, exact: true }).click()
+    const deleteBtn = this.page.getByRole('menuitem', { name: 'Delete', exact: true })
+    await expect(deleteBtn).toBeVisible()
     await deleteBtn.click()
 
     // Wait for confirmation dialog (AlertDialog uses role="alertdialog")
-    const alertDialog = this.page.locator('[role="alertdialog"]')
-    await alertDialog.waitFor({ state: 'visible', timeout: 5000 })
+    const alertDialog = this.page.getByRole('alertdialog').filter({ hasText: name })
+    await expect(alertDialog).toBeVisible({ timeout: 5000 })
 
     // Click confirm delete button inside the dialog
-    const confirmBtn = alertDialog.getByRole('button', { name: /Delete/i })
+    const confirmBtn = alertDialog.getByRole('button', { name: 'Delete', exact: true })
     await confirmBtn.waitFor({ state: 'visible' })
     await confirmBtn.click()
 
-    await this.waitForSuccessToast('deleted')
-    await this.dismissToasts()
+    await this.waitForToastAndAssertSuccess('delete routing rule')
     await waitForNetworkIdle(this.page)
+    await expect.poll(() => this.ruleExists(name), { timeout: 10000 }).toBe(false)
+  }
+
+  async cleanupRoutingRules(names: readonly string[]): Promise<void> {
+    const uniqueNames = new Set(names)
+    if (uniqueNames.size === 0) return
+
+    const rules = await this.getRoutingRules()
+    const matches = rules.filter((rule) => uniqueNames.has(rule.name))
+    const errors: string[] = []
+
+    for (const rule of matches) {
+      const response = await this.page.request.delete(`/api/governance/routing-rules/${rule.id}`)
+      if (!response.ok() && response.status() !== 404) {
+        errors.push(`${rule.name}: ${response.status()} ${await response.text()}`)
+      }
+    }
+
+    const remaining = (await this.getRoutingRules()).filter((rule) => uniqueNames.has(rule.name))
+    if (remaining.length > 0) {
+      errors.push(`still present: ${remaining.map((rule) => rule.name).join(', ')}`)
+    }
+    if (errors.length > 0) {
+      throw new Error(`Failed to clean up routing rules: ${errors.join('; ')}`)
+    }
   }
 
   /**
@@ -292,8 +392,7 @@ export class RoutingRulesPage extends BasePage {
    */
   async toggleRuleEnabled(name: string): Promise<void> {
     await this.dismissToasts() // Dismiss any existing toasts
-    const row = this.getRuleRow(name)
-    await row.scrollIntoViewIfNeeded()
+    const row = await this.getVisibleRuleRow(name)
 
     // Find toggle switch in the row
     const toggle = row.locator('button[role="switch"]')
@@ -591,33 +690,14 @@ export class RoutingRulesPage extends BasePage {
    * Get rule's description from the table (first column contains name + description)
    */
   async getRuleDescription(name: string): Promise<string> {
-    const row = this.getRuleRow(name)
-    const descEl = row.getByTestId('routing-rule-description')
-    const count = await descEl.count()
-    if (count === 0) return ''
-    return (await descEl.textContent()) ?? ''
+    return (await this.getRoutingRuleByName(name))?.description ?? ''
   }
 
   /**
    * Get rule's current priority
    */
   async getRulePriority(name: string): Promise<number | null> {
-    const row = this.getRuleRow(name)
-
-    // Table columns: Name(0), Provider(1), Model(2), Scope(3), Priority(4), Expression(5), Status(6), Actions(7)
-    const cells = row.locator('td')
-    const count = await cells.count()
-
-    // Priority is in the 5th column (index 4)
-    if (count > 4) {
-      const text = await cells.nth(4).textContent()
-      const num = parseInt(text || '', 10)
-      if (!isNaN(num) && num > 0) {
-        return num
-      }
-    }
-
-    return null
+    return (await this.getRoutingRuleByName(name))?.priority ?? null
   }
 
   /**

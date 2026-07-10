@@ -421,13 +421,13 @@ export default function MCPLogsPage() {
 			) : showEmptyState ? (
 				<MCPEmptyState error={displayError} />
 			) : (
-				<div className="no-padding-parent no-border-parent bg-background flex h-[calc(100vh_-_16px)] w-full gap-3">
+				<div className="no-padding-parent no-border-parent bg-background flex h-[calc(100vh_-_16px)] w-full min-w-0 flex-col gap-2 overflow-hidden md:flex-row md:gap-3">
 					{/* Sidebar Filters */}
 					<MCPFilterSidebar filters={filters} onFiltersChange={setFilters} />
 
 					{/* Main Content */}
-					<div className="bg-card flex min-w-0 flex-1 flex-col gap-2 overflow-hidden rounded-l-md">
-						<div className="p-4 pb-0">
+					<div className="bg-card flex min-h-0 w-full min-w-0 flex-1 flex-col gap-2 overflow-hidden rounded-md md:rounded-l-md">
+						<div className="min-w-0 overflow-x-auto p-4 pb-0">
 							<McpHeaderView
 								filters={filters}
 								onFiltersChange={setFilters}

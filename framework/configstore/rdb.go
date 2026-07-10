@@ -298,7 +298,20 @@ func (s *RDBConfigStore) UpdateClientConfig(ctx context.Context, config *ClientC
 		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&tables.TableClientConfig{}).Error; err != nil {
 			return err
 		}
-		return tx.Create(&dbConfig).Error
+		if err := tx.Create(&dbConfig).Error; err != nil {
+			return err
+		}
+		// GORM applies the column's default:10 tag when Create sees an integer
+		// zero value. For this setting, however, 0 is an explicit persisted value
+		// meaning "disable tool synchronization". Update the newly created row by
+		// primary key inside the same transaction so normal table defaults remain
+		// intact for callers that create TableClientConfig directly.
+		if config.MCPToolSyncInterval == 0 {
+			return tx.Model(&tables.TableClientConfig{}).
+				Where("id = ?", dbConfig.ID).
+				UpdateColumn("mcp_tool_sync_interval", 0).Error
+		}
+		return nil
 	})
 }
 

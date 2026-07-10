@@ -2,7 +2,7 @@ import { expect, test } from '../../core/fixtures/base.fixture'
 import { createRoutingRuleData } from './routing-rules.data'
 
 // Track created rules for cleanup
-const createdRules: string[] = []
+const createdRules = new Set<string>()
 
 test.describe('Routing Rules', () => {
   test.beforeEach(async ({ routingRulesPage }) => {
@@ -10,18 +10,11 @@ test.describe('Routing Rules', () => {
   })
 
   test.afterEach(async ({ routingRulesPage }) => {
-    // Clean up any rules created during tests
-    for (const ruleName of [...createdRules]) {
-      try {
-        const exists = await routingRulesPage.ruleExists(ruleName)
-        if (exists) {
-          await routingRulesPage.deleteRoutingRule(ruleName)
-        }
-      } catch {
-        // Ignore cleanup errors
-      }
+    const rulesToDelete = [...createdRules]
+    await routingRulesPage.cleanupRoutingRules(rulesToDelete)
+    for (const ruleName of rulesToDelete) {
+      createdRules.delete(ruleName)
     }
-    createdRules.length = 0
   })
 
   test.describe('Routing Rule Creation', () => {
@@ -42,7 +35,7 @@ test.describe('Routing Rules', () => {
       const ruleData = createRoutingRuleData({
         name: `Basic Rule ${Date.now()}`,
       })
-      createdRules.push(ruleData.name)
+      createdRules.add(ruleData.name)
 
       await routingRulesPage.createRoutingRule(ruleData)
 
@@ -55,7 +48,7 @@ test.describe('Routing Rules', () => {
         name: `Described Rule ${Date.now()}`,
         description: 'A rule with a detailed description for testing',
       })
-      createdRules.push(ruleData.name)
+      createdRules.add(ruleData.name)
 
       await routingRulesPage.createRoutingRule(ruleData)
 
@@ -68,7 +61,7 @@ test.describe('Routing Rules', () => {
         name: `Disabled Rule ${Date.now()}`,
         enabled: false,
       })
-      createdRules.push(ruleData.name)
+      createdRules.add(ruleData.name)
 
       await routingRulesPage.createRoutingRule(ruleData)
 
@@ -96,7 +89,7 @@ test.describe('Routing Rules', () => {
       const ruleData = createRoutingRuleData({
         name: `Edit Test Rule ${Date.now()}`,
       })
-      createdRules.push(ruleData.name)
+      createdRules.add(ruleData.name)
 
       await routingRulesPage.createRoutingRule(ruleData)
 
@@ -115,7 +108,7 @@ test.describe('Routing Rules', () => {
       const ruleData = createRoutingRuleData({
         name: `Delete Test Rule ${Date.now()}`,
       })
-      // Don't add to createdRules since we're testing delete
+      createdRules.add(ruleData.name)
 
       await routingRulesPage.createRoutingRule(ruleData)
 
@@ -137,7 +130,7 @@ test.describe('Routing Rules', () => {
         name: `Toggle Test Rule ${Date.now()}`,
         enabled: true,
       })
-      createdRules.push(ruleData.name)
+      createdRules.add(ruleData.name)
 
       await routingRulesPage.createRoutingRule(ruleData)
 
@@ -193,7 +186,7 @@ test.describe('Routing Rules', () => {
         name: `Provider Filter Rule ${Date.now()}`,
         provider: 'openai', // Set target provider
       })
-      createdRules.push(ruleData.name)
+      createdRules.add(ruleData.name)
 
       await routingRulesPage.createRoutingRule(ruleData)
 
@@ -207,7 +200,7 @@ test.describe('Routing Rules', () => {
         provider: 'openai',
         model: 'gpt-4',
       })
-      createdRules.push(ruleData.name)
+      createdRules.add(ruleData.name)
 
       await routingRulesPage.createRoutingRule(ruleData)
 
@@ -219,18 +212,20 @@ test.describe('Routing Rules', () => {
       // Create two rules with unique priorities (avoid fixed 500/600 so parallel workers don't collide)
       const rule1 = createRoutingRuleData({ name: `Reorder Test Rule 1 ${Date.now()}` })
       const rule2 = createRoutingRuleData({ name: `Reorder Test Rule 2 ${Date.now()}` })
-      createdRules.push(rule1.name, rule2.name)
+      createdRules.add(rule1.name)
+      createdRules.add(rule2.name)
 
       await routingRulesPage.createRoutingRule(rule1)
       await routingRulesPage.createRoutingRule(rule2)
 
       // Change first rule's priority (edit to a new value to test reorder)
       const newPriority = (rule1.priority! + 100) % 901
-      await routingRulesPage.editRoutingRule(rule1.name, { priority: newPriority })
+      const savedPriority = await routingRulesPage.editRoutingRule(rule1.name, { priority: newPriority })
 
       // Verify priority was saved and displayed
       const displayedPriority = await routingRulesPage.getRulePriority(rule1.name)
-      expect(displayedPriority).toBe(newPriority)
+      expect(savedPriority).toBeDefined()
+      expect(displayedPriority).toBe(savedPriority)
     })
 
     test('should create rule with virtual key scope', async ({ routingRulesPage }) => {
@@ -286,7 +281,7 @@ test.describe('Routing Rules', () => {
       // Fill required name
       const ruleName = `CEL Test ${Date.now()}`
       await routingRulesPage.nameInput.fill(ruleName)
-      createdRules.push(ruleName)
+      createdRules.add(ruleName)
 
       // Verify initial CEL is empty/no rules
       const initialCel = await routingRulesPage.getCelExpression()
@@ -316,7 +311,7 @@ test.describe('Routing Rules', () => {
       // Fill required name
       const ruleName = `CEL Combinator Test ${Date.now()}`
       await routingRulesPage.nameInput.fill(ruleName)
-      createdRules.push(ruleName)
+      createdRules.add(ruleName)
 
       // Add two rule conditions to see the combinator in action
       await routingRulesPage.clickAddRule()
@@ -343,7 +338,7 @@ test.describe('Routing Rules', () => {
 
     test('should save rule with conditions successfully', async ({ routingRulesPage }) => {
       const ruleName = `CEL Save Test ${Date.now()}`
-      createdRules.push(ruleName)
+      createdRules.add(ruleName)
 
       await routingRulesPage.createBtn.click()
       await expect(routingRulesPage.sheet).toBeVisible()
@@ -352,6 +347,7 @@ test.describe('Routing Rules', () => {
 
       // Fill name
       await routingRulesPage.nameInput.fill(ruleName)
+      await routingRulesPage.fillAvailablePriority()
 
       // Add a condition (default Model field with default operator)
       await routingRulesPage.clickAddRule()

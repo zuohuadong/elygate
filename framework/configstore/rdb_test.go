@@ -1457,6 +1457,19 @@ func TestUpdateClientConfig(t *testing.T) {
 	assert.Equal(t, 100, result.InitialPoolSize)
 }
 
+func TestUpdateClientConfigPersistsDisabledMCPToolSyncInterval(t *testing.T) {
+	store := setupRDBTestStore(t)
+	ctx := context.Background()
+
+	require.NoError(t, store.UpdateClientConfig(ctx, &ClientConfig{MCPToolSyncInterval: 10}))
+	require.NoError(t, store.UpdateClientConfig(ctx, &ClientConfig{MCPToolSyncInterval: 0}))
+
+	result, err := store.GetClientConfig(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, 0, result.MCPToolSyncInterval, "0 disables MCP tool synchronization and must survive persistence")
+}
+
 func TestUpdateClientMetadata(t *testing.T) {
 	store := setupRDBTestStore(t)
 	ctx := context.Background()

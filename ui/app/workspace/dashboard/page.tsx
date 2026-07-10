@@ -414,18 +414,24 @@ export default function DashboardPage() {
 	const activeTab = urlState.tab || "overview";
 
 	return (
-		<div id="dashboard-root" className="no-padding-parent no-border-parent bg-background flex h-[calc(100vh_-_16px)] w-full gap-3">
+		<div
+			id="dashboard-root"
+			className="no-padding-parent no-border-parent bg-background flex h-[calc(100vh_-_16px)] w-full min-w-0 flex-col gap-2 overflow-hidden md:flex-row md:gap-3"
+		>
 			{/* Sidebar Filters */}
 			<LogsFilterSidebar filters={filters} onFiltersChange={setFilters} />
 
 			{/* Main Content */}
-			<ScrollArea className="bg-card flex min-w-0 flex-1 flex-col gap-4 rounded-l-md" viewportClassName="no-table">
+			<ScrollArea
+				className="bg-card flex min-h-0 w-full min-w-0 flex-1 flex-col gap-4 overflow-hidden rounded-md md:rounded-l-md"
+				viewportClassName="no-table"
+			>
 				{/* Header */}
-				<div className="flex items-center justify-between p-4">
+				<div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
 					<div className="flex items-center gap-2">
 						<h1 className="text-lg font-semibold">Dashboard</h1>
 					</div>
-					<div className="flex items-center gap-2">
+					<div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
 						<ExportPopover
 							getData={getDashboardData}
 							onPreloadData={handlePreloadData}
@@ -481,7 +487,7 @@ export default function DashboardPage() {
 					</div>
 				</div>
 
-				<div className="p-4">
+				<div className="min-w-0 p-4">
 					{/* Tabs */}
 					<Tabs value={activeTab} onValueChange={handleTabChange}>
 						<div className="mb-2 max-w-full overflow-x-auto">
