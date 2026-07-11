@@ -22,6 +22,7 @@ import (
 	configstoreTables "github.com/maximhq/bifrost/framework/configstore/tables"
 	"github.com/maximhq/bifrost/framework/encrypt"
 	"github.com/maximhq/bifrost/framework/modelcatalog"
+	"github.com/maximhq/bifrost/framework/modelcatalog/datasheet"
 	"github.com/maximhq/bifrost/framework/vectorstore"
 	"github.com/maximhq/bifrost/plugins/compat"
 	"github.com/maximhq/bifrost/transports/bifrost-http/lib"
@@ -1389,7 +1390,7 @@ func checkURLAccessibility(rawURL string) error {
 		return fmt.Errorf("invalid URL: %w", err)
 	}
 	if parsed.Scheme == "file" {
-		info, err := os.Stat(parsed.Path)
+		info, err := os.Stat(datasheet.FilePathFromURL(parsed))
 		if err != nil {
 			return fmt.Errorf("file not accessible: %w", err)
 		}

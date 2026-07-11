@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -14,6 +15,14 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/valyala/fasthttp"
 )
+
+func TestCheckURLAccessibilitySupportsRelativeFileURL(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "pricing.json"), []byte(`{}`), 0o600))
+	t.Chdir(dir)
+
+	require.NoError(t, checkURLAccessibility("file://./pricing.json"))
+}
 
 func newVectorStoreConfigHandlerTest(t *testing.T) (*ConfigHandler, configstore.ConfigStore) {
 	t.Helper()

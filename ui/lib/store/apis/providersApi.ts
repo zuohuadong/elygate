@@ -39,6 +39,7 @@ export interface ListModelsResponse {
 export interface ModelDetails {
 	name: string;
 	provider: string;
+	has_pricing_row: boolean;
 	context_length?: number;
 	max_input_tokens?: number;
 	max_output_tokens?: number;
@@ -405,7 +406,7 @@ export const providersApi = baseApi.injectEndpoints({
 
 		// Batch upsert additional_attributes on existing pricing rows. The
 		// pricing row must already exist for each (model, provider); a missing
-		// row surfaces as a 400. An entry with an empty additional_attributes
+		// row surfaces as a 422. An entry with an empty additional_attributes
 		// map clears the column for that row.
 		upsertModelCatalogEntries: builder.mutation<void, ModelPricingAttributesEntry[]>({
 			query: (entries) => ({

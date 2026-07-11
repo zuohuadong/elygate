@@ -75,7 +75,7 @@ export class GovernancePage extends BasePage {
 
   async gotoCustomers(): Promise<void> {
     await this.page.goto('/workspace/governance/customers')
-    await waitForNetworkIdle(this.page)
+    await expect(this.customersCreateBtn).toBeVisible()
   }
 
   getTeamRow(name: string): Locator {

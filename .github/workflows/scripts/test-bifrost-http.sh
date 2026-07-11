@@ -78,6 +78,11 @@ cd bifrost-http
 go build -o ../../tmp/bifrost-http .
 cd ..
 
+# Run integration binaries from the repository root. The shared default config
+# uses repository-relative file:// datasheet URLs, and the UI E2E workflow also
+# starts Bifrost from this directory.
+cd ..
+
 # Run integration tests with different configurations
 echo "🧪 Running integration tests with different configurations..."
 CONFIGS_TO_TEST=(
@@ -93,8 +98,8 @@ CONFIGS_TO_TEST=(
   "withsemanticcache"
 )
 
-TEST_BINARY="../tmp/bifrost-http"
-CONFIGS_DIR="../.github/workflows/configs"
+TEST_BINARY="./tmp/bifrost-http"
+CONFIGS_DIR=".github/workflows/configs"
 
 # Running docker compose
 echo "🐳 Starting Docker services (PostgreSQL, Weaviate, Redis)..."
@@ -249,5 +254,4 @@ for config in "${CONFIGS_TO_TEST[@]}"; do
   sleep 1
 done
 
-cd ..
 echo "✅ Bifrost-HTTP tests completed successfully"

@@ -115,6 +115,68 @@ test.describe('Placeholder and Enterprise Pages', () => {
     })
   })
 
+  test('should load adaptive-routing settings page', async ({ page }) => {
+    await expectOssEnterpriseFallback(page, {
+      path: '/workspace/adaptive-routing/settings',
+      expectedPath: /\/workspace\/adaptive-routing\/settings(?:\?.*)?$/,
+      heading: 'Unlock adaptive routing for better performance',
+    })
+  })
+
+  test('should load circuit-breaker page', async ({ page }) => {
+    await expectOssEnterpriseFallback(page, {
+      path: '/workspace/circuit-breaker',
+      expectedPath: /\/workspace\/circuit-breaker(?:\?.*)?$/,
+      heading: 'Unlock circuit breaker for reliable fallbacks',
+    })
+  })
+
+  test('should load alerting channels page', async ({ page }) => {
+    await expectOssEnterpriseFallback(page, {
+      path: '/workspace/alerting/channels',
+      expectedPath: /\/workspace\/alerting\/channels(?:\?.*)?$/,
+      heading: 'Unlock alerting channels for proactive monitoring',
+    })
+  })
+
+  test('should load alerting history page', async ({ page }) => {
+    await expectOssEnterpriseFallback(page, {
+      path: '/workspace/alerting/history',
+      expectedPath: /\/workspace\/alerting\/history(?:\?.*)?$/,
+      heading: 'Unlock alerting history for proactive monitoring',
+    })
+  })
+
+  test('should load governance users page', async ({ page }) => {
+    await expectOssEnterpriseFallback(page, {
+      path: '/workspace/governance/users',
+      expectedPath: /\/workspace\/governance\/users(?:\?.*)?$/,
+      heading: 'Unlock users & user governance',
+    })
+  })
+
+  test('should load governance business-units page', async ({ page }) => {
+    await expectOssEnterpriseFallback(page, {
+      path: '/workspace/governance/business-units',
+      expectedPath: /\/workspace\/governance\/business-units(?:\?.*)?$/,
+      heading: 'Unlock business units & advanced governance',
+    })
+  })
+
+  test('should load governance access-profiles page', async ({ page }) => {
+    await expectOssEnterpriseFallback(page, {
+      path: '/workspace/governance/access-profiles',
+      expectedPath: /\/workspace\/governance\/access-profiles(?:\?.*)?$/,
+      heading: 'Unlock access profiles for better performance',
+    })
+  })
+
+  test('should redirect the enterprise-only global proxy page to client settings in OSS', async ({ page }) => {
+    await page.goto('/workspace/config/proxy')
+    await expect(page).toHaveURL(/\/workspace\/config\/client-settings(?:\?.*)?$/)
+    await expect(page.getByRole('heading', { name: 'Client Settings', exact: true })).toBeVisible()
+  })
+
   test('should load guardrails configuration page', async ({ page }) => {
     await expectOssEnterpriseFallback(page, {
       path: '/workspace/guardrails/configuration',

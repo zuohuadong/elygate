@@ -129,9 +129,7 @@ test.describe('Governance - Customers', () => {
   })
 
   test('should display create customer button or empty state', async ({ governancePage }) => {
-    const createVisible = await governancePage.customersCreateBtn.isVisible().catch(() => false)
-    const emptyCreateVisible = await governancePage.page.getByTestId('customer-button-create').isVisible().catch(() => false)
-    expect(createVisible || emptyCreateVisible).toBe(true)
+    await expect(governancePage.customersCreateBtn).toBeVisible()
   })
 
   test('should create a customer', async ({ governancePage }) => {

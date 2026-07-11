@@ -24,6 +24,31 @@
       "ssl_mode": "disable"
     }
   },
+  "framework": {
+    "pricing": {
+      "pricing_url": "file://./examples/configs/withlocalpricingfiles/pricing.json",
+      "model_parameters_url": "file://./examples/configs/withlocalpricingfiles/model-parameters.json",
+      "pricing_sync_interval": 86400
+    }
+  },
+  "vector_store": {
+    "enabled": true,
+    "type": "weaviate",
+    "config": {
+      "scheme": "http",
+      "host": "localhost:9000"
+    }
+  },
+  "plugins": [
+    {
+      "enabled": true,
+      "name": "semantic_cache",
+      "config": {
+        "dimension": 1,
+        "vector_store_namespace": "e2e-direct-cache"
+      }
+    }
+  ],
   "providers": {
     "openai": {
       "keys": [

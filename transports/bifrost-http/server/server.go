@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -1175,7 +1176,8 @@ func (s *BifrostHTTPServer) UpsertModelPricingAttributes(ctx context.Context, en
 			}
 		}
 		if len(missing) > 0 {
-			return fmt.Errorf("no pricing row for one or more (model, provider) entries: %s", strings.Join(missing, ", "))
+			sort.Strings(missing)
+			return &handlers.MissingModelPricingRowsError{Entries: missing}
 		}
 		return nil
 	})

@@ -1,6 +1,5 @@
 import { Locator, Page, expect } from '@playwright/test'
 import { BasePage } from '../../../core/pages/base.page'
-import { waitForNetworkIdle } from '../../../core/utils/test-helpers'
 
 /**
  * Page object for the MCP Logs page
@@ -11,6 +10,7 @@ export class MCPLogsPage extends BasePage {
   readonly filtersSection: Locator
   readonly filtersButton: Locator
   readonly statsCards: Locator
+  readonly gettingStartedGuide: Locator
 
   // Filter elements
   readonly toolNameFilter: Locator
@@ -41,6 +41,10 @@ export class MCPLogsPage extends BasePage {
     this.statsCards = page.locator('[data-testid="mcp-stats-cards"]').or(
       page.locator('text=Total Executions').locator('..').locator('..')
     )
+    this.gettingStartedGuide = page.getByRole('heading', {
+      name: 'Get Started with MCP Tool Execution',
+      exact: true,
+    })
 
     // Filters live in the persistent collapsible sidebar.
     this.toolNameFilter = page.getByRole('button', { name: 'Tool Names', exact: true })
@@ -82,9 +86,7 @@ export class MCPLogsPage extends BasePage {
    */
   async goto(): Promise<void> {
     await this.page.goto('/workspace/mcp-logs')
-    await waitForNetworkIdle(this.page)
-    // Wait for table to be visible
-    await this.logsTable.waitFor({ state: 'visible', timeout: 10000 }).catch(() => {})
+    await expect(this.logsTable.or(this.gettingStartedGuide)).toBeVisible()
   }
 
   private async ensureFilterSidebarExpanded(): Promise<void> {
@@ -113,7 +115,6 @@ export class MCPLogsPage extends BasePage {
 
     await checkbox.click()
     await expect(checkbox).toHaveAttribute('data-state', 'checked')
-    await waitForNetworkIdle(this.page)
     return true
   }
 
@@ -145,7 +146,6 @@ export class MCPLogsPage extends BasePage {
 
     await checkbox.click()
     await expect(checkbox).toHaveAttribute('data-state', 'checked')
-    await waitForNetworkIdle(this.page)
     return true
   }
 
@@ -154,8 +154,6 @@ export class MCPLogsPage extends BasePage {
    */
   async searchLogs(query: string): Promise<void> {
     await this.searchInput.fill(query)
-    // Wait for debounced search to trigger network request
-    await waitForNetworkIdle(this.page)
   }
 
   /**
@@ -163,7 +161,6 @@ export class MCPLogsPage extends BasePage {
    */
   async clearSearch(): Promise<void> {
     await this.searchInput.clear()
-    await waitForNetworkIdle(this.page)
   }
 
   /**
@@ -187,8 +184,6 @@ export class MCPLogsPage extends BasePage {
     } else {
       await this.page.keyboard.press('Escape')
     }
-
-    await waitForNetworkIdle(this.page)
   }
 
   /**
@@ -272,7 +267,6 @@ export class MCPLogsPage extends BasePage {
       const offset = params.get('offset')
       return offset === String(expectedOffset)
     }, { timeout: 10000 })
-    await waitForNetworkIdle(this.page)
   }
 
   /**
@@ -295,7 +289,6 @@ export class MCPLogsPage extends BasePage {
       if (expectedOffset === 0) return offset === null || offset === '0'
       return offset === String(expectedOffset)
     }, { timeout: 10000 })
-    await waitForNetworkIdle(this.page)
   }
 
   /**
@@ -317,7 +310,6 @@ export class MCPLogsPage extends BasePage {
     if (await sortButton.count() > 0) {
       await sortButton.first().waitFor({ state: 'visible' })
       await sortButton.first().click()
-      await waitForNetworkIdle(this.page)
     }
   }
 

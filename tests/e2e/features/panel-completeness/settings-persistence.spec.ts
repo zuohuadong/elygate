@@ -11,6 +11,7 @@ interface CompatConfigSnapshot {
 interface ClientConfigSnapshot extends Record<string, unknown> {
 	compat: CompatConfigSnapshot;
 	mcp_tool_sync_interval: number;
+	required_headers?: string[];
 }
 
 interface CoreConfigSnapshot extends Record<string, unknown> {
@@ -35,14 +36,14 @@ async function expectSuccessfulApiResponse(response: APIResponse, action: string
 	expect(response.ok(), `${action} failed with HTTP ${response.status()}: ${await response.text()}`).toBe(true);
 }
 
-async function getJson<T>(request: APIRequestContext, url: string): Promise<T> {
-	const response = await request.get(url);
+async function getJson<T>(request: APIRequestContext, url: string, headers?: Record<string, string>): Promise<T> {
+	const response = await request.get(url, headers ? { headers } : undefined);
 	await expectSuccessfulApiResponse(response, `GET ${url}`);
 	return (await response.json()) as T;
 }
 
-async function putJson(request: APIRequestContext, url: string, data: object): Promise<void> {
-	const response = await request.put(url, { data });
+async function putJson(request: APIRequestContext, url: string, data: object, headers?: Record<string, string>): Promise<void> {
+	const response = await request.put(url, { data, headers });
 	await expectSuccessfulApiResponse(response, `PUT ${url}`);
 }
 
@@ -159,6 +160,37 @@ test.describe.serial("panel configuration save, reload, and restore", () => {
 			await putJson(request, updateEndpoint, original);
 			const restored = await getJson<CoreConfigSnapshot>(request, endpoint);
 			expect(restored.client_config.compat).toEqual(originalCompat);
+		}
+	});
+
+	test("Security persists required headers through refresh and API readback", async ({ page, request }) => {
+		const endpoint = "/api/config?from_db=true";
+		const updateEndpoint = "/api/config";
+		const requiredHeaderName = `x-elygate-e2e-${Date.now()}`;
+		const requiredHeaders = { [requiredHeaderName]: "present" };
+		const original = await getJson<CoreConfigSnapshot>(request, endpoint);
+		const originalRequiredHeaders = original.client_config.required_headers ?? [];
+
+		try {
+			await page.setExtraHTTPHeaders(requiredHeaders);
+			await page.goto("/workspace/config/security", { waitUntil: "domcontentloaded" });
+			const input = page.getByTestId("required-headers-textarea");
+			await expect(input).toBeVisible();
+			await input.fill(requiredHeaderName);
+
+			const saveButton = page.getByRole("button", { name: "Save", exact: true });
+			await expect(saveButton).toBeEnabled();
+			await saveButton.click();
+			await expect(page.getByText("Security settings updated successfully.", { exact: true })).toBeVisible();
+
+			await page.reload({ waitUntil: "domcontentloaded" });
+			await expect(page.getByTestId("required-headers-textarea")).toHaveValue(requiredHeaderName);
+			const persisted = await getJson<CoreConfigSnapshot>(request, endpoint, requiredHeaders);
+			expect(persisted.client_config.required_headers).toEqual([requiredHeaderName]);
+		} finally {
+			await putJson(request, updateEndpoint, original, requiredHeaders);
+			const restored = await getJson<CoreConfigSnapshot>(request, endpoint);
+			expect(restored.client_config.required_headers ?? []).toEqual(originalRequiredHeaders);
 		}
 	});
 });
