@@ -178,7 +178,7 @@ test.describe.serial("panel configuration save, reload, and restore", () => {
 			await expect(input).toBeVisible();
 			await input.fill(requiredHeaderName);
 
-			const saveButton = page.getByRole("button", { name: "Save", exact: true });
+			const saveButton = page.getByTestId("security-save-button");
 			await expect(saveButton).toBeEnabled();
 			await saveButton.click();
 			await expect(page.getByText("Security settings updated successfully.", { exact: true })).toBeVisible();

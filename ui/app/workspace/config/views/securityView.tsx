@@ -424,7 +424,11 @@ export default function SecurityView() {
 				</div>
 			</div>
 			<div className="bg-card sticky bottom-0 flex justify-end pt-2">
-				<Button onClick={handleSave} disabled={!hasChanges || isLoading || !hasSettingsUpdateAccess}>
+				<Button
+					onClick={handleSave}
+					disabled={!hasChanges || isLoading || !hasSettingsUpdateAccess}
+					data-testid="security-save-button"
+				>
 					{isLoading ? "Saving..." : "Save Changes"}
 				</Button>
 			</div>
