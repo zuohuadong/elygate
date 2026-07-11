@@ -20,6 +20,33 @@ async function expectSuccessfulResponse(response: APIResponse, action: string): 
 }
 
 test.describe("MCP Library install defaults", () => {
+	test("keeps the library usable on mobile and opens filters in a sheet", async ({ page }) => {
+		const accessibilityWarnings: string[] = [];
+		page.on("console", (message) => {
+			if (message.type() === "warning" && message.text().includes("Missing `Description`")) {
+				accessibilityWarnings.push(message.text());
+			}
+		});
+
+		await page.setViewportSize({ width: 390, height: 844 });
+		await page.goto("/workspace/mcp-registry/library", { waitUntil: "domcontentloaded" });
+
+		const mainContent = page.getByTestId("mcp-library-main-content");
+		await expect(mainContent).toBeVisible();
+		const contentBox = await mainContent.boundingBox();
+		expect(contentBox, "MCP Library main content should have a measurable mobile layout").not.toBeNull();
+		expect(contentBox!.width).toBeGreaterThan(300);
+
+		await expect(page.getByTestId("mcpLibraryFilterSidebar-toggle-hide")).toBeHidden();
+		await page.getByTestId("mcp-library-mobile-filters-trigger").click();
+		await expect(page.getByTestId("mcp-library-mobile-filters-sheet")).toBeVisible();
+		await expect(page.getByRole("heading", { name: "Filters", exact: true })).toBeVisible();
+		await expect(page.getByTestId("mcp-library-filter-category-toggle")).toBeVisible();
+		expect(accessibilityWarnings).toEqual([]);
+		await page.getByTestId("mcp-library-mobile-filters-close").click();
+		await expect(page.getByTestId("mcp-library-mobile-filters-sheet")).toBeHidden();
+	});
+
 	test("preserves per-user auth scope and required header keys from a custom library entry", async ({ page, request }) => {
 		const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 		const entryName = `E2E required headers ${suffix}`;

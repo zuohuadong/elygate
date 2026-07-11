@@ -28,7 +28,7 @@ import {
 } from "@/lib/types/governance";
 import { cn } from "@/lib/utils";
 import { ChevronDown, Save, X } from "lucide-react";
-import { Dispatch, SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Dispatch, SetStateAction, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { PricingFieldSelector } from "./pricingFieldSelector";
@@ -510,9 +510,10 @@ export default function PricingOverrideSheet({ open, onOpenChange, editingOverri
 		[providerKeyOptions, providerID],
 	);
 
-	// Hydrate the form only when the sheet transitions from closed → open.
-	// This prevents providerKeyOptions refetches from resetting unsaved edits.
-	useEffect(() => {
+	// Hydrate before paint when the sheet transitions from closed → open so an
+	// immediately focused field cannot be overwritten by a post-paint reset.
+	// Provider key refetches still skip hydration and preserve unsaved edits.
+	useLayoutEffect(() => {
 		const wasOpen = prevOpenRef.current;
 		prevOpenRef.current = open;
 		if (!open || wasOpen) return;

@@ -1,10 +1,17 @@
-import { Page, expect } from '@playwright/test';
+import { Page, errors, expect } from '@playwright/test';
 
 /**
- * Wait for network to be idle
+ * Wait for the document, then make a best-effort network-idle check.
  */
 export async function waitForNetworkIdle(page: Page, timeout = 5000): Promise<void> {
-  await page.waitForLoadState('networkidle', { timeout })
+  await page.waitForLoadState('domcontentloaded', { timeout })
+
+  try {
+    await page.waitForLoadState('networkidle', { timeout })
+  } catch (error) {
+    // Long-lived background requests may keep the network active after the page is ready.
+    if (!(error instanceof errors.TimeoutError)) throw error
+  }
 }
 
 /**

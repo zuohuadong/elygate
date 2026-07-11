@@ -249,10 +249,12 @@ test.describe("panel core interactions", () => {
 			await page.goto("/workspace/custom-pricing/overrides", { waitUntil: "domcontentloaded" });
 			await page.getByTestId("pricing-override-create-btn").click();
 			await expect(page.getByRole("heading", { name: "Create Pricing Override" })).toBeVisible();
-			await page.getByTestId("pricing-override-name-input").fill(name);
+			const nameInput = page.getByTestId("pricing-override-name-input");
+			await nameInput.fill(name);
 
 			await page.getByTestId("pricing-override-provider-select").click();
 			await page.getByRole("option", { name: "OpenAI", exact: true }).click();
+			await expect(nameInput).toHaveValue(name);
 			await page.getByTestId("pricing-override-pattern-input").fill("gpt-4o-mini-e2e");
 
 			await page.getByTestId("pricing-override-request-types-btn").click();

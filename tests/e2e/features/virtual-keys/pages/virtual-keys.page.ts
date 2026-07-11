@@ -1,6 +1,6 @@
 import { Locator, Page, expect } from "@playwright/test";
 import { BasePage } from "../../../core/pages/base.page";
-import { fillSelect, waitForNetworkIdle } from "../../../core/utils/test-helpers";
+import { fillSelect } from "../../../core/utils/test-helpers";
 
 /**
  * Provider display names mapping - matches the UI's ProviderLabels
@@ -122,7 +122,12 @@ export class VirtualKeysPage extends BasePage {
    */
   async goto(): Promise<void> {
     await this.page.goto("/workspace/governance/virtual-keys");
-    await waitForNetworkIdle(this.page);
+    await Promise.race([
+      this.createBtn.waitFor({ state: "visible", timeout: 10000 }),
+      this.page
+        .getByText("Config store setup is missing.")
+        .waitFor({ state: "visible", timeout: 10000 }),
+    ]);
   }
 
   /**
