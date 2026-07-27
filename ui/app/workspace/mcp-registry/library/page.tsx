@@ -109,7 +109,7 @@ export default function MCPLibraryPage() {
 		const err = libraryError || mcpClientsError;
 		if (!err) return;
 		const message = getErrorMessage(err);
-		if (message.toLowerCase().includes("mcp is not configured")) return;
+		if (message.toLowerCase().includes("mcp is not configured in this bifrost instance")) return;
 		toast({ title: "Error", description: message, variant: "destructive" });
 	}, [libraryError, mcpClientsError, toast]);
 
@@ -155,12 +155,12 @@ export default function MCPLibraryPage() {
 
 	return (
 		<div className="dark:bg-card no-padding-parent no-border-parent h-[calc(100dvh_-_16px)]">
-			<div className="bg-background flex h-full w-full grow flex-col gap-3 md:flex-row">
+			<div className="bg-background flex h-full w-full grow gap-3">
 				{/* Sidebar Filters */}
 				<MCPLibraryFilterSidebar filters={filters} onFiltersChange={setFilters} />
 
 				{/* Main Content */}
-				<div className="bg-card min-h-0 min-w-0 flex-1 rounded-md md:rounded-l-md" data-testid="mcp-library-main-content">
+				<div className="bg-card h-full w-full rounded-l-md">
 					<div className="flex h-full flex-col gap-4 p-4 pb-2">
 						{/* Header */}
 						<div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">

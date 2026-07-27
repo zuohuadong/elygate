@@ -62,8 +62,8 @@ func withRetries[T any](ctx context.Context, maxRetries int, maxBackoff time.Dur
 	return zero, lastErr
 }
 
-// MCPLibraryEntry is the JSON shape a single server has in an explicitly
-// configured remote MCP library catalog.
+// MCPLibraryEntry is the JSON shape a single server has in the remote MCP
+// library catalog (the payload fetched from DefaultMCPLibraryURL / custom URL).
 // The catalog carries no slug; it is derived from Name at sync time via
 // Slugify. The remaining fields map onto TableMCPLibrary minus the DB-managed
 // fields (ID, Slug, CreatedAt, UpdatedAt).
@@ -98,8 +98,8 @@ type MCPLibraryPayload struct {
 // ConfigStore so it can be called from both the force-sync handler and the
 // background worker without needing a dedicated manager struct.
 func SyncMCPLibrary(ctx context.Context, url string, store configstore.ConfigStore) (int, error) {
-	if strings.TrimSpace(url) == "" {
-		return 0, nil
+	if url == "" {
+		url = DefaultMCPLibraryURL
 	}
 
 	entries, err := withRetries(ctx, urlFetchMaxRetries, urlFetchMaxBackoff, func() ([]MCPLibraryEntry, error) {

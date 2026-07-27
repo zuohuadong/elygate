@@ -455,7 +455,7 @@ export default function MCPView() {
 							<SecretVarInput
 								id="external-client-url"
 								data-testid="mcp-external-client-url-input"
-								placeholder="https://gateway.example.com or env.BIFROST_OAUTH_REDIRECT_URL"
+								placeholder="https://bifrost.example.com or env.BIFROST_OAUTH_REDIRECT_URL"
 								value={localConfig.mcp_external_client_url}
 								onChange={handleClientURLChange}
 								disabled={!hasSettingsUpdateAccess}
@@ -486,7 +486,7 @@ export default function MCPView() {
                   endpoint.{" "}
                   <b>headers</b> (default) - VK / api-key / session headers
                   only, OAuth discovery disabled.{" "}
-								  <b>both</b> - accepts header credentials and Elygate-issued
+                  <b>both</b> - accepts header credentials and Elygate-issued
                   JWTs; existing integrations are unaffected.{" "}
                   <b>oauth</b> - JWTs only; VK and header access is disabled.
                 </p>
@@ -577,7 +577,7 @@ export default function MCPView() {
                     <SecretVarInput
                       id="oauth2-issuer-url"
                       data-testid="oauth2-issuer-url-input"
-                      placeholder="https://gateway.example.com or env.BIFROST_ISSUER_URL"
+                      placeholder="https://bifrost.example.com or env.BIFROST_ISSUER_URL"
                       value={localConfig.oauth2_server_config?.issuer_url}
                       onChange={handleIssuerURLChange}
                       disabled={!hasSettingsUpdateAccess}

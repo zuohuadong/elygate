@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "last_sweep_id": "",
+  "last_sweep_at": "",
+  "cooldown_days": 7,
+  "max_candidates_per_sweep": 3,
+  "claim_gate": {
+    "same_sweep_claim_blocked": true,
+    "claim_after": ""
+  },
+  "guardrails": {
+    "source_url": "backlog-sweep",
+    "max_risk": "low",
+    "core_denylist": [
+      "setup.ts",
+      ".agents/workflows/**",
+      ".agents/automations/**",
+      "templates/**"
+    ]
+  },
+  "generated_tasks": []
+}

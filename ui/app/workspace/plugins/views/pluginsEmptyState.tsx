@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { ArrowUpRight, Puzzle } from "lucide-react";
 
-const CUSTOM_PLUGINS_DOCS_URL = "https://github.com/zuohuadong/elygate/tree/dev/docs";
+const CUSTOM_PLUGINS_DOCS_URL = "https://docs.getbifrost.ai/plugins";
 
 interface PluginsEmptyStateProps {
 	onCreateClick: () => void;

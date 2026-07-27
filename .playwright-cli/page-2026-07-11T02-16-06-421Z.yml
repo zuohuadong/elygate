@@ -1,0 +1,39 @@
+- generic:
+  - generic:
+    - region "Notifications alt+T"
+    - generic:
+      - generic:
+        - main:
+          - generic:
+            - generic:
+              - generic:
+                - button [expanded] [active]: Filters
+              - generic:
+                - generic:
+                  - generic:
+                    - generic:
+                      - heading [level=2]: MCP Server Library
+                      - paragraph: Browse and install MCP servers from the synced catalog.
+                    - generic:
+                      - button: Add Server
+                      - button: Settings
+                  - generic:
+                    - generic:
+                      - generic:
+                        - heading [level=1]: No synced servers yet
+                        - generic: Configure the library sync source in Settings to populate this catalog.
+                        - generic:
+                          - button: Configure sync
+  - dialog [ref=f1e33]:
+    - generic [ref=f1e35]:
+      - generic [ref=f1e36]:
+        - heading "Filters" [level=2] [ref=f1e37]
+        - paragraph [ref=f1e38]: Filter the MCP server library catalog.
+      - button "Close filters" [ref=f1e40] [cursor=pointer]
+    - generic [ref=f1e44]:
+      - generic [ref=f1e45]:
+        - button "Category" [expanded] [ref=f1e46] [cursor=pointer]
+        - generic [ref=f1e50]: No results
+      - button "Connection Type" [ref=f1e54] [cursor=pointer]
+      - button "Auth Type" [ref=f1e59] [cursor=pointer]
+      - button "Tags" [ref=f1e64] [cursor=pointer]

@@ -8,7 +8,7 @@ export default function CircuitBreakerView() {
 				className="mx-auto min-h-[80vh]"
 				icon={<CircuitBoard className="h-[5.5rem] w-[5.5rem]" strokeWidth={1} />}
 				title="Unlock circuit breaker for reliable fallbacks"
-				description="This capability requires the Elygate Enterprise source package and is not included in this OSS build."
+				description="This feature is a part of the Elygate enterprise license. Automatically redirect traffic to a fallback provider when your primary endpoint shows signs of failure."
 				readmeLink="https://docs.getbifrost.ai/enterprise/circuit-breaker"
 			/>
 		</div>

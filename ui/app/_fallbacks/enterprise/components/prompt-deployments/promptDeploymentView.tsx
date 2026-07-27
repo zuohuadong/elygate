@@ -9,7 +9,7 @@ export default function PromptDeploymentView(_props?: { omitTitle?: boolean }) {
 				className="justify-start gap-3 rounded-md border p-4"
 				icon={<Router className="h-8 w-8" strokeWidth={1.5} />}
 				title="Unlock prompt deployments for better prompt versioning and A/B testing."
-				description="This capability requires the Elygate Enterprise source package and is not included in this OSS build."
+				description="This feature is a part of the Elygate enterprise license. We would love to know more about your use case and how we can help you."
 				readmeLink="https://docs.getbifrost.ai/enterprise/prompt-deployments"
 			/>
 		</div>

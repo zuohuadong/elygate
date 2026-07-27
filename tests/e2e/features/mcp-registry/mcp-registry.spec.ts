@@ -67,8 +67,8 @@ test.describe('MCP Registry', () => {
   })
 
   test.describe('MCP Client Display', () => {
-    test('should display MCP clients table or true empty state', async ({ mcpRegistryPage }) => {
-      await expect(mcpRegistryPage.table.or(mcpRegistryPage.emptyState)).toBeVisible()
+    test('should display MCP clients table', async ({ mcpRegistryPage }) => {
+      await expect(mcpRegistryPage.table).toBeVisible()
     })
 
     test('should display create button', async ({ mcpRegistryPage }) => {
@@ -79,12 +79,11 @@ test.describe('MCP Registry', () => {
       const count = await mcpRegistryPage.getClientCount()
       const isEmptyStateVisible = await mcpRegistryPage.isEmptyStateVisible()
 
-      if (isEmptyStateVisible) {
-        expect(count).toBe(0)
-        await expect(mcpRegistryPage.table).not.toBeVisible()
+      if (count === 0) {
+        expect(isEmptyStateVisible).toBe(true)
       } else {
         expect(count).toBeGreaterThan(0)
-        await expect(mcpRegistryPage.table).toBeVisible()
+        expect(isEmptyStateVisible).toBe(false)
       }
     })
   })

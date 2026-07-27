@@ -27,7 +27,7 @@ function PendingComponent() {
 				<div className="w-full max-w-md">
 					<div className="border-border bg-card w-full space-y-6 rounded-sm border p-8">
 						<div className="flex items-center justify-center">
-							<img src="/elygate-logo.svg" alt="Elygate" width={160} height={26} />
+							<img src="/bifrost-logo.webp" alt="Elygate" width={160} height={26} />
 						</div>
 						<div className="flex items-center justify-center py-6">
 							<div className="text-muted-foreground text-sm">Checking authentication...</div>

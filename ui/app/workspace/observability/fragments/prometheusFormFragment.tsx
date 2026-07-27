@@ -420,7 +420,7 @@ export function PrometheusFormFragment({
 													</TooltipTrigger>
 													<TooltipContent>
 														<p className="max-w-xs text-xs">
-														Used to identify this Elygate instance in metrics. If not set, hostname is used automatically.
+															Used to identify this Elygate instance in metrics. If not set, hostname is used automatically.
 														</p>
 													</TooltipContent>
 												</Tooltip>

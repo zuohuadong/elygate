@@ -757,6 +757,10 @@ func DeepCopyChatMessage(original ChatMessage) ChatMessage {
 					copyURL := *annotation.URLCitation.URL
 					copyAnnotation.URLCitation.URL = &copyURL
 				}
+				if annotation.URLCitation.Text != nil {
+					copyText := *annotation.URLCitation.Text
+					copyAnnotation.URLCitation.Text = &copyText
+				}
 				if annotation.URLCitation.Sources != nil {
 					copySources := *annotation.URLCitation.Sources
 					copyAnnotation.URLCitation.Sources = &copySources
@@ -821,6 +825,10 @@ func deepCopyChatContentBlock(original ChatContentBlock) ChatContentBlock {
 	if original.ImageURLStruct != nil {
 		copyImage := ChatInputImage{
 			URL: original.ImageURLStruct.URL,
+		}
+		if original.ImageURLStruct.FileID != nil {
+			copyFileID := *original.ImageURLStruct.FileID
+			copyImage.FileID = &copyFileID
 		}
 		if original.ImageURLStruct.Detail != nil {
 			copyDetail := *original.ImageURLStruct.Detail
@@ -1650,6 +1658,18 @@ func isOpenAIReasoningModel(model string) bool {
 		return false
 	}
 	return len(name) == 2 || name[2] == '-'
+}
+
+// IsAzureModelRouter reports whether model is Azure's model-router model.
+func IsAzureModelRouter(model string) bool {
+	return strings.Contains(model, "model-router")
+}
+
+// IsElevenlabsSoundModel checks if the model targets ElevenLabs' text-to-sound
+// effects API (POST /v1/sound-generation, e.g. "eleven_text_to_sound_v2")
+// rather than text-to-speech. These models are not tied to a voice.
+func IsElevenlabsSoundModel(model string) bool {
+	return strings.Contains(model, "eleven_text_to_sound")
 }
 
 // BedrockModelSupportsCachePoints reports whether the Bedrock model supports

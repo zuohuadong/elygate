@@ -8,7 +8,7 @@ import { SidebarProvider } from "@/components/ui/sidebar";
 import { useStoreSync } from "@/hooks/useStoreSync";
 import { WebSocketProvider } from "@/hooks/useWebSocket";
 import { getErrorMessage, ReduxProvider, useGetCoreConfigQuery, useIsAuthEnabledQuery } from "@/lib/store";
-import type { BifrostConfig } from "@/lib/types/config";
+import { ElygateConfig } from "@/lib/types/config";
 import { RbacProvider, useRbacContext } from "@enterprise/lib/contexts/rbacContext";
 import { useLocation, useMatches } from "@tanstack/react-router";
 import { NuqsAdapter } from "nuqs/adapters/tanstack-router";
@@ -110,9 +110,9 @@ function AppContent({ children }: { children: React.ReactNode }) {
 				<StoreSyncInitializer />
 				<SidebarProvider>
 					<Sidebar />
-					<div className="dark:bg-card custom-scrollbar content-container mx-2 my-2 h-[calc(100dvh-1rem)] min-w-0 flex-1 overflow-auto rounded-md border border-gray-200 bg-white px-2 sm:px-6 md:mr-2 md:ml-0 md:px-10 dark:border-zinc-800">
+					<div className="dark:bg-card custom-scrollbar content-container my-[0.5rem] mr-[0.5rem] h-[calc(100dvh-1rem)] w-full min-w-xl overflow-auto rounded-md border border-gray-200 bg-white px-10 dark:border-zinc-800">
 						<TrialExpiryBanner />
-						<main className="custom-scrollbar content-container-inner relative mx-auto flex h-full min-h-0 min-w-0 flex-col overflow-y-hidden p-2 sm:p-4">
+						<main className="custom-scrollbar content-container-inner relative mx-auto flex h-full min-h-0 flex-col overflow-y-hidden p-4">
 							{isLoading ? <FullPageLoader /> : <FullPage config={bifrostConfig}>{children}</FullPage>}
 						</main>
 					</div>
@@ -128,15 +128,15 @@ function AppContent({ children }: { children: React.ReactNode }) {
 // like the MCP per-user OAuth auth page.
 function MinimalShell({ children }: { children: React.ReactNode }) {
 	return (
-		<div className="dark:bg-card custom-scrollbar content-container mx-2 my-2 h-[calc(100dvh-1rem)] min-w-0 overflow-auto rounded-md border border-gray-200 bg-white px-2 sm:px-6 md:px-10 dark:border-zinc-800">
-			<main className="custom-scrollbar content-container-inner relative mx-auto flex h-full min-h-0 min-w-0 flex-col overflow-y-hidden p-2 sm:p-4">
+		<div className="dark:bg-card custom-scrollbar content-container my-[0.5rem] h-[calc(100dvh-1rem)] w-full overflow-auto rounded-md border border-gray-200 bg-white px-10 dark:border-zinc-800">
+			<main className="custom-scrollbar content-container-inner relative mx-auto flex h-full min-h-0 flex-col overflow-y-hidden p-4">
 				{children}
 			</main>
 		</div>
 	);
 }
 
-function FullPage({ config, children }: { config: BifrostConfig | undefined; children: React.ReactNode }) {
+function FullPage({ config, children }: { config: ElygateConfig | undefined; children: React.ReactNode }) {
 	const pathname = useLocation({ select: (l) => l.pathname });
 	if (config && config.is_db_connected) {
 		return children;

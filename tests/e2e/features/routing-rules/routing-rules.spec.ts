@@ -2,7 +2,7 @@ import { expect, test } from '../../core/fixtures/base.fixture'
 import { createRoutingRuleData } from './routing-rules.data'
 
 // Track created rules for cleanup
-const createdRules = new Set<string>()
+const createdRules: string[] = []
 
 test.describe('Routing Rules', () => {
   test.beforeEach(async ({ routingRulesPage }) => {
@@ -10,11 +10,18 @@ test.describe('Routing Rules', () => {
   })
 
   test.afterEach(async ({ routingRulesPage }) => {
-    const rulesToDelete = [...createdRules]
-    await routingRulesPage.cleanupRoutingRules(rulesToDelete)
-    for (const ruleName of rulesToDelete) {
-      createdRules.delete(ruleName)
+    // Clean up any rules created during tests
+    for (const ruleName of [...createdRules]) {
+      try {
+        const exists = await routingRulesPage.ruleExists(ruleName)
+        if (exists) {
+          await routingRulesPage.deleteRoutingRule(ruleName)
+        }
+      } catch {
+        // Ignore cleanup errors
+      }
     }
+    createdRules.length = 0
   })
 
   test.describe('Routing Rule Creation', () => {
@@ -35,7 +42,7 @@ test.describe('Routing Rules', () => {
       const ruleData = createRoutingRuleData({
         name: `Basic Rule ${Date.now()}`,
       })
-      createdRules.add(ruleData.name)
+      createdRules.push(ruleData.name)
 
       await routingRulesPage.createRoutingRule(ruleData)
 
@@ -48,7 +55,7 @@ test.describe('Routing Rules', () => {
         name: `Described Rule ${Date.now()}`,
         description: 'A rule with a detailed description for testing',
       })
-      createdRules.add(ruleData.name)
+      createdRules.push(ruleData.name)
 
       await routingRulesPage.createRoutingRule(ruleData)
 
@@ -61,7 +68,7 @@ test.describe('Routing Rules', () => {
         name: `Disabled Rule ${Date.now()}`,
         enabled: false,
       })
-      createdRules.add(ruleData.name)
+      createdRules.push(ruleData.name)
 
       await routingRulesPage.createRoutingRule(ruleData)
 
@@ -89,7 +96,7 @@ test.describe('Routing Rules', () => {
       const ruleData = createRoutingRuleData({
         name: `Edit Test Rule ${Date.now()}`,
       })
-      createdRules.add(ruleData.name)
+      createdRules.push(ruleData.name)
 
       await routingRulesPage.createRoutingRule(ruleData)
 
@@ -108,7 +115,7 @@ test.describe('Routing Rules', () => {
       const ruleData = createRoutingRuleData({
         name: `Delete Test Rule ${Date.now()}`,
       })
-      createdRules.add(ruleData.name)
+      // Don't add to createdRules since we're testing delete
 
       await routingRulesPage.createRoutingRule(ruleData)
 
@@ -130,7 +137,7 @@ test.describe('Routing Rules', () => {
         name: `Toggle Test Rule ${Date.now()}`,
         enabled: true,
       })
-      createdRules.add(ruleData.name)
+      createdRules.push(ruleData.name)
 
       await routingRulesPage.createRoutingRule(ruleData)
 
@@ -186,7 +193,7 @@ test.describe('Routing Rules', () => {
         name: `Provider Filter Rule ${Date.now()}`,
         provider: 'openai', // Set target provider
       })
-      createdRules.add(ruleData.name)
+      createdRules.push(ruleData.name)
 
       await routingRulesPage.createRoutingRule(ruleData)
 
@@ -200,7 +207,7 @@ test.describe('Routing Rules', () => {
         provider: 'openai',
         model: 'gpt-4',
       })
-      createdRules.add(ruleData.name)
+      createdRules.push(ruleData.name)
 
       await routingRulesPage.createRoutingRule(ruleData)
 
@@ -212,20 +219,18 @@ test.describe('Routing Rules', () => {
       // Create two rules with unique priorities (avoid fixed 500/600 so parallel workers don't collide)
       const rule1 = createRoutingRuleData({ name: `Reorder Test Rule 1 ${Date.now()}` })
       const rule2 = createRoutingRuleData({ name: `Reorder Test Rule 2 ${Date.now()}` })
-      createdRules.add(rule1.name)
-      createdRules.add(rule2.name)
+      createdRules.push(rule1.name, rule2.name)
 
       await routingRulesPage.createRoutingRule(rule1)
       await routingRulesPage.createRoutingRule(rule2)
 
       // Change first rule's priority (edit to a new value to test reorder)
       const newPriority = (rule1.priority! + 100) % 901
-      const savedPriority = await routingRulesPage.editRoutingRule(rule1.name, { priority: newPriority })
+      await routingRulesPage.editRoutingRule(rule1.name, { priority: newPriority })
 
       // Verify priority was saved and displayed
       const displayedPriority = await routingRulesPage.getRulePriority(rule1.name)
-      expect(savedPriority).toBeDefined()
-      expect(displayedPriority).toBe(savedPriority)
+      expect(displayedPriority).toBe(newPriority)
     })
 
     test('should create rule with virtual key scope', async ({ routingRulesPage }) => {
@@ -281,7 +286,7 @@ test.describe('Routing Rules', () => {
       // Fill required name
       const ruleName = `CEL Test ${Date.now()}`
       await routingRulesPage.nameInput.fill(ruleName)
-      createdRules.add(ruleName)
+      createdRules.push(ruleName)
 
       // Verify initial CEL is empty/no rules
       const initialCel = await routingRulesPage.getCelExpression()
@@ -311,7 +316,7 @@ test.describe('Routing Rules', () => {
       // Fill required name
       const ruleName = `CEL Combinator Test ${Date.now()}`
       await routingRulesPage.nameInput.fill(ruleName)
-      createdRules.add(ruleName)
+      createdRules.push(ruleName)
 
       // Add two rule conditions to see the combinator in action
       await routingRulesPage.clickAddRule()
@@ -336,9 +341,73 @@ test.describe('Routing Rules', () => {
       await routingRulesPage.cancelRule()
     })
 
+    test('should author conditions as raw CEL and round-trip through edit', async ({ routingRulesPage }) => {
+      const ruleName = `CEL Mode Test ${Date.now()}`
+      const celExpression = 'model == "claude-sonnet-4-6"'
+      createdRules.push(ruleName)
+
+      // Create a rule using raw-CEL mode instead of the visual builder
+      await routingRulesPage.createBtn.click()
+      await expect(routingRulesPage.sheet).toBeVisible()
+      await routingRulesPage.waitForSheetAnimation()
+      await routingRulesPage.waitForRuleBuilder()
+
+      await routingRulesPage.nameInput.fill(ruleName)
+      await routingRulesPage.switchToCelMode()
+      await routingRulesPage.fillCelExpression(celExpression)
+
+      await routingRulesPage.saveBtn.click()
+      await routingRulesPage.waitForSuccessToast()
+      await expect(routingRulesPage.sheet).not.toBeVisible({ timeout: 10000 })
+
+      const exists = await routingRulesPage.ruleExists(ruleName)
+      expect(exists).toBe(true)
+
+      // Reopen: a CEL-only rule (no visual query) must open in CEL mode with the
+      // expression intact, not an empty builder that would silently clear it.
+      await routingRulesPage.openEditSheet(ruleName)
+      expect(await routingRulesPage.isCelMode()).toBe(true)
+      expect(await routingRulesPage.getCelTextareaValue()).toBe(celExpression)
+
+      // Saving without touching anything must preserve the CEL expression.
+      await routingRulesPage.saveBtn.click()
+      await routingRulesPage.waitForSuccessToast()
+      await expect(routingRulesPage.sheet).not.toBeVisible({ timeout: 10000 })
+
+      await routingRulesPage.openEditSheet(ruleName)
+      expect(await routingRulesPage.getCelTextareaValue()).toBe(celExpression)
+      await routingRulesPage.cancelRule()
+    })
+
+    test('should reject a malformed CEL expression on save', async ({ routingRulesPage }) => {
+      const ruleName = `CEL Invalid Test ${Date.now()}`
+
+      await routingRulesPage.createBtn.click()
+      await expect(routingRulesPage.sheet).toBeVisible()
+      await routingRulesPage.waitForSheetAnimation()
+      await routingRulesPage.waitForRuleBuilder()
+
+      await routingRulesPage.nameInput.fill(ruleName)
+      await routingRulesPage.switchToCelMode()
+      // Unbalanced parenthesis — rejected by the backend CEL compiler with a 400.
+      await routingRulesPage.fillCelExpression('model == "gpt-4o" && (provider == "openai"')
+
+      await routingRulesPage.saveBtn.click()
+
+      // The sheet stays open on error; the rule must not be created.
+      await expect(routingRulesPage.sheet).toBeVisible()
+      // The compile error is surfaced inline beneath the CEL editor, not in a toast.
+      await expect(routingRulesPage.celError).toBeVisible()
+      await expect(routingRulesPage.celError).toContainText(/cel expression/i)
+      await routingRulesPage.cancelRule()
+
+      const exists = await routingRulesPage.ruleExists(ruleName)
+      expect(exists).toBe(false)
+    })
+
     test('should save rule with conditions successfully', async ({ routingRulesPage }) => {
       const ruleName = `CEL Save Test ${Date.now()}`
-      createdRules.add(ruleName)
+      createdRules.push(ruleName)
 
       await routingRulesPage.createBtn.click()
       await expect(routingRulesPage.sheet).toBeVisible()
@@ -347,7 +416,6 @@ test.describe('Routing Rules', () => {
 
       // Fill name
       await routingRulesPage.nameInput.fill(ruleName)
-      await routingRulesPage.fillAvailablePriority()
 
       // Add a condition (default Model field with default operator)
       await routingRulesPage.clickAddRule()

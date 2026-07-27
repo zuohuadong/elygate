@@ -15,7 +15,7 @@ const NotAvailableBanner = () => {
 						<div className="text-muted-foreground">
 							To enable the UI, please add the database settings to your config.json (see{" "}
 							<a
-								href="https://github.com/zuohuadong/elygate/tree/dev/deploy/elygate-oss"
+								href="https://www.getmaxim.ai/bifrost/docs/quickstart/gateway/setting-up#two-configuration-modes"
 								target="_blank"
 								rel="noopener noreferrer"
 								className="font-medium underline underline-offset-2"

@@ -1,15 +1,12 @@
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scrollArea";
-import { Sheet, SheetClose, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useIsMobile } from "@/hooks/use-mobile";
 import { useGetMCPLibraryFilterDataQuery } from "@/lib/store";
 import { cn } from "@/lib/utils";
-import { ChevronDown, PanelLeftClose, PanelLeftOpen, RotateCcw, Search, X } from "lucide-react";
+import { ChevronDown, PanelLeftClose, PanelLeftOpen, RotateCcw, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 const COLLAPSE_STORAGE_KEY = "mcp-library-filter-sidebar-collapsed";
@@ -43,7 +40,6 @@ interface SidebarProps {
 
 export function MCPLibraryFilterSidebar({ filters, onFiltersChange }: SidebarProps) {
 	const [collapsed, setCollapsed] = useState(false);
-	const isMobile = useIsMobile();
 
 	useEffect(() => {
 		if (typeof window === "undefined") return;
@@ -70,112 +66,6 @@ export function MCPLibraryFilterSidebar({ filters, onFiltersChange }: SidebarPro
 	}, [onFiltersChange]);
 
 	const { data: filterData, isLoading, isError, refetch } = useGetMCPLibraryFilterDataQuery();
-	const filterSections = (
-		<ScrollArea className="flex min-h-0 flex-1 overflow-y-auto p-2 pb-0" viewportClassName="no-table">
-			{isError ? (
-				<div className="flex flex-col items-center gap-3 px-3 py-8 text-center" data-testid="mcpLibraryFilterSidebar-error">
-					<p className="text-muted-foreground text-sm">Failed to load filters.</p>
-					<Button variant="outline" size="sm" onClick={() => refetch()} data-testid="mcpLibraryFilterSidebar-retry-button">
-						<RotateCcw data-icon="inline-start" />
-						Retry
-					</Button>
-				</div>
-			) : (
-				<div className="flex grow flex-col gap-1">
-					<CheckboxFilterSection
-						title="Category"
-						items={filterData?.categories || []}
-						selected={filters.categories}
-						loading={isLoading}
-						defaultOpen
-						onChange={(categories) => onFiltersChange({ ...filters, categories })}
-						testIdPrefix="mcp-library-filter-category"
-					/>
-					<CheckboxFilterSection
-						title="Connection Type"
-						items={filterData?.connection_types || []}
-						selected={filters.connection_types}
-						loading={isLoading}
-						onChange={(connection_types) => onFiltersChange({ ...filters, connection_types })}
-						testIdPrefix="mcp-library-filter-connection-type"
-					/>
-					<CheckboxFilterSection
-						title="Auth Type"
-						items={filterData?.auth_types || []}
-						selected={filters.auth_types}
-						loading={isLoading}
-						onChange={(auth_types) => onFiltersChange({ ...filters, auth_types })}
-						testIdPrefix="mcp-library-filter-auth-type"
-					/>
-					<CheckboxFilterSection
-						title="Tags"
-						items={filterData?.tags || []}
-						selected={filters.tags}
-						loading={isLoading}
-						onChange={(tags) => onFiltersChange({ ...filters, tags })}
-						testIdPrefix="mcp-library-filter-tag"
-					/>
-				</div>
-			)}
-		</ScrollArea>
-	);
-
-	if (isMobile) {
-		return (
-			<div className="flex w-full shrink-0 px-2 pt-2">
-				<Sheet>
-					<SheetTrigger asChild>
-						<Button variant="outline" size="sm" aria-label="Show filters" data-testid="mcp-library-mobile-filters-trigger">
-							<PanelLeftOpen data-icon="inline-start" />
-							Filters
-							{activeFilterCount > 0 && (
-								<Badge variant="secondary" className="min-w-5 justify-center rounded-full px-1.5">
-									{activeFilterCount}
-								</Badge>
-							)}
-						</Button>
-					</SheetTrigger>
-					<SheetContent
-						side="left"
-						className="top-0 bottom-0 h-dvh w-[min(20rem,calc(100vw-1rem))] max-w-none rounded-none border-r p-0 sm:max-w-none"
-						data-testid="mcp-library-mobile-filters-sheet"
-					>
-						<SheetHeader className="justify-between" headerClassName="mb-0 h-12 border-b px-3" showCloseButton={false}>
-							<div>
-								<SheetTitle className="text-sm">Filters</SheetTitle>
-								<SheetDescription className="sr-only">Filter the MCP server library catalog.</SheetDescription>
-							</div>
-							<div className="flex items-center gap-1">
-								{activeFilterCount > 0 && (
-									<Button
-										variant="outline"
-										size="sm"
-										className="text-muted-foreground h-7 px-2 text-xs"
-										onClick={handleReset}
-									>
-										<RotateCcw data-icon="inline-start" />
-										Reset
-									</Button>
-								)}
-								<SheetClose asChild>
-									<Button
-										variant="ghost"
-										size="icon"
-										className="size-7"
-										aria-label="Close filters"
-										data-testid="mcp-library-mobile-filters-close"
-									>
-										<X data-icon="inline-start" />
-									</Button>
-								</SheetClose>
-							</div>
-						</SheetHeader>
-						{filterSections}
-					</SheetContent>
-				</Sheet>
-			</div>
-		);
-	}
 
 	if (collapsed) {
 		return (
@@ -229,7 +119,53 @@ export function MCPLibraryFilterSidebar({ filters, onFiltersChange }: SidebarPro
 				</div>
 			</div>
 
-			{filterSections}
+			<ScrollArea className="flex flex-1 overflow-y-auto p-2 pb-0" viewportClassName="no-table">
+				{isError ? (
+					<div className="flex flex-col items-center gap-3 px-3 py-8 text-center" data-testid="mcpLibraryFilterSidebar-error">
+						<p className="text-muted-foreground text-sm">Failed to load filters.</p>
+						<Button variant="outline" size="sm" onClick={() => refetch()} data-testid="mcpLibraryFilterSidebar-retry-button">
+							<RotateCcw className="size-3" />
+							Retry
+						</Button>
+					</div>
+				) : (
+					<div className="flex grow flex-col gap-1">
+						<CheckboxFilterSection
+							title="Category"
+							items={filterData?.categories || []}
+							selected={filters.categories}
+							loading={isLoading}
+							defaultOpen
+							onChange={(categories) => onFiltersChange({ ...filters, categories })}
+							testIdPrefix="mcp-library-filter-category"
+						/>
+						<CheckboxFilterSection
+							title="Connection Type"
+							items={filterData?.connection_types || []}
+							selected={filters.connection_types}
+							loading={isLoading}
+							onChange={(connection_types) => onFiltersChange({ ...filters, connection_types })}
+							testIdPrefix="mcp-library-filter-connection-type"
+						/>
+						<CheckboxFilterSection
+							title="Auth Type"
+							items={filterData?.auth_types || []}
+							selected={filters.auth_types}
+							loading={isLoading}
+							onChange={(auth_types) => onFiltersChange({ ...filters, auth_types })}
+							testIdPrefix="mcp-library-filter-auth-type"
+						/>
+						<CheckboxFilterSection
+							title="Tags"
+							items={filterData?.tags || []}
+							selected={filters.tags}
+							loading={isLoading}
+							onChange={(tags) => onFiltersChange({ ...filters, tags })}
+							testIdPrefix="mcp-library-filter-tag"
+						/>
+					</div>
+				)}
+			</ScrollArea>
 		</div>
 	);
 }

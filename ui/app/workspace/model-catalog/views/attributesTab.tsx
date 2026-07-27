@@ -7,11 +7,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDebouncedValue } from "@/hooks/useDebounce";
 import { RenderProviderIcon } from "@/lib/constants/icons";
-import { ProviderLabels } from "@/lib/constants/logs";
-import type { ProviderName } from "@/lib/constants/logs";
-import { useGetModelDetailsQuery, useGetProvidersQuery } from "@/lib/store";
-import type { ModelDetails } from "@/lib/store";
-import type { KnownProvider } from "@/lib/types/config";
+import { ProviderLabels, ProviderName } from "@/lib/constants/logs";
+import { ModelDetails, useGetModelDetailsQuery, useGetProvidersQuery } from "@/lib/store";
+import { KnownProvider } from "@/lib/types/config";
 import { formatTokenPriceCompact } from "@/lib/utils/numbers";
 import { RbacOperation, RbacResource, useRbac } from "@enterprise/lib";
 import { ChevronLeft, ChevronRight, Edit, Search } from "lucide-react";
@@ -174,19 +172,6 @@ export default function AttributesTab({ hasAccess }: AttributesTabProps) {
 									const attrs = m.additional_attributes ?? {};
 									const extraKeys = Object.keys(attrs).filter((k) => k !== "description");
 									const testKey = `${toTestIdPart(m.name)}-${toTestIdPart(m.provider)}`;
-									const editButton = (
-										<Button
-											variant="ghost"
-											size="icon"
-											className="size-7"
-											disabled={!hasUpdateAccess || !m.has_pricing_row}
-											onClick={() => setEditing(m)}
-											aria-label={`Edit attributes for ${m.name}`}
-											data-testid={`model-catalog-edit-${testKey}`}
-										>
-											<Edit />
-										</Button>
-									);
 									return (
 										<TableRow key={`${m.provider}|${m.name}`} data-testid={`model-catalog-row-${testKey}`}>
 											<TableCell className="py-3">
@@ -223,27 +208,17 @@ export default function AttributesTab({ hasAccess }: AttributesTabProps) {
 												)}
 											</TableCell>
 											<TableCell className="px-1 py-3">
-												{m.has_pricing_row ? (
-													editButton
-												) : (
-													<TooltipProvider>
-														<Tooltip>
-															<TooltipTrigger asChild>
-																<span
-																	className="inline-flex"
-																	tabIndex={0}
-																	aria-label={`Editing attributes for ${m.name} is unavailable. Sync pricing data first.`}
-																	data-testid={`model-catalog-edit-trigger-${testKey}`}
-																>
-																	{editButton}
-																</span>
-															</TooltipTrigger>
-															<TooltipContent data-testid={`model-catalog-edit-pricing-required-${testKey}`}>
-																Sync pricing data before editing model attributes.
-															</TooltipContent>
-														</Tooltip>
-													</TooltipProvider>
-												)}
+												<Button
+													variant="ghost"
+													size="icon"
+													className="h-7 w-7"
+													disabled={!hasUpdateAccess}
+													onClick={() => setEditing(m)}
+													aria-label={`Edit attributes for ${m.name}`}
+													data-testid={`model-catalog-edit-${testKey}`}
+												>
+													<Edit className="h-4 w-4" />
+												</Button>
 											</TableCell>
 										</TableRow>
 									);

@@ -35,8 +35,8 @@ test.describe('LLM Logs', () => {
       const providerFilter = logsPage.providerFilter
       const isVisible = await providerFilter.isVisible().catch(() => false)
 
-      if (!isVisible) {
-        test.skip(true, 'Provider filter not visible')
+      if (!isVisible || SAMPLE_PROVIDERS.length === 0) {
+        test.skip(!isVisible || SAMPLE_PROVIDERS.length === 0, 'Provider filter not visible or no sample providers')
         return
       }
 
@@ -55,8 +55,8 @@ test.describe('LLM Logs', () => {
       const modelFilter = logsPage.modelFilter
       const isVisible = await modelFilter.isVisible().catch(() => false)
 
-      if (!isVisible) {
-        test.skip(true, 'Model filter not visible')
+      if (!isVisible || SAMPLE_MODELS.length === 0) {
+        test.skip(!isVisible || SAMPLE_MODELS.length === 0, 'Model filter not visible or no sample models')
         return
       }
 
@@ -72,15 +72,13 @@ test.describe('LLM Logs', () => {
     })
 
     test('should filter logs by status', async ({ logsPage, page }) => {
-      const statusVisible = await logsPage.statusFilter.isVisible().catch(() => false)
-      if (!statusVisible) {
-        test.skip(true, 'Status filter not visible')
+      const filtersVisible = await logsPage.filtersButton.isVisible().catch(() => false)
+      if (!filtersVisible) {
+        test.skip(true, 'Filters button not visible')
         return
       }
 
       await logsPage.filterByStatus('success')
-
-      await expect(page.getByTestId('status-filter-checkbox-success').getByRole('checkbox')).toHaveAttribute('data-state', 'checked')
 
       // Assert status filter is applied: logs page persists filters in URL (e.g. status=success)
       await expect

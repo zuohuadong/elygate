@@ -13,7 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
 import { getErrorMessage, useCreateMCPClientMutation } from "@/lib/store";
-import type { CreateMCPClientRequest, MCPAuthType, MCPLibraryEntry, MCPTLSConfig, SecretVar } from "@/lib/types/mcp";
+import { CreateMCPClientRequest, SecretVar, MCPAuthType, MCPLibraryEntry, MCPTLSConfig } from "@/lib/types/mcp";
 import { parseArrayFromText } from "@/lib/utils/array";
 import { RbacOperation, RbacResource, useRbac } from "@enterprise/lib";
 import { Globe, Info, KeyRound, Radio, ShieldCheck, Terminal } from "lucide-react";
@@ -33,20 +33,6 @@ interface MCPLibraryInstallSheetProps {
 
 const emptySecretVar: SecretVar = { value: "", ref: "" };
 
-function normalizeRequiredHeaderKeys(keys?: string[]): string[] {
-	return Array.from(new Set((keys || []).map((key) => key.trim()).filter(Boolean)));
-}
-
-function buildSharedHeaders(requiredHeaderKeys?: string[]): Record<string, SecretVar> {
-	const headerKeys = normalizeRequiredHeaderKeys(requiredHeaderKeys);
-	const keys = headerKeys.length > 0 ? headerKeys : ["Authorization"];
-	return Object.fromEntries(keys.map((key) => [key, { ...emptySecretVar }]));
-}
-
-function isPerUserAuthType(authType?: MCPAuthType): boolean {
-	return authType === "per_user_oauth" || authType === "per_user_headers";
-}
-
 /** Strips empty TLS config so we don't send `{}` to the server. */
 function buildTLSConfigPayload(tls: MCPTLSConfig | undefined): MCPTLSConfig | undefined {
 	if (!tls) return undefined;
@@ -54,6 +40,15 @@ function buildTLSConfigPayload(tls: MCPTLSConfig | undefined): MCPTLSConfig | un
 	const hasCACert = tls.ca_cert_pem?.value?.trim() || tls.ca_cert_pem?.ref?.trim();
 	if (!hasSkipVerify && !hasCACert) return undefined;
 	return { insecure_skip_verify: tls.insecure_skip_verify, ca_cert_pem: hasCACert ? tls.ca_cert_pem : undefined };
+}
+
+function isValidOAuthResourceURI(value: string): boolean {
+	try {
+		const parsed = new URL(value);
+		return parsed.protocol !== "" && parsed.hash === "";
+	} catch {
+		return false;
+	}
 }
 
 /**
@@ -82,7 +77,7 @@ function buildInitialValues(server: MCPLibraryEntry): CreateMCPClientRequest {
 		connection_string: isStdio ? undefined : server.connection_url ? { value: server.connection_url, ref: "" } : emptySecretVar,
 		stdio_config: isStdio && server.stdio_config ? server.stdio_config : undefined,
 		auth_type: authType,
-		headers: authType === "headers" ? buildSharedHeaders(server.required_header_keys) : undefined,
+		headers: authType === "headers" ? { Authorization: { value: "", ref: "" } } : undefined,
 	};
 }
 
@@ -144,6 +139,7 @@ export function MCPLibraryInstallSheet({ server, open, onClose, onInstalled }: M
 	const [createMCPClient] = useCreateMCPClientMutation();
 	const [isLoading, setIsLoading] = useState(false);
 	const [scopesText, setScopesText] = useState("");
+	const [resourceText, setResourceText] = useState("");
 	const [envVars, setEnvVars] = useState<Record<string, string>>({});
 	const [oauthFlow, setOauthFlow] = useState<{
 		authorizeUrl: string;
@@ -167,7 +163,6 @@ export function MCPLibraryInstallSheet({ server, open, onClose, onInstalled }: M
 	const [authScope, setAuthScope] = useState<"shared" | "per_user">("shared");
 
 	const defaultValues = useMemo(() => buildInitialValues(server), [server]);
-	const catalogRequiredHeaderKeys = useMemo(() => normalizeRequiredHeaderKeys(server.required_header_keys), [server.required_header_keys]);
 	const form = useForm<CreateMCPClientRequest>({ defaultValues });
 	const { control, handleSubmit, reset, setValue, watch, setError, clearErrors } = form;
 	const authType = watch("auth_type") || "none";
@@ -195,7 +190,7 @@ export function MCPLibraryInstallSheet({ server, open, onClose, onInstalled }: M
 		}
 		setValue("auth_type", authScope === "per_user" ? "per_user_headers" : "headers");
 		setValue("oauth_config", undefined);
-		setValue("headers", authScope === "shared" ? buildSharedHeaders(catalogRequiredHeaderKeys) : undefined);
+		setValue("headers", { Authorization: { value: "", ref: "" } });
 	};
 
 	const applyAuthScope = (scope: "shared" | "per_user") => {
@@ -204,7 +199,6 @@ export function MCPLibraryInstallSheet({ server, open, onClose, onInstalled }: M
 			setValue("auth_type", scope === "per_user" ? "per_user_oauth" : "oauth");
 		} else if (authKind === "headers") {
 			setValue("auth_type", scope === "per_user" ? "per_user_headers" : "headers");
-			setValue("headers", scope === "shared" ? buildSharedHeaders(catalogRequiredHeaderKeys) : undefined);
 		}
 	};
 
@@ -222,14 +216,15 @@ export function MCPLibraryInstallSheet({ server, open, onClose, onInstalled }: M
 		if (!open) return;
 		reset(defaultValues);
 		setScopesText("");
+		setResourceText("");
 		setEnvVars(initialEnvVars);
 		setOauthFlow(null);
 		setHeadersFlow(null);
-		setPerUserHeaderKeys(catalogRequiredHeaderKeys);
-		setNewHeaderKeyInput(catalogRequiredHeaderKeys.join(", "));
-		setAuthScope(isPerUserAuthType(server.auth_type) ? "per_user" : "shared");
+		setPerUserHeaderKeys([]);
+		setNewHeaderKeyInput("");
+		setAuthScope("shared");
 		setIsLoading(false);
-	}, [catalogRequiredHeaderKeys, defaultValues, initialEnvVars, open, reset, server.auth_type]);
+	}, [defaultValues, initialEnvVars, open, reset]);
 
 	const headersValidationError = useMemo(() => {
 		if ((authType !== "headers" && authType !== "per_user_headers") || !headers) return null;
@@ -270,6 +265,14 @@ export function MCPLibraryInstallSheet({ server, open, onClose, onInstalled }: M
 			if (data.oauth_config?.registration_url && !/^https?:\/\/.+$/.test(data.oauth_config.registration_url)) {
 				setError("oauth_config.registration_url", {
 					message: "Registration URL must start with http:// or https://",
+				});
+				hasErrors = true;
+			}
+			if (resourceText.trim() && !isValidOAuthResourceURI(resourceText.trim())) {
+				toast({
+					title: "Invalid resource URI",
+					description: "OAuth resource must be an absolute URI without a fragment.",
+					variant: "destructive",
 				});
 				hasErrors = true;
 			}
@@ -322,6 +325,7 @@ export function MCPLibraryInstallSheet({ server, open, onClose, onInstalled }: M
 							registration_url: data.oauth_config?.registration_url || undefined,
 							scopes: scopesText.trim() ? parseArrayFromText(scopesText) : undefined,
 							server_url: connectionUrl || undefined,
+							resource: resourceText.trim() || undefined,
 						}
 					: undefined,
 			headers:
@@ -753,6 +757,15 @@ export function MCPLibraryInstallSheet({ server, open, onClose, onInstalled }: M
 														onChange={(event) => setScopesText(event.target.value)}
 														placeholder="read, write, admin"
 														data-testid="library-oauth-scopes-input"
+													/>
+												</div>
+												<div className="space-y-2">
+													<Label>Resource</Label>
+													<Input
+														value={resourceText}
+														onChange={(event) => setResourceText(event.target.value)}
+														placeholder="https://provider.example.com/mcp or urn:example:mcp"
+														data-testid="library-oauth-resource-input"
 													/>
 												</div>
 											</AccordionContent>

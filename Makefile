@@ -1566,7 +1566,7 @@ install-playwright: ## Install Playwright test dependencies
 
 build-test-plugin: ## Build test plugin for E2E tests (copies to tmp/bifrost-test-plugin.so)
 	@$(ECHO) "$(GREEN)Building test plugin for E2E tests...$(NC)"
-	@cd examples/plugins/hello-world && $(MAKE) dev GO_BUILD_FLAGS="-trimpath -tags sqlite_static"
+	@cd examples/plugins/hello-world && make dev
 	@mkdir -p tmp
 	@cp examples/plugins/hello-world/build/hello-world.so tmp/bifrost-test-plugin.so
 	@$(ECHO) "$(GREEN)✓ Test plugin ready at tmp/bifrost-test-plugin.so$(NC)"

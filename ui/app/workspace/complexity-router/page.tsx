@@ -348,7 +348,7 @@ export default function ComplexityRouterPage() {
 						</p>
 					</div>
 					<Button asChild variant="outline" size="sm" className="w-fit shrink-0" data-testid="complexity-router-docs-link">
-						<a href="https://github.com/zuohuadong/elygate/tree/dev/docs" target="_blank" rel="noopener noreferrer">
+						<a href={"https://docs.getbifrost.ai/features/governance/complexity-router"} target="_blank" rel="noopener noreferrer">
 							<ExternalLink className="size-3.5" />
 							Docs
 						</a>

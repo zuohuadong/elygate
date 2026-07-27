@@ -56,14 +56,17 @@ export default function DashboardPage() {
 			cost_chart: parseAsString.withDefault("bar"),
 			model_chart: parseAsString.withDefault("bar"),
 			latency_chart: parseAsString.withDefault("bar"),
+			throughput_chart: parseAsString.withDefault("bar"),
 			cost_model: parseAsString.withDefault("all"),
 			usage_model: parseAsString.withDefault("all"),
 			provider_cost_chart: parseAsString.withDefault("bar"),
 			provider_token_chart: parseAsString.withDefault("bar"),
 			provider_latency_chart: parseAsString.withDefault("bar"),
+			provider_throughput_chart: parseAsString.withDefault("bar"),
 			provider_cost_provider: parseAsString.withDefault("all"),
 			provider_token_provider: parseAsString.withDefault("all"),
 			provider_latency_provider: parseAsString.withDefault("all"),
+			provider_throughput_provider: parseAsString.withDefault("all"),
 			mcp_volume_chart: parseAsString.withDefault("bar"),
 			mcp_cost_chart: parseAsString.withDefault("bar"),
 			mcp_tool_names: parseAsString.withDefault(""),
@@ -238,15 +241,6 @@ export default function DashboardPage() {
 
 	const handlePreloadData = useCallback(async () => {
 		await Promise.all(allRefs.map((r) => r.current?.loadData()));
-
-		// Lazy query promises resolve when the store has the response, but the
-		// tab view refs are refreshed by React on the following render. Wait for
-		// that render before the exporter reads every tab's data.
-		await new Promise<void>((resolve) => {
-			requestAnimationFrame(() => {
-				requestAnimationFrame(() => resolve());
-			});
-		});
 	}, []);
 
 	// Tab change handler
@@ -263,9 +257,11 @@ export default function DashboardPage() {
 	const handleCostChartToggle = useCallback((type: ChartType) => setUrlState({ cost_chart: type }), [setUrlState]);
 	const handleModelChartToggle = useCallback((type: ChartType) => setUrlState({ model_chart: type }), [setUrlState]);
 	const handleLatencyChartToggle = useCallback((type: ChartType) => setUrlState({ latency_chart: type }), [setUrlState]);
+	const handleThroughputChartToggle = useCallback((type: ChartType) => setUrlState({ throughput_chart: type }), [setUrlState]);
 	const handleProviderCostChartToggle = useCallback((type: ChartType) => setUrlState({ provider_cost_chart: type }), [setUrlState]);
 	const handleProviderTokenChartToggle = useCallback((type: ChartType) => setUrlState({ provider_token_chart: type }), [setUrlState]);
 	const handleProviderLatencyChartToggle = useCallback((type: ChartType) => setUrlState({ provider_latency_chart: type }), [setUrlState]);
+	const handleProviderThroughputChartToggle = useCallback((type: ChartType) => setUrlState({ provider_throughput_chart: type }), [setUrlState]);
 	const handleMcpVolumeChartToggle = useCallback((type: ChartType) => setUrlState({ mcp_volume_chart: type }), [setUrlState]);
 	const handleMcpCostChartToggle = useCallback((type: ChartType) => setUrlState({ mcp_cost_chart: type }), [setUrlState]);
 
@@ -282,6 +278,10 @@ export default function DashboardPage() {
 	);
 	const handleProviderLatencyProviderChange = useCallback(
 		(provider: string) => setUrlState({ provider_latency_provider: provider }),
+		[setUrlState],
+	);
+	const handleProviderThroughputProviderChange = useCallback(
+		(provider: string) => setUrlState({ provider_throughput_provider: provider }),
 		[setUrlState],
 	);
 
@@ -423,24 +423,18 @@ export default function DashboardPage() {
 	const activeTab = urlState.tab || "overview";
 
 	return (
-		<div
-			id="dashboard-root"
-			className="no-padding-parent no-border-parent bg-background flex h-[calc(100vh_-_16px)] w-full min-w-0 flex-col gap-2 overflow-hidden md:flex-row md:gap-3"
-		>
+		<div id="dashboard-root" className="no-padding-parent no-border-parent bg-background flex h-[calc(100vh_-_16px)] w-full gap-3">
 			{/* Sidebar Filters */}
 			<LogsFilterSidebar filters={filters} onFiltersChange={setFilters} />
 
 			{/* Main Content */}
-			<ScrollArea
-				className="bg-card flex min-h-0 w-full min-w-0 flex-1 flex-col gap-4 overflow-hidden rounded-md md:rounded-l-md"
-				viewportClassName="no-table"
-			>
+			<ScrollArea className="bg-card flex min-w-0 flex-1 flex-col gap-4 rounded-l-md" viewportClassName="no-table">
 				{/* Header */}
-				<div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+				<div className="flex items-center justify-between p-4">
 					<div className="flex items-center gap-2">
 						<h1 className="text-lg font-semibold">Dashboard</h1>
 					</div>
-					<div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+					<div className="flex items-center gap-2">
 						<ExportPopover
 							getData={getDashboardData}
 							onPreloadData={handlePreloadData}
@@ -496,7 +490,7 @@ export default function DashboardPage() {
 					</div>
 				</div>
 
-				<div className="min-w-0 p-4">
+				<div className="p-4">
 					{/* Tabs */}
 					<Tabs value={activeTab} onValueChange={handleTabChange}>
 						<div className="mb-2 max-w-full overflow-x-auto">
@@ -532,7 +526,7 @@ export default function DashboardPage() {
 						</div>
 
 						{/* Overview Tab */}
-						<TabsContent value="overview" forceMount>
+						<TabsContent value="overview" {...(pdfMode && { forceMount: true })}>
 							<div id="dashboard-section-overview">
 								<OverviewTabView
 									ref={overviewRef}
@@ -545,6 +539,7 @@ export default function DashboardPage() {
 									costChartType={toChartType(urlState.cost_chart)}
 									modelChartType={toChartType(urlState.model_chart)}
 									latencyChartType={toChartType(urlState.latency_chart)}
+									throughputChartType={toChartType(urlState.throughput_chart)}
 									costModel={urlState.cost_model}
 									usageModel={urlState.usage_model}
 									onVolumeChartToggle={handleVolumeChartToggle}
@@ -552,6 +547,7 @@ export default function DashboardPage() {
 									onCostChartToggle={handleCostChartToggle}
 									onModelChartToggle={handleModelChartToggle}
 									onLatencyChartToggle={handleLatencyChartToggle}
+									onThroughputChartToggle={handleThroughputChartToggle}
 									onCostModelChange={handleCostModelChange}
 									onUsageModelChange={handleUsageModelChange}
 								/>
@@ -559,7 +555,7 @@ export default function DashboardPage() {
 						</TabsContent>
 
 						{/* Provider Usage Tab */}
-						<TabsContent value="provider-usage" forceMount>
+						<TabsContent value="provider-usage" {...(pdfMode && { forceMount: true })}>
 							<div id="dashboard-section-provider-usage">
 								<ProviderUsageTabView
 									ref={providerRef}
@@ -570,21 +566,25 @@ export default function DashboardPage() {
 									providerCostChartType={toChartType(urlState.provider_cost_chart)}
 									providerTokenChartType={toChartType(urlState.provider_token_chart)}
 									providerLatencyChartType={toChartType(urlState.provider_latency_chart)}
+									providerThroughputChartType={toChartType(urlState.provider_throughput_chart)}
 									providerCostProvider={urlState.provider_cost_provider}
 									providerTokenProvider={urlState.provider_token_provider}
 									providerLatencyProvider={urlState.provider_latency_provider}
+									providerThroughputProvider={urlState.provider_throughput_provider}
 									onProviderCostChartToggle={handleProviderCostChartToggle}
 									onProviderTokenChartToggle={handleProviderTokenChartToggle}
 									onProviderLatencyChartToggle={handleProviderLatencyChartToggle}
+									onProviderThroughputChartToggle={handleProviderThroughputChartToggle}
 									onProviderCostProviderChange={handleProviderCostProviderChange}
 									onProviderTokenProviderChange={handleProviderTokenProviderChange}
 									onProviderLatencyProviderChange={handleProviderLatencyProviderChange}
+									onProviderThroughputProviderChange={handleProviderThroughputProviderChange}
 								/>
 							</div>
 						</TabsContent>
 
 						{/* Model Rankings Tab */}
-						<TabsContent value="rankings" forceMount>
+						<TabsContent value="rankings" {...(pdfMode && { forceMount: true })}>
 							<div id="dashboard-section-rankings">
 								<ModelRankingsTabView
 									ref={modelRankingsRef}
@@ -597,7 +597,7 @@ export default function DashboardPage() {
 						</TabsContent>
 
 						{/* MCP Tab */}
-						<TabsContent value="mcp" forceMount>
+						<TabsContent value="mcp" {...(pdfMode && { forceMount: true })}>
 							<div id="dashboard-section-mcp">
 								<MCPTabView
 									ref={mcpRef}
@@ -614,7 +614,7 @@ export default function DashboardPage() {
 						</TabsContent>
 
 						{/* Team Rankings Tab */}
-						<TabsContent value="team-rankings" forceMount>
+						<TabsContent value="team-rankings" {...(pdfMode && { forceMount: true })}>
 							<div id="dashboard-section-team-rankings">
 								<DimensionRankingsTabView
 									ref={teamRankingsRef}
@@ -629,7 +629,7 @@ export default function DashboardPage() {
 						</TabsContent>
 
 						{/* Customer Rankings Tab */}
-						<TabsContent value="customer-rankings" forceMount>
+						<TabsContent value="customer-rankings" {...(pdfMode && { forceMount: true })}>
 							<div id="dashboard-section-customer-rankings">
 								<DimensionRankingsTabView
 									ref={customerRankingsRef}
@@ -644,7 +644,7 @@ export default function DashboardPage() {
 						</TabsContent>
 
 						{/* Business Unit Rankings Tab */}
-						<TabsContent value="bu-rankings" forceMount>
+						<TabsContent value="bu-rankings" {...(pdfMode && { forceMount: true })}>
 							<div id="dashboard-section-bu-rankings">
 								<DimensionRankingsTabView
 									ref={buRankingsRef}
@@ -659,7 +659,7 @@ export default function DashboardPage() {
 						</TabsContent>
 
 						{/* User Rankings Tab */}
-						<TabsContent value="user-rankings" forceMount>
+						<TabsContent value="user-rankings" {...(pdfMode && { forceMount: true })}>
 							<div id="dashboard-section-user-rankings">
 								<DimensionRankingsTabView
 									ref={userRankingsRef}
@@ -674,7 +674,7 @@ export default function DashboardPage() {
 						</TabsContent>
 
 						{/* Virtual Key Rankings Tab */}
-						<TabsContent value="virtual-key-rankings" forceMount>
+						<TabsContent value="virtual-key-rankings" {...(pdfMode && { forceMount: true })}>
 							<div id="dashboard-section-virtual-key-rankings">
 								<DimensionRankingsTabView
 									ref={virtualKeyRankingsRef}

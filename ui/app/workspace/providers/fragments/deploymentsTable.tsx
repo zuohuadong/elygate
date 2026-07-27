@@ -232,6 +232,41 @@ function BedrockSection({ config, onChange, disabled }: ProviderSectionProps) {
 					disabled={disabled}
 				/>
 			</FieldRow>
+			<FieldRow label="Project ID" hint="Scope this deployment's Bedrock Mantle (gpt-*/Gemma) calls to a specific project via the OpenAI-Project header. Leave blank to use the key's project.">
+				<SecretVarField
+					value={config.project_id}
+					onChange={(v) => onChange({ project_id: v })}
+					placeholder="proj_xxxxxxxx or env.BEDROCK_PROJECT_ID"
+					disabled={disabled}
+				/>
+			</FieldRow>
+		</div>
+	);
+}
+
+function BedrockMantleSection({ config, onChange, disabled }: ProviderSectionProps) {
+	return (
+		<div className="space-y-4">
+			<SectionHeader
+				title="Bedrock Mantle overrides"
+				description="Override key-level Bedrock Mantle defaults for this deployment. Leave blank to use the key's settings."
+			/>
+			<FieldRow label="Region">
+				<SecretVarField
+					value={config.region}
+					onChange={(v) => onChange({ region: v })}
+					placeholder="us-east-1 or env.BEDROCK_REGION"
+					disabled={disabled}
+				/>
+			</FieldRow>
+			<FieldRow label="Project ID" hint="Scope this deployment to a specific project via the OpenAI-Project / anthropic-workspace-id header. Leave blank to use the key's project.">
+				<SecretVarField
+					value={config.project_id}
+					onChange={(v) => onChange({ project_id: v })}
+					placeholder="proj_xxxxxxxx or env.BEDROCK_PROJECT_ID"
+					disabled={disabled}
+				/>
+			</FieldRow>
 		</div>
 	);
 }
@@ -257,6 +292,28 @@ function ReplicateSection({ config, onChange, disabled }: ProviderSectionProps) 
 	);
 }
 
+function UseAnthropicEndpointsToggleSection({ config, onChange, disabled, providerName }: ProviderSectionProps & { providerName: string }) {
+	return (
+		<div className="space-y-4">
+			<SectionHeader title={`${providerName} overrides`} description={`Override key-level ${providerName} defaults for this deployment.`} />
+			<div className="flex items-start justify-between gap-4 rounded-md border p-3">
+				<div className="space-y-0.5">
+					<label htmlFor="use-anthropic-endpoints-switch" className="text-sm font-medium">Use Anthropic endpoints</label>
+					<p className="text-muted-foreground text-xs">
+						Route chat completions and responses requests through Anthropic-compatible endpoints.
+					</p>
+				</div>
+                <Switch
+                    id="use-anthropic-endpoints-switch"
+                    checked={config.use_anthropic_endpoints ?? false}
+                    onCheckedChange={(checked) => onChange({ use_anthropic_endpoints: checked ? true : undefined })}
+                    disabled={disabled}
+                />
+			</div>
+		</div>
+	);
+}
+
 function ProviderSection({ providerName, ...props }: ProviderSectionProps & { providerName: string }) {
 	switch (providerName) {
 		case "azure":
@@ -265,8 +322,18 @@ function ProviderSection({ providerName, ...props }: ProviderSectionProps & { pr
 			return <VertexSection {...props} />;
 		case "bedrock":
 			return <BedrockSection {...props} />;
+		case "bedrock_mantle":
+			return <BedrockMantleSection {...props} />;
 		case "replicate":
 			return <ReplicateSection {...props} />;
+		case "sgl":
+			return <UseAnthropicEndpointsToggleSection providerName="SGLang" {...props} />;
+        case "deepseek":
+			return <UseAnthropicEndpointsToggleSection providerName="Deepseek" {...props} />;
+        case "fireworks":
+			return <UseAnthropicEndpointsToggleSection providerName="Fireworks" {...props} />;
+        case "vllm":
+			return <UseAnthropicEndpointsToggleSection providerName="vLLM" {...props} />;
 		default:
 			return null;
 	}

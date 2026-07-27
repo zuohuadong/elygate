@@ -1,0 +1,15 @@
+{
+  "version": 2,
+  "source": "sqlite",
+  "db": ".agents/state/coordination.db",
+  "legacy_markdown": "removed",
+  "backup_id": "coordination-v1-2026-06-25T03-09-12-172Z",
+  "created_at": "2026-06-25T03:09:12.422Z",
+  "counts": {
+    "tasks": 14,
+    "contracts": 15,
+    "events": 33,
+    "mailbox": 74,
+    "runs": 0
+  }
+}

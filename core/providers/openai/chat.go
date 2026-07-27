@@ -67,7 +67,7 @@ func ToOpenAIChatRequest(ctx *schemas.BifrostContext, bifrostReq *schemas.Bifros
 	case schemas.OpenAI, schemas.Azure:
 		openaiReq.normalizeReasoningEffort(capModel)
 		return openaiReq
-	case schemas.Cerebras, schemas.DeepSeek:
+	case schemas.Cerebras, schemas.DeepSeek, schemas.Wafer:
 		openaiReq.filterOpenAISpecificParameters(capModel)
 		openaiReq.stripReasoningDetails()
 		return openaiReq
@@ -135,6 +135,9 @@ func (req *OpenAIChatRequest) filterOpenAISpecificParameters(capModel string) {
 	}
 	if req.ChatParameters.PromptCacheRetention != nil {
 		req.ChatParameters.PromptCacheRetention = nil
+	}
+	if req.ChatParameters.PromptCacheOptions != nil {
+		req.ChatParameters.PromptCacheOptions = nil
 	}
 	if req.ChatParameters.Verbosity != nil {
 		req.ChatParameters.Verbosity = nil

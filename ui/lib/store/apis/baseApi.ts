@@ -1,5 +1,5 @@
 import { IS_ENTERPRISE } from "@/lib/constants/config";
-import { BifrostErrorResponse } from "@/lib/types/config";
+import { ElygateErrorResponse } from "@/lib/types/config";
 import { getApiBaseUrl } from "@/lib/utils/port";
 import { createBaseQueryWithRefresh } from "@enterprise/lib/store/utils/baseQueryWithRefresh";
 import { clearOAuthStorage } from "@enterprise/lib/store/utils/tokenManager";
@@ -57,7 +57,7 @@ const baseQuery = fetchBaseQuery({
 		// browsers visiting a scoped page.
 		const tempToken = getActiveTempToken();
 		if (tempToken) {
-			headers.set("X-Bifrost-Temp-Token", tempToken);
+			headers.set("X-Elygate-Temp-Token", tempToken);
 		}
 		return headers;
 	},
@@ -107,9 +107,9 @@ const baseQueryWithErrorHandling: typeof baseQueryWithRefresh = async (args: any
 			};
 		}
 
-		// Handle other errors with proper BifrostErrorResponse format
+		// Handle other errors with proper ElygateErrorResponse format
 		if (error?.data) {
-			const errorData = error.data as BifrostErrorResponse;
+			const errorData = error.data as ElygateErrorResponse;
 			if (errorData.error?.message) {
 				return result;
 			}
@@ -142,7 +142,6 @@ export const baseApi = createApi({
 		"Providers",
 		"MCPClients",
 		"Config",
-		"VectorStoreConfig",
 		"CacheConfig",
 		"VirtualKeys",
 		"Teams",
@@ -198,6 +197,8 @@ export const baseApi = createApi({
 		"AlertChannels",
 		"AlertRules",
 		"AlertHistory",
+		"WebhookEndpoints",
+		"WebhookDeliveries",
 	],
 	endpoints: () => ({}),
 });

@@ -8,7 +8,7 @@ import MCPSessionsAuthPage from "./page";
 // browser can land on this page without bouncing to /login.
 //
 // TempTokenScope handles the auth half: it reads the `#t=…` fragment the
-// server appended to the URL, attaches it as `X-Bifrost-Temp-Token` on
+// server appended to the URL, attaches it as `X-Elygate-Temp-Token` on
 // outbound API calls, and suppresses the global 401-redirect so a stale
 // link renders an inline error instead.
 function RouteComponent() {

@@ -4,7 +4,7 @@ export default function AlertHistoryView() {
 	return (
 		<AlertingPlaceholderView
 			title="Unlock alerting history for proactive monitoring"
-			description="This capability requires the Elygate Enterprise source package and is not included in this OSS build."
+			description="This feature is a part of the Elygate enterprise license. Review alert delivery outcomes, failures, and resolution events in one place."
 			readmeLink="https://docs.getbifrost.ai/enterprise/alerting/alert-history"
 			testIdPrefix="alert-history"
 		/>

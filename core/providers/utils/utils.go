@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/bytedance/sonic"
+	"github.com/cespare/xxhash/v2"
 	"github.com/maximhq/bifrost/core/network"
 	"github.com/maximhq/bifrost/core/schemas"
 	"github.com/tidwall/gjson"
@@ -39,6 +40,57 @@ import (
 // signature embedded in the call_id (e.g. Gemini thoughtSignatures), formatted as
 // "<baseID>_ts_<signature>".
 const ThoughtSignatureSeparator = "_ts_"
+
+// anthropicUnsafeToolUseIDCharRegex matches any character outside Anthropic's
+// required tool_use/tool_result id charset (^[a-zA-Z0-9_-]+$).
+var anthropicUnsafeToolUseIDCharRegex = regexp.MustCompile(`[^A-Za-z0-9_-]+`)
+
+// maxSanitizedAnthropicToolUseIDLen bounds the sanitized id length, matching the
+// 64-char cap this codebase already applies to tool identifiers elsewhere (e.g.
+// OpenAI's call_id, Bedrock's tool-name aliasing) so a long, non-conforming
+// upstream id can't sanitize into something Anthropic still rejects for length.
+const maxSanitizedAnthropicToolUseIDLen = 64
+
+// SanitizeAnthropicToolUseID rewrites a tool_use/tool_result id to satisfy Anthropic's
+// ^[a-zA-Z0-9_-]+$ requirement. Some upstream providers (e.g. Kimi/Gemini-compatible
+// backends) emit ids containing ':' or '.', which Anthropic's API rejects with a 400
+// when such a conversation is replayed through the Anthropic provider. The mapping is
+// deterministic (hash of the original id) so a tool_use id and its matching tool_result
+// id always sanitize to the same value within a request, matching the alias pattern
+// used for Bedrock tool names (see bedrockAliasToolName).
+func SanitizeAnthropicToolUseID(id string) string {
+	// The empty string doesn't match Anthropic's pattern either (it requires at
+	// least one character), so it needs the same hash-based rewrite as ids with
+	// disallowed characters rather than being passed through unchanged.
+	if id != "" && !anthropicUnsafeToolUseIDCharRegex.MatchString(id) {
+		return id
+	}
+	// Use the full 64-bit hash (not a 32-bit truncation) to keep collisions
+	// between distinct ids astronomically unlikely, since two tool_use blocks
+	// sharing an id would make Anthropic's replies ambiguous or rejected.
+	hash := fmt.Sprintf("%016x", xxhash.Sum64String(id))
+	semantic := strings.Trim(anthropicUnsafeToolUseIDCharRegex.ReplaceAllString(id, "_"), "_")
+	if semantic == "" {
+		return hash
+	}
+	if maxSemanticLen := maxSanitizedAnthropicToolUseIDLen - len(hash) - 1; len(semantic) > maxSemanticLen {
+		semantic = strings.Trim(semantic[:maxSemanticLen], "_")
+	}
+	if semantic == "" {
+		return hash
+	}
+	return hash + "_" + semantic
+}
+
+// SanitizeAnthropicToolUseIDPtr is SanitizeAnthropicToolUseID for an optional id.
+// Returns nil unchanged.
+func SanitizeAnthropicToolUseIDPtr(id *string) *string {
+	if id == nil {
+		return nil
+	}
+	sanitized := SanitizeAnthropicToolUseID(*id)
+	return &sanitized
+}
 
 // StripThoughtSignature returns the base tool-call ID without any embedded provider
 // reasoning signature. It is deterministic, so a tool call and its matching output strip
@@ -86,6 +138,39 @@ func JSONFieldExists(data []byte, path string) bool {
 // GetJSONField retrieves a field value from JSON bytes without parsing the entire document.
 func GetJSONField(data []byte, path string) gjson.Result {
 	return gjson.GetBytes(data, path)
+}
+
+// GetJSONSubtree extracts a JSON sub-tree as raw bytes by gjson path, without parsing the
+// entire document. Returns nil if the path does not exist. The returned slice is a copy
+// of the matched sub-tree bytes — safe to retain after the input is mutated or released.
+func GetJSONSubtree(data []byte, path string) []byte {
+	res := gjson.GetBytes(data, path)
+	if !res.Exists() {
+		return nil
+	}
+	raw := res.Raw
+	if raw == "" {
+		return nil
+	}
+	out := make([]byte, len(raw))
+	copy(out, raw)
+	return out
+}
+
+// UnmarshalOrdered decodes JSON bytes into a *schemas.OrderedMap, preserving the key order
+// of the source document. Use this in preference to sonic.Unmarshal into a map[string]any
+// whenever the caller cares about field order (e.g., LLM prompt-cache keying or property
+// ordering surfaced to users).
+//
+// Note: the decoder under the hood is encoding/json (not sonic), because token-by-token
+// decoding is required to preserve key order. Outer dispatch goes through sonic, which
+// invokes OrderedMap's custom UnmarshalJSON.
+func UnmarshalOrdered(data []byte) (*schemas.OrderedMap, error) {
+	om := schemas.NewOrderedMap()
+	if err := sonic.Unmarshal(data, om); err != nil {
+		return nil, err
+	}
+	return om, nil
 }
 
 // logger is the global logger for the provider utils (thread-safe via atomic.Pointer).
@@ -2688,12 +2773,14 @@ func CreateBifrostTextCompletionChunkResponse(
 	currentChunkIndex int,
 	requestType schemas.RequestType,
 	model string,
+	created int,
 ) *schemas.BifrostTextCompletionResponse {
 	response := &schemas.BifrostTextCompletionResponse{
-		ID:     id,
-		Model:  model,
-		Object: "text_completion",
-		Usage:  usage,
+		ID:      id,
+		Model:   model,
+		Created: created,
+		Object:  "text_completion",
+		Usage:   usage,
 		Choices: []schemas.BifrostResponseChoice{
 			{
 				FinishReason:                 finishReason,

@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-team.local/schemas/run-records.schema.json",
+  "title": "Agent Team Run Record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "run_id", "task_id", "status", "started_at", "events", "privacy"],
+  "properties": {
+    "version": { "type": "integer", "const": 1 },
+    "run_id": { "type": "string", "minLength": 1 },
+    "task_id": { "type": "string" },
+    "parent_run_id": { "type": "string" },
+    "status": { "type": "string", "enum": ["running", "review", "done", "blocked", "failed", "interrupted"] },
+    "owner": { "type": "string" },
+    "model": { "type": "string" },
+    "trace_tags": { "type": "array", "items": { "type": "string" } },
+    "started_at": { "type": "string" },
+    "ended_at": { "type": "string" },
+    "subagents": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["role", "model", "context_isolation", "status"],
+        "properties": {
+          "role": { "type": "string" },
+          "model": { "type": "string" },
+          "context_isolation": { "type": "string", "enum": ["isolated", "shared-readonly", "shared-write", "blocked"] },
+          "allowed_files": { "type": "array", "items": { "type": "string" } },
+          "mailbox_ref": { "type": "string" },
+          "status": { "type": "string", "enum": ["pending", "running", "done", "blocked", "interrupted", "failed"] }
+        }
+      }
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["time", "type", "summary"],
+        "properties": {
+          "time": { "type": "string" },
+          "type": { "type": "string" },
+          "summary": { "type": "string" },
+          "evidence_refs": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "verification_commands": { "type": "array", "items": { "type": "string" } },
+    "interruption_recovery": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "resume_state": { "type": "string", "enum": ["not-needed", "resumable", "blocked", "unknown"] },
+        "last_stable_artifact": { "type": "string" },
+        "dangling_subagents": { "type": "array", "items": { "type": "string" } },
+        "recovery_owner": { "type": "string" },
+        "recovery_action": { "type": "string" }
+      }
+    },
+    "privacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["secrets_redacted", "raw_logs_stored"],
+      "properties": {
+        "secrets_redacted": { "type": "boolean" },
+        "raw_logs_stored": { "type": "boolean" }
+      }
+    }
+  }
+}

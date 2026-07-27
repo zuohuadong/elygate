@@ -12,20 +12,18 @@ import (
 	configstoreTables "github.com/maximhq/bifrost/framework/configstore/tables"
 )
 
-// Defaults for sync configuration and timeouts. A fresh private deployment
-// does not contact an external catalog: operators opt in with an explicit
-// HTTP(S) or file:// source in framework_config.
+// Defaults for sync configuration and timeouts. Exposed so the composer can
+// fall back to these when the framework Config leaves fields nil.
 const (
-	DefaultURL                    = ""
-	DefaultModelParametersURL     = ""
+	DefaultURL                    = "https://getbifrost.ai/datasheet"
+	DefaultModelParametersURL     = "https://getbifrost.ai/datasheet/model-parameters"
 	DefaultSyncInterval           = 24 * time.Hour
 	DefaultPricingTimeout         = 60 * time.Second
 	DefaultModelParametersTimeout = 45 * time.Second
 )
 
 // Config groups the values the composer hands to New / UpdateSyncConfig.
-// Zero URL values disable the corresponding remote sync; an explicit HTTP(S)
-// or file:// URL enables it.
+// Zero values fall back to the Default* constants.
 type Config struct {
 	URL                string
 	ModelParametersURL string
@@ -124,22 +122,6 @@ func (s *Store) ModelParametersURL() string {
 	s.syncCfgMu.RLock()
 	defer s.syncCfgMu.RUnlock()
 	return s.modelParametersURL
-}
-
-// HasPricingSyncSource reports whether pricing sync was explicitly configured.
-func (s *Store) HasPricingSyncSource() bool {
-	return strings.TrimSpace(s.URL()) != ""
-}
-
-// HasModelParametersSyncSource reports whether model-parameters sync was
-// explicitly configured.
-func (s *Store) HasModelParametersSyncSource() bool {
-	return strings.TrimSpace(s.ModelParametersURL()) != ""
-}
-
-// HasSyncSource reports whether either model-catalog remote source is enabled.
-func (s *Store) HasSyncSource() bool {
-	return s.HasPricingSyncSource() || s.HasModelParametersSyncSource()
 }
 
 // SyncInterval returns the minimum elapsed time between background syncs.

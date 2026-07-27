@@ -313,7 +313,7 @@ async function startRecalculateCostJob(
 	};
 	const tempToken = getActiveTempToken();
 	if (tempToken) {
-		headers["X-Bifrost-Temp-Token"] = tempToken;
+		headers["X-Elygate-Temp-Token"] = tempToken;
 	}
 
 	const response = await fetch(`${getApiBaseUrl()}/logs/recalculate-cost`, {

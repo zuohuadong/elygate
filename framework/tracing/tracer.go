@@ -476,6 +476,22 @@ func (t *Tracer) ResumeStream(traceID string) {
 	t.accumulator.ResumeStream(traceID)
 }
 
+// ResumeStreamWithReplayInterval arms fixed-interval replay after the in-flight chunk reaches the core gate.
+func (t *Tracer) ResumeStreamWithReplayInterval(traceID string, eventInterval time.Duration) bool {
+	if traceID == "" || t.accumulator == nil {
+		return false
+	}
+	return t.accumulator.ResumeStreamWithReplayInterval(traceID, eventInterval)
+}
+
+// ClearPausedStreamBuffer drops chunks buffered while traceID is paused.
+func (t *Tracer) ClearPausedStreamBuffer(traceID string) error {
+	if traceID == "" || t.accumulator == nil {
+		return nil
+	}
+	return t.accumulator.ClearPausedStreamBuffer(traceID)
+}
+
 // EndStream terminates the streaming response. Any buffered chunks are flushed
 // first; if err is non-nil it is then delivered as a terminal error chunk. After
 // EndStream, all further provider chunks are dropped (PostLLMHook still fires).

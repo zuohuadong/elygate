@@ -1,7 +1,7 @@
 import { ExternalLink, Video } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
-import { BifrostVideoDownloadOutput, BifrostVideoGenerationOutput, BifrostVideoListOutput } from "@/lib/types/logs";
+import { ElygateVideoDownloadOutput, ElygateVideoGenerationOutput, ElygateVideoListOutput } from "@/lib/types/logs";
 
 import CollapsibleBox from "./collapsibleBox";
 import { CodeEditor } from "@/components/ui/codeEditor";
@@ -10,12 +10,12 @@ interface VideoGenerationInput {
 	prompt: string;
 }
 
-type VideoOutput = BifrostVideoGenerationOutput | BifrostVideoDownloadOutput;
+type VideoOutput = ElygateVideoGenerationOutput | ElygateVideoDownloadOutput;
 
 interface VideoViewProps {
 	videoInput?: VideoGenerationInput;
 	videoOutput?: VideoOutput;
-	videoListOutput?: BifrostVideoListOutput;
+	videoListOutput?: ElygateVideoListOutput;
 	requestType?: string;
 }
 
@@ -32,8 +32,8 @@ function getMethodTypeLabel(requestType?: string): string {
 export default function VideoView({ videoInput, videoOutput, videoListOutput, requestType }: VideoViewProps) {
 	const methodTypeLabel = getMethodTypeLabel(requestType);
 	const isDownload = requestType?.toLowerCase().includes("video_download");
-	const downloadOutput = isDownload && videoOutput ? (videoOutput as BifrostVideoDownloadOutput) : null;
-	const generationOutput = !isDownload && videoOutput ? (videoOutput as BifrostVideoGenerationOutput) : null;
+	const downloadOutput = isDownload && videoOutput ? (videoOutput as ElygateVideoDownloadOutput) : null;
+	const generationOutput = !isDownload && videoOutput ? (videoOutput as ElygateVideoGenerationOutput) : null;
 	const outputURL = generationOutput?.videos?.[0]?.url;
 
 	return (

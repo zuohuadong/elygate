@@ -14,7 +14,7 @@ import { ExternalLink, Plus, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
-const DEFAULT_PRICING_SOURCE_URL = "https://github.com/zuohuadong/elygate/tree/dev/docs";
+const DEFAULT_PRICING_SOURCE_URL = "https://getbifrost.ai/datasheet";
 
 interface AttributeSheetProps {
 	model: ModelDetails;

@@ -14,7 +14,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -434,7 +433,7 @@ func (mc *ModelCatalog) syncWorker(ctx context.Context) {
 }
 
 func (mc *ModelCatalog) syncTick(ctx context.Context) {
-	pricingDue := mc.datasheet.HasSyncSource() && time.Since(mc.datasheet.LastSyncedAt()) >= mc.datasheet.SyncInterval()
+	pricingDue := time.Since(mc.datasheet.LastSyncedAt()) >= mc.datasheet.SyncInterval()
 	mcpLibraryDue := mc.isMCPLibrarySyncDue()
 	if !pricingDue && !mcpLibraryDue {
 		return
@@ -570,13 +569,9 @@ func (mc *ModelCatalog) isMCPLibrarySyncDue() bool {
 		return false
 	}
 	mc.syncMu.RLock()
-	url := mc.mcpLibraryURL
 	lastSyncedAt := mc.lastMCPLibrarySyncedAt
 	syncInterval := mc.mcpLibrarySyncInterval
 	mc.syncMu.RUnlock()
-	if strings.TrimSpace(url) == "" {
-		return false
-	}
 	if syncInterval <= 0 {
 		syncInterval = DefaultSyncInterval
 	}

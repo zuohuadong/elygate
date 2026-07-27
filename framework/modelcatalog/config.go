@@ -23,8 +23,9 @@ type Config struct {
 	PricingSyncInterval *int64  `json:"pricing_sync_interval,omitempty"` // seconds
 	ModelParametersURL  *string `json:"model_parameters_url,omitempty"`
 
-	// MCPLibraryURL enables the MCP server library catalog sync. Empty/nil keeps
-	// the catalog local-only; operators can point it at an approved custom source.
+	// MCPLibraryURL overrides the endpoint the MCP server library catalog is
+	// synced from. Empty/nil uses DefaultMCPLibraryURL. Mirrors PricingURL: the
+	// default ships out of the box and the user can point it at a custom source.
 	MCPLibraryURL          *string `json:"mcp_library_url,omitempty"`
 	MCPLibrarySyncInterval *int64  `json:"mcp_library_sync_interval,omitempty"` // seconds
 }
@@ -71,7 +72,7 @@ const (
 	DefaultPricingTimeout         = datasheet.DefaultPricingTimeout
 	DefaultModelParametersTimeout = datasheet.DefaultModelParametersTimeout
 
-	DefaultMCPLibraryURL     = ""
+	DefaultMCPLibraryURL     = "https://getbifrost.ai/mcp-library"
 	DefaultMCPLibraryTimeout = 45 * time.Second
 )
 

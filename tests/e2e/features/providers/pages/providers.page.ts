@@ -80,10 +80,7 @@ export class ProvidersPage extends BasePage {
    */
   async goto(): Promise<void> {
     await this.page.goto('/workspace/providers')
-    await Promise.race([
-      this.providerList.waitFor({ state: 'visible', timeout: 10000 }),
-      this.addProviderBtn.waitFor({ state: 'visible', timeout: 10000 }),
-    ])
+    await waitForNetworkIdle(this.page)
   }
 
   /**

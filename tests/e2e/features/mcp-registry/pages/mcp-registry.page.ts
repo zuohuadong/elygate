@@ -44,7 +44,6 @@ export interface MCPClientConfig {
  */
 export class MCPRegistryPage extends BasePage {
   readonly table: Locator
-  readonly emptyState: Locator
   readonly createBtn: Locator
   readonly sheet: Locator
   readonly detailSheet: Locator
@@ -71,10 +70,6 @@ export class MCPRegistryPage extends BasePage {
   constructor(page: Page) {
     super(page)
     this.table = page.locator('[data-testid="mcp-clients-table"]').or(page.locator('table'))
-    this.emptyState = page.getByRole('heading', {
-      name: 'MCP servers connect tools and context to the gateway',
-      exact: true,
-    })
     this.createBtn = page.locator('[data-testid="create-mcp-client-btn"]').or(
       page.getByRole('button', { name: /New MCP Server/i }).or(page.getByRole('button', { name: /Add/i }))
     )
@@ -121,7 +116,8 @@ export class MCPRegistryPage extends BasePage {
   async goto(): Promise<void> {
     await this.page.goto('/workspace/mcp-registry')
     await waitForNetworkIdle(this.page)
-    await expect(this.table.or(this.emptyState)).toBeVisible({ timeout: 10000 })
+    // Wait for table to be visible
+    await this.table.waitFor({ state: 'visible', timeout: 10000 }).catch(() => {})
   }
 
   /** Get the table row for a client by name. Scoped to tbody so the header row is never matched; first() for stable single-row target. */
@@ -153,17 +149,15 @@ export class MCPRegistryPage extends BasePage {
    * Used as a fallback success signal when the create form doesn't close (e.g. SSE/stdio).
    */
   async waitForClientInTable(name: string, timeoutMs: number): Promise<boolean> {
-    try {
-      await expect(this.getClientRow(name)).toBeVisible({ timeout: timeoutMs })
-      return true
-    } catch {
-      return false
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+      if ((await this.getClientRow(name).count()) > 0) return true
+      await this.page.waitForTimeout(500)
     }
+    return false
   }
 
   async getClientCount(): Promise<number> {
-    if (await this.emptyState.isVisible().catch(() => false)) return 0
-
     // Exclude header row
     const rows = this.table.locator('tbody tr')
     return await rows.count()
@@ -569,6 +563,8 @@ export class MCPRegistryPage extends BasePage {
     await this.goto()
     await this.closeSheet()
     await this.dismissToasts()
+    await this.table.waitFor({ state: 'visible', timeout: 10000 }).catch(() => {})
+    await this.page.waitForTimeout(500)
 
     for (const name of names) {
       const tryDelete = async (): Promise<void> => {
@@ -770,12 +766,12 @@ export class MCPRegistryPage extends BasePage {
    * Polls so we don't rely on a stale locator.
    */
   async waitForClientGone(name: string, timeoutMs: number): Promise<boolean> {
-    try {
-      await expect(this.getClientRow(name)).toHaveCount(0, { timeout: timeoutMs })
-      return true
-    } catch {
-      return false
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+      if ((await this.getClientRow(name).count()) === 0) return true
+      await this.page.waitForTimeout(500)
     }
+    return false
   }
 
   /**
@@ -820,6 +816,7 @@ export class MCPRegistryPage extends BasePage {
    * Check if empty state is visible
    */
   async isEmptyStateVisible(): Promise<boolean> {
-    return await this.emptyState.isVisible().catch(() => false)
+    const emptyMessage = this.page.getByText(/No clients found/i)
+    return await emptyMessage.isVisible().catch(() => false)
   }
 }

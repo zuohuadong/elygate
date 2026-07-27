@@ -84,7 +84,7 @@ func NewBedrockProvider(config *schemas.ProviderConfig, logger schemas.Logger) (
 		MaxConnsPerHost:       config.NetworkConfig.MaxConnsPerHost,
 		MaxIdleConns:          schemas.DefaultMaxIdleConnsPerHost,
 		MaxIdleConnsPerHost:   schemas.DefaultMaxIdleConnsPerHost,
-		IdleConnTimeout:       30 * time.Second,
+		IdleConnTimeout:       time.Second * time.Duration(config.NetworkConfig.KeepAliveTimeoutInSeconds),
 		TLSHandshakeTimeout:   10 * time.Second,
 		ResponseHeaderTimeout: requestTimeout,
 		ExpectContinueTimeout: 1 * time.Second,
@@ -132,7 +132,7 @@ func NewBedrockProvider(config *schemas.ProviderConfig, logger schemas.Logger) (
 		ReadTimeout:         requestTimeout,
 		WriteTimeout:        requestTimeout,
 		MaxConnsPerHost:     config.NetworkConfig.MaxConnsPerHost,
-		MaxIdleConnDuration: 30 * time.Second,
+		MaxIdleConnDuration: time.Second * time.Duration(config.NetworkConfig.KeepAliveTimeoutInSeconds),
 		MaxConnWaitTimeout:  requestTimeout,
 		MaxConnDuration:     time.Second * time.Duration(schemas.DefaultMaxConnDurationInSeconds),
 		ConnPoolStrategy:    fasthttp.FIFO,
@@ -723,7 +723,7 @@ func (provider *BedrockProvider) listMantleModels(ctx *schemas.BifrostContext, k
 		provider.logger.Warn("failed to build mantle list-models request: %v", err)
 		return nil
 	}
-	providerUtils.SetExtraHeadersHTTP(ctx, req, provider.networkConfig.ExtraHeaders, nil)
+	providerUtils.SetExtraHeadersHTTP(ctx, req, WithMantleProject(provider.networkConfig.ExtraHeaders, MantleOpenAIProjectHeader, resolveMantleProjectID(ctx, key)), nil)
 	if key.Value.GetValue() != "" {
 		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", key.Value.GetValue()))
 	} else if bifrostErr := signAWSRequest(ctx, req, key.BedrockKeyConfig, region, bedrockMantleSigningService); bifrostErr != nil {

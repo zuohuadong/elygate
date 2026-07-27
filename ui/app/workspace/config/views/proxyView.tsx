@@ -345,7 +345,7 @@ export default function ProxyView() {
 							{!IS_ENTERPRISE && (
 								<Alert>
 									<Info className="h-4 w-4" />
-									<AlertDescription>SCIM proxy support requires the Elygate Enterprise source package and is unavailable in this OSS build.</AlertDescription>
+									<AlertDescription>SCIM proxy support is available in Elygate Enterprise.</AlertDescription>
 								</Alert>
 							)}
 						</div>

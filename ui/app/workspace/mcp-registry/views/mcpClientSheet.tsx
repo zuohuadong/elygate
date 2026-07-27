@@ -97,6 +97,7 @@ export default function MCPClientSheet({
 
 	const { data: bifrostConfig } = useGetCoreConfigQuery({ fromDB: true });
 	const globalToolSyncInterval = bifrostConfig?.client_config?.mcp_tool_sync_interval ?? 10;
+	const globalToolExecutionTimeout = bifrostConfig?.client_config?.mcp_tool_execution_timeout ?? 30;
 	const { toast } = useToast();
 	const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
 
@@ -568,7 +569,7 @@ export default function MCPClientSheet({
 														<Tooltip>
 															<TooltipTrigger asChild>
 																<a
-																				href="https://github.com/zuohuadong/elygate/tree/dev/docs"
+																	href="https://docs.getbifrost.ai/mcp/code-mode"
 																	target="_blank"
 																	rel="noopener noreferrer"
 																	data-testid="code-mode-link-help"
@@ -824,7 +825,7 @@ export default function MCPClientSheet({
 														<Input
 															type="number"
 															className={`w-24 ${isUsingGlobal ? "text-muted-foreground" : ""}`}
-															placeholder="0"
+															placeholder={String(globalToolExecutionTimeout)}
 															value={field.value === 0 || field.value === undefined ? "" : String(field.value)}
 															onChange={(e) => {
 																if (e.target.value === "") {
@@ -1140,7 +1141,7 @@ export default function MCPClientSheet({
 																	<Tooltip>
 																		<TooltipTrigger asChild>
 																			<a
-																				href="https://github.com/zuohuadong/elygate/tree/dev/docs"
+																				href="https://docs.getbifrost.ai/mcp/agent-mode"
 																				target="_blank"
 																				rel="noopener noreferrer"
 																				aria-label="Learn more about Auto-execute and Agent Mode"
@@ -1151,7 +1152,7 @@ export default function MCPClientSheet({
 																		</TooltipTrigger>
 																		<TooltipContent className="max-w-xs">
 																			<p>
-																	Applies only when Elygate runs the LLM loop in Agent Mode. In MCP Gateway mode, the connected client
+																				Applies only when Elygate runs the LLM loop in Agent Mode. In MCP Gateway mode, the connected client
 																				(Claude Desktop, Cursor, etc.) controls tool approval and this setting is ignored. Click to learn
 																				more.
 																			</p>

@@ -1,5 +1,6 @@
 import { Locator, Page, expect } from '@playwright/test'
 import { BasePage } from '../../../core/pages/base.page'
+import { waitForNetworkIdle } from '../../../core/utils/test-helpers'
 
 /**
  * Page object for the MCP Logs page
@@ -10,7 +11,6 @@ export class MCPLogsPage extends BasePage {
   readonly filtersSection: Locator
   readonly filtersButton: Locator
   readonly statsCards: Locator
-  readonly gettingStartedGuide: Locator
 
   // Filter elements
   readonly toolNameFilter: Locator
@@ -37,19 +37,21 @@ export class MCPLogsPage extends BasePage {
     this.logsTable = page.locator('[data-testid="mcp-logs-table"]').or(page.locator('table'))
     // The filters section is the container with search input and filters button
     this.filtersSection = page.locator('input[placeholder="Search MCP logs"]').locator('..')
-    this.filtersButton = page.getByRole('button', { name: /Hide filters|Show filters/i })
+    this.filtersButton = page.getByRole('button', { name: /Filters/i })
     this.statsCards = page.locator('[data-testid="mcp-stats-cards"]').or(
       page.locator('text=Total Executions').locator('..').locator('..')
     )
-    this.gettingStartedGuide = page.getByRole('heading', {
-      name: 'Get Started with MCP Tool Execution',
-      exact: true,
-    })
 
-    // Filters live in the persistent collapsible sidebar.
-    this.toolNameFilter = page.getByRole('button', { name: 'Tool Names', exact: true })
-    this.serverLabelFilter = page.getByRole('button', { name: 'Servers', exact: true })
-    this.statusFilter = page.getByRole('button', { name: 'Status', exact: true })
+    // Filter elements - filters are inside a popover opened by the Filters button
+    this.toolNameFilter = page.locator('[data-testid="filter-tool-name"]').or(
+      page.locator('button').filter({ hasText: /Tool Name/i })
+    )
+    this.serverLabelFilter = page.locator('[data-testid="filter-server-label"]').or(
+      page.locator('button').filter({ hasText: /Server/i })
+    )
+    this.statusFilter = page.locator('[data-testid="filter-status"]').or(
+      page.locator('button').filter({ hasText: /Status/i })
+    )
     this.searchInput = page.locator('[data-testid="filter-search"]').or(
       page.getByPlaceholder('Search MCP logs')
     )
@@ -61,12 +63,7 @@ export class MCPLogsPage extends BasePage {
     )
 
     // Table elements - exclude status message rows
-    this.tableRows = this.logsTable
-      .locator('tbody tr')
-      .filter({ hasNot: page.getByText(/Listening for|Waiting for new MCP logs/i) })
-      .filter({ hasNot: page.getByText('Live updates paused') })
-      .filter({ hasNot: page.getByText('Not connected') })
-      .filter({ hasNot: page.getByText('No results found') })
+    this.tableRows = this.logsTable.locator('tbody tr').filter({ hasNot: page.locator('text=Listening for') }).filter({ hasNot: page.locator('text=Live updates paused') }).filter({ hasNot: page.locator('text=Not connected') }).filter({ hasNot: page.locator('text=No results found') })
     // Scope pagination to the MCP logs view (avoid matching other pages when navigating)
     const paginationContainer = page.getByTestId('pagination').filter({ has: page.locator('[data-testid="next-page"]') }).first()
     this.paginationControls = paginationContainer
@@ -77,8 +74,9 @@ export class MCPLogsPage extends BasePage {
       paginationContainer.locator('[data-testid="prev-page"]')
     )
 
-    this.logDetailSheet = page.locator('[data-slot="sheet-content"][data-state="open"]')
-    this.closeDetailSheetBtn = this.logDetailSheet.getByRole('button', { name: 'Close', exact: true })
+    // Log detail sheet - Sheet component with role="dialog"
+    this.logDetailSheet = page.locator('[role="dialog"]')
+    this.closeDetailSheetBtn = page.locator('[role="dialog"]').locator('button').filter({ has: page.locator('svg.lucide-x') })
   }
 
   /**
@@ -86,67 +84,105 @@ export class MCPLogsPage extends BasePage {
    */
   async goto(): Promise<void> {
     await this.page.goto('/workspace/mcp-logs')
-    await expect(this.logsTable.or(this.gettingStartedGuide)).toBeVisible()
-  }
-
-  private async ensureFilterSidebarExpanded(): Promise<void> {
-    const showFilters = this.page.getByRole('button', { name: 'Show filters', exact: true })
-    if (await showFilters.isVisible().catch(() => false)) {
-      await showFilters.click()
-    }
-    await expect(this.page.getByRole('button', { name: 'Hide filters', exact: true })).toBeVisible()
-  }
-
-  private async ensureFilterSectionOpen(trigger: Locator): Promise<Locator> {
-    await this.ensureFilterSidebarExpanded()
-    await trigger.waitFor({ state: 'visible' })
-    if ((await trigger.getAttribute('data-state')) !== 'open') {
-      await trigger.click()
-    }
-    await expect(trigger).toHaveAttribute('data-state', 'open')
-    return trigger.locator('xpath=ancestor::*[@data-slot="collapsible"][1]')
-  }
-
-  private async selectFirstCheckbox(trigger: Locator): Promise<boolean> {
-    const section = await this.ensureFilterSectionOpen(trigger)
-    const checkbox = section.getByRole('checkbox').first()
-    const didLoad = await checkbox.waitFor({ state: 'visible', timeout: 10000 }).then(() => true).catch(() => false)
-    if (!didLoad) return false
-
-    await checkbox.click()
-    await expect(checkbox).toHaveAttribute('data-state', 'checked')
-    return true
+    await waitForNetworkIdle(this.page)
+    // Wait for table to be visible
+    await this.logsTable.waitFor({ state: 'visible', timeout: 10000 }).catch(() => {})
   }
 
   /**
-   * Filter by tool name using the first available sidebar checkbox.
+   * Open Filters popover and wait for the command list. Caller can then resolve group/option locators.
+   */
+  private async openFiltersPopover(): Promise<void> {
+    await this.filtersButton.first().waitFor({ state: 'visible' })
+    await this.filtersButton.first().click()
+    await this.page.waitForSelector('[role="listbox"], [data-slot="command-list"]', { timeout: 5000 })
+  }
+
+  /**
+   * Close Filters popover (Escape) and wait for network idle.
+   */
+  private async closeFiltersPopover(): Promise<void> {
+    await this.page.keyboard.press('Escape')
+    await this.page.waitForSelector('[role="listbox"]', { state: 'hidden', timeout: 5000 }).catch(() => {})
+    await waitForNetworkIdle(this.page)
+  }
+
+  /**
+   * Get the first selectable option in a filter group by heading (e.g. "Tool Names", "Servers").
+   * Skips "Loading..." so we only click real options.
+   */
+  private async getFirstOptionInGroup(groupHeading: string): Promise<Locator | null> {
+    const list = this.page.locator('[data-slot="command-list"]').or(this.page.locator('[role="listbox"]'))
+    const group = list.locator('[data-slot="command-group"]').filter({
+      has: this.page.getByText(groupHeading, { exact: true }),
+    })
+    const items = group.locator('[data-slot="command-item"]').or(group.getByRole('option'))
+    const count = await items.count()
+    for (let i = 0; i < count; i++) {
+      const item = items.nth(i)
+      const text = await item.textContent().catch(() => '')
+      if (text && !/loading/i.test(text)) {
+        return item
+      }
+    }
+    return null
+  }
+
+  /**
+   * Open Filters popover and click an option by name. Returns true if the option was found and clicked.
+   */
+  private async openFiltersAndSelectOption(optionText: string | RegExp): Promise<boolean> {
+    await this.openFiltersPopover()
+    const re = typeof optionText === 'string' ? new RegExp(optionText, 'i') : optionText
+    const option = this.page.getByRole('option', { name: re })
+    const count = await option.count()
+    if (count > 0) {
+      await option.first().click()
+      await this.closeFiltersPopover()
+      return true
+    }
+    await this.closeFiltersPopover()
+    return false
+  }
+
+  /**
+   * Filter by tool name: open Filters and select the first available tool name option.
    * @returns true if at least one tool name option was found and selected
    */
   async filterByToolName(): Promise<boolean> {
-    return this.selectFirstCheckbox(this.toolNameFilter)
+    await this.openFiltersPopover()
+    const first = await this.getFirstOptionInGroup('Tool Names')
+    if (!first) {
+      await this.closeFiltersPopover()
+      return false
+    }
+    await first.click()
+    await this.closeFiltersPopover()
+    return true
   }
 
   /**
-   * Filter by server label using the first available sidebar checkbox.
+   * Filter by server label: open Filters and select the first available server label option.
    * @returns true if at least one server label option was found and selected
    */
   async filterByServerLabel(): Promise<boolean> {
-    return this.selectFirstCheckbox(this.serverLabelFilter)
+    await this.openFiltersPopover()
+    const first = await this.getFirstOptionInGroup('Servers')
+    if (!first) {
+      await this.closeFiltersPopover()
+      return false
+    }
+    await first.click()
+    await this.closeFiltersPopover()
+    return true
   }
 
   /**
-   * Filter by status using the matching sidebar checkbox.
+   * Filter by status. Opens Filters popover and toggles the given status option (e.g. success, error).
    * @returns true if the option was found and clicked
    */
   async filterByStatus(status: 'success' | 'error' | 'pending'): Promise<boolean> {
-    const section = await this.ensureFilterSectionOpen(this.statusFilter)
-    const checkbox = section.getByRole('checkbox', { name: new RegExp(`^${status}$`, 'i') })
-    const didLoad = await checkbox.waitFor({ state: 'visible', timeout: 5000 }).then(() => true).catch(() => false)
-    if (!didLoad) return false
-
-    await checkbox.click()
-    await expect(checkbox).toHaveAttribute('data-state', 'checked')
-    return true
+    return this.openFiltersAndSelectOption(status)
   }
 
   /**
@@ -154,6 +190,8 @@ export class MCPLogsPage extends BasePage {
    */
   async searchLogs(query: string): Promise<void> {
     await this.searchInput.fill(query)
+    // Wait for debounced search to trigger network request
+    await waitForNetworkIdle(this.page)
   }
 
   /**
@@ -161,6 +199,7 @@ export class MCPLogsPage extends BasePage {
    */
   async clearSearch(): Promise<void> {
     await this.searchInput.clear()
+    await waitForNetworkIdle(this.page)
   }
 
   /**
@@ -184,6 +223,8 @@ export class MCPLogsPage extends BasePage {
     } else {
       await this.page.keyboard.press('Escape')
     }
+
+    await waitForNetworkIdle(this.page)
   }
 
   /**
@@ -204,10 +245,7 @@ export class MCPLogsPage extends BasePage {
     if (count <= rowIndex) {
       throw new Error(`Row index ${rowIndex} out of bounds (${count} rows available)`)
     }
-    const row = rows.nth(rowIndex)
-    const dataCell = row.locator('td').filter({ hasNot: this.page.getByTestId('log-actions-btn') }).first()
-    await dataCell.click()
-    await this.page.waitForURL(/selected_log=/, { timeout: 5000 })
+    await rows.nth(rowIndex).click()
     await expect(this.logDetailSheet).toBeVisible({ timeout: 5000 })
   }
 
@@ -267,6 +305,7 @@ export class MCPLogsPage extends BasePage {
       const offset = params.get('offset')
       return offset === String(expectedOffset)
     }, { timeout: 10000 })
+    await waitForNetworkIdle(this.page)
   }
 
   /**
@@ -289,6 +328,7 @@ export class MCPLogsPage extends BasePage {
       if (expectedOffset === 0) return offset === null || offset === '0'
       return offset === String(expectedOffset)
     }, { timeout: 10000 })
+    await waitForNetworkIdle(this.page)
   }
 
   /**
@@ -310,6 +350,7 @@ export class MCPLogsPage extends BasePage {
     if (await sortButton.count() > 0) {
       await sortButton.first().waitFor({ state: 'visible' })
       await sortButton.first().click()
+      await waitForNetworkIdle(this.page)
     }
   }
 

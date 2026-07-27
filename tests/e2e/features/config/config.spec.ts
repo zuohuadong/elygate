@@ -1,6 +1,4 @@
 import { expect, test } from '../../core/fixtures/base.fixture'
-import { resolve } from 'path'
-import { pathToFileURL } from 'url'
 import { ConfigSettingsState } from './pages/config-settings.page'
 
 test.describe('Config Settings', () => {
@@ -24,7 +22,7 @@ test.describe('Config Settings', () => {
     test('should navigate to logging config', async ({ configSettingsPage }) => {
       await configSettingsPage.goto('logging')
       await expect(configSettingsPage.saveBtn).toBeVisible()
-      await expect(configSettingsPage.page.getByRole('heading', { name: 'Logs Settings' })).toBeVisible()
+      await expect(configSettingsPage.page.getByRole('heading', { name: /Logging/i })).toBeVisible()
     })
 
     test('should navigate to security config', async ({ configSettingsPage }) => {
@@ -42,7 +40,7 @@ test.describe('Config Settings', () => {
     test('should navigate to pricing config', async ({ configSettingsPage }) => {
       await configSettingsPage.goto('pricing-config')
       await expect(configSettingsPage.saveBtn).toBeVisible()
-      await expect(configSettingsPage.page.getByRole('heading', { name: 'Model Settings' })).toBeVisible()
+      await expect(configSettingsPage.page.getByRole('heading', { name: /Pricing/i })).toBeVisible()
     })
 
     test('should navigate to MCP settings', async ({ configSettingsPage }) => {
@@ -100,9 +98,7 @@ test.describe('Config Settings', () => {
     })
 
     test('should set and save datasheet URL', async ({ configSettingsPage }) => {
-      const testUrl = pathToFileURL(
-        resolve(__dirname, '../../../../examples/configs/withlocalpricingfiles/pricing.json')
-      ).toString()
+      const testUrl = 'https://example.com/pricing.json'
       await configSettingsPage.setPricingDatasheetUrl(testUrl)
 
       const isSaveEnabled = await configSettingsPage.pricingSaveBtn.isDisabled().then((d) => !d)
@@ -158,7 +154,7 @@ test.describe('Config Settings', () => {
     test('should display client settings controls', async ({ configSettingsPage }) => {
       // Check for main controls
       await expect(configSettingsPage.dropExcessRequestsSwitch).toBeVisible()
-      await expect(configSettingsPage.dumpErrorsInConsoleLogsSwitch).toBeVisible()
+      await expect(configSettingsPage.enableLiteLLMFallbacksSwitch).toBeVisible()
       await expect(configSettingsPage.disableDBPingsSwitch).toBeVisible()
     })
 
@@ -198,25 +194,25 @@ test.describe('Config Settings', () => {
       )
     })
 
-    test('should toggle dump errors in console logs', async ({ configSettingsPage }) => {
-      const initialState = await configSettingsPage.getSwitchState(configSettingsPage.dumpErrorsInConsoleLogsSwitch)
+    test('should toggle LiteLLM fallbacks', async ({ configSettingsPage }) => {
+      const initialState = await configSettingsPage.getSwitchState(configSettingsPage.enableLiteLLMFallbacksSwitch)
 
-      await configSettingsPage.toggleDumpErrorsInConsoleLogs()
+      await configSettingsPage.toggleLiteLLMFallbacks()
 
-      const newState = await configSettingsPage.getSwitchState(configSettingsPage.dumpErrorsInConsoleLogsSwitch)
+      const newState = await configSettingsPage.getSwitchState(configSettingsPage.enableLiteLLMFallbacksSwitch)
       expect(newState).toBe(!initialState)
     })
 
-    test('should save and persist dump errors in console logs toggle', async ({ configSettingsPage }) => {
-      const initialState = await configSettingsPage.getSwitchState(configSettingsPage.dumpErrorsInConsoleLogsSwitch)
+    test('should save and persist LiteLLM fallbacks toggle', async ({ configSettingsPage }) => {
+      const initialState = await configSettingsPage.getSwitchState(configSettingsPage.enableLiteLLMFallbacksSwitch)
 
-      await configSettingsPage.toggleDumpErrorsInConsoleLogs()
+      await configSettingsPage.toggleLiteLLMFallbacks()
       await configSettingsPage.saveSettings()
       await configSettingsPage.goto('client-settings')
 
       // Wait for persisted state (form is populated async after navigation)
       const expectedState = !initialState
-      await expect(configSettingsPage.dumpErrorsInConsoleLogsSwitch).toHaveAttribute(
+      await expect(configSettingsPage.enableLiteLLMFallbacksSwitch).toHaveAttribute(
         'data-state',
         expectedState ? 'checked' : 'unchecked'
       )
@@ -526,7 +522,7 @@ test.describe('Config Settings', () => {
     })
 
     test('should display pricing config settings', async ({ configSettingsPage }) => {
-      await expect(configSettingsPage.page.getByRole('heading', { name: 'Model Settings', exact: true })).toBeVisible()
+      await expect(configSettingsPage.page.getByRole('heading', { name: /Pricing/i })).toBeVisible()
     })
   })
 

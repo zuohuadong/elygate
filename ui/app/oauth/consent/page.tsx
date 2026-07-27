@@ -219,7 +219,7 @@ function ConsentView({ flowId }: { flowId: string }) {
 							<div>
 								<p className="text-sm font-medium">Sign in with your account</p>
 								<p className="text-muted-foreground text-xs">
-									Requires an Elygate dashboard account
+									Requires a Elygate dashboard account
 								</p>
 							</div>
 						</div>

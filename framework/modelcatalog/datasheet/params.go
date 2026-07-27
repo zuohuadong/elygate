@@ -54,12 +54,6 @@ func (s *Store) LoadModelParamsFromDB(ctx context.Context) (int, error) {
 // persists to DB (when configStore != nil), and refreshes the in-memory
 // indexes. On URL failure it falls back to DB records when any exist.
 func (s *Store) SyncModelParamsFromURL(ctx context.Context) error {
-	if !s.HasModelParametersSyncSource() {
-		if s.logger != nil {
-			s.logger.Debug("model parameters sync is disabled: no model parameters URL configured")
-		}
-		return nil
-	}
 	if s.logger != nil {
 		s.logger.Debug("starting model parameters synchronization")
 	}
@@ -103,9 +97,6 @@ func (s *Store) SyncModelParamsFromURL(ctx context.Context) error {
 // LoadModelParamsFromURLIntoMemory fetches model parameters from the URL and
 // applies them in-memory only. Used when there's no config store.
 func (s *Store) LoadModelParamsFromURLIntoMemory(ctx context.Context) error {
-	if !s.HasModelParametersSyncSource() {
-		return nil
-	}
 	paramsData, err := withRetries(ctx, urlFetchMaxRetries, urlFetchMaxBackoff, func() (map[string]json.RawMessage, error) {
 		return s.loadModelParametersFromURL(ctx)
 	})
@@ -131,7 +122,7 @@ func (s *Store) loadModelParametersFromURL(ctx context.Context) (map[string]json
 	var data []byte
 
 	if parsed.Scheme == "file" {
-		data, err = os.ReadFile(FilePathFromURL(parsed))
+		data, err = os.ReadFile(filePathFromURL(parsed))
 		if err != nil {
 			return nil, fmt.Errorf("failed to read model parameters file: %w", err)
 		}

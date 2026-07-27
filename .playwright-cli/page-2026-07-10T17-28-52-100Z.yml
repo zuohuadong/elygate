@@ -1,0 +1,206 @@
+- generic [ref=f1e2]:
+  - region "Notifications alt+T"
+  - generic [ref=f1e3]:
+    - generic [ref=f1e6]:
+      - generic [ref=f1e8]:
+        - link [ref=f1e9] [cursor=pointer]:
+          - /url: /workspace/logs
+          - img "Elygate" [ref=f1e10]
+        - button "Collapse sidebar" [ref=f1e11]
+      - generic [ref=f1e16]:
+        - textbox "Search sidebar navigation" [ref=f1e20]:
+          - /placeholder: Search...
+        - generic:
+          - generic: ⌘
+          - generic: K
+      - generic [ref=f1e21]:
+        - list [ref=f1e24]:
+          - listitem [ref=f1e25]:
+            - button "Observability" [ref=f1e26] [cursor=pointer]
+          - listitem [ref=f1e40]:
+            - button "Models" [ref=f1e41] [cursor=pointer]
+          - listitem [ref=f1e50]:
+            - button "MCP clients icon MCP Gateway" [ref=f1e51] [cursor=pointer]:
+              - generic [ref=f1e53]:
+                - img "MCP clients icon" [ref=f1e54]
+                - generic [ref=f1e57]: MCP Gateway
+          - listitem [ref=f1e60]:
+            - link "Plugins" [ref=f1e61] [cursor=pointer]:
+              - /url: /workspace/plugins
+          - listitem [ref=f1e67]:
+            - button "Alerting" [ref=f1e68] [cursor=pointer]
+          - listitem [ref=f1e79]:
+            - button "Governance" [ref=f1e80] [cursor=pointer]
+          - listitem [ref=f1e88]:
+            - button "Guardrails" [ref=f1e89] [cursor=pointer]
+          - listitem [ref=f1e100]:
+            - link "Cluster Config" [ref=f1e101] [cursor=pointer]:
+              - /url: /workspace/cluster
+          - listitem [ref=f1e110]:
+            - button "Adaptive Routing" [ref=f1e111] [cursor=pointer]
+          - listitem [ref=f1e225]:
+            - link "Prompt Repository" [ref=f1e226] [cursor=pointer]:
+              - /url: /workspace/prompt-repo
+          - listitem [ref=f1e233]:
+            - link "Skills Repository" [ref=f1e234] [cursor=pointer]:
+              - /url: /workspace/skills-repo
+          - listitem [ref=f1e123]:
+            - button "Settings" [ref=f1e124] [cursor=pointer]
+            - list [ref=f1e133]:
+              - listitem [ref=f1e134]:
+                - link "Client Settings" [ref=f1e135] [cursor=pointer]:
+                  - /url: /workspace/config/client-settings
+              - listitem [ref=f1e141]:
+                - link "Compatibility" [ref=f1e142] [cursor=pointer]:
+                  - /url: /workspace/config/compatibility
+              - listitem [ref=f1e147]:
+                - link "Caching" [ref=f1e148] [cursor=pointer]:
+                  - /url: /workspace/config/caching
+              - listitem [ref=f1e156]:
+                - link "Security" [ref=f1e157] [cursor=pointer]:
+                  - /url: /workspace/config/security
+              - listitem [ref=f1e163]:
+                - link "API Keys" [ref=f1e164] [cursor=pointer]:
+                  - /url: /workspace/config/api-keys
+              - listitem [ref=f1e170]:
+                - link "Performance Tuning" [ref=f1e171] [cursor=pointer]:
+                  - /url: /workspace/config/performance-tuning
+              - listitem [ref=f1e177]:
+                - link "Feature Flags" [ref=f1e178] [cursor=pointer]:
+                  - /url: /workspace/config/feature-flags
+        - generic [ref=f1e183]:
+          - generic [ref=f1e187]:
+            - generic [ref=f1e189]:
+              - generic [ref=f1e190]: Need help with production setup?
+              - button "Dismiss" [ref=f1e191]
+            - generic [ref=f1e195]:
+              - text: Review the Elygate deployment profile before connecting production providers.Read the deployment guide
+              - link "here" [ref=f1e196] [cursor=pointer]:
+                - /url: https://github.com/zuohuadong/elygate/tree/dev/deploy/elygate-oss
+              - text: .
+          - generic [ref=f1e198]:
+            - link "GitHub Repository" [ref=f1e199] [cursor=pointer]:
+              - /url: https://github.com/zuohuadong/elygate
+            - link "Report a bug" [ref=f1e203] [cursor=pointer]:
+              - /url: https://github.com/zuohuadong/elygate/issues/new?title=%5BBug%5D%20
+            - link "Full Documentation" [ref=f1e214] [cursor=pointer]:
+              - /url: https://github.com/zuohuadong/elygate/tree/dev/docs
+            - button "Toggle theme" [ref=f1e218] [cursor=pointer]
+          - generic [ref=f1e240]: vdev-build
+    - main [ref=f1e221]:
+      - generic [ref=f1e243]:
+        - generic [ref=f1e244]:
+          - heading "Local Cache" [level=2] [ref=f1e245]
+          - paragraph [ref=f1e246]: "Cache responses locally with two complementary lookup paths: direct hash matching for exact replays, and semantic similarity search for related content. Send the x-bf-cache-key header to scope cached responses to a tenant or feature."
+          - generic [ref=f1e247]: "Elygate default: semantic caching is disabled. Use direct-only caching for exact replay. Enable semantic matching only after isolated evaluation proves it is safe for the specific workload; do not use it for coding continuation or stateful conversations."
+        - generic [ref=f1e248]:
+          - generic [ref=f1e249]:
+            - generic [ref=f1e250]:
+              - text: Enable Caching
+              - paragraph [ref=f1e251]: Loads (or unloads) the plugin without a server restart. Configuration changes you make below mutate the live plugin in place, no redeploy needed.
+            - switch "Enable Caching" [checked] [ref=f1e252] [cursor=pointer]
+          - generic [ref=f1e253]:
+            - generic [ref=f1e254]:
+              - generic [ref=f1e255]: Cache Mode
+              - tablist [ref=f1e257]:
+                - tab "Direct only" [ref=f1e258] [cursor=pointer]
+                - tab "Direct + Semantic" [active] [selected] [ref=f1e259] [cursor=pointer]
+              - paragraph [ref=f1e260]: Direct + semantic mode adds vector similarity search on top of direct hash matching. Requires an embedding-capable provider and the model's real dimension. Direct hits are still served first; semantic search runs only when the direct lookup misses.
+            - generic [ref=f1e317]: Pick an embedding provider for semantic mode, or switch to Direct only.
+            - generic [ref=f1e318]:
+              - heading "Embedding Provider & Model" [level=3] [ref=f1e319]
+              - generic [ref=f1e320]:
+                - generic [ref=f1e321]:
+                  - generic [ref=f1e322]: Configured Providers
+                  - combobox [ref=f1e323]:
+                    - generic: Select provider
+                - generic [ref=f1e324]:
+                  - generic [ref=f1e325]: Embedding Model*
+                  - generic [ref=f1e326]:
+                    - generic:
+                      - log
+                      - generic: Select a provider first
+              - paragraph [ref=f1e327]: API keys are inherited from the embedding provider's main configuration, you don't need to add them again here.
+              - generic [ref=f1e328]:
+                - generic [ref=f1e329]: Dimension
+                - spinbutton "Dimension" [ref=f1e330]: "1"
+                - paragraph [ref=f1e331]:
+                  - text: Vector size produced by the embedding model. Must match the model exactly (e.g.
+                  - code [ref=f1e332]: "1536"
+                  - text: for OpenAI
+                  - code [ref=f1e333]: text-embedding-3-small
+                  - text: ","
+                  - code [ref=f1e334]: "3072"
+                  - text: for
+                  - code [ref=f1e335]: text-embedding-3-large
+                  - text: ","
+                  - code [ref=f1e336]: "768"
+                  - text: for many Cohere/Voyage models).
+            - generic [ref=f1e261]:
+              - heading "Cache Settings" [level=3] [ref=f1e262]
+              - generic [ref=f1e263]:
+                - generic [ref=f1e264]:
+                  - generic [ref=f1e265]: TTL (seconds)
+                  - spinbutton "TTL (seconds)" [ref=f1e266]: "300"
+                  - paragraph [ref=f1e267]: How long cached entries live before they expire. Override per-request via the x-bf-cache-ttl header.
+                - generic [ref=f1e337]:
+                  - generic [ref=f1e338]: Similarity Threshold
+                  - spinbutton "Similarity Threshold" [ref=f1e339]: "0.8"
+                  - paragraph [ref=f1e340]: Minimum cosine similarity for a semantic hit. Override per-request via x-bf-cache-threshold.
+            - generic [ref=f1e268]:
+              - heading "Storage & Cache Key" [level=3] [ref=f1e269]
+              - generic [ref=f1e270]:
+                - generic [ref=f1e271]:
+                  - generic [ref=f1e272]: Vector Store Namespace
+                  - textbox "Vector Store Namespace" [ref=f1e273]:
+                    - /placeholder: Optional namespace
+                    - text: elygate-panel-cache
+                  - paragraph [ref=f1e274]: Bucket/index name where cache entries live. Leave blank to use the built-in default. Changing this points the plugin at a different (possibly empty) bucket. Old entries are not deleted, they just stop being queried.
+                - generic [ref=f1e275]:
+                  - generic [ref=f1e276]: Default Cache Key
+                  - textbox "Default Cache Key" [ref=f1e277]:
+                    - /placeholder: (none)
+                    - text: elygate-panel-e2e
+                  - paragraph [ref=f1e278]: "Fallback partition key used when a request doesn't set x-bf-cache-key. Cache keys isolate entries: same key ↔ shared cache pool. Leave blank to disable caching for any request that doesn't send the header."
+            - generic [ref=f1e279]:
+              - heading "Conversation Settings" [level=3] [ref=f1e280]
+              - generic [ref=f1e282]:
+                - generic [ref=f1e283]: Conversation History Threshold
+                - spinbutton "Conversation History Threshold" [ref=f1e284]: "3"
+                - paragraph [ref=f1e285]: Skip caching for conversations with more than this many messages. Long histories rarely match exactly and inflate the cache without paying off.
+              - generic [ref=f1e287]:
+                - generic [ref=f1e288]:
+                  - generic [ref=f1e289]: Exclude System Prompt
+                  - paragraph [ref=f1e290]: Strip system messages from the cache key.
+                - switch [ref=f1e291] [cursor=pointer]
+            - generic [ref=f1e292]:
+              - heading "Cache Key Composition" [level=3] [ref=f1e293]
+              - generic [ref=f1e294]:
+                - generic [ref=f1e295]:
+                  - generic [ref=f1e296]:
+                    - generic [ref=f1e297]: Cache by Model
+                    - paragraph [ref=f1e298]: Include model name in the cache key. Different models won't share cached responses.
+                  - switch [checked] [ref=f1e299] [cursor=pointer]
+                - generic [ref=f1e300]:
+                  - generic [ref=f1e301]:
+                    - generic [ref=f1e302]: Cache by Provider
+                    - paragraph [ref=f1e303]: Include provider name in the cache key. Different providers won't share cached responses.
+                  - switch [checked] [ref=f1e304] [cursor=pointer]
+            - generic [ref=f1e305]:
+              - generic [ref=f1e306]: Per-request overrides
+              - list [ref=f1e307]:
+                - listitem [ref=f1e308]: "x-bf-cache-key: scope this request to a specific cache partition."
+                - listitem [ref=f1e309]: "x-bf-cache-ttl: override TTL for just this request."
+                - listitem [ref=f1e310]: "x-bf-cache-threshold: override the semantic similarity threshold."
+                - listitem [ref=f1e311]:
+                  - text: "x-bf-cache-type: send"
+                  - code [ref=f1e312]: direct
+                  - text: or
+                  - code [ref=f1e313]: semantic
+                  - text: to limit lookup to one path.
+                - listitem [ref=f1e314]:
+                  - text: "x-bf-cache-no-store:"
+                  - code [ref=f1e315]: "true"
+                  - text: to skip writing the response (still serves cached hits).
+          - generic [ref=f1e316]:
+            - button "Save Changes" [disabled]

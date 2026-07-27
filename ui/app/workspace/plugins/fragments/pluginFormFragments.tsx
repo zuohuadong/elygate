@@ -28,9 +28,9 @@ export function PluginFormFragment({ form, isEditMode = false }: PluginFormFragm
 				<p className="text-muted-foreground text-sm">
 					{isEditMode
 						? "Update your plugin configuration. Plugin name and path are read-only."
-						: "Install a custom plugin by providing an absolute file path or HTTP URL accessible to the Elygate deployment (.so)."}{" "}
+						: "Install a custom plugin by providing an absolute file path or HTTP URL accessible to Elygate deployment (.so)."}{" "}
 					<a
-						href="https://github.com/zuohuadong/elygate/tree/dev/docs"
+						href="https://docs.getbifrost.ai/plugins"
 						target="_blank"
 						rel="noopener noreferrer"
 						className="text-primary hover:underline"

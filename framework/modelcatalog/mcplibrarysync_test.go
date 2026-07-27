@@ -24,12 +24,6 @@ func TestFetchMCPLibraryFromFileURL(t *testing.T) {
 	require.Equal(t, schemas.MCPConnectionTypeSTDIO, entries[0].ConnectionType)
 }
 
-func TestSyncMCPLibraryWithoutSourceIsNoop(t *testing.T) {
-	count, err := SyncMCPLibrary(context.Background(), "", nil)
-	require.NoError(t, err)
-	require.Zero(t, count)
-}
-
 func TestWithRetries_TableDriven(t *testing.T) {
 	t.Parallel()
 

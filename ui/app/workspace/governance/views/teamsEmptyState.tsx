@@ -2,7 +2,7 @@ import { Button } from "@/components/ui/button";
 import { Building } from "lucide-react";
 import { ArrowUpRight } from "lucide-react";
 
-const TEAMS_DOCS_URL = "https://github.com/zuohuadong/elygate/tree/dev/docs";
+const TEAMS_DOCS_URL = "https://docs.getbifrost.ai/features/governance/virtual-keys#teams";
 
 interface TeamsEmptyStateProps {
 	onAddClick: () => void;

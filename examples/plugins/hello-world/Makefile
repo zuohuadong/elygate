@@ -50,7 +50,6 @@ endif
 # Example: make build GOOS=linux GOARCH=amd64
 GOOS ?=
 GOARCH ?=
-GO_BUILD_FLAGS ?=
 
 # Output file
 OUTPUT = $(OUTPUT_DIR)/$(PLUGIN_NAME)$(PLUGIN_EXT)
@@ -115,7 +114,7 @@ build: _clean_build_dir ## Build the plugin (supports: make build GOOS=linux GOA
 dev: _clean_build_dir ## Build the plugin for development (no optimization flags)
 	@mkdir -p $(OUTPUT_DIR)
 	@echo "$(COLOR_INFO)Building plugin for development (native build, no optimizations)...$(COLOR_RESET)"
-	CGO_ENABLED=1 go build $(GO_BUILD_FLAGS) -buildmode=plugin -o $(OUTPUT) main.go
+	CGO_ENABLED=1 go build -buildmode=plugin -o $(OUTPUT) main.go
 	@echo "$(COLOR_SUCCESS)✓ Plugin built successfully: $(OUTPUT)$(COLOR_RESET)"
 
 _build-with-docker: # Internal target for Docker-based cross-compilation

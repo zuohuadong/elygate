@@ -1,7 +1,4 @@
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ModelMultiselect } from "@/components/ui/modelMultiselect";
@@ -16,11 +13,9 @@ import {
 	useGetCoreConfigQuery,
 	useGetPluginsQuery,
 	useGetProvidersQuery,
-	useGetVectorStoreConfigQuery,
 	useUpdatePluginMutation,
-	useUpdateVectorStoreConfigMutation,
 } from "@/lib/store";
-import type { EditorCacheConfig, ModelProvider, ModelProviderName, VectorStoreConfig } from "@/lib/types/config";
+import { CacheConfig, EditorCacheConfig, ModelProvider, ModelProviderName } from "@/lib/types/config";
 import { SEMANTIC_CACHE_PLUGIN } from "@/lib/types/plugins";
 import { cn } from "@/lib/utils";
 import { Loader2 } from "lucide-react";
@@ -32,40 +27,6 @@ import { toast } from "sonner";
 // caching. Semantic adds vector similarity on top, requiring an
 // embedding-capable provider and the model's real dimension.
 type CacheMode = "direct" | "semantic";
-
-interface VectorStoreEditorState {
-	enabled: boolean;
-	connectionString: string;
-	schema: string;
-}
-
-const defaultVectorStoreEditor: VectorStoreEditorState = {
-	enabled: false,
-	connectionString: "",
-	schema: "bifrost_vectors",
-};
-
-const vectorStoreEditorFromConfig = (config: VectorStoreConfig): VectorStoreEditorState => ({
-	enabled: config.enabled,
-	connectionString: config.config.connection_string.value || (config.config.connection_string.ref ? "<REDACTED>" : ""),
-	schema: config.config.schema || "bifrost_vectors",
-});
-
-const validateVectorStoreEditor = (config: VectorStoreEditorState): string | null => {
-	if (config.enabled && !config.connectionString.trim()) {
-		return "Connection string is required when pgvector is enabled.";
-	}
-	if (!/^[A-Za-z_][A-Za-z0-9_]{0,62}$/.test(config.schema.trim())) {
-		return "Schema must be a PostgreSQL identifier (letters, numbers, and underscores; no more than 63 characters).";
-	}
-	return null;
-};
-
-type CachePluginPayload = Omit<EditorCacheConfig, "provider" | "embedding_model" | "dimension"> & {
-	provider?: ModelProviderName | "";
-	embedding_model?: string;
-	dimension: number;
-};
 
 // Embedding-capable providers gate the semantic mode. Built-in providers
 // are listed in EmbeddingSupportedProviders; custom providers expose
@@ -112,7 +73,7 @@ const inferMode = (config: EditorCacheConfig): CacheMode => {
 
 // Strip semantic-only fields when persisting a direct-only payload so the
 // server validator doesn't reject a stale provider choice.
-const buildPayload = (config: EditorCacheConfig, mode: CacheMode): CachePluginPayload => {
+const buildPayload = (config: EditorCacheConfig, mode: CacheMode): CacheConfig => {
 	const base = {
 		ttl: config.ttl ?? 0,
 		threshold: config.threshold ?? 0,
@@ -124,16 +85,14 @@ const buildPayload = (config: EditorCacheConfig, mode: CacheMode): CachePluginPa
 		default_cache_key: config.default_cache_key?.trim() || undefined,
 	};
 	if (mode === "direct") {
-		// Plugin updates merge over the stored config. Explicit empty values are
-		// therefore required to clear a previously saved semantic provider/model.
-		return { ...base, provider: "", embedding_model: "", dimension: 1 };
+		return { ...base, dimension: 1 } as CacheConfig;
 	}
 	return {
 		...base,
 		provider: config.provider as ModelProviderName,
 		embedding_model: config.embedding_model ?? "",
 		dimension: config.dimension ?? 0,
-	};
+	} as CacheConfig;
 };
 
 const validateForSave = (config: EditorCacheConfig, mode: CacheMode): string | null => {
@@ -160,11 +119,6 @@ const validateForSave = (config: EditorCacheConfig, mode: CacheMode): string | n
 export default function CachingView() {
 	const { data: bifrostConfig, isLoading: configLoading, error: configError } = useGetCoreConfigQuery({ fromDB: true });
 	const isVectorStoreEnabled = bifrostConfig?.is_cache_connected ?? false;
-	const { data: vectorStoreConfig, isLoading: vectorStoreLoading, error: vectorStoreError } = useGetVectorStoreConfigQuery();
-	const [updateVectorStoreConfig, { isLoading: isSavingVectorStore }] = useUpdateVectorStoreConfigMutation();
-	const [vectorStoreEditor, setVectorStoreEditor] = useState<VectorStoreEditorState>(defaultVectorStoreEditor);
-	const [serverVectorStoreEditor, setServerVectorStoreEditor] = useState<VectorStoreEditorState>(defaultVectorStoreEditor);
-	const isVectorStoreEditable = vectorStoreConfig?.editable ?? true;
 
 	// Local cache state lives on the plugin row keyed by SEMANTIC_CACHE_PLUGIN.
 	// No dedicated /local-cache-config endpoint exists — the plugins API is
@@ -185,13 +139,6 @@ export default function CachingView() {
 	const [serverCacheConfig, setServerCacheConfig] = useState<EditorCacheConfig>(defaultDirectConfig);
 	const [mode, setMode] = useState<CacheMode>("direct");
 
-	useEffect(() => {
-		if (!vectorStoreConfig) return;
-		const editor = vectorStoreEditorFromConfig(vectorStoreConfig);
-		setVectorStoreEditor(editor);
-		setServerVectorStoreEditor(editor);
-	}, [vectorStoreConfig]);
-
 	// Hydrate from the plugin row once it lands. If the plugin doesn't exist
 	// yet (first-time setup), keep the default direct-only seed so the user
 	// can start typing before any save.
@@ -210,81 +157,19 @@ export default function CachingView() {
 		}
 	}, [providersError]);
 
-	useEffect(() => {
-		if (vectorStoreError) {
-			toast.error(`Failed to load vector store configuration: ${getErrorMessage(vectorStoreError)}`);
-		}
-	}, [vectorStoreError]);
-
-	const vectorStoreValidationError = useMemo(() => validateVectorStoreEditor(vectorStoreEditor), [vectorStoreEditor]);
-	const hasUnsavedVectorStoreChanges = useMemo(
-		() =>
-			vectorStoreEditor.enabled !== serverVectorStoreEditor.enabled ||
-			vectorStoreEditor.connectionString !== serverVectorStoreEditor.connectionString ||
-			vectorStoreEditor.schema !== serverVectorStoreEditor.schema,
-		[serverVectorStoreEditor, vectorStoreEditor],
-	);
-
-	const handleVectorStoreSave = async () => {
-		if (vectorStoreValidationError || !vectorStoreConfig || !isVectorStoreEditable) {
-			if (vectorStoreValidationError) toast.error(vectorStoreValidationError);
-			if (vectorStoreConfig && !isVectorStoreEditable) {
-				toast.error(vectorStoreConfig.management_message || "Vector store configuration is managed by config.json.");
-			}
-			return;
-		}
-		const connectionString =
-			vectorStoreEditor.connectionString === serverVectorStoreEditor.connectionString
-				? vectorStoreConfig.config.connection_string
-				: { value: vectorStoreEditor.connectionString.trim() };
-		try {
-			const updated = await updateVectorStoreConfig({
-				enabled: vectorStoreEditor.enabled,
-				type: "pgvector",
-				config: {
-					connection_string: connectionString,
-					schema: vectorStoreEditor.schema.trim(),
-				},
-			}).unwrap();
-			const editor = vectorStoreEditorFromConfig(updated);
-			setVectorStoreEditor(editor);
-			setServerVectorStoreEditor(editor);
-			toast.success("Vector store configuration saved");
-		} catch (error) {
-			toast.error(`Failed to save vector store configuration: ${getErrorMessage(error)}`);
-		}
-	};
+	// Surface validation problems inline rather than only on Save click.
+	const validationError = useMemo(() => validateForSave(cacheConfig, mode), [cacheConfig, mode]);
 
 	// Only show the dimension/namespace heads-up when the user has actually
-	// changed the effective provider/model/dimension. Direct mode deliberately
-	// maps those fields to empty/empty/1, so switching from semantic to direct
-	// is also a structural change even though the editor retains the old values.
+	// touched a structural field. Showing it permanently in semantic mode
+	// trains users to ignore it; showing it on diff makes it land.
 	const hasStructuralChange = useMemo(() => {
-		const targetProvider = mode === "semantic" ? (cacheConfig.provider ?? "") : "";
-		const targetEmbeddingModel = mode === "semantic" ? (cacheConfig.embedding_model ?? "") : "";
-		const targetDimension = mode === "semantic" ? cacheConfig.dimension : 1;
 		return (
-			targetProvider !== (serverCacheConfig.provider ?? "") ||
-			targetEmbeddingModel !== (serverCacheConfig.embedding_model ?? "") ||
-			targetDimension !== serverCacheConfig.dimension
+			cacheConfig.provider !== serverCacheConfig.provider ||
+			cacheConfig.embedding_model !== serverCacheConfig.embedding_model ||
+			cacheConfig.dimension !== serverCacheConfig.dimension
 		);
-	}, [cacheConfig.provider, cacheConfig.embedding_model, cacheConfig.dimension, mode, serverCacheConfig]);
-
-	const hasNamespaceChange = useMemo(
-		() => (cacheConfig.vector_store_namespace?.trim() ?? "") !== (serverCacheConfig.vector_store_namespace?.trim() ?? ""),
-		[cacheConfig.vector_store_namespace, serverCacheConfig.vector_store_namespace],
-	);
-
-	const structuralNamespaceError =
-		hasStructuralChange && !hasNamespaceChange
-			? "Changing cache mode, embedding provider, model, or dimension requires a fresh vector store namespace."
-			: null;
-
-	// Surface validation problems inline rather than only on Save click.
-	const validationError = useMemo(
-		() => validateForSave(cacheConfig, mode) ?? structuralNamespaceError,
-		[cacheConfig, mode, structuralNamespaceError],
-	);
+	}, [cacheConfig, serverCacheConfig]);
 
 	const hasUnsavedConfigChanges = useMemo(() => {
 		const fields: (keyof EditorCacheConfig)[] = [
@@ -326,7 +211,7 @@ export default function CachingView() {
 				// No plugin row + user toggling off ⇒ nothing to disable.
 				// Bail before the success toast so we don't lie about the state.
 				if (!checked) return;
-				const err = validationError;
+				const err = validateForSave(cacheConfig, mode);
 				if (err) {
 					toast.error(err);
 					return;
@@ -346,7 +231,7 @@ export default function CachingView() {
 	};
 
 	const handleSave = async () => {
-		const err = validationError;
+		const err = validateForSave(cacheConfig, mode);
 		if (err) {
 			toast.error(err);
 			return;
@@ -380,161 +265,17 @@ export default function CachingView() {
 	return (
 		<div className="mx-auto w-full max-w-4xl space-y-6">
 			<div>
-				<h2 className="text-lg font-semibold tracking-tight">Caching</h2>
+				<h2 className="text-lg font-semibold tracking-tight">Local Cache</h2>
 				<p className="text-muted-foreground text-sm">
 					Cache responses locally with two complementary lookup paths: <b>direct</b> hash matching for exact replays, and <b>semantic</b>{" "}
 					similarity search for related content. Send the <b>x-bf-cache-key</b> header to scope cached responses to a tenant or feature.{" "}
 					{!isVectorStoreEnabled && (
-						<span className="text-destructive font-medium">Configure and enable pgvector below, then restart Elygate to load it.</span>
+						<span className="text-destructive font-medium">
+							Requires a vector store to be configured and enabled in <code>config.json</code>.
+						</span>
 					)}
 				</p>
-				<div className="mt-3 rounded-sm border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
-					<b>Elygate default:</b> semantic caching is disabled. Use direct-only caching for exact replay. Enable semantic matching only
-					after isolated evaluation proves it is safe for the specific workload; do not use it for coding continuation or stateful
-					conversations.
-				</div>
 			</div>
-
-			<Card data-testid="caching-vector-store-card">
-				<CardHeader className="border-b">
-					<CardTitle>Vector Store</CardTitle>
-					<CardDescription>
-						Persist the pgvector connection used by direct and semantic cache entries. Saving does not hot-swap the running store.
-					</CardDescription>
-					<CardAction>
-						<Badge variant={vectorStoreConfig?.runtime_connected ? "success" : "outline"}>
-							{vectorStoreConfig?.runtime_connected ? "Runtime store loaded" : "Runtime store not loaded"}
-						</Badge>
-					</CardAction>
-				</CardHeader>
-				<CardContent className="flex flex-col gap-4">
-					{vectorStoreLoading && (
-						<div className="flex items-center justify-center py-8">
-							<Loader2 className="text-muted-foreground animate-spin" />
-						</div>
-					)}
-					{Boolean(vectorStoreError) && (
-						<Alert variant="destructive">
-							<AlertTitle>Failed to load vector store configuration</AlertTitle>
-							<AlertDescription>{getErrorMessage(vectorStoreError)}</AlertDescription>
-						</Alert>
-					)}
-					{!vectorStoreLoading && !vectorStoreError && (
-						<>
-							{vectorStoreConfig && !isVectorStoreEditable && (
-								<Alert data-testid="caching-vector-store-config-json-managed">
-									<AlertTitle>Managed by config.json</AlertTitle>
-									<AlertDescription>
-										{vectorStoreConfig.management_message ||
-											"Edit the vector_store section in config.json and restart Elygate to apply changes."}
-									</AlertDescription>
-								</Alert>
-							)}
-							{vectorStoreConfig?.restart_required && (
-								<Alert variant="warning" data-testid="caching-vector-store-restart-required">
-									<AlertTitle>Restart required</AlertTitle>
-									<AlertDescription>
-										{vectorStoreConfig.restart_reason || "Restart Elygate to load the saved vector store configuration."}
-									</AlertDescription>
-								</Alert>
-							)}
-
-							<div className="flex items-center justify-between gap-4 rounded-sm border p-3">
-								<div className="flex flex-col gap-1">
-									<Label htmlFor="vector-store-enabled">Enable pgvector</Label>
-									<p className="text-muted-foreground text-xs">The saved setting becomes active only after a server restart.</p>
-								</div>
-								<Switch
-									id="vector-store-enabled"
-									data-testid="caching-vector-store-enabled-switch"
-									checked={vectorStoreEditor.enabled}
-									disabled={isSavingVectorStore || !isVectorStoreEditable}
-									onCheckedChange={(enabled) => setVectorStoreEditor((current) => ({ ...current, enabled }))}
-								/>
-							</div>
-
-							<div className="grid gap-4 md:grid-cols-2">
-								<div className="flex flex-col gap-2">
-									<p className="text-sm font-medium">Vector store type</p>
-									<div className="flex h-9 items-center rounded-sm border px-3">
-										<Badge variant="secondary" data-testid="caching-vector-store-type">
-											pgvector
-										</Badge>
-									</div>
-									<p className="text-muted-foreground text-xs">Elygate currently exposes the PostgreSQL pgvector adapter in this panel.</p>
-								</div>
-								<div className="flex flex-col gap-2">
-									<Label htmlFor="vector-store-schema">PostgreSQL schema</Label>
-									<Input
-										id="vector-store-schema"
-										data-testid="caching-vector-store-schema-input"
-										value={vectorStoreEditor.schema}
-										aria-invalid={Boolean(vectorStoreValidationError)}
-										disabled={isSavingVectorStore || !isVectorStoreEditable}
-										onChange={(event) =>
-											setVectorStoreEditor((current) => ({
-												...current,
-												schema: event.target.value,
-											}))
-										}
-									/>
-									<p className="text-muted-foreground text-xs">
-										Defaults to <code>bifrost_vectors</code>.
-									</p>
-								</div>
-							</div>
-
-							<div className="flex flex-col gap-2">
-								<Label htmlFor="vector-store-connection-string">PostgreSQL connection string</Label>
-								<Input
-									id="vector-store-connection-string"
-									data-testid="caching-vector-store-connection-string-input"
-									type="password"
-									autoComplete="new-password"
-									placeholder="postgres://user:password@host:5432/database"
-									value={vectorStoreEditor.connectionString}
-									aria-invalid={Boolean(vectorStoreValidationError)}
-									disabled={isSavingVectorStore || !isVectorStoreEditable}
-									onChange={(event) =>
-										setVectorStoreEditor((current) => ({
-											...current,
-											connectionString: event.target.value,
-										}))
-									}
-								/>
-								<p className="text-muted-foreground text-xs">
-									Saved credentials are returned as <code>&lt;REDACTED&gt;</code>. Leaving that placeholder unchanged preserves the stored
-									secret.
-								</p>
-							</div>
-
-							{vectorStoreValidationError && <p className="text-destructive text-sm">{vectorStoreValidationError}</p>}
-						</>
-					)}
-				</CardContent>
-				<CardFooter className="flex-col items-start justify-between gap-4 border-t sm:flex-row sm:items-center">
-					<p className="text-muted-foreground text-xs">
-						{isVectorStoreEditable
-							? "The badge reflects the current process, not the newly saved settings."
-							: "Dashboard editing is disabled while config.json owns the vector_store section."}
-					</p>
-					<Button
-						data-testid="caching-vector-store-save-button"
-						disabled={
-							vectorStoreLoading ||
-							Boolean(vectorStoreError) ||
-							!isVectorStoreEditable ||
-							!hasUnsavedVectorStoreChanges ||
-							Boolean(vectorStoreValidationError) ||
-							isSavingVectorStore
-						}
-						onClick={handleVectorStoreSave}
-					>
-						{isSavingVectorStore && <Loader2 data-icon="inline-start" className="animate-spin" />}
-						{isSavingVectorStore ? "Saving..." : "Save vector store"}
-					</Button>
-				</CardFooter>
-			</Card>
 
 			{configError !== undefined && (
 				<div className="border-destructive/50 bg-destructive/10 rounded-sm border p-4">
@@ -625,17 +366,19 @@ export default function CachingView() {
 									</div>
 								)}
 
-								{hasStructuralChange && (
-									<div className="rounded-sm border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
-										<b>Heads up:</b> a vector store namespace can only hold vectors of <em>one</em> dimension. Whenever you change the cache{" "}
-										<b>mode</b>, embedding <b>provider</b>, <b>model</b>, or <b>dimension</b>, use a fresh namespace. Existing namespaces
-										and data are never dropped or recreated automatically.
-									</div>
-								)}
-
 								{/* Provider/model/dimension only appear in semantic mode. */}
 								{mode === "semantic" && (
 									<>
+										{hasStructuralChange && (
+											<div className="rounded-sm border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+												<b>Heads up:</b> a vector store namespace can only hold vectors of <em>one</em> dimension. Whenever you change the
+												embedding <b>provider</b>, <b>model</b>, or <b>dimension</b>, make sure the <b>dimension</b> still matches what the
+												model produces, otherwise writes to the existing namespace will fail and reads will silently miss. The namespace is{" "}
+												<em>not</em> recreated automatically; either use a fresh namespace or drop the existing class/index in your vector
+												store before saving.
+											</div>
+										)}
+
 										<div className="space-y-4">
 											<h3 className="text-sm font-medium">Embedding Provider &amp; Model</h3>
 											<div className="grid grid-cols-2 gap-4">
@@ -784,13 +527,14 @@ export default function CachingView() {
 												id="vector_store_namespace"
 												data-testid="caching-vector-store-namespace-input"
 												type="text"
-												placeholder="Optional namespace"
+												placeholder="ElygateLocalCachePlugin"
 												value={cacheConfig.vector_store_namespace ?? ""}
 												onChange={(e) => updateLocal({ vector_store_namespace: e.target.value })}
 											/>
 											<p className="text-muted-foreground text-xs">
-												Bucket/index name where cache entries live. Leave blank to use the built-in default. Changing this points the plugin
-												at a different (possibly empty) bucket. Old entries are not deleted, they just stop being queried.
+												Bucket/index name where cache entries live. Leave blank to use the default (<code>ElygateLocalCachePlugin</code>).
+												Changing this points the plugin at a different (possibly empty) bucket. Old entries are not deleted, they just stop
+												being queried.
 											</p>
 										</div>
 										<div className="space-y-2">

@@ -31,7 +31,7 @@ export class DashboardPage extends BasePage {
 
     // Main elements
     this.pageTitle = page.getByRole('heading', { name: /Dashboard/i })
-    this.dateTimePicker = page.getByTestId('dashboard-filter-daterange')
+    this.dateTimePicker = page.locator('[data-testid="dashboard-date-picker"]')
 
     // Chart cards - using data-testid for robust selectors
     this.logVolumeChart = page.locator('[data-testid="chart-log-volume"]')
@@ -103,22 +103,10 @@ export class DashboardPage extends BasePage {
 
   /**
    * Get the date picker trigger button (the button that shows the current period and opens the popover).
-   * The dashboard supplies a dedicated test id, so portaled preset buttons cannot match it.
+   * Identified by having the calendar icon so we don't match preset buttons inside the popover.
    */
   getDatePickerTrigger(): Locator {
-    return this.dateTimePicker
-  }
-
-  /**
-   * Get the currently open dashboard date picker popover.
-   * The popover is portaled, so scope it by its calendar and preset controls
-   * instead of relying on its position relative to the trigger.
-   */
-  getOpenDatePickerPopover(): Locator {
-    return this.page
-      .locator('[data-slot="popover-content"][data-state="open"]')
-      .filter({ has: this.page.getByRole('button', { name: 'Last 30 days', exact: true }) })
-      .filter({ has: this.page.getByRole('grid') })
+    return this.page.locator('button').filter({ has: this.page.locator('svg') }).filter({ hasText: /Last|Pick/i }).first()
   }
 
   /**
@@ -140,20 +128,14 @@ export class DashboardPage extends BasePage {
     const trigger = this.getDatePickerTrigger()
     await trigger.click()
 
-    const popover = this.getOpenDatePickerPopover()
-    await expect(popover).toBeVisible({ timeout: 5000 })
+    // Wait for dialog to open
+    await this.page.waitForSelector('[data-radix-popper-content-wrapper]', { timeout: 5000 }).catch(() => {})
 
     const label = DashboardPage.PERIOD_LABELS[period]
-    await popover.getByRole('button', { name: label, exact: true }).click()
+    await this.page.getByRole('button', { name: label }).click()
 
-    await expect(trigger).toContainText(label)
-
-    // Preset selection updates the query but intentionally leaves the picker open.
-    // Close it so subsequent dashboard interactions cannot hit portaled controls.
-    if (await popover.isVisible().catch(() => false)) {
-      await this.page.keyboard.press('Escape')
-      await expect(popover).toBeHidden({ timeout: 5000 })
-    }
+    // Wait for dialog to close
+    await this.page.locator('[data-radix-popper-content-wrapper]').waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {})
 
     await waitForNetworkIdle(this.page)
   }

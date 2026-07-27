@@ -26,8 +26,6 @@ type mockModelsManager struct {
 	unfiltered  map[schemas.ModelProvider][]string
 	reloadCalls []schemas.ModelProvider
 	reloadErr   error
-	upsertCalls int
-	upsertErr   error
 }
 
 func (m *mockModelsManager) ReloadProvider(_ context.Context, provider schemas.ModelProvider) (*configstoreTables.TableProvider, error) {
@@ -57,8 +55,7 @@ func (m *mockModelsManager) GetUnfilteredModelsForProvider(provider schemas.Mode
 }
 
 func (m *mockModelsManager) UpsertModelPricingAttributes(_ context.Context, _ []ModelPricingAttributesEntry) error {
-	m.upsertCalls++
-	return m.upsertErr
+	return nil
 }
 
 func (m *mockModelsManager) OnKeyAdded(_ context.Context, _ schemas.ModelProvider, _ schemas.Key) error {
@@ -691,109 +688,6 @@ func TestListModelDetails_ErrorsWhenModelCatalogUnavailable(t *testing.T) {
 
 	if ctx.Response.StatusCode() != fasthttp.StatusInternalServerError {
 		t.Fatalf("expected 500, got %d: %s", ctx.Response.StatusCode(), string(ctx.Response.Body()))
-	}
-}
-
-func TestListModelDetails_ReportsPricingRowAvailability(t *testing.T) {
-	SetLogger(&mockLogger{})
-
-	h := providerHandlerForTest(
-		schemas.OpenAI,
-		[]schemas.Key{{ID: "key-a"}},
-		[]string{"gpt-4o", "gpt-4o-2024-08-06", "unpriced-model"},
-		[]string{"gpt-4o", "gpt-4o-2024-08-06", "unpriced-model"},
-	)
-	h.inMemoryStore.ModelCatalog = modelCatalogForPricingJSON(t, []byte(`{
-		"gpt-4o": {"provider":"openai","mode":"chat","base_model":"gpt-4o","context_length":128000}
-	}`))
-
-	ctx := &fasthttp.RequestCtx{}
-	ctx.Request.Header.SetMethod(fasthttp.MethodGet)
-	ctx.Request.SetRequestURI("/api/models/details?provider=openai&unfiltered=true")
-
-	h.listModelDetails(ctx)
-
-	if ctx.Response.StatusCode() != fasthttp.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", ctx.Response.StatusCode(), string(ctx.Response.Body()))
-	}
-
-	var resp ListModelDetailsResponse
-	if err := json.Unmarshal(ctx.Response.Body(), &resp); err != nil {
-		t.Fatalf("failed to unmarshal response: %v", err)
-	}
-	if len(resp.Models) != 3 {
-		t.Fatalf("expected three models, got %#v", resp.Models)
-	}
-
-	availability := make(map[string]bool, len(resp.Models))
-	contextLengths := make(map[string]*int, len(resp.Models))
-	for _, model := range resp.Models {
-		availability[model.Name] = model.HasPricingRow
-		contextLengths[model.Name] = model.ContextLength
-	}
-	if !availability["gpt-4o"] {
-		t.Fatalf("expected gpt-4o to report has_pricing_row=true, got %#v", availability)
-	}
-	if availability["gpt-4o-2024-08-06"] {
-		t.Fatalf("expected alias model without an exact row to report has_pricing_row=false, got %#v", availability)
-	}
-	if contextLengths["gpt-4o-2024-08-06"] == nil || *contextLengths["gpt-4o-2024-08-06"] != 128000 {
-		t.Fatalf("expected alias model to keep base-model capability fallback, got %#v", contextLengths)
-	}
-	if availability["unpriced-model"] {
-		t.Fatalf("expected unpriced-model to report has_pricing_row=false, got %#v", availability)
-	}
-}
-
-func TestUpsertModelCatalogEntries_RejectsMissingPricingRows(t *testing.T) {
-	SetLogger(&mockLogger{})
-
-	modelsManager := &mockModelsManager{upsertErr: &MissingModelPricingRowsError{Entries: []string{"openai/gpt-4o-mini"}}}
-	h := &ProviderHandler{
-		modelsManager: modelsManager,
-	}
-	ctx := &fasthttp.RequestCtx{}
-	ctx.Request.Header.SetMethod(fasthttp.MethodPut)
-	ctx.Request.SetRequestURI("/api/models/catalog")
-	ctx.Request.SetBodyString(`[{"model":"gpt-4o-mini","provider":"openai","additional_attributes":{"description":"test"}}]`)
-
-	h.upsertModelCatalogEntries(ctx)
-
-	if ctx.Response.StatusCode() != fasthttp.StatusUnprocessableEntity {
-		t.Fatalf("expected 422 for a missing pricing row, got %d: %s", ctx.Response.StatusCode(), string(ctx.Response.Body()))
-	}
-	if modelsManager.upsertCalls != 1 {
-		t.Fatalf("expected the transactional write to report the typed missing-row error, got %d manager calls", modelsManager.upsertCalls)
-	}
-
-	var bifrostErr schemas.BifrostError
-	if err := json.Unmarshal(ctx.Response.Body(), &bifrostErr); err != nil {
-		t.Fatalf("failed to unmarshal error response: %v", err)
-	}
-	if bifrostErr.Error == nil || !strings.Contains(bifrostErr.Error.Message, "openai/gpt-4o-mini") {
-		t.Fatalf("expected error to identify the missing pricing row, got %#v", bifrostErr)
-	}
-}
-
-func TestUpsertModelCatalogEntries_AllowsExistingPricingRows(t *testing.T) {
-	SetLogger(&mockLogger{})
-
-	modelsManager := &mockModelsManager{}
-	h := &ProviderHandler{
-		modelsManager: modelsManager,
-	}
-	ctx := &fasthttp.RequestCtx{}
-	ctx.Request.Header.SetMethod(fasthttp.MethodPut)
-	ctx.Request.SetRequestURI("/api/models/catalog")
-	ctx.Request.SetBodyString(`[{"model":"gpt-4o-mini","provider":"openai","additional_attributes":{"description":"test"}}]`)
-
-	h.upsertModelCatalogEntries(ctx)
-
-	if ctx.Response.StatusCode() != fasthttp.StatusNoContent {
-		t.Fatalf("expected 204 for an existing pricing row, got %d: %s", ctx.Response.StatusCode(), string(ctx.Response.Body()))
-	}
-	if modelsManager.upsertCalls != 1 {
-		t.Fatalf("expected the validated write to reach the manager once, got %d calls", modelsManager.upsertCalls)
 	}
 }
 

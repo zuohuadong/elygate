@@ -1,0 +1,63 @@
+{
+  "agents": [
+    {
+      "id": "designer",
+      "name": "Designer",
+      "responsibility": "Propose the artifact structure, field semantics, and revisions.",
+      "mustChallenge": [
+        "Can the artifact be implemented from this wording?",
+        "Is each field necessary?",
+        "Does the wording preserve the user's goal?"
+      ]
+    },
+    {
+      "id": "critic",
+      "name": "Critic",
+      "responsibility": "Attack ambiguity, missing boundaries, weak names, hidden assumptions, and acceptance gaps.",
+      "mustChallenge": [
+        "What can be misunderstood?",
+        "What breaks under edge cases?",
+        "Which names imply the wrong behavior?"
+      ]
+    },
+    {
+      "id": "verifier",
+      "name": "Verifier",
+      "responsibility": "Separate evidence from opinion and compare the proposal to known systems or references.",
+      "mustChallenge": [
+        "What claim needs a source?",
+        "What implementation pattern already exists?",
+        "What risk is unsupported by evidence?"
+      ]
+    },
+    {
+      "id": "editor",
+      "name": "Editor",
+      "responsibility": "Compress the final artifact while preserving accepted decisions and unresolved risks.",
+      "mustChallenge": [
+        "Can a sentence be removed without losing contract meaning?",
+        "Are terms used consistently?",
+        "Does the final text match the decision ledger?"
+      ]
+    }
+  ],
+  "artifactSections": [
+    "Goal",
+    "Non-goals",
+    "User Scenario",
+    "Core Concepts",
+    "Data Model",
+    "Field Naming Rationale",
+    "State Transitions",
+    "Failure Modes",
+    "Acceptance Criteria",
+    "Open Questions"
+  ],
+  "stopConditions": [
+    "All required artifact sections are present.",
+    "Every field has a semantic meaning and naming rationale.",
+    "Every objection is resolved, accepted as risk, or marked out of scope.",
+    "Acceptance criteria are testable by a future implementer.",
+    "The editor can reduce no more text without losing contract meaning."
+  ]
+}

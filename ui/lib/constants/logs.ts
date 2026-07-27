@@ -28,6 +28,8 @@ export const KnownProvidersNames = [
 	"runway",
 	"runware",
 	"fireworks",
+	"sarvam",
+	"wafer",
 ] as const;
 
 // Local Provider type derived from KNOWN_PROVIDERS constant
@@ -35,7 +37,7 @@ export type ProviderName = (typeof KnownProvidersNames)[number];
 
 export const ProviderNames: readonly ProviderName[] = KnownProvidersNames;
 
-// Built-in providers whose Bifrost implementation supports embedding requests.
+// Built-in providers whose Elygate implementation supports embedding requests.
 // Custom providers must instead be checked via custom_provider_config.allowed_requests.embedding.
 export const EmbeddingSupportedProviders: readonly ProviderName[] = [
 	"azure",
@@ -137,6 +139,8 @@ export const ProviderLabels: Record<ProviderName, string> = {
 	runway: "Runway",
 	runware: "Runware",
 	fireworks: "Fireworks AI",
+	sarvam: "Sarvam AI",
+	wafer: "Wafer",
 } as const;
 
 // Helper function to get provider label, supporting custom providers

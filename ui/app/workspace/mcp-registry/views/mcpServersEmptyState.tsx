@@ -2,7 +2,7 @@ import { Button } from "@/components/ui/button";
 import { Link } from "@tanstack/react-router";
 import { ArrowUpRight, Boxes, Server } from "lucide-react";
 
-const MCP_SERVERS_DOCS_URL = "https://github.com/zuohuadong/elygate/tree/dev/docs";
+const MCP_SERVERS_DOCS_URL = "https://docs.getbifrost.ai/features/mcp/overview";
 
 interface MCPServersEmptyStateProps {
 	onAddClick: () => void;

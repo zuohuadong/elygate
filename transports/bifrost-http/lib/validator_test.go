@@ -180,7 +180,7 @@ func TestValidateConfigSchema_InvalidType(t *testing.T) {
 }
 
 func TestValidateConfigSchema_InvalidEnum(t *testing.T) {
-	// vector_store.type must be one of: weaviate, redis, qdrant, pinecone, pgvector
+	// vector_store.type must be one of: weaviate, redis, qdrant, pinecone
 	invalidConfig := `{
 		"vector_store": {
 			"enabled": true,
@@ -191,35 +191,6 @@ func TestValidateConfigSchema_InvalidEnum(t *testing.T) {
 	err := ValidateConfigSchema([]byte(invalidConfig), loadLocalSchema(t))
 	if err == nil {
 		t.Error("expected config with invalid enum value to fail validation")
-	}
-}
-
-func TestValidateConfigSchema_ValidPgvectorConfig(t *testing.T) {
-	validConfig := `{
-		"vector_store": {
-			"enabled": true,
-			"type": "pgvector",
-			"config": {
-				"connection_string": "env.PGVECTOR_DSN",
-				"schema": "bifrost_vectors"
-			}
-		}
-	}`
-	if err := ValidateConfigSchema([]byte(validConfig), loadLocalSchema(t)); err != nil {
-		t.Fatalf("expected valid pgvector config: %v", err)
-	}
-}
-
-func TestValidateConfigSchema_PgvectorRequiresConnectionString(t *testing.T) {
-	invalidConfig := `{
-		"vector_store": {
-			"enabled": true,
-			"type": "pgvector",
-			"config": {"schema": "bifrost_vectors"}
-		}
-	}`
-	if err := ValidateConfigSchema([]byte(invalidConfig), loadLocalSchema(t)); err == nil {
-		t.Fatal("expected pgvector config without connection_string to fail validation")
 	}
 }
 

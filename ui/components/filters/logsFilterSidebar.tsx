@@ -1,20 +1,16 @@
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scrollArea";
-import { Sheet, SheetClose, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TruncatedLabel } from "@/components/ui/truncatedLabel";
-import { useIsMobile } from "@/hooks/use-mobile";
 import { RequestTypeLabels, RequestTypes, RoutingEngineUsedLabels, Statuses } from "@/lib/constants/logs";
 import { useGetAvailableFilterDataQuery, useGetProvidersQuery } from "@/lib/store";
 import type { LogFilters } from "@/lib/types/logs";
 import { cn } from "@/lib/utils";
-import { ChevronDown, LoaderCircle, PanelLeftClose, PanelLeftOpen, Plus, RotateCcw, Search, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Ref } from "react";
+import { ChevronDown, LoaderCircle, PanelLeftClose, PanelLeftOpen, Plus, RotateCcw, Search } from "lucide-react";
+import { Ref, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const COLLAPSE_STORAGE_KEY = "logs-filter-sidebar-collapsed";
 
@@ -29,7 +25,6 @@ interface LogsSidebarProps {
 
 export function LogsFilterSidebar({ filters, onFiltersChange }: LogsSidebarProps) {
 	const [collapsed, setCollapsed] = useState(false);
-	const isMobile = useIsMobile();
 
 	// Load persisted collapsed state on mount
 	useEffect(() => {
@@ -67,75 +62,6 @@ export function LogsFilterSidebar({ filters, onFiltersChange }: LogsSidebarProps
 			end_time: filters.end_time,
 		});
 	}, [filters.start_time, filters.end_time, onFiltersChange]);
-
-	const filterSections = (
-		<ScrollArea className="flex min-h-0 flex-1 overflow-y-auto p-2 pb-0" viewportClassName="no-table">
-			<div className="flex grow flex-col gap-1">
-				{/* First 2 open by default */}
-				<StatusFilter filters={filters} onFiltersChange={onFiltersChange} defaultOpen />
-				<ModelsFilter filters={filters} onFiltersChange={onFiltersChange} defaultOpen />
-				{/* Rest closed unless they have active filters */}
-				<SelectedKeysFilter filters={filters} onFiltersChange={onFiltersChange} />
-				<VirtualKeysFilter filters={filters} onFiltersChange={onFiltersChange} />
-				<ProvidersFilter filters={filters} onFiltersChange={onFiltersChange} />
-				<TypeFilter filters={filters} onFiltersChange={onFiltersChange} />
-				<AliasesFilter filters={filters} onFiltersChange={onFiltersChange} />
-				<RoutingEnginesFilter filters={filters} onFiltersChange={onFiltersChange} />
-				<RoutingRulesFilter filters={filters} onFiltersChange={onFiltersChange} />
-				<LocalCachingFilter filters={filters} onFiltersChange={onFiltersChange} />
-				<UserFilter filters={filters} onFiltersChange={onFiltersChange} />
-				<TeamFilter filters={filters} onFiltersChange={onFiltersChange} />
-				<CustomerFilter filters={filters} onFiltersChange={onFiltersChange} />
-				<BusinessUnitFilter filters={filters} onFiltersChange={onFiltersChange} />
-				<SessionFilter filters={filters} onFiltersChange={onFiltersChange} />
-				<CostFilter filters={filters} onFiltersChange={onFiltersChange} />
-				<StopReasonFilter filters={filters} onFiltersChange={onFiltersChange} />
-				<MetadataFilters filters={filters} onFiltersChange={onFiltersChange} />
-			</div>
-		</ScrollArea>
-	);
-
-	if (isMobile) {
-		return (
-			<div className="flex w-full shrink-0 px-2 pt-2">
-				<Sheet>
-					<SheetTrigger asChild>
-						<Button variant="outline" size="sm" aria-label="Show filters" data-testid="mobile-filters-trigger">
-							<PanelLeftOpen data-icon="inline-start" />
-							Filters
-							{activeFilterCount > 0 && (
-								<Badge variant="secondary" className="min-w-5 justify-center rounded-full px-1.5">
-									{activeFilterCount}
-								</Badge>
-							)}
-						</Button>
-					</SheetTrigger>
-					<SheetContent
-						side="left"
-						className="top-0 bottom-0 h-dvh w-[min(20rem,calc(100vw-1rem))] max-w-none rounded-none border-r p-0 sm:max-w-none"
-					>
-						<SheetHeader className="justify-between" headerClassName="mb-0 h-12 border-b px-3" showCloseButton={false}>
-							<SheetTitle className="text-sm">Filters</SheetTitle>
-							<div className="flex items-center gap-1">
-								{activeFilterCount > 0 && (
-									<Button variant="outline" size="sm" className="text-muted-foreground h-7 px-2 text-xs" onClick={handleReset}>
-										<RotateCcw data-icon="inline-start" />
-										Reset
-									</Button>
-								)}
-								<SheetClose asChild>
-									<Button variant="ghost" size="icon" className="size-7" aria-label="Close filters">
-										<X data-icon="inline-start" />
-									</Button>
-								</SheetClose>
-							</div>
-						</SheetHeader>
-						{filterSections}
-					</SheetContent>
-				</Sheet>
-			</div>
-		);
-	}
 
 	// Collapsed: thin rail with vertical "Filters" label — whole rail is clickable to expand
 	if (collapsed) {
@@ -177,7 +103,30 @@ export function LogsFilterSidebar({ filters, onFiltersChange }: LogsSidebarProps
 			</div>
 
 			{/* Scrollable filter sections */}
-			{filterSections}
+			<ScrollArea className="flex flex-1 overflow-y-auto p-2 pb-0" viewportClassName="no-table">
+				<div className="flex grow flex-col gap-1">
+					{/* First 2 open by default */}
+					<StatusFilter filters={filters} onFiltersChange={onFiltersChange} defaultOpen />
+					<ModelsFilter filters={filters} onFiltersChange={onFiltersChange} defaultOpen />
+					{/* Rest closed unless they have active filters */}
+					<SelectedKeysFilter filters={filters} onFiltersChange={onFiltersChange} />
+					<VirtualKeysFilter filters={filters} onFiltersChange={onFiltersChange} />
+					<ProvidersFilter filters={filters} onFiltersChange={onFiltersChange} />
+					<TypeFilter filters={filters} onFiltersChange={onFiltersChange} />
+					<AliasesFilter filters={filters} onFiltersChange={onFiltersChange} />
+					<RoutingEnginesFilter filters={filters} onFiltersChange={onFiltersChange} />
+					<RoutingRulesFilter filters={filters} onFiltersChange={onFiltersChange} />
+					<LocalCachingFilter filters={filters} onFiltersChange={onFiltersChange} />
+					<UserFilter filters={filters} onFiltersChange={onFiltersChange} />
+					<TeamFilter filters={filters} onFiltersChange={onFiltersChange} />
+					<CustomerFilter filters={filters} onFiltersChange={onFiltersChange} />
+					<BusinessUnitFilter filters={filters} onFiltersChange={onFiltersChange} />
+					<SessionFilter filters={filters} onFiltersChange={onFiltersChange} />
+					<CostFilter filters={filters} onFiltersChange={onFiltersChange} />
+					<StopReasonFilter filters={filters} onFiltersChange={onFiltersChange} />
+					<MetadataFilters filters={filters} onFiltersChange={onFiltersChange} />
+				</div>
+			</ScrollArea>
 		</div>
 	);
 }

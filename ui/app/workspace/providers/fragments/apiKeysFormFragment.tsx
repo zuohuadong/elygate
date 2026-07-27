@@ -14,7 +14,7 @@ import { Control, UseFormReturn } from "react-hook-form";
 import { DeploymentsTable } from "./deploymentsTable";
 
 // Providers that support batch APIs
-const BATCH_SUPPORTED_PROVIDERS = ["openai", "bedrock", "anthropic", "gemini", "azure", "vertex"];
+const BATCH_SUPPORTED_PROVIDERS = ["openai", "bedrock", "anthropic", "gemini", "azure", "vertex", "wafer"];
 
 interface Props {
 	control: Control<any>;
@@ -27,7 +27,7 @@ interface Props {
 
 // Batch API form field for all providers
 function BatchAPIFormField({ control }: { control: Control<any>; form: UseFormReturn<any> }) {
-	return (
+	return (	
 		<FormField
 			control={control}
 			name={`key.use_for_batch_api`}
@@ -60,6 +60,8 @@ export function ApiKeyFormFragment({ control, providerName, baseProviderType, fo
 	const isVLLM = effectiveProvider === "vllm";
 	const isOllama = effectiveProvider === "ollama";
 	const isSGL = effectiveProvider === "sgl";
+    const isDeepseek = effectiveProvider === "deepseek";
+    const isFireworks = effectiveProvider === "fireworks";
 	const isKeylessProvider = isOllama || isSGL;
 	const supportsBatchAPI = BATCH_SUPPORTED_PROVIDERS.includes(effectiveProvider);
 
@@ -673,8 +675,8 @@ export function ApiKeyFormFragment({ control, providerName, baseProviderType, fo
 								<div className="space-y-1.5">
 									<FormLabel>Force single region</FormLabel>
 									<FormDescription>
-										Always call the region set above and skip automatic promotion of multi-region-only models to a
-										multi-region endpoint. Enable when serving these models from a single region via provisioned throughput.
+										Always call the region set above and skip automatic promotion of multi-region-only models to a multi-region endpoint.
+										Enable when serving these models from a single region via provisioned throughput.
 									</FormDescription>
 								</div>
 								<FormControl>
@@ -761,6 +763,27 @@ export function ApiKeyFormFragment({ control, providerName, baseProviderType, fo
 									/>
 								</FormControl>
 								<FormMessage />
+							</FormItem>
+						)}
+					/>
+				</div>
+			)}
+			{(isSGL || isDeepseek || isFireworks || isVLLM) && (
+				<div className="space-y-4">
+					<FormField
+						control={control}
+						name="key.use_anthropic_endpoints"
+						render={({ field }) => (
+							<FormItem className="flex flex-row items-center justify-between rounded-sm border p-2">
+								<div className="space-y-1.5">
+									<FormLabel htmlFor="use-anthropic-endpoints-alias-override-switch">Use Anthropic Endpoints</FormLabel>
+									<FormDescription>
+										Routes chat completions and responses requests through Anthropic-compatible endpoints.
+									</FormDescription>
+								</div>
+								<FormControl>
+									<Switch id="use-anthropic-endpoints-alias-override-switch" checked={field.value ?? false} onCheckedChange={field.onChange} />
+								</FormControl>
 							</FormItem>
 						)}
 					/>
@@ -894,6 +917,27 @@ export function ApiKeyFormFragment({ control, providerName, baseProviderType, fo
 							</FormItem>
 						)}
 					/>
+					<FormField
+						control={control}
+						name={`key.bedrock_key_config.project_id`}
+						render={({ field }) => (
+							<FormItem>
+								<FormLabel>Mantle Project ID (Optional)</FormLabel>
+								<FormDescription>
+									Scopes Bedrock Mantle-routed models (OpenAI-family / Gemma) to a specific project via the OpenAI-Project header. Leave
+									empty to use the account&apos;s default project.
+								</FormDescription>
+								<FormControl>
+									<SecretVarInput
+										data-testid="apikey-bedrock-project-id-input"
+										placeholder="proj_xxxxxxxx or env.BEDROCK_PROJECT_ID"
+										{...field}
+									/>
+								</FormControl>
+								<FormMessage />
+							</FormItem>
+						)}
+					/>
 					{bedrockAuthType !== "api_key" && (
 						<>
 							<FormField
@@ -944,7 +988,7 @@ export function ApiKeyFormFragment({ control, providerName, baseProviderType, fo
 										<FormControl>
 											<SecretVarInput
 												data-testid="apikey-bedrock-session-name-input"
-											placeholder="bifrost-session or env.AWS_SESSION_NAME"
+												placeholder="bifrost-session or env.AWS_SESSION_NAME"
 												{...field}
 											/>
 										</FormControl>
@@ -1094,6 +1138,28 @@ export function ApiKeyFormFragment({ control, providerName, baseProviderType, fo
 								<FormLabel>Region (Required)</FormLabel>
 								<FormControl>
 									<SecretVarInput placeholder="us-east-1 or env.AWS_REGION" {...field} />
+								</FormControl>
+								<FormMessage />
+							</FormItem>
+						)}
+					/>
+
+					<FormField
+						control={control}
+						name={`key.bedrock_mantle_key_config.project_id`}
+						render={({ field }) => (
+							<FormItem>
+								<FormLabel>Project ID (Optional)</FormLabel>
+								<FormDescription>
+									Scopes inference and model listing to a specific Bedrock project (sent as the OpenAI-Project / anthropic-workspace-id
+									header). Leave empty to use the account&apos;s default project.
+								</FormDescription>
+								<FormControl>
+									<SecretVarInput
+										data-testid="apikey-bedrock-mantle-project-id-input"
+										placeholder="proj_xxxxxxxx or env.BEDROCK_PROJECT_ID"
+										{...field}
+									/>
 								</FormControl>
 								<FormMessage />
 							</FormItem>

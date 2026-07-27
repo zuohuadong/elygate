@@ -1,0 +1,14 @@
+{
+  "mode": "idle",
+  "phase": null,
+  "task": null,
+  "started_at": null,
+  "last_activity": null,
+  "iteration": 0,
+  "verification": {
+    "tsc": null,
+    "test": null,
+    "build": null,
+    "lint": null
+  }
+}

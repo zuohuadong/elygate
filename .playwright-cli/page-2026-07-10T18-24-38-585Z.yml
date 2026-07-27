@@ -1,0 +1,765 @@
+- generic [ref=e1]:
+  - generic [ref=e2]:
+    - region "Notifications alt+T"
+    - generic [ref=e3]:
+      - generic [ref=e6]:
+        - generic [ref=e8]:
+          - link [ref=e9] [cursor=pointer]:
+            - /url: /workspace/logs
+            - img "Elygate" [ref=e10]
+          - button "Collapse sidebar" [ref=e11]
+        - generic [ref=e16]:
+          - textbox "Search sidebar navigation" [ref=e20]:
+            - /placeholder: Search...
+          - generic:
+            - generic: ⌘
+            - generic: K
+        - generic [ref=e21]:
+          - list [ref=e24]:
+            - listitem [ref=e25]:
+              - button "Observability" [ref=e26] [cursor=pointer]
+              - list [ref=e40]:
+                - listitem [ref=e41]:
+                  - link "Dashboard" [ref=e42] [cursor=pointer]:
+                    - /url: /workspace/dashboard
+                - listitem [ref=e49]:
+                  - link "LLM Logs" [ref=e50] [cursor=pointer]:
+                    - /url: /workspace/logs
+                - listitem [ref=e54]:
+                  - link "MCP clients icon MCP Logs" [ref=e55] [cursor=pointer]:
+                    - /url: /workspace/mcp-logs
+                    - generic [ref=e56]:
+                      - img "MCP clients icon" [ref=e57]
+                      - generic [ref=e60]: MCP Logs
+                - listitem [ref=e61]:
+                  - link "Connectors" [ref=e62] [cursor=pointer]:
+                    - /url: /workspace/observability
+                - listitem [ref=e68]:
+                  - link "Logs Settings" [ref=e69] [cursor=pointer]:
+                    - /url: /workspace/config/logging
+            - listitem [ref=e75]:
+              - button "Models" [ref=e76] [cursor=pointer]
+            - listitem [ref=e85]:
+              - button "MCP clients icon MCP Gateway" [ref=e86] [cursor=pointer]:
+                - generic [ref=e88]:
+                  - img "MCP clients icon" [ref=e89]
+                  - generic [ref=e92]: MCP Gateway
+            - listitem [ref=e95]:
+              - link "Plugins" [ref=e96] [cursor=pointer]:
+                - /url: /workspace/plugins
+            - listitem [ref=e102]:
+              - button "Alerting" [ref=e103] [cursor=pointer]
+            - listitem [ref=e114]:
+              - button "Governance" [ref=e115] [cursor=pointer]
+            - listitem [ref=e123]:
+              - button "Guardrails" [ref=e124] [cursor=pointer]
+            - listitem [ref=e135]:
+              - link "Cluster Config" [ref=e136] [cursor=pointer]:
+                - /url: /workspace/cluster
+            - listitem [ref=e145]:
+              - button "Adaptive Routing" [ref=e146] [cursor=pointer]
+            - listitem [ref=e212]:
+              - link "Prompt Repository" [ref=e213] [cursor=pointer]:
+                - /url: /workspace/prompt-repo
+            - listitem [ref=e220]:
+              - link "Skills Repository" [ref=e221] [cursor=pointer]:
+                - /url: /workspace/skills-repo
+            - listitem [ref=e158]:
+              - button "Settings" [ref=e159] [cursor=pointer]
+          - generic [ref=e168]:
+            - generic [ref=e172]:
+              - generic [ref=e174]:
+                - generic [ref=e175]: Need help with production setup?
+                - button "Dismiss" [ref=e176]
+              - generic [ref=e180]:
+                - text: Review the Elygate deployment profile before connecting production providers.Read the deployment guide
+                - link "here" [ref=e181] [cursor=pointer]:
+                  - /url: https://github.com/zuohuadong/elygate/tree/dev/deploy/elygate-oss
+                - text: .
+            - generic [ref=e183]:
+              - link "GitHub Repository" [ref=e184] [cursor=pointer]:
+                - /url: https://github.com/zuohuadong/elygate
+              - link "Report a bug" [ref=e188] [cursor=pointer]:
+                - /url: https://github.com/zuohuadong/elygate/issues/new?title=%5BBug%5D%20
+              - link "Full Documentation" [ref=e199] [cursor=pointer]:
+                - /url: https://github.com/zuohuadong/elygate/tree/dev/docs
+              - button "Toggle theme" [ref=e203] [cursor=pointer]
+            - generic [ref=e205]: vdev-build
+      - main [ref=e208]:
+        - generic [ref=e229]:
+          - generic [ref=e230]:
+            - generic [ref=e231]:
+              - generic [ref=e232]: Filters
+              - generic [ref=e233]:
+                - button "Reset" [ref=e1473] [cursor=pointer]
+                - button "Hide filters" [ref=e234] [cursor=pointer]
+            - generic [ref=e238]:
+              - generic [ref=e239]:
+                - button "Status" [expanded] [ref=e240] [cursor=pointer]
+                - generic [ref=e245]:
+                  - generic [ref=e246] [cursor=pointer]:
+                    - checkbox "success" [checked] [active] [ref=e247]
+                    - generic [ref=e248]: success
+                  - generic [ref=e249] [cursor=pointer]:
+                    - checkbox "error" [ref=e250]
+                    - generic [ref=e251]: error
+                  - generic [ref=e252] [cursor=pointer]:
+                    - checkbox "processing" [ref=e253]
+                    - generic [ref=e254]: processing
+                  - generic [ref=e255] [cursor=pointer]:
+                    - checkbox "cancelled" [ref=e256]
+                    - generic [ref=e257]: cancelled
+              - generic [ref=e258]:
+                - button "Models" [expanded] [ref=e259] [cursor=pointer]
+                - generic [ref=e264]:
+                  - textbox "Search or add a model" [ref=e266]
+                  - generic [ref=e267] [cursor=pointer]:
+                    - checkbox "gpt-4o-mini" [ref=e268]
+                    - generic [ref=e269]: gpt-4o-mini
+              - button "Selected Keys" [ref=e271] [cursor=pointer]
+              - button "Virtual Keys" [ref=e276] [cursor=pointer]
+              - button "Providers" [ref=e281] [cursor=pointer]
+              - button "Type" [ref=e286] [cursor=pointer]
+              - button "Aliases" [ref=e291] [cursor=pointer]
+              - button "Routing Engines" [ref=e296] [cursor=pointer]
+              - button "Routing Rules" [ref=e301] [cursor=pointer]
+              - button "Local Caching" [ref=e306] [cursor=pointer]
+              - button "User" [ref=e311] [cursor=pointer]
+              - button "Teams" [ref=e316] [cursor=pointer]
+              - button "Customers" [ref=e321] [cursor=pointer]
+              - button "Business Units" [ref=e326] [cursor=pointer]
+              - button "Session" [ref=e331] [cursor=pointer]
+              - button "Cost" [ref=e336] [cursor=pointer]
+              - button "Stop Reason" [ref=e341] [cursor=pointer]
+              - button "Metadata" [ref=e346] [cursor=pointer]
+          - generic [ref=e350]:
+            - generic [ref=e352]:
+              - button "Refresh" [ref=e353] [cursor=pointer]
+              - button "Live" [ref=e354] [cursor=pointer]
+              - textbox "Search logs" [ref=e359]
+              - button "Last hour" [ref=e361] [cursor=pointer]
+              - button [ref=e363] [cursor=pointer]
+              - button "Column configuration" [ref=e364] [cursor=pointer]
+            - generic [ref=e365]:
+              - generic [ref=e368]:
+                - generic [ref=e369]: Total Requests
+                - generic [ref=e375]:
+                  - generic [ref=e376]: "9"
+                  - generic [ref=e378]: "3"
+              - generic [ref=e382]:
+                - generic [ref=e383]:
+                  - generic [ref=e384]: Success Rate
+                  - button "Success Rate info" [ref=e385]
+                - generic [ref=e389]:
+                  - generic [ref=e391]:
+                    - generic [ref=e392]:
+                      - generic [ref=e1475]: "1"
+                      - generic [ref=e393]: "0"
+                      - generic [ref=e395]: "0"
+                    - generic [ref=e397]:
+                      - generic [ref=e398]: .
+                      - generic [ref=e400]: "0"
+                      - generic [ref=e402]: "0"
+                  - generic [ref=e404]: "%"
+              - generic [ref=e409]:
+                - generic [ref=e410]:
+                  - generic [ref=e411]: User Success Rate
+                  - button "User Success Rate info" [ref=e412]
+                - generic [ref=e416]:
+                  - generic [ref=e418]:
+                    - generic [ref=e419]:
+                      - generic [ref=e1481]: "1"
+                      - generic [ref=e420]: "0"
+                      - generic [ref=e422]: "0"
+                    - generic [ref=e424]:
+                      - generic [ref=e425]: .
+                      - generic [ref=e427]: "0"
+                      - generic [ref=e429]: "0"
+                  - generic [ref=e431]: "%"
+              - generic [ref=e436]:
+                - generic [ref=e437]: Avg Latency
+                - generic [ref=e440]:
+                  - generic [ref=e442]:
+                    - generic [ref=e443]: "5"
+                    - generic [ref=e446]:
+                      - generic [ref=e447]: .
+                      - generic [ref=e449]: "9"
+                      - generic [ref=e451]: "4"
+                  - generic [ref=e453]: ms
+              - generic [ref=e458]:
+                - generic [ref=e459]: Total Tokens
+                - generic [ref=e465]:
+                  - generic [ref=e466]: "3"
+                  - generic [ref=e468]: "7"
+                  - generic [ref=e470]: "2"
+              - generic [ref=e474]:
+                - generic [ref=e475]: Total Cost
+                - generic [ref=e478]:
+                  - generic [ref=e479]: US$
+                  - generic [ref=e482]: "0"
+            - generic [ref=e489]:
+              - generic [ref=e490]:
+                - button "Request Volume" [expanded] [ref=e491]
+                - generic [ref=e496]:
+                  - generic [ref=e497]: Success
+                  - generic [ref=e500]: Error
+                  - generic [ref=e503]: Cancelled
+              - application [ref=e510]:
+                - generic [ref=e543]:
+                  - generic [ref=e544]:
+                    - generic [ref=e545]: 01:23
+                    - generic [ref=e547]: 01:43
+                    - generic [ref=e549]: 02:03
+                  - generic [ref=e551]:
+                    - generic [ref=e552]: "0"
+                    - generic [ref=e1500]: "15"
+                    - generic [ref=e1502]: "30"
+                    - generic [ref=e1504]: "59"
+            - generic [ref=e561]:
+              - table [ref=e564]:
+                - rowgroup [ref=e565]:
+                  - row [ref=e566]:
+                    - columnheader [ref=e567]:
+                      - button "Column actions" [ref=e568] [cursor=pointer]
+                    - columnheader [ref=e569]:
+                      - generic [ref=e570]:
+                        - button "Time" [ref=e572] [cursor=pointer]
+                        - button "Column actions" [ref=e573] [cursor=pointer]
+                    - columnheader "Type Column actions" [ref=e574]:
+                      - generic [ref=e575]:
+                        - generic [ref=e576]: Type
+                        - button "Column actions" [ref=e577] [cursor=pointer]
+                    - columnheader "Message Column actions" [ref=e578]:
+                      - generic [ref=e579]:
+                        - generic [ref=e580]: Message
+                        - button "Column actions" [ref=e581] [cursor=pointer]
+                    - columnheader "Model Column actions" [ref=e582]:
+                      - generic [ref=e583]:
+                        - generic [ref=e584]: Model
+                        - button "Column actions" [ref=e585] [cursor=pointer]
+                    - columnheader [ref=e586]:
+                      - generic [ref=e587]:
+                        - button "Latency" [ref=e589] [cursor=pointer]
+                        - button "Column actions" [ref=e590] [cursor=pointer]
+                    - columnheader [ref=e591]:
+                      - generic [ref=e592]:
+                        - button "Tokens" [ref=e594] [cursor=pointer]
+                        - button "Column actions" [ref=e595] [cursor=pointer]
+                    - columnheader [ref=e596]:
+                      - generic [ref=e597]:
+                        - button "Cost" [ref=e599] [cursor=pointer]
+                        - button "Column actions" [ref=e600] [cursor=pointer]
+                    - columnheader [ref=e601]
+                - rowgroup [ref=e602]:
+                  - row [ref=e603]:
+                    - cell [ref=e604]
+                  - row [ref=e1506] [cursor=pointer]:
+                    - cell [ref=e612]
+                    - cell "Jul 11 02:22:48 2 minutes ago" [ref=e1507]:
+                      - generic [ref=e615]:
+                        - generic [ref=e616]: Jul 11 02:22:48
+                        - generic [ref=e617]: 2 minutes ago
+                    - cell "Chat" [ref=e618]
+                    - 'cell "E2E seed message 27: say hello in 2 words" [ref=e620]'
+                    - cell "gpt-4o-mini OpenAI" [ref=e623]:
+                      - generic [ref=e627]:
+                        - generic [ref=e628]: gpt-4o-mini
+                        - generic [ref=e629]: OpenAI
+                    - cell "N/A" [ref=e630]
+                    - cell "4 1 / 3" [ref=e632]:
+                      - generic [ref=e633]:
+                        - generic [ref=e634]: "4"
+                        - generic [ref=e639]: 1 / 3
+                    - cell "N/A" [ref=e640]
+                    - cell [ref=e642]:
+                      - button "Log actions" [ref=e644]
+                  - row [ref=e1508] [cursor=pointer]:
+                    - cell [ref=e646]
+                    - cell "Jul 11 02:22:48 2 minutes ago" [ref=e1509]:
+                      - generic [ref=e649]:
+                        - generic [ref=e650]: Jul 11 02:22:48
+                        - generic [ref=e651]: 2 minutes ago
+                    - cell "Chat" [ref=e652]
+                    - 'cell "E2E seed message 28: say hello in 3 words" [ref=e654]'
+                    - cell "gpt-4o-mini OpenAI" [ref=e657]:
+                      - generic [ref=e661]:
+                        - generic [ref=e662]: gpt-4o-mini
+                        - generic [ref=e663]: OpenAI
+                    - cell "N/A" [ref=e664]
+                    - cell "4 1 / 3" [ref=e666]:
+                      - generic [ref=e667]:
+                        - generic [ref=e668]: "4"
+                        - generic [ref=e673]: 1 / 3
+                    - cell "N/A" [ref=e674]
+                    - cell [ref=e676]:
+                      - button "Log actions" [ref=e678]
+                  - row [ref=e1510] [cursor=pointer]:
+                    - cell [ref=e680]
+                    - cell "Jul 11 02:22:48 2 minutes ago" [ref=e1511]:
+                      - generic [ref=e683]:
+                        - generic [ref=e684]: Jul 11 02:22:48
+                        - generic [ref=e685]: 2 minutes ago
+                    - cell "Chat" [ref=e686]
+                    - 'cell "E2E seed message 29: say hello in 4 words" [ref=e688]'
+                    - cell "gpt-4o-mini OpenAI" [ref=e691]:
+                      - generic [ref=e695]:
+                        - generic [ref=e696]: gpt-4o-mini
+                        - generic [ref=e697]: OpenAI
+                    - cell "N/A" [ref=e698]
+                    - cell "4 1 / 3" [ref=e700]:
+                      - generic [ref=e701]:
+                        - generic [ref=e702]: "4"
+                        - generic [ref=e707]: 1 / 3
+                    - cell "N/A" [ref=e708]
+                    - cell [ref=e710]:
+                      - button "Log actions" [ref=e712]
+                  - row [ref=e1512] [cursor=pointer]:
+                    - cell [ref=e714]
+                    - cell "Jul 11 02:22:48 2 minutes ago" [ref=e1513]:
+                      - generic [ref=e717]:
+                        - generic [ref=e718]: Jul 11 02:22:48
+                        - generic [ref=e719]: 2 minutes ago
+                    - cell "Chat" [ref=e720]
+                    - 'cell "E2E seed message 30: say hello in 5 words" [ref=e722]'
+                    - cell "gpt-4o-mini OpenAI" [ref=e725]:
+                      - generic [ref=e729]:
+                        - generic [ref=e730]: gpt-4o-mini
+                        - generic [ref=e731]: OpenAI
+                    - cell "N/A" [ref=e732]
+                    - cell "4 1 / 3" [ref=e734]:
+                      - generic [ref=e735]:
+                        - generic [ref=e736]: "4"
+                        - generic [ref=e741]: 1 / 3
+                    - cell "N/A" [ref=e742]
+                    - cell [ref=e744]:
+                      - button "Log actions" [ref=e746]
+                  - row [ref=e1514] [cursor=pointer]:
+                    - cell [ref=e748]
+                    - cell "Jul 11 02:22:48 2 minutes ago" [ref=e1515]:
+                      - generic [ref=e751]:
+                        - generic [ref=e752]: Jul 11 02:22:48
+                        - generic [ref=e753]: 2 minutes ago
+                    - cell "Chat" [ref=e754]
+                    - 'cell "E2E seed message 26: say hello in 1 words" [ref=e756]'
+                    - cell "gpt-4o-mini OpenAI" [ref=e759]:
+                      - generic [ref=e763]:
+                        - generic [ref=e764]: gpt-4o-mini
+                        - generic [ref=e765]: OpenAI
+                    - cell "N/A" [ref=e766]
+                    - cell "4 1 / 3" [ref=e768]:
+                      - generic [ref=e769]:
+                        - generic [ref=e770]: "4"
+                        - generic [ref=e775]: 1 / 3
+                    - cell "N/A" [ref=e776]
+                    - cell [ref=e778]:
+                      - button "Log actions" [ref=e780]
+                  - row [ref=e1516] [cursor=pointer]:
+                    - cell [ref=e782]
+                    - cell "Jul 11 02:22:48 2 minutes ago" [ref=e1517]:
+                      - generic [ref=e785]:
+                        - generic [ref=e786]: Jul 11 02:22:48
+                        - generic [ref=e787]: 2 minutes ago
+                    - cell "Chat" [ref=e788]
+                    - 'cell "E2E seed message 24: say hello in 4 words" [ref=e790]'
+                    - cell "gpt-4o-mini OpenAI" [ref=e793]:
+                      - generic [ref=e797]:
+                        - generic [ref=e798]: gpt-4o-mini
+                        - generic [ref=e799]: OpenAI
+                    - cell "N/A" [ref=e800]
+                    - cell "4 1 / 3" [ref=e802]:
+                      - generic [ref=e803]:
+                        - generic [ref=e804]: "4"
+                        - generic [ref=e809]: 1 / 3
+                    - cell "N/A" [ref=e810]
+                    - cell [ref=e812]:
+                      - button "Log actions" [ref=e814]
+                  - row [ref=e1518] [cursor=pointer]:
+                    - cell [ref=e816]
+                    - cell "Jul 11 02:22:48 2 minutes ago" [ref=e1519]:
+                      - generic [ref=e819]:
+                        - generic [ref=e820]: Jul 11 02:22:48
+                        - generic [ref=e821]: 2 minutes ago
+                    - cell "Chat" [ref=e822]
+                    - 'cell "E2E seed message 25: say hello in 5 words" [ref=e824]'
+                    - cell "gpt-4o-mini OpenAI" [ref=e827]:
+                      - generic [ref=e831]:
+                        - generic [ref=e832]: gpt-4o-mini
+                        - generic [ref=e833]: OpenAI
+                    - cell "N/A" [ref=e834]
+                    - cell "4 1 / 3" [ref=e836]:
+                      - generic [ref=e837]:
+                        - generic [ref=e838]: "4"
+                        - generic [ref=e843]: 1 / 3
+                    - cell "N/A" [ref=e844]
+                    - cell [ref=e846]:
+                      - button "Log actions" [ref=e848]
+                  - row [ref=e1520] [cursor=pointer]:
+                    - cell [ref=e850]
+                    - cell "Jul 11 02:22:48 2 minutes ago" [ref=e1521]:
+                      - generic [ref=e853]:
+                        - generic [ref=e854]: Jul 11 02:22:48
+                        - generic [ref=e855]: 2 minutes ago
+                    - cell "Chat" [ref=e856]
+                    - 'cell "E2E seed message 22: say hello in 2 words" [ref=e858]'
+                    - cell "gpt-4o-mini OpenAI" [ref=e861]:
+                      - generic [ref=e865]:
+                        - generic [ref=e866]: gpt-4o-mini
+                        - generic [ref=e867]: OpenAI
+                    - cell "N/A" [ref=e868]
+                    - cell "4 1 / 3" [ref=e870]:
+                      - generic [ref=e871]:
+                        - generic [ref=e872]: "4"
+                        - generic [ref=e877]: 1 / 3
+                    - cell "N/A" [ref=e878]
+                    - cell [ref=e880]:
+                      - button "Log actions" [ref=e882]
+                  - row [ref=e1522] [cursor=pointer]:
+                    - cell [ref=e884]
+                    - cell "Jul 11 02:22:48 2 minutes ago" [ref=e1523]:
+                      - generic [ref=e887]:
+                        - generic [ref=e888]: Jul 11 02:22:48
+                        - generic [ref=e889]: 2 minutes ago
+                    - cell "Chat" [ref=e890]
+                    - 'cell "E2E seed message 23: say hello in 3 words" [ref=e892]'
+                    - cell "gpt-4o-mini OpenAI" [ref=e895]:
+                      - generic [ref=e899]:
+                        - generic [ref=e900]: gpt-4o-mini
+                        - generic [ref=e901]: OpenAI
+                    - cell "N/A" [ref=e902]
+                    - cell "4 1 / 3" [ref=e904]:
+                      - generic [ref=e905]:
+                        - generic [ref=e906]: "4"
+                        - generic [ref=e911]: 1 / 3
+                    - cell "N/A" [ref=e912]
+                    - cell [ref=e914]:
+                      - button "Log actions" [ref=e916]
+                  - row [ref=e1524] [cursor=pointer]:
+                    - cell [ref=e918]
+                    - cell "Jul 11 02:22:48 2 minutes ago" [ref=e1525]:
+                      - generic [ref=e921]:
+                        - generic [ref=e922]: Jul 11 02:22:48
+                        - generic [ref=e923]: 2 minutes ago
+                    - cell "Chat" [ref=e924]
+                    - 'cell "E2E seed message 21: say hello in 1 words" [ref=e926]'
+                    - cell "gpt-4o-mini OpenAI" [ref=e929]:
+                      - generic [ref=e933]:
+                        - generic [ref=e934]: gpt-4o-mini
+                        - generic [ref=e935]: OpenAI
+                    - cell "5ms" [ref=e936]
+                    - cell "4 1 / 3" [ref=e941]:
+                      - generic [ref=e942]:
+                        - generic [ref=e943]: "4"
+                        - generic [ref=e948]: 1 / 3
+                    - cell "N/A" [ref=e949]
+                    - cell [ref=e951]:
+                      - button "Log actions" [ref=e953]
+                  - row [ref=e1526] [cursor=pointer]:
+                    - cell [ref=e955]
+                    - cell "Jul 11 02:22:48 2 minutes ago" [ref=e1527]:
+                      - generic [ref=e958]:
+                        - generic [ref=e959]: Jul 11 02:22:48
+                        - generic [ref=e960]: 2 minutes ago
+                    - cell "Chat" [ref=e961]
+                    - 'cell "E2E seed message 17: say hello in 2 words" [ref=e963]'
+                    - cell "gpt-4o-mini OpenAI" [ref=e966]:
+                      - generic [ref=e970]:
+                        - generic [ref=e971]: gpt-4o-mini
+                        - generic [ref=e972]: OpenAI
+                    - cell "N/A" [ref=e973]
+                    - cell "4 1 / 3" [ref=e975]:
+                      - generic [ref=e976]:
+                        - generic [ref=e977]: "4"
+                        - generic [ref=e982]: 1 / 3
+                    - cell "N/A" [ref=e983]
+                    - cell [ref=e985]:
+                      - button "Log actions" [ref=e987]
+                  - row [ref=e1528] [cursor=pointer]:
+                    - cell [ref=e989]
+                    - cell "Jul 11 02:22:48 2 minutes ago" [ref=e1529]:
+                      - generic [ref=e992]:
+                        - generic [ref=e993]: Jul 11 02:22:48
+                        - generic [ref=e994]: 2 minutes ago
+                    - cell "Chat" [ref=e995]
+                    - 'cell "E2E seed message 19: say hello in 4 words" [ref=e997]'
+                    - cell "gpt-4o-mini OpenAI" [ref=e1000]:
+                      - generic [ref=e1004]:
+                        - generic [ref=e1005]: gpt-4o-mini
+                        - generic [ref=e1006]: OpenAI
+                    - cell "N/A" [ref=e1007]
+                    - cell "4 1 / 3" [ref=e1009]:
+                      - generic [ref=e1010]:
+                        - generic [ref=e1011]: "4"
+                        - generic [ref=e1016]: 1 / 3
+                    - cell "N/A" [ref=e1017]
+                    - cell [ref=e1019]:
+                      - button "Log actions" [ref=e1021]
+                  - row [ref=e1530] [cursor=pointer]:
+                    - cell [ref=e1023]
+                    - cell "Jul 11 02:22:48 2 minutes ago" [ref=e1531]:
+                      - generic [ref=e1026]:
+                        - generic [ref=e1027]: Jul 11 02:22:48
+                        - generic [ref=e1028]: 2 minutes ago
+                    - cell "Chat" [ref=e1029]
+                    - 'cell "E2E seed message 20: say hello in 5 words" [ref=e1031]'
+                    - cell "gpt-4o-mini OpenAI" [ref=e1034]:
+                      - generic [ref=e1038]:
+                        - generic [ref=e1039]: gpt-4o-mini
+                        - generic [ref=e1040]: OpenAI
+                    - cell "N/A" [ref=e1041]
+                    - cell "4 1 / 3" [ref=e1043]:
+                      - generic [ref=e1044]:
+                        - generic [ref=e1045]: "4"
+                        - generic [ref=e1050]: 1 / 3
+                    - cell "N/A" [ref=e1051]
+                    - cell [ref=e1053]:
+                      - button "Log actions" [ref=e1055]
+                  - row [ref=e1532] [cursor=pointer]:
+                    - cell [ref=e1057]
+                    - cell "Jul 11 02:22:48 2 minutes ago" [ref=e1533]:
+                      - generic [ref=e1060]:
+                        - generic [ref=e1061]: Jul 11 02:22:48
+                        - generic [ref=e1062]: 2 minutes ago
+                    - cell "Chat" [ref=e1063]
+                    - 'cell "E2E seed message 18: say hello in 3 words" [ref=e1065]'
+                    - cell "gpt-4o-mini OpenAI" [ref=e1068]:
+                      - generic [ref=e1072]:
+                        - generic [ref=e1073]: gpt-4o-mini
+                        - generic [ref=e1074]: OpenAI
+                    - cell "N/A" [ref=e1075]
+                    - cell "4 1 / 3" [ref=e1077]:
+                      - generic [ref=e1078]:
+                        - generic [ref=e1079]: "4"
+                        - generic [ref=e1084]: 1 / 3
+                    - cell "N/A" [ref=e1085]
+                    - cell [ref=e1087]:
+                      - button "Log actions" [ref=e1089]
+                  - row [ref=e1534] [cursor=pointer]:
+                    - cell [ref=e1091]
+                    - cell "Jul 11 02:22:48 2 minutes ago" [ref=e1535]:
+                      - generic [ref=e1094]:
+                        - generic [ref=e1095]: Jul 11 02:22:48
+                        - generic [ref=e1096]: 2 minutes ago
+                    - cell "Chat" [ref=e1097]
+                    - 'cell "E2E seed message 16: say hello in 1 words" [ref=e1099]'
+                    - cell "gpt-4o-mini OpenAI" [ref=e1102]:
+                      - generic [ref=e1106]:
+                        - generic [ref=e1107]: gpt-4o-mini
+                        - generic [ref=e1108]: OpenAI
+                    - cell "N/A" [ref=e1109]
+                    - cell "4 1 / 3" [ref=e1111]:
+                      - generic [ref=e1112]:
+                        - generic [ref=e1113]: "4"
+                        - generic [ref=e1118]: 1 / 3
+                    - cell "N/A" [ref=e1119]
+                    - cell [ref=e1121]:
+                      - button "Log actions" [ref=e1123]
+                  - row [ref=e1536] [cursor=pointer]:
+                    - cell [ref=e1125]
+                    - cell "Jul 11 02:22:48 2 minutes ago" [ref=e1537]:
+                      - generic [ref=e1128]:
+                        - generic [ref=e1129]: Jul 11 02:22:48
+                        - generic [ref=e1130]: 2 minutes ago
+                    - cell "Chat" [ref=e1131]
+                    - 'cell "E2E seed message 13: say hello in 3 words" [ref=e1133]'
+                    - cell "gpt-4o-mini OpenAI" [ref=e1136]:
+                      - generic [ref=e1140]:
+                        - generic [ref=e1141]: gpt-4o-mini
+                        - generic [ref=e1142]: OpenAI
+                    - cell "N/A" [ref=e1143]
+                    - cell "4 1 / 3" [ref=e1145]:
+                      - generic [ref=e1146]:
+                        - generic [ref=e1147]: "4"
+                        - generic [ref=e1152]: 1 / 3
+                    - cell "N/A" [ref=e1153]
+                    - cell [ref=e1155]:
+                      - button "Log actions" [ref=e1157]
+                  - row [ref=e1538] [cursor=pointer]:
+                    - cell [ref=e1159]
+                    - cell "Jul 11 02:22:48 2 minutes ago" [ref=e1539]:
+                      - generic [ref=e1162]:
+                        - generic [ref=e1163]: Jul 11 02:22:48
+                        - generic [ref=e1164]: 2 minutes ago
+                    - cell "Chat" [ref=e1165]
+                    - 'cell "E2E seed message 14: say hello in 4 words" [ref=e1167]'
+                    - cell "gpt-4o-mini OpenAI" [ref=e1170]:
+                      - generic [ref=e1174]:
+                        - generic [ref=e1175]: gpt-4o-mini
+                        - generic [ref=e1176]: OpenAI
+                    - cell "N/A" [ref=e1177]
+                    - cell "4 1 / 3" [ref=e1179]:
+                      - generic [ref=e1180]:
+                        - generic [ref=e1181]: "4"
+                        - generic [ref=e1186]: 1 / 3
+                    - cell "N/A" [ref=e1187]
+                    - cell [ref=e1189]:
+                      - button "Log actions" [ref=e1191]
+                  - row [ref=e1540] [cursor=pointer]:
+                    - cell [ref=e1193]
+                    - cell "Jul 11 02:22:48 2 minutes ago" [ref=e1541]:
+                      - generic [ref=e1196]:
+                        - generic [ref=e1197]: Jul 11 02:22:48
+                        - generic [ref=e1198]: 2 minutes ago
+                    - cell "Chat" [ref=e1199]
+                    - 'cell "E2E seed message 15: say hello in 5 words" [ref=e1201]'
+                    - cell "gpt-4o-mini OpenAI" [ref=e1204]:
+                      - generic [ref=e1208]:
+                        - generic [ref=e1209]: gpt-4o-mini
+                        - generic [ref=e1210]: OpenAI
+                    - cell "N/A" [ref=e1211]
+                    - cell "4 1 / 3" [ref=e1213]:
+                      - generic [ref=e1214]:
+                        - generic [ref=e1215]: "4"
+                        - generic [ref=e1220]: 1 / 3
+                    - cell "N/A" [ref=e1221]
+                    - cell [ref=e1223]:
+                      - button "Log actions" [ref=e1225]
+                  - row [ref=e1542] [cursor=pointer]:
+                    - cell [ref=e1227]
+                    - cell "Jul 11 02:22:48 2 minutes ago" [ref=e1543]:
+                      - generic [ref=e1230]:
+                        - generic [ref=e1231]: Jul 11 02:22:48
+                        - generic [ref=e1232]: 2 minutes ago
+                    - cell "Chat" [ref=e1233]
+                    - 'cell "E2E seed message 12: say hello in 2 words" [ref=e1235]'
+                    - cell "gpt-4o-mini OpenAI" [ref=e1238]:
+                      - generic [ref=e1242]:
+                        - generic [ref=e1243]: gpt-4o-mini
+                        - generic [ref=e1244]: OpenAI
+                    - cell "N/A" [ref=e1245]
+                    - cell "4 1 / 3" [ref=e1247]:
+                      - generic [ref=e1248]:
+                        - generic [ref=e1249]: "4"
+                        - generic [ref=e1254]: 1 / 3
+                    - cell "N/A" [ref=e1255]
+                    - cell [ref=e1257]:
+                      - button "Log actions" [ref=e1259]
+                  - row [ref=e1544] [cursor=pointer]:
+                    - cell [ref=e1261]
+                    - cell "Jul 11 02:22:48 2 minutes ago" [ref=e1545]:
+                      - generic [ref=e1264]:
+                        - generic [ref=e1265]: Jul 11 02:22:48
+                        - generic [ref=e1266]: 2 minutes ago
+                    - cell "Chat" [ref=e1267]
+                    - 'cell "E2E seed message 11: say hello in 1 words" [ref=e1269]'
+                    - cell "gpt-4o-mini OpenAI" [ref=e1272]:
+                      - generic [ref=e1276]:
+                        - generic [ref=e1277]: gpt-4o-mini
+                        - generic [ref=e1278]: OpenAI
+                    - cell "N/A" [ref=e1279]
+                    - cell "4 1 / 3" [ref=e1281]:
+                      - generic [ref=e1282]:
+                        - generic [ref=e1283]: "4"
+                        - generic [ref=e1288]: 1 / 3
+                    - cell "N/A" [ref=e1289]
+                    - cell [ref=e1291]:
+                      - button "Log actions" [ref=e1293]
+                  - row [ref=e1546] [cursor=pointer]:
+                    - cell [ref=e1295]
+                    - cell "Jul 11 02:22:48 2 minutes ago" [ref=e1547]:
+                      - generic [ref=e1298]:
+                        - generic [ref=e1299]: Jul 11 02:22:48
+                        - generic [ref=e1300]: 2 minutes ago
+                    - cell "Chat" [ref=e1301]
+                    - 'cell "E2E seed message 8: say hello in 3 words" [ref=e1303]'
+                    - cell "gpt-4o-mini OpenAI" [ref=e1306]:
+                      - generic [ref=e1310]:
+                        - generic [ref=e1311]: gpt-4o-mini
+                        - generic [ref=e1312]: OpenAI
+                    - cell "N/A" [ref=e1313]
+                    - cell "4 1 / 3" [ref=e1315]:
+                      - generic [ref=e1316]:
+                        - generic [ref=e1317]: "4"
+                        - generic [ref=e1322]: 1 / 3
+                    - cell "N/A" [ref=e1323]
+                    - cell [ref=e1325]:
+                      - button "Log actions" [ref=e1327]
+                  - row [ref=e1548] [cursor=pointer]:
+                    - cell [ref=e1329]
+                    - cell "Jul 11 02:22:48 2 minutes ago" [ref=e1549]:
+                      - generic [ref=e1332]:
+                        - generic [ref=e1333]: Jul 11 02:22:48
+                        - generic [ref=e1334]: 2 minutes ago
+                    - cell "Chat" [ref=e1335]
+                    - 'cell "E2E seed message 7: say hello in 2 words" [ref=e1337]'
+                    - cell "gpt-4o-mini OpenAI" [ref=e1340]:
+                      - generic [ref=e1344]:
+                        - generic [ref=e1345]: gpt-4o-mini
+                        - generic [ref=e1346]: OpenAI
+                    - cell "N/A" [ref=e1347]
+                    - cell "4 1 / 3" [ref=e1349]:
+                      - generic [ref=e1350]:
+                        - generic [ref=e1351]: "4"
+                        - generic [ref=e1356]: 1 / 3
+                    - cell "N/A" [ref=e1357]
+                    - cell [ref=e1359]:
+                      - button "Log actions" [ref=e1361]
+                  - row [ref=e1550] [cursor=pointer]:
+                    - cell [ref=e1363]
+                    - cell "Jul 11 02:22:48 2 minutes ago" [ref=e1551]:
+                      - generic [ref=e1366]:
+                        - generic [ref=e1367]: Jul 11 02:22:48
+                        - generic [ref=e1368]: 2 minutes ago
+                    - cell "Chat" [ref=e1369]
+                    - 'cell "E2E seed message 10: say hello in 5 words" [ref=e1371]'
+                    - cell "gpt-4o-mini OpenAI" [ref=e1374]:
+                      - generic [ref=e1378]:
+                        - generic [ref=e1379]: gpt-4o-mini
+                        - generic [ref=e1380]: OpenAI
+                    - cell "N/A" [ref=e1381]
+                    - cell "4 1 / 3" [ref=e1383]:
+                      - generic [ref=e1384]:
+                        - generic [ref=e1385]: "4"
+                        - generic [ref=e1390]: 1 / 3
+                    - cell "N/A" [ref=e1391]
+                    - cell [ref=e1393]:
+                      - button "Log actions" [ref=e1395]
+                  - row [ref=e1552] [cursor=pointer]:
+                    - cell [ref=e1397]
+                    - cell "Jul 11 02:22:48 2 minutes ago" [ref=e1553]:
+                      - generic [ref=e1400]:
+                        - generic [ref=e1401]: Jul 11 02:22:48
+                        - generic [ref=e1402]: 2 minutes ago
+                    - cell "Chat" [ref=e1403]
+                    - 'cell "E2E seed message 9: say hello in 4 words" [ref=e1405]'
+                    - cell "gpt-4o-mini OpenAI" [ref=e1408]:
+                      - generic [ref=e1412]:
+                        - generic [ref=e1413]: gpt-4o-mini
+                        - generic [ref=e1414]: OpenAI
+                    - cell "N/A" [ref=e1415]
+                    - cell "4 1 / 3" [ref=e1417]:
+                      - generic [ref=e1418]:
+                        - generic [ref=e1419]: "4"
+                        - generic [ref=e1424]: 1 / 3
+                    - cell "N/A" [ref=e1425]
+                    - cell [ref=e1427]:
+                      - button "Log actions" [ref=e1429]
+                  - row [ref=e1554] [cursor=pointer]:
+                    - cell [ref=e1431]
+                    - cell "Jul 11 02:22:48 2 minutes ago" [ref=e1555]:
+                      - generic [ref=e1434]:
+                        - generic [ref=e1435]: Jul 11 02:22:48
+                        - generic [ref=e1436]: 2 minutes ago
+                    - cell "Chat" [ref=e1437]
+                    - 'cell "E2E seed message 6: say hello in 1 words" [ref=e1439]'
+                    - cell "gpt-4o-mini OpenAI" [ref=e1442]:
+                      - generic [ref=e1446]:
+                        - generic [ref=e1447]: gpt-4o-mini
+                        - generic [ref=e1448]: OpenAI
+                    - cell "N/A" [ref=e1449]
+                    - cell "4 1 / 3" [ref=e1451]:
+                      - generic [ref=e1452]:
+                        - generic [ref=e1453]: "4"
+                        - generic [ref=e1458]: 1 / 3
+                    - cell "N/A" [ref=e1459]
+                    - cell [ref=e1461]:
+                      - button "Log actions" [ref=e1463]
+              - generic [ref=e1464]:
+                - generic [ref=e1465]: 1-25 of 93 entries
+                - generic [ref=e1466]:
+                  - button "Previous page" [disabled]
+                  - generic [ref=e1467]:
+                    - generic [ref=e1468]: Page
+                    - generic [ref=e1469]: "1"
+                    - generic [ref=e1470]: of 4
+                  - button "Next page" [ref=e1471] [cursor=pointer]
+  - generic [ref=e1472]: "59"

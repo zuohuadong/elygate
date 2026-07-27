@@ -1,0 +1,33 @@
+{
+	"/": [
+		"src/routes/+page.server.ts",
+		"src/routes/+layout.server.ts",
+		"src/routes/+layout.server.ts"
+	],
+	"/keys": [
+		"src/routes/keys/+page.server.ts",
+		"src/routes/+layout.server.ts"
+	],
+	"/login": [
+		"src/routes/+layout.server.ts"
+	],
+	"/logs": [
+		"src/routes/logs/+page.server.ts",
+		"src/routes/+layout.server.ts"
+	],
+	"/logs/export": [
+		"src/routes/logs/export/+server.ts"
+	],
+	"/logs/[id]": [
+		"src/routes/logs/[id]/+page.server.ts",
+		"src/routes/+layout.server.ts"
+	],
+	"/members": [
+		"src/routes/members/+page.server.ts",
+		"src/routes/+layout.server.ts"
+	],
+	"/policy": [
+		"src/routes/policy/+page.server.ts",
+		"src/routes/+layout.server.ts"
+	]
+}

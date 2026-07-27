@@ -16,7 +16,7 @@ export class ConfigSettingsPage extends BasePage {
 
   // Client Settings
   readonly dropExcessRequestsSwitch: Locator
-  readonly dumpErrorsInConsoleLogsSwitch: Locator
+  readonly enableLiteLLMFallbacksSwitch: Locator
   readonly disableDBPingsSwitch: Locator
   readonly asyncJobResultTtlInput: Locator
 
@@ -51,7 +51,7 @@ export class ConfigSettingsPage extends BasePage {
 
     // Client Settings locators
     this.dropExcessRequestsSwitch = page.locator('#drop-excess-requests')
-    this.dumpErrorsInConsoleLogsSwitch = page.getByTestId('client-settings-dump-errors-switch')
+    this.enableLiteLLMFallbacksSwitch = page.locator('#enable-litellm-fallbacks')
     this.disableDBPingsSwitch = page.locator('#disable-db-pings-in-health')
     this.asyncJobResultTtlInput = page.getByTestId('client-settings-async-job-result-ttl-input')
 
@@ -77,10 +77,10 @@ export class ConfigSettingsPage extends BasePage {
     this.observabilityToggles = page.locator('button[role="switch"]')
 
     // Pricing Config locators
-    this.pricingConfigView = page.getByTestId('model-settings-view')
+    this.pricingConfigView = page.getByTestId('pricing-config-view')
     this.pricingDatasheetUrlInput = page.getByTestId('pricing-datasheet-url-input')
     this.pricingForceSyncBtn = page.getByTestId('pricing-force-sync-btn')
-    this.pricingSaveBtn = page.getByTestId('model-settings-save-btn')
+    this.pricingSaveBtn = page.getByTestId('pricing-save-btn')
   }
 
   async goto(path: string): Promise<void> {
@@ -244,8 +244,8 @@ export class ConfigSettingsPage extends BasePage {
     await this.dropExcessRequestsSwitch.click()
   }
 
-  async toggleDumpErrorsInConsoleLogs(): Promise<void> {
-    await this.dumpErrorsInConsoleLogsSwitch.click()
+  async toggleLiteLLMFallbacks(): Promise<void> {
+    await this.enableLiteLLMFallbacksSwitch.click()
   }
 
   async toggleDisableDBPings(): Promise<void> {

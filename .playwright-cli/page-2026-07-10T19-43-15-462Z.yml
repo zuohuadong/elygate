@@ -1,0 +1,86 @@
+- generic [ref=e2]:
+  - region "Notifications alt+T"
+  - generic [ref=e3]:
+    - generic [ref=e6]:
+      - generic [ref=e8]:
+        - link [ref=e9] [cursor=pointer]:
+          - /url: /workspace/logs
+          - img "Elygate" [ref=e10]
+        - button "Collapse sidebar" [ref=e11]
+      - generic [ref=e16]:
+        - textbox "Search sidebar navigation" [ref=e20]:
+          - /placeholder: Search...
+        - generic:
+          - generic: ⌘
+          - generic: K
+      - generic [ref=e21]:
+        - list [ref=e24]:
+          - listitem [ref=e25]:
+            - button "Observability" [ref=e26] [cursor=pointer]
+          - listitem [ref=e40]:
+            - button "Models" [ref=e41] [cursor=pointer]
+            - list [ref=e50]:
+              - listitem [ref=e51]:
+                - link "Model Catalog" [ref=e52] [cursor=pointer]:
+                  - /url: /workspace/model-catalog
+              - listitem [ref=e60]:
+                - link "Model Providers" [ref=e61] [cursor=pointer]:
+                  - /url: /workspace/providers
+              - listitem [ref=e74]:
+                - link "Budgets & Limits" [ref=e75] [cursor=pointer]:
+                  - /url: /workspace/model-limits
+              - listitem [ref=e81]:
+                - link "Routing Rules" [ref=e82] [cursor=pointer]:
+                  - /url: /workspace/routing-rules
+              - listitem [ref=e90]:
+                - link "Complexity Router" [ref=e91] [cursor=pointer]:
+                  - /url: /workspace/complexity-router
+              - listitem [ref=e101]:
+                - link "Circuit Breaker" [ref=e102] [cursor=pointer]:
+                  - /url: /workspace/circuit-breaker
+              - listitem [ref=e111]:
+                - link "Pricing Overrides" [ref=e112] [cursor=pointer]:
+                  - /url: /workspace/custom-pricing/overrides
+              - listitem [ref=e116]:
+                - link "Model Settings" [ref=e117] [cursor=pointer]:
+                  - /url: /workspace/custom-pricing
+          - listitem [ref=e123]:
+            - button "MCP clients icon MCP Gateway" [ref=e124] [cursor=pointer]:
+              - generic [ref=e126]:
+                - img "MCP clients icon" [ref=e127]
+                - generic [ref=e130]: MCP Gateway
+          - listitem [ref=e133]:
+            - link "Plugins" [ref=e134] [cursor=pointer]:
+              - /url: /workspace/plugins
+          - listitem [ref=e140]:
+            - button "Alerting" [ref=e141] [cursor=pointer]
+          - listitem [ref=e152]:
+            - button "Governance" [ref=e153] [cursor=pointer]
+          - listitem [ref=e161]:
+            - button "Guardrails" [ref=e162] [cursor=pointer]
+          - listitem [ref=e173]:
+            - link "Cluster Config" [ref=e174] [cursor=pointer]:
+              - /url: /workspace/cluster
+          - listitem [ref=e183]:
+            - button "Adaptive Routing" [ref=e184] [cursor=pointer]
+          - listitem [ref=e196]:
+            - button "Settings" [ref=e197] [cursor=pointer]
+        - generic [ref=e206]:
+          - generic [ref=e210]:
+            - generic [ref=e212]:
+              - generic [ref=e213]: Need help with production setup?
+              - button "Dismiss" [ref=e214]
+            - generic [ref=e218]:
+              - text: Review the Elygate deployment profile before connecting production providers.Read the deployment guide
+              - link "here" [ref=e219] [cursor=pointer]:
+                - /url: https://github.com/zuohuadong/elygate/tree/dev/deploy/elygate-oss
+              - text: .
+          - generic [ref=e221]:
+            - link "GitHub Repository" [ref=e222] [cursor=pointer]:
+              - /url: https://github.com/zuohuadong/elygate
+            - link "Report a bug" [ref=e226] [cursor=pointer]:
+              - /url: https://github.com/zuohuadong/elygate/issues/new?title=%5BBug%5D%20
+            - link "Full Documentation" [ref=e237] [cursor=pointer]:
+              - /url: https://github.com/zuohuadong/elygate/tree/dev/docs
+            - button "Toggle theme" [ref=e241] [cursor=pointer]
+    - main [ref=e244]

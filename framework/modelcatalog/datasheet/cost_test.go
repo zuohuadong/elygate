@@ -1,6 +1,7 @@
 package datasheet
 
 import (
+	"encoding/json"
 	"testing"
 
 	bifrost "github.com/maximhq/bifrost/core"
@@ -151,6 +152,126 @@ func TestComputeTextCost_WithCachedPromptTokens(t *testing.T) {
 	// Output: 500*0.000015 = 0.0075
 	// Total: 0.0021 + 0.0075 = 0.0096
 	assert.InDelta(t, 0.0096, cost, 1e-12)
+}
+
+// gpt56SolPricing returns the full tiered pricing for gpt-5.6-sol (per the OpenAI
+// pricing page), including flex/priority and the 272k context tier used to
+// exercise the cache-write (cache-creation) tiering added with gpt-5.6.
+func gpt56SolPricing() configstoreTables.TableModelPricing {
+	p := chatPricing(0.000005, 0.00003) // standard input $5/M, output $30/M
+	p.InputCostPerTokenAbove272kTokens = bifrost.Ptr(0.00001)
+	p.InputCostPerTokenFlex = bifrost.Ptr(0.0000025)
+	p.InputCostPerTokenFlexAbove272kTokens = bifrost.Ptr(0.000005)
+	p.InputCostPerTokenPriority = bifrost.Ptr(0.00001)
+	p.OutputCostPerTokenAbove272kTokens = bifrost.Ptr(0.000045)
+	p.OutputCostPerTokenFlex = bifrost.Ptr(0.000015)
+	p.OutputCostPerTokenFlexAbove272kTokens = bifrost.Ptr(0.0000225)
+	p.OutputCostPerTokenPriority = bifrost.Ptr(0.00006)
+	p.CacheReadInputTokenCost = bifrost.Ptr(0.0000005)
+	p.CacheReadInputTokenCostAbove272kTokens = bifrost.Ptr(0.000001)
+	p.CacheReadInputTokenCostFlex = bifrost.Ptr(0.00000025)
+	p.CacheReadInputTokenCostFlexAbove272kTokens = bifrost.Ptr(0.0000005)
+	p.CacheReadInputTokenCostPriority = bifrost.Ptr(0.000001)
+	p.CacheCreationInputTokenCost = bifrost.Ptr(0.00000625)
+	p.CacheCreationInputTokenCostAbove272kTokens = bifrost.Ptr(0.0000125)
+	p.CacheCreationInputTokenCostFlex = bifrost.Ptr(0.000003125)
+	p.CacheCreationInputTokenCostFlexAbove272kTokens = bifrost.Ptr(0.00000625)
+	p.CacheCreationInputTokenCostPriority = bifrost.Ptr(0.0000125)
+	return p
+}
+
+// The reported bug scenario: a fresh-cache gpt-5.6-sol turn now returns and bills
+// cache-write tokens at the base cache-creation rate.
+func TestComputeTextCost_GPT56_StandardCacheWrite(t *testing.T) {
+	p := gpt56SolPricing()
+	usage := &schemas.BifrostLLMUsage{
+		PromptTokens:     28006,
+		CompletionTokens: 443,
+		TotalTokens:      28449,
+		PromptTokensDetails: &schemas.ChatPromptTokensDetails{
+			CachedReadTokens:  0,
+			CachedWriteTokens: 28003,
+		},
+	}
+	cost := computeTextCost(&p, usage, serviceTier{})
+	// input: (28006-28003)*0.000005 = 0.000015
+	// write: 28003*0.00000625 = 0.17501875
+	// output: 443*0.00003 = 0.01329
+	assert.InDelta(t, 0.000015+0.17501875+0.01329, cost, 1e-9)
+}
+
+func TestComputeTextCost_GPT56_StandardCacheWriteAbove272k(t *testing.T) {
+	p := gpt56SolPricing()
+	usage := &schemas.BifrostLLMUsage{
+		PromptTokens:        300000,
+		CompletionTokens:    1000,
+		TotalTokens:         301000,
+		PromptTokensDetails: &schemas.ChatPromptTokensDetails{CachedWriteTokens: 100000},
+	}
+	cost := computeTextCost(&p, usage, serviceTier{})
+	// input: 200000*0.00001 = 2.0; write: 100000*0.0000125 = 1.25; output: 1000*0.000045 = 0.045
+	assert.InDelta(t, 2.0+1.25+0.045, cost, 1e-9)
+}
+
+func TestComputeTextCost_GPT56_FlexTier(t *testing.T) {
+	p := gpt56SolPricing()
+	usage := &schemas.BifrostLLMUsage{
+		PromptTokens:     10000,
+		CompletionTokens: 1000,
+		TotalTokens:      11000,
+		PromptTokensDetails: &schemas.ChatPromptTokensDetails{
+			CachedReadTokens:  4000,
+			CachedWriteTokens: 2000,
+		},
+	}
+	cost := computeTextCost(&p, usage, serviceTier{isFlex: true})
+	// input: 4000*0.0000025 = 0.01; read: 4000*0.00000025 = 0.001
+	// write: 2000*0.000003125 = 0.00625; output: 1000*0.000015 = 0.015
+	assert.InDelta(t, 0.01+0.001+0.00625+0.015, cost, 1e-12)
+}
+
+func TestComputeTextCost_GPT56_FlexTierAbove272k(t *testing.T) {
+	p := gpt56SolPricing()
+	usage := &schemas.BifrostLLMUsage{
+		PromptTokens:     300000,
+		CompletionTokens: 1000,
+		TotalTokens:      301000,
+		PromptTokensDetails: &schemas.ChatPromptTokensDetails{
+			CachedReadTokens:  100000,
+			CachedWriteTokens: 50000,
+		},
+	}
+	cost := computeTextCost(&p, usage, serviceTier{isFlex: true})
+	// input: 150000*0.000005 = 0.75; read: 100000*0.0000005 = 0.05
+	// write: 50000*0.00000625 = 0.3125; output: 1000*0.0000225 = 0.0225
+	assert.InDelta(t, 0.75+0.05+0.3125+0.0225, cost, 1e-9)
+}
+
+func TestComputeTextCost_GPT56_PriorityTier(t *testing.T) {
+	p := gpt56SolPricing()
+	usage := &schemas.BifrostLLMUsage{
+		PromptTokens:     10000,
+		CompletionTokens: 1000,
+		TotalTokens:      11000,
+		PromptTokensDetails: &schemas.ChatPromptTokensDetails{
+			CachedReadTokens:  4000,
+			CachedWriteTokens: 2000,
+		},
+	}
+	cost := computeTextCost(&p, usage, serviceTier{isPriority: true})
+	// input: 4000*0.00001 = 0.04; read: 4000*0.000001 = 0.004
+	// write: 2000*0.0000125 = 0.025; output: 1000*0.00006 = 0.06
+	assert.InDelta(t, 0.04+0.004+0.025+0.06, cost, 1e-12)
+}
+
+// Regression: a flex model without a flex-272k column keeps the flat flex rate
+// above 272k (no new tiering leaks into existing flex models).
+func TestComputeTextCost_FlexFlatAbove272kWhenNoFlexTierColumn(t *testing.T) {
+	p := chatPricing(0.000005, 0.00003)
+	p.InputCostPerTokenFlex = bifrost.Ptr(0.0000025)
+	usage := &schemas.BifrostLLMUsage{PromptTokens: 300000, TotalTokens: 300000}
+	cost := computeTextCost(&p, usage, serviceTier{isFlex: true})
+	assert.InDelta(t, 300000*0.0000025, cost, 1e-9)
 }
 
 func TestComputeTextCost_FastMode(t *testing.T) {
@@ -1925,6 +2046,72 @@ func TestGetPricing_RealtimeFallsBackToChat(t *testing.T) {
 	assert.Equal(t, 0.000005, derefF(p.InputCostPerToken))
 }
 
+func TestGetPricing_ChatFallsBackToResponses(t *testing.T) {
+	s := testStoreWithPricing(map[string]configstoreTables.TableModelPricing{
+		makeKey("gpt-4o", "openai", "responses"): chatPricing(0.000005, 0.000015),
+	})
+	p := s.resolvePricing(schemas.RoutingInfo{Provider: "openai", Model: "gpt-4o"}, schemas.ChatCompletionRequest, LookupScopes{Provider: "openai"})
+	require.NotNil(t, p)
+	assert.Equal(t, 0.000005, derefF(p.InputCostPerToken))
+}
+
+func TestGetPricing_ChatStreamFallsBackToResponses(t *testing.T) {
+	s := testStoreWithPricing(map[string]configstoreTables.TableModelPricing{
+		makeKey("gpt-4o", "openai", "responses"): chatPricing(0.000005, 0.000015),
+	})
+	p := s.resolvePricing(schemas.RoutingInfo{Provider: "openai", Model: "gpt-4o"}, schemas.ChatCompletionStreamRequest, LookupScopes{Provider: "openai"})
+	require.NotNil(t, p)
+	assert.Equal(t, 0.000005, derefF(p.InputCostPerToken))
+}
+
+func TestGetPricing_BedrockMantleChatStreamFallsBackToBedrockResponses(t *testing.T) {
+	s := testStoreWithPricing(map[string]configstoreTables.TableModelPricing{
+		makeKey("openai.gpt-5.5", "bedrock", "responses"): chatPricing(0.0000055, 0.000033),
+	})
+	// The datasheet files openai.gpt-5.5 as responses-only, but bedrock serves it
+	// over chat completions too: bedrock_mantle folds onto bedrock, chat mode
+	// misses, and the responses row is used.
+	p := s.resolvePricing(schemas.RoutingInfo{Provider: "bedrock_mantle", Model: "openai.gpt-5.5"}, schemas.ChatCompletionStreamRequest, LookupScopes{Provider: "bedrock_mantle"})
+	require.NotNil(t, p)
+	assert.Equal(t, 0.0000055, derefF(p.InputCostPerToken))
+	assert.Equal(t, 0.000033, derefF(p.OutputCostPerToken))
+}
+
+func TestGetPricing_BedrockChatAddsOpenAIPrefixThenFallsBackToResponses(t *testing.T) {
+	s := testStoreWithPricing(map[string]configstoreTables.TableModelPricing{
+		makeKey("openai.gpt-5.5", "bedrock", "responses"): chatPricing(0.0000055, 0.000033),
+	})
+	// Bare model name + chat request: the openai. prefix retry fires, then the
+	// prefixed key falls back to responses mode.
+	p := s.resolvePricing(schemas.RoutingInfo{Provider: "bedrock", Model: "gpt-5.5"}, schemas.ChatCompletionRequest, LookupScopes{Provider: "bedrock"})
+	require.NotNil(t, p)
+	assert.Equal(t, 0.0000055, derefF(p.InputCostPerToken))
+}
+
+func TestGetPricing_ExactModeWinsOverFallback(t *testing.T) {
+	s := testStoreWithPricing(map[string]configstoreTables.TableModelPricing{
+		makeKey("gpt-4o", "openai", "chat"):      chatPricing(0.000005, 0.000015),
+		makeKey("gpt-4o", "openai", "responses"): chatPricing(0.000009, 0.000036),
+	})
+	chat := s.resolvePricing(schemas.RoutingInfo{Provider: "openai", Model: "gpt-4o"}, schemas.ChatCompletionRequest, LookupScopes{Provider: "openai"})
+	require.NotNil(t, chat)
+	assert.Equal(t, 0.000005, derefF(chat.InputCostPerToken))
+
+	responses := s.resolvePricing(schemas.RoutingInfo{Provider: "openai", Model: "gpt-4o"}, schemas.ResponsesRequest, LookupScopes{Provider: "openai"})
+	require.NotNil(t, responses)
+	assert.Equal(t, 0.000009, derefF(responses.InputCostPerToken))
+}
+
+func TestGetPricing_GeminiChatFallsBackToVertexResponses(t *testing.T) {
+	s := testStoreWithPricing(map[string]configstoreTables.TableModelPricing{
+		makeKey("gemini-2.0-flash", "vertex", "responses"): chatPricing(0.0000001, 0.0000004),
+	})
+	// gemini provider + chat request → try vertex + chat → try vertex + responses
+	p := s.resolvePricing(schemas.RoutingInfo{Provider: "gemini", Model: "gemini-2.0-flash"}, schemas.ChatCompletionRequest, LookupScopes{Provider: "gemini"})
+	require.NotNil(t, p)
+	assert.Equal(t, 0.0000001, derefF(p.InputCostPerToken))
+}
+
 func TestGetPricing_GeminiResponsesFallsBackToVertexChat(t *testing.T) {
 	s := testStoreWithPricing(map[string]configstoreTables.TableModelPricing{
 		makeKey("gemini-2.0-flash", "vertex", "chat"): chatPricing(0.0000001, 0.0000004),
@@ -3149,4 +3336,491 @@ func TestCalculateCostForUsage_NilUsageIsZero(t *testing.T) {
 		makeKey("gpt-4o", "openai", "chat"): chatPricing(0.000005, 0.000015),
 	})
 	assert.Equal(t, 0.0, s.CalculateCostForUsage(nil, schemas.OpenAI, "gpt-4o", schemas.ChatCompletionRequest, nil))
+}
+
+// TestCalculateCostForUsage_AppliesServedTier verifies the cancel/failure billing
+// path honors the served Anthropic tier carried internally on the usage (fast mode
+// + data residency), so interrupted fast or US-residency streams keep their
+// multiplier instead of being billed as standard/global.
+func TestCalculateCostForUsage_AppliesServedTier(t *testing.T) {
+	p := chatPricing(0.000005, 0.000015) // base $5/$15 per MTok
+	p.InputCostPerTokenFast = bifrost.Ptr(0.00001)
+	p.OutputCostPerTokenFast = bifrost.Ptr(0.00003)
+	p.InferenceGeoUSMultiplier = bifrost.Ptr(1.1)
+	s := testStoreWithPricing(map[string]configstoreTables.TableModelPricing{
+		makeKey("claude-x", "anthropic", "chat"): p,
+	})
+	mk := func(speed, geo *string) *schemas.BifrostLLMUsage {
+		return &schemas.BifrostLLMUsage{PromptTokens: 1000, CompletionTokens: 500, TotalTokens: 1500, Speed: speed, InferenceGeo: geo}
+	}
+	cost := func(u *schemas.BifrostLLMUsage) float64 {
+		return s.CalculateCostForUsage(u, schemas.Anthropic, "claude-x", schemas.ChatCompletionRequest, nil)
+	}
+	fast, us := "fast", "us"
+
+	// No served tier → base rate.
+	assert.InDelta(t, 1000*0.000005+500*0.000015, cost(mk(nil, nil)), 1e-12)
+	// speed:"fast" → flat fast rate.
+	assert.InDelta(t, 1000*0.00001+500*0.00003, cost(mk(&fast, nil)), 1e-12)
+	// inference_geo:"us" → 1.1x on base.
+	assert.InDelta(t, (1000*0.000005+500*0.000015)*1.1, cost(mk(nil, &us)), 1e-12)
+}
+
+// ===========================================================================
+// Golden per-model OpenAI pricing tests
+//
+// These feed the exact published OpenAI rates through the real datasheet
+// JSON -> TableModelPricing conversion (convertEntryToTablePricing) and assert
+// the invoice cost for every service tier and context window. They pin two
+// things at once: the rate-selection ladders in cost.go, and the field wiring
+// that carries each new rate from the datasheet JSON into the pricing row.
+//
+// NOTE: the numbers below are the source of truth for *expected billing*,
+// transcribed from the OpenAI pricing page. The live per-model values arrive
+// via the datasheet sync (not this repo), so these tests validate the compute
+// engine + wiring, not the sync payload.
+// ===========================================================================
+
+// pricingRowFromDatasheetJSON parses a datasheet entry (the shape stored in the
+// synced pricing catalog) and runs the production JSON -> row conversion, so a
+// dropped json tag or a missing conversion-map line would fail these tests.
+func pricingRowFromDatasheetJSON(t *testing.T, modelKey, blob string) configstoreTables.TableModelPricing {
+	t.Helper()
+	var entry Entry
+	require.NoError(t, json.Unmarshal([]byte(blob), &entry))
+	return convertEntryToTablePricing(modelKey, entry)
+}
+
+// Datasheet entries (pricing fields only) for the gpt-5.6 flagship family.
+// Cache writes are the cache_creation_* fields. Short/long context are the
+// base vs _above_272k rates.
+const (
+	gpt56SolDatasheet = `{
+		"provider": "openai", "mode": "chat", "base_model": "gpt-5.6-sol",
+		"input_cost_per_token": 0.000005,
+		"input_cost_per_token_above_272k_tokens": 0.00001,
+		"input_cost_per_token_flex": 0.0000025,
+		"input_cost_per_token_flex_above_272k_tokens": 0.000005,
+		"input_cost_per_token_priority": 0.00001,
+		"output_cost_per_token": 0.00003,
+		"output_cost_per_token_above_272k_tokens": 0.000045,
+		"output_cost_per_token_flex": 0.000015,
+		"output_cost_per_token_flex_above_272k_tokens": 0.0000225,
+		"output_cost_per_token_priority": 0.00006,
+		"cache_read_input_token_cost": 0.0000005,
+		"cache_read_input_token_cost_above_272k_tokens": 0.000001,
+		"cache_read_input_token_cost_flex": 0.00000025,
+		"cache_read_input_token_cost_flex_above_272k_tokens": 0.0000005,
+		"cache_read_input_token_cost_priority": 0.000001,
+		"cache_creation_input_token_cost": 0.00000625,
+		"cache_creation_input_token_cost_above_272k_tokens": 0.0000125,
+		"cache_creation_input_token_cost_flex": 0.000003125,
+		"cache_creation_input_token_cost_flex_above_272k_tokens": 0.00000625,
+		"cache_creation_input_token_cost_priority": 0.0000125
+	}`
+	gpt56TerraDatasheet = `{
+		"provider": "openai", "mode": "chat", "base_model": "gpt-5.6-terra",
+		"input_cost_per_token": 0.0000025,
+		"input_cost_per_token_above_272k_tokens": 0.000005,
+		"input_cost_per_token_flex": 0.00000125,
+		"input_cost_per_token_flex_above_272k_tokens": 0.0000025,
+		"input_cost_per_token_priority": 0.000005,
+		"output_cost_per_token": 0.000015,
+		"output_cost_per_token_above_272k_tokens": 0.0000225,
+		"output_cost_per_token_flex": 0.0000075,
+		"output_cost_per_token_flex_above_272k_tokens": 0.00001125,
+		"output_cost_per_token_priority": 0.00003,
+		"cache_read_input_token_cost": 0.00000025,
+		"cache_read_input_token_cost_above_272k_tokens": 0.0000005,
+		"cache_read_input_token_cost_flex": 0.000000125,
+		"cache_read_input_token_cost_flex_above_272k_tokens": 0.00000025,
+		"cache_read_input_token_cost_priority": 0.0000005,
+		"cache_creation_input_token_cost": 0.000003125,
+		"cache_creation_input_token_cost_above_272k_tokens": 0.00000625,
+		"cache_creation_input_token_cost_flex": 0.0000015625,
+		"cache_creation_input_token_cost_flex_above_272k_tokens": 0.000003125,
+		"cache_creation_input_token_cost_priority": 0.00000625
+	}`
+	gpt56LunaDatasheet = `{
+		"provider": "openai", "mode": "chat", "base_model": "gpt-5.6-luna",
+		"input_cost_per_token": 0.000001,
+		"input_cost_per_token_above_272k_tokens": 0.000002,
+		"input_cost_per_token_flex": 0.0000005,
+		"input_cost_per_token_flex_above_272k_tokens": 0.000001,
+		"input_cost_per_token_priority": 0.000002,
+		"output_cost_per_token": 0.000006,
+		"output_cost_per_token_above_272k_tokens": 0.000009,
+		"output_cost_per_token_flex": 0.000003,
+		"output_cost_per_token_flex_above_272k_tokens": 0.0000045,
+		"output_cost_per_token_priority": 0.000012,
+		"cache_read_input_token_cost": 0.0000001,
+		"cache_read_input_token_cost_above_272k_tokens": 0.0000002,
+		"cache_read_input_token_cost_flex": 0.00000005,
+		"cache_read_input_token_cost_flex_above_272k_tokens": 0.0000001,
+		"cache_read_input_token_cost_priority": 0.0000002,
+		"cache_creation_input_token_cost": 0.00000125,
+		"cache_creation_input_token_cost_above_272k_tokens": 0.0000025,
+		"cache_creation_input_token_cost_flex": 0.000000625,
+		"cache_creation_input_token_cost_flex_above_272k_tokens": 0.00000125,
+		"cache_creation_input_token_cost_priority": 0.0000025
+	}`
+	// gpt-5.5: long-context tiering but NO published cache-write rate ("-").
+	gpt55Datasheet = `{
+		"provider": "openai", "mode": "chat", "base_model": "gpt-5.5",
+		"input_cost_per_token": 0.000005,
+		"input_cost_per_token_above_272k_tokens": 0.00001,
+		"input_cost_per_token_flex": 0.0000025,
+		"input_cost_per_token_flex_above_272k_tokens": 0.000005,
+		"input_cost_per_token_priority": 0.0000125,
+		"output_cost_per_token": 0.00003,
+		"output_cost_per_token_above_272k_tokens": 0.000045,
+		"output_cost_per_token_flex": 0.000015,
+		"output_cost_per_token_flex_above_272k_tokens": 0.0000225,
+		"output_cost_per_token_priority": 0.000075,
+		"cache_read_input_token_cost": 0.0000005,
+		"cache_read_input_token_cost_above_272k_tokens": 0.000001,
+		"cache_read_input_token_cost_flex": 0.00000025,
+		"cache_read_input_token_cost_flex_above_272k_tokens": 0.0000005,
+		"cache_read_input_token_cost_priority": 0.00000125
+	}`
+	// gpt-5.4-mini: NO long-context tier and NO cache-write rate.
+	gpt54MiniDatasheet = `{
+		"provider": "openai", "mode": "chat", "base_model": "gpt-5.4-mini",
+		"input_cost_per_token": 0.00000075,
+		"input_cost_per_token_flex": 0.000000375,
+		"input_cost_per_token_priority": 0.0000015,
+		"output_cost_per_token": 0.0000045,
+		"output_cost_per_token_flex": 0.00000225,
+		"output_cost_per_token_priority": 0.000009,
+		"cache_read_input_token_cost": 0.000000075,
+		"cache_read_input_token_cost_flex": 0.0000000375,
+		"cache_read_input_token_cost_priority": 0.00000015
+	}`
+)
+
+// TestGoldenOpenAIPricing_GPT56Family asserts the exact invoice cost for every
+// (tier x context) cell of the gpt-5.6 pricing tables, including cache read and
+// cache write. Each row hardcodes the rate that *should* apply, so a mis-selected
+// tier or context bucket fails the assertion.
+func TestGoldenOpenAIPricing_GPT56Family(t *testing.T) {
+	sol := pricingRowFromDatasheetJSON(t, "gpt-5.6-sol", gpt56SolDatasheet)
+	terra := pricingRowFromDatasheetJSON(t, "gpt-5.6-terra", gpt56TerraDatasheet)
+	luna := pricingRowFromDatasheetJSON(t, "gpt-5.6-luna", gpt56LunaDatasheet)
+
+	// Short context stays under 272k; long context crosses it.
+	const (
+		shortPrompt, shortRead, shortWrite, shortOut = 10000, 4000, 2000, 1000
+		longPrompt, longRead, longWrite, longOut     = 300000, 100000, 50000, 1000
+	)
+
+	type rates struct{ in, cacheRead, cacheWrite, out float64 }
+	cases := []struct {
+		name    string
+		pricing configstoreTables.TableModelPricing
+		tier    serviceTier
+		long    bool
+		r       rates
+	}{
+		// gpt-5.6-sol
+		{"sol/standard/short", sol, serviceTier{}, false, rates{0.000005, 0.0000005, 0.00000625, 0.00003}},
+		{"sol/standard/long", sol, serviceTier{}, true, rates{0.00001, 0.000001, 0.0000125, 0.000045}},
+		{"sol/flex/short", sol, serviceTier{isFlex: true}, false, rates{0.0000025, 0.00000025, 0.000003125, 0.000015}},
+		{"sol/flex/long", sol, serviceTier{isFlex: true}, true, rates{0.000005, 0.0000005, 0.00000625, 0.0000225}},
+		{"sol/priority/short", sol, serviceTier{isPriority: true}, false, rates{0.00001, 0.000001, 0.0000125, 0.00006}},
+		// gpt-5.6-terra
+		{"terra/standard/short", terra, serviceTier{}, false, rates{0.0000025, 0.00000025, 0.000003125, 0.000015}},
+		{"terra/standard/long", terra, serviceTier{}, true, rates{0.000005, 0.0000005, 0.00000625, 0.0000225}},
+		{"terra/flex/short", terra, serviceTier{isFlex: true}, false, rates{0.00000125, 0.000000125, 0.0000015625, 0.0000075}},
+		{"terra/flex/long", terra, serviceTier{isFlex: true}, true, rates{0.0000025, 0.00000025, 0.000003125, 0.00001125}},
+		{"terra/priority/short", terra, serviceTier{isPriority: true}, false, rates{0.000005, 0.0000005, 0.00000625, 0.00003}},
+		// gpt-5.6-luna
+		{"luna/standard/short", luna, serviceTier{}, false, rates{0.000001, 0.0000001, 0.00000125, 0.000006}},
+		{"luna/standard/long", luna, serviceTier{}, true, rates{0.000002, 0.0000002, 0.0000025, 0.000009}},
+		{"luna/flex/short", luna, serviceTier{isFlex: true}, false, rates{0.0000005, 0.00000005, 0.000000625, 0.000003}},
+		{"luna/flex/long", luna, serviceTier{isFlex: true}, true, rates{0.000001, 0.0000001, 0.00000125, 0.0000045}},
+		{"luna/priority/short", luna, serviceTier{isPriority: true}, false, rates{0.000002, 0.0000002, 0.0000025, 0.000012}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			prompt, read, write, out := shortPrompt, shortRead, shortWrite, shortOut
+			if tc.long {
+				prompt, read, write, out = longPrompt, longRead, longWrite, longOut
+			}
+			usage := &schemas.BifrostLLMUsage{
+				PromptTokens:     prompt,
+				CompletionTokens: out,
+				TotalTokens:      prompt + out,
+				PromptTokensDetails: &schemas.ChatPromptTokensDetails{
+					CachedReadTokens:  read,
+					CachedWriteTokens: write,
+				},
+			}
+			p := tc.pricing
+			cost := computeTextCost(&p, usage, tc.tier)
+			nonCached := prompt - read - write
+			want := float64(nonCached)*tc.r.in + float64(read)*tc.r.cacheRead + float64(write)*tc.r.cacheWrite + float64(out)*tc.r.out
+			assert.InDelta(t, want, cost, 1e-9)
+		})
+	}
+}
+
+// TestGoldenOpenAIPricing_NoCacheWriteModels covers models that OpenAI prices
+// without a cache-write rate (gpt-5.5) and without a long-context tier
+// (gpt-5.4-mini): cache-write tokens fall back to the input rate, and a >272k
+// request on a model with no long-context rate stays on the base rate.
+func TestGoldenOpenAIPricing_NoCacheWriteModels(t *testing.T) {
+	gpt55 := pricingRowFromDatasheetJSON(t, "gpt-5.5", gpt55Datasheet)
+	gpt54mini := pricingRowFromDatasheetJSON(t, "gpt-5.4-mini", gpt54MiniDatasheet)
+
+	// gpt-5.5 has no cache-write rate: write tokens bill at the (long-context) input rate.
+	t.Run("gpt-5.5/standard/long: cache-write falls back to input rate", func(t *testing.T) {
+		usage := &schemas.BifrostLLMUsage{
+			PromptTokens: 300000, CompletionTokens: 1000, TotalTokens: 301000,
+			PromptTokensDetails: &schemas.ChatPromptTokensDetails{CachedReadTokens: 100000, CachedWriteTokens: 50000},
+		}
+		p := gpt55
+		cost := computeTextCost(&p, usage, serviceTier{})
+		// non-cached 150000*0.00001 + read 100000*0.000001 + write 50000*0.00001 (input fallback) + out 1000*0.000045
+		want := 150000*0.00001 + 100000*0.000001 + 50000*0.00001 + 1000*0.000045
+		assert.InDelta(t, want, cost, 1e-9)
+	})
+
+	t.Run("gpt-5.5/flex/short", func(t *testing.T) {
+		usage := &schemas.BifrostLLMUsage{
+			PromptTokens: 10000, CompletionTokens: 1000, TotalTokens: 11000,
+			PromptTokensDetails: &schemas.ChatPromptTokensDetails{CachedReadTokens: 4000},
+		}
+		p := gpt55
+		cost := computeTextCost(&p, usage, serviceTier{isFlex: true})
+		want := 6000*0.0000025 + 4000*0.00000025 + 1000*0.000015
+		assert.InDelta(t, want, cost, 1e-12)
+	})
+
+	t.Run("gpt-5.5/priority/short", func(t *testing.T) {
+		usage := &schemas.BifrostLLMUsage{
+			PromptTokens: 10000, CompletionTokens: 1000, TotalTokens: 11000,
+			PromptTokensDetails: &schemas.ChatPromptTokensDetails{CachedReadTokens: 4000},
+		}
+		p := gpt55
+		cost := computeTextCost(&p, usage, serviceTier{isPriority: true})
+		want := 6000*0.0000125 + 4000*0.00000125 + 1000*0.000075
+		assert.InDelta(t, want, cost, 1e-9)
+	})
+
+	// gpt-5.4-mini has no long-context rate: a >272k request must use the base rate.
+	t.Run("gpt-5.4-mini/standard/above-272k uses base rate", func(t *testing.T) {
+		usage := &schemas.BifrostLLMUsage{
+			PromptTokens: 300000, CompletionTokens: 1000, TotalTokens: 301000,
+			PromptTokensDetails: &schemas.ChatPromptTokensDetails{CachedReadTokens: 50000},
+		}
+		p := gpt54mini
+		cost := computeTextCost(&p, usage, serviceTier{})
+		want := 250000*0.00000075 + 50000*0.000000075 + 1000*0.0000045
+		assert.InDelta(t, want, cost, 1e-9)
+	})
+}
+
+// TestCalculateCost_GPT56_Responses_FlexLongContext_EndToEnd drives the full
+// pipeline for a gpt-5.6 Responses call: service_tier=flex + a >272k prompt with
+// cache writes, through tier detection, usage mapping, pricing lookup, and cost.
+func TestCalculateCost_GPT56_Responses_FlexLongContext_EndToEnd(t *testing.T) {
+	sol := pricingRowFromDatasheetJSON(t, "gpt-5.6-sol", gpt56SolDatasheet)
+	s := testStoreWithPricing(map[string]configstoreTables.TableModelPricing{
+		makeKey("gpt-5.6-sol", "openai", "responses"): sol,
+	})
+	tier := schemas.BifrostServiceTierFlex
+	resp := &schemas.BifrostResponse{
+		ResponsesResponse: &schemas.BifrostResponsesResponse{
+			ServiceTier: &tier,
+			Usage: &schemas.ResponsesResponseUsage{
+				InputTokens:  300000,
+				OutputTokens: 1000,
+				TotalTokens:  301000,
+				InputTokensDetails: &schemas.ResponsesResponseInputTokens{
+					CachedReadTokens:  100000,
+					CachedWriteTokens: 50000,
+				},
+			},
+			ExtraFields: schemas.BifrostResponseExtraFields{
+				RequestType: schemas.ResponsesRequest,
+				RoutingInfo: routingInfoFor(schemas.OpenAI, "gpt-5.6-sol"),
+			},
+		},
+	}
+	cost := s.CalculateCost(resp, nil)
+	// flex long-context: 150000*0.000005 + 100000*0.0000005 + 50000*0.00000625 + 1000*0.0000225
+	want := 150000*0.000005 + 100000*0.0000005 + 50000*0.00000625 + 1000*0.0000225
+	assert.InDelta(t, want, cost, 1e-9)
+}
+
+// TestTieredCacheCreationRate_PriorityWinsOver200kBand verifies a priority cache-write
+// request in the 200k–272k band uses the flat priority rate, not the standard >200k
+// rate. Priority has no long context (OpenAI does not offer priority >272k), so its
+// flat rate must take precedence over the standard context tiers.
+func TestTieredCacheCreationRate_PriorityWinsOver200kBand(t *testing.T) {
+	p := configstoreTables.TableModelPricing{
+		CacheCreationInputTokenCost:                bifrost.Ptr(0.000001),
+		CacheCreationInputTokenCostAbove200kTokens: bifrost.Ptr(0.000002), // standard >200k — must NOT win for priority
+		CacheCreationInputTokenCostPriority:        bifrost.Ptr(0.000005), // flat priority — must win
+	}
+	// 250k tokens: >200k and ≤272k.
+	assert.Equal(t, 0.000005, tieredCacheCreationInputTokenRate(&p, 250000, serviceTier{isPriority: true}))
+	// Non-priority at the same size still uses the standard >200k rate.
+	assert.Equal(t, 0.000002, tieredCacheCreationInputTokenRate(&p, 250000, serviceTier{}))
+}
+
+// ---------------------------------------------------------------------------
+// Anthropic server-side fallback: price the model that actually served
+// ---------------------------------------------------------------------------
+
+// seedFallbackPricing loads the real published Fable 5 / Opus 4.8 rates. Fable 5
+// is exactly 2x Opus 4.8 on both input and output, which is what makes pricing a
+// fallback-served turn against the requested model a clean doubling.
+func seedFallbackPricing(s *Store) {
+	s.pricingData[makeKey("claude-fable-5", "anthropic", "responses")] = configstoreTables.TableModelPricing{
+		Model: "claude-fable-5", Provider: "anthropic", Mode: "responses",
+		InputCostPerToken:  bifrost.Ptr(10.0 / 1_000_000),
+		OutputCostPerToken: bifrost.Ptr(50.0 / 1_000_000),
+	}
+	s.pricingData[makeKey("claude-opus-4-8", "anthropic", "responses")] = configstoreTables.TableModelPricing{
+		Model: "claude-opus-4-8", Provider: "anthropic", Mode: "responses",
+		InputCostPerToken:  bifrost.Ptr(5.0 / 1_000_000),
+		OutputCostPerToken: bifrost.Ptr(25.0 / 1_000_000),
+	}
+}
+
+// fallbackResponse mirrors a real server-side-fallback payload: the caller asked
+// for claude-fable-5, claude-opus-4-8 served, and the top-level usage mirrors the
+// serving attempt.
+func fallbackResponse(servingModel *string, in, out int) *schemas.BifrostResponse {
+	return &schemas.BifrostResponse{
+		ResponsesResponse: &schemas.BifrostResponsesResponse{
+			Model: "claude-opus-4-8",
+			Usage: &schemas.ResponsesResponseUsage{InputTokens: in, OutputTokens: out},
+			ExtraFields: schemas.BifrostResponseExtraFields{
+				RequestType: schemas.ResponsesRequest,
+				RoutingInfo: schemas.RoutingInfo{
+					Provider:                schemas.Anthropic,
+					Model:                   "claude-fable-5",
+					ServerSideFallbackModel: servingModel,
+				},
+			},
+		},
+	}
+}
+
+func TestCalculateCost_ServerSideFallback_PricesServingModel(t *testing.T) {
+	s := newTestStore()
+	seedFallbackPricing(s)
+
+	// Real payload: 31 in / 257 out, served by Opus after Fable declined.
+	// Before the fix this returned the Fable figure, which is exactly double.
+	resp := fallbackResponse(bifrost.Ptr("claude-opus-4-8"), 31, 257)
+	assert.InDelta(t, 31*(5.0/1_000_000)+257*(25.0/1_000_000), s.CalculateCost(resp, nil), 1e-12,
+		"expected Opus 4.8 rates (the serving model), not Fable 5")
+}
+
+// No handoff — the overwhelming majority of responses — must be untouched, even
+// though the response's own model field names a different model.
+func TestCalculateCost_NoServerSideFallback_UsesRoutingModel(t *testing.T) {
+	s := newTestStore()
+	seedFallbackPricing(s)
+
+	resp := fallbackResponse(nil, 31, 257)
+	assert.InDelta(t, 31*(10.0/1_000_000)+257*(50.0/1_000_000), s.CalculateCost(resp, nil), 1e-12,
+		"without a recorded handoff, pricing must stay on the requested model")
+}
+
+// An unpriceable serving model falls through the candidate chain to the
+// requested model rather than collapsing the cost to zero.
+func TestCalculateCost_ServerSideFallback_UnknownServingModelFallsThrough(t *testing.T) {
+	s := newTestStore()
+	seedFallbackPricing(s)
+
+	resp := fallbackResponse(bifrost.Ptr("claude-not-in-catalog"), 31, 257)
+	cost := s.CalculateCost(resp, nil)
+	assert.InDelta(t, 31*(10.0/1_000_000)+257*(50.0/1_000_000), cost, 1e-12)
+	assert.NotZero(t, cost, "an unknown serving model must not zero the cost")
+}
+
+// A key alias would otherwise win the lookup; the serving model outranks it.
+func TestCalculateCost_ServerSideFallback_OutranksKeyAlias(t *testing.T) {
+	s := newTestStore()
+	seedFallbackPricing(s)
+
+	resp := fallbackResponse(bifrost.Ptr("claude-opus-4-8"), 31, 257)
+	resp.ResponsesResponse.ExtraFields.RoutingInfo.Model = "my-fast-alias"
+	resp.ResponsesResponse.ExtraFields.RoutingInfo.ResolvedKeyAlias = &schemas.ResolvedKeyAlias{
+		ModelID:   "claude-fable-5",
+		ModelName: bifrost.Ptr("claude-fable-5"),
+	}
+
+	assert.InDelta(t, 31*(5.0/1_000_000)+257*(25.0/1_000_000), s.CalculateCost(resp, nil), 1e-12,
+		"the alias must not outrank the model that actually served")
+}
+
+// Overrides follow the serving model, so a negotiated rate for the model that
+// actually ran is the one that applies.
+func TestCalculateCost_ServerSideFallback_OverridesKeyOnServingModel(t *testing.T) {
+	s := newTestStore()
+	seedFallbackPricing(s)
+	providerID := "anthropic"
+	require.NoError(t, s.SetOverrides([]configstoreTables.TablePricingOverride{{
+		ID:               "opus-negotiated-rate",
+		ScopeKind:        string(ScopeKindProvider),
+		ProviderID:       &providerID,
+		MatchType:        string(MatchTypeExact),
+		Pattern:          "claude-opus-4-8",
+		RequestTypes:     []schemas.RequestType{schemas.ResponsesRequest},
+		PricingPatchJSON: `{"input_cost_per_token":0.000001,"output_cost_per_token":0.000002}`,
+	}}))
+
+	resp := fallbackResponse(bifrost.Ptr("claude-opus-4-8"), 31, 257)
+	assert.InDelta(t, 31*0.000001+257*0.000002, s.CalculateCost(resp, nil), 1e-12,
+		"an override for the serving model must apply to a fallback-served turn")
+}
+
+// Streaming is billed through CalculateCostForUsage, which receives only
+// (usage, provider, requestedModel) and never sees RoutingInfo. A live
+// fallback-served stream (38 in / 345 out, served by Opus after Fable declined)
+// was reported at $0.01763 — exactly the Fable figure, i.e. double.
+func TestCalculateCostForUsage_ServerSideFallback_PricesServingModel(t *testing.T) {
+	s := newTestStore()
+	seedFallbackPricing(s)
+
+	usage := &schemas.BifrostLLMUsage{
+		PromptTokens:            38,
+		CompletionTokens:        345,
+		TotalTokens:             383,
+		ServerSideFallbackModel: bifrost.Ptr("claude-opus-4-8"),
+	}
+	got := s.CalculateCostForUsage(usage, schemas.Anthropic, "claude-fable-5", schemas.ResponsesRequest, nil)
+	assert.InDelta(t, 38*(5.0/1_000_000)+345*(25.0/1_000_000), got, 1e-12,
+		"expected Opus 4.8 rates for a fallback-served stream")
+	assert.InDelta(t, 0.008815, got, 1e-6, "expected the Opus figure, not the $0.01763 Fable one")
+}
+
+// Sticky-routed stream: a single fallback_message iteration, 38 in / 320 out,
+// reported live at $0.01638 (Fable). Should be $0.00819.
+func TestCalculateCostForUsage_ServerSideFallback_StickyStream(t *testing.T) {
+	s := newTestStore()
+	seedFallbackPricing(s)
+
+	usage := &schemas.BifrostLLMUsage{
+		PromptTokens: 38, CompletionTokens: 320, TotalTokens: 358,
+		ServerSideFallbackModel: bifrost.Ptr("claude-opus-4-8"),
+	}
+	assert.InDelta(t, 0.00819,
+		s.CalculateCostForUsage(usage, schemas.Anthropic, "claude-fable-5", schemas.ResponsesRequest, nil), 1e-6)
+}
+
+// No handoff: the bare-usage path must keep pricing the requested model.
+func TestCalculateCostForUsage_NoServerSideFallback_Unchanged(t *testing.T) {
+	s := newTestStore()
+	seedFallbackPricing(s)
+
+	usage := &schemas.BifrostLLMUsage{PromptTokens: 38, CompletionTokens: 345, TotalTokens: 383}
+	assert.InDelta(t, 38*(10.0/1_000_000)+345*(50.0/1_000_000),
+		s.CalculateCostForUsage(usage, schemas.Anthropic, "claude-fable-5", schemas.ResponsesRequest, nil), 1e-12)
 }

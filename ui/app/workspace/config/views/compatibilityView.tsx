@@ -63,7 +63,7 @@ export default function CompatibilityView() {
 					Configure request conversions and compatibility fallbacks.{" "}
 					<a
 						className="text-primary underline"
-						href="https://github.com/zuohuadong/elygate/tree/dev/docs"
+						href="https://docs.getbifrost.ai/features/compat-plugin"
 						target="_blank"
 						rel="noopener noreferrer"
 						data-testid="litellm-docs-link"

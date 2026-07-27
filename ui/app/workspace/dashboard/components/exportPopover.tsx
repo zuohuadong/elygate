@@ -1,27 +1,11 @@
 import { Button } from "@/components/ui/button";
-import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuGroup,
-	DropdownMenuItem,
-	DropdownMenuTrigger,
-} from "@/components/ui/dropdownMenu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdownMenu";
 import { buildCSV, downloadCSV } from "@/lib/utils/csv";
 import { Download, FileSpreadsheet, FileText, Loader2 } from "lucide-react";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import { type DashboardData, getCSVSections } from "../utils/exportUtils";
 
-const PDF_TAB_LABELS = [
-	"Overview",
-	"Provider Usage",
-	"Model Rankings",
-	"MCP Usage",
-	"Team Rankings",
-	"Customer Rankings",
-	"Business Unit Rankings",
-	"User Rankings",
-	"Virtual Key Rankings",
-];
+const PDF_TAB_LABELS = ["Overview", "Provider Usage", "Model Rankings", "MCP Usage"];
 
 interface ExportPopoverProps {
 	getData: () => DashboardData;
@@ -32,28 +16,10 @@ interface ExportPopoverProps {
 
 export function ExportPopover({ getData, onPreloadData, onPdfExport, onPdfExportDone }: ExportPopoverProps) {
 	const [exporting, setExporting] = useState(false);
-	const [menuCycle, setMenuCycle] = useState(0);
-	const exportingRef = useRef(false);
-
-	const runExport = useCallback(async (exportAction: () => Promise<void>) => {
-		if (exportingRef.current) return;
-
-		exportingRef.current = true;
-		setExporting(true);
-		try {
-			await exportAction();
-		} finally {
-			exportingRef.current = false;
-			setExporting(false);
-			// Radix can retain a completed selection cycle long enough to swallow an
-			// immediate second open. Remount the menu after each export so the next
-			// CSV/PDF action always starts from a clean interaction state.
-			setMenuCycle((cycle) => cycle + 1);
-		}
-	}, []);
 
 	const handleCsvExport = useCallback(async () => {
-		await runExport(async () => {
+		setExporting(true);
+		try {
 			await onPreloadData();
 			const sections = getCSVSections(getData(), "all");
 			const parts: string[] = [];
@@ -66,67 +32,56 @@ export function ExportPopover({ getData, onPreloadData, onPdfExport, onPdfExport
 			if (parts.length > 0) {
 				downloadCSV(parts.join("\n"), "dashboard-export");
 			}
-		});
-	}, [getData, onPreloadData, runExport]);
+		} finally {
+			setExporting(false);
+		}
+	}, [getData, onPreloadData]);
 
 	const handlePdfExport = useCallback(async () => {
-		await runExport(async () => {
-			// Yield a frame so the spinner renders before heavy work starts
-			await new Promise((r) => requestAnimationFrame(r));
+		setExporting(true);
 
-			try {
-				const { generatePdf } = await import("@/lib/utils/pdf");
+		// Yield a frame so the spinner renders before heavy work starts
+		await new Promise((r) => requestAnimationFrame(r));
 
-				const elements = await onPdfExport();
+		try {
+			const { generatePdf } = await import("@/lib/utils/pdf");
 
-				const sections = elements.map((element, i) => ({
-					element,
-					label: PDF_TAB_LABELS[i],
-				}));
+			const elements = await onPdfExport();
 
-				await generatePdf(sections, "dashboard-export", {
-					branding: {
-						logoSrc: "/elygate-logo.svg",
-						text: "Elygate",
-					},
-				});
-			} finally {
-				onPdfExportDone();
-			}
-		});
-	}, [onPdfExport, onPdfExportDone, runExport]);
+			const sections = elements.map((element, i) => ({
+				element,
+				label: PDF_TAB_LABELS[i],
+			}));
+
+			await generatePdf(sections, "dashboard-export", {
+				branding: {
+					logoSrc: "/bifrost-logo.webp",
+					text: "Powered by",
+				},
+			});
+		} finally {
+			onPdfExportDone();
+			setExporting(false);
+		}
+	}, [onPdfExport, onPdfExportDone]);
 
 	return (
-		<DropdownMenu key={menuCycle}>
+		<DropdownMenu>
 			<DropdownMenuTrigger asChild>
-				<Button variant="outline" size="default" aria-busy={exporting} data-testid="dashboard-export-trigger">
-					{exporting ? <Loader2 className="animate-spin" data-icon="inline-start" /> : <Download data-icon="inline-start" />}
+				<Button variant="outline" size="default" disabled={exporting} data-testid="dashboard-export-trigger">
+					{exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
 					{exporting ? "Exporting..." : "Export"}
 				</Button>
 			</DropdownMenuTrigger>
 			<DropdownMenuContent align="end">
-				<DropdownMenuGroup>
-					<DropdownMenuItem
-						onSelect={() => {
-							void handleCsvExport();
-						}}
-						disabled={exporting}
-						data-testid="export-csv-item"
-					>
-						<FileSpreadsheet data-icon="inline-start" />
-						CSV
-					</DropdownMenuItem>
-					<DropdownMenuItem
-						onSelect={() => {
-							void handlePdfExport();
-						}}
-						disabled={exporting}
-						data-testid="export-pdf-item"
-					>
-						<FileText data-icon="inline-start" />
-						PDF
-					</DropdownMenuItem>
-				</DropdownMenuGroup>
+				<DropdownMenuItem onClick={handleCsvExport} data-testid="export-csv-item">
+					<FileSpreadsheet className="h-4 w-4" />
+					CSV
+				</DropdownMenuItem>
+				<DropdownMenuItem onClick={handlePdfExport} data-testid="export-pdf-item">
+					<FileText className="h-4 w-4" />
+					PDF
+				</DropdownMenuItem>
 			</DropdownMenuContent>
 		</DropdownMenu>
 	);

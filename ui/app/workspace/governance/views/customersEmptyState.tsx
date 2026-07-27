@@ -2,7 +2,7 @@ import { Button } from "@/components/ui/button";
 import { WalletCards } from "lucide-react";
 import { ArrowUpRight } from "lucide-react";
 
-const CUSTOMERS_DOCS_URL = "https://github.com/zuohuadong/elygate/tree/dev/docs";
+const CUSTOMERS_DOCS_URL = "https://docs.getbifrost.ai/features/governance/virtual-keys#customers";
 
 interface CustomersEmptyStateProps {
 	onAddClick: () => void;

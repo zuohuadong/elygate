@@ -95,7 +95,7 @@ export default function PerformanceTuningView() {
 			<Alert variant="destructive">
 				<AlertTriangle className="h-4 w-4" />
 				<AlertDescription>
-					These settings require an Elygate service restart to take effect. Current connections will continue with existing settings until
+					These settings require a Elygate service restart to take effect. Current connections will continue with existing settings until
 					restart.
 				</AlertDescription>
 			</Alert>
@@ -153,5 +153,5 @@ export default function PerformanceTuningView() {
 }
 
 const RestartWarning = () => {
-	return <div className="text-muted-foreground mt-2 pl-4 text-xs font-semibold">Restart Elygate to apply changes.</div>;
+	return <div className="text-muted-foreground mt-2 pl-4 text-xs font-semibold">Need to restart Elygate to apply changes.</div>;
 };

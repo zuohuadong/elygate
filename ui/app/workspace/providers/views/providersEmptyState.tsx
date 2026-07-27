@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { ArrowUpRight, Server } from "lucide-react";
 
-const PROVIDERS_DOCS_URL = "https://github.com/zuohuadong/elygate/tree/dev/docs";
+const PROVIDERS_DOCS_URL = "https://docs.getbifrost.ai/providers/supported-providers/overview";
 
 interface ProvidersEmptyStateProps {
 	/** Dropdown (or button) for adding a provider; never greyed out */

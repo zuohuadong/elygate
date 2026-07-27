@@ -1,0 +1,80 @@
+- generic [ref=e2]:
+  - region "Notifications alt+T"
+  - generic [ref=e3]:
+    - generic [ref=e6]:
+      - generic [ref=e8]:
+        - link [ref=e9] [cursor=pointer]:
+          - /url: /workspace/logs
+          - img "Elygate" [ref=e10]
+        - button "Collapse sidebar" [ref=e11]
+      - generic [ref=e16]:
+        - textbox "Search sidebar navigation" [ref=e20]:
+          - /placeholder: Search...
+        - generic:
+          - generic: ⌘
+          - generic: K
+      - generic [ref=e21]:
+        - list [ref=e24]:
+          - listitem [ref=e25]:
+            - button "Observability" [ref=e26] [cursor=pointer]
+          - listitem [ref=e40]:
+            - button "Models" [ref=e41] [cursor=pointer]
+          - listitem [ref=e50]:
+            - button "MCP clients icon MCP Gateway" [ref=e51] [cursor=pointer]:
+              - generic [ref=e53]:
+                - img "MCP clients icon" [ref=e54]
+                - generic [ref=e57]: MCP Gateway
+            - list [ref=e60]:
+              - listitem [ref=e61]:
+                - link "MCP Catalog" [ref=e62] [cursor=pointer]:
+                  - /url: /workspace/mcp-registry
+              - listitem [ref=e70]:
+                - link "MCP Library" [ref=e71] [cursor=pointer]:
+                  - /url: /workspace/mcp-registry/library
+              - listitem [ref=e84]:
+                - link "Tool Groups" [ref=e85] [cursor=pointer]:
+                  - /url: /workspace/mcp-tool-groups
+              - listitem [ref=e92]:
+                - link "Auth Sessions" [ref=e93] [cursor=pointer]:
+                  - /url: /workspace/mcp-sessions
+              - listitem [ref=e99]:
+                - link "OAuth Grants" [ref=e100] [cursor=pointer]:
+                  - /url: /workspace/oauth-grants
+              - listitem [ref=e106]:
+                - link "MCP Settings" [ref=e107] [cursor=pointer]:
+                  - /url: /workspace/mcp-settings
+          - listitem [ref=e113]:
+            - link "Plugins" [ref=e114] [cursor=pointer]:
+              - /url: /workspace/plugins
+          - listitem [ref=e120]:
+            - button "Alerting" [ref=e121] [cursor=pointer]
+          - listitem [ref=e132]:
+            - button "Governance" [ref=e133] [cursor=pointer]
+          - listitem [ref=e141]:
+            - button "Guardrails" [ref=e142] [cursor=pointer]
+          - listitem [ref=e153]:
+            - link "Cluster Config" [ref=e154] [cursor=pointer]:
+              - /url: /workspace/cluster
+          - listitem [ref=e163]:
+            - button "Adaptive Routing" [ref=e164] [cursor=pointer]
+          - listitem [ref=e176]:
+            - button "Settings" [ref=e177] [cursor=pointer]
+        - generic [ref=e186]:
+          - generic [ref=e190]:
+            - generic [ref=e192]:
+              - generic [ref=e193]: Need help with production setup?
+              - button "Dismiss" [ref=e194]
+            - generic [ref=e198]:
+              - text: Review the Elygate deployment profile before connecting production providers.Read the deployment guide
+              - link "here" [ref=e199] [cursor=pointer]:
+                - /url: https://github.com/zuohuadong/elygate/tree/dev/deploy/elygate-oss
+              - text: .
+          - generic [ref=e201]:
+            - link "GitHub Repository" [ref=e202] [cursor=pointer]:
+              - /url: https://github.com/zuohuadong/elygate
+            - link "Report a bug" [ref=e206] [cursor=pointer]:
+              - /url: https://github.com/zuohuadong/elygate/issues/new?title=%5BBug%5D%20
+            - link "Full Documentation" [ref=e217] [cursor=pointer]:
+              - /url: https://github.com/zuohuadong/elygate/tree/dev/docs
+            - button "Toggle theme" [ref=e221] [cursor=pointer]
+    - main [ref=e224]

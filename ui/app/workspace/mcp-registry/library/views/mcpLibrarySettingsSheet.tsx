@@ -119,7 +119,7 @@ export function MCPLibrarySettingsSheet({ open, onClose }: MCPLibrarySettingsShe
 							<Input
 								id="mcp-library-url"
 								type="text"
-									placeholder="https://your-elygate.example/mcp-library"
+								placeholder="https://getbifrost.ai/mcp-library"
 								data-testid="mcp-library-url-input"
 								{...register("mcp_library_url")}
 								className={errors.mcp_library_url ? "border-destructive" : ""}

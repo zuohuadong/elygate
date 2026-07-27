@@ -97,7 +97,9 @@ var dynamicallyConfigurableProviders = []schemas.ModelProvider{
 	schemas.OpenRouter,
 	schemas.Parasail,
 	schemas.Perplexity,
+	schemas.Sarvam,
 	schemas.Vertex,
+	schemas.Wafer,
 	schemas.XAI,
 }
 
@@ -300,6 +302,21 @@ func newBifrostCtxDoneError(ctx *schemas.BifrostContext, stage string) *schemas.
 			Type:    &errorType,
 			Message: message,
 			Error:   ctx.Err(),
+		},
+	}
+}
+
+// newBifrostQueueFullError creates a 503 BifrostError for requests dropped
+// because the provider queue is full and dropExcessRequests is enabled.
+func newBifrostQueueFullError() *schemas.BifrostError {
+	statusCode := 503
+	errorType := schemas.RequestDropped
+	return &schemas.BifrostError{
+		IsBifrostError: true,
+		StatusCode:     &statusCode,
+		Error: &schemas.ErrorField{
+			Type:    &errorType,
+			Message: "request dropped: queue is full",
 		},
 	}
 }

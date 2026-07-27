@@ -44,17 +44,6 @@ type ModelPricingAttributesEntry struct {
 	AdditionalAttributes map[string]string `json:"additional_attributes,omitempty"`
 }
 
-// MissingModelPricingRowsError identifies catalog metadata writes whose
-// (provider, model) key has no pricing row. The server creates this error
-// inside the write transaction so the HTTP layer can map it to a stable 422.
-type MissingModelPricingRowsError struct {
-	Entries []string
-}
-
-func (e *MissingModelPricingRowsError) Error() string {
-	return fmt.Sprintf("no pricing row for one or more (model, provider) entries: %s", strings.Join(e.Entries, ", "))
-}
-
 // ProviderHandler manages HTTP requests for provider operations
 type ProviderHandler struct {
 	dbStore       configstore.ConfigStore
@@ -649,7 +638,6 @@ type ListModelsResponse struct {
 type ModelDetailsResponse struct {
 	Name                 string                `json:"name"`
 	Provider             string                `json:"provider"`
-	HasPricingRow        bool                  `json:"has_pricing_row"`
 	ContextLength        *int                  `json:"context_length,omitempty"`
 	MaxInputTokens       *int                  `json:"max_input_tokens,omitempty"`
 	MaxOutputTokens      *int                  `json:"max_output_tokens,omitempty"`
@@ -763,9 +751,8 @@ func (h *ProviderHandler) listModelDetails(ctx *fasthttp.RequestCtx) {
 	responseModels := make([]ModelDetailsResponse, 0, len(allModels))
 	for _, model := range allModels {
 		details := ModelDetailsResponse{
-			Name:          model.Name,
-			Provider:      string(model.Provider),
-			HasPricingRow: modelCatalog.GetPricingEntryForModel(model.Name, model.Provider) != nil,
+			Name:     model.Name,
+			Provider: string(model.Provider),
 		}
 		if len(model.AccessibleByKeys) > 0 {
 			details.AccessibleByKeys = model.AccessibleByKeys
@@ -1308,11 +1295,6 @@ func (h *ProviderHandler) upsertModelCatalogEntries(ctx *fasthttp.RequestCtx) {
 	}
 
 	if err := h.modelsManager.UpsertModelPricingAttributes(ctx, payload); err != nil {
-		var missingRows *MissingModelPricingRowsError
-		if errors.As(err, &missingRows) {
-			SendError(ctx, fasthttp.StatusUnprocessableEntity, missingRows.Error())
-			return
-		}
 		SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("failed to upsert catalog entries: %v", err))
 		return
 	}

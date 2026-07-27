@@ -13,6 +13,7 @@ import {
 	DatabaseZap,
 	Flag,
 	ShieldHalf,
+	FlaskConical,
 	FolderGit,
 	Gavel,
 	Globe,
@@ -45,6 +46,7 @@ import {
 	Users,
 	Wallet,
 	WalletCards,
+	Webhook,
 	CircuitBoard,
 	GitCompareArrows,
 } from "lucide-react";
@@ -68,11 +70,11 @@ import {
 } from "@/components/ui/sidebar";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { IS_ENTERPRISE } from "@/lib/constants/config";
-import { useGetCoreConfigQuery, useGetVersionQuery, useLogoutMutation } from "@/lib/store";
+import { useGetCoreConfigQuery, useGetLatestReleaseQuery, useGetVersionQuery, useLogoutMutation } from "@/lib/store";
 import { RbacOperation, RbacResource, useRbac } from "@enterprise/lib";
 import type { UserInfo } from "@enterprise/lib/store/utils/tokenManager";
 import { getUserInfo } from "@enterprise/lib/store/utils/tokenManager";
-import { BooksIcon, GithubLogoIcon } from "@phosphor-icons/react";
+import { BooksIcon, DiscordLogoIcon, GithubLogoIcon } from "@phosphor-icons/react";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { ChevronRight } from "lucide-react";
 import { useTheme } from "next-themes";
@@ -113,19 +115,24 @@ const MCPIcon = ({ className }: { className?: string }) => (
 // External links
 const externalLinks = [
 	{
+		title: "Discord Server",
+		url: "https://discord.gg/exN5KAydbU",
+		icon: DiscordLogoIcon,
+	},
+	{
 		title: "GitHub Repository",
-		url: "https://github.com/zuohuadong/elygate",
+		url: "https://github.com/maximhq/bifrost",
 		icon: GithubLogoIcon,
 	},
 	{
 		title: "Report a bug",
-		url: "https://github.com/zuohuadong/elygate/issues/new?title=%5BBug%5D%20",
+		url: "https://github.com/maximhq/bifrost/issues/new?title=[Bug Report]&labels=bug&type=bug&projects=maximhq/1",
 		icon: BugIcon,
 		strokeWidth: 1.5,
 	},
 	{
 		title: "Full Documentation",
-		url: "https://github.com/zuohuadong/elygate/tree/dev/docs",
+		url: "https://docs.getbifrost.ai",
 		icon: BooksIcon,
 		strokeWidth: 1,
 	},
@@ -137,12 +144,12 @@ const productionSetupHelpCard = {
 	title: "Need help with production setup?",
 	description: (
 		<>
-			Review the Elygate deployment profile before connecting production providers.
+			We offer help with production setup including custom integrations and dedicated support.
 			<br />
 			<br />
-			Read the deployment guide{" "}
+			Book a demo with our team{" "}
 			<a
-				href="https://github.com/zuohuadong/elygate/tree/dev/deploy/elygate-oss"
+				href="https://calendly.com/maximai/bifrost-demo?utm_source=bfd_sdbr"
 				target="_blank"
 				className="text-primary font-medium underline"
 				rel="noopener noreferrer"
@@ -495,6 +502,45 @@ const SidebarItemView = ({
 	);
 };
 
+// Helper function to compare semantic versions
+const compareVersions = (v1: string, v2: string): number => {
+	// Remove 'v' prefix if present
+	const cleanV1 = v1.startsWith("v") ? v1.slice(1) : v1;
+	const cleanV2 = v2.startsWith("v") ? v2.slice(1) : v2;
+
+	// Split into main version and prerelease
+	const [mainV1, prereleaseV1] = cleanV1.split("-");
+	const [mainV2, prereleaseV2] = cleanV2.split("-");
+
+	// Compare main version numbers (major.minor.patch)
+	const partsV1 = mainV1.split(".").map(Number);
+	const partsV2 = mainV2.split(".").map(Number);
+
+	for (let i = 0; i < Math.max(partsV1.length, partsV2.length); i++) {
+		const num1 = partsV1[i] || 0;
+		const num2 = partsV2[i] || 0;
+
+		if (num1 > num2) return 1;
+		if (num1 < num2) return -1;
+	}
+
+	// If main versions are equal, check prerelease
+	// Version without prerelease is higher than version with prerelease
+	if (!prereleaseV1 && prereleaseV2) return 1;
+	if (prereleaseV1 && !prereleaseV2) return -1;
+
+	// Both have prereleases, compare them
+	if (prereleaseV1 && prereleaseV2) {
+		// Extract prerelease number (e.g., "prerelease1" -> 1)
+		const prereleaseNum1 = parseInt(prereleaseV1.replace(/\D/g, "")) || 0;
+		const prereleaseNum2 = parseInt(prereleaseV2.replace(/\D/g, "")) || 0;
+
+		if (prereleaseNum1 > prereleaseNum2) return 1;
+		if (prereleaseNum1 < prereleaseNum2) return -1;
+	}
+	return 0;
+};
+
 export default function AppSidebar() {
 	const pathname = useLocation({ select: (l) => l.pathname });
 	const search = useLocation({ select: (l) => l.searchStr ?? "" });
@@ -511,6 +557,9 @@ export default function AppSidebar() {
 	const searchInputRef = useRef<HTMLInputElement>(null);
 	const [cookies, setCookie] = useCookies([PRODUCTION_SETUP_DISMISSED_COOKIE]);
 	const isProductionSetupDismissed = !!cookies[PRODUCTION_SETUP_DISMISSED_COOKIE];
+	const { data: latestRelease } = useGetLatestReleaseQuery(undefined, {
+		skip: !mounted, // Only fetch after component is mounted
+	});
 	const hasLogsAccess = useRbac(RbacResource.Logs, RbacOperation.View);
 	const hasObservabilityAccess = useRbac(RbacResource.Observability, RbacOperation.View);
 	// Alerting is currently surfaced under the existing governance permission
@@ -851,6 +900,13 @@ export default function AppSidebar() {
 				],
 			},
 			{
+				title: "Webhooks",
+				url: "/workspace/webhooks",
+				icon: Webhook,
+				description: "Async job webhook endpoints",
+				hasAccess: hasGovernanceLegacyAccess,
+			},
+			{
 				title: "Cluster Config",
 				url: "/workspace/cluster",
 				icon: Network,
@@ -898,6 +954,14 @@ export default function AppSidebar() {
 					},
 				]
 				: []),
+			{
+				title: "Evals",
+				url: "https://www.getmaxim.ai",
+				icon: FlaskConical,
+				isExternal: true,
+				description: "Evaluations",
+				hasAccess: true,
+			},
 			{
 				title: "Settings",
 				url: "/workspace/config",
@@ -1052,6 +1116,13 @@ export default function AppSidebar() {
 		}
 	}, []);
 
+	const showNewReleaseBanner = useMemo(() => {
+		if (IS_ENTERPRISE) return false;
+		if (latestRelease && version) {
+			return compareVersions(latestRelease.name, version) > 0;
+		}
+		return false;
+	}, [latestRelease, version]);
 	const isAuthEnabled = coreConfig?.auth_config?.is_enabled || false;
 
 	useEffect(() => {
@@ -1214,11 +1285,13 @@ export default function AppSidebar() {
 	};
 
 	// Always render the light theme version for SSR to avoid hydration mismatch
-	const logoSrc = mounted && resolvedTheme === "dark" ? "/elygate-logo-dark.svg" : "/elygate-logo.svg";
-	const iconSrc = "/elygate-icon.svg";
+	const logoSrc = mounted && resolvedTheme === "dark" ? "/bifrost-logo-dark.webp" : "/bifrost-logo.webp";
+	const iconSrc = mounted && resolvedTheme === "dark" ? "/bifrost-icon-dark.webp" : "/bifrost-icon.webp";
 
 	const { isConnected: isWebSocketConnected } = useWebSocket();
 
+	// New release image - based on theme
+	const newReleaseImage = mounted && resolvedTheme === "dark" ? "/images/new-release-image-dark.webp" : "/images/new-release-image.webp";
 
 	// Memoize promo cards array to prevent duplicates and unnecessary re-renders
 	const promoCards = useMemo(() => {
@@ -1237,12 +1310,32 @@ export default function AppSidebar() {
 				variant: "warning" as const,
 			});
 		}
+		if (showNewReleaseBanner && latestRelease) {
+			cards.push({
+				id: "new-release",
+				title: `${latestRelease.name} is now available.`,
+				description: (
+					<div className="flex h-full flex-col gap-2">
+						<img src={newReleaseImage} alt="Elygate" className="h-[95px] rounded-md object-cover" />
+						<a
+							href={`https://docs.getbifrost.ai/changelogs/${latestRelease.name}`}
+							target="_blank"
+							rel="noopener noreferrer"
+							className="text-primary mt-auto pb-1 font-medium underline"
+						>
+							View release notes
+						</a>
+					</div>
+				),
+				dismissible: true,
+			});
+		}
 		// Only show after mounted to ensure cookie is properly hydrated and avoid flash
 		if (!IS_ENTERPRISE && mounted && !isProductionSetupDismissed) {
 			cards.push(productionSetupHelpCard);
 		}
 		return cards;
-	}, [coreConfig?.restart_required, isProductionSetupDismissed, mounted]);
+	}, [coreConfig?.restart_required, showNewReleaseBanner, latestRelease, newReleaseImage, isProductionSetupDismissed, mounted]);
 
 	// Reset areCardsEmpty when promoCards changes
 	useEffect(() => {
@@ -1293,7 +1386,7 @@ export default function AppSidebar() {
 				{/* Expanded state: horizontal layout */}
 				<div className="flex h-10 w-full items-center justify-between px-1.5 group-data-[collapsible=icon]:hidden">
 					<Link to="/workspace/logs" className="group flex items-center gap-2 pl-2">
-							<img className="h-[22px] w-auto" src={logoSrc} alt="Elygate" width={104} height={40} />
+						<img className="h-[22px] w-auto" src={logoSrc} alt="Elygate" width={70} height={70} />
 					</Link>
 					<button
 						onClick={toggleSidebar}
@@ -1407,7 +1500,7 @@ export default function AppSidebar() {
 									</a>
 								))}
 							<ThemeToggle />
-							{IS_ENTERPRISE && userInfo && (userInfo.name || userInfo.email) ? (
+							{IS_ENTERPRISE && userInfo ? (
 								<Popover open={userPopoverOpen} onOpenChange={setUserPopoverOpen}>
 									<PopoverTrigger asChild>
 										<button
@@ -1421,7 +1514,7 @@ export default function AppSidebar() {
 									<PopoverContent side="top" align="start" className="w-56 p-0">
 										<div className="flex flex-col">
 											<div className="px-4 py-3">
-												<p className="text-sm font-medium">{userInfo.name || userInfo.email || "User"}</p>
+												<p className="text-sm font-medium">{userInfo.name || userInfo.email || userInfo.preferred_username || "User"}</p>
 											</div>
 											<Separator />
 											<button

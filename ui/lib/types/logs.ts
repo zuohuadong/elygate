@@ -1,4 +1,4 @@
-// Types for the logs interface based on BifrostResponse schema
+// Types for the logs interface based on ElygateResponse schema
 
 import { DBKey, VirtualKey } from "./governance";
 import { RoutingRule } from "./routingRules";
@@ -63,12 +63,12 @@ export interface TranscriptionUsage {
 	seconds?: number; // For duration-based usage
 }
 
-export interface BifrostSpeech {
+export interface ElygateSpeech {
 	usage?: AudioLLMUsage;
 	audio: string; // base64 encoded audio data
 }
 
-export interface BifrostTranscribe {
+export interface ElygateTranscribe {
 	text: string;
 	logprobs?: TranscriptionLogProb[];
 	usage?: TranscriptionUsage;
@@ -201,7 +201,7 @@ export interface ReasoningDetails {
 	data?: string;
 }
 
-export interface BifrostEmbedding {
+export interface ElygateEmbedding {
 	index: number;
 	object: string;
 	embedding: string | number[] | number[][];
@@ -219,7 +219,7 @@ export interface RerankResult {
 	document?: RerankDocument;
 }
 
-export interface BifrostImageGenerationData {
+export interface ElygateImageGenerationData {
 	url?: string;
 	b64_json?: string;
 	revised_prompt?: string;
@@ -268,18 +268,18 @@ export interface OCRUsageInfo {
 	doc_size_bytes: number;
 }
 
-export interface BifrostOCRResponse {
+export interface ElygateOCRResponse {
 	model: string;
 	pages: OCRPage[];
 	usage_info?: OCRUsageInfo;
 	document_annotation?: string;
 }
 
-export interface BifrostImageGenerationOutput {
+export interface ElygateImageGenerationOutput {
 	id?: string;
 	created?: number;
 	model?: string;
-	data: BifrostImageGenerationData[];
+	data: ElygateImageGenerationData[];
 	background?: string;
 	output_format?: string;
 	quality?: string;
@@ -319,7 +319,7 @@ export interface VideoOutput {
 	base64?: string;
 	content_type?: string;
 }
-export interface BifrostVideoGenerationOutput {
+export interface ElygateVideoGenerationOutput {
 	videos: VideoOutput[];
 	id?: string;
 	completed_at?: number;
@@ -336,18 +336,18 @@ export interface BifrostVideoGenerationOutput {
 	status?: string;
 }
 
-export interface BifrostVideoDownloadOutput {
+export interface ElygateVideoDownloadOutput {
 	video_id: string;
 	content_type?: string;
 }
 
-export interface BifrostVideoDeleteOutput {
+export interface ElygateVideoDeleteOutput {
 	id: string;
 	deleted: boolean;
 	object?: string;
 }
 
-export interface BifrostVideoListOutput {
+export interface ElygateVideoListOutput {
 	object: string;
 	data: VideoObject[];
 	first_id?: string;
@@ -450,7 +450,7 @@ export interface ErrorField {
 	event_id?: string;
 }
 
-export interface BifrostError {
+export interface ElygateError {
 	event_id?: string;
 	type?: string;
 	is_bifrost_error: boolean;
@@ -507,6 +507,10 @@ export interface LogEntry {
 	alias?: string; // Set when model was resolved via alias mapping; the original name the caller used
 	canonical_model_name?: string; // Canonical model name configured on the resolved alias, when set
 	alias_model_family?: string; // Model family configured on the resolved alias, when set
+	// Model that actually produced the response when the provider swapped models inside a
+	// single call (Anthropic server-side fallback). Distinct from fallback_index, which
+	// counts Elygate's own cross-provider failover attempts.
+	server_side_fallback_model?: string;
 	number_of_retries: number;
 	fallback_index: number;
 	attempt_trail?: KeyAttemptRecord[]; // Per-attempt key selection history
@@ -543,16 +547,16 @@ export interface LogEntry {
 	content_summary?: string;
 	output_message?: ChatMessage;
 	responses_output?: ResponsesMessage[];
-	embedding_output?: BifrostEmbedding[];
+	embedding_output?: ElygateEmbedding[];
 	rerank_output?: RerankResult[];
 	ocr_input?: OCRDocument;
-	ocr_output?: BifrostOCRResponse;
-	image_generation_output?: BifrostImageGenerationOutput;
-	video_generation_output?: BifrostVideoGenerationOutput;
-	video_retrieve_output?: BifrostVideoGenerationOutput;
-	video_download_output?: BifrostVideoDownloadOutput;
-	video_list_output?: BifrostVideoListOutput;
-	video_delete_output?: BifrostVideoDeleteOutput;
+	ocr_output?: ElygateOCRResponse;
+	image_generation_output?: ElygateImageGenerationOutput;
+	video_generation_output?: ElygateVideoGenerationOutput;
+	video_retrieve_output?: ElygateVideoGenerationOutput;
+	video_download_output?: ElygateVideoDownloadOutput;
+	video_list_output?: ElygateVideoListOutput;
+	video_delete_output?: ElygateVideoDeleteOutput;
 	params?: ModelParameters;
 	speech_input?: SpeechInput;
 	transcription_input?: TranscriptionInput;
@@ -560,8 +564,8 @@ export interface LogEntry {
 	image_edit_input?: ImageEditInput;
 	image_variation_input?: ImageVariationInput;
 	video_generation_input?: { prompt: string };
-	speech_output?: BifrostSpeech;
-	transcription_output?: BifrostTranscribe;
+	speech_output?: ElygateSpeech;
+	transcription_output?: ElygateTranscribe;
 	list_models_output?: Model[];
 	tools?: Tool[];
 	tool_calls?: ToolCall[];
@@ -571,11 +575,12 @@ export interface LogEntry {
 	cost?: number; // Cost in dollars (total cost of the request - includes cache lookup cost)
 	status: string; // "success", "error", "processing", or "cancelled"
 	stop_reason?: string; // Why the model stopped: "stop", "length", "content_filter", "tool_calls", etc.
-	error_details?: BifrostError;
+	error_details?: ElygateError;
 	stream: boolean; // true if this was a streaming response
 	created_at: string; // ISO string format from Go time.Time - when the log was first created
 	raw_request?: string; // Raw provider request
 	raw_response?: string; // Raw provider response
+	content_hidden?: boolean; // true when content logging was disabled for this request, so no content is served back
 	is_large_payload_request?: boolean; // true if request used large payload streaming
 	is_large_payload_response?: boolean; // true if response used large payload streaming
 	passthrough_request_body?: string; // Raw passthrough request body (UTF-8)
@@ -630,6 +635,8 @@ export interface LogStats {
 	user_facing_total_requests: number;
 	average_latency: number;
 	total_tokens: number;
+	prompt_tokens: number;
+	completion_tokens: number;
 	total_cost: number;
 	cache_hit_rate_total_requests?: number | null;
 	direct_cache_hits?: number | null;
@@ -779,6 +786,38 @@ export interface ProviderLatencyHistogramResponse {
 	providers: string[];
 }
 
+// Throughput (tokens/sec) histogram types
+// tokens_per_second is the aggregate rate for the bucket: total completion tokens
+// divided by total generation latency in seconds.
+export interface ThroughputHistogramBucket {
+	timestamp: string;
+	tokens_per_second: number;
+	total_completion_tokens: number;
+	total_requests: number;
+}
+
+export interface ThroughputHistogramResponse {
+	buckets: ThroughputHistogramBucket[];
+	bucket_size_seconds: number;
+}
+
+export interface ProviderThroughputStats {
+	tokens_per_second: number;
+	total_completion_tokens: number;
+	total_requests: number;
+}
+
+export interface ProviderThroughputHistogramBucket {
+	timestamp: string;
+	by_provider: Record<string, ProviderThroughputStats>;
+}
+
+export interface ProviderThroughputHistogramResponse {
+	buckets: ProviderThroughputHistogramBucket[];
+	bucket_size_seconds: number;
+	providers: string[];
+}
+
 export interface LogsResponse {
 	logs: LogEntry[];
 	pagination: Pagination;
@@ -843,7 +882,10 @@ export type ResponsesMessageType =
 	| "mcp_approval_responses"
 	| "reasoning"
 	| "item_reference"
-	| "refusal";
+	| "refusal"
+	| "tool_search_call"
+	| "tool_search_output"
+	| "additional_tools";
 
 // Content block types for responses
 export type ResponsesMessageContentBlockType =
@@ -1090,7 +1132,7 @@ export interface MCPToolLogEntry {
 	virtual_key_name?: string;
 	arguments?: Record<string, unknown> | string; // JSON parsed tool arguments
 	result?: Record<string, unknown> | string; // JSON parsed tool result
-	error_details?: BifrostError;
+	error_details?: ElygateError;
 	latency?: number; // Execution time in milliseconds
 	cost?: number; // Cost in dollars (per execution cost)
 	status: string; // "processing", "success", or "error"
@@ -1185,6 +1227,7 @@ export interface ModelRankingTrend {
 	tokens_trend: number;
 	cost_trend: number;
 	latency_trend: number;
+	throughput_trend: number;
 }
 
 export interface ModelRankingEntry {
@@ -1197,6 +1240,7 @@ export interface ModelRankingEntry {
 	total_tokens: number;
 	total_cost: number;
 	avg_latency: number;
+	throughput: number; // tokens/sec
 	trend: ModelRankingTrend;
 }
 

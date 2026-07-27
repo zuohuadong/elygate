@@ -8,7 +8,7 @@ export default function AuditLogsView() {
 				className="mx-auto min-h-[80vh]"
 				icon={<ScrollText className="h-[5.5rem] w-[5.5rem]" strokeWidth={1} />}
 				title="Unlock audit logs for better compliance"
-				description="This capability requires the Elygate Enterprise source package and is not included in this OSS build."
+				description="This feature is a part of the Elygate enterprise license. We would love to know more about your use case and how we can help you."
 				readmeLink="https://docs.getbifrost.ai/enterprise/audit-logs"
 			/>
 		</div>
