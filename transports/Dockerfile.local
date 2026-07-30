@@ -1,27 +1,27 @@
 # Dockerfile.local - Uses local module sources via go workspace
 # For pre-release CI builds where module versions aren't published yet
 
-# --- UI Build Stage: Build the React + Vite frontend ---
-  FROM node:25-alpine3.23@sha256:cf38e1f3c28ac9d81cdc0c51d8220320b3b618780e44ef96a39f76f7dbfef023 AS ui-builder
+# --- UI Build Stage: Build the Svelte svadmin panel ---
+  FROM oven/bun:1.3.14-alpine@sha256:5acc90a93e91ff07bf72aa90a7c9f0fa189765aec90b47bdbf2152d2196383c0 AS ui-builder
   WORKDIR /app
 
-  # Copy UI package files and install dependencies
-  COPY ui/package*.json ./
-  RUN npm ci
+  # Install panel dependencies before copying source to preserve the dependency layer.
+  COPY panel/package.json panel/bun.lock ./
+  RUN bun install --frozen-lockfile
 
-  # Copy UI source code
-  COPY ui/ ./
+  COPY panel/ ./
 
-  # Build UI (skip the copy-build step)
-  RUN npm run build-enterprise
-  # Skip the copy-build step since we'll copy the files in the Go build stage
+  # Build and type-check without the local copy-build step; the next stage embeds out/.
+  RUN bunx vite build && bun run check
 
   # --- Go Build Stage: Compile the Go binary using local modules ---
   FROM golang:1.26.4-alpine3.23@sha256:f23e8b227fb4493eabe03bede4d5a32d04092da71962f1fb79b5f7d1e6c2a17f AS builder
   WORKDIR /build
 
   # Install dependencies including gcc for CGO and sqlite
-  RUN apk add --no-cache gcc musl-dev sqlite-dev binutils binutils-gold
+  ARG APK_MIRROR
+  RUN if [ -n "$APK_MIRROR" ]; then sed -i "s#https\?://dl-cdn.alpinelinux.org/alpine#$APK_MIRROR#g" /etc/apk/repositories; fi && \
+      apk add --no-cache gcc musl-dev sqlite-dev binutils binutils-gold
 
   # Set environment for CGO-enabled build (required for go-sqlite3)
   ENV CGO_ENABLED=1 GOOS=linux
@@ -53,8 +53,9 @@
 
   # Build the binary with CGO enabled and static SQLite linking
   ARG VERSION=unknown
+  ARG GOPROXY=https://proxy.golang.org,direct
   RUN cd /build/transports && \
-    go build \
+    GOPROXY="$GOPROXY" go build \
       -ldflags="-w -s -X main.Version=v${VERSION} -extldflags '-static'" \
       -a -trimpath \
       -tags "sqlite_static" \
@@ -72,7 +73,9 @@
   # musl: C standard library (required for CGO binaries)
   # libgcc: GCC runtime library
   # ca-certificates: For HTTPS connections
-  RUN apk add --no-cache musl libgcc ca-certificates zlib=1.3.2-r0
+  ARG APK_MIRROR
+  RUN if [ -n "$APK_MIRROR" ]; then sed -i "s#https\?://dl-cdn.alpinelinux.org/alpine#$APK_MIRROR#g" /etc/apk/repositories; fi && \
+      apk add --no-cache musl libgcc ca-certificates zlib=1.3.2-r0
 
   # Create data directory and set up user
   COPY --from=builder /app/main .

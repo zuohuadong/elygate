@@ -14,6 +14,7 @@ VERSION ?= dev-build
 LOCAL ?=
 DEBUG ?=
 COMPAT ?=
+PANEL_DIR ?= panel
 
 # Colors for output
 RED=\033[0;31m
@@ -67,7 +68,7 @@ define EXPOSE_ENV
 	fi
 endef
 
-.PHONY: all help dev dev-pulse build-ui build build-cli run run-cli install-air install-pulse clean test test-cli install-ui setup-workspace work-init work-clean docs docker-image docker-run cleanup-enterprise mod-tidy test-integrations-py test-integrations-ts install-playwright run-e2e run-e2e-ui run-e2e-headed run-e2e-api format ui install-newman run-provider-harness-test run-cli-harness-test test-semantic-cache test-semantic-cache-complete _test-semantic-cache-complete-inner helm-index
+.PHONY: all help dev dev-pulse build-ui build build-cli run run-cli install-air install-pulse clean test test-cli install-ui install-panel setup-workspace work-init work-clean docs docker-image docker-run cleanup-enterprise mod-tidy test-integrations-py test-integrations-ts install-playwright run-e2e run-e2e-ui run-e2e-headed run-e2e-api format ui install-newman run-provider-harness-test run-cli-harness-test test-semantic-cache test-semantic-cache-complete _test-semantic-cache-complete-inner helm-index
 
 all: help
 
@@ -117,6 +118,10 @@ install-ui: cleanup-enterprise
 	 fi
 	@$(ECHO) "$(GREEN)UI deps are in sync$(NC)"
 
+install-panel: ## Install Elygate svadmin panel dependencies
+	@which bun > /dev/null || ($(ECHO) "$(RED)Error: Bun is required for the Elygate panel.$(NC)" && exit 1)
+	@cd "$(PANEL_DIR)" && bun install --frozen-lockfile
+
 install-air: ## Install air for hot reloading (if not already installed)
 	@which air > /dev/null || ($(ECHO) "$(YELLOW)Installing air for hot reloading...$(NC)" && go install github.com/air-verse/air@latest)
 	@$(ECHO) "$(GREEN)Air is ready$(NC)"
@@ -152,7 +157,7 @@ install-junit-viewer: ## Install junit-viewer for HTML report generation (if not
 		$(ECHO) "$(YELLOW)CI environment detected, skipping junit-viewer installation$(NC)"; \
 	fi
 
-dev: install-ui install-air setup-workspace $(if $(DEBUG),install-delve) ## Start complete development environment (UI + API with proxy)
+dev: install-panel install-air setup-workspace $(if $(DEBUG),install-delve) ## Start complete development environment (UI + API with proxy)
 	@$(EXPOSE_ENV); \
 	set +m; \
 	ui_pid=""; \
@@ -201,12 +206,7 @@ dev: install-ui install-air setup-workspace $(if $(DEBUG),install-delve) ## Star
 	fi; \
 	$(ECHO) ""; \
 	$(ECHO) "$(YELLOW)Starting UI development server...$(NC)"; \
-	$(USE_NODE); if [ -n "$(DISABLE_PROFILER)" ]; then \
-		$(ECHO) "$(CYAN)DevProfiler disabled for testing$(NC)"; \
-		(cd ui && BIFROST_DISABLE_PROFILER=1 npm run dev) & \
-	else \
-		(cd ui && npm run dev) & \
-	fi; \
+	(cd "$(PANEL_DIR)" && bun run dev) & \
 	ui_pid="$$!"; \
 	$(ECHO) "$(YELLOW)[make dev] UI dev server started with pid $$ui_pid$(NC)"; \
 	sleep 3; \
@@ -238,7 +238,7 @@ dev: install-ui install-air setup-workspace $(if $(DEBUG),install-delve) ## Star
 	cleanup; \
 	exit 1
 
-dev-pulse: install-ui install-pulse setup-workspace $(if $(DEBUG),install-delve) ## Start complete development environment using pulse for hot reloading
+dev-pulse: install-panel install-pulse setup-workspace $(if $(DEBUG),install-delve) ## Start complete development environment using pulse for hot reloading
 	@$(EXPOSE_ENV); \
 	set +m; \
 	ui_pid=""; \
@@ -287,12 +287,7 @@ dev-pulse: install-ui install-pulse setup-workspace $(if $(DEBUG),install-delve)
 	fi; \
 	$(ECHO) ""; \
 	$(ECHO) "$(YELLOW)Starting UI development server...$(NC)"; \
-	$(USE_NODE); if [ -n "$(DISABLE_PROFILER)" ]; then \
-		$(ECHO) "$(CYAN)DevProfiler disabled for testing$(NC)"; \
-		(cd ui && BIFROST_DISABLE_PROFILER=1 npm run dev) & \
-	else \
-		(cd ui && npm run dev) & \
-	fi; \
+	(cd "$(PANEL_DIR)" && bun run dev) & \
 	ui_pid="$$!"; \
 	$(ECHO) "$(YELLOW)[make dev-pulse] UI dev server started with pid $$ui_pid$(NC)"; \
 	sleep 3; \
@@ -314,10 +309,9 @@ dev-pulse: install-ui install-pulse setup-workspace $(if $(DEBUG),install-delve)
 	cleanup; \
 	exit 1
 
-build-ui: install-ui ## Build ui
-	@$(ECHO) "$(GREEN)Building ui...$(NC)"
-	@rm -rf ui/.next
-	@$(USE_NODE); cd ui && npm run build && npm run copy-build
+build-ui: install-panel ## Build Elygate svadmin panel
+	@$(ECHO) "$(GREEN)Building Elygate svadmin panel...$(NC)"
+	@cd "$(PANEL_DIR)" && bun run build
 
 build: build-ui ## Build bifrost-http binary
 	@if [ -n "$(LOCAL)" ]; then \
@@ -368,9 +362,16 @@ build: build-ui ## Build bifrost-http binary
 		$(ECHO) "$(GREEN)Built: tmp/bifrost-http (version: v$(VERSION))$(NC)"; \
 	elif [ "$$TARGET_OS" = "$$HOST_OS" ] && [ "$$TARGET_ARCH" = "$$HOST_ARCH" ]; then \
 		$(ECHO) "$(CYAN)Building for $$TARGET_OS/$$TARGET_ARCH (native build with CGO)...$(NC)"; \
+		NATIVE_BUILD_MODE=""; \
+		NATIVE_LINK_MODE=""; \
+		if [ "$$TARGET_OS" = "darwin" ]; then \
+			NATIVE_BUILD_MODE="-buildmode=pie"; \
+			NATIVE_LINK_MODE="-linkmode=external"; \
+		fi; \
 		cd transports/bifrost-http && CGO_ENABLED=1 GOOS=$$TARGET_OS GOARCH=$$TARGET_ARCH $(if $(LOCAL),,GOWORK=off) go build \
-			-ldflags="-w -s -X main.Version=v$(VERSION)" \
-			-a -trimpath \
+			$$NATIVE_BUILD_MODE \
+			-ldflags="$$NATIVE_LINK_MODE -w -s -X main.Version=v$(VERSION)" \
+			-trimpath \
 			-tags "sqlite_static" \
 			-o ../../tmp/bifrost-http \
 			.; \

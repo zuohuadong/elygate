@@ -1,36 +1,39 @@
-# --- UI Build Stage: Build the React + Vite frontend ---
-  FROM node:25-alpine3.23@sha256:bdf2cca6fe3dabd014ea60163eca3f0f7015fbd5c7ee1b0e9ccb4ced6eb02ef4 AS ui-builder
+# --- UI Build Stage: Build the Svelte svadmin panel ---
+  FROM oven/bun:1.3.14-alpine@sha256:5acc90a93e91ff07bf72aa90a7c9f0fa189765aec90b47bdbf2152d2196383c0 AS ui-builder
   WORKDIR /app
 
   # Apply latest alpine security patches before installing packages
-  RUN apk upgrade --no-cache
+  ARG APK_MIRROR
+  RUN if [ -n "$APK_MIRROR" ]; then sed -i "s#https\?://dl-cdn.alpinelinux.org/alpine#$APK_MIRROR#g" /etc/apk/repositories; fi && \
+      apk upgrade --no-cache
 
-  # Copy UI package files and install dependencies
-  COPY ui/package*.json ./
-  RUN npm ci
+  # Install panel dependencies before copying source to preserve the dependency layer.
+  COPY panel/package.json panel/bun.lock ./
+  RUN bun install --frozen-lockfile
 
-  # Copy UI source code
-  COPY ui/ ./
+  COPY panel/ ./
 
-  # Build UI (skip the copy-build step)
-  RUN npm run build-enterprise
-  # Skip the copy-build step since we'll copy the files in the Go build stage
+  # Build and type-check without the local copy-build step; the next stage embeds out/.
+  RUN bunx vite build && bun run check
 
   # --- Go Build Stage: Compile the Go binary ---
   FROM golang:1.26.4-alpine3.23@sha256:f23e8b227fb4493eabe03bede4d5a32d04092da71962f1fb79b5f7d1e6c2a17f AS builder
   WORKDIR /app
 
   # Install dependencies including gcc for CGO and sqlite (with latest security patches)
-  RUN apk upgrade --no-cache && \
-    apk add --no-cache gcc musl-dev sqlite-dev binutils binutils-gold
+  ARG APK_MIRROR
+  RUN if [ -n "$APK_MIRROR" ]; then sed -i "s#https\?://dl-cdn.alpinelinux.org/alpine#$APK_MIRROR#g" /etc/apk/repositories; fi && \
+      apk upgrade --no-cache && \
+      apk add --no-cache gcc musl-dev sqlite-dev binutils binutils-gold
 
   # Set environment for CGO-enabled build (required for go-sqlite3)
   ENV CGO_ENABLED=1 GOOS=linux
 
   COPY transports/go.mod transports/go.sum ./
+  ARG GOPROXY=https://proxy.golang.org,direct
   RUN ls
   RUN cat go.mod
-  RUN go mod download
+  RUN GOPROXY="$GOPROXY" go mod download
 
   # Copy source code and dependencies
   COPY transports/ ./
@@ -40,7 +43,7 @@
   # Build the binary with CGO enabled and static SQLite linking
   ENV GOWORK=off
   ARG VERSION=unknown
-  RUN go build \
+  RUN GOPROXY="$GOPROXY" go build \
     -ldflags="-w -s -X main.Version=v${VERSION} -extldflags '-static'" \
     -a -trimpath \
     -tags "sqlite_static" \
@@ -58,8 +61,10 @@
   # musl: C standard library (required for CGO binaries)
   # libgcc: GCC runtime library
   # ca-certificates: For HTTPS connections
-  RUN apk upgrade --no-cache && \
-    apk add --no-cache musl libgcc ca-certificates zlib
+  ARG APK_MIRROR
+  RUN if [ -n "$APK_MIRROR" ]; then sed -i "s#https\?://dl-cdn.alpinelinux.org/alpine#$APK_MIRROR#g" /etc/apk/repositories; fi && \
+      apk upgrade --no-cache && \
+      apk add --no-cache musl libgcc ca-certificates zlib
 
   # Create data directory and set up user
   COPY --from=builder /app/main .
