@@ -7,6 +7,9 @@
 	import { createMenu, createResources } from './lib/resources';
 	import DashboardPage from './pages/DashboardPage.svelte';
 	import BifrostResourcePage from './pages/BifrostResourcePage.svelte';
+	import EnterpriseFeaturePage from './pages/EnterpriseFeaturePage.svelte';
+	import GenericAdminPage from './pages/GenericAdminPage.svelte';
+	import JsonDocumentPage from './pages/JsonDocumentPage.svelte';
 	import ProvidersPage from './pages/ProvidersPage.svelte';
 	import VirtualKeysPage from './pages/VirtualKeysPage.svelte';
 
@@ -24,6 +27,34 @@
 		'virtual-keys': { list: VirtualKeysPage },
 		models: { list: BifrostResourcePage },
 		logs: { list: BifrostResourcePage },
+		teams: { list: GenericAdminPage },
+		customers: { list: GenericAdminPage },
+		'routing-rules': { list: GenericAdminPage },
+		'model-configs': { list: GenericAdminPage },
+		'provider-governance': { list: GenericAdminPage },
+		'pricing-overrides': { list: GenericAdminPage },
+		budgets: { list: GenericAdminPage },
+		'rate-limits': { list: GenericAdminPage },
+		webhooks: { list: GenericAdminPage },
+		'mcp-sessions': { list: GenericAdminPage },
+		'mcp-logs': { list: GenericAdminPage },
+		plugins: { list: GenericAdminPage },
+		skills: { list: GenericAdminPage },
+		'prompt-folders': { list: GenericAdminPage },
+		prompts: { list: GenericAdminPage },
+		config: { list: JsonDocumentPage },
+		'complexity-analyzer': { list: JsonDocumentPage },
+		users: { list: EnterpriseFeaturePage },
+		'business-units': { list: EnterpriseFeaturePage },
+		rbac: { list: EnterpriseFeaturePage },
+		scim: { list: EnterpriseFeaturePage },
+		'access-profiles': { list: EnterpriseFeaturePage },
+		'audit-logs': { list: EnterpriseFeaturePage },
+		alerting: { list: EnterpriseFeaturePage },
+		guardrails: { list: EnterpriseFeaturePage },
+		cluster: { list: EnterpriseFeaturePage },
+		'circuit-breaker': { list: EnterpriseFeaturePage },
+		'adaptive-routing': { list: EnterpriseFeaturePage },
 	};
 </script>
 

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { ApiError, configureRequestErrorFormatter, requestJson } from './api';
+import { ApiError, configureRequestErrorFormatter, getListPayload, requestJson } from './api';
 
 const originalFetch = globalThis.fetch;
 
@@ -24,5 +24,14 @@ describe('requestJson', () => {
 		}))) as typeof fetch;
 
 		await expect(requestJson('/api/test')).rejects.toEqual(new ApiError(502, 'Provider unavailable'));
+	});
+});
+
+describe('getListPayload', () => {
+	test('unwraps Bifrost management list responses used by the lightweight panel', () => {
+		expect(getListPayload({ teams: [{ id: 'team-1' }] })).toEqual([{ id: 'team-1' }]);
+		expect(getListPayload({ pricing_overrides: [{ id: 'price-1' }] })).toEqual([{ id: 'price-1' }]);
+		expect(getListPayload({ endpoints: [{ id: 'webhook-1' }] })).toEqual([{ id: 'webhook-1' }]);
+		expect(getListPayload({ sessions: [{ id: 'mcp-session-1' }] })).toEqual([{ id: 'mcp-session-1' }]);
 	});
 });

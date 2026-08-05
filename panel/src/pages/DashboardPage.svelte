@@ -7,10 +7,15 @@
 		providers: JsonRecord[];
 		virtualKeys: JsonRecord[];
 		models: JsonRecord[];
+		teams: JsonRecord[];
+		customers: JsonRecord[];
+		routingRules: JsonRecord[];
+		webhooks: JsonRecord[];
+		plugins: JsonRecord[];
 	}
 
 	const i18n = useTranslation();
-	let dashboard: DashboardState = $state.raw({ providers: [], virtualKeys: [], models: [] });
+	let dashboard: DashboardState = $state.raw({ providers: [], virtualKeys: [], models: [], teams: [], customers: [], routingRules: [], webhooks: [], plugins: [] });
 	let isLoading = $state(true);
 	let error = $state('');
 	let updatedAt = $state('');
@@ -18,20 +23,34 @@
 	const activeProviders = $derived(dashboard.providers.filter((provider) => provider.provider_status === 'active').length);
 	const locale = $derived(i18n.locale === 'zh-CN' ? 'zh-CN' : 'en-US');
 
+	function settledList(result: PromiseSettledResult<unknown>): JsonRecord[] {
+		return result.status === 'fulfilled' ? getListPayload(result.value) : [];
+	}
+
 	async function load(): Promise<void> {
 		isLoading = true;
 		error = '';
 		try {
-			const [providers, virtualKeys, models] = await Promise.all([
+			const [providers, virtualKeys, models, teams, customers, routingRules, webhooks, plugins] = await Promise.allSettled([
 				requestJson('/api/providers'),
 				requestJson('/api/governance/virtual-keys'),
 				// Bifrost defaults /api/models to five records; zero deliberately requests the full management list.
 				requestJson('/api/models?limit=0'),
+				requestJson('/api/governance/teams'),
+				requestJson('/api/governance/customers'),
+				requestJson('/api/governance/routing-rules'),
+				requestJson('/api/webhooks'),
+				requestJson('/api/plugins'),
 			]);
 			dashboard = {
-				providers: getListPayload(providers),
-				virtualKeys: getListPayload(virtualKeys),
-				models: getListPayload(models),
+				providers: settledList(providers),
+				virtualKeys: settledList(virtualKeys),
+				models: settledList(models),
+				teams: settledList(teams),
+				customers: settledList(customers),
+				routingRules: settledList(routingRules),
+				webhooks: settledList(webhooks),
+				plugins: settledList(plugins),
 			};
 			updatedAt = new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date());
 		} catch (cause) {
@@ -76,6 +95,22 @@
 		<article>
 			<span>{i18n.t('elygate.modelCount')}</span>
 			<strong>{dashboard.models.length}</strong>
+		</article>
+		<article>
+			<span>{i18n.t('elygate.teamCount')}</span>
+			<strong>{dashboard.teams.length}</strong>
+		</article>
+		<article>
+			<span>{i18n.t('elygate.customerCount')}</span>
+			<strong>{dashboard.customers.length}</strong>
+		</article>
+		<article>
+			<span>{i18n.t('elygate.routingRuleCount')}</span>
+			<strong>{dashboard.routingRules.length}</strong>
+		</article>
+		<article>
+			<span>{i18n.t('elygate.integrationCount')}</span>
+			<strong>{dashboard.webhooks.length + dashboard.plugins.length}</strong>
 		</article>
 	</div>
 
