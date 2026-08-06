@@ -5,6 +5,10 @@ function resource(locale: ElygateLocale, name: string, labelKey: Parameters<type
 	return { name, label: labelFor(locale, labelKey), icon, fields: [], showInMenu: false };
 }
 
+function panelHref(path: string): string {
+	return `#${path}`;
+}
+
 export function createResources(locale: ElygateLocale): ResourceDefinition[] {
 	return [
 		resource(locale, 'providers', 'elygate.providers', 'server'),
@@ -44,19 +48,19 @@ export function createResources(locale: ElygateLocale): ResourceDefinition[] {
 
 export function createMenu(locale: ElygateLocale): MenuItem[] {
 	return [
-		{ name: 'dashboard', label: labelFor(locale, 'elygate.dashboard'), icon: 'layout-dashboard', href: '/' },
+		{ name: 'dashboard', label: labelFor(locale, 'elygate.dashboard'), icon: 'layout-dashboard', href: panelHref('/') },
 		{
 			name: 'gateway',
 			label: labelFor(locale, 'elygate.gateway'),
 			icon: 'network',
 			children: [
-				{ name: 'providers', label: labelFor(locale, 'elygate.providers'), icon: 'server', href: '/providers' },
-				{ name: 'virtual-keys', label: labelFor(locale, 'elygate.virtualKeys'), icon: 'key-round', href: '/virtual-keys' },
-				{ name: 'models', label: labelFor(locale, 'elygate.models'), icon: 'bot', href: '/models' },
-				{ name: 'routing-rules', label: labelFor(locale, 'elygate.routingRules'), icon: 'route', href: '/routing-rules' },
-				{ name: 'model-configs', label: labelFor(locale, 'elygate.modelConfigs'), icon: 'sliders-horizontal', href: '/model-configs' },
-				{ name: 'provider-governance', label: labelFor(locale, 'elygate.providerGovernance'), icon: 'shield-check', href: '/provider-governance' },
-				{ name: 'pricing-overrides', label: labelFor(locale, 'elygate.pricingOverrides'), icon: 'badge-dollar-sign', href: '/pricing-overrides' },
+				{ name: 'providers', label: labelFor(locale, 'elygate.providers'), icon: 'server', href: panelHref('/providers') },
+				{ name: 'virtual-keys', label: labelFor(locale, 'elygate.virtualKeys'), icon: 'key-round', href: panelHref('/virtual-keys') },
+				{ name: 'models', label: labelFor(locale, 'elygate.models'), icon: 'bot', href: panelHref('/models') },
+				{ name: 'routing-rules', label: labelFor(locale, 'elygate.routingRules'), icon: 'route', href: panelHref('/routing-rules') },
+				{ name: 'model-configs', label: labelFor(locale, 'elygate.modelConfigs'), icon: 'sliders-horizontal', href: panelHref('/model-configs') },
+				{ name: 'provider-governance', label: labelFor(locale, 'elygate.providerGovernance'), icon: 'shield-check', href: panelHref('/provider-governance') },
+				{ name: 'pricing-overrides', label: labelFor(locale, 'elygate.pricingOverrides'), icon: 'badge-dollar-sign', href: panelHref('/pricing-overrides') },
 			],
 		},
 		{
@@ -64,13 +68,13 @@ export function createMenu(locale: ElygateLocale): MenuItem[] {
 			label: labelFor(locale, 'elygate.enterprise'),
 			icon: 'briefcase-business',
 			children: [
-				{ name: 'customers', label: labelFor(locale, 'elygate.customers'), icon: 'building-2', href: '/customers' },
-				{ name: 'teams', label: labelFor(locale, 'elygate.teams'), icon: 'users-round', href: '/teams' },
-				{ name: 'users', label: labelFor(locale, 'elygate.users'), icon: 'user-round', href: '/users' },
-				{ name: 'business-units', label: labelFor(locale, 'elygate.businessUnits'), icon: 'building', href: '/business-units' },
-				{ name: 'access-profiles', label: labelFor(locale, 'elygate.accessProfiles'), icon: 'fingerprint', href: '/access-profiles' },
-				{ name: 'rbac', label: labelFor(locale, 'elygate.rbac'), icon: 'lock-keyhole', href: '/rbac' },
-				{ name: 'scim', label: labelFor(locale, 'elygate.scim'), icon: 'id-card', href: '/scim' },
+				{ name: 'customers', label: labelFor(locale, 'elygate.customers'), icon: 'building-2', href: panelHref('/customers') },
+				{ name: 'teams', label: labelFor(locale, 'elygate.teams'), icon: 'users-round', href: panelHref('/teams') },
+				{ name: 'users', label: labelFor(locale, 'elygate.users'), icon: 'user-round', href: panelHref('/users') },
+				{ name: 'business-units', label: labelFor(locale, 'elygate.businessUnits'), icon: 'building', href: panelHref('/business-units') },
+				{ name: 'access-profiles', label: labelFor(locale, 'elygate.accessProfiles'), icon: 'fingerprint', href: panelHref('/access-profiles') },
+				{ name: 'rbac', label: labelFor(locale, 'elygate.rbac'), icon: 'lock-keyhole', href: panelHref('/rbac') },
+				{ name: 'scim', label: labelFor(locale, 'elygate.scim'), icon: 'id-card', href: panelHref('/scim') },
 			],
 		},
 		{
@@ -78,8 +82,8 @@ export function createMenu(locale: ElygateLocale): MenuItem[] {
 			label: labelFor(locale, 'elygate.mcp'),
 			icon: 'boxes',
 			children: [
-				{ name: 'mcp-sessions', label: labelFor(locale, 'elygate.mcpSessions'), icon: 'monitor-dot', href: '/mcp-sessions' },
-				{ name: 'mcp-logs', label: labelFor(locale, 'elygate.mcpLogs'), icon: 'list-tree', href: '/mcp-logs' },
+				{ name: 'mcp-sessions', label: labelFor(locale, 'elygate.mcpSessions'), icon: 'monitor-dot', href: panelHref('/mcp-sessions') },
+				{ name: 'mcp-logs', label: labelFor(locale, 'elygate.mcpLogs'), icon: 'list-tree', href: panelHref('/mcp-logs') },
 			],
 		},
 		{
@@ -87,11 +91,11 @@ export function createMenu(locale: ElygateLocale): MenuItem[] {
 			label: labelFor(locale, 'elygate.observability'),
 			icon: 'activity',
 			children: [
-				{ name: 'logs', label: labelFor(locale, 'elygate.logs'), icon: 'scroll-text', href: '/logs' },
-				{ name: 'budgets', label: labelFor(locale, 'elygate.budgetList'), icon: 'wallet', href: '/budgets' },
-				{ name: 'rate-limits', label: labelFor(locale, 'elygate.rateLimits'), icon: 'gauge', href: '/rate-limits' },
-				{ name: 'audit-logs', label: labelFor(locale, 'elygate.auditLogs'), icon: 'file-search', href: '/audit-logs' },
-				{ name: 'alerting', label: labelFor(locale, 'elygate.alerting'), icon: 'bell-ring', href: '/alerting' },
+				{ name: 'logs', label: labelFor(locale, 'elygate.logs'), icon: 'scroll-text', href: panelHref('/logs') },
+				{ name: 'budgets', label: labelFor(locale, 'elygate.budgetList'), icon: 'wallet', href: panelHref('/budgets') },
+				{ name: 'rate-limits', label: labelFor(locale, 'elygate.rateLimits'), icon: 'gauge', href: panelHref('/rate-limits') },
+				{ name: 'audit-logs', label: labelFor(locale, 'elygate.auditLogs'), icon: 'file-search', href: panelHref('/audit-logs') },
+				{ name: 'alerting', label: labelFor(locale, 'elygate.alerting'), icon: 'bell-ring', href: panelHref('/alerting') },
 			],
 		},
 		{
@@ -99,11 +103,11 @@ export function createMenu(locale: ElygateLocale): MenuItem[] {
 			label: labelFor(locale, 'elygate.integrations'),
 			icon: 'plug-zap',
 			children: [
-				{ name: 'webhooks', label: labelFor(locale, 'elygate.webhooks'), icon: 'webhook', href: '/webhooks' },
-				{ name: 'plugins', label: labelFor(locale, 'elygate.plugins'), icon: 'plug', href: '/plugins' },
-				{ name: 'skills', label: labelFor(locale, 'elygate.skills'), icon: 'sparkles', href: '/skills' },
-				{ name: 'prompt-folders', label: labelFor(locale, 'elygate.promptFolders'), icon: 'folder', href: '/prompt-folders' },
-				{ name: 'prompts', label: labelFor(locale, 'elygate.prompts'), icon: 'message-square-text', href: '/prompts' },
+				{ name: 'webhooks', label: labelFor(locale, 'elygate.webhooks'), icon: 'webhook', href: panelHref('/webhooks') },
+				{ name: 'plugins', label: labelFor(locale, 'elygate.plugins'), icon: 'plug', href: panelHref('/plugins') },
+				{ name: 'skills', label: labelFor(locale, 'elygate.skills'), icon: 'sparkles', href: panelHref('/skills') },
+				{ name: 'prompt-folders', label: labelFor(locale, 'elygate.promptFolders'), icon: 'folder', href: panelHref('/prompt-folders') },
+				{ name: 'prompts', label: labelFor(locale, 'elygate.prompts'), icon: 'message-square-text', href: panelHref('/prompts') },
 			],
 		},
 		{
@@ -111,12 +115,12 @@ export function createMenu(locale: ElygateLocale): MenuItem[] {
 			label: labelFor(locale, 'elygate.system'),
 			icon: 'settings',
 			children: [
-				{ name: 'config', label: labelFor(locale, 'elygate.config'), icon: 'settings', href: '/config' },
-				{ name: 'complexity-analyzer', label: labelFor(locale, 'elygate.complexityAnalyzer'), icon: 'brain-circuit', href: '/complexity-analyzer' },
-				{ name: 'adaptive-routing', label: labelFor(locale, 'elygate.adaptiveRouting'), icon: 'git-branch-plus', href: '/adaptive-routing' },
-				{ name: 'guardrails', label: labelFor(locale, 'elygate.guardrails'), icon: 'shield-alert', href: '/guardrails' },
-				{ name: 'cluster', label: labelFor(locale, 'elygate.cluster'), icon: 'boxes', href: '/cluster' },
-				{ name: 'circuit-breaker', label: labelFor(locale, 'elygate.circuitBreaker'), icon: 'workflow', href: '/circuit-breaker' },
+				{ name: 'config', label: labelFor(locale, 'elygate.config'), icon: 'settings', href: panelHref('/config') },
+				{ name: 'complexity-analyzer', label: labelFor(locale, 'elygate.complexityAnalyzer'), icon: 'brain-circuit', href: panelHref('/complexity-analyzer') },
+				{ name: 'adaptive-routing', label: labelFor(locale, 'elygate.adaptiveRouting'), icon: 'git-branch-plus', href: panelHref('/adaptive-routing') },
+				{ name: 'guardrails', label: labelFor(locale, 'elygate.guardrails'), icon: 'shield-alert', href: panelHref('/guardrails') },
+				{ name: 'cluster', label: labelFor(locale, 'elygate.cluster'), icon: 'boxes', href: panelHref('/cluster') },
+				{ name: 'circuit-breaker', label: labelFor(locale, 'elygate.circuitBreaker'), icon: 'workflow', href: panelHref('/circuit-breaker') },
 			],
 		},
 	];

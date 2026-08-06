@@ -28,10 +28,10 @@
 	<div class="panel">
 		<p>{i18n.t('elygate.enterpriseFeatureHint')}</p>
 		<div class="quick-links">
-			<a href="/teams">{i18n.t('elygate.teams')}</a>
-			<a href="/customers">{i18n.t('elygate.customers')}</a>
-			<a href="/mcp-sessions">{i18n.t('elygate.mcpSessions')}</a>
-			<a href="/routing-rules">{i18n.t('elygate.routingRules')}</a>
+			<a href="#/teams">{i18n.t('elygate.teams')}</a>
+			<a href="#/customers">{i18n.t('elygate.customers')}</a>
+			<a href="#/mcp-sessions">{i18n.t('elygate.mcpSessions')}</a>
+			<a href="#/routing-rules">{i18n.t('elygate.routingRules')}</a>
 		</div>
 	</div>
 </section>
