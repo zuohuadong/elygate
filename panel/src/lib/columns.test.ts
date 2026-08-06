@@ -8,4 +8,12 @@ describe('dynamic resource columns', () => {
 		expect(columnLabelFor('en', 'cache_hit_rate')).toBe('Cache hit rate');
 		expect(columnLabelFor('zh-CN', 'cache_hit_rate')).toBe('cache_hit_rate');
 	});
+
+	test('localizes skill table columns in Chinese', () => {
+		expect(columnLabelFor('zh-CN', 'description')).toBe('描述');
+		expect(columnLabelFor('zh-CN', 'license')).toBe('许可证');
+		expect(columnLabelFor('zh-CN', 'compatibility')).toBe('兼容性');
+		expect(columnLabelFor('zh-CN', 'created_at')).toBe('创建时间');
+		expect(columnLabelFor('zh-CN', 'updated_at')).toBe('更新时间');
+	});
 });

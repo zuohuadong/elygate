@@ -7,22 +7,22 @@
 		"dev": "vite --host 127.0.0.1 --port 3000",
 		"build": "vite build && bun run check && bun run copy-build",
 		"check": "svelte-check --tsconfig ./tsconfig.json",
-		"test": "bun test src/lib/api.test.ts src/lib/auth.test.ts src/lib/columns.test.ts src/lib/data-provider.test.ts",
+		"test": "bun test src/lib/api.test.ts src/lib/auth.test.ts src/lib/columns.test.ts src/lib/config-form.test.ts src/lib/data-provider.test.ts",
 		"copy-build": "rm -rf ../transports/bifrost-http/ui && cp -R out ../transports/bifrost-http/ui"
   },
   "dependencies": {
-    "@svadmin/core": "0.32.2",
-    "@svadmin/ui": "0.38.7",
-    "@tanstack/svelte-query": "^6.1.29",
+    "@svadmin/core": "0.34.0",
+    "@svadmin/ui": "0.40.0",
+    "@tanstack/svelte-query": "^6.1.38",
     "highlight.js": "^11.11.1",
-    "isomorphic-dompurify": "^3.19.0",
-    "marked": "^18.0.0",
-    "marked-highlight": "^2.2.3"
+    "isomorphic-dompurify": "^3.20.0",
+    "marked": "^18.0.7",
+    "marked-highlight": "^2.2.4"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^7.2.0",
     "@tailwindcss/vite": "^4.3.3",
-    "svelte": "^5.56.6",
+    "svelte": "^5.56.8",
     "svelte-check": "^4.7.3",
     "tailwindcss": "^4.3.3",
     "typescript": "^6.0.3",
