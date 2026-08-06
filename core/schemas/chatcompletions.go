@@ -235,6 +235,11 @@ type ChatParameters struct {
 	TaskBudget        *ChatTaskBudget `json:"task_budget,omitempty"`        // Anthropic output_config.task_budget (task-budgets-2026-03-13 beta)
 	ContextManagement json.RawMessage `json:"context_management,omitempty"` // Anthropic context_management — complex union, passed as raw JSON to the provider layer
 
+	// Opts into running built-in server-side tools (e.g. Google Search) in the same
+	// turn as function declarations. Required by Gemini 3+, which otherwise rejects
+	// the combination; providers without the concept ignore it.
+	IncludeServerSideToolInvocations *bool `json:"include_server_side_tool_invocations,omitempty"`
+
 	// Dynamic parameters that can be provider-specific, they are directly
 	// added to the request as is.
 	ExtraParams map[string]interface{} `json:"-"`
@@ -1383,6 +1388,12 @@ type ChatInputFile struct {
 // ChatToolMessage represents a tool message in a chat conversation.
 type ChatToolMessage struct {
 	ToolCallID *string `json:"tool_call_id,omitempty"`
+	// IsError marks the tool execution as failed. Not part of the OpenAI wire
+	// format — converters for providers whose wire supports an error marker map
+	// it (Anthropic tool_result.is_error, Bedrock toolResult.status), and
+	// OpenAI-wire converters strip it before serialization so providers that
+	// reject unknown message parameters never see it.
+	IsError *bool `json:"is_error,omitempty"`
 }
 
 // ChatAssistantMessage represents a message in a chat conversation.

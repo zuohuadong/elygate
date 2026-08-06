@@ -181,7 +181,7 @@ export default function SessionsTable({
 								<TableHead>
 									<HeaderWithTooltip
 										label="Type"
-										tooltip="OAuth: per-user OAuth credential — either a stored token from a completed sign-in, or a pending sign-in flow. Headers: per-user header values (API keys / signed tokens) — either stored or pending submission."
+										tooltip="OAuth: per-user OAuth credential, either a stored token from a completed sign-in, or a pending sign-in flow. Headers: per-user header values (API keys / signed tokens), either stored or pending submission."
 									/>
 								</TableHead>
 								<TableHead>

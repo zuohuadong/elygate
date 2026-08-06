@@ -122,6 +122,15 @@ func NewBedrockProvider(config *schemas.ProviderConfig, logger schemas.Logger) (
 		transport.TLSClientConfig = tlsConfig
 	}
 
+	// When HTTP/2 is enforced and a ping interval is configured, send client-initiated
+	// PING keepalives so an idle streaming connection isn't closed by an intermediary
+	// (surfaces as "unexpected EOF"). Left off by default; opt in via the interval.
+	if config.NetworkConfig.EnforceHTTP2 && config.NetworkConfig.HTTP2PingIntervalInSeconds > 0 {
+		transport.HTTP2 = &http.HTTP2Config{
+			SendPingTimeout: time.Duration(config.NetworkConfig.HTTP2PingIntervalInSeconds) * time.Second,
+		}
+	}
+
 	client := &http.Client{Transport: transport, Timeout: requestTimeout}
 	streamingClient := providerUtils.BuildStreamingHTTPClient(client)
 
@@ -310,7 +319,7 @@ func (provider *BedrockProvider) completeRequest(ctx *schemas.BifrostContext, js
 func (provider *BedrockProvider) executeBedrockRequest(req *http.Request) ([]byte, time.Duration, map[string]string, *schemas.BifrostError) {
 	// Execute the request and measure latency
 	startTime := time.Now()
-	resp, err := provider.client.Do(req)
+	resp, err := providerUtils.DoHTTPRequest(provider.client, req)
 	latency := time.Since(startTime)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
@@ -407,7 +416,7 @@ func (provider *BedrockProvider) completeAgentRuntimeRequest(ctx *schemas.Bifros
 	}
 
 	startTime := time.Now()
-	resp, err := provider.client.Do(req)
+	resp, err := providerUtils.DoHTTPRequest(provider.client, req)
 	latency := time.Since(startTime)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
@@ -509,7 +518,7 @@ func (provider *BedrockProvider) makeStreamingRequest(ctx *schemas.BifrostContex
 
 	// Make the request
 	startTime := time.Now()
-	resp, respErr := provider.streamingClient.Do(req)
+	resp, respErr := providerUtils.DoHTTPRequest(provider.streamingClient, req)
 	latency := time.Since(startTime)
 	if respErr != nil {
 		if errors.Is(respErr, context.Canceled) {
@@ -565,6 +574,56 @@ func (provider *BedrockProvider) makeStreamingRequest(ctx *schemas.BifrostContex
 }
 
 // Returns a BifrostError if signing fails.
+// unsignableHeaders must not be covered by the SigV4 signature: hop-by-hop and
+// proxy-managed headers that an intermediary may rewrite in transit, which invalidates the
+// signature. AWS's signing guide requires only host and x-amz-* to be signed and warns
+// against "volatile transport headers that are mutated by proxies, load balancers, and the
+// nodes in a distributed system". The AWS SDK itself skips only authorization, user-agent,
+// x-amzn-trace-id, expect and transfer-encoding, so the rest is on us. These are removed for
+// signing and restored afterwards, so what goes on the wire is unchanged.
+var unsignableHeaders = map[string]struct{}{
+	"connection":          {},
+	"keep-alive":          {},
+	"te":                  {},
+	"trailer":             {},
+	"upgrade":             {},
+	"proxy-authorization": {},
+	"proxy-authenticate":  {},
+	"x-real-ip":           {},
+	"x-request-id":        {},
+}
+
+// internalHeaderPrefix marks Bifrost's own headers. They carry the caller's virtual key, so
+// they are dropped outright rather than restored — they must never reach a provider.
+const internalHeaderPrefix = "x-bf-"
+
+// restoredHeader is a header lifted off the request for signing, to be put back after.
+type restoredHeader struct {
+	name   string
+	values []string
+}
+
+// stripHeadersForSigning removes headers that must not be signed and returns the ones to put
+// back after signing. Bifrost-internal headers are dropped and never returned. A request with
+// no volatile headers — the common case — allocates nothing and leaves the request untouched.
+func stripHeadersForSigning(header http.Header) []restoredHeader {
+	var restore []restoredHeader
+	for name, values := range header {
+		lower := strings.ToLower(name)
+		internal := strings.HasPrefix(lower, internalHeaderPrefix)
+		_, volatile := unsignableHeaders[lower]
+		if !internal && !volatile && !strings.HasPrefix(lower, "x-forwarded-") {
+			continue
+		}
+		if !internal {
+			restore = append(restore, restoredHeader{name: name, values: values})
+		}
+		// The name came straight off the map, so skip Del's redundant canonicalization.
+		delete(header, name)
+	}
+	return restore
+}
+
 func signAWSRequest(
 	ctx *schemas.BifrostContext,
 	req *http.Request,
@@ -690,6 +749,10 @@ func signAWSRequest(
 		}
 	}
 
+	// The SDK signs every header still on the request, so lift the volatile ones out for
+	// the duration of signing and put them back before the request goes out.
+	restoreHeaders := stripHeadersForSigning(req.Header)
+
 	// Create the AWS signer
 	signer := v4.NewSigner()
 
@@ -700,7 +763,11 @@ func signAWSRequest(
 	}
 
 	// Sign the request with AWS Signature V4
-	if err := signer.SignHTTP(ctx, creds, req, bodyHash, service, region, time.Now()); err != nil {
+	err = signer.SignHTTP(ctx, creds, req, bodyHash, service, region, time.Now())
+	for _, h := range restoreHeaders {
+		req.Header[h.name] = h.values
+	}
+	if err != nil {
 		return providerUtils.NewBifrostOperationError("failed to sign request", err)
 	}
 
@@ -731,7 +798,7 @@ func (provider *BedrockProvider) listMantleModels(ctx *schemas.BifrostContext, k
 		return nil
 	}
 
-	resp, err := provider.client.Do(req)
+	resp, err := providerUtils.DoHTTPRequest(provider.client, req)
 	if err != nil {
 		provider.logger.Warn("mantle list-models request failed: %v", err)
 		return nil
@@ -812,7 +879,7 @@ func (provider *BedrockProvider) listModelsByKey(ctx *schemas.BifrostContext, ke
 	startTime := time.Now()
 
 	// Execute the request
-	resp, err := provider.client.Do(req)
+	resp, err := providerUtils.DoHTTPRequest(provider.client, req)
 	latency := time.Since(startTime)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
@@ -1195,6 +1262,7 @@ func (provider *BedrockProvider) ChatCompletion(ctx *schemas.BifrostContext, key
 	// Set ExtraFields
 	bifrostResponse.ExtraFields.Latency = latency.Milliseconds()
 	bifrostResponse.ExtraFields.ProviderResponseHeaders = providerResponseHeaders
+	applyDroppedUnsupportedTools(ctx, &bifrostResponse.ExtraFields, provider.logger)
 
 	if providerUtils.ShouldSendBackRawRequest(ctx, provider.sendBackRawRequest) {
 		providerUtils.ParseAndSetRawRequest(&bifrostResponse.ExtraFields, jsonData)
@@ -1207,6 +1275,20 @@ func (provider *BedrockProvider) ChatCompletion(ctx *schemas.BifrostContext, key
 	}
 
 	return bifrostResponse, nil
+}
+
+// applyDroppedUnsupportedTools reads tool-drop info stashed in context during
+// request building (ValidateChatToolsForProvider / ValidateResponsesToolsForProvider,
+// plus the Nova-model gate in convertToolConfigFromFiltered/ToBedrockResponsesRequest)
+// and surfaces it on the response so callers aren't left guessing why a requested
+// tool never showed up — mirrors how ProviderResponseHeaders is threaded via context.
+func applyDroppedUnsupportedTools(ctx *schemas.BifrostContext, extraFields *schemas.BifrostResponseExtraFields, logger schemas.Logger) {
+	dropped, ok := ctx.Value(schemas.BifrostContextKeyDroppedUnsupportedTools).([]string)
+	if !ok || len(dropped) == 0 {
+		return
+	}
+	extraFields.DroppedUnsupportedTools = dropped
+	logger.Warn(fmt.Sprintf("bedrock: dropped unsupported tools from request: %v", dropped))
 }
 
 // normalizeCachedUsage folds the accumulated cached read/write token counts into
@@ -1664,6 +1746,7 @@ func (provider *BedrockProvider) Responses(ctx *schemas.BifrostContext, key sche
 	// Set ExtraFields
 	bifrostResponse.ExtraFields.Latency = latency.Milliseconds()
 	bifrostResponse.ExtraFields.ProviderResponseHeaders = providerResponseHeaders
+	applyDroppedUnsupportedTools(ctx, &bifrostResponse.ExtraFields, provider.logger)
 
 	// Set raw request if enabled
 	if providerUtils.ShouldSendBackRawRequest(ctx, provider.sendBackRawRequest) {
@@ -2480,7 +2563,7 @@ func (provider *BedrockProvider) FileUpload(ctx *schemas.BifrostContext, key sch
 
 	// Execute request
 	startTime := time.Now()
-	resp, err := provider.client.Do(httpReq)
+	resp, err := providerUtils.DoHTTPRequest(provider.client, httpReq)
 	latency := time.Since(startTime)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
@@ -2609,7 +2692,7 @@ func (provider *BedrockProvider) FileList(ctx *schemas.BifrostContext, keys []sc
 
 	// Execute request
 	startTime := time.Now()
-	resp, err := provider.client.Do(httpReq)
+	resp, err := providerUtils.DoHTTPRequest(provider.client, httpReq)
 	latency := time.Since(startTime)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
@@ -2721,7 +2804,7 @@ func (provider *BedrockProvider) FileRetrieve(ctx *schemas.BifrostContext, keys 
 
 		// Execute request
 		startTime := time.Now()
-		resp, err := provider.client.Do(httpReq)
+		resp, err := providerUtils.DoHTTPRequest(provider.client, httpReq)
 		latency := time.Since(startTime)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
@@ -2819,7 +2902,7 @@ func (provider *BedrockProvider) FileDelete(ctx *schemas.BifrostContext, keys []
 
 		// Execute request
 		startTime := time.Now()
-		resp, err := provider.client.Do(httpReq)
+		resp, err := providerUtils.DoHTTPRequest(provider.client, httpReq)
 		latency := time.Since(startTime)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
@@ -2900,7 +2983,7 @@ func (provider *BedrockProvider) FileContent(ctx *schemas.BifrostContext, keys [
 
 		// Execute request
 		startTime := time.Now()
-		resp, err := provider.client.Do(httpReq)
+		resp, err := providerUtils.DoHTTPRequest(provider.client, httpReq)
 		latency := time.Since(startTime)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
@@ -2956,10 +3039,14 @@ func (provider *BedrockProvider) BatchCreate(ctx *schemas.BifrostContext, key sc
 		return nil, err
 	}
 
-	// Require RoleArn in extra params
+	// Resolve the batch service role
 	roleArn := ""
-	// First we will honor the role_arn coming from the client side if present
-	if request.ExtraParams != nil {
+	// Server-configured batch role takes priority over the client-sent value
+	if key.BedrockKeyConfig.BatchRoleARN != nil {
+		roleArn = key.BedrockKeyConfig.BatchRoleARN.GetValue()
+	}
+	// Then we will honor the role_arn coming from the client side if present
+	if roleArn == "" && request.ExtraParams != nil {
 		if r, ok := request.ExtraParams["role_arn"].(string); ok {
 			roleArn = r
 		}
@@ -2972,8 +3059,8 @@ func (provider *BedrockProvider) BatchCreate(ctx *schemas.BifrostContext, key sc
 	}
 	// And if still we don't get role ARN
 	if roleArn == "" {
-		provider.logger.Error("role_arn is required for Bedrock batch API (provide in extra_params)")
-		return nil, providerUtils.NewBifrostOperationError("role_arn is required for Bedrock batch API (provide in extra_params)", nil)
+		provider.logger.Error("role_arn is required for Bedrock batch API (send it in extra_params or set batch_role_arn in the key config)")
+		return nil, providerUtils.NewBifrostOperationError("role_arn is required for Bedrock batch API (send it in extra_params or set batch_role_arn in the key config)", nil)
 	}
 	// Get output S3 URI from extra params
 	outputS3Uri := ""
@@ -3105,7 +3192,7 @@ func (provider *BedrockProvider) BatchCreate(ctx *schemas.BifrostContext, key sc
 
 	// Execute request
 	startTime := time.Now()
-	resp, err := provider.client.Do(httpReq)
+	resp, err := providerUtils.DoHTTPRequest(provider.client, httpReq)
 	latency := time.Since(startTime)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
@@ -3230,7 +3317,7 @@ func (provider *BedrockProvider) BatchList(ctx *schemas.BifrostContext, keys []s
 
 	// Execute request
 	startTime := time.Now()
-	resp, err := provider.client.Do(httpReq)
+	resp, err := providerUtils.DoHTTPRequest(provider.client, httpReq)
 	latency := time.Since(startTime)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
@@ -3348,7 +3435,7 @@ func (provider *BedrockProvider) fetchBatchManifest(ctx *schemas.BifrostContext,
 		return nil
 	}
 
-	resp, err := provider.client.Do(httpReq)
+	resp, err := providerUtils.DoHTTPRequest(provider.client, httpReq)
 	if err != nil {
 		provider.logger.Error("failed to fetch manifest: %v", err)
 		return nil
@@ -3410,7 +3497,7 @@ func (provider *BedrockProvider) BatchRetrieve(ctx *schemas.BifrostContext, keys
 
 		// Execute request
 		startTime := time.Now()
-		resp, err := provider.client.Do(httpReq)
+		resp, err := providerUtils.DoHTTPRequest(provider.client, httpReq)
 		latency := time.Since(startTime)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
@@ -3554,7 +3641,7 @@ func (provider *BedrockProvider) BatchCancel(ctx *schemas.BifrostContext, keys [
 
 		// Execute request
 		startTime := time.Now()
-		resp, err := provider.client.Do(httpReq)
+		resp, err := providerUtils.DoHTTPRequest(provider.client, httpReq)
 		latency := time.Since(startTime)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {

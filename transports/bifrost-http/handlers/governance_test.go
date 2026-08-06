@@ -120,12 +120,147 @@ type mockRotateGovernanceManager struct {
 	reloadErr error
 }
 
+// budgetOverrideTestGovernanceManager records reloads after budget override mutations.
+type budgetOverrideTestGovernanceManager struct {
+	GovernanceManager
+	store     configstore.ConfigStore
+	reloadIDs []string
+}
+
+// ReloadVirtualKey records the reload and returns the current persisted virtual key.
+func (m *budgetOverrideTestGovernanceManager) ReloadVirtualKey(ctx context.Context, id string) (*configstoreTables.TableVirtualKey, error) {
+	m.reloadIDs = append(m.reloadIDs, id)
+	return m.store.GetVirtualKey(ctx, id)
+}
+
 func (m *mockRotateGovernanceManager) ReloadVirtualKey(ctx context.Context, id string) (*configstoreTables.TableVirtualKey, error) {
 	m.reloadIDs = append(m.reloadIDs, id)
 	if m.reloadErr != nil {
 		return nil, m.reloadErr
 	}
 	return m.store.GetVirtualKey(ctx, id)
+}
+
+// TestVirtualKeyBudgetOverrideLifecycle verifies finite, replacement, and clear mutations preserve base budget state.
+func TestVirtualKeyBudgetOverrideLifecycle(t *testing.T) {
+	SetLogger(&mockLogger{})
+	store := setupPricingOverrideHandlerStore(t)
+	manager := &budgetOverrideTestGovernanceManager{store: store}
+	handler := &GovernanceHandler{configStore: store, governanceManager: manager}
+	ctx := context.Background()
+
+	active := true
+	vk := &configstoreTables.TableVirtualKey{
+		ID:       "vk-budget-override",
+		Name:     "override-test",
+		Value:    *schemas.NewSecretVar("sk-bf-override-test"),
+		IsActive: &active,
+	}
+	if err := store.CreateVirtualKey(ctx, vk); err != nil {
+		t.Fatalf("create virtual key: %v", err)
+	}
+	scopeID := vk.ID
+	modelConfig := &configstoreTables.TableModelConfig{
+		ID:        "mc-budget-override",
+		ModelName: configstoreTables.ModelConfigAllModels,
+		Scope:     configstoreTables.ModelConfigScopeVirtualKey,
+		ScopeID:   &scopeID,
+		Budgets: []configstoreTables.TableBudget{{
+			ID:            "budget-override",
+			MaxLimit:      100,
+			CurrentUsage:  40,
+			ResetDuration: "1d",
+		}},
+	}
+	if err := store.CreateModelConfig(ctx, modelConfig); err != nil {
+		t.Fatalf("create model config: %v", err)
+	}
+
+	putCtx := newTestRequestCtx(`{"amount":25,"mode":"cycles","cycles":4}`)
+	putCtx.SetUserValue("vk_id", vk.ID)
+	putCtx.SetUserValue("budget_id", "budget-override")
+	handler.updateVirtualKeyBudgetOverride(putCtx)
+	if putCtx.Response.StatusCode() != fasthttp.StatusOK {
+		t.Fatalf("finite override status=%d body=%s", putCtx.Response.StatusCode(), putCtx.Response.Body())
+	}
+
+	budget, err := store.GetBudget(ctx, "budget-override")
+	if err != nil {
+		t.Fatalf("get finite override budget: %v", err)
+	}
+	if budget.MaxLimit != 100 || budget.CurrentUsage != 40 || budget.OverrideAmount != 25 || budget.OverrideMode != configstoreTables.BudgetOverrideModeCycles || budget.OverrideCyclesRemaining != 4 {
+		t.Fatalf("unexpected finite override budget: %+v", budget)
+	}
+
+	replaceCtx := newTestRequestCtx(`{"amount":50,"mode":"forever"}`)
+	replaceCtx.SetUserValue("vk_id", vk.ID)
+	replaceCtx.SetUserValue("budget_id", "budget-override")
+	handler.updateVirtualKeyBudgetOverride(replaceCtx)
+	if replaceCtx.Response.StatusCode() != fasthttp.StatusOK {
+		t.Fatalf("forever override status=%d body=%s", replaceCtx.Response.StatusCode(), replaceCtx.Response.Body())
+	}
+
+	deleteCtx := newTestRequestCtx("")
+	deleteCtx.SetUserValue("vk_id", vk.ID)
+	deleteCtx.SetUserValue("budget_id", "budget-override")
+	handler.deleteVirtualKeyBudgetOverride(deleteCtx)
+	if deleteCtx.Response.StatusCode() != fasthttp.StatusOK {
+		t.Fatalf("clear override status=%d body=%s", deleteCtx.Response.StatusCode(), deleteCtx.Response.Body())
+	}
+	budget, err = store.GetBudget(ctx, "budget-override")
+	if err != nil {
+		t.Fatalf("get cleared override budget: %v", err)
+	}
+	if budget.OverrideAmount != 0 || budget.OverrideMode != "" || budget.OverrideCyclesRemaining != 0 {
+		t.Fatalf("override was not cleared: %+v", budget)
+	}
+	if len(manager.reloadIDs) != 3 {
+		t.Fatalf("reload calls=%d, want 3", len(manager.reloadIDs))
+	}
+}
+
+// TestVirtualKeyBudgetOverrideRejectsDirectMirrorBudget verifies AP-style direct VK budgets cannot be overridden through the OSS endpoint.
+func TestVirtualKeyBudgetOverrideRejectsDirectMirrorBudget(t *testing.T) {
+	SetLogger(&mockLogger{})
+	store := setupPricingOverrideHandlerStore(t)
+	manager := &budgetOverrideTestGovernanceManager{store: store}
+	handler := &GovernanceHandler{configStore: store, governanceManager: manager}
+	ctx := context.Background()
+
+	active := true
+	vk := &configstoreTables.TableVirtualKey{
+		ID:       "vk-ap-managed",
+		Name:     "ap-managed",
+		Value:    *schemas.NewSecretVar("sk-bf-ap-managed"),
+		IsActive: &active,
+	}
+	if err := store.CreateVirtualKey(ctx, vk); err != nil {
+		t.Fatalf("create virtual key: %v", err)
+	}
+	directBudget := &configstoreTables.TableBudget{
+		ID:            "ap-mirror-budget",
+		MaxLimit:      100,
+		ResetDuration: "1d",
+		VirtualKeyID:  &vk.ID,
+	}
+	if err := store.CreateBudget(ctx, directBudget); err != nil {
+		t.Fatalf("create direct budget: %v", err)
+	}
+
+	putCtx := newTestRequestCtx(`{"amount":25,"mode":"forever"}`)
+	putCtx.SetUserValue("vk_id", vk.ID)
+	putCtx.SetUserValue("budget_id", directBudget.ID)
+	handler.updateVirtualKeyBudgetOverride(putCtx)
+	if putCtx.Response.StatusCode() != fasthttp.StatusNotFound {
+		t.Fatalf("status=%d, want 404; body=%s", putCtx.Response.StatusCode(), putCtx.Response.Body())
+	}
+	stored, err := store.GetBudget(ctx, directBudget.ID)
+	if err != nil {
+		t.Fatalf("get direct budget: %v", err)
+	}
+	if stored.OverrideMode != "" {
+		t.Fatalf("direct mirror override changed unexpectedly: %+v", stored)
+	}
 }
 
 type mockComplexityGovernanceManager struct {
@@ -1622,6 +1757,7 @@ func TestGetVirtualKeyQuota_ExternalResolverReplacesWithAccessProfileBudgets(t *
 				Budgets: []configstoreTables.TableBudget{
 					{ID: "b-ap", MaxLimit: 500, CurrentUsage: 42, ResetDuration: "1d", LastReset: cycleStart},
 				},
+				Managed:     true,
 				UsageUserID: "user-1",
 			}, nil
 		},
@@ -1658,6 +1794,144 @@ func TestGetVirtualKeyQuota_ExternalResolverReplacesWithAccessProfileBudgets(t *
 	}
 	if len(call.VirtualKeyIDs) != 0 {
 		t.Fatalf("expected no VK scoping on the AP usage query, got %#v", call.VirtualKeyIDs)
+	}
+}
+
+// TestGetVirtualKeyQuota_ExternalResolverRateLimitOnly verifies a rate-limit-only
+// external result (AP has a rate limit but no budget): the AP rate limit REPLACES the
+// VK's own rate limit, and the VK's own budget mirror rows are dropped rather than
+// reported — an AP-managed VK whose profile has no budget genuinely has no budget, and
+// the VK's own rows are untracked $0 mirrors. Pins the empty-budget semantics shared by
+// the quota and detail/list paths.
+func TestGetVirtualKeyQuota_ExternalResolverRateLimitOnly(t *testing.T) {
+	SetLogger(&mockLogger{})
+
+	active := true
+	cycleStart := time.Date(2026, time.January, 2, 15, 4, 5, 0, time.UTC)
+	tokMax := int64(1000)
+	store := &mockQuotaConfigStore{
+		vk: &configstoreTables.TableVirtualKey{
+			ID:       "vk-1",
+			Name:     "AP Key",
+			IsActive: &active,
+			// Native mirror rate limit — must be replaced by the AP one below.
+			RateLimit: &configstoreTables.TableRateLimit{ID: "rl-vk"},
+		},
+		modelConfigs: []configstoreTables.TableModelConfig{
+			{
+				ID:        "mc-vk",
+				Scope:     configstoreTables.ModelConfigScopeVirtualKey,
+				ScopeID:   schemas.Ptr("vk-1"),
+				ModelName: configstoreTables.ModelConfigAllModels,
+				// VK mirror budget: zero usage — must NOT appear once the VK is AP-managed.
+				Budgets: []configstoreTables.TableBudget{
+					{ID: "b-vk", MaxLimit: 100, CurrentUsage: 0, ResetDuration: "1d", LastReset: cycleStart},
+				},
+			},
+		},
+	}
+	h := &GovernanceHandler{
+		configStore: store,
+		externalQuotaBudgetResolver: func(_ context.Context, vk *configstoreTables.TableVirtualKey) (*ExternalQuotaBudgetResult, error) {
+			if vk.ID != "vk-1" {
+				return nil, nil
+			}
+			// AP-managed VK whose profile carries a rate limit but no budget.
+			return &ExternalQuotaBudgetResult{
+				RateLimit:   &configstoreTables.TableRateLimit{ID: "ap-rl", TokenMaxLimit: &tokMax, TokenCurrentUsage: 250},
+				Managed:     true,
+				UsageUserID: "user-1",
+			}, nil
+		},
+	}
+
+	ctx := &fasthttp.RequestCtx{}
+	ctx.Request.Header.Set("x-bf-vk", "sk-bf-secret")
+
+	h.getVirtualKeyQuota(ctx)
+
+	if ctx.Response.StatusCode() != 200 {
+		t.Fatalf("expected status 200, got %d: %s", ctx.Response.StatusCode(), string(ctx.Response.Body()))
+	}
+	var resp quotaResponse
+	if err := json.Unmarshal(ctx.Response.Body(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	// No AP budget → no budgets reported (the VK's own b-vk mirror is dropped, not surfaced).
+	if len(resp.Budgets) != 0 {
+		t.Fatalf("expected no budgets for a rate-limit-only AP-managed VK, got %#v", resp.Budgets)
+	}
+	// The AP rate limit replaces the VK's own rl-vk.
+	if resp.RateLimit == nil || resp.RateLimit.ID != "ap-rl" || resp.RateLimit.TokenCurrentUsage != 250 {
+		t.Fatalf("expected the access-profile rate limit ap-rl (usage 250), got %#v", resp.RateLimit)
+	}
+}
+
+// TestApplyExternalBudgets_RateLimitOnlyDropsNativeBudgets pins the detail/list-path
+// twin of the quota semantics: for an AP-managed VK whose external result carries a rate
+// limit but no budget, applyExternalBudgets drops the VK's own mirror budgets (rather
+// than preserving them) and swaps in the AP rate limit — so getVirtualKey/getVirtualKeys
+// agree with getVirtualKeyQuota.
+func TestApplyExternalBudgets_RateLimitOnlyDropsNativeBudgets(t *testing.T) {
+	SetLogger(&mockLogger{})
+
+	h := &GovernanceHandler{
+		externalQuotaBudgetResolver: func(_ context.Context, _ *configstoreTables.TableVirtualKey) (*ExternalQuotaBudgetResult, error) {
+			return &ExternalQuotaBudgetResult{
+				RateLimit: &configstoreTables.TableRateLimit{ID: "ap-rl"},
+				Managed:   true,
+			}, nil
+		},
+	}
+	vk := &configstoreTables.TableVirtualKey{
+		ID: "vk-1",
+		Budgets: []configstoreTables.TableBudget{
+			{ID: "b-vk-mirror", MaxLimit: 100, CurrentUsage: 0},
+		},
+		RateLimit: &configstoreTables.TableRateLimit{ID: "rl-vk-mirror"},
+	}
+
+	h.applyExternalBudgets(context.Background(), vk)
+
+	if len(vk.Budgets) != 0 {
+		t.Fatalf("expected native mirror budgets dropped for a rate-limit-only AP result, got %#v", vk.Budgets)
+	}
+	if vk.RateLimit == nil || vk.RateLimit.ID != "ap-rl" {
+		t.Fatalf("expected the AP rate limit ap-rl to replace the native rl-vk-mirror, got %#v", vk.RateLimit)
+	}
+	if !vk.IsAccessProfileManaged {
+		t.Fatalf("expected IsAccessProfileManaged=true for an AP-managed VK")
+	}
+}
+
+// TestApplyExternalBudgets_ManagedWithNoGovernanceFlagsAndClears verifies that a VK the
+// resolver reports as managed but whose profile has NO budget and NO rate limit is still
+// flagged managed (so the UI locks edits / shows the notice) and has its untracked mirror
+// budget and rate-limit rows cleared rather than shown.
+func TestApplyExternalBudgets_ManagedWithNoGovernanceFlagsAndClears(t *testing.T) {
+	SetLogger(&mockLogger{})
+
+	h := &GovernanceHandler{
+		externalQuotaBudgetResolver: func(_ context.Context, _ *configstoreTables.TableVirtualKey) (*ExternalQuotaBudgetResult, error) {
+			return &ExternalQuotaBudgetResult{Managed: true}, nil
+		},
+	}
+	vk := &configstoreTables.TableVirtualKey{
+		ID:        "vk-1",
+		Budgets:   []configstoreTables.TableBudget{{ID: "b-vk-mirror", MaxLimit: 100, CurrentUsage: 0}},
+		RateLimit: &configstoreTables.TableRateLimit{ID: "rl-vk-mirror"},
+	}
+
+	h.applyExternalBudgets(context.Background(), vk)
+
+	if !vk.IsAccessProfileManaged {
+		t.Fatalf("expected IsAccessProfileManaged=true")
+	}
+	if len(vk.Budgets) != 0 {
+		t.Fatalf("expected mirror budgets cleared for a managed VK with no AP budget, got %#v", vk.Budgets)
+	}
+	if vk.RateLimit != nil {
+		t.Fatalf("expected mirror rate limit cleared for a managed VK with no AP rate limit, got %#v", vk.RateLimit)
 	}
 }
 
@@ -2271,6 +2545,73 @@ func TestGetVirtualKeys_FromMemoryTakesPrecedenceOverLimit(t *testing.T) {
 	}
 	if store.getVirtualKeysCalls != 0 {
 		t.Fatalf("from_memory path called GetVirtualKeys %d times", store.getVirtualKeysCalls)
+	}
+}
+
+// TestGetVirtualKeys_FromMemoryRejectsUserFilter locks in the fail-closed contract
+// for the user filter. The in-memory GovernanceData carries no VK↔user assignments,
+// so the filter cannot be applied there; silently ignoring it would return every
+// cached key — the inverse of the DB path, which matches nothing it cannot resolve.
+func TestGetVirtualKeys_FromMemoryRejectsUserFilter(t *testing.T) {
+	SetLogger(&mockLogger{})
+
+	store := &mockConfigStoreForVK{}
+	manager := &mockGovernanceManagerForVK{
+		data: &governance.GovernanceData{
+			VirtualKeys: map[string]*configstoreTables.TableVirtualKey{},
+		},
+	}
+	h := &GovernanceHandler{
+		configStore:       store,
+		governanceManager: manager,
+	}
+
+	ctx := &fasthttp.RequestCtx{}
+	ctx.Request.Header.SetMethod("GET")
+	ctx.Request.SetRequestURI("/api/governance/virtual-keys?from_memory=true&user_id=user-1")
+
+	h.getVirtualKeys(ctx)
+
+	if ctx.Response.StatusCode() != 400 {
+		t.Fatalf("expected status 400, got %d: %s", ctx.Response.StatusCode(), string(ctx.Response.Body()))
+	}
+	// Rejected before any data is read, so no key ever leaves the handler.
+	if manager.getGovernanceDataCalls != 0 {
+		t.Fatalf("expected GetGovernanceData not to be called, got %d", manager.getGovernanceDataCalls)
+	}
+	if store.getVirtualKeysCalls != 0 || store.getVirtualKeysPaginatedCalls != 0 {
+		t.Fatalf("rejected request hit the config store: %d/%d", store.getVirtualKeysCalls, store.getVirtualKeysPaginatedCalls)
+	}
+}
+
+// TestGetVirtualKeys_FromMemoryIgnoresOtherFilters pins the long-standing behaviour
+// the user_id rejection deliberately does not extend to: customer_id/team_id are
+// still silently ignored under from_memory, so existing consumers are unaffected.
+func TestGetVirtualKeys_FromMemoryIgnoresOtherFilters(t *testing.T) {
+	SetLogger(&mockLogger{})
+
+	store := &mockConfigStoreForVK{}
+	manager := &mockGovernanceManagerForVK{
+		data: &governance.GovernanceData{
+			VirtualKeys: map[string]*configstoreTables.TableVirtualKey{},
+		},
+	}
+	h := &GovernanceHandler{
+		configStore:       store,
+		governanceManager: manager,
+	}
+
+	ctx := &fasthttp.RequestCtx{}
+	ctx.Request.Header.SetMethod("GET")
+	ctx.Request.SetRequestURI("/api/governance/virtual-keys?from_memory=true&customer_id=cust-1&team_id=team-1")
+
+	h.getVirtualKeys(ctx)
+
+	if ctx.Response.StatusCode() != 200 {
+		t.Fatalf("expected status 200, got %d: %s", ctx.Response.StatusCode(), string(ctx.Response.Body()))
+	}
+	if manager.getGovernanceDataCalls != 1 {
+		t.Fatalf("expected GetGovernanceData to be called once, got %d", manager.getGovernanceDataCalls)
 	}
 }
 

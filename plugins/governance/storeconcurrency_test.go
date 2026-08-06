@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/maximhq/bifrost/core/schemas"
+	configstoreTables "github.com/maximhq/bifrost/framework/configstore/tables"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -22,6 +24,22 @@ func newStandaloneStore(t *testing.T) *LocalGovernanceStore {
 		LastDBUsagesTokensRateLimits:   map[string]int64{},
 		LastDBUsagesRequestsRateLimits: map[string]int64{},
 	}
+}
+
+// TestGetVirtualKeyByID exercises the ID-keyed lookup directly without taking
+// the full governance snapshot path.
+func TestGetVirtualKeyByID(t *testing.T) {
+	store := newStandaloneStore(t)
+	vk := &configstoreTables.TableVirtualKey{ID: "vk-id", Name: "test", Value: *schemas.NewSecretVar("sk-bf-test")}
+	store.storeVirtualKey(vk.Value.GetValue(), vk)
+
+	got, found := store.GetVirtualKeyByID(context.Background(), vk.ID)
+	require.True(t, found)
+	assert.Same(t, vk, got)
+
+	got, found = store.GetVirtualKeyByID(context.Background(), "missing")
+	assert.False(t, found)
+	assert.Nil(t, got)
 }
 
 // TestBumpBudgetUsage_NoLostIncrements proves the CAS retry loop in
@@ -94,13 +112,18 @@ func TestBumpRateLimitUsage_NoLostIncrements(t *testing.T) {
 func TestResetBudgetAt_ConcurrentResettersCollapse(t *testing.T) {
 	store := newStandaloneStore(t)
 	budgetID := "reset-collapse"
-	old := buildBudget(budgetID, 1000, "1h")
-	old.LastReset = time.Now().Add(-2 * time.Hour)
-	old.CurrentUsage = 999
-	store.budgets.Store(budgetID, old)
-
 	const goroutines = 128
-	newLastReset := time.Now()
+	// Exactly one window between the grant anchor and the reset target, so the
+	// derived remaining count is unambiguous: 5 granted minus 1 window closed.
+	newLastReset := time.Now().Truncate(time.Second)
+	grantAnchor := newLastReset.Add(-time.Hour)
+
+	old := buildBudget(budgetID, 1000, "1h")
+	old.CreatedAt = grantAnchor
+	old.LastReset = grantAnchor
+	old.CurrentUsage = 999
+	require.NoError(t, old.SetOverrideAt(25, configstoreTables.BudgetOverrideModeCycles, 5, grantAnchor))
+	store.budgets.Store(budgetID, old)
 
 	var successes atomic.Int64
 	var wg sync.WaitGroup
@@ -120,4 +143,5 @@ func TestResetBudgetAt_ConcurrentResettersCollapse(t *testing.T) {
 	require.NotNil(t, final)
 	assert.Equal(t, 0.0, final.CurrentUsage)
 	assert.True(t, final.LastReset.Equal(newLastReset))
+	assert.Equal(t, 4, final.OverrideCyclesRemaining, "the single winning reset should consume exactly one override cycle")
 }
