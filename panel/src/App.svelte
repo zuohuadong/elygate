@@ -7,6 +7,7 @@
 	import { createMenu, createResources } from './lib/resources';
 	import DashboardPage from './pages/DashboardPage.svelte';
 	import BifrostResourcePage from './pages/BifrostResourcePage.svelte';
+	import ConfigPage from './pages/ConfigPage.svelte';
 	import EnterpriseFeaturePage from './pages/EnterpriseFeaturePage.svelte';
 	import GenericAdminPage from './pages/GenericAdminPage.svelte';
 	import JsonDocumentPage from './pages/JsonDocumentPage.svelte';
@@ -53,7 +54,7 @@
 		skills: { list: GenericAdminPage },
 		'prompt-folders': { list: GenericAdminPage },
 		prompts: { list: GenericAdminPage },
-		config: { list: JsonDocumentPage },
+		config: { list: ConfigPage },
 		'complexity-analyzer': { list: JsonDocumentPage },
 		users: { list: EnterpriseFeaturePage },
 		'business-units': { list: EnterpriseFeaturePage },
