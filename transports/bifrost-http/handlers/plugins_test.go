@@ -17,8 +17,19 @@ import (
 type capturePluginsStore struct {
 	configstore.ConfigStore
 	existingPlugin  *configstoreTables.TablePlugin
+	plugins         []*configstoreTables.TablePlugin
 	capturedConfig  map[string]any
 	capturedEnabled bool
+}
+
+func (s *capturePluginsStore) GetPlugins(_ context.Context) ([]*configstoreTables.TablePlugin, error) {
+	if s.plugins != nil {
+		return s.plugins, nil
+	}
+	if s.existingPlugin != nil {
+		return []*configstoreTables.TablePlugin{s.existingPlugin}, nil
+	}
+	return nil, nil
 }
 
 func (s *capturePluginsStore) GetPlugin(_ context.Context, name string) (*configstoreTables.TablePlugin, error) {
@@ -233,10 +244,17 @@ func TestUpdatePlugin_ConfigMerge_NewPlugin(t *testing.T) {
 // plugin names, used to assert the getLoadedPlugins response contract.
 type namedPluginsLoader struct {
 	noopPluginsLoader
-	names []string
+	names    []string
+	statuses map[string]schemas.PluginStatus
 }
 
 func (l namedPluginsLoader) GetLoadedPluginNames() []string { return l.names }
+func (l namedPluginsLoader) GetPluginStatus(_ context.Context) map[string]schemas.PluginStatus {
+	if l.statuses != nil {
+		return l.statuses
+	}
+	return l.noopPluginsLoader.GetPluginStatus(context.Background())
+}
 
 // TestGetLoadedPlugins verifies that getLoadedPlugins returns the loader's plugin
 // names under the "plugins" JSON key, locking the response shape the UI depends on.
@@ -268,5 +286,58 @@ func TestGetLoadedPlugins(t *testing.T) {
 		if response.Plugins[i] != name {
 			t.Errorf("plugins[%d] = %q, want %q", i, response.Plugins[i], name)
 		}
+	}
+}
+
+func TestGetPluginsIncludesRuntimeStatusWithoutConfigRows(t *testing.T) {
+	h := &PluginsHandler{
+		pluginsLoader: namedPluginsLoader{
+			statuses: map[string]schemas.PluginStatus{
+				"logging": {
+					Name:   "logging",
+					Status: schemas.PluginStatusActive,
+				},
+				"model-catalog-resolver": {
+					Name:   "model-catalog-resolver",
+					Status: schemas.PluginStatusActive,
+				},
+				"semantic_cache": {
+					Name:   "semantic_cache",
+					Status: schemas.PluginStatusDisabled,
+				},
+			},
+		},
+		configStore: &capturePluginsStore{},
+	}
+
+	ctx := &fasthttp.RequestCtx{}
+	ctx.Request.Header.SetMethod("GET")
+	h.getPlugins(ctx)
+
+	if ctx.Response.StatusCode() != 200 {
+		t.Fatalf("expected 200, got %d: %s", ctx.Response.StatusCode(), ctx.Response.Body())
+	}
+
+	var response struct {
+		Plugins []PluginResponse `json:"plugins"`
+		Count   int              `json:"count"`
+	}
+	if err := json.Unmarshal(ctx.Response.Body(), &response); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if response.Count != 3 || len(response.Plugins) != 3 {
+		t.Fatalf("expected 3 runtime plugins, got count=%d plugins=%v", response.Count, response.Plugins)
+	}
+	if response.Plugins[0].Name != "logging" || response.Plugins[0].ActualName != "logging" {
+		t.Fatalf("unexpected first plugin: %+v", response.Plugins[0])
+	}
+	if response.Plugins[0].IsCustom {
+		t.Fatalf("logging should be reported as a built-in plugin: %+v", response.Plugins[0])
+	}
+	if response.Plugins[1].Name != "model-catalog-resolver" || response.Plugins[1].IsCustom {
+		t.Fatalf("model-catalog-resolver should be reported as a built-in plugin: %+v", response.Plugins[1])
+	}
+	if response.Plugins[2].Name != "semantic_cache" || response.Plugins[2].Enabled {
+		t.Fatalf("unexpected disabled semantic cache row: %+v", response.Plugins[2])
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 
 	"github.com/fasthttp/router"
 	"github.com/maximhq/bifrost/core/schemas"
@@ -115,6 +116,24 @@ type PluginResponse struct {
 	Status     schemas.PluginStatus     `json:"status"`
 }
 
+// buildRuntimePluginResponse constructs a response for plugins that are known to
+// the running server but do not have a persisted config-store row.
+func buildRuntimePluginResponse(actualName string, status schemas.PluginStatus) PluginResponse {
+	name := status.Name
+	if name == "" {
+		name = actualName
+	}
+	return PluginResponse{
+		Name:       name,
+		ActualName: actualName,
+		Enabled:    status.Status != schemas.PluginStatusDisabled,
+		Config:     map[string]any{},
+		IsCustom:   !lib.IsBuiltinPlugin(actualName),
+		Path:       nil,
+		Status:     status,
+	}
+}
+
 // buildPluginResponse constructs a PluginResponse, fetching plugin statuses once.
 func (h *PluginsHandler) buildPluginResponse(ctx context.Context, plugin *configstoreTables.TablePlugin) PluginResponse {
 	return h.buildPluginResponseWithStatuses(plugin, h.pluginsLoader.GetPluginStatus(ctx))
@@ -181,16 +200,13 @@ func (h *PluginsHandler) getPlugins(ctx *fasthttp.RequestCtx) {
 	if h.configStore == nil {
 		pluginStatus := h.pluginsLoader.GetPluginStatus(ctx)
 		finalPlugins := []PluginResponse{}
-		for name, pluginStatus := range pluginStatus {
-			finalPlugins = append(finalPlugins, PluginResponse{
-				Name:       pluginStatus.Name,
-				ActualName: name,
-				Enabled:    true,
-				Config:     map[string]any{},
-				IsCustom:   true,
-				Path:       nil,
-				Status:     pluginStatus,
-			})
+		names := make([]string, 0, len(pluginStatus))
+		for name := range pluginStatus {
+			names = append(names, name)
+		}
+		slices.Sort(names)
+		for _, name := range names {
+			finalPlugins = append(finalPlugins, buildRuntimePluginResponse(name, pluginStatus[name]))
 		}
 		SendJSON(ctx, map[string]any{
 			"plugins": finalPlugins,
@@ -206,8 +222,28 @@ func (h *PluginsHandler) getPlugins(ctx *fasthttp.RequestCtx) {
 	}
 	pluginStatuses := h.pluginsLoader.GetPluginStatus(ctx)
 	finalPlugins := []PluginResponse{}
+	seen := map[string]struct{}{}
 	for _, plugin := range plugins {
 		finalPlugins = append(finalPlugins, h.buildPluginResponseWithStatuses(plugin, pluginStatuses))
+		seen[plugin.Name] = struct{}{}
+	}
+	statusNames := make([]string, 0, len(pluginStatuses))
+	for actualName, pluginStatus := range pluginStatuses {
+		displayName := pluginStatus.Name
+		if displayName == "" {
+			displayName = actualName
+		}
+		if _, ok := seen[displayName]; ok {
+			continue
+		}
+		if _, ok := seen[actualName]; ok {
+			continue
+		}
+		statusNames = append(statusNames, actualName)
+	}
+	slices.Sort(statusNames)
+	for _, actualName := range statusNames {
+		finalPlugins = append(finalPlugins, buildRuntimePluginResponse(actualName, pluginStatuses[actualName]))
 	}
 	// Creating ephemeral struct
 	SendJSON(ctx, map[string]any{
