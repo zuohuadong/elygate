@@ -15,6 +15,17 @@
 
 	registerElygateTranslations();
 
+	function normalizeInitialHashRoute(): void {
+		if (typeof window === 'undefined') return;
+		const { hash, pathname, search } = window.location;
+		if (hash || pathname === '/') return;
+
+		const path = pathname.endsWith('/') ? pathname.slice(0, -1) : pathname;
+		window.history.replaceState(null, '', `/#${path}${search}`);
+	}
+
+	normalizeInitialHashRoute();
+
 	let currentLocale = $state<ElygateLocale>('zh-CN');
 	configureRequestErrorFormatter((status) => labelFor(currentLocale, 'elygate.requestFailed').replace('{status}', String(status)));
 	const bifrostAuthProvider = createBifrostAuthProvider(() => currentLocale);
