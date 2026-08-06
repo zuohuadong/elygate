@@ -188,7 +188,8 @@ export function configFormFromDocument(doc: JsonRecord): ConfigForm {
 
 // 将表单值合并回原始文档：仅覆盖表单管理的字段，其余字段（含状态位、未知新字段）原样保留。
 export function mergeConfigForm(base: JsonRecord, form: ConfigForm): JsonRecord {
-	const doc = structuredClone(base);
+	// 配置文档是纯 JSON；不能用 structuredClone，因为传入的可能是 Svelte $state 代理对象。
+	const doc = JSON.parse(JSON.stringify(base)) as JsonRecord;
 
 	const auth = ensureRecord(doc, 'auth_config');
 	auth.is_enabled = form.authEnabled;
