@@ -3,7 +3,7 @@
 	import { useTranslation } from '@svadmin/core/i18n';
 	import { displayError, parseJsonObject, prettyJson, csv } from '../lib/forms';
 	import { encodePathSegment, getListPayload, getObjectPayload, requestJson, type JsonRecord } from '../lib/api';
-	import { keyAdvancedForForm } from '../lib/resource-forms';
+	import { keyAdvancedForForm, unsupportedProviderConfigFields, type ProviderConfigSection } from '../lib/resource-forms';
 
 	type Modal = 'create' | 'edit' | 'keys' | null;
 	interface Props { resourceName: string; }
@@ -71,6 +71,7 @@
 	let isSaving = $state(false);
 	let error = $state('');
 	let notice = $state('');
+	let warning = $state('');
 
 	async function loadProviders(): Promise<void> {
 		isLoading = true;
@@ -97,6 +98,7 @@
 		providerForm = emptyProviderForm();
 		notice = '';
 		error = '';
+		warning = '';
 		modal = 'create';
 	}
 
@@ -115,7 +117,16 @@
 		};
 		notice = '';
 		error = '';
+		warning = '';
 		modal = 'edit';
+	}
+
+	function assertSupportedFields(section: ProviderConfigSection, value: JsonRecord, label: string): void {
+		const fields = unsupportedProviderConfigFields(section, value);
+		if (!fields.length) return;
+		throw new Error(i18n.t('elygate.providerFieldsUnsupported')
+			.replace('{section}', label)
+			.replace('{fields}', fields.join(', ')));
 	}
 
 	async function saveProvider(): Promise<void> {
@@ -127,6 +138,10 @@
 			const proxy = parseJsonObject(providerForm.proxy, i18n.t('elygate.proxyConfig'), invalidJson);
 			const custom = parseJsonObject(providerForm.custom, i18n.t('elygate.customConfig'), invalidJson);
 			const openai = parseJsonObject(providerForm.openai, i18n.t('elygate.openaiConfig'), invalidJson);
+			assertSupportedFields('network', network, i18n.t('elygate.networkConfig'));
+			assertSupportedFields('proxy', proxy, i18n.t('elygate.proxyConfig'));
+			assertSupportedFields('custom', custom, i18n.t('elygate.customConfig'));
+			assertSupportedFields('openai', openai, i18n.t('elygate.openaiConfig'));
 			if (!providerForm.name.trim()) throw new Error(i18n.t('elygate.required').replace('{field}', i18n.t('elygate.providerName')));
 			const payload: JsonRecord = {
 				network_config: Object.keys(network).length ? network : undefined,
@@ -147,6 +162,7 @@
 				await requestJson(`/api/providers/${encodePathSegment(providerForm.name)}`, { method: 'PUT', body: JSON.stringify(payload) });
 			}
 			modal = null;
+			warning = '';
 			notice = i18n.t('elygate.save');
 			await loadProviders();
 		} catch (cause) {
@@ -175,6 +191,11 @@
 		keyForm = emptyKeyForm();
 		modal = 'keys';
 		error = '';
+		const providerStatus = stringValue(provider, 'provider_status');
+		const reason = stringValue(provider, 'description') || providerStatus || i18n.t('elygate.operationFailed');
+		warning = providerStatus === 'active'
+			? ''
+			: i18n.t('elygate.providerNeedsAttention').replace('{provider}', selectedProvider).replace('{reason}', reason);
 		await loadKeys();
 	}
 
@@ -248,15 +269,16 @@
 <section class="page-shell" data-resource={resourceName}>
 	<header class="page-heading">
 		<div><p class="eyebrow">Elygate / Bifrost API</p><h1>{i18n.t('elygate.providers')}</h1><p>{i18n.t('elygate.providerNameHelp')}</p></div>
-		<div class="heading-actions"><button type="button" onclick={() => void loadProviders()} disabled={isLoading}>{i18n.t('elygate.refresh')}</button><button class="primary" type="button" onclick={openCreate}>{i18n.t('elygate.create')}</button></div>
+		<div class="heading-actions"><button class="primary" type="button" onclick={() => void loadProviders()} disabled={isLoading}>{i18n.t('elygate.refresh')}</button><button class="primary" type="button" onclick={openCreate}>{i18n.t('elygate.create')}</button></div>
 	</header>
 	{#if error}<div class="notice error" role="alert">{error}</div>{/if}
+	{#if warning}<div class="notice warning" role="status">{warning}</div>{/if}
 	{#if notice}<div class="notice success" role="status">{notice}</div>{/if}
 	<div class="table-wrap" aria-busy={isLoading}>
 		<table><thead><tr><th>{i18n.t('elygate.providerName')}</th><th>{i18n.t('elygate.status')}</th><th>{i18n.t('elygate.baseUrl')}</th><th>{i18n.t('elygate.actions')}</th></tr></thead>
 		<tbody>
 		{#each providers as provider (stringValue(provider, 'name'))}
-			<tr><td><strong>{stringValue(provider, 'name')}</strong></td><td>{stringValue(provider, 'provider_status') || '—'}</td><td>{stringValue((provider.network_config as JsonRecord | undefined) ?? {}, 'base_url') || '—'}</td><td class="actions"><button type="button" onclick={() => openEdit(provider)}>{i18n.t('elygate.edit')}</button><button type="button" onclick={() => void openKeys(provider)}>{i18n.t('elygate.manageKeys')}</button><button class="danger" type="button" onclick={() => void removeProvider(provider)}>{i18n.t('elygate.delete')}</button></td></tr>
+				<tr><td><strong>{stringValue(provider, 'name')}</strong></td><td title={stringValue(provider, 'description')}>{stringValue(provider, 'provider_status') || '—'}</td><td>{stringValue((provider.network_config as JsonRecord | undefined) ?? {}, 'base_url') || '—'}</td><td class="actions"><button type="button" onclick={() => openEdit(provider)}>{i18n.t('elygate.edit')}</button><button type="button" onclick={() => void openKeys(provider)}>{i18n.t('elygate.manageKeys')}</button><button class="danger" type="button" onclick={() => void removeProvider(provider)}>{i18n.t('elygate.delete')}</button></td></tr>
 		{:else}<tr><td colspan="4" class="empty">{i18n.t('elygate.noResults')}</td></tr>{/each}
 		</tbody></table>
 	</div>
@@ -266,8 +288,8 @@
 	<div class="modal-backdrop"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="provider-dialog-title"><header><h2 id="provider-dialog-title">{modal === 'create' ? i18n.t('elygate.create') : i18n.t('elygate.edit')} {i18n.t('elygate.providers')}</h2><button type="button" onclick={() => (modal = null)}>{i18n.t('elygate.close')}</button></header>
 		<form onsubmit={submitProvider}><label>{i18n.t('elygate.providerName')}<input bind:value={providerForm.name} required disabled={modal === 'edit'} /><small>{i18n.t('elygate.providerNameHelp')}</small></label>
 			<div class="grid-two"><label>{i18n.t('elygate.concurrency')}<input type="number" min="1" bind:value={providerForm.concurrency} /></label><label>{i18n.t('elygate.bufferSize')}<input type="number" min="1" bind:value={providerForm.bufferSize} /></label></div>
-			<label>{i18n.t('elygate.networkConfig')}<textarea bind:value={providerForm.network} rows="5"></textarea></label><label>{i18n.t('elygate.proxyConfig')}<textarea bind:value={providerForm.proxy} rows="3"></textarea></label>
-			<label>{i18n.t('elygate.customConfig')}<textarea bind:value={providerForm.custom} rows="3"></textarea></label><label>{i18n.t('elygate.openaiConfig')}<textarea bind:value={providerForm.openai} rows="2"></textarea></label>
+				<label>{i18n.t('elygate.networkConfig')}<textarea bind:value={providerForm.network} rows="5"></textarea><small>{i18n.t('elygate.providerNetworkHint')}</small></label><label>{i18n.t('elygate.proxyConfig')}<textarea bind:value={providerForm.proxy} rows="3"></textarea></label>
+				<label>{i18n.t('elygate.customConfig')}<textarea bind:value={providerForm.custom} rows="3"></textarea><small>{i18n.t('elygate.providerCustomHint')}</small></label><label>{i18n.t('elygate.openaiConfig')}<textarea bind:value={providerForm.openai} rows="2"></textarea><small>{i18n.t('elygate.providerOpenAIHint')}</small></label>
 			<div class="checks"><label><input type="checkbox" bind:checked={providerForm.sendBackRequest} /> {i18n.t('elygate.sendBackRawRequest')}</label><label><input type="checkbox" bind:checked={providerForm.sendBackResponse} /> {i18n.t('elygate.sendBackRawResponse')}</label><label><input type="checkbox" bind:checked={providerForm.storeRaw} /> {i18n.t('elygate.storeRawRequestResponse')}</label></div>
 			<footer><button type="button" onclick={() => (modal = null)}>{i18n.t('elygate.cancel')}</button><button class="primary" type="submit" disabled={isSaving}>{i18n.t('elygate.save')}</button></footer>
 		</form>
@@ -299,6 +321,7 @@
 	th { background: var(--muted); color: var(--muted-foreground); font-size: .75rem; text-transform: uppercase; }
 	.notice { border-radius: .65rem; margin-bottom: 1rem; padding: .75rem 1rem; }
 	.notice.error { background: color-mix(in oklch, var(--destructive) 10%, transparent); color: var(--destructive); }
+	.notice.warning { background: color-mix(in oklch, var(--warning, #d97706) 12%, transparent); color: var(--warning, #b45309); }
 	.notice.success { background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); }
 	.empty { color: var(--muted-foreground); text-align: center; }
 	.modal-backdrop { align-items: center; background: rgb(0 0 0 / .45); display: flex; inset: 0; justify-content: center; padding: 1rem; position: fixed; z-index: 100; }

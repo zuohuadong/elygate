@@ -146,3 +146,85 @@ export function columnLabelFor(locale: ElygateLocale, column: string): string {
 	const words = column.replace(/[_-]+/g, ' ').trim();
 	return words ? words.charAt(0).toUpperCase() + words.slice(1) : column;
 }
+
+const BOOLEAN_COLUMNS = new Set(['enabled', 'disabled', 'calendar_aligned', 'include_response', 'isCustom']);
+const DATE_COLUMNS = new Set(['created_at', 'updated_at', 'expires_at', 'last_reset', 'timestamp', 'last_success_at', 'last_failure_at']);
+
+const enumValueTranslations: Record<ElygateLocale, Record<string, Record<string, string>>> = {
+	'zh-CN': {
+		kind: { token: '令牌', flow: '授权流', header: '凭证' },
+		auth_kind: { oauth: 'OAuth', headers: '请求头凭证' },
+		auth_mode: { headers: '请求头凭证', both: '请求头与 OAuth', oauth: '仅 OAuth' },
+		status: {
+			active: '生效',
+			orphaned: '孤立',
+			pending: '待完成',
+			needs_reauth: '需重新认证',
+			needs_update: '待更新',
+		},
+		scope: { global: '全局', provider: '供应商', virtual_key: '虚拟密钥', user: '用户' },
+		scope_kind: {
+			global: '全局',
+			virtual_key: '虚拟密钥',
+			provider: '供应商',
+			provider_key: '供应商密钥',
+			user: '用户',
+		},
+		match_type: { exact: '精确匹配', prefix: '前缀匹配', suffix: '后缀匹配', regex: '正则匹配' },
+	},
+	en: {
+		kind: { token: 'Token', flow: 'Auth flow', header: 'Credential' },
+		auth_kind: { oauth: 'OAuth', headers: 'Header credentials' },
+		auth_mode: { headers: 'Header credentials', both: 'Headers and OAuth', oauth: 'OAuth only' },
+		status: {
+			active: 'Active',
+			orphaned: 'Orphaned',
+			pending: 'Pending',
+			needs_reauth: 'Needs reauth',
+			needs_update: 'Needs update',
+		},
+		scope: { global: 'Global', provider: 'Provider', virtual_key: 'Virtual key', user: 'User' },
+		scope_kind: {
+			global: 'Global',
+			virtual_key: 'Virtual key',
+			provider: 'Provider',
+			provider_key: 'Provider key',
+			user: 'User',
+		},
+		match_type: { exact: 'Exact', prefix: 'Prefix', suffix: 'Suffix', regex: 'Regex' },
+	},
+};
+
+const booleanValueTranslations: Record<ElygateLocale, Record<string, string>> = {
+	'zh-CN': { true: '是', false: '否' },
+	en: { true: 'Yes', false: 'No' },
+};
+
+function padDatePart(value: number): string {
+	return String(value).padStart(2, '0');
+}
+
+export function formatLocalDateTime(value: string): string {
+	const date = new Date(value);
+	if (Number.isNaN(date.getTime())) return value;
+	return [
+		date.getFullYear(),
+		padDatePart(date.getMonth() + 1),
+		padDatePart(date.getDate()),
+	].join('-') + ` ${padDatePart(date.getHours())}:${padDatePart(date.getMinutes())}:${padDatePart(date.getSeconds())}`;
+}
+
+export function columnValueFor(locale: ElygateLocale, column: string, value: unknown): string {
+	if (value === null || value === undefined) return '—';
+	if (BOOLEAN_COLUMNS.has(column) && typeof value === 'boolean') {
+		return booleanValueTranslations[locale][String(value)];
+	}
+	if (typeof value === 'string') {
+		if (DATE_COLUMNS.has(column) && value) return formatLocalDateTime(value);
+		const table = enumValueTranslations[locale][column];
+		if (table && table[value]) return table[value];
+	}
+	if (typeof value === 'string' || typeof value === 'number') return String(value);
+	if (Array.isArray(value)) return value.map((item) => columnValueFor(locale, column, item)).join(', ');
+	return JSON.stringify(value);
+}

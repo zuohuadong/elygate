@@ -19,8 +19,8 @@
 <style>
 	.field-row { align-items: center; border-bottom: 1px solid var(--border); display: flex; gap: 1rem; justify-content: space-between; padding: .7rem 0; }
 	.field-row:last-child { border-bottom: 0; }
-	.field-copy { display: grid; gap: .15rem; min-width: 0; }
-	.field-label { color: var(--foreground); font-size: .85rem; font-weight: 600; }
+	.field-copy { display: grid; flex: 1 1 10rem; gap: .15rem; min-width: 8rem; }
+	.field-label { color: var(--foreground); font-size: .85rem; font-weight: 600; word-break: keep-all; }
 	small { color: var(--muted-foreground); font-size: .72rem; line-height: 1.4; }
 	input {
 		appearance: none;

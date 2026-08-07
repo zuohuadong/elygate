@@ -1,5 +1,6 @@
 import type { MenuItem, ResourceDefinition } from '@svadmin/core';
 import { labelFor, type ElygateLocale } from './i18n';
+import { VISIBLE_ENTERPRISE_RESOURCES } from './menu-policy';
 
 function resource(locale: ElygateLocale, name: string, labelKey: Parameters<typeof labelFor>[1], icon: string): ResourceDefinition {
 	return { name, label: labelFor(locale, labelKey), icon, fields: [], showInMenu: false };
@@ -47,6 +48,10 @@ export function createResources(locale: ElygateLocale): ResourceDefinition[] {
 }
 
 export function createMenu(locale: ElygateLocale): MenuItem[] {
+	const enterpriseItems = {
+		customers: { labelKey: 'elygate.customers', icon: 'building-2', href: panelHref('/customers') },
+		teams: { labelKey: 'elygate.teams', icon: 'users-round', href: panelHref('/teams') },
+	} as const;
 	return [
 		{ name: 'dashboard', label: labelFor(locale, 'elygate.dashboard'), icon: 'layout-dashboard', href: panelHref('/') },
 		{
@@ -67,15 +72,12 @@ export function createMenu(locale: ElygateLocale): MenuItem[] {
 			name: 'enterprise',
 			label: labelFor(locale, 'elygate.enterprise'),
 			icon: 'briefcase-business',
-			children: [
-				{ name: 'customers', label: labelFor(locale, 'elygate.customers'), icon: 'building-2', href: panelHref('/customers') },
-				{ name: 'teams', label: labelFor(locale, 'elygate.teams'), icon: 'users-round', href: panelHref('/teams') },
-				{ name: 'users', label: labelFor(locale, 'elygate.users'), icon: 'user-round', href: panelHref('/users') },
-				{ name: 'business-units', label: labelFor(locale, 'elygate.businessUnits'), icon: 'building', href: panelHref('/business-units') },
-				{ name: 'access-profiles', label: labelFor(locale, 'elygate.accessProfiles'), icon: 'fingerprint', href: panelHref('/access-profiles') },
-				{ name: 'rbac', label: labelFor(locale, 'elygate.rbac'), icon: 'lock-keyhole', href: panelHref('/rbac') },
-				{ name: 'scim', label: labelFor(locale, 'elygate.scim'), icon: 'id-card', href: panelHref('/scim') },
-			],
+			children: VISIBLE_ENTERPRISE_RESOURCES.map((name) => ({
+				name,
+				label: labelFor(locale, enterpriseItems[name].labelKey),
+				icon: enterpriseItems[name].icon,
+				href: enterpriseItems[name].href,
+			})),
 		},
 		{
 			name: 'mcp',

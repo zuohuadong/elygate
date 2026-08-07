@@ -3,7 +3,7 @@
 	import { useTranslation } from '@svadmin/core/i18n';
 	import { displayError, parseJsonArray, parseJsonObject, prettyJson } from '../lib/forms';
 	import { encodePathSegment, getListPayload, getObjectPayload, requestJson, type JsonRecord } from '../lib/api';
-	import { providerConfigsForForm } from '../lib/resource-forms';
+	import { providerConfigsForForm, unavailableVirtualKeyProviders } from '../lib/resource-forms';
 
 	interface VirtualKeyForm {
 		name: string;
@@ -55,6 +55,8 @@
 	let { resourceName }: Props = $props();
 	const i18n = useTranslation();
 	let virtualKeys = $state.raw<JsonRecord[]>([]);
+	let providers = $state.raw<JsonRecord[]>([]);
+	let providerStatusAvailable = $state(false);
 	let form = $state<VirtualKeyForm>(emptyForm());
 	let editing = $state<JsonRecord | null>(null);
 	let isOpen = $state(false);
@@ -69,11 +71,31 @@
 		error = '';
 		try {
 			virtualKeys = getListPayload(await requestJson('/api/governance/virtual-keys'));
+			try {
+				providers = getListPayload(await requestJson('/api/providers'));
+				providerStatusAvailable = true;
+			} catch {
+				providers = [];
+				providerStatusAvailable = false;
+			}
 		} catch (cause) {
 			error = displayError(cause, i18n.t('elygate.loadFailed'));
 		} finally {
 			isLoading = false;
 		}
+	}
+
+	function providerWarning(record: JsonRecord): string {
+		if (!providerStatusAvailable) return '';
+		const unavailable = unavailableVirtualKeyProviders(record.provider_configs, providers);
+		return unavailable.length
+			? i18n.t('elygate.virtualKeyProviderUnavailable').replace('{providers}', unavailable.join(', '))
+			: '';
+	}
+
+	function virtualKeyStatus(record: JsonRecord): string {
+		if (record.is_active === false) return i18n.t('elygate.disabled');
+		return providerWarning(record) || i18n.t('elygate.active');
 	}
 
 	function openCreate(): void {
@@ -184,11 +206,11 @@
 </script>
 
 <section class="page-shell" data-resource={resourceName}>
-	<header class="page-heading"><div><p class="eyebrow">Elygate / Governance</p><h1>{i18n.t('elygate.virtualKeys')}</h1><p>{i18n.t('elygate.securityNotice')}</p></div><div class="heading-actions"><button type="button" onclick={() => void load()} disabled={isLoading}>{i18n.t('elygate.refresh')}</button><button class="primary" type="button" onclick={openCreate}>{i18n.t('elygate.create')}</button></div></header>
+	<header class="page-heading"><div><p class="eyebrow">Elygate / Governance</p><h1>{i18n.t('elygate.virtualKeys')}</h1><p>{i18n.t('elygate.securityNotice')}</p></div><div class="heading-actions"><button class="primary" type="button" onclick={() => void load()} disabled={isLoading}>{i18n.t('elygate.refresh')}</button><button class="primary" type="button" onclick={openCreate}>{i18n.t('elygate.create')}</button></div></header>
 	{#if error}<div class="notice error" role="alert">{error}</div>{/if}
 	{#if notice}<div class="notice success" role="status">{notice}</div>{/if}
 	{#if revealedKey}<div class="secret-reveal" role="status"><div><strong>{i18n.t('elygate.newKeyValue')}</strong><code>{revealedKey}</code></div><button type="button" onclick={() => void copyKey()}>{i18n.t('elygate.copy')}</button><button type="button" onclick={() => (revealedKey = '')}>{i18n.t('elygate.close')}</button></div>{/if}
-	<div class="table-wrap" aria-busy={isLoading}><table><thead><tr><th>{i18n.t('elygate.virtualKeyName')}</th><th>{i18n.t('elygate.status')}</th><th>{i18n.t('elygate.expiresAt')}</th><th>{i18n.t('elygate.description')}</th><th>{i18n.t('elygate.actions')}</th></tr></thead><tbody>{#each virtualKeys as key (stringValue(key, 'id'))}<tr><td><strong>{stringValue(key, 'name')}</strong></td><td>{key.is_active === false ? i18n.t('elygate.disabled') : i18n.t('elygate.active')}</td><td>{stringValue(key, 'expires_at') || '—'}</td><td>{stringValue(key, 'description') || '—'}</td><td class="actions"><button type="button" onclick={() => openEdit(key)}>{i18n.t('elygate.edit')}</button><button type="button" onclick={() => void rotate(key)}>{i18n.t('elygate.rotate')}</button><button class="danger" type="button" onclick={() => void remove(key)}>{i18n.t('elygate.delete')}</button></td></tr>{:else}<tr><td colspan="5" class="empty">{i18n.t('elygate.noResults')}</td></tr>{/each}</tbody></table></div>
+	<div class="table-wrap" aria-busy={isLoading}><table><thead><tr><th>{i18n.t('elygate.virtualKeyName')}</th><th>{i18n.t('elygate.status')}</th><th>{i18n.t('elygate.expiresAt')}</th><th>{i18n.t('elygate.description')}</th><th>{i18n.t('elygate.actions')}</th></tr></thead><tbody>{#each virtualKeys as key (stringValue(key, 'id'))}<tr><td><strong>{stringValue(key, 'name')}</strong></td><td class={providerWarning(key) ? 'warning-text' : undefined} title={providerWarning(key)}>{virtualKeyStatus(key)}</td><td>{stringValue(key, 'expires_at') || '—'}</td><td>{stringValue(key, 'description') || '—'}</td><td class="actions"><button type="button" onclick={() => openEdit(key)}>{i18n.t('elygate.edit')}</button><button type="button" onclick={() => void rotate(key)}>{i18n.t('elygate.rotate')}</button><button class="danger" type="button" onclick={() => void remove(key)}>{i18n.t('elygate.delete')}</button></td></tr>{:else}<tr><td colspan="5" class="empty">{i18n.t('elygate.noResults')}</td></tr>{/each}</tbody></table></div>
 </section>
 
 {#if isOpen}
@@ -243,6 +265,7 @@
 	.notice, .secret-reveal { border-radius: .65rem; margin-bottom: 1rem; padding: .75rem 1rem; }
 	.notice.error { background: color-mix(in oklch, var(--destructive) 10%, transparent); color: var(--destructive); }
 	.notice.success, .secret-reveal { background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); }
+	.warning-text { color: var(--warning, #b45309); font-weight: 650; }
 	.secret-reveal { align-items: center; display: flex; gap: .5rem; justify-content: space-between; }
 	.secret-reveal div { display: grid; gap: .35rem; min-width: 0; }
 	.secret-reveal code { color: var(--foreground); overflow-wrap: anywhere; }

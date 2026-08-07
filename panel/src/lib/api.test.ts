@@ -25,6 +25,18 @@ describe('requestJson', () => {
 
 		await expect(requestJson('/api/test')).rejects.toEqual(new ApiError(502, 'Provider unavailable'));
 	});
+
+	test('extracts the nested Bifrost error message', async () => {
+		globalThis.fetch = (async () => new Response(JSON.stringify({
+			status_code: 409,
+			error: { message: 'Provider is not healthy' },
+		}), {
+			status: 409,
+			headers: { 'Content-Type': 'application/json' },
+		})) as typeof fetch;
+
+		await expect(requestJson('/api/test')).rejects.toEqual(new ApiError(409, 'Provider is not healthy'));
+	});
 });
 
 describe('getListPayload', () => {

@@ -99,7 +99,7 @@
 			<p>{i18n.t('elygate.jsonDocumentHint')}</p>
 		</div>
 		<div class="heading-actions">
-			<button type="button" onclick={() => void load()} disabled={isLoading}>{i18n.t('elygate.refresh')}</button>
+			<button class="primary" type="button" onclick={() => void load()} disabled={isLoading}>{i18n.t('elygate.refresh')}</button>
 			{#if config.resetPath}<button type="button" onclick={() => void reset()} disabled={isSaving}>{i18n.t('elygate.reset')}</button>{/if}
 		</div>
 	</header>

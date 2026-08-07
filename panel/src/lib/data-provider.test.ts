@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { bifrostDataProvider } from './data-provider';
-import { keyAdvancedForForm, providerConfigsForForm } from './resource-forms';
+import {
+	keyAdvancedForForm,
+	providerConfigsForForm,
+	unavailableVirtualKeyProviders,
+	unsupportedProviderConfigFields,
+} from './resource-forms';
 
 const originalFetch = globalThis.fetch;
 
@@ -67,5 +72,21 @@ describe('Bifrost DataProvider', () => {
 			azure_key_config: { endpoint: { value: 'https://example.test' } },
 			use_for_batch_api: false,
 		});
+	});
+
+	test('reports provider JSON fields that the management API would otherwise discard', () => {
+		expect(unsupportedProviderConfigFields('openai', { disable_store: false, base_url: 'https://example.com', api_key: 'secret', model: 'gpt-4o' }))
+			.toEqual(['api_key', 'base_url', 'model']);
+		expect(unsupportedProviderConfigFields('network', { base_url: 'https://example.com' })).toEqual([]);
+		expect(unsupportedProviderConfigFields('custom', { base_provider_type: 'openai', is_key_less: false })).toEqual([]);
+	});
+
+	test('marks virtual-key provider routes unavailable when a provider is missing or unhealthy', () => {
+		const configs = [{ provider: 'healthy' }, { provider: 'broken' }, { provider: 'missing' }];
+		const providers = [
+			{ name: 'healthy', provider_status: 'active' },
+			{ name: 'broken', provider_status: 'error' },
+		];
+		expect(unavailableVirtualKeyProviders(configs, providers)).toEqual(['broken', 'missing']);
 	});
 });

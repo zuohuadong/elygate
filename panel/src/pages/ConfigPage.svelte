@@ -144,7 +144,7 @@
 					{i18n.t('elygate.jsonMode')}
 				</button>
 			</div>
-			<button type="button" onclick={() => void load()} disabled={isLoading || isSaving}>{i18n.t('elygate.refresh')}</button>
+			<button class="primary" type="button" onclick={() => void load()} disabled={isLoading || isSaving}>{i18n.t('elygate.refresh')}</button>
 		</div>
 	</header>
 

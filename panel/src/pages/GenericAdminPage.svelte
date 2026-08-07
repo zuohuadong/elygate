@@ -2,8 +2,8 @@
 	import { onMount } from 'svelte';
 	import { useTranslation } from '@svadmin/core/i18n';
 	import { displayError, parseJsonObject, prettyJson } from '../lib/forms';
-	import { displayValue, encodePathSegment, getListPayload, getTotal, isJsonRecord, requestJson, type JsonRecord } from '../lib/api';
-	import { columnLabelFor } from '../lib/columns';
+	import { encodePathSegment, getListPayload, getTotal, isJsonRecord, requestJson, type JsonRecord } from '../lib/api';
+	import { columnLabelFor, columnValueFor } from '../lib/columns';
 	import type { ElygateLocale } from '../lib/i18n';
 
 	interface Props { resourceName: string; }
@@ -29,6 +29,7 @@
 		allowEdit?: boolean;
 		allowDelete?: boolean;
 		readOnly?: boolean;
+		helpKey?: string;
 		updatePath?: (id: string) => string;
 		deletePath?: (id: string) => string;
 		actions?: ResourceAction[];
@@ -65,6 +66,7 @@
 			titleKey: 'elygate.routingRules',
 			eyebrow: 'Elygate / Bifrost Routing',
 			endpoint: '/api/governance/routing-rules',
+			helpKey: 'elygate.routingRulesHelp',
 			listKey: 'rules',
 			itemKey: 'rule',
 			idFields: ['id'],
@@ -90,6 +92,7 @@
 			titleKey: 'elygate.modelConfigs',
 			eyebrow: 'Elygate / Governance',
 			endpoint: '/api/governance/model-configs',
+			helpKey: 'elygate.modelConfigsHelp',
 			listKey: 'model_configs',
 			itemKey: 'model_config',
 			idFields: ['id'],
@@ -157,6 +160,7 @@
 			titleKey: 'elygate.webhooks',
 			eyebrow: 'Elygate / Integrations',
 			endpoint: '/api/webhooks',
+			helpKey: 'elygate.webhooksHelp',
 			listKey: 'endpoints',
 			itemKey: 'webhook',
 			idFields: ['id'],
@@ -167,7 +171,7 @@
 			createTemplate: {
 				name: '',
 				url: '',
-				events: [],
+				events: ['async_job.completed'],
 				headers: {},
 				include_response: false,
 				allow_private_network: false,
@@ -206,6 +210,7 @@
 			titleKey: 'elygate.plugins',
 			eyebrow: 'Elygate / Integrations',
 			endpoint: '/api/plugins',
+			helpKey: 'elygate.pluginsHelp',
 			listKey: 'plugins',
 			itemKey: 'plugin',
 			idFields: ['name'],
@@ -425,10 +430,10 @@
 		<div>
 			<p class="eyebrow">{config.eyebrow}</p>
 			<h1>{pageTitle}</h1>
-			<p>{i18n.t(config.readOnly ? 'elygate.readOnlyHint' : 'elygate.jsonEditorHint')}</p>
+			<p>{i18n.t(config.helpKey ?? (config.readOnly ? 'elygate.readOnlyHint' : 'elygate.jsonEditorHint'))}</p>
 		</div>
 		<div class="heading-actions">
-			<button type="button" onclick={() => void load()} disabled={isLoading}>{i18n.t('elygate.refresh')}</button>
+			<button class="primary" type="button" onclick={() => void load()} disabled={isLoading}>{i18n.t('elygate.refresh')}</button>
 			{#if canCreate}
 				<button class="primary" type="button" onclick={openCreate}>{i18n.t('elygate.create')}</button>
 			{/if}
@@ -451,7 +456,7 @@
 				{#each records as record (rowKey(record))}
 					<tr>
 						{#each columns as column (column)}
-							<td title={displayValue(record[column])}>{displayValue(record[column])}</td>
+							<td title={columnValueFor(i18n.locale as ElygateLocale, column, record[column])}>{columnValueFor(i18n.locale as ElygateLocale, column, record[column])}</td>
 						{/each}
 						<td class="actions">
 							{#if canEdit}<button type="button" onclick={() => openEdit(record)}>{i18n.t('elygate.edit')}</button>{/if}

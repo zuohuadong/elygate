@@ -25,14 +25,18 @@ export function configureRequestErrorFormatter(formatter?: RequestErrorFormatter
 	requestErrorFormatter = formatter ?? defaultRequestErrorFormatter;
 }
 
+function errorMessageFrom(value: unknown, depth = 0): string {
+	if (typeof value === 'string') return value.trim();
+	if (!isJsonRecord(value) || depth > 2) return '';
+	for (const key of ['message', 'detail', 'error']) {
+		const message = errorMessageFrom(value[key], depth + 1);
+		if (message) return message;
+	}
+	return '';
+}
+
 function getErrorMessage(payload: unknown, fallback: string): string {
-	if (!payload || typeof payload !== 'object') return fallback;
-	const record = payload as JsonRecord;
-	return typeof record.message === 'string'
-		? record.message
-		: typeof record.error === 'string'
-			? record.error
-			: fallback;
+	return errorMessageFrom(payload) || fallback;
 }
 
 export async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> {
