@@ -21,6 +21,10 @@ describe('dynamic resource columns', () => {
 		expect(columnLabelFor('zh-CN', 'parent_request_id')).toBe('父请求 ID');
 		expect(columnLabelFor('zh-CN', 'object')).toBe('请求类型');
 		expect(columnLabelFor('zh-CN', 'nl')).toBe('网络延迟');
+		expect(columnLabelFor('zh-CN', 'number_of_retries')).toBe('重试次数');
+		expect(columnLabelFor('zh-CN', 'fallback_index')).toBe('回退序号');
+		expect(columnLabelFor('zh-CN', 'selected_key_name')).toBe('选中密钥名称');
+		expect(columnLabelFor('zh-CN', 'content_hidden')).toBe('内容已隐藏');
 	});
 });
 
@@ -31,6 +35,8 @@ describe('columnValueFor cell rendering', () => {
 		expect(columnValueFor('zh-CN', 'calendar_aligned', true)).toBe('是');
 		expect(columnValueFor('zh-CN', 'include_response', false)).toBe('否');
 		expect(columnValueFor('zh-CN', 'isCustom', true)).toBe('是');
+		expect(columnValueFor('zh-CN', 'stream', true)).toBe('是');
+		expect(columnValueFor('zh-CN', 'content_hidden', false)).toBe('否');
 	});
 
 	test('translates boolean columns to Yes/No in English', () => {
