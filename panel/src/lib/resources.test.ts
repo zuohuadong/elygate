@@ -81,16 +81,27 @@ const requiredParityResources = [
 
 describe('panel resource registry', () => {
 	test('registers every parity-critical resource exactly once', () => {
-		const names = createResources('zh-CN').map((resource) => resource.name);
+		const names = createResources('zh-CN', true).map((resource) => resource.name);
 		expect(new Set(names).size).toBe(names.length);
 		for (const required of requiredParityResources) expect(names).toContain(required);
 	});
 
 	test('exposes every registered resource when the enterprise module supplies every extension', () => {
-		const resourceNames = createResources('en').map((resource) => resource.name).sort();
-		const menuNames = leafResourceNames(createMenu('en', VISIBLE_ENTERPRISE_RESOURCES)).sort();
+		const resourceNames = createResources('en', true).map((resource) => resource.name).sort();
+		const menuNames = leafResourceNames(createMenu('en', VISIBLE_ENTERPRISE_RESOURCES, true)).sort();
 		expect(new Set(menuNames).size).toBe(menuNames.length);
 		expect(menuNames).toEqual(resourceNames);
+	});
+
+	test('keeps the development profiler out of production panel builds', async () => {
+		expect(createResources('zh-CN').map((resource) => resource.name)).not.toContain('pprof');
+		expect(leafResourceNames(createMenu('zh-CN', VISIBLE_ENTERPRISE_RESOURCES))).not.toContain('pprof');
+		expect(createResources('zh-CN', true).map((resource) => resource.name)).toContain('pprof');
+		expect(leafResourceNames(createMenu('zh-CN', VISIBLE_ENTERPRISE_RESOURCES, true))).toContain('pprof');
+
+		const appSource = await Bun.file(new URL('../App.svelte', import.meta.url)).text();
+		expect(appSource).toContain('const includeDevelopmentResources = import.meta.env.DEV');
+		expect(appSource).toContain('...(includeDevelopmentResources ? { pprof: { list: PprofPage } } : {})');
 	});
 
 	test('keeps OAuth consent exclusively on its public flow route', async () => {

@@ -84,6 +84,7 @@ function menuItem(locale: ElygateLocale, name: string, labelKey: LabelKey, icon:
 }
 
 const enterpriseResourceNames = new Set<string>(VISIBLE_ENTERPRISE_RESOURCES);
+const developmentResourceNames = new Set<string>(['pprof']);
 
 function capabilityMenu(items: MenuItem[], availableResources: ReadonlySet<string>): MenuItem[] {
 	return items.flatMap((item) => {
@@ -96,11 +97,17 @@ function capabilityMenu(items: MenuItem[], availableResources: ReadonlySet<strin
 	});
 }
 
-export function createResources(locale: ElygateLocale): ResourceDefinition[] {
-	return RESOURCE_SPECS.map((spec) => resource(locale, spec));
+export function createResources(locale: ElygateLocale, includeDevelopmentResources = false): ResourceDefinition[] {
+	return RESOURCE_SPECS
+		.filter(([name]) => includeDevelopmentResources || !developmentResourceNames.has(name))
+		.map((spec) => resource(locale, spec));
 }
 
-export function createMenu(locale: ElygateLocale, availableEnterpriseResources: readonly string[] = []): MenuItem[] {
+export function createMenu(
+	locale: ElygateLocale,
+	availableEnterpriseResources: readonly string[] = [],
+	includeDevelopmentResources = false,
+): MenuItem[] {
 	const menu: MenuItem[] = [
 		{ name: 'dashboard', label: labelFor(locale, 'elygate.dashboard'), icon: 'layout-dashboard', href: '#/' },
 		{
@@ -228,7 +235,7 @@ export function createMenu(locale: ElygateLocale, availableEnterpriseResources: 
 				},
 				menuItem(locale, 'agent-handover', 'elygate.agentHandover', 'handshake'),
 				menuItem(locale, 'docs-hub', 'elygate.docsHub', 'book-open-text'),
-				menuItem(locale, 'pprof', 'elygate.pprof', 'gauge'),
+				...(includeDevelopmentResources ? [menuItem(locale, 'pprof', 'elygate.pprof', 'gauge')] : []),
 			],
 		},
 	];

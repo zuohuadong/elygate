@@ -59,6 +59,7 @@
 	const enterpriseResourcePages = enterprisePanel.enterpriseResourcePages ?? {};
 	const enterprisePublicPages = enterprisePanel.enterprisePublicPages ?? {};
 	const EnterprisePublicPage = publicRoute ? enterprisePublicPages[publicRoute] : undefined;
+	const includeDevelopmentResources = import.meta.env.DEV;
 
 	let currentLocale = $state<ElygateLocale>('zh-CN');
 	let runtimeFeatureNames = $state.raw<string[]>([]);
@@ -77,8 +78,8 @@
 
 	configureRequestErrorFormatter((status) => labelFor(currentLocale, 'elygate.requestFailed').replace('{status}', String(status)));
 	const bifrostAuthProvider = createBifrostAuthProvider(() => currentLocale, refreshRuntimeFeatures);
-	const resources = $derived.by(() => createResources(currentLocale));
-	const menu = $derived.by(() => createMenu(currentLocale, availableEnterpriseResources));
+	const resources = $derived.by(() => createResources(currentLocale, includeDevelopmentResources));
+	const menu = $derived.by(() => createMenu(currentLocale, availableEnterpriseResources, includeDevelopmentResources));
 	const loginHint = $derived(labelFor(currentLocale, 'elygate.loginHint'));
 
 	const builtInResourcePages = {
@@ -124,7 +125,7 @@
 		'proxy-config': { list: RoutingNetworkSettingsPage },
 		'mcp-usage-guide': { list: McpUsageGuidePage },
 		'docs-hub': { list: DocsHubPage },
-		pprof: { list: PprofPage },
+		...(includeDevelopmentResources ? { pprof: { list: PprofPage } } : {}),
 		users: { list: EnterpriseFeaturePage },
 		'business-units': { list: EnterpriseFeaturePage },
 		rbac: { list: EnterpriseFeaturePage },
