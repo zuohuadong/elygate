@@ -34,6 +34,7 @@ describe('enterprise panel build contract', () => {
 		expect(dockerfile).toContain('COPY --from=enterprise_panel / /opt/elygate-enterprise-panel/');
 		expect(dockerfile).toContain('COPY docs/ /docs/');
 		expect(dockerfile).toContain('BIFROST_ENTERPRISE_PANEL_PATH=$BIFROST_ENTERPRISE_PANEL_PATH');
+		expect(dockerfile).toContain('FROM --platform=$BUILDPLATFORM oven/bun:');
 		expect(dockerfile).toContain('go work init');
 		expect(dockerfile).toContain('COPY core/ ./core/');
 		expect(dockerfile).toContain('COPY transports/ ./transports/');

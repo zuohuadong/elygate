@@ -4,7 +4,7 @@ FROM scratch AS enterprise_panel
 COPY panel/src/enterprise-fallback/index.ts /index.ts
 
 # --- UI Build Stage: Build the Svelte svadmin panel ---
-  FROM oven/bun:1.3.14-alpine@sha256:5acc90a93e91ff07bf72aa90a7c9f0fa189765aec90b47bdbf2152d2196383c0 AS ui-builder
+  FROM --platform=$BUILDPLATFORM oven/bun:1.3.14-alpine@sha256:5acc90a93e91ff07bf72aa90a7c9f0fa189765aec90b47bdbf2152d2196383c0 AS ui-builder
   WORKDIR /app
 
   # Apply latest alpine security patches before installing packages
@@ -32,6 +32,7 @@ COPY panel/src/enterprise-fallback/index.ts /index.ts
   RUN bunx vite build && bun run check
 
   # --- Go Build Stage: Compile the Go binary ---
+  # Go and runtime stages intentionally use BuildKit's target platform.
   FROM golang:1.26.5-alpine3.23@sha256:622e56dbc11a8cfe87cafa2331e9a201877271cbff918af53d3be315f3da88cc AS builder
   WORKDIR /app
 
