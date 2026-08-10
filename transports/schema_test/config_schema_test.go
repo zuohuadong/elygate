@@ -847,7 +847,6 @@ func TestSchemaMCPClientConfigFields(t *testing.T) {
 		"is_code_mode_client",
 		"connection_string",
 		"auth_type",
-		"oauth_config_id",
 		"headers",
 		"tools_to_execute",
 		"tools_to_auto_execute",
@@ -861,6 +860,12 @@ func TestSchemaMCPClientConfigFields(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("mcp_client_config keeps oauth_config_id server-managed", func(t *testing.T) {
+		if _, found := navigateJSON(schema, "$defs", "mcp_client_config", "properties", "oauth_config_id"); found {
+			t.Error("$defs/mcp_client_config must not expose server-managed 'oauth_config_id'")
+		}
+	})
 
 	t.Run("mcp_client_config with new fields validates (stdio)", func(t *testing.T) {
 		compiled := compileSchema(t)
