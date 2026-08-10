@@ -151,7 +151,6 @@
 		'circuit-breaker': { list: PluginsPage },
 		'adaptive-routing': { list: RoutingRulesPage },
 		'agent-handover': { list: EnterpriseFeaturePage },
-		'oauth-consent': { list: OAuthConsentPage },
 	};
 	const runtimeFeaturePages = $derived.by(() => pluginFeatureResourcePages(runtimeFeatureNames, PluginsPage));
 	const resourcePages = $derived.by(() => ({

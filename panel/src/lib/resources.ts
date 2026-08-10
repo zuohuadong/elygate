@@ -71,7 +71,6 @@ const RESOURCE_SPECS: ResourceSpec[] = [
 	['circuit-breaker', 'elygate.circuitBreaker', 'workflow'],
 	['adaptive-routing', 'elygate.adaptiveRouting', 'git-branch-plus'],
 	['agent-handover', 'elygate.agentHandover', 'handshake'],
-	['oauth-consent', 'elygate.oauthConsent', 'badge-check'],
 	['docs-hub', 'elygate.docsHub', 'book-open-text'],
 	['pprof', 'elygate.pprof', 'gauge'],
 ];
@@ -228,7 +227,6 @@ export function createMenu(locale: ElygateLocale, availableEnterpriseResources: 
 					href: '#/routing-rules',
 				},
 				menuItem(locale, 'agent-handover', 'elygate.agentHandover', 'handshake'),
-				menuItem(locale, 'oauth-consent', 'elygate.oauthConsent', 'badge-check'),
 				menuItem(locale, 'docs-hub', 'elygate.docsHub', 'book-open-text'),
 				menuItem(locale, 'pprof', 'elygate.pprof', 'gauge'),
 			],

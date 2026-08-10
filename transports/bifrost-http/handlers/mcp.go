@@ -1527,7 +1527,7 @@ func (h *MCPHandler) addMCPClient(ctx *fasthttp.RequestCtx) {
 		// form. Without this, a UI that sends "Authorization" as a key
 		// and "authorization" as a value-map entry would spuriously fail.
 		canonUserHeaders := mcputils.CanonicalizeHeaderMap(req.UserHeaders)
-		if missing := missingPerUserHeaderValues(canonHeaderKeys, canonUserHeaders); len(missing) > 0 {
+		if missing := missingPerUserHeaderValues(canonHeaderKeys, canonUserHeaders); !req.Disabled && len(missing) > 0 {
 			SendError(ctx, fasthttp.StatusBadRequest, fmt.Sprintf("sample user_headers missing values for required keys: %s", strings.Join(missing, ", ")))
 			return
 		}
@@ -1566,6 +1566,7 @@ func (h *MCPHandler) addMCPClient(ctx *fasthttp.RequestCtx) {
 			Headers:                req.Headers,
 			AllowedExtraHeaders:    req.AllowedExtraHeaders,
 			AllowOnAllVirtualKeys:  req.AllowOnAllVirtualKeys,
+			Disabled:               req.Disabled,
 		}
 
 		// Verify connection and discover tools using the admin's sample
@@ -1573,10 +1574,17 @@ func (h *MCPHandler) addMCPClient(ctx *fasthttp.RequestCtx) {
 		// persist so the DB row includes them from the start — same
 		// convention as the per-user OAuth branch below. Pass the canon
 		// form so the verify path sees the same keys the schema declares.
-		tools, toolNameMapping, verifyErr := h.mcpManager.VerifyHeadersConnection(bifrostCtx, schemasConfig, canonUserHeaders)
-		if verifyErr != nil {
-			SendError(ctx, fasthttp.StatusUnprocessableEntity, fmt.Sprintf("Verification failed: %v", verifyErr))
-			return
+		// Disabled clients stay dormant until explicitly enabled, including
+		// avoiding verification traffic during registration.
+		tools := map[string]schemas.ChatTool{}
+		toolNameMapping := map[string]string{}
+		if !schemasConfig.Disabled {
+			var verifyErr error
+			tools, toolNameMapping, verifyErr = h.mcpManager.VerifyHeadersConnection(bifrostCtx, schemasConfig, canonUserHeaders)
+			if verifyErr != nil {
+				SendError(ctx, fasthttp.StatusUnprocessableEntity, fmt.Sprintf("Verification failed: %v", verifyErr))
+				return
+			}
 		}
 		schemasConfig.DiscoveredTools = tools
 		schemasConfig.DiscoveredToolNameMapping = toolNameMapping
@@ -1597,9 +1605,14 @@ func (h *MCPHandler) addMCPClient(ctx *fasthttp.RequestCtx) {
 			return
 		}
 
+		registrationMessage := fmt.Sprintf("MCP client registered. %d tools discovered. Each user will submit their own headers on first tool use.", len(tools))
+		if schemasConfig.Disabled {
+			registrationMessage = "MCP client registered in disabled state"
+		}
 		SendJSON(ctx, map[string]any{
-			"status":  "success",
-			"message": fmt.Sprintf("MCP client registered. %d tools discovered. Each user will submit their own headers on first tool use.", len(tools)),
+			"status":        "success",
+			"message":       registrationMessage,
+			"mcp_client_id": schemasConfig.ID,
 		})
 		return
 	}
@@ -1681,6 +1694,7 @@ func (h *MCPHandler) addMCPClient(ctx *fasthttp.RequestCtx) {
 			Headers:                req.Headers,
 			AllowedExtraHeaders:    req.AllowedExtraHeaders,
 			AllowOnAllVirtualKeys:  req.AllowOnAllVirtualKeys,
+			Disabled:               req.Disabled,
 		}
 
 		// Resolve an admin credential for synchronous verification + tool
@@ -1695,7 +1709,7 @@ func (h *MCPHandler) addMCPClient(ctx *fasthttp.RequestCtx) {
 		// credential (see the retention block below).
 		var adminResponse *schemas.OAuth2TokenExchangeResponse
 		sampleSubjectToken, _ := bifrostCtx.Value(schemas.BifrostContextKeyMCPInboundBearer).(string)
-		if sampleSubjectToken != "" {
+		if sampleSubjectToken != "" && !schemasConfig.Disabled {
 			response, exchangeErr := h.store.OAuthProvider.ExchangeAdminCredential(bifrostCtx, schemasConfig, sampleSubjectToken)
 			if exchangeErr != nil {
 				SendError(ctx, fasthttp.StatusUnprocessableEntity, fmt.Sprintf("Admin credential exchange failed: %v", exchangeErr))
@@ -1739,13 +1753,16 @@ func (h *MCPHandler) addMCPClient(ctx *fasthttp.RequestCtx) {
 			}
 		}
 
-		message := fmt.Sprintf("MCP client registered. %d tools discovered. Callers' identity tokens are exchanged automatically on each tool use.", len(schemasConfig.DiscoveredTools))
-		if adminResponse == nil {
-			message = "MCP client registered in pending verification. Verify it from an identity-authenticated session to discover tools."
+		registrationMessage := fmt.Sprintf("MCP client registered. %d tools discovered. Callers' identity tokens are exchanged automatically on each tool use.", len(schemasConfig.DiscoveredTools))
+		if schemasConfig.Disabled {
+			registrationMessage = "MCP client registered in disabled state"
+		} else if adminResponse == nil {
+			registrationMessage = "MCP client registered in pending verification. Verify it from an identity-authenticated session to discover tools."
 		}
 		SendJSON(ctx, map[string]any{
-			"status":  "success",
-			"message": message,
+			"status":        "success",
+			"message":       registrationMessage,
+			"mcp_client_id": schemasConfig.ID,
 		})
 		return
 	}
@@ -1817,6 +1834,7 @@ func (h *MCPHandler) addMCPClient(ctx *fasthttp.RequestCtx) {
 			Headers:                req.Headers,
 			AllowedExtraHeaders:    req.AllowedExtraHeaders,
 			AllowOnAllVirtualKeys:  req.AllowOnAllVirtualKeys,
+			Disabled:               req.Disabled,
 		}
 
 		if err := h.oauthHandler.StorePendingMCPClient(flowInitiation.OauthConfigID, pendingConfig); err != nil {
@@ -1912,6 +1930,7 @@ func (h *MCPHandler) addMCPClient(ctx *fasthttp.RequestCtx) {
 			AllowedExtraHeaders:    req.AllowedExtraHeaders,
 			ToolPricing:            req.ToolPricing,
 			AllowOnAllVirtualKeys:  req.AllowOnAllVirtualKeys,
+			Disabled:               req.Disabled,
 		}
 
 		// Store pending config in database (associated with oauth_config_id for multi-instance support)
@@ -1978,6 +1997,7 @@ func (h *MCPHandler) addMCPClient(ctx *fasthttp.RequestCtx) {
 		ToolExecutionTimeout:   resolvedToolExecutionTimeout,
 		ToolPricing:            req.ToolPricing,
 		AllowOnAllVirtualKeys:  req.AllowOnAllVirtualKeys,
+		Disabled:               req.Disabled,
 	}
 
 	// Creating MCP client config in config store
@@ -2004,9 +2024,14 @@ func (h *MCPHandler) addMCPClient(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
+	registrationMessage := "MCP client connected successfully"
+	if schemasConfig.Disabled {
+		registrationMessage = "MCP client registered in disabled state"
+	}
 	SendJSON(ctx, map[string]any{
-		"status":  "success",
-		"message": "MCP client connected successfully",
+		"status":        "success",
+		"message":       registrationMessage,
+		"mcp_client_id": schemasConfig.ID,
 	})
 }
 

@@ -1,7 +1,7 @@
 package handlers
 
 import (
-	"embed"
+	"io/fs"
 	"mime"
 	"path"
 	"path/filepath"
@@ -18,14 +18,14 @@ const uiDevServerAddr = "localhost:3000"
 
 // UIHandler handles UI routes.
 type UIHandler struct {
-	uiContent embed.FS
+	uiContent fs.ReadFileFS
 	// uiDevClient proxies dashboard requests to the local Vite dev server.
 	// It is only set when dev mode is enabled (see NewUIHandler); nil otherwise.
 	uiDevClient *fasthttp.HostClient
 }
 
 // NewUIHandler creates a new UIHandler instance.
-func NewUIHandler(uiContent embed.FS) *UIHandler {
+func NewUIHandler(uiContent fs.ReadFileFS) *UIHandler {
 	h := &UIHandler{
 		uiContent: uiContent,
 	}
@@ -50,12 +50,15 @@ func (h *UIHandler) RegisterRoutes(router *router.Router, middlewares ...schemas
 
 // serveDashboard serves the dashboard UI.
 func (h *UIHandler) serveDashboard(ctx *fasthttp.RequestCtx) {
-	if IsDevMode() && h.serveDevDashboard(ctx) {
+	requestPath := string(ctx.Path())
+	if requestPath == "/api" || strings.HasPrefix(requestPath, "/api/") {
+		SendError(ctx, fasthttp.StatusNotFound, "Route not found: "+requestPath)
 		return
 	}
 
-	// Get the request path
-	requestPath := string(ctx.Path())
+	if IsDevMode() && h.serveDevDashboard(ctx) {
+		return
+	}
 
 	// Clean the path to prevent directory traversal
 	cleanPath := path.Clean(requestPath)

@@ -75,7 +75,6 @@ const requiredParityResources = [
 	'circuit-breaker',
 	'adaptive-routing',
 	'agent-handover',
-	'oauth-consent',
 	'docs-hub',
 	'pprof',
 ] as const;
@@ -92,6 +91,14 @@ describe('panel resource registry', () => {
 		const menuNames = leafResourceNames(createMenu('en', VISIBLE_ENTERPRISE_RESOURCES)).sort();
 		expect(new Set(menuNames).size).toBe(menuNames.length);
 		expect(menuNames).toEqual(resourceNames);
+	});
+
+	test('keeps OAuth consent exclusively on its public flow route', async () => {
+		expect(createResources('zh-CN').map((resource) => resource.name)).not.toContain('oauth-consent');
+		expect(leafResourceNames(createMenu('zh-CN', VISIBLE_ENTERPRISE_RESOURCES))).not.toContain('oauth-consent');
+		const appSource = await Bun.file(new URL('../App.svelte', import.meta.url)).text();
+		expect(appSource).not.toContain("'oauth-consent': { list: OAuthConsentPage }");
+		expect(appSource).toContain("publicRoute === 'oauth-consent'");
 	});
 
 	test('hides unavailable enterprise surfaces instead of rendering placeholders', () => {
