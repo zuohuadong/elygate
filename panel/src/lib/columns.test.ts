@@ -16,6 +16,12 @@ describe('dynamic resource columns', () => {
 		expect(columnLabelFor('zh-CN', 'created_at')).toBe('创建时间');
 		expect(columnLabelFor('zh-CN', 'updated_at')).toBe('更新时间');
 	});
+
+	test('localizes request-log columns in Chinese', () => {
+		expect(columnLabelFor('zh-CN', 'parent_request_id')).toBe('父请求 ID');
+		expect(columnLabelFor('zh-CN', 'object')).toBe('请求类型');
+		expect(columnLabelFor('zh-CN', 'nl')).toBe('网络延迟');
+	});
 });
 
 describe('columnValueFor cell rendering', () => {

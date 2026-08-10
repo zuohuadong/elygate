@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { useTranslation } from '@svadmin/core/i18n';
 	import { displayValue, getListPayload, getTotal, isJsonRecord, requestJson, type JsonRecord } from '../lib/api';
-	import { columnLabelFor } from '../lib/columns';
+	import { columnLabelFor, columnValueFor } from '../lib/columns';
 	import type { ElygateLocale } from '../lib/i18n';
 
 	interface Props {
@@ -97,7 +97,7 @@
 				<thead><tr>{#each columns as column (column)}<th>{columnLabelFor(i18n.locale as ElygateLocale, column)}</th>{/each}</tr></thead>
 				<tbody>
 					{#each records as record (rowKey(record))}
-						<tr>{#each columns as column (column)}<td title={displayValue(record[column])}>{displayValue(record[column])}</td>{/each}</tr>
+						<tr>{#each columns as column (column)}<td title={displayValue(record[column])}>{columnValueFor(i18n.locale as ElygateLocale, column, record[column])}</td>{/each}</tr>
 					{/each}
 				</tbody>
 			</table>

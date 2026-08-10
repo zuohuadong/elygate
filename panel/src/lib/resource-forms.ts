@@ -38,6 +38,33 @@ export function unsupportedProviderConfigFields(section: ProviderConfigSection, 
 	return Object.keys(value).filter((field) => !allowed.has(field)).sort();
 }
 
+export function hasOpenAIBaseURLVersionConflict(network: JsonRecord, custom: JsonRecord): boolean {
+	if (String(custom.base_provider_type ?? '').trim().toLowerCase() !== 'openai') return false;
+	if (typeof network.base_url !== 'string' || !network.base_url.trim()) return false;
+	try {
+		const pathname = new URL(network.base_url).pathname.replace(/\/+$/, '');
+		return pathname.toLowerCase().endsWith('/v1');
+	} catch {
+		return false;
+	}
+}
+
+export function providerKeyModelsForPayload(modelsInput: string): string[] {
+	const models = modelsInput.split(',').map((item) => item.trim()).filter(Boolean);
+	return models.length ? models : ['*'];
+}
+
+export type ProviderKeyModelAccess = 'all' | 'none' | 'limited';
+
+export function providerKeyModelAccess(models: unknown): ProviderKeyModelAccess {
+	if (!Array.isArray(models) || models.length === 0) return 'none';
+	return models.some((model) => String(model).trim() === '*') ? 'all' : 'limited';
+}
+
+export function isMissingProviderKeyError(error: unknown): boolean {
+	return isRecord(error) && error.status === 404;
+}
+
 export function unavailableVirtualKeyProviders(providerConfigs: unknown, providers: JsonRecord[]): string[] {
 	if (!Array.isArray(providerConfigs)) return [];
 	const statusByName = new Map<string, string>();

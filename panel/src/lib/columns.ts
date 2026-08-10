@@ -4,6 +4,9 @@ const columnTranslations: Record<ElygateLocale, Record<string, string>> = {
 	'zh-CN': {
 		id: 'ID',
 		request_id: '请求 ID',
+		parent_request_id: '父请求 ID',
+		object: '请求类型',
+		nl: '网络延迟',
 		provider: '供应商',
 		name: '名称',
 		description: '描述',
@@ -72,6 +75,9 @@ const columnTranslations: Record<ElygateLocale, Record<string, string>> = {
 	en: {
 		id: 'ID',
 		request_id: 'Request ID',
+		parent_request_id: 'Parent request ID',
+		object: 'Request type',
+		nl: 'Network latency',
 		provider: 'Provider',
 		name: 'Name',
 		description: 'Description',

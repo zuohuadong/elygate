@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { bifrostDataProvider } from './data-provider';
 import {
+	hasOpenAIBaseURLVersionConflict,
+	isMissingProviderKeyError,
 	keyAdvancedForForm,
+	providerKeyModelAccess,
+	providerKeyModelsForPayload,
 	providerConfigsForForm,
 	unavailableVirtualKeyProviders,
 	unsupportedProviderConfigFields,
@@ -79,6 +83,34 @@ describe('Bifrost DataProvider', () => {
 			.toEqual(['api_key', 'base_url', 'model']);
 		expect(unsupportedProviderConfigFields('network', { base_url: 'https://example.com' })).toEqual([]);
 		expect(unsupportedProviderConfigFields('custom', { base_provider_type: 'openai', is_key_less: false })).toEqual([]);
+	});
+
+	test('rejects an OpenAI-compatible base URL that already ends in /v1', () => {
+		expect(hasOpenAIBaseURLVersionConflict(
+			{ base_url: 'https://api.example.com/v1/' },
+			{ base_provider_type: 'openai' },
+		)).toBeTrue();
+		expect(hasOpenAIBaseURLVersionConflict(
+			{ base_url: 'https://api.example.com/gateway' },
+			{ base_provider_type: 'openai' },
+		)).toBeFalse();
+		expect(hasOpenAIBaseURLVersionConflict(
+			{ base_url: 'https://api.example.com/v1/' },
+			{ base_provider_type: 'anthropic' },
+		)).toBeFalse();
+	});
+
+	test('normalizes an empty provider-key model list to the explicit wildcard', () => {
+		expect(providerKeyModelsForPayload('')).toEqual(['*']);
+		expect(providerKeyModelsForPayload(' gpt-4o, claude-sonnet ')).toEqual(['gpt-4o', 'claude-sonnet']);
+		expect(providerKeyModelAccess([])).toBe('none');
+		expect(providerKeyModelAccess(['*'])).toBe('all');
+		expect(providerKeyModelAccess(['gpt-4o'])).toBe('limited');
+	});
+
+	test('treats a missing key on delete as an idempotent result', () => {
+		expect(isMissingProviderKeyError({ status: 404 })).toBeTrue();
+		expect(isMissingProviderKeyError({ status: 500 })).toBeFalse();
 	});
 
 	test('marks virtual-key provider routes unavailable when a provider is missing or unhealthy', () => {
