@@ -42,23 +42,67 @@ COPY panel/src/enterprise-fallback/index.ts /index.ts
       apk add --no-cache gcc musl-dev sqlite-dev binutils binutils-gold
 
   # Set environment for CGO-enabled build (required for go-sqlite3)
-  ENV CGO_ENABLED=1 GOOS=linux
+  ENV CGO_ENABLED=1 GOOS=linux GOWORK=/app/go.work
 
-  COPY transports/go.mod transports/go.sum ./
+  # Seed a minimal workspace from module manifests so dependency download stays
+  # cacheable while the binary still compiles the exact monorepo sources below.
+  COPY core/go.mod core/go.sum ./core/
+  COPY framework/go.mod framework/go.sum ./framework/
+  COPY plugins/compat/go.mod plugins/compat/go.sum ./plugins/compat/
+  COPY plugins/governance/go.mod plugins/governance/go.sum ./plugins/governance/
+  COPY plugins/jsonparser/go.mod plugins/jsonparser/go.sum ./plugins/jsonparser/
+  COPY plugins/logging/go.mod plugins/logging/go.sum ./plugins/logging/
+  COPY plugins/maxim/go.mod plugins/maxim/go.sum ./plugins/maxim/
+  COPY plugins/mocker/go.mod plugins/mocker/go.sum ./plugins/mocker/
+  COPY plugins/modelcatalogresolver/go.mod plugins/modelcatalogresolver/go.sum ./plugins/modelcatalogresolver/
+  COPY plugins/otel/go.mod plugins/otel/go.sum ./plugins/otel/
+  COPY plugins/prompts/go.mod plugins/prompts/go.sum ./plugins/prompts/
+  COPY plugins/semanticcache/go.mod plugins/semanticcache/go.sum ./plugins/semanticcache/
+  COPY plugins/telemetry/go.mod plugins/telemetry/go.sum ./plugins/telemetry/
+  COPY transports/go.mod transports/go.sum ./transports/
   ARG GOPROXY=https://proxy.golang.org,direct
-  RUN ls
-  RUN cat go.mod
-  RUN GOPROXY="$GOPROXY" go mod download
+  RUN --mount=type=cache,target=/go/pkg/mod \
+      go work init \
+      ./core \
+      ./framework \
+      ./plugins/compat \
+      ./plugins/governance \
+      ./plugins/jsonparser \
+      ./plugins/logging \
+      ./plugins/maxim \
+      ./plugins/mocker \
+      ./plugins/modelcatalogresolver \
+      ./plugins/otel \
+      ./plugins/prompts \
+      ./plugins/semanticcache \
+      ./plugins/telemetry \
+      ./transports && \
+      cd transports && GOPROXY="$GOPROXY" go mod download
 
   # Copy source code and dependencies
-  COPY transports/ ./
+  COPY core/ ./core/
+  COPY framework/ ./framework/
+  COPY plugins/compat/ ./plugins/compat/
+  COPY plugins/governance/ ./plugins/governance/
+  COPY plugins/jsonparser/ ./plugins/jsonparser/
+  COPY plugins/logging/ ./plugins/logging/
+  COPY plugins/maxim/ ./plugins/maxim/
+  COPY plugins/mocker/ ./plugins/mocker/
+  COPY plugins/modelcatalogresolver/ ./plugins/modelcatalogresolver/
+  COPY plugins/otel/ ./plugins/otel/
+  COPY plugins/prompts/ ./plugins/prompts/
+  COPY plugins/semanticcache/ ./plugins/semanticcache/
+  COPY plugins/telemetry/ ./plugins/telemetry/
+  COPY transports/ ./transports/
 
-  COPY --from=ui-builder /app/out ./bifrost-http/ui
+  COPY --from=ui-builder /app/out ./transports/bifrost-http/ui
 
   # Build the binary with CGO enabled and static SQLite linking
-  ENV GOWORK=off
+  WORKDIR /app/transports
   ARG VERSION=unknown
-  RUN GOPROXY="$GOPROXY" go build \
+  RUN --mount=type=cache,target=/go/pkg/mod \
+      --mount=type=cache,target=/root/.cache/go-build \
+      GOPROXY="$GOPROXY" go build \
     -ldflags="-w -s -X main.Version=v${VERSION} -extldflags '-static'" \
     -a -trimpath \
     -tags "sqlite_static" \
@@ -83,7 +127,7 @@ COPY panel/src/enterprise-fallback/index.ts /index.ts
 
   # Create data directory and set up user
   COPY --from=builder /app/main .
-  COPY --from=builder /app/docker-entrypoint.sh .
+  COPY --from=builder /app/transports/docker-entrypoint.sh .
 
   # Getting arguments
   ARG ARG_APP_PORT=8080
