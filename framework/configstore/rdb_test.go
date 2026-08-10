@@ -2718,6 +2718,64 @@ func TestDeletePromptSession(t *testing.T) {
 	})
 }
 
+func TestUpdatePromptSessionReplacesExistingMessages(t *testing.T) {
+	store := setupRDBTestStore(t)
+	ctx := context.Background()
+
+	prompt := &tables.TablePrompt{ID: "prompt-update-session", Name: "Prompt"}
+	require.NoError(t, store.CreatePrompt(ctx, prompt))
+	version := &tables.TablePromptVersion{
+		PromptID:      prompt.ID,
+		CommitMessage: "Original version",
+		Messages: []tables.TablePromptVersionMessage{
+			{PromptID: prompt.ID, Message: json.RawMessage(`{"role":"user","content":"first"}`)},
+			{PromptID: prompt.ID, Message: json.RawMessage(`{"role":"assistant","content":"second"}`)},
+		},
+	}
+	require.NoError(t, store.CreatePromptVersion(ctx, version))
+
+	session := &tables.TablePromptSession{
+		PromptID:  prompt.ID,
+		VersionID: &version.ID,
+		Name:      "Session",
+		Messages: []tables.TablePromptSessionMessage{
+			{PromptID: prompt.ID, Message: json.RawMessage(`{"role":"user","content":"first"}`)},
+			{PromptID: prompt.ID, Message: json.RawMessage(`{"role":"assistant","content":"second"}`)},
+		},
+	}
+	require.NoError(t, store.CreatePromptSession(ctx, session))
+
+	stored, err := store.GetPromptSessionByID(ctx, session.ID)
+	require.NoError(t, err)
+	oldMessageIDs := []uint{stored.Messages[0].ID, stored.Messages[1].ID}
+	stored.Name = "Updated session"
+	stored.Messages = []tables.TablePromptSessionMessage{
+		{PromptID: prompt.ID, Message: json.RawMessage(`{"role":"user","content":"after"}`)},
+		{PromptID: prompt.ID, Message: json.RawMessage(`{"role":"assistant","content":"done"}`)},
+	}
+
+	require.NoError(t, store.UpdatePromptSession(ctx, stored))
+
+	updated, err := store.GetPromptSessionByID(ctx, session.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "Updated session", updated.Name)
+	assert.Equal(t, version.ID, *updated.VersionID)
+	require.Len(t, updated.Messages, 2)
+	assert.Equal(t, 0, updated.Messages[0].OrderIndex)
+	assert.Equal(t, 1, updated.Messages[1].OrderIndex)
+	assert.JSONEq(t, `{"role":"user","content":"after"}`, string(updated.Messages[0].Message))
+	assert.JSONEq(t, `{"role":"assistant","content":"done"}`, string(updated.Messages[1].Message))
+
+	var oldMessageCount int64
+	require.NoError(t, store.DB().Model(&tables.TablePromptSessionMessage{}).Where("id IN ?", oldMessageIDs).Count(&oldMessageCount).Error)
+	assert.Zero(t, oldMessageCount)
+
+	unchangedVersion, err := store.GetPromptVersionByID(ctx, version.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "Original version", unchangedVersion.CommitMessage)
+	require.Len(t, unchangedVersion.Messages, 2)
+}
+
 // TestUpsertModelPricesBatch_SQLite guards the pricing-sync write path on
 // SQLite. Batching these rows into a multi-row INSERT makes GORM emit the
 // DEFAULT keyword for the table's many default:null columns, which SQLite
