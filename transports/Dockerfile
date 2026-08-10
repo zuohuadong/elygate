@@ -121,10 +121,11 @@ COPY panel/src/enterprise-fallback/index.ts /index.ts
   # musl: C standard library (required for CGO binaries)
   # libgcc: GCC runtime library
   # ca-certificates: For HTTPS connections
+  # git: smart HTTP serving for Claude Code and Codex skill marketplaces
   ARG APK_MIRROR
   RUN if [ -n "$APK_MIRROR" ]; then sed -i "s#https\?://dl-cdn.alpinelinux.org/alpine#$APK_MIRROR#g" /etc/apk/repositories; fi && \
       apk upgrade --no-cache && \
-      apk add --no-cache musl libgcc ca-certificates zlib
+      apk add --no-cache musl libgcc ca-certificates zlib git
 
   # Create data directory and set up user
   COPY --from=builder /app/main .
