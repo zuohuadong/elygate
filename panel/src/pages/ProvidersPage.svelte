@@ -224,6 +224,12 @@
 		};
 	}
 
+	function clearDeletedKeyFromEditor(id: string): void {
+		if (stringValue(editingKey ?? {}, 'id') !== id) return;
+		editingKey = null;
+		keyForm = emptyKeyForm();
+	}
+
 	async function saveKey(): Promise<void> {
 		if (!selectedProvider || !keyForm.name.trim()) return;
 		isSaving = true;
@@ -267,16 +273,12 @@
 		error = '';
 		try {
 			await requestJson(`/api/providers/${encodePathSegment(selectedProvider)}/keys/${encodePathSegment(id)}`, { method: 'DELETE' });
-			if (stringValue(editingKey ?? {}, 'id') === id) {
-				editingKey = null;
-				keyForm = emptyKeyForm();
-			}
+			clearDeletedKeyFromEditor(id);
 			notice = i18n.t('elygate.delete');
 			await loadKeys();
 		} catch (cause) {
 			if (isMissingProviderKeyError(cause)) {
-				editingKey = null;
-				keyForm = emptyKeyForm();
+				clearDeletedKeyFromEditor(id);
 				notice = i18n.t('elygate.keyAlreadyRemoved');
 				await loadKeys();
 				return;
