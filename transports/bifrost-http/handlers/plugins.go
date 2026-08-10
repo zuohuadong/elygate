@@ -105,15 +105,32 @@ func (h *PluginsHandler) RegisterRoutes(r *router.Router, middlewares ...schemas
 }
 
 type PluginResponse struct {
-	Name       string                   `json:"name"`
-	ActualName string                   `json:"actualName"`
-	Enabled    bool                     `json:"enabled"`
-	Config     any                      `json:"config"`
-	IsCustom   bool                     `json:"isCustom"`
-	Path       *string                  `json:"path"`
-	Placement  *schemas.PluginPlacement `json:"placement,omitempty"`
-	Order      *int                     `json:"order,omitempty"`
-	Status     schemas.PluginStatus     `json:"status"`
+	Name          string                   `json:"name"`
+	ActualName    string                   `json:"actualName"`
+	Enabled       bool                     `json:"enabled"`
+	Config        any                      `json:"config"`
+	IsCustom      bool                     `json:"isCustom"`
+	Path          *string                  `json:"path"`
+	Placement     *schemas.PluginPlacement `json:"placement,omitempty"`
+	Order         *int                     `json:"order,omitempty"`
+	Description   string                   `json:"description,omitempty"`
+	DescriptionZh string                   `json:"descriptionZh,omitempty"`
+	Features      []string                 `json:"features,omitempty"`
+	Status        schemas.PluginStatus     `json:"status"`
+}
+
+func pluginMetadataForResponse(actualName string, status schemas.PluginStatus) schemas.PluginMetadata {
+	for _, name := range []string{actualName, status.Name} {
+		metadata := lib.GetBuiltinPluginMetadata(name)
+		if metadata.Description != "" || metadata.DescriptionZh != "" || len(metadata.Features) > 0 {
+			return metadata
+		}
+	}
+	return schemas.PluginMetadata{
+		Description:   status.Description,
+		DescriptionZh: status.DescriptionZh,
+		Features:      slices.Clone(status.Features),
+	}
 }
 
 // buildRuntimePluginResponse constructs a response for plugins that are known to
@@ -123,14 +140,18 @@ func buildRuntimePluginResponse(actualName string, status schemas.PluginStatus) 
 	if name == "" {
 		name = actualName
 	}
+	metadata := pluginMetadataForResponse(actualName, status)
 	return PluginResponse{
-		Name:       name,
-		ActualName: actualName,
-		Enabled:    status.Status != schemas.PluginStatusDisabled,
-		Config:     map[string]any{},
-		IsCustom:   !lib.IsBuiltinPlugin(actualName),
-		Path:       nil,
-		Status:     status,
+		Name:          name,
+		ActualName:    actualName,
+		Enabled:       status.Status != schemas.PluginStatusDisabled,
+		Config:        map[string]any{},
+		IsCustom:      !lib.IsBuiltinPlugin(actualName),
+		Path:          nil,
+		Description:   metadata.Description,
+		DescriptionZh: metadata.DescriptionZh,
+		Features:      slices.Clone(metadata.Features),
+		Status:        status,
 	}
 }
 
@@ -147,15 +168,16 @@ func (h *PluginsHandler) buildPluginResponseWithStatuses(plugin *configstoreTabl
 		Status: schemas.PluginStatusUninitialized,
 		Logs:   []string{},
 	}
+	actualName := plugin.Name
+	for candidateActualName, status := range pluginStatuses {
+		if plugin.Name == status.Name || plugin.Name == candidateActualName {
+			actualName = candidateActualName
+			pluginStatus = status
+			break
+		}
+	}
 	if !plugin.Enabled {
 		pluginStatus.Status = schemas.PluginStatusDisabled
-	} else {
-		for _, status := range pluginStatuses {
-			if plugin.Name == status.Name {
-				pluginStatus = status
-				break
-			}
-		}
 	}
 	config := plugin.Config
 	if configMap, ok := plugin.Config.(map[string]any); ok {
@@ -167,16 +189,20 @@ func (h *PluginsHandler) buildPluginResponseWithStatuses(plugin *configstoreTabl
 			config = redacted
 		}
 	}
+	metadata := pluginMetadataForResponse(actualName, pluginStatus)
 	return PluginResponse{
-		Name:       plugin.Name,
-		ActualName: pluginStatus.Name,
-		Enabled:    plugin.Enabled,
-		Config:     config,
-		IsCustom:   plugin.IsCustom,
-		Path:       plugin.Path,
-		Placement:  plugin.Placement,
-		Order:      plugin.Order,
-		Status:     pluginStatus,
+		Name:          plugin.Name,
+		ActualName:    actualName,
+		Enabled:       plugin.Enabled,
+		Config:        config,
+		IsCustom:      plugin.IsCustom,
+		Path:          plugin.Path,
+		Placement:     plugin.Placement,
+		Order:         plugin.Order,
+		Description:   metadata.Description,
+		DescriptionZh: metadata.DescriptionZh,
+		Features:      slices.Clone(metadata.Features),
+		Status:        pluginStatus,
 	}
 }
 
@@ -257,17 +283,9 @@ func (h *PluginsHandler) getPlugin(ctx *fasthttp.RequestCtx) {
 	if h.configStore == nil {
 		pluginStatus := h.pluginsLoader.GetPluginStatus(ctx)
 		pluginInfo := PluginResponse{}
-		for name, pluginStatus := range pluginStatus {
-			if pluginStatus.Name == ctx.UserValue("name") {
-				pluginInfo = PluginResponse{
-					Name:       pluginStatus.Name,
-					ActualName: name,
-					Enabled:    true,
-					Config:     map[string]any{},
-					IsCustom:   true,
-					Path:       nil,
-					Status:     pluginStatus,
-				}
+		for actualName, status := range pluginStatus {
+			if status.Name == ctx.UserValue("name") || actualName == ctx.UserValue("name") {
+				pluginInfo = buildRuntimePluginResponse(actualName, status)
 				break
 			}
 		}

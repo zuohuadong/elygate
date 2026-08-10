@@ -48,8 +48,8 @@ func (l *SharedObjectPluginLoader) openPlugin(dp *DynamicPlugin) (*plugin.Plugin
 }
 
 // LoadPlugin loads a generic plugin from a shared object file
-// It uses optional symbol lookup - only GetName and Cleanup are required
-// All other hook methods are optional and stored as nil if not implemented
+// It keeps GetName and Cleanup required. Metadata and hook symbols are optional
+// for plugins built against the same source version.
 func (l *SharedObjectPluginLoader) LoadPlugin(path string, config any) (schemas.BasePlugin, error) {
 	dp := &DynamicPlugin{
 		Path: path,
@@ -79,6 +79,13 @@ func (l *SharedObjectPluginLoader) LoadPlugin(path string, config any) (schemas.
 	var ok bool
 	if dp.getName, ok = getNameSym.(func() string); !ok {
 		return nil, fmt.Errorf("failed to cast GetName to func() string\nSee docs for more information: https://docs.getbifrost.ai/plugins/writing-go-plugin")
+	}
+
+	// Optional: GetPluginMetadata
+	if getPluginMetadataSym, lookupErr := pluginObj.Lookup("GetPluginMetadata"); lookupErr == nil {
+		if dp.getPluginMetadata, ok = getPluginMetadataSym.(func() schemas.PluginMetadata); !ok {
+			return nil, fmt.Errorf("failed to cast GetPluginMetadata to func() schemas.PluginMetadata\nSee docs for more information: https://docs.getbifrost.ai/plugins/writing-go-plugin")
+		}
 	}
 
 	// Required: Cleanup

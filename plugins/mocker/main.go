@@ -480,6 +480,13 @@ func (p *MockerPlugin) GetName() string {
 	return PluginName
 }
 
+func (p *MockerPlugin) GetPluginMetadata() schemas.PluginMetadata {
+	return schemas.PluginMetadata{
+		Description:   "Returns configured mock responses for development and testing.",
+		DescriptionZh: "为开发和测试返回已配置的模拟响应。",
+	}
+}
+
 // HTTPTransportPreHook is not used for this plugin
 func (p *MockerPlugin) HTTPTransportPreHook(ctx *schemas.BifrostContext, req *schemas.HTTPRequest) (*schemas.HTTPResponse, error) {
 	return nil, nil

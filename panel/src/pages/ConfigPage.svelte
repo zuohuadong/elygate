@@ -17,13 +17,39 @@
 	import SelectField from '../lib/fields/SelectField.svelte';
 
 	type Mode = 'form' | 'json';
+	type ConfigSection = 'auth' | 'logging' | 'security' | 'performance' | 'compat' | 'mcp' | 'framework';
 
 	interface Props { resourceName: string; }
 
 	let { resourceName }: Props = $props();
 	const i18n = useTranslation();
+	const sectionMap: Record<string, ConfigSection[]> = {
+		'client-settings': ['security', 'performance'],
+		'compatibility-config': ['compat'],
+		'security-config': ['auth', 'security'],
+		'performance-config': ['performance'],
+		'logging-config': ['logging'],
+		'observability-config': ['logging', 'performance'],
+		'pricing-config': ['framework'],
+		'mcp-settings': ['mcp'],
+		'mcp-gateway-config': ['mcp', 'framework'],
+		'large-payload-config': ['security'],
+	};
+	const titleKeys: Record<string, string> = {
+		'client-settings': 'elygate.clientSettings',
+		'compatibility-config': 'elygate.compatibilityConfig',
+		'security-config': 'elygate.securityConfig',
+		'performance-config': 'elygate.performanceConfig',
+		'logging-config': 'elygate.loggingConfig',
+		'observability-config': 'elygate.observabilityConfig',
+		'pricing-config': 'elygate.pricingConfig',
+		'mcp-settings': 'elygate.mcpSettings',
+		'mcp-gateway-config': 'elygate.mcpGatewayConfig',
+		'large-payload-config': 'elygate.largePayloadConfig',
+	};
 
 	const eyebrow = $derived(`Elygate / Bifrost ${resourceName === 'config' ? 'Config' : resourceName}`);
+	const titleKey = $derived(titleKeys[resourceName] ?? 'elygate.config');
 
 	let rawConfig = $state<JsonRecord>({});
 	let form = $state<ConfigForm>(configFormFromDocument({}));
@@ -123,6 +149,23 @@
 		void save();
 	}
 
+	function shows(section: ConfigSection): boolean {
+		return resourceName === 'config' || (sectionMap[resourceName] ?? []).includes(section);
+	}
+
+	async function forcePricingSync(): Promise<void> {
+		isSaving = true;
+		error = '';
+		try {
+			await requestJson('/api/pricing/force-sync', { method: 'POST' });
+			notice = i18n.t('elygate.pricingSyncStarted');
+		} catch (cause) {
+			error = displayError(cause, i18n.t('elygate.operationFailed'));
+		} finally {
+			isSaving = false;
+		}
+	}
+
 	onMount(() => {
 		void load();
 	});
@@ -132,10 +175,11 @@
 	<header class="page-heading">
 		<div>
 			<p class="eyebrow">{eyebrow}</p>
-			<h1>{i18n.t('elygate.config')}</h1>
+			<h1>{i18n.t(titleKey)}</h1>
 			<p>{i18n.t('elygate.configHint')}</p>
 		</div>
 		<div class="heading-actions">
+			{#if resourceName === 'pricing-config'}<button type="button" onclick={() => void forcePricingSync()} disabled={isSaving}>{i18n.t('elygate.syncPricing')}</button>{/if}
 			<div class="mode-switch" role="group" aria-label={i18n.t('elygate.config')}>
 				<button type="button" class:is-active={mode === 'form'} onclick={() => switchMode('form')} disabled={isLoading || isSaving}>
 					{i18n.t('elygate.formMode')}
@@ -173,7 +217,7 @@
 	<form onsubmit={submit}>
 		{#if mode === 'form'}
 			<div class="section-grid">
-				<section class="config-section">
+				{#if shows('auth')}<section class="config-section">
 					<h2>{i18n.t('elygate.section.auth')}</h2>
 					<SwitchField label={i18n.t('elygate.field.authEnabled')} bind:checked={form.authEnabled} disabled={isLoading} />
 					<TextField label={i18n.t('elygate.field.adminUsername')} bind:value={form.adminUsername} autocomplete="username" disabled={isLoading} />
@@ -185,9 +229,9 @@
 						autocomplete="new-password"
 						disabled={isLoading}
 					/>
-				</section>
+				</section>{/if}
 
-				<section class="config-section">
+				{#if shows('logging')}<section class="config-section">
 					<h2>{i18n.t('elygate.section.logging')}</h2>
 					<SwitchField label={i18n.t('elygate.field.enableLogging')} bind:checked={form.enableLogging} disabled={isLoading} />
 					<SwitchField label={i18n.t('elygate.field.disableContentLogging')} bind:checked={form.disableContentLogging} disabled={isLoading} />
@@ -196,9 +240,9 @@
 					<SwitchField label={i18n.t('elygate.field.allowPerRequestRawOverride')} bind:checked={form.allowPerRequestRawOverride} disabled={isLoading} />
 					<SwitchField label={i18n.t('elygate.field.dumpErrorsInConsoleLogs')} bind:checked={form.dumpErrorsInConsoleLogs} disabled={isLoading} />
 					<NumberField label={i18n.t('elygate.field.logRetentionDays')} bind:value={form.logRetentionDays} min={0} disabled={isLoading} />
-				</section>
+				</section>{/if}
 
-				<section class="config-section">
+				{#if shows('security')}<section class="config-section">
 					<h2>{i18n.t('elygate.section.security')}</h2>
 					<SwitchField label={i18n.t('elygate.field.allowDirectKeys')} bind:checked={form.allowDirectKeys} disabled={isLoading} />
 					<SwitchField label={i18n.t('elygate.field.enforceAuthOnInference')} bind:checked={form.enforceAuthOnInference} disabled={isLoading} />
@@ -207,26 +251,26 @@
 					<SelectField label={i18n.t('elygate.field.dualCredentialConflictBehavior')} bind:value={form.dualCredentialConflictBehavior} options={dualCredentialOptions} disabled={isLoading} />
 					<TextField label={i18n.t('elygate.field.allowedOrigins')} hint={i18n.t('elygate.field.csvHint')} bind:value={form.allowedOrigins} placeholder="*" disabled={isLoading} />
 					<NumberField label={i18n.t('elygate.field.maxRequestBodySizeMb')} bind:value={form.maxRequestBodySizeMb} min={1} disabled={isLoading} />
-				</section>
+				</section>{/if}
 
-				<section class="config-section">
+				{#if shows('performance')}<section class="config-section">
 					<h2>{i18n.t('elygate.section.performance')}</h2>
 					<NumberField label={i18n.t('elygate.field.initialPoolSize')} bind:value={form.initialPoolSize} min={0} disabled={isLoading} />
 					<TextField label={i18n.t('elygate.field.prometheusLabels')} hint={i18n.t('elygate.field.csvHint')} bind:value={form.prometheusLabels} disabled={isLoading} />
 					<NumberField label={i18n.t('elygate.field.asyncJobResultTtl')} bind:value={form.asyncJobResultTtl} min={0} disabled={isLoading} />
 					<NumberField label={i18n.t('elygate.field.routingChainMaxDepth')} bind:value={form.routingChainMaxDepth} min={1} disabled={isLoading} />
 					<SwitchField label={i18n.t('elygate.field.hideDeletedVirtualKeysInFilters')} bind:checked={form.hideDeletedVirtualKeysInFilters} disabled={isLoading} />
-				</section>
+				</section>{/if}
 
-				<section class="config-section">
+				{#if shows('compat')}<section class="config-section">
 					<h2>{i18n.t('elygate.section.compat')}</h2>
 					<SwitchField label={i18n.t('elygate.field.compatConvertTextToChat')} bind:checked={form.compatConvertTextToChat} disabled={isLoading} />
 					<SwitchField label={i18n.t('elygate.field.compatConvertChatToResponses')} bind:checked={form.compatConvertChatToResponses} disabled={isLoading} />
 					<SwitchField label={i18n.t('elygate.field.compatShouldDropParams')} bind:checked={form.compatShouldDropParams} disabled={isLoading} />
 					<SwitchField label={i18n.t('elygate.field.compatShouldConvertParams')} bind:checked={form.compatShouldConvertParams} disabled={isLoading} />
-				</section>
+				</section>{/if}
 
-				<section class="config-section">
+				{#if shows('mcp')}<section class="config-section">
 					<h2>{i18n.t('elygate.section.mcp')}</h2>
 					<NumberField label={i18n.t('elygate.field.mcpAgentDepth')} bind:value={form.mcpAgentDepth} min={0} disabled={isLoading} />
 					<NumberField label={i18n.t('elygate.field.mcpToolExecutionTimeout')} bind:value={form.mcpToolExecutionTimeout} min={0} disabled={isLoading} />
@@ -236,16 +280,16 @@
 					<SwitchField label={i18n.t('elygate.field.mcpEnableTempTokenAuth')} bind:checked={form.mcpEnableTempTokenAuth} disabled={isLoading} />
 					<TextField label={i18n.t('elygate.field.mcpExternalClientUrl')} bind:value={form.mcpExternalClientUrl} disabled={isLoading} />
 					<SelectField label={i18n.t('elygate.field.mcpServerAuthMode')} bind:value={form.mcpServerAuthMode} options={mcpAuthModeOptions} disabled={isLoading} />
-				</section>
+				</section>{/if}
 
-				<section class="config-section">
+				{#if shows('framework')}<section class="config-section">
 					<h2>{i18n.t('elygate.section.framework')}</h2>
 					<TextField label={i18n.t('elygate.field.pricingUrl')} bind:value={form.pricingUrl} disabled={isLoading} />
 					<NumberField label={i18n.t('elygate.field.pricingSyncInterval')} bind:value={form.pricingSyncInterval} min={0} disabled={isLoading} />
 					<TextField label={i18n.t('elygate.field.modelParametersUrl')} bind:value={form.modelParametersUrl} disabled={isLoading} />
 					<TextField label={i18n.t('elygate.field.mcpLibraryUrl')} bind:value={form.mcpLibraryUrl} disabled={isLoading} />
 					<NumberField label={i18n.t('elygate.field.mcpLibrarySyncInterval')} bind:value={form.mcpLibrarySyncInterval} min={0} disabled={isLoading} />
-				</section>
+				</section>{/if}
 			</div>
 		{:else}
 			<label class="json-editor">

@@ -81,6 +81,14 @@ func (s *BifrostHTTPServer) registerPluginWithStatus(ctx context.Context, name s
 	return nil
 }
 
+func pluginMetadata(plugin schemas.BasePlugin) schemas.PluginMetadata {
+	provider, ok := plugin.(schemas.PluginMetadataProvider)
+	if !ok {
+		return schemas.PluginMetadata{}
+	}
+	return provider.GetPluginMetadata()
+}
+
 // CollectObservabilityPlugins gathers all loaded plugins that implement ObservabilityPlugin interface
 func (s *BifrostHTTPServer) CollectObservabilityPlugins() []schemas.ObservabilityPlugin {
 	var observabilityPlugins []schemas.ObservabilityPlugin

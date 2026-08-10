@@ -16,6 +16,19 @@
 		cluster: 'elygate.cluster',
 		'circuit-breaker': 'elygate.circuitBreaker',
 		'adaptive-routing': 'elygate.adaptiveRouting',
+		'mcp-tool-groups': 'elygate.mcpToolGroups',
+		'mcp-auth-config': 'elygate.mcpAuthConfig',
+		'alerting-channels': 'elygate.alertingChannels',
+		'alerting-rules': 'elygate.alertingRules',
+		'alerting-history': 'elygate.alertingHistory',
+		'guardrails-config': 'elygate.guardrailsConfig',
+		'guardrails-providers': 'elygate.guardrailsProviders',
+		'edge-devices': 'elygate.edgeDevices',
+		'edge-inventory': 'elygate.edgeInventory',
+		'edge-config': 'elygate.edgeConfig',
+		'api-keys': 'elygate.apiKeys',
+		'license-info': 'elygate.licenseInfo',
+		'agent-handover': 'elygate.agentHandover',
 	};
 
 	let { resourceName }: Props = $props();

@@ -29,7 +29,10 @@ function failed(message: string): AuthActionResult {
 	return { success: false, error: { message } };
 }
 
-export function createBifrostAuthProvider(getLocale: () => ElygateLocale): AuthProvider {
+export function createBifrostAuthProvider(
+	getLocale: () => ElygateLocale,
+	onAuthenticated: () => Promise<void>,
+): AuthProvider {
 	return {
 		async login(params): Promise<AuthActionResult> {
 			const username = typeof params.username === 'string' ? params.username : '';
@@ -41,6 +44,7 @@ export function createBifrostAuthProvider(getLocale: () => ElygateLocale): AuthP
 					method: 'POST',
 					body: JSON.stringify({ username, password }),
 				});
+				await onAuthenticated();
 				return { success: true, redirectTo: '/' };
 			} catch (error) {
 				return failed(error instanceof Error ? error.message : authLabel(getLocale(), 'loginFailed'));

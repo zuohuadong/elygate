@@ -1,3 +1,8 @@
+# Default named context for OSS builds. Buildx can replace this stage with
+# --build-context enterprise_panel=/path/to/private-panel-module.
+FROM scratch AS enterprise_panel
+COPY panel/src/enterprise-fallback/index.ts /index.ts
+
 # --- UI Build Stage: Build the Svelte svadmin panel ---
   FROM oven/bun:1.3.14-alpine@sha256:5acc90a93e91ff07bf72aa90a7c9f0fa189765aec90b47bdbf2152d2196383c0 AS ui-builder
   WORKDIR /app
@@ -12,8 +17,18 @@
   RUN bun install --frozen-lockfile
 
   COPY panel/ ./
+  COPY docs/ /docs/
+
+  # The named context is isolated from the default repository context and is
+  # only present in this build stage. Enterprise jobs point the path argument
+  # at /opt/elygate-enterprise-panel/index.ts.
+  COPY --from=enterprise_panel / /opt/elygate-enterprise-panel/
 
   # Build and type-check without the local copy-build step; the next stage embeds out/.
+  ARG BIFROST_ENTERPRISE_PANEL_PATH
+  ARG BIFROST_REQUIRE_ENTERPRISE_PANEL=false
+  ENV BIFROST_ENTERPRISE_PANEL_PATH=$BIFROST_ENTERPRISE_PANEL_PATH \
+      BIFROST_REQUIRE_ENTERPRISE_PANEL=$BIFROST_REQUIRE_ENTERPRISE_PANEL
   RUN bunx vite build && bun run check
 
   # --- Go Build Stage: Compile the Go binary ---

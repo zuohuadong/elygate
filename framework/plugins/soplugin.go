@@ -18,8 +18,9 @@ type DynamicPlugin struct {
 	plugin   *plugin.Plugin
 
 	// BasePlugin (required)
-	getName func() string
-	cleanup func() error
+	getName           func() string
+	getPluginMetadata func() schemas.PluginMetadata
+	cleanup           func() error
 
 	// HTTPTransportPlugin (optional)
 	httpTransportPreHook         func(ctx *schemas.BifrostContext, req *schemas.HTTPRequest) (*schemas.HTTPResponse, error)
@@ -52,6 +53,14 @@ type DynamicPlugin struct {
 // GetName returns the name of the plugin (BasePlugin interface)
 func (dp *DynamicPlugin) GetName() string {
 	return dp.getName()
+}
+
+// GetPluginMetadata returns optional user-facing metadata exported by a dynamic plugin.
+func (dp *DynamicPlugin) GetPluginMetadata() schemas.PluginMetadata {
+	if dp.getPluginMetadata == nil {
+		return schemas.PluginMetadata{}
+	}
+	return dp.getPluginMetadata()
 }
 
 // Cleanup is invoked by core/bifrost.go during plugin unload, reload, and shutdown (BasePlugin interface)

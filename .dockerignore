@@ -43,8 +43,27 @@ coverage/
 .cache/
 .parcel-cache/
 
-# Documentation that's not needed for build
-docs/
+# Documentation: the panel bundles only these pages during the UI build.
+docs/**
+!docs/architecture/
+!docs/architecture/core/
+!docs/architecture/core/request-flow.mdx
+!docs/deployment-guides/
+!docs/deployment-guides/how-to/
+!docs/deployment-guides/how-to/security-best-practices.mdx
+!docs/features/
+!docs/features/governance/
+!docs/features/governance/routing.mdx
+!docs/features/governance/virtual-keys.mdx
+!docs/features/webhooks.mdx
+!docs/mcp/
+!docs/mcp/gateway.mdx
+!docs/mcp/overview.mdx
+!docs/plugins/
+!docs/plugins/getting-started.mdx
+!docs/quickstart/
+!docs/quickstart/gateway/
+!docs/quickstart/gateway/setting-up.mdx
 README.md
 *.md
 

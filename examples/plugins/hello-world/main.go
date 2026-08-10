@@ -24,6 +24,13 @@ func GetName() string {
 	return "hello-world"
 }
 
+func GetPluginMetadata() schemas.PluginMetadata {
+	return schemas.PluginMetadata{
+		Description:   "Demonstrates HTTP and LLM hook integration.",
+		DescriptionZh: "演示 HTTP 与 LLM 钩子的集成方式。",
+	}
+}
+
 func HTTPTransportPreHook(ctx *schemas.BifrostContext, req *schemas.HTTPRequest) (*schemas.HTTPResponse, error) {
 	fmt.Println("HTTPTransportPreHook called")
 	// Modify request in-place

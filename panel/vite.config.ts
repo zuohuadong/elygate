@@ -1,6 +1,15 @@
 import tailwindcss from '@tailwindcss/vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { defineConfig, type Plugin } from 'vite';
+import { bundledDocsPlugin } from './vite-docs-plugin.mjs';
+import { resolveEnterprisePanelModule } from './vite-enterprise-panel.mjs';
+
+const runtimeProcess = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process;
+const enterprisePanelPath = resolveEnterprisePanelModule({
+	fallbackPath: new URL('./src/enterprise-fallback/index.ts', import.meta.url).pathname,
+	modulePath: runtimeProcess?.env?.BIFROST_ENTERPRISE_PANEL_PATH,
+	required: runtimeProcess?.env?.BIFROST_REQUIRE_ENTERPRISE_PANEL === 'true',
+});
 
 function stripSvadminSourceDirective(): Plugin {
 	return {
@@ -17,7 +26,7 @@ function stripSvadminSourceDirective(): Plugin {
 }
 
 export default defineConfig({
-	plugins: [stripSvadminSourceDirective(), tailwindcss(), svelte()],
+	plugins: [bundledDocsPlugin(), stripSvadminSourceDirective(), tailwindcss(), svelte()],
 	server: {
 		port: 3000,
 		proxy: {
@@ -28,6 +37,9 @@ export default defineConfig({
 		},
 	},
 	resolve: {
+		alias: {
+			'@elygate/enterprise-panel': enterprisePanelPath,
+		},
 		conditions: ['browser'],
 	},
 	// svadmin ships Svelte source files, so Vite must transform it directly. Its

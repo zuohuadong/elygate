@@ -1679,6 +1679,7 @@ func (s *BifrostHTTPServer) SyncLoadedPlugin(ctx context.Context, name string, p
 	// 5. Update plugin status
 	s.Config.UpdatePluginOverallStatus(plugin.GetName(), name, schemas.PluginStatusActive,
 		[]string{fmt.Sprintf("plugin %s reloaded successfully", name)}, InferPluginTypes(plugin))
+	s.Config.UpdatePluginMetadata(plugin.GetName(), pluginMetadata(plugin))
 	return nil
 }
 

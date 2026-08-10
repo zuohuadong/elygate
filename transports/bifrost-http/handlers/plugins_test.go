@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"testing"
 
 	"github.com/maximhq/bifrost/core/schemas"
@@ -541,10 +542,56 @@ func TestGetPluginsIncludesRuntimeStatusWithoutConfigRows(t *testing.T) {
 	if response.Plugins[0].IsCustom {
 		t.Fatalf("logging should be reported as a built-in plugin: %+v", response.Plugins[0])
 	}
+	if response.Plugins[0].DescriptionZh != "记录请求、响应、用量和错误，便于排障与审计。" {
+		t.Fatalf("logging should include its Chinese description: %+v", response.Plugins[0])
+	}
 	if response.Plugins[1].Name != "model-catalog-resolver" || response.Plugins[1].IsCustom {
 		t.Fatalf("model-catalog-resolver should be reported as a built-in plugin: %+v", response.Plugins[1])
 	}
 	if response.Plugins[2].Name != "semantic_cache" || response.Plugins[2].Enabled {
 		t.Fatalf("unexpected disabled semantic cache row: %+v", response.Plugins[2])
+	}
+}
+
+func TestBuildRuntimePluginResponseUsesCustomPluginMetadata(t *testing.T) {
+	response := buildRuntimePluginResponse("enterprise-governance", schemas.PluginStatus{
+		Name:          "enterprise-governance",
+		Status:        schemas.PluginStatusActive,
+		Description:   "Adds enterprise governance controls.",
+		DescriptionZh: "提供企业级治理控制能力。",
+		Features:      []string{"users", "rbac"},
+	})
+
+	if response.Description != "Adds enterprise governance controls." || response.DescriptionZh != "提供企业级治理控制能力。" {
+		t.Fatalf("custom plugin metadata was not propagated: %+v", response)
+	}
+	if !slices.Equal(response.Features, []string{"users", "rbac"}) {
+		t.Fatalf("custom plugin features were not propagated: %+v", response)
+	}
+}
+
+func TestBuildPluginResponseKeepsCustomActualNameAndMetadata(t *testing.T) {
+	h := &PluginsHandler{pluginsLoader: noopPluginsLoader{}}
+	response := h.buildPluginResponseWithStatuses(
+		&configstoreTables.TablePlugin{
+			Name:     "Guardrails Enterprise",
+			Enabled:  true,
+			IsCustom: true,
+		},
+		map[string]schemas.PluginStatus{
+			"custom-guardrails": {
+				Name:          "Guardrails Enterprise",
+				Status:        schemas.PluginStatusActive,
+				DescriptionZh: "企业护栏",
+				Features:      []string{"guardrails-config"},
+			},
+		},
+	)
+
+	if response.ActualName != "custom-guardrails" {
+		t.Fatalf("actualName = %q, want custom-guardrails", response.ActualName)
+	}
+	if response.DescriptionZh != "企业护栏" || !slices.Equal(response.Features, []string{"guardrails-config"}) {
+		t.Fatalf("custom metadata was not preserved: %+v", response)
 	}
 }

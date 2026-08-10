@@ -20,10 +20,28 @@ const (
 
 // PluginStatus represents the status of a plugin.
 type PluginStatus struct {
-	Name   string       `json:"name"` // Display name of the plugin
-	Status string       `json:"status"`
-	Logs   []string     `json:"logs"`
-	Types  []PluginType `json:"types"` // Plugin types (LLM, MCP, HTTP)
+	Name          string       `json:"name"` // Display name of the plugin
+	Status        string       `json:"status"`
+	Logs          []string     `json:"logs"`
+	Types         []PluginType `json:"types"` // Plugin types (LLM, MCP, HTTP)
+	Description   string       `json:"description,omitempty"`
+	DescriptionZh string       `json:"descriptionZh,omitempty"`
+	Features      []string     `json:"features,omitempty"`
+}
+
+// PluginMetadata provides user-facing descriptions for a plugin.
+// Built-in plugins supply this from the server catalog. Custom plugins can
+// optionally implement PluginMetadataProvider to expose their own metadata.
+type PluginMetadata struct {
+	Description   string   `json:"description,omitempty"`
+	DescriptionZh string   `json:"descriptionZh,omitempty"`
+	Features      []string `json:"features,omitempty"`
+}
+
+// PluginMetadataProvider is optional for plugins built against the same source
+// version. Go shared objects still require matching dependencies and toolchain.
+type PluginMetadataProvider interface {
+	GetPluginMetadata() PluginMetadata
 }
 
 // PluginType represents the type of plugin.

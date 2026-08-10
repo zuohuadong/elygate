@@ -57,6 +57,13 @@ func TestDynamicPluginLifecycle(t *testing.T) {
 		assert.Equal(t, "hello-world", name, "Plugin name should match")
 	})
 
+	t.Run("GetPluginMetadata", func(t *testing.T) {
+		metadataProvider, ok := plugin.(schemas.PluginMetadataProvider)
+		require.True(t, ok, "Plugin should expose optional metadata")
+		metadata := metadataProvider.GetPluginMetadata()
+		assert.Equal(t, "演示 HTTP 与 LLM 钩子的集成方式。", metadata.DescriptionZh)
+	})
+
 	// Test HTTPTransportPreHook
 	t.Run("HTTPTransportPreHook", func(t *testing.T) {
 		ctx := context.Background()

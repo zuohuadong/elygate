@@ -2,102 +2,190 @@ import type { MenuItem, ResourceDefinition } from '@svadmin/core';
 import { labelFor, type ElygateLocale } from './i18n';
 import { VISIBLE_ENTERPRISE_RESOURCES } from './menu-policy';
 
-function resource(locale: ElygateLocale, name: string, labelKey: Parameters<typeof labelFor>[1], icon: string): ResourceDefinition {
+type LabelKey = Parameters<typeof labelFor>[1];
+type ResourceSpec = readonly [name: string, labelKey: LabelKey, icon: string];
+
+const RESOURCE_SPECS: ResourceSpec[] = [
+	['providers', 'elygate.providers', 'server'],
+	['provider-keys', 'elygate.providerKeys', 'key-round'],
+	['virtual-keys', 'elygate.virtualKeys', 'key-round'],
+	['models', 'elygate.models', 'bot'],
+	['model-catalog', 'elygate.modelCatalog', 'layout-grid'],
+	['logs', 'elygate.logs', 'scroll-text'],
+	['teams', 'elygate.teams', 'users-round'],
+	['customers', 'elygate.customers', 'building-2'],
+	['routing-rules', 'elygate.routingRules', 'route'],
+	['model-configs', 'elygate.modelConfigs', 'sliders-horizontal'],
+	['provider-governance', 'elygate.providerGovernance', 'shield-check'],
+	['pricing-overrides', 'elygate.pricingOverrides', 'badge-dollar-sign'],
+	['budgets', 'elygate.budgetList', 'wallet'],
+	['rate-limits', 'elygate.rateLimits', 'gauge'],
+	['webhooks', 'elygate.webhooks', 'webhook'],
+	['mcp-clients', 'elygate.mcpClients', 'server-cog'],
+	['mcp-library', 'elygate.mcpLibrary', 'library'],
+	['mcp-sessions', 'elygate.mcpSessions', 'monitor-dot'],
+	['oauth-grants', 'elygate.oauthGrants', 'shield-check'],
+	['mcp-logs', 'elygate.mcpLogs', 'list-tree'],
+	['mcp-tool-groups', 'elygate.mcpToolGroups', 'tool-case'],
+	['mcp-settings', 'elygate.mcpSettings', 'settings'],
+	['mcp-auth-config', 'elygate.mcpAuthConfig', 'lock-keyhole'],
+	['mcp-usage-guide', 'elygate.mcpUsageGuide', 'book-open-text'],
+	['plugins', 'elygate.plugins', 'plug'],
+	['skills', 'elygate.skills', 'sparkles'],
+	['prompt-folders', 'elygate.promptFolders', 'folder'],
+	['prompts', 'elygate.prompts', 'message-square-text'],
+	['user-agent-mappings', 'elygate.userAgentMappings', 'tags'],
+	['connectors', 'elygate.connectors', 'cable'],
+	['config', 'elygate.config', 'settings'],
+	['client-settings', 'elygate.clientSettings', 'settings-2'],
+	['compatibility-config', 'elygate.compatibilityConfig', 'plug-zap'],
+	['caching-config', 'elygate.cachingConfig', 'database-zap'],
+	['security-config', 'elygate.securityConfig', 'shield-check'],
+	['api-keys', 'elygate.apiKeys', 'key-round'],
+	['performance-config', 'elygate.performanceConfig', 'activity'],
+	['logging-config', 'elygate.loggingConfig', 'scroll-text'],
+	['feature-flags', 'elygate.featureFlags', 'flag'],
+	['proxy-config', 'elygate.proxyConfigTitle', 'globe'],
+	['pricing-config', 'elygate.pricingConfig', 'badge-dollar-sign'],
+	['observability-config', 'elygate.observabilityConfig', 'telescope'],
+	['large-payload-config', 'elygate.largePayloadConfig', 'package-open'],
+	['mcp-gateway-config', 'elygate.mcpGatewayConfig', 'boxes'],
+	['license-info', 'elygate.licenseInfo', 'badge-info'],
+	['complexity-analyzer', 'elygate.complexityAnalyzer', 'brain-circuit'],
+	['complexity-router', 'elygate.complexityRouter', 'git-compare-arrows'],
+	['users', 'elygate.users', 'user-round'],
+	['business-units', 'elygate.businessUnits', 'building'],
+	['rbac', 'elygate.rbac', 'lock-keyhole'],
+	['scim', 'elygate.scim', 'id-card'],
+	['access-profiles', 'elygate.accessProfiles', 'fingerprint'],
+	['audit-logs', 'elygate.auditLogs', 'file-search'],
+	['alerting-channels', 'elygate.alertingChannels', 'megaphone'],
+	['alerting-rules', 'elygate.alertingRules', 'gavel'],
+	['alerting-history', 'elygate.alertingHistory', 'history'],
+	['guardrails-config', 'elygate.guardrailsConfig', 'search-check'],
+	['guardrails-providers', 'elygate.guardrailsProviders', 'boxes'],
+	['edge-devices', 'elygate.edgeDevices', 'laptop-minimal-check'],
+	['edge-inventory', 'elygate.edgeInventory', 'badge-check'],
+	['edge-config', 'elygate.edgeConfig', 'settings'],
+	['cluster', 'elygate.cluster', 'boxes'],
+	['circuit-breaker', 'elygate.circuitBreaker', 'workflow'],
+	['adaptive-routing', 'elygate.adaptiveRouting', 'git-branch-plus'],
+	['agent-handover', 'elygate.agentHandover', 'handshake'],
+	['oauth-consent', 'elygate.oauthConsent', 'badge-check'],
+	['docs-hub', 'elygate.docsHub', 'book-open-text'],
+	['pprof', 'elygate.pprof', 'gauge'],
+];
+
+function resource(locale: ElygateLocale, [name, labelKey, icon]: ResourceSpec): ResourceDefinition {
 	return { name, label: labelFor(locale, labelKey), icon, fields: [], showInMenu: false };
 }
 
-function panelHref(path: string): string {
-	return `#${path}`;
+function menuItem(locale: ElygateLocale, name: string, labelKey: LabelKey, icon: string): MenuItem {
+	return { name, label: labelFor(locale, labelKey), icon, href: `#/${name}` };
+}
+
+const enterpriseResourceNames = new Set<string>(VISIBLE_ENTERPRISE_RESOURCES);
+
+function capabilityMenu(items: MenuItem[], availableResources: ReadonlySet<string>): MenuItem[] {
+	return items.flatMap((item) => {
+		if (item.children) {
+			const children = capabilityMenu(item.children, availableResources);
+			return children.length > 0 ? [{ ...item, children }] : [];
+		}
+		if (enterpriseResourceNames.has(item.name) && !availableResources.has(item.name)) return [];
+		return [item];
+	});
 }
 
 export function createResources(locale: ElygateLocale): ResourceDefinition[] {
-	return [
-		resource(locale, 'providers', 'elygate.providers', 'server'),
-		resource(locale, 'virtual-keys', 'elygate.virtualKeys', 'key-round'),
-		resource(locale, 'models', 'elygate.models', 'bot'),
-		resource(locale, 'logs', 'elygate.logs', 'scroll-text'),
-		resource(locale, 'teams', 'elygate.teams', 'users-round'),
-		resource(locale, 'customers', 'elygate.customers', 'building-2'),
-		resource(locale, 'routing-rules', 'elygate.routingRules', 'route'),
-		resource(locale, 'model-configs', 'elygate.modelConfigs', 'sliders-horizontal'),
-		resource(locale, 'provider-governance', 'elygate.providerGovernance', 'shield-check'),
-		resource(locale, 'pricing-overrides', 'elygate.pricingOverrides', 'badge-dollar-sign'),
-		resource(locale, 'budgets', 'elygate.budgetList', 'wallet'),
-		resource(locale, 'rate-limits', 'elygate.rateLimits', 'gauge'),
-		resource(locale, 'webhooks', 'elygate.webhooks', 'webhook'),
-		resource(locale, 'mcp-sessions', 'elygate.mcpSessions', 'monitor-dot'),
-		resource(locale, 'mcp-logs', 'elygate.mcpLogs', 'list-tree'),
-		resource(locale, 'plugins', 'elygate.plugins', 'plug'),
-		resource(locale, 'skills', 'elygate.skills', 'sparkles'),
-		resource(locale, 'prompt-folders', 'elygate.promptFolders', 'folder'),
-		resource(locale, 'prompts', 'elygate.prompts', 'message-square-text'),
-		resource(locale, 'config', 'elygate.config', 'settings'),
-		resource(locale, 'complexity-analyzer', 'elygate.complexityAnalyzer', 'brain-circuit'),
-		resource(locale, 'users', 'elygate.users', 'user-round'),
-		resource(locale, 'business-units', 'elygate.businessUnits', 'building'),
-		resource(locale, 'rbac', 'elygate.rbac', 'lock-keyhole'),
-		resource(locale, 'scim', 'elygate.scim', 'id-card'),
-		resource(locale, 'access-profiles', 'elygate.accessProfiles', 'fingerprint'),
-		resource(locale, 'audit-logs', 'elygate.auditLogs', 'file-search'),
-		resource(locale, 'alerting', 'elygate.alerting', 'bell-ring'),
-		resource(locale, 'guardrails', 'elygate.guardrails', 'shield-alert'),
-		resource(locale, 'cluster', 'elygate.cluster', 'boxes'),
-		resource(locale, 'circuit-breaker', 'elygate.circuitBreaker', 'workflow'),
-		resource(locale, 'adaptive-routing', 'elygate.adaptiveRouting', 'git-branch-plus'),
-	];
+	return RESOURCE_SPECS.map((spec) => resource(locale, spec));
 }
 
-export function createMenu(locale: ElygateLocale): MenuItem[] {
-	const enterpriseItems = {
-		customers: { labelKey: 'elygate.customers', icon: 'building-2', href: panelHref('/customers') },
-		teams: { labelKey: 'elygate.teams', icon: 'users-round', href: panelHref('/teams') },
-	} as const;
-	return [
-		{ name: 'dashboard', label: labelFor(locale, 'elygate.dashboard'), icon: 'layout-dashboard', href: panelHref('/') },
+export function createMenu(locale: ElygateLocale, availableEnterpriseResources: readonly string[] = []): MenuItem[] {
+	const menu: MenuItem[] = [
+		{ name: 'dashboard', label: labelFor(locale, 'elygate.dashboard'), icon: 'layout-dashboard', href: '#/' },
 		{
-			name: 'gateway',
-			label: labelFor(locale, 'elygate.gateway'),
-			icon: 'network',
+			name: 'observability',
+			label: labelFor(locale, 'elygate.observability'),
+			icon: 'activity',
 			children: [
-				{ name: 'providers', label: labelFor(locale, 'elygate.providers'), icon: 'server', href: panelHref('/providers') },
-				{ name: 'virtual-keys', label: labelFor(locale, 'elygate.virtualKeys'), icon: 'key-round', href: panelHref('/virtual-keys') },
-				{ name: 'models', label: labelFor(locale, 'elygate.models'), icon: 'bot', href: panelHref('/models') },
-				{ name: 'routing-rules', label: labelFor(locale, 'elygate.routingRules'), icon: 'route', href: panelHref('/routing-rules') },
-				{ name: 'model-configs', label: labelFor(locale, 'elygate.modelConfigs'), icon: 'sliders-horizontal', href: panelHref('/model-configs') },
-				{ name: 'provider-governance', label: labelFor(locale, 'elygate.providerGovernance'), icon: 'shield-check', href: panelHref('/provider-governance') },
-				{ name: 'pricing-overrides', label: labelFor(locale, 'elygate.pricingOverrides'), icon: 'badge-dollar-sign', href: panelHref('/pricing-overrides') },
+				menuItem(locale, 'logs', 'elygate.logs', 'scroll-text'),
+				menuItem(locale, 'mcp-logs', 'elygate.mcpLogs', 'list-tree'),
+				menuItem(locale, 'connectors', 'elygate.connectors', 'cable'),
+				menuItem(locale, 'user-agent-mappings', 'elygate.userAgentMappings', 'tags'),
+				menuItem(locale, 'audit-logs', 'elygate.auditLogs', 'file-search'),
+				menuItem(locale, 'alerting-channels', 'elygate.alertingChannels', 'megaphone'),
+				menuItem(locale, 'alerting-rules', 'elygate.alertingRules', 'gavel'),
+				menuItem(locale, 'alerting-history', 'elygate.alertingHistory', 'history'),
 			],
 		},
 		{
-			name: 'enterprise',
-			label: labelFor(locale, 'elygate.enterprise'),
-			icon: 'briefcase-business',
-			children: VISIBLE_ENTERPRISE_RESOURCES.map((name) => ({
-				name,
-				label: labelFor(locale, enterpriseItems[name].labelKey),
-				icon: enterpriseItems[name].icon,
-				href: enterpriseItems[name].href,
-			})),
+			name: 'models-group',
+			label: labelFor(locale, 'elygate.models'),
+			icon: 'box',
+			children: [
+				menuItem(locale, 'models', 'elygate.models', 'bot'),
+				menuItem(locale, 'model-catalog', 'elygate.modelCatalog', 'layout-grid'),
+				menuItem(locale, 'providers', 'elygate.providers', 'server'),
+				menuItem(locale, 'provider-keys', 'elygate.providerKeys', 'key-round'),
+				menuItem(locale, 'budgets', 'elygate.budgetList', 'wallet'),
+				menuItem(locale, 'rate-limits', 'elygate.rateLimits', 'gauge'),
+				menuItem(locale, 'routing-rules', 'elygate.routingRules', 'route'),
+				menuItem(locale, 'complexity-analyzer', 'elygate.complexityAnalyzer', 'brain-circuit'),
+				menuItem(locale, 'complexity-router', 'elygate.complexityRouter', 'git-compare-arrows'),
+				menuItem(locale, 'circuit-breaker', 'elygate.circuitBreaker', 'workflow'),
+				menuItem(locale, 'model-configs', 'elygate.modelConfigs', 'sliders-horizontal'),
+				menuItem(locale, 'provider-governance', 'elygate.providerGovernance', 'shield-check'),
+				menuItem(locale, 'pricing-overrides', 'elygate.pricingOverrides', 'badge-dollar-sign'),
+			],
 		},
 		{
 			name: 'mcp',
 			label: labelFor(locale, 'elygate.mcp'),
 			icon: 'boxes',
 			children: [
-				{ name: 'mcp-sessions', label: labelFor(locale, 'elygate.mcpSessions'), icon: 'monitor-dot', href: panelHref('/mcp-sessions') },
-				{ name: 'mcp-logs', label: labelFor(locale, 'elygate.mcpLogs'), icon: 'list-tree', href: panelHref('/mcp-logs') },
+				menuItem(locale, 'mcp-clients', 'elygate.mcpClients', 'server-cog'),
+				menuItem(locale, 'mcp-library', 'elygate.mcpLibrary', 'library'),
+				menuItem(locale, 'mcp-tool-groups', 'elygate.mcpToolGroups', 'tool-case'),
+				menuItem(locale, 'mcp-sessions', 'elygate.mcpSessions', 'monitor-dot'),
+				menuItem(locale, 'oauth-grants', 'elygate.oauthGrants', 'shield-check'),
+				menuItem(locale, 'mcp-settings', 'elygate.mcpSettings', 'settings'),
+				menuItem(locale, 'mcp-auth-config', 'elygate.mcpAuthConfig', 'lock-keyhole'),
+				menuItem(locale, 'mcp-usage-guide', 'elygate.mcpUsageGuide', 'book-open-text'),
 			],
 		},
 		{
-			name: 'observability',
-			label: labelFor(locale, 'elygate.observability'),
-			icon: 'activity',
+			name: 'governance',
+			label: labelFor(locale, 'elygate.enterprise'),
+			icon: 'landmark',
 			children: [
-				{ name: 'logs', label: labelFor(locale, 'elygate.logs'), icon: 'scroll-text', href: panelHref('/logs') },
-				{ name: 'budgets', label: labelFor(locale, 'elygate.budgetList'), icon: 'wallet', href: panelHref('/budgets') },
-				{ name: 'rate-limits', label: labelFor(locale, 'elygate.rateLimits'), icon: 'gauge', href: panelHref('/rate-limits') },
-				{ name: 'audit-logs', label: labelFor(locale, 'elygate.auditLogs'), icon: 'file-search', href: panelHref('/audit-logs') },
-				{ name: 'alerting', label: labelFor(locale, 'elygate.alerting'), icon: 'bell-ring', href: panelHref('/alerting') },
+				menuItem(locale, 'virtual-keys', 'elygate.virtualKeys', 'key-round'),
+				menuItem(locale, 'teams', 'elygate.teams', 'users-round'),
+				menuItem(locale, 'customers', 'elygate.customers', 'building-2'),
+				menuItem(locale, 'users', 'elygate.users', 'user-round'),
+				menuItem(locale, 'business-units', 'elygate.businessUnits', 'building'),
+				menuItem(locale, 'rbac', 'elygate.rbac', 'lock-keyhole'),
+				menuItem(locale, 'scim', 'elygate.scim', 'id-card'),
+				menuItem(locale, 'access-profiles', 'elygate.accessProfiles', 'fingerprint'),
+			],
+		},
+		{
+			name: 'guardrails',
+			label: labelFor(locale, 'elygate.guardrails'),
+			icon: 'shield-alert',
+			children: [
+				menuItem(locale, 'guardrails-config', 'elygate.guardrailsConfig', 'search-check'),
+				menuItem(locale, 'guardrails-providers', 'elygate.guardrailsProviders', 'boxes'),
+			],
+		},
+		{
+			name: 'edge-control',
+			label: labelFor(locale, 'elygate.edgeControl'),
+			icon: 'hexagon',
+			children: [
+				menuItem(locale, 'edge-devices', 'elygate.edgeDevices', 'laptop-minimal-check'),
+				menuItem(locale, 'edge-inventory', 'elygate.edgeInventory', 'badge-check'),
+				menuItem(locale, 'edge-config', 'elygate.edgeConfig', 'settings'),
 			],
 		},
 		{
@@ -105,11 +193,11 @@ export function createMenu(locale: ElygateLocale): MenuItem[] {
 			label: labelFor(locale, 'elygate.integrations'),
 			icon: 'plug-zap',
 			children: [
-				{ name: 'webhooks', label: labelFor(locale, 'elygate.webhooks'), icon: 'webhook', href: panelHref('/webhooks') },
-				{ name: 'plugins', label: labelFor(locale, 'elygate.plugins'), icon: 'plug', href: panelHref('/plugins') },
-				{ name: 'skills', label: labelFor(locale, 'elygate.skills'), icon: 'sparkles', href: panelHref('/skills') },
-				{ name: 'prompt-folders', label: labelFor(locale, 'elygate.promptFolders'), icon: 'folder', href: panelHref('/prompt-folders') },
-				{ name: 'prompts', label: labelFor(locale, 'elygate.prompts'), icon: 'message-square-text', href: panelHref('/prompts') },
+				menuItem(locale, 'webhooks', 'elygate.webhooks', 'webhook'),
+				menuItem(locale, 'plugins', 'elygate.plugins', 'plug'),
+				menuItem(locale, 'skills', 'elygate.skills', 'sparkles'),
+				menuItem(locale, 'prompt-folders', 'elygate.promptFolders', 'folder'),
+				menuItem(locale, 'prompts', 'elygate.prompts', 'message-square-text'),
 			],
 		},
 		{
@@ -117,13 +205,34 @@ export function createMenu(locale: ElygateLocale): MenuItem[] {
 			label: labelFor(locale, 'elygate.system'),
 			icon: 'settings',
 			children: [
-				{ name: 'config', label: labelFor(locale, 'elygate.config'), icon: 'settings', href: panelHref('/config') },
-				{ name: 'complexity-analyzer', label: labelFor(locale, 'elygate.complexityAnalyzer'), icon: 'brain-circuit', href: panelHref('/complexity-analyzer') },
-				{ name: 'adaptive-routing', label: labelFor(locale, 'elygate.adaptiveRouting'), icon: 'git-branch-plus', href: panelHref('/adaptive-routing') },
-				{ name: 'guardrails', label: labelFor(locale, 'elygate.guardrails'), icon: 'shield-alert', href: panelHref('/guardrails') },
-				{ name: 'cluster', label: labelFor(locale, 'elygate.cluster'), icon: 'boxes', href: panelHref('/cluster') },
-				{ name: 'circuit-breaker', label: labelFor(locale, 'elygate.circuitBreaker'), icon: 'workflow', href: panelHref('/circuit-breaker') },
+				menuItem(locale, 'config', 'elygate.config', 'settings'),
+				menuItem(locale, 'client-settings', 'elygate.clientSettings', 'settings-2'),
+				menuItem(locale, 'compatibility-config', 'elygate.compatibilityConfig', 'plug-zap'),
+				menuItem(locale, 'caching-config', 'elygate.cachingConfig', 'database-zap'),
+				menuItem(locale, 'security-config', 'elygate.securityConfig', 'shield-check'),
+				menuItem(locale, 'api-keys', 'elygate.apiKeys', 'key-round'),
+				menuItem(locale, 'performance-config', 'elygate.performanceConfig', 'activity'),
+				menuItem(locale, 'logging-config', 'elygate.loggingConfig', 'scroll-text'),
+				menuItem(locale, 'feature-flags', 'elygate.featureFlags', 'flag'),
+				menuItem(locale, 'proxy-config', 'elygate.proxyConfigTitle', 'globe'),
+				menuItem(locale, 'pricing-config', 'elygate.pricingConfig', 'badge-dollar-sign'),
+				menuItem(locale, 'observability-config', 'elygate.observabilityConfig', 'telescope'),
+				menuItem(locale, 'large-payload-config', 'elygate.largePayloadConfig', 'package-open'),
+				menuItem(locale, 'mcp-gateway-config', 'elygate.mcpGatewayConfig', 'boxes'),
+				menuItem(locale, 'license-info', 'elygate.licenseInfo', 'badge-info'),
+				menuItem(locale, 'cluster', 'elygate.cluster', 'boxes'),
+				{
+					name: 'adaptive-routing',
+					label: labelFor(locale, 'elygate.adaptiveRouting'),
+					icon: 'git-branch-plus',
+					href: '#/routing-rules',
+				},
+				menuItem(locale, 'agent-handover', 'elygate.agentHandover', 'handshake'),
+				menuItem(locale, 'oauth-consent', 'elygate.oauthConsent', 'badge-check'),
+				menuItem(locale, 'docs-hub', 'elygate.docsHub', 'book-open-text'),
+				menuItem(locale, 'pprof', 'elygate.pprof', 'gauge'),
 			],
 		},
 	];
+	return capabilityMenu(menu, new Set(availableEnterpriseResources));
 }

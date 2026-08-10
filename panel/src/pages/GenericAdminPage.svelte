@@ -12,7 +12,16 @@
 		labelKey: string;
 		method: 'POST' | 'DELETE';
 		path: (record: JsonRecord) => string;
+		body?: (record: JsonRecord) => unknown;
 		confirm?: boolean;
+	}
+
+	interface ChildCollectionConfig {
+		labelKey: string;
+		path: (record: JsonRecord) => string;
+		listKey: string;
+		columns: string[];
+		action?: ResourceAction;
 	}
 
 	interface ResourceConfig {
@@ -30,9 +39,47 @@
 		allowDelete?: boolean;
 		readOnly?: boolean;
 		helpKey?: string;
+		createPath?: string;
 		updatePath?: (id: string) => string;
 		deletePath?: (id: string) => string;
+		mapRecord?: (record: JsonRecord) => JsonRecord;
+		editRecord?: (record: JsonRecord) => JsonRecord;
+		updateBody?: (body: JsonRecord, record: JsonRecord) => unknown;
 		actions?: ResourceAction[];
+		collectionActions?: ResourceAction[];
+		childCollection?: ChildCollectionConfig;
+	}
+
+	function pickRecordFields(record: JsonRecord, fields: string[]): JsonRecord {
+		return Object.fromEntries(fields.filter((field) => field in record).map((field) => [field, record[field]]));
+	}
+
+	function flattenMcpClient(record: JsonRecord): JsonRecord {
+		if (!isJsonRecord(record.config)) return record;
+		return {
+			...record.config,
+			state: record.state,
+			tools: record.tools,
+			vk_configs: record.vk_configs,
+		};
+	}
+
+	function editableMcpClient(record: JsonRecord): JsonRecord {
+		return pickRecordFields(record, [
+			'name',
+			'is_code_mode_client',
+			'headers',
+			'per_user_header_keys',
+			'tools_to_execute',
+			'tools_to_auto_execute',
+			'is_ping_available',
+			'tool_pricing',
+			'allowed_extra_headers',
+			'allow_on_all_virtual_keys',
+			'disabled',
+			'tls_config',
+			'vk_configs',
+		]);
 	}
 
 	const resourceConfigs: Record<string, ResourceConfig> = {
@@ -167,6 +214,7 @@
 			searchParam: 'search',
 			columns: ['name', 'url', 'events', 'disabled', 'include_response', 'failure_count'],
 			allowCreate: true,
+			allowEdit: true,
 			allowDelete: true,
 			createTemplate: {
 				name: '',
@@ -176,11 +224,49 @@
 				include_response: false,
 				allow_private_network: false,
 				disabled: false,
+				max_retries: 0,
+				retry_backoff_initial_seconds: 0,
+				retry_backoff_max_seconds: 0,
+				attempt_timeout_seconds: 0,
+				max_response_payload_kbs: 0,
+				max_concurrent_deliveries: 0,
 			},
+			editRecord: (record) => ({
+				name: record.name ?? '',
+				url: record.url ?? '',
+				events: record.events ?? [],
+				headers: record.headers ?? {},
+				include_response: record.include_response === true,
+				allow_private_network: record.allow_private_network === true,
+				disabled: record.disabled === true,
+				max_retries: record.max_retries ?? 0,
+				retry_backoff_initial_seconds: record.retry_backoff_initial_seconds ?? 0,
+				retry_backoff_max_seconds: record.retry_backoff_max_seconds ?? 0,
+				attempt_timeout_seconds: record.attempt_timeout_seconds ?? 0,
+				max_response_payload_kbs: record.max_response_payload_kbs ?? 0,
+				max_concurrent_deliveries: record.max_concurrent_deliveries ?? 0,
+			}),
 			actions: [
-				{ labelKey: 'elygate.test', method: 'POST', path: (record) => `/api/webhooks/${encodePathSegment(String(record.id))}/test` },
+				{
+					labelKey: 'elygate.test',
+					method: 'POST',
+					path: (record) => `/api/webhooks/${encodePathSegment(String(record.id))}/test`,
+					body: (record) => ({ event: Array.isArray(record.events) && typeof record.events[0] === 'string' ? record.events[0] : 'async_job.completed' }),
+				},
 				{ labelKey: 'elygate.rotateSecret', method: 'POST', path: (record) => `/api/webhooks/${encodePathSegment(String(record.id))}/rotate-secret`, confirm: true },
 			],
+			childCollection: {
+				labelKey: 'elygate.deliveries',
+				path: (record) => `/api/webhooks/${encodePathSegment(String(record.id))}/deliveries?limit=100`,
+				listKey: 'deliveries',
+				columns: ['created_at', 'event', 'outcome', 'status_code', 'attempt_no', 'error'],
+				action: {
+					labelKey: 'elygate.redeliver',
+					method: 'POST',
+					path: (record) => `/api/webhooks/deliveries/${encodePathSegment(String(record.id))}/redeliver`,
+					confirm: true,
+				},
+			},
 		},
 		'mcp-sessions': {
 			titleKey: 'elygate.mcpSessions',
@@ -216,8 +302,10 @@
 			idFields: ['name'],
 			columns: ['name', 'actualName', 'enabled', 'isCustom', 'path', 'status'],
 			allowCreate: true,
+			allowEdit: true,
 			allowDelete: true,
 			createTemplate: { name: '', enabled: true, path: null, config: {}, placement: null, order: null },
+			editRecord: (record) => pickRecordFields(record, ['enabled', 'path', 'config', 'placement', 'order']),
 		},
 		skills: {
 			titleKey: 'elygate.skills',
@@ -259,6 +347,135 @@
 			allowDelete: true,
 			createTemplate: { name: '', folder_id: null },
 		},
+		'mcp-clients': {
+			titleKey: 'elygate.mcpClients',
+			eyebrow: 'Elygate / MCP Gateway',
+			endpoint: '/api/mcp/clients',
+			listKey: 'clients',
+			itemKey: 'client',
+			idFields: ['client_id'],
+			searchParam: 'search',
+			columns: ['name', 'client_id', 'connection_type', 'auth_type', 'state', 'disabled', 'tools', 'vk_configs'],
+			allowCreate: true,
+			allowEdit: true,
+			allowDelete: true,
+			createTemplate: {
+				name: '',
+				connection_type: 'stdio',
+				stdio_config: { command: '', args: [], envs: [] },
+				auth_type: 'none',
+				is_code_mode_client: false,
+			},
+			createPath: '/api/mcp/client',
+			updatePath: (id) => `/api/mcp/client/${encodePathSegment(id)}`,
+			deletePath: (id) => `/api/mcp/client/${encodePathSegment(id)}`,
+			mapRecord: flattenMcpClient,
+			editRecord: editableMcpClient,
+			actions: [
+				{ labelKey: 'elygate.reconnect', method: 'POST', path: (record) => `/api/mcp/client/${encodePathSegment(String(record.client_id))}/reconnect` },
+			],
+		},
+		'mcp-library': {
+			titleKey: 'elygate.mcpLibrary',
+			eyebrow: 'Elygate / MCP Gateway',
+			endpoint: '/api/mcp/library',
+			listKey: 'servers',
+			itemKey: 'entry',
+			idFields: ['id', 'name'],
+			searchParam: 'search',
+			columns: ['name', 'description', 'category', 'connection_type', 'auth_type', 'source', 'updated_at'],
+			allowCreate: true,
+			allowDelete: true,
+			createTemplate: {
+				name: '',
+				description: '',
+				category: '',
+				connection_type: 'stdio',
+				stdio_config: { command: '', args: [], envs: [] },
+				auth_type: 'none',
+				tags: [],
+			},
+			deletePath: (id) => `/api/mcp/library/${encodePathSegment(id)}`,
+			collectionActions: [
+				{ labelKey: 'elygate.sync', method: 'POST', path: () => '/api/mcp/library/force-sync' },
+			],
+		},
+		'oauth2-sessions': {
+			titleKey: 'elygate.oauth2Sessions',
+			eyebrow: 'Elygate / MCP OAuth2',
+			endpoint: '/api/oauth2/sessions',
+			listKey: 'sessions',
+			idFields: ['id'],
+			searchParam: 'q',
+			columns: ['client_name', 'client_id', 'bf_mode', 'bf_sub_display', 'scope', 'created_at', 'last_used_at'],
+			readOnly: true,
+			actions: [
+				{ labelKey: 'elygate.revoke', method: 'DELETE', path: (record) => `/api/oauth2/sessions/${encodePathSegment(String(record.id))}`, confirm: true },
+			],
+		},
+		'oauth-grants': {
+			titleKey: 'elygate.oauthGrants',
+			eyebrow: 'Elygate / MCP OAuth2',
+			endpoint: '/api/oauth2/sessions',
+			listKey: 'sessions',
+			idFields: ['id'],
+			searchParam: 'q',
+			columns: ['client_name', 'client_id', 'bf_mode', 'bf_sub_display', 'scope', 'created_at', 'last_used_at'],
+			readOnly: true,
+			actions: [
+				{ labelKey: 'elygate.revoke', method: 'DELETE', path: (record) => `/api/oauth2/sessions/${encodePathSegment(String(record.id))}`, confirm: true },
+			],
+		},
+		'feature-flags': {
+			titleKey: 'elygate.featureFlags',
+			eyebrow: 'Elygate / System',
+			endpoint: '/api/feature-flags',
+			listKey: 'flags',
+			itemKey: 'flag',
+			idFields: ['id'],
+			columns: ['display_name', 'id', 'enabled', 'source', 'locked', 'registered', 'enterprise_only'],
+			allowEdit: true,
+			updatePath: (id) => `/api/feature-flags/${encodePathSegment(id)}`,
+			editRecord: (record) => pickRecordFields(record, ['enabled']),
+		},
+		'user-agent-mappings': {
+			titleKey: 'elygate.userAgentMappings',
+			eyebrow: 'Elygate / Observability',
+			endpoint: '/api/logs/user-agent-mappings',
+			listKey: 'mappings',
+			itemKey: 'mapping',
+			idFields: ['id'],
+			columns: ['pattern', 'match_type', 'app', 'is_active', 'created_at', 'updated_at'],
+			allowCreate: true,
+			allowEdit: true,
+			allowDelete: true,
+			createTemplate: { pattern: '', match_type: 'contains', app: '', is_active: true },
+		},
+		'provider-keys': {
+			titleKey: 'elygate.providerKeys',
+			eyebrow: 'Elygate / Models',
+			endpoint: '/api/keys',
+			idFields: ['id', 'key_id'],
+			columns: ['name', 'provider', 'key_id', 'models', 'blacklisted_models', 'weight', 'enabled'],
+			readOnly: true,
+		},
+		'model-catalog': {
+			titleKey: 'elygate.modelCatalog',
+			eyebrow: 'Elygate / Models',
+			endpoint: '/api/models/details',
+			listKey: 'models',
+			idFields: ['name'],
+			searchParam: 'query',
+			columns: ['name', 'provider', 'context_length', 'max_input_tokens', 'max_output_tokens', 'is_deprecated', 'additional_attributes'],
+			allowEdit: true,
+			updatePath: () => '/api/models/catalog',
+			editRecord: (record) => ({
+				model: record.name,
+				provider: record.provider,
+				additional_attributes: record.additional_attributes ?? {},
+			}),
+			updateBody: (body) => [body],
+		},
 	};
 
 	let { resourceName }: Props = $props();
@@ -277,6 +494,10 @@
 	let modal = $state<'create' | 'edit' | null>(null);
 	let editing = $state<JsonRecord | null>(null);
 	let formJson = $state('');
+	let childModal = $state<ChildCollectionConfig | null>(null);
+	let childRecords = $state.raw<JsonRecord[]>([]);
+	let childParent = $state.raw<JsonRecord | null>(null);
+	let isChildLoading = $state(false);
 	const columns = $derived(config.columns.length ? config.columns : Array.from(new Set(records.flatMap((record) => Object.keys(record)))).slice(0, 8));
 	const hasNext = $derived(page * Number(pageSize) < total);
 	const canCreate = $derived(!config.readOnly && config.allowCreate === true);
@@ -290,11 +511,14 @@
 	}
 
 	function responseRecords(payload: unknown): JsonRecord[] {
+		let loadedRecords: JsonRecord[];
 		if (isJsonRecord(payload) && config.listKey) {
 			const candidate = payload[config.listKey];
-			if (Array.isArray(candidate)) return candidate.filter(isJsonRecord);
+			loadedRecords = Array.isArray(candidate) ? candidate.filter(isJsonRecord) : getListPayload(payload);
+		} else {
+			loadedRecords = getListPayload(payload);
 		}
-		return getListPayload(payload);
+		return config.mapRecord ? loadedRecords.map(config.mapRecord) : loadedRecords;
 	}
 
 	function responseTotal(payload: unknown, count: number): number {
@@ -313,10 +537,12 @@
 	}
 
 	function rowKey(record: JsonRecord): string {
-		return recordId(record) || `${record.name ?? ''}:${record.created_at ?? ''}:${JSON.stringify(record)}`;
+		const id = recordId(record);
+		return id ? `${id}:${record.provider ?? ''}` : `${record.name ?? ''}:${record.created_at ?? ''}:${JSON.stringify(record)}`;
 	}
 
 	function editableRecord(record: JsonRecord): JsonRecord {
+		if (config.editRecord) return config.editRecord(record);
 		const clone: JsonRecord = { ...record };
 		for (const key of ['id', 'created_at', 'updated_at', 'deleted_at', 'current_usage', 'token_current_usage', 'request_current_usage']) {
 			delete clone[key];
@@ -360,13 +586,13 @@
 		try {
 			const body = parseJsonObject(formJson, pageTitle, i18n.t('elygate.invalidJson'));
 			if (modal === 'create') {
-				await requestJson(config.endpoint, { method: 'POST', body: JSON.stringify(body) });
+				await requestJson(config.createPath ?? config.endpoint, { method: 'POST', body: JSON.stringify(body) });
 			} else if (editing) {
 				const id = recordId(editing);
 				if (!id) throw new Error(i18n.t('elygate.missingId'));
 				await requestJson(config.updatePath ? config.updatePath(id) : `${config.endpoint}/${encodePathSegment(id)}`, {
 					method: 'PUT',
-					body: JSON.stringify(body),
+					body: JSON.stringify(config.updateBody ? config.updateBody(body, editing) : body),
 				});
 			}
 			modal = null;
@@ -396,12 +622,42 @@
 		if (action.confirm && !window.confirm(i18n.t('elygate.confirmAction'))) return;
 		error = '';
 		try {
-			const payload = await requestJson<JsonRecord>(action.path(record), { method: action.method });
-			notice = typeof payload.message === 'string' && payload.message ? payload.message : i18n.t(action.labelKey);
+			const body = action.body?.(record);
+			const payload = await requestJson<unknown>(action.path(record), {
+				method: action.method,
+				...(body === undefined ? {} : { body: JSON.stringify(body) }),
+			});
+			notice = isJsonRecord(payload) && typeof payload.secret === 'string'
+				? `${i18n.t('elygate.newSecretValue')} ${payload.secret}`
+				: isJsonRecord(payload) && typeof payload.message === 'string' && payload.message
+					? payload.message
+					: i18n.t(action.labelKey);
 			await load();
+			if (childModal && childParent) await openChildCollection(childModal, childParent);
 		} catch (cause) {
 			error = displayError(cause, i18n.t('elygate.operationFailed'));
 		}
+	}
+
+	async function openChildCollection(child: ChildCollectionConfig, record: JsonRecord): Promise<void> {
+		childModal = child;
+		childParent = record;
+		isChildLoading = true;
+		error = '';
+		try {
+			const payload = await requestJson<unknown>(child.path(record));
+			const candidate = isJsonRecord(payload) ? payload[child.listKey] : undefined;
+			childRecords = Array.isArray(candidate) ? candidate.filter(isJsonRecord) : getListPayload(payload);
+		} catch (cause) {
+			error = displayError(cause, i18n.t('elygate.loadFailed'));
+			childRecords = [];
+		} finally {
+			isChildLoading = false;
+		}
+	}
+
+	function runCollectionAction(action: ResourceAction): void {
+		void runAction(action, {});
 	}
 
 	function submitSearch(event: SubmitEvent): void {
@@ -434,6 +690,9 @@
 		</div>
 		<div class="heading-actions">
 			<button class="primary" type="button" onclick={() => void load()} disabled={isLoading}>{i18n.t('elygate.refresh')}</button>
+			{#each config.collectionActions ?? [] as action (action.labelKey)}
+				<button type="button" onclick={() => runCollectionAction(action)}>{i18n.t(action.labelKey)}</button>
+			{/each}
 			{#if canCreate}
 				<button class="primary" type="button" onclick={openCreate}>{i18n.t('elygate.create')}</button>
 			{/if}
@@ -460,6 +719,7 @@
 						{/each}
 						<td class="actions">
 							{#if canEdit}<button type="button" onclick={() => openEdit(record)}>{i18n.t('elygate.edit')}</button>{/if}
+							{#if config.childCollection}<button type="button" onclick={() => void openChildCollection(config.childCollection!, record)}>{i18n.t(config.childCollection.labelKey)}</button>{/if}
 							{#each config.actions ?? [] as action (action.labelKey)}
 								<button type="button" onclick={() => void runAction(action, record)}>{i18n.t(action.labelKey)}</button>
 							{/each}
@@ -497,6 +757,17 @@
 	</div>
 {/if}
 
+{#if childModal}
+	<div class="modal-backdrop">
+		<div class="modal wide" role="dialog" aria-modal="true" aria-labelledby="child-dialog-title">
+			<header><h2 id="child-dialog-title">{i18n.t(childModal.labelKey)}</h2><button type="button" onclick={() => (childModal = null)}>{i18n.t('elygate.close')}</button></header>
+			<div class="table-wrap" aria-busy={isChildLoading}><table><thead><tr>{#each childModal.columns as column (column)}<th>{columnLabelFor(i18n.locale as ElygateLocale, column)}</th>{/each}{#if childModal.action}<th>{i18n.t('elygate.actions')}</th>{/if}</tr></thead><tbody>
+				{#each childRecords as record (rowKey(record))}<tr>{#each childModal.columns as column (column)}<td title={columnValueFor(i18n.locale as ElygateLocale, column, record[column])}>{columnValueFor(i18n.locale as ElygateLocale, column, record[column])}</td>{/each}{#if childModal.action}<td><button type="button" onclick={() => void runAction(childModal!.action!, record)}>{i18n.t(childModal.action.labelKey)}</button></td>{/if}</tr>{:else}<tr><td colspan={childModal.columns.length + (childModal.action ? 1 : 0)} class="empty">{isChildLoading ? i18n.t('elygate.loading') : i18n.t('elygate.empty')}</td></tr>{/each}
+			</tbody></table></div>
+		</div>
+	</div>
+{/if}
+
 <style>
 	.page-shell { max-width: 1280px; margin: 0 auto; padding: 1.5rem; }
 	.page-heading { align-items: flex-start; display: flex; justify-content: space-between; gap: 1rem; margin-bottom: 1.5rem; }
@@ -523,6 +794,7 @@
 	.pagination div { display: flex; gap: .5rem; }
 	.modal-backdrop { align-items: center; background: rgb(0 0 0 / .45); display: flex; inset: 0; justify-content: center; padding: 1rem; position: fixed; z-index: 100; }
 	.modal { background: var(--card); border: 1px solid var(--border); border-radius: 1rem; max-height: calc(100vh - 2rem); max-width: 920px; overflow: auto; padding: 1.25rem; width: 100%; }
+	.modal.wide { max-width: 1180px; }
 	.modal > header { align-items: center; display: flex; justify-content: space-between; margin-bottom: 1rem; }
 	h2 { margin: 0; }
 	form { display: grid; gap: .85rem; }

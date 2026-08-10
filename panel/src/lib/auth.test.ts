@@ -2,13 +2,14 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { createBifrostAuthProvider } from './auth';
 
 const originalFetch = globalThis.fetch;
-const auth = createBifrostAuthProvider(() => 'zh-CN');
+let authenticatedCallbacks = 0;
+const auth = createBifrostAuthProvider(() => 'zh-CN', async () => { authenticatedCallbacks += 1; });
 
 function respond(payload: unknown, status = 200): Promise<Response> {
 	return Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { 'Content-Type': 'application/json' } }));
 }
 
-afterEach(() => { globalThis.fetch = originalFetch; });
+afterEach(() => { globalThis.fetch = originalFetch; authenticatedCallbacks = 0; });
 
 describe('Bifrost AuthProvider', () => {
 	test('fails closed when server authentication is disabled', async () => {
@@ -31,5 +32,6 @@ describe('Bifrost AuthProvider', () => {
 		expect(result.success).toBe(true);
 		expect(credentials).toBe('same-origin');
 		expect(JSON.parse(body)).toEqual({ username: 'admin', password: 'secret' });
+		expect(authenticatedCallbacks).toBe(1);
 	});
 });

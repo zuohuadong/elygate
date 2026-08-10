@@ -143,6 +143,11 @@ func IsBuiltinPlugin(name string) bool {
 	return slices.Contains(builtinPluginNames, name)
 }
 
+// GetBuiltinPluginMetadata returns the user-facing metadata for a built-in plugin.
+func GetBuiltinPluginMetadata(name string) schemas.PluginMetadata {
+	return schemas.GetBuiltinPluginMetadata(name)
+}
+
 // pluginOrderInfo stores ordering metadata for a plugin.
 type pluginOrderInfo struct {
 	Placement schemas.PluginPlacement
@@ -5244,7 +5249,8 @@ func (c *Config) IsPluginLoaded(name string) bool {
 	return false
 }
 
-// UpdatePluginOverallStatus updates the overall status of a plugin
+// UpdatePluginOverallStatus updates the overall status of a plugin.
+// Metadata is preserved because status refreshes happen independently of plugin discovery.
 func (c *Config) UpdatePluginOverallStatus(name string, displayName string, status string, logs []string, types []schemas.PluginType) {
 	c.pluginStatusMu.Lock()
 	defer c.pluginStatusMu.Unlock()
@@ -5259,12 +5265,39 @@ func (c *Config) UpdatePluginOverallStatus(name string, displayName string, stat
 	typesCopy := make([]schemas.PluginType, len(types))
 	copy(typesCopy, types)
 
-	c.pluginStatus[name] = schemas.PluginStatus{
-		Name:   displayName,
-		Status: status,
-		Logs:   logsCopy,
-		Types:  typesCopy,
+	pluginMetadata := schemas.PluginMetadata{}
+	if existing, ok := c.pluginStatus[name]; ok {
+		pluginMetadata = schemas.PluginMetadata{
+			Description:   existing.Description,
+			DescriptionZh: existing.DescriptionZh,
+			Features:      slices.Clone(existing.Features),
+		}
 	}
+	c.pluginStatus[name] = schemas.PluginStatus{
+		Name:          displayName,
+		Status:        status,
+		Logs:          logsCopy,
+		Types:         typesCopy,
+		Description:   pluginMetadata.Description,
+		DescriptionZh: pluginMetadata.DescriptionZh,
+		Features:      slices.Clone(pluginMetadata.Features),
+	}
+}
+
+// UpdatePluginMetadata records optional descriptive and capability metadata for a loaded plugin.
+func (c *Config) UpdatePluginMetadata(name string, metadata schemas.PluginMetadata) {
+	c.pluginStatusMu.Lock()
+	defer c.pluginStatusMu.Unlock()
+
+	if c.pluginStatus == nil {
+		c.pluginStatus = make(map[string]schemas.PluginStatus)
+	}
+
+	status := c.pluginStatus[name]
+	status.Description = metadata.Description
+	status.DescriptionZh = metadata.DescriptionZh
+	status.Features = slices.Clone(metadata.Features)
+	c.pluginStatus[name] = status
 }
 
 // UpdatePluginDisplayName updates the display name of a plugin
@@ -5286,10 +5319,13 @@ func (c *Config) UpdatePluginDisplayName(name string, displayName string) error 
 
 	if _, ok := c.pluginStatus[name]; ok {
 		c.pluginStatus[name] = schemas.PluginStatus{
-			Name:   displayName,
-			Status: c.pluginStatus[name].Status,
-			Logs:   c.pluginStatus[name].Logs,
-			Types:  c.pluginStatus[name].Types,
+			Name:          displayName,
+			Status:        c.pluginStatus[name].Status,
+			Logs:          c.pluginStatus[name].Logs,
+			Types:         c.pluginStatus[name].Types,
+			Description:   c.pluginStatus[name].Description,
+			DescriptionZh: c.pluginStatus[name].DescriptionZh,
+			Features:      slices.Clone(c.pluginStatus[name].Features),
 		}
 		return nil
 	}

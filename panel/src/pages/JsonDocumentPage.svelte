@@ -28,6 +28,19 @@
 			putPath: '/api/governance/complexity-analyzer-config',
 			resetPath: '/api/governance/complexity-analyzer-config/reset',
 		},
+		'complexity-router': {
+			titleKey: 'elygate.complexityRouter',
+			eyebrow: 'Elygate / Governance',
+			getPath: '/api/governance/complexity-analyzer-config',
+			putPath: '/api/governance/complexity-analyzer-config',
+			resetPath: '/api/governance/complexity-analyzer-config/reset',
+		},
+		'proxy-config': {
+			titleKey: 'elygate.proxyConfigTitle',
+			eyebrow: 'Elygate / System',
+			getPath: '/api/proxy-config',
+			putPath: '/api/proxy-config',
+		},
 	};
 
 	let { resourceName }: Props = $props();
