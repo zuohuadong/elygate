@@ -1044,7 +1044,10 @@ func (cm *ChatMessage) UnmarshalJSON(data []byte) error {
 	if err := Unmarshal(data, &toolMsg); err != nil {
 		return err
 	}
-	if toolMsg.ToolCallID != nil {
+	// Gate on every field the struct carries, not just ToolCallID -- keying on one
+	// field silently makes the others conditional on it, which would drop a tool
+	// message that marks a failure without correlating an id.
+	if toolMsg.ToolCallID != nil || toolMsg.IsError != nil {
 		cm.ChatToolMessage = (*ChatToolMessage)(&toolMsg)
 	}
 
@@ -1484,8 +1487,8 @@ type ChatAssistantMessageToolCall struct {
 
 // ChatAssistantMessageToolCallFunction represents a call to a function.
 type ChatAssistantMessageToolCallFunction struct {
-	Name      *string `json:"name"`
-	Arguments string  `json:"arguments"` // stringified json as retured by OpenAI, might not be a valid JSON always
+	Name      *string `json:"name,omitempty"` // omitted on streaming continuation deltas; strict clients reject an explicit null (issue #5900)
+	Arguments string  `json:"arguments"`      // stringified json as retured by OpenAI, might not be a valid JSON always
 }
 
 // ChatAudioMessageAudio represents audio data in a message.
