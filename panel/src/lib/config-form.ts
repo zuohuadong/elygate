@@ -47,6 +47,26 @@ export const DUAL_CREDENTIAL_BEHAVIORS = ['prefer_idp', 'prefer_vk', 'error'] as
 export const MCP_SERVER_AUTH_MODES = ['headers', 'both', 'oauth'] as const;
 export const MCP_CODE_MODE_BINDING_LEVELS = ['server', 'tool'] as const;
 
+export interface PersistReloadConfigResult {
+	document: JsonRecord | null;
+	reloadError?: unknown;
+}
+
+export async function persistAndReloadConfigDocument(
+	document: JsonRecord,
+	persist: (document: JsonRecord) => Promise<unknown>,
+	reload: () => Promise<unknown>,
+): Promise<PersistReloadConfigResult> {
+	await persist(document);
+	try {
+		const refreshed = await reload();
+		if (!isJsonRecord(refreshed)) throw new Error('invalid-config-document');
+		return { document: refreshed };
+	} catch (reloadError) {
+		return { document: null, reloadError };
+	}
+}
+
 function boolOf(source: JsonRecord, key: string, fallback = false): boolean {
 	const value = source[key];
 	return typeof value === 'boolean' ? value : fallback;

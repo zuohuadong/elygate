@@ -13,6 +13,7 @@
 		movePluginSequence,
 		PLUGIN_CAPABILITIES_CHANGED_EVENT,
 		pluginDraftFromRecord,
+		shouldClosePluginModalFromBackdrop,
 		type ManagedPlugin,
 		type PluginDraft,
 		type PluginKind,
@@ -230,7 +231,13 @@
 </section>
 
 {#if modal}
-	<div class="modal-backdrop" role="presentation" onclick={(event) => { if (event.target === event.currentTarget && !isSaving) modal = null; }}>
+	<div class="modal-backdrop" role="presentation" onpointerdown={(event) => {
+		if (shouldClosePluginModalFromBackdrop({
+			targetIsBackdrop: event.target === event.currentTarget,
+			button: event.button,
+			isSaving,
+		})) modal = null;
+	}}>
 		<div class:sequence-modal={modal === 'sequence'} class="modal" role="dialog" aria-modal="true" aria-labelledby="plugin-modal-title">
 			<header><div><h2 id="plugin-modal-title">{modal === 'sequence' ? text('插件执行顺序', 'Plugin execution order') : editing ? text('编辑插件', 'Edit plugin') : text('安装插件', 'Install plugin')}</h2><p>{modal === 'sequence' ? text('把自定义插件移动到内置插件块之前或之后，并调整同组顺序。', 'Move custom plugins before or after the built-in block and order them within each group.') : text('配置保存后，启用的插件会立即重新加载。', 'Enabled plugins reload immediately after saving.')}</p></div><button type="button" aria-label={text('关闭', 'Close')} onclick={() => (modal = null)}>×</button></header>
 			{#if modal === 'editor'}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { configFormFromDocument, emptyConfigForm, mergeConfigForm } from './config-form';
+import { configFormFromDocument, emptyConfigForm, mergeConfigForm, persistAndReloadConfigDocument } from './config-form';
 import type { JsonRecord } from './api';
 
 function sampleDocument(): JsonRecord {
@@ -138,5 +138,31 @@ describe('config-form', () => {
 		const client = merged.client_config as JsonRecord;
 		expect(client.initial_pool_size).toBe(5000);
 		expect(client.log_retention_days).toBe(365);
+	});
+
+	it('保存确认后重新读取完整配置文档', async () => {
+		const events: string[] = [];
+		const refreshed = sampleDocument();
+		const result = await persistAndReloadConfigDocument(
+			{ client_config: { enable_logging: false } },
+			async () => { events.push('put'); return { status: 'success' }; },
+			async () => { events.push('get'); return refreshed; },
+		);
+		expect(events).toEqual(['put', 'get']);
+		expect(result.document).toBe(refreshed);
+		expect(result.document?.is_db_connected).toBe(true);
+		expect(result.reloadError).toBeUndefined();
+	});
+
+	it('写入成功但重新认证导致刷新失败时保留已保存语义', async () => {
+		let persisted = false;
+		const result = await persistAndReloadConfigDocument(
+			{ auth_config: { is_enabled: true } },
+			async () => { persisted = true; },
+			async () => { throw new Error('401 unauthorized'); },
+		);
+		expect(persisted).toBe(true);
+		expect(result.document).toBeNull();
+		expect(result.reloadError).toBeInstanceOf(Error);
 	});
 });

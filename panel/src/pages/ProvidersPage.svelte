@@ -3,6 +3,7 @@
 	import { useTranslation } from '@svadmin/core/i18n';
 	import { displayError, parseJsonObject, prettyJson, csv } from '../lib/forms';
 	import { encodePathSegment, getListPayload, requestJson, type JsonRecord } from '../lib/api';
+	import { shouldApplyProviderKeyLoad, type ProviderKeyLoadSnapshot } from '../lib/provider-keys';
 	import {
 		hasOpenAIBaseURLVersionConflict,
 		isMissingProviderKeyError,
@@ -76,12 +77,15 @@
 	let providerForm = $state<ProviderForm>(emptyProviderForm());
 	let keyForm = $state<KeyForm>(emptyKeyForm());
 	let isLoading = $state(true);
+	let isKeysLoading = $state(false);
 	let isSaving = $state(false);
 	let revalidatingKeyId = $state('');
 	let deletingKeyId = $state('');
 	let error = $state('');
 	let notice = $state('');
 	let warning = $state('');
+	let keyLoadGeneration = 0;
+	const providerKeysPage = $derived(resourceName === 'provider-keys');
 
 	async function loadProviders(): Promise<void> {
 		isLoading = true;
@@ -95,13 +99,26 @@
 		}
 	}
 
-	async function loadKeys(): Promise<void> {
-		if (!selectedProvider) return;
-		error = '';
+	async function loadKeys(provider = selectedProvider): Promise<void> {
+		const snapshot: ProviderKeyLoadSnapshot = { provider, generation: ++keyLoadGeneration };
+		if (!provider) {
+			keys = [];
+			isKeysLoading = false;
+			return;
+		}
+		if (shouldApplyProviderKeyLoad(snapshot, selectedProvider, keyLoadGeneration)) {
+			error = '';
+			isKeysLoading = true;
+		}
 		try {
-			keys = getListPayload(await requestJson(`/api/providers/${encodePathSegment(selectedProvider)}/keys`));
+			const nextKeys = getListPayload(await requestJson(`/api/providers/${encodePathSegment(provider)}/keys`));
+			if (shouldApplyProviderKeyLoad(snapshot, selectedProvider, keyLoadGeneration)) keys = nextKeys;
 		} catch (cause) {
-			error = displayError(cause, i18n.t('elygate.loadFailed'));
+			if (shouldApplyProviderKeyLoad(snapshot, selectedProvider, keyLoadGeneration)) {
+				error = displayError(cause, i18n.t('elygate.loadFailed'));
+			}
+		} finally {
+			if (shouldApplyProviderKeyLoad(snapshot, selectedProvider, keyLoadGeneration)) isKeysLoading = false;
 		}
 	}
 
@@ -197,18 +214,24 @@
 		}
 	}
 
-	async function openKeys(provider: JsonRecord): Promise<void> {
-		selectedProvider = stringValue(provider, 'name');
+	async function selectProvider(name: string): Promise<void> {
+		selectedProvider = name;
+		keys = [];
 		editingKey = null;
 		keyForm = emptyKeyForm();
-		modal = 'keys';
 		error = '';
+		const provider = providers.find((item) => stringValue(item, 'name') === name) ?? {};
 		const providerStatus = stringValue(provider, 'provider_status');
 		const reason = stringValue(provider, 'description') || providerStatus || i18n.t('elygate.operationFailed');
 		warning = providerStatus === 'active'
 			? ''
 			: i18n.t('elygate.providerNeedsAttention').replace('{provider}', selectedProvider).replace('{reason}', reason);
-		await loadKeys();
+		await loadKeys(name);
+	}
+
+	async function openKeys(provider: JsonRecord): Promise<void> {
+		modal = 'keys';
+		await selectProvider(stringValue(provider, 'name'));
 	}
 
 	function editKey(key: JsonRecord): void {
@@ -327,25 +350,43 @@
 	function submitProvider(event: SubmitEvent): void { event.preventDefault(); void saveProvider(); }
 	function submitKey(event: SubmitEvent): void { event.preventDefault(); void saveKey(); }
 
-	onMount(() => { void loadProviders(); });
+	async function initialize(): Promise<void> {
+		await loadProviders();
+		if (providerKeysPage && providers.length > 0) await selectProvider(stringValue(providers[0], 'name'));
+	}
+
+	onMount(() => { void initialize(); });
 </script>
+
+{#snippet keyWorkspace()}
+	<div class="provider-key-workspace">
+		{#if warning}<div class="notice warning" role="status">{warning}</div>{/if}
+		<div class="key-layout"><div class="table-wrap" aria-busy={isKeysLoading}><table><thead><tr><th>{i18n.t('elygate.keyName')}</th><th>{i18n.t('elygate.status')}</th><th>{i18n.t('elygate.models')}</th><th>{i18n.t('elygate.actions')}</th></tr></thead><tbody>{#each keys as key (stringValue(key, 'id'))}<tr><td>{stringValue(key, 'name')}</td><td title={stringValue(key, 'description')}>{key.enabled === false ? i18n.t('elygate.disabled') : stringValue(key, 'status') || i18n.t('elygate.enabled')}</td><td>{keyModelsLabel(key)}</td><td class="actions"><button type="button" onclick={() => editKey(key)}>{i18n.t('elygate.edit')}</button><button type="button" onclick={() => void revalidateKey(key)} disabled={revalidatingKeyId === stringValue(key, 'id')}>{i18n.t('elygate.revalidate')}</button><button class="danger" type="button" onclick={() => void removeKey(key)} disabled={deletingKeyId === stringValue(key, 'id')}>{i18n.t('elygate.delete')}</button></td></tr>{:else}<tr><td colspan="4" class="empty">{isKeysLoading ? i18n.t('elygate.loading') : i18n.t('elygate.noResults')}</td></tr>{/each}</tbody></table></div>
+			<form class="key-form" onsubmit={submitKey}><h3>{editingKey ? i18n.t('elygate.edit') : i18n.t('elygate.create')} {i18n.t('elygate.keyName')}</h3><label>{i18n.t('elygate.keyName')}<input bind:value={keyForm.name} required /></label><label>{i18n.t('elygate.keyValue')}<input type="password" bind:value={keyForm.value} autocomplete="new-password" /><small>{i18n.t('elygate.keyValueHelp')}</small></label><label>{i18n.t('elygate.modelsCsv')}<input bind:value={keyForm.models} placeholder="*" /><small>{i18n.t('elygate.keyModelsHelp')}</small></label><label>{i18n.t('elygate.blacklistedModelsCsv')}<input bind:value={keyForm.blacklistedModels} /></label><div class="grid-two"><label>{i18n.t('elygate.weight')}<input type="number" min="0" step="0.01" bind:value={keyForm.weight} /></label><label class="check"><input type="checkbox" bind:checked={keyForm.enabled} /> {i18n.t('elygate.enabled')}</label></div><label>{i18n.t('elygate.advancedJson')}<textarea bind:value={keyForm.advanced} rows="5"></textarea></label><footer><button type="button" onclick={() => { editingKey = null; keyForm = emptyKeyForm(); }}>{i18n.t('elygate.cancel')}</button><button class="primary" type="submit" disabled={isSaving}>{i18n.t('elygate.save')}</button></footer></form>
+		</div>
+	</div>
+{/snippet}
 
 <section class="page-shell" data-resource={resourceName}>
 	<header class="page-heading">
-		<div><p class="eyebrow">Elygate / Bifrost API</p><h1>{i18n.t('elygate.providers')}</h1><p>{i18n.t('elygate.providerNameHelp')}</p></div>
-		<div class="heading-actions"><button class="primary" type="button" onclick={() => void loadProviders()} disabled={isLoading}>{i18n.t('elygate.refresh')}</button><button class="primary" type="button" onclick={openCreate}>{i18n.t('elygate.create')}</button></div>
+		<div><p class="eyebrow">Elygate / Bifrost API</p><h1>{providerKeysPage ? i18n.t('elygate.providerKeys') : i18n.t('elygate.providers')}</h1><p>{providerKeysPage ? i18n.t('elygate.apiKeySeparateHint') : i18n.t('elygate.providerNameHelp')}</p></div>
+		<div class="heading-actions"><button class="primary" type="button" onclick={() => void (providerKeysPage ? loadKeys() : loadProviders())} disabled={isLoading || isKeysLoading}>{i18n.t('elygate.refresh')}</button>{#if !providerKeysPage}<button class="primary" type="button" onclick={openCreate}>{i18n.t('elygate.create')}</button>{/if}</div>
 	</header>
 	{#if error}<div class="notice error" role="alert">{error}</div>{/if}
-	{#if warning}<div class="notice warning" role="status">{warning}</div>{/if}
 	{#if notice}<div class="notice success" role="status">{notice}</div>{/if}
-	<div class="table-wrap" aria-busy={isLoading}>
-		<table><thead><tr><th>{i18n.t('elygate.providerName')}</th><th>{i18n.t('elygate.status')}</th><th>{i18n.t('elygate.baseUrl')}</th><th>{i18n.t('elygate.actions')}</th></tr></thead>
-		<tbody>
-		{#each providers as provider (stringValue(provider, 'name'))}
-				<tr><td><strong>{stringValue(provider, 'name')}</strong></td><td title={stringValue(provider, 'description')}>{stringValue(provider, 'provider_status') || '—'}</td><td>{stringValue((provider.network_config as JsonRecord | undefined) ?? {}, 'base_url') || '—'}</td><td class="actions"><button type="button" onclick={() => openEdit(provider)}>{i18n.t('elygate.edit')}</button><button type="button" onclick={() => void openKeys(provider)}>{i18n.t('elygate.manageKeys')}</button><button class="danger" type="button" onclick={() => void removeProvider(provider)}>{i18n.t('elygate.delete')}</button></td></tr>
-		{:else}<tr><td colspan="4" class="empty">{i18n.t('elygate.noResults')}</td></tr>{/each}
-		</tbody></table>
-	</div>
+	{#if providerKeysPage}
+		<label class="provider-selector">{i18n.t('elygate.providers')}<select bind:value={selectedProvider} onchange={() => void selectProvider(selectedProvider)} disabled={isLoading || providers.length === 0}>{#each providers as provider (stringValue(provider, 'name'))}<option value={stringValue(provider, 'name')}>{stringValue(provider, 'name')}</option>{/each}</select></label>
+		{@render keyWorkspace()}
+	{:else}
+		<div class="table-wrap" aria-busy={isLoading}>
+			<table><thead><tr><th>{i18n.t('elygate.providerName')}</th><th>{i18n.t('elygate.status')}</th><th>{i18n.t('elygate.baseUrl')}</th><th>{i18n.t('elygate.actions')}</th></tr></thead>
+			<tbody>
+			{#each providers as provider (stringValue(provider, 'name'))}
+					<tr><td><strong>{stringValue(provider, 'name')}</strong></td><td title={stringValue(provider, 'description')}>{stringValue(provider, 'provider_status') || '—'}</td><td>{stringValue((provider.network_config as JsonRecord | undefined) ?? {}, 'base_url') || '—'}</td><td class="actions"><button type="button" onclick={() => openEdit(provider)}>{i18n.t('elygate.edit')}</button><button type="button" onclick={() => void openKeys(provider)}>{i18n.t('elygate.manageKeys')}</button><button class="danger" type="button" onclick={() => void removeProvider(provider)}>{i18n.t('elygate.delete')}</button></td></tr>
+			{:else}<tr><td colspan="4" class="empty">{i18n.t('elygate.noResults')}</td></tr>{/each}
+			</tbody></table>
+		</div>
+	{/if}
 </section>
 
 {#if modal === 'create' || modal === 'edit'}
@@ -360,11 +401,9 @@
 	</div></div>
 {/if}
 
-{#if modal === 'keys'}
-	<div class="modal-backdrop"><div class="modal wide" role="dialog" aria-modal="true" aria-labelledby="keys-dialog-title"><header><h2 id="keys-dialog-title">{i18n.t('elygate.manageKeys')}: {selectedProvider}</h2><button type="button" onclick={() => (modal = null)}>{i18n.t('elygate.close')}</button></header>
-		<div class="key-layout"><div class="table-wrap"><table><thead><tr><th>{i18n.t('elygate.keyName')}</th><th>{i18n.t('elygate.status')}</th><th>{i18n.t('elygate.models')}</th><th>{i18n.t('elygate.actions')}</th></tr></thead><tbody>{#each keys as key (stringValue(key, 'id'))}<tr><td>{stringValue(key, 'name')}</td><td title={stringValue(key, 'description')}>{key.enabled === false ? i18n.t('elygate.disabled') : stringValue(key, 'status') || i18n.t('elygate.enabled')}</td><td>{keyModelsLabel(key)}</td><td class="actions"><button type="button" onclick={() => editKey(key)}>{i18n.t('elygate.edit')}</button><button type="button" onclick={() => void revalidateKey(key)} disabled={revalidatingKeyId === stringValue(key, 'id')}>{i18n.t('elygate.revalidate')}</button><button class="danger" type="button" onclick={() => void removeKey(key)} disabled={deletingKeyId === stringValue(key, 'id')}>{i18n.t('elygate.delete')}</button></td></tr>{:else}<tr><td colspan="4" class="empty">{i18n.t('elygate.noResults')}</td></tr>{/each}</tbody></table></div>
-			<form class="key-form" onsubmit={submitKey}><h3>{editingKey ? i18n.t('elygate.edit') : i18n.t('elygate.create')} {i18n.t('elygate.keyName')}</h3><label>{i18n.t('elygate.keyName')}<input bind:value={keyForm.name} required /></label><label>{i18n.t('elygate.keyValue')}<input type="password" bind:value={keyForm.value} autocomplete="new-password" /><small>{i18n.t('elygate.keyValueHelp')}</small></label><label>{i18n.t('elygate.modelsCsv')}<input bind:value={keyForm.models} placeholder="*" /><small>{i18n.t('elygate.keyModelsHelp')}</small></label><label>{i18n.t('elygate.blacklistedModelsCsv')}<input bind:value={keyForm.blacklistedModels} /></label><div class="grid-two"><label>{i18n.t('elygate.weight')}<input type="number" min="0" step="0.01" bind:value={keyForm.weight} /></label><label class="check"><input type="checkbox" bind:checked={keyForm.enabled} /> {i18n.t('elygate.enabled')}</label></div><label>{i18n.t('elygate.advancedJson')}<textarea bind:value={keyForm.advanced} rows="5"></textarea></label><footer><button type="button" onclick={() => { editingKey = null; keyForm = emptyKeyForm(); }}>{i18n.t('elygate.cancel')}</button><button class="primary" type="submit" disabled={isSaving}>{i18n.t('elygate.save')}</button></footer></form>
-		</div>
+	{#if modal === 'keys'}
+		<div class="modal-backdrop"><div class="modal wide" role="dialog" aria-modal="true" aria-labelledby="keys-dialog-title"><header><h2 id="keys-dialog-title">{i18n.t('elygate.manageKeys')}: {selectedProvider}</h2><button type="button" onclick={() => (modal = null)}>{i18n.t('elygate.close')}</button></header>
+			{@render keyWorkspace()}
 	</div></div>
 {/if}
 
@@ -405,6 +444,8 @@
 	.checks input, .check input { width: auto; }
 	form footer { justify-content: flex-end; margin-top: .25rem; }
 	.key-layout { display: grid; gap: 1rem; grid-template-columns: minmax(0, 1.5fr) minmax(280px, 1fr); }
-	.key-form { border: 1px solid var(--border); border-radius: .75rem; padding: 1rem; }
+		.key-form { border: 1px solid var(--border); border-radius: .75rem; padding: 1rem; }
+		.provider-selector { background: var(--card); border: 1px solid var(--border); border-radius: .75rem; margin-bottom: 1rem; max-width: 360px; padding: .8rem; }
+		.provider-selector select { background: var(--background); border: 1px solid var(--border); border-radius: .5rem; color: var(--foreground); font: inherit; padding: .6rem .7rem; width: 100%; }
 	@media (max-width: 800px) { .page-heading, .key-layout { display: flex; flex-direction: column; } .heading-actions { width: 100%; } .heading-actions button { flex: 1; } .grid-two { grid-template-columns: 1fr; } }
 </style>

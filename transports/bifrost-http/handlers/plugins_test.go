@@ -1,10 +1,14 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"slices"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/maximhq/bifrost/core/schemas"
 	"github.com/maximhq/bifrost/framework/configstore"
@@ -70,6 +74,186 @@ func (noopPluginsLoader) NormalizePluginConfig(_ string, _ map[string]any) (map[
 
 func (noopPluginsLoader) ExpandPluginConfigForAPI(_ string, _ map[string]any) (map[string]any, error) {
 	return nil, nil
+}
+
+type rollbackPluginsStore struct {
+	configstore.ConfigStore
+	plugin       *configstoreTables.TablePlugin
+	updateCalls  int
+	deleteCalls  int
+	failUpdateAt int
+}
+
+func clonePluginRow(plugin *configstoreTables.TablePlugin) *configstoreTables.TablePlugin {
+	if plugin == nil {
+		return nil
+	}
+	clone := *plugin
+	if config, ok := plugin.Config.(map[string]any); ok {
+		cloneConfig := make(map[string]any, len(config))
+		for key, value := range config {
+			cloneConfig[key] = value
+		}
+		clone.Config = cloneConfig
+	}
+	return &clone
+}
+
+func (s *rollbackPluginsStore) GetPlugin(_ context.Context, name string) (*configstoreTables.TablePlugin, error) {
+	if s.plugin == nil || s.plugin.Name != name {
+		return nil, configstore.ErrNotFound
+	}
+	return clonePluginRow(s.plugin), nil
+}
+
+func (s *rollbackPluginsStore) GetPlugins(_ context.Context) ([]*configstoreTables.TablePlugin, error) {
+	if s.plugin == nil {
+		return nil, nil
+	}
+	return []*configstoreTables.TablePlugin{clonePluginRow(s.plugin)}, nil
+}
+
+func (s *rollbackPluginsStore) CreatePlugin(_ context.Context, plugin *configstoreTables.TablePlugin, _ ...*gorm.DB) error {
+	s.plugin = clonePluginRow(plugin)
+	return nil
+}
+
+func (s *rollbackPluginsStore) UpdatePlugin(_ context.Context, plugin *configstoreTables.TablePlugin, _ ...*gorm.DB) error {
+	s.updateCalls++
+	if s.failUpdateAt == s.updateCalls {
+		return errors.New("forced update failure")
+	}
+	s.plugin = clonePluginRow(plugin)
+	return nil
+}
+
+func (s *rollbackPluginsStore) DeletePlugin(_ context.Context, _ string, _ ...*gorm.DB) error {
+	s.deleteCalls++
+	s.plugin = nil
+	return nil
+}
+
+type rollbackPluginsLoader struct {
+	noopPluginsLoader
+	reloadErrors  []error
+	reloadConfigs []any
+	removeErrors  []error
+	disabledFlags []bool
+	removeCalls   int
+}
+
+func (l *rollbackPluginsLoader) ReloadPlugin(_ context.Context, _ string, _ *string, config any, _ *schemas.PluginPlacement, _ *int) error {
+	l.reloadConfigs = append(l.reloadConfigs, config)
+	index := len(l.reloadConfigs) - 1
+	if index < len(l.reloadErrors) {
+		return l.reloadErrors[index]
+	}
+	return nil
+}
+
+func (l *rollbackPluginsLoader) RemovePlugin(ctx context.Context, _ string) error {
+	l.removeCalls++
+	disabled, _ := ctx.Value(PluginDisabledKey).(bool)
+	l.disabledFlags = append(l.disabledFlags, disabled)
+	if index := l.removeCalls - 1; index < len(l.removeErrors) {
+		return l.removeErrors[index]
+	}
+	return nil
+}
+
+type invalidRedactorLoader struct {
+	noopPluginsLoader
+	panicOnExpand bool
+	oneShot       *oneShotMarshaler
+	largeInteger  bool
+}
+
+type fakeBestEffortPluginsStore struct {
+	configstore.ConfigStore
+	plugins     []*configstoreTables.TablePlugin
+	diagnostics map[string]error
+}
+
+type concurrentPluginsStore struct {
+	configstore.ConfigStore
+	mu      sync.Mutex
+	plugin  *configstoreTables.TablePlugin
+	updates chan string
+}
+
+func (s *concurrentPluginsStore) GetPlugin(_ context.Context, name string) (*configstoreTables.TablePlugin, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.plugin == nil || s.plugin.Name != name {
+		return nil, configstore.ErrNotFound
+	}
+	return clonePluginRow(s.plugin), nil
+}
+
+func (s *concurrentPluginsStore) UpdatePlugin(_ context.Context, plugin *configstoreTables.TablePlugin, _ ...*gorm.DB) error {
+	s.mu.Lock()
+	s.plugin = clonePluginRow(plugin)
+	s.mu.Unlock()
+	if config, ok := plugin.Config.(map[string]any); ok {
+		if revision, ok := config["revision"].(string); ok {
+			s.updates <- revision
+		}
+	}
+	return nil
+}
+
+type blockingFirstReloadLoader struct {
+	noopPluginsLoader
+	mu           sync.Mutex
+	calls        int
+	firstStarted chan struct{}
+	releaseFirst chan struct{}
+}
+
+func (l *blockingFirstReloadLoader) ReloadPlugin(_ context.Context, _ string, _ *string, _ any, _ *schemas.PluginPlacement, _ *int) error {
+	l.mu.Lock()
+	l.calls++
+	call := l.calls
+	l.mu.Unlock()
+	if call == 1 {
+		close(l.firstStarted)
+		<-l.releaseFirst
+		return &PluginConfigurationError{Err: errors.New("invalid first candidate")}
+	}
+	return nil
+}
+
+func (s fakeBestEffortPluginsStore) GetPlugins(_ context.Context) ([]*configstoreTables.TablePlugin, error) {
+	return nil, errors.New("regular hydration must not be used")
+}
+
+func (s fakeBestEffortPluginsStore) GetPluginsBestEffort(_ context.Context) ([]*configstoreTables.TablePlugin, map[string]error, error) {
+	return s.plugins, s.diagnostics, nil
+}
+
+func (l invalidRedactorLoader) ExpandPluginConfigForAPI(_ string, _ map[string]any) (map[string]any, error) {
+	if l.panicOnExpand {
+		panic("broken plugin redactor")
+	}
+	if l.oneShot != nil {
+		return map[string]any{"value": l.oneShot}, nil
+	}
+	if l.largeInteger {
+		return map[string]any{"value": int64(9223372036854775807)}, nil
+	}
+	return map[string]any{"invalid": func() {}}, nil
+}
+
+type oneShotMarshaler struct {
+	calls int
+}
+
+func (value *oneShotMarshaler) MarshalJSON() ([]byte, error) {
+	value.calls++
+	if value.calls > 1 {
+		return nil, errors.New("marshaler invoked more than once")
+	}
+	return []byte(`{"safe":true}`), nil
 }
 
 // buildUpdateRequest creates a PUT /api/plugins/{name} fasthttp context.
@@ -158,6 +342,312 @@ func TestCreatePlugin_AllowsCustomPathWhenNotBypassed(t *testing.T) {
 	}
 	if store.existingPlugin.Path == nil || *store.existingPlugin.Path != path {
 		t.Errorf("stored plugin path = %v, want %v", store.existingPlugin.Path, path)
+	}
+}
+
+func TestCreatePlugin_LoadFailureRollsBackDBAndRuntime(t *testing.T) {
+	SetLogger(&mockLogger{})
+	store := &rollbackPluginsStore{}
+	loader := &rollbackPluginsLoader{reloadErrors: []error{&PluginConfigurationError{Err: errors.New("api key is required")}}}
+	h := &PluginsHandler{pluginsLoader: loader, configStore: store}
+
+	ctx := buildCreateRequest(t, map[string]any{
+		"name": "logging", "enabled": true, "config": map[string]any{"store": ""},
+	})
+	h.createPlugin(ctx)
+
+	if ctx.Response.StatusCode() != fasthttp.StatusUnprocessableEntity {
+		t.Fatalf("expected 422, got %d: %s", ctx.Response.StatusCode(), ctx.Response.Body())
+	}
+	if store.plugin != nil || store.deleteCalls != 1 {
+		t.Fatalf("candidate plugin was not removed from storage: plugin=%v deletes=%d", store.plugin, store.deleteCalls)
+	}
+	if loader.removeCalls != 1 {
+		t.Fatalf("candidate runtime was not cleaned up, remove calls=%d", loader.removeCalls)
+	}
+}
+
+func TestUpdatePlugin_LoadFailureRestoresDBAndRuntime(t *testing.T) {
+	SetLogger(&mockLogger{})
+	store := &rollbackPluginsStore{plugin: &configstoreTables.TablePlugin{
+		Name: "otel", Enabled: true, Config: map[string]any{"collector_url": "old:4317"},
+	}}
+	loader := &rollbackPluginsLoader{reloadErrors: []error{&PluginConfigurationError{Err: errors.New("collector url is required")}, nil}}
+	h := &PluginsHandler{pluginsLoader: loader, configStore: store}
+
+	ctx := buildUpdateRequest(t, map[string]any{
+		"enabled": true, "config": map[string]any{"collector_url": ""},
+	})
+	h.updatePlugin(ctx)
+
+	if ctx.Response.StatusCode() != fasthttp.StatusUnprocessableEntity {
+		t.Fatalf("expected 422, got %d: %s", ctx.Response.StatusCode(), ctx.Response.Body())
+	}
+	config, _ := store.plugin.Config.(map[string]any)
+	if got := config["collector_url"]; got != "old:4317" {
+		t.Fatalf("stored config was not restored: got %v", got)
+	}
+	if len(loader.reloadConfigs) != 2 {
+		t.Fatalf("expected candidate and previous runtime reloads, got %d", len(loader.reloadConfigs))
+	}
+	oldRuntime, _ := loader.reloadConfigs[1].(map[string]any)
+	if got := oldRuntime["collector_url"]; got != "old:4317" {
+		t.Fatalf("runtime config was not restored: got %v", got)
+	}
+}
+
+func TestUpdatePlugin_RollbackFailureReturns500(t *testing.T) {
+	SetLogger(&mockLogger{})
+	store := &rollbackPluginsStore{
+		plugin:       &configstoreTables.TablePlugin{Name: "otel", Enabled: true, Config: map[string]any{"collector_url": "old:4317"}},
+		failUpdateAt: 2,
+	}
+	loader := &rollbackPluginsLoader{reloadErrors: []error{errors.New("invalid candidate")}}
+	h := &PluginsHandler{pluginsLoader: loader, configStore: store}
+
+	ctx := buildUpdateRequest(t, map[string]any{
+		"enabled": true, "config": map[string]any{"collector_url": ""},
+	})
+	h.updatePlugin(ctx)
+
+	if ctx.Response.StatusCode() != fasthttp.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d: %s", ctx.Response.StatusCode(), ctx.Response.Body())
+	}
+}
+
+func TestUpdatePlugin_RestoresDisabledRuntimeSemantics(t *testing.T) {
+	SetLogger(&mockLogger{})
+	store := &rollbackPluginsStore{plugin: &configstoreTables.TablePlugin{
+		Name: "otel", Enabled: false, Config: map[string]any{"collector_url": "old:4317"},
+	}}
+	loader := &rollbackPluginsLoader{reloadErrors: []error{
+		&PluginConfigurationError{Err: errors.New("collector url is required")},
+	}}
+	h := &PluginsHandler{pluginsLoader: loader, configStore: store}
+
+	ctx := buildUpdateRequest(t, map[string]any{
+		"enabled": true, "config": map[string]any{"collector_url": ""},
+	})
+	h.updatePlugin(ctx)
+
+	if ctx.Response.StatusCode() != fasthttp.StatusUnprocessableEntity {
+		t.Fatalf("expected 422, got %d: %s", ctx.Response.StatusCode(), ctx.Response.Body())
+	}
+	if len(loader.disabledFlags) != 1 || !loader.disabledFlags[0] {
+		t.Fatalf("rollback removed the disabled plugin as a permanent delete: %v", loader.disabledFlags)
+	}
+	if store.plugin == nil || store.plugin.Enabled {
+		t.Fatalf("previous disabled row was not restored: %#v", store.plugin)
+	}
+}
+
+func TestDeletePlugin_RuntimeFailureKeepsRecordForRetry(t *testing.T) {
+	SetLogger(&mockLogger{})
+	store := &rollbackPluginsStore{plugin: &configstoreTables.TablePlugin{
+		Name: "broken-custom", Enabled: true, IsCustom: true, Config: map[string]any{},
+	}}
+	loader := &rollbackPluginsLoader{removeErrors: []error{errors.New("runtime busy"), nil}}
+	h := &PluginsHandler{pluginsLoader: loader, configStore: store}
+	request := func() *fasthttp.RequestCtx {
+		ctx := &fasthttp.RequestCtx{}
+		ctx.Request.Header.SetMethod("DELETE")
+		ctx.SetUserValue("name", "broken-custom")
+		return ctx
+	}
+
+	first := request()
+	h.deletePlugin(first)
+	if first.Response.StatusCode() != fasthttp.StatusInternalServerError {
+		t.Fatalf("expected first delete to fail with 500, got %d: %s", first.Response.StatusCode(), first.Response.Body())
+	}
+	if store.plugin == nil || store.deleteCalls != 0 {
+		t.Fatalf("database row must remain recoverable after runtime failure: plugin=%v deletes=%d", store.plugin, store.deleteCalls)
+	}
+
+	second := request()
+	h.deletePlugin(second)
+	if second.Response.StatusCode() != fasthttp.StatusOK {
+		t.Fatalf("expected retry to succeed, got %d: %s", second.Response.StatusCode(), second.Response.Body())
+	}
+	if store.plugin != nil || store.deleteCalls != 1 {
+		t.Fatalf("retry did not remove the stored row: plugin=%v deletes=%d", store.plugin, store.deleteCalls)
+	}
+}
+
+func TestDeletePlugin_MissingRecordDoesNotUnloadRuntime(t *testing.T) {
+	SetLogger(&mockLogger{})
+	store := &rollbackPluginsStore{}
+	loader := &rollbackPluginsLoader{}
+	h := &PluginsHandler{pluginsLoader: loader, configStore: store}
+	ctx := &fasthttp.RequestCtx{}
+	ctx.Request.Header.SetMethod("DELETE")
+	ctx.SetUserValue("name", "runtime-only")
+
+	h.deletePlugin(ctx)
+
+	if ctx.Response.StatusCode() != fasthttp.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", ctx.Response.StatusCode(), ctx.Response.Body())
+	}
+	if loader.removeCalls != 0 {
+		t.Fatalf("runtime-only plugin was unloaded without a stored record")
+	}
+}
+
+func TestUpdatePlugin_SerializesRollbackAgainstConcurrentSuccess(t *testing.T) {
+	SetLogger(&mockLogger{})
+	store := &concurrentPluginsStore{
+		plugin: &configstoreTables.TablePlugin{
+			Name: "otel", Enabled: true, Config: map[string]any{"revision": "old"},
+		},
+		updates: make(chan string, 8),
+	}
+	loader := &blockingFirstReloadLoader{
+		firstStarted: make(chan struct{}),
+		releaseFirst: make(chan struct{}),
+	}
+	h := &PluginsHandler{pluginsLoader: loader, configStore: store}
+
+	request := func(revision string) *fasthttp.RequestCtx {
+		return buildUpdateRequest(t, map[string]any{
+			"enabled": true,
+			"config":  map[string]any{"revision": revision},
+		})
+	}
+	first := request("candidate-a")
+	second := request("candidate-b")
+	firstDone := make(chan struct{})
+	secondDone := make(chan struct{})
+	go func() { h.updatePlugin(first); close(firstDone) }()
+	<-loader.firstStarted
+	if revision := <-store.updates; revision != "candidate-a" {
+		t.Fatalf("unexpected first stored revision: %s", revision)
+	}
+	go func() { h.updatePlugin(second); close(secondDone) }()
+
+	select {
+	case revision := <-store.updates:
+		if revision == "candidate-b" {
+			t.Fatal("second mutation reached storage while the first mutation was still active")
+		}
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(loader.releaseFirst)
+	<-firstDone
+	<-secondDone
+
+	if first.Response.StatusCode() != fasthttp.StatusUnprocessableEntity || second.Response.StatusCode() != fasthttp.StatusOK {
+		t.Fatalf("unexpected responses: first=%d second=%d", first.Response.StatusCode(), second.Response.StatusCode())
+	}
+	store.mu.Lock()
+	finalConfig, _ := store.plugin.Config.(map[string]any)
+	finalRevision := finalConfig["revision"]
+	store.mu.Unlock()
+	if finalRevision != "candidate-b" {
+		t.Fatalf("rollback overwrote the later successful mutation: %v", finalRevision)
+	}
+}
+
+func TestGetPlugins_InvalidRedactorIsIsolated(t *testing.T) {
+	for _, testCase := range []struct {
+		name          string
+		panicOnExpand bool
+	}{
+		{name: "invalid JSON value"},
+		{name: "panic", panicOnExpand: true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			SetLogger(&mockLogger{})
+			store := &capturePluginsStore{plugins: []*configstoreTables.TablePlugin{{
+				Name: "broken", Enabled: true, Config: map[string]any{"value": "stored"},
+			}}}
+			h := &PluginsHandler{pluginsLoader: invalidRedactorLoader{panicOnExpand: testCase.panicOnExpand}, configStore: store}
+			ctx := &fasthttp.RequestCtx{}
+			h.getPlugins(ctx)
+			if ctx.Response.StatusCode() != fasthttp.StatusOK {
+				t.Fatalf("expected 200, got %d: %s", ctx.Response.StatusCode(), ctx.Response.Body())
+			}
+			var response struct {
+				Plugins []PluginResponse `json:"plugins"`
+			}
+			if err := json.Unmarshal(ctx.Response.Body(), &response); err != nil {
+				t.Fatalf("unmarshal response: %v", err)
+			}
+			if len(response.Plugins) != 1 {
+				t.Fatalf("expected one plugin, got %d", len(response.Plugins))
+			}
+			if config, ok := response.Plugins[0].Config.(map[string]any); !ok || len(config) != 0 {
+				t.Fatalf("unsafe redactor output was not isolated: %#v", response.Plugins[0].Config)
+			}
+		})
+	}
+}
+
+func TestGetPlugins_RedactorCustomMarshalerRunsOnlyOnce(t *testing.T) {
+	SetLogger(&mockLogger{})
+	value := &oneShotMarshaler{}
+	store := &capturePluginsStore{plugins: []*configstoreTables.TablePlugin{{
+		Name: "custom", Enabled: true, Config: map[string]any{"value": "stored"},
+	}}}
+	h := &PluginsHandler{pluginsLoader: invalidRedactorLoader{oneShot: value}, configStore: store}
+	ctx := &fasthttp.RequestCtx{}
+	h.getPlugins(ctx)
+
+	if ctx.Response.StatusCode() != fasthttp.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", ctx.Response.StatusCode(), ctx.Response.Body())
+	}
+	if value.calls != 1 {
+		t.Fatalf("custom marshaler ran %d times", value.calls)
+	}
+}
+
+func TestGetPlugins_RedactorPreservesLargeIntegerWireValue(t *testing.T) {
+	SetLogger(&mockLogger{})
+	store := &capturePluginsStore{plugins: []*configstoreTables.TablePlugin{{
+		Name: "custom", Enabled: true, Config: map[string]any{"value": "stored"},
+	}}}
+	h := &PluginsHandler{pluginsLoader: invalidRedactorLoader{largeInteger: true}, configStore: store}
+	ctx := &fasthttp.RequestCtx{}
+	h.getPlugins(ctx)
+
+	if ctx.Response.StatusCode() != fasthttp.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", ctx.Response.StatusCode(), ctx.Response.Body())
+	}
+	if !json.Valid(ctx.Response.Body()) {
+		t.Fatal("plugin response is not valid JSON")
+	}
+	if !bytes.Contains(ctx.Response.Body(), []byte("9223372036854775807")) {
+		t.Fatalf("large integer lost wire precision: %s", ctx.Response.Body())
+	}
+}
+
+func TestGetPlugins_CorruptStoredConfigDoesNotHideHealthyPlugins(t *testing.T) {
+	SetLogger(&mockLogger{})
+	store := fakeBestEffortPluginsStore{
+		plugins: []*configstoreTables.TablePlugin{
+			{Name: "healthy", Enabled: true, Config: map[string]any{"store": "sqlite"}},
+			{Name: "broken", Enabled: true, Config: map[string]any{}},
+		},
+		diagnostics: map[string]error{"broken": errors.New("invalid stored JSON")},
+	}
+	h := &PluginsHandler{pluginsLoader: noopPluginsLoader{}, configStore: store}
+	ctx := &fasthttp.RequestCtx{}
+	h.getPlugins(ctx)
+
+	if ctx.Response.StatusCode() != fasthttp.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", ctx.Response.StatusCode(), ctx.Response.Body())
+	}
+	var response struct {
+		Plugins []PluginResponse `json:"plugins"`
+	}
+	if err := json.Unmarshal(ctx.Response.Body(), &response); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(response.Plugins) != 2 {
+		t.Fatalf("expected two plugins, got %d", len(response.Plugins))
+	}
+	broken := response.Plugins[1]
+	if broken.Status.Status != schemas.PluginStatusError || len(broken.Status.Logs) == 0 {
+		t.Fatalf("corrupt row is not actionable: %#v", broken.Status)
 	}
 }
 

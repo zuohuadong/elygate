@@ -8,6 +8,7 @@ import {
 	managedPluginFromRecord,
 	movePluginSequence,
 	pluginDraftFromRecord,
+	shouldClosePluginModalFromBackdrop,
 } from './plugin-management';
 
 const plugin = managedPluginFromRecord({
@@ -72,6 +73,13 @@ describe('plugin management helpers', () => {
 			name: 'custom', kind: 'custom', path: '/plugin.so', enabled: true,
 			configJson: '[]', placement: 'post_builtin', order: 0,
 		})).toThrow('config-object');
+	});
+
+	test('closes the editor only for a primary pointer press directly on the backdrop', () => {
+		expect(shouldClosePluginModalFromBackdrop({ targetIsBackdrop: true, button: 0, isSaving: false })).toBe(true);
+		expect(shouldClosePluginModalFromBackdrop({ targetIsBackdrop: false, button: 0, isSaving: false })).toBe(false);
+		expect(shouldClosePluginModalFromBackdrop({ targetIsBackdrop: true, button: 1, isSaving: false })).toBe(false);
+		expect(shouldClosePluginModalFromBackdrop({ targetIsBackdrop: true, button: 0, isSaving: true })).toBe(false);
 	});
 
 	test('moves custom plugins across the built-in boundary and preserves full updates', () => {

@@ -1653,15 +1653,15 @@ func (s *RDBConfigStore) GetMCPClientsPaginated(ctx context.Context, params MCPC
 	if params.Disabled != nil {
 		baseQuery = baseQuery.Where("disabled = ?", *params.Disabled)
 	}
-	// Runtime state filter, resolved by the caller into a connected-id set.
+	// Runtime state filter, resolved by the caller into a healthy-id set.
 	if params.StateInclude != nil {
 		if *params.StateInclude {
-			// connected: must be in the connected set. An empty set (nothing
-			// connected) yields IN (NULL) → matches no rows, which is correct.
+			// healthy: must be in the healthy set. An empty set yields IN
+			// (NULL), matching no rows, which is correct.
 			baseQuery = baseQuery.Where("client_id IN ?", params.StateClientIDs)
 		} else if len(params.StateClientIDs) > 0 {
-			// disconnected: everything not currently connected. An empty
-			// connected set means all rows are disconnected → no constraint.
+			// unstable: everything outside the healthy set. An empty healthy
+			// set means every row is unstable, so no constraint is needed.
 			baseQuery = baseQuery.Where("client_id NOT IN ?", params.StateClientIDs)
 		}
 	}

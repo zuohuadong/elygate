@@ -85,10 +85,10 @@ type MCPClientsQueryParams struct {
 	IsCodeModeClient *bool    // nil = no filter; true/false = filter on is_code_mode_client
 	Disabled         *bool    // nil = no filter; true/false = filter on disabled
 
-	// Runtime connection-state filter. State is not persisted, so the caller
-	// resolves the set of currently-connected client_ids from the engine and
-	// passes it here. StateInclude nil = no filter; true = client_id IN set
-	// (connected); false = client_id NOT IN set (disconnected).
+	// Runtime health-state filter. State is not persisted, so the caller resolves
+	// the set of currently healthy client_ids from the engine and passes it here.
+	// StateInclude nil = no filter; true = client_id IN set (healthy); false =
+	// client_id NOT IN set (unstable).
 	StateClientIDs []string
 	StateInclude   *bool
 

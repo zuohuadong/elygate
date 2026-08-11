@@ -51,6 +51,9 @@ describe('columnValueFor cell rendering', () => {
 		expect(columnValueFor('zh-CN', 'scope', 'global')).toBe('全局');
 		expect(columnValueFor('zh-CN', 'scope_kind', 'provider_key')).toBe('供应商密钥');
 		expect(columnValueFor('zh-CN', 'match_type', 'prefix')).toBe('前缀匹配');
+		expect(columnValueFor('zh-CN', 'auth_type', 'token_exchange')).toBe('委托令牌交换');
+		expect(columnValueFor('zh-CN', 'mcp_state', 'healthy')).toBe('健康');
+		expect(columnValueFor('zh-CN', 'mcp_library_source', 'remote')).toBe('远程目录');
 		expect(columnValueFor('en', 'match_type', 'regex')).toBe('Regex');
 	});
 

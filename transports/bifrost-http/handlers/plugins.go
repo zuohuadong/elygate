@@ -1,12 +1,14 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
 	"slices"
+	"sync"
 
 	"github.com/fasthttp/router"
 	"github.com/maximhq/bifrost/core/schemas"
@@ -36,6 +38,29 @@ type PluginsLoader interface {
 type PluginsHandler struct {
 	configStore   configstore.ConfigStore
 	pluginsLoader PluginsLoader
+	mutationMu    sync.Mutex
+}
+
+// PluginConfigurationError marks activation failures caused while constructing a
+// plugin from administrator-supplied configuration. Runtime synchronization errors
+// deliberately remain untyped and are reported as server failures after rollback.
+type PluginConfigurationError struct {
+	Err error
+}
+
+func (e *PluginConfigurationError) Error() string { return e.Err.Error() }
+func (e *PluginConfigurationError) Unwrap() error { return e.Err }
+
+type bestEffortPluginsStore interface {
+	GetPluginsBestEffort(ctx context.Context) ([]*configstoreTables.TablePlugin, map[string]error, error)
+}
+
+type directPluginDeleteStore interface {
+	DeletePluginDirect(ctx context.Context, name string) error
+}
+
+type directPluginRecordStore interface {
+	PluginRecordExistsDirect(ctx context.Context, name string) (bool, error)
 }
 
 // NewPluginsHandler creates a new PluginsHandler
@@ -82,15 +107,91 @@ func (h *PluginsHandler) normalizePluginConfig(name string, config map[string]an
 // expandPluginConfigForAPI calls the loaded plugin's RedactConfig if it implements
 // ConfigMarshallerPlugin. Returns config unchanged if the plugin is not loaded or
 // does not implement the interface. Returns an error if redaction fails.
-func (h *PluginsHandler) expandPluginConfigForAPI(name string, config map[string]any) (map[string]any, error) {
+func (h *PluginsHandler) expandPluginConfigForAPI(name string, config map[string]any) (result map[string]any, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			result = nil
+			err = fmt.Errorf("plugin config redaction panicked")
+		}
+	}()
+
 	out, err := h.pluginsLoader.ExpandPluginConfigForAPI(name, config)
 	if err != nil {
 		return nil, err
 	}
+	result = config
 	if out != nil {
-		return out, nil
+		result = out
 	}
-	return config, nil
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		return nil, fmt.Errorf("plugin config redaction returned invalid JSON: %w", err)
+	}
+	// Decode the validated bytes back to plain JSON values. A custom json.Marshaler
+	// supplied by a plugin must not run a second time inside SendJSON.
+	var safeResult map[string]any
+	decoder := json.NewDecoder(bytes.NewReader(encoded))
+	decoder.UseNumber()
+	if err := decoder.Decode(&safeResult); err != nil {
+		return nil, fmt.Errorf("plugin config redaction returned invalid JSON: %w", err)
+	}
+	return safeResult, nil
+}
+
+func (h *PluginsHandler) pluginRecordExists(ctx context.Context, name string) (bool, error) {
+	if store, ok := h.configStore.(directPluginRecordStore); ok {
+		return store.PluginRecordExistsDirect(ctx, name)
+	}
+	if _, err := h.configStore.GetPlugin(ctx, name); err != nil {
+		if errors.Is(err, configstore.ErrNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func (h *PluginsHandler) deletePluginRecord(ctx context.Context, name string) error {
+	if store, ok := h.configStore.(directPluginDeleteStore); ok {
+		return store.DeletePluginDirect(ctx, name)
+	}
+	return h.configStore.DeletePlugin(ctx, name)
+}
+
+func (h *PluginsHandler) removePluginRuntime(ctx context.Context, name string) error {
+	if err := h.pluginsLoader.RemovePlugin(ctx, name); err != nil && !errors.Is(err, plugins.ErrPluginNotFound) {
+		return err
+	}
+	return nil
+}
+
+func (h *PluginsHandler) rollbackPluginChange(ctx *fasthttp.RequestCtx, name string, previous *configstoreTables.TablePlugin) error {
+	var rollbackErrors []error
+	if previous == nil {
+		if err := h.removePluginRuntime(ctx, name); err != nil {
+			// Keep the persisted row so a later DELETE can retry runtime cleanup.
+			return fmt.Errorf("remove candidate runtime: %w", err)
+		}
+		if err := h.deletePluginRecord(ctx, name); err != nil && !errors.Is(err, configstore.ErrNotFound) {
+			rollbackErrors = append(rollbackErrors, fmt.Errorf("delete candidate config: %w", err))
+		}
+		return errors.Join(rollbackErrors...)
+	}
+
+	if err := h.configStore.UpdatePlugin(ctx, previous); err != nil {
+		rollbackErrors = append(rollbackErrors, fmt.Errorf("restore previous config: %w", err))
+	}
+	if previous.Enabled {
+		if err := h.pluginsLoader.ReloadPlugin(ctx, previous.Name, previous.Path, previous.Config, previous.Placement, previous.Order); err != nil {
+			rollbackErrors = append(rollbackErrors, fmt.Errorf("restore previous runtime: %w", err))
+		}
+	} else {
+		ctx.SetUserValue(PluginDisabledKey, true)
+		if err := h.removePluginRuntime(ctx, previous.Name); err != nil {
+			rollbackErrors = append(rollbackErrors, fmt.Errorf("restore disabled runtime: %w", err))
+		}
+	}
+	return errors.Join(rollbackErrors...)
 }
 
 // RegisterRoutes registers the routes for the PluginsHandler
@@ -240,7 +341,13 @@ func (h *PluginsHandler) getPlugins(ctx *fasthttp.RequestCtx) {
 		})
 		return
 	}
-	plugins, err := h.configStore.GetPlugins(ctx)
+	plugins, diagnostics, err := func() ([]*configstoreTables.TablePlugin, map[string]error, error) {
+		if store, ok := h.configStore.(bestEffortPluginsStore); ok {
+			return store.GetPluginsBestEffort(ctx)
+		}
+		plugins, err := h.configStore.GetPlugins(ctx)
+		return plugins, nil, err
+	}()
 	if err != nil {
 		logger.Error("failed to get plugins: %v", err)
 		SendError(ctx, 500, "Failed to retrieve plugins")
@@ -250,7 +357,13 @@ func (h *PluginsHandler) getPlugins(ctx *fasthttp.RequestCtx) {
 	finalPlugins := []PluginResponse{}
 	seen := map[string]struct{}{}
 	for _, plugin := range plugins {
-		finalPlugins = append(finalPlugins, h.buildPluginResponseWithStatuses(plugin, pluginStatuses))
+		response := h.buildPluginResponseWithStatuses(plugin, pluginStatuses)
+		if diagnostics[plugin.Name] != nil {
+			response.Config = map[string]any{}
+			response.Status.Status = schemas.PluginStatusError
+			response.Status.Logs = append(response.Status.Logs, "Stored plugin configuration is unreadable. Delete and recreate this plugin configuration.")
+		}
+		finalPlugins = append(finalPlugins, response)
 		seen[plugin.Name] = struct{}{}
 	}
 	statusNames := make([]string, 0, len(pluginStatuses))
@@ -335,6 +448,8 @@ func (h *PluginsHandler) createPlugin(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, 400, "Plugins creation is  not supported when configstore is disabled")
 		return
 	}
+	h.mutationMu.Lock()
+	defer h.mutationMu.Unlock()
 	var request CreatePluginRequest
 	if err := json.Unmarshal(ctx.PostBody(), &request); err != nil {
 		logger.Error("failed to unmarshal create plugin request: %v", err)
@@ -408,10 +523,17 @@ func (h *PluginsHandler) createPlugin(ctx *fasthttp.RequestCtx) {
 	if request.Enabled {
 		if err := h.pluginsLoader.ReloadPlugin(ctx, request.Name, request.Path, normalizedConfig, request.Placement, request.Order); err != nil {
 			logger.Error("failed to load plugin: %v", err)
-			if rbErr := h.configStore.DeletePlugin(ctx, request.Name); rbErr != nil {
-				logger.Error("failed to rollback plugin creation: %v", rbErr)
+			if rollbackErr := h.rollbackPluginChange(ctx, request.Name, nil); rollbackErr != nil {
+				logger.Error("failed to rollback plugin creation after load error %v: %v", err, rollbackErr)
+				SendError(ctx, fasthttp.StatusInternalServerError, "Plugin initialization failed and automatic rollback was incomplete; inspect the plugin status before retrying")
+				return
 			}
-			SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("Plugin created in database but failed to load: %v", err))
+			var configurationError *PluginConfigurationError
+			if errors.As(err, &configurationError) {
+				SendError(ctx, fasthttp.StatusUnprocessableEntity, fmt.Sprintf("Invalid plugin configuration; no changes were applied: %v", err))
+			} else {
+				SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("Plugin activation failed; the candidate was rolled back: %v", err))
+			}
 			return
 		}
 	}
@@ -436,6 +558,8 @@ func (h *PluginsHandler) updatePlugin(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, 400, "Plugins update is not supported when configstore is disabled")
 		return
 	}
+	h.mutationMu.Lock()
+	defer h.mutationMu.Unlock()
 	// Safely validate the "name" parameter
 	nameValue := ctx.UserValue("name")
 	if nameValue == nil {
@@ -456,33 +580,6 @@ func (h *PluginsHandler) updatePlugin(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, 400, "Empty 'name' parameter not allowed")
 		return
 	}
-	var plugin *configstoreTables.TablePlugin
-	var err error
-	// Fetch the existing plugin to enable config merging below.
-	var existingPlugin *configstoreTables.TablePlugin
-	existingPlugin, err = h.configStore.GetPlugin(ctx, name)
-	if err != nil {
-		// If doesn't exist, create it
-		if errors.Is(err, configstore.ErrNotFound) {
-			plugin = &configstoreTables.TablePlugin{
-				Name:     name,
-				Enabled:  false,
-				Config:   map[string]any{},
-				Path:     nil,
-				IsCustom: false,
-			}
-			if err := h.configStore.CreatePlugin(ctx, plugin); err != nil {
-				logger.Error("failed to create plugin: %v", err)
-				SendError(ctx, 500, "Failed to create plugin")
-				return
-			}
-		} else {
-			logger.Error("failed to get plugin: %v", err)
-			SendError(ctx, 500, "Failed to update plugin")
-			return
-		}
-	}
-
 	// Unmarshalling the request body
 	var request UpdatePluginRequest
 	if err := json.Unmarshal(ctx.PostBody(), &request); err != nil {
@@ -519,6 +616,20 @@ func (h *PluginsHandler) updatePlugin(ctx *fasthttp.RequestCtx) {
 			return
 		}
 	}
+
+	// Fetch the previous row only after the complete request has been parsed and
+	// validated. UpdatePlugin already supports an absent row, so a rejected request
+	// must never leave an empty placeholder behind.
+	existingPlugin, err := h.configStore.GetPlugin(ctx, name)
+	if err != nil {
+		if errors.Is(err, configstore.ErrNotFound) {
+			existingPlugin = nil
+		} else {
+			logger.Error("failed to get plugin: %v", err)
+			SendError(ctx, fasthttp.StatusInternalServerError, "Failed to update plugin")
+			return
+		}
+	}
 	// Merge incoming config over the existing DB config so fields unknown to the
 	// calling form (e.g. plugin_span_filter set by a separate UI sheet) are not wiped.
 	mergedConfig := request.Config
@@ -539,8 +650,7 @@ func (h *PluginsHandler) updatePlugin(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, fasthttp.StatusBadRequest, fmt.Sprintf("Invalid plugin configuration: %v", err))
 		return
 	}
-	// Updating the plugin
-	if err := h.configStore.UpdatePlugin(ctx, &configstoreTables.TablePlugin{
+	candidate := &configstoreTables.TablePlugin{
 		Name:      name,
 		Enabled:   request.Enabled,
 		Config:    mergedConfig,
@@ -548,42 +658,42 @@ func (h *PluginsHandler) updatePlugin(ctx *fasthttp.RequestCtx) {
 		IsCustom:  !isBuiltin,
 		Placement: request.Placement,
 		Order:     request.Order,
-	}); err != nil {
+	}
+	if err := h.configStore.UpdatePlugin(ctx, candidate); err != nil {
 		logger.Error("failed to update plugin: %v", err)
 		SendError(ctx, 500, "Failed to update plugin")
 		return
 	}
-	plugin, err = h.configStore.GetPlugin(ctx, name)
-	if err != nil {
-		if errors.Is(err, configstore.ErrNotFound) {
-			SendError(ctx, fasthttp.StatusNotFound, "Plugin not found")
-			return
-		}
-		logger.Error("failed to get plugin: %v", err)
-		SendError(ctx, 500, "Failed to retrieve plugin")
-		return
-	}
-	// We reload the plugin if its enabled, otherwise we stop it
+
+	// Activate only after persistence succeeds. Any activation failure restores both
+	// the previous row and the previous runtime so a bad candidate cannot poison the
+	// next list, edit, disable, or delete operation.
+	var runtimeErr error
 	if request.Enabled {
-		if err := h.pluginsLoader.ReloadPlugin(ctx, name, request.Path, mergedConfig, request.Placement, request.Order); err != nil {
-			logger.Error("failed to load plugin: %v", err)
-			SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("Plugin updated in database but failed to load: %v", err))
-			return
-		}
+		runtimeErr = h.pluginsLoader.ReloadPlugin(ctx, name, request.Path, mergedConfig, request.Placement, request.Order)
 	} else {
 		ctx.SetUserValue(PluginDisabledKey, true)
-		if err := h.pluginsLoader.RemovePlugin(ctx, name); err != nil {
-			if !errors.Is(err, plugins.ErrPluginNotFound) {
-				SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("Plugin updated in database but failed to stop: %v", err))
-				return
-			}
-			// If not found then we don't need to do anything
+		runtimeErr = h.removePluginRuntime(ctx, name)
+	}
+	if runtimeErr != nil {
+		logger.Error("failed to apply plugin runtime change: %v", runtimeErr)
+		if rollbackErr := h.rollbackPluginChange(ctx, name, existingPlugin); rollbackErr != nil {
+			logger.Error("failed to rollback plugin update after runtime error %v: %v", runtimeErr, rollbackErr)
+			SendError(ctx, fasthttp.StatusInternalServerError, "Plugin initialization failed and automatic rollback was incomplete; inspect the plugin status before retrying")
+			return
 		}
+		var configurationError *PluginConfigurationError
+		if errors.As(runtimeErr, &configurationError) {
+			SendError(ctx, fasthttp.StatusUnprocessableEntity, fmt.Sprintf("Invalid plugin configuration; previous configuration was restored: %v", runtimeErr))
+		} else {
+			SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("Plugin activation failed; previous configuration was restored: %v", runtimeErr))
+		}
+		return
 	}
 
 	SendJSON(ctx, map[string]interface{}{
 		"message": "Plugin updated successfully",
-		"plugin":  h.buildPluginResponse(ctx, plugin),
+		"plugin":  h.buildPluginResponse(ctx, candidate),
 	})
 }
 
@@ -593,6 +703,8 @@ func (h *PluginsHandler) deletePlugin(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, 400, "Plugins deletion is not supported when configstore is disabled")
 		return
 	}
+	h.mutationMu.Lock()
+	defer h.mutationMu.Unlock()
 	// Safely validate the "name" parameter
 	nameValue := ctx.UserValue("name")
 	if nameValue == nil {
@@ -614,21 +726,25 @@ func (h *PluginsHandler) deletePlugin(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	if err := h.configStore.DeletePlugin(ctx, name); err != nil {
-		if errors.Is(err, configstore.ErrNotFound) {
-			SendError(ctx, fasthttp.StatusNotFound, "Plugin not found")
-			return
-		}
-		logger.Error("failed to delete plugin: %v", err)
-		SendError(ctx, 500, "Failed to delete plugin")
+	exists, err := h.pluginRecordExists(ctx, name)
+	if err != nil {
+		logger.Error("failed to inspect plugin before delete: %v", err)
+		SendError(ctx, fasthttp.StatusInternalServerError, "Failed to inspect stored plugin configuration")
+		return
+	}
+	if !exists {
+		SendError(ctx, fasthttp.StatusNotFound, "Plugin not found")
 		return
 	}
 
-	if err := h.pluginsLoader.RemovePlugin(ctx, name); err != nil {
-		if !errors.Is(err, plugins.ErrPluginNotFound) {
-			SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("Plugin deleted in database but failed to stop: %v", err))
-			return
-		}
+	if err := h.removePluginRuntime(ctx, name); err != nil {
+		SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("Plugin runtime could not be stopped; no stored configuration was deleted: %v", err))
+		return
+	}
+	if err := h.deletePluginRecord(ctx, name); err != nil && !errors.Is(err, configstore.ErrNotFound) {
+		logger.Error("failed to delete plugin after stopping runtime: %v", err)
+		SendError(ctx, 500, "Plugin runtime was stopped but its stored configuration could not be deleted; retry the delete operation")
+		return
 	}
 	SendJSON(ctx, map[string]interface{}{
 		"message": "Plugin deleted successfully",

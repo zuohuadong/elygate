@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"runtime"
 	"slices"
@@ -14,10 +15,48 @@ import (
 	"github.com/maximhq/bifrost/framework/configstore"
 	configstoreTables "github.com/maximhq/bifrost/framework/configstore/tables"
 	"github.com/maximhq/bifrost/framework/modelcatalog"
+	dynamicPlugins "github.com/maximhq/bifrost/framework/plugins"
 	"github.com/maximhq/bifrost/plugins/governance"
 	"github.com/maximhq/bifrost/transports/bifrost-http/handlers"
 	"github.com/maximhq/bifrost/transports/bifrost-http/lib"
 )
+
+type disabledConfigMarshallerPlugin struct{ name string }
+
+func (p disabledConfigMarshallerPlugin) GetName() string { return p.name }
+func (disabledConfigMarshallerPlugin) Cleanup() error    { return nil }
+func (disabledConfigMarshallerPlugin) MarshalConfigForStorage(config map[string]any) (map[string]any, error) {
+	return config, nil
+}
+func (disabledConfigMarshallerPlugin) RedactConfig(config map[string]any) (map[string]any, error) {
+	return config, nil
+}
+
+func TestRemovePluginPermanentlyCleansDisabledRuntimeMetadata(t *testing.T) {
+	const (
+		name        = "disabled-plugin"
+		displayName = "Disabled Plugin"
+	)
+	config := &lib.Config{}
+	config.UpdatePluginOverallStatus(name, displayName, schemas.PluginStatusDisabled, nil, nil)
+	config.RegisterConfigMarshaller(name, disabledConfigMarshallerPlugin{name: name})
+	server := &BifrostHTTPServer{Config: config}
+
+	if err := server.RemovePlugin(context.Background(), displayName); err != nil {
+		t.Fatalf("remove disabled plugin: %v", err)
+	}
+	if _, ok := config.GetPluginStatus()[name]; ok {
+		t.Fatal("disabled plugin status was not removed")
+	}
+	if marshallers := config.ConfigMarshallers.Load(); marshallers != nil {
+		if _, ok := (*marshallers)[name]; ok {
+			t.Fatal("disabled plugin config marshaller was not removed")
+		}
+	}
+	if err := server.RemovePlugin(context.Background(), "Unknown Plugin"); !errors.Is(err, dynamicPlugins.ErrPluginNotFound) {
+		t.Fatalf("unknown plugin error = %v, want ErrPluginNotFound", err)
+	}
+}
 
 // reloadVirtualKeyConfigStore provides the persistence calls used by ReloadVirtualKey.
 type reloadVirtualKeyConfigStore struct {

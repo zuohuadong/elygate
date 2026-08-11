@@ -9,6 +9,7 @@
 		MCP_SERVER_AUTH_MODES,
 		configFormFromDocument,
 		mergeConfigForm,
+		persistAndReloadConfigDocument,
 		type ConfigForm,
 	} from '../lib/config-form';
 	import SwitchField from '../lib/fields/SwitchField.svelte';
@@ -60,12 +61,16 @@
 	let isLoading = $state(true);
 	let isSaving = $state(false);
 
+	function connectionValue(key: string): boolean | null {
+		return typeof rawConfig[key] === 'boolean' ? rawConfig[key] : null;
+	}
+
 	const statusItems = $derived.by(() => [
-		{ key: 'database', ok: rawConfig.is_db_connected === true, kind: 'connected' as const },
-		{ key: 'logs', ok: rawConfig.is_logs_connected === true, kind: 'connected' as const },
-		{ key: 'cache', ok: rawConfig.is_cache_connected === true, kind: 'connected' as const },
-		{ key: 'objectStorage', ok: rawConfig.is_object_storage_connected === true, kind: 'connected' as const },
-		{ key: 'git', ok: rawConfig.is_git_available === true, kind: 'available' as const },
+		{ key: 'database', ok: connectionValue('is_db_connected'), kind: 'connected' as const },
+		{ key: 'logs', ok: connectionValue('is_logs_connected'), kind: 'connected' as const },
+		{ key: 'cache', ok: connectionValue('is_cache_connected'), kind: 'connected' as const },
+		{ key: 'objectStorage', ok: connectionValue('is_object_storage_connected'), kind: 'connected' as const },
+		{ key: 'git', ok: connectionValue('is_git_available'), kind: 'available' as const },
 	]);
 
 	const restartRequired = $derived(
@@ -134,9 +139,17 @@
 				mode === 'json'
 					? parseJsonObject(jsonText, i18n.t('elygate.config'), i18n.t('elygate.invalidJson'))
 					: mergeConfigForm(rawConfig, form);
-			const response = (await requestJson('/api/config', { method: 'PUT', body: JSON.stringify(body) })) as JsonRecord;
-			applyDocument(response);
-			notice = i18n.t('elygate.saveSuccess');
+			const result = await persistAndReloadConfigDocument(
+				body,
+				(document) => requestJson('/api/config', { method: 'PUT', body: JSON.stringify(document) }),
+				() => requestJson('/api/config'),
+			);
+			if (result.document) {
+				applyDocument(result.document);
+				notice = i18n.t('elygate.saveSuccess');
+			} else {
+				notice = i18n.t('elygate.configSavedRefreshFailed');
+			}
 		} catch (cause) {
 			error = displayError(cause, i18n.t('elygate.operationFailed'));
 		} finally {
@@ -195,10 +208,12 @@
 	<div class="status-grid" aria-label={i18n.t('elygate.connectionStatus')}>
 		{#each statusItems as item (item.key)}
 			<div class="status-item">
-				<span class={['dot', item.ok ? 'ok' : 'off']}></span>
+				<span class={['dot', item.ok === true ? 'ok' : item.ok === false ? 'off' : 'unknown']}></span>
 				<span class="status-name">{i18n.t(`elygate.conn.${item.key}`)}</span>
-				<strong class={item.ok ? 'ok-text' : 'off-text'}>
-					{item.ok
+				<strong class={item.ok === true ? 'ok-text' : item.ok === false ? 'off-text' : 'unknown-text'}>
+					{item.ok === null
+						? i18n.t(isLoading ? 'elygate.conn.checking' : 'elygate.conn.unknown')
+						: item.ok
 						? i18n.t(item.kind === 'connected' ? 'elygate.conn.connected' : 'elygate.conn.available')
 						: i18n.t(item.kind === 'connected' ? 'elygate.conn.disconnected' : 'elygate.conn.unavailable')}
 				</strong>
@@ -320,19 +335,21 @@
 	button.primary { background: var(--primary); border-color: var(--primary); color: var(--primary-foreground); }
 	button:disabled { cursor: wait; opacity: .55; }
 
-	.status-grid { display: grid; gap: .5rem; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); margin-bottom: 1.25rem; }
-	.status-item { align-items: center; border: 1px solid var(--border); border-radius: .55rem; display: flex; gap: .45rem; padding: .55rem .7rem; }
+	.status-grid { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1.25rem; }
+	.status-item { align-items: center; border: 1px solid var(--border); border-radius: .55rem; display: grid; flex: 1 1 170px; gap: .45rem; grid-template-columns: auto minmax(0, 1fr) auto; min-height: 2.65rem; padding: .55rem .7rem; }
 	.dot { border-radius: 50%; flex: none; height: .5rem; width: .5rem; }
 	.dot.ok { background: var(--primary); }
 	.dot.off { background: var(--muted-foreground); opacity: .5; }
-	.status-name { color: var(--foreground); font-size: .78rem; font-weight: 600; }
-	.status-item strong { font-size: .72rem; font-weight: 600; margin-left: auto; }
+	.dot.unknown { background: var(--muted-foreground); opacity: .3; }
+	.status-name { color: var(--foreground); font-size: .78rem; font-weight: 600; min-width: 0; }
+	.status-item strong { font-size: .72rem; font-weight: 600; white-space: nowrap; }
 	.ok-text { color: var(--primary); }
 	.off-text { color: var(--muted-foreground); }
+	.unknown-text { color: var(--muted-foreground); }
 
 	form { display: grid; gap: 1rem; }
-	.section-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); align-items: start; }
-	.config-section { border: 1px solid var(--border); border-radius: .65rem; padding: .35rem 1rem .8rem; }
+	.section-grid { align-items: stretch; display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); }
+	.config-section { border: 1px solid var(--border); border-radius: .65rem; height: 100%; padding: .35rem 1rem .8rem; }
 	.config-section h2 { font-size: .95rem; margin: .65rem 0 .25rem; }
 	.json-editor { color: var(--foreground); display: grid; font-size: .85rem; font-weight: 650; gap: .35rem; }
 	textarea { background: var(--background); border: 1px solid var(--border); border-radius: .65rem; color: var(--foreground); font: 0.8rem ui-monospace, SFMono-Regular, Menlo, monospace; padding: .85rem; resize: vertical; width: 100%; }
@@ -350,5 +367,8 @@
 		.heading-actions > button { flex: 1; }
 		.mode-switch { flex: 1; }
 		.mode-switch button { flex: 1; }
+	}
+	@media (max-width: 480px) {
+		.status-item { flex-basis: 100%; }
 	}
 </style>

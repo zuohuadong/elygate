@@ -20,6 +20,26 @@ describe('model limit payload', () => {
 		});
 	});
 
+	test('accepts numeric values emitted by Svelte number inputs', () => {
+		const draft = {
+			...base,
+			budgets: [{ maxLimit: 25.5, resetDuration: '1M' }],
+			tokenMaxLimit: 10_000,
+			requestMaxLimit: 200,
+		};
+		expect(buildModelLimitPayload(draft)).toMatchObject({
+			budgets: [{ max_limit: 25.5, reset_duration: '1M' }],
+			rate_limit: { token_max_limit: 10_000, request_max_limit: 200 },
+		});
+	});
+
+	test('treats cleared number inputs as empty and rejects non-finite values', () => {
+		const cleared = { ...base, tokenMaxLimit: undefined, requestMaxLimit: 20 };
+		expect(buildModelLimitPayload(cleared)).toMatchObject({ rate_limit: { request_max_limit: 20 } });
+		const invalid = { ...base, tokenMaxLimit: Number.NaN };
+		expect(() => buildModelLimitPayload(invalid)).toThrow(ModelLimitError);
+	});
+
 	test('requires a scope target and at least one limit', () => {
 		for (const [draft, issue] of [
 			[{ ...base, scope: 'virtual_key', budgets: [{ maxLimit: '1', resetDuration: '1M' }] }, 'scope-required'],

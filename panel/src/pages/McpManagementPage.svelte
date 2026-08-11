@@ -4,6 +4,7 @@
 	import { displayValue, getTotal, isJsonRecord, requestJson, type JsonRecord } from '../lib/api';
 	import { displayError, parseJsonObject, prettyJson, csv } from '../lib/forms';
 	import { isSafeOAuthRedirect } from '../lib/oauth-consent';
+	import { columnValueFor } from '../lib/columns';
 	import {
 		buildLibraryClientPayload,
 		buildMcpClientPayload,
@@ -11,7 +12,11 @@
 		buildMcpLibraryQuery,
 		buildMcpSessionQuery,
 		buildOAuthGrantQuery,
+		createCoalescedRefresh,
 		createEmptyMcpClientDraft,
+		localizeMcpCatalogDescription,
+		localizeMcpCatalogValue,
+		refreshMcpData,
 		type McpClientDraft,
 	} from '../lib/mcp-management';
 
@@ -84,6 +89,13 @@
 		const value = filterData[key];
 		return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 	}
+	function locale(): 'zh-CN' | 'en' { return i18n.locale === 'zh-CN' ? 'zh-CN' : 'en'; }
+	function enumLabel(column: string, value: unknown): string { return columnValueFor(locale(), column, value); }
+	function catalogValue(field: 'category' | 'source' | 'tag', value: unknown): string { return localizeMcpCatalogValue(locale(), field, value); }
+	function catalogDescription(record: JsonRecord): string { return localizeMcpCatalogDescription(locale(), record.name, record.category, record.description, record.metadata); }
+	function catalogTags(value: unknown): string {
+		return Array.isArray(value) ? value.map((item) => catalogValue('tag', item)).join(', ') : catalogValue('tag', value);
+	}
 	function normalizeName(value: string): string {
 		const normalized = value.trim().replace(/[^a-zA-Z0-9_]/g, '_').replace(/^[0-9]+/, 'server_').slice(0, 50);
 		return normalized.length >= 3 ? normalized : `mcp_${normalized || 'server'}`;
@@ -123,23 +135,64 @@
 		}
 	}
 
-	async function loadLibraryMetadata(): Promise<void> {
-		if (mode !== 'library') return;
-		const [filtersPayload, clientsPayload] = await Promise.all([
-			requestJson<unknown>('/api/mcp/library/filterdata').catch(() => ({})),
-			requestJson<unknown>('/api/mcp/clients?limit=100&offset=0').catch(() => ({})),
-		]);
-		filterData = isJsonRecord(filtersPayload) ? filtersPayload : {};
-		installedNames = new Set(recordList(clientsPayload, 'clients').flatMap((record) => {
-			const config = clientConfig(record);
-			return [stringValue(config.name).toLowerCase(), stringValue(isJsonRecord(config.connection_string) ? config.connection_string.value : '').toLowerCase()].filter(Boolean);
-		}));
+	async function loadAllMcpClients(): Promise<JsonRecord[]> {
+		const clients: JsonRecord[] = [];
+		const limit = 100;
+		let clientOffset = 0;
+		while (true) {
+			const payload = await requestJson<unknown>(`/api/mcp/clients?limit=${limit}&offset=${clientOffset}`);
+			const page = recordList(payload, 'clients');
+			clients.push(...page);
+			const expectedTotal = getTotal(payload, clients.length);
+			if (page.length === 0 || clients.length >= expectedTotal || page.length < limit) return clients;
+			clientOffset += page.length;
+		}
 	}
+
+	async function loadFilterMetadata(): Promise<void> {
+		const requestedMode = mode;
+		if (mode === 'clients') {
+			let filtersPayload: unknown;
+			try {
+				filtersPayload = await requestJson<unknown>('/api/mcp/clients/filterdata');
+			} catch {
+				return;
+			}
+			if (mode !== requestedMode) return;
+			if (!isJsonRecord(filtersPayload)) return;
+			filterData = filtersPayload;
+			connectionTypes = connectionTypes.filter((item) => facet('connection_types').includes(item));
+			authTypes = authTypes.filter((item) => facet('auth_types').includes(item));
+			states = states.filter((item) => facet('states').includes(item));
+			return;
+		}
+		if (mode !== 'library') { filterData = {}; return; }
+		const [filtersResult, clientsResult] = await Promise.allSettled([
+			requestJson<unknown>('/api/mcp/library/filterdata'),
+			loadAllMcpClients(),
+		]);
+		if (mode !== requestedMode) return;
+		if (filtersResult.status === 'fulfilled' && isJsonRecord(filtersResult.value)) {
+			filterData = filtersResult.value;
+			connectionTypes = connectionTypes.filter((item) => facet('connection_types').includes(item));
+			authTypes = authTypes.filter((item) => facet('auth_types').includes(item));
+			categories = categories.filter((item) => facet('categories').includes(item));
+			tags = tags.filter((item) => facet('tags').includes(item));
+		}
+		if (clientsResult.status === 'fulfilled') {
+			installedNames = new Set(clientsResult.value.flatMap((record) => {
+				const config = clientConfig(record);
+				return [stringValue(config.name).toLowerCase(), stringValue(isJsonRecord(config.connection_string) ? config.connection_string.value : '').toLowerCase()].filter(Boolean);
+			}));
+		}
+	}
+
+	const refreshData = createCoalescedRefresh((reset) => refreshMcpData(reset, loadFilterMetadata, load));
 
 	function resetFilters(): void {
 		search = ''; identity = ''; connectionTypes = []; authTypes = []; states = []; kinds = []; statuses = []; authModes = []; categories = []; tags = [];
 		codeMode = ''; disabled = ''; allVirtualKeys = false;
-		void load(true);
+		void refreshData(true);
 	}
 
 	function openCreateClient(): void {
@@ -201,7 +254,7 @@
 			modal = null;
 			notice = editingClientId ? text('MCP 客户端已更新。', 'MCP client updated.') : text('MCP 客户端已创建。', 'MCP client created.');
 			if (isJsonRecord(response) && typeof response.authorize_url === 'string' && isSafeOAuthRedirect(response.authorize_url, window.location.href)) window.location.assign(response.authorize_url);
-			else await load();
+			else await refreshData();
 		} catch (cause) {
 			error = validationMessage(cause);
 		} finally { isSaving = false; }
@@ -218,7 +271,7 @@
 			else if (action === 'toggle') await requestJson<unknown>(`/api/mcp/client/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify({ disabled: config.disabled !== true }) });
 			else await requestJson<unknown>(`/api/mcp/client/${encodeURIComponent(id)}`, { method: 'DELETE' });
 			notice = action === 'delete' ? text('客户端已删除。', 'Client deleted.') : action === 'toggle' ? text('客户端状态已更新。', 'Client status updated.') : text('已请求重新连接。', 'Reconnect requested.');
-			await load();
+			await refreshData();
 		} catch (cause) { error = displayError(cause, text('操作失败。', 'Action failed.')); }
 		finally { busyId = ''; }
 	}
@@ -276,7 +329,7 @@
 			if (libraryDraft.connectionType === 'stdio') payload.stdio_config = { command: libraryDraft.command.trim(), args: csv(libraryDraft.args), envs: csv(libraryDraft.envs) };
 			else payload.connection_url = libraryDraft.connectionUrl.trim();
 			await requestJson<unknown>('/api/mcp/library', { method: 'POST', body: JSON.stringify(payload) });
-			modal = null; notice = text('自定义 MCP 目录项已发布。', 'Custom MCP library entry published.'); await Promise.all([load(), loadLibraryMetadata()]);
+			modal = null; notice = text('自定义 MCP 目录项已发布。', 'Custom MCP library entry published.'); await refreshData();
 		} catch (cause) { error = displayError(cause, text('发布失败。', 'Failed to publish.')); }
 		finally { isSaving = false; }
 	}
@@ -289,7 +342,7 @@
 			const response = await requestJson<unknown>('/api/mcp/client', { method: 'POST', body: JSON.stringify(payload) });
 			modal = null; notice = text('MCP 服务已安装。', 'MCP server installed.');
 			if (isJsonRecord(response) && typeof response.authorize_url === 'string' && isSafeOAuthRedirect(response.authorize_url, window.location.href)) window.location.assign(response.authorize_url);
-			else await Promise.all([load(), loadLibraryMetadata()]);
+			else await refreshData();
 		} catch (cause) { error = displayError(cause, text('安装失败。', 'Failed to install.')); }
 		finally { isSaving = false; }
 	}
@@ -302,7 +355,7 @@
 		try {
 			await requestJson<unknown>(action === 'sync' ? '/api/mcp/library/force-sync' : `/api/mcp/library/${encodeURIComponent(id)}`, { method: action === 'sync' ? 'POST' : 'DELETE' });
 			notice = action === 'sync' ? text('目录同步已启动。', 'Library sync started.') : text('目录项已移除。', 'Library entry removed.');
-			await Promise.all([load(), loadLibraryMetadata()]);
+			await refreshData();
 		} catch (cause) { error = displayError(cause, text('操作失败。', 'Action failed.')); }
 		finally { busyId = ''; }
 	}
@@ -324,7 +377,7 @@
 				else throw new Error(text('服务端未返回有效授权地址。', 'Server did not return a valid authorization URL.'));
 			} else {
 				await requestJson<unknown>(`/api/mcp/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' });
-				notice = text('MCP 凭据已撤销。', 'MCP credential revoked.'); await load();
+				notice = text('MCP 凭据已撤销。', 'MCP credential revoked.'); await refreshData();
 			}
 		} catch (cause) { error = displayError(cause, text('操作失败。', 'Action failed.')); }
 		finally { busyId = ''; }
@@ -334,7 +387,7 @@
 		const id = recordId(record);
 		if (!id || busyId || !window.confirm(text('确认撤销该 OAuth 授权？', 'Revoke this OAuth grant?'))) return;
 		busyId = id; error = '';
-		try { await requestJson<unknown>(`/api/oauth2/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }); notice = text('OAuth 授权已撤销。', 'OAuth grant revoked.'); await load(); }
+		try { await requestJson<unknown>(`/api/oauth2/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }); notice = text('OAuth 授权已撤销。', 'OAuth grant revoked.'); await refreshData(); }
 		catch (cause) { error = displayError(cause, text('撤销失败。', 'Failed to revoke.')); }
 		finally { busyId = ''; }
 	}
@@ -346,8 +399,8 @@
 
 	onMount(() => {
 		try { const saved = window.localStorage.getItem('mcp-library-view-mode'); if (saved === 'grid' || saved === 'table') viewMode = saved; } catch { /* 使用默认值 */ }
-		void Promise.all([load(), loadLibraryMetadata()]);
-		const timer = window.setInterval(() => { if (!modal && (mode === 'clients' || mode === 'sessions')) void load(); }, 5000);
+		void refreshData();
+		const timer = window.setInterval(() => { if (!modal && (mode === 'clients' || mode === 'sessions')) void refreshData(); }, 5000);
 		return () => window.clearInterval(timer);
 	});
 </script>
@@ -363,22 +416,22 @@
 	{#if error}<div class="notice error" role="alert">{error}</div>{/if}
 	{#if notice}<div class="notice success" role="status">{notice}</div>{/if}
 
-	<form class="toolbar" onsubmit={(event) => { event.preventDefault(); void load(true); }}>
+	<form class="toolbar" onsubmit={(event) => { event.preventDefault(); void refreshData(true); }}>
 		<label>{text('搜索', 'Search')}<input bind:value={search} placeholder={mode === 'library' ? text('名称、描述或标签', 'Name, description, or tag') : text('名称、身份或客户端', 'Name, identity, or client')} /></label>
 		{#if mode === 'sessions'}<label>{text('精确身份', 'Exact identity')}<input bind:value={identity} placeholder="user / vk / session id" /></label>{/if}
 		{#if mode === 'clients' || mode === 'library'}
-			<label>{text('连接类型', 'Connection')}<select multiple bind:value={connectionTypes}><option value="http">HTTP</option><option value="sse">SSE</option><option value="stdio">STDIO</option></select></label>
-			<label>{text('认证类型', 'Authentication')}<select multiple bind:value={authTypes}><option value="none">None</option><option value="headers">Headers</option><option value="oauth">OAuth</option><option value="per_user_oauth">Per-user OAuth</option><option value="per_user_headers">Per-user Headers</option></select></label>
+			<label>{text('连接类型', 'Connection')}<select multiple bind:value={connectionTypes}>{#each facet('connection_types') as item (item)}<option value={item}>{enumLabel('connection_type', item)}</option>{/each}</select></label>
+			<label>{text('认证类型', 'Authentication')}<select multiple bind:value={authTypes}>{#each facet('auth_types') as item (item)}<option value={item}>{enumLabel('auth_type', item)}</option>{/each}</select></label>
 		{/if}
 		{#if mode === 'clients'}
-			<label>{text('连接状态', 'State')}<select multiple bind:value={states}><option value="connected">Connected</option><option value="disconnected">Disconnected</option><option value="error">Error</option><option value="pending_tools">Pending tools</option><option value="disabled">Disabled</option></select></label>
+			<label>{text('连接状态', 'State')}<select multiple bind:value={states}>{#each facet('states') as item (item)}<option value={item}>{enumLabel('mcp_state', item)}</option>{/each}</select></label>
 			<label>{text('代码模式', 'Code mode')}<select bind:value={codeMode}><option value="">{text('全部', 'All')}</option><option value="true">{text('是', 'Yes')}</option><option value="false">{text('否', 'No')}</option></select></label>
 			<label>{text('启用状态', 'Enabled')}<select bind:value={disabled}><option value="">{text('全部', 'All')}</option><option value="false">{text('启用', 'Enabled')}</option><option value="true">{text('停用', 'Disabled')}</option></select></label>
 			<label class="check"><input type="checkbox" bind:checked={allVirtualKeys} />{text('仅全部虚拟密钥可用', 'Only available to all virtual keys')}</label>
 		{/if}
 		{#if mode === 'library'}
-			<label>{text('分类', 'Category')}<select multiple bind:value={categories}>{#each facet('categories') as item (item)}<option value={item}>{item}</option>{/each}</select></label>
-			<label>{text('标签', 'Tags')}<select multiple bind:value={tags}>{#each facet('tags') as item (item)}<option value={item}>{item}</option>{/each}</select></label>
+			<label>{text('分类', 'Category')}<select multiple bind:value={categories}>{#each facet('categories') as item (item)}<option value={item}>{catalogValue('category', item)}</option>{/each}</select></label>
+			<label>{text('标签', 'Tags')}<select multiple bind:value={tags}>{#each facet('tags') as item (item)}<option value={item}>{catalogValue('tag', item)}</option>{/each}</select></label>
 		{/if}
 		{#if mode === 'sessions'}
 			<label>{text('凭据类型', 'Kind')}<select multiple bind:value={kinds}><option value="token">OAuth token</option><option value="flow">Pending flow</option><option value="header">Headers</option></select></label>
@@ -394,7 +447,7 @@
 	{#if mode === 'library' && viewMode === 'grid'}
 		<div class="card-grid">
 			{#each records as record (recordId(record))}
-				<article class="server-card"><div class="server-card-head"><div><h2>{displayValue(record.name)}</h2><p>{displayValue(record.publisher || record.category)}</p></div><span class="badge">{displayValue(record.connection_type)}</span></div><p>{displayValue(record.description)}</p><div class="tag-row">{#each Array.isArray(record.tags) ? record.tags : [] as tag (String(tag))}<span>{displayValue(tag)}</span>{/each}</div><footer><span>{isLibraryInstalled(record) ? text('已安装', 'Installed') : text('未安装', 'Not installed')}</span><div><button type="button" onclick={() => openDetail(record)}>{text('详情', 'Details')}</button><button class="primary" type="button" onclick={() => openInstall(record)}>{text('安装', 'Install')}</button><button class="danger" type="button" onclick={() => void libraryAction(record, 'delete')}>{text('移除', 'Remove')}</button></div></footer></article>
+				<article class="server-card"><div class="server-card-head"><div><h2>{displayValue(record.name)}</h2><p>{record.publisher ? displayValue(record.publisher) : catalogValue('category', record.category)}</p></div><span class="badge">{enumLabel('connection_type', record.connection_type)}</span></div><p>{catalogDescription(record)}</p><div class="tag-row">{#each Array.isArray(record.tags) ? record.tags : [] as tag (String(tag))}<span>{catalogValue('tag', tag)}</span>{/each}</div><footer><span>{isLibraryInstalled(record) ? text('已安装', 'Installed') : text('未安装', 'Not installed')}</span><div><button type="button" onclick={() => openDetail(record)}>{text('详情', 'Details')}</button><button class="primary" type="button" onclick={() => openInstall(record)}>{text('安装', 'Install')}</button><button class="danger" type="button" onclick={() => void libraryAction(record, 'delete')}>{text('移除', 'Remove')}</button></div></footer></article>
 			{:else}<div class="empty">{isLoading ? text('加载中…', 'Loading…') : text('没有匹配的目录项。', 'No matching catalog entries.')}</div>{/each}
 		</div>
 	{:else}
@@ -406,8 +459,8 @@
 			<th>{text('操作', 'Actions')}</th></tr></thead><tbody>
 			{#each records as record (recordId(record))}
 				<tr>
-					{#if mode === 'clients'}{@const config = clientConfig(record)}<td><strong>{displayValue(config.name)}</strong><small>{displayValue(config.client_id)}</small></td><td>{displayValue(config.connection_type)}</td><td>{displayValue(config.auth_type || 'none')}</td><td><span class:danger-badge={record.state === 'error'} class="badge">{config.disabled === true ? 'disabled' : displayValue(record.state)}</span></td><td>{Array.isArray(record.tools) ? record.tools.length : 0}</td><td>{config.allow_on_all_virtual_keys === true ? text('全部虚拟密钥', 'All virtual keys') : `${Array.isArray(record.vk_configs) ? record.vk_configs.length : 0} VK`}</td><td><div class="actions"><button type="button" onclick={() => openDetail(record)}>{text('详情', 'Details')}</button><button type="button" onclick={() => openEditClient(record)}>{text('编辑', 'Edit')}</button><button type="button" disabled={busyId === clientId(record)} onclick={() => void clientAction(record, 'reconnect')}>{text('重连', 'Reconnect')}</button><button type="button" onclick={() => void clientAction(record, 'toggle')}>{config.disabled === true ? text('启用', 'Enable') : text('停用', 'Disable')}</button><button class="danger" type="button" onclick={() => void clientAction(record, 'delete')}>{text('删除', 'Delete')}</button></div></td>{/if}
-					{#if mode === 'library'}<td><strong>{displayValue(record.name)}</strong><small>{displayValue(record.description)}</small></td><td>{displayValue(record.category)}</td><td>{displayValue(record.connection_type)}</td><td>{displayValue(record.auth_type)}</td><td>{displayValue(record.tags)}</td><td>{displayValue(record.source)}</td><td><div class="actions"><button type="button" onclick={() => openDetail(record)}>{text('详情', 'Details')}</button><button class="primary" type="button" onclick={() => openInstall(record)}>{isLibraryInstalled(record) ? text('再次安装', 'Install again') : text('安装', 'Install')}</button><button class="danger" type="button" onclick={() => void libraryAction(record, 'delete')}>{text('移除', 'Remove')}</button></div></td>{/if}
+					{#if mode === 'clients'}{@const config = clientConfig(record)}<td><strong>{displayValue(config.name)}</strong><small>{displayValue(config.client_id)}</small></td><td>{enumLabel('connection_type', config.connection_type)}</td><td>{enumLabel('auth_type', config.auth_type || 'none')}</td><td><span class:danger-badge={record.state === 'error'} class="badge">{enumLabel('mcp_state', config.disabled === true ? 'disabled' : record.state)}</span></td><td>{Array.isArray(record.tools) ? record.tools.length : 0}</td><td>{config.allow_on_all_virtual_keys === true ? text('全部虚拟密钥', 'All virtual keys') : `${Array.isArray(record.vk_configs) ? record.vk_configs.length : 0} VK`}</td><td><div class="actions"><button type="button" onclick={() => openDetail(record)}>{text('详情', 'Details')}</button><button type="button" onclick={() => openEditClient(record)}>{text('编辑', 'Edit')}</button><button type="button" disabled={busyId === clientId(record)} onclick={() => void clientAction(record, 'reconnect')}>{text('重连', 'Reconnect')}</button><button type="button" onclick={() => void clientAction(record, 'toggle')}>{config.disabled === true ? text('启用', 'Enable') : text('停用', 'Disable')}</button><button class="danger" type="button" onclick={() => void clientAction(record, 'delete')}>{text('删除', 'Delete')}</button></div></td>{/if}
+					{#if mode === 'library'}<td><strong>{displayValue(record.name)}</strong><small class="catalog-description">{catalogDescription(record)}</small></td><td>{catalogValue('category', record.category)}</td><td>{enumLabel('connection_type', record.connection_type)}</td><td>{enumLabel('auth_type', record.auth_type)}</td><td>{catalogTags(record.tags)}</td><td>{catalogValue('source', record.source)}</td><td><div class="actions"><button type="button" onclick={() => openDetail(record)}>{text('详情', 'Details')}</button><button class="primary" type="button" onclick={() => openInstall(record)}>{isLibraryInstalled(record) ? text('再次安装', 'Install again') : text('安装', 'Install')}</button><button class="danger" type="button" onclick={() => void libraryAction(record, 'delete')}>{text('移除', 'Remove')}</button></div></td>{/if}
 					{#if mode === 'sessions'}<td><strong>{displayValue(isJsonRecord(record.mcp_client) ? record.mcp_client.name || record.mcp_client.client_id : '—')}</strong></td><td>{record.kind === 'header' || record.auth_kind === 'headers' ? 'Headers' : 'OAuth'} · {displayValue(record.kind)}</td><td>{record.auth_mode === 'user' ? displayValue(isJsonRecord(record.user) ? record.user.name || record.user.email || record.user_id : record.user_id) : record.auth_mode === 'vk' ? displayValue(isJsonRecord(record.virtual_key) ? record.virtual_key.name || record.virtual_key.id : '—') : displayValue(record.session_id)}</td><td><span class="badge">{displayValue(record.status)}</span></td><td>{displayDate(record.expires_at)}</td><td>{displayDate(record.created_at)}</td><td><div class="actions"><button type="button" onclick={() => openDetail(record)}>{text('详情', 'Details')}</button>{#if record.kind === 'flow' || (record.status !== 'orphaned' && record.can_reauth === true)}<button class="primary" type="button" onclick={() => void sessionAction(record, 'reauth')}>{record.kind === 'header' ? text('编辑值', 'Edit values') : record.kind === 'flow' ? text('完成认证', 'Complete auth') : text('重新认证', 'Reauthenticate')}</button>{/if}<button class="danger" type="button" onclick={() => void sessionAction(record, 'revoke')}>{text('撤销', 'Revoke')}</button></div></td>{/if}
 					{#if mode === 'grants'}<td><strong>{displayValue(record.client_name || record.client_id)}</strong><small>{displayValue(record.client_id)}</small></td><td>{displayValue(record.bf_sub_display || record.bf_sub)} · {displayValue(record.bf_mode)}</td><td>{displayValue(record.scope)}</td><td>{displayDate(record.created_at)}</td><td>{displayDate(record.last_used_at || record.created_at)}</td><td><div class="actions"><button type="button" onclick={() => openDetail(record)}>{text('详情', 'Details')}</button><button class="danger" type="button" onclick={() => void revokeGrant(record)}>{text('撤销', 'Revoke')}</button></div></td>{/if}
 				</tr>
@@ -415,7 +468,7 @@
 		</tbody></table></div>
 	{/if}
 
-	<footer class="pagination"><span>{total ? `${offset + 1}–${Math.min(offset + pageSize, total)} / ${total}` : '0'}</span><div><button type="button" disabled={offset === 0 || isLoading} onclick={() => { offset = Math.max(0, offset - pageSize); void load(); }}>{text('上一页', 'Previous')}</button><span>{currentPage} / {totalPages}</span><button type="button" disabled={offset + pageSize >= total || isLoading} onclick={() => { offset += pageSize; void load(); }}>{text('下一页', 'Next')}</button></div></footer>
+	<footer class="pagination"><span>{total ? `${offset + 1}–${Math.min(offset + pageSize, total)} / ${total}` : '0'}</span><div><button type="button" disabled={offset === 0 || isLoading} onclick={() => { offset = Math.max(0, offset - pageSize); void refreshData(); }}>{text('上一页', 'Previous')}</button><span>{currentPage} / {totalPages}</span><button type="button" disabled={offset + pageSize >= total || isLoading} onclick={() => { offset += pageSize; void refreshData(); }}>{text('下一页', 'Next')}</button></div></footer>
 </section>
 
 {#if modal}
@@ -426,14 +479,14 @@
 			{#if modal === 'client'}
 				<div class="form-grid">
 					<label>{text('名称', 'Name')}<input bind:value={clientDraft.name} disabled={!!editingClientId} placeholder="github_server" /></label>
-					<label>{text('连接类型', 'Connection type')}<select bind:value={clientDraft.connectionType} disabled={!!editingClientId}><option value="http">HTTP</option><option value="sse">SSE</option><option value="stdio">STDIO</option></select></label>
+					<label>{text('连接类型', 'Connection type')}<select bind:value={clientDraft.connectionType} disabled={!!editingClientId}><option value="http">{enumLabel('connection_type', 'http')}</option><option value="sse">{enumLabel('connection_type', 'sse')}</option><option value="stdio">{enumLabel('connection_type', 'stdio')}</option></select></label>
 					{#if clientDraft.connectionType === 'stdio'}<label>{text('命令', 'Command')}<input bind:value={clientDraft.command} disabled={!!editingClientId} placeholder="npx" /></label><label>{text('参数（逗号分隔）', 'Arguments (comma-separated)')}<input bind:value={clientDraft.args} disabled={!!editingClientId} /></label><label class="span-2">{text('环境变量（NAME 或 NAME=value）', 'Environment (NAME or NAME=value)')}<input bind:value={clientDraft.envs} disabled={!!editingClientId} /></label>{:else}<label class="span-2">{text('连接地址', 'Connection URL')}<input bind:value={clientDraft.connectionValue} disabled={!!editingClientId} placeholder="https://mcp.example.com" /></label>{/if}
-					<label>{text('认证类型', 'Authentication')}<select bind:value={clientDraft.authType} disabled={!!editingClientId}><option value="none">None</option><option value="headers">Shared headers</option><option value="oauth">Shared OAuth</option><option value="per_user_oauth">Per-user OAuth</option><option value="per_user_headers">Per-user headers</option></select></label>
+					<label>{text('认证类型', 'Authentication')}<select bind:value={clientDraft.authType} disabled={!!editingClientId}><option value="none">{enumLabel('auth_type', 'none')}</option><option value="headers">{enumLabel('auth_type', 'headers')}</option><option value="oauth">{enumLabel('auth_type', 'oauth')}</option><option value="per_user_oauth">{enumLabel('auth_type', 'per_user_oauth')}</option><option value="per_user_headers">{enumLabel('auth_type', 'per_user_headers')}</option></select></label>
 					<label>{text('工具同步间隔（分钟）', 'Tool sync interval (minutes)')}<input type="number" min="0" bind:value={clientDraft.toolSyncMinutes} /></label>
 					<label>{text('工具超时（秒）', 'Tool timeout (seconds)')}<input type="number" min="0" bind:value={clientDraft.toolExecutionSeconds} /></label>
 					<label>{text('额外请求头白名单', 'Extra-header allowlist')}<input bind:value={clientDraft.allowedExtraHeaders} placeholder="x-tenant-id, x-trace-id" /></label>
-					<label class="check"><input type="checkbox" bind:checked={clientDraft.codeMode} />{text('代码模式', 'Code mode')}</label><label class="check"><input type="checkbox" bind:checked={clientDraft.ping} />{text('启用 Ping', 'Enable ping')}</label><label class="check"><input type="checkbox" bind:checked={clientDraft.disabled} />{text('停用客户端', 'Disable client')}</label><label class="check"><input type="checkbox" bind:checked={clientDraft.allVirtualKeys} />{text('全部虚拟密钥可用', 'Available to all virtual keys')}</label>
-					{#if clientDraft.connectionType !== 'stdio'}<label class="check"><input type="checkbox" bind:checked={clientDraft.tlsSkipVerify} />{text('跳过 TLS 校验', 'Skip TLS verification')}</label><label class="span-2">{text('CA 证书 PEM', 'CA certificate PEM')}<textarea rows="3" bind:value={clientDraft.caCert}></textarea></label>{/if}
+					<fieldset class="client-options span-2"><legend>{text('客户端选项', 'Client options')}</legend><div class="client-option-grid"><label class="check"><input type="checkbox" bind:checked={clientDraft.codeMode} />{text('代码模式', 'Code mode')}</label><label class="check"><input type="checkbox" bind:checked={clientDraft.ping} />{text('启用 Ping', 'Enable ping')}</label><label class="check"><input type="checkbox" bind:checked={clientDraft.disabled} />{text('停用客户端', 'Disable client')}</label><label class="check"><input type="checkbox" bind:checked={clientDraft.allVirtualKeys} />{text('全部虚拟密钥可用', 'Available to all virtual keys')}</label>{#if clientDraft.connectionType !== 'stdio'}<label class="check"><input type="checkbox" bind:checked={clientDraft.tlsSkipVerify} />{text('跳过 TLS 校验', 'Skip TLS verification')}</label>{/if}</div></fieldset>
+					{#if clientDraft.connectionType !== 'stdio'}<label class="span-2">{text('CA 证书 PEM', 'CA certificate PEM')}<textarea rows="3" bind:value={clientDraft.caCert}></textarea></label>{/if}
 					{#if clientDraft.authType === 'headers' || clientDraft.authType === 'per_user_headers'}<label class="span-2">{text('共享请求头 JSON', 'Shared headers JSON')}<textarea rows="5" bind:value={clientDraft.headersJson}></textarea></label>{/if}
 					{#if clientDraft.authType === 'per_user_headers'}<label class="span-2">{text('每用户必填请求头名称', 'Required per-user header names')}<input bind:value={clientDraft.perUserHeaderKeys} placeholder="X-Api-Key, X-Tenant" /></label>{#if !editingClientId}<label class="span-2">{text('验证用示例值 JSON', 'Sample values for verification')}<textarea rows="4" bind:value={clientDraft.userHeadersJson}></textarea></label>{/if}{/if}
 					{#if (clientDraft.authType === 'oauth' || clientDraft.authType === 'per_user_oauth')}<label>{text('OAuth Client ID', 'OAuth Client ID')}<input bind:value={clientDraft.oauthClientId} /></label><label>{text('OAuth Client Secret', 'OAuth Client Secret')}<input type="password" bind:value={clientDraft.oauthClientSecret} /></label>{#if !editingClientId}<label class="span-2">{text('授权地址（可自动发现）', 'Authorize URL (optional discovery)')}<input bind:value={clientDraft.authorizeUrl} /></label><label class="span-2">{text('Token 地址（可自动发现）', 'Token URL (optional discovery)')}<input bind:value={clientDraft.tokenUrl} /></label><label>{text('注册地址', 'Registration URL')}<input bind:value={clientDraft.registrationUrl} /></label><label>{text('Scopes', 'Scopes')}<input bind:value={clientDraft.scopes} /></label><label class="span-2">{text('OAuth Resource URI', 'OAuth Resource URI')}<input bind:value={clientDraft.resource} /></label>{/if}{/if}
@@ -441,7 +494,7 @@
 				<details><summary>{text('高级字段 JSON', 'Advanced fields JSON')}</summary><p>{text('用于工具白名单、自动执行、定价和虚拟密钥分配。结构化字段会覆盖同名值。', 'Use for tool allowlists, auto-execution, pricing, and virtual-key assignments. Structured fields override matching keys.')}</p><textarea class="json-editor" rows="10" bind:value={clientDraft.advancedJson}></textarea></details>
 			{/if}
 			{#if modal === 'library-create'}
-				<div class="form-grid"><label>{text('名称', 'Name')}<input bind:value={libraryDraft.name} /></label><label>{text('分类', 'Category')}<input bind:value={libraryDraft.category} /></label><label class="span-2">{text('描述', 'Description')}<textarea rows="3" bind:value={libraryDraft.description}></textarea></label><label>{text('连接类型', 'Connection type')}<select bind:value={libraryDraft.connectionType}><option value="http">HTTP</option><option value="sse">SSE</option><option value="stdio">STDIO</option></select></label><label>{text('认证类型', 'Authentication')}<select bind:value={libraryDraft.authType}><option value="none">None</option><option value="headers">Headers</option><option value="oauth">OAuth</option><option value="per_user_oauth">Per-user OAuth</option><option value="per_user_headers">Per-user Headers</option></select></label>{#if libraryDraft.connectionType === 'stdio'}<label>{text('命令', 'Command')}<input bind:value={libraryDraft.command} /></label><label>{text('参数', 'Arguments')}<input bind:value={libraryDraft.args} /></label><label class="span-2">{text('环境变量名称', 'Environment names')}<input bind:value={libraryDraft.envs} /></label>{:else}<label class="span-2">{text('连接地址', 'Connection URL')}<input bind:value={libraryDraft.connectionUrl} /></label>{/if}<label class="span-2">{text('所需请求头名称', 'Required header names')}<input bind:value={libraryDraft.requiredHeaders} /></label><label>{text('发布者', 'Publisher')}<input bind:value={libraryDraft.publisher} /></label><label>{text('标签', 'Tags')}<input bind:value={libraryDraft.tags} /></label><label>{text('图标 URL', 'Icon URL')}<input bind:value={libraryDraft.iconUrl} /></label><label>{text('文档 URL', 'Docs URL')}<input bind:value={libraryDraft.docsUrl} /></label></div>
+				<div class="form-grid"><label>{text('名称', 'Name')}<input bind:value={libraryDraft.name} /></label><label>{text('分类', 'Category')}<input bind:value={libraryDraft.category} /></label><label class="span-2">{text('描述', 'Description')}<textarea rows="3" bind:value={libraryDraft.description}></textarea></label><label>{text('连接类型', 'Connection type')}<select bind:value={libraryDraft.connectionType}><option value="http">{enumLabel('connection_type', 'http')}</option><option value="sse">{enumLabel('connection_type', 'sse')}</option><option value="stdio">{enumLabel('connection_type', 'stdio')}</option></select></label><label>{text('认证类型', 'Authentication')}<select bind:value={libraryDraft.authType}><option value="none">{enumLabel('auth_type', 'none')}</option><option value="headers">{enumLabel('auth_type', 'headers')}</option><option value="oauth">{enumLabel('auth_type', 'oauth')}</option><option value="per_user_oauth">{enumLabel('auth_type', 'per_user_oauth')}</option><option value="per_user_headers">{enumLabel('auth_type', 'per_user_headers')}</option></select></label>{#if libraryDraft.connectionType === 'stdio'}<label>{text('命令', 'Command')}<input bind:value={libraryDraft.command} /></label><label>{text('参数', 'Arguments')}<input bind:value={libraryDraft.args} /></label><label class="span-2">{text('环境变量名称', 'Environment names')}<input bind:value={libraryDraft.envs} /></label>{:else}<label class="span-2">{text('连接地址', 'Connection URL')}<input bind:value={libraryDraft.connectionUrl} /></label>{/if}<label class="span-2">{text('所需请求头名称', 'Required header names')}<input bind:value={libraryDraft.requiredHeaders} /></label><label>{text('发布者', 'Publisher')}<input bind:value={libraryDraft.publisher} /></label><label>{text('标签', 'Tags')}<input bind:value={libraryDraft.tags} /></label><label>{text('图标 URL', 'Icon URL')}<input bind:value={libraryDraft.iconUrl} /></label><label>{text('文档 URL', 'Docs URL')}<input bind:value={libraryDraft.docsUrl} /></label></div>
 			{/if}
 			{#if modal === 'library-install' && selected}<div class="form-grid"><label class="span-2">{text('客户端名称', 'Client name')}<input bind:value={installName} /></label><label class="span-2">{text('安装覆盖 JSON', 'Install overrides JSON')}<textarea class="json-editor" rows="14" bind:value={installOverrides}></textarea><small>{text('填写 OAuth 客户端、共享请求头、按用户验证值、TLS 或其他高级配置。', 'Provide OAuth client settings, shared headers, per-user verification values, TLS, or other advanced options.')}</small></label></div>{/if}
 			{#if modal === 'library-settings'}<div class="form-grid"><label class="span-2">{text('目录同步地址', 'Library sync URL')}<input bind:value={libraryUrl} placeholder="https://getbifrost.ai/mcp-library" /><small>{text('留空使用 Elygate 默认目录。', 'Leave empty to use the default Elygate catalog.')}</small></label><label>{text('同步周期（小时）', 'Sync interval (hours)')}<input type="number" min="1" max="8760" bind:value={librarySyncHours} /></label></div>{/if}
@@ -476,6 +529,7 @@
 	th { color: var(--muted-foreground); }
 	td strong, td small { display: block; }
 	td small { color: var(--muted-foreground); margin-top: .2rem; max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	td small.catalog-description { line-height: 1.45; max-width: 440px; overflow: visible; text-overflow: clip; white-space: pre-line; }
 	.badge, .tag-row span { background: var(--muted); border-radius: 999px; display: inline-block; font-size: .7rem; padding: .18rem .48rem; }
 	.danger-badge { color: var(--destructive); }
 	.empty { color: var(--muted-foreground); padding: 2rem; text-align: center; }
@@ -498,11 +552,15 @@
 	.modal > footer { border-top: 1px solid var(--border); justify-content: end; padding-top: .9rem; }
 	.form-grid { display: grid; gap: .75rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 	.form-grid input, .form-grid select, .form-grid textarea { width: 100%; }
+	.client-options { border: 1px solid var(--border); border-radius: .65rem; margin: 0; padding: .65rem .75rem .75rem; }
+	.client-options legend { color: var(--muted-foreground); font-size: .75rem; padding: 0 .25rem; }
+	.client-option-grid { display: grid; gap: .45rem .9rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+	.client-options input[type='checkbox'] { flex: 0 0 auto; margin: 0; min-width: 0; width: auto; }
 	.span-2 { grid-column: 1 / -1; }
 	details { border-top: 1px solid var(--border); padding-top: .8rem; }
 	details summary { cursor: pointer; font-weight: 600; }
 	details p, label small { color: var(--muted-foreground); font-size: .75rem; }
 	.json-editor, .json-view { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .75rem; line-height: 1.55; width: 100%; }
 	.json-view { background: var(--muted); border-radius: .65rem; margin: 0; max-height: 68vh; overflow: auto; padding: 1rem; white-space: pre-wrap; }
-	@media (max-width: 760px) { .page-shell { padding: 1rem; } .page-heading { flex-direction: column; } .heading-actions { width: 100%; } .form-grid { grid-template-columns: 1fr; } .span-2 { grid-column: auto; } .pagination { align-items: stretch; flex-direction: column; gap: .6rem; } }
+	@media (max-width: 760px) { .page-shell { padding: 1rem; } .page-heading { flex-direction: column; } .heading-actions { width: 100%; } .form-grid, .client-option-grid { grid-template-columns: 1fr; } .span-2 { grid-column: auto; } .pagination { align-items: stretch; flex-direction: column; gap: .6rem; } }
 </style>

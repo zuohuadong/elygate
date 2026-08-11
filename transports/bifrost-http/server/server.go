@@ -1856,7 +1856,7 @@ func (s *BifrostHTTPServer) ReloadPlugin(ctx context.Context, name string, path 
 	// 1. Instantiate new version
 	plugin, err := InstantiatePlugin(ctx, name, path, pluginConfig, s.Config)
 	if err != nil {
-		return s.updatePluginErrorStatus(name, "loading", err)
+		return s.updatePluginErrorStatus(name, "loading", &handlers.PluginConfigurationError{Err: err})
 	}
 	// Wire the embedding executor on the new instance before syncing.
 	if semanticCachePlugin, ok := plugin.(*semanticcache.Plugin); ok {
@@ -1874,22 +1874,28 @@ func (s *BifrostHTTPServer) RemovePlugin(ctx context.Context, displayName string
 		return dynamicPlugins.ErrPluginNotFound
 	}
 
-	// Check if plugin implements ObservabilityPlugin before removal
+	// Check if plugin implements ObservabilityPlugin before removal. Disabled
+	// plugins retain status and config-marshaller metadata but are not present in
+	// BasePlugins, so a lookup miss is not enough to abort permanent cleanup.
 	var isObservability bool
-	var err error
 	var plugin schemas.BasePlugin
-	if plugin, err = s.Config.FindPluginByName(name); err == nil {
+	if loadedPlugin, err := s.Config.FindPluginByName(name); err == nil {
+		plugin = loadedPlugin
 		_, isObservability = plugin.(schemas.ObservabilityPlugin)
 	}
 
 	// 1. Unregister from config
-	if err := s.Config.UnregisterPlugin(name); err != nil {
-		return err
+	unregisterErr := s.Config.UnregisterPlugin(name)
+	if unregisterErr != nil && !errors.Is(unregisterErr, dynamicPlugins.ErrPluginNotFound) {
+		return unregisterErr
 	}
 
-	// 2. Update Bifrost client
-	if err := s.Client.RemovePlugin(name, InferPluginTypes(plugin)); err != nil {
-		logger.Warn("failed to reload bifrost config after plugin removal: %v", err)
+	// 2. Update Bifrost client only when an active plugin was actually removed.
+	// A disabled plugin is already absent from both execution arrays.
+	if unregisterErr == nil {
+		if err := s.Client.RemovePlugin(name, InferPluginTypes(plugin)); err != nil {
+			logger.Warn("failed to reload bifrost config after plugin removal: %v", err)
+		}
 	}
 
 	// 3. Reload observability plugins if necessary

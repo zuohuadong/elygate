@@ -9,6 +9,10 @@ function leafResourceNames(items: MenuItem[]): string[] {
 	return items.flatMap((item) => item.children?.length ? leafResourceNames(item.children) : item.href === '#/' ? [] : [item.name]);
 }
 
+function leafItems(items: MenuItem[]): MenuItem[] {
+	return items.flatMap((item) => item.children?.length ? leafItems(item.children) : item.href === '#/' ? [] : [item]);
+}
+
 const requiredParityResources = [
 	'providers',
 	'provider-keys',
@@ -86,11 +90,27 @@ describe('panel resource registry', () => {
 		for (const required of requiredParityResources) expect(names).toContain(required);
 	});
 
-	test('exposes every registered resource when the enterprise module supplies every extension', () => {
+	test('exposes canonical workflows while retaining hidden compatibility routes', () => {
 		const resourceNames = createResources('en', true).map((resource) => resource.name).sort();
 		const menuNames = leafResourceNames(createMenu('en', VISIBLE_ENTERPRISE_RESOURCES, true)).sort();
+		const hiddenCompatibilityRoutes = ['budgets', 'complexity-analyzer', 'prompt-folders', 'rate-limits'];
 		expect(new Set(menuNames).size).toBe(menuNames.length);
-		expect(menuNames).toEqual(resourceNames);
+		expect(menuNames).toEqual(resourceNames.filter((name) => !hiddenCompatibilityRoutes.includes(name)));
+		expect(resourceNames).toEqual(expect.arrayContaining(hiddenCompatibilityRoutes));
+		expect(menuNames).toContain('model-configs');
+		expect(menuNames).toContain('complexity-router');
+	});
+
+	test('places virtual keys with model access while keeping organization management focused', () => {
+		const menu = createMenu('zh-CN');
+		const models = menu.find((group) => group.name === 'models-group');
+		const enterprise = menu.find((group) => group.name === 'governance');
+		expect(models?.children?.map((item) => item.name)).toContain('virtual-keys');
+		expect(enterprise?.children?.map((item) => item.name)).not.toContain('virtual-keys');
+		const entries = leafItems(menu).filter((item) => item.name === 'virtual-keys');
+		expect(entries).toHaveLength(1);
+		expect(entries[0]?.href).toBe('#/virtual-keys');
+		expect(createResources('zh-CN').map((resource) => resource.name)).toContain('virtual-keys');
 	});
 
 	test('keeps the development profiler out of production panel builds', async () => {

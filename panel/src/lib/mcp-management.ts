@@ -1,8 +1,100 @@
 import { csv, parseJsonObject } from './forms';
 import type { JsonRecord } from './api';
+import type { ElygateLocale } from './i18n';
 
 export type McpConnectionType = 'http' | 'sse' | 'stdio';
 export type McpAuthType = 'none' | 'headers' | 'oauth' | 'per_user_oauth' | 'per_user_headers';
+
+type McpCatalogField = 'category' | 'source' | 'tag';
+
+const catalogCategoriesZh: Record<string, string> = {
+	'AI Tools': 'AI 工具', Analytics: '分析', Communication: '通信', 'Customer Support': '客户支持', Design: '设计',
+	'Developer Tools': '开发者工具', 'E-Commerce': '电子商务', Finance: '金融', 'Human Resources': '人力资源', Legal: '法务',
+	Lifestyle: '生活方式', Marketing: '营销', Productivity: '生产力', 'Project Management': '项目管理', Research: '研究',
+	Sales: '销售', Search: '搜索', Security: '安全', Travel: '旅行',
+};
+
+const catalogSourcesZh: Record<string, string> = { remote: '远程目录', custom: '自定义' };
+const catalogTagsZh: Record<string, string> = {
+	adobe: 'Adobe', analytics: '分析', audiences: '受众', campaigns: '营销活动', marketing: '营销', orchestration: '编排',
+	'journey-optimizer': '旅程优化', security: '安全', search: '搜索', productivity: '生产力',
+};
+const catalogDescriptionsZh: Record<string, string> = {
+	'Adobe Journey Optimizer': '将 AI 工具连接到 Adobe Journey Optimizer，用于查看状态、发现草稿问题并了解编排组合。由 Adobe 提供远程托管。',
+	'Adobe Marketing Agent': '将 AI 工具连接到 Adobe，以获取营销活动和受众洞察。由 Adobe 提供远程托管。',
+};
+
+function jsonRecord(value: unknown): JsonRecord | undefined {
+	return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as JsonRecord : undefined;
+}
+
+function catalogTranslation(metadata: unknown, field: 'name' | 'description'): string {
+	const i18n = jsonRecord(jsonRecord(metadata)?.i18n);
+	const zh = jsonRecord(i18n?.['zh-CN']) ?? jsonRecord(i18n?.zh);
+	return typeof zh?.[field] === 'string' ? String(zh[field]).trim() : '';
+}
+
+export function localizeMcpCatalogValue(locale: ElygateLocale, field: McpCatalogField, value: unknown): string {
+	const raw = String(value ?? '');
+	if (locale !== 'zh-CN' || !raw) return raw;
+	const translated = field === 'category' ? catalogCategoriesZh[raw] : field === 'source' ? catalogSourcesZh[raw] : catalogTagsZh[raw];
+	if (translated && translated !== raw) return `${translated}（${raw}）`;
+	return field === 'tag' ? `原始标签：${raw}` : raw;
+}
+
+export function localizeMcpCatalogDescription(
+	locale: ElygateLocale,
+	name: unknown,
+	category: unknown,
+	description: unknown,
+	metadata?: unknown,
+): string {
+	const original = String(description ?? '');
+	if (locale !== 'zh-CN' || !original || /[\u3400-\u9fff]/u.test(original)) return original;
+	const translatedDescription = catalogTranslation(metadata, 'description') || catalogDescriptionsZh[String(name ?? '')];
+	if (translatedDescription) return `${translatedDescription}\n英文原文：${original}`;
+	const serverName = catalogTranslation(metadata, 'name') || String(name ?? 'MCP 服务');
+	const categoryName = localizeMcpCatalogValue(locale, 'category', category) || '未分类';
+	return `中文分类摘要：${serverName}；目录分类：${categoryName}。\n英文原文：${original}`;
+}
+
+export async function refreshMcpData(
+	reset: boolean,
+	loadMetadata: () => Promise<void>,
+	loadRecords: (reset: boolean) => Promise<void>,
+): Promise<void> {
+	await loadMetadata();
+	await loadRecords(reset);
+}
+
+export function createCoalescedRefresh(
+	run: (reset: boolean) => Promise<void>,
+): (reset?: boolean) => Promise<void> {
+	let active: Promise<void> | null = null;
+	let rerun = false;
+	let pendingReset = false;
+
+	return (reset = false): Promise<void> => {
+		if (active) {
+			rerun = true;
+			pendingReset ||= reset;
+			return active;
+		}
+		active = (async () => {
+			let cycleReset = reset;
+			do {
+				rerun = false;
+				cycleReset ||= pendingReset;
+				pendingReset = false;
+				await run(cycleReset);
+				cycleReset = false;
+			} while (rerun);
+		})().finally(() => {
+			active = null;
+		});
+		return active;
+	};
+}
 
 export interface McpClientDraft {
 	name: string;

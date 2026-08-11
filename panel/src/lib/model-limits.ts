@@ -1,6 +1,8 @@
+export type NumericDraftValue = string | number | undefined;
+
 export interface BudgetDraft {
 	id?: string;
-	maxLimit: string;
+	maxLimit: NumericDraftValue;
 	resetDuration: string;
 }
 
@@ -10,9 +12,9 @@ export interface ModelLimitDraft {
 	scope: string;
 	scopeId: string;
 	budgets: BudgetDraft[];
-	tokenMaxLimit: string;
+	tokenMaxLimit: NumericDraftValue;
 	tokenResetDuration: string;
-	requestMaxLimit: string;
+	requestMaxLimit: NumericDraftValue;
 	requestResetDuration: string;
 }
 
@@ -25,9 +27,14 @@ export class ModelLimitError extends Error {
 	}
 }
 
-function optionalLimit(value: string): number | undefined {
-	if (!value.trim()) return undefined;
-	const parsed = Number(value);
+function normalizedLimit(value: NumericDraftValue): string {
+	return String(value ?? '').trim();
+}
+
+function optionalLimit(value: NumericDraftValue): number | undefined {
+	const normalized = normalizedLimit(value);
+	if (!normalized) return undefined;
+	const parsed = Number(normalized);
 	if (!Number.isFinite(parsed) || parsed < 0) throw new ModelLimitError('invalid-limit');
 	return parsed;
 }
@@ -38,7 +45,7 @@ export function buildModelLimitPayload(draft: ModelLimitDraft, hadRateLimit = fa
 	if (draft.scope !== 'global' && !draft.scopeId.trim()) throw new ModelLimitError('scope-required');
 
 	const budgets = draft.budgets
-		.filter((budget) => budget.maxLimit.trim() !== '')
+		.filter((budget) => normalizedLimit(budget.maxLimit) !== '')
 		.map((budget) => ({
 			...(budget.id ? { id: budget.id } : {}),
 			max_limit: optionalLimit(budget.maxLimit) as number,

@@ -58,7 +58,17 @@ export interface PluginSequenceUpdate {
 	payload: PluginMutationPayload;
 }
 
+export interface PluginModalBackdropPress {
+	targetIsBackdrop: boolean;
+	button: number;
+	isSaving: boolean;
+}
+
 const PLUGIN_NAME = /^[A-Za-z0-9_-]+$/;
+
+export function shouldClosePluginModalFromBackdrop(press: PluginModalBackdropPress): boolean {
+	return press.targetIsBackdrop && press.button === 0 && !press.isSaving;
+}
 
 function stringList(value: unknown): string[] {
 	return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];

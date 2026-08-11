@@ -95,6 +95,7 @@ func NewMCPHandler(
 // RegisterRoutes registers all MCP-related routes
 func (h *MCPHandler) RegisterRoutes(r *router.Router, middlewares ...schemas.BifrostHTTPMiddleware) {
 	r.GET("/api/mcp/clients", lib.ChainMiddlewares(h.getMCPClients, middlewares...))
+	r.GET("/api/mcp/clients/filterdata", lib.ChainMiddlewares(h.getMCPClientFilterData, middlewares...))
 	r.GET("/api/mcp/library", lib.ChainMiddlewares(h.getMCPLibrary, middlewares...))
 	r.GET("/api/mcp/library/filterdata", lib.ChainMiddlewares(h.getMCPLibraryFilterData, middlewares...))
 	r.POST("/api/mcp/library/force-sync", lib.ChainMiddlewares(h.forceSyncMCPLibrary, middlewares...))
@@ -1051,7 +1052,7 @@ func (h *MCPHandler) forceSyncMCPLibrary(ctx *fasthttp.RequestCtx) {
 }
 
 // getMCPClientsPaginated handles the paginated path for GET /api/mcp/clients.
-// states carries the raw connection-state selection (connected/disconnected);
+// states carries the raw connection-state selection (healthy/unstable);
 // it is resolved against the live engine here because state is not a DB column.
 // projectPerUserAdminCredentialState overlays a response-only needs_reauth
 // state onto a per-user client's runtime state when the retained admin
