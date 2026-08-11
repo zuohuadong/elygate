@@ -21,4 +21,9 @@ describe('panel issue regressions', () => {
 		expect(source).toContain('复杂度层级（complexity_tier）');
 		expect(source).toContain('支持中文和英文关键词');
 	});
+
+	test('runtime config inherits the active theme foreground color', async () => {
+		const source = await Bun.file(new URL('../pages/ConfigPage.svelte', import.meta.url)).text();
+		expect(source).toMatch(/\.page-shell\s*\{[^}]*color:\s*var\(--foreground\)/s);
+	});
 });

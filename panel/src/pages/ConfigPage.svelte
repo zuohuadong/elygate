@@ -322,7 +322,7 @@
 </section>
 
 <style>
-	.page-shell { max-width: 1180px; margin: 0 auto; padding: 1.5rem; }
+	.page-shell { color: var(--foreground); max-width: 1180px; margin: 0 auto; padding: 1.5rem; }
 	.page-heading { align-items: flex-start; display: flex; justify-content: space-between; gap: 1rem; margin-bottom: 1.25rem; }
 	.eyebrow { color: var(--primary); font-size: .75rem; font-weight: 700; letter-spacing: .12em; margin: 0 0 .45rem; text-transform: uppercase; }
 	h1 { margin: 0; font-size: clamp(1.5rem, 3vw, 2.15rem); }
