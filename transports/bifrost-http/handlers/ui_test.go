@@ -69,6 +69,81 @@ func TestUIHandlerKeepsSPAFallbackForApplicationRoutes(t *testing.T) {
 	require.Equal(t, "<html>panel</html>", string(ctx.Response.Body()))
 }
 
+func TestUIHandlerServesByteRangesForBundledMedia(t *testing.T) {
+	t.Parallel()
+	r := router.New()
+	content := testUIContent()
+	content["ui/assets/docs/demo.mp4"] = &fstest.MapFile{Data: []byte("0123456789")}
+	NewUIHandler(readFileFS{FS: content}).RegisterRoutes(r)
+
+	ctx := &fasthttp.RequestCtx{}
+	ctx.Request.Header.SetMethod(fasthttp.MethodGet)
+	ctx.Request.Header.Set("Range", "bytes=2-5")
+	ctx.Request.SetRequestURI("/assets/docs/demo.mp4")
+	r.Handler(ctx)
+
+	require.Equal(t, fasthttp.StatusPartialContent, ctx.Response.StatusCode())
+	require.Equal(t, "2345", string(ctx.Response.Body()))
+	require.Equal(t, "bytes 2-5/10", string(ctx.Response.Header.Peek("Content-Range")))
+	require.Equal(t, "bytes", string(ctx.Response.Header.Peek("Accept-Ranges")))
+	require.Equal(t, "video/mp4", string(ctx.Response.Header.ContentType()))
+}
+
+func TestUIHandlerRejectsUnsatisfiableByteRanges(t *testing.T) {
+	t.Parallel()
+	r := router.New()
+	content := testUIContent()
+	content["ui/assets/docs/demo.mp4"] = &fstest.MapFile{Data: []byte("0123456789")}
+	NewUIHandler(readFileFS{FS: content}).RegisterRoutes(r)
+
+	ctx := &fasthttp.RequestCtx{}
+	ctx.Request.Header.SetMethod(fasthttp.MethodGet)
+	ctx.Request.Header.Set("Range", "bytes=20-30")
+	ctx.Request.SetRequestURI("/assets/docs/demo.mp4")
+	r.Handler(ctx)
+
+	require.Equal(t, fasthttp.StatusRequestedRangeNotSatisfiable, ctx.Response.StatusCode())
+	require.Equal(t, "bytes */10", string(ctx.Response.Header.Peek("Content-Range")))
+}
+
+func TestUIHandlerServesSuffixByteRangesForVideoMetadata(t *testing.T) {
+	t.Parallel()
+	r := router.New()
+	content := testUIContent()
+	content["ui/assets/docs/demo.mp4"] = &fstest.MapFile{Data: []byte("0123456789")}
+	NewUIHandler(readFileFS{FS: content}).RegisterRoutes(r)
+
+	ctx := &fasthttp.RequestCtx{}
+	ctx.Request.Header.SetMethod(fasthttp.MethodGet)
+	ctx.Request.Header.Set("Range", "bytes=-4")
+	ctx.Request.SetRequestURI("/assets/docs/demo.mp4")
+	r.Handler(ctx)
+
+	require.Equal(t, fasthttp.StatusPartialContent, ctx.Response.StatusCode())
+	require.Equal(t, "6789", string(ctx.Response.Body()))
+	require.Equal(t, "bytes 6-9/10", string(ctx.Response.Header.Peek("Content-Range")))
+}
+
+func TestUIHandlerServesOpenEndedByteRangesForVideoSeeking(t *testing.T) {
+	t.Parallel()
+	r := router.New()
+	content := testUIContent()
+	content["ui/assets/docs/demo.mp4"] = &fstest.MapFile{Data: []byte("0123456789")}
+	NewUIHandler(readFileFS{FS: content}).RegisterRoutes(r)
+
+	ctx := &fasthttp.RequestCtx{}
+	ctx.Request.Header.SetMethod(fasthttp.MethodGet)
+	ctx.Request.Header.Set("Range", "bytes=6-")
+	ctx.Request.SetRequestURI("/assets/docs/demo.mp4")
+	r.Handler(ctx)
+
+	require.Equal(t, fasthttp.StatusPartialContent, ctx.Response.StatusCode())
+	require.Equal(t, "6789", string(ctx.Response.Body()))
+	require.Equal(t, "bytes 6-9/10", string(ctx.Response.Header.Peek("Content-Range")))
+	require.Equal(t, "bytes", string(ctx.Response.Header.Peek("Accept-Ranges")))
+	require.Equal(t, "video/mp4", string(ctx.Response.Header.ContentType()))
+}
+
 func testUIContent() fstest.MapFS {
 	return fstest.MapFS{
 		"ui/index.html": &fstest.MapFile{Data: []byte("<html>panel</html>")},

@@ -223,12 +223,6 @@ export function createMenu(
 				menuItem(locale, 'mcp-gateway-config', 'elygate.mcpGatewayConfig', 'boxes'),
 				menuItem(locale, 'license-info', 'elygate.licenseInfo', 'badge-info'),
 				menuItem(locale, 'cluster', 'elygate.cluster', 'boxes'),
-				{
-					name: 'adaptive-routing',
-					label: labelFor(locale, 'elygate.adaptiveRouting'),
-					icon: 'git-branch-plus',
-					href: '#/routing-rules',
-				},
 				menuItem(locale, 'agent-handover', 'elygate.agentHandover', 'handshake'),
 				menuItem(locale, 'docs-hub', 'elygate.docsHub', 'book-open-text'),
 				...(includeDevelopmentResources ? [menuItem(locale, 'pprof', 'elygate.pprof', 'gauge')] : []),

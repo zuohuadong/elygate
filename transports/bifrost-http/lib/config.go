@@ -359,6 +359,10 @@ func (cd *ConfigData) isConfigJSONSourceOfTruth() bool {
 	return normalizeSourceOfTruth(cd.SourceOfTruth) == SourceOfTruthConfigJSON
 }
 
+func (cd *ConfigData) vectorStoreManagedByConfigJSON() bool {
+	return cd != nil && cd.isConfigJSONSourceOfTruth() && cd.sectionPresent("vector_store")
+}
+
 // sectionPresent reports whether a top-level config.json section was explicitly provided.
 func (cd *ConfigData) sectionPresent(name string) bool {
 	if cd == nil {
@@ -557,7 +561,14 @@ type Config struct {
 	// Stores
 	ConfigStore configstore.ConfigStore
 	VectorStore vectorstore.VectorStore
-	LogsStore   logstore.LogStore
+	// VectorStoreConfig is the immutable process-start snapshot used to compare
+	// restart-bound dashboard changes with the currently loaded runtime.
+	VectorStoreConfig *vectorstore.Config
+	// VectorStoreConfigManagedByConfigJSON prevents dashboard persistence from
+	// pretending to override an authoritative vector_store file section.
+	VectorStoreConfigManagedByConfigJSON bool
+	vectorStoreStartupDegraded           bool
+	LogsStore                            logstore.LogStore
 	// LogsStoreConfig is the effective logs store configuration used to create LogsStore.
 	LogsStoreConfig *logstore.Config
 	ObjectStore     objectstore.ObjectStore
@@ -1028,6 +1039,7 @@ func LoadConfig(ctx context.Context, configDirPath string) (*Config, error) {
 // When config data sections are absent (nil), creates default SQLite stores for persistence.
 func initStores(ctx context.Context, config *Config, configData *ConfigData, configDBPath, logsDBPath string) error {
 	var err error
+	config.VectorStoreConfigManagedByConfigJSON = configData.vectorStoreManagedByConfigJSON()
 	// Initialize config store
 	if configData.ConfigStoreConfig != nil && configData.ConfigStoreConfig.Enabled {
 		// Explicit config store configuration from config.json
@@ -1051,13 +1063,6 @@ func initStores(ctx context.Context, config *Config, configData *ConfigData, con
 		logger.Info("config store initialized (default SQLite)")
 	}
 	// else: ConfigStoreConfig is present but Enabled == false — leave ConfigStore nil
-
-	// Clear restart required flag on server startup
-	if config.ConfigStore != nil {
-		if err = config.ConfigStore.ClearRestartRequiredConfig(ctx); err != nil {
-			logger.Warn("failed to clear restart required config: %v", err)
-		}
-	}
 
 	// Initialize log store
 	if configData.LogsStoreConfig != nil && configData.LogsStoreConfig.Enabled {
@@ -1133,18 +1138,8 @@ func initStores(ctx context.Context, config *Config, configData *ConfigData, con
 		}
 	}
 
-	// Initialize vector store (only if explicitly configured)
-	if configData.VectorStoreConfig != nil && configData.VectorStoreConfig.Enabled {
-		logger.Info("connecting to vectorstore")
-		config.VectorStore, err = vectorstore.NewVectorStore(ctx, configData.VectorStoreConfig, logger)
-		if err != nil {
-			logger.Fatal("failed to connect to vector store: %v", err)
-		}
-		if config.ConfigStore != nil {
-			if err = config.ConfigStore.UpdateVectorStoreConfig(ctx, configData.VectorStoreConfig); err != nil {
-				logger.Warn("failed to update vector store config: %v", err)
-			}
-		}
+	if err := initializeVectorStoreConfig(ctx, config, configData, vectorstore.NewVectorStore); err != nil {
+		return err
 	}
 	return nil
 }
@@ -7126,13 +7121,40 @@ func (c *Config) GetVectorStoreConfigRedacted(ctx context.Context) (*vectorstore
 	if vectorStoreConfig == nil {
 		return nil, nil
 	}
+	if vectorStoreConfig.Type == vectorstore.VectorStoreTypePgvector {
+		var configured vectorstore.PgvectorConfig
+		switch value := vectorStoreConfig.Config.(type) {
+		case vectorstore.PgvectorConfig:
+			configured = value
+		case *vectorstore.PgvectorConfig:
+			if value == nil {
+				return nil, fmt.Errorf("failed to cast vector store config to pgvector config")
+			}
+			configured = *value
+		default:
+			return nil, fmt.Errorf("failed to cast vector store config to pgvector config")
+		}
+		redacted := configured
+		redacted.ConnectionString = *configured.ConnectionString.FullyRedacted()
+		result := *vectorStoreConfig
+		result.Config = redacted
+		return &result, nil
+	}
 	if vectorStoreConfig.Type == vectorstore.VectorStoreTypeWeaviate {
-		weaviateConfig, ok := vectorStoreConfig.Config.(*vectorstore.WeaviateConfig)
-		if !ok {
+		var weaviateConfig vectorstore.WeaviateConfig
+		switch configured := vectorStoreConfig.Config.(type) {
+		case vectorstore.WeaviateConfig:
+			weaviateConfig = configured
+		case *vectorstore.WeaviateConfig:
+			if configured == nil {
+				return nil, fmt.Errorf("failed to cast vector store config to weaviate config")
+			}
+			weaviateConfig = *configured
+		default:
 			return nil, fmt.Errorf("failed to cast vector store config to weaviate config")
 		}
 		// Create a copy to avoid modifying the original
-		redactedWeaviateConfig := *weaviateConfig
+		redactedWeaviateConfig := weaviateConfig
 		// Redact password if it exists
 		if redactedWeaviateConfig.APIKey != nil {
 			redactedWeaviateConfig.APIKey = redactedWeaviateConfig.APIKey.Redacted()

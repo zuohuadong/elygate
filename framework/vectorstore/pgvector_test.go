@@ -58,6 +58,14 @@ func TestPgvectorConfig_RequiresConnectionString(t *testing.T) {
 	require.ErrorContains(t, err, "pgvector connection_string is required")
 }
 
+func TestPgvectorConfig_RejectsUnresolvedSecretReference(t *testing.T) {
+	t.Setenv("ELYGATE_TEST_MISSING_PGVECTOR_DSN", "")
+	_, err := newPgvectorStore(t.Context(), &PgvectorConfig{
+		ConnectionString: *schemas.NewSecretVar("env.ELYGATE_TEST_MISSING_PGVECTOR_DSN"),
+	}, nil)
+	require.ErrorContains(t, err, "did not resolve to a value")
+}
+
 func TestPgvectorConnectionString_FullyRedactsLiteralDSN(t *testing.T) {
 	dsn := schemas.NewSecretVar("postgres://bifrost:secret@example.internal:5432/bifrost")
 	redacted := dsn.FullyRedacted()

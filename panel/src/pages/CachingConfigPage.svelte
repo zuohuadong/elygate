@@ -3,6 +3,14 @@
 	import { useTranslation } from '@svadmin/core/i18n';
 	import { displayError } from '../lib/forms';
 	import { getListPayload, isJsonRecord, requestJson, type JsonRecord } from '../lib/api';
+	import {
+		pluginConfigForMutation,
+		pluginFromMutationResponse,
+		vectorStoreDraft,
+		vectorStorePayload,
+		type VectorStoreConfigResponse,
+		type VectorStoreDraft,
+	} from '../lib/caching-config';
 
 	interface Props { resourceName: string; }
 	type CacheMode = 'direct' | 'semantic';
@@ -30,6 +38,9 @@
 	let cacheId = $state('');
 	let cacheKey = $state('');
 	let vectorStoreConnected = $state(false);
+	let vectorStore = $state.raw<VectorStoreConfigResponse | null>(null);
+	let vectorStoreForm = $state<VectorStoreDraft>({ enabled: false, connectionString: '', schema: 'bifrost_vectors' });
+	let isSavingVectorStore = $state(false);
 	let isLoading = $state(true);
 	let isSaving = $state(false);
 	let error = $state('');
@@ -72,14 +83,17 @@
 		isLoading = true;
 		error = '';
 		try {
-			const [pluginPayload, providerPayload, configPayload] = await Promise.all([
+			const [pluginPayload, providerPayload, configPayload, vectorStorePayload] = await Promise.all([
 				requestJson('/api/plugins'),
 				requestJson('/api/providers'),
 				requestJson<JsonRecord>('/api/config'),
+				requestJson<VectorStoreConfigResponse>('/api/vector-store-config'),
 			]);
 			plugin = getListPayload(pluginPayload).find((item) => item.name === PLUGIN_NAME) ?? null;
 			providers = getListPayload(providerPayload);
 			vectorStoreConnected = configPayload.is_cache_connected === true;
+			vectorStore = vectorStorePayload;
+			vectorStoreForm = vectorStoreDraft(vectorStorePayload);
 			applyConfig(plugin && isJsonRecord(plugin.config) ? plugin.config : {});
 		} catch (cause) {
 			error = displayError(cause, i18n.t('elygate.loadFailed'));
@@ -112,18 +126,46 @@
 		error = '';
 		notice = '';
 		try {
-			const body = { enabled, config: payload(), path: plugin?.path ?? null, placement: plugin?.placement ?? null, order: plugin?.order ?? null };
-			if (plugin) {
-				plugin = await requestJson<JsonRecord>(`/api/plugins/${PLUGIN_NAME}`, { method: 'PUT', body: JSON.stringify(body) });
-			} else {
-				plugin = await requestJson<JsonRecord>('/api/plugins', { method: 'POST', body: JSON.stringify({ name: PLUGIN_NAME, ...body }) });
-			}
+			const body = {
+				enabled,
+				config: pluginConfigForMutation(enabled, plugin?.config, payload),
+				path: plugin?.path ?? null,
+				placement: plugin?.placement ?? null,
+				order: plugin?.order ?? null,
+			};
+			const response = plugin
+				? await requestJson<JsonRecord>(`/api/plugins/${PLUGIN_NAME}`, { method: 'PUT', body: JSON.stringify(body) })
+				: await requestJson<JsonRecord>('/api/plugins', { method: 'POST', body: JSON.stringify({ name: PLUGIN_NAME, ...body }) });
+			plugin = pluginFromMutationResponse(response);
 			applyConfig(isJsonRecord(plugin.config) ? plugin.config : {});
 			notice = i18n.t('elygate.saveSuccess');
 		} catch (cause) {
 			error = displayError(cause, i18n.t('elygate.operationFailed'));
 		} finally {
 			isSaving = false;
+		}
+	}
+
+	async function saveVectorStore(): Promise<void> {
+		if (!vectorStore || !vectorStore.editable) return;
+		if (vectorStoreForm.enabled && !vectorStoreForm.connectionString.trim()) {
+			error = i18n.t('elygate.vectorStoreConnectionRequired');
+			return;
+		}
+		isSavingVectorStore = true;
+		error = '';
+		notice = '';
+		try {
+			vectorStore = await requestJson<VectorStoreConfigResponse>('/api/vector-store-config', {
+				method: 'PUT',
+				body: JSON.stringify(vectorStorePayload(vectorStoreForm, vectorStore)),
+			});
+			vectorStoreForm = vectorStoreDraft(vectorStore);
+			notice = i18n.t('elygate.vectorStoreSaved');
+		} catch (cause) {
+			error = displayError(cause, i18n.t('elygate.operationFailed'));
+		} finally {
+			isSavingVectorStore = false;
 		}
 	}
 
@@ -141,8 +183,21 @@
 </script>
 
 <section class="page-shell">
-	<header class="page-heading"><div><p class="eyebrow">Elygate / Plugins</p><h1>{i18n.t('elygate.cachingConfig')}</h1><p>{i18n.t('elygate.cachingHint')}</p></div><div class="toggle"><span>{plugin?.enabled === true ? i18n.t('elygate.enabled') : i18n.t('elygate.disabled')}</span><button type="button" onclick={() => void save(plugin?.enabled !== true)} disabled={isSaving || (!vectorStoreConnected && plugin?.enabled !== true)}>{plugin?.enabled === true ? i18n.t('elygate.disable') : i18n.t('elygate.enable')}</button></div></header>
+	<header class="page-heading"><div><p class="eyebrow">Elygate / {i18n.t('elygate.system')}</p><h1>{i18n.t('elygate.cachingConfig')}</h1><p>{i18n.t('elygate.cachingHint')}</p></div><div class="toggle"><span>{plugin?.enabled === true ? i18n.t('elygate.enabled') : i18n.t('elygate.disabled')}</span><button type="button" onclick={() => void save(plugin?.enabled !== true)} disabled={isSaving || (!vectorStoreConnected && plugin?.enabled !== true)}>{plugin?.enabled === true ? i18n.t('elygate.disable') : i18n.t('elygate.enable')}</button></div></header>
 	{#if !vectorStoreConnected}<div class="notice warning">{i18n.t('elygate.vectorStoreRequired')}</div>{/if}{#if error}<div class="notice error" role="alert">{error}</div>{/if}{#if notice}<div class="notice success" role="status">{notice}</div>{/if}
+	<section class="vector-store-card">
+		<header><div><h2>{i18n.t('elygate.vectorStore')}</h2><p>{i18n.t('elygate.vectorStoreHint')}</p></div><span class:ok={vectorStoreConnected}>{vectorStoreConnected ? i18n.t('elygate.conn.connected') : i18n.t('elygate.conn.disconnected')}</span></header>
+		{#if vectorStore?.management_message}<div class="notice warning">{vectorStore.management_message}</div>{/if}
+		{#if vectorStore?.restart_required}<div class="notice warning">{i18n.t('elygate.restartRequired')} {vectorStore.restart_reason ?? ''}</div>{/if}
+		<div class="form-grid">
+			<label>{i18n.t('elygate.vectorStoreType')}<input value={vectorStore?.type ?? 'pgvector'} disabled /></label>
+			{#if vectorStore?.supported !== false}
+			<label>{i18n.t('elygate.pgvectorConnection')}<input type="password" autocomplete="new-password" bind:value={vectorStoreForm.connectionString} disabled={vectorStore ? !vectorStore.editable : true} placeholder="postgres://…" /></label>
+			<label>{i18n.t('elygate.pgvectorSchema')}<input bind:value={vectorStoreForm.schema} disabled={vectorStore ? !vectorStore.editable : true} /></label>
+			{/if}
+		</div>
+		{#if vectorStore?.supported !== false}<div class="vector-store-actions"><label><input type="checkbox" bind:checked={vectorStoreForm.enabled} disabled={vectorStore ? !vectorStore.editable : true} />{i18n.t('elygate.enablePgvector')}</label><button class="primary" type="button" onclick={() => void saveVectorStore()} disabled={!vectorStore?.editable || isSavingVectorStore}>{i18n.t('elygate.saveVectorStore')}</button></div>{/if}
+	</section>
 	<form onsubmit={(event) => { event.preventDefault(); void save(); }}>
 		<div class="mode-picker"><button type="button" class:is-active={mode === 'direct'} onclick={() => (mode = 'direct')}>{i18n.t('elygate.directCache')}</button><button type="button" class:is-active={mode === 'semantic'} onclick={() => (mode = 'semantic')}>{i18n.t('elygate.semanticCache')}</button></div>
 		<div class="form-grid">
@@ -150,20 +205,27 @@
 			<label>{i18n.t('elygate.cacheTtl')}<input type="number" min="0" bind:value={form.ttl} /></label><label>{i18n.t('elygate.similarityThreshold')}<input type="number" min="0" max="1" step="0.01" bind:value={form.threshold} /></label><label>{i18n.t('elygate.conversationThreshold')}<input type="number" min="1" max="50" bind:value={form.conversationHistoryThreshold} /></label><label>{i18n.t('elygate.vectorNamespace')}<input bind:value={form.vectorStoreNamespace} /></label><label>{i18n.t('elygate.defaultCacheKey')}<input bind:value={form.defaultCacheKey} /></label>
 		</div>
 		<div class="switches"><label><input type="checkbox" bind:checked={form.excludeSystemPrompt} />{i18n.t('elygate.excludeSystemPrompt')}</label><label><input type="checkbox" bind:checked={form.cacheByModel} />{i18n.t('elygate.cacheByModel')}</label><label><input type="checkbox" bind:checked={form.cacheByProvider} />{i18n.t('elygate.cacheByProvider')}</label></div>
-		<footer><button class="primary" type="submit" disabled={isSaving || isLoading}>{i18n.t('elygate.save')}</button></footer>
+		<footer><button class="primary" type="submit" disabled={isSaving || isLoading || !vectorStoreConnected}>{i18n.t('elygate.save')}</button></footer>
 	</form>
 	<section class="cache-tools"><h2>{i18n.t('elygate.cacheManagement')}</h2><p>{i18n.t('elygate.cacheManagementHint')}</p><div><input bind:value={cacheId} placeholder={i18n.t('elygate.cacheId')} /><button type="button" onclick={() => void clearCache('id')}>{i18n.t('elygate.clear')}</button></div><div><input bind:value={cacheKey} placeholder={i18n.t('elygate.cacheKey')} /><button type="button" onclick={() => void clearCache('key')}>{i18n.t('elygate.clear')}</button></div></section>
 </section>
 
 <style>
-	.page-shell { max-width: 980px; margin: 0 auto; padding: 1.5rem; }
+	.page-shell { color: var(--foreground); max-width: 980px; margin: 0 auto; padding: 1.5rem; }
 	.page-heading, .toggle, footer, .mode-picker, .switches, .cache-tools > div { align-items: center; display: flex; gap: .55rem; }
 	.page-heading { align-items: start; justify-content: space-between; margin-bottom: 1rem; }
 	.eyebrow { color: var(--primary); font-size: .75rem; font-weight: 700; letter-spacing: .12em; margin: 0 0 .4rem; text-transform: uppercase; }
 	h1 { margin: 0; } .page-heading p, .cache-tools p { color: var(--muted-foreground); margin: .5rem 0 0; }
 	button { background: var(--muted); border: 1px solid var(--border); border-radius: .5rem; color: var(--foreground); cursor: pointer; font-weight: 650; padding: .55rem .7rem; }
 	button.primary, button.is-active { background: var(--primary); border-color: var(--primary); color: var(--primary-foreground); }
-	form, .cache-tools { background: var(--card); border: 1px solid var(--border); border-radius: .8rem; display: grid; gap: 1rem; padding: 1rem; }
+	form, .cache-tools, .vector-store-card { background: var(--card); border: 1px solid var(--border); border-radius: .8rem; display: grid; gap: 1rem; padding: 1rem; }
+	.vector-store-card { margin-bottom: 1rem; }
+	.vector-store-card > header, .vector-store-actions { align-items: center; display: flex; gap: 1rem; justify-content: space-between; }
+	.vector-store-card h2 { font-size: 1rem; margin: 0; }
+	.vector-store-card header p { color: var(--muted-foreground); font-size: .8rem; margin: .3rem 0 0; }
+	.vector-store-card header > span { border: 1px solid var(--border); border-radius: 999px; color: var(--muted-foreground); font-size: .72rem; padding: .25rem .55rem; }
+	.vector-store-card header > span.ok { color: var(--primary); }
+	.vector-store-actions label { align-items: center; display: flex; }
 	.form-grid { display: grid; gap: .7rem; grid-template-columns: repeat(3, minmax(0, 1fr)); }
 	label { display: grid; font-size: .8rem; font-weight: 650; gap: .35rem; }
 	input, select { background: var(--background); border: 1px solid var(--border); border-radius: .5rem; color: var(--foreground); padding: .6rem; }

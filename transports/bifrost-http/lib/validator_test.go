@@ -194,6 +194,27 @@ func TestValidateConfigSchema_InvalidEnum(t *testing.T) {
 	}
 }
 
+func TestValidateConfigSchema_Pgvector(t *testing.T) {
+	config := []byte(`{"vector_store":{"enabled":true,"type":"pgvector","config":{"connection_string":"env.PGVECTOR_DSN","schema":"elygate_vectors"}}}`)
+	if err := ValidateConfigSchema(config, loadLocalSchema(t)); err != nil {
+		t.Fatalf("expected pgvector config to pass validation, got error: %v", err)
+	}
+}
+
+func TestValidateConfigSchema_VectorStoreConfigMustMatchType(t *testing.T) {
+	tests := map[string]string{
+		"redis rejects pgvector config": `{"vector_store":{"enabled":true,"type":"redis","config":{"connection_string":"env.PGVECTOR_DSN"}}}`,
+		"pgvector rejects redis config": `{"vector_store":{"enabled":true,"type":"pgvector","config":{"addr":"redis:6379"}}}`,
+	}
+	for name, config := range tests {
+		t.Run(name, func(t *testing.T) {
+			if err := ValidateConfigSchema([]byte(config), loadLocalSchema(t)); err == nil {
+				t.Fatal("expected vector store config for the wrong type to fail validation")
+			}
+		})
+	}
+}
+
 func TestValidateConfigSchema_MissingRequiredField(t *testing.T) {
 	// governance.budgets items require id, max_limit, and reset_duration
 	invalidConfig := `{

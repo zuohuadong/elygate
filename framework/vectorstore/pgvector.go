@@ -39,7 +39,7 @@ func ValidatePgvectorConfig(config *PgvectorConfig, requireConnectionString bool
 	if config == nil {
 		return fmt.Errorf("pgvector config is required")
 	}
-	if requireConnectionString && strings.TrimSpace(config.ConnectionString.GetValue()) == "" && !config.ConnectionString.IsFromSecret() {
+	if requireConnectionString && !config.ConnectionString.IsSet() {
 		return fmt.Errorf("pgvector connection_string is required")
 	}
 	schema := config.Schema
@@ -56,12 +56,16 @@ func newPgvectorStore(ctx context.Context, config *PgvectorConfig, _ schemas.Log
 	if err := ValidatePgvectorConfig(config, true); err != nil {
 		return nil, err
 	}
+	connectionString := strings.TrimSpace(config.ConnectionString.GetValue())
+	if connectionString == "" {
+		return nil, fmt.Errorf("pgvector connection_string did not resolve to a value")
+	}
 	schema := config.Schema
 	if schema == "" {
 		schema = "bifrost_vectors"
 	}
 
-	pool, err := pgxpool.New(ctx, config.ConnectionString.GetValue())
+	pool, err := pgxpool.New(ctx, connectionString)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create pgvector connection pool: %w", err)
 	}

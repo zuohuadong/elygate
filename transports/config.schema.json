@@ -1513,62 +1513,35 @@
         },
         "type": {
           "type": "string",
-          "enum": ["weaviate", "redis", "qdrant", "pinecone"],
+          "enum": ["weaviate", "redis", "qdrant", "pinecone", "pgvector"],
           "description": "Vector store type (use \"redis\" for Redis or Valkey-compatible endpoints)"
         },
         "config": {
-          "anyOf": [
-            {
-              "if": {
-                "properties": {
-                  "type": {
-                    "const": "weaviate"
-                  }
-                }
-              },
-              "then": {
-                "$ref": "#/$defs/weaviate_config"
-              }
-            },
-            {
-              "if": {
-                "properties": {
-                  "type": {
-                    "const": "redis"
-                  }
-                }
-              },
-              "then": {
-                "$ref": "#/$defs/redis_config"
-              }
-            },
-            {
-              "if": {
-                "properties": {
-                  "type": {
-                    "const": "qdrant"
-                  }
-                }
-              },
-              "then": {
-                "$ref": "#/$defs/qdrant_config"
-              }
-            },
-            {
-              "if": {
-                "properties": {
-                  "type": {
-                    "const": "pinecone"
-                  }
-                }
-              },
-              "then": {
-                "$ref": "#/$defs/pinecone_config"
-              }
-            }
-          ]
+          "type": "object"
         }
       },
+      "allOf": [
+        {
+          "if": {"properties": {"type": {"const": "weaviate"}}, "required": ["type"]},
+          "then": {"properties": {"config": {"$ref": "#/$defs/weaviate_config"}}, "required": ["config"]}
+        },
+        {
+          "if": {"properties": {"type": {"const": "redis"}}, "required": ["type"]},
+          "then": {"properties": {"config": {"$ref": "#/$defs/redis_config"}}, "required": ["config"]}
+        },
+        {
+          "if": {"properties": {"type": {"const": "qdrant"}}, "required": ["type"]},
+          "then": {"properties": {"config": {"$ref": "#/$defs/qdrant_config"}}, "required": ["config"]}
+        },
+        {
+          "if": {"properties": {"type": {"const": "pinecone"}}, "required": ["type"]},
+          "then": {"properties": {"config": {"$ref": "#/$defs/pinecone_config"}}, "required": ["config"]}
+        },
+        {
+          "if": {"properties": {"type": {"const": "pgvector"}}, "required": ["type"]},
+          "then": {"properties": {"config": {"$ref": "#/$defs/pgvector_config"}}, "required": ["config"]}
+        }
+      ],
       "additionalProperties": false
     },
     "config_store": {
@@ -5463,6 +5436,23 @@
         }
       },
       "required": ["api_key", "index_host"],
+      "additionalProperties": false
+    },
+    "pgvector_config": {
+      "type": "object",
+      "description": "PostgreSQL pgvector configuration for vector storage",
+      "properties": {
+        "connection_string": {
+          "type": "string",
+          "description": "PostgreSQL connection string (supports env.VAR_NAME)"
+        },
+        "schema": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}$",
+          "description": "PostgreSQL schema used for Bifrost vector tables"
+        }
+      },
+      "required": ["connection_string"],
       "additionalProperties": false
     },
     "proxy_config": {

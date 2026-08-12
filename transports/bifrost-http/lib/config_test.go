@@ -386,16 +386,19 @@ import (
 
 // MockConfigStore implements the ConfigStore interface for testing
 type MockConfigStore struct {
-	clientConfig     *configstore.ClientConfig
-	providers        map[schemas.ModelProvider]configstore.ProviderConfig
-	mcpConfig        *schemas.MCPConfig
-	governanceConfig *configstore.GovernanceConfig
-	authConfig       *configstore.AuthConfig
-	frameworkConfig  *tables.TableFrameworkConfig
-	configEntries    map[string]string
-	vectorConfig     *vectorstore.Config
-	logsConfig       *logstore.Config
-	plugins          []*tables.TablePlugin
+	clientConfig      *configstore.ClientConfig
+	providers         map[schemas.ModelProvider]configstore.ProviderConfig
+	mcpConfig         *schemas.MCPConfig
+	governanceConfig  *configstore.GovernanceConfig
+	authConfig        *configstore.AuthConfig
+	frameworkConfig   *tables.TableFrameworkConfig
+	configEntries     map[string]string
+	vectorConfig      *vectorstore.Config
+	vectorUpdateCalls int
+	restartConfig     *tables.RestartRequiredConfig
+	restartClearCalls int
+	logsConfig        *logstore.Config
+	plugins           []*tables.TablePlugin
 
 	// oauthConfigsByID/oauthTokensByConfigID back GetOauthConfigByID,
 	// CreateOauthConfig, UpdateOauthConfig, and MarkTokensNeedsReauthByConfigID
@@ -445,6 +448,307 @@ func NewMockConfigStore() *MockConfigStore {
 		oauthConfigsByID:      make(map[string]*tables.TableOauthConfig),
 		oauthTokensByConfigID: make(map[string][]*tables.TableMCPOauthToken),
 	}
+}
+
+func TestVectorStoreConfigHashIgnoresResolvedSecretValue(t *testing.T) {
+	t.Setenv("PGVECTOR_HASH_DSN", "postgres://first-value")
+	first := &vectorstore.Config{Enabled: true, Type: vectorstore.VectorStoreTypePgvector, Config: vectorstore.PgvectorConfig{
+		ConnectionString: *schemas.NewSecretVar("env.PGVECTOR_HASH_DSN"), Schema: "file_vectors",
+	}}
+	firstHash, err := vectorStoreConfigHash(first)
+	require.NoError(t, err)
+
+	t.Setenv("PGVECTOR_HASH_DSN", "postgres://rotated-value")
+	rotated := &vectorstore.Config{Enabled: true, Type: vectorstore.VectorStoreTypePgvector, Config: vectorstore.PgvectorConfig{
+		ConnectionString: *schemas.NewSecretVar("env.PGVECTOR_HASH_DSN"), Schema: "file_vectors",
+	}}
+	rotatedHash, err := vectorStoreConfigHash(rotated)
+	require.NoError(t, err)
+	require.Equal(t, firstHash, rotatedHash)
+
+	differentRef := &vectorstore.Config{Enabled: true, Type: vectorstore.VectorStoreTypePgvector, Config: vectorstore.PgvectorConfig{
+		ConnectionString: *schemas.NewSecretVar("env.OTHER_PGVECTOR_DSN"), Schema: "file_vectors",
+	}}
+	differentRefHash, err := vectorStoreConfigHash(differentRef)
+	require.NoError(t, err)
+	require.NotEqual(t, firstHash, differentRefHash)
+}
+
+func TestResolveVectorStoreConfigSplitPreservesDashboardConfigWhenFileUnchanged(t *testing.T) {
+	store := NewMockConfigStore()
+	persisted := &vectorstore.Config{Enabled: true, Type: vectorstore.VectorStoreTypePgvector, Config: vectorstore.PgvectorConfig{
+		ConnectionString: *schemas.NewSecretVar("env.PGVECTOR_DSN"), Schema: "dashboard_vectors",
+	}}
+	store.vectorConfig = persisted
+	fileConfig := &vectorstore.Config{Enabled: true, Type: vectorstore.VectorStoreTypePgvector, Config: vectorstore.PgvectorConfig{
+		ConnectionString: *schemas.NewSecretVar("env.FILE_PGVECTOR_DSN"), Schema: "file_vectors",
+	}}
+	fileHash, err := vectorStoreConfigHash(fileConfig)
+	require.NoError(t, err)
+	store.configEntries[vectorStoreFileHashKey] = fileHash
+	configData := &ConfigData{SourceOfTruth: SourceOfTruthSplit, VectorStoreConfig: fileConfig}
+	resolved, source, err := resolveVectorStoreConfig(context.Background(), configData, store)
+	require.NoError(t, err)
+	require.Same(t, persisted, resolved)
+	require.Equal(t, vectorStoreSourceDatabase, source)
+}
+
+func TestResolveVectorStoreConfigSplitAppliesChangedFileConfig(t *testing.T) {
+	store := NewMockConfigStore()
+	store.vectorConfig = &vectorstore.Config{Enabled: true, Type: vectorstore.VectorStoreTypePgvector, Config: vectorstore.PgvectorConfig{
+		ConnectionString: *schemas.NewSecretVar("env.PGVECTOR_DSN"), Schema: "dashboard_vectors",
+	}}
+	previousFile := &vectorstore.Config{Enabled: true, Type: vectorstore.VectorStoreTypePgvector, Config: vectorstore.PgvectorConfig{
+		ConnectionString: *schemas.NewSecretVar("env.FILE_PGVECTOR_DSN"), Schema: "old_file_vectors",
+	}}
+	previousHash, err := vectorStoreConfigHash(previousFile)
+	require.NoError(t, err)
+	store.configEntries[vectorStoreFileHashKey] = previousHash
+	changedFile := &vectorstore.Config{Enabled: true, Type: vectorstore.VectorStoreTypePgvector, Config: vectorstore.PgvectorConfig{
+		ConnectionString: *schemas.NewSecretVar("env.FILE_PGVECTOR_DSN"), Schema: "new_file_vectors",
+	}}
+
+	resolved, source, err := resolveVectorStoreConfig(context.Background(), &ConfigData{SourceOfTruth: SourceOfTruthSplit, VectorStoreConfig: changedFile}, store)
+	require.NoError(t, err)
+	require.Same(t, changedFile, resolved)
+	require.Equal(t, vectorStoreSourceConfigJSON, source)
+}
+
+func TestResolveVectorStoreConfigSplitSeedsFileWithoutCheckpoint(t *testing.T) {
+	store := NewMockConfigStore()
+	store.vectorConfig = &vectorstore.Config{Enabled: false, Type: vectorstore.VectorStoreTypePgvector}
+	fileConfig := &vectorstore.Config{Enabled: false, Type: vectorstore.VectorStoreTypePgvector, Config: vectorstore.PgvectorConfig{Schema: "file_vectors"}}
+
+	resolved, source, err := resolveVectorStoreConfig(context.Background(), &ConfigData{SourceOfTruth: SourceOfTruthSplit, VectorStoreConfig: fileConfig}, store)
+	require.NoError(t, err)
+	require.Same(t, fileConfig, resolved)
+	require.Equal(t, vectorStoreSourceConfigJSON, source)
+}
+
+func TestPersistVectorStoreFileConfigAdvancesCheckpoint(t *testing.T) {
+	store := NewMockConfigStore()
+	fileConfig := &vectorstore.Config{Enabled: false, Type: vectorstore.VectorStoreTypePgvector, Config: vectorstore.PgvectorConfig{Schema: "file_vectors"}}
+	require.NoError(t, persistVectorStoreFileConfig(context.Background(), store, fileConfig))
+	require.Same(t, fileConfig, store.vectorConfig)
+	require.Equal(t, 1, store.vectorUpdateCalls)
+
+	wantHash, err := vectorStoreConfigHash(fileConfig)
+	require.NoError(t, err)
+	require.Equal(t, wantHash, store.configEntries[vectorStoreFileHashKey])
+}
+
+func TestInitStoresChangedFileConfigAdvancesCheckpoint(t *testing.T) {
+	initTestLogger()
+	dir := t.TempDir()
+	store := createTestSQLiteConfigStore(t, dir)
+	oldFileConfig := &vectorstore.Config{Enabled: false, Type: vectorstore.VectorStoreTypePgvector, Config: vectorstore.PgvectorConfig{Schema: "old_vectors"}}
+	require.NoError(t, store.UpdateVectorStoreConfig(context.Background(), oldFileConfig))
+	require.NoError(t, persistVectorStoreFileHash(context.Background(), store, oldFileConfig))
+
+	changedFileConfig := &vectorstore.Config{Enabled: false, Type: vectorstore.VectorStoreTypePgvector, Config: vectorstore.PgvectorConfig{Schema: "new_vectors"}}
+	runtimeConfig := &Config{ConfigStore: store}
+	configData := &ConfigData{
+		SourceOfTruth:     SourceOfTruthSplit,
+		VectorStoreConfig: changedFileConfig,
+		ConfigStoreConfig: &configstore.Config{Enabled: false},
+	}
+	require.NoError(t, initStores(context.Background(), runtimeConfig, configData, filepath.Join(dir, "unused.db"), filepath.Join(dir, "logs.db")))
+	require.Same(t, changedFileConfig, runtimeConfig.VectorStoreConfig)
+
+	persisted, err := store.GetVectorStoreConfig(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "new_vectors", persisted.Config.(vectorstore.PgvectorConfig).Schema)
+	wantHash, err := vectorStoreConfigHash(changedFileConfig)
+	require.NoError(t, err)
+	checkpoint, err := store.GetConfig(context.Background(), vectorStoreFileHashKey)
+	require.NoError(t, err)
+	require.Equal(t, wantHash, checkpoint.Value)
+}
+
+func TestInitializeVectorStoreConfigReadsDesiredStateAfterDistributedLock(t *testing.T) {
+	initTestLogger()
+	dir := t.TempDir()
+	store := createTestSQLiteConfigStore(t, dir)
+	fileConfig := &vectorstore.Config{Enabled: false, Type: vectorstore.VectorStoreTypePgvector, Config: vectorstore.PgvectorConfig{Schema: "file_vectors"}}
+	require.NoError(t, persistVectorStoreFileHash(context.Background(), store, fileConfig))
+	require.NoError(t, store.UpdateVectorStoreConfig(context.Background(), &vectorstore.Config{
+		Enabled: false, Type: vectorstore.VectorStoreTypePgvector, Config: vectorstore.PgvectorConfig{Schema: "old_vectors"},
+	}))
+
+	heldLock, err := NewVectorStoreMutationLock(store, logger)
+	require.NoError(t, err)
+	require.NoError(t, heldLock.Lock(context.Background()))
+	runtimeConfig := &Config{ConfigStore: store}
+	configData := &ConfigData{SourceOfTruth: SourceOfTruthSplit, VectorStoreConfig: fileConfig}
+	done := make(chan error, 1)
+	go func() {
+		done <- initializeVectorStoreConfig(context.Background(), runtimeConfig, configData,
+			func(context.Context, *vectorstore.Config, schemas.Logger) (vectorstore.VectorStore, error) {
+				t.Fatal("disabled vector store must not connect")
+				return nil, nil
+			})
+	}()
+	select {
+	case err := <-done:
+		t.Fatalf("startup reconciliation bypassed the distributed lock: %v", err)
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	newDesired := &vectorstore.Config{Enabled: false, Type: vectorstore.VectorStoreTypePgvector, Config: vectorstore.PgvectorConfig{Schema: "new_vectors"}}
+	require.NoError(t, store.UpdateVectorStoreConfig(context.Background(), newDesired))
+	require.NoError(t, heldLock.Unlock(context.Background()))
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for startup reconciliation")
+	}
+	require.Equal(t, "new_vectors", runtimeConfig.VectorStoreConfig.Config.(vectorstore.PgvectorConfig).Schema)
+}
+
+func TestResolveVectorStoreConfigConfigJSONAuthorityPrefersFileSection(t *testing.T) {
+	store := NewMockConfigStore()
+	store.vectorConfig = &vectorstore.Config{Enabled: true, Type: vectorstore.VectorStoreTypePgvector, Config: vectorstore.PgvectorConfig{
+		ConnectionString: *schemas.NewSecretVar("env.PGVECTOR_DSN"), Schema: "dashboard_vectors",
+	}}
+	fileConfig := &vectorstore.Config{Enabled: false, Type: vectorstore.VectorStoreTypePgvector, Config: vectorstore.PgvectorConfig{
+		ConnectionString: *schemas.NewSecretVar("env.FILE_PGVECTOR_DSN"), Schema: "file_vectors",
+	}}
+	configData := &ConfigData{SourceOfTruth: SourceOfTruthConfigJSON, VectorStoreConfig: fileConfig, presentSections: map[string]bool{"vector_store": true}}
+	resolved, source, err := resolveVectorStoreConfig(context.Background(), configData, store)
+	require.NoError(t, err)
+	require.Same(t, fileConfig, resolved)
+	require.Equal(t, vectorStoreSourceConfigJSON, source)
+}
+
+func TestInitializeResolvedVectorStoreKeepsManagementPlaneOnDatabaseFailure(t *testing.T) {
+	initTestLogger()
+	runtimeConfig := &Config{}
+	desired := &vectorstore.Config{Enabled: true, Type: vectorstore.VectorStoreTypePgvector}
+	deadlineObserved := false
+	degraded, err := initializeResolvedVectorStore(context.Background(), runtimeConfig, desired, vectorStoreSourceDatabase,
+		func(ctx context.Context, _ *vectorstore.Config, _ schemas.Logger) (vectorstore.VectorStore, error) {
+			deadline, ok := ctx.Deadline()
+			deadlineObserved = ok && time.Until(deadline) > 0 && time.Until(deadline) <= 31*time.Second
+			return nil, errors.New("unreachable database")
+		})
+	require.NoError(t, err)
+	require.True(t, degraded)
+	require.True(t, deadlineObserved, "vector store factory must receive a bounded startup context")
+	require.Nil(t, runtimeConfig.VectorStore)
+	require.Nil(t, runtimeConfig.VectorStoreConfig)
+}
+
+func TestInitializeResolvedVectorStoreFailsFastForConfigJSON(t *testing.T) {
+	initTestLogger()
+	runtimeConfig := &Config{}
+	desired := &vectorstore.Config{Enabled: true, Type: vectorstore.VectorStoreTypePgvector}
+	degraded, err := initializeResolvedVectorStore(context.Background(), runtimeConfig, desired, vectorStoreSourceConfigJSON,
+		func(context.Context, *vectorstore.Config, schemas.Logger) (vectorstore.VectorStore, error) {
+			return nil, errors.New("unreachable database")
+		})
+	require.ErrorContains(t, err, "failed to connect to vector store")
+	require.False(t, degraded)
+	require.Nil(t, runtimeConfig.VectorStore)
+	require.Nil(t, runtimeConfig.VectorStoreConfig)
+}
+
+func TestInitializeResolvedVectorStoreHonorsParentDeadline(t *testing.T) {
+	initTestLogger()
+	parentCtx, cancelParent := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancelParent()
+	runtimeConfig := &Config{}
+	desired := &vectorstore.Config{Enabled: true, Type: vectorstore.VectorStoreTypePgvector}
+	degraded, err := initializeResolvedVectorStore(parentCtx, runtimeConfig, desired, vectorStoreSourceDatabase,
+		func(ctx context.Context, _ *vectorstore.Config, _ schemas.Logger) (vectorstore.VectorStore, error) {
+			<-ctx.Done()
+			return nil, ctx.Err()
+		})
+	require.NoError(t, err)
+	require.True(t, degraded)
+	require.Nil(t, runtimeConfig.VectorStoreConfig)
+}
+
+func TestInitializeResolvedVectorStoreAcceptsDisabledDatabaseConfigWithoutConnecting(t *testing.T) {
+	initTestLogger()
+	runtimeConfig := &Config{}
+	desired := &vectorstore.Config{Enabled: false, Type: vectorstore.VectorStoreTypePgvector}
+	called := false
+	degraded, err := initializeResolvedVectorStore(context.Background(), runtimeConfig, desired, vectorStoreSourceDatabase,
+		func(context.Context, *vectorstore.Config, schemas.Logger) (vectorstore.VectorStore, error) {
+			called = true
+			return nil, nil
+		})
+	require.NoError(t, err)
+	require.False(t, degraded)
+	require.False(t, called)
+	require.Same(t, desired, runtimeConfig.VectorStoreConfig)
+}
+
+func TestInitStoresDatabaseVectorFailurePreservesRestartMarkerAndSkipsWriteback(t *testing.T) {
+	initTestLogger()
+	dir := t.TempDir()
+	store := createTestSQLiteConfigStore(t, dir)
+	desired := &vectorstore.Config{Enabled: true, Type: vectorstore.VectorStoreTypePgvector, Config: vectorstore.PgvectorConfig{
+		ConnectionString: *schemas.NewSecretVar("postgres://127.0.0.1:1/elygate?connect_timeout=1"), Schema: "elygate_vectors",
+	}}
+	require.NoError(t, store.UpdateVectorStoreConfig(context.Background(), desired))
+	require.NoError(t, store.SetRestartRequiredConfig(context.Background(), &tables.RestartRequiredConfig{Required: true, Reason: "keep-me"}))
+	runtimeConfig := &Config{ConfigStore: store}
+	// Supplying the already-open store avoids constructing another DB. The
+	// disabled config-store section intentionally leaves runtimeConfig.ConfigStore intact.
+	configData := &ConfigData{ConfigStoreConfig: &configstore.Config{Enabled: false}}
+	require.NoError(t, initStores(context.Background(), runtimeConfig, configData, filepath.Join(dir, "unused.db"), filepath.Join(dir, "logs.db")))
+	require.Nil(t, runtimeConfig.VectorStore)
+	require.Nil(t, runtimeConfig.VectorStoreConfig)
+	restart, err := store.GetRestartRequiredConfig(context.Background())
+	require.NoError(t, err)
+	require.True(t, restart.Required)
+	require.Equal(t, "keep-me", restart.Reason)
+	stored, err := store.GetVectorStoreConfig(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "elygate_vectors", stored.Config.(vectorstore.PgvectorConfig).Schema)
+}
+
+func TestMarkRestartAppliedClearsOnlySuccessfulStartup(t *testing.T) {
+	initTestLogger()
+	successStore := NewMockConfigStore()
+	successStore.restartConfig = &tables.RestartRequiredConfig{Required: true, Reason: VectorStoreRestartReason}
+	(&Config{ConfigStore: successStore}).MarkRestartApplied(context.Background())
+	require.Equal(t, 1, successStore.restartClearCalls)
+	require.False(t, successStore.restartConfig.Required)
+
+	degradedStore := NewMockConfigStore()
+	degradedStore.restartConfig = &tables.RestartRequiredConfig{Required: true, Reason: VectorStoreRestartReason}
+	(&Config{ConfigStore: degradedStore, vectorStoreStartupDegraded: true}).MarkRestartApplied(context.Background())
+	require.Zero(t, degradedStore.restartClearCalls)
+	require.True(t, degradedStore.restartConfig.Required)
+}
+
+func TestMarkRestartAppliedPreservesMarkerWhenDesiredChangedAfterStartup(t *testing.T) {
+	initTestLogger()
+	active := &vectorstore.Config{Enabled: false, Type: vectorstore.VectorStoreTypePgvector, Config: vectorstore.PgvectorConfig{Schema: "active_vectors"}}
+	desired := &vectorstore.Config{Enabled: true, Type: vectorstore.VectorStoreTypePgvector, Config: vectorstore.PgvectorConfig{
+		ConnectionString: *schemas.NewSecretVar("postgres://new@db/elygate"), Schema: "new_vectors",
+	}}
+	store := NewMockConfigStore()
+	store.vectorConfig = desired
+	store.restartConfig = &tables.RestartRequiredConfig{Required: true, Reason: VectorStoreRestartReason}
+	(&Config{ConfigStore: store, VectorStoreConfig: active}).MarkRestartApplied(context.Background())
+	require.Zero(t, store.restartClearCalls)
+	require.True(t, store.restartConfig.Required)
+	require.Equal(t, VectorStoreRestartReason, store.restartConfig.Reason)
+}
+
+func TestMarkRestartAppliedPreservesUnrelatedRestartReason(t *testing.T) {
+	initTestLogger()
+	active := &vectorstore.Config{Enabled: false, Type: vectorstore.VectorStoreTypePgvector}
+	store := NewMockConfigStore()
+	store.vectorConfig = active
+	store.restartConfig = &tables.RestartRequiredConfig{Required: true, Reason: "Other restart reason. " + VectorStoreRestartReason}
+	(&Config{ConfigStore: store, VectorStoreConfig: active}).MarkRestartApplied(context.Background())
+	require.Zero(t, store.restartClearCalls)
+	require.Equal(t, &tables.RestartRequiredConfig{Required: true, Reason: "Other restart reason."}, store.restartConfig)
 }
 
 // Implement ConfigStore interface methods
@@ -1107,6 +1411,7 @@ func (m *MockConfigStore) UpsertFeatureFlag(ctx context.Context, id string, enab
 
 // Vector store config
 func (m *MockConfigStore) UpdateVectorStoreConfig(ctx context.Context, config *vectorstore.Config) error {
+	m.vectorUpdateCalls++
 	m.vectorConfig = config
 	return nil
 }
@@ -1332,14 +1637,17 @@ func (m *MockConfigStore) UpdateProxyConfig(ctx context.Context, config *tables.
 
 // Restart required config
 func (m *MockConfigStore) GetRestartRequiredConfig(ctx context.Context) (*tables.RestartRequiredConfig, error) {
-	return nil, nil
+	return m.restartConfig, nil
 }
 
 func (m *MockConfigStore) SetRestartRequiredConfig(ctx context.Context, config *tables.RestartRequiredConfig) error {
+	m.restartConfig = config
 	return nil
 }
 
 func (m *MockConfigStore) ClearRestartRequiredConfig(ctx context.Context) error {
+	m.restartClearCalls++
+	m.restartConfig = &tables.RestartRequiredConfig{Required: false}
 	return nil
 }
 

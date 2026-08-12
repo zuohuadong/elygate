@@ -1,10 +1,12 @@
 package handlers
 
 import (
+	"fmt"
 	"io/fs"
 	"mime"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -155,8 +157,73 @@ func (h *UIHandler) serveDashboard(ctx *fasthttp.RequestCtx) {
 		ctx.Response.Header.Set("Cache-Control", "public, max-age=3600")
 	}
 
-	// Send the file content
+	if serveStaticByteRange(ctx, data) {
+		return
+	}
+	ctx.Response.Header.Set("Accept-Ranges", "bytes")
 	ctx.SetBody(data)
+}
+
+// serveStaticByteRange handles a single RFC 7233 byte range. Bundled MP4
+// metadata and browser seeking depend on predictable partial responses.
+func serveStaticByteRange(ctx *fasthttp.RequestCtx, data []byte) bool {
+	header := strings.TrimSpace(string(ctx.Request.Header.Peek("Range")))
+	if header == "" {
+		return false
+	}
+	if !strings.HasPrefix(header, "bytes=") || strings.Contains(header, ",") {
+		ctx.Response.Header.Set("Content-Range", fmt.Sprintf("bytes */%d", len(data)))
+		ctx.SetStatusCode(fasthttp.StatusRequestedRangeNotSatisfiable)
+		return true
+	}
+	parts := strings.SplitN(strings.TrimPrefix(header, "bytes="), "-", 2)
+	if len(parts) != 2 {
+		ctx.Response.Header.Set("Content-Range", fmt.Sprintf("bytes */%d", len(data)))
+		ctx.SetStatusCode(fasthttp.StatusRequestedRangeNotSatisfiable)
+		return true
+	}
+	start := 0
+	end := len(data) - 1
+	if parts[0] == "" {
+		suffixLength, err := strconv.Atoi(parts[1])
+		if err != nil || suffixLength <= 0 || len(data) == 0 {
+			ctx.Response.Header.Set("Content-Range", fmt.Sprintf("bytes */%d", len(data)))
+			ctx.SetStatusCode(fasthttp.StatusRequestedRangeNotSatisfiable)
+			return true
+		}
+		if suffixLength < len(data) {
+			start = len(data) - suffixLength
+		}
+	} else {
+		parsedStart, err := strconv.Atoi(parts[0])
+		if err != nil || parsedStart < 0 || parsedStart >= len(data) {
+			ctx.Response.Header.Set("Content-Range", fmt.Sprintf("bytes */%d", len(data)))
+			ctx.SetStatusCode(fasthttp.StatusRequestedRangeNotSatisfiable)
+			return true
+		}
+		start = parsedStart
+	}
+	if start < 0 || start >= len(data) {
+		ctx.Response.Header.Set("Content-Range", fmt.Sprintf("bytes */%d", len(data)))
+		ctx.SetStatusCode(fasthttp.StatusRequestedRangeNotSatisfiable)
+		return true
+	}
+	if parts[0] != "" && parts[1] != "" {
+		requestedEnd, parseErr := strconv.Atoi(parts[1])
+		if parseErr != nil || requestedEnd < start {
+			ctx.Response.Header.Set("Content-Range", fmt.Sprintf("bytes */%d", len(data)))
+			ctx.SetStatusCode(fasthttp.StatusRequestedRangeNotSatisfiable)
+			return true
+		}
+		if requestedEnd < end {
+			end = requestedEnd
+		}
+	}
+	ctx.Response.Header.Set("Accept-Ranges", "bytes")
+	ctx.Response.Header.Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, len(data)))
+	ctx.SetStatusCode(fasthttp.StatusPartialContent)
+	ctx.SetBody(data[start : end+1])
+	return true
 }
 
 // serveDevDashboard proxies dashboard requests to the local Vite dev server.

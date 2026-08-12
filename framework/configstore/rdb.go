@@ -2560,38 +2560,56 @@ func (s *RDBConfigStore) DeleteMCPClientConfig(ctx context.Context, id string) e
 // GetVectorStoreConfig retrieves the vector store configuration from the database.
 func (s *RDBConfigStore) GetVectorStoreConfig(ctx context.Context) (*vectorstore.Config, error) {
 	var vectorStoreTableConfig tables.TableVectorStoreConfig
-	if err := s.DB().WithContext(ctx).First(&vectorStoreTableConfig).Error; err != nil {
+	if err := s.DB().WithContext(ctx).Order("updated_at DESC").Order("id DESC").First(&vectorStoreTableConfig).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			// Return default cache configuration
 			return nil, nil
 		}
 		return nil, err
 	}
-	return &vectorstore.Config{
+	rawConfig := json.RawMessage("null")
+	if vectorStoreTableConfig.Config != nil && strings.TrimSpace(*vectorStoreTableConfig.Config) != "" {
+		rawConfig = json.RawMessage(*vectorStoreTableConfig.Config)
+	}
+	payload, err := json.Marshal(struct {
+		Enabled bool                        `json:"enabled"`
+		Type    vectorstore.VectorStoreType `json:"type"`
+		Config  json.RawMessage             `json:"config"`
+	}{
 		Enabled: vectorStoreTableConfig.Enabled,
-		Config:  vectorStoreTableConfig.Config,
 		Type:    vectorstore.VectorStoreType(vectorStoreTableConfig.Type),
-	}, nil
+		Config:  rawConfig,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal vector store config: %w", err)
+	}
+	var config vectorstore.Config
+	if err := json.Unmarshal(payload, &config); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal vector store config: %w", err)
+	}
+	return &config, nil
 }
 
 // UpdateVectorStoreConfig updates the vector store configuration in the database.
 func (s *RDBConfigStore) UpdateVectorStoreConfig(ctx context.Context, config *vectorstore.Config) error {
 	return s.DB().Transaction(func(tx *gorm.DB) error {
-		// Delete existing cache config
-		if err := tx.WithContext(ctx).Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&tables.TableVectorStoreConfig{}).Error; err != nil {
-			return err
-		}
-		jsonConfig, err := marshalToStringPtr(config.Config)
+		jsonConfig, err := marshalVectorStoreConfigForStorage(config.Config)
 		if err != nil {
 			return err
 		}
 		record := &tables.TableVectorStoreConfig{
+			ID:      1,
 			Type:    string(config.Type),
 			Enabled: config.Enabled,
 			Config:  jsonConfig,
 		}
-		// Create new cache config
-		return tx.WithContext(ctx).Create(record).Error
+		if err := tx.WithContext(ctx).Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "id"}},
+			DoUpdates: clause.AssignmentColumns([]string{"type", "enabled", "config", "encryption_status", "updated_at"}),
+		}).Create(record).Error; err != nil {
+			return err
+		}
+		return tx.WithContext(ctx).Where("id <> ?", record.ID).Delete(&tables.TableVectorStoreConfig{}).Error
 	})
 }
 

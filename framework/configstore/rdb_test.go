@@ -12,6 +12,7 @@ import (
 
 	"github.com/maximhq/bifrost/core/schemas"
 	"github.com/maximhq/bifrost/framework/configstore/tables"
+	"github.com/maximhq/bifrost/framework/vectorstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/sqlite"
@@ -43,6 +44,7 @@ func setupRDBTestStore(t *testing.T) *RDBConfigStore {
 		&tables.TableCustomer{},
 		&tables.TableTeam{},
 		&tables.TableClientConfig{},
+		&tables.TableVectorStoreConfig{},
 		&tables.TableGovernanceConfig{},
 		&tables.TablePlugin{},
 		&tables.TableMCPClient{},
@@ -78,6 +80,75 @@ func setupRDBTestStore(t *testing.T) *RDBConfigStore {
 	}
 	s.refreshPoolFn = func(ctx context.Context) error { return nil }
 	return s
+}
+
+func TestUpdateVectorStoreConfigMaintainsOneDeterministicRow(t *testing.T) {
+	store := setupRDBTestStore(t)
+	ctx := context.Background()
+	legacy := "{}"
+	require.NoError(t, store.DB().Create(&tables.TableVectorStoreConfig{ID: 7, Enabled: false, Type: "redis", Config: &legacy}).Error)
+
+	desired := &vectorstore.Config{Enabled: true, Type: vectorstore.VectorStoreTypePgvector, Config: vectorstore.PgvectorConfig{
+		ConnectionString: *schemas.NewSecretVar("postgres://elygate@db/elygate"), Schema: "elygate_vectors",
+	}}
+	require.NoError(t, store.UpdateVectorStoreConfig(ctx, desired))
+
+	var rows []tables.TableVectorStoreConfig
+	require.NoError(t, store.DB().Order("id").Find(&rows).Error)
+	require.Len(t, rows, 1)
+	require.Equal(t, uint(1), rows[0].ID)
+	stored, err := store.GetVectorStoreConfig(ctx)
+	require.NoError(t, err)
+	require.Equal(t, vectorstore.VectorStoreTypePgvector, stored.Type)
+	require.Equal(t, "elygate_vectors", stored.Config.(vectorstore.PgvectorConfig).Schema)
+}
+
+func TestGetVectorStoreConfigUsesNewestLegacyRow(t *testing.T) {
+	store := setupRDBTestStore(t)
+	older := `{"connection_string":{"value":"postgres://older@db/elygate"},"schema":"older_vectors"}`
+	newer := `{"connection_string":{"value":"postgres://newer@db/elygate"},"schema":"newer_vectors"}`
+	now := time.Now().UTC()
+	require.NoError(t, store.DB().Create(&tables.TableVectorStoreConfig{
+		ID: 3, Enabled: true, Type: "pgvector", Config: &older, UpdatedAt: now.Add(-time.Minute),
+	}).Error)
+	require.NoError(t, store.DB().Create(&tables.TableVectorStoreConfig{
+		ID: 4, Enabled: true, Type: "pgvector", Config: &newer, UpdatedAt: now,
+	}).Error)
+
+	stored, err := store.GetVectorStoreConfig(context.Background())
+	require.NoError(t, err)
+	pg := stored.Config.(vectorstore.PgvectorConfig)
+	require.Equal(t, "newer_vectors", pg.Schema)
+	require.Equal(t, "postgres://newer@db/elygate", pg.ConnectionString.GetValue())
+}
+
+func TestUpdateVectorStoreConfigStoresSecretReferencesWithoutResolvedValues(t *testing.T) {
+	store := setupRDBTestStore(t)
+	t.Setenv("ELYGATE_VECTOR_STORAGE_DSN", "postgres://resolved-secret@db/elygate")
+	desired := &vectorstore.Config{Enabled: true, Type: vectorstore.VectorStoreTypePgvector, Config: vectorstore.PgvectorConfig{
+		ConnectionString: *schemas.NewSecretVar("env.ELYGATE_VECTOR_STORAGE_DSN"), Schema: "elygate_vectors",
+	}}
+	require.NoError(t, store.UpdateVectorStoreConfig(context.Background(), desired))
+
+	var raw struct {
+		Config           string
+		EncryptionStatus string
+	}
+	require.NoError(t, store.DB().Table((tables.TableVectorStoreConfig{}).TableName()).
+		Select("config, encryption_status").Where("id = ?", 1).Scan(&raw).Error)
+	require.NotContains(t, raw.Config, "resolved-secret")
+	if raw.EncryptionStatus == tables.EncryptionStatusEncrypted {
+		require.NotContains(t, raw.Config, "ELYGATE_VECTOR_STORAGE_DSN")
+	} else {
+		require.Contains(t, raw.Config, "env.ELYGATE_VECTOR_STORAGE_DSN")
+	}
+
+	t.Setenv("ELYGATE_VECTOR_STORAGE_DSN", "postgres://rotated-secret@db/elygate")
+	stored, err := store.GetVectorStoreConfig(context.Background())
+	require.NoError(t, err)
+	pg := stored.Config.(vectorstore.PgvectorConfig)
+	require.Equal(t, "env.ELYGATE_VECTOR_STORAGE_DSN", pg.ConnectionString.GetRawRef())
+	require.Equal(t, "postgres://rotated-secret@db/elygate", pg.ConnectionString.GetValue())
 }
 
 func testComplexityAnalyzerConfig() *ComplexityAnalyzerConfig {

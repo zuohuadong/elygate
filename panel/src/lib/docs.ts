@@ -8,15 +8,18 @@ function stripMdx(source: string): string {
 
 function normalizeLinks(source: string, sourcePath: string): string {
 	const directory = sourcePath.includes('/') ? sourcePath.slice(0, sourcePath.lastIndexOf('/') + 1) : '';
-	const withImages = source.replace(/(!\[[^\]]*\]\()((?!https?:\/\/|data:|\/)[^)]+)(\))/gu, (_match, prefix: string, target: string, suffix: string) =>
-		`${prefix}https://raw.githubusercontent.com/maximhq/bifrost/main/docs/${directory}${target}${suffix}`,
-	);
-	return withImages
-		.replace(/(\[[^\]]+\]\()\/(?!\/)([^)]+)(\))/gu, '$1https://docs.getbifrost.ai/$2$3')
-		.replace(/(\[[^\]]+\]\()((?!https?:\/\/|#|mailto:|tel:)[^)]+)(\))/gu, (_match, prefix: string, target: string, suffix: string) => {
+	return source
+		.replace(/(\[[^\]]+\]\()\/(?!\/|assets\/)([^)]+)(\))/gu, '$1https://docs.getbifrost.ai/$2$3')
+		.replace(/(\[[^\]]+\]\()((?!https?:\/\/|\/assets\/|#|mailto:|tel:)[^)]+)(\))/gu, (_match, prefix: string, target: string, suffix: string) => {
 			const normalizedTarget = target.replace(/\.mdx?(?=$|#|\?)/u, '');
 			return `${prefix}${new URL(normalizedTarget, `https://docs.getbifrost.ai/${directory}`).href}${suffix}`;
 		});
+}
+
+export function applyMediaLoadingHints(html: string): string {
+	return html
+		.replace(/<img(?![^>]*\bloading=)/giu, '<img loading="lazy" decoding="async"')
+		.replace(/<video(?![^>]*\bpreload=)/giu, '<video preload="metadata"');
 }
 
 export function normalizeMdxDocument(source: string, sourcePath: string): string {

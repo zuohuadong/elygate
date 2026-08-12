@@ -68,7 +68,7 @@
 	const statusItems = $derived.by(() => [
 		{ key: 'database', ok: connectionValue('is_db_connected'), kind: 'connected' as const },
 		{ key: 'logs', ok: connectionValue('is_logs_connected'), kind: 'connected' as const },
-		{ key: 'cache', ok: connectionValue('is_cache_connected'), kind: 'connected' as const },
+		{ key: 'cache', ok: connectionValue('is_cache_connected'), kind: 'connected' as const, href: '#/caching-config' },
 		{ key: 'objectStorage', ok: connectionValue('is_object_storage_connected'), kind: 'connected' as const },
 		{ key: 'git', ok: connectionValue('is_git_available'), kind: 'available' as const },
 	]);
@@ -207,7 +207,7 @@
 
 	<div class="status-grid" aria-label={i18n.t('elygate.connectionStatus')}>
 		{#each statusItems as item (item.key)}
-			<div class="status-item">
+			<a class="status-item" class:is-link={Boolean(item.href)} href={item.href ?? undefined}>
 				<span class={['dot', item.ok === true ? 'ok' : item.ok === false ? 'off' : 'unknown']}></span>
 				<span class="status-name">{i18n.t(`elygate.conn.${item.key}`)}</span>
 				<strong class={item.ok === true ? 'ok-text' : item.ok === false ? 'off-text' : 'unknown-text'}>
@@ -217,7 +217,7 @@
 						? i18n.t(item.kind === 'connected' ? 'elygate.conn.connected' : 'elygate.conn.available')
 						: i18n.t(item.kind === 'connected' ? 'elygate.conn.disconnected' : 'elygate.conn.unavailable')}
 				</strong>
-			</div>
+			</a>
 		{/each}
 	</div>
 
@@ -337,6 +337,9 @@
 
 	.status-grid { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1.25rem; }
 	.status-item { align-items: center; border: 1px solid var(--border); border-radius: .55rem; display: grid; flex: 1 1 170px; gap: .45rem; grid-template-columns: auto minmax(0, 1fr) auto; min-height: 2.65rem; padding: .55rem .7rem; }
+	.status-item { color: inherit; text-decoration: none; }
+	.status-item.is-link { cursor: pointer; }
+	.status-item.is-link:hover { background: var(--accent); border-color: color-mix(in oklch, var(--primary) 45%, var(--border)); }
 	.dot { border-radius: 50%; flex: none; height: .5rem; width: .5rem; }
 	.dot.ok { background: var(--primary); }
 	.dot.off { background: var(--muted-foreground); opacity: .5; }

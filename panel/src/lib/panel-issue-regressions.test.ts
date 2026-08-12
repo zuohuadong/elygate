@@ -8,10 +8,10 @@ describe('panel issue regressions', () => {
 		expect(source).toContain("i18n.t('elygate.providerKeys')");
 	});
 
-	test('routing weights accept common four-decimal values', async () => {
+	test('routing weights accept common values like 1 and 0.99', async () => {
 		const source = await Bun.file(new URL('../pages/RoutingRulesPage.svelte', import.meta.url)).text();
-		expect(source).toMatch(/type="number"[^>]*min="0\.0001"[^>]*max="1"[^>]*step="0\.0001"/);
-		expect(source).not.toContain('step="0.01"');
+		expect(source).toMatch(/type="number"[^>]*min="0"[^>]*max="1"[^>]*step="any"/);
+		expect(source).not.toMatch(/step="0\.0*1"/);
 	});
 
 	test('complexity routing keeps technical enum values but localizes visible Chinese copy', async () => {
@@ -25,5 +25,16 @@ describe('panel issue regressions', () => {
 	test('runtime config inherits the active theme foreground color', async () => {
 		const source = await Bun.file(new URL('../pages/ConfigPage.svelte', import.meta.url)).text();
 		expect(source).toMatch(/\.page-shell\s*\{[^}]*color:\s*var\(--foreground\)/s);
+	});
+
+	test('caching config identifies the system section instead of plugins', async () => {
+		const source = await Bun.file(new URL('../pages/CachingConfigPage.svelte', import.meta.url)).text();
+		expect(source).toContain("Elygate / {i18n.t('elygate.system')}");
+		expect(source).not.toContain('Elygate / Plugins');
+	});
+
+	test('runtime cache status links to the actionable storage configuration', async () => {
+		const source = await Bun.file(new URL('../pages/ConfigPage.svelte', import.meta.url)).text();
+		expect(source).toContain("href: '#/caching-config'");
 	});
 });

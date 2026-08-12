@@ -93,7 +93,7 @@ describe('panel resource registry', () => {
 	test('exposes canonical workflows while retaining hidden compatibility routes', () => {
 		const resourceNames = createResources('en', true).map((resource) => resource.name).sort();
 		const menuNames = leafResourceNames(createMenu('en', VISIBLE_ENTERPRISE_RESOURCES, true)).sort();
-		const hiddenCompatibilityRoutes = ['budgets', 'complexity-analyzer', 'prompt-folders', 'rate-limits'];
+		const hiddenCompatibilityRoutes = ['adaptive-routing', 'budgets', 'complexity-analyzer', 'prompt-folders', 'rate-limits'];
 		expect(new Set(menuNames).size).toBe(menuNames.length);
 		expect(menuNames).toEqual(resourceNames.filter((name) => !hiddenCompatibilityRoutes.includes(name)));
 		expect(resourceNames).toEqual(expect.arrayContaining(hiddenCompatibilityRoutes));
@@ -143,14 +143,15 @@ describe('panel resource registry', () => {
 		]) {
 			expect(names).not.toContain(enterprise);
 		}
-		expect(names).toContain('adaptive-routing');
+		expect(names).not.toContain('adaptive-routing');
 	});
 
-	test('routes adaptive routing to the real governance routing-rules workflow', () => {
-		const adaptive = createMenu('zh-CN')
-			.flatMap((group) => group.children ?? [])
-			.find((entry) => entry.name === 'adaptive-routing');
-		expect(adaptive?.href).toBe('#/routing-rules');
+	test('keeps adaptive routing as a hidden compatibility route without duplicating routing rules', () => {
+		const menu = createMenu('zh-CN');
+		const leaves = leafItems(menu);
+		expect(leaves.filter((entry) => entry.name === 'adaptive-routing')).toHaveLength(0);
+		expect(leaves.filter((entry) => entry.href === '#/routing-rules')).toHaveLength(1);
+		expect(createResources('zh-CN').map((resource) => resource.name)).toContain('adaptive-routing');
 	});
 
 	test('keeps core MCP workflows on the dedicated management page', async () => {
