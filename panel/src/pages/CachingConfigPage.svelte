@@ -188,7 +188,7 @@
 	<section class="vector-store-card">
 		<header><div><h2>{i18n.t('elygate.vectorStore')}</h2><p>{i18n.t('elygate.vectorStoreHint')}</p></div><span class:ok={vectorStoreConnected}>{vectorStoreConnected ? i18n.t('elygate.conn.connected') : i18n.t('elygate.conn.disconnected')}</span></header>
 		{#if vectorStore?.management_message}<div class="notice warning">{vectorStore.management_message}</div>{/if}
-		{#if vectorStore?.restart_required}<div class="notice warning">{i18n.t('elygate.restartRequired')} {vectorStore.restart_reason ?? ''}</div>{/if}
+		{#if vectorStore?.restart_required}<div class="notice warning"><strong>{i18n.t('elygate.restartRequired')}</strong> {vectorStore.restart_reason ?? ''}<p>{i18n.t('elygate.restartInstructions')}</p></div>{/if}
 		<div class="form-grid">
 			<label>{i18n.t('elygate.vectorStoreType')}<input value={vectorStore?.type ?? 'pgvector'} disabled /></label>
 			{#if vectorStore?.supported !== false}
@@ -205,7 +205,7 @@
 			<label>{i18n.t('elygate.cacheTtl')}<input type="number" min="0" bind:value={form.ttl} /></label><label>{i18n.t('elygate.similarityThreshold')}<input type="number" min="0" max="1" step="0.01" bind:value={form.threshold} /></label><label>{i18n.t('elygate.conversationThreshold')}<input type="number" min="1" max="50" bind:value={form.conversationHistoryThreshold} /></label><label>{i18n.t('elygate.vectorNamespace')}<input bind:value={form.vectorStoreNamespace} /></label><label>{i18n.t('elygate.defaultCacheKey')}<input bind:value={form.defaultCacheKey} /></label>
 		</div>
 		<div class="switches"><label><input type="checkbox" bind:checked={form.excludeSystemPrompt} />{i18n.t('elygate.excludeSystemPrompt')}</label><label><input type="checkbox" bind:checked={form.cacheByModel} />{i18n.t('elygate.cacheByModel')}</label><label><input type="checkbox" bind:checked={form.cacheByProvider} />{i18n.t('elygate.cacheByProvider')}</label></div>
-		<footer><button class="primary" type="submit" disabled={isSaving || isLoading || !vectorStoreConnected}>{i18n.t('elygate.save')}</button></footer>
+		<footer><button class="primary" type="submit" disabled={isSaving || isLoading}>{i18n.t('elygate.save')}</button></footer>
 	</form>
 	<section class="cache-tools"><h2>{i18n.t('elygate.cacheManagement')}</h2><p>{i18n.t('elygate.cacheManagementHint')}</p><div><input bind:value={cacheId} placeholder={i18n.t('elygate.cacheId')} /><button type="button" onclick={() => void clearCache('id')}>{i18n.t('elygate.clear')}</button></div><div><input bind:value={cacheKey} placeholder={i18n.t('elygate.cacheKey')} /><button type="button" onclick={() => void clearCache('key')}>{i18n.t('elygate.clear')}</button></div></section>
 </section>
@@ -239,6 +239,7 @@
 	.notice.error { background: color-mix(in oklch, var(--destructive) 10%, transparent); color: var(--destructive); }
 	.notice.success { background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); }
 	.notice.warning { background: color-mix(in oklch, #d97706 12%, transparent); color: #b45309; }
+	.notice.warning p { margin: .45rem 0 0; }
 	@media (max-width: 760px) { .page-heading { flex-direction: column; } .form-grid { grid-template-columns: 1fr 1fr; } }
 	@media (max-width: 520px) { .form-grid { grid-template-columns: 1fr; } }
 </style>

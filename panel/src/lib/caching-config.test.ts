@@ -79,4 +79,10 @@ describe('caching plugin mutations', () => {
 		expect(selected).toEqual(storedConfig);
 		expect(draftBuilt).toBe(false);
 	});
+
+	test('keeps cache settings save available while the vector store is disconnected', async () => {
+		const source = await Bun.file(new URL('../pages/CachingConfigPage.svelte', import.meta.url)).text();
+		expect(source).not.toContain('disabled={isSaving || isLoading || !vectorStoreConnected}');
+		expect(source).toContain('elygate.restartInstructions');
+	});
 });

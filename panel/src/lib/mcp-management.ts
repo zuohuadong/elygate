@@ -38,8 +38,9 @@ export function localizeMcpCatalogValue(locale: ElygateLocale, field: McpCatalog
 	const raw = String(value ?? '');
 	if (locale !== 'zh-CN' || !raw) return raw;
 	const translated = field === 'category' ? catalogCategoriesZh[raw] : field === 'source' ? catalogSourcesZh[raw] : catalogTagsZh[raw];
+	if (field === 'tag') return translated || raw;
 	if (translated && translated !== raw) return `${translated}（${raw}）`;
-	return field === 'tag' ? `原始标签：${raw}` : raw;
+	return raw;
 }
 
 export function localizeMcpCatalogDescription(

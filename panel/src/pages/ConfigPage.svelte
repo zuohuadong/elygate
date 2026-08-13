@@ -362,7 +362,7 @@
 	.notice.success { background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); }
 	.notice.warning { background: color-mix(in oklch, var(--warning, #d97706) 12%, transparent); color: var(--warning, #b45309); }
 
-	.save-bar { display: flex; justify-content: flex-end; position: sticky; bottom: 0; background: var(--background); border-top: 1px solid var(--border); padding: .75rem 0; }
+	.save-bar { border-top: 1px solid var(--border); display: flex; justify-content: flex-end; padding: .75rem 0; }
 
 	@media (max-width: 760px) {
 		.page-heading { align-items: stretch; flex-direction: column; }

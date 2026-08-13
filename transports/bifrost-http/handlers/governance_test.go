@@ -2954,6 +2954,21 @@ func TestModelConfigToProviderGovernanceNewFields(t *testing.T) {
 	})
 }
 
+func TestProviderGovernanceConfigured(t *testing.T) {
+	t.Run("calendar alignment alone is persistent governance", func(t *testing.T) {
+		mc := &configstoreTables.TableModelConfig{CalendarAligned: true}
+		if !providerGovernanceConfigured(mc, false) {
+			t.Fatal("calendar-aligned provider governance must be persisted without budgets or rate limits")
+		}
+	})
+
+	t.Run("empty governance is removable", func(t *testing.T) {
+		if providerGovernanceConfigured(&configstoreTables.TableModelConfig{}, false) {
+			t.Fatal("empty provider governance should not be persisted")
+		}
+	})
+}
+
 func TestUpdateProviderGovernance_BudgetMutualExclusion(t *testing.T) {
 	SetLogger(&mockLogger{})
 

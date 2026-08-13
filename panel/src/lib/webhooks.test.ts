@@ -43,4 +43,11 @@ describe('webhook management helpers', () => {
 		expect(payload.headers).toEqual(endpoint.headers);
 		expect(payload.max_concurrent_deliveries).toBe(10);
 	});
+
+	test('uses a compact aligned webhook table without exposing row UUIDs', async () => {
+		const source = await Bun.file(new URL('../pages/WebhooksPage.svelte', import.meta.url)).text();
+		expect(source).not.toContain('<small>{idOf(endpoint)}</small>');
+		expect(source).toMatch(/table\s*\{[^}]*table-layout:\s*fixed/);
+		expect(source).toMatch(/th, td\s*\{[^}]*vertical-align:\s*middle/);
+	});
 });

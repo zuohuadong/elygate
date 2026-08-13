@@ -41,6 +41,14 @@ describe('governance management helpers', () => {
 		});
 	});
 
+	test('keeps a calendar-only provider governance payload explicit', () => {
+		const draft = governanceDraftFromRecord({ provider: 'anthropic', calendar_aligned: false }, 'provider');
+		draft.calendarAligned = true;
+		expect(buildGovernancePayload(draft, 'provider', true)).toEqual({
+			budgets: [], rate_limit: {}, calendar_aligned: true,
+		});
+	});
+
 	test('normalizes pricing override scopes and replaces the full numeric patch', () => {
 		const draft = pricingOverrideDraftFromRecord({
 			name: 'team-price', scope_kind: 'virtual_key_provider', virtual_key_id: 'vk-1', provider_id: 'openai',

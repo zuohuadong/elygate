@@ -81,9 +81,9 @@ describe('MCP management helpers', () => {
 	test('localizes MCP catalog metadata without changing filter values', () => {
 		expect(localizeMcpCatalogValue('zh-CN', 'category', 'Marketing')).toBe('营销（Marketing）');
 		expect(localizeMcpCatalogValue('zh-CN', 'source', 'remote')).toBe('远程目录（remote）');
-		expect(localizeMcpCatalogValue('zh-CN', 'tag', 'journey-optimizer')).toBe('旅程优化（journey-optimizer）');
-		expect(localizeMcpCatalogValue('zh-CN', 'tag', 'adobe')).toBe('Adobe（adobe）');
-		expect(localizeMcpCatalogValue('zh-CN', 'tag', 'untranslated-product')).toBe('原始标签：untranslated-product');
+		expect(localizeMcpCatalogValue('zh-CN', 'tag', 'journey-optimizer')).toBe('旅程优化');
+		expect(localizeMcpCatalogValue('zh-CN', 'tag', 'adobe')).toBe('Adobe');
+		expect(localizeMcpCatalogValue('zh-CN', 'tag', 'untranslated-product')).toBe('untranslated-product');
 		expect(localizeMcpCatalogValue('en', 'category', 'Marketing')).toBe('Marketing');
 	});
 
@@ -151,5 +151,13 @@ describe('MCP management helpers', () => {
 		expect(source).not.toContain('<option value="connected">Connected</option>');
 		expect(source).toContain('<fieldset class="client-options span-2">');
 		expect(source).toMatch(/\.client-options input\[type=['"]checkbox['"]\][^{]*\{[^}]*width:\s*auto/);
+	});
+
+	test('keeps library view controls out of the filter form', async () => {
+		const source = await Bun.file(new URL('../pages/McpManagementPage.svelte', import.meta.url)).text();
+		const headingActions = source.slice(source.indexOf('<div class="heading-actions">'), source.indexOf('</header>'));
+		const toolbar = source.slice(source.indexOf('<form class="toolbar"'), source.indexOf('</form>'));
+		expect(headingActions).toContain('view-toggle');
+		expect(toolbar).not.toContain('view-toggle');
 	});
 });

@@ -56,6 +56,7 @@
 	let editingClientId = $state('');
 	let clientDraft = $state<McpClientDraft>(createEmptyMcpClientDraft());
 	let viewMode = $state<'table' | 'grid'>('table');
+	let searchTimer: number | undefined;
 	let installedNames = $state.raw<Set<string>>(new Set());
 	let filterData = $state.raw<JsonRecord>({});
 	let installName = $state('');
@@ -193,6 +194,11 @@
 		search = ''; identity = ''; connectionTypes = []; authTypes = []; states = []; kinds = []; statuses = []; authModes = []; categories = []; tags = [];
 		codeMode = ''; disabled = ''; allVirtualKeys = false;
 		void refreshData(true);
+	}
+	function scheduleSearch(): void {
+		if (mode !== 'library') return;
+		window.clearTimeout(searchTimer);
+		searchTimer = window.setTimeout(() => void refreshData(true), 250);
 	}
 
 	function openCreateClient(): void {
@@ -401,7 +407,7 @@
 		try { const saved = window.localStorage.getItem('mcp-library-view-mode'); if (saved === 'grid' || saved === 'table') viewMode = saved; } catch { /* 使用默认值 */ }
 		void refreshData();
 		const timer = window.setInterval(() => { if (!modal && (mode === 'clients' || mode === 'sessions')) void refreshData(); }, 5000);
-		return () => window.clearInterval(timer);
+		return () => { window.clearInterval(timer); window.clearTimeout(searchTimer); };
 	});
 </script>
 
@@ -410,14 +416,14 @@
 		<div><p class="eyebrow">Elygate / MCP</p><h1>{mode === 'clients' ? text('MCP 客户端', 'MCP Clients') : mode === 'library' ? text('MCP 服务库', 'MCP Server Library') : mode === 'sessions' ? text('MCP 认证会话', 'MCP Auth Sessions') : text('OAuth 授权', 'OAuth Grants')}</h1><p>{mode === 'clients' ? text('管理 MCP 连接、认证、工具、虚拟密钥范围和运行状态。', 'Manage MCP connections, authentication, tools, virtual-key scope, and runtime state.') : mode === 'library' ? text('浏览、筛选、发布并安装同步的 MCP 服务目录。', 'Browse, filter, publish, and install servers from the synced MCP catalog.') : mode === 'sessions' ? text('查看按用户、虚拟密钥或会话绑定的 OAuth 与请求头凭据。', 'Inspect OAuth and header credentials bound to users, virtual keys, or sessions.') : text('管理通过 MCP OAuth 同意流程签发的下游授权。', 'Manage downstream grants issued through the MCP OAuth consent flow.')}</p></div>
 		<div class="heading-actions">
 			{#if mode === 'clients'}<button class="primary" type="button" onclick={openCreateClient}>+ {text('新增客户端', 'New client')}</button>{/if}
-			{#if mode === 'library'}<button type="button" onclick={() => void openLibrarySettings()}>{text('目录设置', 'Library settings')}</button><button type="button" onclick={() => void libraryAction(null, 'sync')}>{text('立即同步', 'Sync now')}</button><button class="primary" type="button" onclick={openLibraryCreate}>+ {text('发布服务', 'Publish server')}</button>{/if}
+			{#if mode === 'library'}<div class="view-toggle"><button class:active={viewMode === 'table'} type="button" onclick={() => setViewMode('table')}>{text('表格', 'Table')}</button><button class:active={viewMode === 'grid'} type="button" onclick={() => setViewMode('grid')}>{text('卡片', 'Grid')}</button></div><button type="button" onclick={() => void openLibrarySettings()}>{text('目录设置', 'Library settings')}</button><button type="button" onclick={() => void libraryAction(null, 'sync')}>{text('立即同步', 'Sync now')}</button><button class="primary" type="button" onclick={openLibraryCreate}>+ {text('发布服务', 'Publish server')}</button>{/if}
 		</div>
 	</header>
 	{#if error}<div class="notice error" role="alert">{error}</div>{/if}
 	{#if notice}<div class="notice success" role="status">{notice}</div>{/if}
 
 	<form class="toolbar" onsubmit={(event) => { event.preventDefault(); void refreshData(true); }}>
-		<label>{text('搜索', 'Search')}<input bind:value={search} placeholder={mode === 'library' ? text('名称、描述或标签', 'Name, description, or tag') : text('名称、身份或客户端', 'Name, identity, or client')} /></label>
+		<label>{text('搜索', 'Search')}<input bind:value={search} oninput={scheduleSearch} placeholder={mode === 'library' ? text('名称、描述或标签', 'Name, description, or tag') : text('名称、身份或客户端', 'Name, identity, or client')} /></label>
 		{#if mode === 'sessions'}<label>{text('精确身份', 'Exact identity')}<input bind:value={identity} placeholder="user / vk / session id" /></label>{/if}
 		{#if mode === 'clients' || mode === 'library'}
 			<label>{text('连接类型', 'Connection')}<select multiple bind:value={connectionTypes}>{#each facet('connection_types') as item (item)}<option value={item}>{enumLabel('connection_type', item)}</option>{/each}</select></label>
@@ -430,8 +436,8 @@
 			<label class="check"><input type="checkbox" bind:checked={allVirtualKeys} />{text('仅全部虚拟密钥可用', 'Only available to all virtual keys')}</label>
 		{/if}
 		{#if mode === 'library'}
-			<label>{text('分类', 'Category')}<select multiple bind:value={categories}>{#each facet('categories') as item (item)}<option value={item}>{catalogValue('category', item)}</option>{/each}</select></label>
-			<label>{text('标签', 'Tags')}<select multiple bind:value={tags}>{#each facet('tags') as item (item)}<option value={item}>{catalogValue('tag', item)}</option>{/each}</select></label>
+			<label>{text('分类', 'Category')}<select multiple bind:value={categories} onchange={() => void refreshData(true)}>{#each facet('categories') as item (item)}<option value={item}>{catalogValue('category', item)}</option>{/each}</select></label>
+			<label>{text('标签', 'Tags')}<select multiple bind:value={tags} onchange={() => void refreshData(true)}>{#each facet('tags') as item (item)}<option value={item}>{catalogValue('tag', item)}</option>{/each}</select></label>
 		{/if}
 		{#if mode === 'sessions'}
 			<label>{text('凭据类型', 'Kind')}<select multiple bind:value={kinds}><option value="token">OAuth token</option><option value="flow">Pending flow</option><option value="header">Headers</option></select></label>
@@ -441,7 +447,6 @@
 			<label>{text('绑定方式', 'Binding mode')}<select multiple bind:value={authModes}><option value="user">User</option><option value="vk">Virtual key</option><option value="session">Session</option></select></label>
 		{/if}
 		<button type="submit">{text('应用筛选', 'Apply')}</button><button type="button" onclick={resetFilters}>{text('清除', 'Clear')}</button>
-		{#if mode === 'library'}<div class="view-toggle"><button class:active={viewMode === 'table'} type="button" onclick={() => setViewMode('table')}>{text('表格', 'Table')}</button><button class:active={viewMode === 'grid'} type="button" onclick={() => setViewMode('grid')}>{text('卡片', 'Grid')}</button></div>{/if}
 	</form>
 
 	{#if mode === 'library' && viewMode === 'grid'}

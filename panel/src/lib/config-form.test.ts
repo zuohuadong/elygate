@@ -60,6 +60,13 @@ function sampleDocument(): JsonRecord {
 }
 
 describe('config-form', () => {
+	it('keeps the save bar in normal flow so it cannot cover bottom controls', async () => {
+		const source = await Bun.file(new URL('../pages/ConfigPage.svelte', import.meta.url)).text();
+		const saveBarRule = source.match(/\.save-bar\s*\{([^}]*)\}/)?.[1] ?? '';
+
+		expect(saveBarRule).not.toContain('position: sticky');
+	});
+
 	it('从文档提取表单值', () => {
 		const form = configFormFromDocument(sampleDocument());
 		expect(form.authEnabled).toBe(true);

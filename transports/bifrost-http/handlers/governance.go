@@ -1036,6 +1036,10 @@ type UpdateProviderGovernanceRequest struct {
 	CalendarAligned *bool                   `json:"calendar_aligned,omitempty"`
 }
 
+func providerGovernanceConfigured(mc *configstoreTables.TableModelConfig, willHaveBudget bool) bool {
+	return mc.CalendarAligned || mc.RateLimitID != nil || willHaveBudget
+}
+
 // RegisterRoutes registers all governance-related routes for the new hierarchical system
 func (h *GovernanceHandler) RegisterRoutes(r *router.Router, middlewares ...schemas.BifrostHTTPMiddleware) {
 	r.GET("/api/governance/complexity-analyzer-config", lib.ChainMiddlewares(h.getComplexityAnalyzerConfig, middlewares...))
@@ -3899,7 +3903,7 @@ func (h *GovernanceHandler) updateProviderGovernance(ctx *fasthttp.RequestCtx) {
 			willHaveBudget = len(*effectiveBudgets) > 0
 		}
 
-		hasGovernance := mc.RateLimitID != nil || willHaveBudget
+		hasGovernance := providerGovernanceConfigured(&mc, willHaveBudget)
 		switch {
 		case !hasGovernance && isNew:
 			// Nothing to persist (removal request on a provider with no governance).
