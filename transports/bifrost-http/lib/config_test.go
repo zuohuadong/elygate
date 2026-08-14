@@ -410,6 +410,16 @@ type MockConfigStore struct {
 	oauthConfigsByID      map[string]*tables.TableOauthConfig
 	oauthTokensByConfigID map[string][]*tables.TableMCPOauthToken
 
+	// oauthConfigsByID/oauthTokensByConfigID back GetOauthConfigByID,
+	// CreateOauthConfig, UpdateOauthConfig, and MarkTokensNeedsReauthByConfigID
+	// with real in-memory state (rather than no-op stubs), following the
+	// testConfigStore shape in framework/oauth2/sync_test.go, so tests can
+	// assert that a credential-rotation call path actually wrote through:
+	// the oauth_configs row was updated and bound tokens were cascaded to
+	// needs_reauth, not just that no panic occurred.
+	oauthConfigsByID      map[string]*tables.TableOauthConfig
+	oauthTokensByConfigID map[string][]*tables.TableMCPOauthToken
+
 	// Track update calls for verification
 	clientConfigUpdated    bool
 	providersConfigUpdated bool
@@ -2084,6 +2094,14 @@ func (m *MockConfigStore) FailSidekiqJob(ctx context.Context, id, runnerID, meta
 	return nil
 }
 
+func (m *MockConfigStore) CancelSidekiqJob(ctx context.Context, id string) (bool, error) {
+	return false, nil
+}
+
+func (m *MockConfigStore) FinalizeCancelledSidekiqJob(ctx context.Context, id, runnerID, metadata string) error {
+	return nil
+}
+
 func (m *MockConfigStore) ListClaimableSidekiqJobs(ctx context.Context, staleBefore time.Time) ([]tables.TableSidekiqJob, error) {
 	return nil, nil
 }
@@ -2694,6 +2712,10 @@ func createTempDir(t *testing.T) string {
 	t.Cleanup(func() {
 		os.RemoveAll(dir)
 	})
+	// Hand the directory a database that has already been through a first boot,
+	// so LoadConfig opens it instead of building it - see
+	// configstoretemplate_test.go for why that matters.
+	seedMigratedConfigDB(t, dir)
 	return dir
 }
 
@@ -18270,6 +18292,12 @@ var excludedGoFields = map[string]map[string]bool{
 		"allow_all_keys": true, // Internal DB field; users configure via key_ids
 		"keys":           true, // GORM many2many relation; users configure via key_ids
 		"budgets":        true, // GORM relation (budgets have provider_config_id FK)
+		// API-only projection (gorm:"-"). The source of truth is VK-scoped model
+		// configs; the governance handler hydrates this field on read and folds it
+		// back on write. config.json is applied via reconcileVirtualKeyAssociations,
+		// which never consults it, so exposing it in the schema would advertise a
+		// config key that silently does nothing.
+		"model_budgets": true,
 	},
 	"tables.TableVirtualKeyMCPConfig": {
 		"mcp_client": true, // GORM relation

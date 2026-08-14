@@ -1768,6 +1768,153 @@ func (h *MCPHandler) addMCPClient(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
+	// Handle token exchange: the caller's identity-provider token is exchanged
+	// per request at runtime, so nothing interactive happens at create.
+	// Verification + tool discovery run synchronously when an admin credential
+	// is available (the client-credentials fallback, or a one-time sample
+	// caller token); without either the client is parked in
+	// pending_verification for the verify-exchange endpoint.
+	if req.AuthType == string(schemas.MCPAuthTypeTokenExchange) {
+		if isEnterprise, _ := bifrostCtx.Value(schemas.BifrostContextKeyIsEnterprise).(bool); !isEnterprise {
+			SendError(ctx, fasthttp.StatusBadRequest, "auth_type 'token_exchange' is not supported")
+			return
+		}
+		if h.store.OAuthProvider == nil || !h.store.OAuthProvider.TokenExchangeAvailable() {
+			SendError(ctx, fasthttp.StatusBadRequest, "auth_type 'token_exchange' requires user-identity authentication with an exchange client to be configured")
+			return
+		}
+		if req.TokenExchange == nil || strings.TrimSpace(req.TokenExchange.Audience) == "" {
+			SendError(ctx, fasthttp.StatusBadRequest, "token_exchange.audience is required when auth_type is 'token_exchange'")
+			return
+		}
+		if !req.TokenExchange.UseIdPCredentials && strings.TrimSpace(req.TokenExchange.ClientID.GetValue()) == "" && !req.TokenExchange.ClientID.IsFromSecret() {
+			SendError(ctx, fasthttp.StatusBadRequest, "token_exchange.client_id is required when auth_type is 'token_exchange' and use_idp_credentials is not set")
+			return
+		}
+		// Token-exchange clients rely on requests that may carry both an
+		// identity token and a virtual key; the 'error' conflict behavior
+		// would reject exactly those requests, so the two settings are
+		// mutually exclusive (enforced in both directions — see the
+		// client-config update path).
+		clientConfig, cfgErr := h.store.ConfigStore.GetClientConfig(ctx)
+		if cfgErr != nil {
+			// Fail closed: silently skipping this check on a read error
+			// would let a token_exchange client be created while
+			// dual_credential_conflict_behavior is still 'error', the exact
+			// pairing this validation exists to prevent.
+			SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("Failed to load client config to validate dual_credential_conflict_behavior: %v", cfgErr))
+			return
+		}
+		if clientConfig != nil && clientConfig.DualCredentialConflictBehavior == configstoreTables.DualCredentialConflictBehaviorError {
+			SendError(ctx, fasthttp.StatusBadRequest, "auth_type 'token_exchange' cannot be used while dual_credential_conflict_behavior is 'error': change it to 'prefer_idp' or 'prefer_vk' first")
+			return
+		}
+
+		toolSyncInterval := mcp.DefaultConnectionCheckInterval
+		if req.ToolSyncInterval != 0 {
+			toolSyncInterval = time.Duration(req.ToolSyncInterval) * time.Minute
+		} else {
+			config, cfgErr := h.store.ConfigStore.GetClientConfig(ctx)
+			if cfgErr == nil && config != nil {
+				toolSyncInterval = time.Duration(config.MCPToolSyncInterval) * time.Minute
+			}
+		}
+
+		isPingAvailable := true
+		if req.IsPingAvailable != nil {
+			isPingAvailable = *req.IsPingAvailable
+		}
+
+		schemasConfig := &schemas.MCPClientConfig{
+			ID:                     req.ClientID,
+			Name:                   req.Name,
+			IsCodeModeClient:       req.IsCodeModeClient,
+			IsPingAvailable:        &isPingAvailable,
+			NeedsSessionStickiness: req.NeedsSessionStickiness,
+			ToolSyncInterval:       toolSyncInterval,
+			ToolExecutionTimeout:   resolvedToolExecutionTimeout,
+			ConnectionType:         schemas.MCPConnectionType(req.ConnectionType),
+			ConnectionString:       req.ConnectionString,
+			StdioConfig:            req.StdioConfig,
+			TLSConfig:              req.TLSConfig,
+			AuthType:               schemas.MCPAuthTypeTokenExchange,
+			TokenExchange:          req.TokenExchange,
+			ToolsToExecute:         req.ToolsToExecute,
+			ToolsToAutoExecute:     req.ToolsToAutoExecute,
+			ToolPricing:            req.ToolPricing,
+			Headers:                req.Headers,
+			AllowedExtraHeaders:    req.AllowedExtraHeaders,
+			AllowOnAllVirtualKeys:  req.AllowOnAllVirtualKeys,
+			Disabled:               req.Disabled,
+		}
+
+		// Resolve an admin credential for synchronous verification + tool
+		// discovery, mirroring the other per-user branches: the signed-in
+		// admin's own identity-provider token — stamped on the request
+		// context by the auth layer — is exchanged exactly like a real
+		// caller's would be ("verify as yourself"; there is no manual token
+		// input). Without one (e.g. API-key authentication) the client is
+		// created in pending_verification for verify-exchange, which the
+		// admin must hit from an identity-authenticated session. The full
+		// response is retained after activation as the admin discovery
+		// credential (see the retention block below).
+		var adminResponse *schemas.OAuth2TokenExchangeResponse
+		sampleSubjectToken, _ := bifrostCtx.Value(schemas.BifrostContextKeyMCPInboundBearer).(string)
+		if sampleSubjectToken != "" {
+			response, exchangeErr := h.store.OAuthProvider.ExchangeAdminCredential(bifrostCtx, schemasConfig, sampleSubjectToken)
+			if exchangeErr != nil {
+				SendError(ctx, fasthttp.StatusUnprocessableEntity, fmt.Sprintf("Admin credential exchange failed: %v", exchangeErr))
+				return
+			}
+			adminResponse = response
+			tools, toolNameMapping, verifyErr := h.mcpManager.VerifyPerUserOAuthConnection(bifrostCtx, schemasConfig, response.AccessToken)
+			if verifyErr != nil {
+				SendError(ctx, fasthttp.StatusUnprocessableEntity, fmt.Sprintf("Verification failed: %v", verifyErr))
+				return
+			}
+			schemasConfig.DiscoveredTools = tools
+			schemasConfig.DiscoveredToolNameMapping = toolNameMapping
+		}
+
+		if err := h.store.ConfigStore.CreateMCPClientConfig(ctx, schemasConfig); err != nil {
+			if errors.Is(err, configstore.ErrAlreadyExists) {
+				SendError(ctx, fasthttp.StatusConflict, "An MCP client with this name already exists")
+				return
+			}
+			SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("Failed to create MCP config: %v", err))
+			return
+		}
+		if err := h.mcpManager.AddMCPClient(bifrostCtx, schemasConfig); err != nil {
+			if delErr := h.store.ConfigStore.DeleteMCPClientConfig(ctx, schemasConfig.ID); delErr != nil {
+				logger.Error(fmt.Sprintf("Failed to roll back MCP client config after AddMCPClient failure: %v", delErr))
+			}
+			SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("Failed to register MCP client: %v", err))
+			return
+		}
+
+		// Retain the admin credential for the periodic tool syncer and the
+		// refresh worker, mirroring the per-user OAuth promotion and the
+		// per-user-headers admin upsert. Deliberately after activation and
+		// persistence, and best-effort: a failed retention doesn't fail the
+		// create — the client is verified and serving, tool-list refresh just
+		// stays unavailable until verify-exchange retains a fresh credential.
+		if adminResponse != nil {
+			if retainErr := h.store.OAuthProvider.RetainExchangeAdminCredential(ctx, schemasConfig, adminResponse); retainErr != nil {
+				logger.Warn(fmt.Sprintf("failed to retain admin exchange credential for MCP client %s: %v", schemasConfig.ID, retainErr))
+			}
+		}
+
+		message := fmt.Sprintf("MCP client registered. %d tools discovered. Callers' identity tokens are exchanged automatically on each tool use.", len(schemasConfig.DiscoveredTools))
+		if adminResponse == nil {
+			message = "MCP client registered in pending verification. Verify it from an identity-authenticated session to discover tools."
+		}
+		SendJSON(ctx, map[string]any{
+			"status":  "success",
+			"message": message,
+		})
+		return
+	}
+
 	// Handle per-user OAuth: admin does a test OAuth login to verify the configuration.
 	// Uses the same pending_oauth pattern as server-level OAuth, but on completion we
 	// verify the connection, discover tools, save the client, and discard the admin's token.
@@ -1835,7 +1982,6 @@ func (h *MCPHandler) addMCPClient(ctx *fasthttp.RequestCtx) {
 			Headers:                req.Headers,
 			AllowedExtraHeaders:    req.AllowedExtraHeaders,
 			AllowOnAllVirtualKeys:  req.AllowOnAllVirtualKeys,
-			Disabled:               req.Disabled,
 		}
 
 		if err := h.oauthHandler.StorePendingMCPClient(flowInitiation.OauthConfigID, pendingConfig); err != nil {
@@ -1931,7 +2077,6 @@ func (h *MCPHandler) addMCPClient(ctx *fasthttp.RequestCtx) {
 			AllowedExtraHeaders:    req.AllowedExtraHeaders,
 			ToolPricing:            req.ToolPricing,
 			AllowOnAllVirtualKeys:  req.AllowOnAllVirtualKeys,
-			Disabled:               req.Disabled,
 		}
 
 		// Store pending config in database (associated with oauth_config_id for multi-instance support)
@@ -2243,8 +2388,8 @@ func (h *MCPHandler) updateMCPClient(ctx *fasthttp.RequestCtx) {
 				req.TokenExchange.ClientSecret = existingConfig.TokenExchange.ClientSecret
 			}
 		}
-		if strings.TrimSpace(req.TokenExchange.ClientID.GetValue()) == "" && !req.TokenExchange.ClientID.IsFromSecret() {
-			SendError(ctx, fasthttp.StatusBadRequest, "token_exchange.client_id must be non-empty")
+		if !req.TokenExchange.UseIdPCredentials && strings.TrimSpace(req.TokenExchange.ClientID.GetValue()) == "" && !req.TokenExchange.ClientID.IsFromSecret() {
+			SendError(ctx, fasthttp.StatusBadRequest, "token_exchange.client_id must be non-empty unless use_idp_credentials is set")
 			return
 		}
 	}

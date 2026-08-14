@@ -239,6 +239,7 @@ type Log struct {
 	VideoListOutput         string    `gorm:"type:text" json:"-"`                                                      // JSON serialized *schemas.BifrostVideoListResponse
 	VideoDeleteOutput       string    `gorm:"type:text" json:"-"`                                                      // JSON serialized *schemas.BifrostVideoDeleteResponse
 	CacheDebug              string    `gorm:"type:text" json:"-"`                                                      // JSON serialized *schemas.BifrostCacheDebug
+	GuardrailDebug          string    `gorm:"type:text" json:"-"` // JSON serialized *schemas.BifrostGuardrailDebug
 	Latency                 *float64  `gorm:"index:idx_logs_latency" json:"latency,omitempty"`
 	TokenUsage              string    `gorm:"type:text" json:"-"`                                                                         // JSON serialized *schemas.LLMUsage
 	Cost                    *float64  `gorm:"index" json:"cost,omitempty"`                                                                // Cost in dollars (total cost of the request - includes cache lookup cost)
@@ -325,6 +326,7 @@ type Log struct {
 	TranscriptionOutputParsed   *schemas.BifrostTranscriptionResponse   `gorm:"-" json:"transcription_output,omitempty"`
 	ImageGenerationOutputParsed *schemas.BifrostImageGenerationResponse `gorm:"-" json:"image_generation_output,omitempty"`
 	CacheDebugParsed            *schemas.BifrostCacheDebug              `gorm:"-" json:"cache_debug,omitempty"`
+	GuardrailDebugParsed        *schemas.BifrostGuardrailDebug          `gorm:"-" json:"guardrail_debug,omitempty"`
 	ListModelsOutputParsed      []schemas.Model                         `gorm:"-" json:"list_models_output,omitempty"`
 	MetadataParsed              map[string]interface{}                  `gorm:"-" json:"metadata,omitempty"`
 	VideoGenerationInputParsed  *schemas.VideoGenerationInput           `gorm:"-" json:"video_generation_input,omitempty"`
@@ -656,6 +658,14 @@ func (l *Log) SerializeFields() error {
 		}
 	}
 
+	if l.GuardrailDebugParsed != nil {
+		if data, err := sonic.Marshal(l.GuardrailDebugParsed); err != nil {
+			return err
+		} else {
+			l.GuardrailDebug = string(data)
+		}
+	}
+
 	if len(l.AttemptTrailParsed) > 0 {
 		if data, err := sonic.Marshal(l.AttemptTrailParsed); err != nil {
 			return err
@@ -966,6 +976,13 @@ func (l *Log) DeserializeFields() error {
 		if err := sonic.Unmarshal([]byte(l.CacheDebug), &l.CacheDebugParsed); err != nil {
 			// Log error but don't fail the operation - initialize as nil
 			l.CacheDebugParsed = nil
+		}
+	}
+
+	if l.GuardrailDebug != "" {
+		if err := sonic.Unmarshal([]byte(l.GuardrailDebug), &l.GuardrailDebugParsed); err != nil {
+			// Log error but don't fail the operation - initialize as nil
+			l.GuardrailDebugParsed = nil
 		}
 	}
 
@@ -2003,11 +2020,16 @@ type DimensionRankingResult struct {
 	Rankings  []DimensionRankingWithTrend `json:"rankings"`
 	Dimension RankingDimension            `json:"dimension"`
 	// TotalActualRequests / TotalAttributedRequests are set for every rollup
-	// dimension (team / business unit / customer / user / virtual key). These use
-	// single-owner attribution (one request → one owner, with owner-less traffic
-	// in an "Unassigned" bucket), so the rollup is additive and the two counts
-	// are equal — both report the real total request count over the window,
-	// including Unassigned.
+	// dimension (team / business unit / customer / user / virtual key), and both
+	// include the "Unassigned" bucket that owner-less traffic falls into.
+	//
+	// TotalActualRequests is the real number of requests in the window.
+	// TotalAttributedRequests is the sum of every ranking row. For team /
+	// customer / business unit a request is credited to every entity it carries
+	// (the enterprise user/AP path records the full hierarchy), so attributed
+	// can exceed actual and the rankings are NOT an additive split of org
+	// traffic. User and virtual key have a single owner per request, so for them
+	// the two counts are equal.
 	TotalActualRequests     int64 `json:"total_actual_requests,omitempty"`
 	TotalAttributedRequests int64 `json:"total_attributed_requests,omitempty"`
 }

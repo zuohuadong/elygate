@@ -18,18 +18,36 @@ import (
 
 const uiDevServerAddr = "localhost:3000"
 
+// ShellRewriter may rewrite the pre-hydration HTML shell before it is served.
+//
+// It is the seam the enterprise build uses to point the shell's logo at a
+// custom asset, so a branded deployment does not flash the Bifrost mark
+// for the moment before the bundle boots. OSS leaves it nil and serves the
+// embedded document exactly as bundled.
+//
+// It runs on the request path for every HTML document, so an implementation
+// must be cheap and must return data unchanged when it has nothing to do.
+type ShellRewriter func(ctx *fasthttp.RequestCtx, data []byte) []byte
+
 // UIHandler handles UI routes.
 type UIHandler struct {
 	uiContent fs.ReadFileFS
 	// uiDevClient proxies dashboard requests to the local Vite dev server.
 	// It is only set when dev mode is enabled (see NewUIHandler); nil otherwise.
 	uiDevClient *fasthttp.HostClient
+	// shellRewriter rewrites the pre-hydration shell. nil disables the rewrite
+	// entirely, which is the OSS path.
+	shellRewriter ShellRewriter
 }
 
-// NewUIHandler creates a new UIHandler instance.
-func NewUIHandler(uiContent fs.ReadFileFS) *UIHandler {
+// NewUIHandler creates a new UIHandler instance. The optional shell rewriter
+// keeps the upstream fs.ReadFileFS contract intact for callers and tests.
+func NewUIHandler(uiContent fs.ReadFileFS, shellRewriters ...ShellRewriter) *UIHandler {
 	h := &UIHandler{
 		uiContent: uiContent,
+	}
+	if len(shellRewriters) > 0 {
+		h.shellRewriter = shellRewriters[0]
 	}
 	// Only wire the dev-server proxy client when running in dev mode. Timeouts
 	// guard against the local Vite server hanging dashboard requests if it is
@@ -52,6 +70,11 @@ func (h *UIHandler) RegisterRoutes(router *router.Router, middlewares ...schemas
 
 // serveDashboard serves the dashboard UI.
 func (h *UIHandler) serveDashboard(ctx *fasthttp.RequestCtx) {
+	if IsDevMode() && h.serveDevDashboard(ctx) {
+		return
+	}
+
+	// Get the request path
 	requestPath := string(ctx.Path())
 	if requestPath == "/api" || strings.HasPrefix(requestPath, "/api/") {
 		SendError(ctx, fasthttp.StatusNotFound, "Route not found: "+requestPath)
@@ -140,6 +163,13 @@ func (h *UIHandler) serveDashboard(ctx *fasthttp.RequestCtx) {
 		}
 	}
 
+	// Give the build a chance to rewrite the static skeleton before it goes out
+	// — see ShellRewriter. nil on OSS, where the embedded bytes are served
+	// untouched.
+	if h.shellRewriter != nil && filepath.Ext(cleanPath) == ".html" {
+		data = h.shellRewriter(ctx, data)
+	}
+
 	// Set content type based on file extension
 	ext := filepath.Ext(cleanPath)
 	contentType := mime.TypeByExtension(ext)
@@ -203,14 +233,9 @@ func serveStaticByteRange(ctx *fasthttp.RequestCtx, data []byte) bool {
 		}
 		start = parsedStart
 	}
-	if start < 0 || start >= len(data) {
-		ctx.Response.Header.Set("Content-Range", fmt.Sprintf("bytes */%d", len(data)))
-		ctx.SetStatusCode(fasthttp.StatusRequestedRangeNotSatisfiable)
-		return true
-	}
 	if parts[0] != "" && parts[1] != "" {
-		requestedEnd, parseErr := strconv.Atoi(parts[1])
-		if parseErr != nil || requestedEnd < start {
+		requestedEnd, err := strconv.Atoi(parts[1])
+		if err != nil || requestedEnd < start {
 			ctx.Response.Header.Set("Content-Range", fmt.Sprintf("bytes */%d", len(data)))
 			ctx.SetStatusCode(fasthttp.StatusRequestedRangeNotSatisfiable)
 			return true

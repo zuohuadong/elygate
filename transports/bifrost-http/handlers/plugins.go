@@ -630,6 +630,7 @@ func (h *PluginsHandler) updatePlugin(ctx *fasthttp.RequestCtx) {
 			return
 		}
 	}
+
 	// Merge incoming config over the existing DB config so fields unknown to the
 	// calling form (e.g. plugin_span_filter set by a separate UI sheet) are not wiped.
 	mergedConfig := request.Config
