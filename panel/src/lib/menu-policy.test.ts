@@ -3,7 +3,6 @@ import {
 	isVisibleEnterpriseResource,
 	pluginFeatureResourcePages,
 	visibleEnterpriseResources,
-	VISIBLE_ENTERPRISE_RESOURCES,
 } from './menu-policy';
 
 const expectedEnterpriseResources = [
@@ -14,19 +13,23 @@ const expectedEnterpriseResources = [
 	'cluster', 'circuit-breaker', 'agent-handover',
 ] as const;
 
+(globalThis as Record<string, unknown>).$state = <Value>(value: Value): Value => value;
+const fallback = await import('../enterprise-fallback/index');
+const enterpriseResourceNames = fallback.enterprisePanelManifest.resources.map((resource) => resource.name);
+
 describe('enterprise menu policy', () => {
 	test('only exposes enterprise surfaces backed by current capabilities', () => {
-		expect([...VISIBLE_ENTERPRISE_RESOURCES].sort()).toEqual([...expectedEnterpriseResources].sort());
-		expect(visibleEnterpriseResources([])).toEqual([]);
-		expect(visibleEnterpriseResources(['guardrails-config', 'circuit-breaker', 'unknown'])).toEqual([
+		expect([...enterpriseResourceNames].sort()).toEqual([...expectedEnterpriseResources].sort());
+		expect(visibleEnterpriseResources([], enterpriseResourceNames)).toEqual([]);
+		expect(visibleEnterpriseResources(['guardrails-config', 'circuit-breaker', 'unknown'], enterpriseResourceNames)).toEqual([
 			'guardrails-config',
 			'circuit-breaker',
 		]);
-		expect(isVisibleEnterpriseResource('guardrails-config', ['guardrails-config'])).toBe(true);
-		expect(isVisibleEnterpriseResource('guardrails-config', [])).toBe(false);
-		expect(isVisibleEnterpriseResource('teams')).toBe(false);
-		expect(isVisibleEnterpriseResource('customers')).toBe(false);
-		expect(isVisibleEnterpriseResource('adaptive-routing')).toBe(false);
+		expect(isVisibleEnterpriseResource('guardrails-config', ['guardrails-config'], enterpriseResourceNames)).toBe(true);
+		expect(isVisibleEnterpriseResource('guardrails-config', [], enterpriseResourceNames)).toBe(false);
+		expect(isVisibleEnterpriseResource('teams', enterpriseResourceNames, enterpriseResourceNames)).toBe(false);
+		expect(isVisibleEnterpriseResource('customers', enterpriseResourceNames, enterpriseResourceNames)).toBe(false);
+		expect(isVisibleEnterpriseResource('adaptive-routing', enterpriseResourceNames, enterpriseResourceNames)).toBe(false);
 	});
 
 	test('runtime plugin metadata maps enterprise features to scoped plugin pages', () => {
@@ -37,7 +40,7 @@ describe('enterprise menu policy', () => {
 			'guardrails-config',
 			'adaptive-routing',
 			'unknown',
-		], pluginPage)).toEqual({
+		], enterpriseResourceNames, pluginPage)).toEqual({
 			users: { list: pluginPage },
 			rbac: { list: pluginPage },
 			'guardrails-config': { list: pluginPage },
@@ -49,5 +52,9 @@ describe('enterprise menu policy', () => {
 		expect(fallback.enterprisePanelAvailable).toBe(false);
 		expect(fallback.enterpriseResourcePages).toEqual({});
 		expect(fallback.enterprisePublicPages).toEqual({});
+		expect(fallback.enterprisePanelManifest.resourcePages).toEqual({});
+		expect(fallback.enterprisePanelManifest.resources.map((resource) => resource.name).sort()).toEqual(
+			[...expectedEnterpriseResources].sort(),
+		);
 	});
 });

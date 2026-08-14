@@ -5,6 +5,10 @@
 	import { ApiError, configureRequestErrorFormatter, getListPayload, requestJson } from './lib/api';
 	import { createBifrostAuthProvider } from './lib/auth';
 	import { bifrostDataProvider } from './lib/data-provider';
+	import {
+		registerEnterprisePanelTranslations,
+		resolveEnterprisePanelManifest,
+	} from './lib/enterprise-panel';
 	import { labelFor, registerElygateTranslations, type ElygateLocale } from './lib/i18n';
 	import { pluginFeatureResourcePages } from './lib/menu-policy';
 	import { resolvePublicPanelRoute } from './lib/public-routes';
@@ -14,12 +18,12 @@
 		PLUGIN_CAPABILITIES_CHANGED_EVENT,
 	} from './lib/plugin-management';
 	import { createMenu, createResources } from './lib/resources';
+	import { enterprisePanelManifest as fallbackEnterprisePanelManifest } from './enterprise-fallback';
 	import DashboardPage from './pages/DashboardPage.svelte';
 	import BifrostResourcePage from './pages/BifrostResourcePage.svelte';
 	import CachingConfigPage from './pages/CachingConfigPage.svelte';
 	import ConfigPage from './pages/ConfigPage.svelte';
 	import DocsHubPage from './pages/DocsHubPage.svelte';
-	import EnterpriseFeaturePage from './pages/EnterpriseFeaturePage.svelte';
 	import EnterprisePublicFallbackPage from './pages/EnterprisePublicFallbackPage.svelte';
 	import GovernanceManagementPage from './pages/GovernanceManagementPage.svelte';
 	import LogsPage from './pages/LogsPage.svelte';
@@ -44,6 +48,8 @@
 	import WebhooksPage from './pages/WebhooksPage.svelte';
 
 	registerElygateTranslations();
+	const enterpriseManifest = resolveEnterprisePanelManifest(enterprisePanel, fallbackEnterprisePanelManifest);
+	registerEnterprisePanelTranslations(enterpriseManifest);
 
 	function normalizeInitialHashRoute(): void {
 		if (typeof window === 'undefined') return;
@@ -56,8 +62,11 @@
 
 	const publicRoute = typeof window !== 'undefined' ? resolvePublicPanelRoute(window.location.pathname) : null;
 	if (!publicRoute) normalizeInitialHashRoute();
-	const enterpriseResourcePages = enterprisePanel.enterpriseResourcePages ?? {};
-	const enterprisePublicPages = enterprisePanel.enterprisePublicPages ?? {};
+	const enterpriseResourcePages = enterpriseManifest.resourcePages;
+	const enterpriseFallbackResourcePages = enterpriseManifest.fallbackResourcePages;
+	const enterprisePublicPages = enterpriseManifest.publicPages;
+	const enterpriseResources = enterpriseManifest.resources;
+	const enterpriseResourceNames = enterpriseResources.map((resource) => resource.name);
 	const EnterprisePublicPage = publicRoute ? enterprisePublicPages[publicRoute] : undefined;
 	const includeDevelopmentResources = import.meta.env.DEV;
 
@@ -78,8 +87,12 @@
 
 	configureRequestErrorFormatter((status) => labelFor(currentLocale, 'elygate.requestFailed').replace('{status}', String(status)));
 	const bifrostAuthProvider = createBifrostAuthProvider(() => currentLocale, refreshRuntimeFeatures);
-	const resources = $derived.by(() => createResources(currentLocale, includeDevelopmentResources));
-	const menu = $derived.by(() => createMenu(currentLocale, availableEnterpriseResources, includeDevelopmentResources));
+	const resources = $derived.by(() =>
+		createResources(currentLocale, includeDevelopmentResources, enterpriseResources),
+	);
+	const menu = $derived.by(() =>
+		createMenu(currentLocale, availableEnterpriseResources, includeDevelopmentResources, enterpriseResources),
+	);
 	const loginHint = $derived(labelFor(currentLocale, 'elygate.loginHint'));
 
 	const builtInResourcePages = {
@@ -126,36 +139,16 @@
 		'mcp-usage-guide': { list: McpUsageGuidePage },
 		'docs-hub': { list: DocsHubPage },
 		...(includeDevelopmentResources ? { pprof: { list: PprofPage } } : {}),
-		users: { list: EnterpriseFeaturePage },
-		'business-units': { list: EnterpriseFeaturePage },
-		rbac: { list: EnterpriseFeaturePage },
-		scim: { list: EnterpriseFeaturePage },
-		'access-profiles': { list: EnterpriseFeaturePage },
-		'audit-logs': { list: EnterpriseFeaturePage },
-		alerting: { list: EnterpriseFeaturePage },
-		'alerting-channels': { list: EnterpriseFeaturePage },
-		'alerting-rules': { list: EnterpriseFeaturePage },
-		'alerting-history': { list: EnterpriseFeaturePage },
-		guardrails: { list: EnterpriseFeaturePage },
-		'guardrails-config': { list: PluginsPage },
-		'guardrails-providers': { list: PluginsPage },
-		'edge-devices': { list: EnterpriseFeaturePage },
-		'edge-inventory': { list: EnterpriseFeaturePage },
-		'edge-config': { list: EnterpriseFeaturePage },
 		connectors: { list: ObservabilityConnectorsPage },
-		'mcp-tool-groups': { list: EnterpriseFeaturePage },
-		'mcp-auth-config': { list: EnterpriseFeaturePage },
-		'api-keys': { list: EnterpriseFeaturePage },
 		'large-payload-config': { list: ConfigPage },
-		'license-info': { list: EnterpriseFeaturePage },
-		cluster: { list: PluginsPage },
-		'circuit-breaker': { list: PluginsPage },
 		'adaptive-routing': { list: RoutingRulesPage },
-		'agent-handover': { list: EnterpriseFeaturePage },
 	};
-	const runtimeFeaturePages = $derived.by(() => pluginFeatureResourcePages(runtimeFeatureNames, PluginsPage));
+	const runtimeFeaturePages = $derived.by(() =>
+		pluginFeatureResourcePages(runtimeFeatureNames, enterpriseResourceNames, PluginsPage),
+	);
 	const resourcePages = $derived.by(() => ({
 		...builtInResourcePages,
+		...enterpriseFallbackResourcePages,
 		...runtimeFeaturePages,
 		...enterpriseResourcePages,
 	}));

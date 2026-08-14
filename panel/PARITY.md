@@ -65,9 +65,10 @@ implementation so an OSS build never claims APIs that are not present.
 
 The following legacy routes import private enterprise implementations or need
 private APIs absent from this checkout. Their menu entries appear only when a
-runtime plugin declares the matching feature or `enterpriseResourcePages`
-provides the page. Direct callbacks and handoff pages use
-`enterprisePublicPages`.
+runtime plugin declares the matching manifest resource or
+`enterprisePanelManifest.resourcePages` provides the page. Direct callbacks
+and handoff pages use `enterprisePanelManifest.publicPages`. Legacy page-map
+exports remain supported during migration.
 
 | Legacy route(s) | Resource/public key | OSS behavior | Enterprise contract |
 | --- | --- | --- | --- |

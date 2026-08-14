@@ -6,38 +6,63 @@ explicit OSS fallback, while enterprise builds replace those pages without
 forking `App.svelte`.
 
 Set `BIFROST_ENTERPRISE_PANEL_PATH` to the absolute path of a TypeScript module
-before running `bun run build`. The module must export:
+before running `bun run build`. New modules should export one manifest so the
+resource registry, menu placement, pages, public flows, and translations stay
+inside the extension boundary:
 
 ```ts
 import type { Component } from 'svelte';
 
 export const enterprisePanelAvailable = true;
-export const enterpriseResourcePages: Record<string, { list: Component<{ resourceName: string }> }> = {
-  users: { list: UsersPage },
-  rbac: { list: RbacPage },
-  'guardrails-config': { list: GuardrailsPage },
-};
-
-export const enterprisePublicPages = {
-  'oauth-consent': EnterpriseOAuthConsentPage,
-  'mcp-auth': EnterpriseMcpAuthPage,
-  'mcp-auth-success': EnterpriseMcpAuthResultPage,
-  'mcp-auth-failed': EnterpriseMcpAuthResultPage,
-  'mcp-oauth-callback': EnterpriseMcpOAuthCallbackPage,
-  'agent-handover': EnterpriseAgentHandoverPage,
-  'scim-oauth-callback': EnterpriseScimOAuthCallbackPage,
+export const enterprisePanelManifest = {
+  resources: [
+    {
+      name: 'users',
+      icon: 'user-round',
+      menuGroup: 'governance',
+      menuOrder: 300,
+      labels: { 'zh-CN': '用户管理', en: 'Users' },
+    },
+  ],
+  resourcePages: {
+    users: { list: UsersPage },
+    rbac: { list: RbacPage },
+    'guardrails-config': { list: GuardrailsPage },
+  } satisfies Record<string, { list: Component<{ resourceName: string }> }>,
+  publicPages: {
+    'oauth-consent': EnterpriseOAuthConsentPage,
+    'mcp-auth': EnterpriseMcpAuthPage,
+    'mcp-auth-success': EnterpriseMcpAuthResultPage,
+    'mcp-auth-failed': EnterpriseMcpAuthResultPage,
+    'mcp-oauth-callback': EnterpriseMcpOAuthCallbackPage,
+    'agent-handover': EnterpriseAgentHandoverPage,
+    'scim-oauth-callback': EnterpriseScimOAuthCallbackPage,
+  },
+  translations: {
+    'zh-CN': { 'enterprise.users.description': '管理企业用户与访问状态' },
+    en: { 'enterprise.users.description': 'Manage enterprise users and access' },
+  },
 };
 ```
 
-The exported keys match the resource names in `src/lib/resources.ts`. An
-enterprise module may override any built-in page, but should normally provide
-the enterprise resources listed by `src/lib/menu-policy.ts`. Every page receives
-the standard svadmin `resourceName` prop and should use same-origin `/api/*`
-requests so server authentication and authorization remain authoritative.
+`menuGroup` accepts `observability`, `models-group`, `mcp`, `governance`,
+`guardrails`, `edge-control`, `integrations`, or `system`. Manifest resource
+names become the capability allowlist. Optional `menuOrder` controls stable
+group ordering; built-in entries use increments of 100, so extensions can be
+placed between them without editing the shared menu. Adding a private resource
+no longer requires editing `App.svelte`, `resources.ts`, or `menu-policy.ts`.
+Every page receives the standard svadmin `resourceName` prop and should use
+same-origin `/api/*` requests so server authentication and authorization remain
+authoritative.
 
-`enterprisePublicPages` is optional at runtime for compatibility with older
-bundles. It overrides direct-navigation pages that must remain outside the
-svadmin hash router. Each public page receives a `route` prop and must preserve
+For compatibility, modules may still export the legacy
+`enterpriseResourcePages` and `enterprisePublicPages` maps. Manifest entries
+take precedence when both forms provide the same key. New work should use the
+manifest; the legacy maps are migration-only.
+
+`publicPages` is optional at runtime. It overrides direct-navigation pages that
+must remain outside the svadmin hash router. Each public page receives a
+`route` prop and must preserve
 the existing URL/query/fragment contract. In particular, temporary credentials
 must only be sent through `X-Bifrost-Temp-Token`, fragments must be stripped
 after capture, and redirects must reject executable protocols. This lets an
@@ -45,7 +70,8 @@ enterprise bundle add signed-in-user consent or branded handoff flows without
 forking the panel shell.
 
 If the variable is absent, the build resolves
-`src/enterprise-fallback/index.ts`, exports no overrides, and keeps the explicit
+`src/enterprise-fallback/index.ts`, exports no capability page overrides, and
+keeps the shared resource/menu metadata plus the explicit
 “enterprise backend required” pages for direct URLs while hiding unavailable
 menu entries. Set `BIFROST_REQUIRE_ENTERPRISE_PANEL=true` in enterprise build
 jobs so a missing `BIFROST_ENTERPRISE_PANEL_PATH` fails the build instead of
