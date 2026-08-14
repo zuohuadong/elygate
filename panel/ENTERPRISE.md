@@ -1,9 +1,15 @@
 # Enterprise panel extension
 
-The lightweight Svelte panel only shows enterprise resources backed by a loaded
-plugin capability or a supplied enterprise page. Direct navigation keeps an
-explicit OSS fallback, while enterprise builds replace those pages without
-forking `App.svelte`.
+`panel/` is Elygate's independently maintained Svelte management panel. It is
+not an overlay on Bifrost's upstream `ui/`, and upstream UI source is not merged
+into this directory. Shared Elygate management workflows belong directly in
+`panel/`; this extension boundary is reserved for private licensing, customer
+customization, or deployment-specific enterprise features.
+
+The panel only shows those private enterprise resources when they are backed by
+a loaded plugin capability or a supplied enterprise page. Direct navigation
+keeps an explicit OSS fallback, while enterprise builds replace those pages
+without forking `App.svelte`.
 
 Set `BIFROST_ENTERPRISE_PANEL_PATH` to the absolute path of a TypeScript module
 before running `bun run build`. New modules should export one manifest so the

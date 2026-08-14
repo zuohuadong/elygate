@@ -4,6 +4,26 @@ This matrix maps the legacy React console routes to the lightweight Svelte
 panel. It distinguishes functional parity from private enterprise
 implementation so an OSS build never claims APIs that are not present.
 
+`panel/` is an Elygate-owned management surface, not a downstream copy of
+Bifrost `ui/`. This matrix records the backend API contract consumed by the
+independent panel; it does not create a source-level parity obligation with the
+upstream UI.
+
+## Backend API contract policy
+
+- Existing same-origin `/api/*` routes, authentication and authorization
+  behavior, request and response fields, pagination, error semantics, and
+  public callback flows are compatibility contracts for `panel/`.
+- Backend changes used by the panel must be additive or backward compatible.
+  A necessary breaking change requires a documented migration, a coordinated
+  panel update, and regression coverage for both sides of the contract.
+- Add or update the route entry in this matrix whenever the panel starts using
+  a new backend API or changes an existing workflow contract.
+- Contract-specific Elygate behavior should live in a narrow adapter, plugin,
+  or sidecar when practical. Generic Bifrost improvements should be proposed
+  upstream instead of accumulating permanent patches in `core/`, `framework/`,
+  or HTTP handlers.
+
 ## Status legend
 
 - **Dedicated**: purpose-built Svelte workflow with the legacy page's primary interactions.
