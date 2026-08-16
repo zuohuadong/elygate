@@ -11,12 +11,12 @@
 		"copy-build": "rm -rf ../transports/bifrost-http/ui && cp -R out ../transports/bifrost-http/ui"
   },
   "dependencies": {
-    "@svadmin/core": "0.34.0",
-    "@svadmin/ui": "0.40.0",
+    "@svadmin/core": "0.36.0",
+    "@svadmin/ui": "0.42.0",
     "@tanstack/svelte-query": "^6.1.38",
     "highlight.js": "^11.11.1",
-    "isomorphic-dompurify": "^3.20.0",
-    "marked": "^18.0.7",
+    "isomorphic-dompurify": "^3.22.0",
+    "marked": "^18.0.9",
     "marked-highlight": "^2.2.4"
   },
   "devDependencies": {
