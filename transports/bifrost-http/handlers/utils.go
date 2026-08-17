@@ -182,11 +182,10 @@ func SendSSEError(ctx *fasthttp.RequestCtx, bifrostErr *schemas.BifrostError) {
 }
 
 // IsOriginAllowed checks if the given origin is allowed based on localhost rules and configured allowed origins.
-// Localhost origins are always allowed. Additional origins can be configured in allowedOrigins.
+// Localhost is an implicit development fallback only when no explicit allowlist is configured.
 // Supports wildcard patterns like *.example.com to match any subdomain.
 func IsOriginAllowed(origin string, allowedOrigins []string) bool {
-	// Always allow localhost origins
-	if isLocalhostOrigin(origin) {
+	if len(allowedOrigins) == 0 && isLocalhostOrigin(origin) {
 		return true
 	}
 

@@ -102,7 +102,7 @@ func (h *WebSocketHandler) getUpgrader() websocket.FastHTTPUpgrader {
 				host := string(ctx.Request.Header.Peek("Host"))
 				return isLocalhost(host)
 			}
-			// Check if origin is allowed (localhost always allowed + configured origins)
+			// Check the configured allowlist; localhost is implicit only when no allowlist exists.
 			return IsOriginAllowed(origin, h.allowedOrigins)
 		},
 	}

@@ -7,8 +7,11 @@ import {
 	providerKeyModelAccess,
 	providerKeyModelsForPayload,
 	providerConfigsForForm,
+	removedVirtualKeyProviderConfigCount,
 	unavailableVirtualKeyProviders,
 	unsupportedProviderConfigFields,
+	virtualKeyAdvancedProviderFields,
+	virtualKeyProviderConfigsForPayload,
 } from './resource-forms';
 
 const originalFetch = globalThis.fetch;
@@ -59,6 +62,33 @@ describe('Bifrost DataProvider', () => {
 				rate_limit: undefined,
 			},
 		]);
+	});
+
+	test('normalizes virtual-key provider routing modes without accepting response projections', () => {
+		expect(virtualKeyProviderConfigsForPayload([
+			{ provider: 'openai', allow_all_keys: true, key_ids: [] },
+			{ provider: 'anthropic', key_ids: ['key-1'] },
+		])).toEqual([
+			{ provider: 'openai', allow_all_keys: true },
+			{ provider: 'anthropic', key_ids: ['key-1'] },
+		]);
+		expect(() => virtualKeyProviderConfigsForPayload([{ provider: 'openai', keys: ['key-1'] }]))
+			.toThrow('keys is response-only');
+		expect(() => virtualKeyProviderConfigsForPayload([{ provider: 'openai', allow_all_keys: true, key_ids: ['key-1'] }]))
+			.toThrow('allow_all_keys');
+	});
+
+	test('reports provider routing fields misplaced in virtual-key advanced JSON', () => {
+		expect(virtualKeyAdvancedProviderFields({ allow_all_keys: true, key_ids: ['key-1'], description: 'ok' }))
+			.toEqual(['allow_all_keys', 'key_ids']);
+	});
+
+	test('detects provider routes removed by a full virtual-key replacement', () => {
+		expect(removedVirtualKeyProviderConfigCount(
+			[{ id: 1, provider: 'openai' }, { id: 2, provider: 'anthropic' }],
+			[{ id: 1, provider: 'openai', allow_all_keys: true }, { provider: 'gemini', key_ids: ['key-1'] }],
+		)).toBe(1);
+		expect(removedVirtualKeyProviderConfigCount([{ id: 1 }], [{ id: 1, provider: 'openai' }])).toBe(0);
 	});
 
 	test('preserves provider-specific key configuration in the advanced form', () => {

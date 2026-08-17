@@ -29,6 +29,8 @@ const KEY_ADVANCED_FIELDS = [
 	'description',
 ] as const;
 
+const VIRTUAL_KEY_PROVIDER_FIELDS = new Set(['allow_all_keys', 'key_ids', 'keys']);
+
 function isRecord(value: unknown): value is JsonRecord {
 	return !!value && typeof value === 'object' && !Array.isArray(value);
 }
@@ -97,6 +99,30 @@ export function providerConfigsForForm(value: unknown): unknown[] {
 			budgets: item.budgets,
 			rate_limit: item.rate_limit,
 		};
+	});
+}
+
+export function virtualKeyAdvancedProviderFields(value: JsonRecord): string[] {
+	return Object.keys(value).filter((field) => VIRTUAL_KEY_PROVIDER_FIELDS.has(field)).sort();
+}
+
+export function removedVirtualKeyProviderConfigCount(current: unknown, next: JsonRecord[]): number {
+	if (!Array.isArray(current)) return 0;
+	const nextIDs = new Set(next.map((item) => item.id).filter((id): id is number => typeof id === 'number'));
+	return current.filter(isRecord).filter((item) => typeof item.id === 'number' && !nextIDs.has(item.id)).length;
+}
+
+export function virtualKeyProviderConfigsForPayload(value: unknown[]): JsonRecord[] {
+	return value.map((item, index) => {
+		if (!isRecord(item)) throw new Error(`provider_configs[${index}] must be an object`);
+		if ('keys' in item) throw new Error(`provider_configs[${index}].keys is response-only; use key_ids or allow_all_keys`);
+		const normalized = { ...item };
+		const keyIDs = Array.isArray(normalized.key_ids) ? normalized.key_ids : [];
+		if (normalized.allow_all_keys === true) {
+			if (keyIDs.length > 0) throw new Error(`provider_configs[${index}] cannot combine allow_all_keys with key_ids`);
+			delete normalized.key_ids;
+		}
+		return normalized;
 	});
 }
 

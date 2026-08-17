@@ -1250,6 +1250,39 @@ func TestCorsMiddleware_WildcardHeaders_NonCredentialed(t *testing.T) {
 	}
 }
 
+func TestCorsMiddleware_WildcardLocalhostIsNotCredentialed(t *testing.T) {
+	SetLogger(&mockLogger{})
+
+	config := &lib.Config{ClientConfig: &configstore.ClientConfig{AllowedOrigins: []string{"*"}}}
+	ctx := &fasthttp.RequestCtx{}
+	ctx.Request.Header.Set("Origin", "http://localhost:3000")
+	NewCorsMiddleware(config).Middleware()(func(*fasthttp.RequestCtx) {})(ctx)
+
+	if origin := string(ctx.Response.Header.Peek("Access-Control-Allow-Origin")); origin != "*" {
+		t.Errorf("Expected wildcard origin response for localhost, got %s", origin)
+	}
+	if credentials := string(ctx.Response.Header.Peek("Access-Control-Allow-Credentials")); credentials != "" {
+		t.Errorf("Wildcard localhost response must not allow credentials, got %s", credentials)
+	}
+}
+
+func TestCorsMiddleware_ExplicitAllowlistRejectsImplicitLocalhost(t *testing.T) {
+	SetLogger(&mockLogger{})
+
+	config := &lib.Config{ClientConfig: &configstore.ClientConfig{AllowedOrigins: []string{"https://admin.example.com"}}}
+	ctx := &fasthttp.RequestCtx{}
+	ctx.Request.Header.SetMethod("OPTIONS")
+	ctx.Request.Header.Set("Origin", "http://localhost:3000")
+	NewCorsMiddleware(config).Middleware()(func(*fasthttp.RequestCtx) {})(ctx)
+
+	if ctx.Response.StatusCode() != fasthttp.StatusForbidden {
+		t.Errorf("Expected localhost preflight to be rejected by explicit allowlist, got %d", ctx.Response.StatusCode())
+	}
+	if origin := string(ctx.Response.Header.Peek("Access-Control-Allow-Origin")); origin != "" {
+		t.Errorf("Rejected localhost origin must not receive CORS headers, got %s", origin)
+	}
+}
+
 func TestCorsMiddleware_WildcardOriginWithoutOriginHeaderDoesNotEmitCORSHeaders(t *testing.T) {
 	SetLogger(&mockLogger{})
 

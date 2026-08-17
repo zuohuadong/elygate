@@ -82,10 +82,12 @@ func TestIsOriginAllowed(t *testing.T) {
 		allowedOrigins []string
 		want           bool
 	}{
-		// Localhost always allowed
+		// Localhost is a development fallback only when no allowlist is configured.
 		{"localhost http", "http://localhost:3000", nil, true},
 		{"localhost https", "https://localhost:8080", nil, true},
 		{"127.0.0.1", "http://127.0.0.1:3000", nil, true},
+		{"localhost rejected by explicit allowlist", "http://localhost:3000", []string{"https://app.example.com"}, false},
+		{"localhost accepted when explicitly listed", "http://localhost:3000", []string{"http://localhost:3000"}, true},
 
 		// Exact match
 		{"exact match", "https://app.example.com", []string{"https://app.example.com"}, true},

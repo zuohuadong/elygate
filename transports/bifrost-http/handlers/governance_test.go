@@ -562,6 +562,102 @@ func TestVirtualKeyProviderConfigAcceptsAllowAllKeys(t *testing.T) {
 	require.True(t, *update.ProviderConfigs[0].AllowAllKeys)
 }
 
+func TestVirtualKeyProviderConfigRejectsResponseOnlyKeys(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "create",
+			body: `{"name":"test","provider_configs":[{"provider":"openai","allow_all_keys":true,"keys":["key-1"]}]}`,
+		},
+		{
+			name: "update",
+			body: `{"provider_configs":[{"id":1,"provider":"openai","keys":["key-1"]}]}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateVirtualKeyWriteFields([]byte(tt.body))
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "keys is response-only")
+			assert.Contains(t, err.Error(), "key_ids")
+		})
+	}
+}
+
+func TestVirtualKeyHandlersRejectResponseOnlyKeys(t *testing.T) {
+	tests := []struct {
+		name string
+		run  func(*GovernanceHandler, *fasthttp.RequestCtx)
+		body string
+	}{
+		{
+			name: "create",
+			run:  func(handler *GovernanceHandler, ctx *fasthttp.RequestCtx) { handler.createVirtualKey(ctx) },
+			body: `{"name":"test","provider_configs":[{"provider":"openai","keys":["key-1"]}]}`,
+		},
+		{
+			name: "update",
+			run: func(handler *GovernanceHandler, ctx *fasthttp.RequestCtx) {
+				ctx.SetUserValue("vk_id", "vk-1")
+				handler.updateVirtualKey(ctx)
+			},
+			body: `{"provider_configs":[{"id":1,"provider":"openai","keys":["key-1"]}]}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := &fasthttp.RequestCtx{}
+			ctx.Request.SetBodyString(tt.body)
+			tt.run(&GovernanceHandler{}, ctx)
+			assert.Equal(t, fasthttp.StatusBadRequest, ctx.Response.StatusCode())
+			assert.Contains(t, string(ctx.Response.Body()), "keys is response-only")
+		})
+	}
+}
+
+func TestVirtualKeyProviderFieldsMustBeNested(t *testing.T) {
+	err := validateVirtualKeyWriteFields([]byte(`{"name":"test","allow_all_keys":true}`))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "provider_configs")
+}
+
+func TestApplyVirtualKeyProviderConfigPatchPreservesOmittedFields(t *testing.T) {
+	weight := 0.75
+	existing := configstoreTables.TableVirtualKeyProviderConfig{
+		Weight:            &weight,
+		AllowedModels:     schemas.WhiteList{"gpt-4o"},
+		BlacklistedModels: schemas.BlackList{"gpt-3.5"},
+		AllowAllKeys:      true,
+	}
+	var req UpdateVirtualKeyRequest
+	require.NoError(t, json.Unmarshal([]byte(`{"provider_configs":[{"id":1,"provider":"openai","allow_all_keys":true}]}`), &req))
+	require.Len(t, req.ProviderConfigs, 1)
+
+	require.NoError(t, applyVirtualKeyProviderConfigPatch(&existing, req.ProviderConfigs[0]))
+	assert.Equal(t, schemas.WhiteList{"gpt-4o"}, existing.AllowedModels)
+	assert.Equal(t, schemas.BlackList{"gpt-3.5"}, existing.BlacklistedModels)
+	require.NotNil(t, existing.Weight)
+	assert.Equal(t, 0.75, *existing.Weight)
+}
+
+func TestApplyVirtualKeyProviderConfigPatchClearsExplicitModelLists(t *testing.T) {
+	existing := configstoreTables.TableVirtualKeyProviderConfig{
+		AllowedModels:     schemas.WhiteList{"gpt-4o"},
+		BlacklistedModels: schemas.BlackList{"gpt-3.5"},
+	}
+	var req UpdateVirtualKeyRequest
+	require.NoError(t, json.Unmarshal([]byte(`{"provider_configs":[{"id":1,"provider":"openai","allowed_models":[],"blacklisted_models":[]}]}`), &req))
+	require.Len(t, req.ProviderConfigs, 1)
+
+	require.NoError(t, applyVirtualKeyProviderConfigPatch(&existing, req.ProviderConfigs[0]))
+	assert.Empty(t, existing.AllowedModels)
+	assert.Empty(t, existing.BlacklistedModels)
+}
+
 func assertStringPtrEqual(t *testing.T, label string, got *string, want *string) {
 	t.Helper()
 	if got == nil || want == nil {

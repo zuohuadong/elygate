@@ -264,23 +264,25 @@ type vkModelBudgetUpdateRequest struct {
 	RateLimit *UpdateRateLimitRequest `json:"rate_limit,omitempty"`
 }
 
+type updateVirtualKeyProviderConfigRequest struct {
+	ID                *uint                        `json:"id,omitempty"` // null for new entries
+	Provider          string                       `json:"provider" validate:"required"`
+	Weight            *float64                     `json:"weight,omitempty"`
+	AllowedModels     schemas.WhiteList            `json:"allowed_models,omitempty"`     // omitted preserves an existing list; [] clears it
+	BlacklistedModels schemas.BlackList            `json:"blacklisted_models,omitempty"` // omitted preserves an existing list; [] clears it
+	Budgets           []CreateBudgetRequest        `json:"budgets,omitempty"`
+	RateLimit         *UpdateRateLimitRequest      `json:"rate_limit,omitempty"`
+	ModelBudgets      []vkModelBudgetUpdateRequest `json:"model_budgets,omitempty"`
+	KeyIDs            schemas.WhiteList            `json:"key_ids,omitempty"`        // omitted preserves existing key authorization
+	AllowAllKeys      *bool                        `json:"allow_all_keys,omitempty"` // mutually exclusive with non-empty key_ids
+}
+
 // UpdateVirtualKeyRequest represents the request body for updating a virtual key
 type UpdateVirtualKeyRequest struct {
-	Name            *string `json:"name,omitempty"`
-	Description     *string `json:"description,omitempty"`
-	ProviderConfigs []struct {
-		ID                *uint                        `json:"id,omitempty"` // null for new entries
-		Provider          string                       `json:"provider" validate:"required"`
-		Weight            *float64                     `json:"weight,omitempty"`
-		AllowedModels     schemas.WhiteList            `json:"allowed_models,omitempty"`     // ["*"] allows all models; empty denies all
-		BlacklistedModels schemas.BlackList            `json:"blacklisted_models,omitempty"` // ["*"] blocks all models; empty blocks none
-		Budgets           []CreateBudgetRequest        `json:"budgets,omitempty"`            // Multi-budget for provider config
-		RateLimit         *UpdateRateLimitRequest      `json:"rate_limit,omitempty"`         // Provider-level rate limit
-		ModelBudgets      []vkModelBudgetUpdateRequest `json:"model_budgets,omitempty"`      // Per-model budgets/rate-limits under this provider (full desired set when provider_configs is supplied)
-		KeyIDs            schemas.WhiteList            `json:"key_ids,omitempty"`            // List of DBKey UUIDs to associate with this provider config
-		AllowAllKeys      *bool                        `json:"allow_all_keys,omitempty"`     // Use every key for this provider; mutually exclusive with key_ids
-	} `json:"provider_configs,omitempty"`
-	MCPConfigs []struct {
+	Name            *string                                 `json:"name,omitempty"`
+	Description     *string                                 `json:"description,omitempty"`
+	ProviderConfigs []updateVirtualKeyProviderConfigRequest `json:"provider_configs,omitempty"`
+	MCPConfigs      []struct {
 		ID             *uint             `json:"id,omitempty"` // null for new entries
 		MCPClientName  string            `json:"mcp_client_name" validate:"required"`
 		ToolsToExecute schemas.WhiteList `json:"tools_to_execute,omitempty"`
@@ -296,6 +298,51 @@ type UpdateVirtualKeyRequest struct {
 }
 
 var errVirtualKeyDualAssociation = errors.New("VirtualKey cannot be attached to both Team and Customer")
+
+func validateVirtualKeyWriteFields(body []byte) error {
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return err
+	}
+	for _, field := range []string{"allow_all_keys", "key_ids", "keys"} {
+		if _, exists := envelope[field]; exists {
+			return fmt.Errorf("%s must be configured inside provider_configs", field)
+		}
+	}
+	rawProviderConfigs, exists := envelope["provider_configs"]
+	if !exists || string(rawProviderConfigs) == "null" {
+		return nil
+	}
+	var providerConfigs []map[string]json.RawMessage
+	if err := json.Unmarshal(rawProviderConfigs, &providerConfigs); err != nil {
+		return err
+	}
+	for i, providerConfig := range providerConfigs {
+		if _, exists := providerConfig["keys"]; exists {
+			return fmt.Errorf("provider_configs[%d].keys is response-only; use key_ids or allow_all_keys", i)
+		}
+	}
+	return nil
+}
+
+func applyVirtualKeyProviderConfigPatch(existing *configstoreTables.TableVirtualKeyProviderConfig, patch updateVirtualKeyProviderConfigRequest) error {
+	if patch.Weight != nil {
+		existing.Weight = patch.Weight
+	}
+	if patch.AllowedModels != nil {
+		if err := patch.AllowedModels.Validate(); err != nil {
+			return fmt.Errorf("invalid allowed_models for provider %s: %w", patch.Provider, err)
+		}
+		existing.AllowedModels = patch.AllowedModels
+	}
+	if patch.BlacklistedModels != nil {
+		if err := patch.BlacklistedModels.Validate(); err != nil {
+			return fmt.Errorf("invalid blacklisted_models for provider %s: %w", patch.Provider, err)
+		}
+		existing.BlacklistedModels = patch.BlacklistedModels
+	}
+	return nil
+}
 
 // optionalJSONStringHasValue reports whether a presence-aware string contains a non-empty value.
 func optionalJSONStringHasValue(value schemas.OptionalJSON[string]) bool {
@@ -1712,6 +1759,10 @@ func (h *GovernanceHandler) getVirtualKeys(ctx *fasthttp.RequestCtx) {
 
 // createVirtualKey handles POST /api/governance/virtual-keys - Create a new virtual key
 func (h *GovernanceHandler) createVirtualKey(ctx *fasthttp.RequestCtx) {
+	if err := validateVirtualKeyWriteFields(ctx.PostBody()); err != nil {
+		SendError(ctx, 400, err.Error())
+		return
+	}
 	var req CreateVirtualKeyRequest
 	if err := json.Unmarshal(ctx.PostBody(), &req); err != nil {
 		SendError(ctx, 400, "Invalid JSON")
@@ -2075,6 +2126,10 @@ func (h *GovernanceHandler) mutateVirtualKeyBudgetOverride(ctx *fasthttp.Request
 // updateVirtualKey handles PUT /api/governance/virtual-keys/{vk_id} - Update a virtual key
 func (h *GovernanceHandler) updateVirtualKey(ctx *fasthttp.RequestCtx) {
 	vkID := ctx.UserValue("vk_id").(string)
+	if err := validateVirtualKeyWriteFields(ctx.PostBody()); err != nil {
+		SendError(ctx, 400, err.Error())
+		return
+	}
 	var req UpdateVirtualKeyRequest
 	if err := json.Unmarshal(ctx.PostBody(), &req); err != nil {
 		SendError(ctx, 400, "Invalid JSON")
@@ -2182,6 +2237,7 @@ func (h *GovernanceHandler) updateVirtualKey(ctx *fasthttp.RequestCtx) {
 			var existingConfigs []configstoreTables.TableVirtualKeyProviderConfig
 			if err := tx.Where("virtual_key_id = ?", vk.ID).
 				Preload("Budgets").
+				Preload("Keys").
 				Find(&existingConfigs).Error; err != nil {
 				return err
 			}
@@ -2282,40 +2338,37 @@ func (h *GovernanceHandler) updateVirtualKey(ctx *fasthttp.RequestCtx) {
 						return fmt.Errorf("provider config %d does not belong to this virtual key", *pc.ID)
 					}
 					requestConfigsMap[*pc.ID] = true
-					if err := pc.AllowedModels.Validate(); err != nil {
-						return &badRequestError{err: fmt.Errorf("invalid allowed_models for provider %s: %w", pc.Provider, err)}
+					if err := applyVirtualKeyProviderConfigPatch(&existing, pc); err != nil {
+						return &badRequestError{err: err}
 					}
-					if err := pc.BlacklistedModels.Validate(); err != nil {
-						return &badRequestError{err: fmt.Errorf("invalid blacklisted_models for provider %s: %w", pc.Provider, err)}
-					}
-					if err := pc.KeyIDs.Validate(); err != nil {
-						return &badRequestError{err: fmt.Errorf("invalid key_ids for provider %s: %w", pc.Provider, err)}
+					if pc.KeyIDs != nil {
+						if err := pc.KeyIDs.Validate(); err != nil {
+							return &badRequestError{err: fmt.Errorf("invalid key_ids for provider %s: %w", pc.Provider, err)}
+						}
 					}
 					existing.Provider = string(providerName)
-					existing.Weight = pc.Weight
-					existing.AllowedModels = pc.AllowedModels
-					existing.BlacklistedModels = pc.BlacklistedModels
 
-					// Get keys for this provider config if specified
-					var keys []configstoreTables.TableKey
-					allowAllKeys := pc.AllowAllKeys != nil && *pc.AllowAllKeys
-					if allowAllKeys && !pc.KeyIDs.IsEmpty() {
-						return &badRequestError{err: fmt.Errorf("allow_all_keys and key_ids cannot be used together for provider %s", pc.Provider)}
-					}
-					if !allowAllKeys && pc.KeyIDs.IsUnrestricted() {
-						allowAllKeys = true
-					} else if !allowAllKeys && !pc.KeyIDs.IsEmpty() {
-						var err error
-						keys, err = h.configStore.GetKeysByIDs(ctx, pc.KeyIDs)
-						if err != nil {
-							return fmt.Errorf("failed to get keys by IDs for provider %s: %w", pc.Provider, err)
+					if pc.AllowAllKeys != nil || pc.KeyIDs != nil {
+						var keys []configstoreTables.TableKey
+						allowAllKeys := pc.AllowAllKeys != nil && *pc.AllowAllKeys
+						if allowAllKeys && !pc.KeyIDs.IsEmpty() {
+							return &badRequestError{err: fmt.Errorf("allow_all_keys and key_ids cannot be used together for provider %s", pc.Provider)}
 						}
-						if len(keys) != len(pc.KeyIDs) {
-							return fmt.Errorf("some keys not found for provider %s: expected %d, found %d", pc.Provider, len(pc.KeyIDs), len(keys))
+						if !allowAllKeys && pc.KeyIDs.IsUnrestricted() {
+							allowAllKeys = true
+						} else if !allowAllKeys && !pc.KeyIDs.IsEmpty() {
+							var err error
+							keys, err = h.configStore.GetKeysByIDs(ctx, pc.KeyIDs)
+							if err != nil {
+								return fmt.Errorf("failed to get keys by IDs for provider %s: %w", pc.Provider, err)
+							}
+							if len(keys) != len(pc.KeyIDs) {
+								return fmt.Errorf("some keys not found for provider %s: expected %d, found %d", pc.Provider, len(pc.KeyIDs), len(keys))
+							}
 						}
+						existing.AllowAllKeys = allowAllKeys
+						existing.Keys = keys
 					}
-					existing.AllowAllKeys = allowAllKeys
-					existing.Keys = keys
 
 					// Provider-config governance is stored in the VK-scoped model config for this
 					// provider (written by syncVKGovernanceToModelConfigs). pc.Budgets == nil

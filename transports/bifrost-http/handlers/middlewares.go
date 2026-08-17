@@ -185,9 +185,9 @@ func (c *CorsMiddleware) Middleware() schemas.BifrostHTTPMiddleware {
 			}
 			origin := string(ctx.Request.Header.Peek("Origin"))
 			allowed := origin != "" && IsOriginAllowed(origin, cfg.allowedOrigins)
-			// A wildcard permits public, non-credentialed access. Only localhost and
-			// explicit allowlist entries receive an origin-specific credentialed response.
-			credentialed := isLocalhostOrigin(origin) || slices.Contains(cfg.allowedOrigins, origin) ||
+			// A wildcard permits public, non-credentialed access. Localhost is credentialed
+			// only as the implicit development fallback when no allowlist is configured.
+			credentialed := (len(cfg.allowedOrigins) == 0 && isLocalhostOrigin(origin)) || slices.Contains(cfg.allowedOrigins, origin) ||
 				slices.ContainsFunc(cfg.allowedOrigins, func(allowedOrigin string) bool {
 					return allowedOrigin != "*" && strings.Contains(allowedOrigin, "*") && matchesWildcardPattern(origin, allowedOrigin)
 				})
@@ -214,7 +214,7 @@ func (c *CorsMiddleware) Middleware() schemas.BifrostHTTPMiddleware {
 					}
 				}
 			}
-			// Check if origin is allowed (localhost always allowed + configured origins)
+			// Check the configured allowlist; localhost is implicit only when no allowlist exists.
 			if allowed {
 				if credentialed {
 					ctx.Response.Header.Set("Access-Control-Allow-Origin", origin)

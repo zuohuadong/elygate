@@ -3,7 +3,7 @@
 	import { useTranslation } from '@svadmin/core/i18n';
 	import { displayError, parseJsonArray, parseJsonObject, prettyJson } from '../lib/forms';
 	import { encodePathSegment, getListPayload, getObjectPayload, requestJson, type JsonRecord } from '../lib/api';
-	import { providerConfigsForForm, unavailableVirtualKeyProviders } from '../lib/resource-forms';
+	import { providerConfigsForForm, removedVirtualKeyProviderConfigCount, unavailableVirtualKeyProviders, virtualKeyAdvancedProviderFields, virtualKeyProviderConfigsForPayload } from '../lib/resource-forms';
 
 	interface VirtualKeyForm {
 		name: string;
@@ -20,6 +20,7 @@
 		advanced: string;
 	}
 	interface Props { resourceName: string; }
+	const providerConfigExample = '[{"provider":"Agnes-AI","allowed_models":["*"],"allow_all_keys":true}]';
 
 	function emptyForm(): VirtualKeyForm {
 		return { name: '', description: '', isActive: true, calendarAligned: false, expiresAt: '', teamId: '', customerId: '', providerConfigs: '[]', mcpConfigs: '[]', budgets: '[]', rateLimit: '', advanced: '' };
@@ -134,11 +135,17 @@
 			if (!form.name.trim()) throw new Error(i18n.t('elygate.required').replace('{field}', i18n.t('elygate.virtualKeyName')));
 			if (form.teamId.trim() && form.customerId.trim()) throw new Error(i18n.t('elygate.teamCustomerConflict'));
 			const invalidJson = i18n.t('elygate.invalidJson');
-			const providerConfigs = parseJsonArray(form.providerConfigs, i18n.t('elygate.providerConfigs'), invalidJson);
+			const providerConfigs = virtualKeyProviderConfigsForPayload(parseJsonArray(form.providerConfigs, i18n.t('elygate.providerConfigs'), invalidJson));
 			const mcpConfigs = parseJsonArray(form.mcpConfigs, i18n.t('elygate.mcpConfigs'), invalidJson);
 			const budgets = parseJsonArray(form.budgets, i18n.t('elygate.budgets'), invalidJson);
 			const rateLimit = parseJsonObject(form.rateLimit, i18n.t('elygate.rateLimit'), invalidJson);
 			const advanced = parseJsonObject(form.advanced, i18n.t('elygate.advancedJson'), invalidJson);
+			const misplacedProviderFields = virtualKeyAdvancedProviderFields(advanced);
+			if (misplacedProviderFields.length) {
+				throw new Error(i18n.t('elygate.virtualKeyAdvancedProviderFields').replace('{fields}', misplacedProviderFields.join(', ')));
+			}
+			const removedProviderCount = removedVirtualKeyProviderConfigCount(editing?.provider_configs, providerConfigs);
+			if (removedProviderCount > 0 && !window.confirm(i18n.t('elygate.confirmReplaceVirtualKeyProviders').replace('{count}', String(removedProviderCount)))) return;
 			const payload: JsonRecord = {
 				...advanced,
 				name: form.name.trim(),
@@ -232,13 +239,13 @@
 					<label><input type="checkbox" bind:checked={form.isActive} /> {i18n.t('elygate.active')}</label>
 					<label><input type="checkbox" bind:checked={form.calendarAligned} /> {i18n.t('elygate.calendarAligned')}</label>
 				</div>
-				<label>{i18n.t('elygate.providerConfigs')}<textarea bind:value={form.providerConfigs} rows="8"></textarea></label>
+				<label>{i18n.t('elygate.providerConfigs')}<textarea bind:value={form.providerConfigs} rows="8" placeholder={providerConfigExample}></textarea><small>{i18n.t('elygate.virtualKeyProviderConfigsHint')}</small></label>
 				<label>{i18n.t('elygate.mcpConfigs')}<textarea bind:value={form.mcpConfigs} rows="5"></textarea></label>
 				<div class="grid-two">
 					<label>{i18n.t('elygate.budgets')}<textarea bind:value={form.budgets} rows="5"></textarea></label>
 					<label>{i18n.t('elygate.rateLimit')}<textarea bind:value={form.rateLimit} rows="5"></textarea></label>
 				</div>
-				<label>{i18n.t('elygate.advancedJson')}<textarea bind:value={form.advanced} rows="4"></textarea></label>
+				<label>{i18n.t('elygate.advancedJson')}<textarea bind:value={form.advanced} rows="4"></textarea><small>{i18n.t('elygate.virtualKeyAdvancedHint')}</small></label>
 				<footer>
 					<button type="button" onclick={() => (isOpen = false)}>{i18n.t('elygate.cancel')}</button>
 					<button class="primary" type="submit" disabled={isSaving}>{i18n.t('elygate.save')}</button>
