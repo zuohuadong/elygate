@@ -40,4 +40,9 @@ describe('enterprise panel build contract', () => {
 		expect(dockerfile).toContain('COPY transports/ ./transports/');
 		expect(dockerfile).toContain('COPY --from=builder /app/transports/docker-entrypoint.sh .');
 	});
+
+	test('local release Dockerfile includes the panel documentation sources', async () => {
+		const dockerfile = await Bun.file(new URL('../../../transports/Dockerfile.local', import.meta.url)).text();
+		expect(dockerfile).toContain('COPY docs/ /docs/');
+	});
 });

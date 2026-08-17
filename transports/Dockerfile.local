@@ -9,9 +9,10 @@
   COPY panel/package.json panel/bun.lock ./
   RUN bun install --frozen-lockfile
 
-  COPY panel/ ./
+	COPY panel/ ./
+	COPY docs/ /docs/
 
-  # Build and type-check without the local copy-build step; the next stage embeds out/.
+	# Build and type-check without the local copy-build step; the next stage embeds out/.
   RUN bunx vite build && bun run check
 
   # --- Go Build Stage: Compile the Go binary using local modules ---
