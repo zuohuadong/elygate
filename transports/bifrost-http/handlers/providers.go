@@ -1372,6 +1372,10 @@ func (h *ProviderHandler) getProviderResponseFromConfig(provider schemas.ModelPr
 	if config.ConcurrencyAndBufferSize == nil {
 		config.ConcurrencyAndBufferSize = &schemas.DefaultConcurrencyAndBufferSize
 	}
+	providerModelStatus := config.Status
+	if providerModelStatus == "unknown" && (config.CustomProviderConfig == nil || !config.CustomProviderConfig.IsKeyLess) {
+		providerModelStatus = ""
+	}
 
 	return ProviderResponse{
 		Name:                     provider,
@@ -1384,7 +1388,7 @@ func (h *ProviderHandler) getProviderResponseFromConfig(provider schemas.ModelPr
 		CustomProviderConfig:     config.CustomProviderConfig,
 		OpenAIConfig:             config.OpenAIConfig,
 		ProviderStatus:           status,
-		Status:                   config.Status,
+		Status:                   providerModelStatus,
 		Description:              config.Description,
 		ConfigHash:               config.ConfigHash,
 	}

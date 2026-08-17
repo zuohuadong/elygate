@@ -110,6 +110,42 @@ func providerHandlerForTest(provider schemas.ModelProvider, keys []schemas.Key, 
 	}
 }
 
+func TestGetProviderResponseFromConfigOmitsUnknownStatusForKeyedProvider(t *testing.T) {
+	h := &ProviderHandler{}
+
+	keyed := h.getProviderResponseFromConfig("Agnes-AI", configstore.ProviderConfig{
+		Status: "unknown",
+		CustomProviderConfig: &schemas.CustomProviderConfig{
+			BaseProviderType: schemas.OpenAI,
+			IsKeyLess:        false,
+		},
+	}, ProviderStatusActive)
+	if keyed.Status != "" {
+		t.Fatalf("expected keyed provider model-discovery status to be omitted, got %q", keyed.Status)
+	}
+	if keyed.ProviderStatus != ProviderStatusActive {
+		t.Fatalf("expected canonical provider status to remain active, got %q", keyed.ProviderStatus)
+	}
+
+	keyedFailure := h.getProviderResponseFromConfig("Agnes-AI", configstore.ProviderConfig{
+		Status: "list_models_failed",
+	}, ProviderStatusActive)
+	if keyedFailure.Status != "list_models_failed" {
+		t.Fatalf("expected actionable keyed provider status to be preserved, got %q", keyedFailure.Status)
+	}
+
+	keyless := h.getProviderResponseFromConfig("keyless-openai", configstore.ProviderConfig{
+		Status: "unknown",
+		CustomProviderConfig: &schemas.CustomProviderConfig{
+			BaseProviderType: schemas.OpenAI,
+			IsKeyLess:        true,
+		},
+	}, ProviderStatusActive)
+	if keyless.Status != "unknown" {
+		t.Fatalf("expected keyless provider model-discovery status to be preserved, got %q", keyless.Status)
+	}
+}
+
 func TestAddProvider_ReloadsRuntimeEvenWhenModelDiscoveryIsSkipped(t *testing.T) {
 	SetLogger(&mockLogger{})
 	lib.SetLogger(&mockLogger{})
