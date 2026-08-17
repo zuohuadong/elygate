@@ -80,6 +80,10 @@ func (h *UIHandler) serveDashboard(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, fasthttp.StatusNotFound, "Route not found: "+requestPath)
 		return
 	}
+	if requestPath == "/v1" || strings.HasPrefix(requestPath, "/v1/") {
+		SendError(ctx, fasthttp.StatusNotFound, "API endpoint not found")
+		return
+	}
 
 	if IsDevMode() && h.serveDevDashboard(ctx) {
 		return

@@ -51,29 +51,39 @@
 		return candidate === null || candidate === undefined ? '—' : String(candidate);
 	}
 
-	function endpoint(): string {
-		const params = new URLSearchParams({
-			limit: pageSize,
-			offset: String((page - 1) * Number(pageSize)),
-			sort_by: 'timestamp',
-			order: 'desc',
-			period,
-		});
+	function filterParams(): URLSearchParams {
+		const params = new URLSearchParams({ period });
 		if (query.trim()) params.set('content_search', query.trim());
 		if (provider) params.set('providers', provider);
 		if (model) params.set('models', model);
 		if (status) params.set('status', status);
+		return params;
+	}
+
+	function endpoint(): string {
+		const params = filterParams();
+		params.set('limit', pageSize);
+		params.set('offset', String((page - 1) * Number(pageSize)));
+		params.set('sort_by', 'timestamp');
+		params.set('order', 'desc');
 		return `/api/logs?${params.toString()}`;
+	}
+
+	function statsEndpoint(): string {
+		return `/api/logs/stats?${filterParams().toString()}`;
 	}
 
 	async function load(): Promise<void> {
 		isLoading = true;
 		error = '';
 		try {
-			const payload = await requestJson<unknown>(endpoint());
+			const [payload, statsPayload] = await Promise.all([
+				requestJson<unknown>(endpoint()),
+				requestJson<LogStats>(statsEndpoint()).catch(() => ({})),
+			]);
 			logs = getListPayload(payload);
+			stats = isJsonRecord(statsPayload) ? statsPayload as LogStats : {};
 			if (isJsonRecord(payload)) {
-				stats = isJsonRecord(payload.stats) ? payload.stats as LogStats : {};
 				total = isJsonRecord(payload.pagination) ? getTotal(payload.pagination, logs.length) : getTotal(payload, logs.length);
 			} else {
 				total = logs.length;
@@ -297,12 +307,12 @@
 	</form>
 
 	<div class="table-wrap" aria-busy={isLoading}>
-		<table><thead><tr><th></th><th>{i18n.t('elygate.timestamp')}</th><th>{i18n.t('elygate.provider')}</th><th>{i18n.t('elygate.model')}</th><th>{i18n.t('elygate.status')}</th><th>{i18n.t('elygate.latency')}</th><th>{i18n.t('elygate.totalCost')}</th><th>{i18n.t('elygate.app')}</th><th>{i18n.t('elygate.description')}</th></tr></thead><tbody>
+		<table><thead><tr><th></th><th>{i18n.t('elygate.timestamp')}</th><th>{i18n.t('elygate.provider')}</th><th>{i18n.t('elygate.model')}</th><th>{i18n.t('elygate.status')}</th><th>{i18n.t('elygate.latency')}</th><th>{i18n.t('elygate.totalCost')}</th><th>{i18n.t('elygate.app')}</th><th>{i18n.t('elygate.description')}</th><th>{i18n.t('elygate.actions')}</th></tr></thead><tbody>
 			{#each logs as log (String(log.id))}
-				<tr onclick={() => void openDetail(log)} tabindex="0" onkeydown={(event) => event.key === 'Enter' && void openDetail(log)}>
-					<td><input type="checkbox" checked={selectedIds.includes(String(log.id))} onclick={(event) => event.stopPropagation()} onchange={(event) => toggleSelected(String(log.id), event.currentTarget.checked)} aria-label={i18n.t('elygate.select')} /></td><td>{new Date(value(log, 'timestamp')).toLocaleString(i18n.locale)}</td><td>{value(log, 'provider')}</td><td>{value(log, 'model')}</td><td><span class={['status', value(log, 'status')]}>{value(log, 'status')}</span></td><td>{Number(log.latency ?? 0).toFixed(0)} ms</td><td>${Number(log.cost ?? 0).toFixed(5)}</td><td>{value(log, 'app')}</td><td>{value(log, 'content_summary')}</td>
+				<tr>
+					<td><input type="checkbox" checked={selectedIds.includes(String(log.id))} onchange={(event) => toggleSelected(String(log.id), event.currentTarget.checked)} aria-label={i18n.t('elygate.select')} /></td><td>{new Date(value(log, 'timestamp')).toLocaleString(i18n.locale)}</td><td>{value(log, 'provider')}</td><td>{value(log, 'model')}</td><td><span class={['status', value(log, 'status')]}>{value(log, 'status')}</span></td><td>{Number(log.latency ?? 0).toFixed(0)} ms</td><td>${Number(log.cost ?? 0).toFixed(5)}</td><td>{value(log, 'app')}</td><td>{value(log, 'content_summary')}</td><td><button type="button" onclick={() => void openDetail(log)}>{i18n.t('elygate.inspect')}</button></td>
 				</tr>
-			{:else}<tr><td colspan="9">{isLoading ? i18n.t('elygate.loading') : i18n.t('elygate.empty')}</td></tr>{/each}
+			{:else}<tr><td colspan="10">{isLoading ? i18n.t('elygate.loading') : i18n.t('elygate.empty')}</td></tr>{/each}
 		</tbody></table>
 	</div>
 	<footer class="pagination"><span>{i18n.t('elygate.page').replace('{page}', String(page))} · {total}</span><div><button type="button" onclick={() => movePage(page - 1)} disabled={page <= 1 || isLoading}>{i18n.t('elygate.previous')}</button><button type="button" onclick={() => movePage(page + 1)} disabled={!hasNext || isLoading}>{i18n.t('elygate.next')}</button></div></footer>

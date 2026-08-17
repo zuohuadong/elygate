@@ -2048,8 +2048,12 @@ func (s *BifrostHTTPServer) RegisterInferenceRoutes(ctx context.Context, middlew
 	}
 	s.MCPServerHandler = mcpServerHandler
 	asyncHandler := handlers.NewAsyncHandler(s.Client, s.Config)
+	inferenceMiddlewares := append([]schemas.BifrostHTTPMiddleware{}, middlewares...)
+	if governancePlugin, err := s.getGovernancePlugin(); err == nil && governancePlugin != nil {
+		inferenceMiddlewares = append(inferenceMiddlewares, handlers.VirtualKeyValidationMiddleware(governancePlugin.GetGovernanceStore()))
+	}
 	s.IntegrationHandler.RegisterRoutes(s.Router, middlewares...)
-	inferenceHandler.RegisterRoutes(s.Router, middlewares...)
+	inferenceHandler.RegisterRoutes(s.Router, inferenceMiddlewares...)
 	asyncHandler.RegisterRoutes(s.Router, middlewares...)
 	mcpInferenceHandler.RegisterRoutes(s.Router, middlewares...)
 	s.MCPServerHandler.RegisterRoutes(s.Router, middlewares...)
@@ -2207,6 +2211,10 @@ func (s *BifrostHTTPServer) RegisterAPIRoutes(ctx context.Context, callbacks Ser
 	s.Router.GET("/metrics", lib.ChainMiddlewares(metricsHandler, middlewares...))
 	// 404 handler
 	s.Router.NotFound = func(ctx *fasthttp.RequestCtx) {
+		if requestPath := string(ctx.Path()); requestPath == "/v1" || strings.HasPrefix(requestPath, "/v1/") {
+			handlers.SendError(ctx, fasthttp.StatusNotFound, "API endpoint not found")
+			return
+		}
 		handlers.SendError(ctx, fasthttp.StatusNotFound, "Route not found: "+string(ctx.Path()))
 	}
 	return nil

@@ -1238,9 +1238,45 @@ func TestCorsMiddleware_WildcardHeaders_NonCredentialed(t *testing.T) {
 	if actualHeaders != "*" {
 		t.Errorf("Expected Access-Control-Allow-Headers to be *, got %s", actualHeaders)
 	}
+	if origin := string(ctx.Response.Header.Peek("Access-Control-Allow-Origin")); origin != "*" {
+		t.Errorf("Expected wildcard origin response, got %s", origin)
+	}
+	if credentials := string(ctx.Response.Header.Peek("Access-Control-Allow-Credentials")); credentials != "" {
+		t.Errorf("Wildcard origin response must not allow credentials, got %s", credentials)
+	}
 
 	if !nextCalled {
 		t.Error("Next handler was not called")
+	}
+}
+
+func TestCorsMiddleware_WildcardOriginWithoutOriginHeaderDoesNotEmitCORSHeaders(t *testing.T) {
+	SetLogger(&mockLogger{})
+
+	config := &lib.Config{ClientConfig: &configstore.ClientConfig{AllowedOrigins: []string{"*"}}}
+	ctx := &fasthttp.RequestCtx{}
+	middleware := NewCorsMiddleware(config).Middleware()
+	middleware(func(*fasthttp.RequestCtx) {})(ctx)
+
+	if origin := string(ctx.Response.Header.Peek("Access-Control-Allow-Origin")); origin != "" {
+		t.Errorf("Expected no CORS origin without request Origin header, got %s", origin)
+	}
+}
+
+func TestCorsMiddleware_ConfiguredSubdomainWildcardIsCredentialed(t *testing.T) {
+	SetLogger(&mockLogger{})
+
+	config := &lib.Config{ClientConfig: &configstore.ClientConfig{AllowedOrigins: []string{"https://*.example.com"}}}
+	ctx := &fasthttp.RequestCtx{}
+	ctx.Request.Header.Set("Origin", "https://admin.example.com")
+	middleware := NewCorsMiddleware(config).Middleware()
+	middleware(func(*fasthttp.RequestCtx) {})(ctx)
+
+	if origin := string(ctx.Response.Header.Peek("Access-Control-Allow-Origin")); origin != "https://admin.example.com" {
+		t.Errorf("Expected configured wildcard origin to be reflected, got %s", origin)
+	}
+	if credentials := string(ctx.Response.Header.Peek("Access-Control-Allow-Credentials")); credentials != "true" {
+		t.Errorf("Expected configured wildcard origin to allow credentials, got %s", credentials)
 	}
 }
 

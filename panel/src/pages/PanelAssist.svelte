@@ -23,14 +23,17 @@
 	}
 
 	async function getLatestRelease(): Promise<void> {
-		const controller = new AbortController();
-		const timeout = window.setTimeout(() => controller.abort(), 3000);
+		let timeout: number | undefined;
 		try {
-			const response = await fetch('https://getbifrost.ai/latest-release', {
+			const response = await Promise.race([
+				fetch('https://getbifrost.ai/latest-release', {
 				headers: { Accept: 'application/json' },
-				signal: controller.signal,
-			});
-			if (!response.ok) return;
+				}),
+				new Promise<undefined>((resolve) => {
+					timeout = window.setTimeout(() => resolve(undefined), 3000);
+				}),
+			]);
+			if (!response?.ok) return;
 			const payload: unknown = await response.json();
 			if (!isJsonRecord(payload)) return;
 			latestVersion = String(payload.name ?? payload.tag ?? payload.version ?? '');
@@ -39,7 +42,7 @@
 		} catch {
 			latestVersion = '';
 		} finally {
-			window.clearTimeout(timeout);
+			if (timeout !== undefined) window.clearTimeout(timeout);
 		}
 	}
 

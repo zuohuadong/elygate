@@ -39,6 +39,34 @@ func TestUIHandlerDoesNotServeSPAForUnknownAPIPaths(t *testing.T) {
 	}
 }
 
+func TestUIHandlerDoesNotServeSPAForUnknownOpenAIAPIPaths(t *testing.T) {
+	t.Parallel()
+
+	r := router.New()
+	NewUIHandler(readFileFS{FS: testUIContent()}).RegisterRoutes(r)
+
+	for _, requestPath := range []string{"/v1", "/v1/not-a-real-endpoint"} {
+		t.Run(requestPath, func(t *testing.T) {
+			ctx := &fasthttp.RequestCtx{}
+			ctx.Request.Header.SetMethod(fasthttp.MethodGet)
+			ctx.Request.SetRequestURI(requestPath)
+			r.Handler(ctx)
+
+			require.Equal(t, fasthttp.StatusNotFound, ctx.Response.StatusCode())
+			require.Equal(t, "application/json", string(ctx.Response.Header.ContentType()))
+			var errorResponse struct {
+				StatusCode int `json:"status_code"`
+				Error      struct {
+					Message string `json:"message"`
+				} `json:"error"`
+			}
+			require.NoError(t, json.Unmarshal(ctx.Response.Body(), &errorResponse))
+			require.Equal(t, fasthttp.StatusNotFound, errorResponse.StatusCode)
+			require.Equal(t, "API endpoint not found", errorResponse.Error.Message)
+		})
+	}
+}
+
 func TestUIHandlerKeepsRegisteredAPIRoutesAheadOfTheWildcard(t *testing.T) {
 	t.Parallel()
 

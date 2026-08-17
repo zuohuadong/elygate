@@ -107,6 +107,23 @@ func NewCorsMiddleware(config *lib.Config) *CorsMiddleware {
 	return c
 }
 
+// VirtualKeyValidationMiddleware rejects unknown virtual keys before inference
+// handlers resolve a provider or select a provider key.
+func VirtualKeyValidationMiddleware(store governance.GovernanceStore) schemas.BifrostHTTPMiddleware {
+	return func(next fasthttp.RequestHandler) fasthttp.RequestHandler {
+		return func(ctx *fasthttp.RequestCtx) {
+			virtualKey := governance.ParseVirtualKeyFromFastHTTPRequest(ctx)
+			if virtualKey != nil && store != nil {
+				if _, exists := store.GetVirtualKey(ctx, *virtualKey); !exists {
+					SendError(ctx, fasthttp.StatusUnauthorized, "virtual key not found. The provided virtual key does not exist or has been revoked.")
+					return
+				}
+			}
+			next(ctx)
+		}
+	}
+}
+
 // UpdateConfig atomically swaps in a fresh immutable snapshot of the configuration.
 // In-flight requests reading the pointer observe either the old or the new snapshot,
 // never a torn value. ReloadClientConfigFromConfigStore must call this whenever the
@@ -167,12 +184,13 @@ func (c *CorsMiddleware) Middleware() schemas.BifrostHTTPMiddleware {
 				}()
 			}
 			origin := string(ctx.Request.Header.Peek("Origin"))
-			allowed := IsOriginAllowed(origin, cfg.allowedOrigins)
-			// Credentialed responses are sent when the origin is not matched solely by a
-			// wildcard AllowedOrigins — i.e. the origin is localhost or explicitly listed.
-			credentialed := !slices.Contains(cfg.allowedOrigins, "*") ||
-				isLocalhostOrigin(origin) ||
-				slices.Contains(cfg.allowedOrigins, origin)
+			allowed := origin != "" && IsOriginAllowed(origin, cfg.allowedOrigins)
+			// A wildcard permits public, non-credentialed access. Only localhost and
+			// explicit allowlist entries receive an origin-specific credentialed response.
+			credentialed := isLocalhostOrigin(origin) || slices.Contains(cfg.allowedOrigins, origin) ||
+				slices.ContainsFunc(cfg.allowedOrigins, func(allowedOrigin string) bool {
+					return allowedOrigin != "*" && strings.Contains(allowedOrigin, "*") && matchesWildcardPattern(origin, allowedOrigin)
+				})
 
 			allowedHeaders := []string{"Content-Type", "Authorization", "X-Requested-With", "X-Stainless-Timeout", "X-Api-Key", "X-OpenAI-Agents-SDK", "X-Operation-ID"}
 			if slices.Contains(cfg.allowedHeaders, "*") {
@@ -198,7 +216,11 @@ func (c *CorsMiddleware) Middleware() schemas.BifrostHTTPMiddleware {
 			}
 			// Check if origin is allowed (localhost always allowed + configured origins)
 			if allowed {
-				ctx.Response.Header.Set("Access-Control-Allow-Origin", origin)
+				if credentialed {
+					ctx.Response.Header.Set("Access-Control-Allow-Origin", origin)
+				} else {
+					ctx.Response.Header.Set("Access-Control-Allow-Origin", "*")
+				}
 				ctx.Response.Header.Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD")
 				ctx.Response.Header.Set("Access-Control-Allow-Headers", strings.Join(allowedHeaders, ", "))
 				if credentialed {
