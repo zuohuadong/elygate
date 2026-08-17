@@ -60,4 +60,11 @@ describe('panel issue regressions', () => {
 		expect(source).not.toContain('AbortController');
 		expect(source).not.toContain('controller.abort()');
 	});
+
+	test('provider retries are explicit and leave the default unchanged when unset', async () => {
+		const source = await Bun.file(new URL('../pages/ProvidersPage.svelte', import.meta.url)).text();
+		expect(source).toContain('maxRetries: string');
+		expect(source).toContain("network.max_retries = maxRetries");
+		expect(source).toContain("i18n.t('elygate.maxRetriesHint')");
+	});
 });

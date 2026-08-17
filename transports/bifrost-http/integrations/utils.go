@@ -154,6 +154,7 @@ func extractExactPath(ctx *fasthttp.RequestCtx) string {
 // since no streaming has begun and clients should receive a standard error response.
 func (g *GenericRouter) sendStreamError(ctx *fasthttp.RequestCtx, bifrostCtx *schemas.BifrostContext, config RouteConfig, bifrostErr *schemas.BifrostError) {
 	bifrostErr = lib.SanitizeBifrostErrorForClient(bifrostErr)
+	bifrostErr = lib.NormalizeBifrostErrorStatusCode(bifrostErr)
 	if bifrostErr == nil {
 		bifrostErr = newBifrostErrorWithCode(nil, lib.ClientSafeInternalErrorMessage, fasthttp.StatusInternalServerError)
 	}
@@ -199,6 +200,7 @@ func (g *GenericRouter) sendStreamError(ctx *fasthttp.RequestCtx, bifrostCtx *sc
 // It handles different error types (string, error interface, or arbitrary objects).
 func (g *GenericRouter) sendError(ctx *fasthttp.RequestCtx, bifrostCtx *schemas.BifrostContext, errorConverter ErrorConverter, bifrostErr *schemas.BifrostError) {
 	bifrostErr = lib.SanitizeBifrostErrorForClient(bifrostErr)
+	bifrostErr = lib.NormalizeBifrostErrorStatusCode(bifrostErr)
 	if bifrostErr == nil {
 		bifrostErr = newBifrostErrorWithCode(nil, lib.ClientSafeInternalErrorMessage, fasthttp.StatusInternalServerError)
 	}

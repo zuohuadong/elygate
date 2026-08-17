@@ -45,6 +45,7 @@
 	let isSaving = $state(false);
 	let error = $state('');
 	let notice = $state('');
+	const cacheEnableBlocked = $derived(plugin?.enabled !== true && !vectorStoreConnected);
 
 	function defaults(): CacheForm {
 		return { ttl: 300, threshold: .8, dimension: 1, conversationHistoryThreshold: 3, excludeSystemPrompt: false, cacheByModel: true, cacheByProvider: true, provider: '', embeddingModel: '', vectorStoreNamespace: '', defaultCacheKey: '' };
@@ -183,7 +184,7 @@
 </script>
 
 <section class="page-shell">
-	<header class="page-heading"><div><p class="eyebrow">Elygate / {i18n.t('elygate.system')}</p><h1>{i18n.t('elygate.cachingConfig')}</h1><p>{i18n.t('elygate.cachingHint')}</p></div><div class="toggle"><span>{plugin?.enabled === true ? i18n.t('elygate.enabled') : i18n.t('elygate.disabled')}</span><button type="button" onclick={() => void save(plugin?.enabled !== true)} disabled={isSaving || (!vectorStoreConnected && plugin?.enabled !== true)}>{plugin?.enabled === true ? i18n.t('elygate.disable') : i18n.t('elygate.enable')}</button></div></header>
+	<header class="page-heading"><div><p class="eyebrow">Elygate / {i18n.t('elygate.system')}</p><h1>{i18n.t('elygate.cachingConfig')}</h1><p>{i18n.t('elygate.cachingHint')}</p></div><div class="toggle"><span>{plugin?.enabled === true ? i18n.t('elygate.enabled') : i18n.t('elygate.disabled')}</span><button type="button" onclick={() => void save(plugin?.enabled !== true)} disabled={isSaving || cacheEnableBlocked} title={cacheEnableBlocked ? i18n.t('elygate.vectorStoreRequired') : undefined}>{plugin?.enabled === true ? i18n.t('elygate.disable') : i18n.t('elygate.enable')}</button>{#if cacheEnableBlocked}<span class="toggle-hint">{i18n.t('elygate.vectorStoreRequired')}</span>{/if}</div></header>
 	{#if !vectorStoreConnected}<div class="notice warning">{i18n.t('elygate.vectorStoreRequired')}</div>{/if}{#if error}<div class="notice error" role="alert">{error}</div>{/if}{#if notice}<div class="notice success" role="status">{notice}</div>{/if}
 	<section class="vector-store-card">
 		<header><div><h2>{i18n.t('elygate.vectorStore')}</h2><p>{i18n.t('elygate.vectorStoreHint')}</p></div><span class:ok={vectorStoreConnected}>{vectorStoreConnected ? i18n.t('elygate.conn.connected') : i18n.t('elygate.conn.disconnected')}</span></header>
@@ -213,6 +214,8 @@
 <style>
 	.page-shell { color: var(--foreground); max-width: 980px; margin: 0 auto; padding: 1.5rem; }
 	.page-heading, .toggle, footer, .mode-picker, .switches, .cache-tools > div { align-items: center; display: flex; gap: .55rem; }
+	.toggle { flex-wrap: wrap; justify-content: flex-end; }
+	.toggle-hint { color: var(--muted-foreground); flex-basis: 100%; font-size: .72rem; max-width: 20rem; text-align: right; }
 	.page-heading { align-items: start; justify-content: space-between; margin-bottom: 1rem; }
 	.eyebrow { color: var(--primary); font-size: .75rem; font-weight: 700; letter-spacing: .12em; margin: 0 0 .4rem; text-transform: uppercase; }
 	h1 { margin: 0; } .page-heading p, .cache-tools p { color: var(--muted-foreground); margin: .5rem 0 0; }

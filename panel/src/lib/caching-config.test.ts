@@ -85,4 +85,10 @@ describe('caching plugin mutations', () => {
 		expect(source).not.toContain('disabled={isSaving || isLoading || !vectorStoreConnected}');
 		expect(source).toContain('elygate.restartInstructions');
 	});
+
+	test('explains why enabling the cache is unavailable', async () => {
+		const source = await Bun.file(new URL('../pages/CachingConfigPage.svelte', import.meta.url)).text();
+		expect(source).toContain('cacheEnableBlocked');
+		expect(source).toContain('class="toggle-hint"');
+	});
 });

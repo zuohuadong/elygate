@@ -1,12 +1,17 @@
 package handlers
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+
+	bifrost "github.com/maximhq/bifrost/core"
+	"github.com/maximhq/bifrost/core/schemas"
+	"github.com/valyala/fasthttp"
 )
 
 // TestIsUniqueConstraintError recognizes common database unique-constraint messages.
@@ -34,6 +39,27 @@ func TestIsUniqueConstraintError_Identifiers(t *testing.T) {
 	}
 	if IsUniqueConstraintError(err, "enterprise_users.email") {
 		t.Fatalf("unrelated identifier matched")
+	}
+}
+
+func TestSendBifrostErrorIncludesDerivedStatusCode(t *testing.T) {
+	ctx := &fasthttp.RequestCtx{}
+	SendBifrostError(ctx, &schemas.BifrostError{
+		IsBifrostError: true,
+		Error:          &schemas.ErrorField{Message: bifrost.ProviderAutoResolveErrorMessage},
+	})
+
+	if got := ctx.Response.StatusCode(); got != fasthttp.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", got, fasthttp.StatusBadRequest)
+	}
+	var payload struct {
+		StatusCode *int `json:"status_code"`
+	}
+	if err := json.Unmarshal(ctx.Response.Body(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.StatusCode == nil || *payload.StatusCode != fasthttp.StatusBadRequest {
+		t.Fatalf("status_code = %v, want %d", payload.StatusCode, fasthttp.StatusBadRequest)
 	}
 }
 

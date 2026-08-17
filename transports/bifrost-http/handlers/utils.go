@@ -116,6 +116,7 @@ func SendError(ctx *fasthttp.RequestCtx, statusCode int, message string) {
 // SendBifrostError sends a BifrostError response
 func SendBifrostError(ctx *fasthttp.RequestCtx, bifrostErr *schemas.BifrostError) {
 	bifrostErr = lib.SanitizeBifrostErrorForClient(bifrostErr)
+	bifrostErr = lib.NormalizeBifrostErrorStatusCode(bifrostErr)
 	if bifrostErr == nil {
 		SendError(ctx, fasthttp.StatusInternalServerError, lib.ClientSafeInternalErrorMessage)
 		return

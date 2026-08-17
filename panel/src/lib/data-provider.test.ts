@@ -54,7 +54,7 @@ describe('Bifrost DataProvider', () => {
 				weight: undefined,
 				allowed_models: [],
 				blacklisted_models: [],
-				key_ids: ['*'],
+				allow_all_keys: true,
 				budgets: undefined,
 				rate_limit: undefined,
 			},

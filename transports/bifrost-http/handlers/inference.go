@@ -996,6 +996,9 @@ func prepareChatCompletionRequest(ctx *fasthttp.RequestCtx, config *lib.Config) 
 			}
 		}
 	}
+	if req.ChatParameters.MaxCompletionTokens != nil && *req.ChatParameters.MaxCompletionTokens < 0 {
+		return nil, nil, fmt.Errorf("max_tokens must be greater than or equal to 0")
+	}
 	req.ChatParameters.ExtraParams = base.ExtraParams
 	return req, &schemas.BifrostChatRequest{
 		Provider:  base.Provider,

@@ -548,6 +548,20 @@ func TestApplyVirtualKeyOwnershipUpdateRejectsDualAssociation(t *testing.T) {
 	}
 }
 
+func TestVirtualKeyProviderConfigAcceptsAllowAllKeys(t *testing.T) {
+	var create CreateVirtualKeyRequest
+	require.NoError(t, json.Unmarshal([]byte(`{"name":"test","provider_configs":[{"provider":"openai","allowed_models":["gpt-4o"],"allow_all_keys":true}]}`), &create))
+	require.Len(t, create.ProviderConfigs, 1)
+	require.NotNil(t, create.ProviderConfigs[0].AllowAllKeys)
+	require.True(t, *create.ProviderConfigs[0].AllowAllKeys)
+
+	var update UpdateVirtualKeyRequest
+	require.NoError(t, json.Unmarshal([]byte(`{"provider_configs":[{"id":1,"provider":"openai","allowed_models":["gpt-4o"],"allow_all_keys":true}]}`), &update))
+	require.Len(t, update.ProviderConfigs, 1)
+	require.NotNil(t, update.ProviderConfigs[0].AllowAllKeys)
+	require.True(t, *update.ProviderConfigs[0].AllowAllKeys)
+}
+
 func assertStringPtrEqual(t *testing.T, label string, got *string, want *string) {
 	t.Helper()
 	if got == nil || want == nil {

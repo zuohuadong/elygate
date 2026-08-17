@@ -20,6 +20,7 @@
 	interface ProviderForm {
 		name: string;
 		network: string;
+		maxRetries: string;
 		concurrency: string;
 		bufferSize: string;
 		proxy: string;
@@ -44,6 +45,7 @@
 		return {
 			name: '',
 			network: '',
+			maxRetries: '',
 			concurrency: '10',
 			bufferSize: '100',
 			proxy: '',
@@ -65,6 +67,13 @@
 
 	function numberValue(record: JsonRecord, key: string, fallback: number): string {
 		return typeof record[key] === 'number' ? String(record[key]) : String(fallback);
+	}
+
+	function networkFormValues(provider: JsonRecord): { network: string; maxRetries: string } {
+		const network = { ...((provider.network_config as JsonRecord | undefined) ?? {}) };
+		const maxRetries = typeof network.max_retries === 'number' && network.max_retries > 0 ? String(network.max_retries) : '';
+		delete network.max_retries;
+		return { network: prettyJson(network), maxRetries };
 	}
 
 	let { resourceName }: Props = $props();
@@ -131,9 +140,11 @@
 	}
 
 	function openEdit(provider: JsonRecord): void {
+		const network = networkFormValues(provider);
 		providerForm = {
 			name: stringValue(provider, 'name'),
-			network: prettyJson(provider.network_config),
+			network: network.network,
+			maxRetries: network.maxRetries,
 			concurrency: numberValue((provider.concurrency_and_buffer_size as JsonRecord | undefined) ?? {}, 'concurrency', 10),
 			bufferSize: numberValue((provider.concurrency_and_buffer_size as JsonRecord | undefined) ?? {}, 'buffer_size', 100),
 			proxy: prettyJson(provider.proxy_config),
@@ -163,6 +174,11 @@
 		try {
 			const invalidJson = i18n.t('elygate.invalidJson');
 			const network = parseJsonObject(providerForm.network, i18n.t('elygate.networkConfig'), invalidJson);
+			if (providerForm.maxRetries.trim()) {
+				const maxRetries = Number(providerForm.maxRetries);
+				if (!Number.isInteger(maxRetries) || maxRetries < 0) throw new Error(i18n.t('elygate.maxRetriesInvalid'));
+				network.max_retries = maxRetries;
+			}
 			const proxy = parseJsonObject(providerForm.proxy, i18n.t('elygate.proxyConfig'), invalidJson);
 			const custom = parseJsonObject(providerForm.custom, i18n.t('elygate.customConfig'), invalidJson);
 			const openai = parseJsonObject(providerForm.openai, i18n.t('elygate.openaiConfig'), invalidJson);
@@ -393,6 +409,7 @@
 	<div class="modal-backdrop"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="provider-dialog-title"><header><h2 id="provider-dialog-title">{modal === 'create' ? i18n.t('elygate.create') : i18n.t('elygate.edit')} {i18n.t('elygate.providers')}</h2><button type="button" onclick={() => (modal = null)}>{i18n.t('elygate.close')}</button></header>
 		<form onsubmit={submitProvider}><div class="form-hint" role="note">{i18n.t('elygate.apiKeySeparateHint')}</div><label>{i18n.t('elygate.providerName')}<input bind:value={providerForm.name} required disabled={modal === 'edit'} /><small>{i18n.t('elygate.providerNameHelp')}</small></label>
 			<div class="grid-two"><label>{i18n.t('elygate.concurrency')}<input type="number" min="1" bind:value={providerForm.concurrency} /></label><label>{i18n.t('elygate.bufferSize')}<input type="number" min="1" bind:value={providerForm.bufferSize} /></label></div>
+			<label>{i18n.t('elygate.maxRetries')}<input type="number" min="0" step="1" bind:value={providerForm.maxRetries} placeholder={i18n.t('elygate.unset')} /><small>{i18n.t('elygate.maxRetriesHint')}</small></label>
 				<label>{i18n.t('elygate.networkConfig')}<textarea bind:value={providerForm.network} rows="5"></textarea><small>{i18n.t('elygate.providerNetworkHint')}</small></label><label>{i18n.t('elygate.proxyConfig')}<textarea bind:value={providerForm.proxy} rows="3"></textarea></label>
 				<label>{i18n.t('elygate.customConfig')}<textarea bind:value={providerForm.custom} rows="3"></textarea><small>{i18n.t('elygate.providerCustomHint')}</small></label><label>{i18n.t('elygate.openaiConfig')}<textarea bind:value={providerForm.openai} rows="2"></textarea><small>{i18n.t('elygate.providerOpenAIHint')}</small></label>
 			<div class="checks"><label><input type="checkbox" bind:checked={providerForm.sendBackRequest} /> {i18n.t('elygate.sendBackRawRequest')}</label><label><input type="checkbox" bind:checked={providerForm.sendBackResponse} /> {i18n.t('elygate.sendBackRawResponse')}</label><label><input type="checkbox" bind:checked={providerForm.storeRaw} /> {i18n.t('elygate.storeRawRequestResponse')}</label></div>

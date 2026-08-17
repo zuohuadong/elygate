@@ -233,6 +233,7 @@ type CreateVirtualKeyRequest struct {
 		RateLimit         *CreateRateLimitRequest `json:"rate_limit,omitempty"`         // Provider-level rate limit
 		ModelBudgets      []vkModelBudgetRequest  `json:"model_budgets,omitempty"`      // Per-model budgets/rate-limits under this provider
 		KeyIDs            schemas.WhiteList       `json:"key_ids,omitempty"`            // List of DBKey UUIDs to associate with this provider config
+		AllowAllKeys      *bool                   `json:"allow_all_keys,omitempty"`     // Use every key for this provider; mutually exclusive with key_ids
 	} `json:"provider_configs,omitempty"` // Empty means no providers allowed (deny-by-default)
 	MCPConfigs []struct {
 		MCPClientName  string            `json:"mcp_client_name" validate:"required"`
@@ -277,6 +278,7 @@ type UpdateVirtualKeyRequest struct {
 		RateLimit         *UpdateRateLimitRequest      `json:"rate_limit,omitempty"`         // Provider-level rate limit
 		ModelBudgets      []vkModelBudgetUpdateRequest `json:"model_budgets,omitempty"`      // Per-model budgets/rate-limits under this provider (full desired set when provider_configs is supplied)
 		KeyIDs            schemas.WhiteList            `json:"key_ids,omitempty"`            // List of DBKey UUIDs to associate with this provider config
+		AllowAllKeys      *bool                        `json:"allow_all_keys,omitempty"`     // Use every key for this provider; mutually exclusive with key_ids
 	} `json:"provider_configs,omitempty"`
 	MCPConfigs []struct {
 		ID             *uint             `json:"id,omitempty"` // null for new entries
@@ -1808,10 +1810,13 @@ func (h *GovernanceHandler) createVirtualKey(ctx *fasthttp.RequestCtx) {
 
 				// Get keys for this provider config if specified
 				var keys []configstoreTables.TableKey
-				allowAllKeys := false
-				if pc.KeyIDs.IsUnrestricted() {
+				allowAllKeys := pc.AllowAllKeys != nil && *pc.AllowAllKeys
+				if allowAllKeys && !pc.KeyIDs.IsEmpty() {
+					return &badRequestError{err: fmt.Errorf("allow_all_keys and key_ids cannot be used together for provider %s", pc.Provider)}
+				}
+				if !allowAllKeys && pc.KeyIDs.IsUnrestricted() {
 					allowAllKeys = true
-				} else if !pc.KeyIDs.IsEmpty() {
+				} else if !allowAllKeys && !pc.KeyIDs.IsEmpty() {
 					var err error
 					keys, err = h.configStore.GetKeysByIDs(ctx, pc.KeyIDs)
 					if err != nil {
@@ -2221,10 +2226,13 @@ func (h *GovernanceHandler) updateVirtualKey(ctx *fasthttp.RequestCtx) {
 
 					// Get keys for this provider config if specified
 					var keys []configstoreTables.TableKey
-					allowAllKeys := false
-					if pc.KeyIDs.IsUnrestricted() {
+					allowAllKeys := pc.AllowAllKeys != nil && *pc.AllowAllKeys
+					if allowAllKeys && !pc.KeyIDs.IsEmpty() {
+						return &badRequestError{err: fmt.Errorf("allow_all_keys and key_ids cannot be used together for provider %s", pc.Provider)}
+					}
+					if !allowAllKeys && pc.KeyIDs.IsUnrestricted() {
 						allowAllKeys = true
-					} else if !pc.KeyIDs.IsEmpty() {
+					} else if !allowAllKeys && !pc.KeyIDs.IsEmpty() {
 						var err error
 						keys, err = h.configStore.GetKeysByIDs(ctx, pc.KeyIDs)
 						if err != nil {
@@ -2290,10 +2298,13 @@ func (h *GovernanceHandler) updateVirtualKey(ctx *fasthttp.RequestCtx) {
 
 					// Get keys for this provider config if specified
 					var keys []configstoreTables.TableKey
-					allowAllKeys := false
-					if pc.KeyIDs.IsUnrestricted() {
+					allowAllKeys := pc.AllowAllKeys != nil && *pc.AllowAllKeys
+					if allowAllKeys && !pc.KeyIDs.IsEmpty() {
+						return &badRequestError{err: fmt.Errorf("allow_all_keys and key_ids cannot be used together for provider %s", pc.Provider)}
+					}
+					if !allowAllKeys && pc.KeyIDs.IsUnrestricted() {
 						allowAllKeys = true
-					} else if !pc.KeyIDs.IsEmpty() {
+					} else if !allowAllKeys && !pc.KeyIDs.IsEmpty() {
 						var err error
 						keys, err = h.configStore.GetKeysByIDs(ctx, pc.KeyIDs)
 						if err != nil {

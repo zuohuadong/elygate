@@ -92,8 +92,8 @@ export function providerConfigsForForm(value: unknown): unknown[] {
 			weight: item.weight,
 			allowed_models: Array.isArray(item.allowed_models) ? item.allowed_models : [],
 			blacklisted_models: Array.isArray(item.blacklisted_models) ? item.blacklisted_models : [],
-			// Bifrost 用 ["*"] 表示允许该 Provider 的全部 Key；空数组是明确拒绝全部。
-			key_ids: item.allow_all_keys === true ? ['*'] : keys,
+			// API uses the explicit field; empty key_ids remains a deny-all configuration.
+			...(item.allow_all_keys === true ? { allow_all_keys: true } : { key_ids: keys }),
 			budgets: item.budgets,
 			rate_limit: item.rate_limit,
 		};
