@@ -8,6 +8,7 @@
 		hasOpenAIBaseURLVersionConflict,
 		isMissingProviderKeyError,
 		keyAdvancedForForm,
+		providerMaxRetriesForPayload,
 		providerKeyModelAccess,
 		providerKeyModelsForPayload,
 		unsupportedProviderConfigFields,
@@ -20,7 +21,7 @@
 	interface ProviderForm {
 		name: string;
 		network: string;
-		maxRetries: string;
+		maxRetries: string | number;
 		concurrency: string;
 		bufferSize: string;
 		proxy: string;
@@ -174,9 +175,13 @@
 		try {
 			const invalidJson = i18n.t('elygate.invalidJson');
 			const network = parseJsonObject(providerForm.network, i18n.t('elygate.networkConfig'), invalidJson);
-			if (providerForm.maxRetries.trim()) {
-				const maxRetries = Number(providerForm.maxRetries);
-				if (!Number.isInteger(maxRetries) || maxRetries < 0) throw new Error(i18n.t('elygate.maxRetriesInvalid'));
+			let maxRetries: number | undefined;
+			try {
+				maxRetries = providerMaxRetriesForPayload(providerForm.maxRetries);
+			} catch {
+				throw new Error(i18n.t('elygate.maxRetriesInvalid'));
+			}
+			if (maxRetries !== undefined) {
 				network.max_retries = maxRetries;
 			}
 			const proxy = parseJsonObject(providerForm.proxy, i18n.t('elygate.proxyConfig'), invalidJson);

@@ -112,6 +112,14 @@ export function removedVirtualKeyProviderConfigCount(current: unknown, next: Jso
 	return current.filter(isRecord).filter((item) => typeof item.id === 'number' && !nextIDs.has(item.id)).length;
 }
 
+export function providerMaxRetriesForPayload(value: unknown): number | undefined {
+	const normalized = String(value ?? '').trim();
+	if (!normalized) return undefined;
+	const parsed = Number(normalized);
+	if (!Number.isInteger(parsed) || parsed < 0) throw new RangeError('max_retries must be a non-negative integer');
+	return parsed;
+}
+
 export function virtualKeyProviderConfigsForPayload(value: unknown[]): JsonRecord[] {
 	return value.map((item, index) => {
 		if (!isRecord(item)) throw new Error(`provider_configs[${index}] must be an object`);

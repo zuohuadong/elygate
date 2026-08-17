@@ -7,6 +7,7 @@ import {
 	providerKeyModelAccess,
 	providerKeyModelsForPayload,
 	providerConfigsForForm,
+	providerMaxRetriesForPayload,
 	removedVirtualKeyProviderConfigCount,
 	unavailableVirtualKeyProviders,
 	unsupportedProviderConfigFields,
@@ -89,6 +90,14 @@ describe('Bifrost DataProvider', () => {
 			[{ id: 1, provider: 'openai', allow_all_keys: true }, { provider: 'gemini', key_ids: ['key-1'] }],
 		)).toBe(1);
 		expect(removedVirtualKeyProviderConfigCount([{ id: 1 }], [{ id: 1, provider: 'openai' }])).toBe(0);
+	});
+
+	test('accepts retry values emitted by Svelte number inputs', () => {
+		expect(providerMaxRetriesForPayload(2)).toBe(2);
+		expect(providerMaxRetriesForPayload('1')).toBe(1);
+		expect(providerMaxRetriesForPayload('')).toBeUndefined();
+		expect(() => providerMaxRetriesForPayload(-1)).toThrow('non-negative integer');
+		expect(() => providerMaxRetriesForPayload(1.5)).toThrow('non-negative integer');
 	});
 
 	test('preserves provider-specific key configuration in the advanced form', () => {
