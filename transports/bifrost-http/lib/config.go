@@ -128,6 +128,7 @@ var builtinPluginNames = []string{
 	logging.PluginName,
 	governance.PluginName,
 	otel.PluginName,
+	"safety",
 	semanticcache.PluginName,
 	compat.PluginName,
 	maxim.PluginName,

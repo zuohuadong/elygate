@@ -24,6 +24,7 @@ require (
 	github.com/maximhq/bifrost/plugins/modelcatalogresolver v1.0.16
 	github.com/maximhq/bifrost/plugins/otel v1.4.7
 	github.com/maximhq/bifrost/plugins/prompts v1.0.35
+	github.com/maximhq/bifrost/plugins/safety v0.0.0
 	github.com/maximhq/bifrost/plugins/semanticcache v1.5.35
 	github.com/maximhq/bifrost/plugins/telemetry v1.5.35
 	github.com/pion/rtcp v1.2.16
@@ -40,6 +41,8 @@ require (
 	gorm.io/driver/sqlite v1.6.0
 	gorm.io/gorm v1.31.1
 )
+
+replace github.com/maximhq/bifrost/plugins/safety => ../plugins/safety
 
 require (
 	cel.dev/expr v0.25.1 // indirect

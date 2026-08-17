@@ -14,6 +14,7 @@ import (
 	"github.com/maximhq/bifrost/plugins/modelcatalogresolver"
 	"github.com/maximhq/bifrost/plugins/otel"
 	"github.com/maximhq/bifrost/plugins/prompts"
+	"github.com/maximhq/bifrost/plugins/safety"
 	"github.com/maximhq/bifrost/plugins/semanticcache"
 	"github.com/maximhq/bifrost/plugins/telemetry"
 	"github.com/maximhq/bifrost/transports/bifrost-http/handlers"
@@ -112,6 +113,20 @@ func loadBuiltinPlugin(ctx context.Context, name string, pluginConfig any, bifro
 		}
 		return semanticcache.Init(ctx, semanticConfig, logger, bifrostConfig.VectorStore)
 
+	case safety.PluginName:
+		safetyConfig, err := MarshalPluginConfig[safety.Config](pluginConfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal safety plugin config: %w", err)
+		}
+		plugin, err := safety.Init(safetyConfig)
+		if err != nil {
+			return nil, err
+		}
+		if plugin.HasOutputRules() && bifrostConfig.LogsStore != nil && (bifrostConfig.ClientConfig == nil || !bifrostConfig.ClientConfig.DisableContentLogging) {
+			return nil, fmt.Errorf("output safety rules require client.disable_content_logging=true to avoid persisting unchecked provider output")
+		}
+		return plugin, nil
+
 	case otel.PluginName:
 		otelConfig, err := MarshalPluginConfig[otel.Config](pluginConfig)
 		if err != nil {
@@ -190,6 +205,15 @@ func (s *BifrostHTTPServer) loadBuiltinPlugins(ctx context.Context) error {
 	s.Config.SetPluginOrderInfo(telemetry.PluginName, builtinPlacement, schemas.Ptr(1))
 
 	// 2. Prompts (requires config store for prompt repository; disabled in enterprise)
+	safetyConfig := s.getPluginConfig(safety.PluginName)
+	if safetyConfig != nil && safetyConfig.Enabled {
+		s.registerPluginWithStatus(ctx, safety.PluginName, nil, safetyConfig.Config, false)
+	} else {
+		s.markPluginDisabled(safety.PluginName)
+	}
+	s.Config.SetPluginOrderInfo(safety.PluginName, builtinPlacement, schemas.Ptr(0))
+
+	// 3. Prompts (requires config store for prompt repository; disabled in enterprise)
 	if s.Config.ConfigStore != nil && ctx.Value(schemas.BifrostContextKeyIsEnterprise) == nil {
 		s.registerPluginWithStatus(ctx, prompts.PluginName, nil, nil, false)
 	} else {

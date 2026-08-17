@@ -5,7 +5,7 @@ icon: "puzzle-piece"
 ---
 
 <Note>
-**The `plugins` array only controls explicitly opt-in plugins**: `semantic_cache`, `otel`, `maxim`, `datadog` (enterprise), and custom plugins.
+**The `plugins` array controls explicitly opt-in plugins**: `safety`, `semantic_cache`, `otel`, `maxim`, `datadog` (enterprise), and custom plugins.
 
 **Telemetry, logging, and governance are auto-loaded built-ins** - they are always active and configured via the `client` block and dedicated top-level keys, not the `plugins` array.
 </Note>
@@ -27,6 +27,51 @@ These plugins start automatically. You do **not** add them to the `plugins` arra
 | **Governance** | Yes, always (OSS) | `client.enforce_auth_on_inference` for VK enforcement; `governance.*` for virtual keys / budgets / routing rules |
 
 See [Client Configuration](/deployment-guides/config-json/client) and [Governance](/deployment-guides/config-json/governance) for full details.
+
+---
+
+## Safety
+
+`safety` is an opt-in built-in plugin for deterministic regular-expression checks at the inference HTTP boundary. Rules are evaluated in declaration order and can inspect `input`, `output`, or `both`.
+
+- `block` returns a `403` OpenAI-style safety error and does not call the model for input matches.
+- `respond` returns a synthetic safe response for Chat Completions, Completions, and Responses endpoints.
+- Output rules require `client.disable_content_logging: true` when a logs store is enabled, so unchecked provider output is not retained before the HTTP response guard runs.
+- Streaming is rejected with `400` when output rules are configured. This is deliberate: partial streamed output cannot be recalled after a later match.
+
+```json
+{
+  "client": {
+    "disable_content_logging": true
+  },
+  "plugins": [
+    {
+      "name": "safety",
+      "enabled": true,
+      "config": {
+        "enabled": true,
+        "rules": [
+          {
+            "id": "prompt-injection",
+            "pattern": "(?i)ignore previous instructions|reveal the system prompt",
+            "apply_to": "input",
+            "action": "block"
+          },
+          {
+            "id": "aws-access-key-output",
+            "pattern": "AKIA[0-9A-Z]{16}",
+            "apply_to": "output",
+            "action": "respond",
+            "response": "The generated content was withheld by safety policy."
+          }
+        ]
+      }
+    }
+  ]
+}
+```
+
+This plugin is a local deterministic policy layer, not a semantic moderation service. Use specific patterns for organization identifiers, secrets, and known prompt-injection phrases; use Enterprise Guardrails or an external safety provider when classification or model-based detection is required.
 
 ---
 

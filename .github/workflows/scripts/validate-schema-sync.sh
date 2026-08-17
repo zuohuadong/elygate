@@ -36,6 +36,7 @@ if [ ! -f "$REPO_ROOT/go.work" ]; then
                ./plugins/compat ./plugins/governance ./plugins/jsonparser \
                ./plugins/logging ./plugins/maxim ./plugins/mocker \
                ./plugins/otel ./plugins/prompts ./plugins/semanticcache \
+               ./plugins/safety \
                ./plugins/telemetry \
                ./transports ./cli; do
       if [ -f "$REPO_ROOT/$mod/go.mod" ]; then

@@ -58,6 +58,7 @@ COPY panel/src/enterprise-fallback/index.ts /index.ts
   COPY plugins/modelcatalogresolver/go.mod plugins/modelcatalogresolver/go.sum ./plugins/modelcatalogresolver/
   COPY plugins/otel/go.mod plugins/otel/go.sum ./plugins/otel/
   COPY plugins/prompts/go.mod plugins/prompts/go.sum ./plugins/prompts/
+  COPY plugins/safety/go.mod ./plugins/safety/
   COPY plugins/semanticcache/go.mod plugins/semanticcache/go.sum ./plugins/semanticcache/
   COPY plugins/telemetry/go.mod plugins/telemetry/go.sum ./plugins/telemetry/
   COPY transports/go.mod transports/go.sum ./transports/
@@ -75,6 +76,7 @@ COPY panel/src/enterprise-fallback/index.ts /index.ts
       ./plugins/modelcatalogresolver \
       ./plugins/otel \
       ./plugins/prompts \
+      ./plugins/safety \
       ./plugins/semanticcache \
       ./plugins/telemetry \
       ./transports && \
@@ -92,6 +94,7 @@ COPY panel/src/enterprise-fallback/index.ts /index.ts
   COPY plugins/modelcatalogresolver/ ./plugins/modelcatalogresolver/
   COPY plugins/otel/ ./plugins/otel/
   COPY plugins/prompts/ ./plugins/prompts/
+  COPY plugins/safety/ ./plugins/safety/
   COPY plugins/semanticcache/ ./plugins/semanticcache/
   COPY plugins/telemetry/ ./plugins/telemetry/
   COPY transports/ ./transports/
