@@ -488,8 +488,9 @@ func ConvertToBifrostContext(ctx *fasthttp.RequestCtx, store HandlerStore) (*sch
 			extraHeaders[labelName] = append(extraHeaders[labelName], string(value))
 			return true
 		}
-		// Async webhook header: names the webhook endpoint to notify when the
-		// async job finishes. Carried as-is; the submit path validates it.
+		// Async webhook header: optionally narrows the terminal notification to
+		// one endpoint. Without it, every enabled endpoint subscribed to the
+		// terminal event is notified. Carried as-is; the submit path validates it.
 		// Handled before direct forwarding: an allowlist that matches this
 		// reserved header would otherwise forward-and-return below, dropping the
 		// endpoint name so the job runs with no notification.

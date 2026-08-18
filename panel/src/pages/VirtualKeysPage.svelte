@@ -3,7 +3,7 @@
 	import { useTranslation } from '@svadmin/core/i18n';
 	import { displayError, parseJsonArray, parseJsonObject, prettyJson } from '../lib/forms';
 	import { encodePathSegment, getListPayload, getObjectPayload, requestJson, type JsonRecord } from '../lib/api';
-	import { providerConfigsForForm, removedVirtualKeyProviderConfigCount, unavailableVirtualKeyProviders, virtualKeyAdvancedProviderFields, virtualKeyProviderConfigsForPayload } from '../lib/resource-forms';
+	import { availableVirtualKeyProviders, duplicateVirtualKeyProviders, providerConfigsForForm, removedVirtualKeyProviderConfigCount, unavailableVirtualKeyProviders, virtualKeyAdvancedProviderFields, virtualKeyProviderConfigsForPayload } from '../lib/resource-forms';
 
 	interface VirtualKeyForm {
 		name: string;
@@ -13,17 +13,14 @@
 		expiresAt: string;
 		teamId: string;
 		customerId: string;
-		providerConfigs: string;
 		mcpConfigs: string;
 		budgets: string;
 		rateLimit: string;
 		advanced: string;
 	}
 	interface Props { resourceName: string; }
-	const providerConfigExample = '[{"provider":"Agnes-AI","allowed_models":["*"],"allow_all_keys":true}]';
-
 	function emptyForm(): VirtualKeyForm {
-		return { name: '', description: '', isActive: true, calendarAligned: false, expiresAt: '', teamId: '', customerId: '', providerConfigs: '[]', mcpConfigs: '[]', budgets: '[]', rateLimit: '', advanced: '' };
+		return { name: '', description: '', isActive: true, calendarAligned: false, expiresAt: '', teamId: '', customerId: '', mcpConfigs: '[]', budgets: '[]', rateLimit: '', advanced: '' };
 	}
 
 	function stringValue(record: JsonRecord, key: string): string {
@@ -57,6 +54,9 @@
 	const i18n = useTranslation();
 	let virtualKeys = $state.raw<JsonRecord[]>([]);
 	let providers = $state.raw<JsonRecord[]>([]);
+	let providerRoutes = $state<JsonRecord[]>([]);
+	let modelsByProvider = $state.raw<Record<string, JsonRecord[]>>({});
+	let keysByProvider = $state.raw<Record<string, JsonRecord[]>>({});
 	let providerStatusAvailable = $state(false);
 	let form = $state<VirtualKeyForm>(emptyForm());
 	let editing = $state<JsonRecord | null>(null);
@@ -66,6 +66,7 @@
 	let error = $state('');
 	let notice = $state('');
 	let revealedKey = $state('');
+	const canAddProviderRoute = $derived(availableVirtualKeyProviders(providers, providerRoutes).length > 0);
 
 	async function load(): Promise<void> {
 		isLoading = true;
@@ -86,6 +87,57 @@
 		}
 	}
 
+	async function loadProviderOptions(providerName: string): Promise<void> {
+		if (!providerName || (modelsByProvider[providerName] && keysByProvider[providerName])) return;
+		const encoded = encodeURIComponent(providerName);
+		try {
+			const [modelPayload, keyPayload] = await Promise.all([
+				requestJson<unknown>(`/api/models?unfiltered=true&limit=0&provider=${encoded}`),
+				requestJson<unknown>(`/api/providers/${encoded}/keys`),
+			]);
+			modelsByProvider = { ...modelsByProvider, [providerName]: getListPayload(modelPayload) };
+			keysByProvider = { ...keysByProvider, [providerName]: getListPayload(keyPayload) };
+		} catch {
+			// 不缓存失败结果；重新打开或切换供应商时会再次请求。
+		}
+	}
+
+	function stringArray(value: unknown): string[] {
+		return Array.isArray(value) ? value.map(String).filter(Boolean) : [];
+	}
+
+	function addProviderRoute(): void {
+		const providerName = availableVirtualKeyProviders(providers, providerRoutes)[0]?.name;
+		if (typeof providerName !== 'string') return;
+		providerRoutes.push({ provider: providerName, allowed_models: ['*'], allow_all_keys: true });
+		void loadProviderOptions(providerName);
+	}
+
+	function removeProviderRoute(index: number): void {
+		providerRoutes.splice(index, 1);
+	}
+
+	function changeProvider(index: number, providerName: string): void {
+		providerRoutes[index] = { provider: providerName, allowed_models: ['*'], allow_all_keys: true };
+		void loadProviderOptions(providerName);
+	}
+
+	function setAllKeys(route: JsonRecord, checked: boolean): void {
+		route.allow_all_keys = checked;
+		if (checked) delete route.key_ids;
+		else route.key_ids = [];
+	}
+
+	function toggleRouteValue(route: JsonRecord, field: 'allowed_models' | 'key_ids', value: string, checked: boolean): void {
+		const current = stringArray(route[field]).filter((item) => item !== '*');
+		route[field] = checked ? [...new Set([...current, value])] : current.filter((item) => item !== value);
+		if (field === 'key_ids' && stringArray(route[field]).length > 0) route.allow_all_keys = false;
+	}
+
+	function setAllModels(route: JsonRecord, checked: boolean): void {
+		route.allowed_models = checked ? ['*'] : [];
+	}
+
 	function providerWarning(record: JsonRecord): string {
 		if (!providerStatusAvailable) return '';
 		const unavailable = unavailableVirtualKeyProviders(record.provider_configs, providers);
@@ -102,6 +154,7 @@
 	function openCreate(): void {
 		editing = null;
 		form = emptyForm();
+		providerRoutes = [];
 		revealedKey = '';
 		error = '';
 		isOpen = true;
@@ -110,6 +163,8 @@
 	function openEdit(record: JsonRecord): void {
 		editing = record;
 		revealedKey = '';
+		providerRoutes = providerConfigsForForm(record.provider_configs).filter((item): item is JsonRecord => !!item && typeof item === 'object' && !Array.isArray(item));
+		for (const route of providerRoutes) if (typeof route.provider === 'string') void loadProviderOptions(route.provider);
 		form = {
 			name: stringValue(record, 'name'),
 			description: stringValue(record, 'description'),
@@ -118,7 +173,6 @@
 			expiresAt: stringValue(record, 'expires_at'),
 			teamId: stringValue(record, 'team_id'),
 			customerId: stringValue(record, 'customer_id'),
-			providerConfigs: prettyJson(providerConfigsForForm(record.provider_configs), '[]'),
 			mcpConfigs: prettyJson(mcpConfigsForForm(record.mcp_configs), '[]'),
 			budgets: prettyJson(Array.isArray(record.budgets) ? record.budgets : [], '[]'),
 			rateLimit: prettyJson(rateLimitForForm(record.rate_limit)),
@@ -135,7 +189,12 @@
 			if (!form.name.trim()) throw new Error(i18n.t('elygate.required').replace('{field}', i18n.t('elygate.virtualKeyName')));
 			if (form.teamId.trim() && form.customerId.trim()) throw new Error(i18n.t('elygate.teamCustomerConflict'));
 			const invalidJson = i18n.t('elygate.invalidJson');
-			const providerConfigs = virtualKeyProviderConfigsForPayload(parseJsonArray(form.providerConfigs, i18n.t('elygate.providerConfigs'), invalidJson));
+			const providerConfigs = virtualKeyProviderConfigsForPayload(JSON.parse(JSON.stringify(providerRoutes)) as unknown[]);
+			const duplicateProviders = duplicateVirtualKeyProviders(providerConfigs);
+			if (duplicateProviders.length) throw new Error(i18n.t('elygate.virtualKeyDuplicateProvider').replace('{providers}', duplicateProviders.join(', ')));
+			for (const [index, route] of providerConfigs.entries()) {
+				if (!String(route.provider ?? '').trim()) throw new Error(i18n.t('elygate.required').replace('{field}', `${i18n.t('elygate.provider')} #${index + 1}`));
+			}
 			const mcpConfigs = parseJsonArray(form.mcpConfigs, i18n.t('elygate.mcpConfigs'), invalidJson);
 			const budgets = parseJsonArray(form.budgets, i18n.t('elygate.budgets'), invalidJson);
 			const rateLimit = parseJsonObject(form.rateLimit, i18n.t('elygate.rateLimit'), invalidJson);
@@ -239,7 +298,21 @@
 					<label><input type="checkbox" bind:checked={form.isActive} /> {i18n.t('elygate.active')}</label>
 					<label><input type="checkbox" bind:checked={form.calendarAligned} /> {i18n.t('elygate.calendarAligned')}</label>
 				</div>
-				<label>{i18n.t('elygate.providerConfigs')}<textarea bind:value={form.providerConfigs} rows="8" placeholder={providerConfigExample}></textarea><small>{i18n.t('elygate.virtualKeyProviderConfigsHint')}</small></label>
+				<fieldset class="route-editor">
+					<legend>{i18n.t('elygate.providerConfigs')}</legend>
+					{#each providerRoutes as route, routeIndex (route)}
+						<section class="route-row">
+							<header><strong>{i18n.t('elygate.provider')} #{routeIndex + 1}</strong><button class="danger" type="button" onclick={() => removeProviderRoute(routeIndex)}>{i18n.t('elygate.delete')}</button></header>
+							<label>{i18n.t('elygate.provider')}<select value={String(route.provider ?? '')} onchange={(event) => changeProvider(routeIndex, event.currentTarget.value)}><option value="">{i18n.t('elygate.select')}</option>{#each availableVirtualKeyProviders(providers, providerRoutes, routeIndex) as provider (String(provider.name))}<option value={String(provider.name)}>{String(provider.name)}</option>{/each}</select></label>
+							<label class="check"><input type="checkbox" checked={route.allow_all_keys === true} onchange={(event) => setAllKeys(route, event.currentTarget.checked)} />{i18n.t('elygate.virtualKeyAllowAllKeys')}</label>
+							{#if route.allow_all_keys !== true}<div class="choice-grid"><strong>{i18n.t('elygate.providerKeys')}</strong>{#each keysByProvider[String(route.provider ?? '')] ?? [] as key (String(key.id ?? key.key_id))}<label class="check"><input type="checkbox" checked={stringArray(route.key_ids).includes(String(key.id ?? key.key_id))} onchange={(event) => toggleRouteValue(route, 'key_ids', String(key.id ?? key.key_id), event.currentTarget.checked)} />{String(key.name ?? key.id ?? key.key_id)}</label>{:else}<small>{i18n.t('elygate.empty')}</small>{/each}</div>{/if}
+							<label class="check"><input type="checkbox" checked={stringArray(route.allowed_models).includes('*')} onchange={(event) => setAllModels(route, event.currentTarget.checked)} />{i18n.t('elygate.virtualKeyAllowAllModels')}</label>
+							{#if !stringArray(route.allowed_models).includes('*')}<div class="choice-grid"><strong>{i18n.t('elygate.models')}</strong>{#each modelsByProvider[String(route.provider ?? '')] ?? [] as model (String(model.name))}<label class="check"><input type="checkbox" checked={stringArray(route.allowed_models).includes(String(model.name))} onchange={(event) => toggleRouteValue(route, 'allowed_models', String(model.name), event.currentTarget.checked)} />{String(model.name)}</label>{:else}<small>{i18n.t('elygate.empty')}</small>{/each}</div>{/if}
+						</section>
+					{:else}<p class="empty">{i18n.t('elygate.virtualKeyNoProviderRoutes')}</p>{/each}
+					<button type="button" onclick={addProviderRoute} disabled={!canAddProviderRoute}>{i18n.t('elygate.virtualKeyAddProviderRoute')}</button>
+					<small>{i18n.t('elygate.virtualKeyProviderConfigsHint')}</small>
+				</fieldset>
 				<label>{i18n.t('elygate.mcpConfigs')}<textarea bind:value={form.mcpConfigs} rows="5"></textarea></label>
 				<div class="grid-two">
 					<label>{i18n.t('elygate.budgets')}<textarea bind:value={form.budgets} rows="5"></textarea></label>
@@ -283,8 +356,15 @@
 	h2 { margin: 0; }
 	form { display: grid; gap: .85rem; }
 	label { display: grid; font-size: .85rem; font-weight: 650; gap: .35rem; }
-	input, textarea { background: var(--background); border: 1px solid var(--border); border-radius: .5rem; color: var(--foreground); font: inherit; padding: .6rem .7rem; width: 100%; }
+	input, textarea, select { background: var(--background); border: 1px solid var(--border); border-radius: .5rem; color: var(--foreground); font: inherit; padding: .6rem .7rem; width: 100%; }
 	textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem; resize: vertical; }
+	.route-editor { border: 1px solid var(--border); border-radius: .65rem; display: grid; gap: .75rem; margin: 0; padding: .85rem; }
+	.route-editor legend { font-size: .85rem; font-weight: 700; padding: 0 .3rem; }
+	.route-row { border-bottom: 1px solid var(--border); display: grid; gap: .7rem; padding-bottom: .85rem; }
+	.route-row header { align-items: center; display: flex; justify-content: space-between; }
+	.check { align-items: center; display: flex; font-weight: 500; gap: .45rem; }
+	.check input { flex: 0 0 auto; width: auto; }
+	.choice-grid { background: var(--muted); border-radius: .5rem; display: grid; gap: .45rem; max-height: 12rem; overflow: auto; padding: .65rem; }
 	.grid-two { display: grid; gap: .75rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 	.checks { flex-wrap: wrap; gap: 1rem; }
 	.checks label { align-items: center; display: flex; font-weight: 500; }

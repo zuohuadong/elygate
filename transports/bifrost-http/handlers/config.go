@@ -44,6 +44,8 @@ var securityHeaders = []string{
 	"x-bf-vk",
 }
 
+const maxLatestReleaseResponseBytes int64 = 1 << 20
+
 func getPasswordPolicyFailures(password string) []string {
 	failures := make([]string, 0, 5)
 	hasUppercase := false
@@ -106,6 +108,8 @@ type ConfigManager interface {
 type ConfigHandler struct {
 	store                 *lib.Config
 	configManager         ConfigManager
+	latestReleaseURL      string
+	httpClient            *http.Client
 	vectorStoreMutationMu sync.Mutex
 }
 
@@ -113,8 +117,15 @@ type ConfigHandler struct {
 // It requires the Bifrost client, a logger, and the config store.
 func NewConfigHandler(configManager ConfigManager, store *lib.Config) *ConfigHandler {
 	return &ConfigHandler{
-		configManager: configManager,
-		store:         store,
+		configManager:    configManager,
+		store:            store,
+		latestReleaseURL: "https://getbifrost.ai/latest-release",
+		httpClient: &http.Client{
+			Timeout: 3 * time.Second,
+			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		},
 	}
 }
 
@@ -127,6 +138,7 @@ func (h *ConfigHandler) RegisterRoutes(r *router.Router, middlewares ...schemas.
 	r.GET("/api/vector-store-config", lib.ChainMiddlewares(h.getVectorStoreConfig, middlewares...))
 	r.PUT("/api/vector-store-config", lib.ChainMiddlewares(h.updateVectorStoreConfig, middlewares...))
 	r.GET("/api/version", lib.ChainMiddlewares(h.getVersion, middlewares...))
+	r.GET("/api/latest-release", lib.ChainMiddlewares(h.getLatestRelease, middlewares...))
 	r.GET("/api/proxy-config", lib.ChainMiddlewares(h.getProxyConfig, middlewares...))
 	r.PUT("/api/proxy-config", lib.ChainMiddlewares(h.updateProxyConfig, middlewares...))
 	r.POST("/api/pricing/force-sync", lib.ChainMiddlewares(h.forceSyncPricing, middlewares...))
@@ -135,6 +147,36 @@ func (h *ConfigHandler) RegisterRoutes(r *router.Router, middlewares ...schemas.
 // getVersion handles GET /api/version - Get the current version
 func (h *ConfigHandler) getVersion(ctx *fasthttp.RequestCtx) {
 	SendJSON(ctx, version)
+}
+
+func (h *ConfigHandler) getLatestRelease(ctx *fasthttp.RequestCtx) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, h.latestReleaseURL, nil)
+	if err != nil {
+		SendError(ctx, fasthttp.StatusInternalServerError, "failed to build release request")
+		return
+	}
+	request.Header.Set("Accept", "application/json")
+	response, err := h.httpClient.Do(request)
+	if err != nil {
+		SendError(ctx, fasthttp.StatusBadGateway, "release service unavailable")
+		return
+	}
+	defer response.Body.Close()
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		SendError(ctx, fasthttp.StatusBadGateway, "release service returned an invalid response")
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(response.Body, maxLatestReleaseResponseBytes+1))
+	if err != nil || int64(len(body)) > maxLatestReleaseResponseBytes {
+		SendError(ctx, fasthttp.StatusBadGateway, "release service response is too large")
+		return
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		SendError(ctx, fasthttp.StatusBadGateway, "release service returned invalid JSON")
+		return
+	}
+	SendJSON(ctx, payload)
 }
 
 // getConfig handles GET /config - Get the current configuration

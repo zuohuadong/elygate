@@ -37,8 +37,9 @@ type GovernanceStore interface {
 	GetVirtualKey(ctx context.Context, vkValue string) (*configstoreTables.TableVirtualKey, bool)
 }
 
-// WebhookDispatcher queues a webhook notification for a job that reached a
-// terminal state. Implementations must not block on receiver I/O.
+// WebhookDispatcher queues webhook notifications for a job that reached a
+// terminal state. A nil WebhookEndpointID means broadcast to every enabled
+// endpoint subscribed to the event. Implementations must not block on receiver I/O.
 type WebhookDispatcher interface {
 	EnqueueJobEvent(ctx context.Context, job *AsyncJob)
 }
@@ -261,7 +262,7 @@ func (e *AsyncJobExecutor) executeJob(job *AsyncJob, operation AsyncOperation, c
 // job whose terminal write failed still reads as processing, so notifying
 // for it would contradict what polling callers see.
 func (e *AsyncJobExecutor) notifyWebhook(ctx context.Context, job *AsyncJob, status schemas.AsyncJobStatus) {
-	if e.webhookDispatcher == nil || job.WebhookEndpointID == nil {
+	if e.webhookDispatcher == nil {
 		return
 	}
 	// The job's terminal state is already committed; a dispatcher panic must

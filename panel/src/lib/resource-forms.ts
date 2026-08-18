@@ -112,6 +112,28 @@ export function removedVirtualKeyProviderConfigCount(current: unknown, next: Jso
 	return current.filter(isRecord).filter((item) => typeof item.id === 'number' && !nextIDs.has(item.id)).length;
 }
 
+export function duplicateVirtualKeyProviders(value: unknown): string[] {
+	if (!Array.isArray(value)) return [];
+	const seen = new Set<string>();
+	const duplicates = new Set<string>();
+	for (const item of value) {
+		if (!isRecord(item) || typeof item.provider !== 'string') continue;
+		const provider = item.provider.trim();
+		if (!provider) continue;
+		if (seen.has(provider)) duplicates.add(provider);
+		seen.add(provider);
+	}
+	return [...duplicates].sort();
+}
+
+export function availableVirtualKeyProviders(providers: JsonRecord[], routes: JsonRecord[], currentIndex = -1): JsonRecord[] {
+	const used = new Set(routes
+		.filter((_, index) => index !== currentIndex)
+		.map((route) => typeof route.provider === 'string' ? route.provider : '')
+		.filter(Boolean));
+	return providers.filter((provider) => typeof provider.name === 'string' && !used.has(provider.name));
+}
+
 export function providerMaxRetriesForPayload(value: unknown): number | undefined {
 	const normalized = String(value ?? '').trim();
 	if (!normalized) return undefined;

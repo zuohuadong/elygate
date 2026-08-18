@@ -7010,6 +7010,22 @@ func (c *Config) WebhookEndpointByName(name string) (*configstoreTables.TableWeb
 	return endpoint, ok
 }
 
+// WebhookEndpointsForEvent returns enabled endpoint snapshots subscribed to event.
+func (c *Config) WebhookEndpointsForEvent(event configstoreTables.WebhookEvent) []*configstoreTables.TableWebhookEndpoint {
+	c.muWebhooks.RLock()
+	defer c.muWebhooks.RUnlock()
+	endpoints := make([]*configstoreTables.TableWebhookEndpoint, 0, len(c.webhookEndpoints))
+	for _, endpoint := range c.webhookEndpoints {
+		if endpoint.Disabled || !slices.Contains(endpoint.Events, event) {
+			continue
+		}
+		copied := *endpoint
+		endpoints = append(endpoints, &copied)
+	}
+	sort.Slice(endpoints, func(i, j int) bool { return endpoints[i].ID < endpoints[j].ID })
+	return endpoints
+}
+
 // SetWebhookEndpoint upserts an endpoint in the in-memory store, replacing
 // any previous entry with the same ID (including a stale name-index entry
 // after a rename). Called by handlers right after a successful database

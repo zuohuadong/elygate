@@ -41,6 +41,7 @@ type LogStore interface {
 // attempt without a database read.
 type EndpointResolver interface {
 	WebhookEndpointByID(id string) (*tables.TableWebhookEndpoint, bool)
+	WebhookEndpointsForEvent(event tables.WebhookEvent) []*tables.TableWebhookEndpoint
 }
 
 // Default delivery tuning, applied when an endpoint does not set its own
@@ -138,25 +139,33 @@ func (d *Dispatcher) Stop() {
 // terminal state. Callers invoke it right after the terminal job update; it
 // performs no receiver I/O — just the queue insert plus a worker wake-up.
 func (d *Dispatcher) EnqueueJobEvent(ctx context.Context, job *logstore.AsyncJob) {
-	if job == nil || job.WebhookEndpointID == nil {
+	if job == nil {
 		return
 	}
 	event, ok := EventForJobStatus(job.Status)
 	if !ok {
 		return
 	}
-	endpointID := *job.WebhookEndpointID
-	endpoint, ok := d.resolver.WebhookEndpointByID(endpointID)
-	if !ok || endpoint.Disabled || !subscribesTo(endpoint, event) {
-		d.logger.Debug("webhooks: skipping enqueue for job %s: endpoint %s is gone, disabled, or unsubscribed", job.ID, endpointID)
-		return
+	var endpoints []*tables.TableWebhookEndpoint
+	if job.WebhookEndpointID != nil {
+		endpointID := *job.WebhookEndpointID
+		endpoint, found := d.resolver.WebhookEndpointByID(endpointID)
+		if !found || endpoint.Disabled || !subscribesTo(endpoint, event) {
+			d.logger.Debug("webhooks: skipping enqueue for job %s: endpoint %s is gone, disabled, or unsubscribed", job.ID, endpointID)
+			return
+		}
+		endpoints = []*tables.TableWebhookEndpoint{endpoint}
+	} else {
+		endpoints = d.resolver.WebhookEndpointsForEvent(event)
 	}
-	webhookJob := &tables.TableWebhookJob{
-		ID:         uuid.NewString(),
-		EndpointID: endpoint.ID,
-		AsyncJobID: job.ID,
-		Event:      event,
+	for _, endpoint := range endpoints {
+		d.enqueueEndpoint(ctx, job.ID, endpoint, event)
 	}
+}
+
+func (d *Dispatcher) enqueueEndpoint(ctx context.Context, asyncJobID string, endpoint *tables.TableWebhookEndpoint, event tables.WebhookEvent) {
+	jobID := uuid.NewSHA1(uuid.NameSpaceURL, []byte(fmt.Sprintf("bifrost:webhook:%s:%s:%s", asyncJobID, endpoint.ID, event)))
+	webhookJob := &tables.TableWebhookJob{ID: jobID.String(), EndpointID: endpoint.ID, AsyncJobID: asyncJobID, Event: event}
 	var err error
 	for attempt := range enqueueAttempts {
 		if err = d.configStore.CreateWebhookJob(ctx, webhookJob); err == nil {
@@ -171,7 +180,7 @@ func (d *Dispatcher) EnqueueJobEvent(ctx context.Context, job *logstore.AsyncJob
 	if err != nil {
 		// The notification is lost; make that operator-visible. This is a
 		// rare storage-failure path, not request-path noise.
-		d.logger.Warn("webhooks: dropping notification for job %s to endpoint %s: enqueue failed after %d attempts: %v", job.ID, endpointID, enqueueAttempts, err)
+		d.logger.Warn("webhooks: dropping notification for job %s to endpoint %s: enqueue failed after %d attempts: %v", asyncJobID, endpoint.ID, enqueueAttempts, err)
 		return
 	}
 	d.Wake()

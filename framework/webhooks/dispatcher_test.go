@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/maximhq/bifrost/core/schemas"
+	"github.com/maximhq/bifrost/framework/configstore"
 	"github.com/maximhq/bifrost/framework/configstore/tables"
 	"github.com/maximhq/bifrost/framework/logstore"
 	"github.com/stretchr/testify/assert"
@@ -73,6 +74,9 @@ func (f *fakeConfigStore) CreateWebhookJob(ctx context.Context, job *tables.Tabl
 	if f.createFailures > 0 {
 		f.createFailures--
 		return fmt.Errorf("simulated storage failure")
+	}
+	if _, exists := f.jobs[job.ID]; exists {
+		return configstore.ErrAlreadyExists
 	}
 	if job.NextAttemptAt.IsZero() {
 		job.NextAttemptAt = time.Now()
@@ -227,6 +231,18 @@ func (r *fakeResolver) WebhookEndpointByID(id string) (*tables.TableWebhookEndpo
 	return endpoint, ok
 }
 
+func (r *fakeResolver) WebhookEndpointsForEvent(event tables.WebhookEvent) []*tables.TableWebhookEndpoint {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var endpoints []*tables.TableWebhookEndpoint
+	for _, endpoint := range r.endpoints {
+		if !endpoint.Disabled && subscribesTo(endpoint, event) {
+			endpoints = append(endpoints, endpoint)
+		}
+	}
+	return endpoints
+}
+
 // --- helpers ---------------------------------------------------------------
 
 func testEndpoint(id, url string) *tables.TableWebhookEndpoint {
@@ -297,14 +313,32 @@ func TestEnqueueJobEvent(t *testing.T) {
 	}
 }
 
+func TestEnqueueJobEventBroadcastsToSubscribedEndpoints(t *testing.T) {
+	completed := testEndpoint("ep-completed", "https://completed.example/hook")
+	failed := testEndpoint("ep-failed", "https://failed.example/hook")
+	failed.Events = []tables.WebhookEvent{tables.WebhookEventAsyncJobFailed}
+	disabled := testEndpoint("ep-disabled", "https://disabled.example/hook")
+	disabled.Disabled = true
+	f := newFixture(t, completed, failed, disabled)
+
+	f.dispatcher.EnqueueJobEvent(context.Background(), &logstore.AsyncJob{ID: "job-1", Status: schemas.AsyncJobStatusCompleted})
+
+	require.Equal(t, 1, f.configStore.jobCount())
+	for id := range f.configStore.jobs {
+		assert.Equal(t, "ep-completed", f.configStore.job(id).EndpointID)
+	}
+
+	// Replaying the terminal notification must not create a duplicate delivery.
+	f.dispatcher.EnqueueJobEvent(context.Background(), &logstore.AsyncJob{ID: "job-1", Status: schemas.AsyncJobStatusCompleted})
+	require.Equal(t, 1, f.configStore.jobCount())
+}
+
 func TestEnqueueJobEventSkips(t *testing.T) {
 	endpoint := testEndpoint("ep-1", "https://receiver.example/hook")
 	f := newFixture(t, endpoint)
 	endpointID := endpoint.ID
 	missingID := "ep-missing"
 
-	// No endpoint requested on the job.
-	f.dispatcher.EnqueueJobEvent(context.Background(), &logstore.AsyncJob{ID: "j1", Status: schemas.AsyncJobStatusCompleted})
 	// Non-terminal status.
 	f.dispatcher.EnqueueJobEvent(context.Background(), &logstore.AsyncJob{ID: "j2", Status: schemas.AsyncJobStatusProcessing, WebhookEndpointID: &endpointID})
 	// Endpoint vanished after submit.

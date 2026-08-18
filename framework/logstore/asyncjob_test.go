@@ -346,7 +346,7 @@ func TestSubmitJob_RejectsUnusableWebhookReference(t *testing.T) {
 	}
 }
 
-func TestSubmitJob_NoWebhookWithoutContextValue(t *testing.T) {
+func TestSubmitJob_BroadcastsWebhookWithoutContextValue(t *testing.T) {
 	dispatcher := &recordingWebhookDispatcher{}
 	executor := newWebhookTestExecutor(t, dispatcher)
 
@@ -357,8 +357,10 @@ func TestSubmitJob_NoWebhookWithoutContextValue(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, job.WebhookEndpointID)
 
-	waitForJobStatus(t, executor.logstore, job.ID)
-	assert.Empty(t, dispatcher.enqueued(), "jobs without a webhook reference must not notify")
+	enqueued := waitForWebhookEnqueue(t, dispatcher, 1)
+	require.Len(t, enqueued, 1)
+	assert.Equal(t, job.ID, enqueued[0].ID)
+	assert.Nil(t, enqueued[0].WebhookEndpointID, "nil endpoint selects subscribed broadcast delivery")
 }
 
 func TestExecuteJob_WebhookEnqueuedOnSuccess(t *testing.T) {

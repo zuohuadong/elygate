@@ -26,16 +26,13 @@
 		let timeout: number | undefined;
 		try {
 			const response = await Promise.race([
-				fetch('https://getbifrost.ai/latest-release', {
-				headers: { Accept: 'application/json' },
-				}),
+				requestJson<JsonRecord>('/api/latest-release'),
 				new Promise<undefined>((resolve) => {
 					timeout = window.setTimeout(() => resolve(undefined), 3000);
 				}),
 			]);
-			if (!response?.ok) return;
-			const payload: unknown = await response.json();
-			if (!isJsonRecord(payload)) return;
+			if (!response || !isJsonRecord(response)) return;
+			const payload = response;
 			latestVersion = String(payload.name ?? payload.tag ?? payload.version ?? '');
 			releaseNotesUrl = String(payload.changelogUrl ?? payload.changelog_url ?? `https://docs.getbifrost.ai/changelogs/${latestVersion}`);
 			releaseVisible = isVersionNewer(latestVersion, version) && window.localStorage.getItem(`elygate.release.dismissed.${latestVersion}`) !== 'true';

@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { bifrostDataProvider } from './data-provider';
 import {
+	availableVirtualKeyProviders,
+	duplicateVirtualKeyProviders,
 	hasOpenAIBaseURLVersionConflict,
 	isMissingProviderKeyError,
 	keyAdvancedForForm,
@@ -90,6 +92,19 @@ describe('Bifrost DataProvider', () => {
 			[{ id: 1, provider: 'openai', allow_all_keys: true }, { provider: 'gemini', key_ids: ['key-1'] }],
 		)).toBe(1);
 		expect(removedVirtualKeyProviderConfigCount([{ id: 1 }], [{ id: 1, provider: 'openai' }])).toBe(0);
+	});
+
+	test('prevents ambiguous duplicate provider routes without rewriting deny-all models', () => {
+		const providers = [{ name: 'openai' }, { name: 'anthropic' }, { name: 'gemini' }];
+		const routes = [
+			{ provider: 'openai', allowed_models: [] },
+			{ provider: 'anthropic', allowed_models: ['*'] },
+			{ provider: 'openai', allowed_models: ['gpt-5'] },
+		];
+		expect(duplicateVirtualKeyProviders(routes)).toEqual(['openai']);
+		expect(availableVirtualKeyProviders(providers, routes, 1)).toEqual([{ name: 'anthropic' }, { name: 'gemini' }]);
+		expect(virtualKeyProviderConfigsForPayload([{ provider: 'openai', allowed_models: [] }]))
+			.toEqual([{ provider: 'openai', allowed_models: [] }]);
 	});
 
 	test('accepts retry values emitted by Svelte number inputs', () => {

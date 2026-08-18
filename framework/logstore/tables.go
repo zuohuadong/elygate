@@ -1230,8 +1230,8 @@ type AsyncJob struct {
 	StatusCode   int                    `gorm:"default:0" json:"status_code,omitempty"`
 	Error        string                 `gorm:"type:text" json:"error,omitempty"`
 	VirtualKeyID *string                `gorm:"type:varchar(255);index:idx_async_jobs_vk_id" json:"virtual_key_id,omitempty"`
-	// WebhookEndpointID references the webhook endpoint to notify when this
-	// job reaches a terminal state, when one was requested at submit time.
+	// WebhookEndpointID optionally narrows terminal notification to one endpoint;
+	// nil broadcasts to every enabled endpoint subscribed to the terminal event.
 	WebhookEndpointID *string    `gorm:"type:varchar(36)" json:"webhook_endpoint_id,omitempty"`
 	ResultTTL         int        `gorm:"default:3600" json:"-"` // TTL in seconds, used to calculate ExpiresAt on completion
 	ExpiresAt         *time.Time `gorm:"index:idx_async_jobs_expires_at" json:"expires_at,omitempty"`

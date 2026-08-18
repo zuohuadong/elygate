@@ -3,8 +3,11 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -35,6 +38,57 @@ func newVectorStoreConfigRequestCtx(body string) *fasthttp.RequestCtx {
 	ctx := &fasthttp.RequestCtx{}
 	ctx.Init(&request, nil, nil)
 	return ctx
+}
+
+func TestGetLatestReleaseProxiesJSONThroughBackend(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "application/json", r.Header.Get("Accept"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"version":"v1.2.3","changelogUrl":"https://docs.example/release"}`))
+	}))
+	defer upstream.Close()
+
+	handler := NewConfigHandler(nil, &lib.Config{})
+	handler.latestReleaseURL = upstream.URL
+	ctx := newVectorStoreConfigRequestCtx("")
+	handler.getLatestRelease(ctx)
+
+	require.Equal(t, fasthttp.StatusOK, ctx.Response.StatusCode(), string(ctx.Response.Body()))
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(ctx.Response.Body(), &payload))
+	require.Equal(t, "v1.2.3", payload["version"])
+}
+
+func TestGetLatestReleaseRejectsRedirectsAndOversizedResponses(t *testing.T) {
+	t.Run("redirect", func(t *testing.T) {
+		target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{"version":"should-not-be-followed"}`))
+		}))
+		defer target.Close()
+		upstream := httptest.NewServer(http.RedirectHandler(target.URL, http.StatusFound))
+		defer upstream.Close()
+
+		handler := NewConfigHandler(nil, &lib.Config{})
+		handler.latestReleaseURL = upstream.URL
+		ctx := newVectorStoreConfigRequestCtx("")
+		handler.getLatestRelease(ctx)
+
+		require.Equal(t, fasthttp.StatusBadGateway, ctx.Response.StatusCode(), string(ctx.Response.Body()))
+	})
+
+	t.Run("oversized", func(t *testing.T) {
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{"version":"` + strings.Repeat("x", int(maxLatestReleaseResponseBytes)) + `"}`))
+		}))
+		defer upstream.Close()
+
+		handler := NewConfigHandler(nil, &lib.Config{})
+		handler.latestReleaseURL = upstream.URL
+		ctx := newVectorStoreConfigRequestCtx("")
+		handler.getLatestRelease(ctx)
+
+		require.Equal(t, fasthttp.StatusBadGateway, ctx.Response.StatusCode(), string(ctx.Response.Body()))
+	})
 }
 
 func TestGetVectorStoreConfigRedactsPgvectorConnectionString(t *testing.T) {

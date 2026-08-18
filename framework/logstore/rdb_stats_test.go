@@ -30,14 +30,16 @@ func TestGetStatsTokenSplit(t *testing.T) {
 	seed := []struct {
 		id                        string
 		prompt, completion, total int
+		cost                      float64
 		status                    string
 	}{
-		{"a", 100, 10, 110, "success"},
-		{"b", 200, 20, 220, "success"},
-		{"c", 400, 40, 440, "error"},       // terminal, must count
-		{"d", 999, 99, 1098, "processing"}, // non-terminal, must NOT count
+		{"a", 100, 10, 110, 0.00085, "success"},
+		{"b", 200, 20, 220, 0.00837, "success"},
+		{"c", 400, 40, 440, 0.001, "error"},   // terminal, must count
+		{"d", 999, 99, 1098, 5, "processing"}, // non-terminal, must NOT count
 	}
 	for _, sd := range seed {
+		cost := sd.cost
 		require.NoError(t, db.Create(&Log{
 			ID:               sd.id,
 			Timestamp:        now,
@@ -45,6 +47,7 @@ func TestGetStatsTokenSplit(t *testing.T) {
 			PromptTokens:     sd.prompt,
 			CompletionTokens: sd.completion,
 			TotalTokens:      sd.total,
+			Cost:             &cost,
 		}).Error)
 	}
 
@@ -55,4 +58,5 @@ func TestGetStatsTokenSplit(t *testing.T) {
 	require.Equal(t, int64(700), stats.PromptTokens, "prompt = 100+200+400")
 	require.Equal(t, int64(70), stats.CompletionTokens, "completion = 10+20+40")
 	require.Equal(t, stats.TotalTokens, stats.PromptTokens+stats.CompletionTokens, "split sums to total")
+	require.InDelta(t, 0.01022, stats.TotalCost, 0.0000001, "cost sums terminal rows shown in the filtered log list")
 }

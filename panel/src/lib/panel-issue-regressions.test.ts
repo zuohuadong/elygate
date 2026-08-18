@@ -53,10 +53,11 @@ describe('panel issue regressions', () => {
 		expect(source).not.toContain('tr onclick={() => void openDetail(log)}');
 	});
 
-	test('release check times out without aborting the browser request', async () => {
+	test('release check uses the same-origin backend proxy', async () => {
 		const source = await Bun.file(new URL('../pages/PanelAssist.svelte', import.meta.url)).text();
 		expect(source).toContain("Promise.race([");
-		expect(source).toContain("fetch('https://getbifrost.ai/latest-release'");
+		expect(source).toContain("requestJson<JsonRecord>('/api/latest-release')");
+		expect(source).not.toContain("fetch('https://getbifrost.ai/latest-release'");
 		expect(source).not.toContain('AbortController');
 		expect(source).not.toContain('controller.abort()');
 	});
@@ -67,5 +68,23 @@ describe('panel issue regressions', () => {
 		expect(source).toContain('providerMaxRetriesForPayload(providerForm.maxRetries)');
 		expect(source).toContain("network.max_retries = maxRetries");
 		expect(source).toContain("i18n.t('elygate.maxRetriesHint')");
+	});
+
+	test('virtual key editor provides graphical provider, key, and model controls', async () => {
+		const source = await Bun.file(new URL('../pages/VirtualKeysPage.svelte', import.meta.url)).text();
+		expect(source).toContain('class="route-editor"');
+		expect(source).toContain("requestJson<unknown>(`/api/providers/${encoded}/keys`)");
+		expect(source).toContain("requestJson<unknown>(`/api/models?unfiltered=true&limit=0&provider=${encoded}`)");
+		expect(source).toContain("i18n.t('elygate.virtualKeyAllowAllKeys')");
+		expect(source).toContain("i18n.t('elygate.virtualKeyAllowAllModels')");
+		expect(source).not.toContain('bind:value={form.providerConfigs}');
+	});
+
+	test('security settings remain editable after configuration loads', async () => {
+		const source = await Bun.file(new URL('../pages/ConfigPage.svelte', import.meta.url)).text();
+		for (const field of ['authEnabled', 'enforceAuthOnInference', 'allowDirectKeys', 'disableDbPingsInHealth', 'dropExcessRequests']) {
+			expect(source).toContain(`bind:checked={form.${field}} disabled={isLoading}`);
+			expect(source).not.toContain(`bind:checked={form.${field}} disabled={true}`);
+		}
 	});
 });
