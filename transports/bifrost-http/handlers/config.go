@@ -339,6 +339,28 @@ type authConfigWithSetupToken struct {
 	SetupToken string `json:"setup_token,omitempty"`
 }
 
+// clientConfigUpdate keeps boolean presence information for security-sensitive
+// partial updates. A missing field preserves the stored value; an explicit false
+// remains a supported administrator choice.
+type clientConfigUpdate struct {
+	configstore.ClientConfig
+	EnforceAuthOnInference *bool `json:"enforce_auth_on_inference"`
+}
+
+func (c *clientConfigUpdate) UnmarshalJSON(data []byte) error {
+	if err := json.Unmarshal(data, &c.ClientConfig); err != nil {
+		return err
+	}
+	var presence struct {
+		EnforceAuthOnInference *bool `json:"enforce_auth_on_inference"`
+	}
+	if err := json.Unmarshal(data, &presence); err != nil {
+		return err
+	}
+	c.EnforceAuthOnInference = presence.EnforceAuthOnInference
+	return nil
+}
+
 // updateConfig updates the core configuration settings.
 // Currently, it supports hot-reloading of the `drop_excess_requests` setting.
 // Note that settings like `prometheus_labels` cannot be changed at runtime.
@@ -349,7 +371,7 @@ func (h *ConfigHandler) updateConfig(ctx *fasthttp.RequestCtx) {
 	}
 
 	payload := struct {
-		ClientConfig    configstore.ClientConfig               `json:"client_config"`
+		ClientConfig    clientConfigUpdate                     `json:"client_config"`
 		FrameworkConfig configstoreTables.TableFrameworkConfig `json:"framework_config"`
 		AuthConfig      *authConfigWithSetupToken              `json:"auth_config"`
 	}{}
@@ -602,10 +624,13 @@ func (h *ConfigHandler) updateConfig(ctx *fasthttp.RequestCtx) {
 	// which atomically swaps in a fresh immutable snapshot carrying the new value.
 	updatedConfig.DumpErrorsInConsoleLogs = payload.ClientConfig.DumpErrorsInConsoleLogs
 
-	updatedConfig.EnforceAuthOnInference = payload.ClientConfig.EnforceAuthOnInference
-	// Sync deprecated columns to match new field so they stay consistent in the DB
-	updatedConfig.EnforceGovernanceHeader = payload.ClientConfig.EnforceAuthOnInference
-	updatedConfig.EnforceSCIMAuth = payload.ClientConfig.EnforceAuthOnInference
+	if payload.ClientConfig.EnforceAuthOnInference != nil {
+		enforceAuth := *payload.ClientConfig.EnforceAuthOnInference
+		updatedConfig.EnforceAuthOnInference = enforceAuth
+		// Sync deprecated columns to match new field so they stay consistent in the DB.
+		updatedConfig.EnforceGovernanceHeader = enforceAuth
+		updatedConfig.EnforceSCIMAuth = enforceAuth
+	}
 
 	// Only update when explicitly provided to avoid clearing the stored default (prefer_idp).
 	// The conflict-vs-token_exchange validation already ran up front, before

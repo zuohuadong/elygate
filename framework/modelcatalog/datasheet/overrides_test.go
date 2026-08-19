@@ -117,6 +117,18 @@ func TestGetPricing_RequestTypeSpecificOverrideBeatsGeneric(t *testing.T) {
 	assert.Equal(t, 15.0, *pricing.InputCostPerToken)
 }
 
+func TestSetOverridesRejectsEmptyRequestTypes(t *testing.T) {
+	s := newTestStore()
+	err := s.SetOverrides([]configstoreTables.TablePricingOverride{{
+		ID:               "invalid-empty-request-types",
+		ScopeKind:        string(ScopeKindGlobal),
+		MatchType:        string(MatchTypeExact),
+		Pattern:          "gpt-4o",
+		PricingPatchJSON: `{"input_cost_per_token":1}`,
+	}})
+	require.EqualError(t, err, "request_types is required and must contain at least one value")
+}
+
 func TestGetPricing_AppliesOverrideAfterFallbackResolution(t *testing.T) {
 	s := newTestStore()
 	s.pricingData[makeKey("gpt-4o", "vertex", "chat")] = configstoreTables.TableModelPricing{

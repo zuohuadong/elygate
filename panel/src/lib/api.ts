@@ -8,11 +8,13 @@ export interface SessionStatus {
 
 export class ApiError extends Error {
 	public readonly status: number;
+	public readonly payload: unknown;
 
-	public constructor(status: number, message: string) {
+	public constructor(status: number, message: string, payload?: unknown) {
 		super(message);
 		this.name = 'ApiError';
 		this.status = status;
+		this.payload = payload;
 	}
 }
 
@@ -52,7 +54,7 @@ export async function requestJson<T>(path: string, init: RequestInit = {}): Prom
 
 	const payload: unknown = await response.json().catch(() => undefined);
 	if (!response.ok) {
-		throw new ApiError(response.status, getErrorMessage(payload, requestErrorFormatter(response.status)));
+		throw new ApiError(response.status, getErrorMessage(payload, requestErrorFormatter(response.status)), payload);
 	}
 	return payload as T;
 }

@@ -684,7 +684,7 @@ var DefaultClientConfig = configstore.ClientConfig{
 	EnableLogging:                   new(true),
 	DisableContentLogging:           false,
 	RetainContentInObjectStorage:    false,
-	EnforceAuthOnInference:          false,
+	EnforceAuthOnInference:          true,
 	AllowedOrigins:                  []string{"*"},
 	AllowedHeaders:                  []string{},
 	WhitelistedRoutes:               []string{},

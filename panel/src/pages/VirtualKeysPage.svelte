@@ -189,7 +189,18 @@
 			if (!form.name.trim()) throw new Error(i18n.t('elygate.required').replace('{field}', i18n.t('elygate.virtualKeyName')));
 			if (form.teamId.trim() && form.customerId.trim()) throw new Error(i18n.t('elygate.teamCustomerConflict'));
 			const invalidJson = i18n.t('elygate.invalidJson');
-			const providerConfigs = virtualKeyProviderConfigsForPayload(JSON.parse(JSON.stringify(providerRoutes)) as unknown[]);
+			let providerConfigs: JsonRecord[];
+			try {
+				providerConfigs = virtualKeyProviderConfigsForPayload(
+					JSON.parse(JSON.stringify(providerRoutes)) as unknown[],
+					{ requireAllowedModels: !editing },
+				);
+			} catch (cause) {
+				if (!editing && cause instanceof Error && cause.message.includes('.allowed_models')) {
+					throw new Error(i18n.t('elygate.virtualKeyModelsRequired'));
+				}
+				throw cause;
+			}
 			const duplicateProviders = duplicateVirtualKeyProviders(providerConfigs);
 			if (duplicateProviders.length) throw new Error(i18n.t('elygate.virtualKeyDuplicateProvider').replace('{providers}', duplicateProviders.join(', ')));
 			for (const [index, route] of providerConfigs.entries()) {

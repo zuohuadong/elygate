@@ -799,7 +799,7 @@ func convertTableOverride(override *configstoreTables.TablePricingOverride) (Ove
 	if err := sonic.Unmarshal([]byte(override.PricingPatchJSON), &options); err != nil {
 		return Override{}, err
 	}
-	return Override{
+	converted := Override{
 		ID:            override.ID,
 		Name:          override.Name,
 		ScopeKind:     ScopeKind(override.ScopeKind),
@@ -811,5 +811,9 @@ func convertTableOverride(override *configstoreTables.TablePricingOverride) (Ove
 		Pattern:       override.Pattern,
 		RequestTypes:  override.RequestTypes,
 		Options:       options,
-	}, nil
+	}
+	if err := converted.IsValid(); err != nil {
+		return Override{}, err
+	}
+	return converted, nil
 }

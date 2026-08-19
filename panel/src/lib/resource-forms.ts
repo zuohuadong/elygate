@@ -142,11 +142,17 @@ export function providerMaxRetriesForPayload(value: unknown): number | undefined
 	return parsed;
 }
 
-export function virtualKeyProviderConfigsForPayload(value: unknown[]): JsonRecord[] {
+export function virtualKeyProviderConfigsForPayload(value: unknown[], options: { requireAllowedModels?: boolean } = {}): JsonRecord[] {
 	return value.map((item, index) => {
 		if (!isRecord(item)) throw new Error(`provider_configs[${index}] must be an object`);
 		if ('keys' in item) throw new Error(`provider_configs[${index}].keys is response-only; use key_ids or allow_all_keys`);
 		const normalized = { ...item };
+		const allowedModels = Array.isArray(normalized.allowed_models)
+			? normalized.allowed_models.map(String).filter(Boolean)
+			: [];
+		if (options.requireAllowedModels && allowedModels.length === 0) {
+			throw new Error(`provider_configs[${index}].allowed_models must allow all models or contain at least one model`);
+		}
 		const keyIDs = Array.isArray(normalized.key_ids) ? normalized.key_ids : [];
 		if (normalized.allow_all_keys === true) {
 			if (keyIDs.length > 0) throw new Error(`provider_configs[${index}] cannot combine allow_all_keys with key_ids`);

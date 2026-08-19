@@ -176,6 +176,7 @@ export function buildPricingOverridePayload(draft: PricingOverrideDraft): JsonRe
 	const pattern = draft.pattern.trim();
 	if (!name) throw new Error('name-required');
 	if (!pattern) throw new Error('pattern-required');
+	if (draft.requestTypes.length === 0) throw new Error('request-types-required');
 	if (draft.matchType === 'exact' && pattern.includes('*')) throw new Error('pattern-exact');
 	if (draft.matchType === 'wildcard') {
 		const stars = pattern.match(/\*/g)?.length ?? 0;

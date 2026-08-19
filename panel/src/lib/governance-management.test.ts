@@ -63,9 +63,17 @@ describe('governance management helpers', () => {
 	});
 
 	test('rejects malformed wildcard patterns and encodes list filters', () => {
-		const draft = pricingOverrideDraftFromRecord({ name: 'bad', scope_kind: 'global', match_type: 'wildcard', pattern: '*gpt*', pricing_patch: '{"input_cost_per_token":1}' });
+		const draft = pricingOverrideDraftFromRecord({ name: 'bad', scope_kind: 'global', match_type: 'wildcard', pattern: '*gpt*', request_types: ['chat_completion'], pricing_patch: '{"input_cost_per_token":1}' });
 		expect(() => buildPricingOverridePayload(draft)).toThrow('pattern-wildcard');
 		expect(buildPricingOverrideQuery({ search: ' GPT ', scopeKind: 'provider', providerId: 'azure/openai', limit: 25, offset: 50 }))
 			.toBe('limit=25&offset=50&search=GPT&scope_kind=provider&provider_id=azure%2Fopenai');
+	});
+
+	test('requires at least one pricing override request type', () => {
+		const draft = pricingOverrideDraftFromRecord({
+			name: 'chat-price', scope_kind: 'global', match_type: 'exact', pattern: 'gpt-5',
+			request_types: [], pricing_patch: '{"input_cost_per_token":1}',
+		});
+		expect(() => buildPricingOverridePayload(draft)).toThrow('request-types-required');
 	});
 });

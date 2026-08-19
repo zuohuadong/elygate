@@ -105,6 +105,14 @@ describe('Bifrost DataProvider', () => {
 		expect(availableVirtualKeyProviders(providers, routes, 1)).toEqual([{ name: 'anthropic' }, { name: 'gemini' }]);
 		expect(virtualKeyProviderConfigsForPayload([{ provider: 'openai', allowed_models: [] }]))
 			.toEqual([{ provider: 'openai', allowed_models: [] }]);
+		expect(() => virtualKeyProviderConfigsForPayload(
+			[{ provider: 'openai', allowed_models: [] }],
+			{ requireAllowedModels: true },
+		)).toThrow('allowed_models');
+		expect(virtualKeyProviderConfigsForPayload(
+			[{ provider: 'openai', allowed_models: ['*'] }],
+			{ requireAllowedModels: true },
+		)).toEqual([{ provider: 'openai', allowed_models: ['*'] }]);
 	});
 
 	test('accepts retry values emitted by Svelte number inputs', () => {

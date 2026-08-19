@@ -118,6 +118,7 @@ func (c *ClientConfig) IsMCPOAuthDiscoveryEnabled() bool {
 func (c *ClientConfig) UnmarshalJSON(data []byte) error {
 	type ClientConfigAlias ClientConfig
 	alias := ClientConfigAlias{
+		EnforceAuthOnInference: true,
 		Compat: CompatConfig{
 			ConvertTextToChat:      true,
 			ConvertChatToResponses: true,

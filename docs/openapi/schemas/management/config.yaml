@@ -41,6 +41,7 @@ ClientConfig:
       description: Allow individual requests to override raw request/response visibility via the x-bf-send-back-raw-request and x-bf-send-back-raw-response headers. When false (default), provider-level settings are authoritative and per-request overrides are ignored.
     enforce_auth_on_inference:
       type: boolean
+      default: true
       description: Whether to enforce virtual key authentication on inference requests
     enforce_governance_header:
       type: boolean

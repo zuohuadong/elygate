@@ -2,7 +2,8 @@
 	import { onMount } from 'svelte';
 	import { useTranslation } from '@svadmin/core/i18n';
 	import { displayError, prettyJson } from '../lib/forms';
-	import { getListPayload, getTotal, isJsonRecord, requestJson, type JsonRecord } from '../lib/api';
+	import { ApiError, getListPayload, getTotal, isJsonRecord, requestJson, type JsonRecord } from '../lib/api';
+	import { clampLogPage, formatLogCost, isCostRecalculationActive, isCostRecalculationStatus, logPageCount, waitForCostRecalculation, type CostRecalculationStatus } from '../lib/log-management';
 
 	interface Props { resourceName: string; }
 	interface LogStats { total_requests?: number; success_rate?: number; average_latency?: number; total_tokens?: number; total_cost?: number; }
@@ -17,6 +18,8 @@
 	let isDetailLoading = $state(false);
 	let isLoading = $state(true);
 	let isMutating = $state(false);
+	let isRecalculating = $state(false);
+	let activeRecalculationJobID = $state('');
 	let error = $state('');
 	let notice = $state('');
 	let query = $state('');
@@ -31,9 +34,12 @@
 	let websocket: WebSocket | null = null;
 	let reconnectTimer: number | null = null;
 	let reloadTimer: number | null = null;
+	let recalculationAbortController: AbortController | null = null;
+	const lifecycleAbortController = new AbortController();
 	let stopped = false;
 
-	const hasNext = $derived(page * Number(pageSize) < total);
+	const totalPages = $derived(logPageCount(total, Number(pageSize)));
+	const hasNext = $derived(page < totalPages);
 	const providers = $derived(stringList(filterData.providers));
 	const models = $derived(stringList(filterData.models));
 	const selectedVideoSources = $derived(selectedLog ? videoSources(selectedLog) : []);
@@ -81,13 +87,22 @@
 				requestJson<unknown>(endpoint()),
 				requestJson<LogStats>(statsEndpoint()).catch(() => ({})),
 			]);
-			logs = getListPayload(payload);
-			stats = isJsonRecord(statsPayload) ? statsPayload as LogStats : {};
+			const nextLogs = getListPayload(payload);
+			let nextTotal: number;
 			if (isJsonRecord(payload)) {
-				total = isJsonRecord(payload.pagination) ? getTotal(payload.pagination, logs.length) : getTotal(payload, logs.length);
+				nextTotal = isJsonRecord(payload.pagination) ? getTotal(payload.pagination, nextLogs.length) : getTotal(payload, nextLogs.length);
 			} else {
-				total = logs.length;
+				nextTotal = nextLogs.length;
 			}
+			const validPage = clampLogPage(page, nextTotal, Number(pageSize));
+			if (validPage !== page) {
+				page = validPage;
+				await load();
+				return;
+			}
+			logs = nextLogs;
+			stats = isJsonRecord(statsPayload) ? statsPayload as LogStats : {};
+			total = nextTotal;
 			selectedIds = selectedIds.filter((id) => logs.some((log) => String(log.id) === id));
 		} catch (cause) {
 			error = displayError(cause, i18n.t('elygate.loadFailed'));
@@ -117,18 +132,106 @@
 		}
 	}
 
+	async function startOrResumeCostRecalculation(): Promise<CostRecalculationStatus> {
+		const signal = lifecycleAbortController.signal;
+		const current = await requestJson<CostRecalculationStatus>('/api/logs/recalculate-cost/status', { signal });
+		if (isCostRecalculationActive(current)) return current;
+		try {
+			return await requestJson<CostRecalculationStatus>('/api/logs/recalculate-cost', {
+				method: 'POST',
+				body: JSON.stringify({ filters: { period } }),
+				signal,
+			});
+		} catch (cause) {
+			if (cause instanceof ApiError && cause.status === 409 && isCostRecalculationStatus(cause.payload)) {
+				return cause.payload;
+			}
+			throw cause;
+		}
+	}
+
+	async function applyCostRecalculationResult(status: CostRecalculationStatus, controller: AbortController): Promise<void> {
+		if (recalculationAbortController !== controller) return;
+		await load();
+		if (recalculationAbortController !== controller) return;
+		if (status.status === 'completed') {
+			notice = i18n.t('elygate.costRecalculationCompleted')
+				.replace('{processed}', String(status.processed ?? 0))
+				.replace('{updated}', String(status.updated ?? 0))
+				.replace('{skipped}', String(status.skipped ?? 0));
+			return;
+		}
+		if (status.status === 'cancelled') {
+			notice = i18n.t('elygate.costRecalculationCancelled');
+			return;
+		}
+		throw new Error(status.last_error || status.message || i18n.t('elygate.costRecalculationFailed'));
+	}
+
+	async function monitorCostRecalculation(job: CostRecalculationStatus): Promise<void> {
+		if (stopped) return;
+		if (!job.id) throw new Error(i18n.t('elygate.operationFailed'));
+		recalculationAbortController?.abort();
+		const controller = new AbortController();
+		recalculationAbortController = controller;
+		activeRecalculationJobID = job.id;
+		isRecalculating = true;
+		notice = i18n.t('elygate.costRecalculationStarted');
+		try {
+			const finalStatus = await waitForCostRecalculation(
+				job.id,
+				async (jobID) => requestJson<CostRecalculationStatus>(
+					`/api/logs/recalculate-cost/status?id=${encodeURIComponent(jobID)}`,
+					{ signal: controller.signal },
+				),
+				{ signal: controller.signal },
+			);
+			await applyCostRecalculationResult(finalStatus, controller);
+		} catch (cause) {
+			if (recalculationAbortController === controller && !(cause instanceof DOMException && cause.name === 'AbortError')) {
+				error = displayError(cause, i18n.t('elygate.operationFailed'));
+			}
+		} finally {
+			if (recalculationAbortController === controller) {
+				recalculationAbortController = null;
+				activeRecalculationJobID = '';
+				isRecalculating = false;
+			}
+		}
+	}
+
 	async function recalculateCosts(): Promise<void> {
 		if (!window.confirm(i18n.t('elygate.confirmAction'))) return;
-		isMutating = true;
-		error = '';
+		error = ''; notice = '';
+		try { await monitorCostRecalculation(await startOrResumeCostRecalculation()); }
+		catch (cause) {
+			if (!stopped && !(cause instanceof DOMException && cause.name === 'AbortError')) {
+				error = displayError(cause, i18n.t('elygate.operationFailed'));
+			}
+		}
+	}
+
+	async function cancelCostRecalculation(): Promise<void> {
+		if (!activeRecalculationJobID) return;
 		try {
-			await requestJson('/api/logs/recalculate-cost', { method: 'POST', body: JSON.stringify({ filters: { period } }) });
-			notice = i18n.t('elygate.costRecalculationStarted');
+			await requestJson<CostRecalculationStatus>(`/api/logs/recalculate-cost/cancel?id=${encodeURIComponent(activeRecalculationJobID)}`, { method: 'POST' });
 		} catch (cause) {
 			error = displayError(cause, i18n.t('elygate.operationFailed'));
-		} finally {
-			isMutating = false;
 		}
+	}
+
+	async function resumeCostRecalculation(): Promise<void> {
+		let job: CostRecalculationStatus;
+		try {
+			job = await requestJson<CostRecalculationStatus>('/api/logs/recalculate-cost/status', { signal: lifecycleAbortController.signal });
+		} catch (cause) {
+			if (!stopped && !(cause instanceof DOMException && cause.name === 'AbortError')) {
+				error = displayError(cause, i18n.t('elygate.operationFailed'));
+			}
+			return;
+		}
+		if (stopped || !isCostRecalculationActive(job)) return;
+		await monitorCostRecalculation(job);
 	}
 
 	async function clearLogs(): Promise<void> {
@@ -262,11 +365,14 @@
 	onMount(() => {
 		void Promise.all([load(), loadFilters()]);
 		void connectWebSocket();
+		void resumeCostRecalculation();
 		return () => {
 			stopped = true;
+			lifecycleAbortController.abort();
 			websocket?.close();
 			if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
 			if (reloadTimer !== null) window.clearTimeout(reloadTimer);
+			recalculationAbortController?.abort();
 		};
 	});
 </script>
@@ -279,7 +385,8 @@
 			<p><span class={['live-dot', liveConnected ? 'connected' : 'disconnected']}></span>{liveConnected ? i18n.t('elygate.liveConnected') : i18n.t('elygate.liveDisconnected')}</p>
 		</div>
 		<div class="heading-actions">
-			<button type="button" onclick={() => void recalculateCosts()} disabled={isMutating}>{i18n.t('elygate.recalculateCosts')}</button>
+			<button type="button" onclick={() => void recalculateCosts()} disabled={isMutating || isRecalculating}>{i18n.t('elygate.recalculateCosts')}</button>
+			{#if isRecalculating}<button type="button" onclick={() => void cancelCostRecalculation()}>{i18n.t('elygate.cancel')}</button>{/if}
 			<button class="danger" type="button" onclick={() => void clearLogs()} disabled={isMutating || selectedIds.length === 0}>{i18n.t('elygate.clearLogs')} ({selectedIds.length})</button>
 			<button class="primary" type="button" onclick={() => void load()} disabled={isLoading}>{i18n.t('elygate.refresh')}</button>
 		</div>
@@ -290,7 +397,7 @@
 		<article><span>{i18n.t('elygate.successRate')}</span><strong>{(stats.success_rate ?? 0).toFixed(1)}%</strong></article>
 		<article><span>{i18n.t('elygate.averageLatency')}</span><strong>{(stats.average_latency ?? 0).toFixed(0)} ms</strong></article>
 		<article><span>{i18n.t('elygate.tokenUsage')}</span><strong>{(stats.total_tokens ?? 0).toLocaleString()}</strong></article>
-		<article><span>{i18n.t('elygate.totalCost')}</span><strong>${(stats.total_cost ?? 0).toFixed(4)}</strong></article>
+		<article><span>{i18n.t('elygate.totalCost')}</span><strong>{formatLogCost(stats.total_cost, 4)}</strong></article>
 	</div>
 
 	{#if error}<div class="notice error" role="alert">{error}</div>{/if}
@@ -310,12 +417,12 @@
 		<table><thead><tr><th></th><th>{i18n.t('elygate.timestamp')}</th><th>{i18n.t('elygate.provider')}</th><th>{i18n.t('elygate.model')}</th><th>{i18n.t('elygate.status')}</th><th>{i18n.t('elygate.latency')}</th><th>{i18n.t('elygate.totalCost')}</th><th>{i18n.t('elygate.app')}</th><th>{i18n.t('elygate.description')}</th><th>{i18n.t('elygate.actions')}</th></tr></thead><tbody>
 			{#each logs as log (String(log.id))}
 				<tr>
-					<td><input type="checkbox" checked={selectedIds.includes(String(log.id))} onchange={(event) => toggleSelected(String(log.id), event.currentTarget.checked)} aria-label={i18n.t('elygate.select')} /></td><td>{new Date(value(log, 'timestamp')).toLocaleString(i18n.locale)}</td><td>{value(log, 'provider')}</td><td>{value(log, 'model')}</td><td><span class={['status', value(log, 'status')]}>{value(log, 'status')}</span></td><td>{Number(log.latency ?? 0).toFixed(0)} ms</td><td>${Number(log.cost ?? 0).toFixed(5)}</td><td>{value(log, 'app')}</td><td>{value(log, 'content_summary')}</td><td><button type="button" onclick={() => void openDetail(log)}>{i18n.t('elygate.inspect')}</button></td>
+					<td><input type="checkbox" checked={selectedIds.includes(String(log.id))} onchange={(event) => toggleSelected(String(log.id), event.currentTarget.checked)} aria-label={i18n.t('elygate.select')} /></td><td>{new Date(value(log, 'timestamp')).toLocaleString(i18n.locale)}</td><td>{value(log, 'provider')}</td><td>{value(log, 'model')}</td><td><span class={['status', value(log, 'status')]}>{value(log, 'status')}</span></td><td>{Number(log.latency ?? 0).toFixed(0)} ms</td><td>{formatLogCost(log.cost, 5)}</td><td>{value(log, 'app')}</td><td>{value(log, 'content_summary')}</td><td><button type="button" onclick={() => void openDetail(log)}>{i18n.t('elygate.inspect')}</button></td>
 				</tr>
 			{:else}<tr><td colspan="10">{isLoading ? i18n.t('elygate.loading') : i18n.t('elygate.empty')}</td></tr>{/each}
 		</tbody></table>
 	</div>
-	<footer class="pagination"><span>{i18n.t('elygate.page').replace('{page}', String(page))} · {total}</span><div><button type="button" onclick={() => movePage(page - 1)} disabled={page <= 1 || isLoading}>{i18n.t('elygate.previous')}</button><button type="button" onclick={() => movePage(page + 1)} disabled={!hasNext || isLoading}>{i18n.t('elygate.next')}</button></div></footer>
+	<footer class="pagination"><span>{i18n.t('elygate.pageOfPages').replace('{page}', String(page)).replace('{pages}', String(totalPages))} · {i18n.t('elygate.totalRecords').replace('{total}', total.toLocaleString())}</span><div><button type="button" onclick={() => movePage(page - 1)} disabled={page <= 1 || isLoading}>{i18n.t('elygate.previous')}</button><button type="button" onclick={() => movePage(page + 1)} disabled={!hasNext || isLoading}>{i18n.t('elygate.next')}</button></div></footer>
 </section>
 
 {#if selectedLog}
@@ -323,7 +430,7 @@
 		<aside class="drawer" aria-label={i18n.t('elygate.logDetails')}>
 			<header><div><p class="eyebrow">{value(selectedLog, 'object')}</p><h2>{value(selectedLog, 'provider')} / {value(selectedLog, 'model')}</h2></div><button type="button" onclick={() => (selectedLog = null)}>{i18n.t('elygate.close')}</button></header>
 			{#if isDetailLoading}<p>{i18n.t('elygate.loading')}</p>{:else}
-				<div class="detail-badges"><span>{value(selectedLog, 'status')}</span><span>{Number(selectedLog.latency ?? 0).toFixed(0)} ms</span><span>${Number(selectedLog.cost ?? 0).toFixed(5)}</span><span>{value(selectedLog, 'id')}</span></div>
+				<div class="detail-badges"><span>{value(selectedLog, 'status')}</span><span>{Number(selectedLog.latency ?? 0).toFixed(0)} ms</span><span>{formatLogCost(selectedLog.cost, 5)}</span><span>{value(selectedLog, 'id')}</span></div>
 				{#if selectedLog.content_hidden === true}<div class="notice">{i18n.t('elygate.contentHidden')}</div>{/if}
 				{#if isJsonRecord(selectedLog.speech_input) && typeof selectedLog.speech_input.input === 'string'}<section><h3>{i18n.t('elygate.speechInput')}</h3><p class="prose-output">{selectedLog.speech_input.input}</p></section>{/if}
 				{#if imageSources(selectedLog).length}<section><h3>{i18n.t('elygate.mediaOutput')}</h3><div class="media-grid">{#each imageSources(selectedLog) as source (source)}<img src={source} alt={i18n.t('elygate.mediaOutput')} />{/each}</div></section>{/if}

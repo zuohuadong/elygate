@@ -80096,7 +80096,8 @@
             "type": "boolean"
           },
           "max_completion_tokens": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": 1
           },
           "metadata": {
             "type": "object",
@@ -85937,10 +85938,12 @@
           },
           "max_tokens": {
             "type": "integer",
+            "minimum": 1,
             "description": "Maximum tokens to generate (legacy, use max_completion_tokens)"
           },
           "max_completion_tokens": {
             "type": "integer",
+            "minimum": 1,
             "description": "Maximum tokens to generate"
           },
           "temperature": {
@@ -91181,6 +91184,7 @@
               },
               "enforce_auth_on_inference": {
                 "type": "boolean",
+                "default": true,
                 "description": "Whether to enforce virtual key authentication on inference requests"
               },
               "enforce_governance_header": {
@@ -91511,6 +91515,7 @@
               },
               "enforce_auth_on_inference": {
                 "type": "boolean",
+                "default": true,
                 "description": "Whether to enforce virtual key authentication on inference requests"
               },
               "enforce_governance_header": {

@@ -152,7 +152,8 @@
         },
         "enforce_auth_on_inference": {
           "type": "boolean",
-          "description": "Require auth (VK, API key, or user token) on inference endpoints"
+          "description": "Require auth (VK, API key, or user token) on inference endpoints",
+          "default": true
         },
         "dual_credential_conflict_behavior": {
           "type": "string",

@@ -314,7 +314,14 @@ func (s *RDBConfigStore) UpdateClientConfig(ctx context.Context, config *ClientC
 		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&tables.TableClientConfig{}).Error; err != nil {
 			return err
 		}
-		return tx.Create(&dbConfig).Error
+		if err := tx.Create(&dbConfig).Error; err != nil {
+			return err
+		}
+		// GORM applies default:true to bool zero values during Create, so persist an
+		// administrator's explicit false after the row has been inserted.
+		return tx.Model(&tables.TableClientConfig{}).
+			Where("id = ?", dbConfig.ID).
+			UpdateColumn("enforce_auth_on_inference", config.EnforceAuthOnInference).Error
 	})
 }
 

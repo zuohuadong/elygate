@@ -3,6 +3,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -981,23 +982,25 @@ func prepareChatCompletionRequest(ctx *fasthttp.RequestCtx, config *lib.Config) 
 	if req.ChatParameters == nil {
 		req.ChatParameters = &schemas.ChatParameters{}
 	}
-	// Handle max_tokens -> max_completion_tokens mapping.
-	// This supports the legacy max_tokens field still used by some implementations.
-	if base.ExtraParams != nil {
-		if maxTokensVal, exists := base.ExtraParams["max_tokens"]; exists {
-			delete(base.ExtraParams, "max_tokens")
-			if req.ChatParameters.MaxCompletionTokens == nil {
-				if maxTokensFloat, ok := maxTokensVal.(float64); ok {
-					maxTokens := int(maxTokensFloat)
-					req.ChatParameters.MaxCompletionTokens = &maxTokens
-				} else if maxTokensInt, ok := maxTokensVal.(int); ok {
-					req.ChatParameters.MaxCompletionTokens = &maxTokensInt
-				}
-			}
-		}
+	legacyMaxTokens, hasLegacyMaxTokens, err := parseOptionalPositiveIntegerField(ctx.PostBody(), "max_tokens")
+	if err != nil {
+		return nil, nil, err
 	}
-	if req.ChatParameters.MaxCompletionTokens != nil && *req.ChatParameters.MaxCompletionTokens < 0 {
-		return nil, nil, fmt.Errorf("max_tokens must be greater than or equal to 0")
+	if base.ExtraParams != nil {
+		delete(base.ExtraParams, "max_tokens")
+	}
+	limitField := "max_completion_tokens"
+	if hasLegacyMaxTokens && req.ChatParameters.MaxCompletionTokens == nil {
+		req.ChatParameters.MaxCompletionTokens = legacyMaxTokens
+		limitField = "max_tokens"
+	}
+	if req.ChatParameters.MaxCompletionTokens != nil {
+		if *req.ChatParameters.MaxCompletionTokens < 1 {
+			return nil, nil, fmt.Errorf("%s must be an integer greater than or equal to 1", limitField)
+		}
+		if maxOutputTokens := modelMaxOutputTokens(config, base.Provider, base.ModelName); maxOutputTokens != nil && *req.ChatParameters.MaxCompletionTokens > *maxOutputTokens {
+			return nil, nil, fmt.Errorf("%s must be less than or equal to %d for model %s", limitField, *maxOutputTokens, base.ModelName)
+		}
 	}
 	req.ChatParameters.ExtraParams = base.ExtraParams
 	return req, &schemas.BifrostChatRequest{
@@ -1007,6 +1010,74 @@ func prepareChatCompletionRequest(ctx *fasthttp.RequestCtx, config *lib.Config) 
 		Params:    req.ChatParameters,
 		Fallbacks: base.Fallbacks,
 	}, nil
+}
+
+func parseOptionalPositiveIntegerField(data []byte, field string) (*int, bool, error) {
+	var rawData map[string]json.RawMessage
+	if err := sonic.Unmarshal(data, &rawData); err != nil {
+		return nil, false, fmt.Errorf("Invalid request payload")
+	}
+	raw, exists := rawData[field]
+	if !exists || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return nil, false, nil
+	}
+	parsed, err := decodeJSONInteger(raw)
+	if err != nil || parsed < 1 {
+		return nil, false, fmt.Errorf("%s must be an integer greater than or equal to 1", field)
+	}
+	maxTokens := int(parsed)
+	return &maxTokens, true, nil
+}
+
+func decodeJSONInteger(raw json.RawMessage) (int64, error) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var decoded any
+	if err := decoder.Decode(&decoded); err != nil {
+		return 0, err
+	}
+	number, ok := decoded.(json.Number)
+	if !ok {
+		return 0, fmt.Errorf("value is not a JSON number")
+	}
+	return strconv.ParseInt(number.String(), 10, 0)
+}
+
+func modelMaxOutputTokens(config *lib.Config, provider schemas.ModelProvider, model string) *int {
+	if config == nil || config.ModelCatalog == nil || model == "" {
+		return nil
+	}
+	if provider != "" {
+		return providerModelMaxOutputTokens(config, provider, model)
+	}
+	var minimum *int
+	for _, candidate := range config.ModelCatalog.GetProvidersForModel(model) {
+		limit := providerModelMaxOutputTokens(config, candidate, model)
+		if limit == nil {
+			continue
+		}
+		if minimum == nil || *limit < *minimum {
+			minimum = limit
+		}
+	}
+	return minimum
+}
+
+func providerModelMaxOutputTokens(config *lib.Config, provider schemas.ModelProvider, model string) *int {
+	modelNames := []string{model}
+	if alias, ok := config.ModelCatalog.ResolveAlias(provider, model); ok {
+		modelNames = append(modelNames, alias.Config.ModelID)
+		if alias.Config.ModelName != nil {
+			modelNames = append(modelNames, *alias.Config.ModelName)
+		}
+	}
+	for _, modelName := range modelNames {
+		if modelInfo := config.ModelCatalog.GetModelInfo(provider, modelName); modelInfo != nil && modelInfo.MaxOutputTokens != nil {
+			limit := *modelInfo.MaxOutputTokens
+			return &limit
+		}
+	}
+	return nil
 }
 
 // chatCompletion handles POST /v1/chat/completions - Process chat completion requests

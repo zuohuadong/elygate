@@ -35,6 +35,7 @@ ChatCompletionRequest:
       type: boolean
     max_completion_tokens:
       type: integer
+      minimum: 1
     metadata:
       type: object
       additionalProperties: true

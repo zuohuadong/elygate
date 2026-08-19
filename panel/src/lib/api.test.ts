@@ -18,24 +18,28 @@ describe('requestJson', () => {
 
 	test('prefers a structured server error message', async () => {
 		configureRequestErrorFormatter((status) => `Request failed (HTTP ${status})`);
-		globalThis.fetch = (() => Promise.resolve(new Response(JSON.stringify({ error: 'Provider unavailable' }), {
+		const payload = { error: 'Provider unavailable' };
+		globalThis.fetch = (() => Promise.resolve(new Response(JSON.stringify(payload), {
 			status: 502,
 			headers: { 'Content-Type': 'application/json' },
 		}))) as typeof fetch;
 
-		await expect(requestJson('/api/test')).rejects.toEqual(new ApiError(502, 'Provider unavailable'));
+		await expect(requestJson('/api/test')).rejects.toEqual(new ApiError(502, 'Provider unavailable', payload));
 	});
 
 	test('extracts the nested Bifrost error message', async () => {
-		globalThis.fetch = (async () => new Response(JSON.stringify({
+		const payload = {
 			status_code: 409,
 			error: { message: 'Provider is not healthy' },
+		};
+		globalThis.fetch = (async () => new Response(JSON.stringify({
+			...payload,
 		}), {
 			status: 409,
 			headers: { 'Content-Type': 'application/json' },
 		})) as typeof fetch;
 
-		await expect(requestJson('/api/test')).rejects.toEqual(new ApiError(409, 'Provider is not healthy'));
+		await expect(requestJson('/api/test')).rejects.toEqual(new ApiError(409, 'Provider is not healthy', payload));
 	});
 });
 

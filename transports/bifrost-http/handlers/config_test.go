@@ -40,6 +40,23 @@ func newVectorStoreConfigRequestCtx(body string) *fasthttp.RequestCtx {
 	return ctx
 }
 
+func TestClientConfigUpdatePreservesEnforceAuthPresence(t *testing.T) {
+	var omitted clientConfigUpdate
+	require.NoError(t, json.Unmarshal([]byte(`{"log_retention_days":365}`), &omitted))
+	require.Nil(t, omitted.EnforceAuthOnInference)
+	require.True(t, omitted.Compat.ConvertTextToChat)
+
+	var disabled clientConfigUpdate
+	require.NoError(t, json.Unmarshal([]byte(`{"enforce_auth_on_inference":false}`), &disabled))
+	require.NotNil(t, disabled.EnforceAuthOnInference)
+	require.False(t, *disabled.EnforceAuthOnInference)
+
+	var enabled clientConfigUpdate
+	require.NoError(t, json.Unmarshal([]byte(`{"enforce_auth_on_inference":true}`), &enabled))
+	require.NotNil(t, enabled.EnforceAuthOnInference)
+	require.True(t, *enabled.EnforceAuthOnInference)
+}
+
 func TestGetLatestReleaseProxiesJSONThroughBackend(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "application/json", r.Header.Get("Accept"))

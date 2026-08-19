@@ -2,6 +2,7 @@ package tables
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/maximhq/bifrost/core/schemas"
@@ -34,15 +35,14 @@ func (TablePricingOverride) TableName() string { return "governance_pricing_over
 
 // BeforeSave serializes virtual fields into their JSON columns before persistence.
 func (p *TablePricingOverride) BeforeSave(tx *gorm.DB) error {
-	if len(p.RequestTypes) > 0 {
-		b, err := json.Marshal(p.RequestTypes)
-		if err != nil {
-			return err
-		}
-		p.RequestTypesJSON = string(b)
-	} else {
-		p.RequestTypesJSON = "[]"
+	if len(p.RequestTypes) == 0 {
+		return fmt.Errorf("request_types is required and must contain at least one value")
 	}
+	b, err := json.Marshal(p.RequestTypes)
+	if err != nil {
+		return err
+	}
+	p.RequestTypesJSON = string(b)
 	return nil
 }
 
