@@ -16,7 +16,10 @@ import (
 func maxTokenValidationConfig(t *testing.T) *lib.Config {
 	t.Helper()
 	pricingPath := filepath.Join(t.TempDir(), "pricing.json")
-	requirePricing := []byte(`{"gpt-4o":{"provider":"openai","mode":"chat","max_output_tokens":65536}}`)
+	requirePricing := []byte(`{
+		"gpt-4o":{"provider":"openai","mode":"chat","max_output_tokens":65536},
+		"gpt-low":{"provider":"openai","mode":"chat","max_output_tokens":4096}
+	}`)
 	if err := os.WriteFile(pricingPath, requirePricing, 0o600); err != nil {
 		t.Fatalf("write pricing fixture: %v", err)
 	}
@@ -30,6 +33,7 @@ func maxTokenValidationConfig(t *testing.T) *lib.Config {
 		Models: schemas.WhiteList{"*"},
 		Aliases: schemas.KeyAliases{
 			"production-chat": {ModelID: "gpt-4o"},
+			"small-chat":      {ModelID: "gpt-low"},
 		},
 	}})
 	return &lib.Config{ModelCatalog: catalog}
@@ -53,7 +57,12 @@ func TestPrepareChatCompletionRequestValidatesLegacyMaxTokens(t *testing.T) {
 		{name: "too large", value: "999999999", wantError: "less than or equal to 65536"},
 		{name: "too large unqualified model", model: "gpt-4o", value: "999999999", wantError: "less than or equal to 65536"},
 		{name: "too large provider alias", model: "openai/production-chat", value: "999999999", wantError: "less than or equal to 65536"},
+		{name: "above lower model limit", model: "openai/gpt-low", value: "4097", wantError: "less than or equal to 4096"},
+		{name: "above lower alias limit", model: "openai/small-chat", value: "4097", wantError: "less than or equal to 4096"},
+		{name: "too large without catalog limit", model: "Agnes-AI/agnes-2.0-flash", value: "65537", wantError: "less than or equal to 65536"},
 		{name: "null", value: "null"},
+		{name: "at lower model limit", model: "openai/gpt-low", value: "4096", wantTokens: func() *int { value := 4096; return &value }()},
+		{name: "at gateway limit", model: "Agnes-AI/agnes-2.0-flash", value: "65536", wantTokens: func() *int { value := 65536; return &value }()},
 		{name: "valid", value: "10", wantTokens: func() *int { value := 10; return &value }()},
 	}
 	for _, test := range tests {

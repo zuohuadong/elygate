@@ -998,8 +998,12 @@ func prepareChatCompletionRequest(ctx *fasthttp.RequestCtx, config *lib.Config) 
 		if *req.ChatParameters.MaxCompletionTokens < 1 {
 			return nil, nil, fmt.Errorf("%s must be an integer greater than or equal to 1", limitField)
 		}
-		if maxOutputTokens := modelMaxOutputTokens(config, base.Provider, base.ModelName); maxOutputTokens != nil && *req.ChatParameters.MaxCompletionTokens > *maxOutputTokens {
-			return nil, nil, fmt.Errorf("%s must be less than or equal to %d for model %s", limitField, *maxOutputTokens, base.ModelName)
+		maxOutputTokens := maximumChatCompletionTokens
+		if modelLimit := modelMaxOutputTokens(config, base.Provider, base.ModelName); modelLimit != nil && *modelLimit < maxOutputTokens {
+			maxOutputTokens = *modelLimit
+		}
+		if *req.ChatParameters.MaxCompletionTokens > maxOutputTokens {
+			return nil, nil, fmt.Errorf("%s must be less than or equal to %d for model %s", limitField, maxOutputTokens, base.ModelName)
 		}
 	}
 	req.ChatParameters.ExtraParams = base.ExtraParams
@@ -1011,6 +1015,8 @@ func prepareChatCompletionRequest(ctx *fasthttp.RequestCtx, config *lib.Config) 
 		Fallbacks: base.Fallbacks,
 	}, nil
 }
+
+const maximumChatCompletionTokens = 65536
 
 func parseOptionalPositiveIntegerField(data []byte, field string) (*int, bool, error) {
 	var rawData map[string]json.RawMessage
