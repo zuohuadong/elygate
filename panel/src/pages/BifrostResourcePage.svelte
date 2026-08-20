@@ -3,6 +3,7 @@
 	import { useTranslation } from '@svadmin/core/i18n';
 	import { displayValue, getListPayload, getTotal, isJsonRecord, requestJson, type JsonRecord } from '../lib/api';
 	import { columnLabelFor, columnValueFor } from '../lib/columns';
+	import { clampPaginationPage, formatPagination, paginationPageCount } from '../lib/display-format';
 	import type { ElygateLocale } from '../lib/i18n';
 
 	interface Props {
@@ -20,6 +21,7 @@
 	let total = $state(0);
 	const columns = $derived.by(() => Array.from(new Set(records.flatMap((record) => Object.keys(record)))).slice(0, 8));
 	const hasNext = $derived(page * Number(pageSize) < total);
+	const totalPages = $derived(paginationPageCount(total, Number(pageSize)));
 
 	function endpoint(): string {
 		const params = new URLSearchParams({ limit: pageSize, offset: String((page - 1) * Number(pageSize)) });
@@ -48,8 +50,16 @@
 		error = '';
 		try {
 			const payload: unknown = await requestJson(endpoint());
-			records = getListPayload(payload);
-			total = responseTotal(payload, records.length);
+			const nextRecords = getListPayload(payload);
+			const nextTotal = responseTotal(payload, nextRecords.length);
+			const validPage = clampPaginationPage(page, nextTotal, Number(pageSize));
+			if (validPage !== page) {
+				page = validPage;
+				await load();
+				return;
+			}
+			records = nextRecords;
+			total = nextTotal;
 		} catch (cause) {
 			error = cause instanceof Error ? cause.message : i18n.t('elygate.loadFailed');
 		} finally {
@@ -103,7 +113,7 @@
 			</table>
 		</div>
 	{/if}
-	<footer class="pagination"><span>{i18n.t('elygate.page').replace('{page}', String(page))} · {total}</span><div><button type="button" onclick={() => movePage(page - 1)} disabled={page <= 1 || isLoading}>{i18n.t('elygate.previous')}</button><button type="button" onclick={() => movePage(page + 1)} disabled={!hasNext || isLoading}>{i18n.t('elygate.next')}</button></div></footer>
+	<footer class="pagination"><span>{formatPagination(page, totalPages, total, i18n.locale)}</span><div><button type="button" onclick={() => movePage(page - 1)} disabled={page <= 1 || isLoading}>{i18n.t('elygate.previous')}</button><button type="button" onclick={() => movePage(page + 1)} disabled={!hasNext || isLoading}>{i18n.t('elygate.next')}</button></div></footer>
 </section>
 
 <style>

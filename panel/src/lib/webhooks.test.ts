@@ -46,6 +46,10 @@ describe('webhook management helpers', () => {
 
 	test('uses a compact aligned webhook table without exposing row UUIDs', async () => {
 		const source = await Bun.file(new URL('../pages/WebhooksPage.svelte', import.meta.url)).text();
+		expect(source).toContain('min-width: 980px');
+		expect(source).toContain('.deliveries table { min-width: 1120px; }');
+		expect(source).toContain('class="table-wrap endpoints-table"');
+		expect(source).toContain('.deliveries th:nth-child(8) { width: 12%; }');
 		expect(source).not.toContain('<small>{idOf(endpoint)}</small>');
 		expect(source).toMatch(/table\s*\{[^}]*table-layout:\s*fixed/);
 		expect(source).toMatch(/th, td\s*\{[^}]*vertical-align:\s*middle/);

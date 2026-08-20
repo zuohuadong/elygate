@@ -5,6 +5,7 @@
 	import { displayError, parseJsonObject, prettyJson, csv } from '../lib/forms';
 	import { isSafeOAuthRedirect } from '../lib/oauth-consent';
 	import { columnValueFor } from '../lib/columns';
+	import { formatPagination } from '../lib/display-format';
 	import {
 		buildLibraryClientPayload,
 		buildMcpClientPayload,
@@ -473,7 +474,7 @@
 		</tbody></table></div>
 	{/if}
 
-	<footer class="pagination"><span>{total ? `${offset + 1}–${Math.min(offset + pageSize, total)} / ${total}` : '0'}</span><div><button type="button" disabled={offset === 0 || isLoading} onclick={() => { offset = Math.max(0, offset - pageSize); void refreshData(); }}>{text('上一页', 'Previous')}</button><span>{currentPage} / {totalPages}</span><button type="button" disabled={offset + pageSize >= total || isLoading} onclick={() => { offset += pageSize; void refreshData(); }}>{text('下一页', 'Next')}</button></div></footer>
+	<footer class="pagination"><span>{formatPagination(currentPage, totalPages, total, i18n.locale)}</span><div><button type="button" disabled={offset === 0 || isLoading} onclick={() => { offset = Math.max(0, offset - pageSize); void refreshData(); }}>{text('上一页', 'Previous')}</button><button type="button" disabled={offset + pageSize >= total || isLoading} onclick={() => { offset += pageSize; void refreshData(); }}>{text('下一页', 'Next')}</button></div></footer>
 </section>
 
 {#if modal}

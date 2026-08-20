@@ -3,6 +3,7 @@
 	import { useTranslation } from '@svadmin/core/i18n';
 	import { getListPayload, getTotal, requestJson, type JsonRecord } from '../lib/api';
 	import { displayError } from '../lib/forms';
+	import { formatPagination, formatUsdCost } from '../lib/display-format';
 	import {
 		buildModelAttributes,
 		displayModelsWithAliases,
@@ -59,7 +60,7 @@
 	const totalPages = $derived(Math.max(1, Math.ceil(modelTotal / PAGE_SIZE)));
 
 	function integer(value: number): string { return Math.round(value).toLocaleString(i18n.locale); }
-	function currency(value: number): string { return new Intl.NumberFormat(i18n.locale, { style: 'currency', currency: 'USD', maximumFractionDigits: value < 1 ? 4 : 2 }).format(value); }
+	function currency(value: number): string { return formatUsdCost(value); }
 	function customProvider(provider: Provider): string { return provider.custom_provider_config?.base_provider_type ? `${i18n.t('elygate.customProvider')} · ${provider.custom_provider_config.base_provider_type}` : i18n.t('elygate.builtInProvider'); }
 
 	async function loadOverview(): Promise<void> {
@@ -204,7 +205,7 @@
 				<tr><td>{model.provider}</td><td><strong class="model-name">{model.name}</strong></td><td>{formatTokenPrice(model.input_cost_per_token, i18n.locale)}</td><td>{formatTokenPrice(model.output_cost_per_token, i18n.locale)}</td><td>{formatTokenPrice(model.cache_creation_input_token_cost, i18n.locale)}</td><td>{formatTokenPrice(model.cache_read_input_token_cost, i18n.locale)}</td><td class="description">{model.additional_attributes?.description ?? '—'}</td><td>{Math.max(0, Object.keys(model.additional_attributes ?? {}).length - (model.additional_attributes?.description ? 1 : 0))}</td><td><button type="button" onclick={() => openEditor(model)}>{i18n.t('elygate.edit')}</button></td></tr>
 			{:else}<tr><td colspan="9">{isModelsLoading ? i18n.t('elygate.loading') : i18n.t('elygate.empty')}</td></tr>{/each}
 		</tbody></table></div>
-		<footer class="pagination"><span>{modelTotal ? `${offset + 1}–${Math.min(offset + PAGE_SIZE, modelTotal)} / ${modelTotal}` : '0'}</span><div><button type="button" disabled={offset === 0 || isModelsLoading} onclick={() => { offset = Math.max(0, offset - PAGE_SIZE); void loadModels(); }}>{i18n.t('elygate.previous')}</button><span>{currentPage} / {totalPages}</span><button type="button" disabled={offset + PAGE_SIZE >= modelTotal || isModelsLoading} onclick={() => { offset += PAGE_SIZE; void loadModels(); }}>{i18n.t('elygate.next')}</button></div></footer>
+		<footer class="pagination"><span>{formatPagination(currentPage, totalPages, modelTotal, i18n.locale)}</span><div><button type="button" disabled={offset === 0 || isModelsLoading} onclick={() => { offset = Math.max(0, offset - PAGE_SIZE); void loadModels(); }}>{i18n.t('elygate.previous')}</button><button type="button" disabled={offset + PAGE_SIZE >= modelTotal || isModelsLoading} onclick={() => { offset += PAGE_SIZE; void loadModels(); }}>{i18n.t('elygate.next')}</button></div></footer>
 	{/if}
 </section>
 

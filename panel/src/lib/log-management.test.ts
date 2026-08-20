@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { clampLogPage, formatLogCost, isCostRecalculationActive, isCostRecalculationStatus, logPageCount, waitForCostRecalculation } from './log-management';
+import { ApiError } from './api';
+import { clampLogPage, costRecalculationConflict, formatLogCost, isCostRecalculationActive, isCostRecalculationStatus, isMissingCostRecalculation, logPageCount, waitForCostRecalculation } from './log-management';
 
 describe('log management helpers', () => {
 	test('derives pages from record count and page size', () => {
@@ -22,11 +23,19 @@ describe('log management helpers', () => {
 		expect(isCostRecalculationActive({ status: 'completed' })).toBe(false);
 	});
 
+	test('recognizes resumable conflicts and missing jobs', () => {
+		const activeJob = { id: 'job-1', status: 'running' };
+		expect(costRecalculationConflict(new ApiError(409, 'conflict', activeJob))).toEqual(activeJob);
+		expect(costRecalculationConflict(new ApiError(409, 'conflict', { error: 'busy' }))).toBeUndefined();
+		expect(isMissingCostRecalculation(new ApiError(404, 'missing'))).toBe(true);
+		expect(isMissingCostRecalculation(new ApiError(503, 'temporary'))).toBe(false);
+	});
+
 	test('distinguishes missing cost data from an explicit zero cost', () => {
-		expect(formatLogCost(undefined, 5)).toBe('—');
-		expect(formatLogCost(null, 5)).toBe('—');
-		expect(formatLogCost(0, 5)).toBe('$0.00000');
-		expect(formatLogCost(0.0018, 4)).toBe('$0.0018');
+		expect(formatLogCost(undefined)).toBe('—');
+		expect(formatLogCost(null)).toBe('—');
+		expect(formatLogCost(0)).toBe('US$0.0000');
+		expect(formatLogCost(0.0018)).toBe('US$0.0018');
 	});
 
 	test('polls until recalculation completes', async () => {

@@ -60,5 +60,6 @@ export function displayModelsWithAliases(models: string[], keys: unknown[]): str
 
 export function formatTokenPrice(value: unknown, locale: string): string {
 	if (typeof value !== 'number' || !Number.isFinite(value)) return '—';
-	return `${new Intl.NumberFormat(locale, { style: 'currency', currency: 'USD', maximumFractionDigits: 6 }).format(value * 1_000_000)} / 1M`;
+	const amount = new Intl.NumberFormat(locale, { minimumFractionDigits: 2, maximumFractionDigits: 6 }).format(value * 1_000_000);
+	return `US$${amount} / 1M`;
 }

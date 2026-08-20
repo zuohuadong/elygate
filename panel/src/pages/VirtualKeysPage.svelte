@@ -148,7 +148,7 @@
 
 	function virtualKeyStatus(record: JsonRecord): string {
 		if (record.is_active === false) return i18n.t('elygate.disabled');
-		return providerWarning(record) || i18n.t('elygate.active');
+		return providerWarning(record) || i18n.t('elygate.enabled');
 	}
 
 	function openCreate(): void {
@@ -306,7 +306,7 @@
 				</div>
 				<label>{i18n.t('elygate.expiresAt')}<input bind:value={form.expiresAt} placeholder="2030-01-01T00:00:00Z" /></label>
 				<div class="checks">
-					<label><input type="checkbox" bind:checked={form.isActive} /> {i18n.t('elygate.active')}</label>
+					<label><input type="checkbox" bind:checked={form.isActive} /> {i18n.t('elygate.enabled')}</label>
 					<label><input type="checkbox" bind:checked={form.calendarAligned} /> {i18n.t('elygate.calendarAligned')}</label>
 				</div>
 				<fieldset class="route-editor">

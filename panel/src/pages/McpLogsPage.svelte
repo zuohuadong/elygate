@@ -3,6 +3,7 @@
 	import { useTranslation } from '@svadmin/core/i18n';
 	import { displayError, prettyJson } from '../lib/forms';
 	import { getListPayload, getTotal, isJsonRecord, requestJson, type JsonRecord } from '../lib/api';
+	import { formatPagination, formatUsdCost } from '../lib/display-format';
 
 	interface Props { resourceName: string; }
 	interface McpStats { total_executions?: number; success_rate?: number; average_latency?: number; total_cost?: number; }
@@ -31,6 +32,7 @@
 	let notice = $state('');
 
 	const hasNext = $derived(page * Number(pageSize) < total);
+	const totalPages = $derived(Math.max(1, Math.ceil(total / Number(pageSize))));
 	const toolNames = $derived(stringList(filterData.tool_names));
 	const serverLabels = $derived(stringList(filterData.server_labels));
 	const maxBucketCount = $derived(Math.max(1, ...histogram.map((bucket) => Number(bucket.count ?? 0))));
@@ -160,7 +162,7 @@
 		<article><span>{i18n.t('elygate.executions')}</span><strong>{(stats.total_executions ?? total).toLocaleString()}</strong></article>
 		<article><span>{i18n.t('elygate.successRate')}</span><strong>{(stats.success_rate ?? 0).toFixed(1)}%</strong></article>
 		<article><span>{i18n.t('elygate.averageLatency')}</span><strong>{(stats.average_latency ?? 0).toFixed(0)} ms</strong></article>
-		<article><span>{i18n.t('elygate.totalCost')}</span><strong>${(stats.total_cost ?? 0).toFixed(5)}</strong></article>
+		<article><span>{i18n.t('elygate.totalCost')}</span><strong>{formatUsdCost(stats.total_cost ?? 0)}</strong></article>
 	</div>
 
 	{#if error}<div class="notice error" role="alert">{error}</div>{/if}
@@ -168,7 +170,7 @@
 
 	<div class="insights">
 		<article class="chart-card"><h2>{i18n.t('elygate.mcpCalls')}</h2><div class="bars" aria-label={i18n.t('elygate.mcpCalls')}>{#each histogram as bucket (String(bucket.timestamp))}<span style={`height: ${Math.max(4, Number(bucket.count ?? 0) / maxBucketCount * 100)}%`} title={`${new Date(String(bucket.timestamp)).toLocaleString(i18n.locale)} · ${bucket.count ?? 0}`}></span>{:else}<p>{i18n.t('elygate.empty')}</p>{/each}</div></article>
-		<article class="top-card"><h2>{i18n.t('elygate.topMcpTools')}</h2>{#each topTools as tool (String(tool.tool_name))}<div class="tool-row"><strong>{value(tool, 'tool_name')}</strong><span>{Number(tool.count ?? 0).toLocaleString()} · ${Number(tool.cost ?? 0).toFixed(5)}</span></div>{:else}<p>{i18n.t('elygate.empty')}</p>{/each}</article>
+		<article class="top-card"><h2>{i18n.t('elygate.topMcpTools')}</h2>{#each topTools as tool (String(tool.tool_name))}<div class="tool-row"><strong>{value(tool, 'tool_name')}</strong><span>{Number(tool.count ?? 0).toLocaleString()} · {formatUsdCost(tool.cost)}</span></div>{:else}<p>{i18n.t('elygate.empty')}</p>{/each}</article>
 	</div>
 
 	<form class="filters" onsubmit={submitFilters}>
@@ -183,10 +185,10 @@
 
 	<div class="table-wrap" aria-busy={isLoading}>
 		<table><thead><tr><th></th><th>{i18n.t('elygate.timestamp')}</th><th>{i18n.t('elygate.toolName')}</th><th>{i18n.t('elygate.serverLabel')}</th><th>{i18n.t('elygate.status')}</th><th>{i18n.t('elygate.latency')}</th><th>{i18n.t('elygate.totalCost')}</th><th>{i18n.t('elygate.app')}</th></tr></thead><tbody>
-			{#each logs as log (String(log.id))}<tr><td><input type="checkbox" checked={selectedIds.includes(String(log.id))} onchange={(event) => toggleSelected(String(log.id), event.currentTarget.checked)} aria-label={i18n.t('elygate.select')} /></td><td><button class="link" type="button" onclick={() => void openDetail(log)}>{new Date(value(log, 'timestamp')).toLocaleString(i18n.locale)}</button></td><td>{value(log, 'tool_name')}</td><td>{value(log, 'server_label')}</td><td><span class={['status', value(log, 'status')]}>{value(log, 'status')}</span></td><td>{Number(log.latency ?? 0).toFixed(0)} ms</td><td>${Number(log.cost ?? 0).toFixed(5)}</td><td>{value(log, 'app')}</td></tr>{:else}<tr><td colspan="8">{isLoading ? i18n.t('elygate.loading') : i18n.t('elygate.empty')}</td></tr>{/each}
+			{#each logs as log (String(log.id))}<tr><td><input type="checkbox" checked={selectedIds.includes(String(log.id))} onchange={(event) => toggleSelected(String(log.id), event.currentTarget.checked)} aria-label={i18n.t('elygate.select')} /></td><td><button class="link" type="button" onclick={() => void openDetail(log)}>{new Date(value(log, 'timestamp')).toLocaleString(i18n.locale)}</button></td><td>{value(log, 'tool_name')}</td><td>{value(log, 'server_label')}</td><td><span class={['status', value(log, 'status')]}>{value(log, 'status')}</span></td><td>{Number(log.latency ?? 0).toFixed(0)} ms</td><td>{formatUsdCost(log.cost)}</td><td>{value(log, 'app')}</td></tr>{:else}<tr><td colspan="8">{isLoading ? i18n.t('elygate.loading') : i18n.t('elygate.empty')}</td></tr>{/each}
 		</tbody></table>
 	</div>
-	<footer class="pagination"><span>{i18n.t('elygate.page').replace('{page}', String(page))} · {total}</span><div><button type="button" onclick={() => movePage(page - 1)} disabled={page <= 1 || isLoading}>{i18n.t('elygate.previous')}</button><button type="button" onclick={() => movePage(page + 1)} disabled={!hasNext || isLoading}>{i18n.t('elygate.next')}</button></div></footer>
+	<footer class="pagination"><span>{formatPagination(page, totalPages, total, i18n.locale)}</span><div><button type="button" onclick={() => movePage(page - 1)} disabled={page <= 1 || isLoading}>{i18n.t('elygate.previous')}</button><button type="button" onclick={() => movePage(page + 1)} disabled={!hasNext || isLoading}>{i18n.t('elygate.next')}</button></div></footer>
 </section>
 
 {#if selectedLog}

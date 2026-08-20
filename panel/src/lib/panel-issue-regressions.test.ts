@@ -53,6 +53,28 @@ describe('panel issue regressions', () => {
 		expect(source).not.toContain('tr onclick={() => void openDetail(log)}');
 	});
 
+	test('cost recalculation only resumes a persisted job id', async () => {
+		const source = await Bun.file(new URL('../pages/LogsPage.svelte', import.meta.url)).text();
+		expect(source).toContain("sessionStorage.getItem(RECALCULATION_JOB_KEY)");
+		expect(source).toContain('recalculate-cost/status?id=');
+		expect(source).toMatch(/terminalStatusObserved = true;\s+await applyCostRecalculationResult/);
+		expect(source).toContain('if (terminalStatusObserved) sessionStorage.removeItem(RECALCULATION_JOB_KEY)');
+		expect(source).toContain('isMissingCostRecalculation(cause) && sessionStorage.getItem(RECALCULATION_JOB_KEY) === job.id');
+		expect(source).toContain('isMissingCostRecalculation(cause) && sessionStorage.getItem(RECALCULATION_JOB_KEY) === jobID');
+		expect(source).not.toContain("requestJson<CostRecalculationStatus>('/api/logs/recalculate-cost/status'");
+	});
+
+	test('governance names do not append internal ids', async () => {
+		const source = await Bun.file(new URL('../pages/GovernanceManagementPage.svelte', import.meta.url)).text();
+		expect(source).toContain("{:else}<tr><td><strong>{nameOf(record)}</strong></td>");
+	});
+
+	test('virtual key status uses a value rather than a field label', async () => {
+		const source = await Bun.file(new URL('../pages/VirtualKeysPage.svelte', import.meta.url)).text();
+		expect(source).toContain("providerWarning(record) || i18n.t('elygate.enabled')");
+		expect(source).not.toContain("providerWarning(record) || i18n.t('elygate.active')");
+	});
+
 	test('release check uses the same-origin backend proxy', async () => {
 		const source = await Bun.file(new URL('../pages/PanelAssist.svelte', import.meta.url)).text();
 		expect(source).toContain("Promise.race([");

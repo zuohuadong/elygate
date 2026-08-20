@@ -3,6 +3,7 @@
 	import { useTranslation } from '@svadmin/core/i18n';
 	import { getListPayload, getTotal, requestJson, type JsonRecord } from '../lib/api';
 	import { displayError } from '../lib/forms';
+	import { formatPagination, formatUsdCost } from '../lib/display-format';
 	import { buildModelLimitPayload, ModelLimitError, type BudgetDraft, type ModelLimitDraft } from '../lib/model-limits';
 
 	interface Props { resourceName: string; }
@@ -38,7 +39,7 @@
 	}
 
 	function integer(value: number): string { return Math.round(value).toLocaleString(i18n.locale); }
-	function currency(value: number): string { return new Intl.NumberFormat(i18n.locale, { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(value); }
+	function currency(value: number): string { return formatUsdCost(value); }
 	function usage(current = 0, limit = 0): string { return `${currency(current)} / ${currency(limit)}`; }
 	function rateUsage(current = 0, limit = 0): string { return `${integer(current)} / ${integer(limit)}`; }
 
@@ -155,7 +156,7 @@
 			<tr><td><strong>{record.model_name === '*' ? i18n.t('elygate.allModels') : record.model_name}</strong></td><td>{record.provider || i18n.t('elygate.all')}</td><td>{record.scope === 'virtual_key' ? i18n.t('elygate.virtualKey') : i18n.t('elygate.global')}</td><td>{record.scope_name || record.scope_id || '—'}</td><td><div class="limit-lines">{#each record.budgets ?? [] as budget (budget.id ?? budget.reset_duration)}<span>{usage(budget.current_usage, budget.max_limit)} · {budget.reset_duration}</span>{:else}—{/each}</div></td><td><div class="limit-lines">{#if record.rate_limit?.token_max_limit !== undefined}<span>{i18n.t('elygate.tokens')}: {rateUsage(record.rate_limit.token_current_usage, record.rate_limit.token_max_limit)} · {record.rate_limit.token_reset_duration}</span>{/if}{#if record.rate_limit?.request_max_limit !== undefined}<span>{i18n.t('elygate.requests')}: {rateUsage(record.rate_limit.request_current_usage, record.rate_limit.request_max_limit)} · {record.rate_limit.request_reset_duration}</span>{/if}{#if !record.rate_limit}—{/if}</div></td><td><div class="actions"><button type="button" onclick={() => openEdit(record)}>{i18n.t('elygate.edit')}</button><button class="danger" type="button" onclick={() => void remove(record)}>{i18n.t('elygate.delete')}</button></div></td></tr>
 		{:else}<tr><td colspan="7">{isLoading ? i18n.t('elygate.loading') : i18n.t('elygate.empty')}</td></tr>{/each}
 	</tbody></table></div>
-	<footer class="pagination"><span>{total ? `${offset + 1}–${Math.min(offset + PAGE_SIZE, total)} / ${total}` : '0'}</span><div><button type="button" disabled={offset === 0 || isLoading} onclick={() => { offset = Math.max(0, offset - PAGE_SIZE); void load(); }}>{i18n.t('elygate.previous')}</button><span>{currentPage} / {totalPages}</span><button type="button" disabled={offset + PAGE_SIZE >= total || isLoading} onclick={() => { offset += PAGE_SIZE; void load(); }}>{i18n.t('elygate.next')}</button></div></footer>
+	<footer class="pagination"><span>{formatPagination(currentPage, totalPages, total, i18n.locale)}</span><div><button type="button" disabled={offset === 0 || isLoading} onclick={() => { offset = Math.max(0, offset - PAGE_SIZE); void load(); }}>{i18n.t('elygate.previous')}</button><button type="button" disabled={offset + PAGE_SIZE >= total || isLoading} onclick={() => { offset += PAGE_SIZE; void load(); }}>{i18n.t('elygate.next')}</button></div></footer>
 </section>
 
 {#if modalOpen}

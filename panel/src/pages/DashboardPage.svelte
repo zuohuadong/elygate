@@ -3,6 +3,8 @@
 	import { useTranslation } from '@svadmin/core/i18n';
 	import { displayError } from '../lib/forms';
 	import { requestJson } from '../lib/api';
+	import { bucketLatencyAverage, providerMetric, sumProviderMetric, weightedAverage } from '../lib/dashboard-metrics';
+	import { formatRankedCost, formatUsdCost } from '../lib/display-format';
 
 	type DashboardTab = 'overview' | 'providers' | 'models' | 'mcp' | 'dimensions';
 	interface Bucket { timestamp: string; [key: string]: unknown; }
@@ -27,7 +29,7 @@
 		dimension_rankings: Record<string, { rankings: Ranking[] }>;
 		mcp: { volume: { buckets: Bucket[] }; cost: { buckets: Bucket[] }; top_tools: { tools: { tool_name: string; count: number; cost: number }[] } };
 	}
-	interface ChartDefinition { labelKey: string; buckets: Bucket[]; key: string; format: (value: number) => string; }
+	interface ChartDefinition { labelKey: string; buckets: Bucket[]; key: string; format: (value: number) => string; aggregate?: (buckets: Bucket[]) => number; }
 
 	const i18n = useTranslation();
 	let data = $state.raw<DashboardData | null>(null);
@@ -44,7 +46,7 @@
 		{ labelKey: 'elygate.requestVolume', buckets: data.overview.requests.buckets, key: 'count', format: integer },
 		{ labelKey: 'elygate.tokenUsage', buckets: data.overview.tokens.buckets, key: 'total_tokens', format: compact },
 		{ labelKey: 'elygate.totalCost', buckets: data.overview.cost.buckets, key: 'total_cost', format: currency },
-		{ labelKey: 'elygate.averageLatency', buckets: data.overview.latency.buckets, key: 'avg_latency', format: milliseconds },
+		{ labelKey: 'elygate.averageLatency', buckets: data.overview.latency.buckets, key: 'avg_latency', format: milliseconds, aggregate: bucketLatencyAverage },
 		{ labelKey: 'elygate.throughput', buckets: data.overview.throughput.buckets, key: 'tokens_per_second', format: (value) => `${value.toFixed(1)} tok/s` },
 	] : []);
 	const providerRows = $derived(providerUsageRows(data));
@@ -57,9 +59,12 @@
 
 	function integer(value: number): string { return Math.round(value).toLocaleString(); }
 	function compact(value: number): string { return new Intl.NumberFormat(i18n.locale, { notation: 'compact', maximumFractionDigits: 1 }).format(value); }
-	function currency(value: number): string { return new Intl.NumberFormat(i18n.locale, { style: 'currency', currency: 'USD', maximumFractionDigits: value < 1 ? 4 : 2 }).format(value); }
+	function currency(value: number): string { return formatUsdCost(value); }
 	function milliseconds(value: number): string { return `${value.toFixed(0)} ms`; }
 	function percentage(value: number): string { return `${value.toFixed(1)}%`; }
+	function isKnownFreeModel(row: Ranking): boolean {
+		return row.provider === 'Agnes-AI' && row.model === 'agnes-2.0-flash';
+	}
 
 	function chartPoints(buckets: Bucket[], key: string): string {
 		if (!buckets.length) return '';
@@ -72,15 +77,6 @@
 		return buckets.reduce((total, bucket) => total + numberValue(bucket[key]), 0);
 	}
 
-	function nestedNumber(bucket: Bucket, section: string, provider: string, field?: string): number {
-		const value = bucket[section];
-		if (!value || typeof value !== 'object' || Array.isArray(value)) return 0;
-		const providerValue = (value as Record<string, unknown>)[provider];
-		if (!field) return numberValue(providerValue);
-		if (!providerValue || typeof providerValue !== 'object' || Array.isArray(providerValue)) return 0;
-		return numberValue((providerValue as Record<string, unknown>)[field]);
-	}
-
 	function providerUsageRows(source: DashboardData | null): Ranking[] {
 		if (!source) return [];
 		const providers = new Set([
@@ -90,15 +86,20 @@
 			...(source.provider_usage.throughput.providers ?? []),
 		]);
 		return [...providers].map((provider) => {
-			const cost = source.provider_usage.cost.buckets.reduce((sum, bucket) => sum + nestedNumber(bucket, 'by_provider', provider), 0);
-			const tokens = source.provider_usage.tokens.buckets.reduce((sum, bucket) => sum + nestedNumber(bucket, 'by_provider', provider, 'total_tokens'), 0);
-			const latencyValues = source.provider_usage.latency.buckets.map((bucket) => nestedNumber(bucket, 'by_provider', provider, 'avg_latency')).filter(Boolean);
-			const throughputValues = source.provider_usage.throughput.buckets.map((bucket) => nestedNumber(bucket, 'by_provider', provider, 'tokens_per_second')).filter(Boolean);
+			const cost = sumProviderMetric(source.provider_usage.cost.buckets, provider);
+			const tokens = sumProviderMetric(source.provider_usage.tokens.buckets, provider, 'total_tokens');
+			const latencyValues = source.provider_usage.latency.buckets.map((bucket) => ({
+				value: providerMetric(bucket, provider, 'avg_latency'),
+				weight: providerMetric(bucket, provider, 'total_requests'),
+			}));
+			const throughputValues = source.provider_usage.throughput.buckets.map((bucket) => providerMetric(bucket, provider, 'tokens_per_second')).filter(Boolean);
+			const totalRequests = sumProviderMetric(source.provider_usage.latency.buckets, provider, 'total_requests');
 			return {
 				provider,
+				total_requests: totalRequests,
 				total_cost: cost,
 				total_tokens: tokens,
-				avg_latency: latencyValues.length ? latencyValues.reduce((sum, value) => sum + value, 0) / latencyValues.length : 0,
+				avg_latency: weightedAverage(latencyValues),
 				throughput: throughputValues.length ? throughputValues.reduce((sum, value) => sum + value, 0) / throughputValues.length : 0,
 			};
 		}).sort((left, right) => (right.total_cost ?? 0) - (left.total_cost ?? 0));
@@ -172,7 +173,7 @@
 		<div class="chart-grid">
 			{#each overviewCharts as chart (chart.labelKey)}
 				<article class="chart-card">
-					<div><span>{i18n.t(chart.labelKey)}</span><strong>{chart.format(chartTotal(chart.buckets, chart.key))}</strong></div>
+					<div><span>{i18n.t(chart.labelKey)}</span><strong>{chart.format(chart.aggregate ? chart.aggregate(chart.buckets) : chartTotal(chart.buckets, chart.key))}</strong></div>
 					<svg viewBox="0 0 100 56" preserveAspectRatio="none" aria-hidden="true"><polyline points={chartPoints(chart.buckets, chart.key)} /></svg>
 				</article>
 			{/each}
@@ -202,7 +203,7 @@
 {#snippet RankingTable(rows: Ranking[], nameKey: 'model' | 'provider' | 'name', i18n: ReturnType<typeof useTranslation>)}
 	<div class="table-wrap"><table><thead><tr><th>{i18n.t('elygate.name')}</th><th>{i18n.t('elygate.totalRequests')}</th><th>{i18n.t('elygate.tokenUsage')}</th><th>{i18n.t('elygate.totalCost')}</th><th>{i18n.t('elygate.successRate')}</th><th>{i18n.t('elygate.averageLatency')}</th><th>{i18n.t('elygate.throughput')}</th></tr></thead><tbody>
 		{#each rows as row, index (`${String(row[nameKey] ?? row.id ?? '')}:${index}`)}
-			<tr><td><strong>{String(row[nameKey] ?? row.id ?? '—')}</strong>{#if nameKey === 'model' && row.provider}<small>{row.provider}</small>{/if}</td><td>{integer(row.total_requests ?? 0)}</td><td>{compact(row.total_tokens ?? 0)}</td><td>{currency(row.total_cost ?? 0)}</td><td>{row.success_rate === undefined ? '—' : percentage(row.success_rate)}</td><td>{row.avg_latency === undefined ? '—' : milliseconds(row.avg_latency)}</td><td>{row.throughput === undefined ? '—' : `${row.throughput.toFixed(1)} tok/s`}</td></tr>
+			<tr><td><strong>{String(row[nameKey] ?? row.id ?? '—')}</strong>{#if nameKey === 'model' && row.provider}<small>{row.provider}</small>{/if}</td><td>{integer(row.total_requests ?? 0)}</td><td>{compact(row.total_tokens ?? 0)}</td><td>{formatRankedCost(row.total_cost, nameKey === 'model' && isKnownFreeModel(row), i18n.locale)}</td><td>{row.success_rate === undefined ? '—' : percentage(row.success_rate)}</td><td>{row.avg_latency === undefined ? '—' : milliseconds(row.avg_latency)}</td><td>{row.throughput === undefined ? '—' : `${row.throughput.toFixed(1)} tok/s`}</td></tr>
 		{:else}<tr><td colspan="7">{i18n.t('elygate.empty')}</td></tr>{/each}
 	</tbody></table></div>
 {/snippet}

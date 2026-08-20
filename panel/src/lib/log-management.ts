@@ -1,3 +1,6 @@
+import { ApiError } from './api';
+import { formatUsdCost } from './display-format';
+
 export interface CostRecalculationStatus {
 	id?: string;
 	status: string;
@@ -29,10 +32,18 @@ export function isCostRecalculationActive(status: CostRecalculationStatus): bool
 	return status.status === 'pending' || status.status === 'running';
 }
 
-export function formatLogCost(value: unknown, fractionDigits: number): string {
-	if (value === null || value === undefined || value === '') return '—';
-	const amount = Number(value);
-	return Number.isFinite(amount) ? `$${amount.toFixed(fractionDigits)}` : '—';
+export function costRecalculationConflict(error: unknown): CostRecalculationStatus | undefined {
+	return error instanceof ApiError && error.status === 409 && isCostRecalculationStatus(error.payload)
+		? error.payload
+		: undefined;
+}
+
+export function isMissingCostRecalculation(error: unknown): boolean {
+	return error instanceof ApiError && error.status === 404;
+}
+
+export function formatLogCost(value: unknown): string {
+	return formatUsdCost(value);
 }
 
 function delay(milliseconds: number, signal?: AbortSignal): Promise<void> {
