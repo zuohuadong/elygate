@@ -26,7 +26,7 @@ export default function TrialExpiryBanner() {
 			<AlertTriangle className="h-3.5 w-3.5" strokeWidth={2} />
 			{expired ? (
 				<span>
-					Your Elygate Enterprise Trial has expired.{" "}
+					Your Bifrost Enterprise Trial has expired.{" "}
 					<a href={supportHref} className="font-semibold underline underline-offset-2">
 						Contact us
 					</a>{" "}
@@ -34,7 +34,7 @@ export default function TrialExpiryBanner() {
 				</span>
 			) : (
 				<span>
-					Your Elygate Enterprise Trial expires in {daysRemaining} {daysRemaining === 1 ? "day" : "days"}.{" "}
+					Your Bifrost Enterprise Trial expires in {daysRemaining} {daysRemaining === 1 ? "day" : "days"}.{" "}
 					<a href={supportHref} className="font-semibold underline underline-offset-2">
 						Contact us
 					</a>{" "}

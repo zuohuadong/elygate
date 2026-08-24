@@ -298,7 +298,7 @@ export default function ClientSettingsView() {
 							Drop Excess Requests
 						</label>
 						<p className="text-muted-foreground text-sm">
-							If enabled, Elygate will drop requests that exceed pool capacity.{" "}
+							If enabled, Bifrost will drop requests that exceed pool capacity.{" "}
 							{localConfig.drop_excess_requests && droppedRequests > 0 ? (
 								<span>
 									Have dropped <b>{droppedRequests} requests</b> since last restart.

@@ -1,12 +1,12 @@
 import { Badge } from "@/components/ui/badge";
 import { CodeEditor } from "@/components/ui/codeEditor";
-import { ElygateTranscribe, TranscriptionInput } from "@/lib/types/logs";
+import { BifrostTranscribe, TranscriptionInput } from "@/lib/types/logs";
 import { Clock, FileAudio, Mic } from "lucide-react";
 import AudioPlayer from "./audioPlayer";
 
 interface TranscriptionViewProps {
 	transcriptionInput?: TranscriptionInput;
-	transcriptionOutput?: ElygateTranscribe;
+	transcriptionOutput?: BifrostTranscribe;
 	isStreaming?: boolean;
 }
 

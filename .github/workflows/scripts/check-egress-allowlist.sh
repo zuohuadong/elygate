@@ -183,8 +183,13 @@ def hosts_in(path):
     found = set()
     for line in raw.splitlines():
         if TEMPLATED.search(line):
-            # Strip the templated spans, keep any fully-literal URLs on the line.
-            line = re.sub(r"https?://[^\s\"']*\{\{[^\s\"']*", " ", line)
+            # Strip only URLs whose AUTHORITY is templated -- those expand to hosts that
+            # cannot be known statically. A literal host with a templated PATH
+            # ("https://files.example.com/{{file_id}}") still dials a knowable host and
+            # must stay in the census, or the validator passes a blocked-egress job that
+            # harden-runner will then kill at the request. Excluding "/" from the span
+            # before the placeholder is what draws that line.
+            line = re.sub(r"https?://[^\s\"'/]*\{\{[^\s\"']*", " ", line)
         for m in HOST_RE.finditer(line):
             found.add(m.group(1))
     return found

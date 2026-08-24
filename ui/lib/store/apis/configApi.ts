@@ -1,11 +1,11 @@
-import { ElygateConfig, GlobalProxyConfig, LatestReleaseResponse } from "@/lib/types/config";
+import { BifrostConfig, GlobalProxyConfig, LatestReleaseResponse } from "@/lib/types/config";
 import axios from "axios";
 import { baseApi } from "./baseApi";
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null && !Array.isArray(value);
 
-const applyMetadataPatch = (metadata: ElygateConfig["metadata"] | undefined, patch: Record<string, unknown>): Record<string, unknown> => {
+const applyMetadataPatch = (metadata: BifrostConfig["metadata"] | undefined, patch: Record<string, unknown>): Record<string, unknown> => {
 	const next = { ...(metadata ?? {}) };
 	Object.entries(patch).forEach(([key, value]) => {
 		if (value === null) {
@@ -51,7 +51,7 @@ export const configApi = baseApi.injectEndpoints({
 		}),
 
 		// Get core configuration
-		getCoreConfig: builder.query<ElygateConfig, { fromDB?: boolean }>({
+		getCoreConfig: builder.query<BifrostConfig, { fromDB?: boolean }>({
 			query: ({ fromDB = false } = {}) => ({
 				url: "/config",
 				params: { from_db: fromDB },
@@ -113,7 +113,7 @@ export const configApi = baseApi.injectEndpoints({
 			keepUnusedDataFor: 300, // Cache for 5 minutes (seconds)
 		}),
 		// Update core configuration
-		updateCoreConfig: builder.mutation<null, ElygateConfig>({
+		updateCoreConfig: builder.mutation<null, BifrostConfig>({
 			query: (data) => ({
 				url: "/config",
 				method: "PUT",

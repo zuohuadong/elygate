@@ -23,7 +23,7 @@ type VideoOutput = BifrostVideoGenerationOutput | BifrostVideoDownloadOutput | B
 interface VideoViewProps {
 	videoInput?: VideoGenerationInput;
 	videoOutput?: VideoOutput;
-	videoListOutput?: ElygateVideoListOutput;
+	videoListOutput?: BifrostVideoListOutput;
 	requestType?: string;
 }
 

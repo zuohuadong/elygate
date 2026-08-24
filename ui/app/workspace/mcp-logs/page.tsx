@@ -437,12 +437,12 @@ export default function MCPLogsPage() {
 			) : showEmptyState ? (
 				<MCPEmptyState error={displayError} />
 			) : (
-				<div className="no-padding-parent no-border-parent bg-background flex h-[calc(var(--app-content-viewport)_-_16px)] w-full gap-3">
+				<div className="no-padding-parent no-border-parent bg-background flex h-[calc(var(--app-content-viewport)_-_var(--app-bottom-padding))] w-full gap-3">
 					{/* Sidebar Filters */}
 					<MCPFilterSidebar filters={filters} onFiltersChange={setFilters} />
 
 					{/* Main Content */}
-					<div className="bg-card flex min-w-0 flex-1 flex-col gap-2 overflow-hidden rounded-l-md">
+					<div className="bg-card flex min-w-0 flex-1 flex-col gap-2 overflow-hidden rounded-md border">
 						<div className="p-4 pb-0">
 							<McpHeaderView
 								filters={filters}

@@ -55,7 +55,7 @@ func (request *GeminiGenerationRequest) ToBifrostResponsesRequest(ctx *schemas.B
 		Fallbacks: schemas.ParseFallbacks(request.Fallbacks),
 	}
 
-	params := request.convertGenerationConfigToResponsesParameters()
+	params := request.convertGenerationConfigToResponsesParameters(provider, model)
 
 	// Convert SystemInstruction to system messages first
 	var inputMessages []schemas.ResponsesMessage
@@ -146,7 +146,7 @@ func ToGeminiResponsesRequestWithImageURLSchemes(ctx *schemas.BifrostContext, bi
 	// Convert parameters to generation config
 	if bifrostReq.Params != nil {
 		var err error
-		geminiReq.GenerationConfig, err = geminiReq.convertParamsToGenerationConfigResponses(bifrostReq.Params, capModel)
+		geminiReq.GenerationConfig, err = geminiReq.convertParamsToGenerationConfigResponses(bifrostReq.Params, bifrostReq.Provider, capModel)
 		if err != nil {
 			return nil, err
 		}
@@ -265,7 +265,7 @@ func (response *GenerateContentResponse) ToResponsesBifrostResponsesResponse() *
 
 	// Create the BifrostResponse with Responses structure
 	bifrostResp := &schemas.BifrostResponsesResponse{
-		ID:        schemas.Ptr("resp_" + providerUtils.GetRandomString(50)),
+		ID:        schemas.Ptr("resp_" + schemas.GetRandomString(50)),
 		CreatedAt: int(time.Now().Unix()),
 		Model:     response.ModelVersion,
 	}
@@ -414,7 +414,14 @@ func ToGeminiResponsesResponse(bifrostResp *schemas.BifrostResponsesResponse) *G
 		for i := range bifrostResp.Output {
 			msg := &bifrostResp.Output[i]
 			if msg.Type != nil && *msg.Type == schemas.ResponsesMessageTypeWebSearchCall {
-				lastWebSearchCall = msg
+				// Grounding's sources are merged onto the FIRST search call on the forward
+				// path, so with two or more rounds the last item carries none and rebuilding
+				// groundingMetadata from it drops groundingChunks entirely. Prefer the item
+				// that actually holds sources; fall back to the last when none does, which
+				// is the single-round case where first and last are the same message.
+				if lastWebSearchCall == nil || !webSearchCallHasSources(lastWebSearchCall) {
+					lastWebSearchCall = msg
+				}
 				consumedIndices[i] = true
 			}
 			// Collect annotations (typically in message after web search)
@@ -627,16 +634,20 @@ func ToGeminiResponsesResponse(bifrostResp *schemas.BifrostResponsesResponse) *G
 		}
 
 		// Preserved server-side tool parts lead the FIRST candidate, not the terminal
-		// group. They are replayed ahead of the generated content precisely to reproduce
-		// Gemini's own ordering, so once a role change has already flushed a candidate,
-		// prepending them to the trailing group would file them behind content they are
-		// supposed to precede.
+		// group. They reproduce Gemini's own ordering, so once a role change has already
+		// flushed a candidate, merging them into the trailing group would file them behind
+		// content they are supposed to precede.
+		//
+		// The merge replays Gemini's whole parts array in Gemini's own order rather than
+		// prepending the tool parts alone: prepending put them ahead of text the model had
+		// emitted first, inverting the interleaving and with it the thought_signature
+		// positional context Gemini validates on replay.
 		if len(preservedToolParts) > 0 {
 			if len(candidates) > 0 && candidates[0].Content != nil {
-				candidates[0].Content.Parts = append(
-					append([]*Part{}, preservedToolParts...), candidates[0].Content.Parts...)
+				candidates[0].Content.Parts = mergePreservedGeminiParts(
+					preservedToolParts, candidates[0].Content.Parts)
 			} else {
-				currentParts = append(append([]*Part{}, preservedToolParts...), currentParts...)
+				currentParts = mergePreservedGeminiParts(preservedToolParts, currentParts)
 			}
 		}
 
@@ -658,18 +669,24 @@ func ToGeminiResponsesResponse(bifrostResp *schemas.BifrostResponsesResponse) *G
 		// So the terminal candidate's metadata moves onto the candidate that has the
 		// content instead, rather than being appended or discarded.
 		if len(dropEmptyGeminiParts(currentParts)) == 0 && len(candidates) > 0 {
-			last := candidates[len(candidates)-1]
-			if last.FinishReason == "" {
-				last.FinishReason = terminal.FinishReason
+			// candidates[0], not the last one. Gemini emits a single candidate per
+			// response; more than one here is an artifact of Bifrost grouping output
+			// items by role, and every Gemini-shaped client reads candidates[0]. With
+			// one flushed candidate the two are the same object, so this only changes
+			// the alternating-role case -- where merging onto the last candidate filed
+			// the finish reason where nothing reads it.
+			target := candidates[0]
+			if target.FinishReason == "" {
+				target.FinishReason = terminal.FinishReason
 			}
-			if last.GroundingMetadata == nil {
-				last.GroundingMetadata = terminal.GroundingMetadata
+			if target.GroundingMetadata == nil {
+				target.GroundingMetadata = terminal.GroundingMetadata
 			}
-			if last.SafetyRatings == nil {
-				last.SafetyRatings = terminal.SafetyRatings
+			if target.SafetyRatings == nil {
+				target.SafetyRatings = terminal.SafetyRatings
 			}
-			if last.AvgLogprobs == 0 {
-				last.AvgLogprobs = terminal.AvgLogprobs
+			if target.AvgLogprobs == 0 {
+				target.AvgLogprobs = terminal.AvgLogprobs
 			}
 		} else {
 			candidates = append(candidates, terminal)
@@ -2919,14 +2936,32 @@ func convertGeminiToolConfigToToolChoice(toolConfig *ToolConfig) *schemas.Respon
 	}
 }
 
-// serverSideToolParts returns the candidate's toolCall/toolResponse parts verbatim.
+// serverSideToolParts returns the candidate's whole parts array verbatim when it contains
+// server-side tool parts, and nil otherwise.
+//
+// Capturing the full array rather than only the toolCall/toolResponse parts is what makes
+// the order restorable. Gemini interleaves text, tool and thought parts freely, and
+// thought_signature carries positional context that is invalidated by reordering -- but the
+// reverse path rebuilds its parts from Bifrost's Responses items, which are a different
+// shape and count, so a tool part's original index has nothing to be restored into. Keeping
+// the original array means the native GenAI path can replay it exactly as Gemini sent it.
 func serverSideToolParts(candidate *Candidate) []*Part {
 	if candidate == nil || candidate.Content == nil {
 		return nil
 	}
-	var parts []*Part
+	hasToolPart := false
 	for _, part := range candidate.Content.Parts {
 		if part != nil && (part.ToolCall != nil || part.ToolResponse != nil) {
+			hasToolPart = true
+			break
+		}
+	}
+	if !hasToolPart {
+		return nil
+	}
+	parts := make([]*Part, 0, len(candidate.Content.Parts))
+	for _, part := range candidate.Content.Parts {
+		if part != nil {
 			parts = append(parts, part)
 		}
 	}
@@ -2954,11 +2989,88 @@ func extractServerSideToolParts(v any) []*Part {
 	return parts
 }
 
+// geminiCallIDWithoutSignature strips the thought-signature suffix Bifrost encodes into a
+// call ID ("name_ts_base64sig"), so the same call compares equal whether it came off the
+// preserved Gemini part or was rebuilt from a Bifrost item.
+func geminiCallIDWithoutSignature(callID string) string {
+	if idx := strings.Index(callID, thoughtSignatureSeparator); idx != -1 {
+		return callID[:idx]
+	}
+	return callID
+}
+
+// geminiPartIdentity returns a comparison key for a Gemini part, used to tell whether a
+// rebuilt part is a lossy re-derivation of one already present in the preserved array.
+// Parts that carry no identifying content return "" and are always treated as distinct.
+func geminiPartIdentity(part *Part) string {
+	if part == nil {
+		return ""
+	}
+	switch {
+	case part.ToolCall != nil:
+		return "tc:" + geminiCallIDWithoutSignature(part.ToolCall.ID) + ":" + part.ToolCall.ToolType
+	case part.ToolResponse != nil:
+		return "tr:" + geminiCallIDWithoutSignature(part.ToolResponse.ID) + ":" + part.ToolResponse.ToolType
+	case part.FunctionCall != nil:
+		return "fc:" + geminiCallIDWithoutSignature(part.FunctionCall.ID) + ":" + part.FunctionCall.Name
+	case part.Text != "":
+		if part.Thought {
+			return "th:" + part.Text
+		}
+		return "tx:" + part.Text
+	case len(part.ThoughtSignature) > 0:
+		return "ts:" + base64.StdEncoding.EncodeToString(part.ThoughtSignature)
+	}
+	return ""
+}
+
+// mergePreservedGeminiParts replays Gemini's original parts in their original order, then
+// appends any rebuilt part the original does not already account for.
+//
+// The preserved array wins on ordering because it is what Gemini actually sent -- the
+// rebuilt parts are derived from Bifrost's Responses items, which lose the interleaving.
+// Rebuilt parts with no counterpart in the original are still appended rather than dropped,
+// so anything added downstream (a plugin rewriting content, an item Bifrost models that
+// Gemini did not send as its own part) survives instead of being silently discarded.
+func mergePreservedGeminiParts(preserved, rebuilt []*Part) []*Part {
+	seen := make(map[string]bool, len(preserved))
+	for _, part := range preserved {
+		if id := geminiPartIdentity(part); id != "" {
+			seen[id] = true
+		}
+	}
+
+	merged := make([]*Part, 0, len(preserved)+len(rebuilt))
+	merged = append(merged, preserved...)
+	for _, part := range rebuilt {
+		id := geminiPartIdentity(part)
+		if id != "" && seen[id] {
+			continue
+		}
+		if id != "" {
+			seen[id] = true
+		}
+		merged = append(merged, part)
+	}
+	return merged
+}
+
+// webSearchCallHasSources reports whether a web_search_call item carries the grounding
+// sources that rebuilding Gemini's groundingChunks depends on.
+func webSearchCallHasSources(msg *schemas.ResponsesMessage) bool {
+	if msg == nil || msg.ResponsesToolMessage == nil || msg.ResponsesToolMessage.Action == nil {
+		return false
+	}
+	action := msg.ResponsesToolMessage.Action.ResponsesWebSearchToolCallAction
+	return action != nil && len(action.Sources) > 0
+}
+
 // firstSearchCallIndex returns the lowest message index among the server-side search calls,
-// i.e. the item grounding metadata should be merged onto.
-func firstSearchCallIndex(byID map[string]int) (int, bool) {
+// i.e. the item grounding metadata should be merged onto. Takes the indices directly rather
+// than a keyed map so ID-less rounds, which never enter that map, are still considered.
+func firstSearchCallIndex(indices []int) (int, bool) {
 	first, found := 0, false
-	for _, idx := range byID {
+	for _, idx := range indices {
 		if !found || idx < first {
 			first, found = idx, true
 		}
@@ -3087,6 +3199,13 @@ func convertGeminiCandidatesToResponsesOutput(candidates []*Candidate) []schemas
 
 		// Index from server-side tool-call ID to the web_search_call item it opened.
 		searchCallIndexByID := map[string]int{}
+		// ToolCall.ID and ToolResponse.ID are both omitempty, so Gemini can leave them out.
+		// Those rounds cannot pair by ID -- they pair by position instead: this FIFO holds
+		// the message indices of ID-less calls still waiting for their response.
+		var anonymousSearchCalls []int
+		// Every web_search_call item's index in emission order, keyed or not, so grounding
+		// metadata can find the first one regardless of whether IDs were present.
+		var searchCallIndices []int
 
 		for _, part := range candidate.Content.Parts {
 			// Handle different types of parts
@@ -3135,7 +3254,7 @@ func convertGeminiCandidatesToResponsesOutput(candidates []*Candidate) []schemas
 			case part.Text != "":
 				// Regular text message
 				msg := schemas.ResponsesMessage{
-					ID:     schemas.Ptr("msg_" + providerUtils.GetRandomString(50)),
+					ID:     schemas.Ptr("msg_" + schemas.GetRandomString(50)),
 					Role:   schemas.Ptr(schemas.ResponsesInputMessageRoleAssistant),
 					Status: schemas.Ptr("completed"),
 					Content: &schemas.ResponsesMessageContent{
@@ -3188,7 +3307,7 @@ func convertGeminiCandidatesToResponsesOutput(candidates []*Candidate) []schemas
 					Arguments: &argumentsStr,
 				}
 				msg := schemas.ResponsesMessage{
-					ID:                   schemas.Ptr("fc_" + providerUtils.GetRandomString(50)),
+					ID:                   schemas.Ptr("fc_" + schemas.GetRandomString(50)),
 					Role:                 schemas.Ptr(schemas.ResponsesInputMessageRoleAssistant),
 					Type:                 schemas.Ptr(schemas.ResponsesMessageTypeFunctionCall),
 					Status:               schemas.Ptr("completed"),
@@ -3347,9 +3466,20 @@ func convertGeminiCandidatesToResponsesOutput(candidates []*Candidate) []schemas
 					// but Bifrost has no neutral item type for it.
 					break
 				}
-				searchCallIndexByID[part.ToolCall.ID] = len(messages)
+				// An ID-less round still needs a distinct item ID -- keying the map on ""
+				// would collapse every such round onto one entry, leaving all but the last
+				// stuck in_progress and every emitted item carrying an empty ID. Mirrors
+				// the streaming path's generateItemID("ws", outputIndex) fallback.
+				itemID := part.ToolCall.ID
+				if itemID == "" {
+					itemID = fmt.Sprintf("ws_%d", len(messages))
+					anonymousSearchCalls = append(anonymousSearchCalls, len(messages))
+				} else {
+					searchCallIndexByID[itemID] = len(messages)
+				}
+				searchCallIndices = append(searchCallIndices, len(messages))
 				messages = append(messages, schemas.ResponsesMessage{
-					ID:     schemas.Ptr(part.ToolCall.ID),
+					ID:     schemas.Ptr(itemID),
 					Type:   schemas.Ptr(schemas.ResponsesMessageTypeWebSearchCall),
 					Status: schemas.Ptr("in_progress"),
 					ResponsesToolMessage: &schemas.ResponsesToolMessage{
@@ -3364,8 +3494,18 @@ func convertGeminiCandidatesToResponsesOutput(candidates []*Candidate) []schemas
 				if msg, ok := reasoningFromThoughtSignature(part); ok {
 					messages = append(messages, msg)
 				}
-				if idx, ok := searchCallIndexByID[part.ToolResponse.ID]; ok && idx < len(messages) {
-					messages[idx].Status = schemas.Ptr("completed")
+				if part.ToolResponse.ID != "" {
+					if idx, ok := searchCallIndexByID[part.ToolResponse.ID]; ok && idx < len(messages) {
+						messages[idx].Status = schemas.Ptr("completed")
+					}
+				} else if len(anonymousSearchCalls) > 0 {
+					// No ID to match on: Gemini emits each round's response after its call,
+					// so the oldest still-open ID-less call is the one this completes.
+					idx := anonymousSearchCalls[0]
+					anonymousSearchCalls = anonymousSearchCalls[1:]
+					if idx < len(messages) {
+						messages[idx].Status = schemas.Ptr("completed")
+					}
 				}
 
 			case part.ThoughtSignature != nil:
@@ -3419,7 +3559,7 @@ func convertGeminiCandidatesToResponsesOutput(candidates []*Candidate) []schemas
 			// item is authoritative — it carries the real call ID. Merge grounding's richer
 			// data (sources, and any queries the call did not spell out) onto it rather than
 			// emitting a second web_search_call for the same search.
-			if idx, ok := firstSearchCallIndex(searchCallIndexByID); ok && idx < len(messages) {
+			if idx, ok := firstSearchCallIndex(searchCallIndices); ok && idx < len(messages) {
 				if existing := messages[idx].ResponsesToolMessage; existing != nil && existing.Action != nil {
 					if action := existing.Action.ResponsesWebSearchToolCallAction; action != nil {
 						if len(sources) > 0 {
@@ -3614,7 +3754,7 @@ func reconstructSchemaFromJSONSchema(jsonSchema *schemas.ResponsesTextConfigForm
 }
 
 // convertParamsToGenerationConfigResponses converts ChatParameters to GenerationConfig for Responses
-func (r *GeminiGenerationRequest) convertParamsToGenerationConfigResponses(params *schemas.ResponsesParameters, capModel string) (GenerationConfig, error) {
+func (r *GeminiGenerationRequest) convertParamsToGenerationConfigResponses(params *schemas.ResponsesParameters, provider schemas.ModelProvider, capModel string) (GenerationConfig, error) {
 	config := GenerationConfig{}
 
 	if params.Temperature != nil {
@@ -3627,32 +3767,33 @@ func (r *GeminiGenerationRequest) convertParamsToGenerationConfigResponses(param
 		config.MaxOutputTokens = int32(*params.MaxOutputTokens)
 	}
 	// Only set ThinkingConfig if the model actually supports thinking
-	if params.Reasoning != nil && supportsThinkingConfig(capModel) {
+	caps := schemas.ResolveModelCaps(provider, capModel)
+	if params.Reasoning != nil && caps.SupportsReasoning(defaultSupportsReasoning(capModel)) {
 		config.ThinkingConfig = &GenerationConfigThinkingConfig{
 			IncludeThoughts: true,
 		}
 
 		hasMaxTokens := params.Reasoning.MaxTokens != nil
 		hasEffort := params.Reasoning.Effort != nil
-		supportsLevel := isGemini3Plus(capModel) // Check if model is 3.0+
+		supportsLevel := caps.SupportsReasoningEffort(isGemini3Plus(capModel)) // thinkingLevel vs thinkingBudget
 
 		// PRIORITY RULE: If both max_tokens and effort are present, use ONLY max_tokens (budget)
 		// This ensures we send only thinkingBudget to Gemini, not thinkingLevel
 
 		// Handle "none" effort explicitly (only if max_tokens not present)
 		if !hasMaxTokens && hasEffort && *params.Reasoning.Effort == "none" {
-			setThinkingBudgetZeroIfSupported(&config, capModel)
+			setThinkingBudgetZeroIfSupported(&config, caps)
 		} else if hasMaxTokens {
 			// User provided max_tokens - use thinkingBudget (all Gemini models support this)
 			// If both max_tokens and effort are present, we ignore effort and use ONLY max_tokens
 			budget := *params.Reasoning.MaxTokens
 			switch budget {
 			case 0:
-				setThinkingBudgetZeroIfSupported(&config, capModel)
+				setThinkingBudgetZeroIfSupported(&config, caps)
 			case DynamicReasoningBudget: // Special case: -1 means dynamic budget
 				config.ThinkingConfig.ThinkingBudget = schemas.Ptr(int32(DynamicReasoningBudget))
 			default:
-				if err := validateThinkingBudget(capModel, budget); err != nil {
+				if err := validateThinkingBudget(caps, budget); err != nil {
 					return config, err
 				}
 				config.ThinkingConfig.ThinkingBudget = schemas.Ptr(int32(budget))
@@ -3661,13 +3802,15 @@ func (r *GeminiGenerationRequest) convertParamsToGenerationConfigResponses(param
 			// User provided effort only (no max_tokens)
 			if supportsLevel {
 				// Gemini 3.0+ - use thinkingLevel (more native)
-				config.ThinkingConfig.ThinkingLevel = schemas.Ptr(effortToThinkingLevel(*params.Reasoning.Effort, capModel))
+				if level := effortToThinkingLevel(caps, *params.Reasoning.Effort); level != "" {
+					config.ThinkingConfig.ThinkingLevel = schemas.Ptr(level)
+				}
 			} else {
-				maxTokens := providerUtils.GetMaxOutputTokensOrDefault(capModel, DefaultCompletionMaxTokens)
+				maxTokens := providerUtils.GetMaxOutputTokensOrDefault(provider, capModel, DefaultCompletionMaxTokens)
 				if config.MaxOutputTokens > 0 {
 					maxTokens = int(config.MaxOutputTokens)
 				}
-				budgetRange := getThinkingBudgetRange(capModel, maxTokens)
+				budgetRange := getThinkingBudgetRange(caps, maxTokens)
 				// Gemini < 3.0 - must convert effort to budget
 				budgetTokens, err := providerUtils.GetBudgetTokensFromReasoningEffort(
 					*params.Reasoning.Effort,
@@ -3931,12 +4074,148 @@ func convertResponsesToolChoiceToGemini(toolChoice *schemas.ResponsesToolChoice)
 // responses, where a tool returns images/files nested in functionResponse.parts). provider
 // distinguishes Vertex AI from the Gemini Developer API, which differ in how multimodal
 // function responses must be referenced (see the FunctionCallOutput handling below).
+// isAssistantPrefillMessage reports whether msg is a plain assistant text turn -- the shape
+// Claude Code sends as a prefill, and the only trailing model turn that is safe to drop.
+//
+// Reasoning items and function calls are deliberately excluded even though they also render as
+// role:"model". Gemini's thinking guide requires thought blocks to survive replay verbatim ("You
+// MUST always resend all thought blocks exactly as they were received from the model",
+// https://ai.google.dev/gemini-api/docs/thinking), and a trailing function call is a turn the
+// caller still owes a functionResponse for -- neither is a prefill, and silently deleting either
+// would corrupt the history rather than repair it.
+func isAssistantPrefillMessage(msg *schemas.ResponsesMessage) bool {
+	if msg.Role == nil || *msg.Role != schemas.ResponsesInputMessageRoleAssistant {
+		return false
+	}
+	if msg.ResponsesToolMessage != nil || msg.ResponsesReasoning != nil {
+		return false
+	}
+	if msg.Type != nil && *msg.Type != schemas.ResponsesMessageTypeMessage {
+		return false
+	}
+	// The type and the standalone-reasoning check above are not sufficient: a turn typed
+	// "message" can still smuggle thought history in through its content blocks. A
+	// reasoning block becomes Part{Thought: true}, and a plain TEXT block carrying a
+	// signature becomes Part.ThoughtSignature -- both in convertContentBlockToGeminiPart.
+	// Either one makes the turn history Gemini requires replayed verbatim, not a prefill.
+	//
+	// So the allowance is a whitelist rather than a blacklist: only unsigned text blocks
+	// qualify, and any other block type (reasoning, refusal, compaction, fallback, image,
+	// file) disqualifies the turn. Erring this way costs at most an untrimmed turn --
+	// which Gemini answers with the 400 the caller already had -- while the opposite
+	// error silently deletes history and is unrecoverable.
+	if msg.Content != nil {
+		for _, block := range msg.Content.ContentBlocks {
+			if block.Signature != nil {
+				return false
+			}
+			switch block.Type {
+			case schemas.ResponsesInputMessageContentBlockTypeText,
+				schemas.ResponsesOutputMessageContentTypeText:
+			default:
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// trimTrailingAssistantPrefill drops the trailing run of assistant prefill turns so the
+// conversation ends on a user turn. Returns messages unchanged when the model declares prefill
+// support via the datasheet (ModelCaps.SupportsAssistantPrefill), which no Gemini model does
+// today -- the hook exists so a future model can opt back in without a code change.
+func trimTrailingAssistantPrefill(messages []schemas.ResponsesMessage, caps schemas.ModelCaps) []schemas.ResponsesMessage {
+	if caps.SupportsAssistantPrefill(false) {
+		return messages
+	}
+	trimmed := len(messages)
+	for trimmed > 0 && isAssistantPrefillMessage(&messages[trimmed-1]) {
+		trimmed--
+	}
+	return messages[:trimmed]
+}
+
+// inlineGeminiSystemReminder renders a mid-conversation role:"system" turn as a user turn wrapped
+// in the <system-reminder> envelope Claude Code uses, keeping it at its original position in the
+// conversation.
+//
+// Gemini has no message-level system role -- Content.role must be "user" or "model" -- so such a
+// turn has to become one or the other. The alternative, hoisting it into systemInstruction, is
+// what this replaces: systemInstruction renders ahead of every message, so a reminder that
+// arrives at turn 40 is presented as though it had been said at turn 0, and growing that block
+// mid-conversation invalidates the cached prefix behind it. This mirrors Bedrock's
+// convertBifrostSystemReminderToBedrockUserMessage and the native Anthropic fallback in
+// inlineMidConversationSystem, both of which measured the hoist as a prompt-cache collapse.
+//
+// The trade is the same one those converters accepted: a user turn is not the operator channel a
+// system turn is, so instruction adherence is weaker. The text originates from the caller's own
+// system role, so nothing attacker-controlled is laundered by the change.
+//
+// Returns nil when the message yields no text, so the caller skips the append.
+func inlineGeminiSystemReminder(msg *schemas.ResponsesMessage, allowedImageURLSchemes ...string) (*Content, error) {
+	if msg.Content == nil {
+		return nil, nil
+	}
+
+	wrap := func(text string) string {
+		return "<system-reminder>\n" + text + "\n</system-reminder>\n"
+	}
+
+	content := &Content{Role: "user"}
+	// ContentStr and ContentBlocks are mutually exclusive sources: whenever ContentStr is
+	// non-nil it is the sole source, matching convertBifrostSystemReminderToBedrockUserMessage.
+	// Gating the block loop on a non-EMPTY string instead would let a caller that set
+	// ContentStr to "" fall through and have its blocks read as well, emitting the reminder
+	// from a source the caller did not select.
+	if msg.Content.ContentStr != nil {
+		if *msg.Content.ContentStr != "" {
+			content.Parts = append(content.Parts, &Part{Text: wrap(*msg.Content.ContentStr)})
+		}
+	} else {
+		for _, block := range msg.Content.ContentBlocks {
+			part, err := convertContentBlockToGeminiPart(block, allowedImageURLSchemes...)
+			if err != nil {
+				return nil, fmt.Errorf("failed to convert system message content block: %w", err)
+			}
+			if part == nil {
+				continue
+			}
+			// Only text is wrapped; a non-text block (image, file) has no envelope to carry and is
+			// passed through as-is rather than dropped.
+			if part.Text != "" {
+				part.Text = wrap(part.Text)
+			}
+			content.Parts = append(content.Parts, part)
+		}
+	}
+
+	if len(content.Parts) == 0 {
+		return nil, nil
+	}
+	return content, nil
+}
+
 func convertResponsesMessagesToGeminiContents(messages []schemas.ResponsesMessage, model string, provider schemas.ModelProvider, allowedImageURLSchemes ...string) ([]Content, *Content, error) {
 	if len(allowedImageURLSchemes) == 0 {
 		allowedImageURLSchemes = defaultGeminiImageURLSchemes
 	}
 
 	isVertex := provider == schemas.Vertex
+	caps := schemas.ResolveModelCaps(provider, model)
+
+	// Gemini rejects a conversation whose final turn is role:"model" -- generateContent answers
+	// 400 with "Please ensure that multiturn requests ends with a user role or a function
+	// response". Content.role is documented as "Must be either 'user' or 'model'", and Gemini
+	// exposes no assistant-prefill mechanism to continue from, so a trailing model turn has no
+	// valid meaning on this wire at all.
+	//
+	// Claude Code routinely ends its message array with an assistant prefill, so /anthropic
+	// traffic pointed at Gemini/Vertex fails on every such turn. Bedrock trims the same shape in
+	// ToBedrockResponsesRequest; this is that trim for Gemini. The gate differs: Bedrock keys on
+	// IsAnthropicModelFamily because a Bedrock target may be a Claude model, which is never true
+	// here, so the default is a flat false and only a datasheet record can turn it back on.
+	messages = trimTrailingAssistantPrefill(messages, caps)
+
 	// if only system / developer message is there, convert it to user message (since openai allows it)
 	if len(messages) == 1 && messages[0].Role != nil && (*messages[0].Role == schemas.ResponsesInputMessageRoleSystem || *messages[0].Role == schemas.ResponsesInputMessageRoleDeveloper) {
 		content := Content{Role: "user"}
@@ -3984,7 +4263,20 @@ func convertResponsesMessagesToGeminiContents(messages []schemas.ResponsesMessag
 	// According to Gemini docs, all function responses must be in a single message
 	var pendingFunctionResponseParts []*Part
 
+	// Set once the leading system prompt ends (first non-system message). Only the leading run is
+	// hoisted into systemInstruction; a system turn that arrives after the conversation has
+	// started is inlined in place instead -- see inlineGeminiSystemReminder.
+	seenNonSystemMessage := false
+
 	for i, msg := range messages {
+		isSystemMessage := msg.Role != nil &&
+			(*msg.Role == schemas.ResponsesInputMessageRoleSystem || *msg.Role == schemas.ResponsesInputMessageRoleDeveloper)
+		// Recorded before the branches below, all of which `continue`, so a reasoning or tool
+		// item still closes the leading system run.
+		if !isSystemMessage {
+			seenNonSystemMessage = true
+		}
+
 		// Standalone reasoning messages carry the model's thought blocks. Their
 		// SIGNATURE is picked up by the look-ahead on the preceding function
 		// call, so only the text is emitted here - sending the signature again
@@ -4027,8 +4319,31 @@ func convertResponsesMessagesToGeminiContents(messages []schemas.ResponsesMessag
 			continue
 		}
 
-		// Handle system messages separately
-		if msg.Role != nil && (*msg.Role == schemas.ResponsesInputMessageRoleSystem || *msg.Role == schemas.ResponsesInputMessageRoleDeveloper) {
+		// A mid-conversation system turn is inlined at its original position as a user turn.
+		// Hoisting it would move it ahead of the whole conversation and invalidate the cached
+		// prefix behind it.
+		if isSystemMessage && seenNonSystemMessage {
+			inlined, err := inlineGeminiSystemReminder(&msg, allowedImageURLSchemes...)
+			if err != nil {
+				return nil, nil, err
+			}
+			if inlined != nil {
+				// Flush first: the reminder is a user turn of its own and must not be filed
+				// behind function responses that precede it.
+				if len(pendingFunctionResponseParts) > 0 {
+					contents = append(contents, Content{
+						Parts: pendingFunctionResponseParts,
+						Role:  "user",
+					})
+					pendingFunctionResponseParts = nil
+				}
+				contents = append(contents, *inlined)
+			}
+			continue
+		}
+
+		// Handle the leading system prompt separately
+		if isSystemMessage {
 			if systemInstruction == nil {
 				systemInstruction = &Content{}
 			}
@@ -4188,7 +4503,7 @@ func convertResponsesMessagesToGeminiContents(messages []schemas.ResponsesMessag
 						//   - Gemini Developer API: do NOT emit $ref — the API rejects it
 						//     ("does not match to a display_name", a known upstream bug). The model
 						//     still reads the media directly from parts.
-						supportsMultimodalToolOutput := isGemini3Plus(model)
+						supportsMultimodalToolOutput := caps.SupportsMultimodalToolOutput(isGemini3Plus(model))
 						var textParts []string
 						for _, block := range msg.ResponsesToolMessage.Output.ResponsesFunctionToolCallOutputBlocks {
 							if block.Text != nil && *block.Text != "" {
@@ -4680,6 +4995,7 @@ func emitWebSearchFromGroundingMetadata(
 			Type:           schemas.ResponsesStreamResponseTypeOutputItemAdded,
 			SequenceNumber: sequenceNumber + len(responses),
 			OutputIndex:    &outputIndex,
+			ItemID:         &itemID,
 			Item: &schemas.ResponsesMessage{
 				ID:     &itemID,
 				Type:   schemas.Ptr(schemas.ResponsesMessageTypeWebSearchCall),

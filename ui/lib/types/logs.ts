@@ -1,4 +1,4 @@
-// Types for the logs interface based on ElygateResponse schema
+// Types for the logs interface based on BifrostResponse schema
 
 import { DBKey, VirtualKey } from "./governance";
 import { RoutingRule } from "./routingRules";
@@ -63,12 +63,12 @@ export interface TranscriptionUsage {
 	seconds?: number; // For duration-based usage
 }
 
-export interface ElygateSpeech {
+export interface BifrostSpeech {
 	usage?: AudioLLMUsage;
 	audio: string; // base64 encoded audio data
 }
 
-export interface ElygateTranscribe {
+export interface BifrostTranscribe {
 	text: string;
 	logprobs?: TranscriptionLogProb[];
 	usage?: TranscriptionUsage;
@@ -201,7 +201,7 @@ export interface ReasoningDetails {
 	data?: string;
 }
 
-export interface ElygateEmbedding {
+export interface BifrostEmbedding {
 	index: number;
 	object: string;
 	embedding: string | number[] | number[][];
@@ -219,7 +219,7 @@ export interface RerankResult {
 	document?: RerankDocument;
 }
 
-export interface ElygateImageGenerationData {
+export interface BifrostImageGenerationData {
 	url?: string;
 	b64_json?: string;
 	revised_prompt?: string;
@@ -268,18 +268,18 @@ export interface OCRUsageInfo {
 	doc_size_bytes: number;
 }
 
-export interface ElygateOCRResponse {
+export interface BifrostOCRResponse {
 	model: string;
 	pages: OCRPage[];
 	usage_info?: OCRUsageInfo;
 	document_annotation?: string;
 }
 
-export interface ElygateImageGenerationOutput {
+export interface BifrostImageGenerationOutput {
 	id?: string;
 	created?: number;
 	model?: string;
-	data: ElygateImageGenerationData[];
+	data: BifrostImageGenerationData[];
 	background?: string;
 	output_format?: string;
 	quality?: string;
@@ -324,7 +324,7 @@ export interface VideoOutput {
 	base64?: string;
 	content_type?: string;
 }
-export interface ElygateVideoGenerationOutput {
+export interface BifrostVideoGenerationOutput {
 	videos: VideoOutput[];
 	id?: string;
 	completed_at?: number;
@@ -342,18 +342,18 @@ export interface ElygateVideoGenerationOutput {
 	content_filter?: ContentFilterInfo;
 }
 
-export interface ElygateVideoDownloadOutput {
+export interface BifrostVideoDownloadOutput {
 	video_id: string;
 	content_type?: string;
 }
 
-export interface ElygateVideoDeleteOutput {
+export interface BifrostVideoDeleteOutput {
 	id: string;
 	deleted: boolean;
 	object?: string;
 }
 
-export interface ElygateVideoListOutput {
+export interface BifrostVideoListOutput {
 	object: string;
 	data: VideoObject[];
 	first_id?: string;
@@ -446,6 +446,40 @@ export interface CacheDebug {
 	similarity?: number;
 }
 
+export interface BatchRequestCounts {
+	total: number;
+	completed: number;
+	failed: number;
+	succeeded?: number; // Anthropic-specific
+	expired?: number; // Anthropic-specific
+	canceled?: number; // Anthropic-specific
+	pending?: number; // Anthropic-specific
+}
+
+export interface BatchModelBreakdown {
+	model: string;
+	request_count: number;
+	usage: LLMUsage;
+	cost?: number; // Absent when this model hasn't priced yet (e.g. no batch rate at settlement time)
+}
+
+export interface BatchAccountingDebug {
+	model_breakdowns?: Record<string, BatchModelBreakdown>;
+	cost?: number; // Mirrors the settled price on a row that isn't itself the aggregate cost row
+	parse_error_count?: number; // Result rows the provider returned that could not be parsed; their usage is not in this row
+	incomplete?: boolean; // The row's total is known to under-state the batch (unpriced usage and/or parse errors)
+}
+
+// Batch detail for batch rows. `accounting` is present only on the aggregate
+// cost row written when a settled batch is priced.
+export interface BatchDebug {
+	batch_id?: string;
+	status?: string; // Provider batch lifecycle status, e.g. "in_progress" / "completed"
+	endpoint?: string; // Provider batch endpoint the batch ran against; absent on rows written before it was persisted
+	request_counts?: BatchRequestCounts;
+	accounting?: BatchAccountingDebug;
+}
+
 export interface GuardrailJudgeCall {
 	phase?: string;
 	rule_id?: number;
@@ -475,7 +509,7 @@ export interface ErrorField {
 	event_id?: string;
 }
 
-export interface ElygateError {
+export interface BifrostError {
 	event_id?: string;
 	type?: string;
 	is_bifrost_error: boolean;
@@ -527,6 +561,16 @@ export interface RedactionMapping {
 	output?: Record<string, string>;
 }
 
+// One slice of Bifrost overhead, attributed to a span (or group of spans) by
+// self-time. duration_us is microseconds. Buckets come in chronological order and
+// summing them gives an independent measure of overhead vs the overhead_latency
+// number (which is total minus the upstream socket accumulator).
+export interface OverheadBucket {
+	name: string; // e.g. "key.selection", "plugin.governance", "transport/core"
+	kind: string; // originating span kind, for grouping/coloring
+	duration_us: number;
+}
+
 export interface LogEntry {
 	id: string;
 	object: string; // text.completion, chat.completion, embedding, audio.speech, audio.transcription
@@ -539,7 +583,7 @@ export interface LogEntry {
 	alias_model_family?: string; // Model family configured on the resolved alias, when set
 	// Model that actually produced the response when the provider swapped models inside a
 	// single call (Anthropic server-side fallback). Distinct from fallback_index, which
-	// counts Elygate's own cross-provider failover attempts.
+	// counts Bifrost's own cross-provider failover attempts.
 	server_side_fallback_model?: string;
 	number_of_retries: number;
 	fallback_index: number;
@@ -577,16 +621,16 @@ export interface LogEntry {
 	content_summary?: string;
 	output_message?: ChatMessage;
 	responses_output?: ResponsesMessage[];
-	embedding_output?: ElygateEmbedding[];
+	embedding_output?: BifrostEmbedding[];
 	rerank_output?: RerankResult[];
 	ocr_input?: OCRDocument;
-	ocr_output?: ElygateOCRResponse;
-	image_generation_output?: ElygateImageGenerationOutput;
-	video_generation_output?: ElygateVideoGenerationOutput;
-	video_retrieve_output?: ElygateVideoGenerationOutput;
-	video_download_output?: ElygateVideoDownloadOutput;
-	video_list_output?: ElygateVideoListOutput;
-	video_delete_output?: ElygateVideoDeleteOutput;
+	ocr_output?: BifrostOCRResponse;
+	image_generation_output?: BifrostImageGenerationOutput;
+	video_generation_output?: BifrostVideoGenerationOutput;
+	video_retrieve_output?: BifrostVideoGenerationOutput;
+	video_download_output?: BifrostVideoDownloadOutput;
+	video_list_output?: BifrostVideoListOutput;
+	video_delete_output?: BifrostVideoDeleteOutput;
 	params?: ModelParameters;
 	speech_input?: SpeechInput;
 	transcription_input?: TranscriptionInput;
@@ -594,22 +638,26 @@ export interface LogEntry {
 	image_edit_input?: ImageEditInput;
 	image_variation_input?: ImageVariationInput;
 	video_generation_input?: { prompt: string };
-	speech_output?: ElygateSpeech;
-	transcription_output?: ElygateTranscribe;
+	speech_output?: BifrostSpeech;
+	transcription_output?: BifrostTranscribe;
 	list_models_output?: Model[];
 	tools?: Tool[];
 	tool_calls?: ToolCall[];
 	latency?: number;
+	upstream_latency?: number; // provider socket time across all attempts, ms
+	overhead_latency?: number; // Bifrost overhead (total minus upstream), ms
+	overhead_breakdown?: OverheadBucket[]; // per-span self-time decomposition of overhead (microseconds)
 	token_usage?: LLMUsage;
 	cache_debug?: CacheDebug;
+	batch_debug?: BatchDebug;
 	guardrail_debug?: GuardrailDebug;
 	cost?: number; // Cost in dollars (total cost of the request - includes cache lookup cost and also guardrail judge calls)
 	// Served billing tier, denormalized onto the log row so cost recomputation can reprice
-	// at the rates the request was actually served at. OpenAI: "priority" / "flex" / "default".
+	// at the rates the request was actually served at. OpenAI: "priority" / "flex" / "ultrafast" / "default".
 	service_tier?: string;
 	status: string; // "success", "error", "processing", or "cancelled"
 	stop_reason?: string; // Why the model stopped: "stop", "length", "content_filter", "tool_calls", etc.
-	error_details?: ElygateError;
+	error_details?: BifrostError;
 	stream: boolean; // true if this was a streaming response
 	created_at: string; // ISO string format from Go time.Time - when the log was first created
 	raw_request?: string; // Raw provider request
@@ -772,6 +820,10 @@ export interface LatencyHistogramBucket {
 	p90_latency: number;
 	p95_latency: number;
 	p99_latency: number;
+	avg_overhead: number;
+	p90_overhead: number;
+	p95_overhead: number;
+	p99_overhead: number;
 	total_requests: number;
 }
 
@@ -1179,7 +1231,7 @@ export interface MCPToolLogEntry {
 	virtual_key_name?: string;
 	arguments?: Record<string, unknown> | string; // JSON parsed tool arguments
 	result?: Record<string, unknown> | string; // JSON parsed tool result
-	error_details?: ElygateError;
+	error_details?: BifrostError;
 	latency?: number; // Execution time in milliseconds
 	cost?: number; // Cost in dollars (per execution cost)
 	status: string; // "processing", "success", or "error"

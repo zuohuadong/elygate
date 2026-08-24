@@ -33,7 +33,7 @@ COPY panel/src/enterprise-fallback/index.ts /index.ts
 
   # --- Go Build Stage: Compile the Go binary ---
   # Go and runtime stages intentionally use BuildKit's target platform.
-  FROM golang:1.26.5-alpine3.23@sha256:622e56dbc11a8cfe87cafa2331e9a201877271cbff918af53d3be315f3da88cc AS builder
+  FROM golang:1.26.6-alpine3.23@sha256:e57c41c1d5864341031181b0db34b9a537bb5773eb6428e4e5bdaea0f9135406 AS builder
   WORKDIR /app
 
   # Install dependencies including gcc for CGO and sqlite (with latest security patches)
@@ -58,6 +58,7 @@ COPY panel/src/enterprise-fallback/index.ts /index.ts
   COPY plugins/modelcatalogresolver/go.mod plugins/modelcatalogresolver/go.sum ./plugins/modelcatalogresolver/
   COPY plugins/otel/go.mod plugins/otel/go.sum ./plugins/otel/
   COPY plugins/prompts/go.mod plugins/prompts/go.sum ./plugins/prompts/
+  COPY plugins/routing/go.mod plugins/routing/go.sum ./plugins/routing/
   COPY plugins/safety/go.mod ./plugins/safety/
   COPY plugins/semanticcache/go.mod plugins/semanticcache/go.sum ./plugins/semanticcache/
   COPY plugins/telemetry/go.mod plugins/telemetry/go.sum ./plugins/telemetry/
@@ -76,6 +77,7 @@ COPY panel/src/enterprise-fallback/index.ts /index.ts
       ./plugins/modelcatalogresolver \
       ./plugins/otel \
       ./plugins/prompts \
+      ./plugins/routing \
       ./plugins/safety \
       ./plugins/semanticcache \
       ./plugins/telemetry \
@@ -94,6 +96,7 @@ COPY panel/src/enterprise-fallback/index.ts /index.ts
   COPY plugins/modelcatalogresolver/ ./plugins/modelcatalogresolver/
   COPY plugins/otel/ ./plugins/otel/
   COPY plugins/prompts/ ./plugins/prompts/
+  COPY plugins/routing/ ./plugins/routing/
   COPY plugins/safety/ ./plugins/safety/
   COPY plugins/semanticcache/ ./plugins/semanticcache/
   COPY plugins/telemetry/ ./plugins/telemetry/
@@ -117,7 +120,7 @@ COPY panel/src/enterprise-fallback/index.ts /index.ts
   RUN test -f /app/main || (echo "Build failed" && exit 1)
 
   # --- Runtime Stage: Minimal runtime image ---
-  FROM alpine:3.23.4@sha256:5b10f432ef3da1b8d4c7eb6c487f2f5a8f096bc91145e68878dd4a5019afde11
+  FROM alpine:3.23.5@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
   WORKDIR /app
 
   # Install runtime dependencies for CGO-enabled binary

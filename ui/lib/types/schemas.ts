@@ -652,6 +652,7 @@ export const allowedRequestsSchema = z.object({
 	ocr_stream: z.boolean().optional(),
 	rerank: z.boolean(),
 	video_generation: z.boolean(),
+	video_edit: z.boolean(),
 	video_retrieve: z.boolean(),
 	video_download: z.boolean(),
 	video_delete: z.boolean(),
@@ -816,7 +817,7 @@ export const coreConfigSchema = z.object({
 	mcp_enable_temp_token_auth: z.boolean().default(false),
 });
 
-// Elygate config schema
+// Bifrost config schema
 export const bifrostConfigSchema = z.object({
 	client_config: coreConfigSchema,
 	is_db_connected: z.boolean(),

@@ -2074,11 +2074,35 @@ append_dynamic_columns_postgres() {
     fi
   done
 
+  # governance_model_pricing per-size and joint size+quality per-image output rates
+  # (added via add_image_size_quality_pricing_columns)
+  for col in output_cost_per_image_above_1024_and_1536_pixels output_cost_per_image_above_1536_and_1024_pixels \
+    output_cost_per_image_above_1024_and_1024_pixels_low_quality \
+    output_cost_per_image_above_1024_and_1536_pixels_low_quality \
+    output_cost_per_image_above_1536_and_1024_pixels_low_quality \
+    output_cost_per_image_above_1024_and_1024_pixels_medium_quality \
+    output_cost_per_image_above_1024_and_1536_pixels_medium_quality \
+    output_cost_per_image_above_1536_and_1024_pixels_medium_quality \
+    output_cost_per_image_above_1024_and_1024_pixels_high_quality \
+    output_cost_per_image_above_1024_and_1536_pixels_high_quality \
+    output_cost_per_image_above_1536_and_1024_pixels_high_quality \
+    output_cost_per_image_above_1024x1024_pixels_standard_quality \
+    output_cost_per_image_above_1024x1536_pixels_standard_quality \
+    output_cost_per_image_above_1536x1024_pixels_standard_quality; do
+    if column_exists_postgres "governance_model_pricing" "$col"; then
+      echo "UPDATE governance_model_pricing SET $col = NULL WHERE id = 1;" >> "$output_file"
+      echo "UPDATE governance_model_pricing SET $col = NULL WHERE id = 2;" >> "$output_file"
+    fi
+  done
+
   # logs.redaction_mapping (added via logs_add_redaction_mapping_column)
   if column_exists_postgres "logs" "redaction_mapping"; then
     echo "UPDATE logs SET redaction_mapping = '' WHERE id = 'log-migration-test-001';" >> "$output_file"
     echo "UPDATE logs SET redaction_mapping = '' WHERE id = 'log-migration-test-002';" >> "$output_file"
     echo "UPDATE logs SET redaction_mapping = '' WHERE id = 'log-migration-test-003';" >> "$output_file"
+  fi
+
+  # -------------------------------------------------------------------------
   # v1.6.3 columns - config store tables
   # -------------------------------------------------------------------------
 
@@ -2198,6 +2222,8 @@ append_dynamic_columns_postgres() {
     echo "UPDATE logs SET server_side_fallback_model = NULL WHERE id = 'log-migration-test-001';" >> "$output_file"
     echo "UPDATE logs SET server_side_fallback_model = 'gpt-4-turbo' WHERE id = 'log-migration-test-002';" >> "$output_file"
     echo "UPDATE logs SET server_side_fallback_model = NULL WHERE id = 'log-migration-test-003';" >> "$output_file"
+  fi
+
   # v1.6.4 columns
   # -------------------------------------------------------------------------
 
@@ -3553,6 +3579,27 @@ append_dynamic_columns_sqlite() {
         echo "UPDATE governance_model_pricing SET $col = NULL WHERE id = 2;" >> "$output_file"
       fi
     done
+
+    # governance_model_pricing per-size and joint size+quality per-image output rates
+    # (added via add_image_size_quality_pricing_columns)
+    for col in output_cost_per_image_above_1024_and_1536_pixels output_cost_per_image_above_1536_and_1024_pixels \
+      output_cost_per_image_above_1024_and_1024_pixels_low_quality \
+      output_cost_per_image_above_1024_and_1536_pixels_low_quality \
+      output_cost_per_image_above_1536_and_1024_pixels_low_quality \
+      output_cost_per_image_above_1024_and_1024_pixels_medium_quality \
+      output_cost_per_image_above_1024_and_1536_pixels_medium_quality \
+      output_cost_per_image_above_1536_and_1024_pixels_medium_quality \
+      output_cost_per_image_above_1024_and_1024_pixels_high_quality \
+      output_cost_per_image_above_1024_and_1536_pixels_high_quality \
+      output_cost_per_image_above_1536_and_1024_pixels_high_quality \
+      output_cost_per_image_above_1024x1024_pixels_standard_quality \
+      output_cost_per_image_above_1024x1536_pixels_standard_quality \
+      output_cost_per_image_above_1536x1024_pixels_standard_quality; do
+      if column_exists_sqlite "$config_db" "governance_model_pricing" "$col"; then
+        echo "UPDATE governance_model_pricing SET $col = NULL WHERE id = 1;" >> "$output_file"
+        echo "UPDATE governance_model_pricing SET $col = NULL WHERE id = 2;" >> "$output_file"
+      fi
+    done
   fi
 
   # logs.redaction_mapping (added via logs_add_redaction_mapping_column)
@@ -3560,6 +3607,8 @@ append_dynamic_columns_sqlite() {
     echo "UPDATE logs SET redaction_mapping = '' WHERE id = 'log-migration-test-001';" >> "$output_file"
     echo "UPDATE logs SET redaction_mapping = '' WHERE id = 'log-migration-test-002';" >> "$output_file"
     echo "UPDATE logs SET redaction_mapping = '' WHERE id = 'log-migration-test-003';" >> "$output_file"
+  fi
+
   # logs.redaction_mapping (added in v1.6.4 via logs_add_redaction_mapping_column -
   # nullable text, stores the encrypted reversible redaction mapping)
   if column_exists_sqlite "$logs_db" "logs" "redaction_mapping"; then

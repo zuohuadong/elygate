@@ -168,7 +168,7 @@ export default function PluginSequenceSheet({ open, onClose, plugins }: PluginSe
 					<Alert variant="info">
 						<AlertDescription>
 							If your config.json file has plugin sequence configured, it will take precedence over the sequence configured in the UI after
-							restarting Elygate.
+							restarting Bifrost.
 						</AlertDescription>
 					</Alert>
 					<div className="flex justify-end gap-2 pt-4">

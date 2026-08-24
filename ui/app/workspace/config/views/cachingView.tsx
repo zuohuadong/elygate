@@ -525,12 +525,12 @@ export default function CachingView() {
 												id="vector_store_namespace"
 												data-testid="caching-vector-store-namespace-input"
 												type="text"
-												placeholder="ElygateLocalCachePlugin"
+												placeholder="BifrostLocalCachePlugin"
 												value={cacheConfig.vector_store_namespace ?? ""}
 												onChange={(e) => updateLocal({ vector_store_namespace: e.target.value })}
 											/>
 											<p className="text-muted-foreground text-xs">
-												Bucket/index name where cache entries live. Leave blank to use the default (<code>ElygateLocalCachePlugin</code>).
+												Bucket/index name where cache entries live. Leave blank to use the default (<code>BifrostLocalCachePlugin</code>).
 												Changing this points the plugin at a different (possibly empty) bucket. Old entries are not deleted, they just stop
 												being queried.
 											</p>

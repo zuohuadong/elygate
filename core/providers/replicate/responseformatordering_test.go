@@ -59,3 +59,37 @@ func TestResponseFormatOrderSurvivesReplicateResponses(t *testing.T) {
 	require.NoError(t, err)
 	schemaorder.AssertPropertyOrder(t, string(raw))
 }
+
+// ResponsesTextConfigFormatFromChatResponseFormat returns a non-nil format for every
+// recognized response_format.type, and for "text"/"json_object" that format carries only
+// Type -- no schema. Assigning it anyway sent gpt-5-structured a schema-less structured
+// output config (`json_schema: {"format":{"type":"json_object"}}`), which is not a
+// structured-output request at all.
+func TestSchemalessResponseFormatDoesNotReachReplicateJsonSchema(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{"json_object", `{"response_format":{"type":"json_object"}}`},
+		{"text", `{"response_format":{"type":"text"}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var params schemas.ChatParameters
+			require.NoError(t, schemas.Unmarshal([]byte(tc.body), &params))
+
+			out, err := ToReplicateChatRequest(&schemas.BifrostChatRequest{
+				Provider: schemas.Replicate,
+				Model:    gpt5StructuredModel,
+				Input: []schemas.ChatMessage{{
+					Role:    schemas.ChatMessageRoleUser,
+					Content: &schemas.ChatMessageContent{ContentStr: schemas.Ptr("assign it")},
+				}},
+				Params: &params,
+			})
+			require.NoError(t, err)
+			require.NotNil(t, out.Input)
+			require.Nil(t, out.Input.JsonSchema,
+				"%s carries no schema, so it must not be sent as a json_schema input", tc.name)
+		})
+	}
+}

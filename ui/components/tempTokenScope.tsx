@@ -3,7 +3,7 @@
 //
 //   1. On mount, reads the token from `window.location.hash` and installs it
 //      in the baseApi module state so all RTK Query calls attach a
-//      `X-Elygate-Temp-Token` header.
+//      `X-Bifrost-Temp-Token` header.
 //   2. Strips the fragment from the URL via `history.replaceState` so the
 //      token does not leak into Referer headers if the user later navigates
 //      away.
@@ -29,7 +29,7 @@ export default function TempTokenScope({ name: _name, children }: TempTokenScope
 	// Install the module state synchronously during render — NOT in useEffect.
 	// React fires child effects before parent effects, so a child API call
 	// triggered from its own useEffect would race ahead of a parent useEffect
-	// and go out without the X-Elygate-Temp-Token header (and without the
+	// and go out without the X-Bifrost-Temp-Token header (and without the
 	// global-401 suppression flag set, so the 401 would force a /login
 	// redirect). useState's initializer runs once during the parent's render,
 	// strictly before any descendant render or effect — so by the time the

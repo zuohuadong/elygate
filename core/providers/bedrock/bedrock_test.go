@@ -4719,6 +4719,74 @@ func TestDocumentInlineTextDataURL(t *testing.T) {
 	assert.Equal(t, base64.StdEncoding.EncodeToString([]byte("%PDF-1.4")), *doc.Source.Bytes)
 }
 
+// A non-base64 data URL payload is percent-encoded by definition, so a malformed
+// escape is malformed input, not content. Swallowing the PathUnescape error sent
+// the literal "%ZZ" bytes to Bedrock as if the caller had asked for them.
+func TestDocumentInlineTextDataURLRejectsMalformedEscape(t *testing.T) {
+	t.Parallel()
+
+	ctx := schemas.NewBifrostContext(context.Background(), schemas.NoDeadline)
+
+	t.Run("Chat", func(t *testing.T) {
+		t.Parallel()
+
+		bifrostReq := &schemas.BifrostChatRequest{
+			Provider: schemas.Bedrock,
+			Model:    "anthropic.claude-sonnet-4-5-20250929-v1:0",
+			Input: []schemas.ChatMessage{
+				{
+					Role: schemas.ChatMessageRoleUser,
+					Content: &schemas.ChatMessageContent{
+						ContentBlocks: []schemas.ChatContentBlock{
+							{
+								Type: schemas.ChatContentBlockTypeFile,
+								File: &schemas.ChatInputFile{
+									Filename: schemas.Ptr("notes.txt"),
+									FileData: schemas.Ptr("data:text/plain,%ZZ"),
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		_, err := bedrock.ToBedrockChatCompletionRequest(ctx, bifrostReq)
+		require.Error(t, err, "a malformed percent escape must not be forwarded verbatim")
+		assert.Contains(t, err.Error(), "percent-encoded")
+	})
+
+	t.Run("Responses", func(t *testing.T) {
+		t.Parallel()
+
+		bifrostReq := &schemas.BifrostResponsesRequest{
+			Provider: schemas.Bedrock,
+			Model:    "anthropic.claude-sonnet-4-5-20250929-v1:0",
+			Input: []schemas.ResponsesMessage{
+				{
+					Type: schemas.Ptr(schemas.ResponsesMessageTypeMessage),
+					Role: schemas.Ptr(schemas.ResponsesInputMessageRoleUser),
+					Content: &schemas.ResponsesMessageContent{
+						ContentBlocks: []schemas.ResponsesMessageContentBlock{
+							{
+								Type: schemas.ResponsesInputMessageContentBlockTypeFile,
+								ResponsesInputMessageContentBlockFile: &schemas.ResponsesInputMessageContentBlockFile{
+									Filename: schemas.Ptr("notes.txt"),
+									FileData: schemas.Ptr("data:text/plain,%ZZ"),
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		_, err := bedrock.ToBedrockResponsesRequest(ctx, bifrostReq)
+		require.Error(t, err, "a malformed percent escape must not be forwarded verbatim")
+		assert.Contains(t, err.Error(), "percent-encoded")
+	})
+}
+
 // The Responses path had its own copy of the format mapping with the same defect.
 func TestToBedrockResponsesRequest_DocumentFormatFromDataURL(t *testing.T) {
 	t.Parallel()

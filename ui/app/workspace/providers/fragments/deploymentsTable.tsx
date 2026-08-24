@@ -419,7 +419,7 @@ function ExpandedConfigPanel({
 						</SelectContent>
 					</Select>
 				</FieldRow>
-				<FieldRow label="Description" hint="Note for users. Not used by Elygate.">
+				<FieldRow label="Description" hint="Note for users. Not used by Bifrost.">
 					<Textarea
 						value={config.description ?? ""}
 						onChange={(e) => {

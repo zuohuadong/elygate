@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { ElygateImageGenerationOutput, ImageEditInput, ImageVariationInput } from "@/lib/types/logs";
+import { BifrostImageGenerationOutput, ImageEditInput, ImageVariationInput } from "@/lib/types/logs";
 import { Image, ChevronLeft, ChevronRight } from "lucide-react";
 import { ImageMessage } from "@/components/chat/ImageMessage";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,7 @@ interface ImageViewProps {
 	imageInput?: ImageGenerationInput;
 	imageEditInput?: ImageEditInput;
 	imageVariationInput?: ImageVariationInput;
-	imageOutput?: ElygateImageGenerationOutput;
+	imageOutput?: BifrostImageGenerationOutput;
 	requestType?: string;
 }
 

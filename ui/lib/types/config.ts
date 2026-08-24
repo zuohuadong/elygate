@@ -326,6 +326,7 @@ export type RequestType =
 	| "ocr"
 	| "ocr_stream"
 	| "video_generation"
+	| "video_edit"
 	| "video_retrieve"
 	| "video_download"
 	| "video_delete"
@@ -336,6 +337,7 @@ export type RequestType =
 	| "batch_list"
 	| "batch_retrieve"
 	| "batch_cancel"
+	| "batch_delete"
 	| "batch_results"
 	| "file_upload"
 	| "file_list"
@@ -383,6 +385,7 @@ export interface AllowedRequests {
 	list_models: boolean;
 	rerank: boolean;
 	video_generation: boolean;
+	video_edit: boolean;
 	video_retrieve: boolean;
 	video_download: boolean;
 	video_delete: boolean;
@@ -466,8 +469,8 @@ export interface ListProviderKeysResponse {
 	total: number;
 }
 
-// ElygateErrorResponse matching Go's schemas.ElygateError
-export interface ElygateErrorResponse {
+// BifrostErrorResponse matching Go's schemas.BifrostError
+export interface BifrostErrorResponse {
 	event_id?: string;
 	type?: string;
 	is_bifrost_error: boolean;
@@ -568,7 +571,7 @@ export interface RestartRequiredConfig {
 	reason?: string;
 }
 
-// Elygate Config
+// Bifrost Config
 export type PluginSpanFilterMode = "include" | "exclude";
 
 export interface PluginSpanFilter {
@@ -576,7 +579,7 @@ export interface PluginSpanFilter {
 	plugins: string[];
 }
 
-export interface ElygateConfig {
+export interface BifrostConfig {
 	client_config: CoreConfig;
 	framework_config: FrameworkConfig;
 	auth_config?: AuthConfig;
@@ -599,7 +602,7 @@ export interface CompatConfig {
 	should_convert_params: boolean;
 }
 
-// Core Elygate configuration types
+// Core Bifrost configuration types
 export interface CoreConfig {
 	drop_excess_requests: boolean;
 	initial_pool_size: number;

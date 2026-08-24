@@ -21,13 +21,18 @@ import { dirname, basename, join } from "node:path";
 // import before the module body runs, so a failure there throws before any try block is entered
 // and the guard below could never catch it. `await import(...)` moves the load inside the guard,
 // which is the only arrangement where the fallback actually runs.
+// Returns { cells, error }. An empty census and a FAILED census are not the same thing: with
+// [] every backend has zero expected cells, so `missing` computes to 0, no backend row is
+// emitted and no coverage warning fires -- a broken import renders as full coverage. The error
+// is carried into the report instead (see the coverage-accounting banner below) rather than
+// left in a console line the Makefile's `|| true` throws away.
 const expectedCells = async () => {
   try {
     const { expectedTokenParityCells } = await import("./lib/token-parity-matrix.mjs");
-    return expectedTokenParityCells();
+    return { cells: expectedTokenParityCells(), error: null };
   } catch (err) {
     console.error(`[render-token-parity-report] cell census unavailable: ${err.message}`);
-    return [];
+    return { cells: [], error: err.message };
   }
 };
 
@@ -35,7 +40,7 @@ const args = Object.fromEntries(
   process.argv.slice(2).reduce((acc, cur, i, arr) => {
     if (cur.startsWith("--")) acc.push([cur.slice(2), arr[i + 1]]);
     return acc;
-  }, [])
+  }, []),
 );
 
 const GLOB = args.glob || "tmp/harness-token-parity-*.json";
@@ -59,7 +64,7 @@ for (const file of fragmentFiles) {
 
 if (rows.length === 0) {
   console.error(
-    `[render-token-parity-report] no fragments matched ${GLOB} - run the parity matrix first (FOLDER="Cross-Cut Round 33: Direct-Provider vs Bifrost Token Parity Matrix (generated)")`
+    `[render-token-parity-report] no fragments matched ${GLOB} - run the parity matrix first (FOLDER="Cross-Cut Round 33: Direct-Provider vs Bifrost Token Parity Matrix (generated)")`,
   );
   process.exit(0);
 }
@@ -67,7 +72,9 @@ if (rows.length === 0) {
 // Last write wins per (backend, modality) - RERUN_FAILED / sequential reruns can produce dupes.
 const byKey = new Map();
 for (const r of rows) byKey.set(`${r.backend}/${r.modality}`, r);
-const merged = [...byKey.values()].sort((a, b) => (a.backend + a.modality).localeCompare(b.backend + b.modality));
+const merged = [...byKey.values()].sort((a, b) =>
+  (a.backend + a.modality).localeCompare(b.backend + b.modality),
+);
 
 // Must mirror token-parity-matrix.mjs's TOLERANCE_PCT/COMPLETION_ABS_FLOOR exactly - this
 // report's verdict column and the actual pm.test assertions embedded in the generated Postman
@@ -111,13 +118,15 @@ lines.push(
   `Generated from ${fragmentFiles.length} newman process(es), ${merged.length} backend/modality cell(s). ` +
     `Tolerance: prompt within ${TOLERANCE_PCT}% of round 1; completion within ${TOLERANCE_PCT}% or ${COMPLETION_ABS_FLOOR} tokens of round 3 cumulative, whichever is looser. ` +
     `Cached is reported, not asserted: no body here sets a cache_control breakpoint, so a non-zero count can only come from implicit caching - which is best-effort, and which the two legs cannot share because they deliberately send different bytes (direct posts each backend's native shape, Bifrost normalizes onto one). ` +
-    `reasoning_on/reasoning_on_streaming are reported as INFO, not asserted (see token-parity-matrix.mjs). Δ = bifrost - direct.`
+    `reasoning_on/reasoning_on_streaming are reported as INFO, not asserted (see token-parity-matrix.mjs). Δ = bifrost - direct.`,
 );
 lines.push("");
 lines.push(
-  "| Backend | Modality | Direct model | Bifrost model | Bifrost baseUrl | Bifrost endpoint | Direct prompt | Bifrost prompt | Δ | Direct cached | Bifrost cached | Δ | Direct completion | Bifrost completion | Δ | Direct total | Bifrost total | Δ | Verdict |"
+  "| Backend | Modality | Direct model | Bifrost model | Bifrost baseUrl | Bifrost endpoint | Direct prompt | Bifrost prompt | Δ | Direct cached | Bifrost cached | Δ | Direct completion | Bifrost completion | Δ | Direct total | Bifrost total | Δ | Verdict |",
 );
-lines.push("|---|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|");
+lines.push(
+  "|---|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
+);
 for (const r of merged) {
   const endpoint = r.bifrost.endpoint || "{{baseUrl}}/v1/chat/completions";
   const directModel = r.direct.model || "-";
@@ -128,7 +137,7 @@ for (const r of merged) {
       `| ${r.direct.cached} | ${r.bifrost.cached} | ${tokenDelta(r.direct.cached, r.bifrost.cached)} ` +
       `| ${r.direct.completion} | ${r.bifrost.completion} | ${tokenDelta(r.direct.completion, r.bifrost.completion)} ` +
       `| ${r.direct.total} | ${r.bifrost.total} | ${tokenDelta(r.direct.total, r.bifrost.total)} ` +
-      `| ${verdict(r)} |`
+      `| ${verdict(r)} |`,
   );
 }
 lines.push("");
@@ -143,16 +152,29 @@ const TOTAL_DIVERGENCE_FLOOR = 100;
 const unexplainedTotals = merged.filter((r) => {
   const totalGap = Math.abs((r.bifrost.total || 0) - (r.direct.total || 0));
   if (totalGap < TOTAL_DIVERGENCE_FLOOR) return false;
-  return withinPct(r.direct.prompt, r.bifrost.prompt, TOLERANCE_PCT) && withinPct(r.direct.completion, r.bifrost.completion, TOLERANCE_PCT);
+  return (
+    withinPct(r.direct.prompt, r.bifrost.prompt, TOLERANCE_PCT) &&
+    withinPct(r.direct.completion, r.bifrost.completion, TOLERANCE_PCT)
+  );
 });
 if (unexplainedTotals.length > 0) {
-  lines.push("> **Unexplained total-token divergence.** These cells agree on prompt and completion -- the two");
-  lines.push("> asserted columns -- but disagree on total by more than " + TOTAL_DIVERGENCE_FLOOR + " tokens. Total is reported,");
-  lines.push("> not asserted, so this does not fail; it is surfaced because a gap the asserted columns cannot");
+  lines.push(
+    "> **Unexplained total-token divergence.** These cells agree on prompt and completion -- the two",
+  );
+  lines.push(
+    "> asserted columns -- but disagree on total by more than " +
+      TOTAL_DIVERGENCE_FLOOR +
+      " tokens. Total is reported,",
+  );
+  lines.push(
+    "> not asserted, so this does not fail; it is surfaced because a gap the asserted columns cannot",
+  );
   lines.push("> explain is worth a look before it is assumed benign.");
   lines.push("");
   for (const r of unexplainedTotals) {
-    lines.push(`> - ${r.backend}/${r.modality}: direct ${r.direct.total} vs bifrost ${r.bifrost.total} (${tokenDelta(r.direct.total, r.bifrost.total)})`);
+    lines.push(
+      `> - ${r.backend}/${r.modality}: direct ${r.direct.total} vs bifrost ${r.bifrost.total} (${tokenDelta(r.direct.total, r.bifrost.total)})`,
+    );
   }
   lines.push("");
 }
@@ -169,7 +191,7 @@ for (const r of merged) {
 // all, so summarizing only what came back rendered it as absent -- and an all-green report missing
 // three of its seven backends reads as healthier than a red one. Missing cells are counted and
 // named here instead.
-const census = await expectedCells();
+const { cells: census, error: censusError } = await expectedCells();
 const expectedByBackend = new Map();
 for (const c of census) {
   const list = expectedByBackend.get(c.backend) || [];
@@ -179,7 +201,9 @@ for (const c of census) {
 
 lines.push("### Per-model summary");
 lines.push("");
-lines.push("| Backend | Expected | Reported | Passing | Failing | Info (not asserted) | Skipped (documented) | Missing |");
+lines.push(
+  "| Backend | Expected | Reported | Passing | Failing | Info (not asserted) | Skipped (documented) | Missing |",
+);
 lines.push("|---|---:|---:|---:|---:|---:|---:|---:|");
 const backendNames = [...new Set([...expectedByBackend.keys(), ...byBackend.keys()])].sort();
 const gaps = [];
@@ -192,22 +216,63 @@ for (const backend of backendNames) {
   const failing = list.filter((r) => verdict(r) === "FAIL").length;
   const info = list.filter((r) => verdict(r) === "INFO").length;
   // Gated cells were deliberately not built this run, so they are neither expected nor missing.
-  const missing = Math.max(0, runnable.length - list.length);
+  //
+  // Missing is computed from cell KEYS, not counts. Subtracting list.length from
+  // runnable.length let one genuinely absent expected modality be cancelled out by one
+  // unexpected reported modality, so the report claimed zero missing cells while coverage
+  // was actually wrong. The keys are named in the gap line so the absent cell is identifiable.
+  const reportedKeys = new Set(list.map((r) => `${r.backend}/${r.modality}`));
+  const missingCells = runnable.filter((c) => !reportedKeys.has(`${c.backend}/${c.modality}`));
+  const missing = missingCells.length;
   if (missing > 0) {
-    gaps.push(`${backend}: ${missing} cell(s) expected but absent from the report`);
+    gaps.push(
+      `${backend}: ${missing} cell(s) expected but absent from the report - ${missingCells
+        .map((c) => c.modality)
+        .join(", ")}`,
+    );
+  }
+  const unexpected = list.filter((r) => !runnable.some((c) => c.modality === r.modality));
+  if (unexpected.length > 0) {
+    gaps.push(
+      `${backend}: ${unexpected.length} reported cell(s) not in the census - ${unexpected
+        .map((r) => r.modality)
+        .join(", ")}`,
+    );
   }
   if (gated.length > 0) {
     gaps.push(`${backend}: ${gated.length} cell(s) not run - ${gated[0].reason}`);
   }
   lines.push(
-    `| ${backend} | ${runnable.length} | ${list.length} | ${list.length - failing - info} | ${failing} | ${info} | ${skipped.length} | ${missing} |`
+    `| ${backend} | ${runnable.length} | ${list.length} | ${list.length - failing - info} | ${failing} | ${info} | ${skipped.length} | ${missing} |`,
   );
 }
 lines.push("");
+if (censusError) {
+  // Loud, and above the gaps block: with no census every Missing count below is 0 and every
+  // backend row is derived from reported data alone, so the numbers cannot be read as coverage.
+  lines.push(
+    "> **:rotating_light: Coverage accounting FAILED.** The expected-cell census could not be loaded:",
+  );
+  lines.push(`> \`${censusError}\``);
+  lines.push(
+    "> Every `Expected` and `Missing` figure below is therefore 0 by default, and a backend whose",
+  );
+  lines.push(
+    "> cells all errored will not appear at all. Treat this report as unable to account for coverage,",
+  );
+  lines.push("> not as evidence of it, until the census import is fixed.");
+  lines.push("");
+}
 if (gaps.length > 0) {
-  lines.push("> **Coverage gaps this run.** A cell counted under `Missing` was expected to produce a row and did not.");
-  lines.push("> Either its requests all errored (check `tmp/harness-failures.md`) or the run was filtered and never");
-  lines.push("> reached them (`PROVIDER=`/`FEATURE=`/`SMOKE=`). Whichever it was, the cell was not measured -- so it is");
+  lines.push(
+    "> **Coverage gaps this run.** A cell counted under `Missing` was expected to produce a row and did not.",
+  );
+  lines.push(
+    "> Either its requests all errored (check `tmp/harness-failures.md`) or the run was filtered and never",
+  );
+  lines.push(
+    "> reached them (`PROVIDER=`/`FEATURE=`/`SMOKE=`). Whichever it was, the cell was not measured -- so it is",
+  );
   lines.push("> not a pass, and the verdict counts to its left do not cover it.");
   lines.push("");
   for (const g of gaps) {
@@ -219,17 +284,25 @@ if (gaps.length > 0) {
 writeFileSync(OUT, lines.join("\n") + "\n");
 const totalFail = merged.filter((r) => verdict(r) === "FAIL").length;
 const totalInfo = merged.filter((r) => verdict(r) === "INFO").length;
-console.error(`[render-token-parity-report] wrote ${OUT} (${merged.length} cells, ${totalFail} failing, ${totalInfo} info)`);
+console.error(
+  `[render-token-parity-report] wrote ${OUT} (${merged.length} cells, ${totalFail} failing, ${totalInfo} info)`,
+);
 
 // --- htmlextra injection ---
-const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const esc = (s) =>
+  String(s).replace(
+    /[&<>"']/g,
+    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c],
+  );
 
 if (existsSync(HTML)) {
   const START = "<!-- TOKEN_PARITY_REPORT_START -->";
   const END = "<!-- TOKEN_PARITY_REPORT_END -->";
   const cellRows = merged
     .map(
-      (r) => `<tr class="${verdict(r) === "FAIL" ? "tp-fail" : verdict(r) === "INFO" ? "tp-info" : "tp-pass"}">
+      (
+        r,
+      ) => `<tr class="${verdict(r) === "FAIL" ? "tp-fail" : verdict(r) === "INFO" ? "tp-info" : "tp-pass"}">
         <td>${esc(r.backend)}</td><td>${esc(r.modality)}</td>
         <td><code>${esc(r.direct.model || "-")}</code></td><td><code>${esc(r.bifrost.model || "-")}</code></td>
         <td><code>${esc(r.bifrost.baseUrl || "-")}</code></td><td><code>${esc(r.bifrost.endpoint || "{{baseUrl}}/v1/chat/completions")}</code></td>
@@ -238,7 +311,7 @@ if (existsSync(HTML)) {
         <td>${r.direct.completion}</td><td>${r.bifrost.completion}</td><td>${tokenDelta(r.direct.completion, r.bifrost.completion)}</td>
         <td>${r.direct.total}</td><td>${r.bifrost.total}</td><td>${tokenDelta(r.direct.total, r.bifrost.total)}</td>
         <td>${verdict(r)}</td>
-      </tr>`
+      </tr>`,
     )
     .join("\n");
   const section = `${START}
@@ -281,11 +354,15 @@ ${END}`;
     ? html.replace(markerRe, section)
     : html.replace(/<body[^>]*>/, (m) => `${m}\n${section}`);
   if (injected === html && !markerRe.test(html)) {
-    console.error(`[render-token-parity-report] no <body> tag found in ${HTML} - skipped HTML injection`);
+    console.error(
+      `[render-token-parity-report] no <body> tag found in ${HTML} - skipped HTML injection`,
+    );
   } else {
     writeFileSync(HTML, injected);
     console.error(`[render-token-parity-report] injected token parity table into ${HTML}`);
   }
 } else {
-  console.error(`[render-token-parity-report] ${HTML} not found (parallel mode doesn't emit htmlextra) - skipped HTML injection`);
+  console.error(
+    `[render-token-parity-report] ${HTML} not found (parallel mode doesn't emit htmlextra) - skipped HTML injection`,
+  );
 }

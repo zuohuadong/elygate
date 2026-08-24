@@ -599,12 +599,7 @@
                   "required": ["override_mode"]
                 },
                 "then": {
-                  "required": [
-                    "override_amount",
-                    "override_cycles_remaining",
-                    "override_cycles_total",
-                    "override_anchor_reset"
-                  ],
+                  "required": ["override_amount", "override_cycles_remaining", "override_cycles_total", "override_anchor_reset"],
                   "properties": {
                     "override_amount": { "exclusiveMinimum": 0 },
                     "override_cycles_remaining": { "minimum": 1 },
@@ -1178,19 +1173,13 @@
                         "webhook_url": {
                           "type": "string",
                           "minLength": 1,
-                          "anyOf": [
-                            { "format": "uri" },
-                            { "pattern": "^env\\.[A-Za-z_][A-Za-z0-9_]*$" }
-                          ],
+                          "anyOf": [{ "format": "uri" }, { "pattern": "^env\\.[A-Za-z_][A-Za-z0-9_]*$" }],
                           "description": "Slack incoming webhook URL. Supports env.VAR_NAME references."
                         },
                         "url": {
                           "type": "string",
                           "minLength": 1,
-                          "anyOf": [
-                            { "format": "uri" },
-                            { "pattern": "^env\\.[A-Za-z_][A-Za-z0-9_]*$" }
-                          ],
+                          "anyOf": [{ "format": "uri" }, { "pattern": "^env\\.[A-Za-z_][A-Za-z0-9_]*$" }],
                           "description": "Alias for webhook_url. Supports env.VAR_NAME references."
                         }
                       },
@@ -1214,19 +1203,13 @@
                         "webhook_url": {
                           "type": "string",
                           "minLength": 1,
-                          "anyOf": [
-                            { "format": "uri" },
-                            { "pattern": "^env\\.[A-Za-z_][A-Za-z0-9_]*$" }
-                          ],
+                          "anyOf": [{ "format": "uri" }, { "pattern": "^env\\.[A-Za-z_][A-Za-z0-9_]*$" }],
                           "description": "Microsoft Teams incoming webhook or workflow URL. Supports env.VAR_NAME references."
                         },
                         "url": {
                           "type": "string",
                           "minLength": 1,
-                          "anyOf": [
-                            { "format": "uri" },
-                            { "pattern": "^env\\.[A-Za-z_][A-Za-z0-9_]*$" }
-                          ],
+                          "anyOf": [{ "format": "uri" }, { "pattern": "^env\\.[A-Za-z_][A-Za-z0-9_]*$" }],
                           "description": "Alias for webhook_url. Supports env.VAR_NAME references."
                         }
                       },
@@ -1258,10 +1241,7 @@
                           "description": "Alias for routing_key. Supports env.VAR_NAME references."
                         }
                       },
-                      "oneOf": [
-                        { "required": ["routing_key"] },
-                        { "required": ["integration_key"] }
-                      ],
+                      "oneOf": [{ "required": ["routing_key"] }, { "required": ["integration_key"] }],
                       "additionalProperties": true
                     }
                   },
@@ -1281,19 +1261,13 @@
                         "url": {
                           "type": "string",
                           "minLength": 1,
-                          "anyOf": [
-                            { "format": "uri" },
-                            { "pattern": "^env\\.[A-Za-z_][A-Za-z0-9_]*$" }
-                          ],
+                          "anyOf": [{ "format": "uri" }, { "pattern": "^env\\.[A-Za-z_][A-Za-z0-9_]*$" }],
                           "description": "Generic webhook URL. Supports env.VAR_NAME references."
                         },
                         "webhook_url": {
                           "type": "string",
                           "minLength": 1,
-                          "anyOf": [
-                            { "format": "uri" },
-                            { "pattern": "^env\\.[A-Za-z_][A-Za-z0-9_]*$" }
-                          ],
+                          "anyOf": [{ "format": "uri" }, { "pattern": "^env\\.[A-Za-z_][A-Za-z0-9_]*$" }],
                           "description": "Alias for url. Supports env.VAR_NAME references."
                         },
                         "headers": {
@@ -1380,15 +1354,7 @@
                 "description": "ID of the explicit target referenced by target_type."
               }
             },
-            "required": [
-              "id",
-              "name",
-              "enabled",
-              "scope_type",
-              "scope_id",
-              "cel_expression",
-              "channel_ids"
-            ],
+            "required": ["id", "name", "enabled", "scope_type", "scope_id", "cel_expression", "channel_ids"],
             "allOf": [
               {
                 "if": {
@@ -1417,109 +1383,109 @@
       "type": "array",
       "description": "Webhook endpoint declarations synced into the database at startup, reconciled by name.",
       "items": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "description": "Stable endpoint ID. Generated when omitted."
-          },
-          "name": {
-            "type": "string",
-            "description": "Unique endpoint name."
-          },
-          "url": {
-            "type": "string",
-            "description": "Delivery URL. HTTPS required unless allow_private_network is set; credentials and fragments are rejected; link-local and metadata addresses are always blocked."
-          },
-          "secret": {
-            "anyOf": [
-              { "type": "string" },
-              {
-                "type": "object",
-                "properties": {
-                  "value": { "type": "string" },
-                  "env_var": { "type": "string" },
-                  "from_env": { "type": "boolean" }
-                },
-                "additionalProperties": false
-              }
-            ],
-            "description": "Signing secret in the whsec_ format. Best supplied as an env reference (\"env.MY_VAR\"); generated when omitted."
-          },
-          "events": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "enum": ["async_job.completed", "async_job.failed"]
-            },
-            "description": "Events this endpoint subscribes to."
-          },
-          "headers": {
             "type": "object",
-            "additionalProperties": {
-              "anyOf": [
-                { "type": "string" },
-                {
-                  "type": "object",
-                  "properties": {
-                    "value": { "type": "string" },
-                    "env_var": { "type": "string" },
-                    "from_env": { "type": "boolean" }
-                  },
-                  "additionalProperties": false
-                }
-              ]
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Stable endpoint ID. Generated when omitted."
+              },
+              "name": {
+                "type": "string",
+                "description": "Unique endpoint name."
+              },
+              "url": {
+                "type": "string",
+                "description": "Delivery URL. HTTPS required unless allow_private_network is set; credentials and fragments are rejected; link-local and metadata addresses are always blocked."
+              },
+              "secret": {
+                "anyOf": [
+                  { "type": "string" },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "value": { "type": "string" },
+                      "env_var": { "type": "string" },
+                      "from_env": { "type": "boolean" }
+                    },
+                    "additionalProperties": false
+                  }
+                ],
+                "description": "Signing secret in the whsec_ format. Best supplied as an env reference (\"env.MY_VAR\"); generated when omitted."
+              },
+              "events": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": ["async_job.completed", "async_job.failed"]
+                },
+                "description": "Events this endpoint subscribes to."
+              },
+              "headers": {
+                "type": "object",
+                "additionalProperties": {
+                  "anyOf": [
+                    { "type": "string" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "value": { "type": "string" },
+                        "env_var": { "type": "string" },
+                        "from_env": { "type": "boolean" }
+                      },
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "description": "Custom headers sent with every delivery (e.g. an Authorization value the receiver requires). Values support env var syntax (\"env.MY_VAR\") and are encrypted at rest. Reserved delivery headers (webhook-id, webhook-timestamp, webhook-signature, content-type, etc.) cannot be overridden."
+              },
+              "include_response": {
+                "type": "boolean",
+                "default": false,
+                "description": "Inline the job response into delivery payloads, capped by max_response_payload_kbs."
+              },
+              "allow_private_network": {
+                "type": "boolean",
+                "default": false,
+                "description": "Permit private-network receivers and plain http. Link-local and metadata addresses stay blocked."
+              },
+              "disabled": {
+                "type": "boolean",
+                "default": false,
+                "description": "Register the endpoint without delivering to it."
+              },
+              "max_retries": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "How many times a failed delivery is retried after its first attempt (default: 4)."
+              },
+              "retry_backoff_initial_seconds": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "Delay before the first retry in seconds; each further retry doubles it (default: 30)."
+              },
+              "retry_backoff_max_seconds": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "Cap on the per-retry delay in seconds (default: 1800)."
+              },
+              "attempt_timeout_seconds": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "End-to-end bound for one delivery attempt in seconds (default: 10)."
+              },
+              "max_response_payload_kbs": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "Cap for inlined response/error payloads in KB when include_response is set (default: 256). Oversized values are omitted and flagged with response_omitted/error_omitted."
+              },
+              "max_concurrent_deliveries": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "Concurrent in-flight deliveries to this endpoint per node (default: 10)."
+              }
             },
-            "description": "Custom headers sent with every delivery (e.g. an Authorization value the receiver requires). Values support env var syntax (\"env.MY_VAR\") and are encrypted at rest. Reserved delivery headers (webhook-id, webhook-timestamp, webhook-signature, content-type, etc.) cannot be overridden."
-          },
-          "include_response": {
-            "type": "boolean",
-            "default": false,
-            "description": "Inline the job response into delivery payloads, capped by max_response_payload_kbs."
-          },
-          "allow_private_network": {
-            "type": "boolean",
-            "default": false,
-            "description": "Permit private-network receivers and plain http. Link-local and metadata addresses stay blocked."
-          },
-          "disabled": {
-            "type": "boolean",
-            "default": false,
-            "description": "Register the endpoint without delivering to it."
-          },
-          "max_retries": {
-            "type": "integer",
-            "minimum": 1,
-            "description": "How many times a failed delivery is retried after its first attempt (default: 4)."
-          },
-          "retry_backoff_initial_seconds": {
-            "type": "integer",
-            "minimum": 1,
-            "description": "Delay before the first retry in seconds; each further retry doubles it (default: 30)."
-          },
-          "retry_backoff_max_seconds": {
-            "type": "integer",
-            "minimum": 1,
-            "description": "Cap on the per-retry delay in seconds (default: 1800)."
-          },
-          "attempt_timeout_seconds": {
-            "type": "integer",
-            "minimum": 1,
-            "description": "End-to-end bound for one delivery attempt in seconds (default: 10)."
-          },
-          "max_response_payload_kbs": {
-            "type": "integer",
-            "minimum": 1,
-            "description": "Cap for inlined response/error payloads in KB when include_response is set (default: 256). Oversized values are omitted and flagged with response_omitted/error_omitted."
-          },
-          "max_concurrent_deliveries": {
-            "type": "integer",
-            "minimum": 1,
-            "description": "Concurrent in-flight deliveries to this endpoint per node (default: 10)."
-          }
-        },
-        "required": ["name", "url", "events"],
-        "additionalProperties": false
+            "required": ["name", "url", "events"],
+            "additionalProperties": false
       }
     },
     "mcp": {
@@ -1727,7 +1693,13 @@
                     "default": "5m"
                   }
                 },
-                "required": ["host", "port", "user", "db_name", "ssl_mode"],
+                "required": [
+                  "host",
+                  "port",
+                  "user",
+                  "db_name",
+                  "ssl_mode"
+                ],
                 "oneOf": [
                   {
                     "required": ["password"]
@@ -1767,90 +1739,12 @@
               "type": "object",
               "description": "AWS Secrets Manager configuration",
               "properties": {
-                "region": {
-                  "anyOf": [
-                    { "type": "string" },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "value": { "type": "string" },
-                        "env_var": { "type": "string" },
-                        "from_env": { "type": "boolean" }
-                      },
-                      "additionalProperties": false
-                    }
-                  ]
-                },
-                "access_key_id": {
-                  "anyOf": [
-                    { "type": "string" },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "value": { "type": "string" },
-                        "env_var": { "type": "string" },
-                        "from_env": { "type": "boolean" }
-                      },
-                      "additionalProperties": false
-                    }
-                  ]
-                },
-                "secret_access_key": {
-                  "anyOf": [
-                    { "type": "string" },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "value": { "type": "string" },
-                        "env_var": { "type": "string" },
-                        "from_env": { "type": "boolean" }
-                      },
-                      "additionalProperties": false
-                    }
-                  ]
-                },
-                "session_token": {
-                  "anyOf": [
-                    { "type": "string" },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "value": { "type": "string" },
-                        "env_var": { "type": "string" },
-                        "from_env": { "type": "boolean" }
-                      },
-                      "additionalProperties": false
-                    }
-                  ]
-                },
-                "role_arn": {
-                  "anyOf": [
-                    { "type": "string" },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "value": { "type": "string" },
-                        "env_var": { "type": "string" },
-                        "from_env": { "type": "boolean" }
-                      },
-                      "additionalProperties": false
-                    }
-                  ]
-                },
-                "kms_key_id": {
-                  "anyOf": [
-                    { "type": "string" },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "value": { "type": "string" },
-                        "env_var": { "type": "string" },
-                        "from_env": { "type": "boolean" }
-                      },
-                      "additionalProperties": false
-                    }
-                  ]
-                }
+                "region": { "anyOf": [{ "type": "string" }, { "type": "object", "properties": { "value": { "type": "string" }, "env_var": { "type": "string" }, "from_env": { "type": "boolean" } }, "additionalProperties": false }] },
+                "access_key_id": { "anyOf": [{ "type": "string" }, { "type": "object", "properties": { "value": { "type": "string" }, "env_var": { "type": "string" }, "from_env": { "type": "boolean" } }, "additionalProperties": false }] },
+                "secret_access_key": { "anyOf": [{ "type": "string" }, { "type": "object", "properties": { "value": { "type": "string" }, "env_var": { "type": "string" }, "from_env": { "type": "boolean" } }, "additionalProperties": false }] },
+                "session_token": { "anyOf": [{ "type": "string" }, { "type": "object", "properties": { "value": { "type": "string" }, "env_var": { "type": "string" }, "from_env": { "type": "boolean" } }, "additionalProperties": false }] },
+                "role_arn": { "anyOf": [{ "type": "string" }, { "type": "object", "properties": { "value": { "type": "string" }, "env_var": { "type": "string" }, "from_env": { "type": "boolean" } }, "additionalProperties": false }] },
+                "kms_key_id": { "anyOf": [{ "type": "string" }, { "type": "object", "properties": { "value": { "type": "string" }, "env_var": { "type": "string" }, "from_env": { "type": "boolean" } }, "additionalProperties": false }] }
               },
               "additionalProperties": false
             },
@@ -1858,34 +1752,8 @@
               "type": "object",
               "description": "GCP Secret Manager configuration",
               "properties": {
-                "project_id": {
-                  "anyOf": [
-                    { "type": "string" },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "value": { "type": "string" },
-                        "env_var": { "type": "string" },
-                        "from_env": { "type": "boolean" }
-                      },
-                      "additionalProperties": false
-                    }
-                  ]
-                },
-                "credentials_json": {
-                  "anyOf": [
-                    { "type": "string" },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "value": { "type": "string" },
-                        "env_var": { "type": "string" },
-                        "from_env": { "type": "boolean" }
-                      },
-                      "additionalProperties": false
-                    }
-                  ]
-                }
+                "project_id": { "anyOf": [{ "type": "string" }, { "type": "object", "properties": { "value": { "type": "string" }, "env_var": { "type": "string" }, "from_env": { "type": "boolean" } }, "additionalProperties": false }] },
+                "credentials_json": { "anyOf": [{ "type": "string" }, { "type": "object", "properties": { "value": { "type": "string" }, "env_var": { "type": "string" }, "from_env": { "type": "boolean" } }, "additionalProperties": false }] }
               },
               "additionalProperties": false
             },
@@ -1893,90 +1761,12 @@
               "type": "object",
               "description": "HashiCorp Vault (KV v2) configuration",
               "properties": {
-                "address": {
-                  "anyOf": [
-                    { "type": "string" },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "value": { "type": "string" },
-                        "env_var": { "type": "string" },
-                        "from_env": { "type": "boolean" }
-                      },
-                      "additionalProperties": false
-                    }
-                  ]
-                },
-                "token": {
-                  "anyOf": [
-                    { "type": "string" },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "value": { "type": "string" },
-                        "env_var": { "type": "string" },
-                        "from_env": { "type": "boolean" }
-                      },
-                      "additionalProperties": false
-                    }
-                  ]
-                },
-                "namespace": {
-                  "anyOf": [
-                    { "type": "string" },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "value": { "type": "string" },
-                        "env_var": { "type": "string" },
-                        "from_env": { "type": "boolean" }
-                      },
-                      "additionalProperties": false
-                    }
-                  ]
-                },
-                "mount_path": {
-                  "anyOf": [
-                    { "type": "string" },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "value": { "type": "string" },
-                        "env_var": { "type": "string" },
-                        "from_env": { "type": "boolean" }
-                      },
-                      "additionalProperties": false
-                    }
-                  ]
-                },
-                "role_id": {
-                  "anyOf": [
-                    { "type": "string" },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "value": { "type": "string" },
-                        "env_var": { "type": "string" },
-                        "from_env": { "type": "boolean" }
-                      },
-                      "additionalProperties": false
-                    }
-                  ]
-                },
-                "secret_id": {
-                  "anyOf": [
-                    { "type": "string" },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "value": { "type": "string" },
-                        "env_var": { "type": "string" },
-                        "from_env": { "type": "boolean" }
-                      },
-                      "additionalProperties": false
-                    }
-                  ]
-                }
+                "address": { "anyOf": [{ "type": "string" }, { "type": "object", "properties": { "value": { "type": "string" }, "env_var": { "type": "string" }, "from_env": { "type": "boolean" } }, "additionalProperties": false }] },
+                "token": { "anyOf": [{ "type": "string" }, { "type": "object", "properties": { "value": { "type": "string" }, "env_var": { "type": "string" }, "from_env": { "type": "boolean" } }, "additionalProperties": false }] },
+                "namespace": { "anyOf": [{ "type": "string" }, { "type": "object", "properties": { "value": { "type": "string" }, "env_var": { "type": "string" }, "from_env": { "type": "boolean" } }, "additionalProperties": false }] },
+                "mount_path": { "anyOf": [{ "type": "string" }, { "type": "object", "properties": { "value": { "type": "string" }, "env_var": { "type": "string" }, "from_env": { "type": "boolean" } }, "additionalProperties": false }] },
+                "role_id": { "anyOf": [{ "type": "string" }, { "type": "object", "properties": { "value": { "type": "string" }, "env_var": { "type": "string" }, "from_env": { "type": "boolean" } }, "additionalProperties": false }] },
+                "secret_id": { "anyOf": [{ "type": "string" }, { "type": "object", "properties": { "value": { "type": "string" }, "env_var": { "type": "string" }, "from_env": { "type": "boolean" } }, "additionalProperties": false }] }
               },
               "additionalProperties": false
             }
@@ -2124,7 +1914,13 @@
                     "default": "5m"
                   }
                 },
-                "required": ["host", "port", "user", "db_name", "ssl_mode"],
+                "required": [
+                  "host",
+                  "port",
+                  "user",
+                  "db_name",
+                  "ssl_mode"
+                ],
                 "oneOf": [
                   {
                     "required": ["password"]
@@ -2242,18 +2038,7 @@
             "bucket": {
               "anyOf": [
                 { "type": "string", "minLength": 1 },
-                {
-                  "type": "object",
-                  "properties": {
-                    "value": { "type": "string" },
-                    "ref": { "type": "string" },
-                    "type": { "type": "string", "enum": ["plain_text", "env", "vault"] },
-                    "env_var": { "type": "string" },
-                    "from_env": { "type": "boolean" }
-                  },
-                  "required": ["value"],
-                  "additionalProperties": false
-                }
+                { "type": "object", "properties": { "value": { "type": "string" }, "ref": { "type": "string" }, "type": { "type": "string", "enum": ["plain_text", "env", "vault"] }, "env_var": { "type": "string" }, "from_env": { "type": "boolean" } }, "required": ["value"], "additionalProperties": false }
               ],
               "description": "Bucket name. Supports env var reference (e.g. env.S3_BUCKET) or a structured secret reference."
             },
@@ -2284,108 +2069,42 @@
               "region": {
                 "anyOf": [
                   { "type": "string" },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "value": { "type": "string" },
-                      "ref": { "type": "string" },
-                      "type": { "type": "string", "enum": ["plain_text", "env", "vault"] },
-                      "env_var": { "type": "string" },
-                      "from_env": { "type": "boolean" }
-                    },
-                    "required": ["value"],
-                    "additionalProperties": false
-                  }
+                  { "type": "object", "properties": { "value": { "type": "string" }, "ref": { "type": "string" }, "type": { "type": "string", "enum": ["plain_text", "env", "vault"] }, "env_var": { "type": "string" }, "from_env": { "type": "boolean" } }, "required": ["value"], "additionalProperties": false }
                 ],
                 "description": "AWS region. Supports env var reference"
               },
               "endpoint": {
                 "anyOf": [
                   { "type": "string" },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "value": { "type": "string" },
-                      "ref": { "type": "string" },
-                      "type": { "type": "string", "enum": ["plain_text", "env", "vault"] },
-                      "env_var": { "type": "string" },
-                      "from_env": { "type": "boolean" }
-                    },
-                    "required": ["value"],
-                    "additionalProperties": false
-                  }
+                  { "type": "object", "properties": { "value": { "type": "string" }, "ref": { "type": "string" }, "type": { "type": "string", "enum": ["plain_text", "env", "vault"] }, "env_var": { "type": "string" }, "from_env": { "type": "boolean" } }, "required": ["value"], "additionalProperties": false }
                 ],
                 "description": "Custom S3-compatible endpoint for MinIO/R2. Supports env var reference"
               },
               "access_key_id": {
                 "anyOf": [
                   { "type": "string" },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "value": { "type": "string" },
-                      "ref": { "type": "string" },
-                      "type": { "type": "string", "enum": ["plain_text", "env", "vault"] },
-                      "env_var": { "type": "string" },
-                      "from_env": { "type": "boolean" }
-                    },
-                    "required": ["value"],
-                    "additionalProperties": false
-                  }
+                  { "type": "object", "properties": { "value": { "type": "string" }, "ref": { "type": "string" }, "type": { "type": "string", "enum": ["plain_text", "env", "vault"] }, "env_var": { "type": "string" }, "from_env": { "type": "boolean" } }, "required": ["value"], "additionalProperties": false }
                 ],
                 "description": "AWS access key ID. Omit to use default credential chain (instance role, env vars, etc.). Supports env var reference"
               },
               "secret_access_key": {
                 "anyOf": [
                   { "type": "string" },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "value": { "type": "string" },
-                      "ref": { "type": "string" },
-                      "type": { "type": "string", "enum": ["plain_text", "env", "vault"] },
-                      "env_var": { "type": "string" },
-                      "from_env": { "type": "boolean" }
-                    },
-                    "required": ["value"],
-                    "additionalProperties": false
-                  }
+                  { "type": "object", "properties": { "value": { "type": "string" }, "ref": { "type": "string" }, "type": { "type": "string", "enum": ["plain_text", "env", "vault"] }, "env_var": { "type": "string" }, "from_env": { "type": "boolean" } }, "required": ["value"], "additionalProperties": false }
                 ],
                 "description": "AWS secret access key. Supports env var reference"
               },
               "session_token": {
                 "anyOf": [
                   { "type": "string" },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "value": { "type": "string" },
-                      "ref": { "type": "string" },
-                      "type": { "type": "string", "enum": ["plain_text", "env", "vault"] },
-                      "env_var": { "type": "string" },
-                      "from_env": { "type": "boolean" }
-                    },
-                    "required": ["value"],
-                    "additionalProperties": false
-                  }
+                  { "type": "object", "properties": { "value": { "type": "string" }, "ref": { "type": "string" }, "type": { "type": "string", "enum": ["plain_text", "env", "vault"] }, "env_var": { "type": "string" }, "from_env": { "type": "boolean" } }, "required": ["value"], "additionalProperties": false }
                 ],
                 "description": "AWS session token for STS temporary credentials. Supports env var reference"
               },
               "role_arn": {
                 "anyOf": [
                   { "type": "string" },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "value": { "type": "string" },
-                      "ref": { "type": "string" },
-                      "type": { "type": "string", "enum": ["plain_text", "env", "vault"] },
-                      "env_var": { "type": "string" },
-                      "from_env": { "type": "boolean" }
-                    },
-                    "required": ["value"],
-                    "additionalProperties": false
-                  }
+                  { "type": "object", "properties": { "value": { "type": "string" }, "ref": { "type": "string" }, "type": { "type": "string", "enum": ["plain_text", "env", "vault"] }, "env_var": { "type": "string" }, "from_env": { "type": "boolean" } }, "required": ["value"], "additionalProperties": false }
                 ],
                 "description": "AWS IAM role ARN for STS AssumeRole. Works with static creds or instance role. Supports env var reference"
               },
@@ -2411,54 +2130,21 @@
               "credentials_json": {
                 "anyOf": [
                   { "type": "string" },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "value": { "type": "string" },
-                      "ref": { "type": "string" },
-                      "type": { "type": "string", "enum": ["plain_text", "env", "vault"] },
-                      "env_var": { "type": "string" },
-                      "from_env": { "type": "boolean" }
-                    },
-                    "required": ["value"],
-                    "additionalProperties": false
-                  }
+                  { "type": "object", "properties": { "value": { "type": "string" }, "ref": { "type": "string" }, "type": { "type": "string", "enum": ["plain_text", "env", "vault"] }, "env_var": { "type": "string" }, "from_env": { "type": "boolean" } }, "required": ["value"], "additionalProperties": false }
                 ],
                 "description": "GCP service account credentials JSON or file path. Omit to use Application Default Credentials. Supports env var reference"
               },
               "credentials": {
                 "anyOf": [
                   { "type": "string" },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "value": { "type": "string" },
-                      "ref": { "type": "string" },
-                      "type": { "type": "string", "enum": ["plain_text", "env", "vault"] },
-                      "env_var": { "type": "string" },
-                      "from_env": { "type": "boolean" }
-                    },
-                    "required": ["value"],
-                    "additionalProperties": false
-                  }
+                  { "type": "object", "properties": { "value": { "type": "string" }, "ref": { "type": "string" }, "type": { "type": "string", "enum": ["plain_text", "env", "vault"] }, "env_var": { "type": "string" }, "from_env": { "type": "boolean" } }, "required": ["value"], "additionalProperties": false }
                 ],
                 "description": "Deprecated: use credentials_json. Kept for backwards compatibility."
               },
               "project_id": {
                 "anyOf": [
                   { "type": "string" },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "value": { "type": "string" },
-                      "ref": { "type": "string" },
-                      "type": { "type": "string", "enum": ["plain_text", "env", "vault"] },
-                      "env_var": { "type": "string" },
-                      "from_env": { "type": "boolean" }
-                    },
-                    "required": ["value"],
-                    "additionalProperties": false
-                  }
+                  { "type": "object", "properties": { "value": { "type": "string" }, "ref": { "type": "string" }, "type": { "type": "string", "enum": ["plain_text", "env", "vault"] }, "env_var": { "type": "string" }, "from_env": { "type": "boolean" } }, "required": ["value"], "additionalProperties": false }
                 ],
                 "description": "GCP project ID override. Supports env var reference"
               },
@@ -2595,6 +2281,18 @@
             "description": "DB-Backed Only. Position within placement group. Lower values execute earlier. Default: 0. Ignored in config.json.",
             "optional": true,
             "default": 0
+          },
+          "semaphore_size": {
+            "type": "integer",
+            "description": "For plugins that implement ObservabilityPlugin (receive completed traces): cap on how many traces may be injected into this plugin concurrently. A saturated cap causes new traces to be dropped for this plugin only, not process-wide. Ignored by plugins that don't receive traces (default: 10000).",
+            "default": 10000,
+            "minimum": 1
+          },
+          "inject_timeout": {
+            "type": "string",
+            "description": "For plugins that implement ObservabilityPlugin: timeout for a single Inject call from the tracer, as a Go duration string (default: 5s). Bounds how long a hung connector can hold a concurrency-budget slot. Ignored by plugins that don't receive traces.",
+            "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
+            "default": "5s"
           }
         },
         "allOf": [
@@ -3073,6 +2771,172 @@
                       },
                       "then": {
                         "required": ["api_key"]
+                      }
+                    }
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "name": {
+                  "const": "splunk"
+                }
+              }
+            },
+            "then": {
+              "required": ["config"],
+              "properties": {
+                "config": {
+                  "type": "object",
+                  "description": "Configuration for the Splunk HEC observability plugin (Enterprise)",
+                  "properties": {
+                    "endpoint": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "HEC base URL, e.g. https://localhost:8088. Do not include the /services/collector path (can use env. prefix)."
+                    },
+                    "token": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "HEC token, sent as the 'Authorization: Splunk <token>' header (can use env. prefix)."
+                    },
+                    "events_index": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Splunk event index for per-request events. Required when enable_events is true."
+                    },
+                    "metrics_index": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Splunk metrics index for derived metrics. Required when enable_metrics is true."
+                    },
+                    "source": {
+                      "type": "string",
+                      "description": "HEC source field on every event and metric",
+                      "default": "bifrost"
+                    },
+                    "sourcetype": {
+                      "type": "string",
+                      "description": "HEC sourcetype for events (metrics use bifrost:metric). Drives field extraction, so keep it stable.",
+                      "default": "bifrost:llm"
+                    },
+                    "host": {
+                      "type": "string",
+                      "description": "HEC host field (defaults to the server hostname)"
+                    },
+                    "enable_events": {
+                      "type": "boolean",
+                      "description": "Emit one flattened event per request to the event index (default: true)",
+                      "default": true
+                    },
+                    "enable_metrics": {
+                      "type": "boolean",
+                      "description": "Derive and emit the metric set to the metrics index (default: true)",
+                      "default": true
+                    },
+                    "disable_content_logging": {
+                      "type": "boolean",
+                      "description": "Strip request/response content from events (default: false)",
+                      "default": false
+                    },
+                    "ca_cert": {
+                      "type": "string",
+                      "description": "PEM-encoded CA certificate to verify the HEC server's TLS certificate (can use env. prefix)"
+                    },
+                    "insecure_skip_verify": {
+                      "type": "boolean",
+                      "description": "Disable TLS certificate verification. Development or isolated environments only; use ca_cert in production (default: false)",
+                      "default": false
+                    },
+                    "custom_fields": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "description": "Static key/value fields added to every event and metric"
+                    },
+                    "request_headers": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Request-header name patterns to capture onto events. Use an explicit allowlist of exact header names; wildcard patterns can capture credentials such as Authorization."
+                    },
+                    "batch_max_bytes": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "description": "Flush a HEC batch once its concatenated bodies reach this many bytes",
+                      "default": 524288
+                    },
+                    "flush_interval_ms": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "description": "Maximum time buffered events wait before a flush",
+                      "default": 1000
+                    },
+                    "post_workers": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 64,
+                      "description": "Concurrent HEC poster goroutines (capped at 64)",
+                      "default": 4
+                    },
+                    "indexer_ack": {
+                      "type": "boolean",
+                      "description": "Enable HEC indexer acknowledgement for confirmed delivery. Set when the HEC token has acknowledgement enabled (default: false).",
+                      "default": false
+                    },
+                    "ack_poll_interval_ms": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "description": "How often to poll Splunk for acknowledgement, in ms (only used when indexer_ack is true)",
+                      "default": 1000
+                    },
+                    "ack_timeout_ms": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "description": "How long an unacknowledged batch waits before the client resends it, in ms (only used when indexer_ack is true)",
+                      "default": 30000
+                    },
+                    "max_ack_attempts": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "description": "Maximum POST attempts per batch before it is dropped (only used when indexer_ack is true)",
+                      "default": 3
+                    }
+                  },
+                  "required": ["endpoint", "token"],
+                  "allOf": [
+                    {
+                      "if": {
+                        "properties": {
+                          "enable_events": {
+                            "not": {
+                              "const": false
+                            }
+                          }
+                        }
+                      },
+                      "then": {
+                        "required": ["events_index"]
+                      }
+                    },
+                    {
+                      "if": {
+                        "properties": {
+                          "enable_metrics": {
+                            "not": {
+                              "const": false
+                            }
+                          }
+                        }
+                      },
+                      "then": {
+                        "required": ["metrics_index"]
                       }
                     }
                   ],
@@ -3932,7 +3796,12 @@
           }
         }
       },
-      "required": ["code_keywords", "reasoning_keywords", "technical_keywords", "simple_keywords"],
+      "required": [
+        "code_keywords",
+        "reasoning_keywords",
+        "technical_keywords",
+        "simple_keywords"
+      ],
       "additionalProperties": false
     },
     "complexity_analyzer_config": {
@@ -4264,7 +4133,15 @@
                   },
                   "model_family": {
                     "type": "string",
-                    "enum": ["anthropic", "openai", "mistral", "cohere", "gemini", "nova", "titan"],
+                    "enum": [
+                      "anthropic",
+                      "openai",
+                      "mistral",
+                      "cohere",
+                      "gemini",
+                      "nova",
+                      "titan"
+                    ],
                     "description": "Underlying model family. Used by provider routing without substring-sniffing the wire model ID."
                   },
                   "description": {
@@ -4762,6 +4639,9 @@
           },
           "minItems": 1,
           "description": "API keys for this provider"
+        },
+        "openai_config": {
+          "$ref": "#/$defs/openai_config"
         },
         "network_config": {
           "$ref": "#/$defs/network_config"
@@ -5978,7 +5858,11 @@
                   "description": "Number of failed probes before marking as failed"
                 }
               },
-              "required": ["timeout_seconds", "success_threshold", "failure_threshold"],
+              "required": [
+                "timeout_seconds",
+                "success_threshold",
+                "failure_threshold"
+              ],
               "additionalProperties": false
             }
           },
@@ -6819,10 +6703,7 @@
         },
         {
           "if": {
-            "properties": {
-              "enabled": { "const": true },
-              "provider": { "const": "cloudflare-access" }
-            },
+            "properties": { "enabled": { "const": true }, "provider": { "const": "cloudflare-access" } },
             "required": ["enabled", "provider"]
           },
           "then": {
@@ -7377,18 +7258,7 @@
             "bucket": {
               "anyOf": [
                 { "type": "string", "minLength": 1 },
-                {
-                  "type": "object",
-                  "properties": {
-                    "value": { "type": "string" },
-                    "ref": { "type": "string" },
-                    "type": { "type": "string", "enum": ["plain_text", "env", "vault"] },
-                    "env_var": { "type": "string" },
-                    "from_env": { "type": "boolean" }
-                  },
-                  "required": ["value"],
-                  "additionalProperties": false
-                }
+                { "type": "object", "properties": { "value": { "type": "string" }, "ref": { "type": "string" }, "type": { "type": "string", "enum": ["plain_text", "env", "vault"] }, "env_var": { "type": "string" }, "from_env": { "type": "boolean" } }, "required": ["value"], "additionalProperties": false }
               ],
               "description": "Bucket name. Supports env var reference (e.g. env.S3_BUCKET) or a structured secret reference."
             },
@@ -7419,108 +7289,42 @@
               "region": {
                 "anyOf": [
                   { "type": "string" },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "value": { "type": "string" },
-                      "ref": { "type": "string" },
-                      "type": { "type": "string", "enum": ["plain_text", "env", "vault"] },
-                      "env_var": { "type": "string" },
-                      "from_env": { "type": "boolean" }
-                    },
-                    "required": ["value"],
-                    "additionalProperties": false
-                  }
+                  { "type": "object", "properties": { "value": { "type": "string" }, "ref": { "type": "string" }, "type": { "type": "string", "enum": ["plain_text", "env", "vault"] }, "env_var": { "type": "string" }, "from_env": { "type": "boolean" } }, "required": ["value"], "additionalProperties": false }
                 ],
                 "description": "AWS region. Supports env var reference"
               },
               "endpoint": {
                 "anyOf": [
                   { "type": "string" },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "value": { "type": "string" },
-                      "ref": { "type": "string" },
-                      "type": { "type": "string", "enum": ["plain_text", "env", "vault"] },
-                      "env_var": { "type": "string" },
-                      "from_env": { "type": "boolean" }
-                    },
-                    "required": ["value"],
-                    "additionalProperties": false
-                  }
+                  { "type": "object", "properties": { "value": { "type": "string" }, "ref": { "type": "string" }, "type": { "type": "string", "enum": ["plain_text", "env", "vault"] }, "env_var": { "type": "string" }, "from_env": { "type": "boolean" } }, "required": ["value"], "additionalProperties": false }
                 ],
                 "description": "Custom S3-compatible endpoint for MinIO/R2. Supports env var reference"
               },
               "access_key_id": {
                 "anyOf": [
                   { "type": "string" },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "value": { "type": "string" },
-                      "ref": { "type": "string" },
-                      "type": { "type": "string", "enum": ["plain_text", "env", "vault"] },
-                      "env_var": { "type": "string" },
-                      "from_env": { "type": "boolean" }
-                    },
-                    "required": ["value"],
-                    "additionalProperties": false
-                  }
+                  { "type": "object", "properties": { "value": { "type": "string" }, "ref": { "type": "string" }, "type": { "type": "string", "enum": ["plain_text", "env", "vault"] }, "env_var": { "type": "string" }, "from_env": { "type": "boolean" } }, "required": ["value"], "additionalProperties": false }
                 ],
                 "description": "AWS access key ID. Omit to use default credential chain (instance role, env vars, etc.). Supports env var reference"
               },
               "secret_access_key": {
                 "anyOf": [
                   { "type": "string" },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "value": { "type": "string" },
-                      "ref": { "type": "string" },
-                      "type": { "type": "string", "enum": ["plain_text", "env", "vault"] },
-                      "env_var": { "type": "string" },
-                      "from_env": { "type": "boolean" }
-                    },
-                    "required": ["value"],
-                    "additionalProperties": false
-                  }
+                  { "type": "object", "properties": { "value": { "type": "string" }, "ref": { "type": "string" }, "type": { "type": "string", "enum": ["plain_text", "env", "vault"] }, "env_var": { "type": "string" }, "from_env": { "type": "boolean" } }, "required": ["value"], "additionalProperties": false }
                 ],
                 "description": "AWS secret access key. Supports env var reference"
               },
               "session_token": {
                 "anyOf": [
                   { "type": "string" },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "value": { "type": "string" },
-                      "ref": { "type": "string" },
-                      "type": { "type": "string", "enum": ["plain_text", "env", "vault"] },
-                      "env_var": { "type": "string" },
-                      "from_env": { "type": "boolean" }
-                    },
-                    "required": ["value"],
-                    "additionalProperties": false
-                  }
+                  { "type": "object", "properties": { "value": { "type": "string" }, "ref": { "type": "string" }, "type": { "type": "string", "enum": ["plain_text", "env", "vault"] }, "env_var": { "type": "string" }, "from_env": { "type": "boolean" } }, "required": ["value"], "additionalProperties": false }
                 ],
                 "description": "AWS session token for STS temporary credentials. Supports env var reference"
               },
               "role_arn": {
                 "anyOf": [
                   { "type": "string" },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "value": { "type": "string" },
-                      "ref": { "type": "string" },
-                      "type": { "type": "string", "enum": ["plain_text", "env", "vault"] },
-                      "env_var": { "type": "string" },
-                      "from_env": { "type": "boolean" }
-                    },
-                    "required": ["value"],
-                    "additionalProperties": false
-                  }
+                  { "type": "object", "properties": { "value": { "type": "string" }, "ref": { "type": "string" }, "type": { "type": "string", "enum": ["plain_text", "env", "vault"] }, "env_var": { "type": "string" }, "from_env": { "type": "boolean" } }, "required": ["value"], "additionalProperties": false }
                 ],
                 "description": "AWS IAM role ARN for STS AssumeRole. Works with static creds or instance role. Supports env var reference"
               },
@@ -7546,54 +7350,21 @@
               "credentials_json": {
                 "anyOf": [
                   { "type": "string" },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "value": { "type": "string" },
-                      "ref": { "type": "string" },
-                      "type": { "type": "string", "enum": ["plain_text", "env", "vault"] },
-                      "env_var": { "type": "string" },
-                      "from_env": { "type": "boolean" }
-                    },
-                    "required": ["value"],
-                    "additionalProperties": false
-                  }
+                  { "type": "object", "properties": { "value": { "type": "string" }, "ref": { "type": "string" }, "type": { "type": "string", "enum": ["plain_text", "env", "vault"] }, "env_var": { "type": "string" }, "from_env": { "type": "boolean" } }, "required": ["value"], "additionalProperties": false }
                 ],
                 "description": "GCP service account credentials JSON or file path. Omit to use Application Default Credentials. Supports env var reference"
               },
               "credentials": {
                 "anyOf": [
                   { "type": "string" },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "value": { "type": "string" },
-                      "ref": { "type": "string" },
-                      "type": { "type": "string", "enum": ["plain_text", "env", "vault"] },
-                      "env_var": { "type": "string" },
-                      "from_env": { "type": "boolean" }
-                    },
-                    "required": ["value"],
-                    "additionalProperties": false
-                  }
+                  { "type": "object", "properties": { "value": { "type": "string" }, "ref": { "type": "string" }, "type": { "type": "string", "enum": ["plain_text", "env", "vault"] }, "env_var": { "type": "string" }, "from_env": { "type": "boolean" } }, "required": ["value"], "additionalProperties": false }
                 ],
                 "description": "Deprecated: use credentials_json. Kept for backwards compatibility."
               },
               "project_id": {
                 "anyOf": [
                   { "type": "string" },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "value": { "type": "string" },
-                      "ref": { "type": "string" },
-                      "type": { "type": "string", "enum": ["plain_text", "env", "vault"] },
-                      "env_var": { "type": "string" },
-                      "from_env": { "type": "boolean" }
-                    },
-                    "required": ["value"],
-                    "additionalProperties": false
-                  }
+                  { "type": "object", "properties": { "value": { "type": "string" }, "ref": { "type": "string" }, "type": { "type": "string", "enum": ["plain_text", "env", "vault"] }, "env_var": { "type": "string" }, "from_env": { "type": "boolean" } }, "required": ["value"], "additionalProperties": false }
                 ],
                 "description": "GCP project ID override. Supports env var reference"
               },
@@ -7763,7 +7534,14 @@
           "description": "Internal hash for change detection (auto-managed)"
         }
       },
-      "required": ["id", "name", "scope_kind", "match_type", "pattern", "request_types"],
+      "required": [
+        "id",
+        "name",
+        "scope_kind",
+        "match_type",
+        "pattern",
+        "request_types"
+      ],
       "additionalProperties": false
     },
     "pricing_override_match_type": {
@@ -7923,6 +7701,9 @@
               "type": "boolean"
             },
             "video_generation": {
+              "type": "boolean"
+            },
+            "video_edit": {
               "type": "boolean"
             },
             "video_retrieve": {
@@ -8132,14 +7913,7 @@
                 "description": "Response header whose value (in milliseconds) overrides default_cooldown (e.g. 'retry-after-ms'). Falls back to default_cooldown when absent or unparsable."
               }
             },
-            "required": [
-              "name",
-              "primary_provider",
-              "primary_model",
-              "fallback_provider",
-              "fallback_model",
-              "condition"
-            ],
+            "required": ["name", "primary_provider", "primary_model", "fallback_provider", "fallback_model", "condition"],
             "additionalProperties": false
           }
         }

@@ -343,7 +343,7 @@ export default function ProxyView() {
 							{!IS_ENTERPRISE && (
 								<Alert>
 									<Info className="h-4 w-4" />
-									<AlertDescription>SCIM proxy support is available in Elygate Enterprise.</AlertDescription>
+									<AlertDescription>SCIM proxy support is available in Bifrost Enterprise.</AlertDescription>
 								</Alert>
 							)}
 						</div>

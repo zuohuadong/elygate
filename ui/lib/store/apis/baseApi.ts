@@ -1,5 +1,5 @@
 import { IS_ENTERPRISE } from "@/lib/constants/config";
-import { ElygateErrorResponse } from "@/lib/types/config";
+import { BifrostErrorResponse } from "@/lib/types/config";
 import { getApiBaseUrl } from "@/lib/utils/port";
 import { createBaseQueryWithRefresh } from "@enterprise/lib/store/utils/baseQueryWithRefresh";
 import { clearOAuthStorage } from "@enterprise/lib/store/utils/tokenManager";
@@ -60,7 +60,7 @@ const baseQuery = fetchBaseQuery({
 		// browsers visiting a scoped page.
 		const tempToken = getActiveTempToken();
 		if (tempToken) {
-			headers.set("X-Elygate-Temp-Token", tempToken);
+			headers.set("X-Bifrost-Temp-Token", tempToken);
 		}
 		return headers;
 	},
@@ -110,9 +110,9 @@ const baseQueryWithErrorHandling: typeof baseQueryWithRefresh = async (args: any
 			};
 		}
 
-		// Handle other errors with proper ElygateErrorResponse format
+		// Handle other errors with proper BifrostErrorResponse format
 		if (error?.data) {
-			const errorData = error.data as ElygateErrorResponse;
+			const errorData = error.data as BifrostErrorResponse;
 			if (errorData.error?.message) {
 				return result;
 			}

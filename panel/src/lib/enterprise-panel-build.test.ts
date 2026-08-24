@@ -46,4 +46,18 @@ describe('enterprise panel build contract', () => {
 		expect(dockerfile).toContain('COPY docs/ /docs/');
 		expect(dockerfile.match(/apk add --no-cache[^\n]*git/g)).toHaveLength(2);
 	});
+
+	test('Red Hat release Dockerfile includes panel docs and the local Go workspace', async () => {
+		const dockerfile = await Bun.file(new URL('../../../transports/Dockerfile.redhat', import.meta.url)).text();
+		expect(dockerfile).toContain('COPY docs/ /docs/');
+		expect(dockerfile).toContain('GOWORK=/app/go.work');
+		expect(dockerfile).toContain('go work init');
+		expect(dockerfile).toContain('COPY core/ ./core/');
+		expect(dockerfile).toContain('COPY framework/ ./framework/');
+		expect(dockerfile).toContain('COPY plugins/routing/ ./plugins/routing/');
+		expect(dockerfile).toContain('COPY plugins/safety/go.mod ./plugins/safety/');
+		expect(dockerfile).toContain('COPY plugins/safety/ ./plugins/safety/');
+		expect(dockerfile).toContain('WORKDIR /app/transports');
+		expect(dockerfile).toContain('COPY --from=builder /app/transports/docker-entrypoint.sh .');
+	});
 });

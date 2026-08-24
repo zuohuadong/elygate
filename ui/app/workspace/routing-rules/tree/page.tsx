@@ -6,7 +6,7 @@
 import { RoutingTreeView } from "./views/routingTreeView";
 
 export const metadata = {
-	title: "Routing Tree | Elygate",
+	title: "Routing Tree | Bifrost",
 	description: "Read-only decision tree visualization of routing rules",
 };
 

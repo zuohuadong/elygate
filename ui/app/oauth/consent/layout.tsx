@@ -8,12 +8,12 @@ import OAuth2ConsentPage from "./page";
 
 // Public OAuth2 consent page — renders outside the dashboard chrome so
 // external users who arrive via `claude mcp add` can pick their identity
-// without needing a Elygate dashboard account.
+// without needing a Bifrost dashboard account.
 //
 // tempTokenScoped: ClientLayout renders MinimalShell and skips the protected
 // config fetch when this flag is set. TempTokenScope extracts the `#t=…`
 // fragment minted by /oauth2/authorize and attaches it as
-// X-Elygate-Temp-Token on every API call, letting the consent flow APIs
+// X-Bifrost-Temp-Token on every API call, letting the consent flow APIs
 // authenticate the anonymous visitor.
 //
 // ThemeProvider, ReduxProvider, NuqsAdapter and Toaster are provided here

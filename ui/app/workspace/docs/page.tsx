@@ -7,7 +7,7 @@ import { BookOpen, Code, ExternalLink, FileText, GitBranch, Play, Shield, Users,
 const docSections = [
 	{
 		title: "Quick Start",
-		description: "Get Elygate running in under 30 seconds",
+		description: "Get Bifrost running in under 30 seconds",
 		icon: Play,
 		url: "https://github.com/maximhq/bifrost/tree/main/docs/quickstart",
 		badge: "Popular",
@@ -15,7 +15,7 @@ const docSections = [
 	},
 	{
 		title: "Architecture",
-		description: "Deep dive into Elygate's design and performance",
+		description: "Deep dive into Bifrost's design and performance",
 		icon: GitBranch,
 		url: "https://github.com/maximhq/bifrost/tree/main/docs/architecture",
 		items: ["System Overview", "Request Flow", "Concurrency Model", "Design Decisions"],
@@ -30,7 +30,7 @@ const docSections = [
 	},
 	{
 		title: "Contributing",
-		description: "Help improve Elygate for everyone",
+		description: "Help improve Bifrost for everyone",
 		icon: Users,
 		url: "https://github.com/maximhq/bifrost/tree/main/docs/contributing",
 		items: ["Contributing Guide", "Adding Providers", "Plugin Development", "Code Conventions"],
@@ -87,9 +87,9 @@ export default function DocsPage() {
 							<BookOpen className="h-4 w-4" />
 							<span className="font-semibold">Documentation</span>
 						</div>
-						<GradientHeader title="Power Up Your Elygate Stack" />
+						<GradientHeader title="Power Up Your Bifrost Stack" />
 						<p className="text-muted-foreground mx-auto max-w-2xl text-lg">
-							Everything you need to know about building production AI applications with Elygate
+							Everything you need to know about building production AI applications with Bifrost
 						</p>
 						<div className="flex justify-center gap-4">
 							<Button asChild>

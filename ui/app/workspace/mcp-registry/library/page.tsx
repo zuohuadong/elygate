@@ -155,13 +155,13 @@ export default function MCPLibraryPage() {
 	const isCatalogEmpty = !isFetching && totalCount === 0 && !debouncedSearch && !hasActiveFilters;
 
 	return (
-		<div className="dark:bg-card no-padding-parent no-border-parent min-h-full md:h-[calc(var(--app-content-viewport)_-_16px)]">
+		<div className="dark:bg-card no-padding-parent no-border-parent min-h-full md:h-[calc(var(--app-content-viewport)_-_var(--app-bottom-padding))]">
 			<div className="bg-background flex min-h-full w-full grow gap-3 md:h-full">
 				{/* Sidebar Filters */}
 				<MCPLibraryFilterSidebar filters={filters} onFiltersChange={setFilters} />
 
 				{/* Main Content */}
-				<div className="bg-card min-h-full w-full rounded-l-md md:h-full">
+				<div className="bg-card min-h-full w-full rounded-md border md:h-full">
 					<div className="flex min-h-full flex-col gap-4 p-4 pb-2 md:h-full">
 						{/* Search + Actions */}
 						<div className="-mx-2 flex flex-col gap-3 px-2 py-2 sm:flex-row sm:items-center">
@@ -222,7 +222,7 @@ export default function MCPLibraryPage() {
 								{hasCreateMCPClientAccess && (
 									<Button variant="outline" size="sm" onClick={() => setAddServerOpen(true)} data-testid="mcp-library-add-server-btn">
 										<Plus className="h-4 w-4" />
-										Add Server
+										Add to Library
 									</Button>
 								)}
 								{hasSettingsAccess && (

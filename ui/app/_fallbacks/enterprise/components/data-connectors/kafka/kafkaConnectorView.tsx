@@ -16,7 +16,7 @@ export default function KafkaConnectorView(_props: KafkaConnectorViewProps) {
 						testIdPrefix="kafka-connector"
 						icon={<img src="/images/kafka-logo.svg" alt="Kafka" width={88} height={88} />}
 						title="Unlock native Kafka log streaming for real-time observability"
-						description="This feature is a part of the Elygate enterprise license. Stream completed request traces as JSON to a Kafka topic for real-time analytics, alerting, and downstream processing."
+						description="This feature is a part of the Bifrost enterprise license. Stream completed request traces as JSON to a Kafka topic for real-time analytics, alerting, and downstream processing."
 						readmeLink="https://docs.getbifrost.ai/enterprise/kafka-connector"
 					/>
 				</div>

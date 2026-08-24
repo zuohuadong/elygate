@@ -1433,6 +1433,11 @@ func (provider *AzureProvider) VideoList(ctx *schemas.BifrostContext, key schema
 	return response, nil
 }
 
+// VideoEdit is not supported by the Azure provider.
+func (provider *AzureProvider) VideoEdit(_ *schemas.BifrostContext, _ schemas.Key, _ *schemas.BifrostVideoEditRequest) (*schemas.BifrostVideoEditResponse, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.VideoEditRequest, provider.GetProviderKey())
+}
+
 // VideoRemix is not supported by Azure provider.
 func (provider *AzureProvider) VideoRemix(_ *schemas.BifrostContext, _ schemas.Key, _ *schemas.BifrostVideoRemixRequest) (*schemas.BifrostVideoGenerationResponse, *schemas.BifrostError) {
 	return nil, providerUtils.NewUnsupportedOperationError(schemas.VideoRemixRequest, provider.GetProviderKey())
@@ -2558,6 +2563,10 @@ func (provider *AzureProvider) BatchResults(ctx *schemas.BifrostContext, keys []
 		ExtraFields: schemas.BifrostResponseExtraFields{
 			Latency: latencyMs,
 		},
+	}
+
+	if providerUtils.ShouldSendBackRawResponse(ctx, provider.sendBackRawResponse) {
+		batchResultsResp.ExtraFields.RawResponse = results
 	}
 
 	if len(parseResult.Errors) > 0 {

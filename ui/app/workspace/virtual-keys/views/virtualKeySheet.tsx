@@ -1664,8 +1664,8 @@ export default function VirtualKeySheet({ virtualKey, defaultTeamId, onSave, onC
 												Align to calendar cycle
 											</Label>
 											<p id="vk-budget-calendar-aligned-description" className="text-muted-foreground text-xs">
-												Reset budgets and rate limits at the start of each period (e.g. 1st of month) instead of rolling from creation date.
-												Quarterly budgets always align to fiscal quarter starts. Applies to durations of a day or longer.
+												Reset budgets and rate limits at the start of each period (e.g. 1st of month) instead of rolling from creation date. Quarterly budgets always align to fiscal quarter starts.
+												Applies to durations of a day or longer.
 											</p>
 										</div>
 										<Switch
@@ -1812,37 +1812,6 @@ export default function VirtualKeySheet({ virtualKey, defaultTeamId, onSave, onC
 																			value: field.value,
 																			label:
 																				field.value === virtualKey?.customer_id ? (virtualKey?.customer?.name ?? field.value) : field.value,
-																		}
-																	: null
-															}
-															triggerClassName="h-9"
-														/>
-														<FormMessage />
-													</FormItem>
-												)}
-											/>
-										)}
-
-										{form.watch("entityType") === "user" && UserPicker && (
-											<FormField
-												control={form.control}
-												name="userId"
-												render={({ field }) => (
-													<FormItem>
-														<FormLabel className="font-normal">Select User</FormLabel>
-														<UserPicker
-															value={field.value || ""}
-															onChange={(val) => {
-																field.onChange(val);
-																void form.trigger("entityType");
-															}}
-															// The attached user may fall outside the picker's first
-															// page; seed the label resolved from the association.
-															fallbackOption={
-																field.value
-																	? {
-																			value: field.value,
-																			label: field.value === assignedUserId ? assignedUserLabel : field.value,
 																		}
 																	: null
 															}

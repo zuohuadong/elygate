@@ -37,7 +37,7 @@ export type ProviderName = (typeof KnownProvidersNames)[number];
 
 export const ProviderNames: readonly ProviderName[] = KnownProvidersNames;
 
-// Built-in providers whose Elygate implementation supports embedding requests.
+// Built-in providers whose Bifrost implementation supports embedding requests.
 // Custom providers must instead be checked via custom_provider_config.allowed_requests.embedding.
 export const EmbeddingSupportedProviders: readonly ProviderName[] = [
 	"azure",
@@ -85,6 +85,7 @@ export const RequestTypes = [
 	"ocr",
 	"ocr_stream",
 	"video_generation",
+	"video_edit",
 	"video_retrieve",
 	"video_download",
 	"video_delete",
@@ -92,6 +93,19 @@ export const RequestTypes = [
 	"video_remix",
 	"count_tokens",
 	"compaction",
+    // Batch operations
+	"batch_create",
+	"batch_list",
+	"batch_retrieve",
+	"batch_cancel",
+	"batch_delete",
+	"batch_results",
+	// File operations
+	"file_upload",
+	"file_list",
+	"file_retrieve",
+	"file_delete",
+	"file_content",
 	// Container operations
 	"container_create",
 	"container_list",
@@ -279,6 +293,7 @@ export const RequestTypeLabels = {
 	ocr: "OCR",
 	ocr_stream: "OCR Stream",
 	video_generation: "Video Generation",
+	video_edit: "Video Edit",
 	video_retrieve: "Video Retrieve",
 	video_download: "Video Download",
 	video_delete: "Video Delete",
@@ -367,6 +382,7 @@ export const RequestTypeColors = {
 	ocr: "bg-amber-100 text-amber-800",
 	ocr_stream: "bg-yellow-100 text-yellow-800",
 	video_generation: "bg-fuchsia-100 text-fuchsia-800",
+	video_edit: "bg-fuchsia-100 text-fuchsia-800",
 	video_retrieve: "bg-blue-100 text-blue-800",
 	video_download: "bg-purple-100 text-purple-800",
 	video_delete: "bg-rose-100 text-rose-800",
