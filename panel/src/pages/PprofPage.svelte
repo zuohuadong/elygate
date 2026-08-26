@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { getAppName } from '../lib/branding';
 	import { onMount } from 'svelte';
 	import { useTranslation } from '@svadmin/core/i18n';
 	import { displayError } from '../lib/forms';
@@ -88,7 +89,7 @@
 <section class="page-shell">
 	<header class="page-heading">
 		<div>
-			<p class="eyebrow">Elygate / Go Runtime</p>
+			<p class="eyebrow">{getAppName()} / Go Runtime</p>
 			<h1>{i18n.t('elygate.pprof')}</h1>
 			<p>{i18n.t('elygate.pprofHint')}</p>
 		</div>

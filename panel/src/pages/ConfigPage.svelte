@@ -3,6 +3,7 @@
 	import { useTranslation } from '@svadmin/core/i18n';
 	import { displayError, parseJsonObject, prettyJson } from '../lib/forms';
 	import { isJsonRecord, requestJson, type JsonRecord } from '../lib/api';
+	import { getAppName, resolveAppName, setAppName } from '../lib/branding';
 	import {
 		DUAL_CREDENTIAL_BEHAVIORS,
 		MCP_CODE_MODE_BINDING_LEVELS,
@@ -49,7 +50,7 @@
 		'large-payload-config': 'elygate.largePayloadConfig',
 	};
 
-	const eyebrow = $derived(`Elygate / Bifrost ${resourceName === 'config' ? 'Config' : resourceName}`);
+	const eyebrow = $derived(`${getAppName()} / ${resourceName === 'config' ? 'Config' : resourceName}`);
 	const titleKey = $derived(titleKeys[resourceName] ?? 'elygate.config');
 
 	let rawConfig = $state<JsonRecord>({});
@@ -98,6 +99,7 @@
 		rawConfig = doc;
 		form = configFormFromDocument(doc);
 		jsonText = prettyJson(doc, '{}');
+		resolveAppName(doc);
 	}
 
 	async function load(): Promise<void> {
@@ -144,6 +146,7 @@
 				(document) => requestJson('/api/config', { method: 'PUT', body: JSON.stringify(document) }),
 				() => requestJson('/api/config'),
 			);
+			setAppName(form.appName);
 			if (result.document) {
 				applyDocument(result.document);
 				notice = i18n.t('elygate.saveSuccess');
@@ -259,6 +262,7 @@
 
 				{#if shows('security')}<section class="config-section">
 					<h2>{i18n.t('elygate.section.security')}</h2>
+					<TextField label={i18n.t('elygate.field.appName')} hint={i18n.t('elygate.field.appNameHint')} bind:value={form.appName} placeholder={getAppName()} disabled={isLoading} />
 					<SwitchField label={i18n.t('elygate.field.allowDirectKeys')} bind:checked={form.allowDirectKeys} disabled={isLoading} />
 					<SwitchField label={i18n.t('elygate.field.enforceAuthOnInference')} bind:checked={form.enforceAuthOnInference} disabled={isLoading} />
 					<SwitchField label={i18n.t('elygate.field.disableDbPingsInHealth')} bind:checked={form.disableDbPingsInHealth} disabled={isLoading} />

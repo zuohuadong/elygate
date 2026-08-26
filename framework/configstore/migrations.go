@@ -474,6 +474,43 @@ var configstoreMigrationSteps = []migrationStep{
 	{IDs: []string{"add_input_cost_per_query_column"}, run: migrationAddInputCostPerQueryColumn},
 	{IDs: []string{"add_ultrafast_pricing_columns"}, run: migrationAddUltrafastPricingColumns},
 	{IDs: []string{"add_image_size_quality_pricing_columns"}, run: migrationAddImageSizeQualityPricingColumns},
+	{IDs: []string{"add_app_name_column_to_client_config"}, run: migrationAddAppNameColumnToClientConfig},
+	{IDs: []string{"add_governance_audit_tables"}, run: migrationAddGovernanceAuditTables},
+	{IDs: []string{"add_governance_audit_public_keys"}, run: migrationAddGovernanceAuditPublicKeys},
+}
+
+func migrationAddGovernanceAuditTables(ctx context.Context, db *gorm.DB, logger schemas.Logger) error {
+	migrationName := "add_governance_audit_tables"
+	logger.Info("[configstore] starting migration %s", migrationName)
+	defer logger.Info("[configstore] finished migration %s", migrationName)
+	return RunSingleMigration(ctx, nil, db, logger, &migrator.Migration{
+		ID: migrationName,
+		Migrate: func(tx *gorm.DB) error {
+			tx = tx.WithContext(ctx)
+			if err := tx.AutoMigrate(&tables.TableGovernanceAuditHead{}, &tables.TableGovernanceAuditEvent{}); err != nil {
+				return err
+			}
+			return tx.FirstOrCreate(&tables.TableGovernanceAuditHead{ID: 1, LastHash: ""}, "id = ?", 1).Error
+		},
+		Rollback: func(tx *gorm.DB) error {
+			return tx.WithContext(ctx).Migrator().DropTable(&tables.TableGovernanceAuditEvent{}, &tables.TableGovernanceAuditHead{})
+		},
+	})
+}
+
+func migrationAddGovernanceAuditPublicKeys(ctx context.Context, db *gorm.DB, logger schemas.Logger) error {
+	migrationName := "add_governance_audit_public_keys"
+	logger.Info("[configstore] starting migration %s", migrationName)
+	defer logger.Info("[configstore] finished migration %s", migrationName)
+	return RunSingleMigration(ctx, nil, db, logger, &migrator.Migration{
+		ID: migrationName,
+		Migrate: func(tx *gorm.DB) error {
+			return tx.WithContext(ctx).AutoMigrate(&tables.TableGovernanceAuditPublicKey{})
+		},
+		Rollback: func(tx *gorm.DB) error {
+			return tx.WithContext(ctx).Migrator().DropTable(&tables.TableGovernanceAuditPublicKey{})
+		},
+	})
 }
 
 func migrationAddNotificationsTable(ctx context.Context, db *gorm.DB, logger schemas.Logger) error {
@@ -12206,4 +12243,22 @@ func migrationAddImageSizeQualityPricingColumns(ctx context.Context, db *gorm.DB
 		return fmt.Errorf("error running %s migration: %s", migrationName, err.Error())
 	}
 	return nil
+}
+
+func migrationAddAppNameColumnToClientConfig(ctx context.Context, db *gorm.DB, logger schemas.Logger) error {
+	migrationName := "add_app_name_column_to_client_config"
+	logger.Info("[configstore] starting migration %s", migrationName)
+	defer logger.Info("[configstore] finished migration %s", migrationName)
+	m := migrator.New(db.WithContext(ctx), migrator.DefaultOptions, []*migrator.Migration{{
+		ID: migrationName,
+		Migrate: func(tx *gorm.DB) error {
+			tx = tx.WithContext(ctx)
+			return addColumnIfNotExists(tx, logger, &tables.TableClientConfig{}, "app_name")
+		},
+		Rollback: func(tx *gorm.DB) error {
+			tx = tx.WithContext(ctx)
+			return dropColumnIfExists(tx, logger, &tables.TableClientConfig{}, "app_name")
+		},
+	}})
+	return m.Migrate()
 }

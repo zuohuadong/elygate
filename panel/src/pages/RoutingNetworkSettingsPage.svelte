@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { getAppName } from '../lib/branding';
 	import { onMount } from 'svelte';
 	import { useTranslation } from '@svadmin/core/i18n';
 	import { isJsonRecord, requestJson, type JsonRecord } from '../lib/api';
@@ -90,7 +91,7 @@
 </script>
 
 <section class="page-shell" data-resource={resourceName}>
-		<header class="page-heading"><div><p class="eyebrow">Elygate / {isComplexity ? text('治理', 'Governance') : text('系统', 'System')}</p><h1>{isComplexity ? text('复杂度路由', 'Complexity router') : text('全局代理', 'Global proxy')}</h1><p>{isComplexity ? text('配置四级复杂度阈值和关键词库，生成可供路由规则匹配的复杂度层级（complexity_tier）。', 'Tune four complexity tiers and keyword dictionaries that produce complexity_tier for routing rules.') : text('控制 SCIM、推理和外部 API 请求的全局 HTTP(S) 代理、认证、绕过列表和 TLS 行为。', 'Control the global HTTP(S) proxy, authentication, bypass list, and TLS behavior for SCIM, inference, and external API requests.')}</p></div><div class="heading-actions"><button type="button" onclick={() => void load()} disabled={isLoading}>{text('刷新', 'Refresh')}</button>{#if isComplexity}<button type="button" onclick={() => void resetComplexity()} disabled={isSaving}>{text('恢复默认', 'Restore defaults')}</button>{/if}<button class="primary" type="button" onclick={() => void save()} disabled={isSaving || isLoading}>{isSaving ? text('保存中…', 'Saving…') : text('保存', 'Save')}</button></div></header>
+		<header class="page-heading"><div><p class="eyebrow">{getAppName()} / {isComplexity ? text('治理', 'Governance') : text('系统', 'System')}</p><h1>{isComplexity ? text('复杂度路由', 'Complexity router') : text('全局代理', 'Global proxy')}</h1><p>{isComplexity ? text('配置四级复杂度阈值和关键词库，生成可供路由规则匹配的复杂度层级（complexity_tier）。', 'Tune four complexity tiers and keyword dictionaries that produce complexity_tier for routing rules.') : text('控制 SCIM、推理和外部 API 请求的全局 HTTP(S) 代理、认证、绕过列表和 TLS 行为。', 'Control the global HTTP(S) proxy, authentication, bypass list, and TLS behavior for SCIM, inference, and external API requests.')}</p></div><div class="heading-actions"><button type="button" onclick={() => void load()} disabled={isLoading}>{text('刷新', 'Refresh')}</button>{#if isComplexity}<button type="button" onclick={() => void resetComplexity()} disabled={isSaving}>{text('恢复默认', 'Restore defaults')}</button>{/if}<button class="primary" type="button" onclick={() => void save()} disabled={isSaving || isLoading}>{isSaving ? text('保存中…', 'Saving…') : text('保存', 'Save')}</button></div></header>
 	{#if error}<div class="notice error" role="alert">{error}</div>{/if}
 	{#if notice}<div class="notice success" role="status">{notice}</div>{/if}
 	{#if isComplexity}

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { getAppName } from '../lib/branding';
 	import { onMount } from 'svelte';
 	import { useTranslation } from '@svadmin/core/i18n';
 	import { displayValue, getListPayload, getTotal, isJsonRecord, requestJson, type JsonRecord } from '../lib/api';
@@ -215,7 +216,7 @@
 </script>
 
 <section class="page-shell" data-resource={resourceName}>
-	<header class="page-heading"><div><p class="eyebrow">Elygate / Governance</p><h1>{title()}</h1><p>{description()}</p></div>{#if entityKind !== 'provider' || isPricing}<button class="primary" type="button" onclick={openCreate}>+ {isPricing ? text('添加价格覆盖', 'Add pricing override') : entityKind === 'team' ? text('创建团队', 'Create team') : text('创建客户', 'Create customer')}</button>{/if}</header>
+	<header class="page-heading"><div><p class="eyebrow">{getAppName()} / Governance</p><h1>{title()}</h1><p>{description()}</p></div>{#if entityKind !== 'provider' || isPricing}<button class="primary" type="button" onclick={openCreate}>+ {isPricing ? text('添加价格覆盖', 'Add pricing override') : entityKind === 'team' ? text('创建团队', 'Create team') : text('创建客户', 'Create customer')}</button>{/if}</header>
 	{#if error}<div class="notice error" role="alert">{error}</div>{/if}
 	{#if notice}<div class="notice success" role="status">{notice}</div>{/if}
 	<form class="toolbar" onsubmit={(event) => { event.preventDefault(); void load(true); }}><label>{text('搜索', 'Search')}<input bind:value={search} placeholder={isPricing ? text('名称或模型模式', 'Name or model pattern') : text('名称', 'Name')} /></label>{#if entityKind === 'team' && !isPricing}<label>{text('客户', 'Customer')}<select bind:value={customerFilter}><option value="">{text('全部', 'All')}</option>{#each customers as customer (idOf(customer))}<option value={idOf(customer)}>{nameOf(customer)}</option>{/each}</select></label>{/if}{#if isPricing}<label>{text('范围', 'Scope')}<select bind:value={scopeFilter}><option value="">{text('全部', 'All')}</option>{#each PRICING_SCOPE_KINDS as scope (scope)}<option value={scope}>{scope}</option>{/each}</select></label><label>Provider<input list="governance-providers" bind:value={providerFilter} /></label>{/if}<button type="submit">{text('应用筛选', 'Apply')}</button><button type="button" onclick={() => { search = ''; customerFilter = ''; scopeFilter = ''; providerFilter = ''; void load(true); }}>{text('清除', 'Clear')}</button></form>

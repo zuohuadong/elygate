@@ -2,13 +2,14 @@
 	import { onMount } from 'svelte';
 	import { AdminApp } from '@svadmin/ui';
 	import * as enterprisePanel from '@elygate/enterprise-panel';
-	import { ApiError, configureRequestErrorFormatter, getListPayload, requestJson } from './lib/api';
+	import { ApiError, configureRequestErrorFormatter, getListPayload, getSessionStatus, requestJson } from './lib/api';
 	import { createBifrostAuthProvider } from './lib/auth';
 	import { bifrostDataProvider } from './lib/data-provider';
 	import {
 		registerEnterprisePanelTranslations,
 		resolveEnterprisePanelManifest,
 	} from './lib/enterprise-panel';
+	import { getAppName, onAppNameChange, resolveAppName, resolveBranding } from './lib/branding';
 	import { labelFor, registerElygateTranslations, type ElygateLocale } from './lib/i18n';
 	import { pluginFeatureResourcePages } from './lib/menu-policy';
 	import { resolvePublicPanelRoute } from './lib/public-routes';
@@ -25,6 +26,8 @@
 	import ConfigPage from './pages/ConfigPage.svelte';
 	import DocsHubPage from './pages/DocsHubPage.svelte';
 	import EnterprisePublicFallbackPage from './pages/EnterprisePublicFallbackPage.svelte';
+	import EmployeePortalPage from './pages/EmployeePortalPage.svelte';
+	import EmployeesPage from './pages/EmployeesPage.svelte';
 	import GovernanceManagementPage from './pages/GovernanceManagementPage.svelte';
 	import LogsPage from './pages/LogsPage.svelte';
 	import McpLogsPage from './pages/McpLogsPage.svelte';
@@ -67,13 +70,30 @@
 	const enterprisePublicPages = enterpriseManifest.publicPages;
 	const enterpriseResources = enterpriseManifest.resources;
 	const enterpriseResourceNames = enterpriseResources.map((resource) => resource.name);
-	const EnterprisePublicPage = publicRoute ? enterprisePublicPages[publicRoute] : undefined;
+	const enterprisePublicRoute = publicRoute === 'employee' ? null : publicRoute;
+	const EnterprisePublicPage = enterprisePublicRoute ? enterprisePublicPages[enterprisePublicRoute] : undefined;
 	const includeDevelopmentResources = import.meta.env.DEV;
 
+	let currentAppName = $state(getAppName());
 	let currentLocale = $state<ElygateLocale>('zh-CN');
 	let runtimeFeatureNames = $state.raw<string[]>([]);
 	const enterprisePageNames = Object.keys(enterpriseResourcePages);
 	const availableEnterpriseResources = $derived([...new Set([...enterprisePageNames, ...runtimeFeatureNames])]);
+
+	async function refreshAppConfig(): Promise<void> {
+		try {
+			const sessionStatus = await getSessionStatus();
+			resolveBranding(sessionStatus as Record<string, unknown>);
+		} catch {
+			// offline or unauthenticated
+		}
+		try {
+			const config = await requestJson<Record<string, unknown>>('/api/config');
+			resolveBranding(config);
+		} catch {
+			// offline or unauthenticated
+		}
+	}
 
 	async function refreshRuntimeFeatures(): Promise<void> {
 		try {
@@ -100,6 +120,7 @@
 		'virtual-keys': { list: VirtualKeysPage },
 		models: { list: BifrostResourcePage },
 		logs: { list: LogsPage },
+		employees: { list: EmployeesPage },
 		teams: { list: GovernanceManagementPage },
 		customers: { list: GovernanceManagementPage },
 		'routing-rules': { list: RoutingRulesPage },
@@ -156,58 +177,77 @@
 	onMount(() => {
 		const refresh = () => { void refreshRuntimeFeatures(); };
 		refresh();
+		void refreshAppConfig();
+		const unsubscribeBrand = onAppNameChange((name) => {
+			currentAppName = name;
+			registerElygateTranslations(name);
+		});
 		window.addEventListener(PLUGIN_CAPABILITIES_CHANGED_EVENT, refresh);
-		return () => window.removeEventListener(PLUGIN_CAPABILITIES_CHANGED_EVENT, refresh);
+		return () => {
+			window.removeEventListener(PLUGIN_CAPABILITIES_CHANGED_EVENT, refresh);
+			unsubscribeBrand();
+		};
 	});
 </script>
 
-{#if publicRoute && EnterprisePublicPage}
-	<EnterprisePublicPage route={publicRoute} />
-{:else if publicRoute === 'oauth-consent'}
-	<OAuthConsentPage />
-{:else if publicRoute === 'agent-handover' || publicRoute === 'scim-oauth-callback'}
-	<EnterprisePublicFallbackPage route={publicRoute} />
-{:else if publicRoute}
-	<McpAuthFlowPage route={publicRoute} />
-{:else}
-	{#key currentLocale}
-		<AdminApp
-		dataProvider={bifrostDataProvider}
-		authProvider={bifrostAuthProvider}
-		{resources}
-		{menu}
-		resourcePages={resourcePages}
-		title="Elygate"
-		bind:locale={currentLocale}
-		defaultTheme="system"
-		themeConfig={{ layoutPreset: 'clean-flat' }}
-		loginDefaults={{ hint: loginHint }}
-	>
-		{#snippet dashboard()}
-			<DashboardPage />
-		{/snippet}
-		</AdminApp>
-	{/key}
+{#key currentAppName}
+	{#if publicRoute && EnterprisePublicPage}
+		<EnterprisePublicPage route={enterprisePublicRoute!} />
+	{:else if publicRoute === 'employee'}
+		<EmployeePortalPage />
+	{:else if publicRoute === 'oauth-consent'}
+		<OAuthConsentPage />
+	{:else if publicRoute === 'agent-handover' || publicRoute === 'scim-oauth-callback'}
+		<EnterprisePublicFallbackPage route={publicRoute} />
+	{:else if publicRoute}
+		<McpAuthFlowPage route={publicRoute} />
+	{:else}
+		{#key currentLocale}
+			<AdminApp
+				dataProvider={bifrostDataProvider}
+				authProvider={bifrostAuthProvider}
+				{resources}
+				{menu}
+				resourcePages={resourcePages}
+				title={currentAppName}
+				bind:locale={currentLocale}
+				defaultTheme="system"
+				themeConfig={{ layoutPreset: 'clean-flat' }}
+				loginDefaults={{ hint: loginHint }}
+			>
+				{#snippet dashboard()}
+					<DashboardPage />
+				{/snippet}
+			</AdminApp>
+		{/key}
 
-	{#key currentLocale}
-		<PanelAssist locale={currentLocale} />
-	{/key}
+		{#key currentLocale}
+			<PanelAssist locale={currentLocale} />
+		{/key}
 
-	<div class="locale-switcher" role="group" aria-label={labelFor(currentLocale, 'elygate.language')}>
-	<button
-		type="button"
-		class={['locale-option', currentLocale === 'zh-CN' && 'is-active']}
-		onclick={() => (currentLocale = 'zh-CN')}
-	>简体中文</button>
-	<button
-		type="button"
-		class={['locale-option', currentLocale === 'en' && 'is-active']}
-		onclick={() => (currentLocale = 'en')}
-	>English</button>
-	</div>
-{/if}
+		<div class="locale-switcher" role="group" aria-label={labelFor(currentLocale, 'elygate.language')}>
+			<button
+				type="button"
+				class={['locale-option', currentLocale === 'zh-CN' && 'is-active']}
+				onclick={() => (currentLocale = 'zh-CN')}
+			>简体中文</button>
+			<button
+				type="button"
+				class={['locale-option', currentLocale === 'en' && 'is-active']}
+				onclick={() => (currentLocale = 'en')}
+			>English</button>
+		</div>
+	{/if}
+{/key}
 
 <style>
+	:global(span[aria-hidden="true"].rounded-lg),
+	:global(aside a.group > span[aria-hidden="true"]) {
+		background-image: var(--app-logo, none);
+		background-size: contain;
+		background-position: center;
+		background-repeat: no-repeat;
+	}
 	.locale-switcher {
 		background: color-mix(in oklch, var(--card) 92%, transparent);
 		border: 1px solid var(--border);

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { getAppName } from '../lib/branding';
 	import { useTranslation } from '@svadmin/core/i18n';
 	import { enterpriseFeatureDefinition } from '../lib/enterprise-feature';
 
@@ -38,7 +39,7 @@
 </script>
 
 <section class="page-shell">
-	<p class="eyebrow">Elygate / {i18n.t(feature.sectionKey)}</p>
+	<p class="eyebrow">{getAppName()} / {i18n.t(feature.sectionKey)}</p>
 	<h1>{i18n.t(feature.titleKey)}</h1>
 	<div class="panel">
 		<p>{i18n.t(feature.hintKey)}</p>

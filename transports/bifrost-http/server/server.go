@@ -39,6 +39,7 @@ import (
 	"github.com/maximhq/bifrost/plugins/routing/complexity"
 	"github.com/maximhq/bifrost/plugins/semanticcache"
 	"github.com/maximhq/bifrost/plugins/telemetry"
+	"github.com/maximhq/bifrost/transports/bifrost-http/employees"
 	"github.com/maximhq/bifrost/transports/bifrost-http/handlers"
 	"github.com/maximhq/bifrost/transports/bifrost-http/integrations"
 	"github.com/maximhq/bifrost/transports/bifrost-http/lib"
@@ -230,6 +231,7 @@ type BifrostHTTPServer struct {
 	MCPServerHandler    *handlers.MCPServerHandler
 	devPprofHandler     *handlers.DevPprofHandler
 	IntegrationHandler  *handlers.IntegrationHandler
+	EmployeeHandler     *employees.Handler
 
 	AuthMiddleware       *handlers.AuthMiddleware
 	CORSMiddleware       *handlers.CorsMiddleware
@@ -2037,7 +2039,14 @@ func (s *BifrostHTTPServer) RegisterInferenceRoutes(ctx context.Context, middlew
 	s.wsPool = bfws.NewPool(s.Config.WebSocketConfig.Pool)
 	wsResponsesHandler := handlers.NewWSResponsesHandler(s.Client, s.Config, s.wsPool)
 	wsRealtimeHandler := handlers.NewWSRealtimeHandler(s.Client, s.Config, s.wsPool)
+	if s.EmployeeHandler != nil {
+		wsResponsesHandler.SetVirtualKeyAccessChecker(s.EmployeeHandler)
+		wsRealtimeHandler.SetVirtualKeyAccessChecker(s.EmployeeHandler)
+	}
 	webrtcRealtimeHandler := handlers.NewWebRTCRealtimeHandler(s.Client, s.Config)
+	if s.EmployeeHandler != nil {
+		webrtcRealtimeHandler.SetVirtualKeyAccessChecker(s.EmployeeHandler)
+	}
 	realtimeClientSecretsHandler := handlers.NewRealtimeClientSecretsHandler(s.Client, s.Config)
 
 	inferenceHandler := handlers.NewInferenceHandler(s.Client, s.Config)
@@ -2057,17 +2066,24 @@ func (s *BifrostHTTPServer) RegisterInferenceRoutes(ctx context.Context, middlew
 	if err != nil {
 		return fmt.Errorf("failed to initialize mcp server handler: %v", err)
 	}
+	if s.EmployeeHandler != nil {
+		mcpServerHandler.SetVirtualKeyAccessChecker(s.EmployeeHandler)
+	}
 	s.MCPServerHandler = mcpServerHandler
 	asyncHandler := handlers.NewAsyncHandler(s.Client, s.Config)
-	inferenceMiddlewares := append([]schemas.BifrostHTTPMiddleware{}, middlewares...)
+	routeMiddlewares := append([]schemas.BifrostHTTPMiddleware{}, middlewares...)
+	if s.EmployeeHandler != nil {
+		routeMiddlewares = append(routeMiddlewares, s.EmployeeHandler.InferenceAccessMiddleware())
+	}
+	inferenceMiddlewares := append([]schemas.BifrostHTTPMiddleware{}, routeMiddlewares...)
 	if governancePlugin, err := s.getGovernancePlugin(); err == nil && governancePlugin != nil {
 		inferenceMiddlewares = append(inferenceMiddlewares, handlers.VirtualKeyValidationMiddleware(governancePlugin.GetGovernanceStore()))
 	}
-	s.IntegrationHandler.RegisterRoutes(s.Router, middlewares...)
+	s.IntegrationHandler.RegisterRoutes(s.Router, routeMiddlewares...)
 	inferenceHandler.RegisterRoutes(s.Router, inferenceMiddlewares...)
-	asyncHandler.RegisterRoutes(s.Router, middlewares...)
-	mcpInferenceHandler.RegisterRoutes(s.Router, middlewares...)
-	s.MCPServerHandler.RegisterRoutes(s.Router, middlewares...)
+	asyncHandler.RegisterRoutes(s.Router, routeMiddlewares...)
+	mcpInferenceHandler.RegisterRoutes(s.Router, routeMiddlewares...)
+	s.MCPServerHandler.RegisterRoutes(s.Router, routeMiddlewares...)
 	return nil
 }
 
@@ -2157,11 +2173,20 @@ func (s *BifrostHTTPServer) RegisterAPIRoutes(ctx context.Context, callbacks Ser
 	configHandler := handlers.NewConfigHandler(callbacks, s.Config)
 	pluginsHandler := handlers.NewPluginsHandler(callbacks, s.Config.ConfigStore)
 	sessionHandler := handlers.NewSessionHandler(s.Config.ConfigStore, s.WSTicketStore)
+	employeeHandler, err := employees.NewHandler(ctx, s.Config.ConfigStore, govLogManager)
+	if err != nil {
+		return fmt.Errorf("failed to initialize employee management: %v", err)
+	}
+	s.EmployeeHandler = employeeHandler
+	if executor := s.Config.GetAsyncJobExecutor(); executor != nil {
+		executor.SetVirtualKeyAccessChecker(employeeHandler)
+	}
 	promptsHandler := handlers.NewPromptsHandler(s.Config.ConfigStore, promptsReloader)
 	featureFlagsHandler := handlers.NewFeatureFlagsHandler(s.Config.FeatureFlags, s.Config.ConfigStore)
 	// Going ahead with API handlers
 	oauth2DiscoveryHandler := handlers.NewOAuth2DiscoveryHandler(s.Config)
 	oauth2IssuanceHandler := handlers.NewOAuth2IssuanceHandler(s.Config, s.TempTokens, s.OAuth2IdentityResolver)
+	oauth2IssuanceHandler.SetVirtualKeyAccessChecker(employeeHandler)
 	oauth2SessionsHandler := handlers.NewOAuth2SessionsHandler(s.Config)
 	oauth2ConsentHandler := handlers.NewOAuth2ConsentHandler(s.Config, s.TempTokens, s.OAuth2IdentityResolver)
 
@@ -2183,6 +2208,7 @@ func (s *BifrostHTTPServer) RegisterAPIRoutes(ctx context.Context, callbacks Ser
 	if sessionHandler != nil {
 		sessionHandler.RegisterRoutes(s.Router, middlewares...)
 	}
+	employeeHandler.RegisterRoutes(s.Router, middlewares...)
 	if promptsHandler != nil {
 		promptsHandler.RegisterRoutes(s.Router, middlewares...)
 	}

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { getAppName } from '../lib/branding';
 	import { onMount } from 'svelte';
 	import { useTranslation } from '@svadmin/core/i18n';
 	import { displayError, parseJsonObject, prettyJson } from '../lib/forms';
@@ -109,7 +110,7 @@
 </script>
 
 <section class="page-shell">
-	<header class="page-heading"><div><p class="eyebrow">Elygate / Governance</p><h1>{i18n.t('elygate.routingRules')}</h1><p>{viewMode === 'tree' ? i18n.t('elygate.routingTreeHint') : i18n.t('elygate.routingRulesStructuredHint')}</p></div><div class="heading-actions"><div class="view-switch"><button type="button" class:is-active={viewMode === 'list'} onclick={() => (viewMode = 'list')}>{i18n.t('elygate.tableView')}</button><button type="button" class:is-active={viewMode === 'tree'} onclick={() => (viewMode = 'tree')}>{i18n.t('elygate.treeView')}</button></div><button class="primary" type="button" onclick={openCreate}>{i18n.t('elygate.create')}</button></div></header>
+	<header class="page-heading"><div><p class="eyebrow">{getAppName()} / Governance</p><h1>{i18n.t('elygate.routingRules')}</h1><p>{viewMode === 'tree' ? i18n.t('elygate.routingTreeHint') : i18n.t('elygate.routingRulesStructuredHint')}</p></div><div class="heading-actions"><div class="view-switch"><button type="button" class:is-active={viewMode === 'list'} onclick={() => (viewMode = 'list')}>{i18n.t('elygate.tableView')}</button><button type="button" class:is-active={viewMode === 'tree'} onclick={() => (viewMode = 'tree')}>{i18n.t('elygate.treeView')}</button></div><button class="primary" type="button" onclick={openCreate}>{i18n.t('elygate.create')}</button></div></header>
 	{#if error}<div class="notice error" role="alert">{error}</div>{/if}{#if notice}<div class="notice success" role="status">{notice}</div>{/if}
 	{#if viewMode === 'list'}
 		<div class="rule-list" aria-busy={isLoading}>

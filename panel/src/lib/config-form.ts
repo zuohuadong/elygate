@@ -2,6 +2,7 @@ import { isJsonRecord, type JsonRecord } from './api';
 import { csv } from './forms';
 
 export interface ConfigForm {
+	appName: string;
 	authEnabled: boolean;
 	adminUsername: string;
 	adminPassword: string;
@@ -113,6 +114,7 @@ function setSecretValue(container: JsonRecord, key: string, value: string): void
 
 export function emptyConfigForm(): ConfigForm {
 	return {
+		appName: '',
 		authEnabled: false,
 		adminUsername: '',
 		adminPassword: '',
@@ -162,6 +164,7 @@ export function configFormFromDocument(doc: JsonRecord): ConfigForm {
 	const compat = isJsonRecord(client.compat) ? client.compat : {};
 	const framework = isJsonRecord(doc.framework_config) ? doc.framework_config : {};
 
+	form.appName = strOf(client, 'app_name') || strOf(doc, 'app_name');
 	form.authEnabled = boolOf(auth, 'is_enabled');
 	form.adminUsername = secretValueOf(auth, 'admin_username');
 	form.adminPassword = secretValueOf(auth, 'admin_password');
@@ -217,6 +220,10 @@ export function mergeConfigForm(base: JsonRecord, form: ConfigForm): JsonRecord 
 	setSecretValue(auth, 'admin_password', form.adminPassword);
 
 	const client = ensureRecord(doc, 'client_config');
+	client.app_name = form.appName ? form.appName.trim() : '';
+	if (form.appName && form.appName.trim()) {
+		doc.app_name = form.appName.trim();
+	}
 	client.drop_excess_requests = form.dropExcessRequests;
 	client.initial_pool_size = toNumber(form.initialPoolSize, numOf(client, 'initial_pool_size'));
 	client.prometheus_labels = csv(form.prometheusLabels);

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { getAppName } from '../lib/branding';
 	import { onMount } from 'svelte';
 	import { useTranslation } from '@svadmin/core/i18n';
 	import { getListPayload, requestJson, type JsonRecord } from '../lib/api';
@@ -82,7 +83,7 @@
 </script>
 
 <section class="page-shell" data-resource={resourceName}>
-	<header class="page-heading"><div><p class="eyebrow">Elygate / Observability</p><h1>{i18n.t('elygate.connectors')}</h1><p>{i18n.t('elygate.connectorsHint')}</p></div><button type="button" onclick={() => void load()}>{i18n.t('elygate.refresh')}</button></header>
+	<header class="page-heading"><div><p class="eyebrow">{getAppName()} / Observability</p><h1>{i18n.t('elygate.connectors')}</h1><p>{i18n.t('elygate.connectorsHint')}</p></div><button type="button" onclick={() => void load()}>{i18n.t('elygate.refresh')}</button></header>
 	{#if error}<div class="notice error" role="alert">{error}</div>{/if}
 	{#if notice}<div class="notice success" role="status">{notice}</div>{/if}
 	<div class="workspace" aria-busy={isLoading}>

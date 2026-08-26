@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { getAppName } from '../lib/branding';
 	import { useTranslation } from '@svadmin/core/i18n';
 	import DOMPurify from 'isomorphic-dompurify';
 	import { Marked } from 'marked';
@@ -44,7 +45,7 @@
 		return [
 			{ slug: 'quickstart', title: zh ? '快速开始' : 'Quick start', description: zh ? '安装、启动并发出第一个请求。' : 'Install, start, and send the first request.', category: zh ? '入门' : 'Start', sourcePath: 'quickstart/gateway/setting-up.mdx', content: quickstartSource },
 			{ slug: 'architecture', title: zh ? '系统架构' : 'Architecture', description: zh ? '理解网关请求链路和核心组件。' : 'Understand the gateway request path and core components.', category: zh ? '核心' : 'Core', sourcePath: 'architecture/core/request-flow.mdx', content: architectureSource },
-			{ slug: 'mcp-overview', title: zh ? 'MCP 概览' : 'MCP overview', description: zh ? '连接服务、客户端和 Elygate 网关。' : 'Connect servers, clients, and the Elygate gateway.', category: 'MCP', sourcePath: 'mcp/overview.mdx', content: mcpOverviewSource },
+			{ slug: 'mcp-overview', title: zh ? 'MCP 概览' : 'MCP overview', description: zh ? `连接服务、客户端和 ${getAppName()} 网关。` : `Connect servers, clients, and the ${getAppName()} gateway.`, category: 'MCP', sourcePath: 'mcp/overview.mdx', content: mcpOverviewSource },
 			{ slug: 'mcp-gateway', title: zh ? 'MCP 网关' : 'MCP gateway', description: zh ? '通过统一端点暴露聚合工具。' : 'Expose aggregated tools through one endpoint.', category: 'MCP', sourcePath: 'mcp/gateway.mdx', content: mcpGatewaySource },
 			{ slug: 'virtual-keys', title: zh ? '虚拟密钥' : 'Virtual keys', description: zh ? '访问控制、预算、限流和路由。' : 'Access control, budgets, limits, and routing.', category: zh ? '治理' : 'Governance', sourcePath: 'features/governance/virtual-keys.mdx', content: virtualKeysSource },
 			{ slug: 'routing', title: zh ? '治理路由' : 'Governance routing', description: zh ? '按供应商、模型和权重分配请求。' : 'Route requests by provider, model, and weight.', category: zh ? '治理' : 'Governance', sourcePath: 'features/governance/routing.mdx', content: routingSource },
@@ -80,7 +81,7 @@
 <section class="page-shell">
 	<header class="hero">
 		<div>
-			<p class="eyebrow">Elygate</p>
+			<p class="eyebrow">{getAppName()}</p>
 			<h1>{i18n.t('elygate.docsHub')}</h1>
 			<p>{i18n.t('elygate.docsHubHint')}</p>
 		</div>

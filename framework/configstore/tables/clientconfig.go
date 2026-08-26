@@ -22,6 +22,7 @@ const (
 
 // TableClientConfig represents global client configuration in the database
 type TableClientConfig struct {
+	AppName                               string                         `gorm:"type:varchar(255);null" json:"app_name,omitempty"`
 	ID                                    uint                           `gorm:"primaryKey;autoIncrement" json:"id"`
 	DropExcessRequests                    bool                           `gorm:"default:false" json:"drop_excess_requests"`
 	PrometheusLabelsJSON                  string                         `gorm:"type:text" json:"-"` // JSON serialized []string

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { getAppName } from '../lib/branding';
 	import { onMount } from 'svelte';
 	import { useTranslation } from '@svadmin/core/i18n';
 	import { displayError, prettyJson } from '../lib/forms';
@@ -154,7 +155,7 @@
 
 <section class="page-shell">
 	<header class="page-heading">
-		<div><p class="eyebrow">Elygate / MCP</p><h1>{i18n.t('elygate.mcpLogs')}</h1><p>{i18n.t('elygate.mcpLogsHint')}</p></div>
+		<div><p class="eyebrow">{getAppName()} / MCP</p><h1>{i18n.t('elygate.mcpLogs')}</h1><p>{i18n.t('elygate.mcpLogsHint')}</p></div>
 		<div class="heading-actions"><button class="danger" type="button" onclick={() => void deleteSelected()} disabled={selectedIds.length === 0 || isMutating}>{i18n.t('elygate.deleteSelected')} ({selectedIds.length})</button><button class="primary" type="button" onclick={() => void load()} disabled={isLoading}>{i18n.t('elygate.refresh')}</button></div>
 	</header>
 

@@ -259,6 +259,71 @@ func (h *ConfigHandler) getConfig(ctx *fasthttp.RequestCtx) {
 	if h.store.EnvLabel != "" {
 		mapConfig["env_label"] = h.store.EnvLabel
 	}
+	// Compute effective app name from client config / metadata or env vars
+	effectiveAppName := ""
+	if h.store.ClientConfig != nil && strings.TrimSpace(h.store.ClientConfig.AppName) != "" {
+		effectiveAppName = strings.TrimSpace(h.store.ClientConfig.AppName)
+	}
+	if effectiveAppName == "" && mapConfig["metadata"] != nil {
+		if meta, ok := mapConfig["metadata"].(map[string]any); ok && meta != nil {
+			if v, ok := meta["app_name"].(string); ok && strings.TrimSpace(v) != "" {
+				effectiveAppName = strings.TrimSpace(v)
+			} else if v, ok := meta["brand_name"].(string); ok && strings.TrimSpace(v) != "" {
+				effectiveAppName = strings.TrimSpace(v)
+			}
+		}
+	}
+	if effectiveAppName == "" {
+		for _, key := range []string{"APP_NAME", "BRAND_NAME", "PLATFORM_NAME", "ELYGATE_APP_NAME", "BIFROST_APP_NAME"} {
+			if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+				effectiveAppName = v
+				break
+			}
+		}
+	}
+	if effectiveAppName != "" {
+		mapConfig["app_name"] = effectiveAppName
+	}
+	effectiveShortName := ""
+	for _, key := range []string{"APP_SHORT_NAME", "BRAND_SHORT_NAME", "SHORT_NAME"} {
+		if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+			effectiveShortName = v
+			break
+		}
+	}
+	if effectiveShortName != "" {
+		mapConfig["short_name"] = effectiveShortName
+	}
+	effectiveEnName := ""
+	for _, key := range []string{"APP_EN_NAME", "BRAND_EN_NAME", "PLATFORM_EN_NAME", "EN_NAME"} {
+		if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+			effectiveEnName = v
+			break
+		}
+	}
+	if effectiveEnName != "" {
+		mapConfig["en_name"] = effectiveEnName
+	}
+	effectiveLogo := ""
+	for _, key := range []string{"APP_LOGO", "BRAND_LOGO", "APP_LOGO_URL", "BRAND_LOGO_URL", "LOGO_URL"} {
+		if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+			effectiveLogo = v
+			break
+		}
+	}
+	if effectiveLogo != "" {
+		mapConfig["logo_url"] = effectiveLogo
+	}
+	effectiveFavicon := ""
+	for _, key := range []string{"APP_FAVICON", "BRAND_FAVICON", "APP_FAVICON_URL", "FAVICON_URL"} {
+		if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+			effectiveFavicon = v
+			break
+		}
+	}
+	if effectiveFavicon != "" {
+		mapConfig["favicon_url"] = effectiveFavicon
+	}
 	mapConfig["is_git_available"] = CheckGitAvailability()
 	mapConfig["is_cache_connected"] = h.store.VectorStore != nil
 	mapConfig["is_logs_connected"] = h.store.LogsStore != nil
@@ -518,6 +583,10 @@ func (h *ConfigHandler) updateConfig(ctx *fasthttp.RequestCtx) {
 	}
 
 	var restartReasons []string
+
+	if payload.ClientConfig.AppName != currentConfig.AppName {
+		updatedConfig.AppName = payload.ClientConfig.AppName
+	}
 
 	if payload.ClientConfig.DropExcessRequests != currentConfig.DropExcessRequests {
 		h.configManager.UpdateDropExcessRequests(ctx, payload.ClientConfig.DropExcessRequests)

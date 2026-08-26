@@ -1,5 +1,6 @@
 import type { AuthActionResult, AuthProvider, CheckResult, Identity } from '@svadmin/core';
 import { getSessionStatus, requestJson } from './api';
+import { formatBrandText, resolveBranding } from './branding';
 import type { ElygateLocale } from './i18n';
 
 const authCopy = {
@@ -7,22 +8,22 @@ const authCopy = {
 		loginRequired: '请输入用户名和密码',
 		loginFailed: '登录失败',
 		sessionExpired: '登录已过期，请重新登录。',
-		authDisabled: '管理员认证尚未启用。请先在 Bifrost 部署配置中启用 auth_config。',
+		authDisabled: '管理员认证尚未启用。请先在部署配置中启用 auth_config。',
 		sessionUnknown: '无法确认登录状态。',
-		adminName: 'Elygate 管理员',
+		adminName: '管理员',
 	},
 	en: {
 		loginRequired: 'Enter a username and password',
 		loginFailed: 'Sign-in failed',
 		sessionExpired: 'Your session has expired. Please sign in again.',
-		authDisabled: 'Administrator authentication is disabled. Enable auth_config in the Bifrost deployment first.',
+		authDisabled: 'Administrator authentication is disabled. Enable auth_config in the deployment first.',
 		sessionUnknown: 'Unable to confirm the sign-in state.',
-		adminName: 'Elygate administrator',
+		adminName: 'Administrator',
 	},
 } as const;
 
 function authLabel(locale: ElygateLocale, key: keyof typeof authCopy.en): string {
-	return authCopy[locale][key];
+	return formatBrandText(authCopy[locale][key]);
 }
 
 function failed(message: string): AuthActionResult {
@@ -63,6 +64,7 @@ export function createBifrostAuthProvider(
 		async check(): Promise<CheckResult> {
 			try {
 				const status = await getSessionStatus();
+				resolveBranding(status as unknown as Record<string, unknown>);
 				if (status.is_auth_enabled && status.has_valid_token) return { authenticated: true };
 				return {
 					authenticated: false,
@@ -85,7 +87,7 @@ export function createBifrostAuthProvider(
 		async getIdentity(): Promise<Identity | null> {
 			const status = await getSessionStatus();
 			if (!status.is_auth_enabled || !status.has_valid_token) return null;
-			return { id: 'bifrost-admin', name: authLabel(getLocale(), 'adminName') };
+			return { id: 'admin', name: authLabel(getLocale(), 'adminName') };
 		},
 	};
 }

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { getAppName } from '../lib/branding';
 	import { onMount } from 'svelte';
 	import { useTranslation } from '@svadmin/core/i18n';
 	import { getListPayload, getTotal, requestJson, type JsonRecord } from '../lib/api';
@@ -142,7 +143,7 @@
 </script>
 
 <section class="page-shell" data-resource={resourceName}>
-	<header class="page-heading"><div><p class="eyebrow">Elygate / Governance</p><h1>{i18n.t('elygate.modelLimits')}</h1><p>{i18n.t('elygate.modelLimitsHint')}</p></div><button class="primary" type="button" onclick={openCreate}>+ {i18n.t('elygate.addLimit')}</button></header>
+	<header class="page-heading"><div><p class="eyebrow">{getAppName()} / Governance</p><h1>{i18n.t('elygate.modelLimits')}</h1><p>{i18n.t('elygate.modelLimitsHint')}</p></div><button class="primary" type="button" onclick={openCreate}>+ {i18n.t('elygate.addLimit')}</button></header>
 	{#if error}<div class="notice error" role="alert">{error}</div>{/if}
 	{#if notice}<div class="notice success" role="status">{notice}</div>{/if}
 	<form class="toolbar" onsubmit={(event) => { event.preventDefault(); void load(true); }}>

@@ -27,6 +27,18 @@ function stripSvadminSourceDirective(): Plugin {
 
 export default defineConfig({
 	plugins: [bundledDocsPlugin(), stripSvadminSourceDirective(), tailwindcss(), svelte()],
+	define: {
+		'process.env.APP_NAME': JSON.stringify(
+			runtimeProcess?.env?.APP_NAME ??
+			runtimeProcess?.env?.BRAND_NAME ??
+			runtimeProcess?.env?.PLATFORM_NAME ??
+			runtimeProcess?.env?.VITE_APP_NAME ??
+			runtimeProcess?.env?.VITE_BRAND_NAME ??
+			runtimeProcess?.env?.ELYGATE_APP_NAME ??
+			runtimeProcess?.env?.BIFROST_APP_NAME ??
+			'',
+		),
+	},
 	server: {
 		port: 3000,
 		proxy: {

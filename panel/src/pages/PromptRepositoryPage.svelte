@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { getAppName } from '../lib/branding';
 	import { onMount } from 'svelte';
 	import { useTranslation } from '@svadmin/core/i18n';
 	import { displayError, parseJsonObject, prettyJson } from '../lib/forms';
@@ -226,7 +227,7 @@
 </script>
 
 <section class="page-shell">
-	<header class="page-heading"><div><p class="eyebrow">Elygate / Repository</p><h1>{i18n.t('elygate.prompts')}</h1><p>{i18n.t('elygate.promptsHint')}</p></div><div><button type="button" onclick={() => void createFolder()}>{i18n.t('elygate.newFolder')}</button><button class="primary" type="button" onclick={() => void createPrompt()}>{i18n.t('elygate.newPrompt')}</button></div></header>
+	<header class="page-heading"><div><p class="eyebrow">{getAppName()} / Repository</p><h1>{i18n.t('elygate.prompts')}</h1><p>{i18n.t('elygate.promptsHint')}</p></div><div><button type="button" onclick={() => void createFolder()}>{i18n.t('elygate.newFolder')}</button><button class="primary" type="button" onclick={() => void createPrompt()}>{i18n.t('elygate.newPrompt')}</button></div></header>
 	{#if error}<div class="notice error" role="alert">{error}</div>{/if}{#if notice}<div class="notice success" role="status">{notice}</div>{/if}
 	<div class="workspace">
 		<aside class="folders"><button type="button" class:is-active={!selectedFolderId} onclick={() => { selectedFolderId = ''; clearPrompt(); void load(); }}>{i18n.t('elygate.allPrompts')}</button>{#each folders as folder (String(folder.id))}<div><button type="button" class:is-active={selectedFolderId === String(folder.id)} onclick={() => { selectedFolderId = String(folder.id); clearPrompt(); void load(); }}><strong class="folder-name" title={String(folder.name)}>{String(folder.name)}</strong><span>{Number(folder.prompts_count ?? 0)}</span></button><button type="button" title={i18n.t('elygate.edit')} aria-label={`${i18n.t('elygate.edit')} ${String(folder.name)}`} onclick={() => void editFolder(folder)}>✎</button><button type="button" title={i18n.t('elygate.delete')} aria-label={`${i18n.t('elygate.delete')} ${String(folder.name)}`} onclick={() => void deleteFolder(folder)}>×</button></div>{/each}</aside>

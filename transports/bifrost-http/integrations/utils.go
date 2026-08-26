@@ -154,9 +154,18 @@ func extractExactPath(ctx *fasthttp.RequestCtx) string {
 // since no streaming has begun and clients should receive a standard error response.
 func (g *GenericRouter) sendStreamError(ctx *fasthttp.RequestCtx, bifrostCtx *schemas.BifrostContext, config RouteConfig, bifrostErr *schemas.BifrostError) {
 	bifrostErr = lib.SanitizeBifrostErrorForClient(bifrostErr)
-	bifrostErr = lib.NormalizeBifrostErrorStatusCode(bifrostErr)
 	if bifrostErr == nil {
 		bifrostErr = newBifrostErrorWithCode(nil, lib.ClientSafeInternalErrorMessage, fasthttp.StatusInternalServerError)
+	} else if bifrostErr.StatusCode == nil {
+		// A stream that has not started cannot expose a provider status; keep the
+		// transport failure on the server-error boundary instead of treating it as
+		// a client validation error.
+		normalized := *bifrostErr
+		statusCode := fasthttp.StatusInternalServerError
+		normalized.StatusCode = &statusCode
+		bifrostErr = &normalized
+	} else {
+		bifrostErr = lib.NormalizeBifrostErrorStatusCode(bifrostErr)
 	}
 
 	// Forward provider response headers from context so streaming error responses include them

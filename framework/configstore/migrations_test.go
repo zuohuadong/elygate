@@ -1170,6 +1170,9 @@ func TestTriggerMigrations_FreshDB(t *testing.T) {
 		&tables.TableVirtualKeyProviderConfig{},
 		&tables.TableVirtualKeyMCPConfig{},
 		&tables.TableNotification{},
+		&tables.TableGovernanceAuditHead{},
+		&tables.TableGovernanceAuditPublicKey{},
+		&tables.TableGovernanceAuditEvent{},
 	}
 
 	migrator := db.Migrator()
@@ -1177,6 +1180,32 @@ func TestTriggerMigrations_FreshDB(t *testing.T) {
 		assert.True(t, migrator.HasTable(table), "table should exist: %T", table)
 	}
 	assert.True(t, migrator.HasColumn(&tables.TableModelPricing{}, "is_deprecated"), "model pricing is_deprecated column should exist")
+}
+
+func TestMigrationAddGovernanceAuditTables_Idempotent(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+
+	require.NoError(t, migrationAddGovernanceAuditTables(context.Background(), db, testMigrationLogger))
+	require.NoError(t, migrationAddGovernanceAuditTables(context.Background(), db, testMigrationLogger))
+	require.True(t, db.Migrator().HasTable(&tables.TableGovernanceAuditHead{}))
+	require.True(t, db.Migrator().HasTable(&tables.TableGovernanceAuditEvent{}))
+
+	var heads []tables.TableGovernanceAuditHead
+	require.NoError(t, db.Find(&heads).Error)
+	require.Len(t, heads, 1)
+	require.Equal(t, uint(1), heads[0].ID)
+	require.Zero(t, heads[0].LastSequence)
+	require.Empty(t, heads[0].LastHash)
+}
+
+func TestMigrationAddGovernanceAuditPublicKeys_Idempotent(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+
+	require.NoError(t, migrationAddGovernanceAuditPublicKeys(context.Background(), db, testMigrationLogger))
+	require.NoError(t, migrationAddGovernanceAuditPublicKeys(context.Background(), db, testMigrationLogger))
+	require.True(t, db.Migrator().HasTable(&tables.TableGovernanceAuditPublicKey{}))
 }
 
 func TestTriggerMigrations_Idempotent(t *testing.T) {

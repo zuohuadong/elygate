@@ -31,12 +31,34 @@ type wsWriter interface {
 // Each event is routed through the standard Bifrost inference pipeline (PreLLMHook, key selection,
 // provider call, PostLLMHook) via the HTTP bridge, with native WS upstream as an optimization.
 type WSResponsesHandler struct {
-	client       *bifrost.Bifrost
-	config       *lib.Config
-	handlerStore lib.HandlerStore
-	pool         *bfws.Pool
-	sessions     *bfws.SessionManager
-	upgrader     ws.FastHTTPUpgrader
+	client        *bifrost.Bifrost
+	config        *lib.Config
+	handlerStore  lib.HandlerStore
+	pool          *bfws.Pool
+	sessions      *bfws.SessionManager
+	upgrader      ws.FastHTTPUpgrader
+	accessChecker VirtualKeyAccessChecker
+}
+
+func (h *WSResponsesHandler) SetVirtualKeyAccessChecker(checker VirtualKeyAccessChecker) {
+	h.accessChecker = checker
+}
+
+func (h *WSResponsesHandler) checkVirtualKeyAccess(auth *authHeaders) error {
+	if h.accessChecker == nil {
+		return nil
+	}
+	bifrostCtx, cancel := createBifrostContextFromAuth(h.handlerStore, auth)
+	if bifrostCtx == nil {
+		cancel()
+		return errors.New("failed to resolve virtual key access")
+	}
+	defer cancel()
+	virtualKey := bifrost.GetStringFromContext(bifrostCtx, schemas.BifrostContextKeyVirtualKey)
+	if virtualKey == "" {
+		return nil
+	}
+	return h.accessChecker.CheckVirtualKeyValueAccess(bifrostCtx, virtualKey)
 }
 
 // NewWSResponsesHandler creates a new WebSocket Responses handler.
@@ -156,6 +178,10 @@ func (h *WSResponsesHandler) eventLoop(conn *ws.Conn, session *bfws.Session, aut
 
 		switch schemas.WebSocketEventType(envelope.Type) {
 		case schemas.WSEventResponseCreate:
+			if err := h.checkVirtualKeyAccess(auth); err != nil {
+				writeWSError(session, 401, "authentication_error", "virtual key access is no longer active")
+				return
+			}
 			h.handleResponseCreate(session, auth, message)
 		default:
 			writeWSError(session, 400, "invalid_request_error", "unsupported event type: "+envelope.Type)

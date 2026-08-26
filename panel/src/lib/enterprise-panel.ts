@@ -1,6 +1,6 @@
 import { addTranslations } from '@svadmin/core/i18n';
 import type { Component } from 'svelte';
-import type { PublicPanelRoute } from './public-routes';
+import type { EnterprisePublicRoute } from './public-routes';
 import type { ElygateLocale } from './i18n';
 
 export const ENTERPRISE_MENU_GROUPS = [
@@ -17,7 +17,7 @@ export const ENTERPRISE_MENU_GROUPS = [
 export type EnterpriseMenuGroup = (typeof ENTERPRISE_MENU_GROUPS)[number];
 export type EnterpriseResourcePage = { list: Component<{ resourceName: string }> };
 export type EnterpriseResourcePages = Record<string, EnterpriseResourcePage>;
-export type EnterprisePublicPages = Partial<Record<PublicPanelRoute, Component<{ route: PublicPanelRoute }>>>;
+export type EnterprisePublicPages = Partial<Record<EnterprisePublicRoute, Component<{ route: EnterprisePublicRoute }>>>;
 
 export interface EnterpriseResourceManifestEntry {
 	name: string;

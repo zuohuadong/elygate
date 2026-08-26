@@ -37,6 +37,10 @@ type GovernanceStore interface {
 	GetVirtualKey(ctx context.Context, vkValue string) (*configstoreTables.TableVirtualKey, bool)
 }
 
+type VirtualKeyAccessChecker interface {
+	CheckVirtualKeyAccess(ctx context.Context, virtualKeyID string) error
+}
+
 // WebhookDispatcher queues webhook notifications for a job that reached a
 // terminal state. A nil WebhookEndpointID means broadcast to every enabled
 // endpoint subscribed to the event. Implementations must not block on receiver I/O.
@@ -57,6 +61,11 @@ type AsyncJobExecutor struct {
 	webhookDispatcher WebhookDispatcher
 	webhookManager    WebhookManager
 	logger            schemas.Logger
+	accessChecker     VirtualKeyAccessChecker
+}
+
+func (e *AsyncJobExecutor) SetVirtualKeyAccessChecker(checker VirtualKeyAccessChecker) {
+	e.accessChecker = checker
 }
 
 // NewAsyncJobExecutor creates a new AsyncJobExecutor. A nil webhookDispatcher
@@ -206,6 +215,21 @@ func (e *AsyncJobExecutor) executeJob(job *AsyncJob, operation AsyncOperation, c
 	}
 
 	ctx.SetValue(schemas.BifrostIsAsyncRequest, true)
+	if job.VirtualKeyID != nil && e.accessChecker != nil {
+		if err := e.accessChecker.CheckVirtualKeyAccess(ctx, *job.VirtualKeyID); err != nil {
+			now := time.Now().UTC()
+			expiresAt := now.Add(time.Duration(job.ResultTTL) * time.Second)
+			errJSON, _ := sonic.Marshal(&schemas.BifrostError{Error: &schemas.ErrorField{Message: "virtual key access is no longer active"}})
+			if updateErr := e.logstore.UpdateAsyncJob(ctx, job.ID, map[string]any{
+				"status": schemas.AsyncJobStatusFailed, "status_code": fasthttp.StatusUnauthorized,
+				"error": string(errJSON), "completed_at": now, "expires_at": expiresAt,
+			}); updateErr != nil {
+				e.logger.Warn("failed to update denied async job: %v", updateErr)
+			}
+			e.notifyWebhook(ctx, job, schemas.AsyncJobStatusFailed)
+			return
+		}
+	}
 
 	// Execute the operation
 	resp, bifrostErr := operation(ctx)

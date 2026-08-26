@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formatBrandText, getAppName } from '../lib/branding';
 	import { onMount } from 'svelte';
 	import { useTranslation } from '@svadmin/core/i18n';
 	import { displayError, parseJsonObject, prettyJson } from '../lib/forms';
@@ -17,27 +18,27 @@
 	const configs: Record<string, DocumentConfig> = {
 		config: {
 			titleKey: 'elygate.config',
-			eyebrow: 'Elygate / Bifrost Config',
+			eyebrow: 'Config',
 			getPath: '/api/config',
 			putPath: '/api/config',
 		},
 		'complexity-analyzer': {
 			titleKey: 'elygate.complexityAnalyzer',
-			eyebrow: 'Elygate / Governance',
+			eyebrow: 'Governance',
 			getPath: '/api/governance/complexity-analyzer-config',
 			putPath: '/api/governance/complexity-analyzer-config',
 			resetPath: '/api/governance/complexity-analyzer-config/reset',
 		},
 		'complexity-router': {
 			titleKey: 'elygate.complexityRouter',
-			eyebrow: 'Elygate / Governance',
+			eyebrow: 'Governance',
 			getPath: '/api/governance/complexity-analyzer-config',
 			putPath: '/api/governance/complexity-analyzer-config',
 			resetPath: '/api/governance/complexity-analyzer-config/reset',
 		},
 		'proxy-config': {
 			titleKey: 'elygate.proxyConfigTitle',
-			eyebrow: 'Elygate / System',
+			eyebrow: 'System',
 			getPath: '/api/proxy-config',
 			putPath: '/api/proxy-config',
 		},
@@ -107,7 +108,7 @@
 <section class="page-shell">
 	<header class="page-heading">
 		<div>
-			<p class="eyebrow">{config.eyebrow}</p>
+			<p class="eyebrow">{getAppName()} / {config.eyebrow}</p>
 			<h1>{title}</h1>
 			<p>{i18n.t('elygate.jsonDocumentHint')}</p>
 		</div>

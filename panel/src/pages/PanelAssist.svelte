@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { getAppName } from '../lib/branding';
 	import { onMount } from 'svelte';
 	import { getListPayload, getSessionStatus, isJsonRecord, requestJson, type JsonRecord } from '../lib/api';
 	import { labelFor, type ElygateLocale } from '../lib/i18n';
@@ -96,7 +97,7 @@
 
 {#if visible}
 	<aside class="assist" aria-label={labelFor(locale, 'elygate.onboarding')}>
-		<header><button class="summary" type="button" onclick={() => (expanded = !expanded)}><strong>Elygate {version}</strong><span>{environment}</span></button><button class="close" type="button" onclick={dismiss} aria-label={labelFor(locale, 'elygate.close')}>×</button></header>
+		<header><button class="summary" type="button" onclick={() => (expanded = !expanded)}><strong>{getAppName()} {version}</strong><span>{environment}</span></button><button class="close" type="button" onclick={dismiss} aria-label={labelFor(locale, 'elygate.close')}>×</button></header>
 		{#if expanded}<div class="body"><p>{labelFor(locale, 'elygate.onboardingHint')}</p>{#each checklist as item (item.href)}<a href={item.href} class:complete={item.complete}><span>{item.complete ? '✓' : '○'}</span>{item.label}</a>{/each}<a class="docs" href="#/docs-hub">{labelFor(locale, 'elygate.openDocs')} →</a></div>{/if}
 	</aside>
 {/if}

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { getAppName } from '../lib/branding';
 	import { onMount } from 'svelte';
 	import { isJsonRecord, type JsonRecord } from '../lib/api';
 	import { expiryMinutes, isSafeOAuthRedirect, tempTokenFromFragment } from '../lib/oauth-consent';
@@ -17,14 +18,14 @@
 	const copy = zh ? {
 		missingTitle: '缺少授权流程标识', missingHint: '链接缺少 flow 参数，请从 MCP 客户端重新发起连接。',
 		loading: '正在加载授权请求…', unavailableTitle: '授权链接不可用', unavailableHint: '链接可能已过期、已使用，或临时令牌已失效。请从 MCP 客户端重新发起连接。',
-		connectTitle: '请求连接到 Elygate', connectHint: '请选择用于此次 MCP 连接的身份。', noModes: '当前没有可用的认证方式。',
+		connectTitle: `请求连接到 ${getAppName()}`, connectHint: '请选择用于此次 MCP 连接的身份。', noModes: '当前没有可用的认证方式。',
 		account: '已登录账户', continueAs: '以此账户继续', virtualKey: '虚拟密钥', virtualKeyHint: '使用当前工作区中的 sk-bf-* 虚拟密钥。',
 		connectKey: '使用密钥连接', anonymous: '匿名会话', anonymousHint: '不绑定账户或虚拟密钥。', continueAnonymous: '匿名继续',
 		expires: '此链接将在约 {minutes} 分钟后过期。', soon: '此链接即将过期。', connecting: '正在连接…', failed: '授权失败', unsafeRedirect: '服务端返回了不安全的跳转地址。',
 	} : {
 		missingTitle: 'Missing flow identifier', missingHint: 'This URL is missing the flow parameter. Restart the connection from your MCP client.',
 		loading: 'Loading authorization request…', unavailableTitle: 'Authorization link unavailable', unavailableHint: 'The link may be expired, already used, or missing its temporary token. Restart the connection from your MCP client.',
-		connectTitle: 'wants to connect to Elygate', connectHint: 'Choose the identity for this MCP connection.', noModes: 'No authentication options are currently available.',
+		connectTitle: `wants to connect to ${getAppName()}`, connectHint: 'Choose the identity for this MCP connection.', noModes: 'No authentication options are currently available.',
 		account: 'Signed-in account', continueAs: 'Continue as this account', virtualKey: 'Virtual key', virtualKeyHint: 'Use an sk-bf-* virtual key from this workspace.',
 		connectKey: 'Connect with key', anonymous: 'Anonymous session', anonymousHint: 'Continue without an account or virtual key.', continueAnonymous: 'Continue anonymously',
 		expires: 'This link expires in about {minutes} minutes.', soon: 'This link expires soon.', connecting: 'Connecting…', failed: 'Authorization failed', unsafeRedirect: 'The server returned an unsafe redirect URL.',

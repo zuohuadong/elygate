@@ -4,6 +4,12 @@ export interface SessionStatus {
 	auth_type: 'none' | 'password';
 	has_valid_token: boolean;
 	is_auth_enabled: boolean;
+	app_name?: string;
+	short_name?: string;
+	en_name?: string;
+	logo_url?: string;
+	favicon_url?: string;
+	[key: string]: unknown;
 }
 
 export class ApiError extends Error {
@@ -44,12 +50,12 @@ function getErrorMessage(payload: unknown, fallback: string): string {
 export async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> {
 	const response = await fetch(path, {
 		credentials: 'same-origin',
+		...init,
 		headers: {
 			Accept: 'application/json',
 			...(init.body ? { 'Content-Type': 'application/json' } : {}),
 			...init.headers,
 		},
-		...init,
 	});
 
 	const payload: unknown = await response.json().catch(() => undefined);
@@ -67,7 +73,7 @@ export function getListPayload(value: unknown): JsonRecord[] {
 	if (Array.isArray(value)) return value.filter(isJsonRecord);
 	if (!isJsonRecord(value)) return [];
 
-	for (const key of ['data', 'items', 'providers', 'virtual_keys', 'logs', 'models', 'keys', 'teams', 'customers', 'rules', 'model_configs', 'budgets', 'rate_limits', 'pricing_overrides', 'webhooks', 'endpoints', 'sessions', 'plugins', 'skills', 'folders', 'prompts']) {
+	for (const key of ['data', 'items', 'employees', 'providers', 'virtual_keys', 'logs', 'models', 'keys', 'teams', 'customers', 'rules', 'model_configs', 'budgets', 'rate_limits', 'pricing_overrides', 'webhooks', 'endpoints', 'sessions', 'plugins', 'skills', 'folders', 'prompts']) {
 		const candidate = value[key];
 		if (Array.isArray(candidate)) return candidate.filter(isJsonRecord);
 	}

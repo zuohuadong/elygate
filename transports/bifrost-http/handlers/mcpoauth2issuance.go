@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -41,6 +42,7 @@ type OAuth2IssuanceHandler struct {
 	// when user identity is available). May be nil — VK refresh is never blocked
 	// then, matching availableModes which keeps offering vk without a resolver.
 	identityResolver OAuth2IdentityResolver
+	accessChecker    VirtualKeyAccessChecker
 }
 
 // NewOAuth2IssuanceHandler creates a new issuance handler. identityResolver may
@@ -48,6 +50,17 @@ type OAuth2IssuanceHandler struct {
 // consent handler offering vk when no resolver is present.
 func NewOAuth2IssuanceHandler(store *lib.Config, tempTokens *temptoken.Service, identityResolver OAuth2IdentityResolver) *OAuth2IssuanceHandler {
 	return &OAuth2IssuanceHandler{store: store, tempTokens: tempTokens, identityResolver: identityResolver}
+}
+
+func (h *OAuth2IssuanceHandler) SetVirtualKeyAccessChecker(checker VirtualKeyAccessChecker) {
+	h.accessChecker = checker
+}
+
+func (h *OAuth2IssuanceHandler) checkVirtualKeyAccess(ctx context.Context, mode, subject string) error {
+	if h.accessChecker == nil || schemas.MCPAuthMode(mode) != schemas.MCPAuthModeVK {
+		return nil
+	}
+	return h.accessChecker.CheckVirtualKeyAccess(ctx, subject)
 }
 
 // RegisterRoutes wires the three OAuth2 issuance routes.
@@ -370,6 +383,10 @@ func (h *OAuth2IssuanceHandler) handleTokenAuthCode(ctx *fasthttp.RequestCtx) {
 		sendOAuthError(ctx, fasthttp.StatusBadRequest, "invalid_grant", "PKCE verification failed")
 		return
 	}
+	if err := h.checkVirtualKeyAccess(ctx, req.BfMode, req.BfSub); err != nil {
+		sendOAuthError(ctx, fasthttp.StatusBadRequest, "invalid_grant", "virtual key access is no longer active")
+		return
+	}
 
 	accessToken, refreshToken, refreshTokenObj, err := h.issueTokenPair(ctx, req.ID, req.ClientID, req.BfMode, req.BfSub, req.Scope, req.Resource)
 	if err != nil {
@@ -460,6 +477,10 @@ func (h *OAuth2IssuanceHandler) handleTokenRefresh(ctx *fasthttp.RequestCtx) {
 		}
 		if errors.Is(vkErr, configstore.ErrNotFound) || vk == nil || !vk.IsActiveValue() {
 			sendOAuthError(ctx, fasthttp.StatusBadRequest, "invalid_grant", "virtual key is no longer active")
+			return
+		}
+		if err := h.checkVirtualKeyAccess(ctx, rt.BfMode, rt.BfSub); err != nil {
+			sendOAuthError(ctx, fasthttp.StatusBadRequest, "invalid_grant", "virtual key access is no longer active")
 			return
 		}
 	}

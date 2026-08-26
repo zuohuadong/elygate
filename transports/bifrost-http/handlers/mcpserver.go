@@ -57,8 +57,27 @@ type MCPServerHandler struct {
 	// vkCache serves by-ID virtual key lookups on the JWT auth path from the
 	// governance in-memory store, avoiding a per-request DB read. Optional: a nil
 	// cache or a miss falls back to the config store. See getVirtualKeyByID.
-	vkCache VirtualKeyCache
-	mu      sync.RWMutex
+	vkCache       VirtualKeyCache
+	accessChecker VirtualKeyAccessChecker
+	mu            sync.RWMutex
+}
+
+func (h *MCPServerHandler) SetVirtualKeyAccessChecker(checker VirtualKeyAccessChecker) {
+	h.accessChecker = checker
+}
+
+func (h *MCPServerHandler) checkVirtualKeyID(ctx context.Context, virtualKeyID string) error {
+	if h.accessChecker == nil {
+		return nil
+	}
+	return h.accessChecker.CheckVirtualKeyAccess(ctx, virtualKeyID)
+}
+
+func (h *MCPServerHandler) checkVirtualKeyValue(ctx context.Context, virtualKeyValue string) error {
+	if h.accessChecker == nil {
+		return nil
+	}
+	return h.accessChecker.CheckVirtualKeyValueAccess(ctx, virtualKeyValue)
 }
 
 // getVirtualKeyByID resolves a virtual key by its row ID for the JWT auth path,
@@ -666,6 +685,9 @@ func (h *MCPServerHandler) getMCPServerForRequest(ctx *fasthttp.RequestCtx) (*mc
 			if !vk.IsActiveValue() {
 				return nil, fmt.Errorf("virtual key is inactive")
 			}
+			if err := h.checkVirtualKeyID(ctx, vk.ID); err != nil {
+				return nil, err
+			}
 			vkServer, err := h.ensureVKMCPServerByValue(ctx, vk.Value.GetValue())
 			if err != nil {
 				return nil, err
@@ -756,6 +778,9 @@ func (h *MCPServerHandler) getMCPServerForRequest(ctx *fasthttp.RequestCtx) (*mc
 			if !vk.IsActiveValue() {
 				return nil, fmt.Errorf("virtual key is inactive")
 			}
+			if err := h.checkVirtualKeyID(ctx, vk.ID); err != nil {
+				return nil, err
+			}
 			res.jwtVK = vk
 			vkServer, serverErr := h.ensureVKMCPServerByValue(ctx, vk.Value.GetValue())
 			if serverErr != nil {
@@ -793,6 +818,9 @@ func (h *MCPServerHandler) getMCPServerForRequest(ctx *fasthttp.RequestCtx) (*mc
 			ctx.Response.Header.Set("WWW-Authenticate", wwwAuthenticateValue(ctx, h.config))
 		}
 		return nil, fmt.Errorf("virtual key required to access mcp server; set one of x-bf-vk, Authorization: Bearer <vk>, x-api-key, or x-goog-api-key in your MCP client config")
+	}
+	if err := h.checkVirtualKeyValue(ctx, vk); err != nil {
+		return nil, err
 	}
 
 	vkServer, err := h.ensureVKMCPServerByValue(ctx, vk)

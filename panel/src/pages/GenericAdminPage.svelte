@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formatBrandText, getAppName } from '../lib/branding';
 	import { onMount } from 'svelte';
 	import { useTranslation } from '@svadmin/core/i18n';
 	import { displayError, parseJsonObject, prettyJson } from '../lib/forms';
@@ -86,7 +87,7 @@
 	const resourceConfigs: Record<string, ResourceConfig> = {
 		teams: {
 			titleKey: 'elygate.teams',
-			eyebrow: 'Elygate / Enterprise Governance',
+			eyebrow: 'Enterprise Governance',
 			endpoint: '/api/governance/teams',
 			listKey: 'teams',
 			itemKey: 'team',
@@ -99,7 +100,7 @@
 		},
 		customers: {
 			titleKey: 'elygate.customers',
-			eyebrow: 'Elygate / Enterprise Governance',
+			eyebrow: 'Enterprise Governance',
 			endpoint: '/api/governance/customers',
 			listKey: 'customers',
 			itemKey: 'customer',
@@ -112,7 +113,7 @@
 		},
 		'routing-rules': {
 			titleKey: 'elygate.routingRules',
-			eyebrow: 'Elygate / Bifrost Routing',
+			eyebrow: 'Routing',
 			endpoint: '/api/governance/routing-rules',
 			helpKey: 'elygate.routingRulesHelp',
 			listKey: 'rules',
@@ -138,7 +139,7 @@
 		},
 		'model-configs': {
 			titleKey: 'elygate.modelConfigs',
-			eyebrow: 'Elygate / Governance',
+			eyebrow: 'Governance',
 			endpoint: '/api/governance/model-configs',
 			helpKey: 'elygate.modelConfigsHelp',
 			listKey: 'model_configs',
@@ -152,7 +153,7 @@
 		},
 		'provider-governance': {
 			titleKey: 'elygate.providerGovernance',
-			eyebrow: 'Elygate / Governance',
+			eyebrow: 'Governance',
 			endpoint: '/api/governance/providers',
 			listKey: 'providers',
 			idFields: ['provider', 'name'],
@@ -164,7 +165,7 @@
 		},
 		'pricing-overrides': {
 			titleKey: 'elygate.pricingOverrides',
-			eyebrow: 'Elygate / Custom Pricing',
+			eyebrow: 'Custom Pricing',
 			endpoint: '/api/governance/pricing-overrides',
 			listKey: 'pricing_overrides',
 			itemKey: 'pricing_override',
@@ -188,7 +189,7 @@
 		},
 		budgets: {
 			titleKey: 'elygate.budgetList',
-			eyebrow: 'Elygate / Governance',
+			eyebrow: 'Governance',
 			endpoint: '/api/governance/budgets',
 			listKey: 'budgets',
 			idFields: ['id'],
@@ -197,7 +198,7 @@
 		},
 		'rate-limits': {
 			titleKey: 'elygate.rateLimits',
-			eyebrow: 'Elygate / Governance',
+			eyebrow: 'Governance',
 			endpoint: '/api/governance/rate-limits',
 			listKey: 'rate_limits',
 			idFields: ['id'],
@@ -206,7 +207,7 @@
 		},
 		webhooks: {
 			titleKey: 'elygate.webhooks',
-			eyebrow: 'Elygate / Integrations',
+			eyebrow: 'Integrations',
 			endpoint: '/api/webhooks',
 			helpKey: 'elygate.webhooksHelp',
 			listKey: 'endpoints',
@@ -271,7 +272,7 @@
 		},
 		'mcp-sessions': {
 			titleKey: 'elygate.mcpSessions',
-			eyebrow: 'Elygate / MCP',
+			eyebrow: 'MCP',
 			endpoint: '/api/mcp/sessions',
 			listKey: 'sessions',
 			idFields: ['id'],
@@ -285,7 +286,7 @@
 		},
 		'mcp-logs': {
 			titleKey: 'elygate.mcpLogs',
-			eyebrow: 'Elygate / Observability',
+			eyebrow: 'Observability',
 			endpoint: '/api/mcp-logs',
 			listKey: 'logs',
 			idFields: ['id'],
@@ -295,7 +296,7 @@
 		},
 		plugins: {
 			titleKey: 'elygate.plugins',
-			eyebrow: 'Elygate / Integrations',
+			eyebrow: 'Integrations',
 			endpoint: '/api/plugins',
 			helpKey: 'elygate.pluginsHelp',
 			listKey: 'plugins',
@@ -310,7 +311,7 @@
 		},
 		skills: {
 			titleKey: 'elygate.skills',
-			eyebrow: 'Elygate / Skills',
+			eyebrow: 'Skills',
 			endpoint: '/api/skills',
 			listKey: 'skills',
 			itemKey: 'skill',
@@ -324,7 +325,7 @@
 		},
 		'prompt-folders': {
 			titleKey: 'elygate.promptFolders',
-			eyebrow: 'Elygate / Prompt Repo',
+			eyebrow: 'Prompt Repo',
 			endpoint: '/api/prompt-repo/folders',
 			listKey: 'folders',
 			itemKey: 'folder',
@@ -337,7 +338,7 @@
 		},
 		prompts: {
 			titleKey: 'elygate.prompts',
-			eyebrow: 'Elygate / Prompt Repo',
+			eyebrow: 'Prompt Repo',
 			endpoint: '/api/prompt-repo/prompts',
 			listKey: 'prompts',
 			itemKey: 'prompt',
@@ -350,7 +351,7 @@
 		},
 		'mcp-clients': {
 			titleKey: 'elygate.mcpClients',
-			eyebrow: 'Elygate / MCP Gateway',
+			eyebrow: 'MCP Gateway',
 			endpoint: '/api/mcp/clients',
 			listKey: 'clients',
 			itemKey: 'client',
@@ -378,7 +379,7 @@
 		},
 		'mcp-library': {
 			titleKey: 'elygate.mcpLibrary',
-			eyebrow: 'Elygate / MCP Gateway',
+			eyebrow: 'MCP Gateway',
 			endpoint: '/api/mcp/library',
 			listKey: 'servers',
 			itemKey: 'entry',
@@ -403,7 +404,7 @@
 		},
 		'oauth2-sessions': {
 			titleKey: 'elygate.oauth2Sessions',
-			eyebrow: 'Elygate / MCP OAuth2',
+			eyebrow: 'MCP OAuth2',
 			endpoint: '/api/oauth2/sessions',
 			listKey: 'sessions',
 			idFields: ['id'],
@@ -416,7 +417,7 @@
 		},
 		'oauth-grants': {
 			titleKey: 'elygate.oauthGrants',
-			eyebrow: 'Elygate / MCP OAuth2',
+			eyebrow: 'MCP OAuth2',
 			endpoint: '/api/oauth2/sessions',
 			listKey: 'sessions',
 			idFields: ['id'],
@@ -429,7 +430,7 @@
 		},
 		'feature-flags': {
 			titleKey: 'elygate.featureFlags',
-			eyebrow: 'Elygate / System',
+			eyebrow: 'System',
 			endpoint: '/api/feature-flags',
 			listKey: 'flags',
 			itemKey: 'flag',
@@ -441,7 +442,7 @@
 		},
 		'user-agent-mappings': {
 			titleKey: 'elygate.userAgentMappings',
-			eyebrow: 'Elygate / Observability',
+			eyebrow: 'Observability',
 			endpoint: '/api/logs/user-agent-mappings',
 			listKey: 'mappings',
 			itemKey: 'mapping',
@@ -454,7 +455,7 @@
 		},
 		'provider-keys': {
 			titleKey: 'elygate.providerKeys',
-			eyebrow: 'Elygate / Models',
+			eyebrow: 'Models',
 			endpoint: '/api/keys',
 			idFields: ['id', 'key_id'],
 			columns: ['name', 'provider', 'key_id', 'models', 'blacklisted_models', 'weight', 'enabled'],
@@ -462,7 +463,7 @@
 		},
 		'model-catalog': {
 			titleKey: 'elygate.modelCatalog',
-			eyebrow: 'Elygate / Models',
+			eyebrow: 'Models',
 			endpoint: '/api/models/details',
 			listKey: 'models',
 			idFields: ['name'],
@@ -694,7 +695,7 @@
 <section class="page-shell">
 	<header class="page-heading">
 		<div>
-			<p class="eyebrow">{config.eyebrow}</p>
+			<p class="eyebrow">{getAppName()} / {config.eyebrow}</p>
 			<h1>{pageTitle}</h1>
 			<p>{i18n.t(config.helpKey ?? (config.readOnly ? 'elygate.readOnlyHint' : 'elygate.jsonEditorHint'))}</p>
 		</div>

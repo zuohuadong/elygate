@@ -40,12 +40,17 @@ var defaultAudioCodec = webrtc.RTPCodecCapability{
 var realtimeSDPMaxMessageSizePattern = regexp.MustCompile(`(?m)^a=max-message-size:(\d+)\s*$`)
 
 type WebRTCRealtimeHandler struct {
-	client       *bifrost.Bifrost
-	config       *lib.Config
-	handlerStore lib.HandlerStore
-	mu           sync.Mutex
-	relays       map[string]*webrtcRealtimeRelay
-	legacyRoutes map[string]schemas.ModelProvider // path → default provider (legacy raw-SDP routes)
+	client        *bifrost.Bifrost
+	config        *lib.Config
+	handlerStore  lib.HandlerStore
+	mu            sync.Mutex
+	relays        map[string]*webrtcRealtimeRelay
+	legacyRoutes  map[string]schemas.ModelProvider // path → default provider (legacy raw-SDP routes)
+	accessChecker VirtualKeyAccessChecker
+}
+
+func (h *WebRTCRealtimeHandler) SetVirtualKeyAccessChecker(checker VirtualKeyAccessChecker) {
+	h.accessChecker = checker
 }
 
 func NewWebRTCRealtimeHandler(client *bifrost.Bifrost, config *lib.Config) *WebRTCRealtimeHandler {
@@ -500,16 +505,17 @@ func (h *WebRTCRealtimeHandler) establishRelay(
 	}
 
 	relay := &webrtcRealtimeRelay{
-		client:       h.client,
-		downstreamPC: downstreamPC,
-		upstreamPC:   upstreamPC,
-		session:      session,
-		bifrostCtx:   relayCtx,
-		cancel:       relayCancel,
-		provider:     provider,
-		providerKey:  providerKey,
-		model:        model,
-		key:          key,
+		client:        h.client,
+		downstreamPC:  downstreamPC,
+		upstreamPC:    upstreamPC,
+		session:       session,
+		bifrostCtx:    relayCtx,
+		cancel:        relayCancel,
+		provider:      provider,
+		providerKey:   providerKey,
+		model:         model,
+		key:           key,
+		accessChecker: h.accessChecker,
 	}
 	relay.onClose = func() {
 		h.unregisterRelay(session.ID())
@@ -608,14 +614,15 @@ type webrtcRealtimeRelay struct {
 	providerToBrowserTrack *webrtc.TrackLocalStaticRTP
 	browserToProviderTrack *webrtc.TrackLocalStaticRTP
 
-	session     *bfws.Session
-	bifrostCtx  *schemas.BifrostContext
-	cancel      context.CancelFunc
-	provider    schemas.RealtimeProvider
-	providerKey schemas.ModelProvider
-	model       string
-	key         *schemas.Key
-	onClose     func()
+	session       *bfws.Session
+	bifrostCtx    *schemas.BifrostContext
+	cancel        context.CancelFunc
+	provider      schemas.RealtimeProvider
+	providerKey   schemas.ModelProvider
+	model         string
+	key           *schemas.Key
+	onClose       func()
+	accessChecker VirtualKeyAccessChecker
 
 	closeOnce sync.Once
 
@@ -815,6 +822,15 @@ func (r *webrtcRealtimeRelay) forwardRTCP(sender *webrtc.RTPSender, target *webr
 }
 
 func (r *webrtcRealtimeRelay) handleDownstreamMessage(msg webrtc.DataChannelMessage) {
+	if r.accessChecker != nil {
+		virtualKey := bifrost.GetStringFromContext(r.bifrostCtx, schemas.BifrostContextKeyVirtualKey)
+		if virtualKey != "" {
+			if err := r.accessChecker.CheckVirtualKeyValueAccess(r.bifrostCtx, virtualKey); err != nil {
+				r.closeWithErrorEvent(newRealtimeTurnErrorEventPayload(newRealtimeWireBifrostError(401, "authentication_error", "virtual key access is no longer active")))
+				return
+			}
+		}
+	}
 	event, err := schemas.ParseRealtimeEvent(msg.Data)
 	if err != nil {
 		logger.Warn("failed to parse browser realtime event: %v", err)

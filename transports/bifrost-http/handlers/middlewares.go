@@ -1265,7 +1265,7 @@ func (m *AuthMiddleware) middleware(shouldSkip func(*configstore.AuthConfig, str
 				cookieToken := string(ctx.Request.Header.Cookie("token"))
 				if cookieToken != "" && validateSession(ctx, m.store, cookieToken) {
 					ctx.SetUserValue(schemas.BifrostContextKeySessionToken, cookieToken)
-					ctx.SetUserValue(schemas.IsLocalAdminContextKey, true)
+					setAuthenticatedLocalAdmin(ctx, configuredLocalAdminUsername(authConfig))
 					next(ctx)
 					return
 				}
@@ -1313,6 +1313,7 @@ func (m *AuthMiddleware) middleware(shouldSkip func(*configstore.AuthConfig, str
 					SendError(ctx, fasthttp.StatusUnauthorized, "Unauthorized")
 					return
 				}
+				setAuthenticatedLocalAdmin(ctx, username)
 				// Continue with the next handler
 				next(ctx)
 				return
@@ -1354,14 +1355,14 @@ func (m *AuthMiddleware) middleware(shouldSkip func(*configstore.AuthConfig, str
 						return
 					}
 					// Mark as local admin for RBAC bypass
-					ctx.SetUserValue(schemas.IsLocalAdminContextKey, true)
+					setAuthenticatedLocalAdmin(ctx, username)
 					// Continue with the next handler
 					next(ctx)
 					return
 				}
 				// setting up session in the request
 				ctx.SetUserValue(schemas.BifrostContextKeySessionToken, token)
-				ctx.SetUserValue(schemas.IsLocalAdminContextKey, true)
+				setAuthenticatedLocalAdmin(ctx, configuredLocalAdminUsername(authConfig))
 				// Continue with the next handler
 				next(ctx)
 				return
@@ -1369,6 +1370,26 @@ func (m *AuthMiddleware) middleware(shouldSkip func(*configstore.AuthConfig, str
 			SendError(ctx, fasthttp.StatusUnauthorized, "Unauthorized")
 		}
 	}
+}
+
+func configuredLocalAdminUsername(authConfig *configstore.AuthConfig) string {
+	if authConfig == nil || authConfig.AdminUserName == nil {
+		return ""
+	}
+	return strings.TrimSpace(authConfig.AdminUserName.GetValue())
+}
+
+func setAuthenticatedLocalAdmin(ctx *fasthttp.RequestCtx, username string) {
+	username = strings.TrimSpace(username)
+	actorID := "local-admin"
+	actorName := "Local administrator"
+	if username != "" {
+		actorID += ":" + username
+		actorName = username
+	}
+	ctx.SetUserValue(schemas.IsLocalAdminContextKey, true)
+	ctx.SetUserValue(schemas.BifrostContextKeyUserID, actorID)
+	ctx.SetUserValue(schemas.BifrostContextKeyUserName, actorName)
 }
 
 // TracingMiddleware creates distributed traces for requests and forwards completed traces

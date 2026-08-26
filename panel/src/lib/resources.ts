@@ -12,6 +12,7 @@ const RESOURCE_SPECS: ResourceSpec[] = [
 	['models', 'elygate.models', 'bot'],
 	['model-catalog', 'elygate.modelCatalog', 'layout-grid'],
 	['logs', 'elygate.logs', 'scroll-text'],
+	['employees', 'elygate.employees', 'contact-round'],
 	['teams', 'elygate.teams', 'users-round'],
 	['customers', 'elygate.customers', 'building-2'],
 	['routing-rules', 'elygate.routingRules', 'route'],
@@ -174,6 +175,7 @@ export function createMenu(
 			label: labelFor(locale, 'elygate.enterprise'),
 			icon: 'landmark',
 			children: orderedMenuItems(locale, 'governance', enterpriseResources, [
+				menuItem(locale, 'employees', 'elygate.employees', 'contact-round'),
 				menuItem(locale, 'teams', 'elygate.teams', 'users-round'),
 				menuItem(locale, 'customers', 'elygate.customers', 'building-2'),
 			]),

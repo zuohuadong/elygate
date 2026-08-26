@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { getAppName } from '../lib/branding';
 	import { onMount } from 'svelte';
 	import { useTranslation } from '@svadmin/core/i18n';
 	import { displayError, prettyJson } from '../lib/forms';
@@ -394,7 +395,7 @@
 <section class="page-shell">
 	<header class="page-heading">
 		<div>
-			<p class="eyebrow">Elygate / Observability</p>
+			<p class="eyebrow">{getAppName()} / Observability</p>
 			<h1>{i18n.t('elygate.logs')}</h1>
 			<p><span class={['live-dot', liveConnected ? 'connected' : 'disconnected']}></span>{liveConnected ? i18n.t('elygate.liveConnected') : i18n.t('elygate.liveDisconnected')}</p>
 		</div>

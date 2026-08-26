@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { getAppName } from '../lib/branding';
 	import { onMount } from 'svelte';
 	import { useTranslation } from '@svadmin/core/i18n';
 	import { displayError } from '../lib/forms';
@@ -124,7 +125,7 @@
 			.map((row) => row.map((value) => `"${String(value ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
 		const link = document.createElement('a');
 		link.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
-		link.download = `elygate-dashboard-${period}.csv`;
+		link.download = `${getAppName().toLowerCase()}-dashboard-${period}.csv`;
 		link.click();
 		URL.revokeObjectURL(link.href);
 	}
@@ -137,7 +138,7 @@
 <section class="page-shell">
 	<header class="page-heading">
 		<div>
-			<p class="eyebrow">Elygate / Observability</p>
+			<p class="eyebrow">{getAppName()} / Observability</p>
 			<h1>{i18n.t('elygate.dashboard')}</h1>
 			<p>{i18n.t('elygate.dashboardHint')}</p>
 		</div>

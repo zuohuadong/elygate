@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { getAppName } from '../lib/branding';
 	import { onMount } from 'svelte';
 	import { useTranslation } from '@svadmin/core/i18n';
 	import { displayValue, getListPayload, getTotal, isJsonRecord, requestJson, type JsonRecord } from '../lib/api';
@@ -86,7 +87,7 @@
 <section class="page-shell">
 	<header>
 		<div>
-			<p class="eyebrow">Elygate / Bifrost API</p>
+			<p class="eyebrow">{getAppName()} / API</p>
 			<h1>{resourceName === 'virtual-keys' ? i18n.t('elygate.virtualKeys') : i18n.t(`elygate.${resourceName}`)}</h1>
 		</div>
 		<button type="button" onclick={() => void load()} disabled={isLoading}>{i18n.t('elygate.refresh')}</button>

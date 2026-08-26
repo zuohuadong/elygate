@@ -1,5 +1,6 @@
 export type McpPublicRoute = 'mcp-auth' | 'mcp-auth-success' | 'mcp-auth-failed' | 'mcp-oauth-callback';
-export type PublicPanelRoute = 'oauth-consent' | McpPublicRoute | 'agent-handover' | 'scim-oauth-callback';
+export type EnterprisePublicRoute = 'oauth-consent' | McpPublicRoute | 'agent-handover' | 'scim-oauth-callback';
+export type PublicPanelRoute = EnterprisePublicRoute | 'employee';
 
 const publicRoutes: Record<string, PublicPanelRoute> = {
 	'/oauth/consent': 'oauth-consent',
@@ -8,6 +9,7 @@ const publicRoutes: Record<string, PublicPanelRoute> = {
 	'/workspace/mcp-sessions/auth-failed': 'mcp-auth-failed',
 	'/workspace/mcp-registry/oauth-callback': 'mcp-oauth-callback',
 	'/agent/handover': 'agent-handover',
+	'/employee': 'employee',
 	'/workspace/scim/oauth-discover-callback': 'scim-oauth-callback',
 };
 

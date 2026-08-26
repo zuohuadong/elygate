@@ -20,6 +20,7 @@ import (
 	"github.com/maximhq/bifrost/core/schemas"
 	"github.com/maximhq/bifrost/framework/configstore"
 	configstoreTables "github.com/maximhq/bifrost/framework/configstore/tables"
+	"github.com/maximhq/bifrost/framework/encrypt"
 	"github.com/maximhq/bifrost/framework/logstore"
 	"github.com/maximhq/bifrost/framework/modelcatalog"
 	"github.com/maximhq/bifrost/plugins/governance"
@@ -148,6 +149,8 @@ type ExternalQuotaBudgetResult struct {
 type GovernanceHandler struct {
 	configStore       configstore.ConfigStore
 	governanceManager GovernanceManager
+	authorizer        GovernanceAuthorizer
+	audit             *governanceAuditService
 	// logManager sources actual per-model usage (from request logs) for the quota
 	// endpoint's model_usage breakdown. Optional: nil when the logging plugin is
 	// not enabled, in which case the breakdown is simply omitted.
@@ -199,12 +202,30 @@ func NewGovernanceHandler(manager GovernanceManager, configStore configstore.Con
 		}
 		return vk.Name, true
 	})
+	if err := bootstrapGovernanceAuditPublicKey(governanceDatabaseContext(), configStore); err != nil {
+		return nil, fmt.Errorf("failed to bootstrap governance audit public key: %w", err)
+	}
+	var audit *governanceAuditService
+	if encrypt.IsEnabled() {
+		audit = &governanceAuditService{store: configStore}
+	}
 	return &GovernanceHandler{
 		governanceManager:           manager,
 		configStore:                 configStore,
+		authorizer:                  contextGovernanceAuthorizer{},
+		audit:                       audit,
 		logManager:                  logManager,
 		externalQuotaBudgetResolver: externalQuotaBudgetResolver,
 	}, nil
+}
+
+// SetGovernanceAuthorizer replaces the default context-backed authorization
+// policy. The caller remains responsible for injecting trusted identity and
+// permission values from authenticated middleware.
+func (h *GovernanceHandler) SetGovernanceAuthorizer(authorizer GovernanceAuthorizer) {
+	if authorizer != nil {
+		h.authorizer = authorizer
+	}
 }
 
 // CreateVirtualKeyRequest represents the request body for creating a virtual key
@@ -1378,15 +1399,22 @@ func (h *GovernanceHandler) RegisterRoutes(r *router.Router, middlewares ...sche
 // RegisterRoutesWithOverrides registers governance routes while allowing downstream editions to replace route families.
 func (h *GovernanceHandler) RegisterRoutesWithOverrides(r *router.Router, overrides GovernanceRouteOverrides, middlewares ...schemas.BifrostHTTPMiddleware) {
 	// Virtual Key CRUD operations
-	r.GET("/api/governance/virtual-keys", lib.ChainMiddlewares(h.getVirtualKeys, middlewares...))
-	r.POST("/api/governance/virtual-keys", lib.ChainMiddlewares(h.createVirtualKey, middlewares...))
-	r.POST("/api/governance/virtual-keys/rotate", lib.ChainMiddlewares(h.rotateVirtualKeys, middlewares...))
-	r.GET("/api/governance/virtual-keys/{vk_id}", lib.ChainMiddlewares(h.getVirtualKey, middlewares...))
-	r.PUT("/api/governance/virtual-keys/{vk_id}", lib.ChainMiddlewares(h.updateVirtualKey, middlewares...))
-	r.POST("/api/governance/virtual-keys/{vk_id}/rotate", lib.ChainMiddlewares(h.rotateVirtualKey, middlewares...))
-	r.PUT("/api/governance/virtual-keys/{vk_id}/budgets/{budget_id}/override", lib.ChainMiddlewares(h.updateVirtualKeyBudgetOverride, middlewares...))
-	r.DELETE("/api/governance/virtual-keys/{vk_id}/budgets/{budget_id}/override", lib.ChainMiddlewares(h.deleteVirtualKeyBudgetOverride, middlewares...))
-	r.DELETE("/api/governance/virtual-keys/{vk_id}", lib.ChainMiddlewares(h.deleteVirtualKey, middlewares...))
+	r.GET("/api/governance/virtual-keys", lib.ChainMiddlewares(h.requireGovernancePermission("virtual_key.read", "virtual_key", governanceResourceID, h.getVirtualKeys), middlewares...))
+	r.POST("/api/governance/virtual-keys", lib.ChainMiddlewares(h.requireGovernancePermission("virtual_key.create", "virtual_key", governanceResourceID, h.createVirtualKey), middlewares...))
+	r.POST("/api/governance/virtual-keys/rotate", lib.ChainMiddlewares(h.requireGovernancePermission("virtual_key.rotate", "virtual_key", governanceResourceID, h.rotateVirtualKeys), middlewares...))
+	r.GET("/api/governance/virtual-keys/{vk_id}", lib.ChainMiddlewares(h.requireGovernancePermission("virtual_key.read", "virtual_key", governanceResourceID, h.getVirtualKey), middlewares...))
+	r.PUT("/api/governance/virtual-keys/{vk_id}", lib.ChainMiddlewares(h.requireGovernancePermission("virtual_key.update", "virtual_key", governanceResourceID, h.updateVirtualKey), middlewares...))
+	r.POST("/api/governance/virtual-keys/{vk_id}/rotate", lib.ChainMiddlewares(h.requireGovernancePermission("virtual_key.rotate", "virtual_key", governanceResourceID, h.rotateVirtualKey), middlewares...))
+	r.PUT("/api/governance/virtual-keys/{vk_id}/budgets/{budget_id}/override", lib.ChainMiddlewares(h.requireGovernancePermission("virtual_key.budget_override.update", "virtual_key", governanceBudgetResourceID, h.updateVirtualKeyBudgetOverride), middlewares...))
+	r.DELETE("/api/governance/virtual-keys/{vk_id}/budgets/{budget_id}/override", lib.ChainMiddlewares(h.requireGovernancePermission("virtual_key.budget_override.delete", "virtual_key", governanceBudgetResourceID, h.deleteVirtualKeyBudgetOverride), middlewares...))
+	r.DELETE("/api/governance/virtual-keys/{vk_id}", lib.ChainMiddlewares(h.requireGovernancePermission("virtual_key.delete", "virtual_key", governanceResourceID, h.deleteVirtualKey), middlewares...))
+
+	// Append-only governance audit query, export, public-key, and integrity verification.
+	r.GET("/api/governance/audit-logs", lib.ChainMiddlewares(h.requireGovernancePermission("audit.read", "governance_audit", nil, h.getGovernanceAuditLogs), middlewares...))
+	r.GET("/api/governance/audit-logs/export", lib.ChainMiddlewares(h.requireGovernancePermission("audit.export", "governance_audit", nil, h.exportGovernanceAuditLogs), middlewares...))
+	r.GET("/api/governance/audit-logs/public-key", lib.ChainMiddlewares(h.requireGovernancePermission("audit.public_key", "governance_audit", nil, h.getGovernanceAuditPublicKey), middlewares...))
+	r.GET("/api/governance/audit-logs/verify", lib.ChainMiddlewares(h.requireGovernancePermission("audit.verify", "governance_audit", nil, h.verifyGovernanceAuditChain), middlewares...))
+	r.GET("/api/governance/audit-logs/{audit_id}/verify", lib.ChainMiddlewares(h.requireGovernancePermission("audit.verify", "governance_audit", auditEventID, h.verifyGovernanceAuditLog), middlewares...))
 
 	// Team CRUD operations. Enterprise replaces this family with a superset
 	// registrar so the router sees exactly one handler per method/path.
@@ -1465,6 +1493,77 @@ func (h *GovernanceHandler) registerTeamRoutes(r *router.Router, overrides *Gove
 
 // Virtual Key CRUD Operations
 
+const governanceVirtualKeyRedactedValue = "[REDACTED]"
+
+func (h *GovernanceHandler) canRevealVirtualKeyValue(ctx *fasthttp.RequestCtx, vkID string) bool {
+	// Handlers assembled without the audit service are legacy/unit-test paths and
+	// retain their existing response contract.
+	if h.audit == nil {
+		return true
+	}
+	principal := adminPrincipalFromRequest(ctx)
+	if principal.LocalAdmin {
+		return true
+	}
+	authorizer := h.authorizer
+	if authorizer == nil {
+		authorizer = contextGovernanceAuthorizer{}
+	}
+	return authorizer.Authorize(ctx, principal, "virtual_key.reveal", "virtual_key/"+vkID) == nil
+}
+
+func (h *GovernanceHandler) governanceVirtualKeyPayload(ctx *fasthttp.RequestCtx, vk *configstoreTables.TableVirtualKey) map[string]any {
+	if vk == nil {
+		return nil
+	}
+	payload := make(map[string]any)
+	encoded, err := json.Marshal(vk)
+	if err == nil {
+		_ = json.Unmarshal(encoded, &payload)
+	}
+	if payload == nil {
+		payload = map[string]any{"id": vk.ID, "name": vk.Name}
+	}
+	if h.canRevealVirtualKeyValue(ctx, vk.ID) {
+		payload["value"] = vk.Value.GetValue()
+		payload["value_redacted"] = false
+	} else {
+		payload["value"] = governanceVirtualKeyRedactedValue
+		payload["value_redacted"] = true
+	}
+	return payload
+}
+
+func (h *GovernanceHandler) governanceVirtualKeyPayloads(ctx *fasthttp.RequestCtx, vks []*configstoreTables.TableVirtualKey) []map[string]any {
+	payloads := make([]map[string]any, 0, len(vks))
+	for _, vk := range vks {
+		payloads = append(payloads, h.governanceVirtualKeyPayload(ctx, vk))
+	}
+	return payloads
+}
+
+func (h *GovernanceHandler) governanceVirtualKeyReadPayloads(ctx *fasthttp.RequestCtx, vks []*configstoreTables.TableVirtualKey, source string) ([]map[string]any, error) {
+	payloads := h.governanceVirtualKeyPayloads(ctx, vks)
+	revealedIDs := make([]string, 0, len(payloads))
+	for i := range payloads {
+		if redacted, _ := payloads[i]["value_redacted"].(bool); !redacted {
+			revealedIDs = append(revealedIDs, vks[i].ID)
+		}
+	}
+	if err := h.persistGovernanceVirtualKeyReveals(ctx, revealedIDs, source); err != nil {
+		return nil, err
+	}
+	return payloads, nil
+}
+
+func (h *GovernanceHandler) governanceVirtualKeyValuePayloads(ctx *fasthttp.RequestCtx, vks []configstoreTables.TableVirtualKey) []map[string]any {
+	payloads := make([]map[string]any, 0, len(vks))
+	for i := range vks {
+		payloads = append(payloads, h.governanceVirtualKeyPayload(ctx, &vks[i]))
+	}
+	return payloads
+}
+
 // getVirtualKeys handles GET /api/governance/virtual-keys - Get all virtual keys with relationships
 func (h *GovernanceHandler) getVirtualKeys(ctx *fasthttp.RequestCtx) {
 	// Check if "from_memory" query parameter is set to true
@@ -1505,8 +1604,13 @@ func (h *GovernanceHandler) getVirtualKeys(ctx *fasthttp.RequestCtx) {
 			h.applyExternalBudgets(ctx, &clone)
 			hydratedVKs[i] = &clone
 		}
+		payloads, err := h.governanceVirtualKeyReadPayloads(ctx, hydratedVKs, "list")
+		if err != nil {
+			SendError(ctx, fasthttp.StatusInternalServerError, "Failed to audit virtual key disclosure")
+			return
+		}
 		SendJSON(ctx, map[string]interface{}{
-			"virtual_keys": hydratedVKs,
+			"virtual_keys": payloads,
 			"count":        len(hydratedVKs),
 			"total_count":  len(hydratedVKs),
 			"limit":        len(hydratedVKs),
@@ -1583,8 +1687,17 @@ func (h *GovernanceHandler) getVirtualKeys(ctx *fasthttp.RequestCtx) {
 		for i := range virtualKeys {
 			h.applyExternalBudgets(ctx, &virtualKeys[i])
 		}
+		pointers := make([]*configstoreTables.TableVirtualKey, 0, len(virtualKeys))
+		for i := range virtualKeys {
+			pointers = append(pointers, &virtualKeys[i])
+		}
+		payloads, auditErr := h.governanceVirtualKeyReadPayloads(ctx, pointers, "list")
+		if auditErr != nil {
+			SendError(ctx, fasthttp.StatusInternalServerError, "Failed to audit virtual key disclosure")
+			return
+		}
 		SendJSON(ctx, map[string]interface{}{
-			"virtual_keys": virtualKeys,
+			"virtual_keys": payloads,
 			"count":        len(virtualKeys),
 			"total_count":  totalCount,
 			"limit":        params.Limit,
@@ -1604,8 +1717,17 @@ func (h *GovernanceHandler) getVirtualKeys(ctx *fasthttp.RequestCtx) {
 	for i := range virtualKeys {
 		h.applyExternalBudgets(ctx, &virtualKeys[i])
 	}
+	pointers := make([]*configstoreTables.TableVirtualKey, 0, len(virtualKeys))
+	for i := range virtualKeys {
+		pointers = append(pointers, &virtualKeys[i])
+	}
+	payloads, auditErr := h.governanceVirtualKeyReadPayloads(ctx, pointers, "list")
+	if auditErr != nil {
+		SendError(ctx, fasthttp.StatusInternalServerError, "Failed to audit virtual key disclosure")
+		return
+	}
 	SendJSON(ctx, map[string]interface{}{
-		"virtual_keys": virtualKeys,
+		"virtual_keys": payloads,
 		"count":        len(virtualKeys),
 		"total_count":  len(virtualKeys),
 		"limit":        len(virtualKeys),
@@ -1661,6 +1783,7 @@ func (h *GovernanceHandler) createVirtualKey(ctx *fasthttp.RequestCtx) {
 			return
 		}
 	}
+	dbCtx := governanceDatabaseContext()
 	// Set defaults: nil means "use DB default (true)"
 	isActive := req.IsActive
 	if isActive == nil {
@@ -1670,14 +1793,15 @@ func (h *GovernanceHandler) createVirtualKey(ctx *fasthttp.RequestCtx) {
 	providerSet := map[schemas.ModelProvider]struct{}{}
 	if req.ProviderConfigs != nil {
 		var err error
-		providerSet, err = h.getConfiguredProviderSet(ctx)
+		providerSet, err = h.getConfiguredProviderSet(dbCtx)
 		if err != nil {
 			SendError(ctx, 500, fmt.Sprintf("Failed to load providers: %v", err))
 			return
 		}
 	}
 	var vk configstoreTables.TableVirtualKey
-	if err := h.configStore.ExecuteTransaction(ctx, func(tx *gorm.DB) error {
+	var auditReceipt *governanceAuditReceipt
+	if err := h.configStore.ExecuteTransaction(dbCtx, func(tx *gorm.DB) error {
 		vk = configstoreTables.TableVirtualKey{
 			ID:              uuid.NewString(),
 			Name:            req.Name,
@@ -1689,7 +1813,7 @@ func (h *GovernanceHandler) createVirtualKey(ctx *fasthttp.RequestCtx) {
 			CalendarAligned: req.CalendarAligned,
 			ExpiresAt:       req.ExpiresAt,
 		}
-		if err := h.configStore.CreateVirtualKey(ctx, &vk, tx); err != nil {
+		if err := h.configStore.CreateVirtualKey(dbCtx, &vk, tx); err != nil {
 			return err
 		}
 		// VK top-level and per-provider budgets/rate-limits are stored in VK-scoped model configs,
@@ -1725,7 +1849,7 @@ func (h *GovernanceHandler) createVirtualKey(ctx *fasthttp.RequestCtx) {
 					allowAllKeys = true
 				} else if !allowAllKeys && !pc.KeyIDs.IsEmpty() {
 					var err error
-					keys, err = h.configStore.GetKeysByIDs(ctx, pc.KeyIDs)
+					keys, err = h.configStore.GetKeysByIDs(dbCtx, pc.KeyIDs)
 					if err != nil {
 						return fmt.Errorf("failed to get keys by IDs for provider %s: %w", pc.Provider, err)
 					}
@@ -1744,7 +1868,7 @@ func (h *GovernanceHandler) createVirtualKey(ctx *fasthttp.RequestCtx) {
 					Keys:              keys,
 				}
 
-				if err := h.configStore.CreateVirtualKeyProviderConfig(ctx, providerConfig, tx); err != nil {
+				if err := h.configStore.CreateVirtualKeyProviderConfig(dbCtx, providerConfig, tx); err != nil {
 					return err
 				}
 				// Provider-config budgets/rate-limit are stored in the VK-scoped model config
@@ -1774,7 +1898,7 @@ func (h *GovernanceHandler) createVirtualKey(ctx *fasthttp.RequestCtx) {
 		if req.RateLimit != nil {
 			topRateLimit = rateLimitFromRequestFields(req.RateLimit.TokenMaxLimit, req.RateLimit.TokenResetDuration, req.RateLimit.RequestMaxLimit, req.RateLimit.RequestResetDuration)
 		}
-		if err := h.syncVKGovernanceToModelConfigs(ctx, tx, &vk, vkModelConfigDesired{
+		if err := h.syncVKGovernanceToModelConfigs(dbCtx, tx, &vk, vkModelConfigDesired{
 			budgetsProvided:   true,
 			budgets:           req.Budgets,
 			rateLimitProvided: req.RateLimit != nil,
@@ -1796,11 +1920,11 @@ func (h *GovernanceHandler) createVirtualKey(ctx *fasthttp.RequestCtx) {
 				if err := mc.ToolsToExecute.Validate(); err != nil {
 					return &badRequestError{err: fmt.Errorf("invalid tools_to_execute for mcp client %s: %w", mc.MCPClientName, err)}
 				}
-				mcpClient, err := h.configStore.GetMCPClientByName(ctx, mc.MCPClientName)
+				mcpClient, err := h.configStore.GetMCPClientByName(dbCtx, mc.MCPClientName)
 				if err != nil {
 					return fmt.Errorf("failed to get MCP client: %w", err)
 				}
-				if err := h.configStore.CreateVirtualKeyMCPConfig(ctx, &configstoreTables.TableVirtualKeyMCPConfig{
+				if err := h.configStore.CreateVirtualKeyMCPConfig(dbCtx, &configstoreTables.TableVirtualKeyMCPConfig{
 					VirtualKeyID:   vk.ID,
 					MCPClientID:    mcpClient.ID,
 					ToolsToExecute: mc.ToolsToExecute,
@@ -1808,6 +1932,18 @@ func (h *GovernanceHandler) createVirtualKey(ctx *fasthttp.RequestCtx) {
 					return err
 				}
 			}
+		}
+		afterSummary, err := loadVirtualKeyAuditSummary(dbCtx, tx, vk.ID)
+		if err != nil {
+			return fmt.Errorf("failed to load virtual key audit summary: %w", err)
+		}
+		auditReceipt, err = h.appendGovernanceAudit(ctx, tx, governanceAuditInput{
+			Action: "virtual_key.create", Resource: "virtual_key", ResourceID: vk.ID,
+			Outcome: "success", After: afterSummary,
+			Metadata: map[string]bool{"credential_disclosed": h.canRevealVirtualKeyValue(ctx, vk.ID)},
+		})
+		if err != nil {
+			return fmt.Errorf("failed to append governance audit event: %w", err)
 		}
 		return nil
 	}); err != nil {
@@ -1823,17 +1959,24 @@ func (h *GovernanceHandler) createVirtualKey(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, 500, err.Error())
 		return
 	}
-	preloadedVk, err := h.governanceManager.ReloadVirtualKey(ctx, vk.ID)
+	preloadedVk, err := h.governanceManager.ReloadVirtualKey(dbCtx, vk.ID)
 	if err != nil {
 		logger.Error("failed to reload virtual key: %v", err)
-		preloadedVk = &vk
+		SendJSONWithStatus(ctx, map[string]any{
+			"message":       "Virtual key created in database but failed to reload in-memory state",
+			"virtual_key":   h.governanceVirtualKeyPayload(ctx, &vk),
+			"committed":     true,
+			"audit_receipt": auditReceipt,
+		}, fasthttp.StatusInternalServerError)
+		return
 	}
 	// Reverse-map governance from the model configs just written, for display.
-	h.hydrateVKGovernance(ctx, preloadedVk)
+	h.hydrateVKGovernance(dbCtx, preloadedVk)
 
 	SendJSON(ctx, map[string]any{
-		"message":     "Virtual key created successfully",
-		"virtual_key": preloadedVk,
+		"message":       "Virtual key created successfully",
+		"virtual_key":   h.governanceVirtualKeyPayload(ctx, preloadedVk),
+		"audit_receipt": auditReceipt,
 	})
 }
 
@@ -1858,9 +2001,12 @@ func (h *GovernanceHandler) getVirtualKey(ctx *fasthttp.RequestCtx) {
 				clone.ProviderConfigs = pcs
 				applyVKGovernanceFromModelConfigs(&clone, byKey, perModelByKey)
 				h.applyExternalBudgets(ctx, &clone)
-				SendJSON(ctx, map[string]interface{}{
-					"virtual_key": &clone,
-				})
+				payloads, auditErr := h.governanceVirtualKeyReadPayloads(ctx, []*configstoreTables.TableVirtualKey{&clone}, "detail")
+				if auditErr != nil {
+					SendError(ctx, fasthttp.StatusInternalServerError, "Failed to audit virtual key disclosure")
+					return
+				}
+				SendJSON(ctx, map[string]interface{}{"virtual_key": payloads[0]})
 				return
 			}
 		}
@@ -1882,32 +2028,46 @@ func (h *GovernanceHandler) getVirtualKey(ctx *fasthttp.RequestCtx) {
 	// untracked rows so the admin detail panel matches the self-service quota view.
 	h.applyExternalBudgets(ctx, vk)
 
-	SendJSON(ctx, map[string]interface{}{
-		"virtual_key": vk,
-	})
+	payloads, auditErr := h.governanceVirtualKeyReadPayloads(ctx, []*configstoreTables.TableVirtualKey{vk}, "detail")
+	if auditErr != nil {
+		SendError(ctx, fasthttp.StatusInternalServerError, "Failed to audit virtual key disclosure")
+		return
+	}
+	SendJSON(ctx, map[string]interface{}{"virtual_key": payloads[0]})
 }
 
-// loadVirtualKeyBudget resolves only budgets owned by the virtual key's scoped model configs.
-func (h *GovernanceHandler) loadVirtualKeyBudget(ctx context.Context, vkID, budgetID string) (*configstoreTables.TableBudget, error) {
-	if _, err := h.configStore.GetVirtualKey(ctx, vkID); err != nil {
-		return nil, err
-	}
-	modelConfigs, err := h.configStore.GetModelConfigsByScopeAndScopeIDs(
-		ctx,
-		configstoreTables.ModelConfigScopeVirtualKey,
-		[]string{vkID},
-	)
-	if err != nil {
-		return nil, err
-	}
-	for i := range modelConfigs {
-		for j := range modelConfigs[i].Budgets {
-			if modelConfigs[i].Budgets[j].ID == budgetID {
-				return &modelConfigs[i].Budgets[j], nil
-			}
+func loadVirtualKeyBudgetForUpdate(ctx context.Context, tx *gorm.DB, vkID, budgetID string) (*configstoreTables.TableBudget, error) {
+	tx = tx.WithContext(ctx)
+	var vk configstoreTables.TableVirtualKey
+	if err := dbForUpdate(tx).Select("id").First(&vk, "id = ?", vkID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, configstore.ErrNotFound
 		}
+		return nil, err
 	}
-	return nil, configstore.ErrNotFound
+
+	var owner configstoreTables.TableModelConfig
+	if err := tx.Model(&configstoreTables.TableModelConfig{}).
+		Select("governance_model_configs.id, governance_model_configs.calendar_aligned").
+		Joins("JOIN governance_budgets ON governance_budgets.model_config_id = governance_model_configs.id").
+		Where("governance_budgets.id = ? AND governance_model_configs.scope = ? AND governance_model_configs.scope_id = ?",
+			budgetID, configstoreTables.ModelConfigScopeVirtualKey, vkID).
+		First(&owner).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, configstore.ErrNotFound
+		}
+		return nil, err
+	}
+
+	var budget configstoreTables.TableBudget
+	if err := dbForUpdate(tx).First(&budget, "id = ? AND model_config_id = ?", budgetID, owner.ID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, configstore.ErrNotFound
+		}
+		return nil, err
+	}
+	budget.IsCalendarAligned = owner.CalendarAligned
+	return &budget, nil
 }
 
 // updateVirtualKeyBudgetOverride handles PUT for a standalone virtual-key budget override.
@@ -1924,64 +2084,91 @@ func (h *GovernanceHandler) deleteVirtualKeyBudgetOverride(ctx *fasthttp.Request
 func (h *GovernanceHandler) mutateVirtualKeyBudgetOverride(ctx *fasthttp.RequestCtx, clear bool) {
 	vkID := ctx.UserValue("vk_id").(string)
 	budgetID := ctx.UserValue("budget_id").(string)
-	budget, err := h.loadVirtualKeyBudget(ctx, vkID, budgetID)
+	var req BudgetOverrideRequest
+	if !clear {
+		if err := json.Unmarshal(ctx.PostBody(), &req); err != nil {
+			SendError(ctx, fasthttp.StatusBadRequest, "invalid request body")
+			return
+		}
+	}
+
+	var budget *configstoreTables.TableBudget
+	var auditReceipt *governanceAuditReceipt
+	action := "virtual_key.budget_override.update"
+	if clear {
+		action = "virtual_key.budget_override.delete"
+	}
+	dbCtx := governanceDatabaseContext()
+	err := h.configStore.ExecuteTransaction(dbCtx, func(tx *gorm.DB) error {
+		current, err := loadVirtualKeyBudgetForUpdate(dbCtx, tx, vkID, budgetID)
+		if err != nil {
+			return err
+		}
+		before, err := loadVirtualKeyAuditSummary(dbCtx, tx, vkID)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return configstore.ErrNotFound
+			}
+			return err
+		}
+		amount, mode, cycles := req.Amount, req.Mode, req.Cycles
+		if clear {
+			amount, mode, cycles = 0, configstoreTables.BudgetOverrideModeNone, 0
+		} else {
+			preview := *current
+			if err := preview.SetOverride(req.Amount, req.Mode, req.Cycles); err != nil {
+				return &badRequestError{err: err}
+			}
+		}
+		budget, err = h.configStore.UpdateBudgetOverride(
+			dbCtx, current.ID, amount, mode, cycles, current.IsCalendarAligned, tx,
+		)
+		if err != nil {
+			return err
+		}
+		after, err := loadVirtualKeyAuditSummary(dbCtx, tx, vkID)
+		if err != nil {
+			return err
+		}
+		auditReceipt, err = h.appendGovernanceAudit(ctx, tx, governanceAuditInput{
+			Action: action, Resource: "virtual_key", ResourceID: vkID,
+			Outcome: "success", Before: before, After: after,
+			Metadata: map[string]string{"budget_id": budgetID},
+		})
+		return err
+	})
 	if err != nil {
 		if errors.Is(err, configstore.ErrNotFound) {
 			SendError(ctx, fasthttp.StatusNotFound, "virtual key or budget not found")
 			return
 		}
-		SendError(ctx, fasthttp.StatusInternalServerError, "failed to retrieve virtual key budget")
-		return
-	}
-
-	if clear {
-		budget.ClearOverride()
-	} else {
-		var req BudgetOverrideRequest
-		if err := json.Unmarshal(ctx.PostBody(), &req); err != nil {
-			SendError(ctx, fasthttp.StatusBadRequest, "invalid request body")
-			return
-		}
-		if err := budget.SetOverride(req.Amount, req.Mode, req.Cycles); err != nil {
-			SendError(ctx, fasthttp.StatusBadRequest, err.Error())
-			return
-		}
-	}
-
-	// IsCalendarAligned was stamped onto the budget by the virtual key's AfterFind
-	// during loadVirtualKeyBudget, and the store needs it to anchor a finite grant
-	// on the same lattice the budget actually resets on.
-	budget, err = h.configStore.UpdateBudgetOverride(
-		ctx,
-		budget.ID,
-		budget.OverrideAmount,
-		budget.OverrideMode,
-		budget.OverrideCyclesRemaining,
-		budget.IsCalendarAligned,
-	)
-	if err != nil {
-		if errors.Is(err, configstore.ErrNotFound) {
-			SendError(ctx, fasthttp.StatusNotFound, "budget not found")
+		var badReqErr *badRequestError
+		if errors.As(err, &badReqErr) {
+			SendError(ctx, fasthttp.StatusBadRequest, badReqErr.Error())
 			return
 		}
 		SendError(ctx, fasthttp.StatusInternalServerError, "failed to update budget override")
 		return
 	}
-	if _, err := h.governanceManager.ReloadVirtualKey(ctx, vkID); err != nil {
+	if _, err := h.governanceManager.ReloadVirtualKey(dbCtx, vkID); err != nil {
 		logger.Error("failed to reload virtual key after budget override: %v", err)
-		SendError(ctx, fasthttp.StatusInternalServerError, "budget override saved but virtual key reload failed")
+		SendJSONWithStatus(ctx, map[string]any{
+			"message": "Budget override committed but virtual key reload failed", "budget": budget,
+			"effective_max_limit": budget.EffectiveMaxLimit(), "committed": true, "audit_receipt": auditReceipt,
+		}, fasthttp.StatusInternalServerError)
 		return
 	}
 
-	SendJSON(ctx, BudgetOverrideResponse{
-		Budget:            budget,
-		EffectiveMaxLimit: budget.EffectiveMaxLimit(),
+	SendJSON(ctx, map[string]any{
+		"budget": budget, "effective_max_limit": budget.EffectiveMaxLimit(),
+		"committed": true, "audit_receipt": auditReceipt,
 	})
 }
 
 // updateVirtualKey handles PUT /api/governance/virtual-keys/{vk_id} - Update a virtual key
 func (h *GovernanceHandler) updateVirtualKey(ctx *fasthttp.RequestCtx) {
 	vkID := ctx.UserValue("vk_id").(string)
+	dbCtx := governanceDatabaseContext()
 	if err := validateVirtualKeyWriteFields(ctx.PostBody()); err != nil {
 		SendError(ctx, 400, err.Error())
 		return
@@ -2017,7 +2204,7 @@ func (h *GovernanceHandler) updateVirtualKey(ctx *fasthttp.RequestCtx) {
 		}
 		newExpiresAt = &parsed
 	}
-	vk, err := h.configStore.GetVirtualKey(ctx, vkID)
+	vk, err := h.configStore.GetVirtualKey(dbCtx, vkID)
 	if err != nil {
 		if errors.Is(err, configstore.ErrNotFound) {
 			SendError(ctx, 404, "Virtual key not found")
@@ -2028,18 +2215,19 @@ func (h *GovernanceHandler) updateVirtualKey(ctx *fasthttp.RequestCtx) {
 	}
 	providerSet := map[schemas.ModelProvider]struct{}{}
 	if len(req.ProviderConfigs) > 0 {
-		providerSet, err = h.getConfiguredProviderSet(ctx)
+		providerSet, err = h.getConfiguredProviderSet(dbCtx)
 		if err != nil {
 			SendError(ctx, 500, fmt.Sprintf("Failed to load providers: %v", err))
 			return
 		}
 	}
-	if err := h.configStore.ExecuteTransaction(ctx, func(tx *gorm.DB) error {
+	var auditReceipt *governanceAuditReceipt
+	if err := h.configStore.ExecuteTransaction(dbCtx, func(tx *gorm.DB) error {
 		var rateLimitIDToDelete string
 		var providerBudgetIDsToDelete []string
 		var providerRateLimitIDsToDelete []string
 		var lockedVK configstoreTables.TableVirtualKey
-		if err := dbForUpdate(tx.WithContext(ctx)).
+		if err := dbForUpdate(tx.WithContext(dbCtx)).
 			Preload("Budgets").
 			Preload("RateLimit").
 			Preload("ProviderConfigs").
@@ -2048,6 +2236,10 @@ func (h *GovernanceHandler) updateVirtualKey(ctx *fasthttp.RequestCtx) {
 				return configstore.ErrNotFound
 			}
 			return err
+		}
+		beforeSummary, err := loadVirtualKeyAuditSummary(dbCtx, tx, vkID)
+		if err != nil {
+			return fmt.Errorf("failed to load virtual key audit summary: %w", err)
 		}
 		vk = &lockedVK
 		sort.Slice(vk.Budgets, func(i, j int) bool {
@@ -2085,7 +2277,7 @@ func (h *GovernanceHandler) updateVirtualKey(ctx *fasthttp.RequestCtx) {
 		// below. Per-provider desired state is accumulated while reconciling provider config rows.
 		var vkGovProviders []vkModelConfigDesired
 
-		if err := h.configStore.UpdateVirtualKey(ctx, vk, tx); err != nil {
+		if err := h.configStore.UpdateVirtualKey(dbCtx, vk, tx); err != nil {
 			return err
 		}
 		if req.ProviderConfigs != nil {
@@ -2146,7 +2338,7 @@ func (h *GovernanceHandler) updateVirtualKey(ctx *fasthttp.RequestCtx) {
 						allowAllKeys = true
 					} else if !allowAllKeys && !pc.KeyIDs.IsEmpty() {
 						var err error
-						keys, err = h.configStore.GetKeysByIDs(ctx, pc.KeyIDs)
+						keys, err = h.configStore.GetKeysByIDs(dbCtx, pc.KeyIDs)
 						if err != nil {
 							return fmt.Errorf("failed to get keys by IDs for provider %s: %w", pc.Provider, err)
 						}
@@ -2165,7 +2357,7 @@ func (h *GovernanceHandler) updateVirtualKey(ctx *fasthttp.RequestCtx) {
 						AllowAllKeys:      allowAllKeys,
 						Keys:              keys,
 					}
-					if err := h.configStore.CreateVirtualKeyProviderConfig(ctx, providerConfig, tx); err != nil {
+					if err := h.configStore.CreateVirtualKeyProviderConfig(dbCtx, providerConfig, tx); err != nil {
 						return err
 					}
 					// Provider-config governance is stored in the VK-scoped model config for this provider.
@@ -2214,7 +2406,7 @@ func (h *GovernanceHandler) updateVirtualKey(ctx *fasthttp.RequestCtx) {
 							allowAllKeys = true
 						} else if !allowAllKeys && !pc.KeyIDs.IsEmpty() {
 							var err error
-							keys, err = h.configStore.GetKeysByIDs(ctx, pc.KeyIDs)
+							keys, err = h.configStore.GetKeysByIDs(dbCtx, pc.KeyIDs)
 							if err != nil {
 								return fmt.Errorf("failed to get keys by IDs for provider %s: %w", pc.Provider, err)
 							}
@@ -2253,7 +2445,7 @@ func (h *GovernanceHandler) updateVirtualKey(ctx *fasthttp.RequestCtx) {
 						return err
 					}
 					vkGovProviders = append(vkGovProviders, modelDesired...)
-					if err := h.configStore.UpdateVirtualKeyProviderConfig(ctx, &existing, tx); err != nil {
+					if err := h.configStore.UpdateVirtualKeyProviderConfig(dbCtx, &existing, tx); err != nil {
 						return err
 					}
 				}
@@ -2271,7 +2463,7 @@ func (h *GovernanceHandler) updateVirtualKey(ctx *fasthttp.RequestCtx) {
 						providerBudgetIDsToDelete,
 						providerRateLimitIDsToDelete,
 					)
-					if err := h.configStore.DeleteVirtualKeyProviderConfig(ctx, id, tx); err != nil {
+					if err := h.configStore.DeleteVirtualKeyProviderConfig(dbCtx, id, tx); err != nil {
 						return err
 					}
 				}
@@ -2292,7 +2484,7 @@ func (h *GovernanceHandler) updateVirtualKey(ctx *fasthttp.RequestCtx) {
 				top.rateLimit = rateLimitFromRequestFields(req.RateLimit.TokenMaxLimit, req.RateLimit.TokenResetDuration, req.RateLimit.RequestMaxLimit, req.RateLimit.RequestResetDuration)
 			}
 		}
-		if err := h.syncVKGovernanceToModelConfigs(ctx, tx, vk, top, vkGovProviders, req.ProviderConfigs != nil, usageReset); err != nil {
+		if err := h.syncVKGovernanceToModelConfigs(dbCtx, tx, vk, top, vkGovProviders, req.ProviderConfigs != nil, usageReset); err != nil {
 			return err
 		}
 		if req.MCPConfigs != nil {
@@ -2334,12 +2526,12 @@ func (h *GovernanceHandler) updateVirtualKey(ctx *fasthttp.RequestCtx) {
 					return &badRequestError{err: fmt.Errorf("invalid tools_to_execute for mcp client %s: %w", mc.MCPClientName, err)}
 				}
 				if mc.ID == nil {
-					mcpClient, err := h.configStore.GetMCPClientByName(ctx, mc.MCPClientName)
+					mcpClient, err := h.configStore.GetMCPClientByName(dbCtx, mc.MCPClientName)
 					if err != nil {
 						return fmt.Errorf("failed to get MCP client: %w", err)
 					}
 					// Create new MCP config
-					if err := h.configStore.CreateVirtualKeyMCPConfig(ctx, &configstoreTables.TableVirtualKeyMCPConfig{
+					if err := h.configStore.CreateVirtualKeyMCPConfig(dbCtx, &configstoreTables.TableVirtualKeyMCPConfig{
 						VirtualKeyID:   vk.ID,
 						MCPClientID:    mcpClient.ID,
 						ToolsToExecute: mc.ToolsToExecute,
@@ -2354,7 +2546,7 @@ func (h *GovernanceHandler) updateVirtualKey(ctx *fasthttp.RequestCtx) {
 					}
 					requestMCPConfigsMap[*mc.ID] = true
 					existing.ToolsToExecute = mc.ToolsToExecute
-					if err := h.configStore.UpdateVirtualKeyMCPConfig(ctx, &existing, tx); err != nil {
+					if err := h.configStore.UpdateVirtualKeyMCPConfig(dbCtx, &existing, tx); err != nil {
 						return err
 					}
 				}
@@ -2367,7 +2559,7 @@ func (h *GovernanceHandler) updateVirtualKey(ctx *fasthttp.RequestCtx) {
 			sort.Slice(mcpConfigIDs, func(i, j int) bool { return mcpConfigIDs[i] < mcpConfigIDs[j] })
 			for _, id := range mcpConfigIDs {
 				if !requestMCPConfigsMap[id] {
-					if err := h.configStore.DeleteVirtualKeyMCPConfig(ctx, id, tx); err != nil {
+					if err := h.configStore.DeleteVirtualKeyMCPConfig(dbCtx, id, tx); err != nil {
 						return err
 					}
 				}
@@ -2375,21 +2567,33 @@ func (h *GovernanceHandler) updateVirtualKey(ctx *fasthttp.RequestCtx) {
 		}
 
 		if rateLimitIDToDelete != "" {
-			if err := h.configStore.DeleteRateLimit(ctx, rateLimitIDToDelete, tx); err != nil {
+			if err := h.configStore.DeleteRateLimit(dbCtx, rateLimitIDToDelete, tx); err != nil {
 				return err
 			}
 		}
 		sort.Strings(providerBudgetIDsToDelete)
 		for _, id := range providerBudgetIDsToDelete {
-			if err := h.configStore.DeleteBudget(ctx, id, tx); err != nil && !errors.Is(err, configstore.ErrNotFound) {
+			if err := h.configStore.DeleteBudget(dbCtx, id, tx); err != nil && !errors.Is(err, configstore.ErrNotFound) {
 				return err
 			}
 		}
 		sort.Strings(providerRateLimitIDsToDelete)
 		for _, id := range providerRateLimitIDsToDelete {
-			if err := h.configStore.DeleteRateLimit(ctx, id, tx); err != nil && !errors.Is(err, configstore.ErrNotFound) {
+			if err := h.configStore.DeleteRateLimit(dbCtx, id, tx); err != nil && !errors.Is(err, configstore.ErrNotFound) {
 				return err
 			}
+		}
+		afterSummary, err := loadVirtualKeyAuditSummary(dbCtx, tx, vk.ID)
+		if err != nil {
+			return fmt.Errorf("failed to load virtual key audit summary: %w", err)
+		}
+		auditReceipt, err = h.appendGovernanceAudit(ctx, tx, governanceAuditInput{
+			Action: "virtual_key.update", Resource: "virtual_key", ResourceID: vk.ID,
+			Outcome: "success", Before: beforeSummary, After: afterSummary,
+			Metadata: map[string]bool{"credential_disclosed": h.canRevealVirtualKeyValue(ctx, vk.ID)},
+		})
+		if err != nil {
+			return fmt.Errorf("failed to append governance audit event: %w", err)
 		}
 
 		return nil
@@ -2407,18 +2611,22 @@ func (h *GovernanceHandler) updateVirtualKey(ctx *fasthttp.RequestCtx) {
 		return
 	}
 	// Load relationships for response
-	preloadedVk, err := h.configStore.GetVirtualKey(ctx, vk.ID)
+	preloadedVk, err := h.configStore.GetVirtualKey(dbCtx, vk.ID)
 	if err != nil {
 		logger.Error("failed to load relationships for updated VK: %v", err)
 		preloadedVk = vk
 	}
 	// Reverse-map governance from VK-scoped model configs for display.
-	h.hydrateVKGovernance(ctx, preloadedVk)
+	h.hydrateVKGovernance(dbCtx, preloadedVk)
 
-	if _, err := h.governanceManager.ReloadVirtualKey(ctx, vk.ID); err != nil {
+	if _, err := h.governanceManager.ReloadVirtualKey(dbCtx, vk.ID); err != nil {
 		// Should never happen but just in case
 		logger.Error("failed to reload virtual key after update: %v", err)
-		SendError(ctx, 500, "Virtual key updated in database but failed to reload in-memory state")
+		SendJSONWithStatus(ctx, map[string]any{
+			"message":       "Virtual key updated in database but failed to reload in-memory state",
+			"committed":     true,
+			"audit_receipt": auditReceipt,
+		}, fasthttp.StatusInternalServerError)
 		return
 	}
 	// Clear usage in the store that actually enforces spend. This must run after
@@ -2426,9 +2634,13 @@ func (h *GovernanceHandler) updateVirtualKey(ctx *fasthttp.RequestCtx) {
 	// and deliberately carries the cached CurrentUsage forward, which would undo
 	// the reset. Enterprise additionally propagates this to cluster peers.
 	if len(usageReset.budgetIDs) > 0 {
-		if err := h.governanceManager.ResetBudgetUsageInMemory(ctx, BudgetUsageResetOwner{Kind: BudgetOwnerVirtualKey, ID: vk.ID}, usageReset.budgetIDs); err != nil {
+		if err := h.governanceManager.ResetBudgetUsageInMemory(dbCtx, BudgetUsageResetOwner{Kind: BudgetOwnerVirtualKey, ID: vk.ID}, usageReset.budgetIDs); err != nil {
 			logger.Error("failed to reset in-memory budget usage after update: %v", err)
-			SendError(ctx, 500, "Virtual key updated but budget usage reset did not take effect")
+			SendJSONWithStatus(ctx, map[string]any{
+				"message":       "Virtual key updated in database but budget usage reset did not take effect",
+				"committed":     true,
+				"audit_receipt": auditReceipt,
+			}, fasthttp.StatusInternalServerError)
 			return
 		}
 	}
@@ -2444,20 +2656,32 @@ func (h *GovernanceHandler) updateVirtualKey(ctx *fasthttp.RequestCtx) {
 		if err := h.adoptCalendarAlignment(ctx, true,
 			BudgetUsageResetOwner{Kind: BudgetOwnerVirtualKey, ID: vk.ID}, adoptBudgets, adoptRateLimitID); err != nil {
 			logger.Error("failed to adopt calendar alignment for virtual key: %v", err)
-			SendError(ctx, 500, "Virtual key updated but calendar alignment did not take effect")
+			SendJSONWithStatus(ctx, map[string]any{
+				"message":       "Virtual key updated in database but calendar alignment did not take effect",
+				"committed":     true,
+				"audit_receipt": auditReceipt,
+			}, fasthttp.StatusInternalServerError)
 			return
 		}
 		modelConfigs, err := h.configStore.GetModelConfigsByScopeAndScopeIDs(ctx, configstoreTables.ModelConfigScopeVirtualKey, []string{vk.ID})
 		if err != nil {
 			logger.Error("failed to load model configs for calendar alignment adoption: %v", err)
-			SendError(ctx, 500, "Virtual key updated but calendar alignment did not take effect")
+			SendJSONWithStatus(ctx, map[string]any{
+				"message":       "Virtual key updated in database but calendar alignment did not take effect",
+				"committed":     true,
+				"audit_receipt": auditReceipt,
+			}, fasthttp.StatusInternalServerError)
 			return
 		}
 		for i := range modelConfigs {
 			if err := h.adoptCalendarAlignment(ctx, true,
 				BudgetUsageResetOwner{Kind: BudgetOwnerModelConfig, ID: modelConfigs[i].ID}, modelConfigs[i].Budgets, modelConfigs[i].RateLimitID); err != nil {
 				logger.Error("failed to adopt calendar alignment for model config %s: %v", modelConfigs[i].ID, err)
-				SendError(ctx, 500, "Virtual key updated but calendar alignment did not take effect")
+				SendJSONWithStatus(ctx, map[string]any{
+					"message":       "Virtual key updated in database but calendar alignment did not take effect",
+					"committed":     true,
+					"audit_receipt": auditReceipt,
+				}, fasthttp.StatusInternalServerError)
 				return
 			}
 		}
@@ -2484,13 +2708,18 @@ func (h *GovernanceHandler) updateVirtualKey(ctx *fasthttp.RequestCtx) {
 	if _, err := h.governanceManager.ReloadVirtualKey(ctx, vk.ID); err != nil {
 		// Should never happen but just in case
 		logger.Error("failed to reload virtual key after update: %v", err)
-		SendError(ctx, 500, "Virtual key updated in database but failed to reload in-memory state")
+		SendJSONWithStatus(ctx, map[string]any{
+			"message":       "Virtual key updated in database but failed to reload in-memory state",
+			"committed":     true,
+			"audit_receipt": auditReceipt,
+		}, fasthttp.StatusInternalServerError)
 		return
 	}
 
 	SendJSON(ctx, map[string]interface{}{
-		"message":     "Virtual key updated successfully",
-		"virtual_key": preloadedVk,
+		"message":       "Virtual key updated successfully",
+		"virtual_key":   h.governanceVirtualKeyPayload(ctx, preloadedVk),
+		"audit_receipt": auditReceipt,
 	})
 }
 
@@ -2515,9 +2744,85 @@ func (h *GovernanceHandler) rotateVirtualKeyByID(ctx context.Context, vkID strin
 	return preloadedVk, nil
 }
 
+func (h *GovernanceHandler) rotateVirtualKeyWithAudit(ctx *fasthttp.RequestCtx, vkID string) (*configstoreTables.TableVirtualKey, *governanceAuditReceipt, bool, error) {
+	var auditReceipt *governanceAuditReceipt
+	var rotatedVK *configstoreTables.TableVirtualKey
+	dbCtx := governanceDatabaseContext()
+	err := h.configStore.ExecuteTransaction(dbCtx, func(tx *gorm.DB) error {
+		var vk configstoreTables.TableVirtualKey
+		if err := dbForUpdate(tx.WithContext(dbCtx)).First(&vk, "id = ?", vkID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return configstore.ErrNotFound
+			}
+			return err
+		}
+		before, err := loadVirtualKeyAuditSummary(dbCtx, tx, vk.ID)
+		if err != nil {
+			return fmt.Errorf("failed to load virtual key audit summary: %w", err)
+		}
+		oldValue := vk.Value.GetValue()
+		vk.Value = *schemas.NewSecretVar(governance.GenerateVirtualKey())
+		if vk.Value.GetValue() == oldValue {
+			return fmt.Errorf("generated virtual key matched existing value")
+		}
+		if err := h.configStore.UpdateVirtualKey(dbCtx, &vk, tx); err != nil {
+			return err
+		}
+		after, err := loadVirtualKeyAuditSummary(dbCtx, tx, vk.ID)
+		if err != nil {
+			return fmt.Errorf("failed to load virtual key audit summary: %w", err)
+		}
+		auditReceipt, err = h.appendGovernanceAudit(ctx, tx, governanceAuditInput{
+			Action: "virtual_key.rotate", Resource: "virtual_key", ResourceID: vk.ID,
+			Outcome: "success", Before: before, After: after,
+			Metadata: map[string]bool{"credential_changed": true, "credential_disclosed": h.canRevealVirtualKeyValue(ctx, vk.ID)},
+		})
+		if err != nil {
+			return fmt.Errorf("failed to append governance audit event: %w", err)
+		}
+		rotatedVK = &vk
+		return nil
+	})
+	if err != nil {
+		return nil, nil, false, err
+	}
+	preloadedVk, reloadErr := h.governanceManager.ReloadVirtualKey(dbCtx, rotatedVK.ID)
+	if reloadErr != nil {
+		return rotatedVK, auditReceipt, true, reloadErr
+	}
+	h.hydrateVKGovernance(dbCtx, preloadedVk)
+	return preloadedVk, auditReceipt, true, nil
+}
+
 // rotateVirtualKey handles POST /api/governance/virtual-keys/{vk_id}/rotate - Rotate only the virtual key value
 func (h *GovernanceHandler) rotateVirtualKey(ctx *fasthttp.RequestCtx) {
 	vkID := ctx.UserValue("vk_id").(string)
+	if h.audit != nil {
+		preloadedVk, auditReceipt, committed, err := h.rotateVirtualKeyWithAudit(ctx, vkID)
+		if err != nil {
+			if errors.Is(err, configstore.ErrNotFound) {
+				SendError(ctx, fasthttp.StatusNotFound, "Virtual key not found")
+				return
+			}
+			if committed {
+				logger.Error("failed to reload virtual key after committed rotation: %v", err)
+				SendJSONWithStatus(ctx, map[string]any{
+					"message":       "Virtual key rotated in database but failed to reload in-memory state",
+					"committed":     true,
+					"audit_receipt": auditReceipt,
+				}, fasthttp.StatusInternalServerError)
+				return
+			}
+			logger.Error("failed to rotate virtual key: %v", err)
+			SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("Failed to rotate virtual key: %v", err))
+			return
+		}
+		SendJSON(ctx, map[string]any{
+			"message": "Virtual key rotated successfully", "virtual_key": h.governanceVirtualKeyPayload(ctx, preloadedVk),
+			"audit_receipt": auditReceipt,
+		})
+		return
+	}
 	preloadedVk, err := h.rotateVirtualKeyByID(ctx, vkID)
 	if err != nil {
 		if errors.Is(err, configstore.ErrNotFound) {
@@ -2560,6 +2865,112 @@ func (h *GovernanceHandler) rotateVirtualKeys(ctx *fasthttp.RequestCtx) {
 		seen[id] = struct{}{}
 		ids = append(ids, id)
 	}
+	sort.Strings(ids)
+	if h.audit != nil {
+		principal := adminPrincipalFromRequest(ctx)
+		authorizer := h.authorizer
+		if authorizer == nil {
+			authorizer = contextGovernanceAuthorizer{}
+		}
+		for _, id := range ids {
+			if err := authorizer.Authorize(ctx, principal, "virtual_key.rotate", "virtual_key/"+id); err != nil {
+				if auditErr := h.persistGovernanceAuthorizationDenial(ctx, principal, "virtual_key.rotate", "virtual_key", id); auditErr != nil {
+					logger.Error("failed to persist denied bulk virtual-key rotation audit event: %v", auditErr)
+					SendError(ctx, fasthttp.StatusInternalServerError, "Authorization denied and audit logging failed")
+					return
+				}
+				SendError(ctx, fasthttp.StatusForbidden, "admin_auth_required")
+				return
+			}
+		}
+		rotated := make([]*configstoreTables.TableVirtualKey, 0, len(ids))
+		receipts := make([]*governanceAuditReceipt, 0, len(ids))
+		dbCtx := governanceDatabaseContext()
+		if err := h.configStore.ExecuteTransaction(dbCtx, func(tx *gorm.DB) error {
+			// Acquire all VK row locks in a deterministic order before any audit
+			// head lock. This prevents [A,B] vs [B,A] bulk requests from
+			// deadlocking on PostgreSQL.
+			for _, id := range ids {
+				var locked configstoreTables.TableVirtualKey
+				if err := dbForUpdate(tx.WithContext(dbCtx)).Select("id").First(&locked, "id = ?", id).Error; err != nil {
+					if errors.Is(err, gorm.ErrRecordNotFound) {
+						return fmt.Errorf("%s: %w", id, configstore.ErrNotFound)
+					}
+					return err
+				}
+			}
+			for _, id := range ids {
+				var vk configstoreTables.TableVirtualKey
+				if err := dbForUpdate(tx.WithContext(dbCtx)).First(&vk, "id = ?", id).Error; err != nil {
+					if errors.Is(err, gorm.ErrRecordNotFound) {
+						return fmt.Errorf("%s: %w", id, configstore.ErrNotFound)
+					}
+					return err
+				}
+				before, err := loadVirtualKeyAuditSummary(dbCtx, tx, vk.ID)
+				if err != nil {
+					return fmt.Errorf("failed to load virtual key audit summary: %w", err)
+				}
+				oldValue := vk.Value.GetValue()
+				vk.Value = *schemas.NewSecretVar(governance.GenerateVirtualKey())
+				if vk.Value.GetValue() == oldValue {
+					return fmt.Errorf("generated virtual key matched existing value")
+				}
+				if err := h.configStore.UpdateVirtualKey(dbCtx, &vk, tx); err != nil {
+					return err
+				}
+				after, err := loadVirtualKeyAuditSummary(dbCtx, tx, vk.ID)
+				if err != nil {
+					return fmt.Errorf("failed to load virtual key audit summary: %w", err)
+				}
+				receipt, err := h.appendGovernanceAudit(ctx, tx, governanceAuditInput{
+					Action: "virtual_key.rotate", Resource: "virtual_key", ResourceID: vk.ID,
+					Outcome: "success", Before: before, After: after,
+					Metadata: map[string]bool{
+						"credential_changed": true, "bulk_operation": true,
+						"credential_disclosed": h.canRevealVirtualKeyValue(ctx, vk.ID),
+					},
+				})
+				if err != nil {
+					return fmt.Errorf("failed to append governance audit event: %w", err)
+				}
+				rotated = append(rotated, &vk)
+				receipts = append(receipts, receipt)
+			}
+			return nil
+		}); err != nil {
+			if errors.Is(err, configstore.ErrNotFound) {
+				SendError(ctx, fasthttp.StatusNotFound, "Virtual key not found; no keys were rotated")
+				return
+			}
+			logger.Error("failed to rotate virtual keys atomically: %v", err)
+			SendError(ctx, fasthttp.StatusInternalServerError, "Failed to rotate virtual keys; no keys were rotated")
+			return
+		}
+		responseKeys := make([]*configstoreTables.TableVirtualKey, 0, len(rotated))
+		reloadFailures := make(map[string]string)
+		for i := range rotated {
+			preloaded, err := h.governanceManager.ReloadVirtualKey(dbCtx, rotated[i].ID)
+			if err != nil {
+				reloadFailures[rotated[i].ID] = "committed but in-memory reload failed"
+				responseKeys = append(responseKeys, rotated[i])
+				continue
+			}
+			h.hydrateVKGovernance(dbCtx, preloaded)
+			responseKeys = append(responseKeys, preloaded)
+		}
+		response := map[string]any{
+			"message": "Virtual keys rotated successfully", "virtual_keys": h.governanceVirtualKeyPayloads(ctx, responseKeys),
+			"audit_receipts": receipts, "committed": true,
+		}
+		if len(reloadFailures) > 0 {
+			response["errors"] = reloadFailures
+			SendJSONWithStatus(ctx, response, fasthttp.StatusInternalServerError)
+			return
+		}
+		SendJSON(ctx, response)
+		return
+	}
 
 	rotated := make([]*configstoreTables.TableVirtualKey, 0, len(ids))
 	failures := make(map[string]string)
@@ -2595,6 +3006,54 @@ func (h *GovernanceHandler) rotateVirtualKeys(ctx *fasthttp.RequestCtx) {
 // deleteVirtualKey handles DELETE /api/governance/virtual-keys/{vk_id} - Delete a virtual key
 func (h *GovernanceHandler) deleteVirtualKey(ctx *fasthttp.RequestCtx) {
 	vkID := ctx.UserValue("vk_id").(string)
+	if h.audit != nil {
+		var vk configstoreTables.TableVirtualKey
+		var auditReceipt *governanceAuditReceipt
+		dbCtx := governanceDatabaseContext()
+		err := h.configStore.ExecuteTransaction(dbCtx, func(tx *gorm.DB) error {
+			if err := dbForUpdate(tx.WithContext(dbCtx)).First(&vk, "id = ?", vkID).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return configstore.ErrNotFound
+				}
+				return err
+			}
+			before, err := loadVirtualKeyAuditSummary(dbCtx, tx, vk.ID)
+			if err != nil {
+				return fmt.Errorf("failed to load virtual key audit summary: %w", err)
+			}
+			if err := h.configStore.DeleteVirtualKey(dbCtx, vkID, tx); err != nil {
+				return err
+			}
+			auditReceipt, err = h.appendGovernanceAudit(ctx, tx, governanceAuditInput{
+				Action: "virtual_key.delete", Resource: "virtual_key", ResourceID: vk.ID,
+				Outcome: "success", Before: before,
+			})
+			if err != nil {
+				return fmt.Errorf("failed to append governance audit event: %w", err)
+			}
+			return nil
+		})
+		if err != nil {
+			if errors.Is(err, configstore.ErrNotFound) {
+				SendError(ctx, fasthttp.StatusNotFound, "Virtual key not found")
+				return
+			}
+			logger.Error("failed to delete virtual key: %v", err)
+			SendError(ctx, fasthttp.StatusInternalServerError, "Failed to delete virtual key")
+			return
+		}
+		if err := h.governanceManager.RemoveVirtualKey(dbCtx, vk.ID); err != nil {
+			logger.Error("failed to remove committed virtual key from memory: %v", err)
+			SendJSONWithStatus(ctx, map[string]any{
+				"message":       "Virtual key deleted in database but failed to evict in-memory state",
+				"committed":     true,
+				"audit_receipt": auditReceipt,
+			}, fasthttp.StatusInternalServerError)
+			return
+		}
+		SendJSON(ctx, map[string]any{"message": "Virtual key deleted successfully", "audit_receipt": auditReceipt})
+		return
+	}
 	// Fetch the virtual key from the database to get the budget and rate limit
 	vk, err := h.configStore.GetVirtualKey(ctx, vkID)
 	if err != nil {

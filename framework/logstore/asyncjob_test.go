@@ -32,6 +32,12 @@ type testGovernanceStore struct {
 	virtualKeys map[string]*configstoreTables.TableVirtualKey
 }
 
+type denyingAsyncAccessChecker struct{}
+
+func (denyingAsyncAccessChecker) CheckVirtualKeyAccess(context.Context, string) error {
+	return assert.AnError
+}
+
 func (t *testGovernanceStore) GetVirtualKey(_ context.Context, vkValue string) (*configstoreTables.TableVirtualKey, bool) {
 	vk, ok := t.virtualKeys[vkValue]
 	return vk, ok
@@ -115,6 +121,25 @@ func TestSubmitJob_PropagatesContextValues(t *testing.T) {
 	assert.Equal(t, "production", capturedCtx.Value(schemas.BifrostContextKey("x-bf-prom-env")))
 	assert.Equal(t, "custom-value", capturedCtx.Value(schemas.BifrostContextKey("x-bf-eh-custom")))
 	assert.Equal(t, true, capturedCtx.Value(schemas.BifrostIsAsyncRequest))
+}
+
+func TestSubmitJob_RechecksVirtualKeyAccessBeforeExecution(t *testing.T) {
+	executor := newTestAsyncExecutor(t)
+	executor.SetVirtualKeyAccessChecker(denyingAsyncAccessChecker{})
+	ctx := schemas.NewBifrostContext(context.Background(), schemas.NoDeadline)
+	ctx.SetValue(schemas.BifrostContextKeyVirtualKey, "sk-bf-test")
+	var called atomic.Bool
+
+	job, err := executor.SubmitJob(ctx, 3600, func(*schemas.BifrostContext) (interface{}, *schemas.BifrostError) {
+		called.Store(true)
+		return nil, nil
+	}, schemas.ChatCompletionRequest)
+	require.NoError(t, err)
+
+	stored := waitForJobStatus(t, executor.logstore, job.ID)
+	require.False(t, called.Load())
+	require.Equal(t, schemas.AsyncJobStatusFailed, stored.Status)
+	require.Equal(t, fasthttp.StatusUnauthorized, stored.StatusCode)
 }
 
 func TestSubmitJob_StoresRequestID(t *testing.T) {

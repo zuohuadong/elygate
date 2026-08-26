@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { getAppName } from '../lib/branding';
 	import { onMount } from 'svelte';
 	import { useTranslation } from '@svadmin/core/i18n';
 	import { displayError, parseJsonObject, prettyJson, csv } from '../lib/forms';
@@ -390,7 +391,7 @@
 
 <section class="page-shell" data-resource={resourceName}>
 	<header class="page-heading">
-		<div><p class="eyebrow">Elygate / Bifrost API</p><h1>{providerKeysPage ? i18n.t('elygate.providerKeys') : i18n.t('elygate.providers')}</h1><p>{providerKeysPage ? i18n.t('elygate.apiKeySeparateHint') : i18n.t('elygate.providerNameHelp')}</p></div>
+		<div><p class="eyebrow">{getAppName()} / Providers</p><h1>{providerKeysPage ? i18n.t('elygate.providerKeys') : i18n.t('elygate.providers')}</h1><p>{providerKeysPage ? i18n.t('elygate.apiKeySeparateHint') : i18n.t('elygate.providerNameHelp')}</p></div>
 		<div class="heading-actions"><button class="primary" type="button" onclick={() => void (providerKeysPage ? loadKeys() : loadProviders())} disabled={isLoading || isKeysLoading}>{i18n.t('elygate.refresh')}</button>{#if !providerKeysPage}<button class="primary" type="button" onclick={openCreate}>{i18n.t('elygate.create')}</button>{/if}</div>
 	</header>
 	{#if error}<div class="notice error" role="alert">{error}</div>{/if}

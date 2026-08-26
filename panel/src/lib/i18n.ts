@@ -1,4 +1,5 @@
 import { addTranslations } from '@svadmin/core/i18n';
+import { formatBrandText, getAppName } from './branding';
 
 export type ElygateLocale = 'zh-CN' | 'en';
 
@@ -172,6 +173,7 @@ const translations = {
 		'elygate.config': '运行配置',
 		'elygate.complexityAnalyzer': '复杂度分析器',
 		'elygate.enterprise': '企业级管理',
+		'elygate.employees': '员工管理',
 		'elygate.users': '用户',
 		'elygate.businessUnits': '业务单元',
 		'elygate.rbac': 'RBAC 权限',
@@ -282,7 +284,7 @@ const translations = {
 		'elygate.cacheManagement': '缓存管理',
 		'elygate.pprof': '性能分析',
 		'elygate.docsHub': '文档中心',
-		'elygate.docsHubHint': '集中访问 Elygate 的快速开始、架构、MCP、治理和扩展开发文档。',
+		'elygate.docsHubHint': '集中访问快速开始、架构、MCP、治理和扩展开发文档。',
 		'elygate.fullDocumentation': '完整文档',
 		'elygate.readMore': '查看文档',
 		'elygate.pprofHint': '每 10 秒刷新 Go 运行时、内存分配和 Goroutine 健康数据。',
@@ -316,14 +318,14 @@ const translations = {
 		'elygate.disable': '停用',
 		'elygate.vectorStoreRequired': '缓存运行时需要服务端配置并连接向量存储；仅精确匹配模式不需要嵌入供应商，但仍依赖缓存存储。',
 		'elygate.vectorStore': '向量存储',
-		'elygate.vectorStoreHint': '保存 pgvector 连接配置；运行时不会热替换，重启 Elygate 后生效。',
+		'elygate.vectorStoreHint': '保存 pgvector 连接配置；运行时不会热替换，重启后端服务后生效。',
 		'elygate.vectorStoreType': '存储类型',
 		'elygate.pgvectorConnection': 'PostgreSQL 连接串',
 		'elygate.pgvectorSchema': '数据库 Schema',
 		'elygate.enablePgvector': '启用 pgvector',
 		'elygate.saveVectorStore': '保存存储配置',
 		'elygate.vectorStoreSaved': '向量存储配置已保存。',
-		'elygate.restartInstructions': '需要服务器管理员重启 Elygate 后端。Docker Compose 可执行 docker compose restart elygate；其他部署方式请按运维手册重启服务，完成后刷新本页确认连接状态。',
+		'elygate.restartInstructions': '需要服务器管理员重启后端服务。使用 Docker Compose 部署时可执行对应服务重启命令；其他部署方式请按运维手册重启服务，完成后刷新本页确认连接状态。',
 		'elygate.vectorStoreConnectionRequired': '启用 pgvector 前必须填写 PostgreSQL 连接串。',
 		'elygate.directCache': '仅精确匹配',
 		'elygate.semanticCache': '精确 + 语义',
@@ -380,14 +382,14 @@ const translations = {
 		'elygate.routingRuleCount': '路由规则',
 		'elygate.integrationCount': '集成项',
 		'elygate.lastUpdated': '最后更新',
-		'elygate.securityNotice': '管理接口受 Bifrost 服务端会话保护。认证未启用时本管理台将拒绝进入。',
-		'elygate.loginHint': '请使用 Bifrost 管理员账户登录。若尚未启用认证，请先设置 auth_config。',
+		'elygate.securityNotice': '管理接口受服务端会话保护。认证未启用时本管理台将拒绝进入。',
+		'elygate.loginHint': '请使用管理员账户登录。若尚未启用认证，请先设置 auth_config。',
 		'elygate.loginRequired': '请输入用户名和密码',
 		'elygate.loginFailed': '登录失败',
 		'elygate.sessionExpired': '登录已过期，请重新登录。',
-		'elygate.authDisabled': '管理员认证尚未启用。请先在 Bifrost 部署配置中启用 auth_config。',
+		'elygate.authDisabled': '管理员认证尚未启用。请先在部署配置中启用 auth_config。',
 		'elygate.sessionUnknown': '无法确认登录状态。',
-		'elygate.adminName': 'Elygate 管理员',
+		'elygate.adminName': '管理员',
 		'elygate.onboarding': '初始化检查',
 		'elygate.onboardingHint': '完成这些步骤即可让网关进入可用状态。',
 		'elygate.onboardingAuth': '启用管理员认证',
@@ -478,7 +480,7 @@ const translations = {
 		'elygate.requestFailed': '请求失败（HTTP {status}）',
 		'elygate.loading': '加载中...',
 		'elygate.readOnlyHint': '此页面展示服务端现有数据；写入动作请从关联资源入口操作。',
-		'elygate.jsonEditorHint': '轻量管理台使用 JSON 编辑复杂配置，字段名与 Bifrost 管理 API 保持一致。',
+		'elygate.jsonEditorHint': '轻量管理台使用 JSON 编辑复杂配置，字段名与管理 API 保持一致。',
 		'elygate.routingRulesHelp': '规则需要 name、合法的 CEL 表达式和至少一个 targets；所有目标 weight 之和必须为 1。',
 		'elygate.modelConfigsHelp': '预算使用 max_limit 与 reset_duration，限流使用 token/request *_max_limit 与 *_reset_duration。',
 		'elygate.webhooksHelp': '当前事件仅支持 async_job.completed 与 async_job.failed；Content-Type 等协议头由服务端管理。',
@@ -539,6 +541,8 @@ const translations = {
 		'elygate.section.compat': '协议兼容转换',
 		'elygate.section.mcp': 'MCP 网关',
 		'elygate.section.framework': '框架与数据同步',
+		'elygate.field.appName': '平台名称',
+		'elygate.field.appNameHint': '自定义控制台和界面展示的品牌/平台名称。支持通过环境变量 APP_NAME 或此处配置。',
 		'elygate.field.authEnabled': '启用管理员认证',
 		'elygate.field.adminUsername': '管理员用户名',
 		'elygate.field.adminPassword': '管理员密码',
@@ -758,6 +762,7 @@ const translations = {
 		'elygate.config': 'Runtime config',
 		'elygate.complexityAnalyzer': 'Complexity analyzer',
 		'elygate.enterprise': 'Enterprise management',
+		'elygate.employees': 'Employees',
 		'elygate.users': 'Users',
 		'elygate.businessUnits': 'Business units',
 		'elygate.rbac': 'RBAC',
@@ -868,7 +873,7 @@ const translations = {
 		'elygate.cacheManagement': 'Cache management',
 		'elygate.pprof': 'Performance profiling',
 		'elygate.docsHub': 'Docs hub',
-		'elygate.docsHubHint': 'Open Elygate quick-start, architecture, MCP, governance, and extension documentation from one place.',
+		'elygate.docsHubHint': 'Open quick-start, architecture, MCP, governance, and extension documentation from one place.',
 		'elygate.fullDocumentation': 'Full documentation',
 		'elygate.readMore': 'Read more',
 		'elygate.pprofHint': 'Refreshes Go runtime, allocation, and goroutine health data every 10 seconds.',
@@ -902,14 +907,14 @@ const translations = {
 		'elygate.disable': 'Disable',
 		'elygate.vectorStoreRequired': 'The cache runtime requires a connected vector store. Direct-only mode needs no embedding provider but still uses the cache store.',
 		'elygate.vectorStore': 'Vector store',
-		'elygate.vectorStoreHint': 'Save the pgvector connection. The runtime is not hot-swapped; restart Elygate to apply it.',
+		'elygate.vectorStoreHint': 'Save the pgvector connection. The runtime is not hot-swapped; restart the gateway service to apply it.',
 		'elygate.vectorStoreType': 'Store type',
 		'elygate.pgvectorConnection': 'PostgreSQL connection string',
 		'elygate.pgvectorSchema': 'Database schema',
 		'elygate.enablePgvector': 'Enable pgvector',
 		'elygate.saveVectorStore': 'Save store configuration',
 		'elygate.vectorStoreSaved': 'Vector store configuration saved.',
-		'elygate.restartInstructions': 'A server administrator must restart the Elygate backend. For Docker Compose, run docker compose restart elygate; for other deployments, follow the operations runbook, then refresh this page to confirm connectivity.',
+		'elygate.restartInstructions': 'A server administrator must restart the backend service. For Docker Compose, restart the service container; for other deployments, follow the operations runbook, then refresh this page to confirm connectivity.',
 		'elygate.vectorStoreConnectionRequired': 'A PostgreSQL connection string is required before enabling pgvector.',
 		'elygate.directCache': 'Direct only',
 		'elygate.semanticCache': 'Direct + semantic',
@@ -966,14 +971,14 @@ const translations = {
 		'elygate.routingRuleCount': 'Routing rules',
 		'elygate.integrationCount': 'Integrations',
 		'elygate.lastUpdated': 'Last updated',
-		'elygate.securityNotice': 'Management APIs are protected by the Bifrost server session. This console refuses access until authentication is enabled.',
-		'elygate.loginHint': 'Use the Bifrost administrator account. Enable auth_config before signing in.',
+		'elygate.securityNotice': 'Management APIs are protected by server session. This console refuses access until authentication is enabled.',
+		'elygate.loginHint': 'Please sign in with your administrator account. If authentication is not enabled yet, configure auth_config first.',
 		'elygate.loginRequired': 'Enter a username and password',
 		'elygate.loginFailed': 'Sign-in failed',
 		'elygate.sessionExpired': 'Your session has expired. Please sign in again.',
-		'elygate.authDisabled': 'Administrator authentication is disabled. Enable auth_config in the Bifrost deployment first.',
+		'elygate.authDisabled': 'Administrator authentication is disabled. Enable auth_config in the deployment first.',
 		'elygate.sessionUnknown': 'Unable to confirm the sign-in state.',
-		'elygate.adminName': 'Elygate administrator',
+		'elygate.adminName': 'Administrator',
 		'elygate.onboarding': 'Setup checklist',
 		'elygate.onboardingHint': 'Complete these steps to make the gateway operational.',
 		'elygate.onboardingAuth': 'Enable administrator authentication',
@@ -1064,7 +1069,7 @@ const translations = {
 		'elygate.requestFailed': 'Request failed (HTTP {status})',
 		'elygate.loading': 'Loading...',
 		'elygate.readOnlyHint': 'This page shows current server data. Use the related resource pages for write operations.',
-		'elygate.jsonEditorHint': 'The lightweight console edits complex resources as JSON using the Bifrost management API field names.',
+		'elygate.jsonEditorHint': 'The lightweight console edits complex resources as JSON using the management API field names.',
 		'elygate.routingRulesHelp': 'A rule needs a name, a valid CEL expression, and at least one target; target weights must add up to 1.',
 		'elygate.modelConfigsHelp': 'Budgets use max_limit and reset_duration; rate limits use token/request *_max_limit and *_reset_duration.',
 		'elygate.webhooksHelp': 'Supported events are async_job.completed and async_job.failed. Protocol headers such as Content-Type are managed by the server.',
@@ -1125,6 +1130,8 @@ const translations = {
 		'elygate.section.compat': 'Protocol compatibility',
 		'elygate.section.mcp': 'MCP gateway',
 		'elygate.section.framework': 'Framework & data sync',
+		'elygate.field.appName': 'Platform Name',
+		'elygate.field.appNameHint': 'Custom platform / brand name displayed across the console and UI. Configurable via APP_NAME env var or here.',
 		'elygate.field.authEnabled': 'Enable admin authentication',
 		'elygate.field.adminUsername': 'Admin username',
 		'elygate.field.adminPassword': 'Admin password',
@@ -1177,12 +1184,17 @@ const translations = {
 	},
 } as const;
 
-export function registerElygateTranslations(): void {
+export function registerElygateTranslations(appNameOverride?: string): void {
+	const name = appNameOverride || getAppName();
 	for (const [locale, copy] of Object.entries(translations)) {
-		addTranslations(locale, copy);
+		const formatted: Record<string, string> = {};
+		for (const [key, value] of Object.entries(copy)) {
+			formatted[key] = formatBrandText(value, name);
+		}
+		addTranslations(locale, formatted);
 	}
 }
 
 export function labelFor(locale: ElygateLocale, key: keyof typeof translations.en): string {
-	return translations[locale][key];
+	return formatBrandText(translations[locale][key]);
 }

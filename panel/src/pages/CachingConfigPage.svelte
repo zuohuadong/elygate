@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { getAppName } from '../lib/branding';
 	import { onMount } from 'svelte';
 	import { useTranslation } from '@svadmin/core/i18n';
 	import { displayError } from '../lib/forms';
@@ -184,7 +185,7 @@
 </script>
 
 <section class="page-shell">
-	<header class="page-heading"><div><p class="eyebrow">Elygate / {i18n.t('elygate.system')}</p><h1>{i18n.t('elygate.cachingConfig')}</h1><p>{i18n.t('elygate.cachingHint')}</p></div><div class="toggle"><span>{plugin?.enabled === true ? i18n.t('elygate.enabled') : i18n.t('elygate.disabled')}</span><button type="button" onclick={() => void save(plugin?.enabled !== true)} disabled={isSaving || cacheEnableBlocked} title={cacheEnableBlocked ? i18n.t('elygate.vectorStoreRequired') : undefined}>{plugin?.enabled === true ? i18n.t('elygate.disable') : i18n.t('elygate.enable')}</button>{#if cacheEnableBlocked}<span class="toggle-hint">{i18n.t('elygate.vectorStoreRequired')}</span>{/if}</div></header>
+	<header class="page-heading"><div><p class="eyebrow">{getAppName()} / {i18n.t('elygate.system')}</p><h1>{i18n.t('elygate.cachingConfig')}</h1><p>{i18n.t('elygate.cachingHint')}</p></div><div class="toggle"><span>{plugin?.enabled === true ? i18n.t('elygate.enabled') : i18n.t('elygate.disabled')}</span><button type="button" onclick={() => void save(plugin?.enabled !== true)} disabled={isSaving || cacheEnableBlocked} title={cacheEnableBlocked ? i18n.t('elygate.vectorStoreRequired') : undefined}>{plugin?.enabled === true ? i18n.t('elygate.disable') : i18n.t('elygate.enable')}</button>{#if cacheEnableBlocked}<span class="toggle-hint">{i18n.t('elygate.vectorStoreRequired')}</span>{/if}</div></header>
 	{#if !vectorStoreConnected}<div class="notice warning">{i18n.t('elygate.vectorStoreRequired')}</div>{/if}{#if error}<div class="notice error" role="alert">{error}</div>{/if}{#if notice}<div class="notice success" role="status">{notice}</div>{/if}
 	<section class="vector-store-card">
 		<header><div><h2>{i18n.t('elygate.vectorStore')}</h2><p>{i18n.t('elygate.vectorStoreHint')}</p></div><span class:ok={vectorStoreConnected}>{vectorStoreConnected ? i18n.t('elygate.conn.connected') : i18n.t('elygate.conn.disconnected')}</span></header>

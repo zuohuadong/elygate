@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { getAppName } from '../lib/branding';
 	import { onMount } from 'svelte';
 	import { useTranslation } from '@svadmin/core/i18n';
 	import { getListPayload, requestJson, type JsonRecord } from '../lib/api';
@@ -116,7 +117,7 @@
 </script>
 
 <section class="page-shell" data-resource={resourceName}>
-	<header class="page-heading"><div><p class="eyebrow">Elygate / {isFeatureFlags ? 'System' : 'Observability'}</p><h1>{isFeatureFlags ? 'Feature Flags' : text('User-Agent 映射', 'User-Agent mappings')}</h1><p>{isFeatureFlags ? text('查看代码注册、数据库、远程配置与 config.json/Helm 的最终来源；锁定或未注册项不会被误切换。', 'Inspect effective values from code defaults, database, remote config, and config.json/Helm; locked or unregistered flags cannot be toggled.') : text('将请求 User-Agent 识别为日志中的应用名称和安全的栅格 Logo，支持包含、前缀、精确和正则匹配。', 'Map request User-Agent values to app names and safe raster logos in logs using contains, prefix, exact, or regex matching.')}</p></div>{#if !isFeatureFlags}<button class="primary" type="button" onclick={openCreate}>+ {text('添加映射', 'Add mapping')}</button>{/if}</header>
+	<header class="page-heading"><div><p class="eyebrow">{getAppName()} / {isFeatureFlags ? 'System' : 'Observability'}</p><h1>{isFeatureFlags ? 'Feature Flags' : text('User-Agent 映射', 'User-Agent mappings')}</h1><p>{isFeatureFlags ? text('查看代码注册、数据库、远程配置与 config.json/Helm 的最终来源；锁定或未注册项不会被误切换。', 'Inspect effective values from code defaults, database, remote config, and config.json/Helm; locked or unregistered flags cannot be toggled.') : text('将请求 User-Agent 识别为日志中的应用名称和安全的栅格 Logo，支持包含、前缀、精确和正则匹配。', 'Map request User-Agent values to app names and safe raster logos in logs using contains, prefix, exact, or regex matching.')}</p></div>{#if !isFeatureFlags}<button class="primary" type="button" onclick={openCreate}>+ {text('添加映射', 'Add mapping')}</button>{/if}</header>
 	{#if error}<div class="notice error" role="alert">{error}</div>{/if}
 	{#if notice}<div class="notice success" role="status">{notice}</div>{/if}
 	<div class="toolbar"><label>{text('搜索', 'Search')}<input bind:value={search} placeholder={isFeatureFlags ? text('名称、ID 或说明', 'Name, ID, or description') : text('模式、应用或类型', 'Pattern, app, or type')} /></label><button type="button" onclick={() => void load()}>{text('刷新', 'Refresh')}</button></div>

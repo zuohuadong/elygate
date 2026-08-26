@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { getAppName } from '../lib/branding';
 	import { onMount } from 'svelte';
 	import { useTranslation } from '@svadmin/core/i18n';
 	import { displayError } from '../lib/forms';
@@ -89,7 +90,7 @@
 	function buildHarnessConfig(activeHarness: Harness, url: string, virtualKey: JsonRecord | undefined, selected: JsonRecord[]): string {
 		if (!virtualKey) return '';
 		const headers = requestHeaders(virtualKey, selected);
-		const registrationName = selected.length === 1 ? clientName(selected[0]) : 'elygate';
+		const registrationName = selected.length === 1 ? clientName(selected[0]) : getAppName().toLowerCase();
 		if (activeHarness === 'claude-code') {
 			const headerArgs = Object.entries(headers).map(([key, value]) => `  --header ${shellQuote(`${key}: ${value}`)}`).join(' \\\n');
 			return `claude mcp add --transport http ${shellQuote(registrationName)} --scope user ${shellQuote(url)} \\\n${headerArgs}`;
@@ -153,7 +154,7 @@
 <section class="page-shell">
 	<header class="page-heading">
 		<div>
-			<p class="eyebrow">Elygate / MCP Gateway</p>
+			<p class="eyebrow">{getAppName()} / MCP Gateway</p>
 			<h1>{i18n.t('elygate.mcpUsageGuide')}</h1>
 			<p>{i18n.t('elygate.mcpGuideHint')}</p>
 		</div>

@@ -67,6 +67,7 @@ func (c *CompatConfig) UnmarshalJSON(data []byte) error {
 // ClientConfig represents the core configuration for Bifrost HTTP transport and the Bifrost Client.
 // It includes settings for excess request handling, Prometheus metrics, and initial pool size.
 type ClientConfig struct {
+	AppName                               string                                `json:"app_name,omitempty"`
 	DropExcessRequests                    bool                                  `json:"drop_excess_requests"`                       // Drop excess requests if the provider queue is full
 	InitialPoolSize                       int                                   `json:"initial_pool_size"`                          // The initial pool size for the bifrost client
 	PrometheusLabels                      []string                              `json:"prometheus_labels"`                          // The labels to be used for prometheus metrics
@@ -137,6 +138,10 @@ func (c *ClientConfig) UnmarshalJSON(data []byte) error {
 // This is used to detect changes between config.json and database config.
 func (c *ClientConfig) GenerateClientConfigHash() (string, error) {
 	hash := sha256.New()
+
+	if c.AppName != "" {
+		hash.Write([]byte("appName:" + c.AppName))
+	}
 
 	// Hash boolean fields
 	if c.DropExcessRequests {

@@ -29,7 +29,7 @@ describe('panel issue regressions', () => {
 
 	test('caching config identifies the system section instead of plugins', async () => {
 		const source = await Bun.file(new URL('../pages/CachingConfigPage.svelte', import.meta.url)).text();
-		expect(source).toContain("Elygate / {i18n.t('elygate.system')}");
+		expect(source).toMatch(/\{getAppName\(\)\}\s*\/\s*\{i18n\.t\('elygate\.system'\)\}/);
 		expect(source).not.toContain('Elygate / Plugins');
 	});
 
@@ -108,5 +108,33 @@ describe('panel issue regressions', () => {
 			expect(source).toContain(`bind:checked={form.${field}} disabled={isLoading}`);
 			expect(source).not.toContain(`bind:checked={form.${field}} disabled={true}`);
 		}
+	});
+
+	test('async branding remounts both public and admin panel routes', async () => {
+		const source = await Bun.file(new URL('../App.svelte', import.meta.url)).text();
+		expect(source).toContain('{#key currentAppName}');
+		expect(source).toContain('onAppNameChange((name) =>');
+		expect(source).toContain('currentAppName = name;');
+	});
+
+	test('employee editor restores focus and supports escape and tab containment', async () => {
+		const source = await Bun.file(new URL('../pages/EmployeesPage.svelte', import.meta.url)).text();
+		expect(source).toContain('<svelte:window onkeydown={handleModalKeydown} />');
+		expect(source).toContain("if (event.key === 'Escape')");
+		expect(source).toContain("if (event.key !== 'Tab') return;");
+		expect(source).toContain('returnFocusElement?.focus();');
+		expect(source).toContain('aria-modal="true"');
+	});
+
+	test('employee credential copy failures are surfaced', async () => {
+		const source = await Bun.file(new URL('../pages/EmployeesPage.svelte', import.meta.url)).text();
+		expect(source).toContain('await navigator.clipboard.writeText(revealedCredential);');
+		expect(source).toMatch(/catch \(cause\)[\s\S]*复制凭据失败/);
+	});
+
+	test('employee portal keeps a valid session when usage loading fails', async () => {
+		const source = await Bun.file(new URL('../pages/EmployeePortalPage.svelte', import.meta.url)).text();
+		expect(source).toMatch(/employee = response\.employee;[\s\S]*try \{[\s\S]*await loadUsageAndKeys\(\);[\s\S]*catch \(cause\)/);
+		expect(source).toMatch(/catch \(cause\) \{[\s\S]*keys = \[\];[\s\S]*stats = \{\};[\s\S]*error =/);
 	});
 });
