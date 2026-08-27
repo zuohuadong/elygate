@@ -1,0 +1,171 @@
+diff --git a/dist/components/AboutSettings.svelte b/dist/components/AboutSettings.svelte
+index c2ffe0aba6e08bed09c631fd09c9a378007201b5..8368c175760ddc851b22aad87ad30c825c08517e 100644
+--- a/dist/components/AboutSettings.svelte
++++ b/dist/components/AboutSettings.svelte
+@@ -9,7 +9,11 @@
+   const adminContext = captureAdminContext();
+   const resources = $derived(adminContext.resources);
+   const providerNames = $derived(adminContext.getDataProviderNames());
+-  const version = '__SVADMIN_VERSION__';
++  const version = '0.53.1';
++  const environmentLabel = (value: string): string => {
++    if (i18n.locale !== 'zh-CN') return value;
++    return ({ light: '浅色', dark: '深色', system: '跟随系统', neutral: '中性色', indigo: '靛蓝色', blue: '蓝色', green: '绿色', rose: '玫瑰色', orange: '橙色', violet: '紫罗兰色' } as Record<string, string>)[value] ?? value;
++  };
+ </script>
+ 
+ <div class="space-y-6">
+@@ -18,12 +22,12 @@
+     <DescriptionList columns={2} items={[
+       { label: i18n.t('settings.version'), value: version },
+       { label: i18n.t('settings.language'), value: i18n.locale },
+-      { label: i18n.t('settings.themeMode'), value: getResolvedTheme() },
+-      { label: i18n.t('settings.colorAccent'), value: getColorTheme() },
++      { label: i18n.t('settings.themeMode'), value: environmentLabel(getResolvedTheme()) },
++      { label: i18n.t('settings.colorAccent'), value: environmentLabel(getColorTheme()) },
+     ]} />
+     <div class="border-t border-border pt-5">
+       <h3 class="text-sm font-medium text-foreground">{i18n.t('settings.registeredResources')}</h3>
+-      <div class="mt-3 flex flex-wrap gap-2">{#each resources as resource (resource.name)}<Badge variant="outline" class="font-mono text-xs">{resource.name}</Badge>{:else}<span class="text-sm text-muted-foreground">—</span>{/each}</div>
++      <div class="mt-3 flex flex-wrap gap-2">{#each resources as resource (resource.name)}<Badge variant="outline" class="text-xs">{resource.label || resource.name}</Badge>{:else}<span class="text-sm text-muted-foreground">—</span>{/each}</div>
+     </div>
+     <div class="border-t border-border pt-5">
+       <h3 class="text-sm font-medium text-foreground">{i18n.t('settings.dataProvider')}</h3>
+diff --git a/dist/components/ApiSettings.svelte b/dist/components/ApiSettings.svelte
+index bc61ad5d4f6512ad462647fe240bdb0ae8e0e33c..3e5e7db1468d99ae7497e01f9c22adcc9bd352da 100644
+--- a/dist/components/ApiSettings.svelte
++++ b/dist/components/ApiSettings.svelte
+@@ -179,7 +179,7 @@
+     {/snippet}
+     {#snippet secondary()}
+       <SettingsGroup title={i18n.t('api.generateTitle')} description={i18n.t('api.generateDesc')}>
+-        <form onsubmit={handleGenerateKey} class="space-y-5"><div class="space-y-2"><Label for="api-key-name">{i18n.t('api.keyName')}</Label><Input id="api-key-name" placeholder="CI deployment token" bind:value={newKeyName} required disabled={!credentialProvider || submitting} /></div><fieldset class="space-y-3" disabled={!credentialProvider || submitting}><legend class="text-sm font-medium text-foreground">{i18n.t('api.permissions')}</legend>{#each Object.keys(newKeyPermissions) as permission (permission)}<div class="flex items-center gap-2"><Checkbox id={`perm-${permission}`} bind:checked={newKeyPermissions[permission as keyof typeof newKeyPermissions]} /><Label for={`perm-${permission}`} class="cursor-pointer text-sm font-normal">{permission}</Label></div>{/each}</fieldset><Button type="submit" class="w-full" disabled={!credentialProvider || submitting || !newKeyName.trim()}>{i18n.t('api.generateButton')}</Button></form>
++        <form onsubmit={handleGenerateKey} class="space-y-5"><div class="space-y-2"><Label for="api-key-name">{i18n.t('api.keyName')}</Label><Input id="api-key-name" placeholder={isZh ? 'CI 部署令牌' : 'CI deployment token'} bind:value={newKeyName} required disabled={!credentialProvider || submitting} /></div><fieldset class="space-y-3" disabled={!credentialProvider || submitting}><legend class="text-sm font-medium text-foreground">{i18n.t('api.permissions')}</legend>{#each Object.keys(newKeyPermissions) as permission (permission)}<div class="flex items-center gap-2"><Checkbox id={`perm-${permission}`} bind:checked={newKeyPermissions[permission as keyof typeof newKeyPermissions]} /><Label for={`perm-${permission}`} class="cursor-pointer text-sm font-normal">{isZh ? ({ Read: '读取', Write: '写入', Delete: '删除', Admin: '管理员' }[permission] ?? permission) : permission}</Label></div>{/each}</fieldset><Button type="submit" class="w-full" disabled={!credentialProvider || submitting || !newKeyName.trim()}>{i18n.t('api.generateButton')}</Button></form>
+       </SettingsGroup>
+     {/snippet}
+   </WorkspaceLayout>
+diff --git a/dist/components/Header.svelte b/dist/components/Header.svelte
+index 6abfcd0de3f4ebd8384eea9b7c38844684b06778..982a595ae8644ab462575ef48cc0e8c402083c23 100644
+--- a/dist/components/Header.svelte
++++ b/dist/components/Header.svelte
+@@ -72,7 +72,7 @@
+       <Button variant="outline" size="sm" onclick={onSearchClick} class="gap-2 text-muted-foreground h-9 px-3 rounded-lg border-border/60">
+         <Search class="h-3.5 w-3.5" />
+         <span class="hidden sm:inline text-xs">{i18n.t('common.search')}</span>
+-        <kbd class="hidden sm:inline-flex items-center gap-0.5 rounded border bg-muted/60 px-1.5 py-0.5 text-[10px] font-medium font-mono text-muted-foreground">
++        <kbd class="hidden sm:inline-flex shrink-0 whitespace-nowrap items-center gap-0.5 rounded border bg-muted/60 px-1.5 py-0.5 text-[10px] font-medium font-mono text-muted-foreground">
+           <span class="text-xs">⌘</span>K
+         </kbd>
+       </Button>
+diff --git a/dist/components/IntegrationsSettings.svelte b/dist/components/IntegrationsSettings.svelte
+index c6813b38cb70b37b10f2a8e7ce2770d3948a6ed2..19ad6d1c08b1f585d72bf19fd2974a3600d79a09 100644
+--- a/dist/components/IntegrationsSettings.svelte
++++ b/dist/components/IntegrationsSettings.svelte
+@@ -8,24 +8,36 @@
+   import StatusBadge from './content/StatusBadge.svelte';
+ 
+   const i18n = useTranslation();
+-  interface Integration { id: string; name: string; description: string; connected: boolean; Icon: Component; }
+-  let integrations = $state<Integration[]>([
+-    { id: 'source-control', name: 'Source Control', description: 'Sync repository metadata, deployments, and commit activity.', connected: true, Icon: FolderGit },
+-    { id: 'chatops', name: 'ChatOps', description: 'Send operational alerts and audit summaries to workspace channels.', connected: false, Icon: MessageCircle },
+-    { id: 'identity-cloud', name: 'Identity Cloud', description: 'Configure SSO and workspace identity handoff.', connected: true, Icon: Cloud },
+-    { id: 'webhooks', name: 'Webhooks', description: 'Register outbound webhooks for internal tools and monitors.', connected: false, Icon: Plug },
++  interface Integration { id: string; name: string; description: string; connected?: boolean; Icon: Component; }
++  interface Props {
++    integrations?: Integration[];
++    onConnectionChange?: (id: string, connected: boolean) => void | Promise<void>;
++  }
++  let { integrations, onConnectionChange }: Props = $props();
++  const defaultIntegrations = $derived<Integration[]>([
++    { id: 'source-control', name: i18n.locale === 'zh-CN' ? '代码仓库' : 'Source Control', description: i18n.locale === 'zh-CN' ? '同步仓库元数据、部署记录和提交活动。' : 'Sync repository metadata, deployments, and commit activity.', Icon: FolderGit },
++    { id: 'chatops', name: 'ChatOps', description: i18n.locale === 'zh-CN' ? '向工作区频道发送运行告警和审计摘要。' : 'Send operational alerts and audit summaries to workspace channels.', Icon: MessageCircle },
++    { id: 'identity-cloud', name: i18n.locale === 'zh-CN' ? '身份云' : 'Identity Cloud', description: i18n.locale === 'zh-CN' ? '配置单点登录和工作区身份交接。' : 'Configure SSO and workspace identity handoff.', Icon: Cloud },
++    { id: 'webhooks', name: 'Webhooks', description: i18n.locale === 'zh-CN' ? '为内部工具和监控注册出站 Webhook。' : 'Register outbound webhooks for internal tools and monitors.', Icon: Plug },
+   ]);
+-  function toggleConnection(id: string, connected: boolean) { integrations = integrations.map((item) => item.id === id ? { ...item, connected } : item); }
++  const displayedIntegrations = $derived(integrations ?? defaultIntegrations);
+ </script>
+ 
+ <div class="space-y-6">
+   <div><h2 class="text-xl font-semibold text-foreground">{i18n.t('settings.integrations')}</h2><p class="mt-1 text-sm text-muted-foreground">{i18n.t('settings.integrationsDescription')}</p></div>
+   <SettingsGroup title={i18n.t('settings.integrations')} description={i18n.t('integrations.addMoreHint')}>
+     <div class="divide-y divide-border">
+-      {#each integrations as integration (integration.id)}
++      {#each displayedIntegrations as integration (integration.id)}
+         <SettingsFieldRow label={integration.name} description={integration.description}>
+           {#snippet control()}
+-            <div class="flex items-center gap-3"><StatusBadge status={integration.connected ? 'success' : 'neutral'} label={integration.connected ? i18n.t('integrations.statusConnected') : i18n.t('integrations.statusDisconnected')} /><Switch checked={integration.connected} onCheckedChange={(checked) => toggleConnection(integration.id, checked)} aria-label={integration.name} /></div>
++            <div class="flex items-center gap-3">
++              {#if integration.connected !== undefined}
++                <StatusBadge status={integration.connected ? 'success' : 'neutral'} label={integration.connected ? i18n.t('integrations.statusConnected') : i18n.t('integrations.statusDisconnected')} />
++                {#if onConnectionChange}<Switch checked={integration.connected} onCheckedChange={(checked) => onConnectionChange?.(integration.id, checked)} aria-label={integration.name} />{/if}
++              {:else}
++                <span class="text-xs text-muted-foreground">{i18n.locale === 'zh-CN' ? '状态由已接入的集成服务提供' : 'Status is provided by the connected integration service'}</span>
++              {/if}
++            </div>
+           {/snippet}
+         </SettingsFieldRow>
+       {/each}
+diff --git a/dist/components/Layout.svelte b/dist/components/Layout.svelte
+index d9d7e656a2a7f96f958188055b0c9c472d5fe9e7..094a50336755f339a8d4507a375c4638afedb890 100644
+--- a/dist/components/Layout.svelte
++++ b/dist/components/Layout.svelte
+@@ -90,7 +90,7 @@
+ 
+   function handleGlobalKeydown(e: KeyboardEvent) {
+     if (!ownsLayoutEvent(e)) return;
+-    if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
++    if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'k' || e.code === 'KeyK')) {
+       e.preventDefault();
+       commandOpen = true;
+     }
+diff --git a/dist/components/ProfilePage.svelte b/dist/components/ProfilePage.svelte
+index c267a4e42dd02f0878551721bc44f993570691b5..2d8d6352733605b9047b2e7cb15160fe72551aa6 100644
+--- a/dist/components/ProfilePage.svelte
++++ b/dist/components/ProfilePage.svelte
+@@ -289,7 +289,7 @@
+ 
+         <PasswordInput
+           id="new-password"
+-          label={i18n.t('auth.password')}
++          label={i18n.t('profile.newPassword')}
+           bind:value={newPassword}
+           autocomplete="new-password"
+           showStrength
+diff --git a/dist/components/Sidebar.svelte b/dist/components/Sidebar.svelte
+index b038302a2aa6a59a4a082734d85f7750a9ce1de7..53c80f45d0f9d897e3315cbce9edfffd31bcb747 100644
+--- a/dist/components/Sidebar.svelte
++++ b/dist/components/Sidebar.svelte
+@@ -457,7 +457,7 @@
+           />
+           <div class="flex-1 min-w-0">
+             <p class="truncate text-[13px] font-medium text-sidebar-foreground">{identity.name}</p>
+-            <p class="truncate text-[11px] text-sidebar-foreground/45">{((identity as Record<string, unknown>).role || (identity as Record<string, unknown>).roleName) ?? 'User'}</p>
++            <p class="truncate text-[11px] text-sidebar-foreground/45">{((identity as Record<string, unknown>).role || (identity as Record<string, unknown>).roleName) ?? (i18n.locale === 'zh-CN' ? '用户' : 'User')}</p>
+           </div>
+           <button
+             class="h-7 w-7 flex items-center justify-center rounded-md text-sidebar-foreground/40 hover:text-sidebar-foreground hover:bg-sidebar-accent/60 transition-colors"
+diff --git a/dist/components/ui/sheet/sheet.svelte b/dist/components/ui/sheet/sheet.svelte
+index 93ab34ab9e1e5485eefa1ee3d6e06041061a693e..23e34497c0c1a6f3ff739285971870cb7f64676b 100644
+--- a/dist/components/ui/sheet/sheet.svelte
++++ b/dist/components/ui/sheet/sheet.svelte
+@@ -34,7 +34,9 @@
+ /* eslint-disable svelte/no-unused-svelte-ignore */
+ 	import { tick } from "svelte";
+ 	import { cn, type WithElementRef } from "../../../utils.js";
++	import { useTranslation } from "@svadmin/core/i18n";
+ 	import type { HTMLAttributes } from "svelte/elements";
++	const i18n = useTranslation();
+ 
+ 	const focusableSelector = [
+ 		'a[href]',
+@@ -58,7 +60,7 @@
+ 		open = $bindable(false),
+ 		side = "right",
+ 		onClose,
+-		closeLabel = "Close",
++		closeLabel = i18n.locale === "zh-CN" ? "关闭" : "Close",
+ 		class: className,
+ 		tabindex = -1,
+ 		children,

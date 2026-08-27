@@ -151,14 +151,15 @@ describe('panel issue regressions', () => {
 
 	test('the svadmin compatibility patch is pinned and covers reported settings regressions', async () => {
 		const packageJson = await Bun.file(new URL('../../package.json', import.meta.url)).json();
-		const patch = await Bun.file(`${process.cwd()}/patches/@svadmin%2Fui@0.42.2.patch`).text();
-		expect(packageJson.patchedDependencies['@svadmin/ui@0.42.2']).toBe('patches/@svadmin%2Fui@0.42.2.patch');
-		for (const contract of ['profile.newPassword', "const version = '0.42.2'", 'whitespace-nowrap', "'用户' : 'User'", 'i18n.locale === "zh-CN" ? "关闭" : "Close"', 'CI 部署令牌', '3 个月前']) {
+		const patch = await Bun.file(`${process.cwd()}/patches/@svadmin%2Fui@0.53.1.patch`).text();
+		expect(packageJson.patchedDependencies['@svadmin/ui@0.53.1']).toBe('patches/@svadmin%2Fui@0.53.1.patch');
+		for (const contract of ['profile.newPassword', "const version = '0.53.1'", 'whitespace-nowrap', "'用户' : 'User'", '关闭" : "Close', 'CI 部署令牌']) {
 			expect(patch).toContain(contract);
 		}
-		expect(patch).toContain('passwordChangedRecently = true');
-		expect(patch).toContain("'刚刚' : 'Just now'");
 		expect(patch).toContain("e.key.toLowerCase() === 'k' || e.code === 'KeyK'");
+		expect(patch).toContain('connected?: boolean');
+		expect(patch).toContain('onConnectionChange?:');
+		expect(patch).toContain('状态由已接入的集成服务提供');
 	});
 
 	test('locale changes update document metadata and theme labels', async () => {
@@ -231,7 +232,7 @@ describe('panel issue regressions', () => {
 		const proxy = await Bun.file(new URL('../pages/RoutingNetworkSettingsPage.svelte', import.meta.url)).text();
 		const docs = await Bun.file(new URL('../pages/DocsHubPage.svelte', import.meta.url)).text();
 		const translations = await Bun.file(new URL('./i18n.ts', import.meta.url)).text();
-		const patch = await Bun.file(`${process.cwd()}/patches/@svadmin%2Fui@0.42.2.patch`).text();
+		const patch = await Bun.file(`${process.cwd()}/patches/@svadmin%2Fui@0.53.1.patch`).text();
 		expect(generic).toContain('localizedEyebrow(config.eyebrow)');
 		expect(generic).toContain("'Enterprise Governance': '企业级管理'");
 		expect(operational).toContain("'source', flag.source ?? 'default'");

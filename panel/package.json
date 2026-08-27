@@ -11,8 +11,8 @@
     "copy-build": "rm -rf ../transports/bifrost-http/ui && cp -R out ../transports/bifrost-http/ui"
   },
   "dependencies": {
-    "@svadmin/core": "0.36.3",
-    "@svadmin/ui": "0.42.2",
+    "@svadmin/core": "0.41.0",
+    "@svadmin/ui": "0.53.1",
     "@tanstack/svelte-query": "^6.1.38",
     "highlight.js": "^11.11.1",
     "isomorphic-dompurify": "^3.22.0",
@@ -29,6 +29,6 @@
     "vite": "^8.1.5"
   },
   "patchedDependencies": {
-    "@svadmin/ui@0.42.2": "patches/@svadmin%2Fui@0.42.2.patch"
+    "@svadmin/ui@0.53.1": "patches/@svadmin%2Fui@0.53.1.patch"
   }
 }
