@@ -52,6 +52,21 @@
 		childCollection?: ChildCollectionConfig;
 	}
 
+	const eyebrowLabels: Record<string, string> = {
+		'Enterprise Governance': '企业级管理',
+		'Routing': '路由',
+		'Governance': '治理',
+		'Custom Pricing': '定价配置',
+		'Integrations': '集成',
+		'MCP Gateway': 'MCP 网关',
+		'MCP OAuth2': 'MCP OAuth2',
+		'System': '系统',
+		'Observability': '可观测性',
+		'Models': '模型管理',
+		'Skills': '技能库',
+		'Prompt Repo': '提示词资源库',
+	};
+
 	function pickRecordFields(record: JsonRecord, fields: string[]): JsonRecord {
 		return Object.fromEntries(fields.filter((field) => field in record).map((field) => [field, record[field]]));
 	}
@@ -482,6 +497,9 @@
 
 	let { resourceName }: Props = $props();
 	const i18n = useTranslation();
+	function localizedEyebrow(value: string): string {
+		return i18n.locale === 'zh-CN' ? (eyebrowLabels[value] ?? value) : value;
+	}
 	const config = $derived(resourceConfigs[resourceName] ?? resourceConfigs.teams);
 	const pageTitle = $derived(i18n.t(config.titleKey));
 	let records = $state.raw<JsonRecord[]>([]);
@@ -695,7 +713,7 @@
 <section class="page-shell">
 	<header class="page-heading">
 		<div>
-			<p class="eyebrow">{getAppName()} / {config.eyebrow}</p>
+			<p class="eyebrow">{getAppName()} / {localizedEyebrow(config.eyebrow)}</p>
 			<h1>{pageTitle}</h1>
 			<p>{i18n.t(config.helpKey ?? (config.readOnly ? 'elygate.readOnlyHint' : 'elygate.jsonEditorHint'))}</p>
 		</div>

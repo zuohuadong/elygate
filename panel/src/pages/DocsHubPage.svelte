@@ -40,18 +40,30 @@
 	let query = $state('');
 	let selectedSlug = $state('quickstart');
 
+	const chineseDocs: Record<string, string> = {
+		quickstart: `# 30 秒开始\n\n## 安装与启动\n\n在项目目录执行 \`bun install\`，然后运行 \`bun run dev\`。生产环境请使用固定版本镜像并启用管理员认证。\n\n## 发送第一个请求\n\n先在“供应商”和“供应商密钥”页面保存上游凭据，再创建虚拟密钥。向 \`/v1/chat/completions\` 发送带有 \`Authorization: Bearer <virtual-key>\` 的请求即可验证链路。\n\n## 下一步\n\n在运行概览查看请求、延迟、Token 和成本；在请求日志检查单次调用；在系统设置中配置认证、日志、缓存、代理和 MCP 网关。`,
+		architecture: `# 系统架构\n\n请求先经过认证与虚拟密钥解析，再进入路由规则、供应商适配器和响应记录。日志、缓存、Webhook 与可观测性插件在请求生命周期的对应阶段执行。\n\n生产排障时，先检查 \`/health\`、数据库连通性和供应商状态，再查看请求日志中的请求 ID。`,
+		'mcp-overview': `# MCP 概览\n\nMCP 客户端连接服务目录中的服务，网关统一处理认证、工具同步、虚拟密钥范围和调用日志。客户端配置与 MCP 网关运行参数分开管理。`,
+		'mcp-gateway': `# MCP 网关\n\n在 MCP 网关配置中设置工具同步、执行超时、认证模式和外部客户端地址。保存后，客户端可通过统一端点发现并调用已启用工具。`,
+		'virtual-keys': `# 虚拟密钥\n\n虚拟密钥用于隔离用户、供应商和模型访问。为每条供应商路由选择全部密钥或指定密钥，并按需限制模型、预算、限流和有效期。明文密钥只在创建或轮换后显示一次。`,
+		routing: `# 治理路由\n\n路由规则支持 CEL 条件、优先级、权重和回退链。先用全局规则验证，再逐步增加用户、团队或虚拟密钥范围。保存前确认每个目标都有有效供应商和模型。`,
+		webhooks: `# Webhook 集成\n\nWebhook 用于接收异步任务完成通知。创建端点后选择事件、签名密钥和重试策略；生产环境建议限制目标网络并验证签名。`,
+		plugins: `# 插件开发\n\n插件可以扩展请求、响应和日志生命周期。安装后在插件管理页检查加载状态、能力声明和执行顺序；配置保存后启用的插件会立即重新加载。`,
+		'production-security': `# 生产安全清单\n\n启用管理员认证，使用强密码和最小权限的虚拟密钥；将允许的跨域来源限制为明确白名单；生产环境不要跳过 TLS 验证。部署后验证健康检查、匿名接口返回 401、日志脱敏和对象存储权限。`,
+	};
+
 	const docs = $derived.by<DocEntry[]>(() => {
 		const zh = i18n.locale === 'zh-CN';
 		return [
-			{ slug: 'quickstart', title: zh ? '快速开始' : 'Quick start', description: zh ? '安装、启动并发出第一个请求。' : 'Install, start, and send the first request.', category: zh ? '入门' : 'Start', sourcePath: 'quickstart/gateway/setting-up.mdx', content: quickstartSource },
-			{ slug: 'architecture', title: zh ? '系统架构' : 'Architecture', description: zh ? '理解网关请求链路和核心组件。' : 'Understand the gateway request path and core components.', category: zh ? '核心' : 'Core', sourcePath: 'architecture/core/request-flow.mdx', content: architectureSource },
-			{ slug: 'mcp-overview', title: zh ? 'MCP 概览' : 'MCP overview', description: zh ? `连接服务、客户端和 ${getAppName()} 网关。` : `Connect servers, clients, and the ${getAppName()} gateway.`, category: 'MCP', sourcePath: 'mcp/overview.mdx', content: mcpOverviewSource },
-			{ slug: 'mcp-gateway', title: zh ? 'MCP 网关' : 'MCP gateway', description: zh ? '通过统一端点暴露聚合工具。' : 'Expose aggregated tools through one endpoint.', category: 'MCP', sourcePath: 'mcp/gateway.mdx', content: mcpGatewaySource },
-			{ slug: 'virtual-keys', title: zh ? '虚拟密钥' : 'Virtual keys', description: zh ? '访问控制、预算、限流和路由。' : 'Access control, budgets, limits, and routing.', category: zh ? '治理' : 'Governance', sourcePath: 'features/governance/virtual-keys.mdx', content: virtualKeysSource },
-			{ slug: 'routing', title: zh ? '治理路由' : 'Governance routing', description: zh ? '按供应商、模型和权重分配请求。' : 'Route requests by provider, model, and weight.', category: zh ? '治理' : 'Governance', sourcePath: 'features/governance/routing.mdx', content: routingSource },
-			{ slug: 'webhooks', title: 'Webhooks', description: zh ? '异步推理完成后的签名回调。' : 'Signed callbacks for completed async inference.', category: zh ? '集成' : 'Integrations', sourcePath: 'features/webhooks.mdx', content: webhooksSource },
-			{ slug: 'plugins', title: zh ? '插件开发' : 'Plugin development', description: zh ? '扩展请求和响应处理生命周期。' : 'Extend the request and response lifecycle.', category: zh ? '扩展' : 'Extensions', sourcePath: 'plugins/getting-started.mdx', content: pluginsSource },
-			{ slug: 'production-security', title: zh ? '生产安全清单' : 'Production security', description: zh ? '部署前的认证、网络和密钥检查。' : 'Authentication, network, and secret checks before deployment.', category: zh ? '部署' : 'Deployment', sourcePath: 'deployment-guides/how-to/security-best-practices.mdx', content: deploymentSource },
+			{ slug: 'quickstart', title: zh ? '快速开始' : 'Quick start', description: zh ? '安装、启动并发出第一个请求。' : 'Install, start, and send the first request.', category: zh ? '入门' : 'Start', sourcePath: 'quickstart/gateway/setting-up.mdx', content: zh ? chineseDocs.quickstart : quickstartSource },
+			{ slug: 'architecture', title: zh ? '系统架构' : 'Architecture', description: zh ? '理解网关请求链路和核心组件。' : 'Understand the gateway request path and core components.', category: zh ? '核心' : 'Core', sourcePath: 'architecture/core/request-flow.mdx', content: zh ? chineseDocs.architecture : architectureSource },
+			{ slug: 'mcp-overview', title: zh ? 'MCP 概览' : 'MCP overview', description: zh ? `连接服务、客户端和 ${getAppName()} 网关。` : `Connect servers, clients, and the ${getAppName()} gateway.`, category: 'MCP', sourcePath: 'mcp/overview.mdx', content: zh ? chineseDocs['mcp-overview'] : mcpOverviewSource },
+			{ slug: 'mcp-gateway', title: zh ? 'MCP 网关' : 'MCP gateway', description: zh ? '通过统一端点暴露聚合工具。' : 'Expose aggregated tools through one endpoint.', category: 'MCP', sourcePath: 'mcp/gateway.mdx', content: zh ? chineseDocs['mcp-gateway'] : mcpGatewaySource },
+			{ slug: 'virtual-keys', title: zh ? '虚拟密钥' : 'Virtual keys', description: zh ? '访问控制、预算、限流和路由。' : 'Access control, budgets, limits, and routing.', category: zh ? '治理' : 'Governance', sourcePath: 'features/governance/virtual-keys.mdx', content: zh ? chineseDocs['virtual-keys'] : virtualKeysSource },
+			{ slug: 'routing', title: zh ? '治理路由' : 'Governance routing', description: zh ? '按供应商、模型和权重分配请求。' : 'Route requests by provider, model, and weight.', category: zh ? '治理' : 'Governance', sourcePath: 'features/governance/routing.mdx', content: zh ? chineseDocs.routing : routingSource },
+			{ slug: 'webhooks', title: 'Webhooks', description: zh ? '异步推理完成后的签名回调。' : 'Signed callbacks for completed async inference.', category: zh ? '集成' : 'Integrations', sourcePath: 'features/webhooks.mdx', content: zh ? chineseDocs.webhooks : webhooksSource },
+			{ slug: 'plugins', title: zh ? '插件开发' : 'Plugin development', description: zh ? '扩展请求和响应处理生命周期。' : 'Extend the request and response lifecycle.', category: zh ? '扩展' : 'Extensions', sourcePath: 'plugins/getting-started.mdx', content: zh ? chineseDocs.plugins : pluginsSource },
+			{ slug: 'production-security', title: zh ? '生产安全清单' : 'Production security', description: zh ? '部署前的认证、网络和密钥检查。' : 'Authentication, network, and secret checks before deployment.', category: zh ? '部署' : 'Deployment', sourcePath: 'deployment-guides/how-to/security-best-practices.mdx', content: zh ? chineseDocs['production-security'] : deploymentSource },
 		];
 	});
 

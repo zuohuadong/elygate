@@ -225,6 +225,26 @@ describe('panel issue regressions', () => {
 		expect(keys).not.toContain('textarea bind:value={form.advanced}');
 	});
 
+	test('fourth-round settings and documentation surfaces are localized', async () => {
+		const generic = await Bun.file(new URL('../pages/GenericAdminPage.svelte', import.meta.url)).text();
+		const operational = await Bun.file(new URL('../pages/OperationalSettingsPage.svelte', import.meta.url)).text();
+		const proxy = await Bun.file(new URL('../pages/RoutingNetworkSettingsPage.svelte', import.meta.url)).text();
+		const docs = await Bun.file(new URL('../pages/DocsHubPage.svelte', import.meta.url)).text();
+		const translations = await Bun.file(new URL('./i18n.ts', import.meta.url)).text();
+		const patch = await Bun.file(`${process.cwd()}/patches/@svadmin%2Fui@0.42.2.patch`).text();
+		expect(generic).toContain('localizedEyebrow(config.eyebrow)');
+		expect(generic).toContain("'Enterprise Governance': '企业级管理'");
+		expect(operational).toContain("'source', flag.source ?? 'default'");
+		expect(proxy).toContain("text('不使用代理的主机', 'No-proxy hosts')");
+		expect(proxy).toContain("text('SCIM 企业目录', 'SCIM Enterprise')");
+		expect(docs).toContain('const chineseDocs: Record<string, string>');
+		expect(docs).toContain("content: zh ? chineseDocs.quickstart : quickstartSource");
+		expect(translations).toContain("'elygate.option.dual.prefer_idp': '优先身份源令牌'");
+		expect(translations).toContain("'elygate.field.compatConvertTextToChat': '文本接口转聊天接口'");
+		expect(patch).toContain("i18n.locale === 'zh-CN' ? '代码仓库' : 'Source Control'");
+		expect(patch).toContain('同步仓库元数据、部署记录和提交活动。');
+	});
+
 	test('employee portal keeps a valid session when usage loading fails', async () => {
 		const source = await Bun.file(new URL('../pages/EmployeePortalPage.svelte', import.meta.url)).text();
 		expect(source).toMatch(/employee = response\.employee;[\s\S]*try \{[\s\S]*await loadUsageAndKeys\(\);[\s\S]*catch \(cause\)/);

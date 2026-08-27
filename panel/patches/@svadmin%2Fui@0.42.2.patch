@@ -80,6 +80,32 @@ index 6abfcd0de3f4ebd8384eea9b7c38844684b06778..982a595ae8644ab462575ef48cc0e8c4
            <span class="text-xs">⌘</span>K
          </kbd>
        </Button>
+diff --git a/dist/components/IntegrationsSettings.svelte b/dist/components/IntegrationsSettings.svelte
+--- a/dist/components/IntegrationsSettings.svelte
++++ b/dist/components/IntegrationsSettings.svelte
+@@ -7 +6,0 @@
+-  import { Switch } from './ui/switch/index.js';
+@@ -20,5 +19,5 @@
+-  let integrations = $state<Integration[]>([
+-    { id: 'source-control', name: 'Source Control', description: 'Sync repository metadata, deployments, and commit activity.', connected: true, Icon: FolderGit, tone: 'bg-zinc-900 text-white' },
+-    { id: 'chatops', name: 'ChatOps', description: 'Send operational alerts and audit summaries to workspace channels.', connected: false, Icon: MessageCircle, tone: 'bg-violet-700 text-white' },
+-    { id: 'identity-cloud', name: 'Identity Cloud', description: 'Configure SSO and workspace identity handoff.', connected: true, Icon: Cloud, tone: 'bg-blue-600 text-white' },
+-    { id: 'webhooks', name: 'Webhooks', description: 'Register outbound webhooks for internal tools and monitors.', connected: false, Icon: Plug, tone: 'bg-emerald-700 text-white' },
++  let integrations = $state<Integration[]>([
++    { id: 'source-control', name: i18n.locale === 'zh-CN' ? '代码仓库' : 'Source Control', description: i18n.locale === 'zh-CN' ? '同步仓库元数据、部署记录和提交活动。' : 'Sync repository metadata, deployments, and commit activity.', connected: true, Icon: FolderGit, tone: 'bg-zinc-900 text-white' },
++    { id: 'chatops', name: 'ChatOps', description: i18n.locale === 'zh-CN' ? '向工作区频道发送运行告警和审计摘要。' : 'Send operational alerts and audit summaries to workspace channels.', connected: false, Icon: MessageCircle, tone: 'bg-violet-700 text-white' },
++    { id: 'identity-cloud', name: i18n.locale === 'zh-CN' ? '身份云' : 'Identity Cloud', description: i18n.locale === 'zh-CN' ? '配置单点登录和工作区身份交接。' : 'Configure SSO and workspace identity handoff.', connected: true, Icon: Cloud, tone: 'bg-blue-600 text-white' },
++    { id: 'webhooks', name: 'Webhooks', description: i18n.locale === 'zh-CN' ? '为内部工具和监控注册出站 Webhook。' : 'Register outbound webhooks for internal tools and monitors.', connected: false, Icon: Plug, tone: 'bg-emerald-700 text-white' },
+@@ -27,3 +26,0 @@
+-  function toggleConnection(id: string, connected: boolean) {
+-    integrations = integrations.map((item) => (item.id === id ? { ...item, connected } : item));
+-  }
+@@ -57,4 +53,1 @@
+-            <div class="flex items-center gap-3">
+-              <span class="text-xs text-muted-foreground">{integration.connected ? i18n.t('integrations.enabled') : i18n.t('integrations.disabled')}</span>
+-              <Switch checked={integration.connected} onCheckedChange={(checked) => toggleConnection(integration.id, checked)} />
+-            </div>
++            <span class="text-xs text-muted-foreground">{i18n.locale === 'zh-CN' ? '状态由已接入的集成服务提供' : 'Status is provided by the connected integration service'}</span>
 diff --git a/dist/components/Layout.svelte b/dist/components/Layout.svelte
 index ec9fa60a16fc60af41a4a757aab32d33e1caa551..207aa4d8c89577d258297c9344179bb06e565d44 100644
 --- a/dist/components/Layout.svelte
