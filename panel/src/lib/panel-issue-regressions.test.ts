@@ -109,7 +109,7 @@ describe('panel issue regressions', () => {
 		expect(source).toContain('form.mcpConfigs as config');
 		expect(source).toContain('form.budgets as budget');
 		expect(source).toContain('form.rateLimit.tokenMaxLimit');
-		expect(source).toContain('<details class="advanced-editor">');
+		expect(source).not.toContain('<details class="advanced-editor">');
 		expect(source).not.toContain('bind:value={form.mcpConfigs}');
 		expect(source).not.toContain('bind:value={form.budgets}');
 		expect(source).not.toContain('bind:value={form.rateLimit}');
@@ -153,9 +153,11 @@ describe('panel issue regressions', () => {
 		const packageJson = await Bun.file(new URL('../../package.json', import.meta.url)).json();
 		const patch = await Bun.file(`${process.cwd()}/patches/@svadmin%2Fui@0.42.2.patch`).text();
 		expect(packageJson.patchedDependencies['@svadmin/ui@0.42.2']).toBe('patches/@svadmin%2Fui@0.42.2.patch');
-		for (const contract of ['profile.newPassword', "const version = '0.42.2'", 'whitespace-nowrap', "'用户' : 'User'", '关闭 / Close', 'CI 部署令牌', '3 个月前']) {
+		for (const contract of ['profile.newPassword', "const version = '0.42.2'", 'whitespace-nowrap', "'用户' : 'User'", 'i18n.locale === "zh-CN" ? "关闭" : "Close"', 'CI 部署令牌', '3 个月前']) {
 			expect(patch).toContain(contract);
 		}
+		expect(patch).toContain('passwordChangedRecently = true');
+		expect(patch).toContain("'刚刚' : 'Just now'");
 	});
 
 	test('locale changes update document metadata and theme labels', async () => {
@@ -194,6 +196,30 @@ describe('panel issue regressions', () => {
 		const source = await Bun.file(new URL('../pages/EmployeesPage.svelte', import.meta.url)).text();
 		expect(source).toContain('await navigator.clipboard.writeText(revealedCredential);');
 		expect(source).toMatch(/catch \(cause\)[\s\S]*复制凭据失败/);
+	});
+
+	test('MCP guide never generates config from redacted virtual keys and surfaces copy failures', async () => {
+		const source = await Bun.file(new URL('../pages/McpUsageGuidePage.svelte', import.meta.url)).text();
+		expect(source).toContain("record?.value_redacted !== true");
+		expect(source).toContain("i18n.t('elygate.copyFailed')");
+		expect(source).toContain("i18n.t('elygate.virtualKeyRevealRequired')");
+	});
+
+	test('virtual key copy failures are surfaced', async () => {
+		const source = await Bun.file(new URL('../pages/VirtualKeysPage.svelte', import.meta.url)).text();
+		expect(source).toContain('await navigator.clipboard.writeText(revealedKey);');
+		expect(source).toContain("error = i18n.t('elygate.copyFailed');");
+	});
+
+	test('reachable page banners use localized labels and virtual keys hide raw advanced JSON', async () => {
+		const resource = await Bun.file(new URL('../pages/BifrostResourcePage.svelte', import.meta.url)).text();
+		const catalog = await Bun.file(new URL('../pages/ModelCatalogPage.svelte', import.meta.url)).text();
+		const guide = await Bun.file(new URL('../pages/McpUsageGuidePage.svelte', import.meta.url)).text();
+		const keys = await Bun.file(new URL('../pages/VirtualKeysPage.svelte', import.meta.url)).text();
+		expect(resource).toContain("i18n.locale === 'zh-CN' ? '接口' : 'API'");
+		expect(catalog).toContain("i18n.t('elygate.models')");
+		expect(guide).toContain("i18n.t('elygate.mcp')");
+		expect(keys).not.toContain('textarea bind:value={form.advanced}');
 	});
 
 	test('employee portal keeps a valid session when usage loading fails', async () => {

@@ -2,14 +2,14 @@
 	import { getAppName } from '../lib/branding';
 	import { onMount } from 'svelte';
 	import { useTranslation } from '@svadmin/core/i18n';
-	import { displayError, parseJsonObject } from '../lib/forms';
+	import { displayError } from '../lib/forms';
 	import { encodePathSegment, getListPayload, getObjectPayload, getTotal, requestJson, type JsonRecord } from '../lib/api';
 	import { formatPagination } from '../lib/display-format';
 
 	interface McpConfigDraft { key: string; id?: number; clientName: string; tools: string; }
 	interface BudgetDraft { key: string; maxLimit: string | number; resetDuration: string; }
 	interface RateLimitDraft { tokenMaxLimit: string | number; tokenResetDuration: string; requestMaxLimit: string | number; requestResetDuration: string; }
-	import { availableVirtualKeyProviders, duplicateVirtualKeyProviders, providerConfigsForForm, removedVirtualKeyProviderConfigCount, unavailableVirtualKeyProviders, virtualKeyAdvancedProviderFields, virtualKeyProviderConfigsForPayload } from '../lib/resource-forms';
+	import { availableVirtualKeyProviders, duplicateVirtualKeyProviders, providerConfigsForForm, removedVirtualKeyProviderConfigCount, unavailableVirtualKeyProviders, virtualKeyProviderConfigsForPayload } from '../lib/resource-forms';
 
 	interface VirtualKeyForm {
 		name: string;
@@ -22,13 +22,12 @@
 		mcpConfigs: McpConfigDraft[];
 		budgets: BudgetDraft[];
 		rateLimit: RateLimitDraft;
-		advanced: string;
 	}
 	interface Props { resourceName: string; }
 	let draftSequence = 0;
 	function draftKey(prefix: string): string { draftSequence += 1; return `${prefix}-${draftSequence}`; }
 	function emptyForm(): VirtualKeyForm {
-		return { name: '', description: '', isActive: true, calendarAligned: false, expiresAt: '', teamId: '', customerId: '', mcpConfigs: [], budgets: [], rateLimit: { tokenMaxLimit: '', tokenResetDuration: '1h', requestMaxLimit: '', requestResetDuration: '1h' }, advanced: '' };
+		return { name: '', description: '', isActive: true, calendarAligned: false, expiresAt: '', teamId: '', customerId: '', mcpConfigs: [], budgets: [], rateLimit: { tokenMaxLimit: '', tokenResetDuration: '1h', requestMaxLimit: '', requestResetDuration: '1h' } };
 	}
 
 	function stringValue(record: JsonRecord, key: string): string {
@@ -201,7 +200,6 @@
 			mcpConfigs: mcpConfigsForForm(record.mcp_configs).map((item) => ({ key: draftKey('mcp'), id: typeof item.id === 'number' ? item.id : undefined, clientName: String(item.mcp_client_name ?? ''), tools: Array.isArray(item.tools_to_execute) ? item.tools_to_execute.map(String).join(', ') : '' })),
 			budgets: (Array.isArray(record.budgets) ? record.budgets : []).filter((item): item is JsonRecord => !!item && typeof item === 'object' && !Array.isArray(item)).map((item) => ({ key: draftKey('budget'), maxLimit: typeof item.max_limit === 'number' ? item.max_limit : '', resetDuration: String(item.reset_duration ?? '1M') })),
 			rateLimit: { tokenMaxLimit: Number(rateLimitForForm(record.rate_limit).token_max_limit) || '', tokenResetDuration: String(rateLimitForForm(record.rate_limit).token_reset_duration ?? '1h'), requestMaxLimit: Number(rateLimitForForm(record.rate_limit).request_max_limit) || '', requestResetDuration: String(rateLimitForForm(record.rate_limit).request_reset_duration ?? '1h') },
-			advanced: '',
 		};
 		error = '';
 		isOpen = true;
@@ -213,7 +211,6 @@
 		try {
 			if (!form.name.trim()) throw new Error(i18n.t('elygate.required').replace('{field}', i18n.t('elygate.virtualKeyName')));
 			if (form.teamId.trim() && form.customerId.trim()) throw new Error(i18n.t('elygate.teamCustomerConflict'));
-			const invalidJson = i18n.t('elygate.invalidJson');
 			let providerConfigs: JsonRecord[];
 			try {
 				providerConfigs = virtualKeyProviderConfigsForPayload(
@@ -243,15 +240,9 @@
 			const tokenMaxLimit = optionalPositiveInteger(form.rateLimit.tokenMaxLimit, i18n.t('elygate.tokenLimit'));
 			const requestMaxLimit = optionalPositiveInteger(form.rateLimit.requestMaxLimit, i18n.t('elygate.requestLimit'));
 			const rateLimit = { ...(tokenMaxLimit !== undefined ? { token_max_limit: tokenMaxLimit, token_reset_duration: form.rateLimit.tokenResetDuration } : {}), ...(requestMaxLimit !== undefined ? { request_max_limit: requestMaxLimit, request_reset_duration: form.rateLimit.requestResetDuration } : {}) };
-			const advanced = parseJsonObject(form.advanced, i18n.t('elygate.advancedJson'), invalidJson);
-			const misplacedProviderFields = virtualKeyAdvancedProviderFields(advanced);
-			if (misplacedProviderFields.length) {
-				throw new Error(i18n.t('elygate.virtualKeyAdvancedProviderFields').replace('{fields}', misplacedProviderFields.join(', ')));
-			}
 			const removedProviderCount = removedVirtualKeyProviderConfigCount(editing?.provider_configs, providerConfigs);
 			if (removedProviderCount > 0 && !window.confirm(i18n.t('elygate.confirmReplaceVirtualKeyProviders').replace('{count}', String(removedProviderCount)))) return;
 			const payload: JsonRecord = {
-				...advanced,
 				name: form.name.trim(),
 				description: form.description.trim(),
 				is_active: form.isActive,
@@ -309,7 +300,12 @@
 	}
 
 	async function copyKey(): Promise<void> {
-		if (revealedKey) await navigator.clipboard.writeText(revealedKey);
+		if (!revealedKey) return;
+		try {
+			await navigator.clipboard.writeText(revealedKey);
+		} catch {
+			error = i18n.t('elygate.copyFailed');
+		}
 	}
 
 	function submit(event: SubmitEvent): void { event.preventDefault(); void save(); }
@@ -373,7 +369,6 @@
 					<legend>{i18n.locale === 'zh-CN' ? '请求限流' : 'Rate limits'}</legend>
 					<div class="grid-two"><label>{i18n.t('elygate.tokenLimit')}<input type="number" min="1" step="1" bind:value={form.rateLimit.tokenMaxLimit} /></label><label>{i18n.locale === 'zh-CN' ? 'Token 重置周期' : 'Token reset window'}<select bind:value={form.rateLimit.tokenResetDuration}>{#each ['1m', '5m', '15m', '30m', '1h', '6h', '1d', '1w', '1M'] as duration (duration)}<option value={duration}>{duration}</option>{/each}</select></label><label>{i18n.t('elygate.requestLimit')}<input type="number" min="1" step="1" bind:value={form.rateLimit.requestMaxLimit} /></label><label>{i18n.locale === 'zh-CN' ? '请求重置周期' : 'Request reset window'}<select bind:value={form.rateLimit.requestResetDuration}>{#each ['1m', '5m', '15m', '30m', '1h', '6h', '1d', '1w', '1M'] as duration (duration)}<option value={duration}>{duration}</option>{/each}</select></label></div>
 				</fieldset>
-				<details class="advanced-editor"><summary>{i18n.locale === 'zh-CN' ? '其他高级字段' : 'Other advanced fields'}</summary><label>{i18n.t('elygate.advancedJson')}<textarea bind:value={form.advanced} rows="4"></textarea><small>{i18n.t('elygate.virtualKeyAdvancedHint')}</small></label></details>
 				<footer>
 					<button type="button" onclick={() => (isOpen = false)}>{i18n.t('elygate.cancel')}</button>
 					<button class="primary" type="submit" disabled={isSaving}>{i18n.t('elygate.save')}</button>
@@ -411,16 +406,12 @@
 	h2 { margin: 0; }
 	form { display: grid; gap: .85rem; }
 	label { display: grid; font-size: .85rem; font-weight: 650; gap: .35rem; }
-	input, textarea, select { background: var(--background); border: 1px solid var(--border); border-radius: .5rem; color: var(--foreground); font: inherit; padding: .6rem .7rem; width: 100%; }
-	textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem; resize: vertical; }
+	input, select { background: var(--background); border: 1px solid var(--border); border-radius: .5rem; color: var(--foreground); font: inherit; padding: .6rem .7rem; width: 100%; }
 	.route-editor { border: 1px solid var(--border); border-radius: .65rem; display: grid; gap: .75rem; margin: 0; padding: .85rem; }
 	.route-editor legend { font-size: .85rem; font-weight: 700; padding: 0 .3rem; }
 	.structured-editor { border: 1px solid var(--border); border-radius: .65rem; display: grid; gap: .75rem; margin: 0; padding: .85rem; }
 	.structured-editor legend { font-size: .85rem; font-weight: 700; padding: 0 .3rem; }
 	.structured-row { align-items: end; display: grid; gap: .65rem; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; }
-	.advanced-editor { border: 1px solid var(--border); border-radius: .65rem; padding: .75rem; }
-	.advanced-editor summary { cursor: pointer; font-weight: 700; }
-	.advanced-editor label { margin-top: .75rem; }
 	.pagination { justify-content: space-between; margin-top: 1rem; }
 	.route-row { border-bottom: 1px solid var(--border); display: grid; gap: .7rem; padding-bottom: .85rem; }
 	.route-row header { align-items: center; display: flex; justify-content: space-between; }

@@ -5,7 +5,8 @@ index c247549bde930acdc2be70454ea14fbeee01510c..9f1d90a0f4e60bfb523579e911369599
 @@ -12,7 +12,11 @@
    const resources = $derived(adminContext.resources);
    const providerNames = $derived(adminContext.getDataProviderNames());
-
+-
++
 -  const version = '__SVADMIN_VERSION__'; // replaced at build time or shown as-is
 +  const version = '0.42.2';
 +  const environmentLabel = (value: string): string => {
@@ -13,7 +14,8 @@ index c247549bde930acdc2be70454ea14fbeee01510c..9f1d90a0f4e60bfb523579e911369599
 +    return ({ light: '浅色', dark: '深色', system: '跟随系统', neutral: '中性色', indigo: '靛蓝色', blue: '蓝色', green: '绿色', rose: '玫瑰色', orange: '橙色', violet: '紫罗兰色' } as Record<string, string>)[value] ?? value;
 +  };
  </script>
-
+-
++
  <div class="space-y-6">
 @@ -49,7 +53,7 @@
      <Card.CardContent>
@@ -53,7 +55,8 @@ index 3d413e9baa4031534b044e3ceb4de8ad826045b3..8f6394de3745e5dcbb3a2fbf58f62e20
 -            <Input id="api-key-name" placeholder="CI deployment token" bind:value={newKeyName} required />
 +            <Input id="api-key-name" placeholder={i18n.locale === 'zh-CN' ? 'CI 部署令牌' : 'CI deployment token'} bind:value={newKeyName} required />
            </div>
-
+-
++
            <div class="space-y-3">
 @@ -133,7 +133,7 @@
              {#each Object.keys(newKeyPermissions) as permission (permission)}
@@ -82,7 +85,8 @@ index 11c3c0d693218a3ffdb579ef0ee35df393a74be5..a6992c7cd2cb6d181cd79e991becfd57
 --- a/dist/components/ProfilePage.svelte
 +++ b/dist/components/ProfilePage.svelte
 @@ -308,7 +308,7 @@
-
+-
++
          <PasswordInput
            id="new-password"
 -          label={i18n.t('auth.password')}
@@ -91,23 +95,29 @@ index 11c3c0d693218a3ffdb579ef0ee35df393a74be5..a6992c7cd2cb6d181cd79e991becfd57
            autocomplete="new-password"
            showStrength
 diff --git a/dist/components/SecuritySettings.svelte b/dist/components/SecuritySettings.svelte
-index dde55f3b0fb198068b017d3fb64d84fe8eeabfe8..b5096226f767b5099a5dda1ac700bf373573bfe6 100644
+index dde55f3b0fb198068b017d3fb64d84fe8eeabfe8..e008da7e5a10c57a93c059f048dfe7c2ca8bfdc5 100644
 --- a/dist/components/SecuritySettings.svelte
 +++ b/dist/components/SecuritySettings.svelte
-@@ -34,7 +34,7 @@
+@@ -34,7 +34,10 @@
    let confirmPassword = $state('');
    let passwordSuccessMessage = $state('');
    let passwordErrorMessage = $state('');
 -  let lastChanged = $state('3 months ago');
-+  let lastChanged = $derived(i18n.locale === 'zh-CN' ? '3 个月前' : '3 months ago');
-
++  let passwordChangedRecently = $state(false);
++  let lastChanged = $derived(passwordChangedRecently
++    ? (i18n.locale === 'zh-CN' ? '刚刚' : 'Just now')
++    : (i18n.locale === 'zh-CN' ? '3 个月前' : '3 months ago'));
+-
++
    function handlePasswordChange(event: SubmitEvent) {
      event.preventDefault();
-@@ -55,7 +55,6 @@
+@@ -55,7 +58,7 @@
      }
-
+-
++
      passwordSuccessMessage = i18n.t('profile.passwordChanged');
 -    lastChanged = 'Just now';
++    passwordChangedRecently = true;
      currentPassword = '';
      newPassword = '';
      confirmPassword = '';
@@ -125,15 +135,38 @@ index bbe94d8e8a6ef3e3f7ff4c951443998423ea3b0a..07c20a29df28de429bb28e9ef01d2534
            <button
              class="h-7 w-7 flex items-center justify-center rounded-md text-sidebar-foreground/40 hover:text-sidebar-foreground hover:bg-sidebar-accent/60 transition-colors"
 diff --git a/dist/components/ui/sheet/sheet.svelte b/dist/components/ui/sheet/sheet.svelte
-index 453c46f30ff0d2b80b03680bcab61eab7d9af658..5263c61ad83c92d801dbe138ec1b444c082d10e4 100644
+index 453c46f30ff0d2b80b03680bcab61eab7d9af658..79e1147edc49fd67b4945e15ab09e498a76b18cf 100644
 --- a/dist/components/ui/sheet/sheet.svelte
 +++ b/dist/components/ui/sheet/sheet.svelte
-@@ -73,7 +73,7 @@
- 			<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
- 				<path d="M18 6 6 18"/><path d="m6 6 12 12"/>
- 			</svg>
+@@ -1,8 +1,11 @@
+ <script lang="ts">
+ /* eslint-disable svelte/no-unused-svelte-ignore */
+-	import { cn, type WithElementRef } from "../../../utils.js";
++	import { cn, type WithElementRef } from "../../../utils.js";
++	import { useTranslation } from "@svadmin/core/i18n";
+-	import type { HTMLAttributes } from "svelte/elements";
++	import type { HTMLAttributes } from "svelte/elements";
+-
++
++	const i18n = useTranslation();
++
+-	type Props = WithElementRef<HTMLAttributes<HTMLDivElement>> & {
++	type Props = WithElementRef<HTMLAttributes<HTMLDivElement>> & {
+-		open?: boolean;
++		open?: boolean;
+-		side?: "left" | "right";
++		side?: "left" | "right";
+@@ -73,7 +76,7 @@
+-			<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
++			<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+-				<path d="M18 6 6 18"/><path d="m6 6 12 12"/>
++				<path d="M18 6 6 18"/><path d="m6 6 12 12"/>
+-			</svg>
++			</svg>
 -			<span class="sr-only">Close</span>
-+			<span class="sr-only">关闭 / Close</span>
- 		</button>
- 	</div>
++			<span class="sr-only">{i18n.locale === "zh-CN" ? "关闭" : "Close"}</span>
+-		</button>
++		</button>
+-	</div>
++	</div>
  {/if}

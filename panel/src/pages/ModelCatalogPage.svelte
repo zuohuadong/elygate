@@ -171,7 +171,7 @@
 
 <section class="page-shell" data-resource={resourceName}>
 	<header class="page-heading">
-		<div><p class="eyebrow">{getAppName()} / Models</p><h1>{i18n.t('elygate.modelCatalog')}</h1><p>{i18n.t('elygate.modelCatalogHint')}</p></div>
+		<div><p class="eyebrow">{getAppName()} / {i18n.t('elygate.models')}</p><h1>{i18n.t('elygate.modelCatalog')}</h1><p>{i18n.t('elygate.modelCatalogHint')}</p></div>
 		<button type="button" class="primary" onclick={() => void (tab === 'overview' ? loadOverview() : loadModels())}>{i18n.t('elygate.refresh')}</button>
 	</header>
 	{#if error}<div class="notice error" role="alert">{error}</div>{/if}

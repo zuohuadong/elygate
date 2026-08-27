@@ -33,6 +33,7 @@
 	let copied = $state(false);
 
 	const selectedVirtualKey = $derived(virtualKeys.find((item) => String(item.id ?? '') === selectedVirtualKeyId));
+	const selectedVirtualKeyReady = $derived(isUsableSecret(selectedVirtualKey));
 	const allowedClients = $derived.by(() => {
 		if (!selectedVirtualKey) return [];
 		return clients.filter((client) => {
@@ -46,10 +47,15 @@
 	const selectedClients = $derived(
 		allowedClients.filter((client) => selectedClientIds.includes(clientId(client))),
 	);
-	const command = $derived(buildHarnessConfig(harness, gatewayUrl(), selectedVirtualKey, selectedClients));
+	const command = $derived(buildHarnessConfig(harness, gatewayUrl(), selectedVirtualKeyReady ? selectedVirtualKey : undefined, selectedClients));
 
 	function secretValue(record: JsonRecord | undefined): string {
 		return typeof record?.value === 'string' ? record.value : '';
+	}
+
+	function isUsableSecret(record: JsonRecord | undefined): boolean {
+		const value = secretValue(record);
+		return Boolean(value) && record?.value_redacted !== true && value !== '[REDACTED]' && value !== '<redacted>';
 	}
 
 	function clientConfig(client: JsonRecord): JsonRecord {
@@ -141,9 +147,13 @@
 
 	async function copyCommand(): Promise<void> {
 		if (!command) return;
-		await navigator.clipboard.writeText(command);
-		copied = true;
-		window.setTimeout(() => (copied = false), 1800);
+		try {
+			await navigator.clipboard.writeText(command);
+			copied = true;
+			window.setTimeout(() => (copied = false), 1800);
+		} catch {
+			error = i18n.t('elygate.copyFailed');
+		}
 	}
 
 	onMount(() => {
@@ -154,7 +164,7 @@
 <section class="page-shell">
 	<header class="page-heading">
 		<div>
-			<p class="eyebrow">{getAppName()} / MCP Gateway</p>
+			<p class="eyebrow">{getAppName()} / {i18n.t('elygate.mcp')}</p>
 			<h1>{i18n.t('elygate.mcpUsageGuide')}</h1>
 			<p>{i18n.t('elygate.mcpGuideHint')}</p>
 		</div>
@@ -208,7 +218,7 @@
 				<strong>{i18n.t('elygate.generatedConfig')}</strong>
 				<button type="button" onclick={() => void copyCommand()} disabled={!command}>{copied ? i18n.t('elygate.copied') : i18n.t('elygate.copy')}</button>
 			</div>
-			<pre>{command || i18n.t('elygate.selectVirtualKeyHint')}</pre>
+			<pre>{command || (selectedVirtualKey ? i18n.t('elygate.virtualKeyRevealRequired') : i18n.t('elygate.selectVirtualKeyHint'))}</pre>
 			<p>{i18n.t('elygate.secretDisplayWarning')}</p>
 		</div>
 	</div>

@@ -9,6 +9,7 @@ RUN if [ -n "$APK_MIRROR" ]; then sed -i "s#https\?://dl-cdn.alpinelinux.org/alp
 
 # Install panel dependencies before copying source to preserve the dependency layer.
 COPY panel/package.json panel/bun.lock ./
+COPY panel/patches ./patches
 RUN bun install --frozen-lockfile
 
 COPY panel/ ./
