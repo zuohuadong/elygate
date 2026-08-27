@@ -160,6 +160,8 @@ describe('panel issue regressions', () => {
 		expect(patch).toContain('connected?: boolean');
 		expect(patch).toContain('onConnectionChange?:');
 		expect(patch).toContain('状态由已接入的集成服务提供');
+		expect(patch).toContain('passwordChangedRecently = true');
+		expect(patch).toContain('最近修改：刚刚');
 	});
 
 	test('locale changes update document metadata and theme labels', async () => {

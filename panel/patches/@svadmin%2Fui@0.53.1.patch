@@ -1,3 +1,6 @@
+diff --git a/node_modules/@svadmin/ui/.bun-tag-9d86056a314d353 b/.bun-tag-9d86056a314d353
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
 diff --git a/dist/components/AboutSettings.svelte b/dist/components/AboutSettings.svelte
 index c2ffe0aba6e08bed09c631fd09c9a378007201b5..8368c175760ddc851b22aad87ad30c825c08517e 100644
 --- a/dist/components/AboutSettings.svelte
@@ -133,6 +136,42 @@ index c267a4e42dd02f0878551721bc44f993570691b5..2d8d6352733605b9047b2e7cb15160fe
            bind:value={newPassword}
            autocomplete="new-password"
            showStrength
+diff --git a/dist/components/SecuritySettings.svelte b/dist/components/SecuritySettings.svelte
+index fbe447118bc36c86f265ee85ee2adb15922b6bb3..eeee6bc998c9320baf0d6aaca564e332c42a2f64 100644
+--- a/dist/components/SecuritySettings.svelte
++++ b/dist/components/SecuritySettings.svelte
+@@ -27,6 +27,7 @@
+   let newPassword = $state('');
+   let confirmPassword = $state('');
+   let passwordErrorMessage = $state('');
++  let passwordChangedRecently = $state(false);
+   let changingPassword = $state(false);
+   let requestId = 0;
+ 
+@@ -67,6 +68,7 @@
+     newPassword = '';
+     confirmPassword = '';
+     passwordErrorMessage = '';
++    passwordChangedRecently = false;
+     changingPassword = false;
+     updatingMfa = false;
+     revoking = null;
+@@ -109,6 +111,7 @@
+       if (!result.success) throw new Error(result.error?.message ?? (isZh ? '密码修改失败' : 'Password update failed'));
+       if (currentRequest !== requestId) return;
+       notifyWithProvider({ type: 'success', message: i18n.t('profile.passwordChanged') }, adminContext.notificationProvider);
++      passwordChangedRecently = true;
+       currentPassword = '';
+       newPassword = '';
+       confirmPassword = '';
+@@ -176,6 +179,7 @@
+       <PasswordInput id="security-current-password" label={i18n.t('profile.currentPassword')} bind:value={currentPassword} autocomplete="current-password" disabled={!authProvider?.updatePassword || changingPassword} />
+       <PasswordInput id="security-new-password" label={i18n.t('profile.newPassword')} bind:value={newPassword} autocomplete="new-password" showStrength disabled={!authProvider?.updatePassword || changingPassword} />
+       <PasswordInput id="security-confirm-password" label={i18n.t('auth.confirmPassword')} bind:value={confirmPassword} autocomplete="new-password" disabled={!authProvider?.updatePassword || changingPassword} />
++      {#if passwordChangedRecently}<p class="text-xs text-muted-foreground">{isZh ? '最近修改：刚刚' : 'Last changed: just now'}</p>{/if}
+       <Button type="submit" disabled={!authProvider?.updatePassword || changingPassword}>{changingPassword ? (isZh ? '更新中...' : 'Updating...') : i18n.t('profile.updatePassword')}</Button>
+     </form>
+   </SettingsGroup>
 diff --git a/dist/components/Sidebar.svelte b/dist/components/Sidebar.svelte
 index b038302a2aa6a59a4a082734d85f7750a9ce1de7..53c80f45d0f9d897e3315cbce9edfffd31bcb747 100644
 --- a/dist/components/Sidebar.svelte
