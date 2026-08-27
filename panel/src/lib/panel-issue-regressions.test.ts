@@ -1,5 +1,18 @@
 import { describe, expect, test } from 'bun:test';
 
+interface PackageManifest {
+	dependencies: Record<string, string>;
+	patchedDependencies?: Record<string, string>;
+}
+
+async function readSvadminUiPatch(): Promise<{ packageJson: PackageManifest; patch: string }> {
+	const packageJson = await Bun.file(new URL('../../package.json', import.meta.url)).json() as PackageManifest;
+	const patchKey = `@svadmin/ui@${packageJson.dependencies?.['@svadmin/ui']}`;
+	const patchPath = packageJson.patchedDependencies?.[patchKey];
+	expect(typeof patchPath).toBe('string');
+	return { packageJson, patch: await Bun.file(`${process.cwd()}/${patchPath}`).text() };
+}
+
 describe('panel issue regressions', () => {
 	test('provider keys route renders a dedicated key workspace', async () => {
 		const source = await Bun.file(new URL('../pages/ProvidersPage.svelte', import.meta.url)).text();
@@ -150,18 +163,18 @@ describe('panel issue regressions', () => {
 	});
 
 	test('the svadmin compatibility patch is pinned and covers reported settings regressions', async () => {
-		const packageJson = await Bun.file(new URL('../../package.json', import.meta.url)).json();
-		const patch = await Bun.file(`${process.cwd()}/patches/@svadmin%2Fui@0.53.1.patch`).text();
-		expect(packageJson.patchedDependencies['@svadmin/ui@0.53.1']).toBe('patches/@svadmin%2Fui@0.53.1.patch');
-		for (const contract of ['profile.newPassword', "const version = '0.53.1'", 'whitespace-nowrap', "'用户' : 'User'", '关闭" : "Close', 'CI 部署令牌']) {
+		const { packageJson, patch } = await readSvadminUiPatch();
+		const uiVersion = packageJson.dependencies['@svadmin/ui'];
+		expect(packageJson.patchedDependencies[`@svadmin/ui@${uiVersion}`]).toBe(`patches/@svadmin%2Fui@${uiVersion}.patch`);
+		for (const contract of ['profile.newPassword', `const version = '${uiVersion}'`, 'whitespace-nowrap', "'用户' : 'User'", '关闭" : "Close', 'CI 部署令牌']) {
 			expect(patch).toContain(contract);
 		}
 		expect(patch).toContain("e.key.toLowerCase() === 'k' || e.code === 'KeyK'");
-		expect(patch).toContain('connected?: boolean');
-		expect(patch).toContain('onConnectionChange?:');
-		expect(patch).toContain('状态由已接入的集成服务提供');
 		expect(patch).toContain('passwordChangedRecently = true');
 		expect(patch).toContain('最近修改：刚刚');
+		const integrations = await Bun.file(`${process.cwd()}/node_modules/@svadmin/ui/dist/components/IntegrationsSettings.svelte`).text();
+		expect(integrations).toContain('onConnectionChange?:');
+		expect(integrations).toContain("i18n.t('integrations.statusProvidedByHost')");
 	});
 
 	test('locale changes update document metadata and theme labels', async () => {
@@ -234,7 +247,7 @@ describe('panel issue regressions', () => {
 		const proxy = await Bun.file(new URL('../pages/RoutingNetworkSettingsPage.svelte', import.meta.url)).text();
 		const docs = await Bun.file(new URL('../pages/DocsHubPage.svelte', import.meta.url)).text();
 		const translations = await Bun.file(new URL('./i18n.ts', import.meta.url)).text();
-		const patch = await Bun.file(`${process.cwd()}/patches/@svadmin%2Fui@0.53.1.patch`).text();
+		const { patch } = await readSvadminUiPatch();
 		expect(generic).toContain('localizedEyebrow(config.eyebrow)');
 		expect(generic).toContain("'Enterprise Governance': '企业级管理'");
 		expect(operational).toContain("'source', flag.source ?? 'default'");
@@ -244,8 +257,9 @@ describe('panel issue regressions', () => {
 		expect(docs).toContain("content: zh ? chineseDocs.quickstart : quickstartSource");
 		expect(translations).toContain("'elygate.option.dual.prefer_idp': '优先身份源令牌'");
 		expect(translations).toContain("'elygate.field.compatConvertTextToChat': '文本接口转聊天接口'");
-		expect(patch).toContain("i18n.locale === 'zh-CN' ? '代码仓库' : 'Source Control'");
-		expect(patch).toContain('同步仓库元数据、部署记录和提交活动。');
+		const integrations = await Bun.file(`${process.cwd()}/node_modules/@svadmin/ui/dist/components/IntegrationsSettings.svelte`).text();
+		expect(integrations).toContain("i18n.t('integrations.sourceControl')");
+		expect(integrations).toContain("i18n.t('integrations.statusProvidedByHost')");
 	});
 
 	test('employee portal keeps a valid session when usage loading fails', async () => {

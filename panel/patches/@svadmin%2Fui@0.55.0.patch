@@ -1,8 +1,8 @@
-diff --git a/node_modules/@svadmin/ui/.bun-tag-9d86056a314d353 b/.bun-tag-9d86056a314d353
+diff --git a/node_modules/@svadmin/ui/.bun-tag-44d4afe139b5910c b/.bun-tag-44d4afe139b5910c
 new file mode 100644
 index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
 diff --git a/dist/components/AboutSettings.svelte b/dist/components/AboutSettings.svelte
-index c2ffe0aba6e08bed09c631fd09c9a378007201b5..8368c175760ddc851b22aad87ad30c825c08517e 100644
+index c2ffe0aba6e08bed09c631fd09c9a378007201b5..c4198a2a9bc372af4d41f524e493b64750b174f3 100644
 --- a/dist/components/AboutSettings.svelte
 +++ b/dist/components/AboutSettings.svelte
 @@ -9,7 +9,11 @@
@@ -10,7 +10,7 @@ index c2ffe0aba6e08bed09c631fd09c9a378007201b5..8368c175760ddc851b22aad87ad30c82
    const resources = $derived(adminContext.resources);
    const providerNames = $derived(adminContext.getDataProviderNames());
 -  const version = '__SVADMIN_VERSION__';
-+  const version = '0.53.1';
++  const version = '0.55.0';
 +  const environmentLabel = (value: string): string => {
 +    if (i18n.locale !== 'zh-CN') return value;
 +    return ({ light: '浅色', dark: '深色', system: '跟随系统', neutral: '中性色', indigo: '靛蓝色', blue: '蓝色', green: '绿色', rose: '玫瑰色', orange: '橙色', violet: '紫罗兰色' } as Record<string, string>)[value] ?? value;
@@ -60,56 +60,6 @@ index 6abfcd0de3f4ebd8384eea9b7c38844684b06778..982a595ae8644ab462575ef48cc0e8c4
            <span class="text-xs">⌘</span>K
          </kbd>
        </Button>
-diff --git a/dist/components/IntegrationsSettings.svelte b/dist/components/IntegrationsSettings.svelte
-index c6813b38cb70b37b10f2a8e7ce2770d3948a6ed2..19ad6d1c08b1f585d72bf19fd2974a3600d79a09 100644
---- a/dist/components/IntegrationsSettings.svelte
-+++ b/dist/components/IntegrationsSettings.svelte
-@@ -8,24 +8,36 @@
-   import StatusBadge from './content/StatusBadge.svelte';
- 
-   const i18n = useTranslation();
--  interface Integration { id: string; name: string; description: string; connected: boolean; Icon: Component; }
--  let integrations = $state<Integration[]>([
--    { id: 'source-control', name: 'Source Control', description: 'Sync repository metadata, deployments, and commit activity.', connected: true, Icon: FolderGit },
--    { id: 'chatops', name: 'ChatOps', description: 'Send operational alerts and audit summaries to workspace channels.', connected: false, Icon: MessageCircle },
--    { id: 'identity-cloud', name: 'Identity Cloud', description: 'Configure SSO and workspace identity handoff.', connected: true, Icon: Cloud },
--    { id: 'webhooks', name: 'Webhooks', description: 'Register outbound webhooks for internal tools and monitors.', connected: false, Icon: Plug },
-+  interface Integration { id: string; name: string; description: string; connected?: boolean; Icon: Component; }
-+  interface Props {
-+    integrations?: Integration[];
-+    onConnectionChange?: (id: string, connected: boolean) => void | Promise<void>;
-+  }
-+  let { integrations, onConnectionChange }: Props = $props();
-+  const defaultIntegrations = $derived<Integration[]>([
-+    { id: 'source-control', name: i18n.locale === 'zh-CN' ? '代码仓库' : 'Source Control', description: i18n.locale === 'zh-CN' ? '同步仓库元数据、部署记录和提交活动。' : 'Sync repository metadata, deployments, and commit activity.', Icon: FolderGit },
-+    { id: 'chatops', name: 'ChatOps', description: i18n.locale === 'zh-CN' ? '向工作区频道发送运行告警和审计摘要。' : 'Send operational alerts and audit summaries to workspace channels.', Icon: MessageCircle },
-+    { id: 'identity-cloud', name: i18n.locale === 'zh-CN' ? '身份云' : 'Identity Cloud', description: i18n.locale === 'zh-CN' ? '配置单点登录和工作区身份交接。' : 'Configure SSO and workspace identity handoff.', Icon: Cloud },
-+    { id: 'webhooks', name: 'Webhooks', description: i18n.locale === 'zh-CN' ? '为内部工具和监控注册出站 Webhook。' : 'Register outbound webhooks for internal tools and monitors.', Icon: Plug },
-   ]);
--  function toggleConnection(id: string, connected: boolean) { integrations = integrations.map((item) => item.id === id ? { ...item, connected } : item); }
-+  const displayedIntegrations = $derived(integrations ?? defaultIntegrations);
- </script>
- 
- <div class="space-y-6">
-   <div><h2 class="text-xl font-semibold text-foreground">{i18n.t('settings.integrations')}</h2><p class="mt-1 text-sm text-muted-foreground">{i18n.t('settings.integrationsDescription')}</p></div>
-   <SettingsGroup title={i18n.t('settings.integrations')} description={i18n.t('integrations.addMoreHint')}>
-     <div class="divide-y divide-border">
--      {#each integrations as integration (integration.id)}
-+      {#each displayedIntegrations as integration (integration.id)}
-         <SettingsFieldRow label={integration.name} description={integration.description}>
-           {#snippet control()}
--            <div class="flex items-center gap-3"><StatusBadge status={integration.connected ? 'success' : 'neutral'} label={integration.connected ? i18n.t('integrations.statusConnected') : i18n.t('integrations.statusDisconnected')} /><Switch checked={integration.connected} onCheckedChange={(checked) => toggleConnection(integration.id, checked)} aria-label={integration.name} /></div>
-+            <div class="flex items-center gap-3">
-+              {#if integration.connected !== undefined}
-+                <StatusBadge status={integration.connected ? 'success' : 'neutral'} label={integration.connected ? i18n.t('integrations.statusConnected') : i18n.t('integrations.statusDisconnected')} />
-+                {#if onConnectionChange}<Switch checked={integration.connected} onCheckedChange={(checked) => onConnectionChange?.(integration.id, checked)} aria-label={integration.name} />{/if}
-+              {:else}
-+                <span class="text-xs text-muted-foreground">{i18n.locale === 'zh-CN' ? '状态由已接入的集成服务提供' : 'Status is provided by the connected integration service'}</span>
-+              {/if}
-+            </div>
-           {/snippet}
-         </SettingsFieldRow>
-       {/each}
 diff --git a/dist/components/Layout.svelte b/dist/components/Layout.svelte
 index d9d7e656a2a7f96f958188055b0c9c472d5fe9e7..094a50336755f339a8d4507a375c4638afedb890 100644
 --- a/dist/components/Layout.svelte
