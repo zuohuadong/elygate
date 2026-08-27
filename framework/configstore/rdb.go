@@ -320,9 +320,23 @@ func (s *RDBConfigStore) UpdateClientConfig(ctx context.Context, config *ClientC
 		}
 		// GORM applies default:true to bool zero values during Create, so persist an
 		// administrator's explicit false after the row has been inserted.
-		return tx.Model(&tables.TableClientConfig{}).
+		if err := tx.Model(&tables.TableClientConfig{}).
 			Where("id = ?", dbConfig.ID).
-			UpdateColumn("enforce_auth_on_inference", config.EnforceAuthOnInference).Error
+			UpdateColumn("enforce_auth_on_inference", config.EnforceAuthOnInference).Error; err != nil {
+			return err
+		}
+		// MCPToolSyncInterval carries `gorm:"default:10"`, and Create omits a
+		// zero-valued column so the database substitutes that default. 0 is a
+		// legitimate value here (the built-in default), so force it through
+		// explicitly. Scoped to this one column so no other defaulted field
+		// changes behavior; the table holds a single row, hence the global
+		// update mirroring the Delete above.
+		if config.MCPToolSyncInterval == 0 {
+			if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Model(&tables.TableClientConfig{}).Update("mcp_tool_sync_interval", 0).Error; err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 }
 
@@ -533,7 +547,7 @@ func (s *RDBConfigStore) GetClientConfig(ctx context.Context) (*ClientConfig, er
 		return nil, err
 	}
 	return &ClientConfig{
-		AppName:                               dbConfig.AppName,
+		AppName:                        dbConfig.AppName,
 		DropExcessRequests:             dbConfig.DropExcessRequests,
 		InitialPoolSize:                dbConfig.InitialPoolSize,
 		PrometheusLabels:               dbConfig.PrometheusLabels,
@@ -1673,6 +1687,11 @@ func (s *RDBConfigStore) GetMCPConfig(ctx context.Context) (*schemas.MCPConfig, 
 	return &schemas.MCPConfig{
 		ClientConfigs:     clientConfigs,
 		ToolManagerConfig: &toolManagerConfig,
+		// The global tool sync interval is stored in minutes on the client
+		// config row. Without carrying it here, a boot with no mcp section in
+		// config.json would hand bifrost.Init a zero and the checkers would
+		// silently fall back to the built-in default.
+		ToolSyncInterval: time.Duration(clientConfig.MCPToolSyncInterval) * time.Minute,
 	}, nil
 }
 
@@ -2407,6 +2426,9 @@ func (s *RDBConfigStore) UpdateMCPClientConfig(ctx context.Context, id string, c
 		// Connection info (ConnectionType, ConnectionString, StdioConfig) is read-only and should not be modified via API
 		if clientConfigCopy.ToolExecutionTimeout < 0 {
 			return fmt.Errorf("tool_execution_timeout must be non-negative, got %d", clientConfigCopy.ToolExecutionTimeout)
+		}
+		if clientConfigCopy.ToolSyncInterval < 0 {
+			return fmt.Errorf("tool_sync_interval must be non-negative, got %d", clientConfigCopy.ToolSyncInterval)
 		}
 
 		updates := map[string]interface{}{
