@@ -80,6 +80,20 @@ index 6abfcd0de3f4ebd8384eea9b7c38844684b06778..982a595ae8644ab462575ef48cc0e8c4
            <span class="text-xs">⌘</span>K
          </kbd>
        </Button>
+diff --git a/dist/components/Layout.svelte b/dist/components/Layout.svelte
+index ec9fa60a16fc60af41a4a757aab32d33e1caa551..207aa4d8c89577d258297c9344179bb06e565d44 100644
+--- a/dist/components/Layout.svelte
++++ b/dist/components/Layout.svelte
+@@ -85,7 +85,7 @@
+-
++
+   function handleGlobalKeydown(e: KeyboardEvent) {
+     if (!ownsLayoutEvent(e)) return;
+-    if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
++    if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'k' || e.code === 'KeyK')) {
+       e.preventDefault();
+       commandOpen = true;
+     }
 diff --git a/dist/components/ProfilePage.svelte b/dist/components/ProfilePage.svelte
 index 11c3c0d693218a3ffdb579ef0ee35df393a74be5..a6992c7cd2cb6d181cd79e991becfd57e4675277 100644
 --- a/dist/components/ProfilePage.svelte

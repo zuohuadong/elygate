@@ -78,6 +78,7 @@
 
 	let currentAppName = $state(getAppName());
 	let currentLocale = $state<ElygateLocale>('zh-CN');
+	let currentHash = $state(typeof window !== 'undefined' ? window.location.hash : '');
 	let runtimeFeatureNames = $state.raw<string[]>([]);
 	const themeLabels = {
 		'zh-CN': { neutral: '中性色', indigo: '靛蓝色', blue: '蓝色', green: '绿色', rose: '玫瑰色', orange: '橙色', violet: '紫罗兰色' },
@@ -197,6 +198,7 @@
 
 	onMount(() => {
 		const refresh = () => { void refreshRuntimeFeatures(); };
+		const syncHash = () => { currentHash = window.location.hash; };
 		refresh();
 		void refreshAppConfig();
 		const unsubscribeBrand = onAppNameChange((name) => {
@@ -204,8 +206,10 @@
 			registerElygateTranslations(name);
 		});
 		window.addEventListener(PLUGIN_CAPABILITIES_CHANGED_EVENT, refresh);
+		window.addEventListener('hashchange', syncHash);
 		return () => {
 			window.removeEventListener(PLUGIN_CAPABILITIES_CHANGED_EVENT, refresh);
+			window.removeEventListener('hashchange', syncHash);
 			unsubscribeBrand();
 		};
 	});
@@ -246,6 +250,7 @@
 			<PanelAssist locale={currentLocale} />
 		{/key}
 
+		{#if currentHash === '#/login'}
 		<div class="locale-switcher" role="group" aria-label={labelFor(currentLocale, 'elygate.language')}>
 			<button
 				type="button"
@@ -258,6 +263,7 @@
 				onclick={() => (currentLocale = 'en')}
 			>English</button>
 		</div>
+		{/if}
 	{/if}
 {/key}
 

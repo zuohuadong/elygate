@@ -158,6 +158,7 @@ describe('panel issue regressions', () => {
 		}
 		expect(patch).toContain('passwordChangedRecently = true');
 		expect(patch).toContain("'刚刚' : 'Just now'");
+		expect(patch).toContain("e.key.toLowerCase() === 'k' || e.code === 'KeyK'");
 	});
 
 	test('locale changes update document metadata and theme labels', async () => {
@@ -166,6 +167,8 @@ describe('panel issue regressions', () => {
 		expect(source).toContain('document.documentElement.lang = locale');
 		expect(source).toContain('builtinPresets[name].label = label');
 		expect(source).toContain('applyLocaleMetadata(currentLocale)');
+		expect(source).toContain("{#if currentHash === '#/login'}");
+		expect(source).toContain("window.addEventListener('hashchange', syncHash)");
 	});
 
 	test('security settings remain editable after configuration loads', async () => {
