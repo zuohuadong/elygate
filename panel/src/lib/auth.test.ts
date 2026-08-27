@@ -34,4 +34,12 @@ describe('Bifrost AuthProvider', () => {
 		expect(JSON.parse(body)).toEqual({ username: 'admin', password: 'secret' });
 		expect(authenticatedCallbacks).toBe(1);
 	});
+
+	test('localizes invalid credentials without leaking the server language', async () => {
+		globalThis.fetch = (() => respond({ error: 'Invalid username or password' }, 401)) as typeof fetch;
+		const zh = await createBifrostAuthProvider(() => 'zh-CN', async () => {}).login({ username: 'admin', password: 'wrong' });
+		const en = await createBifrostAuthProvider(() => 'en', async () => {}).login({ username: 'admin', password: 'wrong' });
+		expect(zh.error?.message).toBe('用户名或密码错误');
+		expect(en.error?.message).toBe('Invalid username or password');
+	});
 });

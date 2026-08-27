@@ -2,8 +2,13 @@
 	import { getAppName } from '../lib/branding';
 	import { onMount } from 'svelte';
 	import { useTranslation } from '@svadmin/core/i18n';
-	import { displayError, parseJsonArray, parseJsonObject, prettyJson } from '../lib/forms';
-	import { encodePathSegment, getListPayload, getObjectPayload, requestJson, type JsonRecord } from '../lib/api';
+	import { displayError, parseJsonObject } from '../lib/forms';
+	import { encodePathSegment, getListPayload, getObjectPayload, getTotal, requestJson, type JsonRecord } from '../lib/api';
+	import { formatPagination } from '../lib/display-format';
+
+	interface McpConfigDraft { key: string; id?: number; clientName: string; tools: string; }
+	interface BudgetDraft { key: string; maxLimit: string | number; resetDuration: string; }
+	interface RateLimitDraft { tokenMaxLimit: string | number; tokenResetDuration: string; requestMaxLimit: string | number; requestResetDuration: string; }
 	import { availableVirtualKeyProviders, duplicateVirtualKeyProviders, providerConfigsForForm, removedVirtualKeyProviderConfigCount, unavailableVirtualKeyProviders, virtualKeyAdvancedProviderFields, virtualKeyProviderConfigsForPayload } from '../lib/resource-forms';
 
 	interface VirtualKeyForm {
@@ -14,21 +19,23 @@
 		expiresAt: string;
 		teamId: string;
 		customerId: string;
-		mcpConfigs: string;
-		budgets: string;
-		rateLimit: string;
+		mcpConfigs: McpConfigDraft[];
+		budgets: BudgetDraft[];
+		rateLimit: RateLimitDraft;
 		advanced: string;
 	}
 	interface Props { resourceName: string; }
+	let draftSequence = 0;
+	function draftKey(prefix: string): string { draftSequence += 1; return `${prefix}-${draftSequence}`; }
 	function emptyForm(): VirtualKeyForm {
-		return { name: '', description: '', isActive: true, calendarAligned: false, expiresAt: '', teamId: '', customerId: '', mcpConfigs: '[]', budgets: '[]', rateLimit: '', advanced: '' };
+		return { name: '', description: '', isActive: true, calendarAligned: false, expiresAt: '', teamId: '', customerId: '', mcpConfigs: [], budgets: [], rateLimit: { tokenMaxLimit: '', tokenResetDuration: '1h', requestMaxLimit: '', requestResetDuration: '1h' }, advanced: '' };
 	}
 
 	function stringValue(record: JsonRecord, key: string): string {
 		return typeof record[key] === 'string' ? String(record[key]) : '';
 	}
 
-	function mcpConfigsForForm(value: unknown): unknown[] {
+	function mcpConfigsForForm(value: unknown): JsonRecord[] {
 		if (!Array.isArray(value)) return [];
 		return value.filter((item): item is JsonRecord => !!item && typeof item === 'object' && !Array.isArray(item)).map((item) => {
 			const client = item.mcp_client && typeof item.mcp_client === 'object' && !Array.isArray(item.mcp_client) ? item.mcp_client as JsonRecord : {};
@@ -67,13 +74,19 @@
 	let error = $state('');
 	let notice = $state('');
 	let revealedKey = $state('');
+	let total = $state(0);
+	let page = $state(1);
+	const pageSize = 20;
+	const totalPages = $derived(Math.max(1, Math.ceil(total / pageSize)));
 	const canAddProviderRoute = $derived(availableVirtualKeyProviders(providers, providerRoutes).length > 0);
 
 	async function load(): Promise<void> {
 		isLoading = true;
 		error = '';
 		try {
-			virtualKeys = getListPayload(await requestJson('/api/governance/virtual-keys'));
+			const payload = await requestJson<unknown>(`/api/governance/virtual-keys?limit=${pageSize}&offset=${(page - 1) * pageSize}`);
+			virtualKeys = getListPayload(payload);
+			total = getTotal(payload, virtualKeys.length);
 			try {
 				providers = getListPayload(await requestJson('/api/providers'));
 				providerStatusAvailable = true;
@@ -161,6 +174,17 @@
 		isOpen = true;
 	}
 
+	function addMcpConfig(): void { form.mcpConfigs.push({ key: draftKey('mcp'), clientName: '', tools: '' }); }
+	function removeMcpConfig(index: number): void { form.mcpConfigs.splice(index, 1); }
+	function addBudget(): void { form.budgets.push({ key: draftKey('budget'), maxLimit: '', resetDuration: '1M' }); }
+	function removeBudget(index: number): void { form.budgets.splice(index, 1); }
+	function optionalPositiveInteger(value: string | number, label: string): number | undefined {
+		if (value === '') return undefined;
+		const parsed = Number(value);
+		if (!Number.isInteger(parsed) || parsed < 1) throw new Error(`${label}${i18n.locale === 'zh-CN' ? '必须是大于 0 的整数。' : ' must be a positive integer.'}`);
+		return parsed;
+	}
+
 	function openEdit(record: JsonRecord): void {
 		editing = record;
 		revealedKey = '';
@@ -174,9 +198,9 @@
 			expiresAt: stringValue(record, 'expires_at'),
 			teamId: stringValue(record, 'team_id'),
 			customerId: stringValue(record, 'customer_id'),
-			mcpConfigs: prettyJson(mcpConfigsForForm(record.mcp_configs), '[]'),
-			budgets: prettyJson(Array.isArray(record.budgets) ? record.budgets : [], '[]'),
-			rateLimit: prettyJson(rateLimitForForm(record.rate_limit)),
+			mcpConfigs: mcpConfigsForForm(record.mcp_configs).map((item) => ({ key: draftKey('mcp'), id: typeof item.id === 'number' ? item.id : undefined, clientName: String(item.mcp_client_name ?? ''), tools: Array.isArray(item.tools_to_execute) ? item.tools_to_execute.map(String).join(', ') : '' })),
+			budgets: (Array.isArray(record.budgets) ? record.budgets : []).filter((item): item is JsonRecord => !!item && typeof item === 'object' && !Array.isArray(item)).map((item) => ({ key: draftKey('budget'), maxLimit: typeof item.max_limit === 'number' ? item.max_limit : '', resetDuration: String(item.reset_duration ?? '1M') })),
+			rateLimit: { tokenMaxLimit: Number(rateLimitForForm(record.rate_limit).token_max_limit) || '', tokenResetDuration: String(rateLimitForForm(record.rate_limit).token_reset_duration ?? '1h'), requestMaxLimit: Number(rateLimitForForm(record.rate_limit).request_max_limit) || '', requestResetDuration: String(rateLimitForForm(record.rate_limit).request_reset_duration ?? '1h') },
 			advanced: '',
 		};
 		error = '';
@@ -207,9 +231,18 @@
 			for (const [index, route] of providerConfigs.entries()) {
 				if (!String(route.provider ?? '').trim()) throw new Error(i18n.t('elygate.required').replace('{field}', `${i18n.t('elygate.provider')} #${index + 1}`));
 			}
-			const mcpConfigs = parseJsonArray(form.mcpConfigs, i18n.t('elygate.mcpConfigs'), invalidJson);
-			const budgets = parseJsonArray(form.budgets, i18n.t('elygate.budgets'), invalidJson);
-			const rateLimit = parseJsonObject(form.rateLimit, i18n.t('elygate.rateLimit'), invalidJson);
+			const mcpConfigs = form.mcpConfigs.map((item, index) => {
+				if (!item.clientName.trim()) throw new Error(i18n.t('elygate.required').replace('{field}', `${i18n.t('elygate.mcpConfigs')} #${index + 1}`));
+				return { ...(item.id !== undefined ? { id: item.id } : {}), mcp_client_name: item.clientName.trim(), tools_to_execute: item.tools.split(',').map((tool) => tool.trim()).filter(Boolean) };
+			});
+			const budgets = form.budgets.map((item, index) => {
+				const maxLimit = Number(item.maxLimit);
+				if (!Number.isFinite(maxLimit) || maxLimit <= 0) throw new Error(`${i18n.t('elygate.budgets')} #${index + 1}${i18n.locale === 'zh-CN' ? '金额必须大于 0。' : ' amount must be greater than 0.'}`);
+				return { max_limit: maxLimit, reset_duration: item.resetDuration };
+			});
+			const tokenMaxLimit = optionalPositiveInteger(form.rateLimit.tokenMaxLimit, i18n.t('elygate.tokenLimit'));
+			const requestMaxLimit = optionalPositiveInteger(form.rateLimit.requestMaxLimit, i18n.t('elygate.requestLimit'));
+			const rateLimit = { ...(tokenMaxLimit !== undefined ? { token_max_limit: tokenMaxLimit, token_reset_duration: form.rateLimit.tokenResetDuration } : {}), ...(requestMaxLimit !== undefined ? { request_max_limit: requestMaxLimit, request_reset_duration: form.rateLimit.requestResetDuration } : {}) };
 			const advanced = parseJsonObject(form.advanced, i18n.t('elygate.advancedJson'), invalidJson);
 			const misplacedProviderFields = virtualKeyAdvancedProviderFields(advanced);
 			if (misplacedProviderFields.length) {
@@ -284,11 +317,12 @@
 </script>
 
 <section class="page-shell" data-resource={resourceName}>
-	<header class="page-heading"><div><p class="eyebrow">{getAppName()} / Governance</p><h1>{i18n.t('elygate.virtualKeys')}</h1><p>{i18n.t('elygate.securityNotice')}</p></div><div class="heading-actions"><button class="primary" type="button" onclick={() => void load()} disabled={isLoading}>{i18n.t('elygate.refresh')}</button><button class="primary" type="button" onclick={openCreate}>{i18n.t('elygate.create')}</button></div></header>
+	<header class="page-heading"><div><p class="eyebrow">{getAppName()} / {i18n.t('elygate.enterprise')}</p><h1>{i18n.t('elygate.virtualKeys')}</h1><p>{i18n.t('elygate.securityNotice')}</p></div><div class="heading-actions"><button class="primary" type="button" onclick={() => void load()} disabled={isLoading}>{i18n.t('elygate.refresh')}</button><button class="primary" type="button" onclick={openCreate}>{i18n.t('elygate.create')}</button></div></header>
 	{#if error}<div class="notice error" role="alert">{error}</div>{/if}
 	{#if notice}<div class="notice success" role="status">{notice}</div>{/if}
 	{#if revealedKey}<div class="secret-reveal" role="status"><div><strong>{i18n.t('elygate.newKeyValue')}</strong><code>{revealedKey}</code></div><button type="button" onclick={() => void copyKey()}>{i18n.t('elygate.copy')}</button><button type="button" onclick={() => (revealedKey = '')}>{i18n.t('elygate.close')}</button></div>{/if}
 	<div class="table-wrap" aria-busy={isLoading}><table><thead><tr><th>{i18n.t('elygate.virtualKeyName')}</th><th>{i18n.t('elygate.status')}</th><th>{i18n.t('elygate.expiresAt')}</th><th>{i18n.t('elygate.description')}</th><th>{i18n.t('elygate.actions')}</th></tr></thead><tbody>{#each virtualKeys as key (stringValue(key, 'id'))}<tr><td><strong>{stringValue(key, 'name')}</strong></td><td class={providerWarning(key) ? 'warning-text' : undefined} title={providerWarning(key)}>{virtualKeyStatus(key)}</td><td>{stringValue(key, 'expires_at') || '—'}</td><td>{stringValue(key, 'description') || '—'}</td><td class="actions"><button type="button" onclick={() => openEdit(key)}>{i18n.t('elygate.edit')}</button><button type="button" onclick={() => void rotate(key)}>{i18n.t('elygate.rotate')}</button><button class="danger" type="button" onclick={() => void remove(key)}>{i18n.t('elygate.delete')}</button></td></tr>{:else}<tr><td colspan="5" class="empty">{i18n.t('elygate.noResults')}</td></tr>{/each}</tbody></table></div>
+	<footer class="pagination"><span>{formatPagination(page, totalPages, total, i18n.locale)}</span><div><button type="button" disabled={page <= 1 || isLoading} onclick={() => { page -= 1; void load(); }}>{i18n.t('elygate.previous')}</button><button type="button" disabled={page >= totalPages || isLoading} onclick={() => { page += 1; void load(); }}>{i18n.t('elygate.next')}</button></div></footer>
 </section>
 
 {#if isOpen}
@@ -325,12 +359,21 @@
 					<button type="button" onclick={addProviderRoute} disabled={!canAddProviderRoute}>{i18n.t('elygate.virtualKeyAddProviderRoute')}</button>
 					<small>{i18n.t('elygate.virtualKeyProviderConfigsHint')}</small>
 				</fieldset>
-				<label>{i18n.t('elygate.mcpConfigs')}<textarea bind:value={form.mcpConfigs} rows="5"></textarea></label>
-				<div class="grid-two">
-					<label>{i18n.t('elygate.budgets')}<textarea bind:value={form.budgets} rows="5"></textarea></label>
-					<label>{i18n.t('elygate.rateLimit')}<textarea bind:value={form.rateLimit} rows="5"></textarea></label>
-				</div>
-				<label>{i18n.t('elygate.advancedJson')}<textarea bind:value={form.advanced} rows="4"></textarea><small>{i18n.t('elygate.virtualKeyAdvancedHint')}</small></label>
+				<fieldset class="structured-editor">
+					<legend>{i18n.t('elygate.mcpConfigs')}</legend>
+					{#each form.mcpConfigs as config, index (config.key)}<div class="structured-row"><label>{i18n.locale === 'zh-CN' ? 'MCP 客户端名称' : 'MCP client name'}<input bind:value={config.clientName} /></label><label>{i18n.locale === 'zh-CN' ? '允许工具（逗号分隔）' : 'Allowed tools (comma-separated)'}<input bind:value={config.tools} /></label><button class="danger" type="button" onclick={() => removeMcpConfig(index)}>{i18n.t('elygate.delete')}</button></div>{:else}<p class="empty">{i18n.locale === 'zh-CN' ? '未授权 MCP 客户端。' : 'No MCP clients are authorized.'}</p>{/each}
+					<button type="button" onclick={addMcpConfig}>+ {i18n.locale === 'zh-CN' ? '添加 MCP 客户端' : 'Add MCP client'}</button>
+				</fieldset>
+				<fieldset class="structured-editor">
+					<legend>{i18n.t('elygate.budgets')}</legend>
+					{#each form.budgets as budget, index (budget.key)}<div class="structured-row"><label>{i18n.locale === 'zh-CN' ? '金额上限' : 'Amount limit'}<input type="number" min="0.01" step="0.01" bind:value={budget.maxLimit} /></label><label>{i18n.locale === 'zh-CN' ? '重置周期' : 'Reset window'}<select bind:value={budget.resetDuration}>{#each ['1m', '5m', '15m', '30m', '1h', '6h', '1d', '1w', '1M', '1Q'] as duration (duration)}<option value={duration}>{duration}</option>{/each}</select></label><button class="danger" type="button" onclick={() => removeBudget(index)}>{i18n.t('elygate.delete')}</button></div>{:else}<p class="empty">{i18n.locale === 'zh-CN' ? '未设置预算。' : 'No budgets configured.'}</p>{/each}
+					<button type="button" onclick={addBudget}>+ {i18n.t('elygate.addBudget')}</button>
+				</fieldset>
+				<fieldset class="structured-editor">
+					<legend>{i18n.locale === 'zh-CN' ? '请求限流' : 'Rate limits'}</legend>
+					<div class="grid-two"><label>{i18n.t('elygate.tokenLimit')}<input type="number" min="1" step="1" bind:value={form.rateLimit.tokenMaxLimit} /></label><label>{i18n.locale === 'zh-CN' ? 'Token 重置周期' : 'Token reset window'}<select bind:value={form.rateLimit.tokenResetDuration}>{#each ['1m', '5m', '15m', '30m', '1h', '6h', '1d', '1w', '1M'] as duration (duration)}<option value={duration}>{duration}</option>{/each}</select></label><label>{i18n.t('elygate.requestLimit')}<input type="number" min="1" step="1" bind:value={form.rateLimit.requestMaxLimit} /></label><label>{i18n.locale === 'zh-CN' ? '请求重置周期' : 'Request reset window'}<select bind:value={form.rateLimit.requestResetDuration}>{#each ['1m', '5m', '15m', '30m', '1h', '6h', '1d', '1w', '1M'] as duration (duration)}<option value={duration}>{duration}</option>{/each}</select></label></div>
+				</fieldset>
+				<details class="advanced-editor"><summary>{i18n.locale === 'zh-CN' ? '其他高级字段' : 'Other advanced fields'}</summary><label>{i18n.t('elygate.advancedJson')}<textarea bind:value={form.advanced} rows="4"></textarea><small>{i18n.t('elygate.virtualKeyAdvancedHint')}</small></label></details>
 				<footer>
 					<button type="button" onclick={() => (isOpen = false)}>{i18n.t('elygate.cancel')}</button>
 					<button class="primary" type="submit" disabled={isSaving}>{i18n.t('elygate.save')}</button>
@@ -346,7 +389,7 @@
 	.eyebrow { color: var(--primary); font-size: .75rem; font-weight: 700; letter-spacing: .12em; margin: 0 0 .45rem; text-transform: uppercase; }
 	h1 { margin: 0; font-size: clamp(1.5rem, 3vw, 2.15rem); }
 	.page-heading p { color: var(--muted-foreground); margin: .55rem 0 0; }
-	.heading-actions, .actions, footer, .checks { align-items: center; display: flex; gap: .5rem; }
+	.heading-actions, .actions, footer, .checks, .pagination, .pagination div { align-items: center; display: flex; gap: .5rem; }
 	button { background: var(--muted); border: 1px solid var(--border); border-radius: .55rem; color: var(--foreground); cursor: pointer; font-weight: 600; padding: .55rem .75rem; white-space: nowrap; }
 	button.primary { background: var(--primary); border-color: var(--primary); color: var(--primary-foreground); }
 	button.danger { color: var(--destructive); }
@@ -372,6 +415,13 @@
 	textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem; resize: vertical; }
 	.route-editor { border: 1px solid var(--border); border-radius: .65rem; display: grid; gap: .75rem; margin: 0; padding: .85rem; }
 	.route-editor legend { font-size: .85rem; font-weight: 700; padding: 0 .3rem; }
+	.structured-editor { border: 1px solid var(--border); border-radius: .65rem; display: grid; gap: .75rem; margin: 0; padding: .85rem; }
+	.structured-editor legend { font-size: .85rem; font-weight: 700; padding: 0 .3rem; }
+	.structured-row { align-items: end; display: grid; gap: .65rem; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; }
+	.advanced-editor { border: 1px solid var(--border); border-radius: .65rem; padding: .75rem; }
+	.advanced-editor summary { cursor: pointer; font-weight: 700; }
+	.advanced-editor label { margin-top: .75rem; }
+	.pagination { justify-content: space-between; margin-top: 1rem; }
 	.route-row { border-bottom: 1px solid var(--border); display: grid; gap: .7rem; padding-bottom: .85rem; }
 	.route-row header { align-items: center; display: flex; justify-content: space-between; }
 	.check { align-items: center; display: flex; font-weight: 500; gap: .45rem; }
@@ -382,5 +432,5 @@
 	.checks label { align-items: center; display: flex; font-weight: 500; }
 	.checks input { width: auto; }
 	form footer { justify-content: flex-end; }
-	@media (max-width: 760px) { .page-heading, .secret-reveal { align-items: stretch; flex-direction: column; } .grid-two { grid-template-columns: 1fr; } }
+	@media (max-width: 760px) { .page-heading, .secret-reveal, .pagination { align-items: stretch; flex-direction: column; } .grid-two, .structured-row { grid-template-columns: 1fr; } }
 </style>

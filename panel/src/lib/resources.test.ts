@@ -22,6 +22,7 @@ const requiredParityResources = [
 	'models',
 	'model-catalog',
 	'logs',
+	'request-logs',
 	'teams',
 	'customers',
 	'mcp-logs',
@@ -95,7 +96,7 @@ describe('panel resource registry', () => {
 	test('exposes canonical workflows while retaining hidden compatibility routes', () => {
 		const resourceNames = createResources('en', true, enterpriseResources).map((resource) => resource.name).sort();
 		const menuNames = leafResourceNames(createMenu('en', enterpriseResourceNames, true, enterpriseResources)).sort();
-		const hiddenCompatibilityRoutes = ['adaptive-routing', 'budgets', 'complexity-analyzer', 'prompt-folders', 'rate-limits'];
+		const hiddenCompatibilityRoutes = ['adaptive-routing', 'budgets', 'complexity-analyzer', 'prompt-folders', 'rate-limits', 'request-logs'];
 		expect(new Set(menuNames).size).toBe(menuNames.length);
 		expect(menuNames).toEqual(resourceNames.filter((name) => !hiddenCompatibilityRoutes.includes(name)));
 		expect(resourceNames).toEqual(expect.arrayContaining(hiddenCompatibilityRoutes));

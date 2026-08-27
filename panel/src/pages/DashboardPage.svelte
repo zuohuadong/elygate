@@ -124,10 +124,13 @@
 		const csv = [['model', 'provider', 'requests', 'tokens', 'cost', 'success_rate', 'avg_latency_ms', 'throughput'], ...rows]
 			.map((row) => row.map((value) => `"${String(value ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
 		const link = document.createElement('a');
-		link.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+		const objectUrl = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+		link.href = objectUrl;
+		document.body.append(link);
 		link.download = `${getAppName().toLowerCase()}-dashboard-${period}.csv`;
 		link.click();
-		URL.revokeObjectURL(link.href);
+		link.remove();
+		window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
 	}
 
 	onMount(() => {
@@ -138,7 +141,7 @@
 <section class="page-shell">
 	<header class="page-heading">
 		<div>
-			<p class="eyebrow">{getAppName()} / Observability</p>
+			<p class="eyebrow">{getAppName()} / {i18n.t('elygate.observability')}</p>
 			<h1>{i18n.t('elygate.dashboard')}</h1>
 			<p>{i18n.t('elygate.dashboardHint')}</p>
 		</div>

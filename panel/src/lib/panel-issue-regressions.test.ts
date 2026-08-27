@@ -102,6 +102,70 @@ describe('panel issue regressions', () => {
 		expect(source).not.toContain('bind:value={form.providerConfigs}');
 	});
 
+	test('virtual key governance uses backend pagination and structured complex fields', async () => {
+		const source = await Bun.file(new URL('../pages/VirtualKeysPage.svelte', import.meta.url)).text();
+		expect(source).toContain('/api/governance/virtual-keys?limit=${pageSize}&offset=${(page - 1) * pageSize}');
+		expect(source).toContain('formatPagination(page, totalPages, total, i18n.locale)');
+		expect(source).toContain('form.mcpConfigs as config');
+		expect(source).toContain('form.budgets as budget');
+		expect(source).toContain('form.rateLimit.tokenMaxLimit');
+		expect(source).toContain('<details class="advanced-editor">');
+		expect(source).not.toContain('bind:value={form.mcpConfigs}');
+		expect(source).not.toContain('bind:value={form.budgets}');
+		expect(source).not.toContain('bind:value={form.rateLimit}');
+	});
+
+	test('dashboard CSV uses a mounted link and releases the object URL asynchronously', async () => {
+		const source = await Bun.file(new URL('../pages/DashboardPage.svelte', import.meta.url)).text();
+		expect(source).toContain('document.body.append(link)');
+		expect(source).toContain('link.click()');
+		expect(source).toContain('link.remove()');
+		expect(source).toContain('window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0)');
+	});
+
+	test('MCP settings reads the real client configuration and remains distinct from gateway editing', async () => {
+		const source = await Bun.file(new URL('../pages/McpSettingsPage.svelte', import.meta.url)).text();
+		expect(source).toContain("configFormFromDocument(await requestJson('/api/config'))");
+		expect(source).toContain('config.mcpServerAuthMode');
+		expect(source).toContain('config.mcpToolSyncInterval');
+		expect(source).not.toContain('document.mcp');
+		const app = await Bun.file(new URL('../App.svelte', import.meta.url)).text();
+		expect(app).toContain("'mcp-settings': { list: McpSettingsPage }");
+		expect(app).toContain("'mcp-gateway-config': { list: ConfigPage }");
+	});
+
+	test('governance, provider, routing, and log values are localized at render time', async () => {
+		const governance = await Bun.file(new URL('../pages/GovernanceManagementPage.svelte', import.meta.url)).text();
+		const providers = await Bun.file(new URL('../pages/ProvidersPage.svelte', import.meta.url)).text();
+		const routing = await Bun.file(new URL('../pages/RoutingRulesPage.svelte', import.meta.url)).text();
+		const logs = await Bun.file(new URL('../pages/LogsPage.svelte', import.meta.url)).text();
+		const mcpLogs = await Bun.file(new URL('../pages/McpLogsPage.svelte', import.meta.url)).text();
+		expect(governance).toContain("text('供应商治理', 'Provider governance')");
+		expect(governance).toContain('scopeLabel(record.scope_kind)');
+		expect(governance).toContain('requestTypesLabel(record.request_types)');
+		expect(providers).toContain("status === 'success' || status === 'active'");
+		expect(routing).toContain('scopeLabel(rule.scope)');
+		expect(logs).toContain("statusLabel(value(log, 'status'))");
+		expect(mcpLogs).toContain("statusLabel(value(log, 'status'))");
+	});
+
+	test('the svadmin compatibility patch is pinned and covers reported settings regressions', async () => {
+		const packageJson = await Bun.file(new URL('../../package.json', import.meta.url)).json();
+		const patch = await Bun.file(`${process.cwd()}/patches/@svadmin%2Fui@0.42.2.patch`).text();
+		expect(packageJson.patchedDependencies['@svadmin/ui@0.42.2']).toBe('patches/@svadmin%2Fui@0.42.2.patch');
+		for (const contract of ['profile.newPassword', "const version = '0.42.2'", 'whitespace-nowrap', "'用户' : 'User'", '关闭 / Close', 'CI 部署令牌', '3 个月前']) {
+			expect(patch).toContain(contract);
+		}
+	});
+
+	test('locale changes update document metadata and theme labels', async () => {
+		const source = await Bun.file(new URL('../App.svelte', import.meta.url)).text();
+		expect(source).toContain('document.title = locale === \'zh-CN\'');
+		expect(source).toContain('document.documentElement.lang = locale');
+		expect(source).toContain('builtinPresets[name].label = label');
+		expect(source).toContain('applyLocaleMetadata(currentLocale)');
+	});
+
 	test('security settings remain editable after configuration loads', async () => {
 		const source = await Bun.file(new URL('../pages/ConfigPage.svelte', import.meta.url)).text();
 		for (const field of ['authEnabled', 'enforceAuthOnInference', 'allowDirectKeys', 'disableDbPingsInHealth', 'dropExcessRequests']) {

@@ -50,7 +50,20 @@
 		'large-payload-config': 'elygate.largePayloadConfig',
 	};
 
-	const eyebrow = $derived(`${getAppName()} / ${resourceName === 'config' ? 'Config' : resourceName}`);
+	const sectionLabels: Record<string, string> = {
+		config: 'elygate.system',
+		'client-settings': 'elygate.system',
+		'compatibility-config': 'elygate.system',
+		'security-config': 'elygate.system',
+		'performance-config': 'elygate.system',
+		'logging-config': 'elygate.system',
+		'pricing-config': 'elygate.system',
+		'observability-config': 'elygate.observability',
+		'mcp-settings': 'elygate.mcp',
+		'mcp-gateway-config': 'elygate.system',
+		'large-payload-config': 'elygate.system',
+	};
+	const eyebrow = $derived(`${getAppName()} / ${i18n.t(sectionLabels[resourceName] ?? 'elygate.system')}`);
 	const titleKey = $derived(titleKeys[resourceName] ?? 'elygate.config');
 
 	let rawConfig = $state<JsonRecord>({});

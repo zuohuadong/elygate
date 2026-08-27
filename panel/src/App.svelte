@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { AdminApp } from '@svadmin/ui';
+	import { builtinPresets } from '@svadmin/core';
 	import * as enterprisePanel from '@elygate/enterprise-panel';
 	import { ApiError, configureRequestErrorFormatter, getListPayload, getSessionStatus, requestJson } from './lib/api';
 	import { createBifrostAuthProvider } from './lib/auth';
@@ -9,7 +10,7 @@
 		registerEnterprisePanelTranslations,
 		resolveEnterprisePanelManifest,
 	} from './lib/enterprise-panel';
-	import { getAppName, onAppNameChange, resolveAppName, resolveBranding } from './lib/branding';
+	import { getAppName, getEnName, onAppNameChange, resolveAppName, resolveBranding } from './lib/branding';
 	import { labelFor, registerElygateTranslations, type ElygateLocale } from './lib/i18n';
 	import { pluginFeatureResourcePages } from './lib/menu-policy';
 	import { resolvePublicPanelRoute } from './lib/public-routes';
@@ -33,6 +34,7 @@
 	import McpLogsPage from './pages/McpLogsPage.svelte';
 	import McpManagementPage from './pages/McpManagementPage.svelte';
 	import McpUsageGuidePage from './pages/McpUsageGuidePage.svelte';
+	import McpSettingsPage from './pages/McpSettingsPage.svelte';
 	import McpAuthFlowPage from './pages/McpAuthFlowPage.svelte';
 	import ModelCatalogPage from './pages/ModelCatalogPage.svelte';
 	import ModelLimitsPage from './pages/ModelLimitsPage.svelte';
@@ -77,6 +79,10 @@
 	let currentAppName = $state(getAppName());
 	let currentLocale = $state<ElygateLocale>('zh-CN');
 	let runtimeFeatureNames = $state.raw<string[]>([]);
+	const themeLabels = {
+		'zh-CN': { neutral: '中性色', indigo: '靛蓝色', blue: '蓝色', green: '绿色', rose: '玫瑰色', orange: '橙色', violet: '紫罗兰色' },
+		en: { neutral: 'Neutral', indigo: 'Indigo', blue: 'Blue', green: 'Green', rose: 'Rose', orange: 'Orange', violet: 'Violet' },
+	} as const;
 	const enterprisePageNames = Object.keys(enterpriseResourcePages);
 	const availableEnterpriseResources = $derived([...new Set([...enterprisePageNames, ...runtimeFeatureNames])]);
 
@@ -115,11 +121,26 @@
 	);
 	const loginHint = $derived(labelFor(currentLocale, 'elygate.loginHint'));
 
+	function applyLocaleMetadata(locale: ElygateLocale): void {
+		if (typeof document !== 'undefined') {
+			document.title = locale === 'zh-CN' ? `${currentAppName} 管理台` : `${getEnName()} Admin Console`;
+			document.documentElement.lang = locale;
+		}
+		for (const [name, label] of Object.entries(themeLabels[locale])) {
+			if (builtinPresets[name]) builtinPresets[name].label = label;
+		}
+	}
+
+	$effect(() => {
+		applyLocaleMetadata(currentLocale);
+	});
+
 	const builtInResourcePages = {
 		providers: { list: ProvidersPage },
 		'virtual-keys': { list: VirtualKeysPage },
 		models: { list: BifrostResourcePage },
 		logs: { list: LogsPage },
+		'request-logs': { list: LogsPage },
 		employees: { list: EmployeesPage },
 		teams: { list: GovernanceManagementPage },
 		customers: { list: GovernanceManagementPage },
@@ -152,7 +173,7 @@
 		'logging-config': { list: ConfigPage },
 		'pricing-config': { list: ConfigPage },
 		'observability-config': { list: ConfigPage },
-		'mcp-settings': { list: ConfigPage },
+		'mcp-settings': { list: McpSettingsPage },
 		'mcp-gateway-config': { list: ConfigPage },
 		'complexity-analyzer': { list: RoutingNetworkSettingsPage },
 		'complexity-router': { list: RoutingNetworkSettingsPage },

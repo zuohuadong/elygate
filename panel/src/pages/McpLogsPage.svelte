@@ -47,6 +47,16 @@
 		return candidate === null || candidate === undefined || candidate === '' ? '—' : String(candidate);
 	}
 
+	function statusLabel(value: string): string {
+		const labels: Record<string, string> = {
+			success: i18n.t('elygate.success'),
+			error: i18n.t('elygate.error'),
+			cancelled: i18n.t('elygate.cancelled'),
+			processing: i18n.t('elygate.processing'),
+		};
+		return labels[value] ?? value;
+	}
+
 	function filterParams(): URLSearchParams {
 		const params = new URLSearchParams({ period });
 		if (query.trim()) params.set('content_search', query.trim());
@@ -155,7 +165,7 @@
 
 <section class="page-shell">
 	<header class="page-heading">
-		<div><p class="eyebrow">{getAppName()} / MCP</p><h1>{i18n.t('elygate.mcpLogs')}</h1><p>{i18n.t('elygate.mcpLogsHint')}</p></div>
+		<div><p class="eyebrow">{getAppName()} / {i18n.t('elygate.mcp')}</p><h1>{i18n.t('elygate.mcpLogs')}</h1><p>{i18n.t('elygate.mcpLogsHint')}</p></div>
 		<div class="heading-actions"><button class="danger" type="button" onclick={() => void deleteSelected()} disabled={selectedIds.length === 0 || isMutating}>{i18n.t('elygate.deleteSelected')} ({selectedIds.length})</button><button class="primary" type="button" onclick={() => void load()} disabled={isLoading}>{i18n.t('elygate.refresh')}</button></div>
 	</header>
 
@@ -178,15 +188,15 @@
 		<label>{i18n.t('elygate.search')}<input bind:value={query} /></label>
 		<label>{i18n.t('elygate.toolName')}<select bind:value={toolName}><option value="">{i18n.t('elygate.all')}</option>{#each toolNames as item (item)}<option value={item}>{item}</option>{/each}</select></label>
 		<label>{i18n.t('elygate.serverLabel')}<select bind:value={serverLabel}><option value="">{i18n.t('elygate.all')}</option>{#each serverLabels as item (item)}<option value={item}>{item}</option>{/each}</select></label>
-		<label>{i18n.t('elygate.status')}<select bind:value={status}><option value="">{i18n.t('elygate.all')}</option><option value="success">success</option><option value="error">error</option><option value="cancelled">cancelled</option><option value="processing">processing</option></select></label>
-		<label>{i18n.t('elygate.timeRange')}<select bind:value={period}><option value="1h">1h</option><option value="24h">24h</option><option value="7d">7d</option><option value="30d">30d</option></select></label>
+		<label>{i18n.t('elygate.status')}<select bind:value={status}><option value="">{i18n.t('elygate.all')}</option><option value="success">{i18n.t('elygate.success')}</option><option value="error">{i18n.t('elygate.error')}</option><option value="cancelled">{i18n.t('elygate.cancelled')}</option><option value="processing">{i18n.t('elygate.processing')}</option></select></label>
+		<label>{i18n.t('elygate.timeRange')}<select bind:value={period}><option value="1h">{i18n.t('elygate.period.1h')}</option><option value="24h">{i18n.t('elygate.period.24h')}</option><option value="7d">{i18n.t('elygate.period.7d')}</option><option value="30d">{i18n.t('elygate.period.30d')}</option></select></label>
 		<label>{i18n.t('elygate.pageSize')}<select bind:value={pageSize}><option value="20">20</option><option value="50">50</option><option value="100">100</option></select></label>
 		<button type="submit" disabled={isLoading}>{i18n.t('elygate.search')}</button>
 	</form>
 
 	<div class="table-wrap" aria-busy={isLoading}>
 		<table><thead><tr><th></th><th>{i18n.t('elygate.timestamp')}</th><th>{i18n.t('elygate.toolName')}</th><th>{i18n.t('elygate.serverLabel')}</th><th>{i18n.t('elygate.status')}</th><th>{i18n.t('elygate.latency')}</th><th>{i18n.t('elygate.totalCost')}</th><th>{i18n.t('elygate.app')}</th></tr></thead><tbody>
-			{#each logs as log (String(log.id))}<tr><td><input type="checkbox" checked={selectedIds.includes(String(log.id))} onchange={(event) => toggleSelected(String(log.id), event.currentTarget.checked)} aria-label={i18n.t('elygate.select')} /></td><td><button class="link" type="button" onclick={() => void openDetail(log)}>{new Date(value(log, 'timestamp')).toLocaleString(i18n.locale)}</button></td><td>{value(log, 'tool_name')}</td><td>{value(log, 'server_label')}</td><td><span class={['status', value(log, 'status')]}>{value(log, 'status')}</span></td><td>{Number(log.latency ?? 0).toFixed(0)} ms</td><td>{formatUsdCost(log.cost)}</td><td>{value(log, 'app')}</td></tr>{:else}<tr><td colspan="8">{isLoading ? i18n.t('elygate.loading') : i18n.t('elygate.empty')}</td></tr>{/each}
+			{#each logs as log (String(log.id))}<tr><td><input type="checkbox" checked={selectedIds.includes(String(log.id))} onchange={(event) => toggleSelected(String(log.id), event.currentTarget.checked)} aria-label={i18n.t('elygate.select')} /></td><td><button class="link" type="button" onclick={() => void openDetail(log)}>{new Date(value(log, 'timestamp')).toLocaleString(i18n.locale)}</button></td><td>{value(log, 'tool_name')}</td><td>{value(log, 'server_label')}</td><td><span class={['status', value(log, 'status')]}>{statusLabel(value(log, 'status'))}</span></td><td>{Number(log.latency ?? 0).toFixed(0)} ms</td><td>{formatUsdCost(log.cost)}</td><td>{value(log, 'app')}</td></tr>{:else}<tr><td colspan="8">{isLoading ? i18n.t('elygate.loading') : i18n.t('elygate.empty')}</td></tr>{/each}
 		</tbody></table>
 	</div>
 	<footer class="pagination"><span>{formatPagination(page, totalPages, total, i18n.locale)}</span><div><button type="button" onclick={() => movePage(page - 1)} disabled={page <= 1 || isLoading}>{i18n.t('elygate.previous')}</button><button type="button" onclick={() => movePage(page + 1)} disabled={!hasNext || isLoading}>{i18n.t('elygate.next')}</button></div></footer>
@@ -196,7 +206,7 @@
 	<div class="drawer-backdrop" role="presentation" onclick={() => (selectedLog = null)}></div>
 	<aside class="drawer" aria-label={i18n.t('elygate.mcpLogDetails')}>
 		<header><div><p>{value(selectedLog, 'server_label')}</p><h2>{value(selectedLog, 'tool_name')}</h2></div><button type="button" onclick={() => (selectedLog = null)}>{i18n.t('elygate.close')}</button></header>
-		<div class="detail-grid"><div><span>{i18n.t('elygate.status')}</span><strong>{value(selectedLog, 'status')}</strong></div><div><span>{i18n.t('elygate.latency')}</span><strong>{Number(selectedLog.latency ?? 0).toFixed(0)} ms</strong></div><div><span>{i18n.t('elygate.virtualKey')}</span><strong>{value(selectedLog, 'virtual_key_name')}</strong></div><div><span>{i18n.t('elygate.llmRequestId')}</span><strong>{value(selectedLog, 'llm_request_id')}</strong></div></div>
+		<div class="detail-grid"><div><span>{i18n.t('elygate.status')}</span><strong>{statusLabel(value(selectedLog, 'status'))}</strong></div><div><span>{i18n.t('elygate.latency')}</span><strong>{Number(selectedLog.latency ?? 0).toFixed(0)} ms</strong></div><div><span>{i18n.t('elygate.virtualKey')}</span><strong>{value(selectedLog, 'virtual_key_name')}</strong></div><div><span>{i18n.t('elygate.llmRequestId')}</span><strong>{value(selectedLog, 'llm_request_id')}</strong></div></div>
 		<h3>{i18n.t('elygate.arguments')}</h3><pre>{formatted(selectedLog.arguments)}</pre>
 		<h3>{i18n.t('elygate.result')}</h3><pre>{formatted(selectedLog.result)}</pre>
 		{#if selectedLog.error_details}<h3>{i18n.t('elygate.errorDetails')}</h3><pre>{formatted(selectedLog.error_details)}</pre>{/if}

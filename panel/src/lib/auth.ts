@@ -11,6 +11,8 @@ const authCopy = {
 		authDisabled: '管理员认证尚未启用。请先在部署配置中启用 auth_config。',
 		sessionUnknown: '无法确认登录状态。',
 		adminName: '管理员',
+		userRole: '用户',
+		invalidCredentials: '用户名或密码错误',
 	},
 	en: {
 		loginRequired: 'Enter a username and password',
@@ -19,6 +21,8 @@ const authCopy = {
 		authDisabled: 'Administrator authentication is disabled. Enable auth_config in the deployment first.',
 		sessionUnknown: 'Unable to confirm the sign-in state.',
 		adminName: 'Administrator',
+		userRole: 'User',
+		invalidCredentials: 'Invalid username or password',
 	},
 } as const;
 
@@ -28,6 +32,12 @@ function authLabel(locale: ElygateLocale, key: keyof typeof authCopy.en): string
 
 function failed(message: string): AuthActionResult {
 	return { success: false, error: { message } };
+}
+
+function loginErrorMessage(locale: ElygateLocale, error: unknown): string {
+	const message = error instanceof Error ? error.message.trim() : '';
+	if (/invalid username or password/i.test(message)) return authLabel(locale, 'invalidCredentials');
+	return message || authLabel(locale, 'loginFailed');
 }
 
 export function createBifrostAuthProvider(
@@ -48,7 +58,7 @@ export function createBifrostAuthProvider(
 				await onAuthenticated();
 				return { success: true, redirectTo: '/' };
 			} catch (error) {
-				return failed(error instanceof Error ? error.message : authLabel(getLocale(), 'loginFailed'));
+				return failed(loginErrorMessage(getLocale(), error));
 			}
 		},
 
@@ -87,7 +97,7 @@ export function createBifrostAuthProvider(
 		async getIdentity(): Promise<Identity | null> {
 			const status = await getSessionStatus();
 			if (!status.is_auth_enabled || !status.has_valid_token) return null;
-			return { id: 'admin', name: authLabel(getLocale(), 'adminName') };
+			return { id: 'admin', name: authLabel(getLocale(), 'adminName'), role: authLabel(getLocale(), 'userRole') };
 		},
 	};
 }

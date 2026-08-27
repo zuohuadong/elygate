@@ -3,12 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-	"scripts": {
-		"dev": "vite --host 127.0.0.1 --port 3000",
-		"build": "vite build && bun run check && bun run copy-build",
-		"check": "svelte-check --tsconfig ./tsconfig.json",
-		"test": "bun test src/lib/*.test.ts",
-		"copy-build": "rm -rf ../transports/bifrost-http/ui && cp -R out ../transports/bifrost-http/ui"
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 3000",
+    "build": "vite build && bun run check && bun run copy-build",
+    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "test": "bun test src/lib/*.test.ts",
+    "copy-build": "rm -rf ../transports/bifrost-http/ui && cp -R out ../transports/bifrost-http/ui"
   },
   "dependencies": {
     "@svadmin/core": "0.36.3",
@@ -27,5 +27,8 @@
     "tailwindcss": "^4.3.3",
     "typescript": "^6.0.3",
     "vite": "^8.1.5"
+  },
+  "patchedDependencies": {
+    "@svadmin/ui@0.42.2": "patches/@svadmin%2Fui@0.42.2.patch"
   }
 }

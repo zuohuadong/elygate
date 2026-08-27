@@ -204,7 +204,7 @@
 
 <section class="page-shell" data-resource={resourceName}>
 	<header class="page-heading">
-		<div><p class="eyebrow">{getAppName()} / Organization</p><h1>{text('员工管理', 'Employees')}</h1><p>{text('管理员工身份、岗位、账号状态和专属虚拟密钥。员工通过独立门户查看本人用量。', 'Manage employee identity, role, status, and dedicated virtual key. Employees use a separate self-service portal.')}</p></div>
+		<div><p class="eyebrow">{getAppName()} / {text('企业级管理', 'Enterprise management')}</p><h1>{text('员工管理', 'Employees')}</h1><p>{text('管理员工身份、岗位、账号状态和专属虚拟密钥。员工通过独立门户查看本人用量。', 'Manage employee identity, role, status, and dedicated virtual key. Employees use a separate self-service portal.')}</p></div>
 		<div class="heading-actions"><a class="secondary" href="/employee" target="_blank" rel="noreferrer">{text('员工门户', 'Employee portal')}</a><button class="secondary" type="button" onclick={() => void load()} disabled={loading}>{text('刷新', 'Refresh')}</button><button class="primary" type="button" onclick={openCreate}>{text('新增员工', 'Add employee')}</button></div>
 	</header>
 
@@ -224,7 +224,7 @@
 {#if modalOpen}
 	<div class="modal-backdrop" role="presentation" onclick={(event) => { if (event.currentTarget === event.target) closeModal(); }}>
 		<div bind:this={modalElement} class="modal" role="dialog" aria-modal="true" aria-labelledby="employee-modal-title" tabindex="-1">
-			<header><div><p class="eyebrow">IDENTITY</p><h2 id="employee-modal-title">{editing ? text('编辑员工', 'Edit employee') : text('新增员工', 'Add employee')}</h2></div><button class="icon-button" type="button" aria-label={text('关闭', 'Close')} title={text('关闭', 'Close')} onclick={closeModal}>×</button></header>
+			<header><div><h2 id="employee-modal-title">{editing ? text('编辑员工', 'Edit employee') : text('新增员工', 'Add employee')}</h2></div><button class="icon-button" type="button" aria-label={text('关闭', 'Close')} title={text('关闭', 'Close')} onclick={closeModal}>×</button></header>
 			<form onsubmit={submit}>
 				<div class="form-grid"><label>{text('用户名', 'Username')}<input bind:value={form.username} autocomplete="off" placeholder="name.code" /></label><label>{text('姓名', 'Name')}<input bind:value={form.name} /></label><label>{text('部门', 'Department')}<input bind:value={form.department} /></label><label>{text('职务 / 岗位', 'Job title')}<input bind:value={form.jobTitle} /></label><label>{text('适用软件', 'Applications')}<input bind:value={form.applications} /></label><label>{text('账号类型', 'Account type')}<input bind:value={form.accountType} /></label><label class="wide">{text('专属虚拟密钥', 'Dedicated virtual key')}<select bind:value={form.virtualKeyId} disabled={editing !== null}><option value="">{text('请选择', 'Select')}</option>{#each virtualKeys as key (stringValue(key, 'id'))}<option value={stringValue(key, 'id')}>{stringValue(key, 'name')} · {stringValue(key, 'id')}</option>{/each}</select><small>{editing ? text('创建后不可解绑或转移；如需更换，请由管理员执行受控迁移。', 'Assignments cannot be removed or transferred after creation.') : text('每名员工必须绑定一个专属 Key。', 'Each employee requires one dedicated key.')}</small></label><label class="toggle wide"><input type="checkbox" bind:checked={form.isActive} /><span>{text('账号启用', 'Account active')}</span></label></div>
 				<footer><button class="secondary" type="button" onclick={closeModal}>{text('取消', 'Cancel')}</button><button class="primary" type="submit" disabled={saving}>{saving ? text('保存中…', 'Saving…') : text('保存', 'Save')}</button></footer>

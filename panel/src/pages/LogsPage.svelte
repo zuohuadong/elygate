@@ -60,6 +60,16 @@
 		return candidate === null || candidate === undefined ? '—' : String(candidate);
 	}
 
+	function statusLabel(value: string): string {
+		const labels: Record<string, string> = {
+			success: i18n.t('elygate.success'),
+			error: i18n.t('elygate.error'),
+			cancelled: i18n.t('elygate.cancelled'),
+			processing: i18n.t('elygate.processing'),
+		};
+		return labels[value] ?? value;
+	}
+
 	function filterParams(): URLSearchParams {
 		const params = new URLSearchParams({ period });
 		if (query.trim()) params.set('content_search', query.trim());
@@ -395,7 +405,7 @@
 <section class="page-shell">
 	<header class="page-heading">
 		<div>
-			<p class="eyebrow">{getAppName()} / Observability</p>
+			<p class="eyebrow">{getAppName()} / {i18n.t('elygate.observability')}</p>
 			<h1>{i18n.t('elygate.logs')}</h1>
 			<p><span class={['live-dot', liveConnected ? 'connected' : 'disconnected']}></span>{liveConnected ? i18n.t('elygate.liveConnected') : i18n.t('elygate.liveDisconnected')}</p>
 		</div>
@@ -422,8 +432,8 @@
 		<label>{i18n.t('elygate.search')}<input bind:value={query} /></label>
 		<label>{i18n.t('elygate.provider')}<select bind:value={provider}><option value="">{i18n.t('elygate.all')}</option>{#each providers as item (item)}<option value={item}>{item}</option>{/each}</select></label>
 		<label>{i18n.t('elygate.model')}<select bind:value={model}><option value="">{i18n.t('elygate.all')}</option>{#each models as item (item)}<option value={item}>{item}</option>{/each}</select></label>
-		<label>{i18n.t('elygate.status')}<select bind:value={status}><option value="">{i18n.t('elygate.all')}</option><option value="success">success</option><option value="error">error</option><option value="cancelled">cancelled</option><option value="processing">processing</option></select></label>
-		<label>{i18n.t('elygate.timeRange')}<select bind:value={period}><option value="1h">1h</option><option value="24h">24h</option><option value="7d">7d</option><option value="30d">30d</option></select></label>
+		<label>{i18n.t('elygate.status')}<select bind:value={status}><option value="">{i18n.t('elygate.all')}</option><option value="success">{i18n.t('elygate.success')}</option><option value="error">{i18n.t('elygate.error')}</option><option value="cancelled">{i18n.t('elygate.cancelled')}</option><option value="processing">{i18n.t('elygate.processing')}</option></select></label>
+		<label>{i18n.t('elygate.timeRange')}<select bind:value={period}><option value="1h">{i18n.t('elygate.period.1h')}</option><option value="24h">{i18n.t('elygate.period.24h')}</option><option value="7d">{i18n.t('elygate.period.7d')}</option><option value="30d">{i18n.t('elygate.period.30d')}</option></select></label>
 		<label>{i18n.t('elygate.pageSize')}<select bind:value={pageSize}><option value="20">20</option><option value="50">50</option><option value="100">100</option></select></label>
 		<button type="submit" disabled={isLoading}>{i18n.t('elygate.search')}</button>
 	</form>
@@ -432,7 +442,7 @@
 		<table><thead><tr><th></th><th>{i18n.t('elygate.timestamp')}</th><th>{i18n.t('elygate.provider')}</th><th>{i18n.t('elygate.model')}</th><th>{i18n.t('elygate.status')}</th><th>{i18n.t('elygate.latency')}</th><th>{i18n.t('elygate.totalCost')}</th><th>{i18n.t('elygate.app')}</th><th>{i18n.t('elygate.description')}</th><th>{i18n.t('elygate.actions')}</th></tr></thead><tbody>
 			{#each logs as log (String(log.id))}
 				<tr>
-					<td><input type="checkbox" checked={selectedIds.includes(String(log.id))} onchange={(event) => toggleSelected(String(log.id), event.currentTarget.checked)} aria-label={i18n.t('elygate.select')} /></td><td>{new Date(value(log, 'timestamp')).toLocaleString(i18n.locale)}</td><td>{value(log, 'provider')}</td><td>{value(log, 'model')}</td><td><span class={['status', value(log, 'status')]}>{value(log, 'status')}</span></td><td>{Number(log.latency ?? 0).toFixed(0)} ms</td><td>{formatLogCost(log.cost)}</td><td>{value(log, 'app')}</td><td>{value(log, 'content_summary')}</td><td><button type="button" onclick={() => void openDetail(log)}>{i18n.t('elygate.inspect')}</button></td>
+					<td><input type="checkbox" checked={selectedIds.includes(String(log.id))} onchange={(event) => toggleSelected(String(log.id), event.currentTarget.checked)} aria-label={i18n.t('elygate.select')} /></td><td>{new Date(value(log, 'timestamp')).toLocaleString(i18n.locale)}</td><td>{value(log, 'provider')}</td><td>{value(log, 'model')}</td><td><span class={['status', value(log, 'status')]}>{statusLabel(value(log, 'status'))}</span></td><td>{Number(log.latency ?? 0).toFixed(0)} ms</td><td>{formatLogCost(log.cost)}</td><td>{value(log, 'app')}</td><td>{value(log, 'content_summary')}</td><td><button type="button" onclick={() => void openDetail(log)}>{i18n.t('elygate.inspect')}</button></td>
 				</tr>
 			{:else}<tr><td colspan="10">{isLoading ? i18n.t('elygate.loading') : i18n.t('elygate.empty')}</td></tr>{/each}
 		</tbody></table>
@@ -445,7 +455,7 @@
 		<aside class="drawer" aria-label={i18n.t('elygate.logDetails')}>
 			<header><div><p class="eyebrow">{value(selectedLog, 'object')}</p><h2>{value(selectedLog, 'provider')} / {value(selectedLog, 'model')}</h2></div><button type="button" onclick={() => (selectedLog = null)}>{i18n.t('elygate.close')}</button></header>
 			{#if isDetailLoading}<p>{i18n.t('elygate.loading')}</p>{:else}
-				<div class="detail-badges"><span>{value(selectedLog, 'status')}</span><span>{Number(selectedLog.latency ?? 0).toFixed(0)} ms</span><span>{formatLogCost(selectedLog.cost)}</span><span>{value(selectedLog, 'id')}</span></div>
+				<div class="detail-badges"><span>{statusLabel(value(selectedLog, 'status'))}</span><span>{Number(selectedLog.latency ?? 0).toFixed(0)} ms</span><span>{formatLogCost(selectedLog.cost)}</span><span>{value(selectedLog, 'id')}</span></div>
 				{#if selectedLog.content_hidden === true}<div class="notice">{i18n.t('elygate.contentHidden')}</div>{/if}
 				{#if isJsonRecord(selectedLog.speech_input) && typeof selectedLog.speech_input.input === 'string'}<section><h3>{i18n.t('elygate.speechInput')}</h3><p class="prose-output">{selectedLog.speech_input.input}</p></section>{/if}
 				{#if imageSources(selectedLog).length}<section><h3>{i18n.t('elygate.mediaOutput')}</h3><div class="media-grid">{#each imageSources(selectedLog) as source (source)}<img src={source} alt={i18n.t('elygate.mediaOutput')} />{/each}</div></section>{/if}

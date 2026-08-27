@@ -216,7 +216,7 @@
 </script>
 
 <section class="page-shell">
-	<header class="page-heading"><div><p class="eyebrow">{getAppName()} / Repository</p><h1>{i18n.t('elygate.skills')}</h1><p>{i18n.t('elygate.skillsHint')}</p></div><div class="heading-actions"><span>{i18n.t('elygate.marketplaceVersion')}: <strong>{globalVersion || '—'}</strong></span><button type="button" onclick={() => void bumpGlobalVersion('patch')}>+ patch</button><button type="button" onclick={() => void cleanupOrphans()}>{i18n.t('elygate.cleanupFiles')}</button><button class="primary" type="button" onclick={newSkill}>{i18n.t('elygate.create')}</button></div></header>
+	<header class="page-heading"><div><p class="eyebrow">{getAppName()} / {i18n.t('elygate.integrations')}</p><h1>{i18n.t('elygate.skills')}</h1><p>{i18n.t('elygate.skillsHint')}</p></div><div class="heading-actions"><span>{i18n.t('elygate.marketplaceVersion')}: <strong>{globalVersion || '—'}</strong></span><button type="button" onclick={() => void bumpGlobalVersion('patch')}>+ {i18n.locale === 'zh-CN' ? '补丁版本' : 'Patch'}</button><button type="button" onclick={() => void cleanupOrphans()}>{i18n.t('elygate.cleanupFiles')}</button><button class="primary" type="button" onclick={newSkill}>{i18n.t('elygate.create')}</button></div></header>
 	{#if error}<div class="notice error" role="alert">{error}</div>{/if}{#if notice}<div class="notice success" role="status">{notice}</div>{/if}
 	<div class="workspace">
 		<aside class="skill-list">
