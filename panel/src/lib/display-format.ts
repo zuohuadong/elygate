@@ -1,7 +1,7 @@
 export function formatUsdCost(value: unknown): string {
 	if (value === null || value === undefined || value === '') return '—';
 	const amount = Number(value);
-	return Number.isFinite(amount) ? `US$${amount.toFixed(4)}` : '—';
+	return Number.isFinite(amount) ? `$${amount.toFixed(4)}` : '—';
 }
 
 export function formatRankedCost(value: unknown, isFree: boolean, locale: string): string {

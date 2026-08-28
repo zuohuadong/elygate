@@ -30,7 +30,9 @@ describe('panel issue regressions', () => {
 	test('complexity routing keeps technical enum values but localizes visible Chinese copy', async () => {
 		const source = await Bun.file(new URL('../pages/RoutingNetworkSettingsPage.svelte', import.meta.url)).text();
 		expect(source).toContain("text('治理', 'Governance')");
-		expect(source).toContain('简单（SIMPLE）');
+		expect(source).toContain("text('简单', 'Simple')");
+		expect(source).not.toContain('简单（SIMPLE）');
+		expect(source).not.toMatch(/>SIMPLE<|>MEDIUM<|>COMPLEX<|>REASONING</);
 		expect(source).toContain('复杂度层级（complexity_tier）');
 		expect(source).toContain('支持中文和英文关键词');
 	});
@@ -179,7 +181,8 @@ describe('panel issue regressions', () => {
 
 	test('locale changes update document metadata and theme labels', async () => {
 		const source = await Bun.file(new URL('../App.svelte', import.meta.url)).text();
-		expect(source).toContain('document.title = locale === \'zh-CN\'');
+		expect(source).toContain('pageTitleForHash(currentHash, locale, resourceLabels)');
+		expect(source).toContain('`${pageTitle} - ${currentAppName} 管理台`');
 		expect(source).toContain('document.documentElement.lang = locale');
 		expect(source).toContain('builtinPresets[name].label = label');
 		expect(source).toContain('applyLocaleMetadata(currentLocale)');
@@ -235,10 +238,27 @@ describe('panel issue regressions', () => {
 		const catalog = await Bun.file(new URL('../pages/ModelCatalogPage.svelte', import.meta.url)).text();
 		const guide = await Bun.file(new URL('../pages/McpUsageGuidePage.svelte', import.meta.url)).text();
 		const keys = await Bun.file(new URL('../pages/VirtualKeysPage.svelte', import.meta.url)).text();
-		expect(resource).toContain("i18n.locale === 'zh-CN' ? '接口' : 'API'");
+		expect(resource).toContain("i18n.locale === 'zh-CN' ? '模型管理' : 'Model management'");
 		expect(catalog).toContain("i18n.t('elygate.models')");
 		expect(guide).toContain("i18n.t('elygate.mcp')");
 		expect(keys).not.toContain('textarea bind:value={form.advanced}');
+	});
+
+	test('current Lingxi copy and recovery controls stay localized and interactive', async () => {
+		const app = await Bun.file(new URL('../App.svelte', import.meta.url)).text();
+		const governance = await Bun.file(new URL('../pages/GovernanceManagementPage.svelte', import.meta.url)).text();
+		const modelLimits = await Bun.file(new URL('../pages/ModelLimitsPage.svelte', import.meta.url)).text();
+		const virtualKeys = await Bun.file(new URL('../pages/VirtualKeysPage.svelte', import.meta.url)).text();
+		const translations = await Bun.file(new URL('./i18n.ts', import.meta.url)).text();
+		expect(governance).toContain("text('令牌上限', 'Token limit')");
+		expect(governance).toContain('durationLabel(duration)');
+		expect(governance).not.toContain("text('Token 上限', 'Token limit')");
+		expect(modelLimits).toContain('durationLabel(record.rate_limit.token_reset_duration)');
+		expect(virtualKeys).toContain("i18n.locale === 'zh-CN' ? '令牌重置周期' : 'Token reset window'");
+		expect(translations).toContain("'elygate.tokenLimit': '令牌最大值'");
+		expect(translations).toContain("'elygate.requestJson': 'JSON 配置'");
+		expect(app).toContain(':global([data-svadmin-system-error] button)');
+		expect(app).toContain('pointer-events: auto !important');
 	});
 
 	test('fourth-round settings and documentation surfaces are localized', async () => {

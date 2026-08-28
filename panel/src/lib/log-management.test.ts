@@ -34,8 +34,8 @@ describe('log management helpers', () => {
 	test('distinguishes missing cost data from an explicit zero cost', () => {
 		expect(formatLogCost(undefined)).toBe('—');
 		expect(formatLogCost(null)).toBe('—');
-		expect(formatLogCost(0)).toBe('US$0.0000');
-		expect(formatLogCost(0.0018)).toBe('US$0.0018');
+		expect(formatLogCost(0)).toBe('$0.0000');
+		expect(formatLogCost(0.0018)).toBe('$0.0018');
 	});
 
 	test('polls until recalculation completes', async () => {

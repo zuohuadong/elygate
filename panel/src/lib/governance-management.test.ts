@@ -5,9 +5,18 @@ import {
 	buildPricingOverrideQuery,
 	governanceDraftFromRecord,
 	pricingOverrideDraftFromRecord,
+	resetDurationLabel,
 } from './governance-management';
 
 describe('governance management helpers', () => {
+	test('localizes reset duration labels without changing API values', () => {
+		expect(resetDurationLabel('30s', 'zh-CN')).toBe('30 秒');
+		expect(resetDurationLabel('1m', 'zh-CN')).toBe('1 分钟');
+		expect(resetDurationLabel('1M', 'zh-CN')).toBe('1 个月');
+		expect(resetDurationLabel('1Q', 'zh-CN')).toBe('1 个季度');
+		expect(resetDurationLabel('1h', 'en')).toBe('1h');
+	});
+
 	test('round-trips team governance and explicitly clears an assignment and rate limit', () => {
 		const draft = governanceDraftFromRecord({
 			id: 'team-1', name: 'Platform', customer_id: 'customer-1', calendar_aligned: true,
