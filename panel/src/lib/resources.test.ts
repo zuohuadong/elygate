@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { MenuItem } from '@svadmin/core';
+import { fileURLToPath } from 'node:url';
 
 (globalThis as Record<string, unknown>).$state = <Value>(value: Value): Value => value;
 const { createMenu, createResources } = await import('./resources');
@@ -102,6 +103,22 @@ describe('panel resource registry', () => {
 		expect(resourceNames).toEqual(expect.arrayContaining(hiddenCompatibilityRoutes));
 		expect(menuNames).toContain('model-configs');
 		expect(menuNames).toContain('complexity-router');
+	});
+
+	test('marks only navigable resources for the about page', () => {
+		const resources = createResources('zh-CN', false, enterpriseResources, ['users']);
+		const aboutNames = resources.filter((resource) => resource.meta?.aboutVisible === true).map((resource) => resource.name);
+		expect(aboutNames).toContain('models');
+		expect(aboutNames).toContain('users');
+		for (const unavailable of ['adaptive-routing', 'request-logs', 'budgets', 'rbac', 'pprof']) {
+			expect(aboutNames).not.toContain(unavailable);
+		}
+	});
+
+	test('keeps the about-page visibility filter in the svadmin patch', async () => {
+		const patchDirectory = fileURLToPath(new URL('../../patches/', import.meta.url));
+		const patch = await Bun.file(`${patchDirectory}@svadmin%2Fui@0.55.0.patch`).text();
+		expect(patch).toContain('+  const resources = $derived(adminContext.resources.filter((resource) => resource.meta?.aboutVisible !== false));');
 	});
 
 	test('places virtual keys with model access while keeping organization management focused', () => {

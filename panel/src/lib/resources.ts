@@ -60,6 +60,12 @@ function resource(locale: ElygateLocale, [name, labelKey, icon]: ResourceSpec): 
 	return { name, label: labelFor(locale, labelKey), icon, fields: [], showInMenu: false };
 }
 
+function visibleResourceNames(items: readonly MenuItem[]): Set<string> {
+	return new Set(items.flatMap((item) => item.children?.length
+		? [...visibleResourceNames(item.children)]
+		: item.href && item.href !== '#/' ? [item.name] : []));
+}
+
 function menuItem(locale: ElygateLocale, name: string, labelKey: LabelKey, icon: string): MenuItem {
 	return { name, label: labelFor(locale, labelKey), icon, href: `#/${name}` };
 }
@@ -108,18 +114,28 @@ export function createResources(
 	locale: ElygateLocale,
 	includeDevelopmentResources = false,
 	enterpriseResources: readonly EnterpriseResourceManifestEntry[] = [],
+	availableEnterpriseResources: readonly string[] = [],
 ): ResourceDefinition[] {
 	const builtInResources = RESOURCE_SPECS
 		.filter(([name]) => includeDevelopmentResources || !developmentResourceNames.has(name))
 		.map((spec) => resource(locale, spec));
-	const extensionResources = enterpriseResources.map((entry) => ({
+	const extensionResources: ResourceDefinition[] = enterpriseResources.map((entry) => ({
 		name: entry.name,
 		label: entry.labels[locale],
 		icon: entry.icon,
 		fields: [],
 		showInMenu: false,
 	}));
-	return [...builtInResources, ...extensionResources];
+	const visibleNames = visibleResourceNames(createMenu(
+		locale,
+		availableEnterpriseResources,
+		includeDevelopmentResources,
+		enterpriseResources,
+	));
+	return [...builtInResources, ...extensionResources].map((entry) => ({
+		...entry,
+		meta: { ...entry.meta, aboutVisible: visibleNames.has(entry.name) },
+	}));
 }
 
 export function createMenu(

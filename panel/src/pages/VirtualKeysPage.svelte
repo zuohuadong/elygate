@@ -5,6 +5,7 @@
 	import { displayError } from '../lib/forms';
 	import { encodePathSegment, getListPayload, getObjectPayload, getTotal, requestJson, type JsonRecord } from '../lib/api';
 	import { formatPagination } from '../lib/display-format';
+	import { resetDurationLabel } from '../lib/governance-management';
 
 	interface McpConfigDraft { key: string; id?: number; clientName: string; tools: string; }
 	interface BudgetDraft { key: string; maxLimit: string | number; resetDuration: string; }
@@ -78,6 +79,7 @@
 	const pageSize = 20;
 	const totalPages = $derived(Math.max(1, Math.ceil(total / pageSize)));
 	const canAddProviderRoute = $derived(availableVirtualKeyProviders(providers, providerRoutes).length > 0);
+	function durationLabel(duration: string): string { return resetDurationLabel(duration, i18n.locale); }
 
 	async function load(): Promise<void> {
 		isLoading = true;
@@ -362,12 +364,12 @@
 				</fieldset>
 				<fieldset class="structured-editor">
 					<legend>{i18n.t('elygate.budgets')}</legend>
-					{#each form.budgets as budget, index (budget.key)}<div class="structured-row"><label>{i18n.locale === 'zh-CN' ? '金额上限' : 'Amount limit'}<input type="number" min="0.01" step="0.01" bind:value={budget.maxLimit} /></label><label>{i18n.locale === 'zh-CN' ? '重置周期' : 'Reset window'}<select bind:value={budget.resetDuration}>{#each ['1m', '5m', '15m', '30m', '1h', '6h', '1d', '1w', '1M', '1Q'] as duration (duration)}<option value={duration}>{duration}</option>{/each}</select></label><button class="danger" type="button" onclick={() => removeBudget(index)}>{i18n.t('elygate.delete')}</button></div>{:else}<p class="empty">{i18n.locale === 'zh-CN' ? '未设置预算。' : 'No budgets configured.'}</p>{/each}
+					{#each form.budgets as budget, index (budget.key)}<div class="structured-row"><label>{i18n.locale === 'zh-CN' ? '金额上限' : 'Amount limit'}<input type="number" min="0.01" step="0.01" bind:value={budget.maxLimit} /></label><label>{i18n.locale === 'zh-CN' ? '重置周期' : 'Reset window'}<select bind:value={budget.resetDuration}>{#each ['1m', '5m', '15m', '30m', '1h', '6h', '1d', '1w', '1M', '1Q'] as duration (duration)}<option value={duration}>{durationLabel(duration)}</option>{/each}</select></label><button class="danger" type="button" onclick={() => removeBudget(index)}>{i18n.t('elygate.delete')}</button></div>{:else}<p class="empty">{i18n.locale === 'zh-CN' ? '未设置预算。' : 'No budgets configured.'}</p>{/each}
 					<button type="button" onclick={addBudget}>+ {i18n.t('elygate.addBudget')}</button>
 				</fieldset>
 				<fieldset class="structured-editor">
 					<legend>{i18n.locale === 'zh-CN' ? '请求限流' : 'Rate limits'}</legend>
-					<div class="grid-two"><label>{i18n.t('elygate.tokenLimit')}<input type="number" min="1" step="1" bind:value={form.rateLimit.tokenMaxLimit} /></label><label>{i18n.locale === 'zh-CN' ? 'Token 重置周期' : 'Token reset window'}<select bind:value={form.rateLimit.tokenResetDuration}>{#each ['1m', '5m', '15m', '30m', '1h', '6h', '1d', '1w', '1M'] as duration (duration)}<option value={duration}>{duration}</option>{/each}</select></label><label>{i18n.t('elygate.requestLimit')}<input type="number" min="1" step="1" bind:value={form.rateLimit.requestMaxLimit} /></label><label>{i18n.locale === 'zh-CN' ? '请求重置周期' : 'Request reset window'}<select bind:value={form.rateLimit.requestResetDuration}>{#each ['1m', '5m', '15m', '30m', '1h', '6h', '1d', '1w', '1M'] as duration (duration)}<option value={duration}>{duration}</option>{/each}</select></label></div>
+					<div class="grid-two"><label>{i18n.t('elygate.tokenLimit')}<input type="number" min="1" step="1" bind:value={form.rateLimit.tokenMaxLimit} /></label><label>{i18n.locale === 'zh-CN' ? '令牌重置周期' : 'Token reset window'}<select bind:value={form.rateLimit.tokenResetDuration}>{#each ['1m', '5m', '15m', '30m', '1h', '6h', '1d', '1w', '1M'] as duration (duration)}<option value={duration}>{durationLabel(duration)}</option>{/each}</select></label><label>{i18n.t('elygate.requestLimit')}<input type="number" min="1" step="1" bind:value={form.rateLimit.requestMaxLimit} /></label><label>{i18n.locale === 'zh-CN' ? '请求重置周期' : 'Request reset window'}<select bind:value={form.rateLimit.requestResetDuration}>{#each ['1m', '5m', '15m', '30m', '1h', '6h', '1d', '1w', '1M'] as duration (duration)}<option value={duration}>{durationLabel(duration)}</option>{/each}</select></label></div>
 				</fieldset>
 				<footer>
 					<button type="button" onclick={() => (isOpen = false)}>{i18n.t('elygate.cancel')}</button>

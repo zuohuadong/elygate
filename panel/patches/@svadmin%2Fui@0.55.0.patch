@@ -7,7 +7,8 @@ index c2ffe0aba6e08bed09c631fd09c9a378007201b5..c4198a2a9bc372af4d41f524e493b647
 +++ b/dist/components/AboutSettings.svelte
 @@ -9,7 +9,11 @@
    const adminContext = captureAdminContext();
-   const resources = $derived(adminContext.resources);
+-  const resources = $derived(adminContext.resources);
++  const resources = $derived(adminContext.resources.filter((resource) => resource.meta?.aboutVisible !== false));
    const providerNames = $derived(adminContext.getDataProviderNames());
 -  const version = '__SVADMIN_VERSION__';
 +  const version = '0.55.0';
