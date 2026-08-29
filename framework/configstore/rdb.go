@@ -5241,7 +5241,11 @@ func (s *RDBConfigStore) UpdateRateLimitUsage(ctx context.Context, id string, to
 // loadRoutingRulesOrdered loads routing rules with Targets preloaded, using consistent ordering:
 // rules by priority ASC, created_at DESC, id ASC; targets by weight DESC for deterministic ordering.
 func (s *RDBConfigStore) loadRoutingRulesOrdered(ctx context.Context, dest *[]tables.TableRoutingRule, scopes ...func(*gorm.DB) *gorm.DB) error {
-	q := s.DB().WithContext(ctx).
+	// ScopedDB, not DB: routing-rule reads must honor any row-visibility
+	// QueryScope stashed on ctx (the enterprise DAC wrapper attaches one for
+	// request-driven reads). Background callers (engine bootstrap, cache
+	// reloads on context.Background) carry no scope and stay unfiltered.
+	q := s.ScopedDB(ctx).
 		Preload("Targets", func(db *gorm.DB) *gorm.DB {
 			return db.Order("weight DESC").
 				Order("COALESCE(provider, '') ASC").
@@ -5454,6 +5458,9 @@ func (s *RDBConfigStore) UpdateRoutingRule(ctx context.Context, rule *tables.Tab
 
 		targets := rule.Targets
 		rule.Targets = nil
+		// created_at is immutable: Save writes every column, so a caller passing a rule it
+		// didn't read from the DB would otherwise zero it out. Always keep the persisted value.
+		rule.CreatedAt = existing.CreatedAt
 		if err := tx.Omit("Targets").Save(rule).Error; err != nil {
 			return err
 		}
@@ -5547,6 +5554,10 @@ func (s *RDBConfigStore) SyncRoutingRules(ctx context.Context, toAdd []tables.Ta
 			}
 			targets := rule.Targets
 			rule.Targets = nil
+			// Rules in toUpdate come from config.json, which carries no created_at; GORM's Save
+			// selects every column, so an unset CreatedAt would overwrite the original insert
+			// timestamp with the zero time. Carry the persisted value forward.
+			rule.CreatedAt = existing.CreatedAt
 			if err := tx.Omit("Targets").Save(rule).Error; err != nil {
 				return err
 			}
