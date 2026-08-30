@@ -1,0 +1,16 @@
+## Elygate local Go build baseline
+
+This checkout uses a Go workspace and cgo-backed dependencies. On macOS, use
+the repository wrapper for targeted tests and builds so the toolchain, linker
+parallelism, and cache are consistent:
+
+```bash
+scripts/go-local.sh test ./transports/bifrost-http/controlplane -p=1 -count=1
+scripts/go-local.sh test ./transports/bifrost-http/server ./transports/bifrost-http/handlers -p=1 -count=1
+```
+
+The wrapper defaults to Go `1.27.0`, `CGO_ENABLED=1`, `GOMAXPROCS=4`, and
+`GOCACHE=/tmp/elygate-go-cache`. It intentionally ignores a global `GOCACHE`
+on `/Volumes/Data`, where metadata-heavy cache access can stall package loading
+and linking. Set `GOTOOLCHAIN`, `ELYGATE_GOCACHE`, or `GOMAXPROCS` explicitly
+when reproducing a different CI or release baseline.

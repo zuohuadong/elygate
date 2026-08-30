@@ -39,6 +39,7 @@ import (
 	"github.com/maximhq/bifrost/plugins/routing/complexity"
 	"github.com/maximhq/bifrost/plugins/semanticcache"
 	"github.com/maximhq/bifrost/plugins/telemetry"
+	"github.com/maximhq/bifrost/transports/bifrost-http/controlplane"
 	"github.com/maximhq/bifrost/transports/bifrost-http/employees"
 	"github.com/maximhq/bifrost/transports/bifrost-http/handlers"
 	"github.com/maximhq/bifrost/transports/bifrost-http/integrations"
@@ -232,6 +233,7 @@ type BifrostHTTPServer struct {
 	devPprofHandler     *handlers.DevPprofHandler
 	IntegrationHandler  *handlers.IntegrationHandler
 	EmployeeHandler     *employees.Handler
+	ControlPlaneHandler *controlplane.Handler
 
 	AuthMiddleware       *handlers.AuthMiddleware
 	CORSMiddleware       *handlers.CorsMiddleware
@@ -269,6 +271,17 @@ type BifrostHTTPServer struct {
 	WebhookDispatcher *webhooks.Dispatcher
 
 	wsPool *bfws.Pool
+}
+
+func (s *BifrostHTTPServer) virtualKeyAccessChecker() handlers.VirtualKeyAccessChecker {
+	checkers := make([]handlers.VirtualKeyAccessChecker, 0, 2)
+	if s.EmployeeHandler != nil {
+		checkers = append(checkers, s.EmployeeHandler)
+	}
+	if s.ControlPlaneHandler != nil {
+		checkers = append(checkers, s.ControlPlaneHandler)
+	}
+	return handlers.NewCompositeVirtualKeyAccessChecker(checkers...)
 }
 
 var logger schemas.Logger
@@ -2051,13 +2064,13 @@ func (s *BifrostHTTPServer) RegisterInferenceRoutes(ctx context.Context, middlew
 	s.wsPool = bfws.NewPool(s.Config.WebSocketConfig.Pool)
 	wsResponsesHandler := handlers.NewWSResponsesHandler(s.Client, s.Config, s.wsPool)
 	wsRealtimeHandler := handlers.NewWSRealtimeHandler(s.Client, s.Config, s.wsPool)
-	if s.EmployeeHandler != nil {
-		wsResponsesHandler.SetVirtualKeyAccessChecker(s.EmployeeHandler)
-		wsRealtimeHandler.SetVirtualKeyAccessChecker(s.EmployeeHandler)
+	if checker := s.virtualKeyAccessChecker(); checker != nil {
+		wsResponsesHandler.SetVirtualKeyAccessChecker(checker)
+		wsRealtimeHandler.SetVirtualKeyAccessChecker(checker)
 	}
 	webrtcRealtimeHandler := handlers.NewWebRTCRealtimeHandler(s.Client, s.Config)
-	if s.EmployeeHandler != nil {
-		webrtcRealtimeHandler.SetVirtualKeyAccessChecker(s.EmployeeHandler)
+	if checker := s.virtualKeyAccessChecker(); checker != nil {
+		webrtcRealtimeHandler.SetVirtualKeyAccessChecker(checker)
 	}
 	realtimeClientSecretsHandler := handlers.NewRealtimeClientSecretsHandler(s.Client, s.Config)
 
@@ -2078,12 +2091,15 @@ func (s *BifrostHTTPServer) RegisterInferenceRoutes(ctx context.Context, middlew
 	if err != nil {
 		return fmt.Errorf("failed to initialize mcp server handler: %v", err)
 	}
-	if s.EmployeeHandler != nil {
-		mcpServerHandler.SetVirtualKeyAccessChecker(s.EmployeeHandler)
+	if checker := s.virtualKeyAccessChecker(); checker != nil {
+		mcpServerHandler.SetVirtualKeyAccessChecker(checker)
 	}
 	s.MCPServerHandler = mcpServerHandler
 	asyncHandler := handlers.NewAsyncHandler(s.Client, s.Config)
 	routeMiddlewares := append([]schemas.BifrostHTTPMiddleware{}, middlewares...)
+	if s.ControlPlaneHandler != nil {
+		routeMiddlewares = append(routeMiddlewares, s.ControlPlaneHandler.InferenceAccessMiddleware())
+	}
 	if s.EmployeeHandler != nil {
 		routeMiddlewares = append(routeMiddlewares, s.EmployeeHandler.InferenceAccessMiddleware())
 	}
@@ -2190,15 +2206,26 @@ func (s *BifrostHTTPServer) RegisterAPIRoutes(ctx context.Context, callbacks Ser
 		return fmt.Errorf("failed to initialize employee management: %v", err)
 	}
 	s.EmployeeHandler = employeeHandler
-	if executor := s.Config.GetAsyncJobExecutor(); executor != nil {
-		executor.SetVirtualKeyAccessChecker(employeeHandler)
+	if s.Config.ConfigStore != nil {
+		controlPlaneStore, storeErr := controlplane.NewStore(ctx, s.Config.ConfigStore)
+		if storeErr != nil {
+			return fmt.Errorf("failed to initialize control plane: %v", storeErr)
+		}
+		s.ControlPlaneHandler = controlplane.NewHandler(controlPlaneStore, govLogManager, s)
+	}
+	if checker := s.virtualKeyAccessChecker(); checker != nil {
+		if executor := s.Config.GetAsyncJobExecutor(); executor != nil {
+			executor.SetVirtualKeyAccessChecker(checker)
+		}
 	}
 	promptsHandler := handlers.NewPromptsHandler(s.Config.ConfigStore, promptsReloader)
 	featureFlagsHandler := handlers.NewFeatureFlagsHandler(s.Config.FeatureFlags, s.Config.ConfigStore)
 	// Going ahead with API handlers
 	oauth2DiscoveryHandler := handlers.NewOAuth2DiscoveryHandler(s.Config)
 	oauth2IssuanceHandler := handlers.NewOAuth2IssuanceHandler(s.Config, s.TempTokens, s.OAuth2IdentityResolver)
-	oauth2IssuanceHandler.SetVirtualKeyAccessChecker(employeeHandler)
+	if checker := s.virtualKeyAccessChecker(); checker != nil {
+		oauth2IssuanceHandler.SetVirtualKeyAccessChecker(checker)
+	}
 	oauth2SessionsHandler := handlers.NewOAuth2SessionsHandler(s.Config)
 	oauth2ConsentHandler := handlers.NewOAuth2ConsentHandler(s.Config, s.TempTokens, s.OAuth2IdentityResolver)
 
@@ -2221,6 +2248,9 @@ func (s *BifrostHTTPServer) RegisterAPIRoutes(ctx context.Context, callbacks Ser
 		sessionHandler.RegisterRoutes(s.Router, middlewares...)
 	}
 	employeeHandler.RegisterRoutes(s.Router, middlewares...)
+	if s.ControlPlaneHandler != nil {
+		s.ControlPlaneHandler.RegisterRoutes(s.Router, middlewares...)
+	}
 	if promptsHandler != nil {
 		promptsHandler.RegisterRoutes(s.Router, middlewares...)
 	}

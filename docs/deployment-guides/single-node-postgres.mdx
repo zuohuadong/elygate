@@ -1,0 +1,102 @@
+---
+title: "Single-node PostgreSQL"
+description: "Run one Elygate gateway and PostgreSQL with Docker Compose"
+icon: "server"
+---
+
+This is the recommended deployment profile for small and medium-sized teams. It runs one Elygate process and one PostgreSQL instance on a single server. Kubernetes, Redis, an external queue, and object storage are not required.
+
+## Architecture
+
+```text
+reverse proxy (optional)
+        |
+        v
+Elygate :8080
+        |
+        v
+PostgreSQL 16+
+```
+
+PostgreSQL stores configuration, governance data, logs, usage ledger records, audit events, and durable background jobs. Elygate uses database transactions and advisory locks for coordination. Redis is only an optional vector-store backend; use pgvector when semantic caching is required without another service.
+
+## Files
+
+The repository includes a runnable template in `examples/single-node-postgres`:
+
+```text
+examples/single-node-postgres/
+  .env.example
+  config.json
+  docker-compose.yml
+```
+
+Create the local environment file and replace every placeholder before starting:
+
+```bash
+cd examples/single-node-postgres
+cp .env.example .env
+docker compose config
+docker compose up -d
+```
+
+Do not commit `.env`. Keep `ENCRYPTION_KEY` stable across restarts, upgrades, backups, and restores.
+
+## Verify
+
+```bash
+curl --fail --show-error http://127.0.0.1:8080/health
+docker compose ps
+docker compose logs --tail=100 elygate
+```
+
+After the initial administrator setup, create a Project and Application, bind a Virtual Key, send one non-streaming request and one streaming request, then confirm the request appears in Usage Ledger and Audit.
+
+## Backup
+
+Back up PostgreSQL before every upgrade. The database is the durable source of truth for this profile.
+
+```bash
+docker compose exec -T postgres \
+  pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc \
+  > "elygate-$(date +%Y%m%d-%H%M%S).dump"
+```
+
+Also retain the deployed `config.json`, `.env` through your secret-management process, and the exact Elygate image tag or digest. Never place `.env` inside the database dump archive.
+
+## Restore
+
+Restore into an empty database using the same Elygate version that produced the backup, then start Elygate and allow migrations to run:
+
+```bash
+docker compose stop elygate
+docker compose exec -T postgres \
+  dropdb -U "$POSTGRES_USER" --if-exists "$POSTGRES_DB"
+docker compose exec -T postgres \
+  createdb -U "$POSTGRES_USER" "$POSTGRES_DB"
+docker compose exec -T postgres \
+  pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists \
+  < elygate-backup.dump
+docker compose start elygate
+```
+
+Perform restore drills on a test server. A backup that has never been restored is not recovery evidence.
+
+## Upgrade and rollback
+
+1. Record the current image tag or digest.
+2. Create and verify a PostgreSQL backup.
+3. Pull or build the new fixed image version.
+4. Run `docker compose up -d --no-deps --force-recreate elygate`.
+5. Verify `/health`, administrator login, one inference request, Usage Ledger, and Audit.
+6. If verification fails, restore the previous image. Restore the database backup only when the failed version ran an incompatible migration or changed persistent data.
+
+Avoid production `latest` tags. Use an immutable version or image digest so rollback selects the exact previous build.
+
+## Operational boundaries
+
+- This profile intentionally runs one Elygate process. There is no automatic gateway failover.
+- PostgreSQL may run on the same server or an external managed server.
+- TLS should terminate at a reverse proxy when the service is exposed outside a trusted network.
+- Set log retention according to disk capacity. PostgreSQL logs and audit tables grow independently of container filesystem usage.
+- External KMS, WORM storage, SBOM verification, and Kubernetes are optional customer-specific extensions, not prerequisites for this profile.
