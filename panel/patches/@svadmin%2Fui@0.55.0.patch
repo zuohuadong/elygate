@@ -48,6 +48,28 @@ index bc61ad5d4f6512ad462647fe240bdb0ae8e0e33c..3e5e7db1468d99ae7497e01f9c22adcc
        </SettingsGroup>
      {/snippet}
    </WorkspaceLayout>
+diff --git a/dist/components/CommandPalette.svelte b/dist/components/CommandPalette.svelte
+index 0c6cb7f38019a18349cd94c0af7725e9e326a76f..afbc6730ffec1028a5667c3ce4f129e1465af358 100644
+--- a/dist/components/CommandPalette.svelte
++++ b/dist/components/CommandPalette.svelte
+@@ -96,7 +96,7 @@
+           </Command.Item>
+           {#each resources as r, _i (_i)}
+             <Command.Item
+-              value={r.name}
++              value={`${r.name} ${r.label}`}
+               onSelect={() => act(() => adminContext.navigate(`/${r.name}`))}
+               class={itemClass}
+             >
+@@ -112,7 +112,7 @@
+         <Command.Group heading={i18n.t('common.actions')}>
+           {#each resources as r, _i (_i)}
+             <Command.Item
+-              value={"create-" + r.name}
++              value={`${"create-" + r.name} ${r.label}`}
+               onSelect={() => act(() => adminContext.navigate(`/${r.name}/create`))}
+               class={itemClass}
+             >
 diff --git a/dist/components/Header.svelte b/dist/components/Header.svelte
 index 6abfcd0de3f4ebd8384eea9b7c38844684b06778..982a595ae8644ab462575ef48cc0e8c402083c23 100644
 --- a/dist/components/Header.svelte

@@ -179,6 +179,12 @@ describe('panel issue regressions', () => {
 		expect(integrations).toContain("i18n.t('integrations.statusProvidedByHost')");
 	});
 
+	test('global search matches localized resource labels', async () => {
+		const { patch } = await readSvadminUiPatch();
+		expect(patch).toContain('value={`${r.name} ${r.label}`}');
+		expect(patch).toContain('value={`${"create-" + r.name} ${r.label}`}');
+	});
+
 	test('locale changes update document metadata and theme labels', async () => {
 		const source = await Bun.file(new URL('../App.svelte', import.meta.url)).text();
 		expect(source).toContain('pageTitleForHash(currentHash, locale, resourceLabels)');
