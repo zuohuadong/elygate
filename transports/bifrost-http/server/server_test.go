@@ -58,13 +58,6 @@ func TestRemovePluginPermanentlyCleansDisabledRuntimeMetadata(t *testing.T) {
 	}
 }
 
-func TestVirtualKeyAccessCheckerOmitsNilHandlers(t *testing.T) {
-	server := &BifrostHTTPServer{}
-	if checker := server.virtualKeyAccessChecker(); checker != nil {
-		t.Fatalf("virtual key checker = %T, want nil when no handlers are wired", checker)
-	}
-}
-
 // reloadVirtualKeyConfigStore provides the persistence calls used by ReloadVirtualKey.
 type reloadVirtualKeyConfigStore struct {
 	configstore.ConfigStore

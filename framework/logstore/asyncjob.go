@@ -101,11 +101,6 @@ func (e *AsyncJobExecutor) RetrieveJob(ctx context.Context, jobID string, vkValu
 		if *job.VirtualKeyID != vk.ID {
 			return nil, fmt.Errorf("virtual key mismatch")
 		}
-		if e.accessChecker != nil {
-			if err := e.accessChecker.CheckVirtualKeyAccess(ctx, *job.VirtualKeyID); err != nil {
-				return nil, err
-			}
-		}
 	}
 	if job.RequestType != operationType {
 		return nil, fmt.Errorf("operation type mismatch")

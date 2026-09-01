@@ -2,7 +2,7 @@
 	import { getAppName } from '../lib/branding';
 	import { onMount } from 'svelte';
 	import { useTranslation } from '@svadmin/core/i18n';
-	import { getListPayload, getTotal, requestJson, type JsonRecord } from '../lib/api';
+	import { getListPayload, getTotal, isJsonRecord, requestJson, type JsonRecord } from '../lib/api';
 	import { displayError } from '../lib/forms';
 	import { formatPagination, formatUsdCost } from '../lib/display-format';
 	import { buildModelLimitPayload, ModelLimitError, type BudgetDraft, type ModelLimitDraft } from '../lib/model-limits';
@@ -45,12 +45,30 @@
 	function rateUsage(current = 0, limit = 0): string { return `${integer(current)} / ${integer(limit)}`; }
 
 	async function loadLookups(): Promise<void> {
-		const [providerPayload, virtualKeyPayload] = await Promise.all([
+		const [providerPayload, virtualKeysPayload] = await Promise.all([
 			requestJson<unknown>('/api/providers').catch(() => []),
-			requestJson<unknown>('/api/governance/virtual-keys?limit=0&from_memory=true').catch(() => []),
+			loadAllVirtualKeys(),
 		]);
 		providers = getListPayload(providerPayload).map((record) => record.name).filter((name): name is string => typeof name === 'string');
-		virtualKeys = getListPayload(virtualKeyPayload).filter((record): record is NamedRecord => typeof record.id === 'string' && typeof record.name === 'string');
+		virtualKeys = virtualKeysPayload;
+	}
+
+	async function loadAllVirtualKeys(): Promise<NamedRecord[]> {
+		const pageSize = 100;
+		const all: NamedRecord[] = [];
+		let offset = 0;
+		let expected = Number.POSITIVE_INFINITY;
+		for (;;) {
+			const payload = await requestJson<unknown>(`/api/governance/virtual-keys?limit=${pageSize}&offset=${offset}`);
+			const page = getListPayload(payload).filter((record): record is NamedRecord => typeof record.id === 'string' && typeof record.name === 'string');
+			all.push(...page);
+			const pagination = isJsonRecord(payload) && isJsonRecord(payload.pagination) ? payload.pagination : payload;
+			const reportedTotal = getTotal(pagination, 0);
+			if (reportedTotal > 0) expected = reportedTotal;
+			if (page.length === 0 || all.length >= expected || page.length < pageSize) break;
+			offset += page.length;
+		}
+		return [...new Map(all.map((record) => [record.id, record])).values()];
 	}
 
 	async function load(reset = false): Promise<void> {

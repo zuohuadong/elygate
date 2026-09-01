@@ -25,6 +25,7 @@
 	import BifrostResourcePage from './pages/BifrostResourcePage.svelte';
 	import CachingConfigPage from './pages/CachingConfigPage.svelte';
 	import ConfigPage from './pages/ConfigPage.svelte';
+	import ControlPlanePage from './pages/ControlPlanePage.svelte';
 	import DocsHubPage from './pages/DocsHubPage.svelte';
 	import EnterprisePublicFallbackPage from './pages/EnterprisePublicFallbackPage.svelte';
 	import EmployeePortalPage from './pages/EmployeePortalPage.svelte';
@@ -88,12 +89,14 @@
 	const availableEnterpriseResources = $derived([...new Set([...enterprisePageNames, ...runtimeFeatureNames])]);
 
 	async function refreshAppConfig(): Promise<void> {
+		let sessionStatus;
 		try {
-			const sessionStatus = await getSessionStatus();
+			sessionStatus = await getSessionStatus();
 			resolveBranding(sessionStatus as Record<string, unknown>);
 		} catch {
-			// offline or unauthenticated
+			return;
 		}
+		if (sessionStatus.is_auth_enabled && !sessionStatus.has_valid_token) return;
 		try {
 			const config = await requestJson<Record<string, unknown>>('/api/config');
 			resolveBranding(config);
@@ -104,6 +107,8 @@
 
 	async function refreshRuntimeFeatures(): Promise<void> {
 		try {
+			const sessionStatus = await getSessionStatus();
+			if (sessionStatus.is_auth_enabled && !sessionStatus.has_valid_token) return;
 			const payload = await requestJson<unknown>('/api/plugins');
 			runtimeFeatureNames = activePluginFeatures(getListPayload(payload).map(managedPluginFromRecord));
 		} catch (error) {
@@ -145,6 +150,9 @@
 		employees: { list: EmployeesPage },
 		teams: { list: GovernanceManagementPage },
 		customers: { list: GovernanceManagementPage },
+		'control-plane-projects': { list: ControlPlanePage },
+		'control-plane-applications': { list: ControlPlanePage },
+		'control-plane-usage': { list: ControlPlanePage },
 		'routing-rules': { list: RoutingRulesPage },
 		'model-configs': { list: ModelLimitsPage },
 		'provider-governance': { list: GovernanceManagementPage },

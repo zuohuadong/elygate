@@ -15,10 +15,12 @@
 		{ id: 'otel', pluginName: 'otel', label: 'OpenTelemetry', description: 'OTLP traces and metrics', available: true },
 		{ id: 'prometheus', pluginName: 'telemetry', label: 'Prometheus', description: 'Prometheus metrics endpoint', available: true },
 		{ id: 'maxim', pluginName: 'maxim', label: 'Maxim', description: 'LLM observability export', available: true },
-		{ id: 'datadog', pluginName: 'datadog', label: 'Datadog', description: 'APM and metrics export', available: true },
-		{ id: 'bigquery', pluginName: 'bigquery', label: 'BigQuery', description: 'Warehouse log export', available: true },
-		{ id: 'kafka', pluginName: 'kafka', label: 'Kafka', description: 'Streaming event export', available: true },
-		{ id: 'pubsub', pluginName: 'pubsub', label: 'Pub/Sub', description: 'Google Cloud Pub/Sub export', available: true },
+		// Keep connectors visible as roadmap entries, but do not let the panel
+		// create database records for plugins that the runtime cannot load.
+		{ id: 'datadog', pluginName: 'datadog', label: 'Datadog', description: 'APM and metrics export', available: false },
+		{ id: 'bigquery', pluginName: 'bigquery', label: 'BigQuery', description: 'Warehouse log export', available: false },
+		{ id: 'kafka', pluginName: 'kafka', label: 'Kafka', description: 'Streaming event export', available: false },
+		{ id: 'pubsub', pluginName: 'pubsub', label: 'Pub/Sub', description: 'Google Cloud Pub/Sub export', available: false },
 		{ id: 'newrelic', pluginName: 'newrelic', label: 'New Relic', description: 'APM export', available: false },
 	];
 

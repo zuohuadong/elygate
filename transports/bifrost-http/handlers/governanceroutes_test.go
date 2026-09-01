@@ -76,6 +76,7 @@ func TestGovernanceRouteOverridesDefaultToOSS(t *testing.T) {
 		{method: fasthttp.MethodGet, path: "/api/governance/teams/{team_id}"},
 		{method: fasthttp.MethodPut, path: "/api/governance/teams/{team_id}"},
 		{method: fasthttp.MethodDelete, path: "/api/governance/teams/{team_id}"},
+		{method: fasthttp.MethodGet, path: "/api/governance/pricing-overrides/{id}"},
 	} {
 		if got := countRegisteredRoute(r, route.method, route.path); got != 1 {
 			t.Fatalf("%s %s registrations = %d, want 1", route.method, route.path, got)

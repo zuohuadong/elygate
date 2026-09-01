@@ -6,15 +6,12 @@ icon: "server"
 
 Bifrost runs as a long-running Linux container. To deploy it, choose a container platform, decide where Bifrost will store its configuration and logs, provide its secrets, and expose its HTTP port.
 
-For the current Elygate small-business product profile, start with [Single-node PostgreSQL](/deployment-guides/single-node-postgres). It is the recommended path for one server, one Elygate process, and one PostgreSQL instance. The Kubernetes, Helm, cloud, and multinode guides remain available for other Bifrost distributions but are not part of the current Elygate single-node acceptance scope.
-
 Start with [Bifrost Deployment Requirements](/deployment-guides/runtime-contract) to understand the image, storage, database, ports, health checks, and scaling behavior. Then use the guide for your platform.
 
 ## Deployment support matrix
 
 | Platform | Guide | Typical deployment |
 |---|---|---|
-| Docker or a VM | [Single-node PostgreSQL](/deployment-guides/single-node-postgres) | Run one Elygate process with PostgreSQL-backed storage |
 | Kubernetes | [Helm](/deployment-guides/helm) | Deploy the official chart to any compatible Kubernetes cluster |
 | Amazon EKS | [EKS](/deployment-guides/platforms/eks) | Deploy the Helm chart to an existing EKS cluster |
 | Google Kubernetes Engine | [GKE](/deployment-guides/platforms/gke) | Deploy the Helm chart to an existing GKE cluster |
@@ -25,7 +22,7 @@ Start with [Bifrost Deployment Requirements](/deployment-guides/runtime-contract
 | Railway | [Railway](/deployment-guides/platforms/railway) | Run one service with a volume or PostgreSQL |
 | Fly.io | [Fly.io](/deployment-guides/fly) | Run one Machine with a Fly Volume or PostgreSQL |
 | Terraform | [Terraform module](/deployment-guides/k8s) | Create a supported cloud or Kubernetes deployment from code |
-| Docker or a VM (OSS SQLite) | [Docker setup](/quickstart/gateway/setting-up#docker) | Run one process with a mounted data directory |
+| Docker or a VM | [Docker setup](/quickstart/gateway/setting-up#docker) | Run the image directly with a mounted data directory |
 
 The Kubernetes guides begin with an existing cluster. If you need to create a cluster, each page links to the cloud provider's setup documentation before continuing with the Bifrost installation.
 

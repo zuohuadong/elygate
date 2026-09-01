@@ -136,6 +136,48 @@ describe('panel issue regressions', () => {
 		expect(source).toContain('window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0)');
 	});
 
+	test('dashboard rankings expose svadmin table summaries for each aggregate view', async () => {
+		const source = await Bun.file(new URL('../pages/DashboardPage.svelte', import.meta.url)).text();
+		expect(source).toContain("import { TableSummary } from '@svadmin/ui';");
+		expect(source.match(/<TableSummary/g)?.length).toBe(3);
+		expect(source).toContain("aggregations={{ total_requests: 'sum', total_tokens: 'sum', total_cost: 'sum' }}");
+	});
+
+	test('observability connectors do not advertise plugins absent from the runtime', async () => {
+		const source = await Bun.file(new URL('../pages/ObservabilityConnectorsPage.svelte', import.meta.url)).text();
+		for (const plugin of ['datadog', 'bigquery', 'kafka', 'pubsub']) {
+			expect(source).toContain(`pluginName: '${plugin}'`);
+			expect(source).toContain(`pluginName: '${plugin}', label:`);
+		}
+		expect(source).toMatch(/pluginName: 'datadog',[^\n]*available: false/);
+		expect(source).toMatch(/pluginName: 'bigquery',[^\n]*available: false/);
+		expect(source).toMatch(/pluginName: 'kafka',[^\n]*available: false/);
+		expect(source).toMatch(/pluginName: 'pubsub',[^\n]*available: false/);
+	});
+
+	test('model limits uses bounded virtual-key pagination for lookup data', async () => {
+		const source = await Bun.file(new URL('../pages/ModelLimitsPage.svelte', import.meta.url)).text();
+		expect(source).toContain('/api/governance/virtual-keys?limit=${pageSize}&offset=${offset}');
+		expect(source).toContain('all.length >= expected');
+		expect(source).toContain('offset += page.length');
+	});
+
+	test('control plane resets dependent selection and guards mutations', async () => {
+		const source = await Bun.file(new URL('../pages/ControlPlanePage.svelte', import.meta.url)).text();
+		expect(source).toContain("selectedApplication = ''");
+		expect(source).toContain('applications = []');
+		expect(source).toContain('saving = true');
+		expect(source).toContain('catch (cause)');
+		expect(source).toContain('disabled={loading || saving || !selectedProject || !applicationName.trim()}');
+		expect(source).toContain('disabled={loading || saving || !selectedApplication || !virtualKeyId.trim()}');
+		expect(source).toContain('Any active binding on another application will be revoked');
+		expect(source).toContain('projectLoadSeq');
+		expect(source).toContain('keyLoadSeq');
+		expect(source).toContain('loadApplications().catch');
+		expect(source).toContain('showDisclosure');
+		expect(source).toContain('if (sequence === disclosureSeq) disclosedKey =');
+	});
+
 	test('MCP settings reads the real client configuration and remains distinct from gateway editing', async () => {
 		const source = await Bun.file(new URL('../pages/McpSettingsPage.svelte', import.meta.url)).text();
 		expect(source).toContain("configFormFromDocument(await requestJson('/api/config'))");
@@ -200,6 +242,13 @@ describe('panel issue regressions', () => {
 		expect(source).toContain('{#key currentAppName}');
 		expect(source).toContain('onAppNameChange((name) =>');
 		expect(source).toContain('currentAppName = name;');
+	});
+
+	test('login bootstrap does not request protected config before authentication', async () => {
+		const source = await Bun.file(new URL('../App.svelte', import.meta.url)).text();
+		expect(source).toContain('sessionStatus.is_auth_enabled && !sessionStatus.has_valid_token');
+		expect(source).toContain("const payload = await requestJson<unknown>('/api/plugins')");
+		expect(source).toContain("const config = await requestJson<Record<string, unknown>>('/api/config')");
 	});
 
 	test('employee editor restores focus and supports escape and tab containment', async () => {

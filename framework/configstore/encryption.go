@@ -95,6 +95,27 @@ func (s *RDBConfigStore) EncryptPlaintextRows(ctx context.Context) error {
 	}
 	totalEncrypted += count
 
+	// config_webhook_endpoints
+	count, err = s.encryptPlaintextWebhookEndpoints(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to encrypt webhook endpoints: %w", err)
+	}
+	totalEncrypted += count
+
+	// mcp_oauth_flows (PKCE code verifiers)
+	count, err = s.encryptPlaintextMCPOauthFlows(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to encrypt MCP OAuth flows: %w", err)
+	}
+	totalEncrypted += count
+
+	// mcp_per_user_header_credentials
+	count, err = s.encryptPlaintextMCPPerUserHeaderCredentials(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to encrypt MCP per-user header credentials: %w", err)
+	}
+	totalEncrypted += count
+
 	if totalEncrypted > 0 && s.logger != nil {
 		s.logger.Info(fmt.Sprintf("encrypted %d plaintext rows across all tables", totalEncrypted))
 	}
@@ -149,7 +170,27 @@ func (s *RDBConfigStore) encryptPlaintextVirtualKeys(ctx context.Context) (int, 
 		}
 		if err := s.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 			for i := range vks {
-				if err := tx.Save(&vks[i]).Error; err != nil {
+				resolved := vks[i].Value.GetValue()
+				if resolved == "" {
+					return fmt.Errorf("virtual key %s: secret reference could not be resolved", vks[i].ID)
+				}
+
+				storedValue := vks[i].Value.GetRawRef()
+				if !vks[i].Value.IsFromSecret() {
+					encryptedValue, err := encrypt.Encrypt(resolved)
+					if err != nil {
+						return fmt.Errorf("failed to encrypt virtual key value: %w", err)
+					}
+					storedValue = encryptedValue
+				}
+
+				// Rewrite only encryption-owned columns. Legacy rows may predate
+				// current ownership invariants, which must not block at-rest
+				// encryption or be silently changed by this startup pass.
+				if err := tx.Exec(
+					"UPDATE governance_virtual_keys SET value = ?, value_hash = ?, encryption_status = ? WHERE id = ?",
+					storedValue, encrypt.HashSHA256(resolved), encryptionStatusEncrypted, vks[i].ID,
+				).Error; err != nil {
 					return err
 				}
 			}
@@ -405,6 +446,98 @@ func (s *RDBConfigStore) encryptPlaintextPlugins(ctx context.Context) (int, erro
 			return count, err
 		}
 		count += len(plugins)
+	}
+	return count, nil
+}
+
+// encryptPlaintextWebhookEndpoints finds webhook endpoint rows whose signing
+// secret or custom headers are still stored in plaintext and re-saves them.
+// The TableWebhookEndpoint.BeforeSave hook performs field encryption.
+func (s *RDBConfigStore) encryptPlaintextWebhookEndpoints(ctx context.Context) (int, error) {
+	var count int
+	for {
+		var endpoints []tables.TableWebhookEndpoint
+		if err := s.DB().WithContext(ctx).
+			Where("encryption_status = ? OR encryption_status IS NULL OR encryption_status = ''", encryptionStatusPlainText).
+			Limit(encryptionBatchSize).
+			Find(&endpoints).Error; err != nil {
+			return count, err
+		}
+		if len(endpoints) == 0 {
+			break
+		}
+		if err := s.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			for i := range endpoints {
+				if err := tx.WithContext(ctx).Save(&endpoints[i]).Error; err != nil {
+					return err
+				}
+			}
+			return nil
+		}); err != nil {
+			return count, err
+		}
+		count += len(endpoints)
+	}
+	return count, nil
+}
+
+// encryptPlaintextMCPOauthFlows migrates PKCE code verifiers in the active
+// OAuth flow table. The TableMCPOauthFlow.BeforeSave hook performs encryption.
+func (s *RDBConfigStore) encryptPlaintextMCPOauthFlows(ctx context.Context) (int, error) {
+	var count int
+	for {
+		var flows []tables.TableMCPOauthFlow
+		if err := s.DB().WithContext(ctx).
+			Where("encryption_status = ? OR encryption_status IS NULL OR encryption_status = ''", encryptionStatusPlainText).
+			Limit(encryptionBatchSize).
+			Find(&flows).Error; err != nil {
+			return count, err
+		}
+		if len(flows) == 0 {
+			break
+		}
+		if err := s.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			for i := range flows {
+				if err := tx.WithContext(ctx).Save(&flows[i]).Error; err != nil {
+					return err
+				}
+			}
+			return nil
+		}); err != nil {
+			return count, err
+		}
+		count += len(flows)
+	}
+	return count, nil
+}
+
+// encryptPlaintextMCPPerUserHeaderCredentials migrates user-supplied MCP
+// header values. The TableMCPPerUserHeaderCredential.BeforeSave hook performs
+// encryption.
+func (s *RDBConfigStore) encryptPlaintextMCPPerUserHeaderCredentials(ctx context.Context) (int, error) {
+	var count int
+	for {
+		var credentials []tables.TableMCPPerUserHeaderCredential
+		if err := s.DB().WithContext(ctx).
+			Where("encryption_status = ? OR encryption_status IS NULL OR encryption_status = ''", encryptionStatusPlainText).
+			Limit(encryptionBatchSize).
+			Find(&credentials).Error; err != nil {
+			return count, err
+		}
+		if len(credentials) == 0 {
+			break
+		}
+		if err := s.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			for i := range credentials {
+				if err := tx.WithContext(ctx).Save(&credentials[i]).Error; err != nil {
+					return err
+				}
+			}
+			return nil
+		}); err != nil {
+			return count, err
+		}
+		count += len(credentials)
 	}
 	return count, nil
 }

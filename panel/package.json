@@ -11,24 +11,24 @@
     "copy-build": "rm -rf ../transports/bifrost-http/ui && cp -R out ../transports/bifrost-http/ui"
   },
   "dependencies": {
-    "@svadmin/core": "0.41.1",
-    "@svadmin/ui": "0.55.0",
-    "@tanstack/svelte-query": "^6.1.38",
-    "highlight.js": "^11.11.1",
-    "isomorphic-dompurify": "^3.22.0",
-    "marked": "^18.0.9",
+    "@svadmin/core": "0.47.0",
+    "@svadmin/ui": "0.65.0",
+    "@tanstack/svelte-query": "^6.1.48",
+    "highlight.js": "^11.12.0",
+    "isomorphic-dompurify": "^3.23.0",
+    "marked": "^18.0.11",
     "marked-highlight": "^2.2.4"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^7.2.0",
     "@tailwindcss/vite": "^4.3.3",
-    "svelte": "^5.56.8",
+    "svelte": "^5.56.10",
     "svelte-check": "^4.7.3",
     "tailwindcss": "^4.3.3",
     "typescript": "^6.0.3",
     "vite": "^8.1.5"
   },
   "patchedDependencies": {
-    "@svadmin/ui@0.55.0": "patches/@svadmin%2Fui@0.55.0.patch"
+    "@svadmin/ui@0.65.0": "patches/@svadmin%2Fui@0.65.0.patch"
   }
 }

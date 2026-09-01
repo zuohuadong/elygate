@@ -52,6 +52,9 @@ func setupEncryptionTestStore(t *testing.T) (*RDBConfigStore, *gorm.DB) {
 		&tables.TableVirtualKeyMCPConfig{},
 		&tables.TableModel{},
 		&tables.TempToken{},
+		&tables.TableWebhookEndpoint{},
+		&tables.TableMCPOauthFlow{},
+		&tables.TableMCPPerUserHeaderCredential{},
 	)
 	require.NoError(t, err)
 
@@ -127,6 +130,22 @@ func TestEncryptPlaintextRows_EncryptsAllTables(t *testing.T) {
 		 VALUES (?, ?, 1, ?, 'plain_text', ?, ?)`,
 		"test-plugin", true, `{"api_key":"plugin-secret"}`, now, now)
 
+	insertPlaintextRow(t, db,
+		`INSERT INTO config_webhook_endpoints (id, name, url, secret, events_json, headers_json, encryption_status, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, 'plain_text', ?, ?)`,
+		"webhook-1", "test-webhook", "https://receiver.example.com/hook", "webhook-plaintext-secret",
+		`["async_job.completed"]`, `{"Authorization":"Bearer webhook-token"}`, now, now)
+
+	insertPlaintextRow(t, db,
+		`INSERT INTO mcp_oauth_flows (id, mcp_client_id, oauth_config_id, state, redirect_uri, code_verifier, flow_mode, status, encryption_status, expires_at, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'plain_text', ?, ?, ?)`,
+		"flow-1", "mcp-1", "oauth-1", "state-1", "https://receiver.example.com/callback", "pkce-plaintext-verifier", "user", "pending", future, now, now)
+
+	insertPlaintextRow(t, db,
+		`INSERT INTO mcp_per_user_header_credentials (id, mcp_client_id, auth_mode, status, headers_json, encryption_status, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, 'plain_text', ?, ?)`,
+		"cred-1", "mcp-1", "user", "active", `{"Authorization":"Bearer user-token"}`, now, now)
+
 	// Run the startup encryption pass
 	err := store.EncryptPlaintextRows(ctx)
 	require.NoError(t, err)
@@ -172,6 +191,37 @@ func TestEncryptPlaintextRows_EncryptsAllTables(t *testing.T) {
 	var pluginRow map[string]any
 	db.Table("config_plugins").Where("name = ?", "test-plugin").Take(&pluginRow)
 	assert.Equal(t, "encrypted", pluginRow["encryption_status"])
+
+	var webhookRow map[string]any
+	db.Table("config_webhook_endpoints").Where("id = ?", "webhook-1").Take(&webhookRow)
+	assert.Equal(t, "encrypted", webhookRow["encryption_status"])
+	assert.NotEqual(t, "webhook-plaintext-secret", webhookRow["secret"])
+	assert.NotEqual(t, `{"Authorization":"Bearer webhook-token"}`, webhookRow["headers_json"])
+
+	var webhook tables.TableWebhookEndpoint
+	require.NoError(t, db.Where("id = ?", "webhook-1").First(&webhook).Error)
+	require.NotNil(t, webhook.Secret)
+	assert.Equal(t, "webhook-plaintext-secret", webhook.Secret.GetValue())
+	authorizationHeader := webhook.Headers["Authorization"]
+	assert.Equal(t, "Bearer webhook-token", authorizationHeader.GetValue())
+
+	var flowRow map[string]any
+	db.Table("mcp_oauth_flows").Where("id = ?", "flow-1").Take(&flowRow)
+	assert.Equal(t, "encrypted", flowRow["encryption_status"])
+	assert.NotEqual(t, "pkce-plaintext-verifier", flowRow["code_verifier"])
+	var flow tables.TableMCPOauthFlow
+	require.NoError(t, db.Where("id = ?", "flow-1").First(&flow).Error)
+	assert.Equal(t, "pkce-plaintext-verifier", flow.CodeVerifier)
+
+	var credentialRow map[string]any
+	db.Table("mcp_per_user_header_credentials").Where("id = ?", "cred-1").Take(&credentialRow)
+	assert.Equal(t, "encrypted", credentialRow["encryption_status"])
+	assert.NotEqual(t, `{"Authorization":"Bearer user-token"}`, credentialRow["headers_json"])
+	var credential tables.TableMCPPerUserHeaderCredential
+	require.NoError(t, db.Where("id = ?", "cred-1").First(&credential).Error)
+	headers, err := credential.GetHeaders()
+	require.NoError(t, err)
+	assert.Equal(t, "Bearer user-token", headers["Authorization"])
 }
 
 func TestEncryptPlaintextRows_SkipsAlreadyEncrypted(t *testing.T) {
@@ -1358,6 +1408,39 @@ func TestEncryptPlaintextRows_SkipsAlreadyEncryptedVirtualKeys(t *testing.T) {
 	var rawAfter map[string]any
 	db.Table("governance_virtual_keys").Where("id = ?", "vk-already-enc").Take(&rawAfter)
 	assert.Equal(t, encryptedBefore, rawAfter["value"])
+}
+
+func TestEncryptPlaintextVirtualKeys_AllowsLegacyDualOwnershipRows(t *testing.T) {
+	store, db := setupEncryptionTestStore(t)
+	now := time.Now().UTC().Format("2006-01-02 15:04:05")
+
+	// Legacy databases may contain rows that predate the mutual-exclusion
+	// invariant. Startup encryption must preserve ownership and only rewrite
+	// the sensitive value plus its lookup metadata.
+	insertPlaintextRow(t, db,
+		`INSERT INTO governance_virtual_keys (id, name, value, is_active, team_id, customer_id, encryption_status, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, 'plain_text', ?, ?)`,
+		"vk-legacy-dual", "legacy-dual", "vk-legacy-secret", true, "team-legacy", "customer-legacy", now, now)
+
+	count, err := store.encryptPlaintextVirtualKeys(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 1, count)
+
+	var raw struct {
+		Value            string
+		TeamID           string
+		CustomerID       string
+		EncryptionStatus string
+	}
+	require.NoError(t, db.Table("governance_virtual_keys").Where("id = ?", "vk-legacy-dual").Take(&raw).Error)
+	assert.Equal(t, "encrypted", raw.EncryptionStatus)
+	assert.NotEqual(t, "vk-legacy-secret", raw.Value)
+	assert.Equal(t, "team-legacy", raw.TeamID)
+	assert.Equal(t, "customer-legacy", raw.CustomerID)
+
+	var found tables.TableVirtualKey
+	require.NoError(t, db.Where("id = ?", "vk-legacy-dual").First(&found).Error)
+	assert.Equal(t, "vk-legacy-secret", found.Value.GetValue())
 }
 
 // ============================================================================

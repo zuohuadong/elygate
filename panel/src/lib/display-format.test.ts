@@ -4,14 +4,14 @@ import { clampPaginationPage, formatPagination, formatRankedCost, formatUsdCost,
 describe('display format helpers', () => {
 	test('uses one USD precision across observability pages', () => {
 		expect(formatUsdCost(undefined)).toBe('—');
-		expect(formatUsdCost(0)).toBe('US$0.0000');
-		expect(formatUsdCost(0.0304215)).toBe('US$0.0304');
+		expect(formatUsdCost(0)).toBe('$0.0000');
+		expect(formatUsdCost(0.0304215)).toBe('$0.0304');
 	});
 
 	test('distinguishes free usage from missing cost data', () => {
-		expect(formatRankedCost(0, true, 'zh-CN')).toBe('US$0.0000 · 免费');
-		expect(formatRankedCost(0, true, 'en-US')).toBe('US$0.0000 · Free');
-		expect(formatRankedCost(0, false, 'zh-CN')).toBe('US$0.0000');
+		expect(formatRankedCost(0, true, 'zh-CN')).toBe('$0.0000 · 免费');
+		expect(formatRankedCost(0, true, 'en-US')).toBe('$0.0000 · Free');
+		expect(formatRankedCost(0, false, 'zh-CN')).toBe('$0.0000');
 		expect(formatRankedCost(undefined, true, 'zh-CN')).toBe('—');
 		expect(formatRankedCost(null, true, 'zh-CN')).toBe('—');
 		expect(formatRankedCost('', true, 'zh-CN')).toBe('—');

@@ -100,6 +100,47 @@ func newTestRequestCtx(body string) *fasthttp.RequestCtx {
 	return ctx
 }
 
+func TestGetPricingOverrideByID(t *testing.T) {
+	SetLogger(&mockLogger{})
+	store := setupPricingOverrideHandlerStore(t)
+	handler := &GovernanceHandler{configStore: store}
+
+	override := configstoreTables.TablePricingOverride{
+		ID:               "override-get-1",
+		Name:             "Read by ID",
+		ScopeKind:        string(modelcatalog.ScopeKindGlobal),
+		MatchType:        string(modelcatalog.MatchTypeExact),
+		Pattern:          "gpt-4.1",
+		PricingPatchJSON: `{"input_cost_per_token":1}`,
+		RequestTypes:     []schemas.RequestType{schemas.ChatCompletionRequest},
+	}
+	require.NoError(t, store.CreatePricingOverride(context.Background(), &override))
+
+	ctx := newTestRequestCtx("")
+	ctx.SetUserValue("id", override.ID)
+	handler.getPricingOverride(ctx)
+
+	require.Equal(t, fasthttp.StatusOK, ctx.Response.StatusCode(), string(ctx.Response.Body()))
+	var response struct {
+		PricingOverride configstoreTables.TablePricingOverride `json:"pricing_override"`
+	}
+	require.NoError(t, json.Unmarshal(ctx.Response.Body(), &response))
+	assert.Equal(t, override.ID, response.PricingOverride.ID)
+	assert.Equal(t, override.Name, response.PricingOverride.Name)
+}
+
+func TestGetPricingOverrideByIDNotFound(t *testing.T) {
+	SetLogger(&mockLogger{})
+	store := setupPricingOverrideHandlerStore(t)
+	handler := &GovernanceHandler{configStore: store}
+
+	ctx := newTestRequestCtx("")
+	ctx.SetUserValue("id", "missing")
+	handler.getPricingOverride(ctx)
+
+	require.Equal(t, fasthttp.StatusNotFound, ctx.Response.StatusCode(), string(ctx.Response.Body()))
+}
+
 func TestUpdatePricingOverride_ReplacesFullBody(t *testing.T) {
 	SetLogger(&mockLogger{})
 	store := setupPricingOverrideHandlerStore(t)

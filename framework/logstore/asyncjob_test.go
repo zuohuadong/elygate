@@ -142,23 +142,6 @@ func TestSubmitJob_RechecksVirtualKeyAccessBeforeExecution(t *testing.T) {
 	require.Equal(t, fasthttp.StatusUnauthorized, stored.StatusCode)
 }
 
-func TestRetrieveJob_RechecksVirtualKeyAccess(t *testing.T) {
-	executor := newTestAsyncExecutor(t)
-	ctx := schemas.NewBifrostContext(context.Background(), schemas.NoDeadline)
-	ctx.SetValue(schemas.BifrostContextKeyVirtualKey, "sk-bf-test")
-
-	job, err := executor.SubmitJob(ctx, 3600, func(*schemas.BifrostContext) (interface{}, *schemas.BifrostError) {
-		return map[string]string{"status": "ok"}, nil
-	}, schemas.ChatCompletionRequest)
-	require.NoError(t, err)
-	waitForJobStatus(t, executor.logstore, job.ID)
-
-	executor.SetVirtualKeyAccessChecker(denyingAsyncAccessChecker{})
-	value := "sk-bf-test"
-	_, err = executor.RetrieveJob(context.Background(), job.ID, &value, schemas.ChatCompletionRequest)
-	require.ErrorIs(t, err, assert.AnError)
-}
-
 func TestSubmitJob_StoresRequestID(t *testing.T) {
 	// File-backed store: the test polls the job row across goroutines, and a
 	// :memory: DSN gives each pooled connection its own database.

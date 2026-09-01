@@ -1448,6 +1448,7 @@ func (h *GovernanceHandler) RegisterRoutesWithOverrides(r *router.Router, overri
 	// Pricing override operations
 	r.GET("/api/governance/pricing-overrides", lib.ChainMiddlewares(h.getPricingOverrides, middlewares...))
 	r.POST("/api/governance/pricing-overrides", lib.ChainMiddlewares(h.createPricingOverride, middlewares...))
+	r.GET("/api/governance/pricing-overrides/{id}", lib.ChainMiddlewares(h.getPricingOverride, middlewares...))
 	r.PUT("/api/governance/pricing-overrides/{id}", lib.ChainMiddlewares(h.updatePricingOverride, middlewares...))
 	r.DELETE("/api/governance/pricing-overrides/{id}", lib.ChainMiddlewares(h.deletePricingOverride, middlewares...))
 
@@ -5032,6 +5033,21 @@ func (h *GovernanceHandler) getPricingOverrides(ctx *fasthttp.RequestCtx) {
 		"limit":             len(overrides),
 		"offset":            0,
 	})
+}
+
+func (h *GovernanceHandler) getPricingOverride(ctx *fasthttp.RequestCtx) {
+	id := ctx.UserValue("id").(string)
+	override, err := h.configStore.GetPricingOverrideByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, configstore.ErrNotFound) {
+			SendError(ctx, fasthttp.StatusNotFound, "Pricing override not found")
+			return
+		}
+		logger.Error("failed to retrieve pricing override: %v", err)
+		SendError(ctx, fasthttp.StatusInternalServerError, "Failed to retrieve pricing override")
+		return
+	}
+	SendJSON(ctx, map[string]interface{}{"pricing_override": override})
 }
 
 func (h *GovernanceHandler) createPricingOverride(ctx *fasthttp.RequestCtx) {

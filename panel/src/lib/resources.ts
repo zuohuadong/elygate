@@ -16,6 +16,9 @@ const RESOURCE_SPECS: ResourceSpec[] = [
 	['employees', 'elygate.employees', 'contact-round'],
 	['teams', 'elygate.teams', 'users-round'],
 	['customers', 'elygate.customers', 'building-2'],
+	['control-plane-projects', 'elygate.controlPlaneProjects', 'folder-kanban'],
+	['control-plane-applications', 'elygate.controlPlaneApplications', 'app-window'],
+	['control-plane-usage', 'elygate.controlPlaneUsage', 'chart-no-axes-combined'],
 	['routing-rules', 'elygate.routingRules', 'route'],
 	['model-configs', 'elygate.modelConfigs', 'sliders-horizontal'],
 	['provider-governance', 'elygate.providerGovernance', 'shield-check'],
@@ -137,6 +140,7 @@ export function createMenu(
 			children: orderedMenuItems(locale, 'observability', enterpriseResources, [
 				menuItem(locale, 'logs', 'elygate.logs', 'scroll-text'),
 				menuItem(locale, 'mcp-logs', 'elygate.mcpLogs', 'list-tree'),
+				menuItem(locale, 'control-plane-usage', 'elygate.controlPlaneUsage', 'chart-no-axes-combined'),
 				menuItem(locale, 'connectors', 'elygate.connectors', 'cable'),
 				menuItem(locale, 'user-agent-mappings', 'elygate.userAgentMappings', 'tags'),
 			]),
@@ -179,6 +183,8 @@ export function createMenu(
 				menuItem(locale, 'employees', 'elygate.employees', 'contact-round'),
 				menuItem(locale, 'teams', 'elygate.teams', 'users-round'),
 				menuItem(locale, 'customers', 'elygate.customers', 'building-2'),
+				menuItem(locale, 'control-plane-projects', 'elygate.controlPlaneProjects', 'folder-kanban'),
+				menuItem(locale, 'control-plane-applications', 'elygate.controlPlaneApplications', 'app-window'),
 			]),
 		},
 		{

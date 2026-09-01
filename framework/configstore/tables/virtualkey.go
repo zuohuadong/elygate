@@ -297,11 +297,24 @@ func (vk *TableVirtualKey) VaultStoreSelfManaged() {}
 // rather than {"value":"bfvk-xxx","type":"plain_text"}.
 func (vk TableVirtualKey) MarshalJSON() ([]byte, error) {
 	type Alias TableVirtualKey
+	safe := Alias(vk)
+	if vk.Team != nil {
+		team := *vk.Team
+		team.Customer = nil
+		team.VirtualKeys = nil
+		safe.Team = &team
+	}
+	if vk.Customer != nil {
+		customer := *vk.Customer
+		customer.Teams = nil
+		customer.VirtualKeys = nil
+		safe.Customer = &customer
+	}
 	return json.Marshal(&struct {
 		Alias
 		Value string `json:"value"`
 	}{
-		Alias: Alias(vk),
+		Alias: safe,
 		Value: vk.Value.GetValue(),
 	})
 }

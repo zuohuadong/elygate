@@ -33,7 +33,7 @@ describe('model catalog helpers', () => {
 	});
 
 	test('formats per-token prices per million tokens', () => {
-		expect(formatTokenPrice(0.0000025, 'en')).toBe('US$2.50 / 1M');
+		expect(formatTokenPrice(0.0000025, 'en')).toBe('$2.50 / 1M');
 		expect(formatTokenPrice(undefined, 'en')).toBe('—');
 	});
 });

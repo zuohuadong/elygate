@@ -562,7 +562,6 @@
         "pages": [
           "deployment-guides/overview",
           "deployment-guides/runtime-contract",
-          "deployment-guides/single-node-postgres",
           {
             "group": "Managed Kubernetes",
             "icon": "cloud",
