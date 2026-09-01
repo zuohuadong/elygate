@@ -41,6 +41,7 @@
 	import ModelLimitsPage from './pages/ModelLimitsPage.svelte';
 	import OAuthConsentPage from './pages/OAuthConsentPage.svelte';
 	import ObservabilityConnectorsPage from './pages/ObservabilityConnectorsPage.svelte';
+	import UsageLedgerPage from './pages/UsageLedgerPage.svelte';
 	import OperationalSettingsPage from './pages/OperationalSettingsPage.svelte';
 	import PanelAssist from './pages/PanelAssist.svelte';
 	import PprofPage from './pages/PprofPage.svelte';
@@ -186,6 +187,7 @@
 		'docs-hub': { list: DocsHubPage },
 		...(includeDevelopmentResources ? { pprof: { list: PprofPage } } : {}),
 		connectors: { list: ObservabilityConnectorsPage },
+		'usage-ledger': { list: UsageLedgerPage },
 		'large-payload-config': { list: ConfigPage },
 		'adaptive-routing': { list: RoutingRulesPage },
 	};
@@ -230,7 +232,7 @@
 	{:else if publicRoute}
 		<McpAuthFlowPage route={publicRoute} />
 	{:else}
-		{#key currentLocale}
+		{#key `${currentLocale}:${currentHash}`}
 			<AdminApp
 				dataProvider={bifrostDataProvider}
 				authProvider={bifrostAuthProvider}

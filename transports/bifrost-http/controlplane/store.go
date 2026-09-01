@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -447,33 +448,61 @@ func (s *Store) ProjectLogs(ctx context.Context, logs []logstore.Log) (int, erro
 }
 
 func (s *Store) projectLogs(ctx context.Context, logs []logstore.Log, advanceCheckpoint bool) (int, error) {
+	var fallbackApp *Application
+	getFallbackApp := func() (*Application, error) {
+		if fallbackApp != nil {
+			return fallbackApp, nil
+		}
+		project := &Project{ID: "default", OrganizationID: "default", Name: "Default", Status: "active", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+		if err := s.db(ctx).Where("id = ?", project.ID).FirstOrCreate(project).Error; err != nil {
+			return nil, err
+		}
+		fallbackApp = &Application{ID: "default", ProjectID: project.ID, Name: "Unassigned", Environment: "production", Status: "active", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+		if err := s.db(ctx).Where("id = ?", fallbackApp.ID).FirstOrCreate(fallbackApp).Error; err != nil {
+			return nil, err
+		}
+		return fallbackApp, nil
+	}
 	count := 0
 	for _, entry := range logs {
-		if entry.VirtualKeyID == nil || *entry.VirtualKeyID == "" {
-			continue
+		var app *Application
+		virtualKeyID := ""
+		if entry.VirtualKeyID != nil {
+			virtualKeyID = *entry.VirtualKeyID
 		}
-		binding, err := s.BindingAt(ctx, *entry.VirtualKeyID, entry.Timestamp)
-		if err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				continue
+		if virtualKeyID != "" {
+			binding, err := s.BindingAt(ctx, virtualKeyID, entry.Timestamp)
+			if err == nil {
+				app, err = s.GetApplication(ctx, binding.ApplicationID)
+				if err != nil {
+					return count, err
+				}
+			} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return count, err
 			}
-			return count, err
 		}
-		app, err := s.GetApplication(ctx, binding.ApplicationID)
-		if err != nil {
-			return count, err
+		if app == nil {
+			var err error
+			app, err = getFallbackApp()
+			if err != nil {
+				return count, err
+			}
 		}
 		cost := 0.0
 		if entry.Cost != nil {
 			cost = *entry.Cost
 		}
-		row := UsageLedgerEntry{ID: uuid.NewString(), SourceLogID: entry.ID, OccurredAt: entry.Timestamp, ProjectID: app.ProjectID, ApplicationID: app.ID, VirtualKeyID: *entry.VirtualKeyID, TeamID: entry.TeamID, CustomerID: entry.CustomerID, UserID: entry.UserID, Provider: entry.Provider, Model: entry.Model, Status: entry.Status, PromptTokens: entry.PromptTokens, OutputTokens: entry.CompletionTokens, TotalTokens: entry.TotalTokens, Cost: cost, ProjectionVer: 1, CreatedAt: time.Now().UTC()}
+		row := UsageLedgerEntry{ID: uuid.NewString(), SourceLogID: entry.ID, OccurredAt: entry.Timestamp, ProjectID: app.ProjectID, ApplicationID: app.ID, VirtualKeyID: virtualKeyID, TeamID: entry.TeamID, CustomerID: entry.CustomerID, UserID: entry.UserID, Provider: entry.Provider, Model: entry.Model, Status: entry.Status, PromptTokens: entry.PromptTokens, OutputTokens: entry.CompletionTokens, TotalTokens: entry.TotalTokens, Cost: cost, ProjectionVer: 1, CreatedAt: time.Now().UTC()}
 		result := s.db(ctx).Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "source_log_id"}}, DoNothing: true}).Create(&row)
 		if result.Error != nil {
 			return count, result.Error
 		}
 		count += int(result.RowsAffected)
 	}
+	// Advance the projector checkpoint for every scanned log batch, including
+	// logs that cannot be projected because they have no virtual-key binding.
+	// Otherwise an unbound request is rescanned forever and the Usage Ledger
+	// status falsely reports a stalled watermark.
 	if advanceCheckpoint && len(logs) > 0 {
 		last := logs[0]
 		for _, item := range logs[1:] {
@@ -563,8 +592,26 @@ func (s *Store) ListAudit(ctx context.Context, limit int) ([]AuditEvent, error) 
 		limit = 100
 	}
 	var out []AuditEvent
-	err := s.db(ctx).Order("created_at DESC").Limit(limit).Find(&out).Error
-	return out, err
+	if err := s.db(ctx).Order("created_at DESC").Limit(limit).Find(&out).Error; err != nil {
+		return nil, err
+	}
+	// Governance mutations use the signed audit chain. Surface those events in
+	// the control-plane feed as well so the Usage Ledger audit view does not
+	// appear empty just because two audit stores back different API surfaces.
+	if s.db(ctx).Migrator().HasTable(&configtables.TableGovernanceAuditEvent{}) {
+		var governanceEvents []configtables.TableGovernanceAuditEvent
+		if err := s.db(ctx).Order("occurred_at DESC").Limit(limit).Find(&governanceEvents).Error; err != nil {
+			return nil, err
+		}
+		for _, event := range governanceEvents {
+			out = append(out, AuditEvent{ID: event.ID, ActorID: event.ActorID, Action: event.Action, ResourceType: event.Resource, ResourceID: event.ResourceID, CreatedAt: event.OccurredAt})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
 }
 
 func (s *Store) CheckVirtualKeyValueAccess(ctx context.Context, value string) error {

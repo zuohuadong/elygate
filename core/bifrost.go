@@ -5241,11 +5241,8 @@ func (bifrost *Bifrost) handleRequest(ctx *schemas.BifrostContext, req *schemas.
 	// Empty provider/model after PreRequestHook means no plugin
 	// could pick a provider for this model — the caller's input is unresolvable.
 	if err := validateRequestAfterPreRequestHooks(req); err != nil {
-		// Returning before tryRequest skips the downstream log drain, so flush
-		// any PreRequestHook-emitted plugin logs here.
-		flushPluginLogs(ctx)
 		err.PopulateExtraFields(req.RequestType, provider, model, model)
-		return nil, err
+		return nil, bifrost.finishEarlyRequestError(ctx, req, err)
 	}
 
 	bifrost.logger.Debug("primary provider %s with model %s and %d fallbacks", provider, model, len(fallbacks))
@@ -5339,6 +5336,40 @@ func (bifrost *Bifrost) handleRequest(ctx *schemas.BifrostContext, req *schemas.
 	return nil, primaryErr
 }
 
+// finishEarlyRequestError runs the same post-hook path used by provider errors
+// for validation failures that happen before tryRequest (for example when no
+// provider can be resolved). This keeps rejected requests visible to logging
+// and telemetry plugins instead of silently dropping them before PreLLMHook.
+func (bifrost *Bifrost) finishEarlyRequestError(ctx *schemas.BifrostContext, req *schemas.BifrostRequest, requestErr *schemas.BifrostError) *schemas.BifrostError {
+	if ctx == nil || req == nil || requestErr == nil {
+		return requestErr
+	}
+	tracer := bifrost.getTracer()
+	if tracer != nil {
+		ctx.SetValue(schemas.BifrostContextKeyTracer, tracer)
+		if _, ok := ctx.Value(schemas.BifrostContextKeyTraceID).(string); !ok {
+			if traceID := tracer.CreateTrace(""); traceID != "" {
+				ctx.SetValue(schemas.BifrostContextKeyTraceID, traceID)
+				ctx.SetValue(schemas.BifrostContextKeyExportTraceID, traceID)
+			}
+		}
+	}
+	pipeline := bifrost.getPluginPipeline()
+	defer bifrost.releasePluginPipeline(pipeline)
+	_, shortCircuit, preCount := pipeline.RunLLMPreHooks(ctx, req)
+	if shortCircuit != nil && shortCircuit.Error != nil {
+		requestErr = shortCircuit.Error
+	}
+	provider, model, _ := req.GetRequestFields()
+	requestErr.PopulateExtraFields(req.RequestType, provider, model, model)
+	_, postErr := pipeline.RunPostLLMHooks(ctx, nil, requestErr, preCount)
+	drainAndAttachPluginLogs(ctx)
+	if postErr != nil {
+		return postErr
+	}
+	return requestErr
+}
+
 // handleStreamRequest handles the stream request to the provider based on the request type
 // It handles plugin hooks, request validation, response processing, and fallback providers.
 // If the primary provider fails, it will try each fallback provider in order until one succeeds.
@@ -5378,11 +5409,8 @@ func (bifrost *Bifrost) handleStreamRequest(ctx *schemas.BifrostContext, req *sc
 	// Empty provider after PreRequestHook means no plugin
 	// could pick a provider for this model — the caller's input is unresolvable.
 	if err := validateRequestAfterPreRequestHooks(req); err != nil {
-		// Returning before tryStreamRequest skips the downstream log drain, so
-		// flush any PreRequestHook-emitted plugin logs here.
-		flushPluginLogs(ctx)
 		err.PopulateExtraFields(req.RequestType, provider, model, model)
-		return nil, err
+		return nil, bifrost.finishEarlyRequestError(ctx, req, err)
 	}
 
 	bifrost.logger.Debug("primary provider %s with model %s and %d fallbacks", provider, model, len(fallbacks))

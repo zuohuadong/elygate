@@ -196,6 +196,19 @@ describe('panel issue regressions', () => {
 		expect(source).toContain("window.addEventListener('hashchange', syncHash)");
 	});
 
+	test('hash navigation remounts the admin router on the first route change', async () => {
+		const source = await Bun.file(new URL('../App.svelte', import.meta.url)).text();
+		expect(source).toContain('{#key `${currentLocale}:${currentHash}`}');
+	});
+
+	test('empty virtual-key names show explicit validation feedback', async () => {
+		const source = await Bun.file(new URL('../pages/VirtualKeysPage.svelte', import.meta.url)).text();
+		expect(source).toContain('<form onsubmit={submit} novalidate>');
+		expect(source).toContain('nameError = i18n.t(\'elygate.required\')');
+		expect(source).toContain('class="field-error"');
+		expect(source).toContain('aria-invalid={nameError ? \'true\' : \'false\'}');
+	});
+
 	test('security settings remain editable after configuration loads', async () => {
 		const source = await Bun.file(new URL('../pages/ConfigPage.svelte', import.meta.url)).text();
 		for (const field of ['authEnabled', 'enforceAuthOnInference', 'allowDirectKeys', 'disableDbPingsInHealth', 'dropExcessRequests']) {
