@@ -132,6 +132,44 @@ index 32945bc..f7d6949 100644
            </div>
            <button
              class="h-7 w-7 flex items-center justify-center rounded-md text-sidebar-foreground/40 hover:text-sidebar-foreground hover:bg-sidebar-accent/60 transition-colors"
+diff --git a/dist/components/CommandPalette.svelte b/dist/components/CommandPalette.svelte
+index 0e68687..6501915 100644
+--- a/dist/components/CommandPalette.svelte
++++ b/dist/components/CommandPalette.svelte
+@@ -101,7 +101,7 @@
+             {#if adminContext.accessControlProvider}
+               <CanAccess resource={r.name} action="list">
+                 <Command.Item
+-                  value={r.name}
++                  value={`${r.name} ${r.label}`}
+                   onSelect={() => act(() => navigation.list(r.name))}
+                   class={itemClass}
+                 >
+@@ -111,7 +111,7 @@
+               </CanAccess>
+             {:else}
+               <Command.Item
+-                value={r.name}
++                value={`${r.name} ${r.label}`}
+                 onSelect={() => act(() => navigation.list(r.name))}
+                 class={itemClass}
+               >
+@@ -130,13 +130,13 @@
+             {#if r.canCreate !== false}
+               {#if adminContext.accessControlProvider}
+                 <CanAccess resource={r.name} action="create">
+-                  <Command.Item value={"create-" + r.name} onSelect={() => act(() => navigation.create(r.name))} class={itemClass}>
++                  <Command.Item value={`${"create-" + r.name} ${r.label}`} onSelect={() => act(() => navigation.create(r.name))} class={itemClass}>
+                     <Plus class="h-4 w-4 text-muted-foreground" />
+                     {i18n.t('common.create')} {r.label}
+                   </Command.Item>
+                 </CanAccess>
+               {:else}
+-                <Command.Item value={"create-" + r.name} onSelect={() => act(() => navigation.create(r.name))} class={itemClass}>
++                <Command.Item value={`${"create-" + r.name} ${r.label}`} onSelect={() => act(() => navigation.create(r.name))} class={itemClass}>
+                   <Plus class="h-4 w-4 text-muted-foreground" />
+                   {i18n.t('common.create')} {r.label}
+                 </Command.Item>
 diff --git a/dist/components/ui/sheet/sheet.svelte b/dist/components/ui/sheet/sheet.svelte
 index 93ab34a..23e3449 100644
 --- a/dist/components/ui/sheet/sheet.svelte
