@@ -278,6 +278,7 @@ func (p *RoutingPlugin) applyRoutingRules(ctx *schemas.BifrostContext, req *sche
 	requestType := string(req.RequestType)
 	headers, _ := ctx.Value(schemas.BifrostContextKeyRequestHeaders).(map[string]string)
 	queryParams, _ := ctx.Value(schemas.BifrostContextKeyRequestQuery).(map[string]string)
+	metadata := requestMetadata(req)
 
 	// Set up lazy complexity computation; only runs if a rule references complexity_tier.
 	var computeComplexity func() *complexity.ComplexityResult
@@ -325,6 +326,7 @@ func (p *RoutingPlugin) applyRoutingRules(ctx *schemas.BifrostContext, req *sche
 		RequestType:              requestType,
 		Headers:                  headers,
 		QueryParams:              queryParams,
+		Metadata:                 metadata,
 		BudgetAndRateLimitStatus: p.governance.GetBudgetAndRateLimitStatus(ctx, model, provider, virtualKey, nil, nil, nil),
 		ComputeComplexity:        computeComplexity,
 	}
@@ -386,6 +388,34 @@ func (p *RoutingPlugin) applyRoutingRules(ctx *schemas.BifrostContext, req *sche
 
 	p.logger.Debug("[Routing] Applied routing decision: provider=%s, model=%s, keyID=%s, fallbacks=%v", decision.Provider, decision.Model, decision.KeyID, decision.Fallbacks)
 	return decision, nil
+}
+
+func requestMetadata(req *schemas.BifrostRequest) map[string]string {
+	if req == nil {
+		return nil
+	}
+	var raw *map[string]any
+	switch req.RequestType {
+	case schemas.ChatCompletionRequest, schemas.ChatCompletionStreamRequest:
+		if req.ChatRequest != nil && req.ChatRequest.Params != nil {
+			raw = req.ChatRequest.Params.Metadata
+		}
+	case schemas.ResponsesRequest, schemas.ResponsesStreamRequest:
+		if req.ResponsesRequest != nil && req.ResponsesRequest.Params != nil {
+			raw = req.ResponsesRequest.Params.Metadata
+		}
+	}
+	if raw == nil {
+		return nil
+	}
+	metadata := make(map[string]string, len(*raw))
+	for key, value := range *raw {
+		if value == nil {
+			continue
+		}
+		metadata[key] = fmt.Sprint(value)
+	}
+	return metadata
 }
 
 // PreLLMHook implements schemas.LLMPlugin (no-op).

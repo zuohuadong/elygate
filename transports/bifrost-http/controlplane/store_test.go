@@ -124,6 +124,23 @@ func TestBackfillProjectionDoesNotAdvanceCheckpoint(t *testing.T) {
 	require.True(t, checkpoint.Watermark.IsZero())
 }
 
+func TestProjectLogsAdvancesCheckpointForUnboundLogs(t *testing.T) {
+	store, _ := testControlPlaneStore(t)
+	occurred := time.Now().UTC().Add(time.Minute)
+	count, err := store.ProjectLogs(context.Background(), []logstore.Log{{ID: "unbound-log", Timestamp: occurred}})
+	require.NoError(t, err)
+	require.Zero(t, count)
+	checkpoint, err := store.Checkpoint(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "unbound-log", checkpoint.LastLogID)
+	require.WithinDuration(t, occurred, checkpoint.Watermark, time.Second)
+	rows, total, err := store.ListUsage(context.Background(), UsageQuery{ApplicationID: "default"})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+	require.Len(t, rows, 1)
+	require.Empty(t, rows[0].VirtualKeyID)
+}
+
 func TestExpiredBindingRejectsVirtualKeyValue(t *testing.T) {
 	store, cs := testControlPlaneStore(t)
 	active := true

@@ -20,6 +20,7 @@
 		PLUGIN_CAPABILITIES_CHANGED_EVENT,
 	} from './lib/plugin-management';
 	import { createMenu, createResources } from './lib/resources';
+	import { pageTitleForHash } from './lib/page-metadata';
 	import { enterprisePanelManifest as fallbackEnterprisePanelManifest } from './enterprise-fallback';
 	import DashboardPage from './pages/DashboardPage.svelte';
 	import BifrostResourcePage from './pages/BifrostResourcePage.svelte';
@@ -41,6 +42,7 @@
 	import ModelLimitsPage from './pages/ModelLimitsPage.svelte';
 	import OAuthConsentPage from './pages/OAuthConsentPage.svelte';
 	import ObservabilityConnectorsPage from './pages/ObservabilityConnectorsPage.svelte';
+	import UsageLedgerPage from './pages/UsageLedgerPage.svelte';
 	import OperationalSettingsPage from './pages/OperationalSettingsPage.svelte';
 	import PanelAssist from './pages/PanelAssist.svelte';
 	import PprofPage from './pages/PprofPage.svelte';
@@ -120,7 +122,7 @@
 	configureRequestErrorFormatter((status) => labelFor(currentLocale, 'elygate.requestFailed').replace('{status}', String(status)));
 	const bifrostAuthProvider = createBifrostAuthProvider(() => currentLocale, refreshRuntimeFeatures);
 	const resources = $derived.by(() =>
-		createResources(currentLocale, includeDevelopmentResources, enterpriseResources),
+		createResources(currentLocale, includeDevelopmentResources, enterpriseResources, availableEnterpriseResources),
 	);
 	const menu = $derived.by(() =>
 		createMenu(currentLocale, availableEnterpriseResources, includeDevelopmentResources, enterpriseResources),
@@ -129,7 +131,9 @@
 
 	function applyLocaleMetadata(locale: ElygateLocale): void {
 		if (typeof document !== 'undefined') {
-			document.title = locale === 'zh-CN' ? `${currentAppName} 管理台` : `${getEnName()} Admin Console`;
+			const resourceLabels = Object.fromEntries(resources.map((resource) => [resource.name, resource.label]));
+			const pageTitle = pageTitleForHash(currentHash, locale, resourceLabels);
+			document.title = locale === 'zh-CN' ? `${pageTitle} - ${currentAppName} 管理台` : `${pageTitle} - ${getEnName()} Admin Console`;
 			document.documentElement.lang = locale;
 		}
 		for (const [name, label] of Object.entries(themeLabels[locale])) {
@@ -191,6 +195,7 @@
 		'docs-hub': { list: DocsHubPage },
 		...(includeDevelopmentResources ? { pprof: { list: PprofPage } } : {}),
 		connectors: { list: ObservabilityConnectorsPage },
+		'usage-ledger': { list: UsageLedgerPage },
 		'large-payload-config': { list: ConfigPage },
 		'adaptive-routing': { list: RoutingRulesPage },
 	};
@@ -235,7 +240,7 @@
 	{:else if publicRoute}
 		<McpAuthFlowPage route={publicRoute} />
 	{:else}
-		{#key currentLocale}
+		{#key `${currentLocale}:${currentHash}`}
 			<AdminApp
 				dataProvider={bifrostDataProvider}
 				authProvider={bifrostAuthProvider}
@@ -307,4 +312,5 @@
 	}
 
 	.locale-option.is-active { background: var(--muted); color: var(--foreground); font-weight: 650; }
+	:global([data-svadmin-system-error] button) { cursor: pointer; pointer-events: auto !important; }
 </style>

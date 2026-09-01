@@ -32,6 +32,7 @@ const ROUTE_LABEL_KEYS = {
 	'prompt-folders': 'elygate.promptFolders',
 	prompts: 'elygate.prompts',
 	connectors: 'elygate.connectors',
+	'usage-ledger': 'elygate.usageLedger',
 	config: 'elygate.config',
 	'client-settings': 'elygate.clientSettings',
 	'compatibility-config': 'elygate.compatibilityConfig',

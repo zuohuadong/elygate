@@ -18,6 +18,10 @@ var paramKeyPattern = regexp.MustCompile(`params\[["']([^"']+)["']\]`)
 // paramInPattern matches "in params" membership test patterns like "Region" in params or 'Region' in params
 var paramInPattern = regexp.MustCompile(`["']([^"']+)["']\s+in\s+params`)
 
+// requestFieldPattern accepts structured request aliases while preserving the
+// historical numeric `request` rate-limit variable.
+var requestFieldPattern = regexp.MustCompile(`\brequest\.(model|provider|type|metadata)\b`)
+
 // normalizeMapKeysInCEL lowercases header and param keys in CEL expressions
 // so that headers["X-Api-Key"] becomes headers["x-api-key"], "X-Api-Key" in headers becomes "x-api-key" in headers,
 // params["Region"] becomes params["region"], and "Region" in params becomes "region" in params.
@@ -32,6 +36,22 @@ func NormalizeMapKeysInCEL(expr string) string {
 	// Normalize "in" membership test
 	expr = headerInPattern.ReplaceAllStringFunc(expr, toLower)
 	expr = paramInPattern.ReplaceAllStringFunc(expr, toLower)
+	// Keep both CEL contracts usable: request.model/provider/type are aliases
+	// for the existing flat variables, while `request` remains numeric.
+	expr = requestFieldPattern.ReplaceAllStringFunc(expr, func(match string) string {
+		switch match {
+		case "request.model":
+			return "model"
+		case "request.provider":
+			return "provider"
+		case "request.type":
+			return "request_type"
+		case "request.metadata":
+			return "metadata"
+		default:
+			return match
+		}
+	})
 	return expr
 }
 

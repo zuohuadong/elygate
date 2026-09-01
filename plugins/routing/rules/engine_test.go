@@ -1767,6 +1767,11 @@ func TestNormalizeMapKeysInCEL(t *testing.T) {
 			input:    `model == "gpt-4o"`,
 			expected: `model == "gpt-4o"`,
 		},
+		{
+			name:     "structured request model alias",
+			input:    `request.model == "gpt-4o" && request.provider == "openai" && request.type == "chat_completion" && request.metadata["tier"] == "pro"`,
+			expected: `model == "gpt-4o" && provider == "openai" && request_type == "chat_completion" && metadata["tier"] == "pro"`,
+		},
 		// Header "in" operator
 		{
 			name:     "header in operator with double quotes",
