@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -41,12 +42,118 @@ func (h *SessionHandler) RegisterRoutes(r *router.Router, middlewares ...schemas
 
 // isAuthEnabled handles GET /api/session/is-auth-enabled - Check if auth is enabled
 func (h *SessionHandler) isAuthEnabled(ctx *fasthttp.RequestCtx) {
+	resp := map[string]any{
+		"is_auth_enabled": false,
+		"has_valid_token": false,
+		"auth_type":       "none",
+	}
+
+	effectiveAppName := ""
+	effectiveShortName := ""
+	effectiveEnName := ""
+	effectiveLogo := ""
+	effectiveFavicon := ""
+
+	if h.configStore != nil {
+		if cc, err := h.configStore.GetClientConfig(ctx); err == nil && cc != nil {
+			if strings.TrimSpace(cc.AppName) != "" {
+				effectiveAppName = strings.TrimSpace(cc.AppName)
+			}
+		}
+		if metadata, err := h.configStore.GetClientMetadata(ctx); err == nil && len(metadata) > 0 {
+			if effectiveAppName == "" {
+				if v, ok := metadata["app_name"].(string); ok && strings.TrimSpace(v) != "" {
+					effectiveAppName = strings.TrimSpace(v)
+				} else if v, ok := metadata["brand_name"].(string); ok && strings.TrimSpace(v) != "" {
+					effectiveAppName = strings.TrimSpace(v)
+				} else if v, ok := metadata["platform_name"].(string); ok && strings.TrimSpace(v) != "" {
+					effectiveAppName = strings.TrimSpace(v)
+				}
+			}
+			if v, ok := metadata["short_name"].(string); ok && strings.TrimSpace(v) != "" {
+				effectiveShortName = strings.TrimSpace(v)
+			} else if v, ok := metadata["brand_short_name"].(string); ok && strings.TrimSpace(v) != "" {
+				effectiveShortName = strings.TrimSpace(v)
+			}
+			if v, ok := metadata["en_name"].(string); ok && strings.TrimSpace(v) != "" {
+				effectiveEnName = strings.TrimSpace(v)
+			} else if v, ok := metadata["brand_en_name"].(string); ok && strings.TrimSpace(v) != "" {
+				effectiveEnName = strings.TrimSpace(v)
+			} else if v, ok := metadata["platform_en_name"].(string); ok && strings.TrimSpace(v) != "" {
+				effectiveEnName = strings.TrimSpace(v)
+			}
+			if v, ok := metadata["logo_url"].(string); ok && strings.TrimSpace(v) != "" {
+				effectiveLogo = strings.TrimSpace(v)
+			} else if v, ok := metadata["app_logo"].(string); ok && strings.TrimSpace(v) != "" {
+				effectiveLogo = strings.TrimSpace(v)
+			}
+			if v, ok := metadata["favicon_url"].(string); ok && strings.TrimSpace(v) != "" {
+				effectiveFavicon = strings.TrimSpace(v)
+			} else if v, ok := metadata["app_favicon"].(string); ok && strings.TrimSpace(v) != "" {
+				effectiveFavicon = strings.TrimSpace(v)
+			}
+		}
+	}
+
+	if effectiveAppName == "" {
+		for _, key := range []string{"APP_NAME", "BRAND_NAME", "PLATFORM_NAME", "ELYGATE_APP_NAME", "BIFROST_APP_NAME"} {
+			if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+				effectiveAppName = v
+				break
+			}
+		}
+	}
+	if effectiveShortName == "" {
+		for _, key := range []string{"APP_SHORT_NAME", "BRAND_SHORT_NAME", "SHORT_NAME"} {
+			if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+				effectiveShortName = v
+				break
+			}
+		}
+	}
+	if effectiveEnName == "" {
+		for _, key := range []string{"APP_EN_NAME", "BRAND_EN_NAME", "PLATFORM_EN_NAME", "EN_NAME"} {
+			if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+				effectiveEnName = v
+				break
+			}
+		}
+	}
+	if effectiveLogo == "" {
+		for _, key := range []string{"APP_LOGO", "BRAND_LOGO", "APP_LOGO_URL", "BRAND_LOGO_URL", "LOGO_URL"} {
+			if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+				effectiveLogo = v
+				break
+			}
+		}
+	}
+	if effectiveFavicon == "" {
+		for _, key := range []string{"APP_FAVICON", "BRAND_FAVICON", "APP_FAVICON_URL", "FAVICON_URL"} {
+			if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+				effectiveFavicon = v
+				break
+			}
+		}
+	}
+
+	if effectiveAppName != "" {
+		resp["app_name"] = effectiveAppName
+	}
+	if effectiveShortName != "" {
+		resp["short_name"] = effectiveShortName
+	}
+	if effectiveEnName != "" {
+		resp["en_name"] = effectiveEnName
+	}
+	if effectiveLogo != "" {
+		resp["logo_url"] = effectiveLogo
+	}
+	if effectiveFavicon != "" {
+		resp["favicon_url"] = effectiveFavicon
+	}
+
 	if h.configStore == nil {
-		SendJSON(ctx, map[string]any{
-			"is_auth_enabled": false,
-			"has_valid_token": false,
-			"auth_type":       "none",
-		})
+		SendJSON(ctx, resp)
 		return
 	}
 	authConfig, err := h.configStore.GetAuthConfig(ctx)
@@ -55,11 +162,7 @@ func (h *SessionHandler) isAuthEnabled(ctx *fasthttp.RequestCtx) {
 		return
 	}
 	if authConfig == nil {
-		SendJSON(ctx, map[string]any{
-			"is_auth_enabled": false,
-			"has_valid_token": false,
-			"auth_type":       "none",
-		})
+		SendJSON(ctx, resp)
 		return
 	}
 	// Check if the header has a token and is valid (Authorization header or cookie)
@@ -77,11 +180,10 @@ func (h *SessionHandler) isAuthEnabled(ctx *fasthttp.RequestCtx) {
 			hasValidToken = true
 		}
 	}
-	SendJSON(ctx, map[string]any{
-		"is_auth_enabled": authConfig.IsEnabled,
-		"has_valid_token": hasValidToken,
-		"auth_type":       dashboardAuthType(authConfig.IsEnabled),
-	})
+	resp["is_auth_enabled"] = authConfig.IsEnabled
+	resp["has_valid_token"] = hasValidToken
+	resp["auth_type"] = dashboardAuthType(authConfig.IsEnabled)
+	SendJSON(ctx, resp)
 }
 
 // dashboardAuthType reports the dashboard session auth mode for frontend flows.

@@ -8,6 +8,7 @@ import (
 
 	"github.com/maximhq/bifrost/framework/configstore/tables"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // isUniqueConstraintError checks if the error is a unique constraint violation (SQLite or PostgreSQL)
@@ -511,8 +512,9 @@ func (s *RDBConfigStore) UpdatePromptSession(ctx context.Context, session *table
 			}
 		}
 
-		// Update the session
-		res := tx.Where("id = ?", session.ID).Save(session)
+		// Associations are replaced explicitly below; do not let Save insert new
+		// messages before the existing order indexes have been deleted.
+		res := tx.Omit(clause.Associations).Where("id = ?", session.ID).Save(session)
 		if res.Error != nil {
 			return res.Error
 		}

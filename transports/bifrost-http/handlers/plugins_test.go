@@ -3,6 +3,9 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"slices"
+	"sync"
 	"testing"
 
 	"github.com/maximhq/bifrost/core/schemas"
@@ -17,8 +20,19 @@ import (
 type capturePluginsStore struct {
 	configstore.ConfigStore
 	existingPlugin  *configstoreTables.TablePlugin
+	plugins         []*configstoreTables.TablePlugin
 	capturedConfig  map[string]any
 	capturedEnabled bool
+}
+
+func (s *capturePluginsStore) GetPlugins(_ context.Context) ([]*configstoreTables.TablePlugin, error) {
+	if s.plugins != nil {
+		return s.plugins, nil
+	}
+	if s.existingPlugin != nil {
+		return []*configstoreTables.TablePlugin{s.existingPlugin}, nil
+	}
+	return nil, nil
 }
 
 func (s *capturePluginsStore) GetPlugin(_ context.Context, name string) (*configstoreTables.TablePlugin, error) {
@@ -60,6 +74,186 @@ func (noopPluginsLoader) ExpandPluginConfigForAPI(_ string, _ map[string]any) (m
 	return nil, nil
 }
 
+type rollbackPluginsStore struct {
+	configstore.ConfigStore
+	plugin       *configstoreTables.TablePlugin
+	updateCalls  int
+	deleteCalls  int
+	failUpdateAt int
+}
+
+func clonePluginRow(plugin *configstoreTables.TablePlugin) *configstoreTables.TablePlugin {
+	if plugin == nil {
+		return nil
+	}
+	clone := *plugin
+	if config, ok := plugin.Config.(map[string]any); ok {
+		cloneConfig := make(map[string]any, len(config))
+		for key, value := range config {
+			cloneConfig[key] = value
+		}
+		clone.Config = cloneConfig
+	}
+	return &clone
+}
+
+func (s *rollbackPluginsStore) GetPlugin(_ context.Context, name string) (*configstoreTables.TablePlugin, error) {
+	if s.plugin == nil || s.plugin.Name != name {
+		return nil, configstore.ErrNotFound
+	}
+	return clonePluginRow(s.plugin), nil
+}
+
+func (s *rollbackPluginsStore) GetPlugins(_ context.Context) ([]*configstoreTables.TablePlugin, error) {
+	if s.plugin == nil {
+		return nil, nil
+	}
+	return []*configstoreTables.TablePlugin{clonePluginRow(s.plugin)}, nil
+}
+
+func (s *rollbackPluginsStore) CreatePlugin(_ context.Context, plugin *configstoreTables.TablePlugin, _ ...*gorm.DB) error {
+	s.plugin = clonePluginRow(plugin)
+	return nil
+}
+
+func (s *rollbackPluginsStore) UpdatePlugin(_ context.Context, plugin *configstoreTables.TablePlugin, _ ...*gorm.DB) error {
+	s.updateCalls++
+	if s.failUpdateAt == s.updateCalls {
+		return errors.New("forced update failure")
+	}
+	s.plugin = clonePluginRow(plugin)
+	return nil
+}
+
+func (s *rollbackPluginsStore) DeletePlugin(_ context.Context, _ string, _ ...*gorm.DB) error {
+	s.deleteCalls++
+	s.plugin = nil
+	return nil
+}
+
+type rollbackPluginsLoader struct {
+	noopPluginsLoader
+	reloadErrors  []error
+	reloadConfigs []any
+	removeErrors  []error
+	disabledFlags []bool
+	removeCalls   int
+}
+
+func (l *rollbackPluginsLoader) ReloadPlugin(_ context.Context, _ string, _ *string, config any, _ *schemas.PluginPlacement, _ *int) error {
+	l.reloadConfigs = append(l.reloadConfigs, config)
+	index := len(l.reloadConfigs) - 1
+	if index < len(l.reloadErrors) {
+		return l.reloadErrors[index]
+	}
+	return nil
+}
+
+func (l *rollbackPluginsLoader) RemovePlugin(ctx context.Context, _ string) error {
+	l.removeCalls++
+	disabled, _ := ctx.Value(PluginDisabledKey).(bool)
+	l.disabledFlags = append(l.disabledFlags, disabled)
+	if index := l.removeCalls - 1; index < len(l.removeErrors) {
+		return l.removeErrors[index]
+	}
+	return nil
+}
+
+type invalidRedactorLoader struct {
+	noopPluginsLoader
+	panicOnExpand bool
+	oneShot       *oneShotMarshaler
+	largeInteger  bool
+}
+
+type fakeBestEffortPluginsStore struct {
+	configstore.ConfigStore
+	plugins     []*configstoreTables.TablePlugin
+	diagnostics map[string]error
+}
+
+type concurrentPluginsStore struct {
+	configstore.ConfigStore
+	mu      sync.Mutex
+	plugin  *configstoreTables.TablePlugin
+	updates chan string
+}
+
+func (s *concurrentPluginsStore) GetPlugin(_ context.Context, name string) (*configstoreTables.TablePlugin, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.plugin == nil || s.plugin.Name != name {
+		return nil, configstore.ErrNotFound
+	}
+	return clonePluginRow(s.plugin), nil
+}
+
+func (s *concurrentPluginsStore) UpdatePlugin(_ context.Context, plugin *configstoreTables.TablePlugin, _ ...*gorm.DB) error {
+	s.mu.Lock()
+	s.plugin = clonePluginRow(plugin)
+	s.mu.Unlock()
+	if config, ok := plugin.Config.(map[string]any); ok {
+		if revision, ok := config["revision"].(string); ok {
+			s.updates <- revision
+		}
+	}
+	return nil
+}
+
+type blockingFirstReloadLoader struct {
+	noopPluginsLoader
+	mu           sync.Mutex
+	calls        int
+	firstStarted chan struct{}
+	releaseFirst chan struct{}
+}
+
+func (l *blockingFirstReloadLoader) ReloadPlugin(_ context.Context, _ string, _ *string, _ any, _ *schemas.PluginPlacement, _ *int) error {
+	l.mu.Lock()
+	l.calls++
+	call := l.calls
+	l.mu.Unlock()
+	if call == 1 {
+		close(l.firstStarted)
+		<-l.releaseFirst
+		return &PluginConfigurationError{Err: errors.New("invalid first candidate")}
+	}
+	return nil
+}
+
+func (s fakeBestEffortPluginsStore) GetPlugins(_ context.Context) ([]*configstoreTables.TablePlugin, error) {
+	return nil, errors.New("regular hydration must not be used")
+}
+
+func (s fakeBestEffortPluginsStore) GetPluginsBestEffort(_ context.Context) ([]*configstoreTables.TablePlugin, map[string]error, error) {
+	return s.plugins, s.diagnostics, nil
+}
+
+func (l invalidRedactorLoader) ExpandPluginConfigForAPI(_ string, _ map[string]any) (map[string]any, error) {
+	if l.panicOnExpand {
+		panic("broken plugin redactor")
+	}
+	if l.oneShot != nil {
+		return map[string]any{"value": l.oneShot}, nil
+	}
+	if l.largeInteger {
+		return map[string]any{"value": int64(9223372036854775807)}, nil
+	}
+	return map[string]any{"invalid": func() {}}, nil
+}
+
+type oneShotMarshaler struct {
+	calls int
+}
+
+func (value *oneShotMarshaler) MarshalJSON() ([]byte, error) {
+	value.calls++
+	if value.calls > 1 {
+		return nil, errors.New("marshaler invoked more than once")
+	}
+	return []byte(`{"safe":true}`), nil
+}
+
 // buildUpdateRequest creates a PUT /api/plugins/{name} fasthttp context.
 func buildUpdateRequest(t *testing.T, body any) *fasthttp.RequestCtx {
 	t.Helper()
@@ -72,6 +266,115 @@ func buildUpdateRequest(t *testing.T, body any) *fasthttp.RequestCtx {
 	ctx.Request.SetBody(raw)
 	ctx.SetUserValue("name", "otel")
 	return ctx
+}
+
+// buildCreateRequest creates a POST /api/plugins fasthttp context.
+func buildCreateRequest(t *testing.T, body any) *fasthttp.RequestCtx {
+	t.Helper()
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal request body: %v", err)
+	}
+	ctx := &fasthttp.RequestCtx{}
+	ctx.Request.Header.SetMethod("POST")
+	ctx.Request.SetBody(raw)
+	return ctx
+}
+
+// TestCreatePlugin_RejectsCustomPathWhenAuthBypassed verifies that POST /api/plugins
+// refuses to create a custom (non-builtin) plugin with a Path - the .so that would get
+// dlopen()'d - when the request was let through by the auth middleware's fail-open
+// bypass (dashboard auth disabled/unconfigured), and that no DB write happens.
+func TestCreatePlugin_RejectsCustomPathWhenAuthBypassed(t *testing.T) {
+	SetLogger(&mockLogger{})
+
+	store := &capturePluginsStore{}
+	h := &PluginsHandler{
+		pluginsLoader: noopPluginsLoader{},
+		configStore:   store,
+	}
+
+	path := "/tmp/evil.so"
+	ctx := buildCreateRequest(t, map[string]any{
+		"name":    "my-custom-test-plugin",
+		"enabled": true,
+		"path":    path,
+	})
+	ctx.SetUserValue(schemas.BifrostContextKeyAuthBypassed, true)
+
+	h.createPlugin(ctx)
+
+	if ctx.Response.StatusCode() != fasthttp.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", ctx.Response.StatusCode(), ctx.Response.Body())
+	}
+	if store.existingPlugin != nil {
+		t.Error("CreatePlugin should not have been called on the config store")
+	}
+}
+
+// TestCreatePlugin_AllowsCustomPathWhenNotBypassed verifies the same request succeeds
+// for a genuinely authenticated caller (BifrostContextKeyAuthBypassed not set).
+func TestCreatePlugin_AllowsCustomPathWhenNotBypassed(t *testing.T) {
+	SetLogger(&mockLogger{})
+
+	store := &capturePluginsStore{}
+	h := &PluginsHandler{
+		pluginsLoader: noopPluginsLoader{},
+		configStore:   store,
+	}
+
+	path := "/opt/bifrost/plugins/trusted.so"
+	ctx := buildCreateRequest(t, map[string]any{
+		"name":    "my-custom-test-plugin",
+		"enabled": false,
+		"path":    path,
+	})
+
+	h.createPlugin(ctx)
+
+	if ctx.Response.StatusCode() != fasthttp.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", ctx.Response.StatusCode(), ctx.Response.Body())
+	}
+	if store.existingPlugin == nil {
+		t.Fatal("CreatePlugin was not called on the config store")
+	}
+	if store.existingPlugin.Path == nil || *store.existingPlugin.Path != path {
+		t.Errorf("stored plugin path = %v, want %v", store.existingPlugin.Path, path)
+	}
+}
+
+// TestUpdatePlugin_RejectsCustomPathWhenAuthBypassed verifies the matching guard on
+// PUT /api/plugins/{name}.
+func TestUpdatePlugin_RejectsCustomPathWhenAuthBypassed(t *testing.T) {
+	SetLogger(&mockLogger{})
+
+	store := &capturePluginsStore{
+		existingPlugin: &configstoreTables.TablePlugin{
+			Name:     "my-custom-test-plugin",
+			Enabled:  false,
+			IsCustom: true,
+		},
+	}
+	h := &PluginsHandler{
+		pluginsLoader: noopPluginsLoader{},
+		configStore:   store,
+	}
+
+	ctx := buildUpdateRequest(t, map[string]any{
+		"enabled": true,
+		"path":    "/tmp/evil.so",
+	})
+	ctx.SetUserValue("name", "my-custom-test-plugin")
+	ctx.SetUserValue(schemas.BifrostContextKeyAuthBypassed, true)
+
+	h.updatePlugin(ctx)
+
+	if ctx.Response.StatusCode() != fasthttp.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", ctx.Response.StatusCode(), ctx.Response.Body())
+	}
+	if store.capturedConfig != nil || store.capturedEnabled {
+		t.Error("UpdatePlugin should not have been called on the config store")
+	}
 }
 
 // TestUpdatePlugin_ConfigMerge verifies that updatePlugin merges the incoming
@@ -138,6 +441,104 @@ func TestRestoreRedacted_OTELProfilesHeaders(t *testing.T) {
 	}
 	if headers3["x-langfuse-ingestion-version"] != "env.NEW_VERSION" {
 		t.Errorf("env.* version should pass through, got %q", headers3["x-langfuse-ingestion-version"])
+	}
+}
+
+// TestRestoreRedacted_KafkaSecretVarObjects covers the Kafka connector shape: secrets are
+// stored in the DB as plain strings, but the redacted GET returns plain-text SecretVars as
+// value-only objects ({"value": "supe…cret"} — ref/type are omitempty). Saving that back
+// must restore the stored string, not persist the mask.
+func TestRestoreRedacted_KafkaSecretVarObjects(t *testing.T) {
+	realPassword := "REAL-KAFKA-SASL-PASSWORD-123"
+	realCACert := "-----BEGIN CERTIFICATE-----\nREAL\n-----END CERTIFICATE-----"
+	maskedPassword := schemas.NewSecretVar(realPassword).Redacted().GetValue()
+	maskedCACert := schemas.NewSecretVar(realCACert).Redacted().GetValue()
+
+	// What MarshalForStorage stored in the DB.
+	existing := map[string]any{
+		"brokers": []any{"localhost:9092"},
+		"ca_cert": realCACert,
+		"sasl": map[string]any{
+			"mechanism": "PLAIN",
+			"username":  "kafka-user",
+			"password":  realPassword,
+		},
+	}
+	// What the UI sends back after a redacted GET, untouched.
+	incoming := map[string]any{
+		"brokers": []any{"localhost:9092"},
+		"ca_cert": map[string]any{"value": maskedCACert},
+		"sasl": map[string]any{
+			"mechanism": "PLAIN",
+			"username":  map[string]any{"value": "kafka-user"},
+			"password":  map[string]any{"value": maskedPassword},
+		},
+	}
+
+	got := restoreRedactedFromExisting(incoming, existing)
+	if got["ca_cert"] != realCACert {
+		t.Errorf("ca_cert not restored: got %v, want %q", got["ca_cert"], realCACert)
+	}
+	sasl := got["sasl"].(map[string]any)
+	if sasl["password"] != realPassword {
+		t.Errorf("sasl.password not restored: got %v, want %q", sasl["password"], realPassword)
+	}
+	// A non-redacted value-only object (username shown in clear) must pass through.
+	if u, ok := sasl["username"].(map[string]any); !ok || u["value"] != "kafka-user" {
+		t.Errorf("sasl.username should pass through unchanged, got %v", sasl["username"])
+	}
+
+	// A genuinely rotated password ({"value": ..., "ref": ""} as SecretVarInput emits)
+	// must pass through, not be clobbered by the stored value.
+	rotated := map[string]any{
+		"sasl": map[string]any{
+			"password": map[string]any{"value": "A-BRAND-NEW-PASSWORD-5678", "ref": ""},
+		},
+	}
+	got2 := restoreRedactedFromExisting(rotated, existing)
+	p, ok := got2["sasl"].(map[string]any)["password"].(map[string]any)
+	if !ok || p["value"] != "A-BRAND-NEW-PASSWORD-5678" {
+		t.Errorf("new password should pass through, got %v", got2["sasl"].(map[string]any)["password"])
+	}
+
+	// Switching to an env reference must pass through (intentional update).
+	envRef := map[string]any{
+		"sasl": map[string]any{
+			"password": map[string]any{"value": "", "ref": "env.KAFKA_PASSWORD", "type": "env"},
+		},
+	}
+	got3 := restoreRedactedFromExisting(envRef, existing)
+	p3, ok := got3["sasl"].(map[string]any)["password"].(map[string]any)
+	if !ok || p3["ref"] != "env.KAFKA_PASSWORD" {
+		t.Errorf("env ref password should pass through, got %v", got3["sasl"].(map[string]any)["password"])
+	}
+}
+
+// TestRestoreRedacted_FullyRedactedSentinel covers the telemetry (Prometheus push gateway)
+// password shape: FullyRedacted() returns the fixed "<REDACTED>" sentinel instead of the
+// prefix/suffix mask, and the stored value is a plain string.
+func TestRestoreRedacted_FullyRedactedSentinel(t *testing.T) {
+	realPassword := "REAL-PUSHGATEWAY-PASSWORD"
+	sentinel := schemas.NewSecretVar(realPassword).FullyRedacted().GetValue()
+
+	existing := map[string]any{
+		"push_gateway": map[string]any{
+			"basic_auth": map[string]any{"username": "pgw-user", "password": realPassword},
+		},
+	}
+	incoming := map[string]any{
+		"push_gateway": map[string]any{
+			"basic_auth": map[string]any{
+				"username": map[string]any{"value": "pgw-user"},
+				"password": map[string]any{"value": sentinel},
+			},
+		},
+	}
+
+	got := restoreRedactedFromExisting(incoming, existing)
+	ba := got["push_gateway"].(map[string]any)["basic_auth"].(map[string]any)
+	if ba["password"] != realPassword {
+		t.Errorf("sentinel password not restored: got %v, want %q", ba["password"], realPassword)
 	}
 }
 
@@ -233,10 +634,17 @@ func TestUpdatePlugin_ConfigMerge_NewPlugin(t *testing.T) {
 // plugin names, used to assert the getLoadedPlugins response contract.
 type namedPluginsLoader struct {
 	noopPluginsLoader
-	names []string
+	names    []string
+	statuses map[string]schemas.PluginStatus
 }
 
 func (l namedPluginsLoader) GetLoadedPluginNames() []string { return l.names }
+func (l namedPluginsLoader) GetPluginStatus(_ context.Context) map[string]schemas.PluginStatus {
+	if l.statuses != nil {
+		return l.statuses
+	}
+	return l.noopPluginsLoader.GetPluginStatus(context.Background())
+}
 
 // TestGetLoadedPlugins verifies that getLoadedPlugins returns the loader's plugin
 // names under the "plugins" JSON key, locking the response shape the UI depends on.
@@ -268,5 +676,104 @@ func TestGetLoadedPlugins(t *testing.T) {
 		if response.Plugins[i] != name {
 			t.Errorf("plugins[%d] = %q, want %q", i, response.Plugins[i], name)
 		}
+	}
+}
+
+func TestGetPluginsIncludesRuntimeStatusWithoutConfigRows(t *testing.T) {
+	h := &PluginsHandler{
+		pluginsLoader: namedPluginsLoader{
+			statuses: map[string]schemas.PluginStatus{
+				"logging": {
+					Name:   "logging",
+					Status: schemas.PluginStatusActive,
+				},
+				"model-catalog-resolver": {
+					Name:   "model-catalog-resolver",
+					Status: schemas.PluginStatusActive,
+				},
+				"semantic_cache": {
+					Name:   "semantic_cache",
+					Status: schemas.PluginStatusDisabled,
+				},
+			},
+		},
+		configStore: &capturePluginsStore{},
+	}
+
+	ctx := &fasthttp.RequestCtx{}
+	ctx.Request.Header.SetMethod("GET")
+	h.getPlugins(ctx)
+
+	if ctx.Response.StatusCode() != 200 {
+		t.Fatalf("expected 200, got %d: %s", ctx.Response.StatusCode(), ctx.Response.Body())
+	}
+
+	var response struct {
+		Plugins []PluginResponse `json:"plugins"`
+		Count   int              `json:"count"`
+	}
+	if err := json.Unmarshal(ctx.Response.Body(), &response); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if response.Count != 3 || len(response.Plugins) != 3 {
+		t.Fatalf("expected 3 runtime plugins, got count=%d plugins=%v", response.Count, response.Plugins)
+	}
+	if response.Plugins[0].Name != "logging" || response.Plugins[0].ActualName != "logging" {
+		t.Fatalf("unexpected first plugin: %+v", response.Plugins[0])
+	}
+	if response.Plugins[0].IsCustom {
+		t.Fatalf("logging should be reported as a built-in plugin: %+v", response.Plugins[0])
+	}
+	if response.Plugins[0].DescriptionZh != "记录请求、响应、用量和错误，便于排障与审计。" {
+		t.Fatalf("logging should include its Chinese description: %+v", response.Plugins[0])
+	}
+	if response.Plugins[1].Name != "model-catalog-resolver" || response.Plugins[1].IsCustom {
+		t.Fatalf("model-catalog-resolver should be reported as a built-in plugin: %+v", response.Plugins[1])
+	}
+	if response.Plugins[2].Name != "semantic_cache" || response.Plugins[2].Enabled {
+		t.Fatalf("unexpected disabled semantic cache row: %+v", response.Plugins[2])
+	}
+}
+
+func TestBuildRuntimePluginResponseUsesCustomPluginMetadata(t *testing.T) {
+	response := buildRuntimePluginResponse("enterprise-governance", schemas.PluginStatus{
+		Name:          "enterprise-governance",
+		Status:        schemas.PluginStatusActive,
+		Description:   "Adds enterprise governance controls.",
+		DescriptionZh: "提供企业级治理控制能力。",
+		Features:      []string{"users", "rbac"},
+	})
+
+	if response.Description != "Adds enterprise governance controls." || response.DescriptionZh != "提供企业级治理控制能力。" {
+		t.Fatalf("custom plugin metadata was not propagated: %+v", response)
+	}
+	if !slices.Equal(response.Features, []string{"users", "rbac"}) {
+		t.Fatalf("custom plugin features were not propagated: %+v", response)
+	}
+}
+
+func TestBuildPluginResponseKeepsCustomActualNameAndMetadata(t *testing.T) {
+	h := &PluginsHandler{pluginsLoader: noopPluginsLoader{}}
+	response := h.buildPluginResponseWithStatuses(
+		&configstoreTables.TablePlugin{
+			Name:     "Guardrails Enterprise",
+			Enabled:  true,
+			IsCustom: true,
+		},
+		map[string]schemas.PluginStatus{
+			"custom-guardrails": {
+				Name:          "Guardrails Enterprise",
+				Status:        schemas.PluginStatusActive,
+				DescriptionZh: "企业护栏",
+				Features:      []string{"guardrails-config"},
+			},
+		},
+	)
+
+	if response.ActualName != "custom-guardrails" {
+		t.Fatalf("actualName = %q, want custom-guardrails", response.ActualName)
+	}
+	if response.DescriptionZh != "企业护栏" || !slices.Equal(response.Features, []string{"guardrails-config"}) {
+		t.Fatalf("custom metadata was not preserved: %+v", response)
 	}
 }

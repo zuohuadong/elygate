@@ -36,7 +36,7 @@ func NewNebiusProvider(config *schemas.ProviderConfig, logger schemas.Logger) (*
 		ReadTimeout:         requestTimeout,
 		WriteTimeout:        requestTimeout,
 		MaxConnsPerHost:     config.NetworkConfig.MaxConnsPerHost,
-		MaxIdleConnDuration: 30 * time.Second,
+		MaxIdleConnDuration: time.Second * time.Duration(config.NetworkConfig.KeepAliveTimeoutInSeconds),
 		MaxConnWaitTimeout:  requestTimeout,
 		MaxConnDuration:     time.Second * time.Duration(schemas.DefaultMaxConnDurationInSeconds),
 		ConnPoolStrategy:    fasthttp.FIFO,
@@ -406,6 +406,11 @@ func (provider *NebiusProvider) VideoDelete(_ *schemas.BifrostContext, _ schemas
 // VideoList is not supported by Nebius provider.
 func (provider *NebiusProvider) VideoList(_ *schemas.BifrostContext, _ schemas.Key, _ *schemas.BifrostVideoListRequest) (*schemas.BifrostVideoListResponse, *schemas.BifrostError) {
 	return nil, providerUtils.NewUnsupportedOperationError(schemas.VideoListRequest, provider.GetProviderKey())
+}
+
+// VideoEdit is not supported by the Nebius provider.
+func (provider *NebiusProvider) VideoEdit(_ *schemas.BifrostContext, _ schemas.Key, _ *schemas.BifrostVideoEditRequest) (*schemas.BifrostVideoEditResponse, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.VideoEditRequest, provider.GetProviderKey())
 }
 
 // VideoRemix is not supported by Nebius provider.

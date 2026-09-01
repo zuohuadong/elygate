@@ -1,4 +1,5 @@
-import { BifrostConfig, GlobalProxyConfig } from "@/lib/types/config";
+import { BifrostConfig, GlobalProxyConfig, LatestReleaseResponse } from "@/lib/types/config";
+import axios from "axios";
 import { baseApi } from "./baseApi";
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
@@ -19,6 +20,36 @@ const applyMetadataPatch = (metadata: BifrostConfig["metadata"] | undefined, pat
 
 export const configApi = baseApi.injectEndpoints({
 	endpoints: (builder) => ({
+		getUserAgentMappings: builder.query<{ mappings: UserAgentMapping[] }, void>({
+			query: () => ({
+				url: "/logs/user-agent-mappings",
+			}),
+			providesTags: ["UserAgentMappings"],
+		}),
+		createUserAgentMapping: builder.mutation<UserAgentMapping, UserAgentMappingPayload>({
+			query: (data) => ({
+				url: "/logs/user-agent-mappings",
+				method: "POST",
+				body: data,
+			}),
+			invalidatesTags: ["UserAgentMappings"],
+		}),
+		updateUserAgentMapping: builder.mutation<UserAgentMapping, { id: string; data: UserAgentMappingPayload }>({
+			query: ({ id, data }) => ({
+				url: `/logs/user-agent-mappings/${id}`,
+				method: "PUT",
+				body: data,
+			}),
+			invalidatesTags: ["UserAgentMappings"],
+		}),
+		deleteUserAgentMapping: builder.mutation<{ success: boolean }, string>({
+			query: (id) => ({
+				url: `/logs/user-agent-mappings/${id}`,
+				method: "DELETE",
+			}),
+			invalidatesTags: ["UserAgentMappings"],
+		}),
+
 		// Get core configuration
 		getCoreConfig: builder.query<BifrostConfig, { fromDB?: boolean }>({
 			query: ({ fromDB = false } = {}) => ({
@@ -35,6 +66,52 @@ export const configApi = baseApi.injectEndpoints({
 			}),
 		}),
 
+		// Get latest release from public site
+		getLatestRelease: builder.query<LatestReleaseResponse, void>({
+			queryFn: async (_arg, { signal }) => {
+				try {
+					const response = await axios.get("https://getbifrost.ai/latest-release", {
+						timeout: 3000, // 3 second timeout
+						signal,
+						headers: {
+							Accept: "application/json",
+						},
+						maxRedirects: 5,
+						validateStatus: (status) => status >= 200 && status < 300,
+					});
+					const data = response.data as any;
+					const normalized: LatestReleaseResponse = {
+						name: data.name ?? data.tag ?? data.version ?? "",
+						changelogUrl: data.changelogUrl ?? data.changelog_url ?? "",
+					};
+					return { data: normalized };
+				} catch (error) {
+					if (axios.isAxiosError(error)) {
+						if (error.code === "ECONNABORTED" || error.code === "ETIMEDOUT") {
+							console.warn("Latest release fetch timed out after 3s");
+							return {
+								error: {
+									status: "TIMEOUT_ERROR",
+									error: "Request timeout",
+									data: { error: { message: "Request timeout" } },
+								},
+							};
+						}
+						console.error("Latest release fetch error:", error.message);
+					} else {
+						console.error("Latest release fetch error:", error);
+					}
+					return {
+						error: {
+							status: "FETCH_ERROR",
+							error: String(error),
+							data: { error: { message: "Network error" } },
+						},
+					};
+				}
+			},
+			keepUnusedDataFor: 300, // Cache for 5 minutes (seconds)
+		}),
 		// Update core configuration
 		updateCoreConfig: builder.mutation<null, BifrostConfig>({
 			query: (data) => ({
@@ -95,6 +172,29 @@ export const configApi = baseApi.injectEndpoints({
 	}),
 });
 
+export type UserAgentMappingMatchType = "contains" | "starts_with" | "exact" | "regex";
+
+export interface UserAgentMapping {
+	id: string;
+	pattern: string;
+	match_type: UserAgentMappingMatchType;
+	app: string;
+	logo?: string;
+	logo_mime?: string | null;
+	is_active: boolean;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface UserAgentMappingPayload {
+	pattern: string;
+	match_type: UserAgentMappingMatchType;
+	app: string;
+	logo?: string;
+	logo_mime?: string | null;
+	is_active: boolean;
+}
+
 export const {
 	useGetVersionQuery,
 	useGetCoreConfigQuery,
@@ -103,4 +203,10 @@ export const {
 	useForcePricingSyncMutation,
 	useUpdateClientMetadataMutation,
 	useLazyGetCoreConfigQuery,
+	useGetLatestReleaseQuery,
+	useLazyGetLatestReleaseQuery,
+	useGetUserAgentMappingsQuery,
+	useCreateUserAgentMappingMutation,
+	useUpdateUserAgentMappingMutation,
+	useDeleteUserAgentMappingMutation,
 } = configApi;

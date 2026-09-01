@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/maximhq/bifrost/core/mcp"
@@ -33,6 +34,12 @@ var transientServerStatusCodes = map[int]bool{
 	502: true, // Bad Gateway
 	503: true, // Service Unavailable
 	504: true, // Gateway Timeout
+	// 529 — Anthropic's overloaded_error ("The API is temporarily overloaded",
+	// docs.claude.com/en/api/errors), also surfaced by Bedrock Mantle's Claude
+	// endpoint. It reflects capacity across all callers rather than anything about
+	// this credential, so it retries on the same key instead of rotating: rotating
+	// would burn every key on a condition none of them can avoid.
+	529: true,
 }
 
 // perKeyFailureStatusCodes are failures bound to the specific key/account rather than
@@ -97,7 +104,9 @@ var dynamicallyConfigurableProviders = []schemas.ModelProvider{
 	schemas.OpenRouter,
 	schemas.Parasail,
 	schemas.Perplexity,
+	schemas.Sarvam,
 	schemas.Vertex,
+	schemas.Wafer,
 	schemas.XAI,
 }
 
@@ -127,8 +136,11 @@ func CanProviderKeyValueBeEmpty(providerKey schemas.ModelProvider) bool {
 	return providerKey == schemas.Vertex || providerKey == schemas.Bedrock || providerKey == schemas.BedrockMantle || providerKey == schemas.VLLM || providerKey == schemas.Azure || providerKey == schemas.Ollama || providerKey == schemas.SGL
 }
 
-func isKeySkippingAllowed(providerKey schemas.ModelProvider) bool {
-	return providerKey != schemas.Azure && providerKey != schemas.Bedrock && providerKey != schemas.BedrockMantle && providerKey != schemas.Vertex
+// isKeySkippingAllowed gates SkipKeySelection on the provider this attempt resolved to. The flag
+// is set only for Claude Code OAuth passthrough, where the caller's token is the upstream
+// credential — and only the Anthropic provider forwards it.
+func isKeySkippingAllowed(baseProvider schemas.ModelProvider) bool {
+	return baseProvider == schemas.Anthropic
 }
 
 // calculateBackoff implements exponential backoff with jitter for retry attempts.
@@ -304,6 +316,21 @@ func newBifrostCtxDoneError(ctx *schemas.BifrostContext, stage string) *schemas.
 	}
 }
 
+// newBifrostQueueFullError creates a 503 BifrostError for requests dropped
+// because the provider queue is full and dropExcessRequests is enabled.
+func newBifrostQueueFullError() *schemas.BifrostError {
+	statusCode := 503
+	errorType := schemas.RequestDropped
+	return &schemas.BifrostError{
+		IsBifrostError: true,
+		StatusCode:     &statusCode,
+		Error: &schemas.ErrorField{
+			Type:    &errorType,
+			Message: "request dropped: queue is full",
+		},
+	}
+}
+
 // newBifrostMessageChan creates a channel that sends a bifrost response.
 // It is used to send a bifrost response to the client.
 func newBifrostMessageChan(message *schemas.BifrostResponse) chan *schemas.BifrostStreamChunk {
@@ -327,6 +354,8 @@ func newBifrostMessageChan(message *schemas.BifrostResponse) chan *schemas.Bifro
 func clearCtxForFallback(ctx *schemas.BifrostContext) {
 	ctx.ClearValue(schemas.BifrostContextKeyAPIKeyID)
 	ctx.ClearValue(schemas.BifrostContextKeyAPIKeyName)
+	ctx.ClearValue(schemas.BifrostContextKeyDirectKey)
+	ctx.ClearValue(schemas.BifrostContextKeyRoutingPinnedAPIKeyID)
 	ctx.ClearValue(schemas.BifrostContextKeyGovernanceIncludeOnlyKeys)
 	ctx.ClearValue(schemas.BifrostContextKeyChangeRequestType)
 	ctx.ClearValue(schemas.BifrostContextKeyAttemptTrail)
@@ -359,6 +388,30 @@ func clearCtxForFallback(ctx *schemas.BifrostContext) {
 // should stay tied to the caller's trace) and
 // BifrostContextKeySkipPluginPipeline (whether the internal request runs the
 // plugin pipeline is the caller's decision).
+// virtualKeyHeader carries Bifrost's own virtual key. IsSensitiveHeader does not match it
+// (no api-key/authorization/secret substring, no -token suffix), so it would otherwise be
+// exported to traces verbatim.
+const virtualKeyHeader = "x-bf-vk"
+
+// extraHeaderSpanAttribute returns the span-attribute value for a caller-supplied header and
+// whether it should be exported at all. The virtual key is dropped outright; other
+// credential-bearing headers keep their key (presence is useful) with the value redacted.
+func extraHeaderSpanAttribute(name string, values []string) (any, bool) {
+	if name == "" || len(values) == 0 {
+		return nil, false
+	}
+	if strings.EqualFold(name, virtualKeyHeader) {
+		return nil, false
+	}
+	if schemas.IsSensitiveHeader(name) {
+		return schemas.RedactedAttrValue, true
+	}
+	if len(values) == 1 {
+		return values[0], true
+	}
+	return values, true
+}
+
 func ClearContextForInternalRequest(ctx *schemas.BifrostContext) {
 	// Key routing.
 	ctx.ClearValue(schemas.BifrostContextKeyGovernanceIncludeOnlyKeys)
@@ -375,6 +428,7 @@ func ClearContextForInternalRequest(ctx *schemas.BifrostContext) {
 	ctx.ClearValue(schemas.BifrostContextKeyLargePayloadMode)
 	ctx.ClearValue(schemas.BifrostContextKeyLargeResponseMode)
 	ctx.ClearValue(schemas.BifrostContextKeyExtraHeaders)
+	ctx.ClearValue(schemas.BifrostContextKeyPassthroughHeaders)
 	ctx.ClearValue(schemas.BifrostContextKeyURLPath)
 }
 
@@ -409,7 +463,7 @@ func IsStandardProvider(providerKey schemas.ModelProvider) bool {
 
 // IsStreamRequestType returns true if the given request type is a stream request.
 func IsStreamRequestType(reqType schemas.RequestType) bool {
-	return reqType == schemas.TextCompletionStreamRequest || reqType == schemas.ChatCompletionStreamRequest || reqType == schemas.ResponsesStreamRequest || reqType == schemas.SpeechStreamRequest || reqType == schemas.TranscriptionStreamRequest || reqType == schemas.ImageGenerationStreamRequest || reqType == schemas.ImageEditStreamRequest || reqType == schemas.PassthroughStreamRequest || reqType == schemas.WebSocketResponsesRequest || reqType == schemas.RealtimeRequest
+	return reqType == schemas.TextCompletionStreamRequest || reqType == schemas.ChatCompletionStreamRequest || reqType == schemas.ResponsesStreamRequest || reqType == schemas.ResponsesRetrieveStreamRequest || reqType == schemas.SpeechStreamRequest || reqType == schemas.TranscriptionStreamRequest || reqType == schemas.ImageGenerationStreamRequest || reqType == schemas.ImageEditStreamRequest || reqType == schemas.PassthroughStreamRequest || reqType == schemas.WebSocketResponsesRequest || reqType == schemas.RealtimeRequest
 }
 
 func GetTracerFromContext(ctx *schemas.BifrostContext) (schemas.Tracer, string, error) {
@@ -450,11 +504,13 @@ func isContainerRequestType(reqType schemas.RequestType) bool {
 		reqType == schemas.ContainerFileDeleteRequest
 }
 
-// isModellessVideoRequestType returns true if the given request type is a video request that does not require a model.
+// isModellessVideoRequestType returns true if the given request type is a video request that can
+// be served without a model. Callers gate on model == "", so video edit — which takes a model when
+// the source is uploaded and omits it when the source is an existing video ID — belongs here too.
 func isModellessVideoRequestType(reqType schemas.RequestType) bool {
 	switch reqType {
 	case schemas.VideoRetrieveRequest, schemas.VideoDownloadRequest, schemas.VideoListRequest,
-		schemas.VideoDeleteRequest, schemas.VideoRemixRequest:
+		schemas.VideoDeleteRequest, schemas.VideoRemixRequest, schemas.VideoEditRequest:
 		return true
 	default:
 		return false
@@ -469,7 +525,7 @@ func isPassthroughRequestType(reqType schemas.RequestType) bool {
 // isResponsesLifecycleRequestType returns true for OpenAI Responses API lifecycle HTTP verbs.
 func isResponsesLifecycleRequestType(reqType schemas.RequestType) bool {
 	switch reqType {
-	case schemas.ResponsesRetrieveRequest, schemas.ResponsesDeleteRequest, schemas.ResponsesCancelRequest, schemas.ResponsesInputItemsRequest:
+	case schemas.ResponsesRetrieveRequest, schemas.ResponsesRetrieveStreamRequest, schemas.ResponsesDeleteRequest, schemas.ResponsesCancelRequest, schemas.ResponsesInputItemsRequest:
 		return true
 	default:
 		return false
@@ -579,6 +635,19 @@ func RedactSensitiveString(s string) string {
 	return s[:4] + "[REDACTED]" + s[len(s)-4:]
 }
 
+// externalURLDNSLookupTimeout bounds the DNS resolution in ValidateExternalURL. The
+// package-level net.LookupIP has no context/deadline of its own, so a hung or blackholed
+// resolver (rather than a fast refusal) can block the caller indefinitely -- this timeout
+// closes that gap regardless of the caller's own retry/timeout logic, since those only
+// bound the HTTP request that follows resolution, not resolution itself.
+const externalURLDNSLookupTimeout = 5 * time.Second
+
+// lookupIPAddr is a seam over (&net.Resolver{}).LookupIPAddr so tests can substitute a
+// resolver that blocks until its context is canceled, proving externalURLDNSLookupTimeout
+// actually cuts off an in-flight lookup rather than only a lookup whose context had
+// already expired before it started.
+var lookupIPAddr = (&net.Resolver{}).LookupIPAddr
+
 // ValidateExternalURL validates a URL for security concerns (SSRF protection).
 // When allowPrivateNetwork is true, RFC 1918 private IPs are permitted (for k8s/LAN deployments).
 // Link-local addresses (169.254.x.x, fe80::) are always blocked regardless of allowPrivateNetwork.
@@ -600,10 +669,18 @@ func ValidateExternalURL(urlStr string, allowPrivateNetwork bool) error {
 	if hostname == "" {
 		return fmt.Errorf("URL must have a hostname")
 	}
-	// Resolve hostname to IP addresses
-	ips, err := net.LookupIP(hostname)
+	// Resolve hostname to IP addresses. Bounded via net.Resolver.LookupIPAddr (not the
+	// package-level net.LookupIP, which has no way to accept a deadline) so a stalled
+	// resolver fails fast instead of hanging the caller forever.
+	lookupCtx, cancel := context.WithTimeout(context.Background(), externalURLDNSLookupTimeout)
+	defer cancel()
+	addrs, err := lookupIPAddr(lookupCtx, hostname)
 	if err != nil {
 		return fmt.Errorf("failed to resolve hostname: %w", err)
+	}
+	ips := make([]net.IP, len(addrs))
+	for i, addr := range addrs {
+		ips[i] = addr.IP
 	}
 	for _, ip := range ips {
 		if ip.IsLoopback() {
@@ -626,6 +703,43 @@ func ValidateExternalURL(urlStr string, allowPrivateNetwork bool) error {
 // sanitizeSpanName sanitizes a span name to remove capital letters and spaces to make it a valid span name.
 func sanitizeSpanName(name string) string {
 	return schemas.SanitizePluginSpanName(name)
+}
+
+// pluginSpanNameSet holds the precomputed "plugin.<name>.<hook>" span names for
+// one plugin. Building them with Sprintf on every hook invocation costs ~2
+// allocs per span at request rate; plugin names are static, so cache them.
+type pluginSpanNameSet struct {
+	prehook            string
+	prerequesthook     string
+	posthook           string
+	mcpPrehook         string
+	mcpPosthook        string
+	mcpConnectPrehook  string
+	mcpConnectPosthook string
+}
+
+// pluginSpanNameCache maps plugin name -> *pluginSpanNameSet. Bounded by the
+// number of distinct registered plugins.
+var pluginSpanNameCache sync.Map
+
+func pluginSpanNamesFor(name string) *pluginSpanNameSet {
+	if v, ok := pluginSpanNameCache.Load(name); ok {
+		return v.(*pluginSpanNameSet)
+	}
+	s := sanitizeSpanName(name)
+	set := &pluginSpanNameSet{
+		prehook:            "plugin." + s + ".prehook",
+		prerequesthook:     "plugin." + s + ".prerequesthook",
+		posthook:           "plugin." + s + ".posthook",
+		mcpPrehook:         "plugin." + s + ".mcp_prehook",
+		mcpPosthook:        "plugin." + s + ".mcp_posthook",
+		mcpConnectPrehook:  "plugin." + s + ".mcp_connect_prehook",
+		mcpConnectPosthook: "plugin." + s + ".mcp_connect_posthook",
+	}
+	if v, loaded := pluginSpanNameCache.LoadOrStore(name, set); loaded {
+		return v.(*pluginSpanNameSet)
+	}
+	return set
 }
 
 // IsCodemodeTool returns true if the given tool name is a codemode tool.
@@ -658,7 +772,21 @@ func isPromptOptionalImageEditType(t *string) bool {
 	normalized := strings.ToLower(strings.TrimSpace(*t))
 	normalized = strings.ReplaceAll(normalized, "-", "_")
 	return slices.Contains(
-		[]string{"background_removal", "remove_background", "remove_bg", "erase_object", "upscale_fast"},
+		[]string{"background_removal", "remove_background", "remove_bg", "erase_object", "upscale", "upscale_fast", "mask", "segmentation", "vectorize", "controlnet_preprocess", "controlnet", "preprocess"},
+		normalized,
+	)
+}
+
+// isPromptOptionalVideoEditType returns true for video edit task types that are driven purely by
+// the source video and take no text prompt.
+func isPromptOptionalVideoEditType(t *string) bool {
+	if t == nil {
+		return false
+	}
+	normalized := strings.ToLower(strings.TrimSpace(*t))
+	normalized = strings.ReplaceAll(normalized, "-", "_")
+	return slices.Contains(
+		[]string{"background_removal", "remove_background", "remove_bg", "upscale"},
 		normalized,
 	)
 }

@@ -1,0 +1,42 @@
+{
+  "$schema": "https://www.getbifrost.ai/schema",
+  "encryption_key": "env.BIFROST_ENCRYPTION_KEY",
+  "config_store": {
+    "enabled": true,
+    "type": "postgres",
+    "config": {
+      "host": "postgres",
+      "port": "5432",
+      "user": "env.POSTGRES_USER",
+      "password": "env.POSTGRES_PASSWORD",
+      "db_name": "env.POSTGRES_DB",
+      "ssl_mode": "disable",
+      "max_idle_conns": 5,
+      "max_open_conns": 25,
+      "conn_max_lifetime": "30m",
+      "conn_max_idle_time": "5m"
+    }
+  },
+  "logs_store": {
+    "enabled": true,
+    "type": "postgres",
+    "config": {
+      "host": "postgres",
+      "port": "5432",
+      "user": "env.POSTGRES_USER",
+      "password": "env.POSTGRES_PASSWORD",
+      "db_name": "env.POSTGRES_DB",
+      "ssl_mode": "disable",
+      "max_idle_conns": 5,
+      "max_open_conns": 25,
+      "conn_max_lifetime": "30m",
+      "conn_max_idle_time": "5m"
+    },
+    "retention_days": 30
+  },
+  "client": {
+    "enable_logging": true,
+    "disable_content_logging": false,
+    "log_retention_days": 30
+  }
+}

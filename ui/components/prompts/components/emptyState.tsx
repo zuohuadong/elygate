@@ -41,7 +41,7 @@ export function PromptsEmptyState() {
 			</div>
 			<div className="flex flex-col gap-1">
 				<h1 className="text-muted-foreground text-xl font-medium">Build, test, and version your prompts</h1>
-				<div className="text-muted-foreground mx-auto mt-2 max-w-[600px] text-sm font-normal">
+				<div className="text-muted-foreground mx-auto mt-2 w-full max-w-[600px] text-sm font-normal">
 					{canCreate
 						? "Create prompts, test them with different models and parameters in the playground, and version your changes for deployment."
 						: "View prompts and test them with different models and parameters in the playground."}
@@ -52,7 +52,7 @@ export function PromptsEmptyState() {
 						aria-label="Read more about prompt repository (opens in new tab)"
 						data-testid="empty-state-read-more"
 						onClick={() => {
-							window.open("https://github.com/zuohuadong/elygate/tree/dev/docs", "_blank", "noopener,noreferrer");
+							window.open(`https://docs.getbifrost.ai/features/prompt-repository?utm_source=bfd`, "_blank", "noopener,noreferrer");
 						}}
 					>
 						Read more <ArrowUpRight className="text-muted-foreground h-3 w-3" />

@@ -2,6 +2,9 @@ package plugins
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/maximhq/bifrost/core/network"
 	"github.com/maximhq/bifrost/core/schemas"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -51,6 +55,13 @@ func TestDynamicPluginLifecycle(t *testing.T) {
 	t.Run("GetName", func(t *testing.T) {
 		name := plugin.GetName()
 		assert.Equal(t, "hello-world", name, "Plugin name should match")
+	})
+
+	t.Run("GetPluginMetadata", func(t *testing.T) {
+		metadataProvider, ok := plugin.(schemas.PluginMetadataProvider)
+		require.True(t, ok, "Plugin should expose optional metadata")
+		metadata := metadataProvider.GetPluginMetadata()
+		assert.Equal(t, "演示 HTTP 与 LLM 钩子的集成方式。", metadata.DescriptionZh)
 	})
 
 	// Test HTTPTransportPreHook
@@ -806,4 +817,41 @@ func TestLoadPluginWithOptionalHooks(t *testing.T) {
 		err := dynamicPlugin.Inject(ctx, trace)
 		assert.NoError(t, err, "Inject should not error for unimplemented hook")
 	})
+}
+
+// TestSharedObjectPluginLoader_ZeroValueBlocksPrivateDownload verifies the zero-value
+// loader (used at every call site that predates the allowlist) still refuses to reach a
+// private/loopback host for a URL-based plugin path - a useful zero value must default to
+// the secure behavior, not to "no SSRF protection".
+func TestSharedObjectPluginLoader_ZeroValueBlocksPrivateDownload(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	loader := &SharedObjectPluginLoader{}
+	_, err := loader.VerifyBasePlugin(server.URL)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "non-public address")
+}
+
+// TestNewSharedObjectPluginLoader_AllowlistPermitsConfiguredHost verifies a loader built
+// with an allowlist covering the target host gets past the SSRF gate - the resulting error
+// (if any) comes from plugin.Open failing on non-plugin bytes, not from the SSRF guard.
+func TestNewSharedObjectPluginLoader_AllowlistPermitsConfiguredHost(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("not a real plugin binary"))
+	}))
+	defer server.Close()
+
+	u, err := url.Parse(server.URL)
+	require.NoError(t, err)
+	allow, err := network.NewAllowlist([]string{u.Hostname()})
+	require.NoError(t, err)
+
+	loader := NewSharedObjectPluginLoader(allow)
+	_, err = loader.VerifyBasePlugin(server.URL)
+	require.Error(t, err) // fails at plugin.Open - the bytes aren't a real .so
+	assert.NotContains(t, err.Error(), "non-public address")
 }

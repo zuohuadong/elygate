@@ -40,6 +40,10 @@ func ParseVirtualKeyFromFastHTTPRequest(req *fasthttp.RequestCtx) *string {
 	if xGoogleAPIKey != "" && strings.HasPrefix(strings.ToLower(xGoogleAPIKey), VirtualKeyPrefix) {
 		return bifrost.Ptr(xGoogleAPIKey)
 	}
+	azureAPIKey := string(req.Request.Header.Peek("api-key"))
+	if azureAPIKey != "" && strings.HasPrefix(strings.ToLower(azureAPIKey), VirtualKeyPrefix) {
+		return bifrost.Ptr(azureAPIKey)
+	}
 	return nil
 }
 
@@ -51,10 +55,66 @@ func IsModelRequiredForRequest(requestType schemas.RequestType) bool {
 	// Cached content list/retrieve/update/delete target a resource name (cachedContents/{id}),
 	// not a model, so they carry no model to filter on; only create binds a cache to a model.
 	// Responses retrieve/delete/cancel/input_items target a response_id, not a model.
-	if requestType == schemas.ListModelsRequest || requestType == schemas.MCPToolExecutionRequest || requestType == schemas.BatchCreateRequest || requestType == schemas.BatchListRequest || requestType == schemas.BatchRetrieveRequest || requestType == schemas.BatchCancelRequest || requestType == schemas.BatchResultsRequest || requestType == schemas.FileUploadRequest || requestType == schemas.FileListRequest || requestType == schemas.FileRetrieveRequest || requestType == schemas.FileDeleteRequest || requestType == schemas.FileContentRequest || requestType == schemas.ContainerCreateRequest || requestType == schemas.ContainerListRequest || requestType == schemas.ContainerRetrieveRequest || requestType == schemas.ContainerDeleteRequest || requestType == schemas.ContainerFileCreateRequest || requestType == schemas.ContainerFileListRequest || requestType == schemas.ContainerFileRetrieveRequest || requestType == schemas.ContainerFileContentRequest || requestType == schemas.ContainerFileDeleteRequest || requestType == schemas.CachedContentListRequest || requestType == schemas.CachedContentRetrieveRequest || requestType == schemas.CachedContentUpdateRequest || requestType == schemas.CachedContentDeleteRequest || requestType == schemas.ResponsesRetrieveRequest || requestType == schemas.ResponsesDeleteRequest || requestType == schemas.ResponsesCancelRequest || requestType == schemas.ResponsesInputItemsRequest || requestType == schemas.VideoRetrieveRequest || requestType == schemas.VideoDownloadRequest || requestType == schemas.VideoListRequest || requestType == schemas.VideoDeleteRequest || requestType == schemas.VideoRemixRequest || requestType == schemas.PassthroughRequest || requestType == schemas.PassthroughStreamRequest {
+	// Video edit's model is optional too — the OpenAI SDKs send none and the provider infers it from
+	// the source video — so it is evaluated only when the caller supplies one, same as passthrough.
+	if requestType == schemas.ListModelsRequest || requestType == schemas.MCPToolExecutionRequest || requestType == schemas.BatchCreateRequest || requestType == schemas.BatchListRequest || requestType == schemas.BatchRetrieveRequest || requestType == schemas.BatchCancelRequest || requestType == schemas.BatchResultsRequest || requestType == schemas.FileUploadRequest || requestType == schemas.FileListRequest || requestType == schemas.FileRetrieveRequest || requestType == schemas.FileDeleteRequest || requestType == schemas.FileContentRequest || requestType == schemas.ContainerCreateRequest || requestType == schemas.ContainerListRequest || requestType == schemas.ContainerRetrieveRequest || requestType == schemas.ContainerDeleteRequest || requestType == schemas.ContainerFileCreateRequest || requestType == schemas.ContainerFileListRequest || requestType == schemas.ContainerFileRetrieveRequest || requestType == schemas.ContainerFileContentRequest || requestType == schemas.ContainerFileDeleteRequest || requestType == schemas.CachedContentListRequest || requestType == schemas.CachedContentRetrieveRequest || requestType == schemas.CachedContentUpdateRequest || requestType == schemas.CachedContentDeleteRequest || requestType == schemas.ResponsesRetrieveRequest || requestType == schemas.ResponsesRetrieveStreamRequest || requestType == schemas.ResponsesDeleteRequest || requestType == schemas.ResponsesCancelRequest || requestType == schemas.ResponsesInputItemsRequest || requestType == schemas.VideoRetrieveRequest || requestType == schemas.VideoDownloadRequest || requestType == schemas.VideoListRequest || requestType == schemas.VideoDeleteRequest || requestType == schemas.VideoRemixRequest || requestType == schemas.VideoEditRequest || requestType == schemas.PassthroughRequest || requestType == schemas.PassthroughStreamRequest {
 		return false
 	}
 	return true
+}
+
+// IsModelCheckedWhenPresent reports whether a request type whose model is optional
+// should still be checked against the model allowlist when it does carry one.
+//
+// These are the types IsModelRequiredForRequest excludes because their model may
+// legitimately be absent — a file-based batch names none, passthrough forwards raw
+// routes, video edit lets the provider infer it. "Optional" must not mean
+// "unenforced": when the caller does name a model, the allowlist applies.
+func IsModelCheckedWhenPresent(requestType schemas.RequestType) bool {
+	switch requestType {
+	case schemas.PassthroughRequest, schemas.PassthroughStreamRequest,
+		schemas.VideoEditRequest, schemas.BatchCreateRequest:
+		return true
+	default:
+		return false
+	}
+}
+
+// parseVirtualKeyFromHTTPRequest parses the virtual key from HTTP request headers.
+// It checks multiple headers in order: x-bf-vk, Authorization (Bearer token), x-api-key, and x-goog-api-key.
+// Parameters:
+//   - req: The HTTP request containing headers to parse
+//
+// Returns:
+//   - *string: The virtual key if found, nil otherwise
+func parseVirtualKeyFromHTTPRequest(req *schemas.HTTPRequest) *string {
+	var virtualKeyValue string
+	vkHeader := req.CaseInsensitiveHeaderLookup("x-bf-vk")
+	if vkHeader != "" && strings.HasPrefix(strings.ToLower(vkHeader), VirtualKeyPrefix) {
+		return new(vkHeader)
+	}
+	authHeader := req.CaseInsensitiveHeaderLookup("Authorization")
+	if authHeader != "" {
+		if strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
+			authHeaderValue := strings.TrimSpace(authHeader[7:]) // Remove "Bearer " prefix
+			if authHeaderValue != "" && strings.HasPrefix(strings.ToLower(authHeaderValue), VirtualKeyPrefix) {
+				virtualKeyValue = authHeaderValue
+			}
+		}
+	}
+	if virtualKeyValue != "" {
+		return new(virtualKeyValue)
+	}
+	xAPIKey := req.CaseInsensitiveHeaderLookup("x-api-key")
+	if xAPIKey != "" && strings.HasPrefix(strings.ToLower(xAPIKey), VirtualKeyPrefix) {
+		return new(xAPIKey)
+	}
+	// Checking x-goog-api-key header
+	xGoogleAPIKey := req.CaseInsensitiveHeaderLookup("x-goog-api-key")
+	if xGoogleAPIKey != "" && strings.HasPrefix(strings.ToLower(xGoogleAPIKey), VirtualKeyPrefix) {
+		return new(xGoogleAPIKey)
+	}
+	return nil
 }
 
 // getWeight safely dereferences a *float64 weight pointer, returning 1.0 as default if nil.

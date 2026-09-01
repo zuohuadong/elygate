@@ -1,3 +1,4 @@
+import PageTitle from "@/components/pageTitle";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -264,22 +265,15 @@ export default function CachingView() {
 
 	return (
 		<div className="mx-auto w-full max-w-4xl space-y-6">
-			<div>
-				<h2 className="text-lg font-semibold tracking-tight">Local Cache</h2>
-				<p className="text-muted-foreground text-sm">
-					Cache responses locally with two complementary lookup paths: <b>direct</b> hash matching for exact replays, and <b>semantic</b>{" "}
-					similarity search for related content. Send the <b>x-bf-cache-key</b> header to scope cached responses to a tenant or feature.{" "}
-					{!isVectorStoreEnabled && (
-						<span className="text-destructive font-medium">
-							Requires a vector store to be configured and enabled in <code>config.json</code>.
-						</span>
-					)}
-				</p>
-				<div className="mt-3 rounded-sm border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
-					<b>Elygate default:</b> semantic caching is disabled. Use direct-only caching for exact replay. Enable semantic matching only after
-					isolated evaluation proves it is safe for the specific workload; do not use it for coding continuation or stateful conversations.
-				</div>
-			</div>
+			<PageTitle title="Local Cache">
+				Cache responses locally with two complementary lookup paths: <b>direct</b> hash matching for exact replays, and <b>semantic</b>{" "}
+				similarity search for related content. Send the <b>x-bf-cache-key</b> header to scope cached responses to a tenant or feature.{" "}
+				{!isVectorStoreEnabled && (
+					<span className="text-destructive font-medium">
+						Requires a vector store to be configured and enabled in <code>config.json</code>.
+					</span>
+				)}
+			</PageTitle>
 
 			{configError !== undefined && (
 				<div className="border-destructive/50 bg-destructive/10 rounded-sm border p-4">
@@ -332,7 +326,7 @@ export default function CachingView() {
 								<div className="space-y-2">
 									<Label className="text-sm font-medium">Cache Mode</Label>
 									<Tabs value={mode} onValueChange={(v) => setMode(v as CacheMode)}>
-										<TabsList className="grid w-full grid-cols-2">
+										<TabsList className="flex w-full justify-start">
 											<TabsTrigger value="direct" data-testid="caching-mode-direct-tab">
 												Direct only
 											</TabsTrigger>
@@ -385,7 +379,7 @@ export default function CachingView() {
 
 										<div className="space-y-4">
 											<h3 className="text-sm font-medium">Embedding Provider &amp; Model</h3>
-											<div className="grid grid-cols-2 gap-4">
+											<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
 												<div className="space-y-2">
 													<Label htmlFor="provider">Configured Providers</Label>
 													<Select
@@ -465,7 +459,7 @@ export default function CachingView() {
 								{/* Cache settings shared across modes. */}
 								<div className="space-y-4">
 									<h3 className="text-sm font-medium">Cache Settings</h3>
-									<div className={cn("grid gap-4", mode === "semantic" ? "grid-cols-2" : "grid-cols-1")}>
+									<div className={cn("grid gap-4", mode === "semantic" ? "grid-cols-1 md:grid-cols-2" : "grid-cols-1")}>
 										<div className="space-y-2">
 											<Label htmlFor="ttl">TTL (seconds)</Label>
 											<Input
@@ -524,19 +518,19 @@ export default function CachingView() {
 								{/* Storage & Cache Key. */}
 								<div className="space-y-4">
 									<h3 className="text-sm font-medium">Storage &amp; Cache Key</h3>
-									<div className="grid grid-cols-2 gap-4">
+									<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
 										<div className="space-y-2">
 											<Label htmlFor="vector_store_namespace">Vector Store Namespace</Label>
 											<Input
 												id="vector_store_namespace"
 												data-testid="caching-vector-store-namespace-input"
 												type="text"
-												placeholder="Optional namespace"
+												placeholder="BifrostLocalCachePlugin"
 												value={cacheConfig.vector_store_namespace ?? ""}
 												onChange={(e) => updateLocal({ vector_store_namespace: e.target.value })}
 											/>
 											<p className="text-muted-foreground text-xs">
-												Bucket/index name where cache entries live. Leave blank to use the built-in default.
+												Bucket/index name where cache entries live. Leave blank to use the default (<code>BifrostLocalCachePlugin</code>).
 												Changing this points the plugin at a different (possibly empty) bucket. Old entries are not deleted, they just stop
 												being queried.
 											</p>
@@ -562,7 +556,7 @@ export default function CachingView() {
 								{/* Conversation Settings. */}
 								<div className="space-y-4">
 									<h3 className="text-sm font-medium">Conversation Settings</h3>
-									<div className="grid grid-cols-2 gap-4">
+									<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
 										<div className="space-y-2">
 											<Label htmlFor="conversation_history_threshold">Conversation History Threshold</Label>
 											<Input

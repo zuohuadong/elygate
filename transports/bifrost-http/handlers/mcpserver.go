@@ -57,8 +57,27 @@ type MCPServerHandler struct {
 	// vkCache serves by-ID virtual key lookups on the JWT auth path from the
 	// governance in-memory store, avoiding a per-request DB read. Optional: a nil
 	// cache or a miss falls back to the config store. See getVirtualKeyByID.
-	vkCache VirtualKeyCache
-	mu      sync.RWMutex
+	vkCache       VirtualKeyCache
+	accessChecker VirtualKeyAccessChecker
+	mu            sync.RWMutex
+}
+
+func (h *MCPServerHandler) SetVirtualKeyAccessChecker(checker VirtualKeyAccessChecker) {
+	h.accessChecker = checker
+}
+
+func (h *MCPServerHandler) checkVirtualKeyID(ctx context.Context, virtualKeyID string) error {
+	if h.accessChecker == nil {
+		return nil
+	}
+	return h.accessChecker.CheckVirtualKeyAccess(ctx, virtualKeyID)
+}
+
+func (h *MCPServerHandler) checkVirtualKeyValue(ctx context.Context, virtualKeyValue string) error {
+	if h.accessChecker == nil {
+		return nil
+	}
+	return h.accessChecker.CheckVirtualKeyValueAccess(ctx, virtualKeyValue)
 }
 
 // getVirtualKeyByID resolves a virtual key by its row ID for the JWT auth path,
@@ -308,15 +327,18 @@ func (h *MCPServerHandler) handleMCPServerSSE(ctx *fasthttp.RequestCtx) {
 		}
 
 		// Periodic SSE comment heartbeats keep idle connections alive through
-		// proxies and let us detect client disconnect via reader.Send() returning
-		// false — fasthttp.RequestCtx never cancels bifrostCtx on its own.
+		// proxies and let us detect client disconnect via reader.SendHeartbeat()
+		// returning false — fasthttp.RequestCtx never cancels bifrostCtx on its own.
+		//
+		// Use the shared frame, never a local one: a hand-rolled ": ping\n\n" carries the
+		// trailing blank line #5883 removed (some decoders dispatch it as an empty event,
+		// #5874) and bypasses the line-boundary gate #5905 added.
 		ticker := time.NewTicker(sseHeartbeatInterval)
 		defer ticker.Stop()
-		ping := []byte(": ping\n\n")
 		for {
 			select {
 			case <-ticker.C:
-				if !reader.Send(ping) {
+				if !reader.SendHeartbeat() {
 					return
 				}
 			case <-(*bifrostCtx).Done():
@@ -390,6 +412,7 @@ func (h *MCPServerHandler) syncServer(server *server.MCPServer, availableTools [
 		toolName := tool.Function.Name
 
 		handler := func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			logger.Info("[mcp-server] tool handler start tool=%q arg_count=%d", toolName, len(request.GetArguments()))
 			// Inject tool filter into execution context if present
 			if toolFilter != nil {
 				ctx = context.WithValue(ctx, schemas.MCPContextKeyIncludeTools, toolFilter)
@@ -413,6 +436,7 @@ func (h *MCPServerHandler) syncServer(server *server.MCPServer, availableTools [
 			// Execute the tool via tool executor
 			toolMessage, err := h.toolManager.ExecuteChatMCPTool(ctx, &toolCall)
 			if err != nil {
+				logger.Info("[mcp-server] tool handler error tool=%q error=%s", toolName, bifrost.GetErrorMessage(err))
 				if authReq := err.ExtraFields.MCPAuthRequired; authReq != nil {
 					// Two surfaces share this error: per-user OAuth uses
 					// AuthorizeURL (the upstream provider's authorize page);
@@ -425,13 +449,18 @@ func (h *MCPServerHandler) syncServer(server *server.MCPServer, availableTools [
 						url = authReq.SubmitURL
 						action = "submit the required headers"
 					}
-					return mcp.NewToolResultError(fmt.Sprintf(
+					message := fmt.Sprintf(
 						"Authentication required for %s. Open this URL to %s: %s",
 						authReq.MCPClientName, action, url,
-					)), nil
+					)
+					if schemas.MCPAuthURLHasTempTokenFragment(url) {
+						message += schemas.MCPAuthTempTokenReminder
+					}
+					return mcp.NewToolResultError(message), nil
 				}
 				return mcp.NewToolResultError(fmt.Sprintf("Tool execution failed: %v", bifrost.GetErrorMessage(err))), nil
 			}
+			logger.Info("[mcp-server] tool handler success tool=%q", toolName)
 
 			// Extract content from tool message
 			var resultText string
@@ -639,11 +668,9 @@ func (h *MCPServerHandler) getMCPServerForRequest(ctx *fasthttp.RequestCtx) (*mc
 	if h.identityResolver != nil &&
 		(authMode == tables.MCPServerAuthModeHeaders || authMode == tables.MCPServerAuthModeBoth) {
 		if userID, _ := ctx.UserValue(schemas.BifrostContextKeyUserID).(string); userID != "" {
-			// The user identity is the sole credential; reject a stray virtual key
-			// header so it is not also attributed to the request.
-			if headerVK := getVKFromRequest(ctx); headerVK != "" {
-				return nil, fmt.Errorf("conflicting credentials: a user token and a virtual key header were both provided; send only one")
-			}
+			// Dual-credential conflict (IDP token + VK) is handled upstream in the SCIM
+			// InferenceMiddleware before identity is stamped, respecting the operator's
+			// dual_credential_conflict_behavior config. No check needed here.
 			vkID, err := h.identityResolver.ResolveUserVirtualKey(ctx, userID)
 			if err != nil {
 				return nil, err
@@ -657,6 +684,9 @@ func (h *MCPServerHandler) getMCPServerForRequest(ctx *fasthttp.RequestCtx) (*mc
 			}
 			if !vk.IsActiveValue() {
 				return nil, fmt.Errorf("virtual key is inactive")
+			}
+			if err := h.checkVirtualKeyID(ctx, vk.ID); err != nil {
+				return nil, err
 			}
 			vkServer, err := h.ensureVKMCPServerByValue(ctx, vk.Value.GetValue())
 			if err != nil {
@@ -748,6 +778,9 @@ func (h *MCPServerHandler) getMCPServerForRequest(ctx *fasthttp.RequestCtx) (*mc
 			if !vk.IsActiveValue() {
 				return nil, fmt.Errorf("virtual key is inactive")
 			}
+			if err := h.checkVirtualKeyID(ctx, vk.ID); err != nil {
+				return nil, err
+			}
 			res.jwtVK = vk
 			vkServer, serverErr := h.ensureVKMCPServerByValue(ctx, vk.Value.GetValue())
 			if serverErr != nil {
@@ -785,6 +818,9 @@ func (h *MCPServerHandler) getMCPServerForRequest(ctx *fasthttp.RequestCtx) (*mc
 			ctx.Response.Header.Set("WWW-Authenticate", wwwAuthenticateValue(ctx, h.config))
 		}
 		return nil, fmt.Errorf("virtual key required to access mcp server; set one of x-bf-vk, Authorization: Bearer <vk>, x-api-key, or x-goog-api-key in your MCP client config")
+	}
+	if err := h.checkVirtualKeyValue(ctx, vk); err != nil {
+		return nil, err
 	}
 
 	vkServer, err := h.ensureVKMCPServerByValue(ctx, vk)

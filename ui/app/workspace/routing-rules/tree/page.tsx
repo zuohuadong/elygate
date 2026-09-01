@@ -6,13 +6,13 @@
 import { RoutingTreeView } from "./views/routingTreeView";
 
 export const metadata = {
-	title: "Routing Tree | Elygate",
+	title: "Routing Tree | Bifrost",
 	description: "Read-only decision tree visualization of routing rules",
 };
 
 export default function RoutingTreePage() {
 	return (
-		<div className="no-padding-parent no-border-parent h-[calc(100dvh_)] w-full">
+		<div className="no-padding-parent no-border-parent h-[calc(var(--app-content-viewport)_)] w-full">
 			<RoutingTreeView />
 		</div>
 	);

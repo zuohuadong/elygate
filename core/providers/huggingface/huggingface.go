@@ -75,7 +75,7 @@ func NewHuggingFaceProvider(config *schemas.ProviderConfig, logger schemas.Logge
 		ReadTimeout:         requestTimeout,
 		WriteTimeout:        requestTimeout,
 		MaxConnsPerHost:     config.NetworkConfig.MaxConnsPerHost,
-		MaxIdleConnDuration: 30 * time.Second,
+		MaxIdleConnDuration: time.Second * time.Duration(config.NetworkConfig.KeepAliveTimeoutInSeconds),
 		MaxConnWaitTimeout:  requestTimeout,
 		MaxConnDuration:     time.Second * time.Duration(schemas.DefaultMaxConnDurationInSeconds),
 		ConnPoolStrategy:    fasthttp.FIFO,
@@ -554,12 +554,9 @@ func (provider *HuggingFaceProvider) ChatCompletionStream(ctx *schemas.BifrostCo
 	}
 
 	customRequestConverter := func(request *schemas.BifrostChatRequest) (providerUtils.RequestBodyWithExtraParams, error) {
-		reqBody, err := ToHuggingFaceChatCompletionRequest(request)
+		reqBody, err := ToHuggingFaceChatCompletionStreamRequest(request)
 		if err != nil {
 			return nil, err
-		}
-		if reqBody != nil {
-			reqBody.Stream = schemas.Ptr(true)
 		}
 		return reqBody, nil
 	}
@@ -1058,7 +1055,7 @@ func (provider *HuggingFaceProvider) ImageGenerationStream(ctx *schemas.BifrostC
 
 	startTime := time.Now()
 	// Make the request
-	err := provider.streamingClient.Do(req, resp)
+	err := providerUtils.DoStreamingRequest(ctx, provider.streamingClient, req, resp)
 	latency := time.Since(startTime)
 	if err != nil {
 		defer providerUtils.ReleaseStreamingResponse(ctx, resp)
@@ -1442,7 +1439,7 @@ func (provider *HuggingFaceProvider) ImageEditStream(ctx *schemas.BifrostContext
 
 	startTime := time.Now()
 	// Make the request
-	err := provider.streamingClient.Do(req, resp)
+	err := providerUtils.DoStreamingRequest(ctx, provider.streamingClient, req, resp)
 	latency := time.Since(startTime)
 	if err != nil {
 		defer providerUtils.ReleaseStreamingResponse(ctx, resp)
@@ -1685,6 +1682,11 @@ func (provider *HuggingFaceProvider) VideoDelete(_ *schemas.BifrostContext, _ sc
 // VideoList is not supported by the Hugging Face provider.
 func (provider *HuggingFaceProvider) VideoList(_ *schemas.BifrostContext, _ schemas.Key, _ *schemas.BifrostVideoListRequest) (*schemas.BifrostVideoListResponse, *schemas.BifrostError) {
 	return nil, providerUtils.NewUnsupportedOperationError(schemas.VideoListRequest, provider.GetProviderKey())
+}
+
+// VideoEdit is not supported by the HuggingFace provider.
+func (provider *HuggingFaceProvider) VideoEdit(_ *schemas.BifrostContext, _ schemas.Key, _ *schemas.BifrostVideoEditRequest) (*schemas.BifrostVideoEditResponse, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.VideoEditRequest, provider.GetProviderKey())
 }
 
 // VideoRemix is not supported by the Hugging Face provider.

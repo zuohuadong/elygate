@@ -90,10 +90,17 @@ func CreateGenAIRouteConfigs(pathPrefix string) []RouteConfig {
 			if requestType, ok := ctx.Value(schemas.BifrostContextKeyHTTPRequestType).(schemas.RequestType); ok && requestType == schemas.BatchCreateRequest && ctx.Value(isGeminiBatchCreateRequestContextKey) != nil {
 				return &gemini.GeminiBatchCreateRequest{}
 			}
+			if requestType, ok := ctx.Value(schemas.BifrostContextKeyHTTPRequestType).(schemas.RequestType); ok && requestType == schemas.CountTokensRequest {
+				return &gemini.GeminiCountTokensRequest{}
+			}
 			return &gemini.GeminiGenerationRequest{}
 		},
 		RequestConverter: func(ctx *schemas.BifrostContext, req interface{}) (*schemas.BifrostRequest, error) {
-			if geminiReq, ok := req.(*gemini.GeminiGenerationRequest); ok {
+			if countTokensReq, ok := req.(*gemini.GeminiCountTokensRequest); ok {
+				return &schemas.BifrostRequest{
+					CountTokensRequest: countTokensReq.ToGeminiGenerationRequest().ToBifrostResponsesRequest(ctx),
+				}, nil
+			} else if geminiReq, ok := req.(*gemini.GeminiGenerationRequest); ok {
 				if geminiReq.IsCountTokens {
 					return &schemas.BifrostRequest{
 						CountTokensRequest: geminiReq.ToBifrostResponsesRequest(ctx),
@@ -153,29 +160,24 @@ func CreateGenAIRouteConfigs(pathPrefix string) []RouteConfig {
 					provider = schemas.Gemini
 				}
 
-				// Convert Gemini batch request items directly to Bifrost format
+				// Convert Gemini batch request items directly to Bifrost format. Marshalling the
+				// parsed request preserves every modeled field (contents, generationConfig,
+				// safetySettings, systemInstruction, tools, toolConfig, cachedContent, labels)
+				// without hand-listing them, so new fields never silently drop.
 				var requests []schemas.BatchRequestItem
 				if geminiReq.Batch.InputConfig.Requests != nil && len(geminiReq.Batch.InputConfig.Requests.Requests) > 0 {
 					requests = make([]schemas.BatchRequestItem, len(geminiReq.Batch.InputConfig.Requests.Requests))
 					for i, geminiItem := range geminiReq.Batch.InputConfig.Requests.Requests {
-						requestMap := make(map[string]interface{})
-						if geminiItem.Request.Contents != nil {
-							requestMap["contents"] = geminiItem.Request.Contents
+						reqBytes, err := sonic.Marshal(geminiItem.Request)
+						if err != nil {
+							return nil, err
 						}
-						if geminiItem.Request.GenerationConfig != nil {
-							requestMap["generationConfig"] = geminiItem.Request.GenerationConfig
-						}
-						if len(geminiItem.Request.SafetySettings) > 0 {
-							requestMap["safetySettings"] = geminiItem.Request.SafetySettings
-						}
-						if geminiItem.Request.SystemInstruction != nil {
-							requestMap["systemInstruction"] = geminiItem.Request.SystemInstruction
+						body := map[string]interface{}{}
+						if err := sonic.Unmarshal(reqBytes, &body); err != nil {
+							return nil, err
 						}
 
-						requests[i] = schemas.BatchRequestItem{
-							CustomID: "",
-							Body:     requestMap,
-						}
+						requests[i] = schemas.BatchRequestItem{Body: body}
 						// Extract custom_id from metadata
 						if geminiItem.Metadata != nil && geminiItem.Metadata.Key != "" {
 							requests[i].CustomID = geminiItem.Metadata.Key
@@ -188,6 +190,11 @@ func CreateGenAIRouteConfigs(pathPrefix string) []RouteConfig {
 					Model:          &geminiReq.Model,
 					Requests:       requests,
 					RawRequestBody: getGenAIRawRequestBody(ctx),
+				}
+
+				// Carry the caller-supplied display name (config.display_name) through.
+				if geminiReq.Batch.DisplayName != "" {
+					bifrostBatchReq.DisplayName = &geminiReq.Batch.DisplayName
 				}
 
 				// Handle file-based input
@@ -233,6 +240,7 @@ func CreateGenAIRouteConfigs(pathPrefix string) []RouteConfig {
 			return gemini.ToGeminiError(err)
 		},
 		StreamConfig: &StreamConfig{
+			HeartbeatFraming: lib.SSEHeartbeatDelimitedCommentBlock,
 			ResponsesStreamResponseConverter: func(ctx *schemas.BifrostContext, resp *schemas.BifrostResponsesStreamResponse) (string, interface{}, error) {
 				// Store state in context so it persists across chunks of the same stream
 				const stateKey = "gemini_stream_state"
@@ -1044,15 +1052,18 @@ func createGenAIRerankRouteConfig(pathPrefix string) RouteConfig {
 			return nil, errors.New("invalid rerank request type")
 		},
 		RerankResponseConverter: func(ctx *schemas.BifrostContext, resp *schemas.BifrostRerankResponse) (interface{}, error) {
-			if resp.ExtraFields.Provider == schemas.Vertex {
-				if resp.ExtraFields.RawResponse != nil {
-					return resp.ExtraFields.RawResponse, nil
-				}
-			}
-			return resp, nil
+			// No raw passthrough here, unlike other routes: ToVertexRankRequest replaces caller
+			// record IDs with synthetic ones, so the raw upstream records are not addressable.
+			return vertex.ToVertexRankResponse(resp)
 		},
 		ErrorConverter: func(ctx *schemas.BifrostContext, err *schemas.BifrostError) interface{} {
 			return gemini.ToGeminiError(err)
+		},
+		// Resolve the provider from x-model-provider (Vertex by default) so the route can be
+		// served cross-provider like /cohere/v2/rerank and /bedrock/rerank.
+		PreCallback: func(ctx *fasthttp.RequestCtx, bifrostCtx *schemas.BifrostContext, req interface{}) error {
+			bifrostCtx.SetValue(bifrostContextKeyProvider, getProviderFromHeader(ctx, schemas.Vertex))
+			return nil
 		},
 	}
 }
@@ -1486,6 +1497,15 @@ func extractAndSetModelAndRequestType(ctx *fasthttp.RequestCtx, bifrostCtx *sche
 			bifrostCtx.SetValue(schemas.BifrostContextKeyUseRawRequestBody, true)
 		}
 
+		return nil
+	case *gemini.GeminiCountTokensRequest:
+		if modelStr != "" {
+			r.Model = modelStr
+		}
+		if explicitGemini {
+			setGenAIRawRequestBodyFromRequest(ctx, bifrostCtx)
+			bifrostCtx.SetValue(schemas.BifrostContextKeyUseRawRequestBody, true)
+		}
 		return nil
 	case *gemini.GeminiEmbeddingRequest:
 		if modelStr != "" {

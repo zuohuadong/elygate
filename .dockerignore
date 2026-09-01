@@ -43,8 +43,49 @@ coverage/
 .cache/
 .parcel-cache/
 
-# Documentation that's not needed for build
-docs/
+# Documentation: the panel bundles only these pages during the UI build.
+docs/**
+!docs/media/
+docs/media/**
+!docs/media/dynamic-plugins-architecture.png
+!docs/media/getting-started.png
+!docs/media/run-npx.mp4
+!docs/media/ui-config-mcp-disable-auto-tool-inject.png
+!docs/media/ui-config.png
+!docs/media/ui-create-customer.png
+!docs/media/ui-create-teams.png
+!docs/media/ui-disable-auth-on-inference.png
+!docs/media/ui-enable-auth-on-inference.png
+!docs/media/ui-virtual-key-expiry.png
+!docs/media/ui-virtual-key-keys-filter.png
+!docs/media/ui-virtual-key-routing.png
+!docs/media/ui-virtual-key.png
+!docs/media/ui-webhooks-create.png
+!docs/media/ui-webhooks-deliveries.png
+!docs/media/ui-webhooks-list.png
+!docs/media/ui-webhooks-secret.png
+!docs/media/vk-budget-override-add-override-dialog.png
+!docs/media/vk-budget-override-add-override.png
+!docs/media/vk-override-budget-overriden-budget-view.png
+!docs/architecture/
+!docs/architecture/core/
+!docs/architecture/core/request-flow.mdx
+!docs/deployment-guides/
+!docs/deployment-guides/how-to/
+!docs/deployment-guides/how-to/security-best-practices.mdx
+!docs/features/
+!docs/features/governance/
+!docs/features/governance/routing.mdx
+!docs/features/governance/virtual-keys.mdx
+!docs/features/webhooks.mdx
+!docs/mcp/
+!docs/mcp/gateway.mdx
+!docs/mcp/overview.mdx
+!docs/plugins/
+!docs/plugins/getting-started.mdx
+!docs/quickstart/
+!docs/quickstart/gateway/
+!docs/quickstart/gateway/setting-up.mdx
 README.md
 *.md
 

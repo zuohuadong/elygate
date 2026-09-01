@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	bifrost "github.com/maximhq/bifrost/core"
 	"github.com/maximhq/bifrost/core/schemas"
 	"github.com/maximhq/bifrost/framework/configstore"
 	configstoreTables "github.com/maximhq/bifrost/framework/configstore/tables"
@@ -161,6 +160,23 @@ func TestGovernanceStore_CheckBudget_SingleBudget(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestGovernanceStoreCheckBudgetUsesOverride verifies enforcement reads the additive effective limit.
+func TestGovernanceStoreCheckBudgetUsesOverride(t *testing.T) {
+	store, err := NewLocalGovernanceStore(context.Background(), NewMockLogger(), nil, &configstore.GovernanceConfig{}, nil)
+	require.NoError(t, err)
+	budget := buildBudgetWithUsage("override-budget", 100, 110, "1d")
+	require.NoError(t, budget.SetOverride(25, configstoreTables.BudgetOverrideModeCycles, 2))
+
+	decision, err := store.CheckBudget(context.Background(), EntityWiseBudgets{"VirtualKey": {budget}}, nil)
+	require.NoError(t, err)
+	assert.Equal(t, DecisionAllow, decision)
+
+	decision, err = store.CheckBudget(context.Background(), EntityWiseBudgets{"VirtualKey": {budget}}, map[string]float64{budget.ID: 15})
+	require.Error(t, err)
+	assert.Equal(t, DecisionBudgetExceeded, decision)
+	assert.Contains(t, err.Error(), "125.0000 dollars")
 }
 
 // TestGovernanceStore_CheckBudget_HierarchyValidation tests multi-level budget hierarchy
@@ -419,7 +435,7 @@ func TestGovernanceStore_MultiBudget_ResolverBlocksOnBudgetExceeded(t *testing.T
 	resolver := NewBudgetResolver(store, nil, logger, nil)
 	ctx := &schemas.BifrostContext{}
 
-	result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false)
+	result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false, false)
 	assertDecision(t, DecisionBudgetExceeded, result)
 	assert.Contains(t, result.Reason, "budget exceeded")
 }
@@ -446,7 +462,7 @@ func TestGovernanceStore_MultiBudget_ResolverAllowsUnderLimit(t *testing.T) {
 	resolver := NewBudgetResolver(store, nil, logger, nil)
 	ctx := &schemas.BifrostContext{}
 
-	result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false)
+	result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false, false)
 	assertDecision(t, DecisionAllow, result)
 }
 
@@ -479,7 +495,7 @@ func TestGovernanceStore_MultiBudget_UsageDrivesBlockAfterRequests(t *testing.T)
 	require.NoError(t, err)
 
 	ctx := &schemas.BifrostContext{}
-	result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false)
+	result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false, false)
 	assertDecision(t, DecisionAllow, result)
 
 	// Request 2: $0.80 — still fine ($1.60 total)
@@ -488,7 +504,7 @@ func TestGovernanceStore_MultiBudget_UsageDrivesBlockAfterRequests(t *testing.T)
 	require.NoError(t, err)
 
 	ctx = &schemas.BifrostContext{}
-	result = resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false)
+	result = resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false, false)
 	assertDecision(t, DecisionAllow, result)
 
 	// Request 3: $0.80 — pushes hourly to $2.40 > $2.00 limit → blocked
@@ -497,7 +513,7 @@ func TestGovernanceStore_MultiBudget_UsageDrivesBlockAfterRequests(t *testing.T)
 	require.NoError(t, err)
 
 	ctx = &schemas.BifrostContext{}
-	result = resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false)
+	result = resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false, false)
 	assertDecision(t, DecisionBudgetExceeded, result)
 	assert.Contains(t, result.Reason, "budget exceeded")
 
@@ -785,6 +801,88 @@ func TestGovernanceStore_ResetExpiredBudgets(t *testing.T) {
 	assert.Equal(t, 0.0, updatedVK.Budgets[0].CurrentUsage, "Budget usage should be reset")
 }
 
+// TestGovernanceStoreResetBudgetAdvancesOverride verifies each existing reset consumes one finite cycle.
+func TestGovernanceStoreResetBudgetAdvancesOverride(t *testing.T) {
+	store := newStandaloneStore(t)
+	finite := buildBudgetWithUsage("finite-override", 100, 75, "1d")
+	require.NoError(t, finite.SetOverride(25, configstoreTables.BudgetOverrideModeCycles, 2))
+	store.budgets.Store(finite.ID, finite)
+
+	firstReset := finite.LastReset.Add(24 * time.Hour)
+	reset, ok := store.ResetBudgetAt(context.Background(), finite.ID, firstReset)
+	require.True(t, ok)
+	assert.Zero(t, reset.CurrentUsage)
+	assert.Equal(t, 1, reset.OverrideCyclesRemaining)
+	assert.Equal(t, 125.0, reset.EffectiveMaxLimit())
+
+	secondReset := firstReset.Add(24 * time.Hour)
+	reset, ok = store.ResetBudgetAt(context.Background(), finite.ID, secondReset)
+	require.True(t, ok)
+	assert.False(t, reset.HasActiveOverride())
+	assert.Equal(t, 100.0, reset.EffectiveMaxLimit())
+
+	permanent := buildBudgetWithUsage("forever-override", 100, 75, "1d")
+	require.NoError(t, permanent.SetOverride(50, configstoreTables.BudgetOverrideModeForever, 0))
+	store.budgets.Store(permanent.ID, permanent)
+	reset, ok = store.ResetBudgetAt(context.Background(), permanent.ID, permanent.LastReset.Add(24*time.Hour))
+	require.True(t, ok)
+	assert.True(t, reset.HasActiveOverride())
+	assert.Equal(t, 150.0, reset.EffectiveMaxLimit())
+}
+
+// TestGovernanceStoreUpsertBudgetConfigRefreshesOverride verifies cache refreshes config without clobbering runtime counters.
+func TestGovernanceStoreUpsertBudgetConfigRefreshesOverride(t *testing.T) {
+	store := newStandaloneStore(t)
+	lastReset := time.Now().Add(-30 * time.Minute)
+	live := buildBudgetWithUsage("cache-override", 100, 40, "1h")
+	live.LastReset = lastReset
+	store.budgets.Store(live.ID, live)
+
+	refreshed := buildBudgetWithUsage(live.ID, 120, 0, "2h")
+	require.NoError(t, refreshed.SetOverride(30, configstoreTables.BudgetOverrideModeCycles, 3))
+	store.UpsertBudgetConfig(context.Background(), live.ID, refreshed)
+
+	got := store.LoadBudget(context.Background(), live.ID)
+	require.NotNil(t, got)
+	assert.Equal(t, 40.0, got.CurrentUsage)
+	assert.True(t, got.LastReset.Equal(lastReset))
+	assert.Equal(t, 120.0, got.MaxLimit)
+	assert.Equal(t, "2h", got.ResetDuration)
+	assert.Equal(t, 30.0, got.OverrideAmount)
+	assert.Equal(t, configstoreTables.BudgetOverrideModeCycles, got.OverrideMode)
+	assert.Equal(t, 3, got.OverrideCyclesRemaining)
+}
+
+// TestGovernanceStoreResetPersistsOverrideLifecycle verifies the existing reset write stores the decremented cycle state.
+func TestGovernanceStoreResetPersistsOverrideLifecycle(t *testing.T) {
+	ctx := context.Background()
+	logger := NewMockLogger()
+	configStore, err := configstore.NewConfigStore(ctx, &configstore.Config{
+		Enabled: true,
+		Type:    configstore.ConfigStoreTypeSQLite,
+		Config:  &configstore.SQLiteConfig{Path: t.TempDir() + "/governance.db"},
+	}, logger)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, configStore.Close(ctx)) })
+
+	budget := buildBudgetWithUsage("persisted-override", 100, 75, "1d")
+	require.NoError(t, budget.SetOverride(25, configstoreTables.BudgetOverrideModeCycles, 2))
+	require.NoError(t, configStore.CreateBudget(ctx, budget))
+
+	store, err := NewLocalGovernanceStore(ctx, logger, configStore, nil, nil)
+	require.NoError(t, err)
+	reset, ok := store.ResetBudgetAt(ctx, budget.ID, budget.LastReset.Add(24*time.Hour))
+	require.True(t, ok)
+	require.NoError(t, store.ResetExpiredBudgets(ctx, []*configstoreTables.TableBudget{reset}))
+
+	persisted, err := configStore.GetBudget(ctx, budget.ID)
+	require.NoError(t, err)
+	assert.Zero(t, persisted.CurrentUsage)
+	assert.Equal(t, 25.0, persisted.OverrideAmount)
+	assert.Equal(t, configstoreTables.BudgetOverrideModeCycles, persisted.OverrideMode)
+	assert.Equal(t, 1, persisted.OverrideCyclesRemaining)
+}
+
 // TestGovernanceStore_GetAllBudgets tests retrieving all budgets
 func TestGovernanceStore_GetAllBudgets(t *testing.T) {
 	logger := NewMockLogger()
@@ -805,181 +903,6 @@ func TestGovernanceStore_GetAllBudgets(t *testing.T) {
 	assert.NotNil(t, allBudgets["budget1"])
 	assert.NotNil(t, allBudgets["budget2"])
 	assert.NotNil(t, allBudgets["budget3"])
-}
-
-// TestGovernanceStore_RoutingRules_CreateAndRetrieve tests creating and retrieving routing rules
-func TestGovernanceStore_RoutingRules_CreateAndRetrieve(t *testing.T) {
-	logger := NewMockLogger()
-	store, err := NewLocalGovernanceStore(context.Background(), logger, nil, &configstore.GovernanceConfig{}, nil)
-	require.NoError(t, err)
-
-	// Create a global routing rule
-	rule1 := &configstoreTables.TableRoutingRule{
-		ID:            "1",
-		Name:          "Global Rule",
-		Description:   "Test global routing rule",
-		Enabled:       bifrost.Ptr(true),
-		CelExpression: "model == 'gpt-4o'",
-		Targets: []configstoreTables.TableRoutingTarget{
-			{Provider: bifrost.Ptr("openai"), Model: bifrost.Ptr("gpt-4"), Weight: 1.0},
-		},
-		Fallbacks:       nil,
-		ParsedFallbacks: []string{"azure/gpt-4-turbo"},
-		Scope:           "global",
-		ScopeID:         nil,
-		Priority:        10,
-		CreatedAt:       time.Now(),
-		UpdatedAt:       time.Now(),
-	}
-
-	// Create a team-scoped routing rule
-	teamID := "team-123"
-	rule2 := &configstoreTables.TableRoutingRule{
-		ID:            "2",
-		Name:          "Team Rule",
-		Description:   "Test team routing rule",
-		Enabled:       bifrost.Ptr(true),
-		CelExpression: "model in ['gpt-4o', 'gpt-4-turbo']",
-		Targets: []configstoreTables.TableRoutingTarget{
-			{Provider: bifrost.Ptr("azure"), Weight: 1.0},
-		},
-		Fallbacks:       nil,
-		ParsedFallbacks: []string{"groq/mixtral-8x7b"},
-		Scope:           "team",
-		ScopeID:         &teamID,
-		Priority:        20,
-		CreatedAt:       time.Now(),
-		UpdatedAt:       time.Now(),
-	}
-
-	// Store rules in memory
-	err = store.UpdateRoutingRuleInMemory(context.Background(), rule1)
-	require.NoError(t, err)
-	err = store.UpdateRoutingRuleInMemory(context.Background(), rule2)
-	require.NoError(t, err)
-
-	// Test retrieval by scope
-	globalRules := store.GetScopedRoutingRules(context.Background(), "global", "")
-	assert.Equal(t, 1, len(globalRules))
-	assert.Equal(t, "Global Rule", globalRules[0].Name)
-
-	teamRules := store.GetScopedRoutingRules(context.Background(), "team", teamID)
-	assert.Equal(t, 1, len(teamRules))
-	assert.Equal(t, "Team Rule", teamRules[0].Name)
-
-	// Test ListRoutingRules
-	allRules := store.GetAllRoutingRules(context.Background())
-	assert.Equal(t, 2, len(allRules))
-}
-
-// TestGovernanceStore_RoutingRules_PriorityOrdering tests that rules are sorted by priority
-func TestGovernanceStore_RoutingRules_PriorityOrdering(t *testing.T) {
-	logger := NewMockLogger()
-	store, err := NewLocalGovernanceStore(context.Background(), logger, nil, &configstore.GovernanceConfig{}, nil)
-	require.NoError(t, err)
-
-	// Create rules with different priorities
-	rules := []*configstoreTables.TableRoutingRule{
-		{
-			ID:       "1",
-			Name:     "Priority 5",
-			Priority: 5,
-			Scope:    "global",
-			ScopeID:  nil,
-			Enabled:  bifrost.Ptr(true),
-		},
-		{
-			ID:       "2",
-			Name:     "Priority 20",
-			Priority: 20,
-			Scope:    "global",
-			ScopeID:  nil,
-			Enabled:  bifrost.Ptr(true),
-		},
-		{
-			ID:       "3",
-			Name:     "Priority 10",
-			Priority: 10,
-			Scope:    "global",
-			ScopeID:  nil,
-			Enabled:  bifrost.Ptr(true),
-		},
-	}
-
-	for _, rule := range rules {
-		err := store.UpdateRoutingRuleInMemory(context.Background(), rule)
-		require.NoError(t, err)
-	}
-
-	// Retrieve and verify ordering (sorted by priority ASC, so lower numbers first)
-	retrieved := store.GetScopedRoutingRules(context.Background(), "global", "")
-	assert.Equal(t, 3, len(retrieved))
-	assert.Equal(t, 5, retrieved[0].Priority)
-	assert.Equal(t, 10, retrieved[1].Priority)
-	assert.Equal(t, 20, retrieved[2].Priority)
-}
-
-// TestGovernanceStore_RoutingRules_DisabledRulesFiltered tests that disabled rules are filtered out
-func TestGovernanceStore_RoutingRules_DisabledRulesFiltered(t *testing.T) {
-	logger := NewMockLogger()
-	store, err := NewLocalGovernanceStore(context.Background(), logger, nil, &configstore.GovernanceConfig{}, nil)
-	require.NoError(t, err)
-
-	enabledRule := &configstoreTables.TableRoutingRule{
-		ID:      "1",
-		Name:    "Enabled Rule",
-		Enabled: bifrost.Ptr(true),
-		Scope:   "global",
-		ScopeID: nil,
-	}
-
-	disabledRule := &configstoreTables.TableRoutingRule{
-		ID:      "2",
-		Name:    "Disabled Rule",
-		Enabled: bifrost.Ptr(false),
-		Scope:   "global",
-		ScopeID: nil,
-	}
-
-	err = store.UpdateRoutingRuleInMemory(context.Background(), enabledRule)
-	require.NoError(t, err)
-	err = store.UpdateRoutingRuleInMemory(context.Background(), disabledRule)
-	require.NoError(t, err)
-
-	// Only enabled rules should be returned
-	retrieved := store.GetScopedRoutingRules(context.Background(), "global", "")
-	assert.Equal(t, 1, len(retrieved))
-	assert.Equal(t, "Enabled Rule", retrieved[0].Name)
-}
-
-// TestGovernanceStore_RoutingRules_DeleteRule tests deleting a routing rule
-func TestGovernanceStore_RoutingRules_DeleteRule(t *testing.T) {
-	logger := NewMockLogger()
-	store, err := NewLocalGovernanceStore(context.Background(), logger, nil, &configstore.GovernanceConfig{}, nil)
-	require.NoError(t, err)
-
-	rule := &configstoreTables.TableRoutingRule{
-		ID:      "1",
-		Name:    "Test Rule",
-		Enabled: bifrost.Ptr(true),
-		Scope:   "global",
-		ScopeID: nil,
-	}
-
-	// Add rule
-	err = store.UpdateRoutingRuleInMemory(context.Background(), rule)
-	require.NoError(t, err)
-
-	retrieved := store.GetScopedRoutingRules(context.Background(), "global", "")
-	assert.Equal(t, 1, len(retrieved))
-
-	// Delete rule
-	err = store.DeleteRoutingRuleInMemory(context.Background(), rule.ID)
-	require.NoError(t, err)
-
-	// Verify deletion
-	retrieved = store.GetScopedRoutingRules(context.Background(), "global", "")
-	assert.Equal(t, 0, len(retrieved))
 }
 
 // TestGovernanceStore_RateLimitStatus tests rate limit status calculation
@@ -1115,6 +1038,35 @@ func TestGetBudgetAndRateLimitStatus_VKScopedModelConfig_NoMatchOtherProvider(t 
 	assert.Equal(t, 0.0, status.BudgetPercentUsed, "openai VK-scoped budget must not appear for anthropic requests")
 }
 
+// TestCollectApplicableGovernanceIDs_VKWildcardBudget_NoModel is a regression test for a
+// batch accounting bug: a VK created with an unscoped "Budget configuration" (via the
+// Create Virtual Key UI) stores the budget as a VK-scoped, all-providers, all-models
+// wildcard model config (scope=virtual_key, model="*", provider=nil). Batch-create
+// requests may not carry a top-level model, so CollectApplicableGovernanceIDs used to
+// gate the entire VK-scoped model-config lookup on model != "" and silently miss this
+// budget — the batch settled but the VK budget was never bumped.
+func TestCollectApplicableGovernanceIDs_VKWildcardBudget_NoModel(t *testing.T) {
+	logger := NewMockLogger()
+	vkID := "vk-batches"
+	vkValue := "vk-batches-value"
+
+	budget := buildBudgetWithUsage("vk-wildcard-budget", 100.0, 0.0, "1M")
+	mc := buildVKScopedModelConfig("mc-vk-wildcard", configstoreTables.ModelConfigAllModels, nil, vkID, budget, nil)
+	vk := buildVirtualKey(vkID, vkValue, "batches", true)
+
+	store, err := NewLocalGovernanceStore(context.Background(), logger, nil, &configstore.GovernanceConfig{
+		ModelConfigs: []configstoreTables.TableModelConfig{*mc},
+		Budgets:      []configstoreTables.TableBudget{*budget},
+	}, nil)
+	require.NoError(t, err)
+
+	store.virtualKeys.Store(vkValue, vk)
+
+	budgetIDs, _ := store.CollectApplicableGovernanceIDs(context.Background(), vkValue, "", schemas.ModelProvider("anthropic"), "")
+
+	assert.Contains(t, budgetIDs, budget.ID, "VK-scoped wildcard budget must be found even when the request carries no model (e.g. batch-create)")
+}
+
 // TestGetBudgetAndRateLimitStatus_GlobalModelConfig tests that a global model+provider
 // config budget is visible to GetBudgetAndRateLimitStatus.
 func TestGetBudgetAndRateLimitStatus_GlobalModelConfig(t *testing.T) {
@@ -1134,195 +1086,6 @@ func TestGetBudgetAndRateLimitStatus_GlobalModelConfig(t *testing.T) {
 
 	require.NotNil(t, status)
 	assert.Equal(t, 75.0, status.BudgetPercentUsed, "global model+provider budget must be visible to routing status")
-}
-
-// TestGovernanceStore_RoutingRules_MultipleScopes tests rules with multiple scopes
-func TestGovernanceStore_RoutingRules_MultipleScopes(t *testing.T) {
-	logger := NewMockLogger()
-	store, err := NewLocalGovernanceStore(context.Background(), logger, nil, &configstore.GovernanceConfig{}, nil)
-	require.NoError(t, err)
-
-	customerID := "cust-123"
-	teamID := "team-456"
-
-	// Create rules for different scopes
-	globalRule := &configstoreTables.TableRoutingRule{
-		ID: "1", Name: "Global", Scope: "global", ScopeID: nil, Priority: 10, Enabled: bifrost.Ptr(true),
-	}
-	customerRule := &configstoreTables.TableRoutingRule{
-		ID: "2", Name: "Customer", Scope: "customer", ScopeID: &customerID, Priority: 20, Enabled: bifrost.Ptr(true),
-	}
-	teamRule := &configstoreTables.TableRoutingRule{
-		ID: "3", Name: "Team", Scope: "team", ScopeID: &teamID, Priority: 30, Enabled: bifrost.Ptr(true),
-	}
-
-	require.NoError(t, store.UpdateRoutingRuleInMemory(context.Background(), globalRule))
-	require.NoError(t, store.UpdateRoutingRuleInMemory(context.Background(), customerRule))
-	require.NoError(t, store.UpdateRoutingRuleInMemory(context.Background(), teamRule))
-
-	// Test global scope
-	globalRules := store.GetScopedRoutingRules(context.Background(), "global", "")
-	assert.Equal(t, 1, len(globalRules))
-	assert.Equal(t, "Global", globalRules[0].Name)
-
-	// Test customer scope
-	custRules := store.GetScopedRoutingRules(context.Background(), "customer", customerID)
-	assert.Equal(t, 1, len(custRules))
-	assert.Equal(t, "Customer", custRules[0].Name)
-
-	// Test team scope
-	teamRules := store.GetScopedRoutingRules(context.Background(), "team", teamID)
-	assert.Equal(t, 1, len(teamRules))
-	assert.Equal(t, "Team", teamRules[0].Name)
-
-	// ListAll should return all rules sorted by priority ASC (lower numbers = higher priority)
-	allRules := store.GetAllRoutingRules(context.Background())
-	assert.Equal(t, 3, len(allRules))
-	assert.Equal(t, 10, allRules[0].Priority) // Global (highest)
-	assert.Equal(t, 20, allRules[1].Priority) // Customer
-	assert.Equal(t, 30, allRules[2].Priority) // Team (lowest)
-}
-
-// TestCompileAndCacheProgram tests CEL program compilation and caching
-func TestCompileAndCacheProgram(t *testing.T) {
-	logger := NewMockLogger()
-	store, err := NewLocalGovernanceStore(context.Background(), logger, nil, &configstore.GovernanceConfig{}, nil)
-	require.NoError(t, err)
-
-	rule := &configstoreTables.TableRoutingRule{
-		ID:            "rule-1",
-		Name:          "Test Rule",
-		CelExpression: "model == 'gpt-4o' && tokens_used < 80.0",
-		Targets: []configstoreTables.TableRoutingTarget{
-			{Provider: bifrost.Ptr("openai")},
-		},
-		Enabled: bifrost.Ptr(true),
-	}
-
-	// First compilation
-	program1, err := store.GetRoutingProgram(context.Background(), rule)
-	require.NoError(t, err)
-	assert.NotNil(t, program1)
-
-	// Verify it's cached - second call should return cached program
-	program2, err := store.GetRoutingProgram(context.Background(), rule)
-	require.NoError(t, err)
-	assert.NotNil(t, program2)
-
-	// Both should be the same cached instance
-	assert.Equal(t, program1, program2)
-}
-
-// TestCompileAndCacheProgram_InvalidExpression tests error handling for invalid CEL
-func TestCompileAndCacheProgram_InvalidExpression(t *testing.T) {
-	logger := NewMockLogger()
-	store, err := NewLocalGovernanceStore(context.Background(), logger, nil, &configstore.GovernanceConfig{}, nil)
-	require.NoError(t, err)
-
-	rule := &configstoreTables.TableRoutingRule{
-		ID:            "rule-invalid",
-		Name:          "Invalid Rule",
-		CelExpression: "model == gpt-4o'", // Syntax error
-		Targets: []configstoreTables.TableRoutingTarget{
-			{Provider: bifrost.Ptr("openai")},
-		},
-		Enabled: bifrost.Ptr(true),
-	}
-
-	_, err = store.GetRoutingProgram(context.Background(), rule)
-	assert.Error(t, err)
-
-	// Invalid rule should not be cached - attempting to get it again should fail
-	_, err = store.GetRoutingProgram(context.Background(), rule)
-	assert.Error(t, err)
-}
-
-// TestCompileAndCacheProgram_CacheInvalidation tests cache invalidation on rule update
-func TestCompileAndCacheProgram_CacheInvalidation(t *testing.T) {
-	logger := NewMockLogger()
-	store, err := NewLocalGovernanceStore(context.Background(), logger, nil, &configstore.GovernanceConfig{}, nil)
-	require.NoError(t, err)
-
-	rule := &configstoreTables.TableRoutingRule{
-		ID:            "rule-update",
-		Name:          "Update Rule",
-		CelExpression: "model == 'gpt-4o'",
-		Targets: []configstoreTables.TableRoutingTarget{
-			{Provider: bifrost.Ptr("openai")},
-		},
-		Enabled: bifrost.Ptr(true),
-		Scope:   "global",
-	}
-
-	// Compile and cache
-	program1, err := store.GetRoutingProgram(context.Background(), rule)
-	require.NoError(t, err)
-	assert.NotNil(t, program1)
-
-	// Update rule in memory (should invalidate cache)
-	rule.CelExpression = "model == 'gpt-4-turbo'"
-	err = store.UpdateRoutingRuleInMemory(context.Background(), rule)
-	require.NoError(t, err)
-
-	// Recompile should work
-	program2, err := store.GetRoutingProgram(context.Background(), rule)
-	require.NoError(t, err)
-	assert.NotNil(t, program2)
-}
-
-// TestCompileAndCacheProgram_CacheInvalidationOnDelete tests cache invalidation on rule deletion
-func TestCompileAndCacheProgram_CacheInvalidationOnDelete(t *testing.T) {
-	logger := NewMockLogger()
-	store, err := NewLocalGovernanceStore(context.Background(), logger, nil, &configstore.GovernanceConfig{}, nil)
-	require.NoError(t, err)
-
-	rule := &configstoreTables.TableRoutingRule{
-		ID:            "rule-delete",
-		Name:          "Delete Rule",
-		CelExpression: "provider == 'openai'",
-		Targets: []configstoreTables.TableRoutingTarget{
-			{Provider: bifrost.Ptr("openai")},
-		},
-		Enabled: bifrost.Ptr(true),
-		Scope:   "global",
-	}
-
-	// Compile and cache
-	_, err = store.GetRoutingProgram(context.Background(), rule)
-	require.NoError(t, err)
-
-	// Delete rule (should invalidate cache)
-	err = store.DeleteRoutingRuleInMemory(context.Background(), rule.ID)
-	require.NoError(t, err)
-
-	// After deletion, we can't verify cache directly, but the rule is gone from storage
-}
-
-// TestCompileAndCacheProgram_EmptyExpression tests compilation of empty CEL expression (defaults to "true")
-func TestCompileAndCacheProgram_EmptyExpression(t *testing.T) {
-	logger := NewMockLogger()
-	store, err := NewLocalGovernanceStore(context.Background(), logger, nil, &configstore.GovernanceConfig{}, nil)
-	require.NoError(t, err)
-
-	rule := &configstoreTables.TableRoutingRule{
-		ID:            "rule-empty",
-		Name:          "Empty Rule",
-		CelExpression: "",
-		Targets: []configstoreTables.TableRoutingTarget{
-			{Provider: bifrost.Ptr("openai")},
-		},
-		Enabled: bifrost.Ptr(true),
-	}
-
-	program, err := store.GetRoutingProgram(context.Background(), rule)
-	require.NoError(t, err)
-	assert.NotNil(t, program)
-
-	// Verify caching works - second call should return same program
-	program2, err := store.GetRoutingProgram(context.Background(), rule)
-	require.NoError(t, err)
-	assert.NotNil(t, program2)
-	assert.Equal(t, program, program2)
 }
 
 // TestGetTeamNameAndGetCustomerName verifies the display-name accessors the
@@ -1464,4 +1227,53 @@ func TestGovernanceStore_Customer_CalendarAligned_UpdateInMemory(t *testing.T) {
 // Utility functions for tests
 func ptrInt64(i int64) *int64 {
 	return &i
+}
+
+// An access profile's per-model budgets materialise as user-scoped model configs
+// naming one model and provider. A batch create carries no top-level model, so the
+// in-flight collection matches only the wildcard tiers and those per-model budgets
+// are invisible to it — which is why batch spend never reached them. Settlement
+// knows the models and asks for them by name.
+func TestCollectModelScopedGovernanceIDs_FindsExactModelConfigMissedAtCreateTime(t *testing.T) {
+	logger := NewMockLogger()
+	ctx := context.Background()
+	providerName := "openai"
+	userID := "user-alice"
+
+	perModel := buildBudgetWithUsage("ap-model-budget", 100.0, 0.0, "1M")
+	perModelMC := buildModelConfig("mc-user-gpt5", "gpt-5", &providerName, perModel, nil)
+	perModelMC.Scope = configstoreTables.ModelConfigScopeUser
+	perModelMC.ScopeID = &userID
+
+	wildcard := buildBudgetWithUsage("ap-wildcard-budget", 100.0, 0.0, "1M")
+	wildcardMC := buildModelConfig("mc-user-all", configstoreTables.ModelConfigAllModels, &providerName, wildcard, nil)
+	wildcardMC.Scope = configstoreTables.ModelConfigScopeUser
+	wildcardMC.ScopeID = &userID
+
+	store, err := NewLocalGovernanceStore(ctx, logger, nil, &configstore.GovernanceConfig{
+		ModelConfigs: []configstoreTables.TableModelConfig{*perModelMC, *wildcardMC},
+		Budgets:      []configstoreTables.TableBudget{*perModel, *wildcard},
+	}, nil)
+	require.NoError(t, err)
+
+	// What batch create sees: no model, so only the wildcard is collected.
+	inFlight, _ := store.CollectApplicableGovernanceIDs(ctx, "", userID, schemas.ModelProvider(providerName), "")
+	assert.Contains(t, inFlight, wildcard.ID)
+	assert.NotContains(t, inFlight, perModel.ID, "the per-model budget cannot be matched without a model")
+
+	// What settlement sees: the model is known, so the per-model budget is reachable.
+	atSettlement, _ := store.CollectModelScopedGovernanceIDs(ctx, "", userID, schemas.ModelProvider(providerName), "gpt-5")
+	assert.Contains(t, atSettlement, perModel.ID)
+	// The wildcard is returned too and overlaps the in-flight set by design; callers
+	// subtract what they already charged rather than relying on it being absent.
+	assert.Contains(t, atSettlement, wildcard.ID)
+
+	// A model with no config of its own still finds the wildcard and nothing else.
+	otherModel, _ := store.CollectModelScopedGovernanceIDs(ctx, "", userID, schemas.ModelProvider(providerName), "gpt-4o")
+	assert.NotContains(t, otherModel, perModel.ID)
+	assert.Contains(t, otherModel, wildcard.ID)
+
+	// Scope isolation: another user's id must not reach these configs.
+	otherUser, _ := store.CollectModelScopedGovernanceIDs(ctx, "", "user-bob", schemas.ModelProvider(providerName), "gpt-5")
+	assert.Empty(t, otherUser)
 }

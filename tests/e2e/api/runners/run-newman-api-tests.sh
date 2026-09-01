@@ -207,17 +207,33 @@ fi
 # Make globally-installed npm packages (e.g. newman-reporter-htmlextra from
 # `npm install -g`) visible to Node's module resolver. Node 20+ no longer falls
 # back to the global npm prefix automatically, so without this NODE_PATH addition
-# the require.resolve check below fails even when the package is installed.
+# a global install is invisible to Node even when the package is installed.
 if NPM_GLOBAL_ROOT="$(npm root -g 2>/dev/null)" && [ -n "$NPM_GLOBAL_ROOT" ]; then
     export NODE_PATH="$NPM_GLOBAL_ROOT${NODE_PATH:+:$NODE_PATH}"
 fi
 
 # Validate optional reporters are resolvable before invoking newman so we fail
-# fast with a clear message instead of a cryptic mid-run newman error. node's
-# require.resolve uses the same module-resolution path newman uses (including
-# the NODE_PATH set above for the global npm root and below for newman-reporter-dbverify).
+# fast with a clear message instead of a cryptic mid-run newman error.
+#
+# The probe must resolve from newman's own install tree, because that is where
+# newman resolves its reporters from: it requires `newman-reporter-<name>` from
+# inside the newman package, so Node walks up newman's own node_modules chain.
+# CI installs newman and its reporters locally under
+# .github/workflows/tools/node_modules and puts only .bin on PATH, so a probe
+# that resolves from this script's cwd (or from the global npm root) reports the
+# reporter missing on a tree where newman itself would load it fine.
+# process.cwd() stays in the paths list to cover a repo-local npm install, and
+# NODE_PATH (set above for the global root, and below for newman-reporter-dbverify)
+# is still honoured by Node on top of these paths.
 if [[ "$REPORTERS" == *"htmlextra"* ]]; then
-    if ! node -e 'require.resolve("newman-reporter-htmlextra")' >/dev/null 2>&1; then
+    if ! node -e '
+        const fs = require("fs"), path = require("path");
+        const paths = [process.cwd()];
+        try {
+            paths.unshift(path.dirname(fs.realpathSync(process.argv[1])));
+        } catch (e) { /* newman not on PATH or not a real file; cwd still applies */ }
+        require.resolve("newman-reporter-htmlextra", { paths });
+    ' "$(command -v newman)" >/dev/null 2>&1; then
         echo -e "${RED}Error: newman-reporter-htmlextra is not installed${NC}"
         echo "Install it with: npm install -g newman-reporter-htmlextra"
         exit 1
@@ -525,7 +541,12 @@ if [ $EXIT_CODE -eq 0 ]; then
         node "$SCRIPT_DIR/set-auth-config.mjs" enable 2>&1 | tee -a "$LOG_FILE"
     AUTH_SETUP_EXIT=${PIPESTATUS[0]}
     set -e
-    if [ $AUTH_SETUP_EXIT -ne 0 ]; then
+    # Exit 3 means the auth pass cannot run here (fresh database, no bootstrap
+    # token). That is a coverage gap, not a test failure -- do not fail a run
+    # whose unauthenticated pass was green.
+    if [ $AUTH_SETUP_EXIT -eq 3 ]; then
+        echo -e "${YELLOW}Skipping authenticated API management pass (see message above).${NC}" | tee -a "$LOG_FILE"
+    elif [ $AUTH_SETUP_EXIT -ne 0 ]; then
         EXIT_CODE=$AUTH_SETUP_EXIT
     else
         AUTH_ENABLED_BY_RUN="1"

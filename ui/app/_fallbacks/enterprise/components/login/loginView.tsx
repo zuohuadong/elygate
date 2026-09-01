@@ -1,11 +1,32 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useBranding } from "@/lib/hooks/useBranding";
 import { getErrorMessage, useLoginMutation } from "@/lib/store/apis";
+import { BooksIcon, DiscordLogoIcon, GithubLogoIcon } from "@phosphor-icons/react";
 import { useNavigate } from "@tanstack/react-router";
 import { Eye, EyeOff } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
+
+const externalLinks = [
+	{
+		title: "Discord Server",
+		url: "https://discord.gg/exN5KAydbU",
+		icon: DiscordLogoIcon,
+	},
+	{
+		title: "GitHub Repository",
+		url: "https://github.com/maximhq/bifrost",
+		icon: GithubLogoIcon,
+	},
+	{
+		title: "Full Documentation",
+		url: "https://docs.getbifrost.ai",
+		icon: BooksIcon,
+		strokeWidth: 1,
+	},
+];
 
 export default function LoginView() {
 	const { resolvedTheme } = useTheme();
@@ -37,7 +58,7 @@ export default function LoginView() {
 		}
 	};
 
-	const logoSrc = mounted && resolvedTheme === "dark" ? "/elygate-logo-dark.svg" : "/elygate-logo.svg";
+	const { logoSrc, logoAlt } = useBranding(mounted && resolvedTheme === "dark");
 
 	return (
 		<div className="flex min-h-screen items-center justify-center p-4">
@@ -45,7 +66,7 @@ export default function LoginView() {
 				<div className="border-border bg-card w-full space-y-6 rounded-sm border p-8">
 					{/* Logo */}
 					<div className="flex items-center justify-center">
-						<img src={logoSrc} alt="Elygate" width={160} height={26} className="" />
+						<img src={logoSrc} alt={logoAlt} width={160} height={26} className="max-h-[40px] w-auto max-w-[220px] object-contain" />
 					</div>
 
 					<div className="space-y-2 text-center">
@@ -103,6 +124,21 @@ export default function LoginView() {
 						</Button>
 					</form>
 
+					{/* Social Links */}
+					<div className="flex items-center justify-center gap-4 pt-4">
+						{externalLinks.map((item, index) => (
+							<a
+								key={index}
+								href={item.url}
+								target="_blank"
+								rel="noopener noreferrer"
+								className="text-muted-foreground hover:text-primary transition-colors"
+								title={item.title}
+							>
+								<item.icon className="h-5 w-5" size={20} weight="regular" strokeWidth={item.strokeWidth} />
+							</a>
+						))}
+					</div>
 				</div>
 			</div>
 		</div>

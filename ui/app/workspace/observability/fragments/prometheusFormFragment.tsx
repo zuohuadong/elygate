@@ -340,7 +340,7 @@ export function PrometheusFormFragment({
 						<Alert variant="info">
 							<AlertTriangle className="" />
 							<AlertDescription className="text-xs">
-								If you are running multiple Elygate nodes, use push gateway for accurate metrics. Pull-based /metrics scraping may miss
+								If you are running multiple Bifrost nodes, use push gateway for accurate metrics. Pull-based /metrics scraping may miss
 								nodes behind a load balancer.
 							</AlertDescription>
 						</Alert>
@@ -366,7 +366,7 @@ export function PrometheusFormFragment({
 								)}
 							/>
 
-							<div className="grid grid-cols-2 gap-4">
+							<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
 								<FormField
 									control={form.control}
 									name="prometheus_config.job_name"
@@ -420,7 +420,7 @@ export function PrometheusFormFragment({
 													</TooltipTrigger>
 													<TooltipContent>
 														<p className="max-w-xs text-xs">
-														Used to identify this Elygate instance in metrics. If not set, hostname is used automatically.
+															Used to identify this Bifrost instance in metrics. If not set, hostname is used automatically.
 														</p>
 													</TooltipContent>
 												</Tooltip>
@@ -470,7 +470,7 @@ export function PrometheusFormFragment({
 												<Trash className="h-4 w-4" />
 											</Button>
 										</div>
-										<div className="border-muted grid grid-cols-2 gap-4">
+										<div className="border-muted grid grid-cols-1 gap-4 md:grid-cols-2">
 											<FormField
 												control={form.control}
 												name="prometheus_config.basic_auth_username"

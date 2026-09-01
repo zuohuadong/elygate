@@ -46,7 +46,7 @@ func NewBedrockMantleProvider(config *schemas.ProviderConfig, logger schemas.Log
 		ReadTimeout:         requestTimeout,
 		WriteTimeout:        requestTimeout,
 		MaxConnsPerHost:     config.NetworkConfig.MaxConnsPerHost,
-		MaxIdleConnDuration: 30 * time.Second,
+		MaxIdleConnDuration: time.Second * time.Duration(config.NetworkConfig.KeepAliveTimeoutInSeconds),
 		MaxConnWaitTimeout:  requestTimeout,
 		MaxConnDuration:     time.Second * time.Duration(schemas.DefaultMaxConnDurationInSeconds),
 		ConnPoolStrategy:    fasthttp.FIFO,
@@ -79,19 +79,39 @@ const defaultMantleRegion = "us-east-1"
 // region, model, and API path (e.g. "chat/completions", "responses"). The native-Anthropic
 // path is built separately by mantleAnthropicURL. Pass the canonical (capability-resolved)
 // model for correct path gating; the request body still carries the wire request.Model.
-// Frontier families (closed gpt-5.x, Gemma 4) live under the "openai/v1" base path; gpt-oss
+// Frontier families (closed gpt-5.x, Gemma 4, Grok) live under the "openai/v1" base path; gpt-oss
 // uses the bare "v1" path.
-func mantleOpenAIURL(region, model, path string) string {
+func mantleOpenAIURL(endpoints *schemas.BedrockEndpoints, region, model, path string) string {
 	base := "v1"
-	if strings.Contains(model, "gpt-5") || strings.Contains(model, "gemma-4") {
+	if strings.Contains(model, "gpt-5") || strings.Contains(model, "gemma-4") || schemas.IsGrokModel(model) {
 		base = "openai/v1"
 	}
-	return fmt.Sprintf("https://bedrock-mantle.%s.api.aws/%s/%s", region, base, path)
+	return fmt.Sprintf("https://%s/%s/%s", mantleHost(endpoints, region), base, path)
 }
 
 // mantleAnthropicURL builds the Bedrock Mantle native-Anthropic Messages endpoint URL.
-func mantleAnthropicURL(region string) string {
-	return fmt.Sprintf("https://bedrock-mantle.%s.api.aws/anthropic/v1/messages", region)
+func mantleAnthropicURL(endpoints *schemas.BedrockEndpoints, region string) string {
+	return fmt.Sprintf("https://%s/anthropic/v1/messages", mantleHost(endpoints, region))
+}
+
+// mantleHost returns the host to dial for Bedrock Mantle: the configured interface VPC endpoint
+// override when set, otherwise the public regional host.
+func mantleHost(endpoints *schemas.BedrockEndpoints, region string) string {
+	if endpoints != nil {
+		if host := schemas.NormalizeEndpointHost(endpoints.Mantle); host != "" {
+			return host
+		}
+	}
+	return fmt.Sprintf("bedrock-mantle.%s.api.aws", region)
+}
+
+// mantleEndpoints returns the endpoint overrides on a mantle key config, tolerating a nil config
+// so callers on the API-key auth path need no guard.
+func mantleEndpoints(cfg *schemas.BedrockMantleKeyConfig) *schemas.BedrockEndpoints {
+	if cfg == nil {
+		return nil
+	}
+	return cfg.Endpoints
 }
 
 // mantleSigner returns a BodySigner that SigV4-signs the request body for the bedrock-mantle
@@ -120,9 +140,11 @@ func (provider *BedrockMantleProvider) GetProviderKey() schemas.ModelProvider {
 // per-request extra headers consumed by the shared OpenAI list-models path.
 func (provider *BedrockMantleProvider) listModelsByKey(ctx *schemas.BifrostContext, key schemas.Key, request *schemas.BifrostListModelsRequest) (*schemas.BifrostListModelsResponse, *schemas.BifrostError) {
 	region := provider.resolveRegion(ctx, key, "")
-	mURL := mantleOpenAIURL(region, "", "models")
+	mURL := mantleOpenAIURL(mantleEndpoints(key.BedrockMantleKeyConfig), region, "", "models")
 
-	extraHeaders := provider.networkConfig.ExtraHeaders
+	// Scope the catalog to the configured project via the OpenAI-Project header (default project
+	// when unset). It is a plain header, so it does not need to be part of the SigV4 SignedHeaders.
+	extraHeaders := bedrock.WithMantleProject(provider.networkConfig.ExtraHeaders, bedrock.MantleOpenAIProjectHeader, resolveProjectID(ctx, key))
 	if key.Value.GetValue() == "" {
 		// SigV4: sign the GET and overlay the signed headers; OpenAI's ListModelsByKey only sets
 		// a Bearer header when the key carries a value, so the SigV4 Authorization wins here.
@@ -130,8 +152,8 @@ func (provider *BedrockMantleProvider) listModelsByKey(ctx *schemas.BifrostConte
 		if bifrostErr != nil {
 			return nil, bifrostErr
 		}
-		merged := make(map[string]string, len(provider.networkConfig.ExtraHeaders)+len(sigHeaders))
-		maps.Copy(merged, provider.networkConfig.ExtraHeaders)
+		merged := make(map[string]string, len(extraHeaders)+len(sigHeaders))
+		maps.Copy(merged, extraHeaders)
 		maps.Copy(merged, sigHeaders)
 		extraHeaders = merged
 	}
@@ -169,7 +191,7 @@ func (provider *BedrockMantleProvider) ChatCompletion(ctx *schemas.BifrostContex
 	// Anthropic-family models (Claude) use the native Anthropic Messages surface; all other
 	// (OpenAI-family / Gemma) models use the OpenAI-compatible surface.
 	if schemas.IsAnthropicModelFamily(ctx, request.Model) {
-		url := mantleAnthropicURL(region)
+		url := mantleAnthropicURL(mantleEndpoints(key.BedrockMantleKeyConfig), region)
 		_, bareModel := parseBedrockRegionAndModel(request.Model)
 		return anthropic.HandleAnthropicChatCompletionRequest(
 			ctx,
@@ -184,20 +206,20 @@ func (provider *BedrockMantleProvider) ChatCompletion(ctx *schemas.BifrostContex
 				ShouldSendBackRawResponse: provider.sendBackRawResponse,
 			},
 			openai.BearerAuthHeader(key),
-			addAnthropicHeaders(provider.networkConfig.ExtraHeaders),
+			addAnthropicHeaders(bedrock.WithMantleProject(provider.networkConfig.ExtraHeaders, bedrock.MantleAnthropicProjectHeader, resolveProjectID(ctx, key))),
 			provider.mantleSigner(ctx, key, url, "application/json", region),
 			provider.logger,
 		)
 	}
 
-	url := mantleOpenAIURL(region, schemas.ResolveCanonicalModel(ctx, request.Model), "chat/completions")
+	url := mantleOpenAIURL(mantleEndpoints(key.BedrockMantleKeyConfig), region, schemas.ResolveCanonicalModel(ctx, request.Model), "chat/completions")
 	return openai.HandleOpenAIChatCompletionRequest(
 		ctx,
 		provider.mantleClient,
 		url,
 		request,
 		openai.BearerAuthHeader(key),
-		provider.networkConfig.ExtraHeaders,
+		bedrock.WithMantleProject(provider.networkConfig.ExtraHeaders, bedrock.MantleOpenAIProjectHeader, resolveProjectID(ctx, key)),
 		providerUtils.ShouldSendBackRawRequest(ctx, provider.sendBackRawRequest),
 		providerUtils.ShouldSendBackRawResponse(ctx, provider.sendBackRawResponse),
 		provider.GetProviderKey(),
@@ -216,7 +238,7 @@ func (provider *BedrockMantleProvider) ChatCompletionStream(ctx *schemas.Bifrost
 	// Anthropic-family models (Claude) use the native Anthropic Messages surface; all other
 	// (OpenAI-family / Gemma) models use the OpenAI-compatible surface.
 	if schemas.IsAnthropicModelFamily(ctx, request.Model) {
-		url := mantleAnthropicURL(region)
+		url := mantleAnthropicURL(mantleEndpoints(key.BedrockMantleKeyConfig), region)
 
 		_, bareModel := parseBedrockRegionAndModel(request.Model)
 		jsonData, bifrostErr := anthropic.BuildAnthropicChatRequestBody(ctx, request, anthropic.AnthropicRequestBuildConfig{
@@ -237,7 +259,7 @@ func (provider *BedrockMantleProvider) ChatCompletionStream(ctx *schemas.Bifrost
 			url,
 			jsonData,
 			openai.BearerAuthHeader(key),
-			addAnthropicHeaders(provider.networkConfig.ExtraHeaders),
+			addAnthropicHeaders(bedrock.WithMantleProject(provider.networkConfig.ExtraHeaders, bedrock.MantleAnthropicProjectHeader, resolveProjectID(ctx, key))),
 			provider.networkConfig.StreamIdleTimeoutInSeconds,
 			provider.networkConfig.BetaHeaderOverrides,
 			providerUtils.ShouldSendBackRawRequest(ctx, provider.sendBackRawRequest),
@@ -251,10 +273,10 @@ func (provider *BedrockMantleProvider) ChatCompletionStream(ctx *schemas.Bifrost
 		)
 	}
 
-	url := mantleOpenAIURL(region, schemas.ResolveCanonicalModel(ctx, request.Model), "chat/completions")
+	url := mantleOpenAIURL(mantleEndpoints(key.BedrockMantleKeyConfig), region, schemas.ResolveCanonicalModel(ctx, request.Model), "chat/completions")
 	return openai.HandleOpenAIChatCompletionStreaming(
 		ctx, provider.mantleStreamingClient, url, request,
-		openai.BearerAuthHeader(key), provider.networkConfig.ExtraHeaders,
+		openai.BearerAuthHeader(key), bedrock.WithMantleProject(provider.networkConfig.ExtraHeaders, bedrock.MantleOpenAIProjectHeader, resolveProjectID(ctx, key)),
 		provider.networkConfig.StreamIdleTimeoutInSeconds,
 		providerUtils.ShouldSendBackRawRequest(ctx, provider.sendBackRawRequest),
 		providerUtils.ShouldSendBackRawResponse(ctx, provider.sendBackRawResponse),
@@ -273,7 +295,7 @@ func (provider *BedrockMantleProvider) Responses(ctx *schemas.BifrostContext, ke
 	// Anthropic-family models (Claude) use the native Anthropic Messages surface; all other
 	// (OpenAI-family / Gemma) models use the OpenAI-compatible surface.
 	if schemas.IsAnthropicModelFamily(ctx, request.Model) {
-		url := mantleAnthropicURL(region)
+		url := mantleAnthropicURL(mantleEndpoints(key.BedrockMantleKeyConfig), region)
 
 		_, bareModel := parseBedrockRegionAndModel(request.Model)
 		return anthropic.HandleAnthropicResponsesRequest(
@@ -290,20 +312,20 @@ func (provider *BedrockMantleProvider) Responses(ctx *schemas.BifrostContext, ke
 				ShouldSendBackRawResponse: provider.sendBackRawResponse,
 			},
 			openai.BearerAuthHeader(key),
-			addAnthropicHeaders(provider.networkConfig.ExtraHeaders),
+			addAnthropicHeaders(bedrock.WithMantleProject(provider.networkConfig.ExtraHeaders, bedrock.MantleAnthropicProjectHeader, resolveProjectID(ctx, key))),
 			provider.mantleSigner(ctx, key, url, "application/json", region),
 			provider.logger,
 		)
 	}
 
-	url := mantleOpenAIURL(region, schemas.ResolveCanonicalModel(ctx, request.Model), "responses")
+	url := mantleOpenAIURL(mantleEndpoints(key.BedrockMantleKeyConfig), region, schemas.ResolveCanonicalModel(ctx, request.Model), "responses")
 	return openai.HandleOpenAIResponsesRequest(
 		ctx,
 		provider.mantleClient,
 		url,
 		request,
 		openai.BearerAuthHeader(key),
-		provider.networkConfig.ExtraHeaders,
+		bedrock.WithMantleProject(provider.networkConfig.ExtraHeaders, bedrock.MantleOpenAIProjectHeader, resolveProjectID(ctx, key)),
 		providerUtils.ShouldSendBackRawRequest(ctx, provider.sendBackRawRequest),
 		providerUtils.ShouldSendBackRawResponse(ctx, provider.sendBackRawResponse),
 		provider.GetProviderKey(),
@@ -321,7 +343,7 @@ func (provider *BedrockMantleProvider) ResponsesStream(ctx *schemas.BifrostConte
 	// Anthropic-family models (Claude) use the native Anthropic Messages surface; all other
 	// (OpenAI-family / Gemma) models use the OpenAI-compatible surface.
 	if schemas.IsAnthropicModelFamily(ctx, request.Model) {
-		url := mantleAnthropicURL(region)
+		url := mantleAnthropicURL(mantleEndpoints(key.BedrockMantleKeyConfig), region)
 
 		_, bareModel := parseBedrockRegionAndModel(request.Model)
 		jsonData, bifrostErr := anthropic.BuildAnthropicResponsesRequestBody(ctx, request, anthropic.AnthropicRequestBuildConfig{
@@ -343,7 +365,7 @@ func (provider *BedrockMantleProvider) ResponsesStream(ctx *schemas.BifrostConte
 			url,
 			jsonData,
 			openai.BearerAuthHeader(key),
-			addAnthropicHeaders(provider.networkConfig.ExtraHeaders),
+			addAnthropicHeaders(bedrock.WithMantleProject(provider.networkConfig.ExtraHeaders, bedrock.MantleAnthropicProjectHeader, resolveProjectID(ctx, key))),
 			provider.networkConfig.StreamIdleTimeoutInSeconds,
 			provider.networkConfig.BetaHeaderOverrides,
 			providerUtils.ShouldSendBackRawRequest(ctx, provider.sendBackRawRequest),
@@ -357,10 +379,10 @@ func (provider *BedrockMantleProvider) ResponsesStream(ctx *schemas.BifrostConte
 		)
 	}
 
-	url := mantleOpenAIURL(region, schemas.ResolveCanonicalModel(ctx, request.Model), "responses")
+	url := mantleOpenAIURL(mantleEndpoints(key.BedrockMantleKeyConfig), region, schemas.ResolveCanonicalModel(ctx, request.Model), "responses")
 	return openai.HandleOpenAIResponsesStreaming(
 		ctx, provider.mantleStreamingClient, url, request,
-		openai.BearerAuthHeader(key), provider.networkConfig.ExtraHeaders,
+		openai.BearerAuthHeader(key), bedrock.WithMantleProject(provider.networkConfig.ExtraHeaders, bedrock.MantleOpenAIProjectHeader, resolveProjectID(ctx, key)),
 		provider.networkConfig.StreamIdleTimeoutInSeconds,
 		providerUtils.ShouldSendBackRawRequest(ctx, provider.sendBackRawRequest),
 		providerUtils.ShouldSendBackRawResponse(ctx, provider.sendBackRawResponse),
@@ -466,6 +488,11 @@ func (provider *BedrockMantleProvider) VideoList(_ *schemas.BifrostContext, _ sc
 	return nil, providerUtils.NewUnsupportedOperationError(schemas.VideoListRequest, provider.GetProviderKey())
 }
 
+// VideoEdit is not supported by the BedrockMantle provider.
+func (provider *BedrockMantleProvider) VideoEdit(_ *schemas.BifrostContext, _ schemas.Key, _ *schemas.BifrostVideoEditRequest) (*schemas.BifrostVideoEditResponse, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.VideoEditRequest, provider.GetProviderKey())
+}
+
 // VideoRemix is not supported by the Bedrock Mantle provider.
 func (provider *BedrockMantleProvider) VideoRemix(_ *schemas.BifrostContext, _ schemas.Key, _ *schemas.BifrostVideoRemixRequest) (*schemas.BifrostVideoGenerationResponse, *schemas.BifrostError) {
 	return nil, providerUtils.NewUnsupportedOperationError(schemas.VideoRemixRequest, provider.GetProviderKey())
@@ -526,10 +553,7 @@ func (provider *BedrockMantleProvider) BatchResults(_ *schemas.BifrostContext, _
 	return nil, providerUtils.NewUnsupportedOperationError(schemas.BatchResultsRequest, provider.GetProviderKey())
 }
 
-// CountTokens is not supported by the Bedrock Mantle provider.
-func (provider *BedrockMantleProvider) CountTokens(_ *schemas.BifrostContext, _ schemas.Key, _ *schemas.BifrostResponsesRequest) (*schemas.BifrostCountTokensResponse, *schemas.BifrostError) {
-	return nil, providerUtils.NewUnsupportedOperationError(schemas.CountTokensRequest, provider.GetProviderKey())
-}
+// CountTokens is implemented in counttokens.go (native-Anthropic count_tokens path).
 
 // Compaction is not supported by the Bedrock Mantle provider.
 func (provider *BedrockMantleProvider) Compaction(ctx *schemas.BifrostContext, key schemas.Key, request *schemas.BifrostCompactionRequest) (*schemas.BifrostCompactionResponse, *schemas.BifrostError) {

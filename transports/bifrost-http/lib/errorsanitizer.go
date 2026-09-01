@@ -3,7 +3,9 @@ package lib
 import (
 	"strings"
 
+	bifrost "github.com/maximhq/bifrost/core"
 	"github.com/maximhq/bifrost/core/schemas"
+	"github.com/valyala/fasthttp"
 )
 
 const ClientSafeInternalErrorMessage = "internal server error"
@@ -27,6 +29,23 @@ func SanitizeBifrostErrorForClient(err *schemas.BifrostError) *schemas.BifrostEr
 	}
 
 	return &sanitized
+}
+
+// NormalizeBifrostErrorStatusCode preserves the transport-selected status in
+// the JSON body, including provider/model auto-resolution validation failures.
+func NormalizeBifrostErrorStatusCode(err *schemas.BifrostError) *schemas.BifrostError {
+	if err == nil || err.StatusCode != nil {
+		return err
+	}
+
+	normalized := *err
+	statusCode := fasthttp.StatusInternalServerError
+	if !err.IsBifrostError || (err.Error != nil &&
+		(err.Error.Message == bifrost.ProviderAutoResolveErrorMessage || err.Error.Message == bifrost.ModelAutoResolveErrorMessage)) {
+		statusCode = fasthttp.StatusBadRequest
+	}
+	normalized.StatusCode = &statusCode
+	return &normalized
 }
 
 func shouldHideErrorDetails(_ *schemas.BifrostError, field *schemas.ErrorField) bool {

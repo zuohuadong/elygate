@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<meta name="color-scheme" content="light dark" />
+		<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+		<title>管理台</title>
+		<script>!function(){try{var n=localStorage.getItem("app-brand-name")||localStorage.getItem("app-name");if(n)document.title=n+" 管理台";var l=localStorage.getItem("app-brand-logo")||localStorage.getItem("app-logo");if(l)document.documentElement.style.setProperty("--app-logo",l.startsWith("url(")?l:"url("+JSON.stringify(l)+")");var f=localStorage.getItem("app-brand-favicon")||localStorage.getItem("app-favicon");if(f){var el=document.querySelector("link[rel*='icon']");if(!el){el=document.createElement("link");el.rel="icon";document.head.appendChild(el)}el.href=f}}catch(e){}}()</script>
+	</head>
+	<body>
+		<div id="app"></div>
+		<script type="module" src="/src/main.ts"></script>
+	</body>
+</html>

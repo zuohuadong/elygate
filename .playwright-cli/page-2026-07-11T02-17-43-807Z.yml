@@ -1,0 +1,80 @@
+- generic [ref=f2e2]:
+  - region "Notifications alt+T"
+  - generic [ref=f2e3]:
+    - generic [ref=f2e6]:
+      - generic [ref=f2e8]:
+        - link [ref=f2e9] [cursor=pointer]:
+          - /url: /workspace/logs
+          - img "Elygate" [ref=f2e10]
+        - button "Collapse sidebar" [ref=f2e11]
+      - generic [ref=f2e16]:
+        - textbox "Search sidebar navigation" [ref=f2e20]:
+          - /placeholder: Search...
+        - generic:
+          - generic: ⌘
+          - generic: K
+      - generic [ref=f2e21]:
+        - list [ref=f2e24]:
+          - listitem [ref=f2e25]:
+            - button "Observability" [ref=f2e26] [cursor=pointer]
+          - listitem [ref=f2e40]:
+            - button "Models" [ref=f2e41] [cursor=pointer]
+          - listitem [ref=f2e50]:
+            - button "MCP clients icon MCP Gateway" [ref=f2e51] [cursor=pointer]:
+              - generic [ref=f2e53]:
+                - img "MCP clients icon" [ref=f2e54]
+                - generic [ref=f2e57]: MCP Gateway
+            - list [ref=f2e60]:
+              - listitem [ref=f2e61]:
+                - link "MCP Catalog" [ref=f2e62] [cursor=pointer]:
+                  - /url: /workspace/mcp-registry
+              - listitem [ref=f2e70]:
+                - link "MCP Library" [ref=f2e71] [cursor=pointer]:
+                  - /url: /workspace/mcp-registry/library
+              - listitem [ref=f2e84]:
+                - link "Tool Groups" [ref=f2e85] [cursor=pointer]:
+                  - /url: /workspace/mcp-tool-groups
+              - listitem [ref=f2e92]:
+                - link "Auth Sessions" [ref=f2e93] [cursor=pointer]:
+                  - /url: /workspace/mcp-sessions
+              - listitem [ref=f2e99]:
+                - link "OAuth Grants" [ref=f2e100] [cursor=pointer]:
+                  - /url: /workspace/oauth-grants
+              - listitem [ref=f2e106]:
+                - link "MCP Settings" [ref=f2e107] [cursor=pointer]:
+                  - /url: /workspace/mcp-settings
+          - listitem [ref=f2e113]:
+            - link "Plugins" [ref=f2e114] [cursor=pointer]:
+              - /url: /workspace/plugins
+          - listitem [ref=f2e120]:
+            - button "Alerting" [ref=f2e121] [cursor=pointer]
+          - listitem [ref=f2e132]:
+            - button "Governance" [ref=f2e133] [cursor=pointer]
+          - listitem [ref=f2e141]:
+            - button "Guardrails" [ref=f2e142] [cursor=pointer]
+          - listitem [ref=f2e153]:
+            - link "Cluster Config" [ref=f2e154] [cursor=pointer]:
+              - /url: /workspace/cluster
+          - listitem [ref=f2e163]:
+            - button "Adaptive Routing" [ref=f2e164] [cursor=pointer]
+          - listitem [ref=f2e176]:
+            - button "Settings" [ref=f2e177] [cursor=pointer]
+        - generic [ref=f2e186]:
+          - generic [ref=f2e190]:
+            - generic [ref=f2e192]:
+              - generic [ref=f2e193]: Need help with production setup?
+              - button "Dismiss" [ref=f2e194]
+            - generic [ref=f2e198]:
+              - text: Review the Elygate deployment profile before connecting production providers.Read the deployment guide
+              - link "here" [ref=f2e199] [cursor=pointer]:
+                - /url: https://github.com/zuohuadong/elygate/tree/dev/deploy/elygate-oss
+              - text: .
+          - generic [ref=f2e201]:
+            - link "GitHub Repository" [ref=f2e202] [cursor=pointer]:
+              - /url: https://github.com/zuohuadong/elygate
+            - link "Report a bug" [ref=f2e206] [cursor=pointer]:
+              - /url: https://github.com/zuohuadong/elygate/issues/new?title=%5BBug%5D%20
+            - link "Full Documentation" [ref=f2e217] [cursor=pointer]:
+              - /url: https://github.com/zuohuadong/elygate/tree/dev/docs
+            - button "Toggle theme" [ref=f2e221] [cursor=pointer]
+    - main [ref=f2e224]

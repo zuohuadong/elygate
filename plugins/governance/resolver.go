@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	bifrost "github.com/maximhq/bifrost/core"
 	"github.com/maximhq/bifrost/core/schemas"
 	configstoreTables "github.com/maximhq/bifrost/framework/configstore/tables"
 	"github.com/maximhq/bifrost/framework/modelcatalog"
@@ -185,7 +186,6 @@ func (r *BudgetResolver) EvaluateTeamRequest(ctx *schemas.BifrostContext, teamID
 		Decision: DecisionAllow,
 		Reason:   "Team-level checks passed",
 	}
-
 }
 
 // EvaluateUserRequest evaluates user-level rate limits and budgets (enterprise-only)
@@ -242,7 +242,9 @@ func (r *BudgetResolver) EvaluateUserRequest(ctx *schemas.BifrostContext, userID
 
 // EvaluateVirtualKeyRequest evaluates virtual key-specific checks including validation, filtering, rate limits, and budgets
 // skipRateLimitsAndBudgets evaluates to true when we want to skip rate limits and budgets. This is used when user auth is present (user governance handles limits).
-func (r *BudgetResolver) EvaluateVirtualKeyRequest(ctx *schemas.BifrostContext, virtualKeyValue string, provider schemas.ModelProvider, model string, requestType schemas.RequestType, skipRateLimitsAndBudgets bool) *EvaluationResult {
+// skipProviderCheck evaluates to true for requests that are evaluated but never routed, where the provider is not an operator choice. It drops the
+// provider allowlist, and with it the model allowlist for a provider the VK has no config for, because that model list only exists inside a provider config.
+func (r *BudgetResolver) EvaluateVirtualKeyRequest(ctx *schemas.BifrostContext, virtualKeyValue string, provider schemas.ModelProvider, model string, requestType schemas.RequestType, skipRateLimitsAndBudgets bool, skipProviderCheck bool) *EvaluationResult {
 	// 1. Validate virtual key exists and is active
 	vk, exists := r.store.GetVirtualKey(ctx, virtualKeyValue)
 	if !exists {
@@ -278,8 +280,13 @@ func (r *BudgetResolver) EvaluateVirtualKeyRequest(ctx *schemas.BifrostContext, 
 			Reason:   "Virtual key has expired",
 		}
 	}
+	// A VK that has no provider config for this provider also has no model allowlist for it,
+	// since allowed models hang off a provider config. When the provider gate is skipped the
+	// model gate has nothing left to check against, so it is skipped with it. A provider the
+	// VK does configure keeps its model allowlist.
+	providerUnconfigured := skipProviderCheck && !r.isProviderAllowed(vk, provider)
 	// 2. Check provider filtering
-	if requestType != schemas.MCPToolExecutionRequest && requestType != schemas.ListModelsRequest && !r.isProviderAllowed(vk, provider) {
+	if !skipProviderCheck && requestType != schemas.MCPToolExecutionRequest && requestType != schemas.ListModelsRequest && !r.isProviderAllowed(vk, provider) {
 		return &EvaluationResult{
 			Decision:   DecisionProviderBlocked,
 			Reason:     fmt.Sprintf("Provider '%s' is not allowed for this virtual key", provider),
@@ -288,8 +295,16 @@ func (r *BudgetResolver) EvaluateVirtualKeyRequest(ctx *schemas.BifrostContext, 
 	}
 	// 3. Check model filtering. Most request types always carry a model and are always checked.
 	// Passthrough forwards raw provider routes where a model may or may not be resolvable for some request types.
-	isPassthrough := requestType == schemas.PassthroughRequest || requestType == schemas.PassthroughStreamRequest
-	if (IsModelRequiredForRequest(requestType) || (isPassthrough && model != "")) && !r.isModelAllowed(vk, provider, model) {
+	// Video edit's model is itself optional (e.g. OpenAI infers it from the source video ID), so it's
+	// checked only when the caller actually supplied one, same as passthrough.
+	// Requests that are evaluated but never routed set the skip-model-check flag on the
+	// context. Their model is whatever upstream model the caller was already talking to,
+	// not a model an operator granted this key, so the allowlist carries no meaning for
+	// them. This is separate from skipProviderCheck: a provider the key does configure
+	// still carries a model allowlist that would deny the request one step later.
+	skipModelCheck := bifrost.GetBoolFromContext(ctx, schemas.BifrostContextKeySkipModelCheck)
+	checkModelIfPresent := IsModelCheckedWhenPresent(requestType)
+	if !skipModelCheck && !providerUnconfigured && (IsModelRequiredForRequest(requestType) || (checkModelIfPresent && model != "")) && !r.isModelAllowed(vk, provider, model) {
 		return &EvaluationResult{
 			Decision:   DecisionModelBlocked,
 			Reason:     fmt.Sprintf("Model '%s' is not allowed for this virtual key", model),

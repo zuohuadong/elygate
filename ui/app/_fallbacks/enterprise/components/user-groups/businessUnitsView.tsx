@@ -9,7 +9,7 @@ export function BusinessUnitsView() {
 				testIdPrefix="business-units-governance"
 				icon={<Building2 className="h-[5.5rem] w-[5.5rem]" strokeWidth={1} />}
 				title="Unlock business units & advanced governance"
-				description="This capability requires the Elygate Enterprise source package and is not included in this OSS build."
+				description="Manage users, business units with our enterprise-grade governance. This feature is part of the Bifrost enterprise license."
 				readmeLink="https://docs.getbifrost.ai/enterprise/advanced-governance"
 			/>
 		</div>

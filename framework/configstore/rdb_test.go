@@ -4,11 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/maximhq/bifrost/core/schemas"
 	"github.com/maximhq/bifrost/framework/configstore/tables"
+	"github.com/maximhq/bifrost/framework/vectorstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/sqlite"
@@ -40,6 +44,7 @@ func setupRDBTestStore(t *testing.T) *RDBConfigStore {
 		&tables.TableCustomer{},
 		&tables.TableTeam{},
 		&tables.TableClientConfig{},
+		&tables.TableVectorStoreConfig{},
 		&tables.TableGovernanceConfig{},
 		&tables.TablePlugin{},
 		&tables.TableMCPClient{},
@@ -53,9 +58,14 @@ func setupRDBTestStore(t *testing.T) *RDBConfigStore {
 		&tables.TablePromptSessionMessage{},
 		&tables.TableOauthUserSession{},
 		&tables.TableOauthUserToken{},
+		&tables.TableOauthToken{},
+		&tables.TableMCPOauthToken{},
+		&tables.TableMCPOauthFlow{},
 		&tables.TableMCPPerUserHeaderCredential{},
 		&tables.TableMCPPerUserHeaderFlow{},
 		&tables.TableOAuth2RefreshToken{},
+		&tables.TableWebhookEndpoint{},
+		&tables.TableWebhookJob{},
 	)
 	require.NoError(t, err, "Failed to migrate test database")
 
@@ -70,6 +80,75 @@ func setupRDBTestStore(t *testing.T) *RDBConfigStore {
 	}
 	s.refreshPoolFn = func(ctx context.Context) error { return nil }
 	return s
+}
+
+func TestUpdateVectorStoreConfigMaintainsOneDeterministicRow(t *testing.T) {
+	store := setupRDBTestStore(t)
+	ctx := context.Background()
+	legacy := "{}"
+	require.NoError(t, store.DB().Create(&tables.TableVectorStoreConfig{ID: 7, Enabled: false, Type: "redis", Config: &legacy}).Error)
+
+	desired := &vectorstore.Config{Enabled: true, Type: vectorstore.VectorStoreTypePgvector, Config: vectorstore.PgvectorConfig{
+		ConnectionString: *schemas.NewSecretVar("postgres://elygate@db/elygate"), Schema: "elygate_vectors",
+	}}
+	require.NoError(t, store.UpdateVectorStoreConfig(ctx, desired))
+
+	var rows []tables.TableVectorStoreConfig
+	require.NoError(t, store.DB().Order("id").Find(&rows).Error)
+	require.Len(t, rows, 1)
+	require.Equal(t, uint(1), rows[0].ID)
+	stored, err := store.GetVectorStoreConfig(ctx)
+	require.NoError(t, err)
+	require.Equal(t, vectorstore.VectorStoreTypePgvector, stored.Type)
+	require.Equal(t, "elygate_vectors", stored.Config.(vectorstore.PgvectorConfig).Schema)
+}
+
+func TestGetVectorStoreConfigUsesNewestLegacyRow(t *testing.T) {
+	store := setupRDBTestStore(t)
+	older := `{"connection_string":{"value":"postgres://older@db/elygate"},"schema":"older_vectors"}`
+	newer := `{"connection_string":{"value":"postgres://newer@db/elygate"},"schema":"newer_vectors"}`
+	now := time.Now().UTC()
+	require.NoError(t, store.DB().Create(&tables.TableVectorStoreConfig{
+		ID: 3, Enabled: true, Type: "pgvector", Config: &older, UpdatedAt: now.Add(-time.Minute),
+	}).Error)
+	require.NoError(t, store.DB().Create(&tables.TableVectorStoreConfig{
+		ID: 4, Enabled: true, Type: "pgvector", Config: &newer, UpdatedAt: now,
+	}).Error)
+
+	stored, err := store.GetVectorStoreConfig(context.Background())
+	require.NoError(t, err)
+	pg := stored.Config.(vectorstore.PgvectorConfig)
+	require.Equal(t, "newer_vectors", pg.Schema)
+	require.Equal(t, "postgres://newer@db/elygate", pg.ConnectionString.GetValue())
+}
+
+func TestUpdateVectorStoreConfigStoresSecretReferencesWithoutResolvedValues(t *testing.T) {
+	store := setupRDBTestStore(t)
+	t.Setenv("ELYGATE_VECTOR_STORAGE_DSN", "postgres://resolved-secret@db/elygate")
+	desired := &vectorstore.Config{Enabled: true, Type: vectorstore.VectorStoreTypePgvector, Config: vectorstore.PgvectorConfig{
+		ConnectionString: *schemas.NewSecretVar("env.ELYGATE_VECTOR_STORAGE_DSN"), Schema: "elygate_vectors",
+	}}
+	require.NoError(t, store.UpdateVectorStoreConfig(context.Background(), desired))
+
+	var raw struct {
+		Config           string
+		EncryptionStatus string
+	}
+	require.NoError(t, store.DB().Table((tables.TableVectorStoreConfig{}).TableName()).
+		Select("config, encryption_status").Where("id = ?", 1).Scan(&raw).Error)
+	require.NotContains(t, raw.Config, "resolved-secret")
+	if raw.EncryptionStatus == tables.EncryptionStatusEncrypted {
+		require.NotContains(t, raw.Config, "ELYGATE_VECTOR_STORAGE_DSN")
+	} else {
+		require.Contains(t, raw.Config, "env.ELYGATE_VECTOR_STORAGE_DSN")
+	}
+
+	t.Setenv("ELYGATE_VECTOR_STORAGE_DSN", "postgres://rotated-secret@db/elygate")
+	stored, err := store.GetVectorStoreConfig(context.Background())
+	require.NoError(t, err)
+	pg := stored.Config.(vectorstore.PgvectorConfig)
+	require.Equal(t, "env.ELYGATE_VECTOR_STORAGE_DSN", pg.ConnectionString.GetRawRef())
+	require.Equal(t, "postgres://rotated-secret@db/elygate", pg.ConnectionString.GetValue())
 }
 
 func testComplexityAnalyzerConfig() *ComplexityAnalyzerConfig {
@@ -744,6 +823,179 @@ func TestUpdateBudget(t *testing.T) {
 	assert.Equal(t, 200.0, result.MaxLimit)
 }
 
+// TestUpdateBudgetPreservesRuntimeCounters verifies a configuration-shaped update
+// cannot clobber the runtime-owned counters.
+//
+// CurrentUsage and LastReset are advanced by the governance dump path, never by
+// config.json, which is why GenerateBudgetHash deliberately excludes them. A
+// source_of_truth=config.json startup force-sync replays the file row through
+// UpdateBudget with those fields at their Go zero values, so UpdateBudget must
+// carry the persisted values forward the same way it already does for the
+// override grant and the owner FKs.
+func TestUpdateBudgetPreservesRuntimeCounters(t *testing.T) {
+	store := setupRDBTestStore(t)
+	ctx := context.Background()
+
+	lastReset := time.Date(2026, time.August, 1, 0, 0, 0, 0, time.UTC)
+	require.NoError(t, store.CreateBudget(ctx, &tables.TableBudget{
+		ID:            "budget-runtime-counters",
+		MaxLimit:      100.0,
+		ResetDuration: "1h",
+		CurrentUsage:  42.5,
+		LastReset:     lastReset,
+	}))
+
+	// The shape config.json produces: configuration-owned fields only, with the
+	// runtime counters absent and therefore zero.
+	require.NoError(t, store.UpdateBudget(ctx, &tables.TableBudget{
+		ID:            "budget-runtime-counters",
+		MaxLimit:      200.0,
+		ResetDuration: "1h",
+	}))
+
+	result, err := store.GetBudget(ctx, "budget-runtime-counters")
+	require.NoError(t, err)
+	assert.Equal(t, 200.0, result.MaxLimit, "configuration-owned max_limit must follow the file")
+	assert.Equal(t, "1h", result.ResetDuration, "configuration-owned reset_duration must follow the file")
+	assert.Equal(t, 42.5, result.CurrentUsage, "runtime-owned current_usage must survive a config-shaped update")
+	assert.True(t, result.LastReset.Equal(lastReset),
+		"runtime-owned last_reset must survive a config-shaped update: got %s, want %s",
+		result.LastReset.UTC(), lastReset)
+}
+
+// TestCreateBudgetWithOverride verifies finite and permanent override state round-trips through the config store.
+func TestCreateBudgetWithOverride(t *testing.T) {
+	store := setupRDBTestStore(t)
+	ctx := context.Background()
+	// A finite grant must carry its anchor and total, which is what the remaining
+	// count is derived from. A cycles override without them is rejected by
+	// validation rather than persisted as a lifecycle-less override.
+	grantAnchor := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+	tests := []*tables.TableBudget{
+		{
+			ID:                      "budget-override-cycles",
+			MaxLimit:                100,
+			ResetDuration:           "1h",
+			LastReset:               grantAnchor,
+			OverrideAmount:          25,
+			OverrideMode:            tables.BudgetOverrideModeCycles,
+			OverrideCyclesRemaining: 4,
+			OverrideCyclesTotal:     4,
+			OverrideAnchorReset:     &grantAnchor,
+		},
+		{
+			ID:             "budget-override-forever",
+			MaxLimit:       200,
+			ResetDuration:  "1d",
+			OverrideAmount: 50,
+			OverrideMode:   tables.BudgetOverrideModeForever,
+		},
+	}
+
+	for _, budget := range tests {
+		require.NoError(t, store.CreateBudget(ctx, budget))
+		got, err := store.GetBudget(ctx, budget.ID)
+		require.NoError(t, err)
+		assert.Equal(t, budget.OverrideAmount, got.OverrideAmount)
+		assert.Equal(t, budget.OverrideMode, got.OverrideMode)
+		assert.Equal(t, budget.OverrideCyclesRemaining, got.OverrideCyclesRemaining)
+		assert.Equal(t, budget.OverrideCyclesTotal, got.OverrideCyclesTotal)
+		if budget.OverrideAnchorReset == nil {
+			assert.Nil(t, got.OverrideAnchorReset)
+			continue
+		}
+		require.NotNil(t, got.OverrideAnchorReset)
+		assert.True(t, got.OverrideAnchorReset.Equal(*budget.OverrideAnchorReset),
+			"grant anchor did not round-trip: got %s, want %s", got.OverrideAnchorReset.UTC(), budget.OverrideAnchorReset.UTC())
+	}
+}
+
+// TestUpdateBudgetOverridePreservesBudgetState verifies the partial update cannot clobber usage or base configuration.
+func TestUpdateBudgetOverridePreservesBudgetState(t *testing.T) {
+	store := setupRDBTestStore(t)
+	ctx := context.Background()
+	budget := &tables.TableBudget{
+		ID:            "budget-override-partial-update",
+		MaxLimit:      100,
+		ResetDuration: "1d",
+		CurrentUsage:  40,
+	}
+	require.NoError(t, store.CreateBudget(ctx, budget))
+
+	updated, err := store.UpdateBudgetOverride(ctx, budget.ID, 25, tables.BudgetOverrideModeCycles, 4, false)
+	require.NoError(t, err)
+	assert.Equal(t, 100.0, updated.MaxLimit)
+	assert.Equal(t, "1d", updated.ResetDuration)
+	assert.Equal(t, 40.0, updated.CurrentUsage)
+	assert.Equal(t, 25.0, updated.OverrideAmount)
+	assert.Equal(t, tables.BudgetOverrideModeCycles, updated.OverrideMode)
+	assert.Equal(t, 4, updated.OverrideCyclesRemaining)
+	assert.Equal(t, 4, updated.OverrideCyclesTotal)
+	require.NotNil(t, updated.OverrideAnchorReset, "a finite grant must be anchored so its remaining count can be derived")
+
+	cleared, err := store.UpdateBudgetOverride(ctx, budget.ID, 0, "", 0, false)
+	require.NoError(t, err)
+	assert.Equal(t, 100.0, cleared.MaxLimit)
+	assert.Equal(t, 40.0, cleared.CurrentUsage)
+	assert.Zero(t, cleared.OverrideAmount)
+	assert.Empty(t, cleared.OverrideMode)
+	assert.Zero(t, cleared.OverrideCyclesRemaining)
+	assert.Zero(t, cleared.OverrideCyclesTotal)
+	assert.Nil(t, cleared.OverrideAnchorReset, "clearing must drop the grant so it cannot be re-derived")
+}
+
+// TestUpdateBudgetOverrideAnchorsAtCurrentWindow verifies a rolling grant is
+// anchored on the budget's CreatedAt lattice, so every node derives the same
+// remaining count from it.
+func TestUpdateBudgetOverrideAnchorsAtCurrentWindow(t *testing.T) {
+	store := setupRDBTestStore(t)
+	ctx := context.Background()
+	created := time.Now().UTC().Add(-10 * time.Hour).Truncate(time.Second)
+	budget := &tables.TableBudget{
+		ID:            "budget-override-rolling-anchor",
+		MaxLimit:      100,
+		ResetDuration: "1h",
+		CreatedAt:     created,
+		LastReset:     created,
+	}
+	require.NoError(t, store.CreateBudget(ctx, budget))
+
+	updated, err := store.UpdateBudgetOverride(ctx, budget.ID, 25, tables.BudgetOverrideModeCycles, 2, false)
+	require.NoError(t, err)
+	require.NotNil(t, updated.OverrideAnchorReset)
+
+	// The anchor must be a lattice point: an exact number of windows past the
+	// budget's creation instant, not the wall clock at grant time.
+	offset := updated.OverrideAnchorReset.Sub(updated.CreatedAt)
+	assert.Zero(t, offset%time.Hour,
+		"grant anchor is not lattice aligned: %s past CreatedAt is not a whole number of 1h windows", offset)
+}
+
+// TestUpdateBudgetOverrideAnchorsAtCalendarPeriodStart verifies a calendar-aligned
+// grant is anchored on the calendar boundary rather than the rolling lattice.
+func TestUpdateBudgetOverrideAnchorsAtCalendarPeriodStart(t *testing.T) {
+	store := setupRDBTestStore(t)
+	ctx := context.Background()
+	created := time.Now().UTC().AddDate(0, 0, -10).Truncate(time.Second)
+	budget := &tables.TableBudget{
+		ID:            "budget-override-calendar-anchor",
+		MaxLimit:      100,
+		ResetDuration: "1d",
+		CreatedAt:     created,
+		LastReset:     created,
+	}
+	require.NoError(t, store.CreateBudget(ctx, budget))
+
+	updated, err := store.UpdateBudgetOverride(ctx, budget.ID, 25, tables.BudgetOverrideModeCycles, 2, true)
+	require.NoError(t, err)
+	require.NotNil(t, updated.OverrideAnchorReset)
+
+	wantAnchor := tables.GetCalendarPeriodStart("1d", time.Now(), tables.QuarterStartNotApplicable)
+	assert.True(t, updated.OverrideAnchorReset.Equal(wantAnchor),
+		"calendar-aligned grant anchor should be midnight UTC today: got %s, want %s",
+		updated.OverrideAnchorReset.UTC(), wantAnchor.UTC())
+}
+
 func TestGetBudgets(t *testing.T) {
 	store := setupRDBTestStore(t)
 	ctx := context.Background()
@@ -855,9 +1107,166 @@ func TestUpdateRateLimit(t *testing.T) {
 	assert.Equal(t, int64(200000), *result.TokenMaxLimit)
 }
 
+// TestUpdateRateLimitPreservesRuntimeCounters is the rate-limit counterpart of
+// TestUpdateBudgetPreservesRuntimeCounters: the same startup force-sync replays
+// the file-shaped rate limit, and the token/request counters are runtime-owned
+// for the same reason (GenerateRateLimitHash excludes them).
+func TestUpdateRateLimitPreservesRuntimeCounters(t *testing.T) {
+	store := setupRDBTestStore(t)
+	ctx := context.Background()
+
+	tokenMax := int64(100000)
+	tokenDuration := "1h"
+	requestMax := int64(500)
+	requestDuration := "1h"
+	tokenLastReset := time.Date(2026, time.August, 1, 0, 0, 0, 0, time.UTC)
+	requestLastReset := time.Date(2026, time.August, 1, 0, 30, 0, 0, time.UTC)
+
+	require.NoError(t, store.CreateRateLimit(ctx, &tables.TableRateLimit{
+		ID:                   "rate-limit-runtime-counters",
+		TokenMaxLimit:        &tokenMax,
+		TokenResetDuration:   &tokenDuration,
+		TokenCurrentUsage:    1234,
+		TokenLastReset:       tokenLastReset,
+		RequestMaxLimit:      &requestMax,
+		RequestResetDuration: &requestDuration,
+		RequestCurrentUsage:  56,
+		RequestLastReset:     requestLastReset,
+	}))
+
+	newTokenMax := int64(200000)
+	require.NoError(t, store.UpdateRateLimit(ctx, &tables.TableRateLimit{
+		ID:                   "rate-limit-runtime-counters",
+		TokenMaxLimit:        &newTokenMax,
+		TokenResetDuration:   &tokenDuration,
+		RequestMaxLimit:      &requestMax,
+		RequestResetDuration: &requestDuration,
+	}))
+
+	result, err := store.GetRateLimit(ctx, "rate-limit-runtime-counters")
+	require.NoError(t, err)
+	require.NotNil(t, result.TokenMaxLimit)
+	assert.Equal(t, int64(200000), *result.TokenMaxLimit, "configuration-owned token_max_limit must follow the file")
+	assert.Equal(t, int64(1234), result.TokenCurrentUsage, "runtime-owned token_current_usage must survive a config-shaped update")
+	assert.Equal(t, int64(56), result.RequestCurrentUsage, "runtime-owned request_current_usage must survive a config-shaped update")
+	assert.True(t, result.TokenLastReset.Equal(tokenLastReset),
+		"runtime-owned token_last_reset must survive a config-shaped update: got %s, want %s",
+		result.TokenLastReset.UTC(), tokenLastReset)
+	assert.True(t, result.RequestLastReset.Equal(requestLastReset),
+		"runtime-owned request_last_reset must survive a config-shaped update: got %s, want %s",
+		result.RequestLastReset.UTC(), requestLastReset)
+}
+
 // =============================================================================
 // Virtual Key Tests
 // =============================================================================
+
+// TestGetVirtualKeysPaginated_AssignmentFilters covers how the customer / team /
+// user filters compose. A virtual key is assigned to at most one of the three, so
+// supplying several ORs them rather than narrowing to nothing.
+//
+// UserID is unresolvable in the OSS build — the VK↔user link lives in an
+// enterprise-only table — so it contributes a never-true disjunct here: a
+// user-only filter matches nothing instead of silently returning every key. It
+// deliberately does NOT suppress a customer/team disjunct supplied alongside it;
+// those are still resolvable, and dropping them would diverge from the enterprise
+// store, which returns exactly that union.
+func TestGetVirtualKeysPaginated_AssignmentFilters(t *testing.T) {
+	store := setupRDBTestStore(t)
+	ctx := context.Background()
+
+	require.NoError(t, store.CreateCustomer(ctx, &tables.TableCustomer{ID: "cust-1", Name: "Customer One"}))
+	require.NoError(t, store.CreateTeam(ctx, &tables.TableTeam{ID: "team-1", Name: "Team One"}))
+
+	custID, teamID := "cust-1", "team-1"
+	seed := []*tables.TableVirtualKey{
+		{ID: "vk-cust", Name: "Customer Key", Value: *schemas.NewSecretVar("vk-cust-val"), IsActive: schemas.Ptr(true), CustomerID: &custID},
+		{ID: "vk-team", Name: "Team Key", Value: *schemas.NewSecretVar("vk-team-val"), IsActive: schemas.Ptr(true), TeamID: &teamID},
+		{ID: "vk-none", Name: "Unassigned Key", Value: *schemas.NewSecretVar("vk-none-val"), IsActive: schemas.Ptr(true)},
+	}
+	for _, vk := range seed {
+		require.NoError(t, store.CreateVirtualKey(ctx, vk))
+	}
+
+	tests := []struct {
+		name    string
+		params  VirtualKeyQueryParams
+		wantIDs []string
+	}{
+		{
+			name:    "no filters returns every key",
+			params:  VirtualKeyQueryParams{},
+			wantIDs: []string{"vk-cust", "vk-none", "vk-team"},
+		},
+		{
+			name:    "customer only",
+			params:  VirtualKeyQueryParams{CustomerID: "cust-1"},
+			wantIDs: []string{"vk-cust"},
+		},
+		{
+			name:    "team only",
+			params:  VirtualKeyQueryParams{TeamID: "team-1"},
+			wantIDs: []string{"vk-team"},
+		},
+		{
+			name:    "customer or team",
+			params:  VirtualKeyQueryParams{CustomerID: "cust-1", TeamID: "team-1"},
+			wantIDs: []string{"vk-cust", "vk-team"},
+		},
+		{
+			// Fail closed: OSS cannot resolve the assignment, so it matches nothing
+			// rather than falling through to an unfiltered list.
+			name:    "user only matches nothing in OSS",
+			params:  VirtualKeyQueryParams{UserID: "user-1"},
+			wantIDs: nil,
+		},
+		{
+			name:    "user plus customer keeps the resolvable customer disjunct",
+			params:  VirtualKeyQueryParams{UserID: "user-1", CustomerID: "cust-1"},
+			wantIDs: []string{"vk-cust"},
+		},
+		{
+			name:    "user plus team keeps the resolvable team disjunct",
+			params:  VirtualKeyQueryParams{UserID: "user-1", TeamID: "team-1"},
+			wantIDs: []string{"vk-team"},
+		},
+		{
+			name:    "user plus customer and team keeps both resolvable disjuncts",
+			params:  VirtualKeyQueryParams{UserID: "user-1", CustomerID: "cust-1", TeamID: "team-1"},
+			wantIDs: []string{"vk-cust", "vk-team"},
+		},
+		{
+			name:    "user filter never widens a non-matching search",
+			params:  VirtualKeyQueryParams{UserID: "user-1", Search: "Unassigned"},
+			wantIDs: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			vks, totalCount, err := store.GetVirtualKeysPaginated(ctx, tt.params)
+			require.NoError(t, err)
+
+			gotIDs := make([]string, 0, len(vks))
+			for _, vk := range vks {
+				gotIDs = append(gotIDs, vk.ID)
+			}
+			sort.Strings(gotIDs)
+			assert.Equal(t, tt.wantIDs, nonEmptyIDs(gotIDs))
+			// The count drives pagination, so it must agree with the page contents.
+			assert.Equal(t, int64(len(tt.wantIDs)), totalCount)
+		})
+	}
+}
+
+// nonEmptyIDs normalizes an empty slice to nil so table cases can express
+// "matches nothing" as a nil wantIDs.
+func nonEmptyIDs(ids []string) []string {
+	if len(ids) == 0 {
+		return nil
+	}
+	return ids
+}
 
 func TestCreateVirtualKey(t *testing.T) {
 	store := setupRDBTestStore(t)
@@ -1309,6 +1718,153 @@ func TestCreateVirtualKeyProviderConfig_WithKeys(t *testing.T) {
 	err = store.DB().Preload("Keys").First(&configWithKeys, "id = ?", configs[0].ID).Error
 	require.NoError(t, err)
 	assert.Len(t, configWithKeys.Keys, 1)
+}
+
+// TestReplaceVirtualKeyProviderConfigsPreservesParity verifies bulk replacement keeps nested ownership and key associations.
+func TestReplaceVirtualKeyProviderConfigsPreservesParity(t *testing.T) {
+	store := setupRDBTestStore(t)
+	ctx := context.Background()
+	require.NoError(t, store.UpdateProvidersConfig(ctx, map[schemas.ModelProvider]ProviderConfig{
+		"openai": {Keys: []schemas.Key{{ID: "replacement-key", Name: "replacement-key", Value: *schemas.NewSecretVar("secret"), Weight: 1}}},
+	}))
+	vk := &tables.TableVirtualKey{ID: "vk-replace-pcs", Name: "replace", Value: *schemas.NewSecretVar("vk-replace"), IsActive: schemas.Ptr(true)}
+	require.NoError(t, store.CreateVirtualKey(ctx, vk))
+	oldRateLimit := &tables.TableRateLimit{ID: "old-pc-rate-limit"}
+	require.NoError(t, store.CreateRateLimit(ctx, oldRateLimit))
+	old := &tables.TableVirtualKeyProviderConfig{VirtualKeyID: vk.ID, Provider: "anthropic", RateLimitID: &oldRateLimit.ID, RateLimit: oldRateLimit, Budgets: []tables.TableBudget{{ID: "old-pc-budget", MaxLimit: 1, ResetDuration: "1h"}}}
+	require.NoError(t, store.CreateVirtualKeyProviderConfig(ctx, old))
+
+	newRateLimit := &tables.TableRateLimit{ID: "new-pc-rate-limit"}
+	tx := store.DB().WithContext(ctx).Begin()
+	require.NoError(t, tx.Error)
+	err := store.ReplaceVirtualKeyProviderConfigs(ctx, vk.ID, []tables.TableVirtualKeyProviderConfig{{
+		Provider: "openai", Keys: []tables.TableKey{{KeyID: "replacement-key"}},
+		Budgets: []tables.TableBudget{{ID: "new-pc-budget", MaxLimit: 10, ResetDuration: "1d"}}, RateLimitID: &newRateLimit.ID, RateLimit: newRateLimit,
+	}}, tx)
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit().Error)
+
+	var configs []tables.TableVirtualKeyProviderConfig
+	require.NoError(t, store.DB().Preload("Keys").Preload("Budgets").Preload("RateLimit").Where("virtual_key_id = ?", vk.ID).Find(&configs).Error)
+	require.Len(t, configs, 1)
+	require.Equal(t, "openai", configs[0].Provider)
+	require.Len(t, configs[0].Keys, 1)
+	require.Equal(t, "replacement-key", configs[0].Keys[0].KeyID)
+	require.Len(t, configs[0].Budgets, 1)
+	require.Equal(t, "new-pc-budget", configs[0].Budgets[0].ID)
+	require.NotNil(t, configs[0].RateLimit)
+	require.Equal(t, newRateLimit.ID, configs[0].RateLimit.ID)
+	for _, id := range []string{"old-pc-budget", "old-pc-rate-limit"} {
+		var count int64
+		table := (&tables.TableBudget{}).TableName()
+		if id == "old-pc-rate-limit" {
+			table = (&tables.TableRateLimit{}).TableName()
+		}
+		require.NoError(t, store.DB().Table(table).Where("id = ?", id).Count(&count).Error)
+		require.Zero(t, count)
+	}
+}
+
+// TestReplaceVirtualKeyProviderConfigsRollsBackOnUnresolvedKey verifies replacement remains atomic on resolution failure.
+func TestReplaceVirtualKeyProviderConfigsRollsBackOnUnresolvedKey(t *testing.T) {
+	store := setupRDBTestStore(t)
+	ctx := context.Background()
+	vk := &tables.TableVirtualKey{ID: "vk-replace-rollback", Name: "rollback", Value: *schemas.NewSecretVar("vk-rollback"), IsActive: schemas.Ptr(true)}
+	require.NoError(t, store.CreateVirtualKey(ctx, vk))
+	require.NoError(t, store.CreateVirtualKeyProviderConfig(ctx, &tables.TableVirtualKeyProviderConfig{VirtualKeyID: vk.ID, Provider: "anthropic"}))
+
+	tx := store.DB().WithContext(ctx).Begin()
+	require.NoError(t, tx.Error)
+	err := store.ReplaceVirtualKeyProviderConfigs(ctx, vk.ID, []tables.TableVirtualKeyProviderConfig{{Provider: "openai", Keys: []tables.TableKey{{KeyID: "missing"}}}}, tx)
+	require.Error(t, err)
+	require.NoError(t, tx.Rollback().Error)
+	configs, listErr := store.GetVirtualKeyProviderConfigs(ctx, vk.ID)
+	require.NoError(t, listErr)
+	require.Len(t, configs, 1)
+	require.Equal(t, "anthropic", configs[0].Provider)
+}
+
+// TestReplaceVirtualKeyProviderConfigsResolvesKeysByName verifies bulk replacement
+// accepts the config-file reference forms that CreateVirtualKeyProviderConfig
+// accepts: a name with no KeyID, and a KeyID that misses but carries a usable name.
+func TestReplaceVirtualKeyProviderConfigsResolvesKeysByName(t *testing.T) {
+	store := setupRDBTestStore(t)
+	ctx := context.Background()
+	require.NoError(t, store.UpdateProvidersConfig(ctx, map[schemas.ModelProvider]ProviderConfig{
+		"openai":    {Keys: []schemas.Key{{ID: "openai-key-id", Name: "openai-name", Value: *schemas.NewSecretVar("s1"), Weight: 1}}},
+		"anthropic": {Keys: []schemas.Key{{ID: "anthropic-key-id", Name: "anthropic-name", Value: *schemas.NewSecretVar("s2"), Weight: 1}}},
+	}))
+	vk := &tables.TableVirtualKey{ID: "vk-replace-by-name", Name: "by-name", Value: *schemas.NewSecretVar("vk-by-name"), IsActive: schemas.Ptr(true)}
+	require.NoError(t, store.CreateVirtualKey(ctx, vk))
+
+	tx := store.DB().WithContext(ctx).Begin()
+	require.NoError(t, tx.Error)
+	require.NoError(t, store.ReplaceVirtualKeyProviderConfigs(ctx, vk.ID, []tables.TableVirtualKeyProviderConfig{
+		// Name only, no KeyID — the config-file form.
+		{Provider: "openai", Keys: []tables.TableKey{{Name: "openai-name"}}},
+		// KeyID that does not resolve, but the name does — the fallback path.
+		{Provider: "anthropic", Keys: []tables.TableKey{{KeyID: "stale-id", Name: "anthropic-name"}}},
+	}, tx))
+	require.NoError(t, tx.Commit().Error)
+
+	var configs []tables.TableVirtualKeyProviderConfig
+	require.NoError(t, store.DB().Preload("Keys").Where("virtual_key_id = ?", vk.ID).Order("provider").Find(&configs).Error)
+	require.Len(t, configs, 2)
+	// Resolution is scoped per provider, so each config must land on its own
+	// provider's key rather than whichever row happened to match the name first.
+	require.Equal(t, "anthropic", configs[0].Provider)
+	require.Len(t, configs[0].Keys, 1)
+	require.Equal(t, "anthropic-key-id", configs[0].Keys[0].KeyID)
+	require.Equal(t, "openai", configs[1].Provider)
+	require.Len(t, configs[1].Keys, 1)
+	require.Equal(t, "openai-key-id", configs[1].Keys[0].KeyID)
+}
+
+// TestReplaceVirtualKeyProviderConfigsReportsEveryUnresolvedKey verifies a blank
+// reference is aggregated with the others rather than short-circuiting the scan.
+func TestReplaceVirtualKeyProviderConfigsReportsEveryUnresolvedKey(t *testing.T) {
+	store := setupRDBTestStore(t)
+	ctx := context.Background()
+	vk := &tables.TableVirtualKey{ID: "vk-replace-unresolved", Name: "unresolved", Value: *schemas.NewSecretVar("vk-unresolved"), IsActive: schemas.Ptr(true)}
+	require.NoError(t, store.CreateVirtualKey(ctx, vk))
+
+	tx := store.DB().WithContext(ctx).Begin()
+	require.NoError(t, tx.Error)
+	err := store.ReplaceVirtualKeyProviderConfigs(ctx, vk.ID, []tables.TableVirtualKeyProviderConfig{
+		{Provider: "openai", Keys: []tables.TableKey{{}, {KeyID: "missing-id"}, {Name: "missing-name"}}},
+	}, tx)
+	require.NoError(t, tx.Rollback().Error)
+	var unresolvedErr *ErrUnresolvedKeys
+	require.ErrorAs(t, err, &unresolvedErr)
+	require.ElementsMatch(t, []string{"key[0]", "key_id=missing-id", "name=missing-name"}, unresolvedErr.Identifiers)
+}
+
+// TestReplaceVirtualKeyProviderConfigsChunksInserts verifies replacement crosses both bounded insert sizes.
+func TestReplaceVirtualKeyProviderConfigsChunksInserts(t *testing.T) {
+	store := setupRDBTestStore(t)
+	ctx := context.Background()
+	vk := &tables.TableVirtualKey{ID: "vk-replace-chunks", Name: "chunks", Value: *schemas.NewSecretVar("vk-chunks"), IsActive: schemas.Ptr(true)}
+	require.NoError(t, store.CreateVirtualKey(ctx, vk))
+	configs := make([]tables.TableVirtualKeyProviderConfig, 101)
+	for i := range configs {
+		configs[i] = tables.TableVirtualKeyProviderConfig{Provider: fmt.Sprintf("provider-%03d", i)}
+	}
+	createStatements := 0
+	callbackName := "test:count-provider-config-inserts"
+	require.NoError(t, store.DB().Callback().Create().After("gorm:create").Register(callbackName, func(db *gorm.DB) {
+		if db.Statement.Table == (&tables.TableVirtualKeyProviderConfig{}).TableName() {
+			createStatements++
+		}
+	}))
+	t.Cleanup(func() { _ = store.DB().Callback().Create().Remove(callbackName) })
+	tx := store.DB().WithContext(ctx).Begin()
+	require.NoError(t, tx.Error)
+	require.NoError(t, store.ReplaceVirtualKeyProviderConfigs(ctx, vk.ID, configs, tx))
+	require.NoError(t, tx.Commit().Error)
+	var count int64
+	require.NoError(t, store.DB().Model(&tables.TableVirtualKeyProviderConfig{}).Where("virtual_key_id = ?", vk.ID).Count(&count).Error)
+	require.Equal(t, int64(101), count)
+	require.Equal(t, 2, createStatements, "101 configs should use two bounded insert statements instead of 101 row inserts")
 }
 
 func TestCreateVirtualKeyProviderConfig_UnresolvedKeys(t *testing.T) {
@@ -2233,6 +2789,64 @@ func TestDeletePromptSession(t *testing.T) {
 	})
 }
 
+func TestUpdatePromptSessionReplacesExistingMessages(t *testing.T) {
+	store := setupRDBTestStore(t)
+	ctx := context.Background()
+
+	prompt := &tables.TablePrompt{ID: "prompt-update-session", Name: "Prompt"}
+	require.NoError(t, store.CreatePrompt(ctx, prompt))
+	version := &tables.TablePromptVersion{
+		PromptID:      prompt.ID,
+		CommitMessage: "Original version",
+		Messages: []tables.TablePromptVersionMessage{
+			{PromptID: prompt.ID, Message: json.RawMessage(`{"role":"user","content":"first"}`)},
+			{PromptID: prompt.ID, Message: json.RawMessage(`{"role":"assistant","content":"second"}`)},
+		},
+	}
+	require.NoError(t, store.CreatePromptVersion(ctx, version))
+
+	session := &tables.TablePromptSession{
+		PromptID:  prompt.ID,
+		VersionID: &version.ID,
+		Name:      "Session",
+		Messages: []tables.TablePromptSessionMessage{
+			{PromptID: prompt.ID, Message: json.RawMessage(`{"role":"user","content":"first"}`)},
+			{PromptID: prompt.ID, Message: json.RawMessage(`{"role":"assistant","content":"second"}`)},
+		},
+	}
+	require.NoError(t, store.CreatePromptSession(ctx, session))
+
+	stored, err := store.GetPromptSessionByID(ctx, session.ID)
+	require.NoError(t, err)
+	oldMessageIDs := []uint{stored.Messages[0].ID, stored.Messages[1].ID}
+	stored.Name = "Updated session"
+	stored.Messages = []tables.TablePromptSessionMessage{
+		{PromptID: prompt.ID, Message: json.RawMessage(`{"role":"user","content":"after"}`)},
+		{PromptID: prompt.ID, Message: json.RawMessage(`{"role":"assistant","content":"done"}`)},
+	}
+
+	require.NoError(t, store.UpdatePromptSession(ctx, stored))
+
+	updated, err := store.GetPromptSessionByID(ctx, session.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "Updated session", updated.Name)
+	assert.Equal(t, version.ID, *updated.VersionID)
+	require.Len(t, updated.Messages, 2)
+	assert.Equal(t, 0, updated.Messages[0].OrderIndex)
+	assert.Equal(t, 1, updated.Messages[1].OrderIndex)
+	assert.JSONEq(t, `{"role":"user","content":"after"}`, string(updated.Messages[0].Message))
+	assert.JSONEq(t, `{"role":"assistant","content":"done"}`, string(updated.Messages[1].Message))
+
+	var oldMessageCount int64
+	require.NoError(t, store.DB().Model(&tables.TablePromptSessionMessage{}).Where("id IN ?", oldMessageIDs).Count(&oldMessageCount).Error)
+	assert.Zero(t, oldMessageCount)
+
+	unchangedVersion, err := store.GetPromptVersionByID(ctx, version.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "Original version", unchangedVersion.CommitMessage)
+	require.Len(t, unchangedVersion.Messages, 2)
+}
+
 // TestUpsertModelPricesBatch_SQLite guards the pricing-sync write path on
 // SQLite. Batching these rows into a multi-row INSERT makes GORM emit the
 // DEFAULT keyword for the table's many default:null columns, which SQLite
@@ -2277,6 +2891,56 @@ func TestUpsertModelPricesBatch_SQLite(t *testing.T) {
 	assert.InDelta(t, 0.000005, *updated.InputCostPerToken, 1e-9)
 }
 
+func TestUpsertModelPricesBatch_MegapixelImageTierColumns_SurviveResync(t *testing.T) {
+	// Regression test for pricingSyncUpdateColumns: a column present on
+	// TableModelPricing but missing from that explicit update-column list
+	// would insert fine on the first sync (Create writes every column) but
+	// silently revert to null on the second sync (ON CONFLICT DO UPDATE only
+	// touches listed columns).
+	s := setupRDBTestStore(t)
+	require.NoError(t, s.DB().AutoMigrate(&tables.TableModelPricing{}))
+
+	ctx := context.Background()
+	cost := func(f float64) *float64 { return &f }
+
+	pricing := []tables.TableModelPricing{
+		{
+			Model:                               "prunaai/p-image-upscale",
+			Provider:                            "replicate",
+			Mode:                                "image_generation",
+			OutputCostPerImage:                  cost(0.005),
+			OutputCostPerImageAbove4Megapixels:  cost(0.01),
+			OutputCostPerImageAbove8Megapixels:  cost(0.02),
+			OutputCostPerImageAbove16Megapixels: cost(0.04),
+			OutputCostPerImageAbove32Megapixels: cost(0.06),
+			OutputCostPerImageAbove64Megapixels: cost(0.12),
+		},
+	}
+
+	require.NoError(t, s.UpsertModelPricesBatch(ctx, pricing))
+
+	// Re-upsert the same row (simulating the next scheduled datasheet sync)
+	// with a changed tier value to exercise the ON CONFLICT update path.
+	pricing[0].OutputCostPerImageAbove16Megapixels = cost(0.05)
+	require.NoError(t, s.UpsertModelPricesBatch(ctx, pricing))
+
+	got, err := s.GetModelPrices(ctx)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+
+	row := got[0]
+	require.NotNil(t, row.OutputCostPerImageAbove4Megapixels)
+	require.NotNil(t, row.OutputCostPerImageAbove8Megapixels)
+	require.NotNil(t, row.OutputCostPerImageAbove16Megapixels)
+	require.NotNil(t, row.OutputCostPerImageAbove32Megapixels)
+	require.NotNil(t, row.OutputCostPerImageAbove64Megapixels)
+	assert.InDelta(t, 0.01, *row.OutputCostPerImageAbove4Megapixels, 1e-9)
+	assert.InDelta(t, 0.02, *row.OutputCostPerImageAbove8Megapixels, 1e-9)
+	assert.InDelta(t, 0.05, *row.OutputCostPerImageAbove16Megapixels, 1e-9) // survived resync with the updated value
+	assert.InDelta(t, 0.06, *row.OutputCostPerImageAbove32Megapixels, 1e-9)
+	assert.InDelta(t, 0.12, *row.OutputCostPerImageAbove64Megapixels, 1e-9)
+}
+
 func TestUpsertModelParametersBatch_SQLite(t *testing.T) {
 	s := setupRDBTestStore(t)
 	require.NoError(t, s.DB().AutoMigrate(&tables.TableModelParameters{}))
@@ -2312,4 +2976,982 @@ func TestUpsertModelParametersBatch_SQLite(t *testing.T) {
 	got, err = s.GetModelParameters(ctx)
 	require.NoError(t, err)
 	assert.Len(t, got, 3)
+}
+
+func testWebhookEndpoint(name string) *tables.TableWebhookEndpoint {
+	return &tables.TableWebhookEndpoint{
+		Name:   name,
+		URL:    "https://93.184.216.34/hook",
+		Events: []tables.WebhookEvent{tables.WebhookEventAsyncJobCompleted},
+	}
+}
+
+func TestWebhookEndpointsPaginated(t *testing.T) {
+	store := setupRDBTestStore(t)
+	ctx := context.Background()
+
+	billing := testWebhookEndpoint("billing-hook")
+	require.NoError(t, store.CreateWebhookEndpoint(ctx, billing))
+
+	alerts := testWebhookEndpoint("alerts-hook")
+	alerts.URL = "https://93.184.216.34/alerts"
+	alerts.Events = []tables.WebhookEvent{tables.WebhookEventAsyncJobFailed}
+	require.NoError(t, store.CreateWebhookEndpoint(ctx, alerts))
+
+	paused := testWebhookEndpoint("paused-hook")
+	paused.Disabled = true
+	require.NoError(t, store.CreateWebhookEndpoint(ctx, paused))
+
+	names := func(endpoints []tables.TableWebhookEndpoint) []string {
+		out := make([]string, 0, len(endpoints))
+		for _, e := range endpoints {
+			out = append(out, e.Name)
+		}
+		return out
+	}
+
+	// No filters: everything, creation order, full count.
+	all, total, err := store.GetWebhookEndpointsPaginated(ctx, WebhookEndpointsQueryParams{Limit: 10})
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), total)
+	assert.Equal(t, []string{"billing-hook", "alerts-hook", "paused-hook"}, names(all))
+
+	// Paging: total stays the full match count.
+	page, total, err := store.GetWebhookEndpointsPaginated(ctx, WebhookEndpointsQueryParams{Limit: 1, Offset: 1})
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), total)
+	assert.Equal(t, []string{"alerts-hook"}, names(page))
+
+	// Search matches name or URL, case-insensitively.
+	found, total, err := store.GetWebhookEndpointsPaginated(ctx, WebhookEndpointsQueryParams{Search: "ALERTS", Limit: 10})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), total)
+	assert.Equal(t, []string{"alerts-hook"}, names(found))
+
+	// Disabled filter is tri-state.
+	enabledOnly := false
+	found, total, err = store.GetWebhookEndpointsPaginated(ctx, WebhookEndpointsQueryParams{Disabled: &enabledOnly, Limit: 10})
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), total)
+	assert.Equal(t, []string{"billing-hook", "alerts-hook"}, names(found))
+
+	// Event filter selects subscribers of any requested event.
+	found, total, err = store.GetWebhookEndpointsPaginated(ctx, WebhookEndpointsQueryParams{
+		Events: []string{string(tables.WebhookEventAsyncJobFailed)},
+		Limit:  10,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), total)
+	assert.Equal(t, []string{"alerts-hook"}, names(found))
+
+	// Filters compose with AND semantics.
+	found, total, err = store.GetWebhookEndpointsPaginated(ctx, WebhookEndpointsQueryParams{
+		Search:   "hook",
+		Disabled: &enabledOnly,
+		Events:   []string{string(tables.WebhookEventAsyncJobCompleted)},
+		Limit:    10,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), total)
+	assert.Equal(t, []string{"billing-hook"}, names(found))
+}
+
+func TestWebhookEndpointsSearchEscapesLikeWildcards(t *testing.T) {
+	store := setupRDBTestStore(t)
+	ctx := context.Background()
+
+	require.NoError(t, store.CreateWebhookEndpoint(ctx, testWebhookEndpoint("prod-hook")))
+	require.NoError(t, store.CreateWebhookEndpoint(ctx, testWebhookEndpoint("team_hook")))
+
+	names := func(endpoints []tables.TableWebhookEndpoint) []string {
+		out := make([]string, 0, len(endpoints))
+		for _, e := range endpoints {
+			out = append(out, e.Name)
+		}
+		return out
+	}
+
+	// A literal "_" must match only the name that contains one — not act as a
+	// single-character LIKE wildcard, which would also match "prod-hook".
+	found, total, err := store.GetWebhookEndpointsPaginated(ctx, WebhookEndpointsQueryParams{Search: "_", Limit: 10})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), total)
+	assert.Equal(t, []string{"team_hook"}, names(found))
+}
+
+func TestWebhookEndpointCreate(t *testing.T) {
+	store := setupRDBTestStore(t)
+	ctx := context.Background()
+
+	endpoint := testWebhookEndpoint("create-test")
+	require.NoError(t, store.CreateWebhookEndpoint(ctx, endpoint))
+
+	// Server generates the ID and a Standard Webhooks style secret, and leaves
+	// the plaintext on the struct for one-time display.
+	assert.NotEmpty(t, endpoint.ID)
+	require.NotNil(t, endpoint.Secret)
+	secret := endpoint.Secret.GetValue()
+	assert.True(t, strings.HasPrefix(secret, "whsec_"), "secret %q missing whsec_ prefix", secret)
+	assert.Len(t, secret, len("whsec_")+44) // base64 of 32 bytes
+
+	fetched, err := store.GetWebhookEndpointByID(ctx, endpoint.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "create-test", fetched.Name)
+	assert.Equal(t, "https://93.184.216.34/hook", fetched.URL)
+	assert.Equal(t, []tables.WebhookEvent{tables.WebhookEventAsyncJobCompleted}, fetched.Events)
+	assert.Equal(t, secret, fetched.Secret.GetValue())
+
+	byName, err := store.GetWebhookEndpointByName(ctx, "create-test")
+	require.NoError(t, err)
+	assert.Equal(t, endpoint.ID, byName.ID)
+
+	// Distinct endpoints get distinct generated secrets.
+	second := testWebhookEndpoint("create-test-2")
+	require.NoError(t, store.CreateWebhookEndpoint(ctx, second))
+	assert.NotEqual(t, secret, second.Secret.GetValue())
+}
+
+func TestWebhookEndpointCreateDuplicateName(t *testing.T) {
+	store := setupRDBTestStore(t)
+	ctx := context.Background()
+
+	require.NoError(t, store.CreateWebhookEndpoint(ctx, testWebhookEndpoint("dup-name")))
+	err := store.CreateWebhookEndpoint(ctx, testWebhookEndpoint("dup-name"))
+	assert.ErrorIs(t, err, ErrAlreadyExists)
+}
+
+func TestWebhookEndpointCreateRejectsUnresolvedSecretRef(t *testing.T) {
+	store := setupRDBTestStore(t)
+	ctx := context.Background()
+
+	// An env reference that resolves to nothing must never be persisted —
+	// deliveries would sign with an empty key. The API never accepts a
+	// secret, so a reference can only arrive from config.json.
+	endpoint := testWebhookEndpoint("unresolved-ref")
+	endpoint.Secret = schemas.NewSecretVar("env.E2E_WEBHOOK_SECRET_THAT_DOES_NOT_EXIST")
+	require.True(t, endpoint.Secret.IsFromSecret())
+
+	err := store.CreateWebhookEndpoint(ctx, endpoint)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "did not resolve")
+
+	// A reference that resolves is kept as the signing key.
+	t.Setenv("E2E_WEBHOOK_SECRET_SET", "whsec_from_env")
+	resolved := testWebhookEndpoint("resolved-ref")
+	resolved.Secret = schemas.NewSecretVar("env.E2E_WEBHOOK_SECRET_SET")
+	require.NoError(t, store.CreateWebhookEndpoint(ctx, resolved))
+	assert.Equal(t, "whsec_from_env", resolved.Secret.GetValue())
+}
+
+func TestWebhookEndpointCreateFailureKeepsCallerPlaintext(t *testing.T) {
+	store := setupRDBTestStore(t)
+	ctx := context.Background()
+
+	require.NoError(t, store.CreateWebhookEndpoint(ctx, testWebhookEndpoint("plaintext-kept")))
+
+	// A failed create (duplicate name here) must leave the caller's secret
+	// as the plaintext it supplied — not the BeforeSave ciphertext — so a
+	// retry cannot double-encrypt and persist unusable key material.
+	retry := testWebhookEndpoint("plaintext-kept")
+	retry.Secret = schemas.NewSecretVar("whsec_caller_supplied")
+	err := store.CreateWebhookEndpoint(ctx, retry)
+	require.ErrorIs(t, err, ErrAlreadyExists)
+	assert.Equal(t, "whsec_caller_supplied", retry.Secret.GetValue())
+
+	// And the retry (under a fresh name) persists a working secret.
+	retry.Name = "plaintext-kept-2"
+	retry.ID = ""
+	require.NoError(t, store.CreateWebhookEndpoint(ctx, retry))
+	fetched, err := store.GetWebhookEndpointByID(ctx, retry.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "whsec_caller_supplied", fetched.Secret.GetValue())
+}
+
+func TestWebhookEndpointUpdate(t *testing.T) {
+	store := setupRDBTestStore(t)
+	ctx := context.Background()
+
+	endpoint := testWebhookEndpoint("update-test")
+	require.NoError(t, store.CreateWebhookEndpoint(ctx, endpoint))
+	originalSecret := endpoint.Secret.GetValue()
+
+	// Seed a failure streak without going through hooks.
+	require.NoError(t, store.DB().Model(&tables.TableWebhookEndpoint{}).
+		Where("id = ?", endpoint.ID).UpdateColumn("consecutive_failures", 7).Error)
+
+	// A non-URL change keeps the failure counter and the stored secret.
+	loaded, err := store.GetWebhookEndpointByID(ctx, endpoint.ID)
+	require.NoError(t, err)
+	loaded.IncludeResponse = true
+	loaded.Events = []tables.WebhookEvent{tables.WebhookEventAsyncJobCompleted, tables.WebhookEventAsyncJobFailed}
+	require.NoError(t, store.UpdateWebhookEndpoint(ctx, loaded))
+
+	fetched, err := store.GetWebhookEndpointByID(ctx, endpoint.ID)
+	require.NoError(t, err)
+	assert.True(t, fetched.IncludeResponse)
+	assert.Len(t, fetched.Events, 2)
+	assert.Equal(t, 7, fetched.ConsecutiveFailures)
+	assert.Equal(t, originalSecret, fetched.Secret.GetValue(), "update must not touch the signing secret")
+
+	// Changing the URL resets the failure counter.
+	fetched.URL = "https://93.184.216.35/hook"
+	require.NoError(t, store.UpdateWebhookEndpoint(ctx, fetched))
+	fetched, err = store.GetWebhookEndpointByID(ctx, endpoint.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "https://93.184.216.35/hook", fetched.URL)
+	assert.Equal(t, 0, fetched.ConsecutiveFailures)
+}
+
+func TestWebhookEndpointUpdateReenablePreservesFailureCounter(t *testing.T) {
+	store := setupRDBTestStore(t)
+	ctx := context.Background()
+
+	endpoint := testWebhookEndpoint("reenable-test")
+	require.NoError(t, store.CreateWebhookEndpoint(ctx, endpoint))
+
+	loaded, err := store.GetWebhookEndpointByID(ctx, endpoint.ID)
+	require.NoError(t, err)
+	loaded.Disabled = true
+	require.NoError(t, store.UpdateWebhookEndpoint(ctx, loaded))
+	require.NoError(t, store.DB().Model(&tables.TableWebhookEndpoint{}).
+		Where("id = ?", endpoint.ID).UpdateColumn("consecutive_failures", 25).Error)
+
+	disabled, err := store.GetWebhookEndpointByID(ctx, endpoint.ID)
+	require.NoError(t, err)
+	assert.True(t, disabled.Disabled)
+
+	disabled.Disabled = false
+	require.NoError(t, store.UpdateWebhookEndpoint(ctx, disabled))
+
+	// Re-enabling does not touch the failure counter — only a successful
+	// delivery (or a URL change) resets it.
+	reenabled, err := store.GetWebhookEndpointByID(ctx, endpoint.ID)
+	require.NoError(t, err)
+	assert.False(t, reenabled.Disabled)
+	assert.Equal(t, 25, reenabled.ConsecutiveFailures)
+}
+
+func TestWebhookEndpointUpdateNotFound(t *testing.T) {
+	store := setupRDBTestStore(t)
+
+	endpoint := testWebhookEndpoint("ghost")
+	endpoint.ID = "does-not-exist"
+	assert.ErrorIs(t, store.UpdateWebhookEndpoint(context.Background(), endpoint), ErrNotFound)
+}
+
+func TestWebhookEndpointDelete(t *testing.T) {
+	store := setupRDBTestStore(t)
+	ctx := context.Background()
+
+	endpoint := testWebhookEndpoint("delete-test")
+	require.NoError(t, store.CreateWebhookEndpoint(ctx, endpoint))
+
+	require.NoError(t, store.DeleteWebhookEndpoint(ctx, endpoint.ID))
+	_, err := store.GetWebhookEndpointByID(ctx, endpoint.ID)
+	assert.ErrorIs(t, err, ErrNotFound)
+	assert.ErrorIs(t, store.DeleteWebhookEndpoint(ctx, endpoint.ID), ErrNotFound)
+}
+
+func TestWebhookEndpointRotateSecret(t *testing.T) {
+	store := setupRDBTestStore(t)
+	ctx := context.Background()
+
+	endpoint := testWebhookEndpoint("rotate-test")
+	require.NoError(t, store.CreateWebhookEndpoint(ctx, endpoint))
+	originalSecret := endpoint.Secret.GetValue()
+
+	rotated, err := store.RotateWebhookEndpointSecret(ctx, endpoint.ID)
+	require.NoError(t, err)
+
+	newSecret := rotated.Secret.GetValue()
+	assert.True(t, strings.HasPrefix(newSecret, "whsec_"))
+	assert.NotEqual(t, originalSecret, newSecret)
+
+	// Rotation is immediate: only the new secret is stored.
+	fetched, err := store.GetWebhookEndpointByID(ctx, endpoint.ID)
+	require.NoError(t, err)
+	assert.Equal(t, newSecret, fetched.Secret.GetValue())
+
+	_, err = store.RotateWebhookEndpointSecret(ctx, "does-not-exist")
+	assert.ErrorIs(t, err, ErrNotFound)
+}
+
+func TestWebhookEndpointList(t *testing.T) {
+	store := setupRDBTestStore(t)
+	ctx := context.Background()
+
+	endpoints, err := store.GetWebhookEndpoints(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, endpoints)
+
+	require.NoError(t, store.CreateWebhookEndpoint(ctx, testWebhookEndpoint("list-a")))
+	require.NoError(t, store.CreateWebhookEndpoint(ctx, testWebhookEndpoint("list-b")))
+
+	endpoints, err = store.GetWebhookEndpoints(ctx)
+	require.NoError(t, err)
+	assert.Len(t, endpoints, 2)
+}
+
+func TestWebhookEndpointUpdatePersistsTuningAndHeaders(t *testing.T) {
+	store := setupRDBTestStore(t)
+	ctx := context.Background()
+
+	endpoint := testWebhookEndpoint("update-persist-test")
+	require.NoError(t, store.CreateWebhookEndpoint(ctx, endpoint))
+
+	loaded, err := store.GetWebhookEndpointByID(ctx, endpoint.ID)
+	require.NoError(t, err)
+	loaded.MaxRetries = 2
+	loaded.AttemptTimeoutSeconds = 7
+	loaded.MaxConcurrentDeliveries = 3
+	loaded.Headers = map[string]schemas.SecretVar{"Authorization": {Val: "Bearer tok"}}
+	require.NoError(t, store.UpdateWebhookEndpoint(ctx, loaded))
+
+	fetched, err := store.GetWebhookEndpointByID(ctx, endpoint.ID)
+	require.NoError(t, err)
+	assert.Equal(t, 2, fetched.MaxRetries, "updates must persist tuning knobs")
+	assert.Equal(t, 7, fetched.AttemptTimeoutSeconds)
+	assert.Equal(t, 3, fetched.MaxConcurrentDeliveries)
+	require.Len(t, fetched.Headers, 1)
+	auth := fetched.Headers["Authorization"]
+	assert.Equal(t, "Bearer tok", auth.GetValue())
+}
+
+func TestWebhookEndpointRecordFailureAndSuccess(t *testing.T) {
+	store := setupRDBTestStore(t)
+	ctx := context.Background()
+
+	endpoint := testWebhookEndpoint("counter-test")
+	require.NoError(t, store.CreateWebhookEndpoint(ctx, endpoint))
+
+	failures, err := store.RecordWebhookEndpointFailure(ctx, endpoint.ID)
+	require.NoError(t, err)
+	assert.Equal(t, 1, failures)
+	failures, err = store.RecordWebhookEndpointFailure(ctx, endpoint.ID)
+	require.NoError(t, err)
+	assert.Equal(t, 2, failures)
+
+	fetched, err := store.GetWebhookEndpointByID(ctx, endpoint.ID)
+	require.NoError(t, err)
+	assert.Equal(t, 2, fetched.ConsecutiveFailures)
+	assert.NotNil(t, fetched.LastFailureAt)
+	assert.Nil(t, fetched.LastSuccessAt)
+
+	require.NoError(t, store.RecordWebhookEndpointSuccess(ctx, endpoint.ID))
+	fetched, err = store.GetWebhookEndpointByID(ctx, endpoint.ID)
+	require.NoError(t, err)
+	assert.Equal(t, 0, fetched.ConsecutiveFailures)
+	assert.NotNil(t, fetched.LastSuccessAt)
+
+	_, err = store.RecordWebhookEndpointFailure(ctx, "does-not-exist")
+	assert.ErrorIs(t, err, ErrNotFound)
+	assert.ErrorIs(t, store.RecordWebhookEndpointSuccess(ctx, "does-not-exist"), ErrNotFound)
+}
+
+func TestWebhookEndpointCounterUpdatesLeaveConfigUntouched(t *testing.T) {
+	store := setupRDBTestStore(t)
+	ctx := context.Background()
+
+	endpoint := testWebhookEndpoint("counter-config-test")
+	require.NoError(t, store.CreateWebhookEndpoint(ctx, endpoint))
+	secret := endpoint.Secret.GetValue()
+
+	before, err := store.GetWebhookEndpointByID(ctx, endpoint.ID)
+	require.NoError(t, err)
+
+	_, err = store.RecordWebhookEndpointFailure(ctx, endpoint.ID)
+	require.NoError(t, err)
+	require.NoError(t, store.RecordWebhookEndpointSuccess(ctx, endpoint.ID))
+
+	after, err := store.GetWebhookEndpointByID(ctx, endpoint.ID)
+	require.NoError(t, err)
+	assert.Equal(t, before.UpdatedAt.UnixNano(), after.UpdatedAt.UnixNano(),
+		"operational counters must not touch updated_at")
+	assert.Equal(t, before.URL, after.URL)
+	assert.Equal(t, before.Events, after.Events)
+	assert.Equal(t, secret, after.Secret.GetValue(),
+		"operational counters must not touch the stored secret")
+}
+
+func testWebhookJob(id, endpointID string) *tables.TableWebhookJob {
+	return &tables.TableWebhookJob{
+		ID:         id,
+		EndpointID: endpointID,
+		AsyncJobID: "async-job-1",
+		Event:      tables.WebhookEventAsyncJobCompleted,
+	}
+}
+
+// getWebhookJob reads a queue row directly; the store deliberately exposes no
+// single-row getter, since workers only ever list-and-claim.
+func getWebhookJob(t *testing.T, store *RDBConfigStore, id string) *tables.TableWebhookJob {
+	t.Helper()
+	var job tables.TableWebhookJob
+	require.NoError(t, store.DB().Where("id = ?", id).First(&job).Error)
+	return &job
+}
+
+// setWebhookJobClaimedUntil forces a job's lease expiry to a fixed time so
+// lease expiry can be exercised deterministically without sleeping.
+func setWebhookJobClaimedUntil(t *testing.T, store *RDBConfigStore, id string, ts time.Time) {
+	t.Helper()
+	require.NoError(t, store.DB().Model(&tables.TableWebhookJob{}).
+		Where("id = ?", id).UpdateColumn("claimed_until", ts.UTC()).Error)
+}
+
+func TestWebhookJobCreateValidation(t *testing.T) {
+	store := setupRDBTestStore(t)
+	ctx := context.Background()
+
+	assert.Error(t, store.CreateWebhookJob(ctx, nil))
+	assert.Error(t, store.CreateWebhookJob(ctx, &tables.TableWebhookJob{EndpointID: "ep", AsyncJobID: "job", Event: tables.WebhookEventAsyncJobCompleted}))
+	assert.Error(t, store.CreateWebhookJob(ctx, &tables.TableWebhookJob{ID: "id", AsyncJobID: "job", Event: tables.WebhookEventAsyncJobCompleted}))
+	assert.Error(t, store.CreateWebhookJob(ctx, &tables.TableWebhookJob{ID: "id", EndpointID: "ep", Event: tables.WebhookEventAsyncJobCompleted}))
+	assert.Error(t, store.CreateWebhookJob(ctx, &tables.TableWebhookJob{ID: "id", EndpointID: "ep", AsyncJobID: "job", Event: "bogus.event"}))
+	// A new job must enter unattempted and unclaimed.
+	assert.Error(t, store.CreateWebhookJob(ctx, &tables.TableWebhookJob{ID: "id", EndpointID: "ep", AsyncJobID: "job", Event: tables.WebhookEventAsyncJobCompleted, AttemptCount: 1}))
+	assert.Error(t, store.CreateWebhookJob(ctx, &tables.TableWebhookJob{ID: "id", EndpointID: "ep", AsyncJobID: "job", Event: tables.WebhookEventAsyncJobCompleted, ClaimedBy: "node-a"}))
+}
+
+func TestWebhookJobCreateDefaultsAndDuplicate(t *testing.T) {
+	store := setupRDBTestStore(t)
+	ctx := context.Background()
+
+	job := testWebhookJob("job-1", "ep-1")
+	require.NoError(t, store.CreateWebhookJob(ctx, job))
+	assert.False(t, job.NextAttemptAt.IsZero(), "zero NextAttemptAt defaults to now (due immediately)")
+	assert.False(t, job.CreatedAt.IsZero())
+
+	stored := getWebhookJob(t, store, "job-1")
+	assert.Equal(t, 0, stored.AttemptCount)
+	assert.Empty(t, stored.ClaimedBy)
+	assert.Nil(t, stored.ClaimedUntil)
+
+	// The id doubles as the delivery's wire identifier and must stay unique
+	// while a delivery is in flight.
+	assert.ErrorIs(t, store.CreateWebhookJob(ctx, testWebhookJob("job-1", "ep-1")), ErrAlreadyExists)
+}
+
+func TestWebhookJobClaimRace(t *testing.T) {
+	store := setupRDBTestStore(t)
+	ctx := context.Background()
+
+	// Pin the pool to a single connection so both racers hit the same
+	// in-memory database; SQLite serializes writes on that connection, which
+	// is precisely the atomicity the conditional UPDATE relies on.
+	sqlDB, err := store.DB().DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+
+	require.NoError(t, store.CreateWebhookJob(ctx, testWebhookJob("job-1", "ep-1")))
+
+	// Two nodes claim the same job simultaneously: both block on the barrier,
+	// then fire together. Exactly one conditional UPDATE may match the still-due
+	// row, so exactly one claimer must win.
+	nodes := []string{"node-a", "node-b"}
+	results := make([]bool, len(nodes))
+	errs := make([]error, len(nodes))
+	var start sync.WaitGroup
+	start.Add(1)
+	var done sync.WaitGroup
+	for i, node := range nodes {
+		done.Add(1)
+		go func(i int, node string) {
+			defer done.Done()
+			start.Wait()
+			results[i], errs[i] = store.ClaimWebhookJob(ctx, "job-1", node, time.Now().Add(time.Minute))
+		}(i, node)
+	}
+	start.Done()
+	done.Wait()
+
+	for i, node := range nodes {
+		require.NoErrorf(t, errs[i], "claim by %s errored", node)
+	}
+	wins := 0
+	for _, won := range results {
+		if won {
+			wins++
+		}
+	}
+	assert.Equal(t, 1, wins, "exactly one concurrent claimer must win")
+
+	stored := getWebhookJob(t, store, "job-1")
+	assert.Contains(t, nodes, stored.ClaimedBy, "the stored claim must belong to a racer")
+	require.NotNil(t, stored.ClaimedUntil)
+}
+
+func TestWebhookJobClaimLeaseExpiryReclaim(t *testing.T) {
+	store := setupRDBTestStore(t)
+	ctx := context.Background()
+
+	require.NoError(t, store.CreateWebhookJob(ctx, testWebhookJob("job-1", "ep-1")))
+	won, err := store.ClaimWebhookJob(ctx, "job-1", "node-a", time.Now().Add(time.Minute))
+	require.NoError(t, err)
+	require.True(t, won)
+
+	// The owner dies mid-attempt: its lease lapses and another node reclaims.
+	setWebhookJobClaimedUntil(t, store, "job-1", time.Now().Add(-time.Second))
+	won, err = store.ClaimWebhookJob(ctx, "job-1", "node-b", time.Now().Add(time.Minute))
+	require.NoError(t, err)
+	assert.True(t, won)
+	assert.Equal(t, "node-b", getWebhookJob(t, store, "job-1").ClaimedBy)
+}
+
+func TestWebhookJobClaimNotDueRejected(t *testing.T) {
+	store := setupRDBTestStore(t)
+	ctx := context.Background()
+
+	job := testWebhookJob("job-1", "ep-1")
+	job.NextAttemptAt = time.Now().Add(time.Hour)
+	require.NoError(t, store.CreateWebhookJob(ctx, job))
+
+	won, err := store.ClaimWebhookJob(ctx, "job-1", "node-a", time.Now().Add(time.Minute))
+	require.NoError(t, err)
+	assert.False(t, won)
+
+	won, err = store.ClaimWebhookJob(ctx, "missing-job", "node-a", time.Now().Add(time.Minute))
+	require.NoError(t, err)
+	assert.False(t, won)
+
+	// A non-future lease is rejected outright: winning with an already-expired
+	// lease would leave the job instantly reclaimable by another worker.
+	won, err = store.ClaimWebhookJob(ctx, "job-1", "node-a", time.Now().Add(-time.Second))
+	assert.Error(t, err)
+	assert.False(t, won)
+}
+
+func TestWebhookJobListDue(t *testing.T) {
+	store := setupRDBTestStore(t)
+	ctx := context.Background()
+
+	// Oldest due job, listed first.
+	oldest := testWebhookJob("due-oldest", "ep-1")
+	oldest.NextAttemptAt = time.Now().Add(-2 * time.Minute)
+	require.NoError(t, store.CreateWebhookJob(ctx, oldest))
+
+	newer := testWebhookJob("due-newer", "ep-1")
+	newer.NextAttemptAt = time.Now().Add(-time.Minute)
+	require.NoError(t, store.CreateWebhookJob(ctx, newer))
+
+	future := testWebhookJob("future", "ep-1")
+	future.NextAttemptAt = time.Now().Add(time.Hour)
+	require.NoError(t, store.CreateWebhookJob(ctx, future))
+
+	claimed := testWebhookJob("claimed-live", "ep-1")
+	claimed.NextAttemptAt = time.Now().Add(-time.Minute)
+	require.NoError(t, store.CreateWebhookJob(ctx, claimed))
+	won, err := store.ClaimWebhookJob(ctx, "claimed-live", "node-a", time.Now().Add(time.Minute))
+	require.NoError(t, err)
+	require.True(t, won)
+
+	expired := testWebhookJob("claimed-expired", "ep-1")
+	expired.NextAttemptAt = time.Now().Add(-3 * time.Minute)
+	require.NoError(t, store.CreateWebhookJob(ctx, expired))
+	won, err = store.ClaimWebhookJob(ctx, "claimed-expired", "node-a", time.Now().Add(time.Minute))
+	require.NoError(t, err)
+	require.True(t, won)
+	setWebhookJobClaimedUntil(t, store, "claimed-expired", time.Now().Add(-time.Second))
+
+	due, err := store.ListDueWebhookJobs(ctx, 0)
+	require.NoError(t, err)
+	ids := make([]string, 0, len(due))
+	for _, j := range due {
+		ids = append(ids, j.ID)
+	}
+	assert.Equal(t, []string{"claimed-expired", "due-oldest", "due-newer"}, ids)
+
+	due, err = store.ListDueWebhookJobs(ctx, 1)
+	require.NoError(t, err)
+	require.Len(t, due, 1)
+	assert.Equal(t, "claimed-expired", due[0].ID)
+}
+
+// TestWebhookJobUTCDueComparison guards the queue's time handling with the
+// UTC timestamps the dispatcher actually writes: SQLite compares datetimes
+// as strings, so a due check made with a local-zone now sees a future UTC
+// next_attempt_at as already due on any machine east of UTC — which made
+// retries fire on the next poll tick instead of after their backoff.
+func TestWebhookJobUTCDueComparison(t *testing.T) {
+	store := setupRDBTestStore(t)
+	ctx := context.Background()
+
+	future := testWebhookJob("utc-future", "ep-1")
+	future.NextAttemptAt = time.Now().UTC().Add(time.Hour)
+	require.NoError(t, store.CreateWebhookJob(ctx, future))
+
+	due, err := store.ListDueWebhookJobs(ctx, 0)
+	require.NoError(t, err)
+	assert.Empty(t, due, "a job due an hour from now must not be listed")
+
+	won, err := store.ClaimWebhookJob(ctx, "utc-future", "node-a", time.Now().UTC().Add(time.Minute))
+	require.NoError(t, err)
+	assert.False(t, won, "a job due an hour from now must not be claimable")
+}
+
+func TestWebhookJobReschedule(t *testing.T) {
+	store := setupRDBTestStore(t)
+	ctx := context.Background()
+
+	require.NoError(t, store.CreateWebhookJob(ctx, testWebhookJob("job-1", "ep-1")))
+	lease := time.Now().Add(time.Minute)
+	won, err := store.ClaimWebhookJob(ctx, "job-1", "node-a", lease)
+	require.NoError(t, err)
+	require.True(t, won)
+
+	// A non-owner cannot reschedule someone else's claim.
+	assert.Error(t, store.RescheduleWebhookJob(ctx, "job-1", "node-b", lease, time.Now().Add(5*time.Minute)))
+
+	next := time.Now().Add(5 * time.Minute)
+	require.NoError(t, store.RescheduleWebhookJob(ctx, "job-1", "node-a", lease, next))
+
+	stored := getWebhookJob(t, store, "job-1")
+	assert.Equal(t, 1, stored.AttemptCount)
+	assert.Empty(t, stored.ClaimedBy)
+	assert.Nil(t, stored.ClaimedUntil)
+	assert.WithinDuration(t, next, stored.NextAttemptAt, time.Second)
+
+	// The claim was released, so a second reschedule has nothing to fence on.
+	assert.Error(t, store.RescheduleWebhookJob(ctx, "job-1", "node-a", lease, next))
+}
+
+func TestWebhookJobDelete(t *testing.T) {
+	store := setupRDBTestStore(t)
+	ctx := context.Background()
+
+	require.NoError(t, store.CreateWebhookJob(ctx, testWebhookJob("job-1", "ep-1")))
+
+	// Only the current claim holder can retire a job.
+	assert.Error(t, store.DeleteWebhookJob(ctx, "job-1", "node-a", time.Now().Add(time.Minute)))
+
+	lease := time.Now().Add(time.Minute)
+	won, err := store.ClaimWebhookJob(ctx, "job-1", "node-a", lease)
+	require.NoError(t, err)
+	require.True(t, won)
+	assert.Error(t, store.DeleteWebhookJob(ctx, "job-1", "node-b", lease))
+	require.NoError(t, store.DeleteWebhookJob(ctx, "job-1", "node-a", lease))
+
+	var count int64
+	require.NoError(t, store.DB().Model(&tables.TableWebhookJob{}).Where("id = ?", "job-1").Count(&count).Error)
+	assert.Zero(t, count)
+}
+
+func TestWebhookJobClaimCycleWithEmptyRunnerID(t *testing.T) {
+	store := setupRDBTestStore(t)
+	ctx := context.Background()
+
+	// Single-node mode claims with an empty runner id; the lease alone
+	// fences, and fenced writes still match the empty claimed_by.
+	require.NoError(t, store.CreateWebhookJob(ctx, testWebhookJob("job-1", "ep-1")))
+	lease := time.Now().Add(time.Minute)
+	won, err := store.ClaimWebhookJob(ctx, "job-1", "", lease)
+	require.NoError(t, err)
+	require.True(t, won)
+
+	won, err = store.ClaimWebhookJob(ctx, "job-1", "", time.Now().Add(time.Minute))
+	require.NoError(t, err)
+	assert.False(t, won, "live lease must fence even without runner ids")
+
+	require.NoError(t, store.RescheduleWebhookJob(ctx, "job-1", "", lease, time.Now().Add(time.Minute)))
+	assert.Equal(t, 1, getWebhookJob(t, store, "job-1").AttemptCount)
+}
+
+func TestWebhookJobStaleOwnerAfterReclaimIsFenced(t *testing.T) {
+	store := setupRDBTestStore(t)
+	ctx := context.Background()
+
+	// Same runner reclaims a job after its first lease expired — the stale
+	// attempt still holds the OLD lease value, and runner identity alone
+	// cannot tell the two claims apart (the single-node runner id is empty).
+	require.NoError(t, store.CreateWebhookJob(ctx, testWebhookJob("job-1", "ep-1")))
+	staleLease := time.Now().Add(time.Minute)
+	won, err := store.ClaimWebhookJob(ctx, "job-1", "", staleLease)
+	require.NoError(t, err)
+	require.True(t, won)
+	setWebhookJobClaimedUntil(t, store, "job-1", time.Now().Add(-time.Second))
+
+	// The expired-lease value in the DB, exactly as the reclaim will see it.
+	expiredLease := *getWebhookJob(t, store, "job-1").ClaimedUntil
+
+	newLease := time.Now().Add(time.Minute)
+	won, err = store.ClaimWebhookJob(ctx, "job-1", "", newLease)
+	require.NoError(t, err)
+	require.True(t, won, "expired lease must be reclaimable")
+
+	// The stale owner's terminal mutations must match nothing.
+	assert.Error(t, store.RescheduleWebhookJob(ctx, "job-1", "", staleLease, time.Now().Add(time.Minute)))
+	assert.Error(t, store.RescheduleWebhookJob(ctx, "job-1", "", expiredLease, time.Now().Add(time.Minute)))
+	assert.Error(t, store.DeleteWebhookJob(ctx, "job-1", "", staleLease))
+	assert.Error(t, store.DeleteWebhookJob(ctx, "job-1", "", expiredLease))
+
+	stored := getWebhookJob(t, store, "job-1")
+	assert.Zero(t, stored.AttemptCount, "stale reschedule must not move the attempt counter")
+	require.NotNil(t, stored.ClaimedUntil, "stale delete must not release the live claim")
+
+	// The live claim holder still owns the job.
+	require.NoError(t, store.DeleteWebhookJob(ctx, "job-1", "", newLease))
+}
+
+func TestClientConfigWebhookConfigRoundTrip(t *testing.T) {
+	store := setupRDBTestStore(t)
+	ctx := context.Background()
+
+	require.NoError(t, store.UpdateClientConfig(ctx, &ClientConfig{
+		WebhookConfig: &tables.WebhookConfig{DeliveryHistoryRetentionDays: 90},
+	}))
+	loaded, err := store.GetClientConfig(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, loaded.WebhookConfig, "webhook settings must survive the database round-trip")
+	assert.Equal(t, 90, loaded.WebhookConfig.DeliveryHistoryRetentionDays)
+
+	// Absent settings stay absent rather than becoming a zero-value struct.
+	require.NoError(t, store.UpdateClientConfig(ctx, &ClientConfig{}))
+	loaded, err = store.GetClientConfig(ctx)
+	require.NoError(t, err)
+	assert.Nil(t, loaded.WebhookConfig)
+}
+
+func TestWebhookEndpointTuningRoundTripAndHash(t *testing.T) {
+	store := setupRDBTestStore(t)
+	ctx := context.Background()
+
+	endpoint := testWebhookEndpoint("tuning-test")
+	endpoint.MaxRetries = 2
+	endpoint.RetryBackoffInitialSeconds = 5
+	endpoint.AttemptTimeoutSeconds = 3
+	require.NoError(t, endpoint.Validate())
+	require.NoError(t, store.CreateWebhookEndpoint(ctx, endpoint))
+
+	fetched, err := store.GetWebhookEndpointByID(ctx, endpoint.ID)
+	require.NoError(t, err)
+	assert.Equal(t, 2, fetched.MaxRetries)
+	assert.Equal(t, 5, fetched.RetryBackoffInitialSeconds)
+	assert.Equal(t, 3, fetched.AttemptTimeoutSeconds)
+	assert.Zero(t, fetched.MaxConcurrentDeliveries, "unset knobs stay zero (worker default)")
+
+	// Tuning participates in change detection for config.json sync.
+	baseHash, err := GenerateWebhookEndpointHash(fetched)
+	require.NoError(t, err)
+	fetched.MaxRetries = 7
+	changedHash, err := GenerateWebhookEndpointHash(fetched)
+	require.NoError(t, err)
+	assert.NotEqual(t, baseHash, changedHash)
+
+	// Negative knobs are rejected at validation.
+	invalid := testWebhookEndpoint("tuning-invalid")
+	invalid.MaxRetries = -1
+	assert.Error(t, invalid.Validate())
+}
+
+// TestRDBConfigStore_SyncRoutingRules covers the batch path used by config-file reloads.
+// It defers the unique-priority-per-scope check to the final state, so a valid permutation
+// (e.g. swapping two priorities) succeeds despite a transient intermediate collision, while a
+// genuine end-state duplicate still errors and a missing update target returns ErrNotFound.
+func TestRDBConfigStore_SyncRoutingRules(t *testing.T) {
+	ctx := context.Background()
+
+	rule := func(id string, priority int) tables.TableRoutingRule {
+		return *routingRuleFixture(id, priority, "openai")
+	}
+
+	tests := []struct {
+		name       string
+		toAdd      []tables.TableRoutingRule
+		toUpdate   []tables.TableRoutingRule
+		wantErrIs  error
+		wantErrSub string
+		wantFinal  map[string]int // expected priority per rule ID after the call
+	}{
+		{
+			name:      "valid priority swap succeeds",
+			toUpdate:  []tables.TableRoutingRule{rule("rule-a", 1), rule("rule-b", 0)},
+			wantFinal: map[string]int{"rule-a": 1, "rule-b": 0},
+		},
+		{
+			name:      "batch add plus swap succeeds",
+			toAdd:     []tables.TableRoutingRule{rule("rule-c", 2)},
+			toUpdate:  []tables.TableRoutingRule{rule("rule-a", 1), rule("rule-b", 0)},
+			wantFinal: map[string]int{"rule-a": 1, "rule-b": 0, "rule-c": 2},
+		},
+		{
+			name:       "final-state duplicate priority fails and rolls back",
+			toUpdate:   []tables.TableRoutingRule{rule("rule-a", 1), rule("rule-b", 1)},
+			wantErrSub: "already exists",
+			wantFinal:  map[string]int{"rule-a": 0, "rule-b": 1}, // unchanged (rolled back)
+		},
+		{
+			name:      "missing update ID returns ErrNotFound",
+			toUpdate:  []tables.TableRoutingRule{rule("rule-missing", 5)},
+			wantErrIs: ErrNotFound,
+			wantFinal: map[string]int{"rule-a": 0, "rule-b": 1}, // unchanged
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			store := setupRDBTestStore(t)
+			require.NoError(t, store.CreateRoutingRule(ctx, routingRuleFixture("rule-a", 0, "openai")))
+			require.NoError(t, store.CreateRoutingRule(ctx, routingRuleFixture("rule-b", 1, "openai")))
+
+			err := store.SyncRoutingRules(ctx, tc.toAdd, tc.toUpdate)
+			switch {
+			case tc.wantErrIs != nil:
+				require.ErrorIs(t, err, tc.wantErrIs)
+			case tc.wantErrSub != "":
+				require.Error(t, err)
+				require.Contains(t, err.Error(), tc.wantErrSub)
+			default:
+				require.NoError(t, err)
+			}
+
+			for id, want := range tc.wantFinal {
+				got, getErr := store.GetRoutingRule(ctx, id)
+				require.NoError(t, getErr)
+				require.Equalf(t, want, got.Priority, "priority for %s", id)
+			}
+		})
+	}
+}
+
+// TestUpsertModelPricesBatch_InputCostPerQuerySurvivesResync guards the ON CONFLICT DO UPDATE
+// column list. Create() writes every column, so a first sync looks correct even when a field is
+// missing from pricingSyncUpdateColumns - the value only disappears on the next resync of an
+// existing row, which is 24h later in production.
+func TestUpsertModelPricesBatch_InputCostPerQuerySurvivesResync(t *testing.T) {
+	s := setupRDBTestStore(t)
+	require.NoError(t, s.DB().AutoMigrate(&tables.TableModelPricing{}))
+
+	ctx := context.Background()
+	cost := func(f float64) *float64 { return &f }
+
+	row := tables.TableModelPricing{Model: "rerank-v3.5", Provider: "cohere", Mode: "rerank"}
+	require.NoError(t, s.UpsertModelPricesBatch(ctx, []tables.TableModelPricing{row}))
+
+	row.InputCostPerQuery = cost(0.002)
+	require.NoError(t, s.UpsertModelPricesBatch(ctx, []tables.TableModelPricing{row}))
+
+	got, err := s.GetModelPrices(ctx)
+	require.NoError(t, err)
+	var found *tables.TableModelPricing
+	for i := range got {
+		if got[i].Model == "rerank-v3.5" {
+			found = &got[i]
+			break
+		}
+	}
+	require.NotNil(t, found)
+	require.NotNil(t, found.InputCostPerQuery, "input_cost_per_query missing from pricingSyncUpdateColumns")
+	assert.Equal(t, 0.002, *found.InputCostPerQuery)
+}
+
+// TestUpsertModelPricesBatch_SizeQualityImageColumnsSurviveResync pins the
+// ON CONFLICT DO UPDATE path: a column missing from pricingSyncUpdateColumns is
+// written on the initial Create but silently dropped on every later sync of an
+// existing row.
+func TestUpsertModelPricesBatch_SizeQualityImageColumnsSurviveResync(t *testing.T) {
+	s := setupRDBTestStore(t)
+	require.NoError(t, s.DB().AutoMigrate(&tables.TableModelPricing{}))
+
+	ctx := context.Background()
+	cost := func(f float64) *float64 { return &f }
+
+	// First sync: the row exists with none of the new rates set.
+	row := tables.TableModelPricing{Model: "gpt-image-1", Provider: "openai", Mode: "image_generation"}
+	require.NoError(t, s.UpsertModelPricesBatch(ctx, []tables.TableModelPricing{row}))
+
+	// Second sync of the same row now carries them, exercising the update path.
+	row.OutputCostPerImageAbove1024x1536Pixels = cost(0.001)
+	row.OutputCostPerImageAbove1536x1024Pixels = cost(0.002)
+	row.OutputCostPerImageAbove1024x1024PixelsLowQuality = cost(0.003)
+	row.OutputCostPerImageAbove1024x1536PixelsLowQuality = cost(0.004)
+	row.OutputCostPerImageAbove1536x1024PixelsLowQuality = cost(0.005)
+	row.OutputCostPerImageAbove1024x1024PixelsMediumQuality = cost(0.006)
+	row.OutputCostPerImageAbove1024x1536PixelsMediumQuality = cost(0.007)
+	row.OutputCostPerImageAbove1536x1024PixelsMediumQuality = cost(0.008)
+	row.OutputCostPerImageAbove1024x1024PixelsHighQuality = cost(0.009)
+	row.OutputCostPerImageAbove1024x1536PixelsHighQuality = cost(0.010)
+	row.OutputCostPerImageAbove1536x1024PixelsHighQuality = cost(0.011)
+	row.OutputCostPerImageAbove1024x1024PixelsStandardQuality = cost(0.012)
+	row.OutputCostPerImageAbove1024x1536PixelsStandardQuality = cost(0.013)
+	row.OutputCostPerImageAbove1536x1024PixelsStandardQuality = cost(0.014)
+	require.NoError(t, s.UpsertModelPricesBatch(ctx, []tables.TableModelPricing{row}))
+
+	got, err := s.GetModelPrices(ctx)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	updated := got[0]
+
+	require.NotNil(t, updated.OutputCostPerImageAbove1024x1536Pixels, "OutputCostPerImageAbove1024x1536Pixels was dropped by the ON CONFLICT update (missing from pricingSyncUpdateColumns)")
+	assert.InDelta(t, 0.001, *updated.OutputCostPerImageAbove1024x1536Pixels, 1e-9)
+	require.NotNil(t, updated.OutputCostPerImageAbove1536x1024Pixels, "OutputCostPerImageAbove1536x1024Pixels was dropped by the ON CONFLICT update (missing from pricingSyncUpdateColumns)")
+	assert.InDelta(t, 0.002, *updated.OutputCostPerImageAbove1536x1024Pixels, 1e-9)
+	require.NotNil(t, updated.OutputCostPerImageAbove1024x1024PixelsLowQuality, "OutputCostPerImageAbove1024x1024PixelsLowQuality was dropped by the ON CONFLICT update (missing from pricingSyncUpdateColumns)")
+	assert.InDelta(t, 0.003, *updated.OutputCostPerImageAbove1024x1024PixelsLowQuality, 1e-9)
+	require.NotNil(t, updated.OutputCostPerImageAbove1024x1536PixelsLowQuality, "OutputCostPerImageAbove1024x1536PixelsLowQuality was dropped by the ON CONFLICT update (missing from pricingSyncUpdateColumns)")
+	assert.InDelta(t, 0.004, *updated.OutputCostPerImageAbove1024x1536PixelsLowQuality, 1e-9)
+	require.NotNil(t, updated.OutputCostPerImageAbove1536x1024PixelsLowQuality, "OutputCostPerImageAbove1536x1024PixelsLowQuality was dropped by the ON CONFLICT update (missing from pricingSyncUpdateColumns)")
+	assert.InDelta(t, 0.005, *updated.OutputCostPerImageAbove1536x1024PixelsLowQuality, 1e-9)
+	require.NotNil(t, updated.OutputCostPerImageAbove1024x1024PixelsMediumQuality, "OutputCostPerImageAbove1024x1024PixelsMediumQuality was dropped by the ON CONFLICT update (missing from pricingSyncUpdateColumns)")
+	assert.InDelta(t, 0.006, *updated.OutputCostPerImageAbove1024x1024PixelsMediumQuality, 1e-9)
+	require.NotNil(t, updated.OutputCostPerImageAbove1024x1536PixelsMediumQuality, "OutputCostPerImageAbove1024x1536PixelsMediumQuality was dropped by the ON CONFLICT update (missing from pricingSyncUpdateColumns)")
+	assert.InDelta(t, 0.007, *updated.OutputCostPerImageAbove1024x1536PixelsMediumQuality, 1e-9)
+	require.NotNil(t, updated.OutputCostPerImageAbove1536x1024PixelsMediumQuality, "OutputCostPerImageAbove1536x1024PixelsMediumQuality was dropped by the ON CONFLICT update (missing from pricingSyncUpdateColumns)")
+	assert.InDelta(t, 0.008, *updated.OutputCostPerImageAbove1536x1024PixelsMediumQuality, 1e-9)
+	require.NotNil(t, updated.OutputCostPerImageAbove1024x1024PixelsHighQuality, "OutputCostPerImageAbove1024x1024PixelsHighQuality was dropped by the ON CONFLICT update (missing from pricingSyncUpdateColumns)")
+	assert.InDelta(t, 0.009, *updated.OutputCostPerImageAbove1024x1024PixelsHighQuality, 1e-9)
+	require.NotNil(t, updated.OutputCostPerImageAbove1024x1536PixelsHighQuality, "OutputCostPerImageAbove1024x1536PixelsHighQuality was dropped by the ON CONFLICT update (missing from pricingSyncUpdateColumns)")
+	assert.InDelta(t, 0.010, *updated.OutputCostPerImageAbove1024x1536PixelsHighQuality, 1e-9)
+	require.NotNil(t, updated.OutputCostPerImageAbove1536x1024PixelsHighQuality, "OutputCostPerImageAbove1536x1024PixelsHighQuality was dropped by the ON CONFLICT update (missing from pricingSyncUpdateColumns)")
+	assert.InDelta(t, 0.011, *updated.OutputCostPerImageAbove1536x1024PixelsHighQuality, 1e-9)
+	require.NotNil(t, updated.OutputCostPerImageAbove1024x1024PixelsStandardQuality, "OutputCostPerImageAbove1024x1024PixelsStandardQuality was dropped by the ON CONFLICT update (missing from pricingSyncUpdateColumns)")
+	assert.InDelta(t, 0.012, *updated.OutputCostPerImageAbove1024x1024PixelsStandardQuality, 1e-9)
+	require.NotNil(t, updated.OutputCostPerImageAbove1024x1536PixelsStandardQuality, "OutputCostPerImageAbove1024x1536PixelsStandardQuality was dropped by the ON CONFLICT update (missing from pricingSyncUpdateColumns)")
+	assert.InDelta(t, 0.013, *updated.OutputCostPerImageAbove1024x1536PixelsStandardQuality, 1e-9)
+	require.NotNil(t, updated.OutputCostPerImageAbove1536x1024PixelsStandardQuality, "OutputCostPerImageAbove1536x1024PixelsStandardQuality was dropped by the ON CONFLICT update (missing from pricingSyncUpdateColumns)")
+	assert.InDelta(t, 0.014, *updated.OutputCostPerImageAbove1536x1024PixelsStandardQuality, 1e-9)
+}
+
+// TestRDBConfigStore_RoutingRuleCreatedAtSurvivesUpdate guards created_at against GORM's Save,
+// which selects every column: rules arriving from a config.json reload carry no created_at, so
+// without an explicit carry-forward the original insert timestamp is overwritten with the zero
+// time. Both the batch (SyncRoutingRules) and single (UpdateRoutingRule) paths are covered.
+func TestRDBConfigStore_RoutingRuleCreatedAtSurvivesUpdate(t *testing.T) {
+	ctx := context.Background()
+
+	assertCreatedAt := func(t *testing.T, store *RDBConfigStore, id string, want time.Time) {
+		t.Helper()
+		got, err := store.GetRoutingRule(ctx, id)
+		require.NoError(t, err)
+		require.False(t, got.CreatedAt.IsZero(), "created_at must not be zeroed by an update")
+		require.Equal(t, want, got.CreatedAt, "created_at must be preserved")
+	}
+
+	t.Run("SyncRoutingRules preserves created_at", func(t *testing.T) {
+		store := setupRDBTestStore(t)
+		require.NoError(t, store.CreateRoutingRule(ctx, routingRuleFixture("rule-a", 0, "openai")))
+		created, err := store.GetRoutingRule(ctx, "rule-a")
+		require.NoError(t, err)
+		require.False(t, created.CreatedAt.IsZero())
+
+		// Shape of a config-file rule: no created_at, changed payload.
+		fileRule := routingRuleFixture("rule-a", 3, "anthropic")
+		fileRule.Description = "edited in config.json"
+		require.NoError(t, store.SyncRoutingRules(ctx, nil, []tables.TableRoutingRule{*fileRule}))
+
+		assertCreatedAt(t, store, "rule-a", created.CreatedAt)
+	})
+
+	t.Run("UpdateRoutingRule preserves created_at", func(t *testing.T) {
+		store := setupRDBTestStore(t)
+		require.NoError(t, store.CreateRoutingRule(ctx, routingRuleFixture("rule-a", 0, "openai")))
+		created, err := store.GetRoutingRule(ctx, "rule-a")
+		require.NoError(t, err)
+		require.False(t, created.CreatedAt.IsZero())
+
+		partial := routingRuleFixture("rule-a", 3, "anthropic")
+		partial.Description = "updated without reading the row first"
+		require.NoError(t, store.UpdateRoutingRule(ctx, partial))
+
+		assertCreatedAt(t, store, "rule-a", created.CreatedAt)
+	})
 }

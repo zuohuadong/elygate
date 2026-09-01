@@ -83,6 +83,19 @@ func (p *JsonParserPlugin) GetName() string {
 	return PluginName
 }
 
+func (p *JsonParserPlugin) GetPluginMetadata() schemas.PluginMetadata {
+	return schemas.PluginMetadata{
+		Description:   "Parses and normalizes structured JSON responses.",
+		DescriptionZh: "解析并规范化结构化 JSON 响应。",
+	}
+}
+
+// HTTPTransportPreAuthHook is a no-op: this plugin does no credential work, so it has
+// nothing to do before the transport authenticates the request (HTTPTransportPlugin interface).
+func (*JsonParserPlugin) HTTPTransportPreAuthHook(_ *schemas.BifrostContext, _ *schemas.HTTPRequest) (*schemas.HTTPResponse, error) {
+	return nil, nil
+}
+
 // HTTPTransportPreHook is not used for this plugin
 func (p *JsonParserPlugin) HTTPTransportPreHook(ctx *schemas.BifrostContext, req *schemas.HTTPRequest) (*schemas.HTTPResponse, error) {
 	return nil, nil

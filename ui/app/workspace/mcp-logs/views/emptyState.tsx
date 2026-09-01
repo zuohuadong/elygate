@@ -85,10 +85,10 @@ export function MCPEmptyState({ error, statusIndicator }: MCPEmptyStateProps) {
 				python: `import openai
 import requests
 
-# Step 1: Initialize OpenAI client with Elygate
+# Step 1: Initialize OpenAI client with Bifrost
 client = openai.OpenAI(
     base_url="${baseUrl}/openai",
-    api_key="dummy-api-key"  # Handled by Elygate
+    api_key="dummy-api-key"  # Handled by Bifrost
 )
 
 # Step 2: Send chat request
@@ -101,7 +101,7 @@ response = client.chat.completions.create(
 message = response.choices[0].message
 if message.tool_calls:
     for tool_call in message.tool_calls:
-        # Step 4: Execute tool via Elygate
+        # Step 4: Execute tool via Bifrost
         tool_result = requests.post(
             "${baseUrl}/v1/mcp/tool/execute",
             json={
@@ -126,10 +126,10 @@ if message.tool_calls:
         print(final_response.choices[0].message.content)`,
 				typescript: `import OpenAI from "openai";
 
-// Step 1: Initialize OpenAI client with Elygate
+// Step 1: Initialize OpenAI client with Bifrost
 const openai = new OpenAI({
   baseURL: "${baseUrl}/openai",
-  apiKey: "dummy-api-key", // Handled by Elygate
+  apiKey: "dummy-api-key", // Handled by Bifrost
 });
 
 // Step 2: Send chat request
@@ -143,7 +143,7 @@ const message = response.choices[0].message;
 // Step 3: Check for tool calls
 if (message.tool_calls) {
   for (const toolCall of message.tool_calls) {
-    // Step 4: Execute tool via Elygate
+    // Step 4: Execute tool via Bifrost
     const toolResult = await fetch("${baseUrl}/v1/mcp/tool/execute", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -181,7 +181,7 @@ client = openai.OpenAI(
     api_key="dummy-api-key"
 )
 
-# With agent mode enabled, Elygate automatically:
+# With agent mode enabled, Bifrost automatically:
 # 1. Receives tool calls from LLM
 # 2. Executes auto-approved tools (e.g., read_file, list_directory)
 # 3. Feeds results back to LLM
@@ -213,7 +213,7 @@ const openai = new OpenAI({
   apiKey: "dummy-api-key",
 });
 
-// With agent mode enabled, Elygate automatically:
+// With agent mode enabled, Bifrost automatically:
 // 1. Receives tool calls from LLM
 // 2. Executes auto-approved tools (e.g., read_file, list_directory)
 // 3. Feeds results back to LLM
@@ -264,7 +264,7 @@ if (response.choices[0].message.tool_calls) {
 				</div>
 
 				<Tabs defaultValue="manual" className="w-full rounded-lg border">
-					<TabsList className="grid h-10 w-full grid-cols-2 rounded-t-lg rounded-b-none">
+					<TabsList className="flex h-10 w-full justify-start rounded-t-lg rounded-b-none">
 						<TabsTrigger value="manual">Manual Tool Execution</TabsTrigger>
 						<TabsTrigger value="agent">Agent Mode (Auto-Execute)</TabsTrigger>
 					</TabsList>

@@ -24,7 +24,7 @@ export default function DatadogConnectorView(_props: DatadogConnectorViewProps) 
 						className="mx-auto w-full max-w-lg"
 						icon={<Dog className="h-[5.5rem] w-[5.5rem]" strokeWidth={1} />}
 						title="Unlock native Datadog data ingestion for better observability"
-						description="This capability requires the Elygate Enterprise source package and is not included in this OSS build."
+						description="This feature is a part of the Bifrost enterprise license. We would love to know more about your use case and how we can help you."
 						readmeLink="https://docs.getbifrost.ai/enterprise/datadog-connector"
 					/>
 				</div>

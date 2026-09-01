@@ -21,9 +21,11 @@ OpenAIChatRequest:
       description: Whether to stream the response
     max_tokens:
       type: integer
+      minimum: 1
       description: Maximum tokens to generate (legacy, use max_completion_tokens)
     max_completion_tokens:
       type: integer
+      minimum: 1
       description: Maximum tokens to generate
     temperature:
       type: number

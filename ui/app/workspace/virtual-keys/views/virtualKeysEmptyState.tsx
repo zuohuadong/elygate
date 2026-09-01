@@ -2,7 +2,7 @@ import { Button } from "@/components/ui/button";
 import { KeyRound } from "lucide-react";
 import { ArrowUpRight } from "lucide-react";
 
-const VIRTUAL_KEYS_DOCS_URL = "https://github.com/zuohuadong/elygate/tree/dev/docs";
+const VIRTUAL_KEYS_DOCS_URL = "https://docs.getbifrost.ai/features/governance/virtual-keys";
 
 interface VirtualKeysEmptyStateProps {
 	onAddClick: () => void;
@@ -20,7 +20,7 @@ export function VirtualKeysEmptyState({ onAddClick, canCreate = true }: VirtualK
 			</div>
 			<div className="flex flex-col gap-1">
 				<h1 className="text-muted-foreground text-xl font-medium">Virtual keys control access, budgets, and rate limits</h1>
-				<div className="text-muted-foreground mx-auto mt-2 max-w-[600px] text-sm font-normal">
+				<div className="text-muted-foreground mx-auto mt-2 w-full max-w-[600px] text-sm font-normal">
 					Create virtual keys to assign permissions, spending limits, and usage quotas to teams, customers, or API clients.
 				</div>
 				<div className="mx-auto mt-6 flex flex-row flex-wrap items-center justify-center gap-2">

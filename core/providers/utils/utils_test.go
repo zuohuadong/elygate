@@ -658,9 +658,10 @@ func TestMarshalSorted_Deterministic(t *testing.T) {
 	}
 }
 
-// TestCheckAndDecodeBody_PooledGzip verifies that CheckAndDecodeBody correctly
-// decompresses gzip-encoded responses using pooled gzip readers.
-func TestCheckAndDecodeBody_PooledGzip(t *testing.T) {
+// TestCheckAndDecodeBody_ContentEncodings verifies that unary provider responses
+// are decoded with the shared pooled readers before JSON parsing.
+func TestCheckAndDecodeBody_ContentEncodings(t *testing.T) {
+	chainedPayload := gzipCompress([]byte(`{"message":"chained"}`))
 	tests := []struct {
 		name            string
 		body            []byte
@@ -690,6 +691,36 @@ func TestCheckAndDecodeBody_PooledGzip(t *testing.T) {
 			wantErr:         false,
 		},
 		{
+			name:            "brotli encoded body",
+			body:            compressBrotli([]byte(`{"input_tokens":16998}`)),
+			contentEncoding: "br",
+			wantBody:        `{"input_tokens":16998}`,
+		},
+		{
+			name:            "deflate encoded body",
+			body:            compressFlate([]byte(`{"message":"deflate"}`)),
+			contentEncoding: "deflate",
+			wantBody:        `{"message":"deflate"}`,
+		},
+		{
+			name:            "zstd encoded body",
+			body:            compressZstd([]byte(`{"message":"zstd"}`)),
+			contentEncoding: "zstd",
+			wantBody:        `{"message":"zstd"}`,
+		},
+		{
+			name:            "identity encoded body",
+			body:            []byte(`{"message":"identity"}`),
+			contentEncoding: "identity",
+			wantBody:        `{"message":"identity"}`,
+		},
+		{
+			name:            "chained gzip then brotli body",
+			body:            compressBrotli(chainedPayload),
+			contentEncoding: "gzip, br",
+			wantBody:        `{"message":"chained"}`,
+		},
+		{
 			name:            "no encoding - plain body",
 			body:            []byte(`plain text`),
 			contentEncoding: "",
@@ -707,6 +738,30 @@ func TestCheckAndDecodeBody_PooledGzip(t *testing.T) {
 			name:            "invalid gzip data",
 			body:            []byte{0xFF, 0xFE, 0xFD},
 			contentEncoding: "gzip",
+			wantErr:         true,
+		},
+		{
+			name:            "invalid brotli data",
+			body:            []byte{0xFF, 0xFE, 0xFD},
+			contentEncoding: "br",
+			wantErr:         true,
+		},
+		{
+			name:            "invalid deflate data",
+			body:            []byte{0xFF, 0xFE, 0xFD},
+			contentEncoding: "deflate",
+			wantErr:         true,
+		},
+		{
+			name:            "invalid zstd data",
+			body:            []byte{0xFF, 0xFE, 0xFD},
+			contentEncoding: "zstd",
+			wantErr:         true,
+		},
+		{
+			name:            "unsupported encoding",
+			body:            []byte(`encoded somehow`),
+			contentEncoding: "snappy",
 			wantErr:         true,
 		},
 	}
@@ -1938,6 +1993,76 @@ func TestStripThoughtSignature(t *testing.T) {
 	}
 }
 
+func TestSanitizeAnthropicToolUseID(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+	}{
+		{"empty", ""},
+		{"already valid", "call_abc123_XYZ-9"},
+		{"kimi-style colon and dot", "functions.Bash:0"},
+		{"gemini-style slash", "projects/foo/tool/1"},
+		{"only unsafe chars", "::.."},
+		{"long id with one unsafe char", "a-very-long-tool-call-identifier-that-goes-on-and-on:0"},
+		{"long id with many unsafe chars", strings.Repeat("segment.with.dots/and:colons/", 5)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := SanitizeAnthropicToolUseID(tc.in)
+
+			// Anthropic's pattern requires at least one character, so an already-valid,
+			// non-empty id is the only case left unchanged; everything else (including
+			// the empty string) must be rewritten to a non-empty, conforming id.
+			if tc.in != "" && !anthropicUnsafeToolUseIDCharRegex.MatchString(tc.in) {
+				if got != tc.in {
+					t.Errorf("SanitizeAnthropicToolUseID(%q) = %q, want unchanged", tc.in, got)
+				}
+				return
+			}
+			if got == "" {
+				t.Errorf("SanitizeAnthropicToolUseID(%q) = empty, want a non-empty conforming id", tc.in)
+			}
+			if anthropicUnsafeToolUseIDCharRegex.MatchString(got) {
+				t.Errorf("SanitizeAnthropicToolUseID(%q) = %q, still contains unsafe characters", tc.in, got)
+			}
+			if len(got) > maxSanitizedAnthropicToolUseIDLen {
+				t.Errorf("SanitizeAnthropicToolUseID(%q) = %q (len %d), exceeds %d-char cap", tc.in, got, len(got), maxSanitizedAnthropicToolUseIDLen)
+			}
+			if got2 := SanitizeAnthropicToolUseID(tc.in); got2 != got {
+				t.Errorf("SanitizeAnthropicToolUseID(%q) is not deterministic: %q != %q", tc.in, got, got2)
+			}
+		})
+	}
+
+	// A tool_use id and its matching tool_result id must sanitize identically,
+	// since Anthropic requires them to reference the same value.
+	toolUseID := "functions.get_weather:0"
+	if SanitizeAnthropicToolUseID(toolUseID) != SanitizeAnthropicToolUseID(toolUseID) {
+		t.Error("matching tool_use/tool_result ids diverged after sanitization")
+	}
+
+	// Distinct ids that collapse to the same replaced-character skeleton must
+	// still sanitize to distinct values (hash is computed on the original id).
+	if SanitizeAnthropicToolUseID("functions.Bash:0") == SanitizeAnthropicToolUseID("functions.Bash:1") {
+		t.Error("distinct tool ids sanitized to the same value")
+	}
+}
+
+func TestSanitizeAnthropicToolUseIDPtr(t *testing.T) {
+	if got := SanitizeAnthropicToolUseIDPtr(nil); got != nil {
+		t.Errorf("SanitizeAnthropicToolUseIDPtr(nil) = %v, want nil", got)
+	}
+
+	id := "functions.Bash:0"
+	got := SanitizeAnthropicToolUseIDPtr(&id)
+	if got == nil {
+		t.Fatal("SanitizeAnthropicToolUseIDPtr returned nil for non-nil input")
+	}
+	if *got != SanitizeAnthropicToolUseID(id) {
+		t.Errorf("SanitizeAnthropicToolUseIDPtr(%q) = %q, want %q", id, *got, SanitizeAnthropicToolUseID(id))
+	}
+}
+
 // finalizerTestTracer is a minimal schemas.Tracer that models only the
 // deferred-span lifecycle: a span stays parked until ClearDeferredSpan runs.
 // It records the status passed to EndSpan so tests can assert span outcomes.
@@ -2077,5 +2202,40 @@ func TestProcessAndSendResponse_CompletesSpanWhenFinalSendFails(t *testing.T) {
 	}
 	if tracer.endStatus != schemas.SpanStatusOk {
 		t.Errorf("successful stream whose delivery failed should end as %q, got %q", schemas.SpanStatusOk, tracer.endStatus)
+	}
+}
+
+// TestProviderSendsDoneMarker guards the stream termination switch: a provider
+// missing from the non-DONE case would make the stream loop in
+// core/providers/openai/openai.go wait indefinitely for a [DONE] marker it never sends.
+func TestProviderSendsDoneMarker(t *testing.T) {
+	tests := []struct {
+		provider schemas.ModelProvider
+		want     bool
+	}{
+		// Providers that don't send a [DONE] marker; stream ends on finish_reason.
+		{schemas.Cerebras, false},
+		{schemas.Perplexity, false},
+		{schemas.Bedrock, false},
+		{schemas.BedrockMantle, false},
+		// Providers that do send a [DONE] marker.
+		{schemas.OpenAI, true},
+		{schemas.Azure, true},
+		{schemas.Anthropic, true},
+		{schemas.Groq, true},
+		{schemas.OpenRouter, true},
+		// HuggingFace's router does send [DONE]. It was previously listed as not
+		// sending one, which made the stream loop break on finish_reason and drop
+		// the trailing usage-only chunk that several inference providers emit
+		// after it, leaving the stream with zero tokens and zero cost.
+		{schemas.HuggingFace, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.provider), func(t *testing.T) {
+			if got := ProviderSendsDoneMarker(tt.provider); got != tt.want {
+				t.Errorf("ProviderSendsDoneMarker(%s) = %v, want %v", tt.provider, got, tt.want)
+			}
+		})
 	}
 }

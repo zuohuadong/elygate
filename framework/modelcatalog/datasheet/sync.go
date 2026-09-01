@@ -11,7 +11,6 @@ import (
 	"time"
 
 	bifrost "github.com/maximhq/bifrost/core"
-	providerUtils "github.com/maximhq/bifrost/core/providers/utils"
 	configstoreTables "github.com/maximhq/bifrost/framework/configstore/tables"
 )
 
@@ -29,12 +28,6 @@ const (
 // gossip hook — none of that lives here. SyncFromURL is the pure
 // "URL → DB → memory" step.
 func (s *Store) SyncFromURL(ctx context.Context) error {
-	if !s.HasPricingSyncSource() {
-		if s.logger != nil {
-			s.logger.Debug("pricing catalog sync is disabled: no pricing URL configured")
-		}
-		return nil
-	}
 	pricingData, err := withRetries(ctx, urlFetchMaxRetries, urlFetchMaxBackoff, func() (map[string]Entry, error) {
 		return s.loadPricingFromURL(ctx)
 	})
@@ -82,11 +75,6 @@ func (s *Store) SyncFromURL(ctx context.Context) error {
 		s.applyPricingData(pricingData)
 	}
 
-	// Populate provider-utils model params cache from any max_output_tokens
-	// fields in the pricing entries so providers can read those without a
-	// separate model-parameters sync round-trip.
-	s.populateModelParamsFromPricing(pricingData)
-
 	if s.logger != nil {
 		s.logger.Debug("successfully synced %d pricing records", len(pricingData))
 	}
@@ -123,9 +111,6 @@ func (s *Store) LoadFromDB(ctx context.Context) error {
 // LoadFromURLIntoMemory loads pricing from the URL directly into memory
 // (no DB). Used when the composer was built without a config store.
 func (s *Store) LoadFromURLIntoMemory(ctx context.Context) error {
-	if !s.HasPricingSyncSource() {
-		return nil
-	}
 	pricingData, err := withRetries(ctx, urlFetchMaxRetries, urlFetchMaxBackoff, func() (map[string]Entry, error) {
 		return s.loadPricingFromURL(ctx)
 	})
@@ -133,7 +118,6 @@ func (s *Store) LoadFromURLIntoMemory(ctx context.Context) error {
 		return fmt.Errorf("failed to load pricing data from URL: %w", err)
 	}
 	s.applyPricingData(pricingData)
-	s.populateModelParamsFromPricing(pricingData)
 	return nil
 }
 
@@ -152,7 +136,7 @@ func (s *Store) applyPricingData(pricingData map[string]Entry) {
 	s.mu.Unlock()
 }
 
-// filePathFromURL resolves a parsed file:// URL to a filesystem path,
+// FilePathFromURL resolves a parsed file:// URL to a filesystem path,
 // supporting both absolute and relative references. Go's url.Parse scatters a
 // relative path across different fields depending on its form, so we reassemble
 // it here:
@@ -163,7 +147,11 @@ func (s *Store) applyPricingData(pricingData map[string]Entry) {
 //
 // Relative paths resolve against the process working directory, matching how the
 // sqlite config store treats a relative "path" value.
-func filePathFromURL(parsed *url.URL) string {
+//
+// Exported because every air-gapped source in the catalog resolves file:// URLs
+// the same way: the pricing datasheet, the model parameters datasheet, and the
+// MCP library catalog (modelcatalog.fetchMCPLibrary).
+func FilePathFromURL(parsed *url.URL) string {
 	if parsed.Opaque != "" {
 		return parsed.Opaque
 	}
@@ -188,7 +176,7 @@ func (s *Store) loadPricingFromURL(ctx context.Context) (map[string]Entry, error
 	var data []byte
 
 	if parsed.Scheme == "file" {
-		data, err = os.ReadFile(filePathFromURL(parsed))
+		data, err = os.ReadFile(FilePathFromURL(parsed))
 		if err != nil {
 			return nil, fmt.Errorf("failed to read pricing file: %w", err)
 		}
@@ -223,25 +211,4 @@ func (s *Store) loadPricingFromURL(ctx context.Context) (map[string]Entry, error
 	}
 
 	return pricingData, nil
-}
-
-// populateModelParamsFromPricing extracts max_output_tokens from pricing
-// entries and seeds the provider-utils model params cache so providers can
-// look up max output tokens without a separate model-parameters sync.
-func (s *Store) populateModelParamsFromPricing(pricingData map[string]Entry) {
-	modelParamsEntries := make(map[string]providerUtils.ModelParams)
-	for modelKey, entry := range pricingData {
-		if entry.MaxOutputTokens != nil {
-			modelName := extractModelName(modelKey)
-			modelParamsEntries[modelName] = providerUtils.ModelParams{
-				MaxOutputTokens: entry.MaxOutputTokens,
-			}
-		}
-	}
-	if len(modelParamsEntries) > 0 {
-		providerUtils.BulkSetModelParams(modelParamsEntries)
-		if s.logger != nil {
-			s.logger.Debug("populated %d model params entries from pricing datasheet", len(modelParamsEntries))
-		}
-	}
 }

@@ -29,7 +29,7 @@ func TestBudgetResolver_EvaluateRequest_AllowedRequest(t *testing.T) {
 	resolver := NewBudgetResolver(store, nil, logger, nil)
 	ctx := &schemas.BifrostContext{}
 
-	result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false)
+	result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false, false)
 
 	assertDecision(t, DecisionAllow, result)
 	assertVirtualKeyFound(t, result)
@@ -44,7 +44,7 @@ func TestBudgetResolver_EvaluateRequest_VirtualKeyNotFound(t *testing.T) {
 	resolver := NewBudgetResolver(store, nil, logger, nil)
 	ctx := &schemas.BifrostContext{}
 
-	result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-nonexistent", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false)
+	result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-nonexistent", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false, false)
 
 	assertDecision(t, DecisionVirtualKeyNotFound, result)
 }
@@ -62,7 +62,7 @@ func TestBudgetResolver_EvaluateRequest_VirtualKeyBlocked(t *testing.T) {
 	resolver := NewBudgetResolver(store, nil, logger, nil)
 	ctx := &schemas.BifrostContext{}
 
-	result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false)
+	result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false, false)
 
 	assertDecision(t, DecisionVirtualKeyBlocked, result)
 }
@@ -86,7 +86,7 @@ func TestBudgetResolver_EvaluateRequest_ProviderBlocked(t *testing.T) {
 	ctx := &schemas.BifrostContext{}
 
 	// Try to use OpenAI (not allowed)
-	result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false)
+	result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false, false)
 
 	assertDecision(t, DecisionProviderBlocked, result)
 	assertVirtualKeyFound(t, result)
@@ -114,7 +114,7 @@ func TestBudgetResolver_EvaluateRequest_ListModelsBypassesProviderBlock(t *testi
 	ctx := &schemas.BifrostContext{}
 
 	// OpenAI is not in the allowlist, but ListModelsRequest must not be provider-blocked.
-	result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ListModelsRequest, false)
+	result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ListModelsRequest, false, false)
 
 	assert.NotEqual(t, DecisionProviderBlocked, result.Decision, "ListModelsRequest must bypass provider allowlist gating")
 	assertDecision(t, DecisionAllow, result)
@@ -145,9 +145,148 @@ func TestBudgetResolver_EvaluateRequest_ModelBlocked(t *testing.T) {
 	ctx := &schemas.BifrostContext{}
 
 	// Try to use gpt-4o-mini (not in allowed list)
-	result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4o-mini", schemas.ChatCompletionRequest, false)
+	result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4o-mini", schemas.ChatCompletionRequest, false, false)
 
 	assertDecision(t, DecisionModelBlocked, result)
+}
+
+// TestBudgetResolver_EvaluateRequest_SkipProviderCheckAllowsUnconfiguredProvider verifies
+// that skipProviderCheck drops the provider allowlist, and drops the model allowlist with
+// it when the VK has no config for that provider. Callers that are evaluated but never
+// routed (the enterprise /inspect endpoint) set this: their provider is whatever upstream
+// the caller was already talking to, so the allowlist has nothing to say about it. Without
+// the model gate following along the request would just fail one step later on a model list
+// that only exists inside a provider config the VK does not have.
+func TestBudgetResolver_EvaluateRequest_SkipProviderCheckAllowsUnconfiguredProvider(t *testing.T) {
+	logger := NewMockLogger()
+
+	// Anthropic-only VK, same shape as TestBudgetResolver_EvaluateRequest_ProviderBlocked.
+	providerConfigs := []configstoreTables.TableVirtualKeyProviderConfig{
+		buildProviderConfig("anthropic", []string{"claude-3-sonnet"}),
+	}
+	vk := buildVirtualKeyWithProviders("vk1", "sk-bf-test", "Test VK", providerConfigs)
+
+	store, err := NewLocalGovernanceStore(context.Background(), logger, nil, &configstore.GovernanceConfig{
+		VirtualKeys: []configstoreTables.TableVirtualKey{*vk},
+	}, nil)
+	require.NoError(t, err)
+
+	resolver := NewBudgetResolver(store, nil, logger, nil)
+	ctx := &schemas.BifrostContext{}
+
+	// Baseline: without the flag this is a provider block.
+	blocked := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false, false)
+	assertDecision(t, DecisionProviderBlocked, blocked)
+
+	// With the flag the same request is allowed, and does not fall through to a model block.
+	result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false, true)
+	assert.NotEqual(t, DecisionProviderBlocked, result.Decision, "skipProviderCheck must bypass the provider allowlist")
+	assert.NotEqual(t, DecisionModelBlocked, result.Decision, "an unconfigured provider carries no model allowlist to block on")
+	assertDecision(t, DecisionAllow, result)
+}
+
+// TestBudgetResolver_EvaluateRequest_SkipProviderCheckKeepsModelAllowlist verifies that
+// skipProviderCheck only relaxes the model gate for providers the VK has no config for.
+// A provider the VK does configure keeps its model allowlist, so model governance stays
+// intact on the paths that set the flag.
+func TestBudgetResolver_EvaluateRequest_SkipProviderCheckKeepsModelAllowlist(t *testing.T) {
+	logger := NewMockLogger()
+
+	providerConfigs := []configstoreTables.TableVirtualKeyProviderConfig{
+		{
+			Provider:      "openai",
+			AllowedModels: []string{"gpt-4", "gpt-4-turbo"},
+			Weight:        bifrost.Ptr(1.0),
+			RateLimit:     nil,
+			Keys:          []configstoreTables.TableKey{},
+		},
+	}
+	vk := buildVirtualKeyWithProviders("vk1", "sk-bf-test", "Test VK", providerConfigs)
+
+	store, err := NewLocalGovernanceStore(context.Background(), logger, nil, &configstore.GovernanceConfig{
+		VirtualKeys: []configstoreTables.TableVirtualKey{*vk},
+	}, nil)
+	require.NoError(t, err)
+
+	resolver := NewBudgetResolver(store, nil, logger, nil)
+	ctx := &schemas.BifrostContext{}
+
+	// openai IS configured, so gpt-4o-mini stays blocked even with the flag set.
+	result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4o-mini", schemas.ChatCompletionRequest, false, true)
+	assertDecision(t, DecisionModelBlocked, result)
+
+	// And an allowed model on that same configured provider still passes.
+	allowed := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false, true)
+	assertDecision(t, DecisionAllow, allowed)
+}
+
+// TestGovernancePlugin_EvaluateGovernanceRequest_DirectKeySatisfiesMandatoryAuth verifies direct provider keys satisfy mandatory auth after transport validation.
+func TestGovernancePlugin_EvaluateGovernanceRequest_DirectKeySatisfiesMandatoryAuth(t *testing.T) {
+	logger := NewMockLogger()
+	store, err := NewLocalGovernanceStore(context.Background(), logger, nil, &configstore.GovernanceConfig{}, nil)
+	require.NoError(t, err)
+
+	mandatory := true
+	plugin := &GovernancePlugin{
+		store:         store,
+		resolver:      NewBudgetResolver(store, nil, logger, nil),
+		isVkMandatory: &mandatory,
+		isEnterprise:  true,
+	}
+
+	ctx := &schemas.BifrostContext{}
+	ctx.SetValue(schemas.BifrostContextKeyDirectKey, schemas.Key{
+		ID:    "header-provided",
+		Name:  "header-provided",
+		Value: schemas.SecretVar{Val: "sk-real-openai-key"},
+	})
+
+	result, bifrostErr := plugin.EvaluateGovernanceRequest(ctx, &EvaluationRequest{
+		Provider: schemas.OpenAI,
+		Model:    "gpt-4o",
+	}, schemas.PassthroughRequest)
+
+	require.Nil(t, bifrostErr)
+	assertDecision(t, DecisionAllow, result)
+}
+
+// TestGovernancePlugin_EvaluateGovernanceRequest_HeaderWithoutContextDoesNotSatisfyMandatoryAuth verifies callers cannot spoof direct-key auth with only a request header.
+func TestGovernancePlugin_EvaluateGovernanceRequest_HeaderWithoutContextDoesNotSatisfyMandatoryAuth(t *testing.T) {
+	logger := NewMockLogger()
+	store, err := NewLocalGovernanceStore(context.Background(), logger, nil, &configstore.GovernanceConfig{}, nil)
+	require.NoError(t, err)
+
+	mandatory := true
+	plugin := &GovernancePlugin{
+		store:         store,
+		resolver:      NewBudgetResolver(store, nil, logger, nil),
+		isVkMandatory: &mandatory,
+		isEnterprise:  true,
+	}
+
+	_, bifrostErr := plugin.EvaluateGovernanceRequest(&schemas.BifrostContext{}, &EvaluationRequest{
+		Provider: schemas.OpenAI,
+		Model:    "gpt-4o",
+	}, schemas.PassthroughRequest)
+
+	require.NotNil(t, bifrostErr)
+	require.NotNil(t, bifrostErr.StatusCode)
+	assert.Equal(t, 401, *bifrostErr.StatusCode)
+	assert.Equal(t, "authentication is required. Provide a virtual key (x-bf-vk), API key, or user token.", bifrostErr.Error.Message)
+}
+
+// TestHasDirectKeyAuth reads only the transport-owned direct-key context value.
+func TestHasDirectKeyAuth(t *testing.T) {
+	ctx := &schemas.BifrostContext{}
+	assert.False(t, hasDirectKeyAuth(ctx))
+
+	ctx.SetValue(schemas.BifrostContextKeyDirectKey, schemas.Key{
+		ID:    "header-provided",
+		Name:  "header-provided",
+		Value: schemas.SecretVar{Val: "sk-real-openai-key"},
+	})
+
+	assert.True(t, hasDirectKeyAuth(ctx))
 }
 
 // TestBudgetResolver_EvaluateRequest_RateLimitExceeded_TokenLimit tests token limit
@@ -167,7 +306,7 @@ func TestBudgetResolver_EvaluateRequest_RateLimitExceeded_TokenLimit(t *testing.
 	resolver := NewBudgetResolver(store, nil, logger, nil)
 	ctx := &schemas.BifrostContext{}
 
-	result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false)
+	result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false, false)
 
 	assertDecision(t, DecisionTokenLimited, result)
 	assertRateLimitInfo(t, result)
@@ -190,7 +329,7 @@ func TestBudgetResolver_EvaluateRequest_RateLimitExceeded_RequestLimit(t *testin
 	resolver := NewBudgetResolver(store, nil, logger, nil)
 	ctx := &schemas.BifrostContext{}
 
-	result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false)
+	result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false, false)
 
 	assertDecision(t, DecisionRequestLimited, result)
 }
@@ -228,7 +367,7 @@ func TestBudgetResolver_EvaluateRequest_RateLimitExpired(t *testing.T) {
 	resolver := NewBudgetResolver(store, nil, logger, nil)
 	ctx := &schemas.BifrostContext{}
 
-	result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false)
+	result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false, false)
 
 	// Should allow because rate limit was expired and has been reset
 	assertDecision(t, DecisionAllow, result)
@@ -250,7 +389,7 @@ func TestBudgetResolver_EvaluateRequest_BudgetExceeded(t *testing.T) {
 	resolver := NewBudgetResolver(store, nil, logger, nil)
 	ctx := &schemas.BifrostContext{}
 
-	result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false)
+	result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false, false)
 
 	assertDecision(t, DecisionBudgetExceeded, result)
 }
@@ -277,7 +416,7 @@ func TestBudgetResolver_EvaluateRequest_BudgetExpired(t *testing.T) {
 	resolver := NewBudgetResolver(store, nil, logger, nil)
 	ctx := &schemas.BifrostContext{}
 
-	result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false)
+	result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false, false)
 
 	// Should allow because budget is expired (will be reset)
 	assertDecision(t, DecisionAllow, result)
@@ -312,7 +451,7 @@ func TestBudgetResolver_EvaluateRequest_MultiLevelBudgetHierarchy(t *testing.T) 
 	ctx := &schemas.BifrostContext{}
 
 	// Test: All under limit should pass
-	result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false)
+	result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false, false)
 	assertDecision(t, DecisionAllow, result)
 
 	// Test: VK budget exceeds should fail
@@ -323,7 +462,7 @@ func TestBudgetResolver_EvaluateRequest_MultiLevelBudgetHierarchy(t *testing.T) 
 		vkBudgetToUpdate.CurrentUsage = 100.0
 		store.budgets.Store("vk-budget", vkBudgetToUpdate)
 	}
-	result = resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false)
+	result = resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false, false)
 	assertDecision(t, DecisionBudgetExceeded, result)
 }
 
@@ -345,7 +484,7 @@ func TestBudgetResolver_EvaluateRequest_ProviderLevelRateLimit(t *testing.T) {
 	resolver := NewBudgetResolver(store, nil, logger, nil)
 	ctx := &schemas.BifrostContext{}
 
-	result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false)
+	result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false, false)
 
 	assertDecision(t, DecisionTokenLimited, result)
 	assertRateLimitInfo(t, result)
@@ -368,7 +507,7 @@ func TestBudgetResolver_CheckRateLimits_BothExceeded(t *testing.T) {
 	resolver := NewBudgetResolver(store, nil, logger, nil)
 	ctx := &schemas.BifrostContext{}
 
-	result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false)
+	result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false, false)
 
 	assertDecision(t, DecisionRateLimited, result)
 	assert.Contains(t, result.Reason, "rate limit")
@@ -519,7 +658,7 @@ func TestBudgetResolver_ContextPopulation(t *testing.T) {
 	resolver := NewBudgetResolver(store, nil, logger, nil)
 	ctx := &schemas.BifrostContext{}
 
-	result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false)
+	result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false, false)
 
 	assert.Equal(t, DecisionAllow, result.Decision)
 
@@ -550,9 +689,12 @@ func TestBudgetResolver_EvaluateRequest_PassthroughModelFiltering(t *testing.T) 
 		{"passthrough stream disallowed model is blocked", "gpt-4o-mini", schemas.PassthroughStreamRequest, DecisionModelBlocked},
 		{"passthrough stream allowed model passes", "gpt-4", schemas.PassthroughStreamRequest, DecisionAllow},
 		{"passthrough stream without model has no restriction", "", schemas.PassthroughStreamRequest, DecisionAllow},
-		// Scoping guard: batch is model-not-required and not passthrough, so its model is never
-		// filtered even when set to a disallowed value (behavior unchanged by the passthrough fix).
-		{"batch with disallowed model is not filtered", "gpt-4o-mini", schemas.BatchCreateRequest, DecisionAllow},
+		// Batch create carries no model of its own for a file-based batch, but an inline
+		// one names a model per item and governance evaluates each — so the allowlist
+		// applies whenever a model is actually present.
+		{"batch with disallowed model is blocked", "gpt-4o-mini", schemas.BatchCreateRequest, DecisionModelBlocked},
+		{"batch with allowed model passes", "gpt-4", schemas.BatchCreateRequest, DecisionAllow},
+		{"batch without model has no restriction", "", schemas.BatchCreateRequest, DecisionAllow},
 	}
 
 	for _, tt := range tests {
@@ -571,7 +713,7 @@ func TestBudgetResolver_EvaluateRequest_PassthroughModelFiltering(t *testing.T) 
 			resolver := NewBudgetResolver(store, nil, logger, nil)
 			ctx := &schemas.BifrostContext{}
 
-			result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, tt.model, tt.requestType, false)
+			result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, tt.model, tt.requestType, false, false)
 			assertDecision(t, tt.want, result)
 		})
 	}
@@ -594,7 +736,7 @@ func TestBudgetResolver_EvaluateVirtualKeyRequest_ActiveNoExpiry(t *testing.T) {
 	resolver := NewBudgetResolver(store, nil, logger, nil)
 	ctx := &schemas.BifrostContext{}
 
-	result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false)
+	result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false, false)
 	assertDecision(t, DecisionAllow, result)
 }
 
@@ -617,7 +759,7 @@ func TestBudgetResolver_EvaluateVirtualKeyRequest_FutureExpiry(t *testing.T) {
 	resolver := NewBudgetResolver(store, nil, logger, nil)
 	ctx := &schemas.BifrostContext{}
 
-	result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false)
+	result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false, false)
 	assertDecision(t, DecisionAllow, result)
 }
 
@@ -640,7 +782,7 @@ func TestBudgetResolver_EvaluateVirtualKeyRequest_ExpiredKey(t *testing.T) {
 	resolver := NewBudgetResolver(store, nil, logger, nil)
 	ctx := &schemas.BifrostContext{}
 
-	result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false)
+	result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false, false)
 	assertDecision(t, DecisionVirtualKeyBlocked, result)
 	assert.Contains(t, result.Reason, "expired")
 }
@@ -662,7 +804,42 @@ func TestBudgetResolver_EvaluateVirtualKeyRequest_InactiveWithFutureExpiry(t *te
 	resolver := NewBudgetResolver(store, nil, logger, nil)
 	ctx := &schemas.BifrostContext{}
 
-	result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false)
+	result := resolver.EvaluateVirtualKeyRequest(ctx, "sk-bf-test", schemas.OpenAI, "gpt-4", schemas.ChatCompletionRequest, false, false)
 	assertDecision(t, DecisionVirtualKeyBlocked, result)
 	assert.Contains(t, result.Reason, "inactive")
+}
+
+// TestBudgetResolver_EvaluateRequest_SkipModelCheckAllowsBlockedModel verifies that
+// the skip-model-check context flag drops the virtual key model allowlist even for a
+// provider the key does configure. Callers that are evaluated but never routed (the
+// enterprise /inspect endpoint) set the flag: they never reach a provider, so the model
+// on the payload is the one the caller was already talking to, not a model an operator
+// granted. skipProviderCheck alone is not enough here, because a configured provider
+// still carries a model allowlist for the request to fail on one step later.
+func TestBudgetResolver_EvaluateRequest_SkipModelCheckAllowsBlockedModel(t *testing.T) {
+	logger := NewMockLogger()
+
+	providerConfigs := []configstoreTables.TableVirtualKeyProviderConfig{
+		buildProviderConfig("openai", []string{"gpt-4"}),
+	}
+	vk := buildVirtualKeyWithProviders("vk1", "sk-bf-test", "Test VK", providerConfigs)
+
+	store, err := NewLocalGovernanceStore(context.Background(), logger, nil, &configstore.GovernanceConfig{
+		VirtualKeys: []configstoreTables.TableVirtualKey{*vk},
+	}, nil)
+	require.NoError(t, err)
+
+	resolver := NewBudgetResolver(store, nil, logger, nil)
+
+	// Baseline: without the flag the configured provider's model allowlist blocks.
+	plain := &schemas.BifrostContext{}
+	blocked := resolver.EvaluateVirtualKeyRequest(plain, "sk-bf-test", schemas.OpenAI, "gpt-4o-mini", schemas.ChatCompletionRequest, false, true)
+	assertDecision(t, DecisionModelBlocked, blocked)
+
+	// With the flag the same request is allowed.
+	skipping := &schemas.BifrostContext{}
+	skipping.SetValue(schemas.BifrostContextKeySkipModelCheck, true)
+	result := resolver.EvaluateVirtualKeyRequest(skipping, "sk-bf-test", schemas.OpenAI, "gpt-4o-mini", schemas.ChatCompletionRequest, false, true)
+	assert.NotEqual(t, DecisionModelBlocked, result.Decision, "skipModelCheck must bypass the virtual key model allowlist")
+	assertDecision(t, DecisionAllow, result)
 }

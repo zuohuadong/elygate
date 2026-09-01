@@ -31,19 +31,41 @@ type PgvectorStore struct {
 
 var pgvectorIdentifier = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,62}$`)
 
-func newPgvectorStore(ctx context.Context, config *PgvectorConfig, _ schemas.Logger) (*PgvectorStore, error) {
-	if config == nil || strings.TrimSpace(config.ConnectionString.GetValue()) == "" {
-		return nil, fmt.Errorf("pgvector connection_string is required")
+// ValidatePgvectorConfig validates persisted pgvector settings without opening a
+// database connection. Management APIs use this before saving restart-bound
+// configuration; runtime initialization performs the same validation before
+// connecting.
+func ValidatePgvectorConfig(config *PgvectorConfig, requireConnectionString bool) error {
+	if config == nil {
+		return fmt.Errorf("pgvector config is required")
+	}
+	if requireConnectionString && !config.ConnectionString.IsSet() {
+		return fmt.Errorf("pgvector connection_string is required")
 	}
 	schema := config.Schema
 	if schema == "" {
 		schema = "bifrost_vectors"
 	}
 	if !pgvectorIdentifier.MatchString(schema) {
-		return nil, fmt.Errorf("pgvector schema must be a PostgreSQL identifier")
+		return fmt.Errorf("pgvector schema must be a PostgreSQL identifier")
+	}
+	return nil
+}
+
+func newPgvectorStore(ctx context.Context, config *PgvectorConfig, _ schemas.Logger) (*PgvectorStore, error) {
+	if err := ValidatePgvectorConfig(config, true); err != nil {
+		return nil, err
+	}
+	connectionString := strings.TrimSpace(config.ConnectionString.GetValue())
+	if connectionString == "" {
+		return nil, fmt.Errorf("pgvector connection_string did not resolve to a value")
+	}
+	schema := config.Schema
+	if schema == "" {
+		schema = "bifrost_vectors"
 	}
 
-	pool, err := pgxpool.New(ctx, config.ConnectionString.GetValue())
+	pool, err := pgxpool.New(ctx, connectionString)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create pgvector connection pool: %w", err)
 	}
@@ -75,8 +97,8 @@ func (s *PgvectorStore) Ping(ctx context.Context) error {
 }
 
 func (s *PgvectorStore) CreateNamespace(ctx context.Context, namespace string, dimension int, _ map[string]VectorStoreProperties) error {
-	if dimension <= 1 {
-		return fmt.Errorf("pgvector namespace dimension must be greater than 1")
+	if dimension <= 0 {
+		return fmt.Errorf("pgvector namespace dimension must be greater than 0")
 	}
 	table, err := s.qualifiedTable(namespace)
 	if err != nil {
@@ -92,7 +114,7 @@ func (s *PgvectorStore) CreateNamespace(ctx context.Context, namespace string, d
 	}
 
 	var existingDimension int
-	err = s.pool.QueryRow(ctx, `SELECT a.atttypmod - 4
+	err = s.pool.QueryRow(ctx, `SELECT a.atttypmod
 		FROM pg_attribute a
 		JOIN pg_class c ON c.oid = a.attrelid
 		JOIN pg_namespace n ON n.oid = c.relnamespace

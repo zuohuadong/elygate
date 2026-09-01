@@ -79,6 +79,24 @@ func TestOpenAIResponsesRequest_MarshalJSON_ReasoningMaxTokensAbsent(t *testing.
 			},
 			description: "When Reasoning is nil, reasoning field should not appear in output",
 		},
+		{
+			name: "reasoning context and mode are preserved while max_tokens is dropped",
+			request: &OpenAIResponsesRequest{
+				Model: "gpt-5.6",
+				Input: OpenAIResponsesRequestInput{
+					OpenAIResponsesRequestInputStr: schemas.Ptr("test"),
+				},
+				ResponsesParameters: schemas.ResponsesParameters{
+					Reasoning: &schemas.ResponsesParametersReasoning{
+						Effort:    schemas.Ptr("max"),
+						Context:   schemas.Ptr("current_turn"),
+						Mode:      schemas.Ptr("pro"),
+						MaxTokens: schemas.Ptr(1000),
+					},
+				},
+			},
+			description: "reasoning.context and reasoning.mode should pass through to output",
+		},
 	}
 
 	for _, tt := range tests {
@@ -117,12 +135,63 @@ func TestOpenAIResponsesRequest_MarshalJSON_ReasoningMaxTokensAbsent(t *testing.
 							t.Error("reasoning.generate_summary should be present in output")
 						}
 					}
+					if tt.request.Reasoning.Context != nil {
+						if got, exists := reasoning["context"]; !exists || got != *tt.request.Reasoning.Context {
+							t.Errorf("reasoning.context = %v, want %q", got, *tt.request.Reasoning.Context)
+						}
+					}
+					if tt.request.Reasoning.Mode != nil {
+						if got, exists := reasoning["mode"]; !exists || got != *tt.request.Reasoning.Mode {
+							t.Errorf("reasoning.mode = %v, want %q", got, *tt.request.Reasoning.Mode)
+						}
+					}
 				}
 			} else if tt.request.Reasoning != nil {
 				// If reasoning is set, it should appear in JSON (unless all fields are nil/omitted)
 				if tt.request.Reasoning.Effort != nil || tt.request.Reasoning.Summary != nil || tt.request.Reasoning.GenerateSummary != nil {
 					t.Error("reasoning field should be present in JSON when Reasoning is set with non-nil fields")
 				}
+			}
+		})
+	}
+}
+
+func TestNormalizeOpenAIReasoningEffort(t *testing.T) {
+	tests := []struct {
+		name     string
+		model    string
+		effort   string
+		expected string
+	}{
+		{"preserves minimal for gpt-5", "gpt-5", "minimal", "minimal"},
+		{"preserves minimal for gpt-5-mini", "gpt-5-mini", "minimal", "minimal"},
+		{"preserves minimal for gpt-5-nano", "gpt-5-nano", "minimal", "minimal"},
+		{"maps minimal to low for gpt-5.4", "gpt-5.4", "minimal", "low"},
+		{"maps minimal to low for gpt-5.2", "gpt-5.2", "minimal", "low"},
+		{"maps minimal to low for gpt-5.6", "gpt-5.6", "minimal", "low"},
+		{"maps minimal to low for o3", "o3", "minimal", "low"},
+		{"maps minimal to low for o1", "o1", "minimal", "low"},
+		{"maps minimal to low for o4", "o4", "minimal", "low"},
+		{"maps minimal to low for gpt-oss", "gpt-oss", "minimal", "low"},
+		{"gpt-5.6 keeps max", "gpt-5.6", "max", "max"},
+		{"gpt-5.6 variant keeps max", "gpt-5.6-terra", "max", "max"},
+		{"gpt-5.6 keeps xhigh", "gpt-5.6", "xhigh", "xhigh"},
+		{"provider-prefixed gpt-5.6 keeps max", "openai/gpt-5.6", "max", "max"},
+		{"deepseek-v4 keeps max", "deepseek-v4", "max", "max"},
+		{"glm-5.2 keeps max", "glm-5.2", "max", "max"},
+		{"gpt-5.5 downgrades max to xhigh", "gpt-5.5", "max", "xhigh"},
+		{"gpt-5.2 downgrades max to xhigh", "gpt-5.2", "max", "xhigh"},
+		{"gpt-5.5 keeps xhigh", "gpt-5.5", "xhigh", "xhigh"},
+		{"gpt-5.1 downgrades max to high", "gpt-5.1", "max", "high"},
+		{"gpt-5.1 downgrades xhigh to high", "gpt-5.1", "xhigh", "high"},
+		{"standard effort passes through", "gpt-5.1", "medium", "medium"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			caps := schemas.ResolveModelCaps(schemas.OpenAI, tt.model)
+			if got := caps.NormalizeReasoningEffort(tt.effort, defaultEffortControl(tt.model)); got != tt.expected {
+				t.Errorf("model %q: NormalizeReasoningEffort(%q) = %q, want %q", tt.model, tt.effort, got, tt.expected)
 			}
 		})
 	}
@@ -1034,5 +1103,57 @@ func TestOpenAICompactionRequest_MarshalJSON_Input(t *testing.T) {
 			}
 			tt.assert(t, m)
 		})
+	}
+}
+
+// TestEffortPredicatesAgainstCatalogIDs pins the three effort predicates against
+// model IDs as they actually appear in the datasheet. bareModelLower strips only
+// one leading segment, so region and vendor namespaces survive ("azure/eu/gpt-5.2"
+// → "eu/gpt-5.2"); the xhigh/max needles are matched as substrings for that
+// reason, while "minimal" needs a boundary check because "gpt-5" is a literal
+// prefix of every dot-revision that dropped it.
+func TestEffortPredicatesAgainstCatalogIDs(t *testing.T) {
+	cases := []struct {
+		model               string
+		minimal, xhigh, max bool
+	}{
+		// original trio: minimal only
+		{"gpt-5", true, false, false},
+		{"gpt-5-mini", true, false, false},
+		{"gpt-5-nano", true, false, false},
+		{"gpt-5-2025-08-07", true, false, false},
+		{"gpt-5-mini-2025-08-07", true, false, false},
+		{"azure/gpt-5", true, false, false},
+		{"azure/eu/gpt-5-2025-08-07", true, false, false},
+		{"databricks/databricks-gpt-5", true, false, false},
+		// trio variants that never had minimal
+		{"gpt-5-codex", false, false, false},
+		{"gpt-5-pro", false, false, false},
+		{"gpt-5-chat-latest", false, false, false},
+		{"gpt-5-search-api", false, false, false},
+		// dot-revisions: no minimal; xhigh from 5.2
+		{"gpt-5.1", false, false, false},
+		{"gpt-5.2", false, true, false},
+		{"azure/eu/gpt-5.2", false, true, false},
+		{"gmi/openai/gpt-5.2", false, true, false},
+		{"gpt-5.3-codex", false, true, false},
+		{"gpt-5.4", false, true, false},
+		{"gpt-5.6-terra", false, true, true},
+		{"openai.gpt-5.6-sol", false, true, true},
+		// non-gpt families
+		{"deepseek-v4-pro", false, false, true},
+		{"glm-5.2", false, false, true},
+		{"gpt-4o", false, false, false},
+	}
+	for _, c := range cases {
+		if got := acceptsMinimalEffort(c.model); got != c.minimal {
+			t.Errorf("minimal(%q) = %v, want %v", c.model, got, c.minimal)
+		}
+		if got := acceptsXHighEffort(c.model); got != c.xhigh {
+			t.Errorf("xhigh(%q) = %v, want %v", c.model, got, c.xhigh)
+		}
+		if got := acceptsMaxEffort(c.model); got != c.max {
+			t.Errorf("max(%q) = %v, want %v", c.model, got, c.max)
+		}
 	}
 }

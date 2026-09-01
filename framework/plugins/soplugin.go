@@ -18,8 +18,14 @@ type DynamicPlugin struct {
 	plugin   *plugin.Plugin
 
 	// BasePlugin (required)
-	getName func() string
-	cleanup func() error
+	getName           func() string
+	getPluginMetadata func() schemas.PluginMetadata
+	cleanup           func() error
+
+	// HTTPTransportPlugin, pre-auth phase (optional). Forward-compat: new .so plugins can export
+	// HTTPTransportPreAuthHook to run before the transport authenticates the request.
+	// Plugins predating the hook leave it nil and are skipped by the pre-auth phase.
+	httpTransportPreAuthHook func(ctx *schemas.BifrostContext, req *schemas.HTTPRequest) (*schemas.HTTPResponse, error)
 
 	// HTTPTransportPlugin (optional)
 	httpTransportPreHook         func(ctx *schemas.BifrostContext, req *schemas.HTTPRequest) (*schemas.HTTPResponse, error)
@@ -54,9 +60,27 @@ func (dp *DynamicPlugin) GetName() string {
 	return dp.getName()
 }
 
+// GetPluginMetadata returns optional user-facing metadata exported by a dynamic plugin.
+func (dp *DynamicPlugin) GetPluginMetadata() schemas.PluginMetadata {
+	if dp.getPluginMetadata == nil {
+		return schemas.PluginMetadata{}
+	}
+	return dp.getPluginMetadata()
+}
+
 // Cleanup is invoked by core/bifrost.go during plugin unload, reload, and shutdown (BasePlugin interface)
 func (dp *DynamicPlugin) Cleanup() error {
 	return dp.cleanup()
+}
+
+// HTTPTransportPreAuthHook intercepts HTTP requests at the transport layer before the transport
+// authenticates them (HTTPTransportPlugin interface). Same dispatch as the other optional
+// hooks: typed symbol if exported, else no-op.
+func (dp *DynamicPlugin) HTTPTransportPreAuthHook(ctx *schemas.BifrostContext, req *schemas.HTTPRequest) (*schemas.HTTPResponse, error) {
+	if dp.httpTransportPreAuthHook == nil {
+		return nil, nil // No-op if not implemented
+	}
+	return dp.httpTransportPreAuthHook(ctx, req)
 }
 
 // HTTPTransportPreHook intercepts HTTP requests at the transport layer before entering Bifrost core (HTTPTransportPlugin interface)

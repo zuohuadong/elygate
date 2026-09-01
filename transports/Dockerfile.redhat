@@ -1,44 +1,101 @@
-# --- UI Build Stage: Build the React + Vite frontend ---
-FROM node:25-alpine3.23@sha256:bdf2cca6fe3dabd014ea60163eca3f0f7015fbd5c7ee1b0e9ccb4ced6eb02ef4 AS ui-builder
+# --- UI Build Stage: Build the Svelte svadmin panel ---
+FROM oven/bun:1.3.14-alpine@sha256:5acc90a93e91ff07bf72aa90a7c9f0fa189765aec90b47bdbf2152d2196383c0 AS ui-builder
 WORKDIR /app
 
 # Apply latest alpine security patches before installing packages
-RUN apk upgrade --no-cache
+ARG APK_MIRROR
+RUN if [ -n "$APK_MIRROR" ]; then sed -i "s#https\?://dl-cdn.alpinelinux.org/alpine#$APK_MIRROR#g" /etc/apk/repositories; fi && \
+    apk upgrade --no-cache
 
-# Copy UI package files and install dependencies
-COPY ui/package*.json ./
-RUN npm ci
+# Install panel dependencies before copying source to preserve the dependency layer.
+COPY panel/package.json panel/bun.lock ./
+COPY panel/patches ./patches
+RUN bun install --frozen-lockfile
 
-# Copy UI source code
-COPY ui/ ./
+COPY panel/ ./
+COPY docs/ /docs/
 
-# Build UI (skip the copy-build step)
-RUN npm run build-enterprise
-# Skip the copy-build step since we'll copy the files in the Go build stage
+# Build and type-check without the local copy-build step; the next stage embeds out/.
+RUN bunx vite build && bun run check
 
 # --- Go Build Stage: Compile the Go binary ---
-FROM golang:1.26.4-alpine3.23@sha256:f23e8b227fb4493eabe03bede4d5a32d04092da71962f1fb79b5f7d1e6c2a17f AS builder
+FROM golang:1.27.0-alpine3.24@sha256:4c9fe60190a2a3350ddc51de80d0224b8a6698d12bdfc999fee45ea9d6c46dbc AS builder
 WORKDIR /app
 
 # Install dependencies including gcc for CGO and sqlite (with latest security patches)
-RUN apk upgrade --no-cache && \
-  apk add --no-cache gcc musl-dev sqlite-dev binutils binutils-gold
+ARG APK_MIRROR
+RUN if [ -n "$APK_MIRROR" ]; then sed -i "s#https\?://dl-cdn.alpinelinux.org/alpine#$APK_MIRROR#g" /etc/apk/repositories; fi && \
+    apk upgrade --no-cache && \
+    apk add --no-cache gcc musl-dev sqlite-dev binutils binutils-gold
 
 # Set environment for CGO-enabled build (required for go-sqlite3)
-ENV CGO_ENABLED=1 GOOS=linux
+ENV CGO_ENABLED=1 GOOS=linux GOWORK=/app/go.work
 
-COPY transports/go.mod transports/go.sum ./
-RUN go mod download
+# Seed a minimal workspace from module manifests so dependency download stays
+# cacheable while the binary still compiles the exact monorepo sources below.
+COPY core/go.mod core/go.sum ./core/
+COPY framework/go.mod framework/go.sum ./framework/
+COPY plugins/compat/go.mod plugins/compat/go.sum ./plugins/compat/
+COPY plugins/governance/go.mod plugins/governance/go.sum ./plugins/governance/
+COPY plugins/jsonparser/go.mod plugins/jsonparser/go.sum ./plugins/jsonparser/
+COPY plugins/logging/go.mod plugins/logging/go.sum ./plugins/logging/
+COPY plugins/maxim/go.mod plugins/maxim/go.sum ./plugins/maxim/
+COPY plugins/mocker/go.mod plugins/mocker/go.sum ./plugins/mocker/
+COPY plugins/modelcatalogresolver/go.mod plugins/modelcatalogresolver/go.sum ./plugins/modelcatalogresolver/
+COPY plugins/otel/go.mod plugins/otel/go.sum ./plugins/otel/
+COPY plugins/prompts/go.mod plugins/prompts/go.sum ./plugins/prompts/
+COPY plugins/routing/go.mod plugins/routing/go.sum ./plugins/routing/
+COPY plugins/safety/go.mod ./plugins/safety/
+COPY plugins/semanticcache/go.mod plugins/semanticcache/go.sum ./plugins/semanticcache/
+COPY plugins/telemetry/go.mod plugins/telemetry/go.sum ./plugins/telemetry/
+COPY transports/go.mod transports/go.sum ./transports/
+ARG GOPROXY=https://proxy.golang.org,direct
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go work init \
+    ./core \
+    ./framework \
+    ./plugins/compat \
+    ./plugins/governance \
+    ./plugins/jsonparser \
+    ./plugins/logging \
+    ./plugins/maxim \
+    ./plugins/mocker \
+    ./plugins/modelcatalogresolver \
+    ./plugins/otel \
+    ./plugins/prompts \
+    ./plugins/routing \
+    ./plugins/safety \
+    ./plugins/semanticcache \
+    ./plugins/telemetry \
+    ./transports && \
+    cd transports && GOPROXY="$GOPROXY" go mod download
 
 # Copy source code and dependencies
-COPY transports/ ./
+COPY core/ ./core/
+COPY framework/ ./framework/
+COPY plugins/compat/ ./plugins/compat/
+COPY plugins/governance/ ./plugins/governance/
+COPY plugins/jsonparser/ ./plugins/jsonparser/
+COPY plugins/logging/ ./plugins/logging/
+COPY plugins/maxim/ ./plugins/maxim/
+COPY plugins/mocker/ ./plugins/mocker/
+COPY plugins/modelcatalogresolver/ ./plugins/modelcatalogresolver/
+COPY plugins/otel/ ./plugins/otel/
+COPY plugins/prompts/ ./plugins/prompts/
+COPY plugins/routing/ ./plugins/routing/
+COPY plugins/safety/ ./plugins/safety/
+COPY plugins/semanticcache/ ./plugins/semanticcache/
+COPY plugins/telemetry/ ./plugins/telemetry/
+COPY transports/ ./transports/
 
-COPY --from=ui-builder /app/out ./bifrost-http/ui
+COPY --from=ui-builder /app/out ./transports/bifrost-http/ui
 
 # Build the binary with CGO enabled and static SQLite linking
-ENV GOWORK=off
+WORKDIR /app/transports
 ARG VERSION=unknown
-RUN go build \
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    GOPROXY="$GOPROXY" go build \
   -ldflags="-w -s -X main.Version=v${VERSION} -extldflags '-static'" \
   -a -trimpath \
   -tags "sqlite_static" \
@@ -47,9 +104,9 @@ RUN go build \
 
 # Verify build succeeded
 RUN test -f /app/main || (echo "Build failed" && exit 1)
-  
+
 # --- Runtime Stage: Red Hat UBI 9 Minimal ---
-FROM registry.access.redhat.com/ubi9/ubi-minimal@sha256:24650313873554b6ba16c1a1b6b9f9142604f6ab735113e1695faf2dd07fdede
+FROM registry.access.redhat.com/ubi9/ubi-minimal@sha256:8eb2830d0936237fc13a1f2f7e45aecf90d69043380ad167fad0343632937f41
 
 # Redeclared here so it is in scope for the LABEL instruction below.
 ARG VERSION=unknown
@@ -74,7 +131,7 @@ RUN microdnf install -y ca-certificates && \
 COPY LICENSE /licenses/LICENSE
 
 COPY --from=builder /app/main .
-COPY --from=builder /app/docker-entrypoint.sh .
+COPY --from=builder /app/transports/docker-entrypoint.sh .
 
 # Getting arguments
 ARG ARG_APP_PORT=8080
@@ -102,9 +159,13 @@ ENV GOGC="" \
 # UID 1001 is the Red Hat recommended non-root numeric UID for certified containers.
 # We avoid creating a named user (adduser) since UBI minimal may not have useradd,
 # and Red Hat Preflight expects a numeric USER instruction.
-RUN mkdir -p $APP_DIR/logs && \
-  chown -R 1001:0 /app /licenses && \
+# Guard the group-writable chmod so it never applies when APP_DIR resolves to
+# /app itself (e.g. --build-arg ARG_APP_DIR=/app), which would make the binary
+# group-0-writable. /app and /licenses already get g=u above.
+RUN mkdir -p "$APP_DIR/logs" && \
+  chown -R 1001:0 /app /licenses "$APP_DIR" && \
   chmod -R g=u /app /licenses && \
+  { [ "$APP_DIR" = "/app" ] || chmod -R g=rwX "$APP_DIR"; } && \
   chmod +x /app/docker-entrypoint.sh
 
 USER 1001

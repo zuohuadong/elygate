@@ -1,3 +1,4 @@
+import PageTitle from "@/components/pageTitle";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -87,15 +88,12 @@ export default function PerformanceTuningView() {
 
 	return (
 		<div className="mx-auto w-full max-w-4xl space-y-4">
-			<div>
-				<h2 className="text-lg font-semibold tracking-tight">Performance Tuning</h2>
-				<p className="text-muted-foreground text-sm">Configure performance-related settings.</p>
-			</div>
+			<PageTitle title="Performance Tuning">Configure performance-related settings.</PageTitle>
 
 			<Alert variant="destructive">
 				<AlertTriangle className="h-4 w-4" />
 				<AlertDescription>
-					These settings require an Elygate service restart to take effect. Current connections will continue with existing settings until
+					These settings require a Bifrost service restart to take effect. Current connections will continue with existing settings until
 					restart.
 				</AlertDescription>
 			</Alert>
@@ -153,5 +151,5 @@ export default function PerformanceTuningView() {
 }
 
 const RestartWarning = () => {
-	return <div className="text-muted-foreground mt-2 pl-4 text-xs font-semibold">Restart Elygate to apply changes.</div>;
+	return <div className="text-muted-foreground mt-2 pl-4 text-xs font-semibold">Need to restart Bifrost to apply changes.</div>;
 };

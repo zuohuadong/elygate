@@ -1,0 +1,83 @@
+- generic [ref=e2]:
+  - region "Notifications alt+T"
+  - generic [ref=e3]:
+    - generic [ref=e6]:
+      - generic [ref=e8]:
+        - link [ref=e9] [cursor=pointer]:
+          - /url: /workspace/logs
+          - img "Elygate" [ref=e10]
+        - button "Collapse sidebar" [ref=e11]
+      - generic [ref=e16]:
+        - textbox "Search sidebar navigation" [ref=e20]:
+          - /placeholder: Search...
+        - generic:
+          - generic: ⌘
+          - generic: K
+      - generic [ref=e21]:
+        - list [ref=e24]:
+          - listitem [ref=e25]:
+            - button "Observability" [ref=e26] [cursor=pointer]
+          - listitem [ref=e40]:
+            - button "Models" [ref=e41] [cursor=pointer]
+          - listitem [ref=e50]:
+            - button "MCP clients icon MCP Gateway" [ref=e51] [cursor=pointer]:
+              - generic [ref=e53]:
+                - img "MCP clients icon" [ref=e54]
+                - generic [ref=e57]: MCP Gateway
+          - listitem [ref=e60]:
+            - link "Plugins" [ref=e61] [cursor=pointer]:
+              - /url: /workspace/plugins
+          - listitem [ref=e67]:
+            - button "Alerting" [ref=e68] [cursor=pointer]
+          - listitem [ref=e79]:
+            - button "Governance" [ref=e80] [cursor=pointer]
+          - listitem [ref=e88]:
+            - button "Guardrails" [ref=e89] [cursor=pointer]
+          - listitem [ref=e100]:
+            - link "Cluster Config" [ref=e101] [cursor=pointer]:
+              - /url: /workspace/cluster
+          - listitem [ref=e110]:
+            - button "Adaptive Routing" [ref=e111] [cursor=pointer]
+          - listitem [ref=e123]:
+            - button "Settings" [ref=e124] [cursor=pointer]
+            - list [ref=e133]:
+              - listitem [ref=e134]:
+                - link "Client Settings" [ref=e135] [cursor=pointer]:
+                  - /url: /workspace/config/client-settings
+              - listitem [ref=e141]:
+                - link "Compatibility" [ref=e142] [cursor=pointer]:
+                  - /url: /workspace/config/compatibility
+              - listitem [ref=e147]:
+                - link "Caching" [ref=e148] [cursor=pointer]:
+                  - /url: /workspace/config/caching
+              - listitem [ref=e156]:
+                - link "Security" [ref=e157] [cursor=pointer]:
+                  - /url: /workspace/config/security
+              - listitem [ref=e163]:
+                - link "API Keys" [ref=e164] [cursor=pointer]:
+                  - /url: /workspace/config/api-keys
+              - listitem [ref=e170]:
+                - link "Performance Tuning" [ref=e171] [cursor=pointer]:
+                  - /url: /workspace/config/performance-tuning
+              - listitem [ref=e177]:
+                - link "Feature Flags" [ref=e178] [cursor=pointer]:
+                  - /url: /workspace/config/feature-flags
+        - generic [ref=e183]:
+          - generic [ref=e187]:
+            - generic [ref=e189]:
+              - generic [ref=e190]: Need help with production setup?
+              - button "Dismiss" [ref=e191]
+            - generic [ref=e195]:
+              - text: Review the Elygate deployment profile before connecting production providers.Read the deployment guide
+              - link "here" [ref=e196] [cursor=pointer]:
+                - /url: https://github.com/zuohuadong/elygate/tree/dev/deploy/elygate-oss
+              - text: .
+          - generic [ref=e198]:
+            - link "GitHub Repository" [ref=e199] [cursor=pointer]:
+              - /url: https://github.com/zuohuadong/elygate
+            - link "Report a bug" [ref=e203] [cursor=pointer]:
+              - /url: https://github.com/zuohuadong/elygate/issues/new?title=%5BBug%5D%20
+            - link "Full Documentation" [ref=e214] [cursor=pointer]:
+              - /url: https://github.com/zuohuadong/elygate/tree/dev/docs
+            - button "Toggle theme" [ref=e218] [cursor=pointer]
+    - main [ref=e221]

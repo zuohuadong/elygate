@@ -1,0 +1,63 @@
+{
+  "$schema": "https://www.getbifrost.ai/schema",
+  "client": {
+    "enable_logging": true,
+    "initial_pool_size": 64
+  },
+  "config_store": {
+    "enabled": true,
+    "type": "sqlite",
+    "config": {
+      "path": "/tmp/elygate-panel-e2e-pg.kIWmiz/config.db"
+    }
+  },
+  "logs_store": {
+    "enabled": true,
+    "type": "sqlite",
+    "config": {
+      "path": "/tmp/elygate-panel-e2e-pg.kIWmiz/logs.db"
+    }
+  },
+  "vector_store": {
+    "enabled": true,
+    "type": "pgvector",
+    "config": {
+      "connection_string": "postgres://postgres@127.0.0.1:54329/elygate_panel_e2e?sslmode=disable",
+      "schema": "elygate_panel_e2e"
+    }
+  },
+  "plugins": [
+    {
+      "enabled": false,
+      "name": "semantic_cache",
+      "config": {
+        "dimension": 1,
+        "vector_store_namespace": "elygate-panel-cache",
+        "default_cache_key": "elygate-panel-e2e",
+        "ttl": 300,
+        "threshold": 0.8,
+        "conversation_history_threshold": 3,
+        "exclude_system_prompt": false,
+        "cache_by_model": true,
+        "cache_by_provider": true
+      }
+    }
+  ],
+  "providers": {
+    "openai": {
+      "keys": [
+        {
+          "name": "panel-e2e-openai",
+          "value": "mock-key",
+          "weight": 1,
+          "models": ["*"]
+        }
+      ],
+      "network_config": {
+        "base_url": "http://127.0.0.1:65535",
+        "default_request_timeout_in_seconds": 2,
+        "max_retries": 0
+      }
+    }
+  }
+}

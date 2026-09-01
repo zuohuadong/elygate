@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"strings"
 
@@ -13,30 +14,55 @@ import (
 	schemas "github.com/maximhq/bifrost/core/schemas"
 )
 
+const (
+	// MantleOpenAIProjectHeader selects a Bedrock Mantle project on the OpenAI-compatible surface
+	// (chat/completions, responses, /models). AWS routes to the account's default project when absent.
+	MantleOpenAIProjectHeader = "OpenAI-Project"
+	// MantleAnthropicProjectHeader selects a Bedrock Mantle project on the native-Anthropic surface
+	// (/anthropic/v1/messages).
+	MantleAnthropicProjectHeader = "anthropic-workspace-id"
+)
+
+// WithMantleProject returns headers with the given Mantle project header set when projectID is
+// non-empty, letting AWS fall back to the account's default project when it is empty. It never
+// mutates base (which may be the shared networkConfig.ExtraHeaders map). The project header is a
+// plain (non x-amz-*) header, so it does not need to be part of the SigV4 SignedHeaders.
+func WithMantleProject(base map[string]string, headerName, projectID string) map[string]string {
+	if projectID == "" {
+		return base
+	}
+	out := maps.Clone(base)
+	if out == nil {
+		out = make(map[string]string, 1)
+	}
+	out[headerName] = projectID
+	return out
+}
+
 // isMantleModel reports whether a model should be routed via the Bedrock Mantle
-// OpenAI-compatible endpoint. OpenAI-family (gpt-*) and Gemma 4 models are mantle-only
-// (they have no Converse equivalent). Gemma 3 is intentionally excluded: it only supports
-// Chat (not Responses) on mantle, and the Converse path serves both APIs, so forcing it to
-// mantle would break Responses.
+// OpenAI-compatible endpoint. OpenAI-family (gpt-*), Gemma 4, and Grok models are
+// mantle-only (they have no Converse equivalent). Gemma 3 is intentionally excluded: it
+// only supports Chat (not Responses) on mantle, and the Converse path serves both APIs,
+// so forcing it to mantle would break Responses.
 //
 // Deprecated: in-provider Bedrock Mantle routing is retained for backwards compatibility.
 // New configurations should use the "bedrock_mantle" provider, which owns the Bedrock Mantle
 // surface (Claude native-Anthropic, OpenAI-compatible, and Gemma).
 func isMantleModel(ctx *schemas.BifrostContext, model string) bool {
-	return schemas.IsOpenAIModelFamily(ctx, model) || strings.Contains(model, "gemma-4")
+	return schemas.IsOpenAIModelFamily(ctx, model) || strings.Contains(model, "gemma-4") || schemas.IsGrokModel(model)
 }
 
 // mantleOpenAIURL builds the Bedrock Mantle OpenAI-compatible endpoint URL for the given
 // region, model, and API path (e.g. "chat/completions", "responses"). Pass the canonical
 // (capability-resolved) model for correct path gating; the request body still carries the
-// wire request.Model. Frontier families (closed gpt-5.x, Gemma 4) live under the "openai/v1"
+// wire request.Model. Frontier families (closed gpt-5.x, Gemma 4, Grok) live under the "openai/v1"
 // base path; gpt-oss uses the bare "v1" path.
-func mantleOpenAIURL(region, model, path string) string {
+func mantleOpenAIURL(endpoints *schemas.BedrockEndpoints, region, model, path string) string {
 	base := "v1"
-	if strings.Contains(model, "gpt-5") || strings.Contains(model, "gemma-4") {
+	if strings.Contains(model, "gpt-5") || strings.Contains(model, "gemma-4") || schemas.IsGrokModel(model) {
 		base = "openai/v1"
 	}
-	return fmt.Sprintf("https://bedrock-mantle.%s.api.aws/%s/%s", region, base, path)
+	return fmt.Sprintf("https://%s/%s/%s", resolveBedrockHost(endpoints, bedrockServiceMantle, region), base, path)
 }
 
 // SignMantleV4Headers computes SigV4 auth headers for a mantle request by signing a dummy
@@ -114,7 +140,7 @@ func (provider *BedrockProvider) mantleChatCompletions(
 	request *schemas.BifrostChatRequest,
 ) (*schemas.BifrostChatResponse, *schemas.BifrostError) {
 	region := resolveBedrockRegion(ctx, key, request.Model)
-	url := mantleOpenAIURL(region, schemas.ResolveCanonicalModel(ctx, request.Model), "chat/completions")
+	url := mantleOpenAIURL(bedrockEndpoints(key.BedrockKeyConfig), region, schemas.ResolveCanonicalModel(ctx, request.Model), "chat/completions")
 
 	// SigV4 (empty key value): sign the exact body the handler builds via a signer closure.
 	// Bearer (key has a value): no signer; auth flows through the Authorization header.
@@ -131,7 +157,7 @@ func (provider *BedrockProvider) mantleChatCompletions(
 		url,
 		request,
 		openai.BearerAuthHeader(key),
-		provider.networkConfig.ExtraHeaders,
+		WithMantleProject(provider.networkConfig.ExtraHeaders, MantleOpenAIProjectHeader, resolveMantleProjectID(ctx, key)),
 		providerUtils.ShouldSendBackRawRequest(ctx, provider.sendBackRawRequest),
 		providerUtils.ShouldSendBackRawResponse(ctx, provider.sendBackRawResponse),
 		provider.GetProviderKey(),
@@ -152,7 +178,7 @@ func (provider *BedrockProvider) mantleChatCompletionsStream(
 	request *schemas.BifrostChatRequest,
 ) (chan *schemas.BifrostStreamChunk, *schemas.BifrostError) {
 	region := resolveBedrockRegion(ctx, key, request.Model)
-	url := mantleOpenAIURL(region, schemas.ResolveCanonicalModel(ctx, request.Model), "chat/completions")
+	url := mantleOpenAIURL(bedrockEndpoints(key.BedrockKeyConfig), region, schemas.ResolveCanonicalModel(ctx, request.Model), "chat/completions")
 
 	// SigV4 (empty key value): sign the exact body the handler builds via a signer closure.
 	// Bearer (key has a value): no signer; auth flows through the Authorization header.
@@ -165,7 +191,7 @@ func (provider *BedrockProvider) mantleChatCompletionsStream(
 
 	return openai.HandleOpenAIChatCompletionStreaming(
 		ctx, provider.mantleStreamingClient, url, request,
-		openai.BearerAuthHeader(key), provider.networkConfig.ExtraHeaders,
+		openai.BearerAuthHeader(key), WithMantleProject(provider.networkConfig.ExtraHeaders, MantleOpenAIProjectHeader, resolveMantleProjectID(ctx, key)),
 		provider.networkConfig.StreamIdleTimeoutInSeconds,
 		providerUtils.ShouldSendBackRawRequest(ctx, provider.sendBackRawRequest),
 		providerUtils.ShouldSendBackRawResponse(ctx, provider.sendBackRawResponse),
@@ -189,7 +215,7 @@ func (provider *BedrockProvider) mantleResponses(
 	request *schemas.BifrostResponsesRequest,
 ) (*schemas.BifrostResponsesResponse, *schemas.BifrostError) {
 	region := resolveBedrockRegion(ctx, key, request.Model)
-	url := mantleOpenAIURL(region, schemas.ResolveCanonicalModel(ctx, request.Model), "responses")
+	url := mantleOpenAIURL(bedrockEndpoints(key.BedrockKeyConfig), region, schemas.ResolveCanonicalModel(ctx, request.Model), "responses")
 
 	// SigV4 (empty key value): sign the exact body the handler builds via a signer closure.
 	// Bearer (key has a value): no signer; auth flows through the Authorization header.
@@ -206,7 +232,7 @@ func (provider *BedrockProvider) mantleResponses(
 		url,
 		request,
 		openai.BearerAuthHeader(key),
-		provider.networkConfig.ExtraHeaders,
+		WithMantleProject(provider.networkConfig.ExtraHeaders, MantleOpenAIProjectHeader, resolveMantleProjectID(ctx, key)),
 		providerUtils.ShouldSendBackRawRequest(ctx, provider.sendBackRawRequest),
 		providerUtils.ShouldSendBackRawResponse(ctx, provider.sendBackRawResponse),
 		provider.GetProviderKey(),
@@ -227,7 +253,7 @@ func (provider *BedrockProvider) mantleResponsesStream(
 	request *schemas.BifrostResponsesRequest,
 ) (chan *schemas.BifrostStreamChunk, *schemas.BifrostError) {
 	region := resolveBedrockRegion(ctx, key, request.Model)
-	url := mantleOpenAIURL(region, schemas.ResolveCanonicalModel(ctx, request.Model), "responses")
+	url := mantleOpenAIURL(bedrockEndpoints(key.BedrockKeyConfig), region, schemas.ResolveCanonicalModel(ctx, request.Model), "responses")
 
 	// SigV4 (empty key value): sign the exact body the handler builds via a signer closure.
 	// Bearer (key has a value): no signer; auth flows through the Authorization header.
@@ -240,7 +266,7 @@ func (provider *BedrockProvider) mantleResponsesStream(
 
 	return openai.HandleOpenAIResponsesStreaming(
 		ctx, provider.mantleStreamingClient, url, request,
-		openai.BearerAuthHeader(key), provider.networkConfig.ExtraHeaders,
+		openai.BearerAuthHeader(key), WithMantleProject(provider.networkConfig.ExtraHeaders, MantleOpenAIProjectHeader, resolveMantleProjectID(ctx, key)),
 		provider.networkConfig.StreamIdleTimeoutInSeconds,
 		providerUtils.ShouldSendBackRawRequest(ctx, provider.sendBackRawRequest),
 		providerUtils.ShouldSendBackRawResponse(ctx, provider.sendBackRawResponse),

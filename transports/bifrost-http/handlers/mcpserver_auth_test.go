@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"context"
+	"errors"
 	"testing"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -12,6 +14,16 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/valyala/fasthttp"
 )
+
+type denyingVirtualKeyAccessChecker struct{}
+
+func (denyingVirtualKeyAccessChecker) CheckVirtualKeyAccess(context.Context, string) error {
+	return errors.New("employee inactive")
+}
+
+func (denyingVirtualKeyAccessChecker) CheckVirtualKeyValueAccess(context.Context, string) error {
+	return errors.New("employee inactive")
+}
 
 // newTestMCPHandler builds an MCPServerHandler around the given config without
 // going through NewMCPServerHandler (which needs a live tool manager). Per-VK
@@ -143,6 +155,25 @@ func TestGetMCPServerForRequest_JWTPath(t *testing.T) {
 		_, err := h.getMCPServerForRequest(ctx)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "inactive")
+	})
+
+	t.Run("vk JWT is rejected when its employee is inactive", func(t *testing.T) {
+		activeVK := &configtables.TableVirtualKey{ID: "vk-row-1", Value: *schemas.NewSecretVar("sk-bf-active"), IsActive: new(true)}
+		store := &mockOAuth2Store{signingKey: key, vksByID: map[string]*configtables.TableVirtualKey{"vk-row-1": activeVK}}
+		cfg := newTestOAuth2Config(store, configtables.MCPServerAuthModeOAuth, false)
+		h := newTestMCPHandler(cfg)
+		h.SetVirtualKeyAccessChecker(denyingVirtualKeyAccessChecker{})
+		h.vkMCPServers[activeVK.Value.GetValue()] = server.NewMCPServer("vk", "v0")
+
+		raw := mintTestToken(t, priv, key.KID, func(c jwt.MapClaims) {
+			c["bf_mode"] = string(schemas.MCPAuthModeVK)
+			c["sub"] = "vk-row-1"
+		})
+		ctx := &fasthttp.RequestCtx{}
+		ctx.Request.Header.Set("Authorization", "Bearer "+raw)
+
+		_, err := h.getMCPServerForRequest(ctx)
+		require.ErrorContains(t, err, "employee inactive")
 	})
 
 	t.Run("vk JWT for unknown key is rejected", func(t *testing.T) {
@@ -413,19 +444,34 @@ func TestGetMCPServerForRequest_PreAuthenticatedUserPath(t *testing.T) {
 		assert.Contains(t, err.Error(), "no MCP access grant")
 	})
 
-	t.Run("stamped user id with a header VK is rejected as conflicting", func(t *testing.T) {
+	// A stamped user id wins over any virtual key sent in the request headers: the
+	// request is scoped to the user's representative VK and the header VK is never
+	// honoured. Rejecting the pair as conflicting is deliberately NOT this
+	// function's job — that decision belongs upstream, in the SCIM inference
+	// middleware, which applies the operator's dual_credential_conflict_behavior
+	// before any identity is stamped (see getMCPServerForRequest). What matters
+	// here is that a header VK cannot escalate or redirect an already-authenticated
+	// user to a different key.
+	t.Run("stamped user id takes precedence over a header VK", func(t *testing.T) {
 		cfg := newTestOAuth2Config(newStore(), configtables.MCPServerAuthModeBoth, true)
 		h := newTestMCPHandler(cfg)
 		h.identityResolver = &fakeResolver{userVKID: "vk-row-1"}
-		h.vkMCPServers[activeVK.Value.GetValue()] = server.NewMCPServer("vk", "v0")
+		userVKServer := server.NewMCPServer("vk", "v0")
+		h.vkMCPServers[activeVK.Value.GetValue()] = userVKServer
+		headerVKServer := server.NewMCPServer("header-vk", "v0")
+		h.vkMCPServers["sk-bf-header"] = headerVKServer
 
 		ctx := &fasthttp.RequestCtx{}
 		ctx.SetUserValue(schemas.BifrostContextKeyUserID, "user-1")
 		ctx.Request.Header.Set(string(schemas.BifrostContextKeyVirtualKey), "sk-bf-header")
 
-		_, err := h.getMCPServerForRequest(ctx)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "conflicting credentials")
+		res, err := h.getMCPServerForRequest(ctx)
+		require.NoError(t, err)
+		require.NotNil(t, res)
+		assert.Equal(t, userVKServer, res.mcpServer)
+		assert.NotEqual(t, headerVKServer, res.mcpServer)
+		assert.Nil(t, res.jwtVK)
+		assert.Nil(t, res.jwtClaims)
 	})
 
 	t.Run("inactive representative virtual key is rejected", func(t *testing.T) {

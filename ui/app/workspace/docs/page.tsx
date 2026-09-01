@@ -7,46 +7,46 @@ import { BookOpen, Code, ExternalLink, FileText, GitBranch, Play, Shield, Users,
 const docSections = [
 	{
 		title: "Quick Start",
-		description: "Get Elygate running in under 30 seconds",
+		description: "Get Bifrost running in under 30 seconds",
 		icon: Play,
-		url: "https://github.com/zuohuadong/elygate/tree/dev/docs/quickstart",
+		url: "https://github.com/maximhq/bifrost/tree/main/docs/quickstart",
 		badge: "Popular",
 		items: ["HTTP Transport Setup", "Go Package Usage", "Docker Guide"],
 	},
 	{
 		title: "Architecture",
-		description: "Understand Elygate's upstream core design and performance",
+		description: "Deep dive into Bifrost's design and performance",
 		icon: GitBranch,
-		url: "https://github.com/zuohuadong/elygate/tree/dev/docs/architecture",
+		url: "https://github.com/maximhq/bifrost/tree/main/docs/architecture",
 		items: ["System Overview", "Request Flow", "Concurrency Model", "Design Decisions"],
 	},
 	{
 		title: "Usage Guides",
 		description: "Complete API reference and configuration guides",
 		icon: BookOpen,
-		url: "https://github.com/zuohuadong/elygate/tree/dev/docs/usage",
+		url: "https://github.com/maximhq/bifrost/tree/main/docs/usage",
 		badge: "Comprehensive",
 		items: ["Providers Setup", "Key Management", "Error Handling", "Memory & Networking"],
 	},
 	{
 		title: "Contributing",
-		description: "Help improve Elygate and its upstream core",
+		description: "Help improve Bifrost for everyone",
 		icon: Users,
-		url: "https://github.com/zuohuadong/elygate/tree/dev/docs/contributing",
+		url: "https://github.com/maximhq/bifrost/tree/main/docs/contributing",
 		items: ["Contributing Guide", "Adding Providers", "Plugin Development", "Code Conventions"],
 	},
 	{
 		title: "Integration Examples",
 		description: "Practical examples and testing code",
 		icon: Code,
-		url: "https://github.com/zuohuadong/elygate/tree/dev/docs/usage/http-transport/integrations",
+		url: "https://github.com/maximhq/bifrost/tree/main/docs/usage/http-transport/integrations",
 		items: ["OpenAI Integration", "Anthropic Integration", "GenAI Integration", "Migration Guides"],
 	},
 	{
 		title: "Benchmarks",
 		description: "Performance metrics and guides",
 		icon: Zap,
-		url: "https://github.com/zuohuadong/elygate/blob/dev/docs/benchmarks.md",
+		url: "https://github.com/maximhq/bifrost/blob/main/docs/benchmarks.md",
 		items: ["5K RPS Test Results", "Performance Metrics", "Configuration Tuning", "Hardware Comparisons"],
 	},
 ];
@@ -56,7 +56,7 @@ const featuredDocs = [
 		title: "MCP Documentation",
 		description: "Comprehensive guide to Model Context Protocol integration",
 		content: "Learn how to build sophisticated AI agents with MCP support, tool calling, and external integrations.",
-		href: "https://github.com/zuohuadong/elygate/blob/dev/docs/mcp.md",
+		href: "https://github.com/maximhq/bifrost/blob/main/docs/mcp.md",
 		icon: FileText,
 		buttonText: "View MCP Guide",
 		borderColor: "border-primary/20",
@@ -67,7 +67,7 @@ const featuredDocs = [
 		title: "Governance Plugin",
 		description: "Complete access control, budgets, and rate limiting guide",
 		content: "Master Virtual Keys, hierarchical budgets, rate limiting, and usage tracking for secure AI infrastructure.",
-		href: "https://github.com/zuohuadong/elygate/blob/dev/docs/governance.md",
+		href: "https://github.com/maximhq/bifrost/blob/main/docs/governance.md",
 		icon: Shield,
 		buttonText: "View Governance Guide",
 		borderColor: "border-green-200 dark:border-green-800",
@@ -87,14 +87,14 @@ export default function DocsPage() {
 							<BookOpen className="h-4 w-4" />
 							<span className="font-semibold">Documentation</span>
 						</div>
-						<GradientHeader title="Power Up Your Elygate Stack" />
+						<GradientHeader title="Power Up Your Bifrost Stack" />
 						<p className="text-muted-foreground mx-auto max-w-2xl text-lg">
-							Everything you need to know about building production AI applications with Elygate
+							Everything you need to know about building production AI applications with Bifrost
 						</p>
 						<div className="flex justify-center gap-4">
 							<Button asChild>
 								<a
-									href="https://github.com/zuohuadong/elygate/tree/dev/docs"
+									href="https://github.com/maximhq/bifrost/tree/main/docs"
 									target="_blank"
 									rel="noopener noreferrer"
 									data-testid="docs-view-full-documentation-link"
@@ -105,7 +105,7 @@ export default function DocsPage() {
 							</Button>
 							<Button variant="outline" asChild>
 								<a
-									href="https://github.com/zuohuadong/elygate/tree/dev/docs/quickstart"
+									href="https://github.com/maximhq/bifrost/tree/main/docs/quickstart"
 									target="_blank"
 									rel="noopener noreferrer"
 									data-testid="docs-quick-start-guide-link"

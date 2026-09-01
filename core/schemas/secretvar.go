@@ -50,7 +50,14 @@ func parseSecretRef(value string) *SecretVar {
 	}
 	if sonic.Valid([]byte(value)) {
 		valueNode, _ := sonic.Get([]byte(val), "value")
-		if valueNode.Exists() {
+		refNode, _ := sonic.Get([]byte(val), "ref")
+		typeNode, _ := sonic.Get([]byte(val), "type")
+		envVarNode, _ := sonic.Get([]byte(val), "env_var")
+		fromEnvNode, _ := sonic.Get([]byte(val), "from_env")
+		isSecretVarJSON := valueNode.Exists() ||
+			(refNode.Exists() && typeNode.Exists()) ||
+			(envVarNode.Exists() && fromEnvNode.Exists())
+		if isSecretVarJSON {
 			type secretVarCompat struct {
 				Val        string     `json:"value"`
 				Ref        string     `json:"ref"`
@@ -251,6 +258,17 @@ func (e *SecretVar) Equals(other *SecretVar) bool {
 		e.SecretType == other.SecretType
 }
 
+// Clone returns a SecretVar holding the same value as e, backed by a
+// distinct pointer — so a caller mutating the clone's fields (e.g. in-place
+// encryption before a DB write) never touches e itself.
+func (e *SecretVar) Clone() *SecretVar {
+	if e == nil {
+		return nil
+	}
+	clone := *e
+	return &clone
+}
+
 // Redacted returns a new SecretVar with the value redacted.
 func (e *SecretVar) Redacted() *SecretVar {
 	if e == nil {
@@ -299,7 +317,14 @@ func (e *SecretVar) UnmarshalJSON(data []byte) error {
 	}
 	if sonic.Valid(data) {
 		valueNode, _ := sonic.Get(data, "value")
-		if valueNode.Exists() {
+		refNode, _ := sonic.Get(data, "ref")
+		typeNode, _ := sonic.Get(data, "type")
+		envVarNode, _ := sonic.Get(data, "env_var")
+		fromEnvNode, _ := sonic.Get(data, "from_env")
+		isSecretVarJSON := valueNode.Exists() ||
+			(refNode.Exists() && typeNode.Exists()) ||
+			(envVarNode.Exists() && fromEnvNode.Exists())
+		if isSecretVarJSON {
 			type secretVarCompat struct {
 				Val        string     `json:"value"`
 				Ref        string     `json:"ref"`
@@ -460,6 +485,13 @@ func (e *SecretVar) ShouldPreserveStored() bool {
 		return false
 	}
 	return e.GetValue() == "" || e.IsRedacted()
+}
+
+// IsMaskedPlaceholder reports whether the value is a client-side redaction
+// placeholder that must not overwrite a stored credential. Secret references
+// are intentional updates and are never treated as placeholders.
+func (e *SecretVar) IsMaskedPlaceholder() bool {
+	return e != nil && e.IsRedacted() && !e.IsFromSecret()
 }
 
 // IsSet returns true if the SecretVar has a resolved value or a secret reference.

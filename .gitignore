@@ -200,6 +200,7 @@ tests/e2e/api/routing/ledger-*
 *.exe~
 *.test
 *.out
+1millogs
 
 # Dependency directories
 vendor/
@@ -255,3 +256,16 @@ ui/app/routeTree.gen.ts
 bifrost-migration-cli
 
 tests/e2e/clis/reports
+progress.md
+tasks.md
+servers.local.md
+.mailbox/
+.agents/state/
+.agents/automations/
+.agents/docs/
+.agents/goal-forge/runs/
+AGENTS.md
+CODEBUDDY.md
+CLAUDE.md
+.zed/CONVENTIONS.md
+HERMES.md

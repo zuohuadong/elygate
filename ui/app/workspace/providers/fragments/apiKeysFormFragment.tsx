@@ -1,7 +1,8 @@
-import { SecretVarInput } from "@/components/ui/secretVarInput";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { ModelMultiselect } from "@/components/ui/modelMultiselect";
+import { SecretVarInput } from "@/components/ui/secretVarInput";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -14,7 +15,7 @@ import { Control, UseFormReturn } from "react-hook-form";
 import { DeploymentsTable } from "./deploymentsTable";
 
 // Providers that support batch APIs
-const BATCH_SUPPORTED_PROVIDERS = ["openai", "bedrock", "anthropic", "gemini", "azure", "vertex"];
+const BATCH_SUPPORTED_PROVIDERS = ["openai", "bedrock", "anthropic", "gemini", "azure", "vertex", "wafer"];
 
 interface Props {
 	control: Control<any>;
@@ -48,6 +49,92 @@ function BatchAPIFormField({ control }: { control: Control<any>; form: UseFormRe
 	);
 }
 
+// AWS endpoint services Bifrost dials for Bedrock. `name` is the config field, `placeholder` the
+// DNS name shape for that service - S3 differs from the rest, so each is spelled out.
+const BEDROCK_VPC_ENDPOINT_SERVICES = [
+	{
+		name: "runtime",
+		label: "Runtime",
+		description: "Serves all inference.",
+		placeholder: "vpce-0abc123-x1y2z3.bedrock-runtime.us-east-1.vpce.amazonaws.com",
+	},
+	{
+		name: "control_plane",
+		label: "Control Plane",
+		description: "Serves model listing and batch jobs.",
+		placeholder: "vpce-0abc123-x1y2z3.bedrock.us-east-1.vpce.amazonaws.com",
+	},
+	{
+		name: "mantle",
+		label: "Mantle",
+		description: "Serves mantle-routed models.",
+		placeholder: "vpce-0abc123-x1y2z3.bedrock-mantle.us-east-1.vpce.amazonaws.com",
+	},
+	{
+		name: "agent_runtime",
+		label: "Agent Runtime",
+		description: "Serves rerank.",
+		placeholder: "vpce-0abc123-x1y2z3.bedrock-agent-runtime.us-east-1.vpce.amazonaws.com",
+	},
+	{
+		name: "s3",
+		label: "S3",
+		description: "Serves batch file I/O. Requires the bucket-prefixed endpoint name. A Gateway endpoint needs no value here.",
+		placeholder: "bucket.vpce-0abc123-x1y2z3.s3.us-east-1.vpce.amazonaws.com",
+	},
+];
+
+// VPC endpoint host overrides for AWS PrivateLink. Collapsed by default: most deployments reach
+// Bedrock over the public regional endpoints and never set these.
+function VPCEndpointsFormField({
+	control,
+	configKey,
+	services,
+}: {
+	control: Control<any>;
+	configKey: string;
+	services: typeof BEDROCK_VPC_ENDPOINT_SERVICES;
+}) {
+	return (
+		<Accordion type="single" collapsible className="w-full">
+			<AccordionItem value="vpc-endpoints" className="rounded-sm border px-2 last:border-b">
+				<AccordionTrigger className="py-2 hover:no-underline" data-testid="bedrock-vpc-endpoints-trigger">
+					<span className="block space-y-1.5 pr-2">
+						<span className="block text-sm leading-none font-medium">VPC Endpoints (Optional)</span>
+						<span className="text-muted-foreground block text-sm font-normal">
+							Route traffic through interface VPC endpoints instead of the public regional endpoints. Use each endpoint&apos;s DNS name from
+							the VPC console, not its ID. Region is still required — it sets the request signing scope.
+						</span>
+					</span>
+				</AccordionTrigger>
+				<AccordionContent className="space-y-4 pt-2 pb-3">
+					{services.map((service) => (
+						<FormField
+							key={service.name}
+							control={control}
+							name={`${configKey}.endpoints.${service.name}`}
+							render={({ field }) => (
+								<FormItem>
+									<FormLabel>{service.label}</FormLabel>
+									<FormDescription>{service.description}</FormDescription>
+									<FormControl>
+										<SecretVarInput
+											data-testid={`apikey-bedrock-endpoint-${service.name}-input`}
+											placeholder={service.placeholder}
+											{...field}
+										/>
+									</FormControl>
+									<FormMessage />
+								</FormItem>
+							)}
+						/>
+					))}
+				</AccordionContent>
+			</AccordionItem>
+		</Accordion>
+	);
+}
+
 export function ApiKeyFormFragment({ control, providerName, baseProviderType, form }: Props) {
 	// Credential UI keys off the base provider type for custom providers; the
 	// model list, deployments table, and API calls still use the real providerName.
@@ -60,6 +147,8 @@ export function ApiKeyFormFragment({ control, providerName, baseProviderType, fo
 	const isVLLM = effectiveProvider === "vllm";
 	const isOllama = effectiveProvider === "ollama";
 	const isSGL = effectiveProvider === "sgl";
+	const isDeepseek = effectiveProvider === "deepseek";
+	const isFireworks = effectiveProvider === "fireworks";
 	const isKeylessProvider = isOllama || isSGL;
 	const supportsBatchAPI = BATCH_SUPPORTED_PROVIDERS.includes(effectiveProvider);
 
@@ -360,9 +449,15 @@ export function ApiKeyFormFragment({ control, providerName, baseProviderType, fo
 							<FormItem data-testid="apikey-deployments-field">
 								<FormLabel>Deployments (Optional)</FormLabel>
 								<FormDescription>
-									Map a request model name to the provider&apos;s identifier (deployment name, inference profile ID, fine-tuned endpoint ID,
-									etc.). Expand a row to set the canonical model name, model family, and provider-specific overrides - these power
-									cost/pricing logs and family-based routing.
+									Map a request model name to the provider&apos;s identifier (deployment name, inference profile ID, etc.). Expand a row for
+									canonical name, model family, and provider overrides - these drive cost logs and family-based routing.
+									{isReplicate && (
+										<>
+											{" "}
+											Replicate deployments are listed only while &quot;Use Deployments Endpoint&quot; is on - otherwise type the owner/name
+											and press Enter.
+										</>
+									)}
 								</FormDescription>
 								<FormControl>
 									<div data-testid="apikey-deployments-table">
@@ -406,7 +501,7 @@ export function ApiKeyFormFragment({ control, providerName, baseProviderType, fo
 								}
 							}}
 						>
-							<TabsList className="grid w-full grid-cols-3">
+							<TabsList className="flex w-full justify-start">
 								<TabsTrigger data-testid="apikey-azure-default-credential-tab" value="default_credential">
 									Default Credential
 								</TabsTrigger>
@@ -557,7 +652,7 @@ export function ApiKeyFormFragment({ control, providerName, baseProviderType, fo
 								}
 							}}
 						>
-							<TabsList className="grid w-full grid-cols-3">
+							<TabsList className="flex w-full justify-start">
 								<TabsTrigger data-testid="apikey-vertex-service-account-tab" value="service_account">
 									Service Account (Attached)
 								</TabsTrigger>
@@ -673,8 +768,8 @@ export function ApiKeyFormFragment({ control, providerName, baseProviderType, fo
 								<div className="space-y-1.5">
 									<FormLabel>Force single region</FormLabel>
 									<FormDescription>
-										Always call the region set above and skip automatic promotion of multi-region-only models to a
-										multi-region endpoint. Enable when serving these models from a single region via provisioned throughput.
+										Always call the region set above and skip automatic promotion of multi-region-only models to a multi-region endpoint.
+										Enable when serving these models from a single region via provisioned throughput.
 									</FormDescription>
 								</div>
 								<FormControl>
@@ -697,8 +792,11 @@ export function ApiKeyFormFragment({ control, providerName, baseProviderType, fo
 								<div className="space-y-1.5">
 									<FormLabel>Use Deployments Endpoint</FormLabel>
 									<FormDescription>
-										Route requests through the Replicate deployments endpoint instead of the models endpoint.
+										Sends <strong>every</strong> model on this key to /v1/deployments/&#123;owner&#125;/&#123;name&#125;/predictions, so
+										plain model names stop working. To switch just one model, leave this off and set &quot;Use deployments endpoint&quot; on
+										its row above.
 									</FormDescription>
+									<FormMessage />
 								</div>
 								<FormControl>
 									<Switch checked={field.value ?? false} onCheckedChange={field.onChange} />
@@ -766,6 +864,29 @@ export function ApiKeyFormFragment({ control, providerName, baseProviderType, fo
 					/>
 				</div>
 			)}
+			{(isSGL || isDeepseek || isFireworks || isVLLM) && (
+				<div className="space-y-4">
+					<FormField
+						control={control}
+						name="key.use_anthropic_endpoints"
+						render={({ field }) => (
+							<FormItem className="flex flex-row items-center justify-between rounded-sm border p-2">
+								<div className="space-y-1.5">
+									<FormLabel htmlFor="use-anthropic-endpoints-alias-override-switch">Use Anthropic Endpoints</FormLabel>
+									<FormDescription>Routes chat completions and responses requests through Anthropic-compatible endpoints.</FormDescription>
+								</div>
+								<FormControl>
+									<Switch
+										id="use-anthropic-endpoints-alias-override-switch"
+										checked={field.value ?? false}
+										onCheckedChange={field.onChange}
+									/>
+								</FormControl>
+							</FormItem>
+						)}
+					/>
+				</div>
+			)}
 			{isBedrock && (
 				<div className="space-y-4">
 					<Separator className="my-6" />
@@ -796,7 +917,7 @@ export function ApiKeyFormFragment({ control, providerName, baseProviderType, fo
 								}
 							}}
 						>
-							<TabsList className="grid w-full grid-cols-3">
+							<TabsList className="flex w-full justify-start">
 								<TabsTrigger data-testid="apikey-bedrock-iam-role-tab" value="iam_role">
 									IAM Role (Inherited)
 								</TabsTrigger>
@@ -894,6 +1015,27 @@ export function ApiKeyFormFragment({ control, providerName, baseProviderType, fo
 							</FormItem>
 						)}
 					/>
+					<FormField
+						control={control}
+						name={`key.bedrock_key_config.project_id`}
+						render={({ field }) => (
+							<FormItem>
+								<FormLabel>Mantle Project ID (Optional)</FormLabel>
+								<FormDescription>
+									Scopes Bedrock Mantle-routed models (OpenAI-family / Gemma) to a specific project via the OpenAI-Project header. Leave
+									empty to use the account&apos;s default project.
+								</FormDescription>
+								<FormControl>
+									<SecretVarInput
+										data-testid="apikey-bedrock-project-id-input"
+										placeholder="proj_xxxxxxxx or env.BEDROCK_PROJECT_ID"
+										{...field}
+									/>
+								</FormControl>
+								<FormMessage />
+							</FormItem>
+						)}
+					/>
 					{bedrockAuthType !== "api_key" && (
 						<>
 							<FormField
@@ -944,7 +1086,7 @@ export function ApiKeyFormFragment({ control, providerName, baseProviderType, fo
 										<FormControl>
 											<SecretVarInput
 												data-testid="apikey-bedrock-session-name-input"
-											placeholder="bifrost-session or env.AWS_SESSION_NAME"
+												placeholder="bifrost-session or env.AWS_SESSION_NAME"
 												{...field}
 											/>
 										</FormControl>
@@ -967,7 +1109,30 @@ export function ApiKeyFormFragment({ control, providerName, baseProviderType, fo
 							</FormItem>
 						)}
 					/>
+					{supportsBatchAPI && (
+						<FormField
+							control={control}
+							name={`key.bedrock_key_config.batch_role_arn`}
+							render={({ field }) => (
+								<FormItem>
+									<FormLabel>Batch Role ARN (Optional)</FormLabel>
+									<FormDescription>
+										Service role Bedrock assumes for batch S3 access. When set, it takes priority over the role_arn sent in requests.
+									</FormDescription>
+									<FormControl>
+										<SecretVarInput
+											data-testid="apikey-bedrock-batch-role-arn-input"
+											placeholder="arn:aws:iam::123456789:role/BatchRole or env.AWS_BATCH_ROLE_ARN"
+											{...field}
+										/>
+									</FormControl>
+									<FormMessage />
+								</FormItem>
+							)}
+						/>
+					)}
 					{supportsBatchAPI && <BatchAPIFormField control={control} form={form} />}
+					<VPCEndpointsFormField control={control} configKey="key.bedrock_key_config" services={BEDROCK_VPC_ENDPOINT_SERVICES} />
 				</div>
 			)}
 
@@ -1001,7 +1166,7 @@ export function ApiKeyFormFragment({ control, providerName, baseProviderType, fo
 								}
 							}}
 						>
-							<TabsList className="grid w-full grid-cols-3">
+							<TabsList className="flex w-full justify-start">
 								<TabsTrigger data-testid="apikey-bedrock-mantle-iam-role-tab" value="iam_role">
 									IAM Role (Inherited)
 								</TabsTrigger>
@@ -1100,6 +1265,28 @@ export function ApiKeyFormFragment({ control, providerName, baseProviderType, fo
 						)}
 					/>
 
+					<FormField
+						control={control}
+						name={`key.bedrock_mantle_key_config.project_id`}
+						render={({ field }) => (
+							<FormItem>
+								<FormLabel>Project ID (Optional)</FormLabel>
+								<FormDescription>
+									Scopes inference and model listing to a specific Bedrock project (sent as the OpenAI-Project / anthropic-workspace-id
+									header). Leave empty to use the account&apos;s default project.
+								</FormDescription>
+								<FormControl>
+									<SecretVarInput
+										data-testid="apikey-bedrock-mantle-project-id-input"
+										placeholder="proj_xxxxxxxx or env.BEDROCK_PROJECT_ID"
+										{...field}
+									/>
+								</FormControl>
+								<FormMessage />
+							</FormItem>
+						)}
+					/>
+
 					{bedrockMantleAuthType !== "api_key" && (
 						<>
 							<FormField
@@ -1148,6 +1335,11 @@ export function ApiKeyFormFragment({ control, providerName, baseProviderType, fo
 							/>
 						</>
 					)}
+					<VPCEndpointsFormField
+						control={control}
+						configKey="key.bedrock_mantle_key_config"
+						services={BEDROCK_VPC_ENDPOINT_SERVICES.filter((s) => s.name === "mantle")}
+					/>
 				</div>
 			)}
 		</div>

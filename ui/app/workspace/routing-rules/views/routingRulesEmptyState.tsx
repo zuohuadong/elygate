@@ -2,7 +2,7 @@ import { Button } from "@/components/ui/button";
 import { Route } from "lucide-react";
 import { ArrowUpRight } from "lucide-react";
 
-const ROUTING_RULES_DOCS_URL = "https://github.com/zuohuadong/elygate/tree/dev/docs";
+const ROUTING_RULES_DOCS_URL = "https://docs.getbifrost.ai/providers/routing-rules";
 
 interface RoutingRulesEmptyStateProps {
 	onAddClick: () => void;
@@ -20,7 +20,7 @@ export function RoutingRulesEmptyState({ onAddClick, canCreate = true }: Routing
 			</div>
 			<div className="flex flex-col gap-1">
 				<h1 className="text-muted-foreground text-xl font-medium">Routing rules direct requests using CEL conditions</h1>
-				<div className="text-muted-foreground mx-auto mt-2 max-w-[600px] text-sm font-normal">
+				<div className="text-muted-foreground mx-auto mt-2 w-full max-w-[600px] text-sm font-normal">
 					Create CEL-based rules to route requests by model, provider, budget, or custom attributes. Control which provider or model handles
 					each request.
 				</div>

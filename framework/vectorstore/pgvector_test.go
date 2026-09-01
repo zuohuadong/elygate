@@ -1,6 +1,7 @@
 package vectorstore
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"testing"
@@ -57,6 +58,14 @@ func TestPgvectorConfig_RequiresConnectionString(t *testing.T) {
 	require.ErrorContains(t, err, "pgvector connection_string is required")
 }
 
+func TestPgvectorConfig_RejectsUnresolvedSecretReference(t *testing.T) {
+	t.Setenv("ELYGATE_TEST_MISSING_PGVECTOR_DSN", "")
+	_, err := newPgvectorStore(t.Context(), &PgvectorConfig{
+		ConnectionString: *schemas.NewSecretVar("env.ELYGATE_TEST_MISSING_PGVECTOR_DSN"),
+	}, nil)
+	require.ErrorContains(t, err, "did not resolve to a value")
+}
+
 func TestPgvectorConnectionString_FullyRedactsLiteralDSN(t *testing.T) {
 	dsn := schemas.NewSecretVar("postgres://bifrost:secret@example.internal:5432/bifrost")
 	redacted := dsn.FullyRedacted()
@@ -76,10 +85,16 @@ func TestPgvectorStore_Integration(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, store.Close(t.Context(), "")) })
 
 	namespace := "bifrost-pgvector-test-" + time.Now().UTC().Format("20060102150405.000000000")
+	require.ErrorContains(t, store.CreateNamespace(t.Context(), namespace+"-invalid", 0, nil), "greater than 0")
+
+	directNamespace := namespace + "-direct"
+	require.NoError(t, store.CreateNamespace(t.Context(), directNamespace, 1, nil))
+	t.Cleanup(func() { require.NoError(t, store.DeleteNamespace(context.Background(), directNamespace)) })
+
 	require.NoError(t, store.CreateNamespace(t.Context(), namespace, 3, map[string]VectorStoreProperties{
 		"cache_key": {DataType: VectorStorePropertyTypeString},
 	}))
-	t.Cleanup(func() { require.NoError(t, store.DeleteNamespace(t.Context(), namespace)) })
+	t.Cleanup(func() { require.NoError(t, store.DeleteNamespace(context.Background(), namespace)) })
 
 	require.NoError(t, store.Add(t.Context(), namespace, "first", []float32{1, 0, 0}, map[string]interface{}{"cache_key": "tenant-a"}))
 	chunk, err := store.GetChunk(t.Context(), namespace, "first")
@@ -94,4 +109,9 @@ func TestPgvectorStore_Integration(t *testing.T) {
 	deleted, err := store.DeleteAll(t.Context(), namespace, []Query{{Field: "cache_key", Operator: QueryOperatorEqual, Value: "tenant-a"}})
 	require.NoError(t, err)
 	require.Len(t, deleted, 1)
+	require.Equal(t, "first", deleted[0].ID)
+	require.Equal(t, DeleteStatusSuccess, deleted[0].Status)
+
+	_, err = store.GetChunk(t.Context(), namespace, "first")
+	require.ErrorContains(t, err, "not found")
 }

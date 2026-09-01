@@ -10,3 +10,5 @@ docker-entrypoint.sh text eol=lf
 # Mark dummy credentials as generated to avoid security scanner false positives
 tests/integrations/dummy-gcp-credentials.json linguist-generated=true
 
+# Nested unified diffs contain whitespace-significant context markers.
+*.patch whitespace=-trailing-space,-space-before-tab

@@ -15,9 +15,19 @@ import (
 // span deployments across distinct GCP projects (e.g. Anthropic models in
 // one project, Gemini in another).
 func resolveVertexProjectID(ctx *schemas.BifrostContext, key schemas.Key) string {
-	if ra := schemas.GetResolvedAlias(ctx); ra != nil && ra.Config != nil && ra.Config.VertexAliasCfg != nil && ra.Config.VertexAliasCfg.ProjectID != nil {
-		if v := ra.Config.VertexAliasCfg.ProjectID.GetValue(); v != "" {
-			return v
+	if ra := schemas.GetResolvedAlias(ctx); ra != nil && ra.Config != nil {
+		// Shared top-level override (how project_id now arrives from JSON/UI).
+		if ra.Config.ProjectID != nil {
+			if v := ra.Config.ProjectID.GetValue(); v != "" {
+				return v
+			}
+		}
+		// Back-compat for Go-constructed VertexAliasCfg (e.g. tests); the JSON
+		// path always populates the top-level field above.
+		if ra.Config.VertexAliasCfg != nil && ra.Config.VertexAliasCfg.ProjectID != nil {
+			if v := ra.Config.VertexAliasCfg.ProjectID.GetValue(); v != "" {
+				return v
+			}
 		}
 	}
 	if key.VertexKeyConfig != nil {
@@ -234,18 +244,27 @@ var vertexFlexModels = []string{
 	"gemini-3.1-flash-lite",
 	"gemini-3.1-flash-image-preview",
 	"gemini-3.1-pro-preview",
+	"gemini-3.5-flash-lite",
 	"gemini-3-flash-preview",
 	"gemini-3-pro-image-preview",
 }
 
 // isVertexModelSupportedForTier reports whether a model supports the given service tier.
-// Custom/fine-tuned models (all-digits IDs) are passed through without restriction since
-// their base model cannot be determined from the ID alone.
+// Prefers the datasheet's service_tiers list, falling back to the published model
+// prefixes above. Custom/fine-tuned models (all-digits IDs) are passed through without
+// restriction since their base model cannot be determined from the ID alone.
 func isVertexModelSupportedForTier(model string, tier schemas.BifrostServiceTier) bool {
 	if schemas.IsAllDigitsASCII(model) {
 		return true
 	}
 	normalized := gemini.NormalizeModelName(model)
+	caps := schemas.ResolveModelCaps(schemas.Vertex, normalized)
+	return caps.ServiceTierSupported(tier, vertexTierPrefixMatch(normalized, tier))
+}
+
+// vertexTierPrefixMatch is the name-based fallback for tier support, from Google's
+// published Priority/Flex PayGo model lists. Tiers Vertex does not offer are false.
+func vertexTierPrefixMatch(normalized string, tier schemas.BifrostServiceTier) bool {
 	var prefixes []string
 	switch tier {
 	case schemas.BifrostServiceTierPriority:

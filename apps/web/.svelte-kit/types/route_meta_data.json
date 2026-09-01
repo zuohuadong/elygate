@@ -1,0 +1,78 @@
+{
+	"/": [
+		"src/routes/+layout.ts",
+		"src/routes/+layout.ts"
+	],
+	"/channels": [
+		"src/routes/+layout.ts"
+	],
+	"/consumer": [
+		"src/routes/+layout.ts"
+	],
+	"/consumer/docs": [
+		"src/routes/+layout.ts"
+	],
+	"/consumer/logs": [
+		"src/routes/+layout.ts"
+	],
+	"/consumer/packages": [
+		"src/routes/+layout.ts"
+	],
+	"/consumer/playground": [
+		"src/routes/+layout.ts"
+	],
+	"/consumer/pricing": [
+		"src/routes/+layout.ts"
+	],
+	"/invite-codes": [
+		"src/routes/+layout.ts"
+	],
+	"/login": [
+		"src/routes/+layout.ts"
+	],
+	"/logs": [
+		"src/routes/+layout.ts"
+	],
+	"/models": [
+		"src/routes/+layout.ts"
+	],
+	"/packages": [
+		"src/routes/+layout.ts"
+	],
+	"/payment": [
+		"src/routes/+layout.ts"
+	],
+	"/pricing": [
+		"src/routes/+layout.ts"
+	],
+	"/rate-limits": [
+		"src/routes/+layout.ts"
+	],
+	"/redemptions": [
+		"src/routes/+layout.ts"
+	],
+	"/register": [
+		"src/routes/+layout.ts"
+	],
+	"/settings": [
+		"src/routes/+layout.ts"
+	],
+	"/stats": [
+		"src/routes/+layout.ts"
+	],
+	"/status": [
+		"src/routes/+layout.ts"
+	],
+	"/tasks": [
+		"src/routes/+layout.ts"
+	],
+	"/tokens": [
+		"src/routes/+layout.ts"
+	],
+	"/user-groups": [
+		"src/routes/+layout.ts"
+	],
+	"/users": [
+		"src/routes/+layout.ts"
+	]
+}

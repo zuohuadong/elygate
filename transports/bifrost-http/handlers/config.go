@@ -11,6 +11,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/fasthttp/router"
@@ -42,6 +43,8 @@ var securityHeaders = []string{
 	"x-bf-api-key",
 	"x-bf-vk",
 }
+
+const maxLatestReleaseResponseBytes int64 = 1 << 20
 
 func getPasswordPolicyFailures(password string) []string {
 	failures := make([]string, 0, 5)
@@ -86,6 +89,9 @@ func getPasswordPolicyFailures(password string) []string {
 // ConfigManager is the interface for the config manager
 type ConfigManager interface {
 	UpdateAuthConfig(ctx context.Context, authConfig *configstore.AuthConfig) error
+	// ValidateSetupToken checks the one-time bootstrap token required to create the
+	// first admin account. Returns true once an admin account already exists.
+	ValidateSetupToken(token string) bool
 	ReloadClientConfigFromConfigStore(ctx context.Context) error
 	UpdateSyncConfig(ctx context.Context) error
 	ForceReloadPricing(ctx context.Context) error
@@ -100,16 +106,26 @@ type ConfigManager interface {
 // ConfigHandler manages runtime configuration updates for Bifrost.
 // It provides endpoints to update and retrieve settings persisted via the ConfigStore backed by sql database.
 type ConfigHandler struct {
-	store         *lib.Config
-	configManager ConfigManager
+	store                 *lib.Config
+	configManager         ConfigManager
+	latestReleaseURL      string
+	httpClient            *http.Client
+	vectorStoreMutationMu sync.Mutex
 }
 
 // NewConfigHandler creates a new handler for configuration management.
 // It requires the Bifrost client, a logger, and the config store.
 func NewConfigHandler(configManager ConfigManager, store *lib.Config) *ConfigHandler {
 	return &ConfigHandler{
-		configManager: configManager,
-		store:         store,
+		configManager:    configManager,
+		store:            store,
+		latestReleaseURL: "https://getbifrost.ai/latest-release",
+		httpClient: &http.Client{
+			Timeout: 3 * time.Second,
+			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		},
 	}
 }
 
@@ -119,7 +135,10 @@ func (h *ConfigHandler) RegisterRoutes(r *router.Router, middlewares ...schemas.
 	r.GET("/api/config", lib.ChainMiddlewares(h.getConfig, middlewares...))
 	r.PUT("/api/config", lib.ChainMiddlewares(h.updateConfig, middlewares...))
 	r.POST("/api/config/metadata", lib.ChainMiddlewares(h.updateMetadata, middlewares...))
+	r.GET("/api/vector-store-config", lib.ChainMiddlewares(h.getVectorStoreConfig, middlewares...))
+	r.PUT("/api/vector-store-config", lib.ChainMiddlewares(h.updateVectorStoreConfig, middlewares...))
 	r.GET("/api/version", lib.ChainMiddlewares(h.getVersion, middlewares...))
+	r.GET("/api/latest-release", lib.ChainMiddlewares(h.getLatestRelease, middlewares...))
 	r.GET("/api/proxy-config", lib.ChainMiddlewares(h.getProxyConfig, middlewares...))
 	r.PUT("/api/proxy-config", lib.ChainMiddlewares(h.updateProxyConfig, middlewares...))
 	r.POST("/api/pricing/force-sync", lib.ChainMiddlewares(h.forceSyncPricing, middlewares...))
@@ -128,6 +147,36 @@ func (h *ConfigHandler) RegisterRoutes(r *router.Router, middlewares ...schemas.
 // getVersion handles GET /api/version - Get the current version
 func (h *ConfigHandler) getVersion(ctx *fasthttp.RequestCtx) {
 	SendJSON(ctx, version)
+}
+
+func (h *ConfigHandler) getLatestRelease(ctx *fasthttp.RequestCtx) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, h.latestReleaseURL, nil)
+	if err != nil {
+		SendError(ctx, fasthttp.StatusInternalServerError, "failed to build release request")
+		return
+	}
+	request.Header.Set("Accept", "application/json")
+	response, err := h.httpClient.Do(request)
+	if err != nil {
+		SendError(ctx, fasthttp.StatusBadGateway, "release service unavailable")
+		return
+	}
+	defer response.Body.Close()
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		SendError(ctx, fasthttp.StatusBadGateway, "release service returned an invalid response")
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(response.Body, maxLatestReleaseResponseBytes+1))
+	if err != nil || int64(len(body)) > maxLatestReleaseResponseBytes {
+		SendError(ctx, fasthttp.StatusBadGateway, "release service response is too large")
+		return
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		SendError(ctx, fasthttp.StatusBadGateway, "release service returned invalid JSON")
+		return
+	}
+	SendJSON(ctx, payload)
 }
 
 // getConfig handles GET /config - Get the current configuration
@@ -158,7 +207,12 @@ func (h *ConfigHandler) getConfig(ctx *fasthttp.RequestCtx) {
 		mapConfig["framework_config"] = *normalizedFrameworkConfig
 	} else {
 		mapConfig["client_config"] = h.store.ClientConfig.Redacted()
-		normalizedFrameworkConfig, _, _ := lib.ResolveFrameworkPricingConfig(nil, h.store.FrameworkConfig)
+		// Snapshot under the read lock; updateConfig swaps this pointer from
+		// another request goroutine.
+		h.store.Mu.RLock()
+		storedFrameworkConfig := h.store.FrameworkConfig
+		h.store.Mu.RUnlock()
+		normalizedFrameworkConfig, _, _ := lib.ResolveFrameworkPricingConfig(nil, storedFrameworkConfig)
 		mapConfig["framework_config"] = *normalizedFrameworkConfig
 	}
 	if h.store.ConfigStore != nil {
@@ -188,14 +242,12 @@ func (h *ConfigHandler) getConfig(ctx *fasthttp.RequestCtx) {
 				"admin_password": passwordSecretVar,
 				"is_enabled":     authConfig.IsEnabled,
 			}
-		} else {
-			// No auth config exists yet, return default empty SecretVar values
-			mapConfig["auth_config"] = map[string]any{
-				"admin_username": &schemas.SecretVar{},
-				"admin_password": &schemas.SecretVar{},
-				"is_enabled":     false,
-			}
 		}
+		// When authConfig is nil, no admin account has been created yet: leave
+		// auth_config unset (rather than a placeholder object) so the UI's
+		// isFirstTimeSetup check (!bifrostConfig?.auth_config) can tell "no admin
+		// configured yet" apart from "admin configured with empty fields" and show
+		// the setup-token field / include setup_token in the create request.
 	} else {
 		mapConfig["auth_config"] = map[string]any{
 			"admin_username": &schemas.SecretVar{},
@@ -207,9 +259,75 @@ func (h *ConfigHandler) getConfig(ctx *fasthttp.RequestCtx) {
 	if h.store.EnvLabel != "" {
 		mapConfig["env_label"] = h.store.EnvLabel
 	}
+	// Compute effective app name from client config / metadata or env vars
+	effectiveAppName := ""
+	if h.store.ClientConfig != nil && strings.TrimSpace(h.store.ClientConfig.AppName) != "" {
+		effectiveAppName = strings.TrimSpace(h.store.ClientConfig.AppName)
+	}
+	if effectiveAppName == "" && mapConfig["metadata"] != nil {
+		if meta, ok := mapConfig["metadata"].(map[string]any); ok && meta != nil {
+			if v, ok := meta["app_name"].(string); ok && strings.TrimSpace(v) != "" {
+				effectiveAppName = strings.TrimSpace(v)
+			} else if v, ok := meta["brand_name"].(string); ok && strings.TrimSpace(v) != "" {
+				effectiveAppName = strings.TrimSpace(v)
+			}
+		}
+	}
+	if effectiveAppName == "" {
+		for _, key := range []string{"APP_NAME", "BRAND_NAME", "PLATFORM_NAME", "ELYGATE_APP_NAME", "BIFROST_APP_NAME"} {
+			if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+				effectiveAppName = v
+				break
+			}
+		}
+	}
+	if effectiveAppName != "" {
+		mapConfig["app_name"] = effectiveAppName
+	}
+	effectiveShortName := ""
+	for _, key := range []string{"APP_SHORT_NAME", "BRAND_SHORT_NAME", "SHORT_NAME"} {
+		if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+			effectiveShortName = v
+			break
+		}
+	}
+	if effectiveShortName != "" {
+		mapConfig["short_name"] = effectiveShortName
+	}
+	effectiveEnName := ""
+	for _, key := range []string{"APP_EN_NAME", "BRAND_EN_NAME", "PLATFORM_EN_NAME", "EN_NAME"} {
+		if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+			effectiveEnName = v
+			break
+		}
+	}
+	if effectiveEnName != "" {
+		mapConfig["en_name"] = effectiveEnName
+	}
+	effectiveLogo := ""
+	for _, key := range []string{"APP_LOGO", "BRAND_LOGO", "APP_LOGO_URL", "BRAND_LOGO_URL", "LOGO_URL"} {
+		if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+			effectiveLogo = v
+			break
+		}
+	}
+	if effectiveLogo != "" {
+		mapConfig["logo_url"] = effectiveLogo
+	}
+	effectiveFavicon := ""
+	for _, key := range []string{"APP_FAVICON", "BRAND_FAVICON", "APP_FAVICON_URL", "FAVICON_URL"} {
+		if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+			effectiveFavicon = v
+			break
+		}
+	}
+	if effectiveFavicon != "" {
+		mapConfig["favicon_url"] = effectiveFavicon
+	}
 	mapConfig["is_git_available"] = CheckGitAvailability()
 	mapConfig["is_cache_connected"] = h.store.VectorStore != nil
 	mapConfig["is_logs_connected"] = h.store.LogsStore != nil
+	mapConfig["is_object_storage_connected"] = h.store.LogsStoreConfig != nil && h.store.LogsStoreConfig.ObjectStorage != nil
 	// Fetching proxy config
 	if h.store.ConfigStore != nil {
 		proxyConfig, err := h.store.ConfigStore.GetProxyConfig(ctx)
@@ -271,6 +389,43 @@ func (h *ConfigHandler) updateMetadata(ctx *fasthttp.RequestCtx) {
 	SendJSON(ctx, map[string]any{"success": true})
 }
 
+// authConfigWithSetupToken extends the persisted AuthConfig shape with the
+// one-time bootstrap setup_token field, for the auth_config object in PUT
+// /api/config requests only. setup_token lives here (nested under auth_config
+// on the wire) rather than directly on configstore.AuthConfig because that
+// type is also what gets persisted to and read back from the DB via
+// UpdateAuthConfig/GetAuthConfig; keeping SetupToken off it means there's no
+// risk of it ever being written to storage or echoed back by GET /api/config.
+type authConfigWithSetupToken struct {
+	configstore.AuthConfig
+	// SetupToken is the one-time bootstrap token (see AuthMiddleware.bootstrapToken)
+	// required only when this request is creating the very first admin account.
+	// It is never persisted.
+	SetupToken string `json:"setup_token,omitempty"`
+}
+
+// clientConfigUpdate keeps boolean presence information for security-sensitive
+// partial updates. A missing field preserves the stored value; an explicit false
+// remains a supported administrator choice.
+type clientConfigUpdate struct {
+	configstore.ClientConfig
+	EnforceAuthOnInference *bool `json:"enforce_auth_on_inference"`
+}
+
+func (c *clientConfigUpdate) UnmarshalJSON(data []byte) error {
+	if err := json.Unmarshal(data, &c.ClientConfig); err != nil {
+		return err
+	}
+	var presence struct {
+		EnforceAuthOnInference *bool `json:"enforce_auth_on_inference"`
+	}
+	if err := json.Unmarshal(data, &presence); err != nil {
+		return err
+	}
+	c.EnforceAuthOnInference = presence.EnforceAuthOnInference
+	return nil
+}
+
 // updateConfig updates the core configuration settings.
 // Currently, it supports hot-reloading of the `drop_excess_requests` setting.
 // Note that settings like `prometheus_labels` cannot be changed at runtime.
@@ -281,9 +436,9 @@ func (h *ConfigHandler) updateConfig(ctx *fasthttp.RequestCtx) {
 	}
 
 	payload := struct {
-		ClientConfig    configstore.ClientConfig               `json:"client_config"`
+		ClientConfig    clientConfigUpdate                     `json:"client_config"`
 		FrameworkConfig configstoreTables.TableFrameworkConfig `json:"framework_config"`
-		AuthConfig      *configstore.AuthConfig                `json:"auth_config"`
+		AuthConfig      *authConfigWithSetupToken              `json:"auth_config"`
 	}{}
 
 	if err := json.Unmarshal(ctx.PostBody(), &payload); err != nil {
@@ -337,10 +492,31 @@ func (h *ConfigHandler) updateConfig(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, fasthttp.StatusBadRequest, "MCP library sync interval must be greater than 0")
 		return
 	}
+	// Checking the live models sync interval. Unlike the intervals above, 0 is
+	// accepted: it is the documented way to turn the background refresher off.
+	if payload.FrameworkConfig.LiveModelsSyncInterval != nil {
+		interval := *payload.FrameworkConfig.LiveModelsSyncInterval
+		if interval < 0 {
+			logger.Warn("live models sync interval cannot be negative")
+			SendError(ctx, fasthttp.StatusBadRequest, "live models sync interval cannot be negative (use 0 to disable background refresh)")
+			return
+		}
+		if interval > 0 && interval < modelcatalog.MinimumLiveModelsSyncIntervalSec {
+			logger.Warn("live models sync interval is below the minimum of %d seconds", modelcatalog.MinimumLiveModelsSyncIntervalSec)
+			SendError(ctx, fasthttp.StatusBadRequest, fmt.Sprintf("live models sync interval must be 0 (disabled) or at least %d seconds", modelcatalog.MinimumLiveModelsSyncIntervalSec))
+			return
+		}
+	}
 
 	// Get current config with proper locking
 	currentConfig := h.store.ClientConfig
-	updatedConfig := currentConfig
+	// Build the update on an independent copy: the live config must not
+	// change until persistence succeeds, or a failed store write would leave
+	// memory ahead of the database. A shallow copy is enough because every
+	// edit below replaces a whole field; nothing mutates through the shared
+	// pointer or slice fields.
+	copied := *currentConfig
+	updatedConfig := &copied
 
 	// Validate MCP auth-mode / OAuth2 server settings before any live mutation
 	// below (drop-excess flag, MCP tool-manager reload, compat plugin reload,
@@ -394,7 +570,29 @@ func (h *ConfigHandler) updateConfig(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
+	// The 'error' behavior rejects exactly the requests token_exchange
+	// clients rely on (an identity token alongside a virtual key), so the
+	// two settings are mutually exclusive — mirrored by the MCP client
+	// create path rejecting token_exchange while it is 'error'. Checked up
+	// front, alongside the other validations above: everything below this
+	// point applies live in-memory mutations before the DB write at the end
+	// of this handler, so a rejection here must happen before any of that
+	// runs — otherwise a 400 would leave runtime state changed with nothing
+	// persisted.
+	if payload.ClientConfig.DualCredentialConflictBehavior == configstoreTables.DualCredentialConflictBehaviorError && h.store.MCPConfig != nil {
+		for _, mcpClient := range h.store.MCPConfig.ClientConfigs {
+			if mcpClient.AuthType == schemas.MCPAuthTypeTokenExchange {
+				SendError(ctx, fasthttp.StatusBadRequest, fmt.Sprintf("dual_credential_conflict_behavior cannot be set to 'error' while MCP client %q uses auth_type 'token_exchange'; delete that client first or choose 'prefer_idp'/'prefer_vk'", mcpClient.Name))
+				return
+			}
+		}
+	}
+
 	var restartReasons []string
+
+	if payload.ClientConfig.AppName != currentConfig.AppName {
+		updatedConfig.AppName = payload.ClientConfig.AppName
+	}
 
 	if payload.ClientConfig.DropExcessRequests != currentConfig.DropExcessRequests {
 		h.configManager.UpdateDropExcessRequests(ctx, payload.ClientConfig.DropExcessRequests)
@@ -432,8 +630,12 @@ func (h *ConfigHandler) updateConfig(ctx *fasthttp.RequestCtx) {
 		updatedConfig.MCPDisableAutoToolInject = payload.ClientConfig.MCPDisableAutoToolInject
 		shouldReloadMCPToolManagerConfig = true
 	}
-	// MCPToolSyncInterval supports 0 (disabled), so compare against current value
-	// instead of a > 0 guard used by other numeric fields.
+	if err := validateGlobalToolSyncIntervalMinutes(payload.ClientConfig.MCPToolSyncInterval); err != nil {
+		SendError(ctx, fasthttp.StatusBadRequest, err.Error())
+		return
+	}
+	// 0 means the built-in default, so compare against the current value
+	// instead of the > 0 guard used by other numeric fields.
 	if payload.ClientConfig.MCPToolSyncInterval != currentConfig.MCPToolSyncInterval {
 		updatedConfig.MCPToolSyncInterval = payload.ClientConfig.MCPToolSyncInterval
 	}
@@ -452,7 +654,6 @@ func (h *ConfigHandler) updateConfig(ctx *fasthttp.RequestCtx) {
 		if h.store.MCPConfig.ToolManagerConfig == nil {
 			h.store.MCPConfig.ToolManagerConfig = &schemas.MCPToolManagerConfig{}
 		}
-		h.store.MCPConfig.ToolSyncInterval = time.Duration(updatedConfig.MCPToolSyncInterval) * time.Second
 		h.store.MCPConfig.ToolManagerConfig.MaxAgentDepth = updatedConfig.MCPAgentDepth
 		h.store.MCPConfig.ToolManagerConfig.ToolExecutionTimeout = schemas.Duration(time.Duration(updatedConfig.MCPToolExecutionTimeout) * time.Second)
 		h.store.MCPConfig.ToolManagerConfig.CodeModeBindingLevel = schemas.CodeModeBindingLevel(updatedConfig.MCPCodeModeBindingLevel)
@@ -494,15 +695,27 @@ func (h *ConfigHandler) updateConfig(ctx *fasthttp.RequestCtx) {
 	// No restart needed - logging plugin holds a live pointer to ClientConfig.DisableContentLogging,
 	// and ReloadClientConfigFromConfigStore mutates the struct in place so the next request picks up the new value.
 	updatedConfig.DisableContentLogging = payload.ClientConfig.DisableContentLogging
+	// No restart needed - logging plugin holds a live pointer to ClientConfig.RetainContentInObjectStorage.
+	updatedConfig.RetainContentInObjectStorage = payload.ClientConfig.RetainContentInObjectStorage
 	updatedConfig.DisableDBPingsInHealth = payload.ClientConfig.DisableDBPingsInHealth
 	// No restart needed - ReloadClientConfigFromConfigStore calls CorsMiddleware.UpdateConfig,
 	// which atomically swaps in a fresh immutable snapshot carrying the new value.
 	updatedConfig.DumpErrorsInConsoleLogs = payload.ClientConfig.DumpErrorsInConsoleLogs
 
-	updatedConfig.EnforceAuthOnInference = payload.ClientConfig.EnforceAuthOnInference
-	// Sync deprecated columns to match new field so they stay consistent in the DB
-	updatedConfig.EnforceGovernanceHeader = payload.ClientConfig.EnforceAuthOnInference
-	updatedConfig.EnforceSCIMAuth = payload.ClientConfig.EnforceAuthOnInference
+	if payload.ClientConfig.EnforceAuthOnInference != nil {
+		enforceAuth := *payload.ClientConfig.EnforceAuthOnInference
+		updatedConfig.EnforceAuthOnInference = enforceAuth
+		// Sync deprecated columns to match new field so they stay consistent in the DB.
+		updatedConfig.EnforceGovernanceHeader = enforceAuth
+		updatedConfig.EnforceSCIMAuth = enforceAuth
+	}
+
+	// Only update when explicitly provided to avoid clearing the stored default (prefer_idp).
+	// The conflict-vs-token_exchange validation already ran up front, before
+	// any live mutation.
+	if payload.ClientConfig.DualCredentialConflictBehavior != "" {
+		updatedConfig.DualCredentialConflictBehavior = payload.ClientConfig.DualCredentialConflictBehavior
+	}
 
 	// Only update MaxRequestBodySizeMB if explicitly provided (> 0) to avoid clearing stored value
 	if payload.ClientConfig.MaxRequestBodySizeMB > 0 {
@@ -546,7 +759,7 @@ func (h *ConfigHandler) updateConfig(ctx *fasthttp.RequestCtx) {
 	if payload.ClientConfig.MCPToolExecutionTimeout > 0 {
 		updatedConfig.MCPToolExecutionTimeout = payload.ClientConfig.MCPToolExecutionTimeout
 	}
-	// 0 is a valid value (disabled), so persist it when changed.
+	// 0 is a valid value (the built-in default), so persist it when changed.
 	if payload.ClientConfig.MCPToolSyncInterval != currentConfig.MCPToolSyncInterval {
 		updatedConfig.MCPToolSyncInterval = payload.ClientConfig.MCPToolSyncInterval
 	}
@@ -626,14 +839,16 @@ func (h *ConfigHandler) updateConfig(ctx *fasthttp.RequestCtx) {
 	}
 	updatedConfig.LogRetentionDays = payload.ClientConfig.LogRetentionDays
 
-	// Update the store with the new config
-	h.store.ClientConfig = updatedConfig
-
 	if err := h.store.ConfigStore.UpdateClientConfig(ctx, updatedConfig); err != nil {
 		logger.Warn("failed to save configuration: %v", err)
 		SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("failed to save configuration: %v", err))
 		return
 	}
+
+	// Apply the in-memory change only after persistence succeeds, copying
+	// into the live struct (the same way ReloadClientConfigFromConfigStore
+	// publishes) so every holder of the pointer observes it.
+	*h.store.ClientConfig = *updatedConfig
 	// Reloading client config from config store
 	if err := h.configManager.ReloadClientConfigFromConfigStore(ctx); err != nil {
 		logger.Warn("failed to reload client config from config store: %v", err)
@@ -656,6 +871,7 @@ func (h *ConfigHandler) updateConfig(ctx *fasthttp.RequestCtx) {
 			ModelParametersURL:     bifrost.Ptr(modelcatalog.DefaultModelParametersURL),
 			MCPLibraryURL:          bifrost.Ptr(modelcatalog.DefaultMCPLibraryURL),
 			MCPLibrarySyncInterval: bifrost.Ptr(int64(modelcatalog.DefaultSyncInterval.Seconds())),
+			LiveModelsSyncInterval: bifrost.Ptr(int64(modelcatalog.DefaultLiveModelsSyncInterval.Seconds())),
 		}
 	}
 	// Handling individual nil cases
@@ -674,15 +890,16 @@ func (h *ConfigHandler) updateConfig(ctx *fasthttp.RequestCtx) {
 	if frameworkConfig.MCPLibrarySyncInterval == nil {
 		frameworkConfig.MCPLibrarySyncInterval = bifrost.Ptr(int64(modelcatalog.DefaultSyncInterval.Seconds()))
 	}
+	if frameworkConfig.LiveModelsSyncInterval == nil {
+		frameworkConfig.LiveModelsSyncInterval = bifrost.Ptr(int64(modelcatalog.DefaultLiveModelsSyncInterval.Seconds()))
+	}
 	// Updating framework config
 	shouldReloadFrameworkConfig := false
 	if payload.FrameworkConfig.PricingURL != nil && *payload.FrameworkConfig.PricingURL != *frameworkConfig.PricingURL {
-		if *payload.FrameworkConfig.PricingURL != "" {
-			if err := checkURLAccessibility(*payload.FrameworkConfig.PricingURL); err != nil {
-				logger.Warn("failed to check the accessibility of the pricing URL: %v", err)
-				SendError(ctx, fasthttp.StatusBadRequest, fmt.Sprintf("failed to check the accessibility of the pricing URL: %v", err))
-				return
-			}
+		if err := checkURLAccessibility(*payload.FrameworkConfig.PricingURL); err != nil {
+			logger.Warn("failed to check the accessibility of the pricing URL: %v", err)
+			SendError(ctx, fasthttp.StatusBadRequest, fmt.Sprintf("failed to check the accessibility of the pricing URL: %v", err))
+			return
 		}
 		frameworkConfig.PricingURL = payload.FrameworkConfig.PricingURL
 		shouldReloadFrameworkConfig = true
@@ -728,6 +945,13 @@ func (h *ConfigHandler) updateConfig(ctx *fasthttp.RequestCtx) {
 			shouldReloadFrameworkConfig = true
 		}
 	}
+	if payload.FrameworkConfig.LiveModelsSyncInterval != nil {
+		syncInterval := *payload.FrameworkConfig.LiveModelsSyncInterval
+		if frameworkConfig.LiveModelsSyncInterval == nil || syncInterval != *frameworkConfig.LiveModelsSyncInterval {
+			frameworkConfig.LiveModelsSyncInterval = &syncInterval
+			shouldReloadFrameworkConfig = true
+		}
+	}
 	// Reload config if required
 	if shouldReloadFrameworkConfig {
 		var syncSeconds int64
@@ -736,15 +960,25 @@ func (h *ConfigHandler) updateConfig(ctx *fasthttp.RequestCtx) {
 		} else {
 			syncSeconds = int64(modelcatalog.DefaultSyncInterval.Seconds())
 		}
-		h.store.FrameworkConfig = &framework.FrameworkConfig{
+		updatedFrameworkConfig := &framework.FrameworkConfig{
 			Pricing: &modelcatalog.Config{
 				PricingURL:             frameworkConfig.PricingURL,
 				PricingSyncInterval:    &syncSeconds,
 				ModelParametersURL:     frameworkConfig.ModelParametersURL,
 				MCPLibraryURL:          frameworkConfig.MCPLibraryURL,
 				MCPLibrarySyncInterval: frameworkConfig.MCPLibrarySyncInterval,
+				LiveModelsSyncInterval: frameworkConfig.LiveModelsSyncInterval,
 			},
 		}
+		// Publish the new config under the write lock: other request goroutines
+		// read this pointer through LiveModelsSyncInterval and UpdateSyncConfig.
+		// A whole new struct is swapped in rather than mutated in place, which is
+		// what lets readers use the pointer after releasing the lock. Scoped to
+		// the assignment alone — the store write and reload below take the read
+		// lock themselves, and sync.RWMutex is not reentrant.
+		h.store.Mu.Lock()
+		h.store.FrameworkConfig = updatedFrameworkConfig
+		h.store.Mu.Unlock()
 		// Saving framework config
 		if err := h.store.ConfigStore.UpdateFrameworkConfig(ctx, frameworkConfig); err != nil {
 			logger.Warn("failed to save framework configuration: %v", err)
@@ -752,11 +986,7 @@ func (h *ConfigHandler) updateConfig(ctx *fasthttp.RequestCtx) {
 			return
 		}
 		// Reloading pricing manager
-		if err := h.configManager.UpdateSyncConfig(ctx); err != nil {
-			logger.Warn("failed to reload framework configuration: %v", err)
-			SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("failed to reload framework configuration: %v", err))
-			return
-		}
+		h.configManager.UpdateSyncConfig(ctx)
 	}
 	// Checking auth config and trying to update if required
 	if payload.AuthConfig != nil {
@@ -815,6 +1045,17 @@ func (h *ConfigHandler) updateConfig(ctx *fasthttp.RequestCtx) {
 				SendError(ctx, fasthttp.StatusBadRequest, "auth username and password must be provided")
 				return
 			}
+
+			// Creating the very first admin account is the one config write this
+			// endpoint allows while genuinely unauthenticated (no admin exists yet to
+			// authenticate as). Require the operator-configured setup token (config.json
+			// setup_token or BIFROST_SETUP_TOKEN env var) so that action can't be taken by
+			// an unauthenticated network caller racing the real operator to a freshly
+			// exposed instance.
+			if authConfig == nil && !h.configManager.ValidateSetupToken(payload.AuthConfig.SetupToken) {
+				SendError(ctx, fasthttp.StatusForbidden, "a valid setup token is required to create the initial admin account; configure setup_token in config.json (or the BIFROST_SETUP_TOKEN env var) and pass it in this request")
+				return
+			}
 			// Fetching current Auth config
 			if payload.AuthConfig.AdminUserName.GetValue() != "" {
 				if payload.AuthConfig.AdminPassword.ShouldPreserveStored() {
@@ -849,7 +1090,7 @@ func (h *ConfigHandler) updateConfig(ctx *fasthttp.RequestCtx) {
 				}
 			}
 			// Save auth config - this handles both first-time creation and updates
-			err = h.configManager.UpdateAuthConfig(ctx, payload.AuthConfig)
+			err = h.configManager.UpdateAuthConfig(ctx, &payload.AuthConfig.AuthConfig)
 			if err != nil {
 				logger.Warn("failed to update auth config: %v", err)
 				SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("failed to update auth config: %v", err))
@@ -863,7 +1104,7 @@ func (h *ConfigHandler) updateConfig(ctx *fasthttp.RequestCtx) {
 			if payload.AuthConfig.AdminUserName == nil || payload.AuthConfig.AdminUserName.GetValue() == "" {
 				payload.AuthConfig.AdminUserName = authConfig.AdminUserName
 			}
-			err = h.configManager.UpdateAuthConfig(ctx, payload.AuthConfig)
+			err = h.configManager.UpdateAuthConfig(ctx, &payload.AuthConfig.AuthConfig)
 			if err != nil {
 				logger.Warn("failed to update auth config: %v", err)
 				SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("failed to update auth config: %v", err))
@@ -1171,6 +1412,21 @@ func checkURLAccessibility(rawURL string) error {
 	}()
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// validateGlobalToolSyncIntervalMinutes checks a client-config
+// mcp_tool_sync_interval: 0 means the built-in default, negatives are
+// rejected, and the ceiling is the minutes->Duration overflow edge shared
+// with the per-client tool_sync_interval (maxToolSyncIntervalMinutes), since
+// the stored minutes are multiplied by time.Minute on every reload.
+func validateGlobalToolSyncIntervalMinutes(minutes int) error {
+	if minutes < 0 {
+		return fmt.Errorf("mcp_tool_sync_interval must be 0 (use the default) or a positive number of minutes")
+	}
+	if int64(minutes) > maxToolSyncIntervalMinutes {
+		return fmt.Errorf("mcp_tool_sync_interval must be at most %d minutes", maxToolSyncIntervalMinutes)
 	}
 	return nil
 }

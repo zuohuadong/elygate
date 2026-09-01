@@ -1,4 +1,5 @@
 import { formatCost, formatLatency } from "@/app/workspace/dashboard/utils/chartUtils";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -22,21 +23,37 @@ import {
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdownMenu";
 import { DottedSeparator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { TruncatedLabel } from "@/components/ui/truncatedLabel";
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
 import { ProviderIconType, RenderProviderIcon, RoutingEngineUsedIcons } from "@/lib/constants/icons";
-import { RequestTypeColors, RequestTypeLabels, RoutingEngineUsedColors, RoutingEngineUsedLabels, Status } from "@/lib/constants/logs";
-import { ContentBlock, LogEntry, ResponsesMessage } from "@/lib/types/logs";
+import {
+	getProviderLabel,
+	logAppDisplayName,
+	mapAppToClientApp,
+	mapUserAgentToApp,
+	RequestTypeColors,
+	RequestTypeLabels,
+	RoutingEngineUsedColors,
+	RoutingEngineUsedLabels,
+	Status,
+} from "@/lib/constants/logs";
+import { useGetProvidersQuery, useGetUserAgentMappingsQuery } from "@/lib/store";
+import { BatchRequestCounts, ContentBlock, LogEntry, OverheadBucket, ResponsesMessage } from "@/lib/types/logs";
 import { cn } from "@/lib/utils";
 import { downloadAsJson } from "@/lib/utils/browser-download";
 import { formatCompactNumber } from "@/lib/utils/numbers";
+import { applyRedactionMapping, applyRedactionMappingToValue, hasRedactionMappingEntries } from "@/lib/utils/redaction";
+import { extractResponsesItemPayload, summarizeResponsesToolCall } from "@/lib/utils/responsesItems";
 import { isJson } from "@/lib/utils/validation";
+import { RbacOperation, RbacResource, useRbac } from "@enterprise/lib";
 import { Link } from "@tanstack/react-router";
 import { addMilliseconds, format } from "date-fns";
-import { AlertCircle, ChevronDown, Clipboard, Copy, Download, Loader2, MoreVertical, Trash2, Wrench } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { AlertCircle, ChevronDown, Clipboard, Copy, Download, Loader2, MoreVertical, Trash2, Wrench, X } from "lucide-react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import BlockHeader from "../views/blockHeader";
 import CollapsibleBox from "../views/collapsibleBox";
@@ -48,6 +65,11 @@ import PluginLogsView from "../views/pluginLogsView";
 import SpeechView from "../views/speechView";
 import TranscriptionView from "../views/transcriptionView";
 import VideoView from "../views/videoView";
+import { resolveRawJsonNoticeState } from "./logDetailView.utils";
+
+// Full-precision cost for the detail view; per-request costs are often < $0.01,
+// where formatCost's 2-4 dp rounding would hide the value.
+const formatCostPrecise = (value?: number): string => `$${parseFloat((value ?? 0).toFixed(6))}`;
 
 const formatRealtimeTransport = (value: unknown): string => {
 	const transport = String(value ?? "").trim();
@@ -70,18 +92,6 @@ const getRealtimeTransportBadgeClass = (value: unknown): string => {
 		default:
 			return "border-slate-300 bg-slate-50 text-slate-700 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-300";
 	}
-};
-
-const hasRedactionMappingEntries = (mapping?: LogEntry["redaction_mapping"]): boolean =>
-	Boolean(mapping && (Object.keys(mapping.input ?? {}).length > 0 || Object.keys(mapping.output ?? {}).length > 0));
-
-const applyRedactionMapping = (text: string | undefined, mapping?: Record<string, string>): string => {
-	if (!text || !mapping) return text || "";
-	let result = text;
-	for (const [key, value] of Object.entries(mapping)) {
-		result = result.replaceAll(`[${key}]`, value);
-	}
-	return result;
 };
 
 const formatRealtimeSource = (value: unknown): string => {
@@ -113,9 +123,12 @@ const extractResponsesText = (msg: ResponsesMessage, mapping?: Record<string, st
 		text = msg.content
 			.filter(
 				(b: any) =>
-					b && b.text && (b.type === "input_text" || b.type === "output_text" || b.type === "reasoning_text" || b.type === "refusal"),
+					b &&
+					(b.text || b.refusal) &&
+					(b.type === "input_text" || b.type === "output_text" || b.type === "reasoning_text" || b.type === "refusal"),
 			)
-			.map((b: any) => b.text as string)
+			// Refusal blocks carry their text in `refusal`, not `text`.
+			.map((b: any) => (b.text ?? b.refusal) as string)
 			.join("\n");
 	} else if (typeof (msg as any).arguments === "string") {
 		text = (msg as any).arguments as string;
@@ -238,6 +251,8 @@ const getResponsesRole = (msg: ResponsesMessage): MessageRole => {
 		msg.type &&
 		(msg.type.endsWith("_call") ||
 			msg.type.endsWith("_call_output") ||
+			msg.type === "tool_search_output" ||
+			msg.type === "additional_tools" ||
 			msg.type === "mcp_list_tools" ||
 			msg.type === "mcp_approval_request" ||
 			msg.type === "mcp_approval_responses")
@@ -261,6 +276,37 @@ const isReasoningResponsesMessage = (m: ResponsesMessage): boolean => m.type ===
 // Streaming providers can emit a single logical assistant turn (or reasoning
 // item) as many small messages. Collapse adjacent ones so the UI shows one
 // bubble per turn instead of N "1 line" bubbles.
+// Expands namespace tool declarations into their callable children
+// (`namespace.tool` names), leaving plain declarations untouched.
+const flattenDeclaredTools = (tools: any[]): any[] =>
+	tools.flatMap((tool) =>
+		tool?.type === "namespace" && Array.isArray(tool.tools)
+			? (tool.tools as any[]).map((nested) => ({ ...nested, name: `${tool.name ?? "namespace"}.${nested?.name ?? ""}` }))
+			: [tool],
+	);
+
+// Later declarations of the same tool replace earlier ones — a conversation
+// history can carry multiple `additional_tools` items, each a point-in-time
+// update, so the effective tool set is last-write-wins by name. Unnamed
+// declarations are kept as-is.
+const dedupeDeclaredTools = (tools: any[]): any[] => {
+	const byName = new Map<string, number>();
+	const out: any[] = [];
+	for (const tool of tools) {
+		const name = tool?.name ?? tool?.function?.name;
+		if (typeof name === "string" && name) {
+			const idx = byName.get(name);
+			if (idx !== undefined) {
+				out[idx] = tool;
+				continue;
+			}
+			byName.set(name, out.length);
+		}
+		out.push(tool);
+	}
+	return out;
+};
+
 const coalesceResponsesMessages = (msgs: ResponsesMessage[]): ResponsesMessage[] => {
 	const out: ResponsesMessage[] = [];
 	for (const m of msgs) {
@@ -332,8 +378,30 @@ const formatToolChoice = (value: unknown): string => {
 	}
 };
 
+// batchRequestStates lists the provider's per-state request tallies as discrete
+// label/count pairs. Total, Completed, and Failed are universal (every provider
+// sets them, and a 0 is a real, useful count — e.g. "no failures yet"), so they
+// always render. The remaining states are Anthropic-specific and simply absent
+// for other providers, so those are dropped when not reported.
+const batchRequestStates = (counts: BatchRequestCounts): [string, number][] => {
+	const optional: [string, number | undefined][] = [
+		["Succeeded", counts.succeeded],
+		["Expired", counts.expired],
+		["Canceled", counts.canceled],
+		["Pending", counts.pending],
+	];
+	return [
+		["Completed", counts.completed],
+		["Failed", counts.failed],
+		...optional.filter((entry): entry is [string, number] => Boolean(entry[1])),
+	];
+};
+
 // Helper to detect passthrough operations
 const isPassthroughOperation = (object: string) => object === "passthrough" || object === "passthrough_stream";
+
+// Helper to detect batch operations (they carry no messages or tool declarations)
+const isBatchOperation = (object: string) => object.startsWith("batch_");
 
 // Helper to detect container operations (for hiding irrelevant fields like Model/Tokens)
 const isContainerOperation = (object: string) => {
@@ -364,6 +432,16 @@ const statusDotStyles: Record<string, string> = {
 	cancelled: "bg-gray-400",
 };
 
+const batchStatusBadgeStyles: Record<string, string> = {
+	completed: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+	ended: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+	failed: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
+	expired: "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300",
+	cancelled: "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300",
+	deleted: "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300",
+};
+const batchStatusBadgeDefault = "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200";
+
 function StatusPill({ status }: { status: Status }) {
 	return (
 		<span
@@ -376,6 +454,17 @@ function StatusPill({ status }: { status: Status }) {
 			{status}
 		</span>
 	);
+}
+
+// Colors an HTTP status code badge by response class.
+function statusCodeBadgeClass(code: number): string {
+	if (code >= 200 && code < 300)
+		return "bg-green-50 text-green-700 border-green-200 dark:bg-green-950/40 dark:text-green-400 dark:border-green-900";
+	if (code >= 300 && code < 400)
+		return "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/40 dark:text-blue-400 dark:border-blue-900";
+	if (code >= 400 && code < 500)
+		return "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-900";
+	return "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-400 dark:border-red-900";
 }
 
 function HeroStat({
@@ -400,6 +489,305 @@ function HeroStat({
 				{value}
 			</div>
 			{sub ? <div className="text-muted-foreground mt-0.5 truncate text-[11px]">{sub}</div> : null}
+		</div>
+	);
+}
+
+// formatMicros renders a microsecond overhead value, promoting to ms once it is
+// large enough that microseconds would just be noise.
+function formatMicros(us: number): string {
+	if (us >= 1000) return `${(us / 1000).toFixed(2)} ms`;
+	return `${us.toFixed(us < 10 ? 1 : 0)} µs`;
+}
+
+// Top-level overhead categories shown in the stacked bar + legend. Raw backend span
+// names are grouped into a handful of user-facing categories: Serialization (JSON
+// parse/encode), Conversion (API schema translation), Plugins, Middleware (auth/access),
+// Key selection, Processing (internal request pipeline), Networking
+// (client<->gateway<->provider handling), Client delivery (SSE egress to the client), and Scheduling (the
+// residual goroutine-hop latency between phases). "View details" drills into the member
+// spans inside each grouped category with their friendly labels. See OVERHEAD_LABELS /
+// OVERHEAD_BUCKET_CATEGORY / overheadCategoryKey for the mapping.
+type OverheadCategory = {
+	key: string;
+	label: string;
+	colorClass: string;
+	totalUs: number;
+	members: OverheadBucket[];
+};
+
+// The four serialization phases collapsed into the "Serialization" category. Their
+// per-phase labels below are used for the drill-down rows.
+const OVERHEAD_SERIALIZATION_PHASES = new Set(["request-unmarshal", "request-marshal", "response-parse", "response-marshal"]);
+
+// Top-level categories shown in the stacked bar + legend. Each has a distinct colour.
+const OVERHEAD_CATEGORY_META: Record<string, { label: string; colorClass: string }> = {
+	serialization: { label: "Serialization", colorClass: "bg-indigo-500/70" },
+	conversion: { label: "Conversion", colorClass: "bg-fuchsia-500/70" },
+	plugins: { label: "Plugins", colorClass: "bg-blue-500/70" },
+	middleware: { label: "Middleware", colorClass: "bg-cyan-500/70" },
+	routing: { label: "Key selection", colorClass: "bg-amber-500/70" },
+	processing: { label: "Processing", colorClass: "bg-teal-500/70" },
+	networking: { label: "Networking", colorClass: "bg-emerald-500/70" },
+	streaming: { label: "Client delivery", colorClass: "bg-red-500/70" },
+	scheduling: { label: "Scheduling", colorClass: "bg-slate-500/70" },
+	other: { label: "Other", colorClass: "bg-muted-foreground/50" },
+};
+
+// Friendly drill-down labels for each raw bucket name (the technical span names the
+// backend emits). Members without an entry fall back to the name with any "plugin."
+// prefix stripped.
+const OVERHEAD_LABELS: Record<string, string> = {
+	// Serialization (JSON parse / encode)
+	"request-unmarshal": "Request parse",
+	"request-marshal": "Request encode",
+	"response-parse": "Response parse",
+	"response-marshal": "Response encode",
+	// Conversion (API schema translation)
+	convertor: "Schema conversion",
+	"convertor.stream-in": "Stream convert (inbound)",
+	"convertor.stream-out": "Stream convert (outbound)",
+	// Middleware (auth / access control)
+	"middleware.apikeys": "API",
+	"middleware.scim": "SCIM",
+	"middleware.auth": "Auth",
+	// Routing
+	"key-pool": "Key pool",
+	"key.selection": "Key selection",
+	// Processing (internal request pipeline)
+	"handle-setup": "Request setup",
+	"pipeline-pre": "Pre-hooks",
+	"pipeline-post": "Post-hooks",
+	"worker-setup": "Worker setup",
+	"worker-handoff": "Worker handoff",
+	"queue-wait": "Queue wait",
+	"attribute-population": "Attribute population",
+	// Networking (client<->gateway<->provider handling)
+	"provider-internal": "Provider I/O",
+	"transport-context": "Request context building",
+	"transport-response-headers": "Response headers",
+	"response-finalize": "Response read",
+	"request-sign": "Request signing",
+	"credentials-fetch": "Credential fetch",
+	// Streaming relay
+	"stream-backpressure": "Client backpressure",
+	"stream-client-write": "Client write",
+	scheduling: "Scheduling",
+};
+
+// Category assignment for buckets that aren't matched by a prefix rule below. Every
+// backend bucket name should be either matched by a prefix rule (serialization phases,
+// middleware.*, convertor*, plugin.*) or listed here — otherwise it lands in "Other",
+// which is the signal that a new bucket needs a home.
+const OVERHEAD_BUCKET_CATEGORY: Record<string, string> = {
+	"key-pool": "routing",
+	"key.selection": "routing",
+	"handle-setup": "processing",
+	"pipeline-pre": "processing",
+	"pipeline-post": "processing",
+	"worker-setup": "processing",
+	"worker-handoff": "processing",
+	"queue-wait": "processing",
+	"attribute-population": "processing",
+	"provider-internal": "networking",
+	"transport-context": "networking",
+	"transport-response-headers": "networking",
+	"response-finalize": "networking",
+	"request-sign": "networking",
+	"credentials-fetch": "networking",
+	"stream-backpressure": "streaming",
+	"stream-client-write": "streaming",
+	scheduling: "scheduling",
+};
+
+// Raw backend spans that split one user-facing step into internals a reader doesn't care
+// about are folded into a single member. key-pool (the pool lookup) + key.selection (the
+// actual pick) are both "choosing the API key", so they collapse into "Key selection".
+const OVERHEAD_MEMBER_MERGE: Record<string, string> = {
+	"key-pool": "key.selection",
+};
+function mergedBucketName(name: string): string {
+	return OVERHEAD_MEMBER_MERGE[name] ?? name;
+}
+
+function overheadCategoryKey(b: OverheadBucket): string {
+	if (OVERHEAD_SERIALIZATION_PHASES.has(b.name)) {
+		return "serialization";
+	}
+	if (b.name.startsWith("middleware.")) {
+		return "middleware";
+	}
+	// The bare "convertor" phase and the per-chunk streaming variants (convertor.stream-in
+	// / .stream-out) all fold into the single Conversion category.
+	if (b.name === "convertor" || b.name.startsWith("convertor.")) {
+		return "conversion";
+	}
+	const mapped = OVERHEAD_BUCKET_CATEGORY[b.name];
+	if (mapped) {
+		return mapped;
+	}
+	return b.kind === "plugin" ? "plugins" : "other";
+}
+
+// overheadMemberLabel renders a drill-down member with its friendly label when there is
+// one, else the span name with the redundant "plugin." prefix stripped (every plugin row
+// already sits under the Plugins group).
+// Plugin display names where a plain title-case of the kebab id would read wrong
+// (acronyms, multi-word tokens). Everything else is title-cased from its id.
+const PLUGIN_LABEL_OVERRIDES: Record<string, string> = {
+	otel: "OpenTelemetry",
+	datadog: "Datadog",
+	compat: "Compatibility",
+	"adaptive-loadbalancer": "Adaptive Load Balancer",
+	"model-catalog-resolver": "Model Catalog Resolver",
+};
+
+// pluginDisplayName turns a plugin's kebab-case id ("enterprise-governance") into a
+// friendly label ("Enterprise Governance"), honouring PLUGIN_LABEL_OVERRIDES first.
+function pluginDisplayName(id: string): string {
+	if (PLUGIN_LABEL_OVERRIDES[id]) return PLUGIN_LABEL_OVERRIDES[id];
+	return id
+		.split("-")
+		.filter(Boolean)
+		.map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+		.join(" ");
+}
+
+function overheadMemberLabel(name: string): string {
+	const friendly = OVERHEAD_LABELS[name];
+	if (friendly) return friendly;
+	if (name.startsWith("plugin.")) return pluginDisplayName(name.slice("plugin.".length));
+	if (name.startsWith("middleware.")) return name.slice("middleware.".length);
+	return name;
+}
+
+// buildOverheadCategories groups the raw buckets into the top-level categories,
+// ordered largest-first so the bar and legend read like the numbers.
+function buildOverheadCategories(buckets: OverheadBucket[]): OverheadCategory[] {
+	const grouped = new Map<string, OverheadBucket[]>();
+	for (const b of buckets) {
+		const key = overheadCategoryKey(b);
+		const list = grouped.get(key);
+		if (list) list.push(b);
+		else grouped.set(key, [b]);
+	}
+	const cats: OverheadCategory[] = [];
+	for (const [key, rawMembers] of grouped) {
+		// Fold raw span splits into their merged member (e.g. key-pool -> key.selection),
+		// summing durations, before sorting/rendering.
+		const byName = new Map<string, OverheadBucket>();
+		for (const m of rawMembers) {
+			const name = mergedBucketName(m.name);
+			const existing = byName.get(name);
+			if (existing) existing.duration_us += m.duration_us;
+			else byName.set(name, { ...m, name });
+		}
+		const members = Array.from(byName.values());
+		members.sort((a, b) => b.duration_us - a.duration_us);
+		cats.push({
+			key,
+			label: OVERHEAD_CATEGORY_META[key]?.label ?? key,
+			colorClass: OVERHEAD_CATEGORY_META[key]?.colorClass ?? "bg-muted-foreground/50",
+			totalUs: members.reduce((acc, m) => acc + m.duration_us, 0),
+			members,
+		});
+	}
+	return cats.sort((a, b) => b.totalUs - a.totalUs);
+}
+
+// OverheadBreakdown renders Bifrost's overhead as a single horizontal stacked bar
+// split into the top-level categories, with a legend beneath. Plugin and internal
+// spans are measured directly; the "scheduling" bucket (from the backend) accounts for
+// the residual goroutine-hop latency between phases, so the segments sum to the full
+// overhead number. "View details" expands the categories that hold more than one span
+// into their individual members so a specific phase or plugin can be inspected.
+function OverheadBreakdown({ buckets, overheadMs }: { buckets: OverheadBucket[]; overheadMs?: number }) {
+	const [showDetails, setShowDetails] = useState(false);
+	if (!buckets || buckets.length === 0) return null;
+
+	const categories = buildOverheadCategories(buckets);
+	const sumUs = buckets.reduce((acc, b) => acc + b.duration_us, 0);
+	const overheadUs = overheadMs != null && !isNaN(overheadMs) ? overheadMs * 1000 : undefined;
+
+	// When measured spans already exceed the computed overhead, the backend omits a
+	// scheduling bucket (it would be negative): a sign the upstream accumulator is
+	// over-counting. Surface it rather than let the numbers look inconsistent.
+	const overCounted = overheadUs != null && sumUs > overheadUs + 1;
+
+	const barTotal = categories.reduce((acc, c) => acc + c.totalUs, 0) || 1;
+	// Only categories that aggregate more than one span are worth drilling into.
+	const drillable = categories.filter((c) => c.members.length > 1);
+
+	return (
+		<div className="space-y-3">
+			<div className="flex items-center justify-between gap-2">
+				<BlockHeader title="Overhead Breakdown" />
+				<div className="font-mono text-xs tabular-nums">{formatMicros(overheadUs ?? sumUs)}</div>
+			</div>
+
+			<div className="flex h-3 w-full overflow-hidden rounded-sm">
+				{categories.map((c) => (
+					<div
+						key={c.key}
+						className={cn(c.colorClass, "h-full")}
+						style={{ width: `${(c.totalUs / barTotal) * 100}%` }}
+						title={`${c.label} · ${formatMicros(c.totalUs)}`}
+					/>
+				))}
+			</div>
+
+			<div className="flex flex-wrap gap-x-4 gap-y-1.5">
+				{categories.map((c) => (
+					<div key={c.key} className="flex items-center gap-1.5 font-mono text-[11px]">
+						<span className={cn("h-2.5 w-2.5 shrink-0 rounded-[2px]", c.colorClass)} />
+						<span>{c.label}</span>
+						<span className="text-muted-foreground tabular-nums">{formatMicros(c.totalUs)}</span>
+					</div>
+				))}
+			</div>
+
+			{drillable.length > 0 ? (
+				<button
+					type="button"
+					onClick={() => setShowDetails((v) => !v)}
+					className="text-muted-foreground hover:text-foreground flex items-center gap-1 font-mono text-[11px] transition"
+				>
+					View details
+					<ChevronDown className={cn("h-3 w-3 transition-transform", showDetails ? "rotate-180" : "rotate-0")} />
+				</button>
+			) : null}
+
+			{showDetails ? (
+				<div className="space-y-3 pt-1">
+					{drillable.map((c) => (
+						<div key={c.key} className="space-y-1.5">
+							<div className="text-muted-foreground flex items-center gap-1.5 text-[11px] font-medium tracking-wide uppercase">
+								<span className={cn("h-2 w-2 shrink-0 rounded-[2px]", c.colorClass)} />
+								{c.label}
+								{/* normal-case: keep the unit as "µs" — uppercasing mangles the micro sign into "ΜS" (reads as ms) */}
+								<span className="normal-case tabular-nums">{formatMicros(c.totalUs)}</span>
+							</div>
+							<div className="space-y-1 pl-3">
+								{c.members.map((m) => (
+									<div key={m.name} className="flex items-center justify-between gap-3 font-mono text-[11px]">
+										<span className="truncate" title={m.name}>
+											{overheadMemberLabel(m.name)}
+										</span>
+										<span className="text-muted-foreground shrink-0 tabular-nums">{formatMicros(m.duration_us)}</span>
+									</div>
+								))}
+							</div>
+						</div>
+					))}
+				</div>
+			) : null}
+
+			{overCounted ? (
+				<div className="text-muted-foreground text-[11px]">
+					Measured spans ({formatMicros(sumUs)}) exceed the computed overhead ({formatMicros(overheadUs!)}); the upstream accumulator may be
+					over-counting.
+				</div>
+			) : null}
 		</div>
 	);
 }
@@ -476,7 +864,7 @@ function RoutingDecisionLogs({ logs }: { logs: string }) {
 										className={cn(
 											"inline-block w-24 shrink-0 rounded px-1.5 py-0.5 text-center text-[10px] font-semibold uppercase",
 											RoutingEngineUsedColors[scope as keyof typeof RoutingEngineUsedColors] ??
-												"bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300",
+											"bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300",
 										)}
 									>
 										{RoutingEngineUsedLabels[scope as keyof typeof RoutingEngineUsedLabels] ?? scope}
@@ -572,6 +960,72 @@ interface LogDetailViewProps {
 	onFilterByParentRequestId?: (parentRequestId: string) => void;
 }
 
+// Explains an empty Raw JSON tab. Raw payloads are only persisted when the
+// provider's `store_raw_request_response` is on, and teams that turn it off for
+// storage reasons otherwise just see an unexplained blank tab. This reads the
+// provider's *current* setting, so it is phrased in the present tense — it says
+// why raw JSON is missing for this provider today, not what was configured when
+// the request ran. When the setting is on (or unreadable, e.g. the viewer has no
+// provider access) we fall back to the neutral copy, since the row may simply
+// have failed before reaching the provider. While the setting is still being
+// fetched we show neither message - see `resolveRawJsonNoticeState`.
+function RawJsonUnavailableNotice({ provider }: { provider: string }) {
+	const hasProvidersAccess = useRbac(RbacResource.ModelProvider, RbacOperation.View);
+	const {
+		data: providers,
+		isLoading: isProvidersLoading,
+		isError: isProvidersError,
+	} = useGetProvidersQuery(undefined, { skip: !hasProvidersAccess });
+
+	const noticeState = useMemo(
+		() => resolveRawJsonNoticeState({ hasProvidersAccess, isProvidersLoading, isProvidersError, providers, provider }),
+		[hasProvidersAccess, isProvidersLoading, isProvidersError, providers, provider],
+	);
+
+	if (noticeState === "loading") {
+		return (
+			<div className="rounded-sm border border-dashed p-5">
+				<Skeleton className="mx-auto h-4 w-48" />
+			</div>
+		);
+	}
+
+	if (noticeState === "unknown") {
+		return <div className="text-muted-foreground rounded-sm border border-dashed p-5 text-center text-sm">No raw JSON available.</div>;
+	}
+
+	return (
+		<div className="text-muted-foreground space-y-3 rounded-sm border border-dashed p-5 text-sm">
+			<div className="text-foreground font-medium">Raw JSON storage is disabled by settings</div>
+			<p>
+				<span className="text-foreground font-medium">{getProviderLabel(provider)}</span> is configured not to persist raw request and
+				response payloads in log records, so there is nothing to show here. To start capturing them:
+			</p>
+			<ol className="ml-4 list-decimal space-y-1">
+				<li>
+					Open{" "}
+					<Link to="/workspace/providers" search={{ provider }} className="text-foreground font-medium underline underline-offset-2">
+						Providers → {getProviderLabel(provider)}
+					</Link>
+				</li>
+				<li>
+					Click the <span className="text-foreground font-medium">settings</span> icon to open the provider configuration
+				</li>
+				<li>
+					Go to the <span className="text-foreground font-medium">Debugging</span> tab
+				</li>
+				<li>
+					Turn on <span className="text-foreground font-medium">Store Raw Request/Response</span>
+				</li>
+			</ol>
+			<p className="text-xs">
+				This applies to new requests only, existing logs will not gain raw JSON. To capture raw payloads for a single request instead, send
+				the <code className="text-[11px]">x-bf-store-raw-request-response: true</code> header.
+			</p>
+		</div>
+	);
+}
+
 export function LogDetailView({
 	log,
 	resolvedSelectedPromptName,
@@ -608,24 +1062,170 @@ export function LogDetailView({
 
 	const selectedPromptDisplayName = resolvedSelectedPromptName ?? log.selected_prompt_name ?? "";
 
+	const { data: userAgentMappingsData } = useGetUserAgentMappingsQuery();
+	const customAppIcons = useMemo(() => {
+		const icons: Record<string, string> = {};
+		for (const mapping of userAgentMappingsData?.mappings ?? []) {
+			if (mapping.app && mapping.logo && mapping.logo_mime) {
+				icons[mapping.app] = `data:${mapping.logo_mime};base64,${mapping.logo}`;
+			}
+		}
+		return icons;
+	}, [userAgentMappingsData?.mappings]);
+
 	const isContainer = isContainerOperation(log.object);
+	const detectedApp = log.app ? mapAppToClientApp(log.app) : log.user_agent ? mapUserAgentToApp(log.user_agent) : null;
+	const detectedAppIcon = log.app && detectedApp ? customAppIcons[log.app] || detectedApp.icon : detectedApp?.icon;
+	const detectedAppLabel = detectedApp ? logAppDisplayName(detectedApp, log.user_agent) : "";
 	const showTabs = !isContainer;
 	const isPassthrough = isPassthroughOperation(log.object);
 	const isRealtimeTurn = log.object === "realtime.turn";
+	const isBatch = isBatchOperation(log.object);
+	const batchDebug = log.batch_debug;
+	const batchRawRequest = useMemo(() => {
+		if (!isBatch || !log.raw_request) return null;
+		try {
+			const parsed = JSON.parse(log.raw_request);
+			return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
+		} catch {
+			return null;
+		}
+	}, [isBatch, log.raw_request]);
+	const batchInlineRequests = useMemo(() => {
+		const requests = batchRawRequest?.requests;
+		if (Array.isArray(requests)) {
+			return requests
+				.map((r: any, index: number) => ({
+					customId: typeof r?.custom_id === "string" && r.custom_id ? r.custom_id : `request-${index + 1}`,
+					model: typeof r?.params?.model === "string" ? r.params.model : typeof r?.body?.model === "string" ? r.body.model : null,
+					messages: Array.isArray(r?.params?.messages) ? r.params.messages : Array.isArray(r?.body?.messages) ? r.body.messages : [],
+				}))
+				.filter((r) => r.messages.length > 0);
+		}
+		const geminiRequests = batchRawRequest?.batch as any;
+		const geminiItems = geminiRequests?.inputConfig?.requests?.requests;
+		if (Array.isArray(geminiItems)) {
+			return geminiItems
+				.map((item: any, index: number) => {
+					const contents = item?.request?.contents;
+					const messages = Array.isArray(contents)
+						? contents.map((c: any) => ({
+							role: c?.role === "model" ? "assistant" : c?.role || "user",
+							content: Array.isArray(c?.parts)
+								? c.parts
+									.filter((p: any) => p && typeof p.text === "string")
+									.map((p: any) => p.text)
+									.join("")
+								: "",
+						}))
+						: [];
+					return {
+						customId: typeof item?.metadata?.key === "string" && item.metadata.key ? item.metadata.key : `request-${index + 1}`,
+						model: null as string | null,
+						messages,
+					};
+				})
+				.filter((r) => r.messages.length > 0);
+		}
+		return [];
+	}, [batchRawRequest]);
+	const batchInputFileId =
+		typeof batchRawRequest?.input_file_id === "string"
+			? (batchRawRequest.input_file_id as string)
+			: typeof (batchRawRequest?.batch as any)?.inputConfig?.fileName === "string"
+				? ((batchRawRequest?.batch as any).inputConfig.fileName as string)
+				: null;
+	const batchRawResponse = useMemo(() => {
+		if (!isBatch || !log.raw_response) return null;
+		try {
+			const parsed = JSON.parse(log.raw_response);
+			return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
+		} catch {
+			return null;
+		}
+	}, [isBatch, log.raw_response]);
+	// batch_debug is only recorded for create/retrieve, so fall back to the raw
+	// provider payload to describe the batch a cancel addressed.
+	const batchId = batchDebug?.batch_id ?? (typeof batchRawResponse?.id === "string" ? (batchRawResponse.id as string) : null);
+	const batchStatus = batchDebug?.status ?? (typeof batchRawResponse?.status === "string" ? (batchRawResponse.status as string) : null);
+	const showBatchDetailsTab = showTabs && isBatch && log.object !== "batch_list";
+
+	const batchResultItems = useMemo(() => {
+		const raw = batchRawResponse;
+		const results: any[] = Array.isArray(raw) ? raw : Array.isArray(raw?.results) ? (raw!.results as any[]) : [];
+		return results
+			.map((item: any, index: number) => {
+				const customId = typeof item?.custom_id === "string" && item.custom_id ? item.custom_id : `result-${index + 1}`;
+				const body = item?.response?.body;
+				const model =
+					typeof item?.result?.message?.model === "string"
+						? item.result.message.model
+						: typeof body?.model === "string"
+							? body.model
+							: null;
+				let message: any = null;
+				let rawFallback: string | null = null;
+				const candidate = Array.isArray(body?.candidates) ? body.candidates[0] : null;
+				if (item?.result?.message) {
+					message = item.result.message;
+				} else if (body?.choices?.[0]?.message) {
+					message = body.choices[0].message;
+				} else if (body?.content !== undefined) {
+					message = body;
+				} else if (candidate) {
+					const parts = candidate?.content?.parts;
+					const text = Array.isArray(parts)
+						? parts
+							.filter((p: any) => p && typeof p.text === "string")
+							.map((p: any) => p.text)
+							.join("")
+						: "";
+					const role = candidate?.content?.role === "model" ? "assistant" : candidate?.content?.role || "assistant";
+					message = { role, content: text };
+				} else if (typeof body?.text === "string") {
+					message = { role: "assistant", content: body.text };
+				} else if (body && Object.keys(body).length > 0) {
+					rawFallback = JSON.stringify(body, null, 2);
+				} else if (item?.result && Object.keys(item.result).length > 0) {
+					rawFallback = JSON.stringify(item.result, null, 2);
+				}
+				const errorMessage: string | null =
+					item?.error?.message ||
+					(item?.result?.type && item.result.type !== "succeeded" ? `Batch item ${item.result.type}` : null) ||
+					(typeof item?.response?.status_code === "number" && item.response.status_code >= 400
+						? `Provider returned HTTP ${item.response.status_code}`
+						: null);
+				return { customId, model, message, rawFallback, errorMessage };
+			})
+			.filter((r) => r.message || r.rawFallback || r.errorMessage);
+	}, [batchRawResponse]);
 	const passthroughParams = isPassthrough
 		? (log.params as {
-				method?: string;
-				path?: string;
-				raw_query?: string;
-				status_code?: number;
-			})
+			method?: string;
+			path?: string;
+			raw_query?: string;
+			status_code?: number;
+		})
 		: null;
+	// Only errors and passthrough requests carry a real HTTP status code; others have none.
+	// Non-HTTP errors (timeouts, network, marshal) default to 0; treat that as no status
+	// so the header doesn't render a misleading red "0" badge.
+	const rawStatusCode = log.error_details?.status_code ?? passthroughParams?.status_code ?? null;
+	const statusCode = rawStatusCode === 0 ? null : rawStatusCode;
 
+	// Tools can also be declared inside Responses input items instead of the
+	// top-level tools param (codex code-mode models send an `additional_tools`
+	// input item with the tool definitions, including namespace groupings).
+	const inputDeclaredToolEntries = (log.responses_input_history ?? [])
+		.filter((m) => m.type === "additional_tools" && Array.isArray(m.tools))
+		.flatMap((m) => m.tools as any[]);
+	const inputDeclaredTools = flattenDeclaredTools(inputDeclaredToolEntries);
+	const declaredTools = dedupeDeclaredTools([...flattenDeclaredTools((log.params?.tools as any[]) ?? []), ...inputDeclaredTools]);
 	let toolsParameter = null;
-	if (log.params?.tools) {
+	if (declaredTools.length) {
 		try {
-			toolsParameter = JSON.stringify(log.params.tools, null, 2);
-		} catch {}
+			toolsParameter = JSON.stringify(declaredTools, null, 2);
+		} catch { }
 	}
 
 	const audioFormat = (log.params as any)?.audio?.format || (log.params as any)?.extra_params?.audio?.format || undefined;
@@ -633,7 +1233,7 @@ export function LogDetailView({
 	const rawResponse = applyRedactionMapping(log.raw_response, activeOutputRevealMapping);
 	const passthroughRequestBody = applyRedactionMapping(log.passthrough_request_body, activeInputRevealMapping);
 	const passthroughResponseBody = applyRedactionMapping(log.passthrough_response_body, activeOutputRevealMapping);
-	const videoOutput = log.video_generation_output || log.video_retrieve_output || log.video_download_output;
+	const videoOutput = log.video_generation_output || log.video_retrieve_output || log.video_download_output || log.video_delete_output;
 	const videoListOutput = log.video_list_output;
 	const pluginLogCount = (() => {
 		if (!log.plugin_logs) return 0;
@@ -642,7 +1242,7 @@ export function LogDetailView({
 			if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
 				return Object.values(parsed).reduce<number>((sum, v) => sum + (Array.isArray(v) ? v.length : 0), 0);
 			}
-		} catch {}
+		} catch { }
 		return 0;
 	})();
 
@@ -661,8 +1261,11 @@ export function LogDetailView({
 				<div className="flex items-center gap-3">
 					{revealAvailable && (
 						<div className="flex items-center gap-2">
-							<span className="text-muted-foreground text-[11px] font-medium">Show original values</span>
+							<label htmlFor="logdetails-reveal-toggle" className="text-muted-foreground text-[11px] font-medium">
+								Show original values
+							</label>
 							<Switch
+								id="logdetails-reveal-toggle"
 								checked={revealEnabled}
 								onCheckedChange={handleToggleReveal}
 								data-testid="logdetails-reveal-toggle"
@@ -724,13 +1327,24 @@ export function LogDetailView({
 							</AlertDialogContent>
 						</AlertDialog>
 					) : null}
+					{onClose ? (
+						<Button
+							variant="ghost"
+							className="size-8"
+							type="button"
+							onClick={onClose}
+							data-testid="logdetails-close-button"
+							aria-label="Close"
+						>
+							<X className="h-3 w-3" />
+						</Button>
+					) : null}
 				</div>
 			</div>
 			<div className="border-border rounded-sm border">
 				<div className="flex items-start justify-between gap-6 px-5 pt-5 pb-4">
 					<div className="min-w-0 flex-1">
 						<div className="flex flex-wrap items-center gap-2">
-							<StatusPill status={log.status as Status} />
 							<Badge
 								variant="outline"
 								className={cn(
@@ -740,6 +1354,15 @@ export function LogDetailView({
 							>
 								{RequestTypeLabels[log.object as keyof typeof RequestTypeLabels] ?? log.object}
 							</Badge>
+							<StatusPill status={log.status as Status} />
+							{statusCode != null && (
+								<Badge
+									variant="outline"
+									className={cn("rounded-sm px-2 py-0.5 font-medium tabular-nums", statusCodeBadgeClass(statusCode))}
+								>
+									{statusCode}
+								</Badge>
+							)}
 							{log.routing_rule && (
 								<Link
 									to="/workspace/logs"
@@ -793,6 +1416,17 @@ export function LogDetailView({
 									{log.metadata.realtime_voice}
 								</Badge>
 							)}
+							{batchDebug?.status && (
+								<Badge
+									variant="outline"
+									className={cn(
+										"rounded-sm px-2 py-0.5 font-medium uppercase",
+										batchStatusBadgeStyles[batchDebug.status] ?? batchStatusBadgeDefault,
+									)}
+								>
+									{batchDebug.status.replace(/_/g, " ")}
+								</Badge>
+							)}
 						</div>
 						<div className="mt-3 flex items-center gap-2">
 							<div className="text-muted-foreground w-24 shrink-0 text-[10.5px] font-semibold tracking-wider uppercase">Request</div>
@@ -840,7 +1474,7 @@ export function LogDetailView({
 						<span className="uppercase">{log.provider}</span>
 					</div>
 				</div>
-				<div className="border-border grid grid-cols-2 border-t md:grid-cols-5">
+				<div className="border-border grid grid-cols-1 border-t sm:grid-cols-2 md:grid-cols-5">
 					<HeroStat
 						label="Latency"
 						valueClass="text-primary"
@@ -873,11 +1507,10 @@ export function LogDetailView({
 						}
 						sub={
 							log.token_usage
-								? `total ${formatCompactNumber(log.token_usage.total_tokens ?? 0)}${
-										log.token_usage.completion_tokens_details?.reasoning_tokens
-											? ` · reasoning ${formatCompactNumber(log.token_usage.completion_tokens_details.reasoning_tokens)}`
-											: ""
-									}`
+								? `total ${formatCompactNumber(log.token_usage.total_tokens ?? 0)}${log.token_usage.completion_tokens_details?.reasoning_tokens
+									? ` · reasoning ${formatCompactNumber(log.token_usage.completion_tokens_details.reasoning_tokens)}`
+									: ""
+								}`
 								: "—"
 						}
 						hasRightBorder
@@ -901,7 +1534,7 @@ export function LogDetailView({
 					) : (
 						<HeroStat
 							label="Tools available"
-							value={(log.params?.tools?.length ?? 0).toString()}
+							value={declaredTools.length.toString()}
 							sub={(log.params as any)?.tool_choice != null ? `choice: ${formatToolChoice((log.params as any).tool_choice)}` : ""}
 						/>
 					)}
@@ -915,10 +1548,10 @@ export function LogDetailView({
 						<ChevronDown className="h-3.5 w-3.5 transition-transform group-open:rotate-180" />
 					</span>
 				</summary>
-				<div className="space-y-4 border-t px-6 py-4">
+				<div className="space-y-4 border-t px-4 py-4 md:px-6">
 					<div className="space-y-4">
 						<BlockHeader title="Timings" />
-						<div className="grid w-full grid-cols-3 items-center justify-between gap-4">
+						<div className="grid w-full grid-cols-1 items-center justify-between gap-4 md:grid-cols-3">
 							<LogEntryDetailsView
 								className="w-full"
 								label="Start Timestamp"
@@ -938,14 +1571,30 @@ export function LogDetailView({
 							<LogEntryDetailsView
 								className="w-full"
 								label="Latency"
+								tooltip="Total end-to-end request time: upstream plus Bifrost overhead."
 								value={log.latency == null || isNaN(log.latency) ? "N/A" : <div>{log.latency.toFixed(2)}ms</div>}
 							/>
+							<LogEntryDetailsView
+								className="w-full"
+								label="Upstream Latency"
+								tooltip="Time spent waiting on the provider, summed across every attempt."
+								value={log.upstream_latency == null || isNaN(log.upstream_latency) ? "N/A" : <div>{log.upstream_latency.toFixed(2)}ms</div>}
+							/>
+							<LogEntryDetailsView
+								className="w-full"
+								label="Bifrost Overhead"
+								tooltip="Time added by Bifrost itself: routing, plugins, and processing."
+								value={log.overhead_latency == null || isNaN(log.overhead_latency) ? "N/A" : <div>{log.overhead_latency.toFixed(2)}ms</div>}
+							/>
 						</div>
+						{log.overhead_breakdown && log.overhead_breakdown.length > 0 ? (
+							<OverheadBreakdown buckets={log.overhead_breakdown} overheadMs={log.overhead_latency} />
+						) : null}
 					</div>
 					<DottedSeparator />
 					<div className="space-y-4">
 						<BlockHeader title="Request Details" />
-						<div className="grid w-full grid-cols-3 items-start justify-between gap-4">
+						<div className="grid w-full grid-cols-1 items-start justify-between gap-4 md:grid-cols-3">
 							<LogEntryDetailsView
 								className="w-full"
 								label="Provider"
@@ -964,6 +1613,31 @@ export function LogDetailView({
 							{!isContainer && log.alias_model_family && (
 								<LogEntryDetailsView className="w-full" label="Model Family" value={log.alias_model_family} />
 							)}
+							{!isContainer && log.server_side_fallback_model && (
+								<LogEntryDetailsView className="w-full" label="Served By (fallback)" value={log.server_side_fallback_model} />
+							)}
+							{detectedApp && (
+								<LogEntryDetailsView
+									className="w-full"
+									label="App"
+									value={
+										<div className="flex min-w-0 items-center gap-2" title={log.user_agent || undefined}>
+											{detectedAppIcon ? (
+												<img
+													className="rounded-sm"
+													src={detectedAppIcon}
+													alt={detectedAppLabel}
+													width={20}
+													height={20}
+													loading="lazy"
+													decoding="async"
+												/>
+											) : null}
+											<span className="truncate">{detectedAppLabel}</span>
+										</div>
+									}
+								/>
+							)}
 							<LogEntryDetailsView
 								className="w-full"
 								label="Type"
@@ -975,6 +1649,17 @@ export function LogDetailView({
 									</div>
 								}
 							/>
+							{log.service_tier && (
+								<LogEntryDetailsView
+									className="w-full"
+									label="Service Tier"
+									value={
+										<Badge variant="secondary" className="uppercase" data-testid="logdetails-service-tier">
+											{log.service_tier}
+										</Badge>
+									}
+								/>
+							)}
 							{log.stop_reason && (
 								<LogEntryDetailsView
 									className="w-full"
@@ -1005,16 +1690,20 @@ export function LogDetailView({
 											<Tooltip>
 												<TooltipTrigger asChild>
 													<code
-														className="block min-w-0 cursor-pointer font-normal break-all text-blue-600 underline-offset-2 hover:underline dark:text-blue-400"
+														className="block max-w-full min-w-0 cursor-pointer truncate font-normal text-blue-600 underline-offset-2 hover:underline dark:text-blue-400"
 														onClick={() => onFilterByParentRequestId(log.parent_request_id as string)}
 													>
 														{log.parent_request_id}
 													</code>
 												</TooltipTrigger>
-												<TooltipContent sideOffset={6}>Filter this session</TooltipContent>
+												<TooltipContent sideOffset={6} className="max-w-md break-all">
+													{log.parent_request_id} · Filter this session
+												</TooltipContent>
 											</Tooltip>
 										) : (
-											<code className="block min-w-0 font-normal break-all">{log.parent_request_id}</code>
+											<TruncatedLabel className="block max-w-full min-w-0 font-normal" tooltipSide="top">
+												{log.parent_request_id}
+											</TruncatedLabel>
 										)
 									}
 								/>
@@ -1142,7 +1831,7 @@ export function LogDetailView({
 												<Link
 													to="/workspace/logs"
 													search={(prev) => ({ ...prev, offset: 0, selected_log: "", user_ids: [log.user_id] })}
-													className={`block min-w-0 cursor-pointer text-sm font-normal break-all text-blue-600 underline-offset-2 hover:underline dark:text-blue-400${log.user_name ? "" : " font-mono"}`}
+													className={`block max-w-full min-w-0 cursor-pointer truncate text-sm font-normal text-blue-600 underline-offset-2 hover:underline dark:text-blue-400${log.user_name ? "" : " font-mono"}`}
 													data-testid="logdetails-user-link"
 												>
 													{log.user_name || log.user_id}
@@ -1312,15 +2001,56 @@ export function LogDetailView({
 							<DottedSeparator />
 							<div className="space-y-4">
 								<BlockHeader title="Tokens" />
-								<div className="grid w-full grid-cols-3 items-center justify-between gap-4">
+								<div className="grid w-full grid-cols-1 items-center justify-between gap-4 md:grid-cols-3">
 									<LogEntryDetailsView className="w-full" label="Input Tokens" value={log.token_usage?.prompt_tokens || "-"} />
 									<LogEntryDetailsView className="w-full" label="Output Tokens" value={log.token_usage?.completion_tokens || "-"} />
 									<LogEntryDetailsView className="w-full" label="Total Tokens" value={log.token_usage?.total_tokens || "-"} />
-									<LogEntryDetailsView
-										className="w-full"
-										label="Cost"
-										value={log.cost != null ? `$${parseFloat(log.cost.toFixed(6))}` : "-"}
-									/>
+									{(log.cost_breakdown?.input_cost ?? 0) > 0 && (
+										<LogEntryDetailsView className="w-full" label="Input Cost" value={formatCostPrecise(log.cost_breakdown?.input_cost)} />
+									)}
+									{(log.cost_breakdown?.output_cost ?? 0) > 0 && (
+										<LogEntryDetailsView
+											className="w-full"
+											label="Output Cost"
+											value={formatCostPrecise(log.cost_breakdown?.output_cost)}
+										/>
+									)}
+									{(log.cost_breakdown?.total_cost ?? log.cost ?? 0) > 0 && (
+										<LogEntryDetailsView
+											className="w-full"
+											label="Total Cost"
+											value={formatCostPrecise(log.cost_breakdown?.total_cost ?? log.cost)}
+										/>
+									)}
+									{/* Additional cost (guardrail / semantic cache / MCP) on its own row below. */}
+									{(log.cost_breakdown?.additional_cost ?? 0) > 0 && (
+										<LogEntryDetailsView
+											className="w-full md:col-start-1"
+											label="Additional Cost"
+											value={formatCostPrecise(log.cost_breakdown?.additional_cost)}
+										/>
+									)}
+									{(log.cost_breakdown?.additional_cost_details?.guardrail_cost ?? 0) > 0 && (
+										<LogEntryDetailsView
+											className="w-full"
+											label="Guardrail Cost"
+											value={formatCostPrecise(log.cost_breakdown?.additional_cost_details?.guardrail_cost)}
+										/>
+									)}
+									{(log.cost_breakdown?.additional_cost_details?.semantic_cache_cost ?? 0) > 0 && (
+										<LogEntryDetailsView
+											className="w-full"
+											label="Semantic Cache Cost"
+											value={formatCostPrecise(log.cost_breakdown?.additional_cost_details?.semantic_cache_cost)}
+										/>
+									)}
+									{(log.cost_breakdown?.additional_cost_details?.mcp_cost ?? 0) > 0 && (
+										<LogEntryDetailsView
+											className="w-full"
+											label="MCP Cost"
+											value={formatCostPrecise(log.cost_breakdown?.additional_cost_details?.mcp_cost)}
+										/>
+									)}
 									{isRealtimeTurn && (
 										<>
 											<LogEntryDetailsView
@@ -1426,7 +2156,7 @@ export function LogDetailView({
 										<DottedSeparator />
 										<div className="space-y-4">
 											<BlockHeader title="Reasoning Parameters" />
-											<div className="grid w-full grid-cols-3 items-center justify-between gap-4">
+											<div className="grid w-full grid-cols-1 items-center justify-between gap-4 md:grid-cols-3">
 												{reasoning.effort && (
 													<LogEntryDetailsView
 														className="w-full"
@@ -1466,12 +2196,52 @@ export function LogDetailView({
 									</>
 								);
 							})()}
+							{batchDebug && (
+								<>
+									<DottedSeparator />
+									<div className="space-y-4">
+										<BlockHeader title="Batch Details" />
+										{batchDebug.batch_id && (
+											<LogEntryDetailsView
+												className="w-full"
+												label="Batch ID"
+												value={
+													<span className="flex items-center gap-1">
+														<code className="font-mono text-xs">{batchDebug.batch_id}</code>
+														<CopyInlineButton text={batchDebug.batch_id} testId="logdetails-copy-batch-id-button" />
+													</span>
+												}
+											/>
+										)}
+										{(batchDebug.request_counts || batchDebug.accounting?.cost != null) && (
+											<div className="grid w-full grid-cols-1 items-start justify-between gap-4 md:grid-cols-3">
+												{batchDebug.request_counts && (
+													<>
+														<LogEntryDetailsView
+															className="w-full"
+															label="Total Requests"
+															value={String(batchDebug.request_counts.total)}
+														/>
+														{batchRequestStates(batchDebug.request_counts).map(([label, count]) => (
+															<LogEntryDetailsView key={label} className="w-full" label={label} value={String(count)} />
+														))}
+													</>
+												)}
+												{batchDebug.accounting?.cost != null && (
+													<LogEntryDetailsView className="w-full" label="Batch Cost" value={formatCost(batchDebug.accounting.cost)} />
+												)}
+											</div>
+										)}
+									</div>
+								</>
+							)}
+
 							{log.cache_debug && (
 								<>
 									<DottedSeparator />
 									<div className="space-y-4">
 										<BlockHeader title={`Caching Details (${log.cache_debug.cache_hit ? "Hit" : "Miss"})`} />
-										<div className="grid w-full grid-cols-3 items-center justify-between gap-4">
+										<div className="grid w-full grid-cols-1 items-center justify-between gap-4 md:grid-cols-3">
 											{log.cache_debug.cache_hit ? (
 												<>
 													<LogEntryDetailsView
@@ -1546,6 +2316,66 @@ export function LogDetailView({
 							)}
 						</>
 					)}
+					{!isContainer && !isPassthrough && log.guardrail_debug?.judge_calls && log.guardrail_debug.judge_calls.length > 0 && (
+						<>
+							<DottedSeparator />
+							<div className="space-y-4">
+								<BlockHeader title="Guardrail Details" />
+								<div className="space-y-4">
+									{log.guardrail_debug.judge_calls.map((call, index) => (
+										<div
+											key={`${call.rule_id ?? call.rule_name ?? "guardrail"}-${call.guardrail_name ?? "judge"}-${index}`}
+											className={cn("grid w-full grid-cols-1 gap-4 md:grid-cols-3", index > 0 && "border-border border-t pt-4")}
+										>
+											{call.rule_name && <LogEntryDetailsView className="w-full" label="Rule" value={call.rule_name} />}
+											{call.phase && (
+												<LogEntryDetailsView
+													className="w-full"
+													label="Phase"
+													value={
+														<Badge variant="secondary" className="uppercase">
+															{call.phase}
+														</Badge>
+													}
+												/>
+											)}
+											{call.action && (
+												<LogEntryDetailsView
+													className="w-full"
+													label="Action"
+													value={
+														<Badge variant={call.action === "GUARDRAIL_INTERVENED" ? "destructive" : "success"}>
+															{call.action === "GUARDRAIL_INTERVENED" ? "Blocked" : "Allowed"}
+														</Badge>
+													}
+												/>
+											)}
+											{call.guardrail_name && <LogEntryDetailsView className="w-full" label="Guardrail" value={call.guardrail_name} />}
+											{call.guardrail_provider && (
+												<LogEntryDetailsView className="w-full" label="Guardrail Provider" value={call.guardrail_provider} />
+											)}
+											{call.judge_provider && (
+												<LogEntryDetailsView
+													className="w-full"
+													label="Judge Provider"
+													value={
+														<Badge variant="secondary" className="uppercase">
+															{call.judge_provider}
+														</Badge>
+													}
+												/>
+											)}
+											{call.judge_model && <LogEntryDetailsView className="w-full" label="Judge Model" value={call.judge_model} />}
+											<LogEntryDetailsView className="w-full" label="Prompt Tokens" value={call.prompt_tokens ?? 0} />
+											<LogEntryDetailsView className="w-full" label="Completion Tokens" value={call.completion_tokens ?? 0} />
+											<LogEntryDetailsView className="w-full" label="Total Tokens" value={call.total_tokens ?? 0} />
+											{call.reason && <LogEntryDetailsView className="w-full md:col-span-3" label="Reason" value={call.reason} />}
+										</div>
+									))}
+								</div>
+							</div>
+						</>
+					)}
 					{!isContainer &&
 						!isPassthrough &&
 						log.metadata &&
@@ -1570,7 +2400,7 @@ export function LogDetailView({
 								<DottedSeparator />
 								<div className="space-y-4">
 									<BlockHeader title="Metadata" />
-									<div className="grid w-full grid-cols-3 items-start justify-between gap-4">
+									<div className="grid w-full grid-cols-1 items-start justify-between gap-4 md:grid-cols-3">
 										{Object.entries(log.metadata)
 											.filter(([key]) => {
 												if (key === "isAsyncRequest") return false;
@@ -1598,9 +2428,23 @@ export function LogDetailView({
 						)}
 				</div>
 			</details>
-			<Tabs key={log.id} defaultValue={showTabs ? "messages" : "plugins"} className="gap-2">
+			<Tabs
+				key={log.id}
+				defaultValue={showBatchDetailsTab ? "details" : showTabs && !isBatch ? "messages" : showTabs ? "routing" : "plugins"}
+				className="gap-2"
+			>
 				<TabsList className="bg-muted/60 h-10 w-fit">
-					{showTabs && (
+					{showBatchDetailsTab && (
+						<TabsTrigger value="details" className="px-3">
+							Details
+							{batchInlineRequests.length + batchResultItems.length ? (
+								<span className="bg-background text-muted-foreground ml-1.5 rounded-sm border px-2 py-0.5 text-[10px] tabular-nums">
+									{batchInlineRequests.length + batchResultItems.length}
+								</span>
+							) : null}
+						</TabsTrigger>
+					)}
+					{showTabs && !isBatch && (
 						<TabsTrigger value="messages" className="px-3">
 							Messages
 							{log.input_history?.length ? (
@@ -1611,12 +2455,12 @@ export function LogDetailView({
 						</TabsTrigger>
 					)}
 
-					{showTabs && !isPassthrough && !log.list_models_output && (
+					{showTabs && !isPassthrough && !log.list_models_output && !isBatch && (
 						<TabsTrigger value="tools" className="px-3">
 							Tools
-							{log.params?.tools?.length ? (
+							{declaredTools.length ? (
 								<span className="bg-background text-muted-foreground ml-1.5 rounded-sm border px-2 py-0.5 text-[10px] tabular-nums">
-									{log.params.tools.length}
+									{declaredTools.length}
 								</span>
 							) : null}
 						</TabsTrigger>
@@ -1646,8 +2490,160 @@ export function LogDetailView({
 					)}
 				</TabsList>
 
+				{showBatchDetailsTab && (
+					<TabsContent value="details" className="space-y-4">
+						{(batchId || batchStatus || (batchInlineRequests.length === 0 && batchInputFileId)) && (
+							<div className="bg-card space-y-4 rounded-sm border p-5">
+								{batchId && (
+									<LogEntryDetailsView
+										label="Batch ID"
+										value={
+											<span className="flex items-center gap-1">
+												<code className="font-mono text-xs">{batchId}</code>
+												<CopyInlineButton text={batchId} testId="logdetails-details-copy-batch-id-button" />
+											</span>
+										}
+									/>
+								)}
+								{batchInlineRequests.length === 0 && batchInputFileId && (
+									<LogEntryDetailsView
+										label="Input File ID"
+										value={
+											<span className="flex items-center gap-1">
+												<code className="font-mono text-xs">{batchInputFileId}</code>
+												<CopyInlineButton text={batchInputFileId} testId="logdetails-copy-input-file-id-button" />
+											</span>
+										}
+									/>
+								)}
+								{batchStatus && (
+									<LogEntryDetailsView
+										label="Status"
+										value={
+											<Badge
+												variant="outline"
+												className={cn(
+													"rounded-sm px-2 py-0.5 font-medium uppercase",
+													batchStatusBadgeStyles[batchStatus] ?? batchStatusBadgeDefault,
+												)}
+											>
+												{batchStatus.replace(/_/g, " ")}
+											</Badge>
+										}
+									/>
+								)}
+							</div>
+						)}
+						<div className="bg-card rounded-sm border">
+							{batchInlineRequests.length > 0 ? (
+								<div className="px-5 pt-5 pb-2">
+									<div className="text-muted-foreground mb-1 text-[10.5px] font-semibold tracking-wider uppercase">
+										Batch Requests ({batchInlineRequests.length})
+									</div>
+									<Accordion type="multiple" className="w-full">
+										{batchInlineRequests.map((request, index) => (
+											<AccordionItem key={`${request.customId}-${index}`} value={`${request.customId}-${index}`}>
+												<AccordionTrigger className="text-[13px]">
+													<span className="flex items-center gap-2">
+														<code className="font-mono text-xs">{request.customId}</code>
+														{request.model && (
+															<Badge variant="secondary" className="rounded-sm px-1.5 py-0 text-[10.5px] font-normal">
+																{request.model}
+															</Badge>
+														)}
+														<span className="text-muted-foreground text-[11px]">
+															{request.messages.length} message{request.messages.length === 1 ? "" : "s"}
+														</span>
+													</span>
+												</AccordionTrigger>
+												<AccordionContent className="space-y-3 pb-2">
+													{request.messages.map((message: any, msgIndex: number) => {
+														const role = ((message?.role as string) || "user") as MessageRole;
+														const text = extractMessageText(message);
+														return (
+															<MessageRow key={msgIndex} role={role} last={msgIndex === request.messages.length - 1}>
+																{text ? (
+																	<CollapsibleCode text={text} preview={3} mono={false} />
+																) : (
+																	<span className="text-muted-foreground text-xs">Empty message</span>
+																)}
+															</MessageRow>
+														);
+													})}
+												</AccordionContent>
+											</AccordionItem>
+										))}
+									</Accordion>
+								</div>
+							) : batchResultItems.length > 0 ? (
+								<div className="px-5 pt-5 pb-2">
+									<div className="text-muted-foreground mb-1 text-[10.5px] font-semibold tracking-wider uppercase">
+										Batch Results ({batchResultItems.length})
+									</div>
+									<Accordion type="multiple" className="w-full">
+										{batchResultItems.map((result, index) => (
+											<AccordionItem key={`${result.customId}-${index}`} value={`${result.customId}-${index}`}>
+												<AccordionTrigger className="text-[13px]">
+													<span className="flex items-center gap-2">
+														<code className="font-mono text-xs">{result.customId}</code>
+														{result.model && (
+															<Badge variant="secondary" className="rounded-sm px-1.5 py-0 text-[10.5px] font-normal">
+																{result.model}
+															</Badge>
+														)}
+														{result.errorMessage && <span className="text-[11px] text-red-600 dark:text-red-400">Failed</span>}
+													</span>
+												</AccordionTrigger>
+												<AccordionContent className="space-y-3 pb-2">
+													{result.errorMessage ? (
+														<div className="rounded-sm border border-red-200 bg-red-50/70 p-3 text-[12.5px] text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-400">
+															{result.errorMessage}
+														</div>
+													) : result.message ? (
+														(() => {
+															const role = ((result.message?.role as string) || "assistant") as MessageRole;
+															const text = extractMessageText(result.message);
+															return (
+																<MessageRow role={role} last>
+																	{text ? (
+																		<CollapsibleCode text={text} preview={3} mono={false} />
+																	) : (
+																		<span className="text-muted-foreground text-xs">Empty message</span>
+																	)}
+																</MessageRow>
+															);
+														})()
+													) : result.rawFallback ? (
+														<div>
+															<div className="text-muted-foreground mb-1 text-[10.5px]">
+																Unrecognized result shape — showing the raw response body
+															</div>
+															<CollapsibleCode text={result.rawFallback} preview={5} lang="json" />
+														</div>
+													) : (
+														<span className="text-muted-foreground text-xs">Empty result</span>
+													)}
+												</AccordionContent>
+											</AccordionItem>
+										))}
+									</Accordion>
+								</div>
+							) : (
+								<div className="text-muted-foreground p-5 text-center text-sm">
+									No batch request or result details were captured for this row.
+								</div>
+							)}
+						</div>
+					</TabsContent>
+				)}
+
 				<TabsContent value="messages" className="space-y-4">
-					<div className="flex justify-end">
+					{log.content_hidden && (
+						<div className="text-muted-foreground rounded-sm border border-dashed p-5 text-center text-sm">
+							Content logging has been disabled for this request.
+						</div>
+					)}
+					<div className={cn("flex justify-end", log.content_hidden && "hidden")}>
 						<DropdownMenu>
 							<DropdownMenuTrigger asChild>
 								<button
@@ -1816,11 +2812,11 @@ export function LogDetailView({
 							<div className="bg-card rounded-sm border p-5">
 								{(visibleRoles.size < allRoles.length
 									? log.input_history?.filter((m) => {
-											if (!m) return false;
-											const mainRole = ((m.role as string) || "user") as MessageRole;
-											const hasReasoning = !!extractChatReasoning(m);
-											return visibleRoles.has(mainRole) || (hasReasoning && visibleRoles.has("reasoning"));
-										})
+										if (!m) return false;
+										const mainRole = ((m.role as string) || "user") as MessageRole;
+										const hasReasoning = !!extractChatReasoning(m);
+										return visibleRoles.has(mainRole) || (hasReasoning && visibleRoles.has("reasoning"));
+									})
 									: log.input_history?.filter(Boolean)
 								)?.flatMap((message, index) => {
 									const role = ((message.role as string) || "user") as MessageRole;
@@ -2036,6 +3032,9 @@ export function LogDetailView({
 											!!reasoningParts.contentText ||
 											reasoningParts.signatures.length > 0);
 									const text = role === "reasoning" ? "" : extractResponsesText(msg, mapping);
+									// Whatever the item carries outside the fields rendered below — a server tool's `action`,
+									// a custom_tool_call's `input`, a compaction item's `encrypted_content`.
+									const itemPayload = extractResponsesItemPayload(msg);
 									const lineCount = text ? text.split("\n").length : 0;
 									const approxTokens = text ? Math.max(1, Math.round(text.length / 4)) : 0;
 									let meta: string | undefined;
@@ -2065,7 +3064,14 @@ export function LogDetailView({
 												? msg.name
 												: msg.type === "function_call_output" && msg.call_id
 													? msg.call_id
-													: msg.type || undefined;
+													: Array.isArray(msg.tools)
+														? (() => {
+															const callable = flattenDeclaredTools(msg.tools).length;
+															return callable !== msg.tools.length
+																? `${msg.type} · ${msg.tools.length} declarations · ${callable} callable tools`
+																: `${msg.type} · ${msg.tools.length} tool${msg.tools.length === 1 ? "" : "s"}`;
+														})()
+														: [msg.type, summarizeResponsesToolCall(msg, mapping)].filter(Boolean).join(" · ") || undefined;
 									}
 									const usePlainText = role === "user" || role === "assistant";
 									return (
@@ -2113,6 +3119,12 @@ export function LogDetailView({
 													text={typeof msg.output === "string" ? msg.output : JSON.stringify(msg.output, null, 2)}
 													preview={3}
 												/>
+											) : Array.isArray(msg.tools) && msg.tools.length > 0 ? (
+												<CollapsibleCode text={JSON.stringify(msg.tools, null, 2)} preview={3} />
+											) : Array.isArray(msg.tools) ? (
+												<div className="text-muted-foreground text-[12px] italic">No tools declared</div>
+											) : itemPayload ? (
+												<CollapsibleCode text={JSON.stringify(applyRedactionMappingToValue(itemPayload, mapping), null, 2)} preview={3} />
 											) : (
 												<div className="text-muted-foreground text-[12px] italic">No content</div>
 											)}
@@ -2136,13 +3148,13 @@ export function LogDetailView({
 
 					{log.is_large_payload_request && !log.input_history?.length && !log.responses_input_history?.length && (
 						<div className="rounded-sm border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950/50 dark:text-amber-300">
-							Large payload request — input content was streamed directly to the provider and is not available for display.
+							Large payload request: input content was streamed directly to the provider and is not available for display.
 							{log.raw_request && " A truncated preview is available in the Raw JSON tab."}
 						</div>
 					)}
 					{log.is_large_payload_response && !log.output_message && !log.responses_output?.length && log.status !== "processing" && (
 						<div className="rounded-sm border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950/50 dark:text-amber-300">
-							Large payload response — response content was streamed directly to the client and is not available for display.
+							Large payload response: response content was streamed directly to the client and is not available for display.
 							{log.raw_response && " A truncated preview is available in the Raw JSON tab."}
 						</div>
 					)}
@@ -2240,7 +3252,14 @@ export function LogDetailView({
 					{toolsParameter ? (
 						<div className="bg-card rounded-sm border p-5">
 							<div className="text-muted-foreground mb-3 text-[12px]">
-								{log.params?.tools?.length ?? 0} tools exposed to the model
+								{declaredTools.length} tools exposed to the model
+								{inputDeclaredTools.length ? (
+									<>
+										{" "}
+										· {inputDeclaredTools.length} via input items
+										{inputDeclaredTools.length !== inputDeclaredToolEntries.length ? " (namespaces expanded)" : ""}
+									</>
+								) : null}
 								{(log.params as any)?.tool_choice != null ? (
 									<>
 										{" "}
@@ -2250,8 +3269,8 @@ export function LogDetailView({
 								) : null}
 							</div>
 							<div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-								{(log.params?.tools as any[]).map((tool, i) => {
-									const name = tool?.function?.name ?? tool?.name ?? `tool_${i}`;
+								{declaredTools.map((tool, i) => {
+									const name = tool?.name ?? tool?.function?.name ?? `tool_${i}`;
 									const description = tool?.function?.description ?? tool?.description ?? "";
 									const schema = tool?.function?.parameters ?? tool?.input_schema ?? tool?.parameters ?? null;
 									const schemaJson = schema != null ? JSON.stringify(schema, null, 2) : "";
@@ -2294,7 +3313,7 @@ export function LogDetailView({
 					) : null}
 					{log.params?.instructions && (
 						<CollapsibleBox title="Instructions" onCopy={() => log.params?.instructions || ""}>
-							<div className="custom-scrollbar max-h-[400px] overflow-y-auto px-6 py-2 font-mono text-xs break-words whitespace-pre-wrap">
+							<div className="custom-scrollbar max-h-[400px] overflow-y-auto px-4 py-2 font-mono text-xs break-words whitespace-pre-wrap md:px-6">
 								{log.params.instructions}
 							</div>
 						</CollapsibleBox>
@@ -2312,7 +3331,7 @@ export function LogDetailView({
 							title={`Attempt Trail (${log.attempt_trail.length} attempts)`}
 							onCopy={() => JSON.stringify(log.attempt_trail, null, 2)}
 						>
-							<div className="overflow-x-auto px-6 py-3">
+							<div className="overflow-x-auto px-4 py-3 md:px-6">
 								<table className="w-full border-collapse text-xs">
 									<thead>
 										<tr className="border-border text-muted-foreground border-b">
@@ -2423,7 +3442,7 @@ export function LogDetailView({
 						</>
 					)}
 					{!rawRequest && !rawResponse && !passthroughRequestBody && !passthroughResponseBody && (
-						<div className="text-muted-foreground rounded-sm border border-dashed p-5 text-center text-sm">No raw JSON available.</div>
+						<RawJsonUnavailableNotice provider={log.provider} />
 					)}
 				</TabsContent>
 			</Tabs>

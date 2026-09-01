@@ -1,0 +1,83 @@
+- generic [ref=f1e2]:
+  - region "Notifications alt+T"
+  - generic [ref=f1e3]:
+    - generic [ref=f1e6]:
+      - generic [ref=f1e8]:
+        - link [ref=f1e9] [cursor=pointer]:
+          - /url: /workspace/logs
+          - img "Elygate" [ref=f1e10]
+        - button "Collapse sidebar" [ref=f1e11]
+      - generic [ref=f1e16]:
+        - textbox "Search sidebar navigation" [ref=f1e20]:
+          - /placeholder: Search...
+        - generic:
+          - generic: ⌘
+          - generic: K
+      - generic [ref=f1e21]:
+        - list [ref=f1e24]:
+          - listitem [ref=f1e25]:
+            - button "Observability" [ref=f1e26] [cursor=pointer]
+          - listitem [ref=f1e40]:
+            - button "Models" [ref=f1e41] [cursor=pointer]
+          - listitem [ref=f1e50]:
+            - button "MCP clients icon MCP Gateway" [ref=f1e51] [cursor=pointer]:
+              - generic [ref=f1e53]:
+                - img "MCP clients icon" [ref=f1e54]
+                - generic [ref=f1e57]: MCP Gateway
+          - listitem [ref=f1e60]:
+            - link "Plugins" [ref=f1e61] [cursor=pointer]:
+              - /url: /workspace/plugins
+          - listitem [ref=f1e67]:
+            - button "Alerting" [ref=f1e68] [cursor=pointer]
+          - listitem [ref=f1e79]:
+            - button "Governance" [ref=f1e80] [cursor=pointer]
+          - listitem [ref=f1e88]:
+            - button "Guardrails" [ref=f1e89] [cursor=pointer]
+          - listitem [ref=f1e100]:
+            - link "Cluster Config" [ref=f1e101] [cursor=pointer]:
+              - /url: /workspace/cluster
+          - listitem [ref=f1e110]:
+            - button "Adaptive Routing" [ref=f1e111] [cursor=pointer]
+          - listitem [ref=f1e123]:
+            - button "Settings" [ref=f1e124] [cursor=pointer]
+            - list [ref=f1e133]:
+              - listitem [ref=f1e134]:
+                - link "Client Settings" [ref=f1e135] [cursor=pointer]:
+                  - /url: /workspace/config/client-settings
+              - listitem [ref=f1e141]:
+                - link "Compatibility" [ref=f1e142] [cursor=pointer]:
+                  - /url: /workspace/config/compatibility
+              - listitem [ref=f1e147]:
+                - link "Caching" [ref=f1e148] [cursor=pointer]:
+                  - /url: /workspace/config/caching
+              - listitem [ref=f1e156]:
+                - link "Security" [ref=f1e157] [cursor=pointer]:
+                  - /url: /workspace/config/security
+              - listitem [ref=f1e163]:
+                - link "API Keys" [ref=f1e164] [cursor=pointer]:
+                  - /url: /workspace/config/api-keys
+              - listitem [ref=f1e170]:
+                - link "Performance Tuning" [ref=f1e171] [cursor=pointer]:
+                  - /url: /workspace/config/performance-tuning
+              - listitem [ref=f1e177]:
+                - link "Feature Flags" [ref=f1e178] [cursor=pointer]:
+                  - /url: /workspace/config/feature-flags
+        - generic [ref=f1e183]:
+          - generic [ref=f1e187]:
+            - generic [ref=f1e189]:
+              - generic [ref=f1e190]: Need help with production setup?
+              - button "Dismiss" [ref=f1e191]
+            - generic [ref=f1e195]:
+              - text: Review the Elygate deployment profile before connecting production providers.Read the deployment guide
+              - link "here" [ref=f1e196] [cursor=pointer]:
+                - /url: https://github.com/zuohuadong/elygate/tree/dev/deploy/elygate-oss
+              - text: .
+          - generic [ref=f1e198]:
+            - link "GitHub Repository" [ref=f1e199] [cursor=pointer]:
+              - /url: https://github.com/zuohuadong/elygate
+            - link "Report a bug" [ref=f1e203] [cursor=pointer]:
+              - /url: https://github.com/zuohuadong/elygate/issues/new?title=%5BBug%5D%20
+            - link "Full Documentation" [ref=f1e214] [cursor=pointer]:
+              - /url: https://github.com/zuohuadong/elygate/tree/dev/docs
+            - button "Toggle theme" [ref=f1e218] [cursor=pointer]
+    - main [ref=f1e221]
