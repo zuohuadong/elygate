@@ -328,6 +328,10 @@ func (h *ConfigHandler) getConfig(ctx *fasthttp.RequestCtx) {
 	mapConfig["is_cache_connected"] = h.store.VectorStore != nil
 	mapConfig["is_logs_connected"] = h.store.LogsStore != nil
 	mapConfig["is_object_storage_connected"] = h.store.LogsStoreConfig != nil && h.store.LogsStoreConfig.ObjectStorage != nil
+	mapConfig["hidden_request_types"] = []string{}
+	if h.store.LogsStoreConfig != nil && len(h.store.LogsStoreConfig.HiddenRequestTypes) > 0 {
+		mapConfig["hidden_request_types"] = h.store.LogsStoreConfig.HiddenRequestTypes
+	}
 	// Fetching proxy config
 	if h.store.ConfigStore != nil {
 		proxyConfig, err := h.store.ConfigStore.GetProxyConfig(ctx)
@@ -452,6 +456,17 @@ func (h *ConfigHandler) updateConfig(ctx *fasthttp.RequestCtx) {
 	// rejection would leave the process in a partially-updated state.
 	if err := lib.ValidateBaseURL(payload.ClientConfig.MCPExternalClientURL.GetValue()); err != nil {
 		SendError(ctx, fasthttp.StatusBadRequest, fmt.Sprintf("mcp_external_client_url %v", err))
+		return
+	}
+
+	// vk_rotation_cooldown bounds: negative is meaningless, and anything past 30
+	// days keeps a retired credential alive long enough to defeat the rotation.
+	if payload.ClientConfig.VKRotationCooldown < 0 {
+		SendError(ctx, fasthttp.StatusBadRequest, "vk_rotation_cooldown must not be negative")
+		return
+	}
+	if payload.ClientConfig.VKRotationCooldown.D() > configstore.MaxVKRotationCooldown {
+		SendError(ctx, fasthttp.StatusBadRequest, "vk_rotation_cooldown must not exceed 30 days")
 		return
 	}
 
@@ -729,13 +744,15 @@ func (h *ConfigHandler) updateConfig(ctx *fasthttp.RequestCtx) {
 	newCompat := payload.ClientConfig.Compat
 	oldCompat := currentConfig.Compat
 	if newCompat != oldCompat {
-		newEnabled := newCompat.ConvertTextToChat || newCompat.ConvertChatToResponses || newCompat.ShouldDropParams || newCompat.ShouldConvertParams
+		newEnabled := newCompat.ConvertTextToChat || newCompat.ConvertChatToResponses || newCompat.ShouldDropParams || newCompat.ShouldConvertParams ||
+			newCompat.AzureDeepseek
 		if newEnabled {
 			compatCfg := &compat.Config{
 				ConvertTextToChat:      newCompat.ConvertTextToChat,
 				ConvertChatToResponses: newCompat.ConvertChatToResponses,
 				ShouldDropParams:       newCompat.ShouldDropParams,
 				ShouldConvertParams:    newCompat.ShouldConvertParams,
+				AzureDeepseek:          newCompat.AzureDeepseek,
 			}
 			if err := h.configManager.ReloadPlugin(ctx, compat.PluginName, nil, compatCfg, nil, nil); err != nil {
 				logger.Warn("failed to load compat plugin: %v", err)
@@ -793,6 +810,10 @@ func (h *ConfigHandler) updateConfig(ctx *fasthttp.RequestCtx) {
 
 	// Toggle allowing direct key bypass via x-bf-direct-key header
 	updatedConfig.AllowDirectKeys = payload.ClientConfig.AllowDirectKeys
+
+	// Rotation grace period; bounds validated up front. Copied unconditionally
+	// so 0 clears a previously stored cooldown.
+	updatedConfig.VKRotationCooldown = payload.ClientConfig.VKRotationCooldown
 
 	// No restart needed - routing engine reads via pointer, change is effective immediately.
 	if payload.ClientConfig.RoutingChainMaxDepth > 0 {

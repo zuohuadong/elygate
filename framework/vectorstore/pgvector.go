@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -133,6 +134,10 @@ func (s *PgvectorStore) CreateNamespace(ctx context.Context, namespace string, d
 	if _, err := s.pool.Exec(ctx, fmt.Sprintf(`CREATE INDEX IF NOT EXISTS %s ON %s USING gin (metadata)`, metadataIndex, table)); err != nil {
 		return fmt.Errorf("failed to create pgvector metadata index: %w", err)
 	}
+	comment := strings.ReplaceAll(namespace, "'", "''")
+	if _, err := s.pool.Exec(ctx, fmt.Sprintf(`COMMENT ON TABLE %s IS '%s'`, table, comment)); err != nil {
+		return fmt.Errorf("failed to set pgvector namespace comment: %w", err)
+	}
 	return nil
 }
 
@@ -146,6 +151,38 @@ func (s *PgvectorStore) DeleteNamespace(ctx context.Context, namespace string) e
 		return fmt.Errorf("failed to delete pgvector namespace: %w", err)
 	}
 	return nil
+}
+
+func (s *PgvectorStore) ListNamespaces(ctx context.Context, prefix string) ([]string, error) {
+	if s == nil || s.pool == nil {
+		return nil, fmt.Errorf("pgvector store is not initialized")
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT COALESCE(obj_description(c.oid, 'pg_class'), c.relname)
+		FROM pg_class c
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE n.nspname = $1 AND c.relkind = 'r' AND c.relname LIKE 'bifrost_vec_%'
+	`, s.schema)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list pgvector namespaces: %w", err)
+	}
+	defer rows.Close()
+
+	var namespaces []string
+	for rows.Next() {
+		var ns string
+		if err := rows.Scan(&ns); err != nil {
+			return nil, fmt.Errorf("failed to scan pgvector namespace: %w", err)
+		}
+		if strings.HasPrefix(ns, prefix) {
+			namespaces = append(namespaces, ns)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read pgvector namespaces: %w", err)
+	}
+	sort.Strings(namespaces)
+	return namespaces, nil
 }
 
 func (s *PgvectorStore) GetChunk(ctx context.Context, namespace string, id string) (SearchResult, error) {

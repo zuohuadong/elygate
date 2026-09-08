@@ -41,6 +41,7 @@ func TestChatCompletionRejectsForgedVirtualKeyBeforeProviderSelection(t *testing
 		nil,
 		&configstore.GovernanceConfig{},
 		nil,
+		nil,
 	)
 	require.NoError(t, err)
 	vkMandatory := false
@@ -80,7 +81,7 @@ func TestChatCompletionRejectsForgedVirtualKeyBeforeProviderSelection(t *testing
 		t.Run(tc.name, func(t *testing.T) {
 			r := router.New()
 			config := &lib.Config{ClientConfig: &configstore.ClientConfig{AllowDirectKeys: true}}
-			NewInferenceHandler(client, config).RegisterRoutes(r, VirtualKeyValidationMiddleware(store))
+			NewInferenceHandler(nil, client, config).RegisterRoutes(r, VirtualKeyValidationMiddleware(store))
 
 			ctx := &fasthttp.RequestCtx{}
 			ctx.Request.Header.SetMethod(fasthttp.MethodPost)

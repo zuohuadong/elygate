@@ -833,6 +833,10 @@ func createBifrostContextFromAuth(handlerStore lib.HandlerStore, auth *authHeade
 			ctx.SetValue(schemas.BifrostContextKeyVirtualKey, auth.googAPIKey)
 		}
 	}
+	// The headers captured at upgrade are all this connection will ever present, so the identity is
+	// settled here the way the HTTP path settles it, a connection that presented nothing included:
+	// governance refuses a request nobody settled, and a keyless connection is not that.
+	lib.SettleIdentity(ctx)
 
 	// Forward x-bf-* headers
 	matcher := (*lib.HeaderMatcher)(nil)
