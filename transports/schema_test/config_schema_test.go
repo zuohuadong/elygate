@@ -1633,6 +1633,7 @@ func TestSchemaVectorStoreTypes(t *testing.T) {
 		vectorstore.VectorStoreTypeRedis:    "redis_config",
 		vectorstore.VectorStoreTypeQdrant:   "qdrant_config",
 		vectorstore.VectorStoreTypePinecone: "pinecone_config",
+		vectorstore.VectorStoreTypePgvector: "pgvector_config",
 		vectorstore.VectorStoreTypeChromem:  "chromem_config",
 	}
 
@@ -1684,6 +1685,7 @@ func TestSchemaVectorStoreTypes(t *testing.T) {
 			"redis":    `{"vector_store": {"enabled": true, "type": "redis", "config": {"addr": "localhost:6379"}}}`,
 			"qdrant":   `{"vector_store": {"enabled": true, "type": "qdrant", "config": {"host": "localhost"}}}`,
 			"pinecone": `{"vector_store": {"enabled": true, "type": "pinecone", "config": {"api_key": "k", "index_host": "h"}}}`,
+			"pgvector": `{"vector_store": {"enabled": true, "type": "pgvector", "config": {"connection_string": "postgres://user:pass@localhost:5432/db"}}}`,
 			"chromem":  `{"vector_store": {"enabled": true, "type": "chromem", "config": {"path": "/app/data/chromem"}}}`,
 		}
 		for name, config := range valid {

@@ -45,6 +45,25 @@ export interface PricingOverrideDraft {
 }
 
 export const RESET_DURATIONS = ['1m', '5m', '15m', '30m', '1h', '6h', '1d', '1w', '1M'] as const;
+
+
+const RESET_DURATION_LABELS_ZH: Record<string, string> = {
+	'30s': '30 秒',
+	'1m': '1 分钟',
+	'5m': '5 分钟',
+	'15m': '15 分钟',
+	'30m': '30 分钟',
+	'1h': '1 小时',
+	'6h': '6 小时',
+	'1d': '1 天',
+	'1w': '1 周',
+	'1M': '1 个月',
+	'1Q': '1 个季度',
+};
+
+export function resetDurationLabel(duration: string, locale: string): string {
+	return locale.startsWith('zh') ? RESET_DURATION_LABELS_ZH[duration] ?? duration : duration;
+}
 export const REQUEST_TYPES = [
 	'chat_completion', 'text_completion', 'responses', 'embedding', 'rerank', 'speech', 'transcription',
 	'image_generation', 'image_variation', 'image_edit', 'video_generation', 'video_remix', 'ocr',

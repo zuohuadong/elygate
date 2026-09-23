@@ -39,6 +39,7 @@ const RESOURCE_SPECS: ResourceSpec[] = [
 	['prompts', 'elygate.prompts', 'message-square-text'],
 	['user-agent-mappings', 'elygate.userAgentMappings', 'tags'],
 	['connectors', 'elygate.connectors', 'cable'],
+	['usage-ledger', 'elygate.usageLedger', 'landmark'],
 	['config', 'elygate.config', 'settings'],
 	['client-settings', 'elygate.clientSettings', 'settings-2'],
 	['compatibility-config', 'elygate.compatibilityConfig', 'plug-zap'],
@@ -61,6 +62,12 @@ const RESOURCE_SPECS: ResourceSpec[] = [
 
 function resource(locale: ElygateLocale, [name, labelKey, icon]: ResourceSpec): ResourceDefinition {
 	return { name, label: labelFor(locale, labelKey), icon, fields: [], showInMenu: false };
+}
+
+function visibleResourceNames(items: readonly MenuItem[]): Set<string> {
+	return new Set(items.flatMap((item) => item.children?.length
+		? [...visibleResourceNames(item.children)]
+		: item.href && item.href !== '#/' ? [item.name] : []));
 }
 
 function menuItem(locale: ElygateLocale, name: string, labelKey: LabelKey, icon: string): MenuItem {
@@ -111,18 +118,28 @@ export function createResources(
 	locale: ElygateLocale,
 	includeDevelopmentResources = false,
 	enterpriseResources: readonly EnterpriseResourceManifestEntry[] = [],
+	availableEnterpriseResources: readonly string[] = [],
 ): ResourceDefinition[] {
 	const builtInResources = RESOURCE_SPECS
 		.filter(([name]) => includeDevelopmentResources || !developmentResourceNames.has(name))
 		.map((spec) => resource(locale, spec));
-	const extensionResources = enterpriseResources.map((entry) => ({
+	const extensionResources: ResourceDefinition[] = enterpriseResources.map((entry) => ({
 		name: entry.name,
 		label: entry.labels[locale],
 		icon: entry.icon,
 		fields: [],
 		showInMenu: false,
 	}));
-	return [...builtInResources, ...extensionResources];
+	const visibleNames = visibleResourceNames(createMenu(
+		locale,
+		availableEnterpriseResources,
+		includeDevelopmentResources,
+		enterpriseResources,
+	));
+	return [...builtInResources, ...extensionResources].map((entry) => ({
+		...entry,
+		meta: { ...entry.meta, aboutVisible: visibleNames.has(entry.name) },
+	}));
 }
 
 export function createMenu(
@@ -142,6 +159,7 @@ export function createMenu(
 				menuItem(locale, 'mcp-logs', 'elygate.mcpLogs', 'list-tree'),
 				menuItem(locale, 'control-plane-usage', 'elygate.controlPlaneUsage', 'chart-no-axes-combined'),
 				menuItem(locale, 'connectors', 'elygate.connectors', 'cable'),
+				menuItem(locale, 'usage-ledger', 'elygate.usageLedger', 'landmark'),
 				menuItem(locale, 'user-agent-mappings', 'elygate.userAgentMappings', 'tags'),
 			]),
 		},

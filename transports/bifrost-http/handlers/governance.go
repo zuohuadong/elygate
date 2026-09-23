@@ -2384,7 +2384,6 @@ func (h *GovernanceHandler) getVirtualKey(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, fasthttp.StatusInternalServerError, "Failed to audit virtual key disclosure")
 		return
 	}
-	SendJSON(ctx, map[string]interface{}{"virtual_key": payloads[0]})
 	SendJSON(ctx, map[string]interface{}{
 		"virtual_key":     payloads[0],
 		"virtual_mcp_ids": vmcpIDs,

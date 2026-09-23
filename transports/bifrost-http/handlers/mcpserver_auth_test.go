@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -14,6 +15,16 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/valyala/fasthttp"
 )
+
+type denyingVirtualKeyAccessChecker struct{}
+
+func (denyingVirtualKeyAccessChecker) CheckVirtualKeyAccess(context.Context, string) error {
+	return errors.New("employee inactive")
+}
+
+func (denyingVirtualKeyAccessChecker) CheckVirtualKeyValueAccess(context.Context, string) error {
+	return errors.New("employee inactive")
+}
 
 // newTestMCPHandler builds an MCPServerHandler around the given config without going through
 // NewMCPServerHandler (which needs a live tool manager). No admitter is wired, so admission
@@ -171,6 +182,20 @@ func TestAuthenticate_JWTPath(t *testing.T) {
 
 		require.NoError(t, h.authenticate(ctx, bifrostCtx))
 		assert.Equal(t, "sk-bf-x", stringFromCtx(bifrostCtx, schemas.BifrostContextKeyVirtualKey))
+	})
+
+	t.Run("vk JWT is rejected when its employee is inactive", func(t *testing.T) {
+		activeVK := &configtables.TableVirtualKey{ID: "vk-row-1", Value: *schemas.NewSecretVar("sk-bf-active"), IsActive: new(true)}
+		store := &mockOAuth2Store{signingKey: key, vksByID: map[string]*configtables.TableVirtualKey{"vk-row-1": activeVK}}
+		cfg := newTestOAuth2Config(store, configtables.MCPServerAuthModeOAuth, false)
+		h := newTestMCPHandler(cfg)
+		h.SetVirtualKeyAccessChecker(denyingVirtualKeyAccessChecker{})
+
+		ctx, bifrostCtx := newRequestCtx()
+		ctx.Request.Header.Set("Authorization", "Bearer "+vkToken("vk-row-1"))
+
+		err := h.authenticate(ctx, bifrostCtx)
+		require.ErrorContains(t, err, "employee inactive")
 	})
 
 	t.Run("vk JWT for an unknown key is rejected", func(t *testing.T) {

@@ -5,6 +5,7 @@
 	import { displayError } from '../lib/forms';
 	import { encodePathSegment, getListPayload, getObjectPayload, getTotal, requestJson, type JsonRecord } from '../lib/api';
 	import { formatPagination } from '../lib/display-format';
+	import { resetDurationLabel } from '../lib/governance-management';
 
 	interface McpConfigDraft { key: string; id?: number; clientName: string; tools: string; }
 	interface BudgetDraft { key: string; maxLimit: string | number; resetDuration: string; }
@@ -71,6 +72,7 @@
 	let isLoading = $state(true);
 	let isSaving = $state(false);
 	let error = $state('');
+	let nameError = $state('');
 	let notice = $state('');
 	let revealedKey = $state('');
 	let total = $state(0);
@@ -80,6 +82,7 @@
 	const pageSize = 20;
 	const totalPages = $derived(Math.max(1, Math.ceil(total / pageSize)));
 	const canAddProviderRoute = $derived(availableVirtualKeyProviders(providers, providerRoutes).length > 0);
+	function durationLabel(duration: string): string { return resetDurationLabel(duration, i18n.locale); }
 	function isMutating(id: string): boolean { return mutatingIds.includes(id); }
 	function beginMutation(id: string): boolean {
 		if (isMutating(id)) return false;
@@ -200,6 +203,7 @@
 		providerRoutes = [];
 		revealedKey = '';
 		error = '';
+		nameError = '';
 		isOpen = true;
 	}
 
@@ -232,6 +236,7 @@
 			rateLimit: { tokenMaxLimit: Number(rateLimitForForm(record.rate_limit).token_max_limit) || '', tokenResetDuration: String(rateLimitForForm(record.rate_limit).token_reset_duration ?? '1h'), requestMaxLimit: Number(rateLimitForForm(record.rate_limit).request_max_limit) || '', requestResetDuration: String(rateLimitForForm(record.rate_limit).request_reset_duration ?? '1h') },
 		};
 		error = '';
+		nameError = '';
 		isOpen = true;
 	}
 
@@ -239,8 +244,12 @@
 		if (isSaving) return;
 		isSaving = true;
 		error = '';
+		nameError = '';
 		try {
-			if (!form.name.trim()) throw new Error(i18n.t('elygate.required').replace('{field}', i18n.t('elygate.virtualKeyName')));
+			if (!form.name.trim()) {
+				nameError = i18n.t('elygate.required').replace('{field}', i18n.t('elygate.virtualKeyName'));
+				throw new Error(nameError);
+			}
 			let providerConfigs: JsonRecord[];
 			try {
 				providerConfigs = virtualKeyProviderConfigsForPayload(
@@ -368,8 +377,8 @@
 				<h2 id="vk-dialog-title">{editing ? i18n.t('elygate.edit') : i18n.t('elygate.create')} {i18n.t('elygate.virtualKeys')}</h2>
 				<button type="button" disabled={isSaving} onclick={closeModal}>{i18n.t('elygate.close')}</button>
 			</header>
-			<form onsubmit={submit}>
-				<label>{i18n.t('elygate.virtualKeyName')}<input bind:value={form.name} required /></label>
+			<form onsubmit={submit} novalidate>
+				<label class:name-invalid={!!nameError}>{i18n.t('elygate.virtualKeyName')}<input bind:value={form.name} aria-invalid={nameError ? 'true' : 'false'} aria-describedby={nameError ? 'vk-name-error' : undefined} oninput={() => (nameError = '')} />{#if nameError}<small id="vk-name-error" class="field-error">{nameError}</small>{/if}</label>
 				<label>{i18n.t('elygate.description')}<input bind:value={form.description} /></label>
 				<div class="grid-two">
 					<label>{i18n.t('elygate.teamId')}<input bind:value={form.teamId} /></label>
@@ -402,12 +411,12 @@
 				</fieldset>
 				<fieldset class="structured-editor">
 					<legend>{i18n.t('elygate.budgets')}</legend>
-					{#each form.budgets as budget, index (budget.key)}<div class="structured-row"><label>{i18n.locale === 'zh-CN' ? '金额上限' : 'Amount limit'}<input type="number" min="0.01" step="0.01" bind:value={budget.maxLimit} /></label><label>{i18n.locale === 'zh-CN' ? '重置周期' : 'Reset window'}<select bind:value={budget.resetDuration}>{#each ['1m', '5m', '15m', '30m', '1h', '6h', '1d', '1w', '1M', '1Q'] as duration (duration)}<option value={duration}>{duration}</option>{/each}</select></label><button class="danger" type="button" onclick={() => removeBudget(index)}>{i18n.t('elygate.delete')}</button></div>{:else}<p class="empty">{i18n.locale === 'zh-CN' ? '未设置预算。' : 'No budgets configured.'}</p>{/each}
+					{#each form.budgets as budget, index (budget.key)}<div class="structured-row"><label>{i18n.locale === 'zh-CN' ? '金额上限' : 'Amount limit'}<input type="number" min="0.01" step="0.01" bind:value={budget.maxLimit} /></label><label>{i18n.locale === 'zh-CN' ? '重置周期' : 'Reset window'}<select bind:value={budget.resetDuration}>{#each ['1m', '5m', '15m', '30m', '1h', '6h', '1d', '1w', '1M', '1Q'] as duration (duration)}<option value={duration}>{durationLabel(duration)}</option>{/each}</select></label><button class="danger" type="button" onclick={() => removeBudget(index)}>{i18n.t('elygate.delete')}</button></div>{:else}<p class="empty">{i18n.locale === 'zh-CN' ? '未设置预算。' : 'No budgets configured.'}</p>{/each}
 					<button type="button" onclick={addBudget}>+ {i18n.t('elygate.addBudget')}</button>
 				</fieldset>
 				<fieldset class="structured-editor">
 					<legend>{i18n.locale === 'zh-CN' ? '请求限流' : 'Rate limits'}</legend>
-					<div class="grid-two"><label>{i18n.t('elygate.tokenLimit')}<input type="number" min="1" step="1" bind:value={form.rateLimit.tokenMaxLimit} /></label><label>{i18n.locale === 'zh-CN' ? 'Token 重置周期' : 'Token reset window'}<select bind:value={form.rateLimit.tokenResetDuration}>{#each ['1m', '5m', '15m', '30m', '1h', '6h', '1d', '1w', '1M'] as duration (duration)}<option value={duration}>{duration}</option>{/each}</select></label><label>{i18n.t('elygate.requestLimit')}<input type="number" min="1" step="1" bind:value={form.rateLimit.requestMaxLimit} /></label><label>{i18n.locale === 'zh-CN' ? '请求重置周期' : 'Request reset window'}<select bind:value={form.rateLimit.requestResetDuration}>{#each ['1m', '5m', '15m', '30m', '1h', '6h', '1d', '1w', '1M'] as duration (duration)}<option value={duration}>{duration}</option>{/each}</select></label></div>
+					<div class="grid-two"><label>{i18n.t('elygate.tokenLimit')}<input type="number" min="1" step="1" bind:value={form.rateLimit.tokenMaxLimit} /></label><label>{i18n.locale === 'zh-CN' ? '令牌重置周期' : 'Token reset window'}<select bind:value={form.rateLimit.tokenResetDuration}>{#each ['1m', '5m', '15m', '30m', '1h', '6h', '1d', '1w', '1M'] as duration (duration)}<option value={duration}>{durationLabel(duration)}</option>{/each}</select></label><label>{i18n.t('elygate.requestLimit')}<input type="number" min="1" step="1" bind:value={form.rateLimit.requestMaxLimit} /></label><label>{i18n.locale === 'zh-CN' ? '请求重置周期' : 'Request reset window'}<select bind:value={form.rateLimit.requestResetDuration}>{#each ['1m', '5m', '15m', '30m', '1h', '6h', '1d', '1w', '1M'] as duration (duration)}<option value={duration}>{durationLabel(duration)}</option>{/each}</select></label></div>
 				</fieldset>
 				<footer>
 					<button type="button" disabled={isSaving} onclick={closeModal}>{i18n.t('elygate.cancel')}</button>
@@ -446,6 +455,8 @@
 	h2 { margin: 0; }
 	form { display: grid; gap: .85rem; }
 	label { display: grid; font-size: .85rem; font-weight: 650; gap: .35rem; }
+	label.name-invalid { color: var(--destructive); }
+	.field-error { color: var(--destructive); font-size: .78rem; font-weight: 500; }
 	input, select { background: var(--background); border: 1px solid var(--border); border-radius: .5rem; color: var(--foreground); font: inherit; padding: .6rem .7rem; width: 100%; }
 	.route-editor { border: 1px solid var(--border); border-radius: .65rem; display: grid; gap: .75rem; margin: 0; padding: .85rem; }
 	.route-editor legend { font-size: .85rem; font-weight: 700; padding: 0 .3rem; }

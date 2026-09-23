@@ -79,11 +79,12 @@ describe('MCP management helpers', () => {
 	});
 
 	test('localizes MCP catalog metadata without changing filter values', () => {
-		expect(localizeMcpCatalogValue('zh-CN', 'category', 'Marketing')).toBe('营销（Marketing）');
-		expect(localizeMcpCatalogValue('zh-CN', 'source', 'remote')).toBe('远程目录（remote）');
+		expect(localizeMcpCatalogValue('zh-CN', 'category', 'Marketing')).toBe('营销');
+		expect(localizeMcpCatalogValue('zh-CN', 'source', 'remote')).toBe('远程目录');
 		expect(localizeMcpCatalogValue('zh-CN', 'tag', 'journey-optimizer')).toBe('旅程优化');
 		expect(localizeMcpCatalogValue('zh-CN', 'tag', 'adobe')).toBe('Adobe');
-		expect(localizeMcpCatalogValue('zh-CN', 'tag', 'untranslated-product')).toBe('untranslated-product');
+		expect(localizeMcpCatalogValue('zh-CN', 'tag', 'customer-support')).toBe('客户支持');
+		expect(localizeMcpCatalogValue('zh-CN', 'tag', 'untranslated-product')).toBe('专有标签：untranslated product');
 		expect(localizeMcpCatalogValue('en', 'category', 'Marketing')).toBe('Marketing');
 	});
 
@@ -92,7 +93,7 @@ describe('MCP management helpers', () => {
 		const localized = localizeMcpCatalogDescription('zh-CN', 'Example Marketing Server', 'Marketing', original);
 		expect(localized).toContain('Example Marketing Server');
 		expect(localized).toContain('中文分类摘要');
-		expect(localized).toContain('营销（Marketing）');
+		expect(localized).toContain('目录分类：营销');
 		expect(localized).toContain(original);
 		expect(localizeMcpCatalogDescription('en', 'Example Marketing Server', 'Marketing', original)).toBe(original);
 	});

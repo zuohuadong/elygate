@@ -60,6 +60,7 @@ type EvaluationContext struct {
 	Provider                 schemas.ModelProvider                // Current provider
 	Model                    string                               // Current model
 	RequestType              string                               // Request type (e.g., "chat_completion", "embedding"); streaming requests carry a distinct "_stream" suffix (e.g., "chat_completion_stream")
+	Metadata                 map[string]string                    // Request metadata exposed to CEL (for example request.metadata["tier"])
 	Fallbacks                []string                             // Fallback chain: ["provider/model", ...]
 	Headers                  map[string]string                    // Request headers for dynamic routing
 	QueryParams              map[string]string                    // Query parameters for dynamic routing
@@ -481,6 +482,11 @@ func extractRoutingVariables(ctx *EvaluationContext) (map[string]interface{}, er
 		}
 	}
 	variables["params"] = normalizedParams
+	metadata := make(map[string]string, len(ctx.Metadata))
+	for key, value := range ctx.Metadata {
+		metadata[strings.ToLower(key)] = value
+	}
+	variables["metadata"] = metadata
 
 	// Who the request is governed as. Absent scopes are the empty string, which is what a rule comparing
 	// against one has always seen: the branching this replaced existed only to reach through a
@@ -636,6 +642,7 @@ func createCELEnvironment() (*cel.Env, error) {
 		// Headers and params (dynamic from request)
 		cel.Variable("headers", cel.MapType(cel.StringType, cel.StringType)),
 		cel.Variable("params", cel.MapType(cel.StringType, cel.StringType)),
+		cel.Variable("metadata", cel.MapType(cel.StringType, cel.StringType)),
 
 		// VirtualKey/Team/Customer context
 		cel.Variable("virtual_key_id", cel.StringType),
