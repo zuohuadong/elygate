@@ -53,6 +53,45 @@ func TestControlPlaneProjectApplicationBindingAndLedgerAreIdempotent(t *testing.
 	require.InDelta(t, cost, rows[0].Cost, 0.000001)
 }
 
+func TestProjectLogsCopiesSessionTreeAndListUsageFilters(t *testing.T) {
+	store, cs := testControlPlaneStore(t)
+	active := true
+	require.NoError(t, cs.CreateVirtualKey(context.Background(), &configtables.TableVirtualKey{ID: "vk-tree", Name: "vk-tree", Value: *schemas.NewSecretVar("sk-tree"), IsActive: &active, CreatedAt: time.Now(), UpdatedAt: time.Now()}))
+	project := &Project{Name: "Session tree"}
+	require.NoError(t, store.CreateProject(context.Background(), project))
+	app := &Application{ProjectID: project.ID, Name: "Agents"}
+	require.NoError(t, store.CreateApplication(context.Background(), app))
+	_, err := store.BindVirtualKey(context.Background(), app.ID, "vk-tree", nil)
+	require.NoError(t, err)
+
+	sessionID, parentID, agent := "child-1", "parent-1", "reviewer"
+	cost := 0.12
+	logs := []logstore.Log{{
+		ID: "log-tree-1", Timestamp: time.Now().UTC().Add(time.Second), Provider: "openai", Model: "gpt-4o-mini",
+		Status: "success", VirtualKeyID: ptr("vk-tree"), SessionID: &sessionID, ParentSessionID: &parentID,
+		AgentName: &agent, IsSubagent: true, PromptTokens: 4, CompletionTokens: 6, TotalTokens: 10, Cost: &cost,
+	}}
+	count, err := store.ProjectLogs(context.Background(), logs)
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
+
+	rows, total, err := store.ListUsage(context.Background(), UsageQuery{SessionID: "child-1", IsSubagent: ptr(true)})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+	require.Len(t, rows, 1)
+	require.Equal(t, "child-1", optionalStringValue(rows[0].SessionID))
+	require.Equal(t, "parent-1", optionalStringValue(rows[0].ParentSessionID))
+	require.Equal(t, "reviewer", optionalStringValue(rows[0].AgentName))
+	require.True(t, rows[0].IsSubagent)
+
+	_, total, err = store.ListUsage(context.Background(), UsageQuery{TreeSessionID: "parent-1"})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+	_, total, err = store.ListUsage(context.Background(), UsageQuery{AgentName: "reviewer", IsFork: ptr(true)})
+	require.NoError(t, err)
+	require.Zero(t, total)
+}
+
 func TestListApplicationsReturnsRows(t *testing.T) {
 	store, _ := testControlPlaneStore(t)
 	project := &Project{Name: "Applications"}
@@ -122,6 +161,32 @@ func TestBackfillProjectionDoesNotAdvanceCheckpoint(t *testing.T) {
 	checkpoint, err := store.Checkpoint(context.Background())
 	require.NoError(t, err)
 	require.True(t, checkpoint.Watermark.IsZero())
+}
+
+type partialUsageReader struct{}
+
+func (partialUsageReader) ScanUsageLogs(_ context.Context, visit func([]logstore.Log) error) error {
+	return visit(nil)
+}
+
+func TestReconcileUsageDoesNotDeleteLedgerForPartialReader(t *testing.T) {
+	store, _ := testControlPlaneStore(t)
+	ctx := context.Background()
+	project := &Project{Name: "Partial reader"}
+	require.NoError(t, store.CreateProject(ctx, project))
+	app := &Application{ProjectID: project.ID, Name: "Partial"}
+	require.NoError(t, store.CreateApplication(ctx, app))
+	key, err := store.CreateApplicationKey(ctx, app.ID, "partial-key", "", nil, "test")
+	require.NoError(t, err)
+	_, err = store.ProjectLogs(ctx, []logstore.Log{{
+		ID: "partial-source", Timestamp: time.Now().UTC(), VirtualKeyID: ptr(key.VirtualKeyID), Status: "success",
+	}})
+	require.NoError(t, err)
+
+	require.NoError(t, store.ReconcileUsage(ctx, partialUsageReader{}))
+	_, total, err := store.ListUsage(ctx, UsageQuery{ApplicationID: app.ID})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
 }
 
 func TestExpiredBindingRejectsVirtualKeyValue(t *testing.T) {

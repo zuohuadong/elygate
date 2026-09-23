@@ -53,6 +53,8 @@
 	let description = $state('');
 	let attributeRows = $state<EditableAttributeRow[]>([]);
 	let nextRowId = 1;
+	let overviewLoadSeq = 0;
+	let modelsLoadSeq = 0;
 
 	const filteredOverviewRows = $derived(overviewProvider
 		? overviewRows.filter((row) => row.provider.name === overviewProvider)
@@ -65,6 +67,7 @@
 	function customProvider(provider: Provider): string { return provider.custom_provider_config?.base_provider_type ? `${i18n.t('elygate.customProvider')} · ${provider.custom_provider_config.base_provider_type}` : i18n.t('elygate.builtInProvider'); }
 
 	async function loadOverview(): Promise<void> {
+		const sequence = ++overviewLoadSeq;
 		isOverviewLoading = true;
 		error = '';
 		try {
@@ -73,10 +76,9 @@
 				requestJson<unknown>('/api/models?unfiltered=true&limit=0'),
 				requestJson<LogStats>('/api/logs/stats?period=24h').catch((): LogStats => ({})),
 			]);
-			providers = getListPayload(providerPayload).filter((value): value is Provider => typeof value.name === 'string');
-			totalModels = getTotal(modelPayload, getListPayload(modelPayload).length);
-			globalStats = stats;
-			overviewRows = await Promise.all(providers.map(async (provider) => {
+			const nextProviders = getListPayload(providerPayload).filter((value): value is Provider => typeof value.name === 'string');
+			const nextTotalModels = getTotal(modelPayload, getListPayload(modelPayload).length);
+			const nextOverviewRows = await Promise.all(nextProviders.map(async (provider) => {
 				const encodedProvider = encodeURIComponent(provider.name);
 				const [providerStats, histogram, keyPayload] = await Promise.all([
 					requestJson<LogStats>(`/api/logs/stats?period=24h&providers=${encodedProvider}`).catch((): LogStats => ({})),
@@ -90,32 +92,44 @@
 					models: displayModelsWithAliases(histogram.models ?? [], getListPayload(keyPayload)),
 				};
 			}));
+			if (sequence !== overviewLoadSeq) return;
+			providers = nextProviders;
+			totalModels = nextTotalModels;
+			globalStats = stats;
+			overviewRows = nextOverviewRows;
 		} catch (cause) {
-			error = displayError(cause, i18n.t('elygate.loadFailed'));
+			if (sequence === overviewLoadSeq) error = displayError(cause, i18n.t('elygate.loadFailed'));
 		} finally {
-			isOverviewLoading = false;
+			if (sequence === overviewLoadSeq) isOverviewLoading = false;
 		}
 	}
 
 	async function loadModels(reset = false): Promise<void> {
 		if (reset) offset = 0;
+		const sequence = ++modelsLoadSeq;
+		const requestedOffset = offset;
+		const requestedQuery = query.trim();
+		const requestedProvider = providerFilter;
 		isModelsLoading = true;
 		error = '';
-		const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(offset), unfiltered: 'true' });
-		if (query.trim()) params.set('query', query.trim());
-		if (providerFilter) params.set('provider', providerFilter);
+		const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(requestedOffset), unfiltered: 'true' });
+		if (requestedQuery) params.set('query', requestedQuery);
+		if (requestedProvider) params.set('provider', requestedProvider);
 		try {
 			const payload = await requestJson<unknown>(`/api/models/details?${params.toString()}`);
-			models = getListPayload(payload).filter((value): value is ModelDetails => typeof value.name === 'string' && typeof value.provider === 'string');
-			modelTotal = getTotal(payload, models.length);
+			if (sequence !== modelsLoadSeq || offset !== requestedOffset || query.trim() !== requestedQuery || providerFilter !== requestedProvider) return;
+			const nextModels = getListPayload(payload).filter((value): value is ModelDetails => typeof value.name === 'string' && typeof value.provider === 'string');
+			models = nextModels;
+			modelTotal = getTotal(payload, nextModels.length);
 		} catch (cause) {
-			error = displayError(cause, i18n.t('elygate.loadFailed'));
+			if (sequence === modelsLoadSeq && offset === requestedOffset && query.trim() === requestedQuery && providerFilter === requestedProvider) error = displayError(cause, i18n.t('elygate.loadFailed'));
 		} finally {
-			isModelsLoading = false;
+			if (sequence === modelsLoadSeq) isModelsLoading = false;
 		}
 	}
 
 	function openEditor(model: ModelDetails): void {
+		if (isSaving) return;
 		editing = model;
 		description = model.additional_attributes?.description ?? '';
 		attributeRows = Object.entries(model.additional_attributes ?? {})
@@ -139,18 +153,21 @@
 	}
 
 	async function saveAttributes(): Promise<void> {
-		if (!editing) return;
+		if (!editing || isSaving) return;
+		const editingSnapshot = { name: editing.name, provider: editing.provider };
 		isSaving = true;
 		error = '';
 		try {
 			const attributes = buildModelAttributes(description, attributeRows);
 			await requestJson<void>('/api/models/catalog', {
 				method: 'PUT',
-				body: JSON.stringify([{ model: editing.name, provider: editing.provider, additional_attributes: attributes }]),
+				body: JSON.stringify([{ model: editingSnapshot.name, provider: editingSnapshot.provider, additional_attributes: attributes }]),
 			});
-			editing = null;
-			notice = i18n.t('elygate.attributesSaved');
-			await loadModels();
+			if (editing?.name === editingSnapshot.name && editing?.provider === editingSnapshot.provider) {
+				editing = null;
+				notice = i18n.t('elygate.attributesSaved');
+				await loadModels();
+			}
 		} catch (cause) {
 			error = cause instanceof ModelAttributeError ? attributeError(cause) : displayError(cause, i18n.t('elygate.saveFailed'));
 		} finally {
@@ -203,7 +220,7 @@
 		</form>
 		<div class="table-wrap"><table class="models-table"><thead><tr><th>{i18n.t('elygate.provider')}</th><th>{i18n.t('elygate.model')}</th><th>{i18n.t('elygate.inputPrice')}</th><th>{i18n.t('elygate.outputPrice')}</th><th>{i18n.t('elygate.cacheWritePrice')}</th><th>{i18n.t('elygate.cacheReadPrice')}</th><th>{i18n.t('elygate.description')}</th><th>{i18n.t('elygate.attributes')}</th><th></th></tr></thead><tbody>
 			{#each models as model (`${model.provider}:${model.name}`)}
-				<tr><td>{model.provider}</td><td><strong class="model-name">{model.name}</strong></td><td>{formatTokenPrice(model.input_cost_per_token, i18n.locale)}</td><td>{formatTokenPrice(model.output_cost_per_token, i18n.locale)}</td><td>{formatTokenPrice(model.cache_creation_input_token_cost, i18n.locale)}</td><td>{formatTokenPrice(model.cache_read_input_token_cost, i18n.locale)}</td><td class="description">{model.additional_attributes?.description ?? '—'}</td><td>{Math.max(0, Object.keys(model.additional_attributes ?? {}).length - (model.additional_attributes?.description ? 1 : 0))}</td><td><button type="button" onclick={() => openEditor(model)}>{i18n.t('elygate.edit')}</button></td></tr>
+				<tr><td>{model.provider}</td><td><strong class="model-name">{model.name}</strong></td><td>{formatTokenPrice(model.input_cost_per_token, i18n.locale)}</td><td>{formatTokenPrice(model.output_cost_per_token, i18n.locale)}</td><td>{formatTokenPrice(model.cache_creation_input_token_cost, i18n.locale)}</td><td>{formatTokenPrice(model.cache_read_input_token_cost, i18n.locale)}</td><td class="description">{model.additional_attributes?.description ?? '—'}</td><td>{Math.max(0, Object.keys(model.additional_attributes ?? {}).length - (model.additional_attributes?.description ? 1 : 0))}</td><td><button type="button" disabled={isSaving} onclick={() => openEditor(model)}>{i18n.t('elygate.edit')}</button></td></tr>
 			{:else}<tr><td colspan="9">{isModelsLoading ? i18n.t('elygate.loading') : i18n.t('elygate.empty')}</td></tr>{/each}
 		</tbody></table></div>
 		<footer class="pagination"><span>{formatPagination(currentPage, totalPages, modelTotal, i18n.locale)}</span><div><button type="button" disabled={offset === 0 || isModelsLoading} onclick={() => { offset = Math.max(0, offset - PAGE_SIZE); void loadModels(); }}>{i18n.t('elygate.previous')}</button><button type="button" disabled={offset + PAGE_SIZE >= modelTotal || isModelsLoading} onclick={() => { offset += PAGE_SIZE; void loadModels(); }}>{i18n.t('elygate.next')}</button></div></footer>
@@ -213,12 +230,12 @@
 {#if editing}
 	<div class="modal-backdrop" role="presentation" onclick={(event) => { if (event.target === event.currentTarget && !isSaving) editing = null; }}>
 		<div class="modal" role="dialog" aria-modal="true" aria-labelledby="model-attribute-title">
-			<header><div><h2 id="model-attribute-title">{i18n.t('elygate.editModelAttributes')}</h2><p>{editing.provider} / <code>{editing.name}</code></p></div><button type="button" aria-label={i18n.t('elygate.close')} onclick={() => (editing = null)}>×</button></header>
+			<header><div><h2 id="model-attribute-title">{i18n.t('elygate.editModelAttributes')}</h2><p>{editing.provider} / <code>{editing.name}</code></p></div><button type="button" aria-label={i18n.t('elygate.close')} disabled={isSaving} onclick={() => (editing = null)}>×</button></header>
 			<div class="pricing-grid"><article><span>{i18n.t('elygate.inputPrice')}</span><strong>{formatTokenPrice(editing.input_cost_per_token, i18n.locale)}</strong></article><article><span>{i18n.t('elygate.outputPrice')}</span><strong>{formatTokenPrice(editing.output_cost_per_token, i18n.locale)}</strong></article><article><span>{i18n.t('elygate.cacheWritePrice')}</span><strong>{formatTokenPrice(editing.cache_creation_input_token_cost, i18n.locale)}</strong></article><article><span>{i18n.t('elygate.cacheReadPrice')}</span><strong>{formatTokenPrice(editing.cache_read_input_token_cost, i18n.locale)}</strong></article></div>
-			<label>{i18n.t('elygate.description')}<textarea bind:value={description} rows="4" placeholder={i18n.t('elygate.modelDescriptionHint')}></textarea></label>
-			<div class="attribute-heading"><strong>{i18n.t('elygate.otherAttributes')}</strong><button type="button" onclick={addAttributeRow}>+ {i18n.t('elygate.add')}</button></div>
-			<div class="attribute-list">{#each attributeRows as row (row.id)}<div><input bind:value={row.key} placeholder={i18n.t('elygate.attributeKey')} /><input bind:value={row.value} placeholder={i18n.t('elygate.attributeValue')} /><button type="button" aria-label={i18n.t('elygate.delete')} onclick={() => removeAttributeRow(row.id)}>×</button></div>{:else}<p>{i18n.t('elygate.noOtherAttributes')}</p>{/each}</div>
-			<footer><a href={`https://getbifrost.ai/datasheet?model=${encodeURIComponent(editing.name)}`} target="_blank" rel="noreferrer">{i18n.t('elygate.pricingSource')}</a><div><button type="button" onclick={() => (editing = null)}>{i18n.t('elygate.cancel')}</button><button class="primary" type="button" disabled={isSaving} onclick={() => void saveAttributes()}>{isSaving ? i18n.t('elygate.saving') : i18n.t('elygate.save')}</button></div></footer>
+			<label>{i18n.t('elygate.description')}<textarea bind:value={description} rows="4" placeholder={i18n.t('elygate.modelDescriptionHint')} disabled={isSaving}></textarea></label>
+			<div class="attribute-heading"><strong>{i18n.t('elygate.otherAttributes')}</strong><button type="button" disabled={isSaving} onclick={addAttributeRow}>+ {i18n.t('elygate.add')}</button></div>
+			<div class="attribute-list">{#each attributeRows as row (row.id)}<div><input bind:value={row.key} placeholder={i18n.t('elygate.attributeKey')} disabled={isSaving} /><input bind:value={row.value} placeholder={i18n.t('elygate.attributeValue')} disabled={isSaving} /><button type="button" aria-label={i18n.t('elygate.delete')} disabled={isSaving} onclick={() => removeAttributeRow(row.id)}>×</button></div>{:else}<p>{i18n.t('elygate.noOtherAttributes')}</p>{/each}</div>
+			<footer><a href={`https://getbifrost.ai/datasheet?model=${encodeURIComponent(editing.name)}`} target="_blank" rel="noreferrer">{i18n.t('elygate.pricingSource')}</a><div><button type="button" disabled={isSaving} onclick={() => (editing = null)}>{i18n.t('elygate.cancel')}</button><button class="primary" type="button" disabled={isSaving} onclick={() => void saveAttributes()}>{isSaving ? i18n.t('elygate.saving') : i18n.t('elygate.save')}</button></div></footer>
 		</div>
 	</div>
 {/if}

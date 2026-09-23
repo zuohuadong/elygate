@@ -5,7 +5,7 @@ describe('routing rules page contract', () => {
 		const source = await Bun.file(new URL('../pages/RoutingRulesPage.svelte', import.meta.url)).text();
 
 		expect(source).toContain("placeholder=\"openai/gpt-4o\"");
-		expect(source).toContain('fallbacks: form.fallbacks.map((fallback) => fallback.trim()).filter(Boolean)');
+		expect(source).toContain('fallbacks: formSnapshot.fallbacks.map((fallback) => fallback.trim()).filter(Boolean)');
 		expect(source).not.toContain('function toggleFallback');
 		expect(source).not.toContain('rules.filter((rule) => rule.id !== editing?.id)');
 	});
@@ -14,7 +14,7 @@ describe('routing rules page contract', () => {
 		const source = await Bun.file(new URL('../pages/RoutingRulesPage.svelte', import.meta.url)).text();
 
 		expect(source).toContain('<input bind:value={form.name} />');
-		expect(source).toContain('name: form.name.trim()');
+		expect(source).toContain('name: formSnapshot.name.trim()');
 		expect(source).toContain('class="query-editor"');
 		expect(source).toMatch(/\.query-editor[^}]*width:\s*100%/);
 	});

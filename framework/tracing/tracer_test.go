@@ -8,6 +8,7 @@ import (
 
 	"github.com/bytedance/sonic"
 	"github.com/maximhq/bifrost/core/schemas"
+	"github.com/stretchr/testify/require"
 )
 
 type testRealtimeObservabilityPlugin struct {
@@ -74,6 +75,34 @@ func TestTracer_CompleteAndFlushTraceInjectsObservabilityPlugins(t *testing.T) {
 
 	if got := tracer.store.GetTrace(traceID); got != nil {
 		t.Fatalf("trace %q was not released after flush", traceID)
+	}
+}
+
+// TestTracer_TransformPausedStreamBufferForwardsToAccumulator verifies the production tracer exposes the gate transformation capability.
+func TestTracer_TransformPausedStreamBufferForwardsToAccumulator(t *testing.T) {
+	store := NewTraceStore(5*time.Minute, nil)
+	defer store.Stop()
+
+	tracer := NewTracer(store, nil, nil)
+	defer tracer.Stop()
+
+	const traceID = "trace-transform-paused"
+	tracer.PauseStream(traceID)
+
+	ctx := schemas.NewBifrostContext(context.Background(), schemas.NoDeadline)
+	ctx.SetValue(schemas.BifrostContextKeyTracer, tracer)
+	ctx.SetValue(schemas.BifrostContextKeyTraceID, traceID)
+
+	called := false
+	err := ctx.TransformPausedStreamBuffer(func(chunks []*schemas.BifrostStreamChunk) (schemas.PausedStreamBufferTransformResult, error) {
+		called = true
+		return schemas.PausedStreamBufferTransformResult{Chunks: chunks}, nil
+	})
+	if err != nil {
+		t.Fatalf("TransformPausedStreamBuffer() error = %v", err)
+	}
+	if !called {
+		t.Fatal("TransformPausedStreamBuffer() did not reach the streaming accumulator")
 	}
 }
 
@@ -461,6 +490,26 @@ func TestTracer_PopulateLLMResponseAttributesDropsZeroAggregatesWhenBilled(t *te
 	}
 }
 
+func TestTracer_PopulateLLMResponseAttributesRecordsComplexityScore(t *testing.T) {
+	store := NewTraceStore(5*time.Minute, nil)
+	defer store.Stop()
+
+	tracer := NewTracer(store, nil, nil)
+	defer tracer.Stop()
+
+	traceID := tracer.CreateTrace("")
+	ctx := schemas.NewBifrostContext(context.Background(), schemas.NoDeadline)
+	ctx.SetValue(schemas.BifrostContextKeyTraceID, traceID)
+	ctx.SetValue(schemas.BifrostContextKeyGovernanceComplexityScore, 0.875)
+
+	_, handle := tracer.StartSpan(ctx, "llm-call", schemas.SpanKindLLMCall)
+	tracer.PopulateLLMResponseAttributes(ctx, handle, nil, nil)
+
+	trace := store.GetTrace(traceID)
+	require.NotNil(t, trace)
+	require.Equal(t, 0.875, trace.RootSpan.Attributes[schemas.AttrBifrostComplexityScore])
+}
+
 func TestTracer_GetSpanHandleByID_RootSpan(t *testing.T) {
 	store := NewTraceStore(5*time.Minute, nil)
 	defer store.Stop()
@@ -693,4 +742,92 @@ func TestIntegration_FullDistributedTraceFlow(t *testing.T) {
 	t.Logf("    -> HTTP Span: %s (ParentID: %s)", httpSpan.SpanID, httpSpan.ParentID)
 	t.Logf("      -> LLM Span: %s (ParentID: %s)", llmSpan.SpanID, llmSpan.ParentID)
 	t.Logf("        -> Plugin Span: %s (ParentID: %s)", pluginSpan.SpanID, pluginSpan.ParentID)
+}
+
+// Span-derived connectors read the classification off the span, so it must land there.
+func TestTracer_PopulateLLMResponseAttributesStampsErrorType(t *testing.T) {
+	newSpan := func(t *testing.T, requestType schemas.RequestType) (*Tracer, *TraceStore, string, schemas.SpanHandle, *schemas.BifrostContext) {
+		t.Helper()
+		store := NewTraceStore(5*time.Minute, nil)
+		t.Cleanup(store.Stop)
+		tracer := NewTracer(store, nil, nil)
+		t.Cleanup(tracer.Stop)
+
+		traceID := tracer.CreateTrace("")
+		ctx := schemas.NewBifrostContext(context.Background(), schemas.NoDeadline)
+		ctx.SetValue(schemas.BifrostContextKeyTraceID, traceID)
+		_, handle := tracer.StartSpan(ctx, "llm-call", schemas.SpanKindLLMCall)
+		// Mirrors core/bifrost.go, which stamps request.type at span creation.
+		tracer.SpanFromHandle(handle).SetAttribute(schemas.AttrLegacyRequestType, string(requestType))
+		return tracer, store, traceID, handle, ctx
+	}
+
+	t.Run("provider 404 on an embedding", func(t *testing.T) {
+		tracer, store, traceID, handle, ctx := newSpan(t, schemas.EmbeddingRequest)
+		status := 404
+		tracer.PopulateLLMResponseAttributes(ctx, handle, nil, &schemas.BifrostError{
+			StatusCode: &status,
+			// The raw provider type must not win over the classification.
+			Error: &schemas.ErrorField{Type: schemas.Ptr("invalid_request_error")},
+		})
+
+		got := store.GetTrace(traceID).RootSpan.Attributes[schemas.AttrBifrostErrorType]
+		if got != string(schemas.ErrorTypeCallerModelUnknown) {
+			t.Errorf("attribute %s = %v, want %q", schemas.AttrBifrostErrorType, got, schemas.ErrorTypeCallerModelUnknown)
+		}
+	})
+
+	t.Run("a declaration wins over the status", func(t *testing.T) {
+		tracer, store, traceID, handle, ctx := newSpan(t, schemas.ChatCompletionRequest)
+		status := 403
+		bifrostErr := &schemas.BifrostError{StatusCode: &status}
+		bifrostErr.ExtraFields.ErrorType = schemas.ErrorTypePolicyModelBlocked
+		tracer.PopulateLLMResponseAttributes(ctx, handle, nil, bifrostErr)
+
+		got := store.GetTrace(traceID).RootSpan.Attributes[schemas.AttrBifrostErrorType]
+		if got != string(schemas.ErrorTypePolicyModelBlocked) {
+			t.Errorf("attribute %s = %v, want %q", schemas.AttrBifrostErrorType, got, schemas.ErrorTypePolicyModelBlocked)
+		}
+	})
+
+	t.Run("absent on success", func(t *testing.T) {
+		tracer, store, traceID, handle, ctx := newSpan(t, schemas.ChatCompletionRequest)
+		tracer.PopulateLLMResponseAttributes(ctx, handle, nil, nil)
+
+		if _, ok := store.GetTrace(traceID).RootSpan.Attributes[schemas.AttrBifrostErrorType]; ok {
+			t.Errorf("attribute %s present on a successful span", schemas.AttrBifrostErrorType)
+		}
+	})
+}
+
+// A Responses API refusal must reach the llm.call span as both the spec'd
+// gen_ai.response.finish_reasons list and the legacy singular
+// gen_ai.response.finish_reason, exactly like a chat completion does. Before
+// the fix the Responses populator never emitted the key, so the tracer had
+// nothing to derive the singular from and both attributes were absent.
+func TestTracer_PopulateLLMResponseAttributesEmitsResponsesFinishReason(t *testing.T) {
+	store := NewTraceStore(5*time.Minute, nil)
+	defer store.Stop()
+
+	tracer := NewTracer(store, nil, nil)
+	defer tracer.Stop()
+
+	traceID := tracer.CreateTrace("")
+	ctx := context.WithValue(context.Background(), schemas.BifrostContextKeyTraceID, traceID)
+	_, handle := tracer.StartSpan(ctx, "llm.call", schemas.SpanKindLLMCall)
+
+	resp := &schemas.BifrostResponse{
+		ResponsesResponse: &schemas.BifrostResponsesResponse{
+			ID:         schemas.Ptr("resp_refusal"),
+			Model:      "gpt-4o-mini",
+			StopReason: schemas.Ptr("refusal"),
+		},
+	}
+
+	bctx := schemas.NewBifrostContext(context.Background(), time.Time{})
+	tracer.PopulateLLMResponseAttributes(bctx, handle, resp, nil)
+
+	span := store.GetTrace(traceID).RootSpan
+	require.Equal(t, []string{"refusal"}, span.Attributes[schemas.AttrFinishReasons])
+	require.Equal(t, "refusal", span.Attributes[schemas.AttrFinishReason])
 }

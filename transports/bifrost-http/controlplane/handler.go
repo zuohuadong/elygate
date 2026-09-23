@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/fasthttp/router"
@@ -28,6 +29,29 @@ type Handler struct {
 	store      *Store
 	logManager logging.LogManager
 	lifecycle  VirtualKeyLifecycle
+	usageSync  usageSyncState
+}
+
+const usageReconcileMinInterval = 5 * time.Second
+
+var errUsageSyncRetry = errors.New("usage sync retry")
+
+// usageSyncState coalesces concurrent reads that arrive while the usage ledger
+// is being reconciled. The source scan remains complete for correctness, but a
+// burst of panel requests no longer starts one full scan per request.
+type usageSyncState struct {
+	mu             sync.Mutex
+	run            *usageSyncRun
+	fingerprint    logstore.UsageLogFingerprint
+	hasFingerprint bool
+	initialized    bool
+}
+
+type usageSyncRun struct {
+	done              chan struct{}
+	err               error
+	sourceFingerprint logstore.UsageLogFingerprint
+	hasFingerprint    bool
 }
 
 // VirtualKeyLifecycle keeps control-plane key changes synchronized with the
@@ -356,44 +380,156 @@ func parseTimeParam(ctx *fasthttp.RequestCtx, key string) (*time.Time, error) {
 	value = value.UTC()
 	return &value, nil
 }
-func (h *Handler) syncUsage(ctx context.Context, requestedStart, end *time.Time) error {
+func (h *Handler) syncUsage(ctx context.Context, requestedStart, end *time.Time, force ...bool) error {
+	for {
+		err := h.syncUsageOnce(ctx, requestedStart, end, force...)
+		if err != errUsageSyncRetry {
+			return err
+		}
+	}
+}
+
+// waitForUsageSync hands a waiting caller back to the decision path after the
+// current owner finishes. Re-evaluating the fingerprint/checkpoint there keeps
+// the expensive source scan out of the in-flight window and lets a healthy
+// waiter take over when the owner was cancelled or timed out.
+func (h *Handler) waitForUsageSync(ctx context.Context, run *usageSyncRun) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-run.done:
+	}
+	// Prefer the waiter's own cancellation over an owner error when both become
+	// ready together; callers should never receive a success/retry after their
+	// request context has expired.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if run.err != nil {
+		if errors.Is(run.err, context.Canceled) || errors.Is(run.err, context.DeadlineExceeded) {
+			return errUsageSyncRetry
+		}
+		return run.err
+	}
+	return errUsageSyncRetry
+}
+
+func (h *Handler) syncUsageOnce(ctx context.Context, requestedStart, end *time.Time, force ...bool) error {
 	if h.logManager == nil {
 		return nil
 	}
-	checkpoint, err := h.store.Checkpoint(ctx)
-	if err != nil {
-		return err
+	// Direct callers retain the historical fresh-sync behavior. HTTP read paths
+	// opt into the reuse window explicitly with force=false.
+	forceSync := len(force) == 0 || force[0]
+	reader, ok := h.logManager.(logstore.UsageLogReader)
+	if !ok {
+		return errors.New("log manager does not support consistent usage reconciliation")
 	}
-	// Freeze the incremental scan boundary so new logs arriving during paging
-	// cannot shift later pages and create an unbounded sync window.
-	if end == nil {
-		value := time.Now().UTC()
-		end = &value
+	fingerprintReader, hasFingerprint := h.logManager.(logstore.UsageLogFingerprintReader)
+	// Check for an existing owner before reading the source fingerprint. The
+	// fingerprint implementation may itself scan the full log store, so doing
+	// it for every waiter defeats reconciliation coalescing.
+	h.usageSync.mu.Lock()
+	inFlight := h.usageSync.run
+	h.usageSync.mu.Unlock()
+	if inFlight != nil {
+		return h.waitForUsageSync(ctx, inFlight)
 	}
-	var start *time.Time
-	if !checkpoint.Watermark.IsZero() {
-		value := checkpoint.Watermark
-		start = &value
-	}
-	// Explicit time-bounded queries are backfills and must never move the
-	// global projector watermark; only the default incremental sync advances it.
-	advanceCheckpoint := requestedStart == nil
-	if requestedStart != nil && (start == nil || requestedStart.Before(*start)) {
-		value := requestedStart.UTC()
-		start = &value
-	}
-	for offset := 0; ; offset += 500 {
-		result, searchErr := h.logManager.Search(ctx, &logstore.SearchFilters{StartTime: start, EndTime: end}, &logstore.PaginationOptions{Limit: 500, Offset: offset, SortBy: "timestamp", Order: "asc"})
-		if searchErr != nil {
-			return searchErr
-		}
-		if _, projectErr := h.store.projectLogs(ctx, result.Logs, advanceCheckpoint); projectErr != nil {
-			return projectErr
-		}
-		if len(result.Logs) < 500 {
-			return nil
+
+	var sourceFingerprint logstore.UsageLogFingerprint
+	if hasFingerprint {
+		var fingerprintErr error
+		sourceFingerprint, fingerprintErr = fingerprintReader.UsageLogFingerprint(ctx)
+		if fingerprintErr != nil {
+			// Only an explicitly unsupported optional capability may use the
+			// checkpoint fallback. A real source-store error must not be treated
+			// as a fresh ledger and silently skip reconciliation.
+			if !errors.Is(fingerprintErr, logstore.ErrUsageLogFingerprintUnsupported) {
+				return fingerprintErr
+			}
+			hasFingerprint = false
 		}
 	}
+
+	h.usageSync.mu.Lock()
+	if h.usageSync.run != nil {
+		run := h.usageSync.run
+		h.usageSync.mu.Unlock()
+		return h.waitForUsageSync(ctx, run)
+	}
+	// A fingerprint is stronger than the time-based reuse window: it catches
+	// late completion and repricing even when the previous reconciliation was
+	// only a few milliseconds ago. Managers without the optional fingerprint
+	// reader retain the checkpoint TTL fallback.
+	if !forceSync {
+		if hasFingerprint {
+			// Aggregate-only fingerprints are retained for compatibility with
+			// custom readers, but they are not strong enough to skip a source
+			// scan: swapping per-row fields can preserve every aggregate.
+			if h.usageSync.hasFingerprint && sourceFingerprint.Digest != "" &&
+				h.usageSync.fingerprint.Digest != "" &&
+				h.usageSync.fingerprint.Equal(sourceFingerprint) {
+				h.usageSync.mu.Unlock()
+				return nil
+			}
+		} else {
+			checkpoint, err := h.store.Checkpoint(ctx)
+			if err != nil {
+				h.usageSync.mu.Unlock()
+				return err
+			}
+			// GORM populates UpdatedAt on the initial FirstOrCreate row. A
+			// checkpoint with no watermark/log ID has not actually projected a
+			// source snapshot yet and must not be treated as fresh.
+			checkpointIsRecent := !checkpoint.UpdatedAt.IsZero() && time.Since(checkpoint.UpdatedAt) >= 0 && time.Since(checkpoint.UpdatedAt) < usageReconcileMinInterval
+			if (h.usageSync.initialized || usageCheckpointHasProjection(checkpoint)) && checkpointIsRecent {
+				h.usageSync.mu.Unlock()
+				return nil
+			}
+		}
+	}
+	run := &usageSyncRun{done: make(chan struct{}), sourceFingerprint: sourceFingerprint, hasFingerprint: hasFingerprint}
+	h.usageSync.run = run
+	h.usageSync.mu.Unlock()
+
+	// Time filters apply to the resulting ledger, never to change discovery.
+	// A changed or uncached fingerprint must bypass the store's TTL check; the
+	// fingerprint itself is the proof that a fresh projection is needed.
+	reconcileForce := forceSync || (!forceSync && hasFingerprint)
+	err := h.store.ReconcileUsage(ctx, reader, reconcileForce)
+	if err == nil && hasFingerprint {
+		// Re-read after the scan. If a write landed while the source cursor was
+		// open, retain the pre-scan fingerprint so the next request must refresh
+		// instead of incorrectly treating the just-written state as projected.
+		latest, fingerprintErr := fingerprintReader.UsageLogFingerprint(ctx)
+		if fingerprintErr != nil {
+			if errors.Is(fingerprintErr, logstore.ErrUsageLogFingerprintUnsupported) {
+				hasFingerprint = false
+			} else {
+				err = fingerprintErr
+			}
+		} else {
+			h.usageSync.mu.Lock()
+			if latest.Equal(sourceFingerprint) {
+				h.usageSync.fingerprint = latest
+			} else {
+				h.usageSync.fingerprint = sourceFingerprint
+			}
+			h.usageSync.hasFingerprint = true
+			h.usageSync.mu.Unlock()
+		}
+	}
+	h.usageSync.mu.Lock()
+	run.err = err
+	if err == nil && !hasFingerprint {
+		h.usageSync.initialized = true
+	}
+	close(run.done)
+	if h.usageSync.run == run {
+		h.usageSync.run = nil
+	}
+	h.usageSync.mu.Unlock()
+	return err
 }
 func (h *Handler) usageQuery(ctx *fasthttp.RequestCtx) (UsageQuery, error) {
 	start, err := parseTimeParam(ctx, "start_time")
@@ -404,6 +540,9 @@ func (h *Handler) usageQuery(ctx *fasthttp.RequestCtx) (UsageQuery, error) {
 	if err != nil {
 		return UsageQuery{}, err
 	}
+	if start != nil && end != nil && !start.Before(*end) {
+		return UsageQuery{}, errors.New("start_time must be before end_time")
+	}
 	limit, _ := strconv.Atoi(string(ctx.QueryArgs().Peek("limit")))
 	offset, _ := strconv.Atoi(string(ctx.QueryArgs().Peek("offset")))
 	if limit <= 0 || limit > 1000 {
@@ -412,7 +551,47 @@ func (h *Handler) usageQuery(ctx *fasthttp.RequestCtx) (UsageQuery, error) {
 	if offset < 0 {
 		offset = 0
 	}
-	return UsageQuery{ProjectID: string(ctx.QueryArgs().Peek("project_id")), ApplicationID: string(ctx.QueryArgs().Peek("application_id")), StartTime: start, EndTime: end, Limit: limit, Offset: offset}, nil
+	isSubagent, err := parseOptionalBoolQuery(ctx, "is_subagent")
+	if err != nil {
+		return UsageQuery{}, err
+	}
+	isFork, err := parseOptionalBoolQuery(ctx, "is_fork")
+	if err != nil {
+		return UsageQuery{}, err
+	}
+	return UsageQuery{
+		ProjectID:       strings.TrimSpace(string(ctx.QueryArgs().Peek("project_id"))),
+		ApplicationID:   strings.TrimSpace(string(ctx.QueryArgs().Peek("application_id"))),
+		SessionID:       strings.TrimSpace(string(ctx.QueryArgs().Peek("session_id"))),
+		ParentSessionID: strings.TrimSpace(string(ctx.QueryArgs().Peek("parent_session_id"))),
+		AgentName:       strings.TrimSpace(string(ctx.QueryArgs().Peek("agent_name"))),
+		TreeSessionID:   strings.TrimSpace(string(ctx.QueryArgs().Peek("tree_session_id"))),
+		IsSubagent:      isSubagent,
+		IsFork:          isFork,
+		StartTime:       start,
+		EndTime:         end,
+		Limit:           limit,
+		Offset:          offset,
+	}, nil
+}
+
+func parseOptionalBoolQuery(ctx *fasthttp.RequestCtx, key string) (*bool, error) {
+	raw := strings.TrimSpace(string(ctx.QueryArgs().Peek(key)))
+	if raw == "" {
+		return nil, nil
+	}
+	value, err := strconv.ParseBool(raw)
+	if err != nil {
+		return nil, fmt.Errorf("%s must be a boolean", key)
+	}
+	return &value, nil
+}
+
+func csvOptionalString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 func (h *Handler) listUsage(ctx *fasthttp.RequestCtx) {
 	opCtx, cancel := controlPlaneContext()
@@ -422,7 +601,7 @@ func (h *Handler) listUsage(ctx *fasthttp.RequestCtx) {
 		writeError(ctx, 400, err)
 		return
 	}
-	if err := h.syncUsage(opCtx, q.StartTime, q.EndTime); err != nil {
+	if err := h.syncUsage(opCtx, q.StartTime, q.EndTime, false); err != nil {
 		writeError(ctx, 500, err)
 		return
 	}
@@ -443,7 +622,7 @@ func (h *Handler) exportUsage(ctx *fasthttp.RequestCtx) {
 	}
 	q.Limit = 100000
 	q.Export = true
-	if err := h.syncUsage(opCtx, q.StartTime, q.EndTime); err != nil {
+	if err := h.syncUsage(opCtx, q.StartTime, q.EndTime, false); err != nil {
 		writeError(ctx, 500, err)
 		return
 	}
@@ -454,9 +633,9 @@ func (h *Handler) exportUsage(ctx *fasthttp.RequestCtx) {
 	}
 	var b strings.Builder
 	w := csv.NewWriter(&b)
-	_ = w.Write([]string{"occurred_at", "project_id", "application_id", "virtual_key_id", "provider", "model", "status", "prompt_tokens", "output_tokens", "total_tokens", "cost"})
+	_ = w.Write([]string{"occurred_at", "project_id", "application_id", "virtual_key_id", "provider", "model", "session_id", "parent_session_id", "agent_name", "session_client_type", "is_subagent", "is_fork", "status", "prompt_tokens", "output_tokens", "total_tokens", "cost"})
 	for _, row := range rows {
-		_ = w.Write([]string{row.OccurredAt.Format(time.RFC3339), row.ProjectID, row.ApplicationID, row.VirtualKeyID, row.Provider, row.Model, row.Status, strconv.Itoa(row.PromptTokens), strconv.Itoa(row.OutputTokens), strconv.Itoa(row.TotalTokens), strconv.FormatFloat(row.Cost, 'f', 8, 64)})
+		_ = w.Write([]string{row.OccurredAt.Format(time.RFC3339), row.ProjectID, row.ApplicationID, row.VirtualKeyID, row.Provider, row.Model, csvOptionalString(row.SessionID), csvOptionalString(row.ParentSessionID), csvOptionalString(row.AgentName), csvOptionalString(row.SessionClientType), strconv.FormatBool(row.IsSubagent), strconv.FormatBool(row.IsFork), row.Status, strconv.Itoa(row.PromptTokens), strconv.Itoa(row.OutputTokens), strconv.Itoa(row.TotalTokens), strconv.FormatFloat(row.Cost, 'f', 8, 64)})
 	}
 	w.Flush()
 	ctx.SetStatusCode(200)
@@ -472,11 +651,11 @@ func (h *Handler) usageStatus(ctx *fasthttp.RequestCtx) {
 		writeError(ctx, 500, err)
 		return
 	}
-	lag := time.Since(checkpoint.Watermark)
-	if checkpoint.Watermark.IsZero() {
+	lag := time.Since(checkpoint.UpdatedAt)
+	if checkpoint.UpdatedAt.IsZero() || lag < 0 {
 		lag = 0
 	}
-	writeJSON(ctx, 200, map[string]any{"watermark": checkpoint.Watermark, "last_log_id": checkpoint.LastLogID, "lag_seconds": int64(lag.Seconds())})
+	writeJSON(ctx, 200, map[string]any{"watermark": checkpoint.Watermark, "last_log_id": checkpoint.LastLogID, "last_reconciled_at": checkpoint.UpdatedAt, "lag_seconds": int64(lag.Seconds())})
 }
 
 func (h *Handler) listAudit(ctx *fasthttp.RequestCtx) {

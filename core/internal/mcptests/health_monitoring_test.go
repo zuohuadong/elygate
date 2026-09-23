@@ -17,9 +17,9 @@ import (
 func TestHealthCheckSTDIOServerDropAndRecoverIn20Seconds(t *testing.T) {
 	t.Parallel()
 
-	// Use temperature STDIO server
-	bifrostRoot := "/Users/prathammaxim/Desktop/bifrost"
-	clientConfig := GetTemperatureMCPClientConfig(bifrostRoot)
+	// Use the hermetic temperature STDIO fixture built by setup-mcp-tests.
+	InitMCPServerPaths(t)
+	clientConfig := GetTemperatureMCPClientConfig(mcpServerPaths.ExamplesRoot)
 	clientConfig.ID = "stdio-health-recovery-test"
 
 	// 1. Create STDIO client with bifrost manager

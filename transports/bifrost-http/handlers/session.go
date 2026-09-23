@@ -20,8 +20,9 @@ import (
 
 // SessionHandler manages HTTP requests for session operations
 type SessionHandler struct {
-	configStore   configstore.ConfigStore
-	wsTicketStore *WSTicketStore
+	configStore     configstore.ConfigStore
+	wsTicketStore   *WSTicketStore
+	passwordLimiter lib.PasswordLimiter
 }
 
 // NewSessionHandler creates a new session handler instance
@@ -208,6 +209,13 @@ func (h *SessionHandler) login(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, fasthttp.StatusBadRequest, "Invalid request payload")
 		return
 	}
+	finish, allowed := h.passwordLimiter.Begin(ctx.RemoteIP().String(), payload.Username)
+	if !allowed {
+		SendError(ctx, fasthttp.StatusTooManyRequests, "Too many login attempts. Please try again later.")
+		return
+	}
+	authenticated := false
+	defer func() { finish(authenticated) }()
 
 	// Get auth config
 	authConfig, err := h.configStore.GetAuthConfig(ctx)
@@ -236,7 +244,6 @@ func (h *SessionHandler) login(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, fasthttp.StatusUnauthorized, "Invalid username or password")
 		return
 	}
-
 	// Creating a new session
 	token := uuid.New().String()
 	session := &tables.SessionsTable{
@@ -250,6 +257,7 @@ func (h *SessionHandler) login(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("Failed to create session: %v", err))
 		return
 	}
+	authenticated = true
 
 	// Setting cookies
 	cookie := fasthttp.AcquireCookie()
@@ -286,6 +294,16 @@ func (h *SessionHandler) logout(ctx *fasthttp.RequestCtx) {
 		token = string(ctx.Request.Header.Cookie("token"))
 	}
 
+	// Retain the cookie on storage failure so a retry can invalidate the session.
+	if token != "" {
+		err := h.configStore.DeleteSession(ctx, token)
+		if err != nil && !errors.Is(err, configstore.ErrNotFound) {
+			logger.Error("failed to delete session during logout: %v", err)
+			SendError(ctx, fasthttp.StatusInternalServerError, "Failed to invalidate session. Please try again.")
+			return
+		}
+	}
+
 	// clear token from cookies
 	cookie := fasthttp.AcquireCookie()
 	defer fasthttp.ReleaseCookie(cookie)
@@ -300,16 +318,6 @@ func (h *SessionHandler) logout(ctx *fasthttp.RequestCtx) {
 		cookie.SetSecure(true)
 	}
 	ctx.Response.Header.SetCookie(cookie)
-
-	// delete session from database if token exists
-	if token != "" {
-		err := h.configStore.DeleteSession(ctx, token)
-		if err != nil && !errors.Is(err, configstore.ErrNotFound) {
-			logger.Error("failed to delete session during logout: %v", err)
-			SendError(ctx, fasthttp.StatusInternalServerError, "Failed to invalidate session. Please try again.")
-			return
-		}
-	}
 
 	SendJSON(ctx, map[string]any{
 		"message": "Logout successful",

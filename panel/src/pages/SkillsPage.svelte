@@ -22,8 +22,14 @@
 	let isLoading = $state(true);
 	let isSaving = $state(false);
 	let isUploading = $state(false);
+	let isActionBusy = $state(false);
 	let error = $state('');
 	let notice = $state('');
+	let listLoadSeq = 0;
+	let detailSeq = 0;
+	let versionInspectSeq = 0;
+	let actionSeq = 0;
+	let mutationSeq = 0;
 
 	function emptyForm(): SkillForm {
 		return { name: '', description: '', license: '', compatibility: '', allowedTools: '', version: '0.1.0', skillBody: '', metadata: '{}', extraFrontmatter: '{}', files: '[]', serve: true };
@@ -60,6 +66,10 @@
 	}
 
 	async function load(): Promise<void> {
+		const sequence = ++listLoadSeq;
+		const selectedId = selected?.id;
+		const detailSequence = detailSeq;
+		const mutationSequence = mutationSeq;
 		isLoading = true;
 		error = '';
 		try {
@@ -68,20 +78,26 @@
 				requestJson(`/api/skills?${params.toString()}`),
 				requestJson<{ version?: string }>('/api/skills/all/version'),
 			]);
+			if (sequence !== listLoadSeq) return;
 			skills = getListPayload(skillsPayload);
 			globalVersion = versionPayload.version ?? '';
-			if (selected) {
-				const refreshed = skills.find((skill) => skill.id === selected?.id);
-				if (refreshed) await selectSkill(refreshed);
+			if (selected && selected.id === selectedId && detailSeq === detailSequence && mutationSeq === mutationSequence && !isSaving && !isUploading && !isActionBusy) {
+				const refreshed = skills.find((skill) => skill.id === selectedId);
+				if (refreshed) await selectSkill(refreshed, { invalidateAction: false });
 			}
 		} catch (cause) {
-			error = displayError(cause, i18n.t('elygate.loadFailed'));
+			if (sequence === listLoadSeq) error = displayError(cause, i18n.t('elygate.loadFailed'));
 		} finally {
-			isLoading = false;
+			if (sequence === listLoadSeq && detailSeq === detailSequence) isLoading = false;
 		}
 	}
 
-	async function selectSkill(skill: JsonRecord): Promise<void> {
+	async function selectSkill(skill: JsonRecord, options: { invalidateAction?: boolean } = {}): Promise<void> {
+		if (options.invalidateAction !== false) actionSeq += 1;
+		versionInspectSeq += 1;
+		const sequence = ++detailSeq;
+		const mutationSequence = mutationSeq;
+		selected = skill;
 		isLoading = true;
 		error = '';
 		try {
@@ -90,24 +106,34 @@
 				requestJson(`/api/skills/${id}`),
 				requestJson(`/api/skills/${id}/versions?limit=100`),
 			]);
+			if (sequence !== detailSeq || mutationSequence !== mutationSeq) return;
 			applySkill(objectPayload(detailPayload, 'skill'));
 			versions = isJsonRecord(versionsPayload) && Array.isArray(versionsPayload.versions) ? versionsPayload.versions.filter(isJsonRecord) : [];
 		} catch (cause) {
-			error = displayError(cause, i18n.t('elygate.loadFailed'));
+			if (sequence === detailSeq && mutationSequence === mutationSeq) error = displayError(cause, i18n.t('elygate.loadFailed'));
 		} finally {
-			isLoading = false;
+			if (sequence === detailSeq) isLoading = false;
 		}
 	}
 
 	function newSkill(): void {
+		mutationSeq += 1;
+		actionSeq += 1;
+		detailSeq += 1;
+		versionInspectSeq += 1;
 		selected = null;
 		versions = [];
 		form = emptyForm();
+		isLoading = false;
 		error = '';
 		notice = '';
 	}
 
 	async function save(): Promise<void> {
+		if (isSaving) return;
+		const saveActionSeq = actionSeq;
+		const saveSelectedId = selected?.id;
+		const saveMutationSeq = ++mutationSeq;
 		isSaving = true;
 		error = '';
 		notice = '';
@@ -133,11 +159,13 @@
 				response = await requestJson('/api/skills', { method: 'POST', body: JSON.stringify({ ...payload, name: form.name.trim() }) });
 			}
 			const saved = objectPayload(response, 'skill');
+			const contextMatches = saveMutationSeq === mutationSeq && saveActionSeq === actionSeq && selected?.id === saveSelectedId;
+			if (!contextMatches) return;
 			applySkill(saved);
 			notice = i18n.t('elygate.saveSuccess');
 			await load();
 		} catch (cause) {
-			error = displayError(cause, i18n.t('elygate.operationFailed'));
+			if (saveMutationSeq === mutationSeq && saveActionSeq === actionSeq && selected?.id === saveSelectedId) error = displayError(cause, i18n.t('elygate.operationFailed'));
 		} finally {
 			isSaving = false;
 		}
@@ -146,6 +174,9 @@
 	async function uploadFile(): Promise<void> {
 		const file = pendingUpload;
 		if (!file) return;
+		const uploadActionSeq = actionSeq;
+		const uploadSelectedId = selected?.id;
+		const uploadMutationSeq = ++mutationSeq;
 		isUploading = true;
 		error = '';
 		try {
@@ -156,6 +187,7 @@
 			const payload: unknown = await response.json().catch(() => ({}));
 			if (!response.ok) throw new Error(isJsonRecord(payload) && typeof payload.error === 'string' ? payload.error : `HTTP ${response.status}`);
 			if (!isJsonRecord(payload)) throw new Error(i18n.t('elygate.operationFailed'));
+			if (uploadMutationSeq !== mutationSeq || uploadActionSeq !== actionSeq || selected?.id !== uploadSelectedId) return;
 			const files = parseJsonArray(form.files, i18n.t('elygate.files'), i18n.t('elygate.invalidJson'));
 			files.push({ path: payload.path, source_type: 'upload', upload_id: payload.upload_id, storage_key: payload.storage_key, blob_id: payload.blob_id, mime_type: payload.mime_type });
 			form.files = prettyJson(files, '[]');
@@ -164,75 +196,101 @@
 			uploadRevision += 1;
 			notice = i18n.t('elygate.fileUploaded');
 		} catch (cause) {
-			error = displayError(cause, i18n.t('elygate.operationFailed'));
+			if (uploadMutationSeq === mutationSeq && uploadActionSeq === actionSeq && selected?.id === uploadSelectedId) error = displayError(cause, i18n.t('elygate.operationFailed'));
 		} finally {
 			isUploading = false;
 		}
 	}
 
 	async function shiftVersion(version: string): Promise<void> {
-		if (!selected || !window.confirm(i18n.t('elygate.confirmAction'))) return;
+		if (!selected || isActionBusy || isSaving || isUploading || !window.confirm(i18n.t('elygate.confirmAction'))) return;
+		const skillId = String(selected.id);
+		isActionBusy = true;
+		const sequence = ++actionSeq;
+		const mutationSequence = ++mutationSeq;
+		versionInspectSeq += 1;
 		try {
-			await requestJson(`/api/skills/${encodeURIComponent(String(selected.id))}/shift-version`, { method: 'POST', body: JSON.stringify({ version }) });
+			await requestJson(`/api/skills/${encodeURIComponent(skillId)}/shift-version`, { method: 'POST', body: JSON.stringify({ version }) });
+			if (mutationSequence !== mutationSeq || sequence !== actionSeq || !selected || String(selected.id) !== skillId) return;
 			notice = i18n.t('elygate.servingVersionChanged');
 			await selectSkill(selected);
-		} catch (cause) { error = displayError(cause, i18n.t('elygate.operationFailed')); }
+		} catch (cause) {
+			if (mutationSequence === mutationSeq && sequence === actionSeq && selected && String(selected.id) === skillId) error = displayError(cause, i18n.t('elygate.operationFailed'));
+		} finally { isActionBusy = false; }
 	}
 
 	async function inspectVersion(version: string): Promise<void> {
 		if (!selected) return;
+		const skillId = String(selected.id);
+		const sequence = ++versionInspectSeq;
 		try {
-			const payload = await requestJson(`/api/skills/${encodeURIComponent(String(selected.id))}?version=${encodeURIComponent(version)}`);
+			const payload = await requestJson(`/api/skills/${encodeURIComponent(skillId)}?version=${encodeURIComponent(version)}`);
+			if (sequence !== versionInspectSeq || !selected || String(selected.id) !== skillId) return;
 			applySkill(objectPayload(payload, 'skill'));
 			form.version = nextVersion(selected.highest_version ?? selected.latest_version);
-		} catch (cause) { error = displayError(cause, i18n.t('elygate.loadFailed')); }
+		} catch (cause) {
+			if (sequence === versionInspectSeq && selected && String(selected.id) === skillId) error = displayError(cause, i18n.t('elygate.loadFailed'));
+		}
 	}
 
 	async function bumpGlobalVersion(bump: 'major' | 'minor' | 'patch'): Promise<void> {
+		if (isActionBusy || isSaving || isUploading) return;
+		isActionBusy = true;
 		try {
 			const payload = await requestJson<{ version: string }>('/api/skills/all/version', { method: 'PUT', body: JSON.stringify({ bump }) });
 			globalVersion = payload.version;
 		} catch (cause) { error = displayError(cause, i18n.t('elygate.operationFailed')); }
+		finally { isActionBusy = false; }
 	}
 
 	async function cleanupOrphans(): Promise<void> {
-		if (!window.confirm(i18n.t('elygate.confirmAction'))) return;
+		if (isActionBusy || isSaving || isUploading || !window.confirm(i18n.t('elygate.confirmAction'))) return;
+		isActionBusy = true;
 		try {
 			const payload = await requestJson<JsonRecord>('/api/skills/files/orphans', { method: 'DELETE' });
 			notice = typeof payload.message === 'string' ? payload.message : i18n.t('elygate.cleanupComplete');
 		} catch (cause) { error = displayError(cause, i18n.t('elygate.operationFailed')); }
+		finally { isActionBusy = false; }
 	}
 
 	async function removeSkill(): Promise<void> {
-		if (!selected || !window.confirm(i18n.t('elygate.confirmDelete'))) return;
+		if (!selected || isActionBusy || isSaving || isUploading || !window.confirm(i18n.t('elygate.confirmDelete'))) return;
+		const skillId = String(selected.id);
+		isActionBusy = true;
+		const sequence = ++actionSeq;
+		const mutationSequence = ++mutationSeq;
+		versionInspectSeq += 1;
 		try {
-			await requestJson(`/api/skills/${encodeURIComponent(String(selected.id))}`, { method: 'DELETE' });
+			await requestJson(`/api/skills/${encodeURIComponent(skillId)}`, { method: 'DELETE' });
+			if (mutationSequence !== mutationSeq || sequence !== actionSeq || !selected || String(selected.id) !== skillId) return;
 			newSkill();
 			await load();
-		} catch (cause) { error = displayError(cause, i18n.t('elygate.operationFailed')); }
+		} catch (cause) {
+			if (mutationSequence === mutationSeq && sequence === actionSeq && selected && String(selected.id) === skillId) error = displayError(cause, i18n.t('elygate.operationFailed'));
+		} finally { isActionBusy = false; }
 	}
 
 	onMount(() => { void load(); });
 </script>
 
 <section class="page-shell">
-	<header class="page-heading"><div><p class="eyebrow">{getAppName()} / {i18n.t('elygate.integrations')}</p><h1>{i18n.t('elygate.skills')}</h1><p>{i18n.t('elygate.skillsHint')}</p></div><div class="heading-actions"><span>{i18n.t('elygate.marketplaceVersion')}: <strong>{globalVersion || '—'}</strong></span><button type="button" onclick={() => void bumpGlobalVersion('patch')}>+ {i18n.locale === 'zh-CN' ? '补丁版本' : 'Patch'}</button><button type="button" onclick={() => void cleanupOrphans()}>{i18n.t('elygate.cleanupFiles')}</button><button class="primary" type="button" onclick={newSkill}>{i18n.t('elygate.create')}</button></div></header>
+		<header class="page-heading"><div><p class="eyebrow">{getAppName()} / {i18n.t('elygate.integrations')}</p><h1>{i18n.t('elygate.skills')}</h1><p>{i18n.t('elygate.skillsHint')}</p></div><div class="heading-actions"><span>{i18n.t('elygate.marketplaceVersion')}: <strong>{globalVersion || '—'}</strong></span><button type="button" disabled={isActionBusy || isSaving || isUploading} onclick={() => void bumpGlobalVersion('patch')}>+ {i18n.locale === 'zh-CN' ? '补丁版本' : 'Patch'}</button><button type="button" disabled={isActionBusy || isSaving || isUploading} onclick={() => void cleanupOrphans()}>{i18n.t('elygate.cleanupFiles')}</button><button class="primary" type="button" disabled={isActionBusy || isSaving || isUploading} onclick={newSkill}>{i18n.t('elygate.create')}</button></div></header>
 	{#if error}<div class="notice error" role="alert">{error}</div>{/if}{#if notice}<div class="notice success" role="status">{notice}</div>{/if}
 	<div class="workspace">
 		<aside class="skill-list">
-			<form onsubmit={(event) => { event.preventDefault(); void load(); }}><input bind:value={query} placeholder={i18n.t('elygate.search')} /><button type="submit">{i18n.t('elygate.search')}</button></form>
-			{#each skills as skill (String(skill.id))}<button type="button" class:is-active={selected?.id === skill.id} onclick={() => void selectSkill(skill)}><strong>{String(skill.name)}</strong><span>v{String(skill.latest_version ?? '—')} · {Number(skill.file_count ?? 0)} {i18n.t('elygate.files')}</span></button>{:else}<p>{isLoading ? i18n.t('elygate.loading') : i18n.t('elygate.empty')}</p>{/each}
+				<form onsubmit={(event) => { event.preventDefault(); void load(); }}><input bind:value={query} placeholder={i18n.t('elygate.search')} disabled={isSaving || isUploading || isActionBusy} /><button type="submit" disabled={isSaving || isUploading || isActionBusy}>{i18n.t('elygate.search')}</button></form>
+				{#each skills as skill (String(skill.id))}<button type="button" disabled={isSaving || isUploading || isActionBusy} class:is-active={selected?.id === skill.id} onclick={() => void selectSkill(skill)}><strong>{String(skill.name)}</strong><span>v{String(skill.latest_version ?? '—')} · {Number(skill.file_count ?? 0)} {i18n.t('elygate.files')}</span></button>{:else}<p>{isLoading ? i18n.t('elygate.loading') : i18n.t('elygate.empty')}</p>{/each}
 		</aside>
 		<main class="editor">
 			<form onsubmit={(event) => { event.preventDefault(); void save(); }}>
-				<div class="form-grid"><label>{i18n.t('elygate.name')}<input bind:value={form.name} disabled={!!selected} /></label><label>{i18n.t('elygate.version')}<input bind:value={form.version} /></label><label class="wide">{i18n.t('elygate.description')}<input bind:value={form.description} /></label><label>{i18n.t('elygate.license')}<input bind:value={form.license} /></label><label>{i18n.t('elygate.compatibility')}<input bind:value={form.compatibility} /></label><label class="wide">{i18n.t('elygate.allowedTools')}<input bind:value={form.allowedTools} /></label></div>
-				<label>{i18n.t('elygate.skillMarkdown')}<textarea bind:value={form.skillBody} rows="16"></textarea></label>
-				<div class="json-grid"><label>{i18n.t('elygate.metadata')}<textarea bind:value={form.metadata} rows="8"></textarea></label><label>{i18n.t('elygate.extraFrontmatter')}<textarea bind:value={form.extraFrontmatter} rows="8"></textarea></label></div>
-				<label>{i18n.t('elygate.files')} JSON<textarea bind:value={form.files} rows="9"></textarea></label>
-				<div class="upload-row">{#key uploadRevision}<input type="file" onchange={(event) => (pendingUpload = event.currentTarget.files?.[0])} />{/key}<input bind:value={uploadPath} placeholder={i18n.t('elygate.filePath')} /><button type="button" onclick={() => void uploadFile()} disabled={isUploading}>{i18n.t('elygate.upload')}</button></div>
-				<footer><label class="serve"><input type="checkbox" bind:checked={form.serve} />{i18n.t('elygate.serveVersion')}</label>{#if selected}<button class="danger" type="button" onclick={() => void removeSkill()}>{i18n.t('elygate.delete')}</button>{/if}<button class="primary" type="submit" disabled={isSaving}>{isSaving ? i18n.t('elygate.saving') : i18n.t('elygate.save')}</button></footer>
+				<div class="form-grid"><label>{i18n.t('elygate.name')}<input bind:value={form.name} disabled={!!selected || isSaving || isUploading || isActionBusy} /></label><label>{i18n.t('elygate.version')}<input bind:value={form.version} disabled={isSaving || isUploading || isActionBusy} /></label><label class="wide">{i18n.t('elygate.description')}<input bind:value={form.description} disabled={isSaving || isUploading || isActionBusy} /></label><label>{i18n.t('elygate.license')}<input bind:value={form.license} disabled={isSaving || isUploading || isActionBusy} /></label><label>{i18n.t('elygate.compatibility')}<input bind:value={form.compatibility} disabled={isSaving || isUploading || isActionBusy} /></label><label class="wide">{i18n.t('elygate.allowedTools')}<input bind:value={form.allowedTools} disabled={isSaving || isUploading || isActionBusy} /></label></div>
+				<label>{i18n.t('elygate.skillMarkdown')}<textarea bind:value={form.skillBody} rows="16" disabled={isSaving || isUploading || isActionBusy}></textarea></label>
+				<div class="json-grid"><label>{i18n.t('elygate.metadata')}<textarea bind:value={form.metadata} rows="8" disabled={isSaving || isUploading || isActionBusy}></textarea></label><label>{i18n.t('elygate.extraFrontmatter')}<textarea bind:value={form.extraFrontmatter} rows="8" disabled={isSaving || isUploading || isActionBusy}></textarea></label></div>
+				<label>{i18n.t('elygate.files')} JSON<textarea bind:value={form.files} rows="9" disabled={isSaving || isUploading || isActionBusy}></textarea></label>
+				<div class="upload-row">{#key uploadRevision}<input type="file" disabled={isSaving || isUploading || isActionBusy} onchange={(event) => (pendingUpload = event.currentTarget.files?.[0])} />{/key}<input bind:value={uploadPath} placeholder={i18n.t('elygate.filePath')} disabled={isSaving || isUploading || isActionBusy} /><button type="button" onclick={() => void uploadFile()} disabled={isUploading || isSaving || isActionBusy}>{i18n.t('elygate.upload')}</button></div>
+				<footer><label class="serve"><input type="checkbox" bind:checked={form.serve} disabled={isSaving || isUploading || isActionBusy} />{i18n.t('elygate.serveVersion')}</label>{#if selected}<button class="danger" type="button" disabled={isSaving || isUploading || isActionBusy} onclick={() => void removeSkill()}>{i18n.t('elygate.delete')}</button>{/if}<button class="primary" type="submit" disabled={isSaving || isUploading || isActionBusy}>{isSaving ? i18n.t('elygate.saving') : i18n.t('elygate.save')}</button></footer>
 			</form>
-			{#if selected}<section class="versions"><h2>{i18n.t('elygate.versionHistory')}</h2>{#each versions as version (String(version.id))}<div><span><strong>v{String(version.version)}</strong><small>{new Date(String(version.created_at)).toLocaleString(i18n.locale)}</small></span><button type="button" onclick={() => void inspectVersion(String(version.version))}>{i18n.t('elygate.inspect')}</button>{#if version.version !== selected.latest_version}<button type="button" onclick={() => void shiftVersion(String(version.version))}>{i18n.t('elygate.serve')}</button>{/if}</div>{:else}<p>{i18n.t('elygate.empty')}</p>{/each}</section>{/if}
+				{#if selected}<section class="versions"><h2>{i18n.t('elygate.versionHistory')}</h2>{#each versions as version (String(version.id))}<div><span><strong>v{String(version.version)}</strong><small>{new Date(String(version.created_at)).toLocaleString(i18n.locale)}</small></span><button type="button" disabled={isSaving || isUploading || isActionBusy} onclick={() => void inspectVersion(String(version.version))}>{i18n.t('elygate.inspect')}</button>{#if version.version !== selected.latest_version}<button type="button" disabled={isSaving || isUploading || isActionBusy} onclick={() => void shiftVersion(String(version.version))}>{i18n.t('elygate.serve')}</button>{/if}</div>{:else}<p>{i18n.t('elygate.empty')}</p>{/each}</section>{/if}
 		</main>
 	</div>
 </section>

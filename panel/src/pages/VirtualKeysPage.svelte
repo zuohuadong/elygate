@@ -75,28 +75,58 @@
 	let revealedKey = $state('');
 	let total = $state(0);
 	let page = $state(1);
+	let loadSeq = 0;
+	let mutatingIds = $state<string[]>([]);
 	const pageSize = 20;
 	const totalPages = $derived(Math.max(1, Math.ceil(total / pageSize)));
 	const canAddProviderRoute = $derived(availableVirtualKeyProviders(providers, providerRoutes).length > 0);
+	function isMutating(id: string): boolean { return mutatingIds.includes(id); }
+	function beginMutation(id: string): boolean {
+		if (isMutating(id)) return false;
+		mutatingIds = [...mutatingIds, id];
+		return true;
+	}
+	function endMutation(id: string): void { mutatingIds = mutatingIds.filter((current) => current !== id); }
+	function closeModal(): void { if (!isSaving) isOpen = false; }
+	function handleModalKeydown(event: KeyboardEvent): void {
+		if (isOpen && event.key === 'Escape') {
+			event.preventDefault();
+			closeModal();
+		}
+	}
 
 	async function load(): Promise<void> {
+		const sequence = ++loadSeq;
+		const requestedPage = page;
 		isLoading = true;
 		error = '';
 		try {
 			const payload = await requestJson<unknown>(`/api/governance/virtual-keys?limit=${pageSize}&offset=${(page - 1) * pageSize}`);
-			virtualKeys = getListPayload(payload);
-			total = getTotal(payload, virtualKeys.length);
+			if (sequence !== loadSeq || page !== requestedPage) return;
+			const nextKeys = getListPayload(payload);
+			const nextTotal = getTotal(payload, nextKeys.length);
+			const validPage = nextTotal > 0 ? Math.min(requestedPage, Math.max(1, Math.ceil(nextTotal / pageSize))) : 1;
+			if (validPage !== requestedPage) {
+				page = validPage;
+				await load();
+				return;
+			}
+			virtualKeys = nextKeys;
+			total = nextTotal;
 			try {
-				providers = getListPayload(await requestJson('/api/providers'));
+				const providerPayload = await requestJson('/api/providers');
+				if (sequence !== loadSeq || page !== requestedPage) return;
+				providers = getListPayload(providerPayload);
 				providerStatusAvailable = true;
 			} catch {
+				if (sequence !== loadSeq || page !== requestedPage) return;
 				providers = [];
 				providerStatusAvailable = false;
 			}
 		} catch (cause) {
-			error = displayError(cause, i18n.t('elygate.loadFailed'));
+			if (sequence === loadSeq && page === requestedPage) error = displayError(cause, i18n.t('elygate.loadFailed'));
 		} finally {
-			isLoading = false;
+			if (sequence === loadSeq) isLoading = false;
 		}
 	}
 
@@ -206,11 +236,11 @@
 	}
 
 	async function save(): Promise<void> {
+		if (isSaving) return;
 		isSaving = true;
 		error = '';
 		try {
 			if (!form.name.trim()) throw new Error(i18n.t('elygate.required').replace('{field}', i18n.t('elygate.virtualKeyName')));
-			if (form.teamId.trim() && form.customerId.trim()) throw new Error(i18n.t('elygate.teamCustomerConflict'));
 			let providerConfigs: JsonRecord[];
 			try {
 				providerConfigs = virtualKeyProviderConfigsForPayload(
@@ -276,26 +306,34 @@
 
 	async function rotate(record: JsonRecord): Promise<void> {
 		if (!window.confirm(i18n.t('elygate.confirmRotate'))) return;
+		const id = stringValue(record, 'id');
+		if (!beginMutation(id)) return;
 		error = '';
 		try {
-			const response = await requestJson(`/api/governance/virtual-keys/${encodePathSegment(stringValue(record, 'id'))}/rotate`, { method: 'POST' });
+			const response = await requestJson(`/api/governance/virtual-keys/${encodePathSegment(id)}/rotate`, { method: 'POST' });
 			const rotated = getObjectPayload(response, 'virtual_key');
 			revealedKey = stringValue(rotated, 'value');
 			notice = i18n.t('elygate.rotate');
 			await load();
 		} catch (cause) {
 			error = displayError(cause, i18n.t('elygate.operationFailed'));
+		} finally {
+			endMutation(id);
 		}
 	}
 
 	async function remove(record: JsonRecord): Promise<void> {
 		if (!window.confirm(i18n.t('elygate.confirmDelete'))) return;
+		const id = stringValue(record, 'id');
+		if (!beginMutation(id)) return;
 		try {
-			await requestJson(`/api/governance/virtual-keys/${encodePathSegment(stringValue(record, 'id'))}`, { method: 'DELETE' });
+			await requestJson(`/api/governance/virtual-keys/${encodePathSegment(id)}`, { method: 'DELETE' });
 			notice = i18n.t('elygate.delete');
 			await load();
 		} catch (cause) {
 			error = displayError(cause, i18n.t('elygate.operationFailed'));
+		} finally {
+			endMutation(id);
 		}
 	}
 
@@ -317,16 +355,18 @@
 	{#if error}<div class="notice error" role="alert">{error}</div>{/if}
 	{#if notice}<div class="notice success" role="status">{notice}</div>{/if}
 	{#if revealedKey}<div class="secret-reveal" role="status"><div><strong>{i18n.t('elygate.newKeyValue')}</strong><code>{revealedKey}</code></div><button type="button" onclick={() => void copyKey()}>{i18n.t('elygate.copy')}</button><button type="button" onclick={() => (revealedKey = '')}>{i18n.t('elygate.close')}</button></div>{/if}
-	<div class="table-wrap" aria-busy={isLoading}><table><thead><tr><th>{i18n.t('elygate.virtualKeyName')}</th><th>{i18n.t('elygate.status')}</th><th>{i18n.t('elygate.expiresAt')}</th><th>{i18n.t('elygate.description')}</th><th>{i18n.t('elygate.actions')}</th></tr></thead><tbody>{#each virtualKeys as key (stringValue(key, 'id'))}<tr><td><strong>{stringValue(key, 'name')}</strong></td><td class={providerWarning(key) ? 'warning-text' : undefined} title={providerWarning(key)}>{virtualKeyStatus(key)}</td><td>{stringValue(key, 'expires_at') || '—'}</td><td>{stringValue(key, 'description') || '—'}</td><td class="actions"><button type="button" onclick={() => openEdit(key)}>{i18n.t('elygate.edit')}</button><button type="button" onclick={() => void rotate(key)}>{i18n.t('elygate.rotate')}</button><button class="danger" type="button" onclick={() => void remove(key)}>{i18n.t('elygate.delete')}</button></td></tr>{:else}<tr><td colspan="5" class="empty">{i18n.t('elygate.noResults')}</td></tr>{/each}</tbody></table></div>
+	<div class="table-wrap" aria-busy={isLoading}><table><thead><tr><th>{i18n.t('elygate.virtualKeyName')}</th><th>{i18n.t('elygate.status')}</th><th>{i18n.t('elygate.expiresAt')}</th><th>{i18n.t('elygate.description')}</th><th>{i18n.t('elygate.actions')}</th></tr></thead><tbody>{#each virtualKeys as key (stringValue(key, 'id'))}<tr><td><strong>{stringValue(key, 'name')}</strong></td><td class={providerWarning(key) ? 'warning-text' : undefined} title={providerWarning(key)}>{virtualKeyStatus(key)}</td><td>{stringValue(key, 'expires_at') || '—'}</td><td>{stringValue(key, 'description') || '—'}</td><td class="actions"><button type="button" disabled={isMutating(stringValue(key, 'id'))} onclick={() => openEdit(key)}>{i18n.t('elygate.edit')}</button><button type="button" disabled={isMutating(stringValue(key, 'id'))} onclick={() => void rotate(key)}>{i18n.t('elygate.rotate')}</button><button class="danger" type="button" disabled={isMutating(stringValue(key, 'id'))} onclick={() => void remove(key)}>{i18n.t('elygate.delete')}</button></td></tr>{:else}<tr><td colspan="5" class="empty">{i18n.t('elygate.noResults')}</td></tr>{/each}</tbody></table></div>
 	<footer class="pagination"><span>{formatPagination(page, totalPages, total, i18n.locale)}</span><div><button type="button" disabled={page <= 1 || isLoading} onclick={() => { page -= 1; void load(); }}>{i18n.t('elygate.previous')}</button><button type="button" disabled={page >= totalPages || isLoading} onclick={() => { page += 1; void load(); }}>{i18n.t('elygate.next')}</button></div></footer>
 </section>
 
+<svelte:window onkeydown={handleModalKeydown} />
+
 {#if isOpen}
-	<div class="modal-backdrop">
+	<div class="modal-backdrop" role="presentation" onclick={(event) => { if (event.target === event.currentTarget) closeModal(); }}>
 		<div class="modal" role="dialog" aria-modal="true" aria-labelledby="vk-dialog-title">
 			<header>
 				<h2 id="vk-dialog-title">{editing ? i18n.t('elygate.edit') : i18n.t('elygate.create')} {i18n.t('elygate.virtualKeys')}</h2>
-				<button type="button" onclick={() => (isOpen = false)}>{i18n.t('elygate.close')}</button>
+				<button type="button" disabled={isSaving} onclick={closeModal}>{i18n.t('elygate.close')}</button>
 			</header>
 			<form onsubmit={submit}>
 				<label>{i18n.t('elygate.virtualKeyName')}<input bind:value={form.name} required /></label>
@@ -370,7 +410,7 @@
 					<div class="grid-two"><label>{i18n.t('elygate.tokenLimit')}<input type="number" min="1" step="1" bind:value={form.rateLimit.tokenMaxLimit} /></label><label>{i18n.locale === 'zh-CN' ? 'Token 重置周期' : 'Token reset window'}<select bind:value={form.rateLimit.tokenResetDuration}>{#each ['1m', '5m', '15m', '30m', '1h', '6h', '1d', '1w', '1M'] as duration (duration)}<option value={duration}>{duration}</option>{/each}</select></label><label>{i18n.t('elygate.requestLimit')}<input type="number" min="1" step="1" bind:value={form.rateLimit.requestMaxLimit} /></label><label>{i18n.locale === 'zh-CN' ? '请求重置周期' : 'Request reset window'}<select bind:value={form.rateLimit.requestResetDuration}>{#each ['1m', '5m', '15m', '30m', '1h', '6h', '1d', '1w', '1M'] as duration (duration)}<option value={duration}>{duration}</option>{/each}</select></label></div>
 				</fieldset>
 				<footer>
-					<button type="button" onclick={() => (isOpen = false)}>{i18n.t('elygate.cancel')}</button>
+					<button type="button" disabled={isSaving} onclick={closeModal}>{i18n.t('elygate.cancel')}</button>
 					<button class="primary" type="submit" disabled={isSaving}>{i18n.t('elygate.save')}</button>
 				</footer>
 			</form>

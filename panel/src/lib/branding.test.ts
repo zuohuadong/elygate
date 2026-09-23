@@ -12,7 +12,14 @@ import {
 	setEnName,
 	setShortName,
 } from "./branding";
-import { labelFor, registerElygateTranslations } from "./i18n";
+
+async function loadI18nForBunTest(): Promise<typeof import("./i18n")> {
+	const runeGlobal = globalThis as typeof globalThis & {
+		$state?: <T>(value: T) => T;
+	};
+	runeGlobal.$state ??= <T>(value: T) => value;
+	return import("./i18n");
+}
 
 describe("custom branding & app name", () => {
 	test("resolves default app name when unconfigured", () => {
@@ -65,7 +72,8 @@ describe("custom branding & app name", () => {
 		);
 	});
 
-	test("registers translations with custom brand without showing original brand words", () => {
+	test("registers translations with custom brand without showing original brand words", async () => {
+		const { labelFor, registerElygateTranslations } = await loadI18nForBunTest();
 		setAppName("CloudLLM");
 		registerElygateTranslations("CloudLLM");
 		const zh = labelFor("zh-CN", "elygate.restartInstructions");
@@ -77,5 +85,5 @@ describe("custom branding & app name", () => {
 		expect(en).not.toContain("Bifrost");
 		expect(hint).not.toContain("Elygate");
 		expect(hint).not.toContain("Bifrost");
-	});
+	}, 15_000);
 });

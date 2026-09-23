@@ -46,15 +46,17 @@ func forwardProviderHeadersFromContext(ctx *fasthttp.RequestCtx, bifrostCtx *sch
 
 // CompletionHandler manages HTTP requests for completion operations
 type CompletionHandler struct {
-	client *bifrost.Bifrost
-	config *lib.Config
+	modelsManager ModelsManager
+	client        *bifrost.Bifrost
+	config        *lib.Config
 }
 
 // NewInferenceHandler creates a new completion handler instance
-func NewInferenceHandler(client *bifrost.Bifrost, config *lib.Config) *CompletionHandler {
+func NewInferenceHandler(modelsManager ModelsManager, client *bifrost.Bifrost, config *lib.Config) *CompletionHandler {
 	return &CompletionHandler{
-		client: client,
-		config: config,
+		modelsManager: modelsManager,
+		client:        client,
+		config:        config,
 	}
 }
 
@@ -220,6 +222,13 @@ var rerankParamsKnownFields = map[string]bool{
 	"next_token":         true,
 }
 
+var decisionParamsKnownFields = map[string]bool{
+	"model":     true,
+	"state":     true,
+	"questions": true,
+	"fallbacks": true,
+}
+
 var ocrParamsKnownFields = map[string]bool{
 	"model":                      true,
 	"id":                         true,
@@ -302,6 +311,7 @@ var imageEditParamsKnownFields = map[string]bool{
 	"num_inference_steps": true,
 	"upscale_factor":      true,
 	"target_megapixels":   true,
+	"aspect_ratio":        true,
 	"stream":              true,
 }
 
@@ -571,6 +581,13 @@ type RerankRequest struct {
 	*schemas.RerankParameters
 }
 
+// DecisionHandlerRequest is a bifrost decision request
+type DecisionHandlerRequest struct {
+	State     interface{}                         `json:"state"`
+	Questions map[string]schemas.DecisionQuestion `json:"questions"`
+	BifrostParams
+}
+
 // OCRHandlerRequest is a bifrost OCR request
 type OCRHandlerRequest struct {
 	ID       *string             `json:"id,omitempty"`
@@ -718,6 +735,7 @@ var PathToTypeMapping = map[string]schemas.RequestType{
 	"/v1/responses":              schemas.ResponsesRequest,
 	"/v1/embeddings":             schemas.EmbeddingRequest,
 	"/v1/rerank":                 schemas.RerankRequest,
+	"/v1/decisions":              schemas.DecisionRequest,
 	"/v1/ocr":                    schemas.OCRRequest,
 	"/v1/audio/speech":           schemas.SpeechRequest,
 	"/v1/audio/transcriptions":   schemas.TranscriptionRequest,
@@ -773,6 +791,7 @@ func (h *CompletionHandler) RegisterRoutes(r *router.Router, middlewares ...sche
 	r.GET("/v1/responses/{response_id}/input_items", lib.ChainMiddlewares(h.responsesInputItems, responsesInputItemsMW...))
 	r.POST("/v1/embeddings", lib.ChainMiddlewares(h.embeddings, baseMiddlewares...))
 	r.POST("/v1/rerank", lib.ChainMiddlewares(h.rerank, baseMiddlewares...))
+	r.POST("/v1/decisions", lib.ChainMiddlewares(h.evaluation, baseMiddlewares...))
 	r.POST("/v1/ocr", lib.ChainMiddlewares(h.ocr, baseMiddlewares...))
 	// ElevenLabs sound-effect models also flow through /v1/audio/speech; the
 	// provider routes them to /v1/sound-generation by model id, keeping SDK and
@@ -850,6 +869,17 @@ func (h *CompletionHandler) RegisterRoutes(r *router.Router, middlewares ...sche
 	r.DELETE("/v1/containers/{container_id}/files/{file_id}", lib.ChainMiddlewares(h.containerFileDelete, containerFileDeleteMW...))
 }
 
+// applyListModelsProviderFilter narrows the provider fan-out of a models listing to what the
+// request may reach. The rule belongs to whoever can answer what that is, shared with the
+// integration routes that list models; a handler wired without one leaves the fan-out alone,
+// because narrowing is an optimization over the answer and not the check that produces it.
+func (h *CompletionHandler) applyListModelsProviderFilter(bifrostCtx *schemas.BifrostContext) {
+	if h.modelsManager == nil {
+		return
+	}
+	h.modelsManager.NarrowListModelsProviders(bifrostCtx)
+}
+
 // listModels handles GET /v1/models - Process list models requests
 // If provider is not specified, lists all models from all configured providers
 func (h *CompletionHandler) listModels(ctx *fasthttp.RequestCtx) {
@@ -863,8 +893,8 @@ func (h *CompletionHandler) listModels(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, fasthttp.StatusBadRequest, "Failed to convert context")
 		return
 	}
-	if provider == "" && !h.applyListModelsVirtualKeyProviderFilter(ctx, bifrostCtx) {
-		return
+	if provider == "" {
+		h.applyListModelsProviderFilter(bifrostCtx)
 	}
 
 	var resp *schemas.BifrostListModelsResponse
@@ -1342,6 +1372,61 @@ func (h *CompletionHandler) rerank(ctx *fasthttp.RequestCtx) {
 	}
 
 	resp, bifrostErr := h.client.RerankRequest(bifrostCtx, bifrostRerankReq)
+	if bifrostErr != nil {
+		forwardProviderHeadersFromContext(ctx, bifrostCtx)
+		SendBifrostError(ctx, bifrostErr)
+		return
+	}
+
+	if resp != nil {
+		lib.ApplyBifrostResponseHeaders(ctx, bifrostCtx, resp.ExtraFields)
+	}
+
+	if streamLargeResponseIfActive(ctx, bifrostCtx) {
+		return
+	}
+	// Send successful response
+	SendJSON(ctx, resp)
+}
+
+// prepareDecisionRequest prepares a BifrostDecisionRequest from the HTTP request body
+func prepareDecisionRequest(ctx *fasthttp.RequestCtx, config *lib.Config) (*DecisionHandlerRequest, *schemas.BifrostDecisionRequest, error) {
+	req, base, err := prepareRequest[DecisionHandlerRequest](ctx, config, decisionParamsKnownFields)
+	if err != nil {
+		return nil, nil, err
+	}
+	if req.State == nil {
+		return nil, nil, fmt.Errorf("state is required for decision")
+	}
+	if len(req.Questions) == 0 {
+		return nil, nil, fmt.Errorf("questions are required for decision")
+	}
+	return req, &schemas.BifrostDecisionRequest{
+		Provider:  base.Provider,
+		Model:     base.ModelName,
+		State:     req.State,
+		Questions: req.Questions,
+		Fallbacks: base.Fallbacks,
+	}, nil
+}
+
+// evaluation handles POST /v1/decisions - Process decision requests
+func (h *CompletionHandler) evaluation(ctx *fasthttp.RequestCtx) {
+	_, bifrostDecisionReq, err := prepareDecisionRequest(ctx, h.config)
+	if err != nil {
+		SendError(ctx, fasthttp.StatusBadRequest, err.Error())
+		return
+	}
+
+	// Convert context
+	bifrostCtx, cancel := lib.ConvertToBifrostContext(ctx, h.config)
+	defer cancel()
+	if bifrostCtx == nil {
+		SendError(ctx, fasthttp.StatusBadRequest, "Failed to convert context")
+		return
+	}
+
+	resp, bifrostErr := h.client.DecisionRequest(bifrostCtx, bifrostDecisionReq)
 	if bifrostErr != nil {
 		forwardProviderHeadersFromContext(ctx, bifrostCtx)
 		SendBifrostError(ctx, bifrostErr)
@@ -2021,9 +2106,10 @@ func (h *CompletionHandler) handleStreamingTranscriptionRequest(ctx *fasthttp.Re
 }
 
 // handleStreamingResponse is a generic function to handle streaming responses using Server-Sent Events (SSE)
-// The cancel function is called ONLY when client disconnects are detected via write errors.
-// Bifrost handles cleanup internally for normal completion and errors, so we only cancel
-// upstream streams when write errors indicate the client has disconnected.
+// The cancel function is called here only when client disconnects are detected via write errors;
+// a client that closes its socket before the first write is caught by the socket watcher started
+// in lib.ConvertToBifrostContext. Bifrost handles cleanup internally for normal completion and
+// errors, so we only cancel upstream streams when the client has disconnected.
 func (h *CompletionHandler) handleStreamingResponse(ctx *fasthttp.RequestCtx, bifrostCtx *schemas.BifrostContext, requestType schemas.RequestType, getStream func() (chan *schemas.BifrostStreamChunk, *schemas.BifrostError), cancel context.CancelFunc) {
 	// Get the streaming channel — called BEFORE setting SSE headers so that
 	// provider errors return proper HTTP status codes + JSON content type.

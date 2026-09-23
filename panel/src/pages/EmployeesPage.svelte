@@ -33,12 +33,15 @@
 	let search = $state('');
 	let modalElement = $state<HTMLDivElement | null>(null);
 	let returnFocusElement = $state<HTMLElement | null>(null);
+	let loadSeq = 0;
+	let resetIds = $state<string[]>([]);
 	const filteredEmployees = $derived.by(() => {
 		const query = search.trim().toLowerCase();
 		if (!query) return employees;
 		return employees.filter((employee) => [employee.name, employee.username, employee.department, employee.job_title]
 			.some((value) => String(value ?? '').toLowerCase().includes(query)));
 	});
+	function isResetting(id: string): boolean { return resetIds.includes(id); }
 
 	function text(zh: string, en: string): string { return i18n.locale === 'zh-CN' ? zh : en; }
 	function emptyForm(): EmployeeForm {
@@ -96,6 +99,7 @@
 	}
 
 	async function load(): Promise<void> {
+		const sequence = ++loadSeq;
 		loading = true;
 		error = '';
 		try {
@@ -103,12 +107,13 @@
 				requestJson<unknown>('/api/employees'),
 				requestJson<unknown>('/api/governance/virtual-keys'),
 			]);
+			if (sequence !== loadSeq) return;
 			employees = getListPayload(employeePayload);
 			virtualKeys = getListPayload(keyPayload);
 		} catch (cause) {
-			error = displayError(cause, text('员工数据加载失败。', 'Failed to load employees.'));
+			if (sequence === loadSeq) error = displayError(cause, text('员工数据加载失败。', 'Failed to load employees.'));
 		} finally {
-			loading = false;
+			if (sequence === loadSeq) loading = false;
 		}
 	}
 
@@ -149,6 +154,7 @@
 	}
 
 	async function save(): Promise<void> {
+		if (saving) return;
 		saving = true;
 		error = '';
 		try {
@@ -171,6 +177,8 @@
 	async function resetPassword(employee: JsonRecord): Promise<void> {
 		if (!window.confirm(text('重置后现有员工会话会立即失效。确认继续？', 'Existing employee sessions will be revoked. Continue?'))) return;
 		const id = stringValue(employee, 'id');
+		if (isResetting(id)) return;
+		resetIds = [...resetIds, id];
 		busyId = id;
 		error = '';
 		try {
@@ -181,7 +189,8 @@
 		} catch (cause) {
 			error = displayError(cause, text('重置密码失败。', 'Failed to reset password.'));
 		} finally {
-			busyId = '';
+			resetIds = resetIds.filter((current) => current !== id);
+			if (busyId === id) busyId = '';
 		}
 	}
 
@@ -217,7 +226,7 @@
 	<div class="toolbar"><input type="search" bind:value={search} placeholder={text('搜索姓名、用户名、部门或岗位', 'Search name, username, department, or role')} /><span>{filteredEmployees.length} {text('名员工', 'employees')}</span></div>
 	<div class="table-wrap" aria-busy={loading}>
 		<table><thead><tr><th>{text('员工', 'Employee')}</th><th>{text('部门 / 岗位', 'Department / role')}</th><th>{text('适用软件', 'Applications')}</th><th>{text('专属密钥', 'Dedicated key')}</th><th>{text('状态', 'Status')}</th><th>{text('操作', 'Actions')}</th></tr></thead>
-		<tbody>{#each filteredEmployees as employee (stringValue(employee, 'id'))}<tr><td><strong>{stringValue(employee, 'name')}</strong><small>@{stringValue(employee, 'username')}</small></td><td>{stringValue(employee, 'department') || '—'}<small>{stringValue(employee, 'job_title') || '—'}</small></td><td>{stringValue(employee, 'applications') || '—'}<small>{stringValue(employee, 'account_type') || '—'}</small></td><td>{assignedKeyName(employee)}</td><td><span class:active={boolValue(employee, 'is_active')} class="status">{boolValue(employee, 'is_active') ? text('启用', 'Active') : text('停用', 'Disabled')}</span></td><td class="actions"><button type="button" onclick={() => openEdit(employee)}>{text('编辑', 'Edit')}</button><button type="button" disabled={busyId === stringValue(employee, 'id')} onclick={() => void resetPassword(employee)}>{text('重置密码', 'Reset password')}</button></td></tr>{:else}<tr><td colspan="6" class="empty">{loading ? text('正在加载…', 'Loading…') : text('暂无员工。', 'No employees.')}</td></tr>{/each}</tbody></table>
+		<tbody>{#each filteredEmployees as employee (stringValue(employee, 'id'))}<tr><td><strong>{stringValue(employee, 'name')}</strong><small>@{stringValue(employee, 'username')}</small></td><td>{stringValue(employee, 'department') || '—'}<small>{stringValue(employee, 'job_title') || '—'}</small></td><td>{stringValue(employee, 'applications') || '—'}<small>{stringValue(employee, 'account_type') || '—'}</small></td><td>{assignedKeyName(employee)}</td><td><span class:active={boolValue(employee, 'is_active')} class="status">{boolValue(employee, 'is_active') ? text('启用', 'Active') : text('停用', 'Disabled')}</span></td><td class="actions"><button type="button" onclick={() => openEdit(employee)}>{text('编辑', 'Edit')}</button><button type="button" disabled={isResetting(stringValue(employee, 'id'))} onclick={() => void resetPassword(employee)}>{text('重置密码', 'Reset password')}</button></td></tr>{:else}<tr><td colspan="6" class="empty">{loading ? text('正在加载…', 'Loading…') : text('暂无员工。', 'No employees.')}</td></tr>{/each}</tbody></table>
 	</div>
 </section>
 

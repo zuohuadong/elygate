@@ -91,6 +91,16 @@ type TableWebhookEndpoint struct {
 // TableName sets the table name for the webhook endpoint model
 func (TableWebhookEndpoint) TableName() string { return "config_webhook_endpoints" }
 
+// VaultPathKey implements schemas.VaultPathKeyer so the global vault
+// callbacks can store and remove the endpoint signing secret and custom
+// header values under the endpoint's stable ID.
+func (w *TableWebhookEndpoint) VaultPathKey() string {
+	if w == nil {
+		return ""
+	}
+	return w.ID
+}
+
 // protectedWebhookHeaders are delivery headers callers can never override:
 // the Standard Webhooks signing headers plus protocol- and identity-level
 // headers the delivery client owns.

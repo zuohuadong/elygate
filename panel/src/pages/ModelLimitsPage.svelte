@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { getAppName } from '../lib/branding';
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { useTranslation } from '@svadmin/core/i18n';
-	import { getListPayload, getTotal, requestJson, type JsonRecord } from '../lib/api';
+	import { getListPayload, getTotal, isJsonRecord, requestJson, type JsonRecord } from '../lib/api';
 	import { displayError } from '../lib/forms';
 	import { formatPagination, formatUsdCost } from '../lib/display-format';
 	import { buildModelLimitPayload, ModelLimitError, type BudgetDraft, type ModelLimitDraft } from '../lib/model-limits';
@@ -27,13 +27,19 @@
 	let providerFilter = $state('');
 	let isLoading = $state(true);
 	let isSaving = $state(false);
+	let modalContextSeq = 0;
 	let error = $state('');
 	let notice = $state('');
 	let editing = $state.raw<ModelConfig | null>(null);
 	let modalOpen = $state(false);
+	let modalElement = $state<HTMLDivElement | null>(null);
+	let returnFocusElement = $state<HTMLElement | null>(null);
 	let draft = $state<ModelLimitDraft>(emptyDraft());
+	let loadSeq = 0;
+	let removingIds = $state<string[]>([]);
 	const currentPage = $derived(Math.floor(offset / PAGE_SIZE) + 1);
 	const totalPages = $derived(Math.max(1, Math.ceil(total / PAGE_SIZE)));
+	function isRemoving(id: string): boolean { return removingIds.includes(id); }
 
 	function emptyDraft(): ModelLimitDraft {
 		return { modelName: '*', provider: '', scope: 'global', scopeId: '', budgets: [], tokenMaxLimit: '', tokenResetDuration: '1h', requestMaxLimit: '', requestResetDuration: '1h' };
@@ -43,18 +49,83 @@
 	function currency(value: number): string { return formatUsdCost(value); }
 	function usage(current = 0, limit = 0): string { return `${currency(current)} / ${currency(limit)}`; }
 	function rateUsage(current = 0, limit = 0): string { return `${integer(current)} / ${integer(limit)}`; }
+	function focusableElements(): HTMLElement[] {
+		if (!modalElement) return [];
+		return Array.from(modalElement.querySelectorAll<HTMLElement>(
+			'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
+		)).filter((element) => !element.hidden);
+	}
+	function finishClosingModal(): void {
+		modalOpen = false;
+		void tick().then(() => {
+			returnFocusElement?.focus();
+			returnFocusElement = null;
+		});
+	}
+	function closeModal(): void {
+		if (!isSaving) finishClosingModal();
+	}
+	function openModal(): void {
+		if (document.activeElement instanceof HTMLElement) returnFocusElement = document.activeElement;
+		modalOpen = true;
+		void tick().then(() => (focusableElements()[0] ?? modalElement)?.focus());
+	}
+	function handleModalKeydown(event: KeyboardEvent): void {
+		if (!modalOpen) return;
+		if (event.key === 'Escape') {
+			event.preventDefault();
+			closeModal();
+			return;
+		}
+		if (event.key !== 'Tab') return;
+		const elements = focusableElements();
+		if (elements.length === 0) {
+			event.preventDefault();
+			modalElement?.focus();
+			return;
+		}
+		const first = elements[0];
+		const last = elements[elements.length - 1];
+		if (event.shiftKey && document.activeElement === first) {
+			event.preventDefault();
+			last.focus();
+		} else if (!event.shiftKey && document.activeElement === last) {
+			event.preventDefault();
+			first.focus();
+		}
+	}
 
 	async function loadLookups(): Promise<void> {
-		const [providerPayload, virtualKeyPayload] = await Promise.all([
+		const [providerPayload, virtualKeysPayload] = await Promise.all([
 			requestJson<unknown>('/api/providers').catch(() => []),
-			requestJson<unknown>('/api/governance/virtual-keys?limit=0&from_memory=true').catch(() => []),
+			loadAllVirtualKeys(),
 		]);
 		providers = getListPayload(providerPayload).map((record) => record.name).filter((name): name is string => typeof name === 'string');
-		virtualKeys = getListPayload(virtualKeyPayload).filter((record): record is NamedRecord => typeof record.id === 'string' && typeof record.name === 'string');
+		virtualKeys = virtualKeysPayload;
+	}
+
+	async function loadAllVirtualKeys(): Promise<NamedRecord[]> {
+		const pageSize = 100;
+		const all: NamedRecord[] = [];
+		let offset = 0;
+		let expected = Number.POSITIVE_INFINITY;
+		for (;;) {
+			const payload = await requestJson<unknown>(`/api/governance/virtual-keys?limit=${pageSize}&offset=${offset}`);
+			const page = getListPayload(payload).filter((record): record is NamedRecord => typeof record.id === 'string' && typeof record.name === 'string');
+			all.push(...page);
+			const pagination = isJsonRecord(payload) && isJsonRecord(payload.pagination) ? payload.pagination : payload;
+			const reportedTotal = getTotal(pagination, 0);
+			if (reportedTotal > 0) expected = reportedTotal;
+			if (page.length === 0 || all.length >= expected || page.length < pageSize) break;
+			offset += page.length;
+		}
+		return [...new Map(all.map((record) => [record.id, record])).values()];
 	}
 
 	async function load(reset = false): Promise<void> {
 		if (reset) offset = 0;
+		const sequence = ++loadSeq;
+		const requestedOffset = offset;
 		isLoading = true;
 		error = '';
 		const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(offset) });
@@ -63,24 +134,30 @@
 		if (providerFilter) params.set('provider', providerFilter);
 		try {
 			const payload = await requestJson<unknown>(`/api/governance/model-configs?${params.toString()}`);
+			if (sequence !== loadSeq || offset !== requestedOffset) return;
 			records = getListPayload(payload).filter((record): record is ModelConfig => typeof record.id === 'string' && typeof record.model_name === 'string');
 			total = getTotal(payload, records.length);
-			if (total > 0 && offset >= total) { offset = Math.floor((total - 1) / PAGE_SIZE) * PAGE_SIZE; await load(); }
+			if (total === 0 && requestedOffset !== 0) { offset = 0; await load(); }
+			else if (total > 0 && requestedOffset >= total) { offset = Math.floor((total - 1) / PAGE_SIZE) * PAGE_SIZE; await load(); }
 		} catch (cause) {
-			error = displayError(cause, i18n.t('elygate.loadFailed'));
+			if (sequence === loadSeq && offset === requestedOffset) error = displayError(cause, i18n.t('elygate.loadFailed'));
 		} finally {
-			isLoading = false;
+			if (sequence === loadSeq) isLoading = false;
 		}
 	}
 
 	function openCreate(): void {
+		if (isSaving || removingIds.length > 0) return;
+		modalContextSeq += 1;
 		editing = null;
 		draft = emptyDraft();
-		modalOpen = true;
+		openModal();
 		error = '';
 	}
 
 	function openEdit(record: ModelConfig): void {
+		if (isSaving || isRemoving(record.id)) return;
+		modalContextSeq += 1;
 		editing = record;
 		draft = {
 			modelName: record.model_name,
@@ -93,7 +170,7 @@
 			requestMaxLimit: record.rate_limit?.request_max_limit === undefined ? '' : String(record.rate_limit.request_max_limit),
 			requestResetDuration: record.rate_limit?.request_reset_duration ?? '1h',
 		};
-		modalOpen = true;
+		openModal();
 		error = '';
 	}
 
@@ -106,16 +183,22 @@
 
 	async function save(): Promise<void> {
 		if (isSaving) return;
+		const contextSequence = modalContextSeq;
+		const contextId = editing?.id ?? '';
+		const draftSnapshot = JSON.parse(JSON.stringify(draft)) as ModelLimitDraft;
+		const editingSnapshot = editing;
 		isSaving = true;
 		error = '';
 		notice = '';
 		try {
-			const payload = buildModelLimitPayload(draft, !!editing?.rate_limit);
-			const path = editing ? `/api/governance/model-configs/${encodeURIComponent(editing.id)}` : '/api/governance/model-configs';
-			await requestJson<unknown>(path, { method: editing ? 'PUT' : 'POST', body: JSON.stringify(payload) });
-			modalOpen = false;
-			notice = editing ? i18n.t('elygate.modelLimitUpdated') : i18n.t('elygate.modelLimitCreated');
-			await load();
+			const payload = buildModelLimitPayload(draftSnapshot, !!editingSnapshot?.rate_limit);
+			const path = contextId ? `/api/governance/model-configs/${encodeURIComponent(contextId)}` : '/api/governance/model-configs';
+			await requestJson<unknown>(path, { method: contextId ? 'PUT' : 'POST', body: JSON.stringify(payload) });
+			if (contextSequence === modalContextSeq && (editing?.id ?? '') === contextId) {
+				finishClosingModal();
+				notice = editingSnapshot ? i18n.t('elygate.modelLimitUpdated') : i18n.t('elygate.modelLimitCreated');
+				await load();
+			}
 		} catch (cause) {
 			error = cause instanceof ModelLimitError ? validationMessage(cause) : displayError(cause, i18n.t('elygate.saveFailed'));
 		} finally {
@@ -124,7 +207,9 @@
 	}
 
 	async function remove(record: ModelConfig): Promise<void> {
-		if (!window.confirm(i18n.t('elygate.confirmDeleteModelLimit').replace('{model}', record.model_name))) return;
+		if (isSaving || isRemoving(record.id) || !window.confirm(i18n.t('elygate.confirmDeleteModelLimit').replace('{model}', record.model_name))) return;
+		if (editing?.id === record.id) finishClosingModal();
+		removingIds = [...removingIds, record.id];
 		error = '';
 		try {
 			await requestJson<void>(`/api/governance/model-configs/${encodeURIComponent(record.id)}`, { method: 'DELETE' });
@@ -132,18 +217,24 @@
 			await load();
 		} catch (cause) {
 			error = displayError(cause, i18n.t('elygate.deleteFailed'));
+		} finally {
+			removingIds = removingIds.filter((id) => id !== record.id);
 		}
 	}
 
 	onMount(() => {
-		void Promise.all([loadLookups(), load()]);
+		void Promise.allSettled([loadLookups(), load()]).then(([lookupResult]) => {
+			if (lookupResult.status === 'rejected') error = displayError(lookupResult.reason, i18n.t('elygate.loadFailed'));
+		});
 		const timer = window.setInterval(() => { if (!modalOpen) void load(); }, 5000);
 		return () => window.clearInterval(timer);
 	});
 </script>
 
+<svelte:window onkeydown={handleModalKeydown} />
+
 <section class="page-shell" data-resource={resourceName}>
-	<header class="page-heading"><div><p class="eyebrow">{getAppName()} / {i18n.t('elygate.enterprise')}</p><h1>{i18n.t('elygate.modelLimits')}</h1><p>{i18n.t('elygate.modelLimitsHint')}</p></div><button class="primary" type="button" onclick={openCreate}>+ {i18n.t('elygate.addLimit')}</button></header>
+	<header class="page-heading"><div><p class="eyebrow">{getAppName()} / {i18n.t('elygate.enterprise')}</p><h1>{i18n.t('elygate.modelLimits')}</h1><p>{i18n.t('elygate.modelLimitsHint')}</p></div><button class="primary" type="button" disabled={isSaving || removingIds.length > 0} onclick={openCreate}>+ {i18n.t('elygate.addLimit')}</button></header>
 	{#if error}<div class="notice error" role="alert">{error}</div>{/if}
 	{#if notice}<div class="notice success" role="status">{notice}</div>{/if}
 	<form class="toolbar" onsubmit={(event) => { event.preventDefault(); void load(true); }}>
@@ -154,16 +245,17 @@
 	</form>
 	<div class="table-wrap"><table><thead><tr><th>{i18n.t('elygate.model')}</th><th>{i18n.t('elygate.provider')}</th><th>{i18n.t('elygate.scope')}</th><th>{i18n.t('elygate.scopeTarget')}</th><th>{i18n.t('elygate.budgetList')}</th><th>{i18n.t('elygate.rateLimits')}</th><th></th></tr></thead><tbody>
 		{#each records as record (record.id)}
-			<tr><td><strong>{record.model_name === '*' ? i18n.t('elygate.allModels') : record.model_name}</strong></td><td>{record.provider || i18n.t('elygate.all')}</td><td>{record.scope === 'virtual_key' ? i18n.t('elygate.virtualKey') : i18n.t('elygate.global')}</td><td>{record.scope_name || record.scope_id || '—'}</td><td><div class="limit-lines">{#each record.budgets ?? [] as budget (budget.id ?? budget.reset_duration)}<span>{usage(budget.current_usage, budget.max_limit)} · {budget.reset_duration}</span>{:else}—{/each}</div></td><td><div class="limit-lines">{#if record.rate_limit?.token_max_limit !== undefined}<span>{i18n.t('elygate.tokens')}: {rateUsage(record.rate_limit.token_current_usage, record.rate_limit.token_max_limit)} · {record.rate_limit.token_reset_duration}</span>{/if}{#if record.rate_limit?.request_max_limit !== undefined}<span>{i18n.t('elygate.requests')}: {rateUsage(record.rate_limit.request_current_usage, record.rate_limit.request_max_limit)} · {record.rate_limit.request_reset_duration}</span>{/if}{#if !record.rate_limit}—{/if}</div></td><td><div class="actions"><button type="button" onclick={() => openEdit(record)}>{i18n.t('elygate.edit')}</button><button class="danger" type="button" onclick={() => void remove(record)}>{i18n.t('elygate.delete')}</button></div></td></tr>
+				<tr><td><strong>{record.model_name === '*' ? i18n.t('elygate.allModels') : record.model_name}</strong></td><td>{record.provider || i18n.t('elygate.all')}</td><td>{record.scope === 'virtual_key' ? i18n.t('elygate.virtualKey') : i18n.t('elygate.global')}</td><td>{record.scope_name || record.scope_id || '—'}</td><td><div class="limit-lines">{#each record.budgets ?? [] as budget (budget.id ?? budget.reset_duration)}<span>{usage(budget.current_usage, budget.max_limit)} · {budget.reset_duration}</span>{:else}—{/each}</div></td><td><div class="limit-lines">{#if record.rate_limit?.token_max_limit !== undefined}<span>{i18n.t('elygate.tokens')}: {rateUsage(record.rate_limit.token_current_usage, record.rate_limit.token_max_limit)} · {record.rate_limit.token_reset_duration}</span>{/if}{#if record.rate_limit?.request_max_limit !== undefined}<span>{i18n.t('elygate.requests')}: {rateUsage(record.rate_limit.request_current_usage, record.rate_limit.request_max_limit)} · {record.rate_limit.request_reset_duration}</span>{/if}{#if !record.rate_limit}—{/if}</div></td><td><div class="actions"><button type="button" disabled={isSaving || isRemoving(record.id)} onclick={() => openEdit(record)}>{i18n.t('elygate.edit')}</button><button class="danger" type="button" disabled={isRemoving(record.id) || isSaving} onclick={() => void remove(record)}>{i18n.t('elygate.delete')}</button></div></td></tr>
 		{:else}<tr><td colspan="7">{isLoading ? i18n.t('elygate.loading') : i18n.t('elygate.empty')}</td></tr>{/each}
 	</tbody></table></div>
 	<footer class="pagination"><span>{formatPagination(currentPage, totalPages, total, i18n.locale)}</span><div><button type="button" disabled={offset === 0 || isLoading} onclick={() => { offset = Math.max(0, offset - PAGE_SIZE); void load(); }}>{i18n.t('elygate.previous')}</button><button type="button" disabled={offset + PAGE_SIZE >= total || isLoading} onclick={() => { offset += PAGE_SIZE; void load(); }}>{i18n.t('elygate.next')}</button></div></footer>
 </section>
 
 {#if modalOpen}
-	<div class="modal-backdrop" role="presentation" onclick={(event) => { if (event.target === event.currentTarget && !isSaving) modalOpen = false; }}>
-		<div class="modal" role="dialog" aria-modal="true" aria-labelledby="model-limit-title">
-			<header><div><h2 id="model-limit-title">{editing ? i18n.t('elygate.editLimit') : i18n.t('elygate.createLimit')}</h2><p>{i18n.t('elygate.modelLimitFormHint')}</p></div><button type="button" aria-label={i18n.t('elygate.close')} onclick={() => (modalOpen = false)}>×</button></header>
+	<div class="modal-backdrop" role="presentation" onclick={(event) => { if (event.target === event.currentTarget) closeModal(); }}>
+		<div bind:this={modalElement} class="modal" role="dialog" aria-modal="true" aria-labelledby="model-limit-title" tabindex="-1">
+			<header><div><h2 id="model-limit-title">{editing ? i18n.t('elygate.editLimit') : i18n.t('elygate.createLimit')}</h2><p>{i18n.t('elygate.modelLimitFormHint')}</p></div><button type="button" aria-label={i18n.t('elygate.close')} disabled={isSaving} onclick={closeModal}>×</button></header>
+			<fieldset disabled={isSaving}>
 			<div class="form-grid">
 				<label>{i18n.t('elygate.provider')}<select bind:value={draft.provider} disabled={!!editing}><option value="">{i18n.t('elygate.all')}</option>{#each providers as provider (provider)}<option value={provider}>{provider}</option>{/each}</select></label>
 				<label>{i18n.t('elygate.model')}<input bind:value={draft.modelName} disabled={!!editing} placeholder="*" /></label>
@@ -172,7 +264,7 @@
 			</div>
 			<section class="form-section"><div class="section-heading"><div><h3>{i18n.t('elygate.budgets')}</h3><p>{i18n.t('elygate.budgetsHint')}</p></div><button type="button" onclick={addBudget}>+ {i18n.t('elygate.addBudget')}</button></div><div class="budget-list">{#each draft.budgets as budget, index (budget.id ?? `new-${index}`)}<div><label>{i18n.t('elygate.maxCost')}<input type="number" min="0" step="any" bind:value={budget.maxLimit} /></label><label>{i18n.t('elygate.resetPeriod')}<select bind:value={budget.resetDuration}>{#each resetDurations as duration (duration)}<option value={duration}>{duration}</option>{/each}</select></label><button type="button" aria-label={i18n.t('elygate.delete')} onclick={() => removeBudget(index)}>×</button></div>{:else}<p>{i18n.t('elygate.noBudgets')}</p>{/each}</div></section>
 			<section class="form-section"><div class="section-heading"><div><h3>{i18n.t('elygate.rateLimits')}</h3><p>{i18n.t('elygate.rateLimitsHint')}</p></div></div><div class="form-grid"><label>{i18n.t('elygate.tokenLimit')}<input type="number" min="0" step="1" bind:value={draft.tokenMaxLimit} /></label><label>{i18n.t('elygate.resetPeriod')}<select bind:value={draft.tokenResetDuration}>{#each resetDurations as duration (duration)}<option value={duration}>{duration}</option>{/each}</select></label><label>{i18n.t('elygate.requestLimit')}<input type="number" min="0" step="1" bind:value={draft.requestMaxLimit} /></label><label>{i18n.t('elygate.resetPeriod')}<select bind:value={draft.requestResetDuration}>{#each resetDurations as duration (duration)}<option value={duration}>{duration}</option>{/each}</select></label></div></section>
-			<footer><button type="button" onclick={() => (modalOpen = false)}>{i18n.t('elygate.cancel')}</button><button class="primary" type="button" disabled={isSaving} onclick={() => void save()}>{isSaving ? i18n.t('elygate.saving') : i18n.t('elygate.save')}</button></footer>
+			</fieldset><footer><button type="button" disabled={isSaving} onclick={closeModal}>{i18n.t('elygate.cancel')}</button><button class="primary" type="button" disabled={isSaving} onclick={() => void save()}>{isSaving ? i18n.t('elygate.saving') : i18n.t('elygate.save')}</button></footer>
 		</div>
 	</div>
 {/if}

@@ -9,6 +9,25 @@ afterEach(() => {
 });
 
 describe('requestJson', () => {
+	test.each(['POST', 'PUT', 'PATCH', 'DELETE'])('sets JSON content type for bodyless %s', async (method) => {
+		globalThis.fetch = (async (_path, init) => {
+			expect(new Headers(init?.headers).get('Content-Type')).toBe('application/json');
+			expect(init?.credentials).toBe('same-origin');
+			return new Response(null, { status: 204 });
+		}) as typeof fetch;
+		await requestJson('/api/control-plane/test', { method });
+	});
+
+	test('preserves Headers and tuple header overrides', async () => {
+		for (const headers of [new Headers({ 'X-Test': 'yes', Accept: 'text/plain' }), [['X-Test', 'yes'], ['Accept', 'text/plain']] as [string, string][]]) {
+			globalThis.fetch = (async (_path, init) => {
+				expect(new Headers(init?.headers).get('X-Test')).toBe('yes');
+				expect(new Headers(init?.headers).get('Accept')).toBe('text/plain');
+				return new Response('{}');
+			}) as typeof fetch;
+			await requestJson('/api/test', { headers });
+		}
+	});
 	test('uses the active localized fallback for unstructured errors', async () => {
 		configureRequestErrorFormatter((status) => `请求失败（HTTP ${status}）`);
 		globalThis.fetch = (() => Promise.resolve(new Response('', { status: 503 }))) as typeof fetch;

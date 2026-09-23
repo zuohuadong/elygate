@@ -53,6 +53,9 @@
 	let deliveryTotal = $state(0);
 	let deliveryOffset = $state(0);
 	let isDeliveryLoading = $state(false);
+	let loadSeq = 0;
+	let deliveryLoadSeq = 0;
+	let detailContextSeq = 0;
 	const currentPage = $derived(Math.floor(offset / PAGE_SIZE) + 1);
 	const totalPages = $derived(Math.max(1, Math.ceil(total / PAGE_SIZE)));
 	const deliveryPage = $derived(Math.floor(deliveryOffset / DELIVERY_PAGE_SIZE) + 1);
@@ -82,51 +85,80 @@
 		if (cause.message.startsWith('invalid:')) return text('投递参数必须是非负整数。', 'Delivery tuning values must be non-negative integers.');
 		return cause.message;
 	}
+	function detailMatches(sequence: number, endpointId: string): boolean {
+		return sequence === detailContextSeq && modal === 'detail' && Boolean(selected) && idOf(selected!) === endpointId;
+	}
+	function closeModal(): void {
+		detailContextSeq += 1;
+		modal = null;
+	}
 
 	async function load(reset = false): Promise<void> {
 		if (reset) offset = 0;
+		const sequence = ++loadSeq;
+		const requestedOffset = offset;
 		isLoading = true; error = '';
 		try {
-			const payload = await requestJson<unknown>(`/api/webhooks?${buildWebhookQuery({ search, events: eventFilters, status: statusFilter, limit: PAGE_SIZE, offset })}`);
+			const payload = await requestJson<unknown>(`/api/webhooks?${buildWebhookQuery({ search, events: eventFilters, status: statusFilter, limit: PAGE_SIZE, offset: requestedOffset })}`);
+			if (sequence !== loadSeq || offset !== requestedOffset) return;
 			endpoints = list(payload, 'endpoints');
 			total = getTotal(payload, endpoints.length);
 			if (selected && modal === 'detail') selected = endpoints.find((endpoint) => idOf(endpoint) === idOf(selected!)) ?? selected;
-			if (total > 0 && offset >= total) { offset = Math.floor((total - 1) / PAGE_SIZE) * PAGE_SIZE; await load(); }
-		} catch (cause) { error = displayError(cause, text('Webhook 加载失败。', 'Failed to load webhooks.')); }
-		finally { isLoading = false; }
+			if (total === 0 && requestedOffset !== 0) { offset = 0; await load(); return; }
+			if (total > 0 && requestedOffset >= total) { offset = Math.floor((total - 1) / PAGE_SIZE) * PAGE_SIZE; await load(); return; }
+		} catch (cause) {
+			if (sequence === loadSeq) error = displayError(cause, text('Webhook 加载失败。', 'Failed to load webhooks.'));
+		}
+		finally { if (sequence === loadSeq) isLoading = false; }
 	}
 
 	async function loadDeliveries(reset = false): Promise<void> {
-		if (!selected) return;
+		if (!selected) { deliveryLoadSeq += 1; isDeliveryLoading = false; return; }
 		if (reset) deliveryOffset = 0;
+		const sequence = ++deliveryLoadSeq;
+		const endpointId = idOf(selected);
+		const requestedOffset = deliveryOffset;
 		isDeliveryLoading = true;
 		try {
-			const payload = await requestJson<unknown>(`/api/webhooks/${encodeURIComponent(idOf(selected))}/deliveries?limit=${DELIVERY_PAGE_SIZE}&offset=${deliveryOffset}`);
-			deliveries = list(payload, 'deliveries');
+			const payload = await requestJson<unknown>(`/api/webhooks/${encodeURIComponent(endpointId)}/deliveries?limit=${DELIVERY_PAGE_SIZE}&offset=${requestedOffset}`);
+			if (sequence !== deliveryLoadSeq || deliveryOffset !== requestedOffset || !selected || idOf(selected) !== endpointId || modal !== 'detail') return;
+			const nextDeliveries = list(payload, 'deliveries');
 			const pagination = isJsonRecord(payload) && isJsonRecord(payload.pagination) ? payload.pagination : {};
-			deliveryTotal = typeof pagination.total_count === 'number' ? pagination.total_count : deliveries.length;
-		} catch (cause) { error = displayError(cause, text('投递历史加载失败。', 'Failed to load delivery history.')); }
-		finally { isDeliveryLoading = false; }
+			const nextTotal = typeof pagination.total_count === 'number' ? pagination.total_count : nextDeliveries.length;
+			if (nextTotal === 0 && requestedOffset !== 0) { deliveryOffset = 0; await loadDeliveries(); return; }
+			if (nextTotal > 0 && requestedOffset >= nextTotal) { deliveryOffset = Math.floor((nextTotal - 1) / DELIVERY_PAGE_SIZE) * DELIVERY_PAGE_SIZE; await loadDeliveries(); return; }
+			deliveries = nextDeliveries;
+			deliveryTotal = nextTotal;
+		} catch (cause) {
+			if (sequence === deliveryLoadSeq && selected && idOf(selected) === endpointId && modal === 'detail') error = displayError(cause, text('投递历史加载失败。', 'Failed to load delivery history.'));
+		}
+		finally { if (sequence === deliveryLoadSeq) isDeliveryLoading = false; }
 	}
 
-	function openCreate(): void { editingId = ''; draft = emptyWebhookDraft(); modal = 'editor'; error = ''; }
-	function openEdit(endpoint: JsonRecord): void { editingId = idOf(endpoint); draft = webhookDraftFromEndpoint(endpoint); modal = 'editor'; error = ''; }
-	async function openDetails(endpoint: JsonRecord): Promise<void> { selected = endpoint; deliveryOffset = 0; testEvent = 'async_job.completed'; modal = 'detail'; error = ''; await loadDeliveries(); }
+	function openCreate(): void { if (isSaving || busyId) return; detailContextSeq += 1; editingId = ''; draft = emptyWebhookDraft(); modal = 'editor'; error = ''; }
+	function openEdit(endpoint: JsonRecord): void { if (isSaving || busyId) return; detailContextSeq += 1; editingId = idOf(endpoint); draft = webhookDraftFromEndpoint(endpoint); modal = 'editor'; error = ''; }
+	async function openDetails(endpoint: JsonRecord): Promise<void> { if (isSaving || busyId) return; detailContextSeq += 1; selected = endpoint; deliveryOffset = 0; testEvent = 'async_job.completed'; modal = 'detail'; error = ''; await loadDeliveries(); }
 	function toggleDraftEvent(event: WebhookEvent): void {
 		draft.events = draft.events.includes(event) ? draft.events.filter((current) => current !== event) : [...draft.events, event];
 	}
 
 	async function save(): Promise<void> {
-		if (isSaving) return;
+		if (isSaving || busyId) return;
+		const editingIdSnapshot = editingId;
+		const draftSnapshot: WebhookDraft = { ...draft, events: [...draft.events] };
+		const contextSnapshot = detailContextSeq;
 		isSaving = true; error = ''; notice = '';
 		try {
-			const payload = buildWebhookPayload(draft);
-			const response = await requestJson<unknown>(editingId ? `/api/webhooks/${encodeURIComponent(editingId)}` : '/api/webhooks', { method: editingId ? 'PUT' : 'POST', body: JSON.stringify(payload) });
+			const payload = buildWebhookPayload(draftSnapshot);
+			const response = await requestJson<unknown>(editingIdSnapshot ? `/api/webhooks/${encodeURIComponent(editingIdSnapshot)}` : '/api/webhooks', { method: editingIdSnapshot ? 'PUT' : 'POST', body: JSON.stringify(payload) });
+			const contextMatches = contextSnapshot === detailContextSeq && editingId === editingIdSnapshot && modal === 'editor';
+			if (!contextMatches) return;
 			modal = null;
-			if (!editingId && isJsonRecord(response) && typeof response.secret === 'string') revealSecret(isJsonRecord(response.endpoint) ? String(response.endpoint.name ?? draft.name) : draft.name, response.secret);
+			detailContextSeq += 1;
+			if (!editingIdSnapshot && isJsonRecord(response) && typeof response.secret === 'string') revealSecret(isJsonRecord(response.endpoint) ? String(response.endpoint.name ?? draftSnapshot.name) : draftSnapshot.name, response.secret);
 			else notice = text('Webhook 已更新。', 'Webhook updated.');
 			await load();
-		} catch (cause) { error = validationMessage(cause); }
+		} catch (cause) { if (contextSnapshot === detailContextSeq && editingId === editingIdSnapshot && modal === 'editor') error = validationMessage(cause); }
 		finally { isSaving = false; }
 	}
 
@@ -137,7 +169,7 @@
 	}
 
 	async function toggleEndpoint(endpoint: JsonRecord): Promise<void> {
-		const id = idOf(endpoint); if (!id || busyId) return;
+		const id = idOf(endpoint); if (!id || isSaving || busyId) return;
 		busyId = id; error = '';
 		try { await requestJson<unknown>(`/api/webhooks/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(endpointPayload(endpoint, { disabled: endpoint.disabled !== true })) }); notice = endpoint.disabled === true ? text('Webhook 已启用。', 'Webhook enabled.') : text('Webhook 已停用。', 'Webhook disabled.'); await load(); }
 		catch (cause) { error = displayError(cause, text('状态更新失败。', 'Failed to update status.')); }
@@ -145,42 +177,55 @@
 	}
 
 	async function remove(endpoint: JsonRecord): Promise<void> {
-		const id = idOf(endpoint); if (!id || busyId || !window.confirm(text(`确认删除 Webhook ${displayValue(endpoint.name)}？`, `Delete webhook ${displayValue(endpoint.name)}?`))) return;
+		const id = idOf(endpoint); if (!id || isSaving || busyId || !window.confirm(text(`确认删除 Webhook ${displayValue(endpoint.name)}？`, `Delete webhook ${displayValue(endpoint.name)}?`))) return;
 		busyId = id; error = '';
-		try { await requestJson<unknown>(`/api/webhooks/${encodeURIComponent(id)}`, { method: 'DELETE' }); if (selected && idOf(selected) === id) modal = null; notice = text('Webhook 已删除。', 'Webhook deleted.'); await load(); }
+		try { await requestJson<unknown>(`/api/webhooks/${encodeURIComponent(id)}`, { method: 'DELETE' }); if (selected && idOf(selected) === id) closeModal(); notice = text('Webhook 已删除。', 'Webhook deleted.'); await load(); }
 		catch (cause) { error = displayError(cause, text('删除失败。', 'Failed to delete.')); }
 		finally { busyId = ''; }
 	}
 
 	async function rotateSecret(endpoint: JsonRecord): Promise<void> {
-		const id = idOf(endpoint); if (!id || busyId || !window.confirm(text('轮换后旧 Secret 将立即失效，确认继续？', 'The old secret becomes invalid immediately. Continue?'))) return;
+		const id = idOf(endpoint); if (!id || isSaving || busyId || !window.confirm(text('轮换后旧 Secret 将立即失效，确认继续？', 'The old secret becomes invalid immediately. Continue?'))) return;
+		const contextSnapshot = detailContextSeq;
+		const modalSnapshot = modal;
+		const selectedSnapshot = idOf(selected ?? {});
 		busyId = id; error = '';
 		try {
 			const response = await requestJson<unknown>(`/api/webhooks/${encodeURIComponent(id)}/rotate-secret`, { method: 'POST' });
+			const contextMatches = contextSnapshot === detailContextSeq && modal === modalSnapshot && (modalSnapshot !== 'detail' || selectedSnapshot === id);
+			if (!contextMatches) return;
 			if (!isJsonRecord(response) || typeof response.secret !== 'string') throw new Error(text('服务端未返回 Secret。', 'Server did not return a secret.'));
 			revealSecret(String(isJsonRecord(response.endpoint) ? response.endpoint.name ?? endpoint.name : endpoint.name), response.secret);
-		} catch (cause) { error = displayError(cause, text('Secret 轮换失败。', 'Failed to rotate secret.')); }
-		finally { busyId = ''; }
+		} catch (cause) {
+			if (contextSnapshot === detailContextSeq && modal === modalSnapshot && (modalSnapshot !== 'detail' || selectedSnapshot === id)) error = displayError(cause, text('Secret 轮换失败。', 'Failed to rotate secret.'));
+		}
+		finally { if (busyId === id) busyId = ''; }
 	}
 
 	async function testEndpoint(): Promise<void> {
-		if (!selected || busyId) return;
-		const id = idOf(selected); busyId = id; error = '';
+		if (!selected || isSaving || busyId) return;
+		const id = idOf(selected); const contextSnapshot = detailContextSeq; busyId = id; error = '';
 		try {
 			const response = await requestJson<unknown>(`/api/webhooks/${encodeURIComponent(id)}/test`, { method: 'POST', body: JSON.stringify({ event: testEvent }) });
+			if (!detailMatches(contextSnapshot, id)) return;
 			if (isJsonRecord(response) && response.delivered === true) notice = text(`测试投递成功，接收端返回 ${displayValue(response.receiver_status_code)}。`, `Test delivered; receiver returned ${displayValue(response.receiver_status_code)}.`);
 			else throw new Error(isJsonRecord(response) && typeof response.error === 'string' ? response.error : text('接收端拒绝测试投递。', 'Receiver rejected the test delivery.'));
 			await loadDeliveries(true);
-		} catch (cause) { error = displayError(cause, text('测试投递失败。', 'Test delivery failed.')); }
-		finally { busyId = ''; }
+		} catch (cause) { if (detailMatches(contextSnapshot, id)) error = displayError(cause, text('测试投递失败。', 'Test delivery failed.')); }
+		finally { if (busyId === id) busyId = ''; }
 	}
 
 	async function redeliver(delivery: JsonRecord): Promise<void> {
-		const id = idOf(delivery); if (!id || busyId || !window.confirm(text('确认重新投递该事件？', 'Redeliver this event?'))) return;
+		const id = idOf(delivery); if (!id || isSaving || busyId || !window.confirm(text('确认重新投递该事件？', 'Redeliver this event?'))) return;
+		const endpointId = selected ? idOf(selected) : ''; const contextSnapshot = detailContextSeq;
 		busyId = id; error = '';
-		try { await requestJson<unknown>(`/api/webhooks/deliveries/${encodeURIComponent(id)}/redeliver`, { method: 'POST' }); notice = text('重新投递已入队。', 'Redelivery queued.'); await loadDeliveries(); }
-		catch (cause) { error = displayError(cause, text('重新投递失败。', 'Redelivery failed.')); }
-		finally { busyId = ''; }
+		try {
+			await requestJson<unknown>(`/api/webhooks/deliveries/${encodeURIComponent(id)}/redeliver`, { method: 'POST' });
+			if (!detailMatches(contextSnapshot, endpointId)) return;
+			notice = text('重新投递已入队。', 'Redelivery queued.');
+			await loadDeliveries();
+		} catch (cause) { if (detailMatches(contextSnapshot, endpointId)) error = displayError(cause, text('重新投递失败。', 'Redelivery failed.')); }
+		finally { if (busyId === id) busyId = ''; }
 	}
 
 	onMount(() => {
@@ -191,26 +236,26 @@
 </script>
 
 <section class="page-shell" data-resource={resourceName}>
-	<header class="page-heading"><div><p class="eyebrow">{getAppName()} / {i18n.t('elygate.integrations')}</p><h1>Webhook</h1><p>{text('异步任务完成后会通知所有订阅对应事件的启用端点；可通过 x-bf-async-webhook 仅指定一个端点。', 'Async jobs notify every enabled endpoint subscribed to the terminal event; use x-bf-async-webhook to target only one endpoint.')}</p></div><button class="primary" type="button" onclick={openCreate}>+ {text('添加端点', 'Add endpoint')}</button></header>
+	<header class="page-heading"><div><p class="eyebrow">{getAppName()} / {i18n.t('elygate.integrations')}</p><h1>Webhook</h1><p>{text('异步任务完成后会通知所有订阅对应事件的启用端点；可通过 x-bf-async-webhook 仅指定一个端点。', 'Async jobs notify every enabled endpoint subscribed to the terminal event; use x-bf-async-webhook to target only one endpoint.')}</p></div><button class="primary" type="button" disabled={isSaving || !!busyId} onclick={openCreate}>+ {text('添加端点', 'Add endpoint')}</button></header>
 	{#if error}<div class="notice error" role="alert">{error}</div>{/if}
 	{#if notice}<div class="notice success" role="status">{notice}</div>{/if}
 	<form class="toolbar" onsubmit={(event) => { event.preventDefault(); void load(true); }}><label>{text('搜索', 'Search')}<input bind:value={search} placeholder={text('名称或 URL', 'Name or URL')} /></label><label>{text('事件', 'Events')}<select multiple bind:value={eventFilters}>{#each WEBHOOK_EVENTS as event (event)}<option value={event}>{eventLabel(event)}</option>{/each}</select></label><label>{text('状态', 'Status')}<select bind:value={statusFilter}><option value="">{text('全部', 'All')}</option><option value="enabled">{text('启用', 'Enabled')}</option><option value="disabled">{text('停用', 'Disabled')}</option></select></label><button type="submit">{text('应用筛选', 'Apply')}</button><button type="button" onclick={() => { search = ''; eventFilters = []; statusFilter = ''; void load(true); }}>{text('清除', 'Clear')}</button></form>
-	<div class="table-wrap endpoints-table" class:loading={isLoading}><table><thead><tr><th>{text('名称', 'Name')}</th><th>URL</th><th>{text('事件', 'Events')}</th><th>{text('状态', 'Status')}</th><th>{text('连续失败', 'Failures')}</th><th>{text('最近成功', 'Last success')}</th><th>{text('操作', 'Actions')}</th></tr></thead><tbody>{#each endpoints as endpoint (idOf(endpoint))}<tr><td><strong>{displayValue(endpoint.name)}</strong></td><td><code>{displayValue(endpoint.url)}</code></td><td><div class="badges">{#each Array.isArray(endpoint.events) ? endpoint.events : [] as event (String(event))}<span>{eventLabel(String(event))}</span>{/each}</div></td><td><button class:enabled={endpoint.disabled !== true} class="status-button" type="button" disabled={busyId === idOf(endpoint)} onclick={() => void toggleEndpoint(endpoint)}>{endpoint.disabled === true ? text('停用', 'Disabled') : text('启用', 'Enabled')}</button></td><td>{displayValue(endpoint.consecutive_failures || 0)}</td><td>{date(endpoint.last_success_at)}</td><td><div class="actions"><button type="button" onclick={() => void openDetails(endpoint)}>{text('详情', 'Details')}</button><button type="button" onclick={() => openEdit(endpoint)}>{text('编辑', 'Edit')}</button><button type="button" onclick={() => void rotateSecret(endpoint)}>{text('轮换 Secret', 'Rotate secret')}</button><button class="danger" type="button" onclick={() => void remove(endpoint)}>{text('删除', 'Delete')}</button></div></td></tr>{:else}<tr><td class="empty" colspan="7">{isLoading ? text('加载中…', 'Loading…') : text('没有匹配的 Webhook。', 'No matching webhooks.')}</td></tr>{/each}</tbody></table></div>
+		<div class="table-wrap endpoints-table" class:loading={isLoading}><table><thead><tr><th>{text('名称', 'Name')}</th><th>URL</th><th>{text('事件', 'Events')}</th><th>{text('状态', 'Status')}</th><th>{text('连续失败', 'Failures')}</th><th>{text('最近成功', 'Last success')}</th><th>{text('操作', 'Actions')}</th></tr></thead><tbody>{#each endpoints as endpoint (idOf(endpoint))}<tr><td><strong>{displayValue(endpoint.name)}</strong></td><td><code>{displayValue(endpoint.url)}</code></td><td><div class="badges">{#each Array.isArray(endpoint.events) ? endpoint.events : [] as event (String(event))}<span>{eventLabel(String(event))}</span>{/each}</div></td><td><button class:enabled={endpoint.disabled !== true} class="status-button" type="button" disabled={!!busyId || isSaving} onclick={() => void toggleEndpoint(endpoint)}>{endpoint.disabled === true ? text('停用', 'Disabled') : text('启用', 'Enabled')}</button></td><td>{displayValue(endpoint.consecutive_failures || 0)}</td><td>{date(endpoint.last_success_at)}</td><td><div class="actions"><button type="button" disabled={isSaving || !!busyId} onclick={() => void openDetails(endpoint)}>{text('详情', 'Details')}</button><button type="button" disabled={isSaving || !!busyId} onclick={() => openEdit(endpoint)}>{text('编辑', 'Edit')}</button><button type="button" disabled={isSaving || !!busyId} onclick={() => void rotateSecret(endpoint)}>{text('轮换 Secret', 'Rotate secret')}</button><button class="danger" type="button" disabled={isSaving || !!busyId} onclick={() => void remove(endpoint)}>{text('删除', 'Delete')}</button></div></td></tr>{:else}<tr><td class="empty" colspan="7">{isLoading ? text('加载中…', 'Loading…') : text('没有匹配的 Webhook。', 'No matching webhooks.')}</td></tr>{/each}</tbody></table></div>
 	<footer class="pagination"><span>{formatPagination(currentPage, totalPages, total, i18n.locale)}</span><div><button type="button" disabled={offset === 0 || isLoading} onclick={() => { offset = Math.max(0, offset - PAGE_SIZE); void load(); }}>{text('上一页', 'Previous')}</button><button type="button" disabled={offset + PAGE_SIZE >= total || isLoading} onclick={() => { offset += PAGE_SIZE; void load(); }}>{text('下一页', 'Next')}</button></div></footer>
 </section>
 
 {#if modal}
-	<div class="modal-backdrop" role="presentation" onclick={(event) => { if (event.target === event.currentTarget && !isSaving) modal = null; }}><div class:wide={modal === 'detail'} class="modal" role="dialog" aria-modal="true" aria-labelledby="webhook-modal-title"><header><div><h2 id="webhook-modal-title">{modal === 'editor' ? (editingId ? text('编辑 Webhook', 'Edit webhook') : text('添加 Webhook', 'Add webhook')) : modal === 'secret' ? text('保存签名 Secret', 'Save signing secret') : displayValue(selected?.name)}</h2>{#if modal === 'detail'}<p>{displayValue(selected?.url)}</p>{/if}</div><button type="button" aria-label={text('关闭', 'Close')} onclick={() => (modal = null)}>×</button></header>
+		<div class="modal-backdrop" role="presentation" onclick={(event) => { if (event.target === event.currentTarget && !isSaving && !busyId) closeModal(); }}><div class:wide={modal === 'detail'} class="modal" role="dialog" aria-modal="true" aria-labelledby="webhook-modal-title"><header><div><h2 id="webhook-modal-title">{modal === 'editor' ? (editingId ? text('编辑 Webhook', 'Edit webhook') : text('添加 Webhook', 'Add webhook')) : modal === 'secret' ? text('保存签名 Secret', 'Save signing secret') : displayValue(selected?.name)}</h2>{#if modal === 'detail'}<p>{displayValue(selected?.url)}</p>{/if}</div><button type="button" aria-label={text('关闭', 'Close')} disabled={isSaving || !!busyId} onclick={closeModal}>×</button></header>
 		{#if modal === 'editor'}
-			<div class="form-grid"><label>{text('名称', 'Name')}<input bind:value={draft.name} placeholder="billing-service" /></label><label>{text('接收地址', 'Receiver URL')}<input bind:value={draft.url} placeholder="https://example.com/hooks/gateway" /></label><fieldset class="span-2"><legend>{text('订阅事件', 'Subscribed events')}</legend>{#each WEBHOOK_EVENTS as event (event)}<label class="check"><input type="checkbox" checked={draft.events.includes(event)} onchange={() => toggleDraftEvent(event)} /><span><strong>{eventLabel(event)}</strong><small>{event === 'async_job.completed' ? text('异步任务成功完成。', 'An async job completed successfully.') : text('异步任务达到终态失败。', 'An async job reached a terminal failure.')}</small></span></label>{/each}</fieldset><label class="check"><input type="checkbox" bind:checked={draft.includeResponse} />{text('包含任务响应载荷', 'Include response payload')}</label><label class="check"><input type="checkbox" bind:checked={draft.allowPrivateNetwork} />{text('允许私有网络地址', 'Allow private network')}</label><label class="check"><input type="checkbox" bind:checked={draft.disabled} />{text('创建为停用状态', 'Keep endpoint disabled')}</label><label class="span-2">{text('自定义请求头 JSON', 'Custom headers JSON')}<textarea class="json-editor" rows="7" bind:value={draft.headersJson}></textarea><small>{text('字符串值会保存为 Secret；也可使用 {"type":"env","ref":"NAME"}。', 'String values are stored as secrets; env references may use {"type":"env","ref":"NAME"}.')}</small></label></div>
-			<section class="tuning"><h3>{text('投递调优', 'Delivery tuning')}</h3><p>{text('留空或 0 使用投递工作器默认值。', 'Leave blank or use 0 for worker defaults.')}</p><div class="form-grid">{#each tuningFields as field (field.key)}<label>{text(field.zh, field.en)}<input type="number" min="0" bind:value={draft[field.key]} placeholder={String(field.fallback)} /></label>{/each}</div></section>
-			<footer><button type="button" onclick={() => (modal = null)}>{text('取消', 'Cancel')}</button><button class="primary" type="button" disabled={isSaving} onclick={() => void save()}>{isSaving ? text('保存中…', 'Saving…') : text('保存', 'Save')}</button></footer>
+				<div class="form-grid"><label>{text('名称', 'Name')}<input bind:value={draft.name} placeholder="billing-service" disabled={isSaving} /></label><label>{text('接收地址', 'Receiver URL')}<input bind:value={draft.url} placeholder="https://example.com/hooks/gateway" disabled={isSaving} /></label><fieldset class="span-2" disabled={isSaving}><legend>{text('订阅事件', 'Subscribed events')}</legend>{#each WEBHOOK_EVENTS as event (event)}<label class="check"><input type="checkbox" checked={draft.events.includes(event)} onchange={() => toggleDraftEvent(event)} /><span><strong>{eventLabel(event)}</strong><small>{event === 'async_job.completed' ? text('异步任务成功完成。', 'An async job completed successfully.') : text('异步任务达到终态失败。', 'An async job reached a terminal failure.')}</small></span></label>{/each}</fieldset><label class="check"><input type="checkbox" bind:checked={draft.includeResponse} disabled={isSaving} />{text('包含任务响应载荷', 'Include response payload')}</label><label class="check"><input type="checkbox" bind:checked={draft.allowPrivateNetwork} disabled={isSaving} />{text('允许私有网络地址', 'Allow private network')}</label><label class="check"><input type="checkbox" bind:checked={draft.disabled} disabled={isSaving} />{text('创建为停用状态', 'Keep endpoint disabled')}</label><label class="span-2">{text('自定义请求头 JSON', 'Custom headers JSON')}<textarea class="json-editor" rows="7" bind:value={draft.headersJson} disabled={isSaving}></textarea><small>{text('字符串值会保存为 Secret；也可使用 {"type":"env","ref":"NAME"}。', 'String values are stored as secrets; env references may use {"type":"env","ref":"NAME"}.')}</small></label></div>
+			<section class="tuning"><h3>{text('投递调优', 'Delivery tuning')}</h3><p>{text('留空或 0 使用投递工作器默认值。', 'Leave blank or use 0 for worker defaults.')}</p><div class="form-grid">{#each tuningFields as field (field.key)}<label>{text(field.zh, field.en)}<input type="number" min="0" bind:value={draft[field.key]} placeholder={String(field.fallback)} disabled={isSaving} /></label>{/each}</div></section>
+				<footer><button type="button" disabled={isSaving || !!busyId} onclick={closeModal}>{text('取消', 'Cancel')}</button><button class="primary" type="button" disabled={isSaving || !!busyId} onclick={() => void save()}>{isSaving ? text('保存中…', 'Saving…') : text('保存', 'Save')}</button></footer>
 		{/if}
 		{#if modal === 'secret'}<div class="secret-panel"><p>{text('此 Secret 只显示一次。关闭前请复制到接收端配置；之后只能轮换，无法重新读取。', 'This secret is shown once. Copy it into the receiver configuration before closing; it cannot be read again, only rotated.')}</p><label>{text('端点', 'Endpoint')}<input readonly value={secretName} /></label><label>Secret<textarea readonly rows="4" value={secretValue}></textarea></label><button class="primary" type="button" onclick={() => void copySecret()}>{text('复制 Secret', 'Copy secret')}</button></div>{/if}
 		{#if modal === 'detail' && selected}
-			<div class="detail-actions"><label>{text('测试事件', 'Test event')}<select bind:value={testEvent}>{#each WEBHOOK_EVENTS as event (event)}<option value={event}>{eventLabel(event)}</option>{/each}</select></label><button class="primary" type="button" disabled={busyId === idOf(selected)} onclick={() => void testEndpoint()}>{text('发送测试', 'Send test')}</button><button type="button" onclick={() => { modal = null; openEdit(selected!); }}>{text('编辑配置', 'Edit configuration')}</button><button type="button" onclick={() => void rotateSecret(selected!)}>{text('轮换 Secret', 'Rotate secret')}</button></div>
+			<div class="detail-actions"><label>{text('测试事件', 'Test event')}<select bind:value={testEvent} disabled={!!busyId}>{#each WEBHOOK_EVENTS as event (event)}<option value={event}>{eventLabel(event)}</option>{/each}</select></label><button class="primary" type="button" disabled={!!busyId || isSaving} onclick={() => void testEndpoint()}>{text('发送测试', 'Send test')}</button><button type="button" disabled={!!busyId || isSaving} onclick={() => { closeModal(); openEdit(selected!); }}>{text('编辑配置', 'Edit configuration')}</button><button type="button" disabled={!!busyId || isSaving} onclick={() => void rotateSecret(selected!)}>{text('轮换 Secret', 'Rotate secret')}</button></div>
 			<div class="detail-grid"><article><h3>{text('订阅与安全', 'Subscriptions and security')}</h3><dl><div><dt>{text('事件', 'Events')}</dt><dd>{displayValue(selected.events)}</dd></div><div><dt>{text('附带响应', 'Include response')}</dt><dd>{selected.include_response === true ? text('是', 'Yes') : text('否', 'No')}</dd></div><div><dt>{text('私有网络', 'Private network')}</dt><dd>{selected.allow_private_network === true ? text('允许', 'Allowed') : text('禁止', 'Blocked')}</dd></div><div><dt>{text('请求头', 'Headers')}</dt><dd><code>{prettyJson(selected.headers, '{}')}</code></dd></div></dl></article><article><h3>{text('运行状态', 'Runtime status')}</h3><dl><div><dt>{text('状态', 'Status')}</dt><dd>{selected.disabled === true ? text('停用', 'Disabled') : text('启用', 'Enabled')}</dd></div><div><dt>{text('连续失败', 'Consecutive failures')}</dt><dd>{displayValue(selected.consecutive_failures || 0)}</dd></div><div><dt>{text('最近成功', 'Last success')}</dt><dd>{date(selected.last_success_at)}</dd></div><div><dt>{text('最近失败', 'Last failure')}</dt><dd>{date(selected.last_failure_at)}</dd></div></dl></article></div>
-			<section class="deliveries"><div class="section-heading"><div><h3>{text('投递历史', 'Delivery history')}</h3><p>{text('查看接收端状态码、重试结果和错误，并可手动重新投递。', 'Inspect receiver status, retry outcome, and errors, and manually redeliver.')}</p></div><button type="button" onclick={() => void loadDeliveries()}>{text('刷新', 'Refresh')}</button></div><div class="table-wrap"><table><thead><tr><th>{text('时间', 'Time')}</th><th>{text('事件', 'Event')}</th><th>{text('请求 ID', 'Request ID')}</th><th>{text('尝试', 'Attempt')}</th><th>{text('结果', 'Outcome')}</th><th>{text('状态码', 'Status')}</th><th>{text('错误', 'Error')}</th><th></th></tr></thead><tbody>{#each deliveries as delivery (idOf(delivery))}<tr><td>{date(delivery.created_at)}</td><td>{eventLabel(String(delivery.event))}</td><td><code>{displayValue(delivery.request_id)}</code></td><td>{displayValue(delivery.attempt_no)}</td><td><span class="badge">{displayValue(delivery.outcome)}</span></td><td>{displayValue(delivery.status_code)}</td><td>{displayValue(delivery.error)}</td><td><button type="button" disabled={busyId === idOf(delivery) || delivery.outcome === 'retryable_failure' || selected.disabled === true} onclick={() => void redeliver(delivery)}>{text('重新投递', 'Redeliver')}</button></td></tr>{:else}<tr><td class="empty" colspan="8">{isDeliveryLoading ? text('加载中…', 'Loading…') : text('暂无投递记录。', 'No deliveries yet.')}</td></tr>{/each}</tbody></table></div><footer class="pagination"><span>{formatPagination(deliveryPage, deliveryPages, deliveryTotal, i18n.locale)}</span><div><button type="button" disabled={deliveryOffset === 0} onclick={() => { deliveryOffset = Math.max(0, deliveryOffset - DELIVERY_PAGE_SIZE); void loadDeliveries(); }}>{text('上一页', 'Previous')}</button><button type="button" disabled={deliveryOffset + DELIVERY_PAGE_SIZE >= deliveryTotal} onclick={() => { deliveryOffset += DELIVERY_PAGE_SIZE; void loadDeliveries(); }}>{text('下一页', 'Next')}</button></div></footer></section>
+				<section class="deliveries"><div class="section-heading"><div><h3>{text('投递历史', 'Delivery history')}</h3><p>{text('查看接收端状态码、重试结果和错误，并可手动重新投递。', 'Inspect receiver status, retry outcome, and errors, and manually redeliver.')}</p></div><button type="button" onclick={() => void loadDeliveries()} disabled={isDeliveryLoading || !!busyId}>{text('刷新', 'Refresh')}</button></div><div class="table-wrap"><table><thead><tr><th>{text('时间', 'Time')}</th><th>{text('事件', 'Event')}</th><th>{text('请求 ID', 'Request ID')}</th><th>{text('尝试', 'Attempt')}</th><th>{text('结果', 'Outcome')}</th><th>{text('状态码', 'Status')}</th><th>{text('错误', 'Error')}</th><th></th></tr></thead><tbody>{#each deliveries as delivery (idOf(delivery))}<tr><td>{date(delivery.created_at)}</td><td>{eventLabel(String(delivery.event))}</td><td><code>{displayValue(delivery.request_id)}</code></td><td>{displayValue(delivery.attempt_no)}</td><td><span class="badge">{displayValue(delivery.outcome)}</span></td><td>{displayValue(delivery.status_code)}</td><td>{displayValue(delivery.error)}</td><td><button type="button" disabled={!!busyId || delivery.outcome === 'retryable_failure' || selected.disabled === true} onclick={() => void redeliver(delivery)}>{text('重新投递', 'Redeliver')}</button></td></tr>{:else}<tr><td class="empty" colspan="8">{isDeliveryLoading ? text('加载中…', 'Loading…') : text('暂无投递记录。', 'No deliveries yet.')}</td></tr>{/each}</tbody></table></div><footer class="pagination"><span>{formatPagination(deliveryPage, deliveryPages, deliveryTotal, i18n.locale)}</span><div><button type="button" disabled={deliveryOffset === 0 || isDeliveryLoading || !!busyId} onclick={() => { deliveryOffset = Math.max(0, deliveryOffset - DELIVERY_PAGE_SIZE); void loadDeliveries(); }}>{text('上一页', 'Previous')}</button><button type="button" disabled={deliveryOffset + DELIVERY_PAGE_SIZE >= deliveryTotal || isDeliveryLoading || !!busyId} onclick={() => { deliveryOffset += DELIVERY_PAGE_SIZE; void loadDeliveries(); }}>{text('下一页', 'Next')}</button></div></footer></section>
 		{/if}
 	</div></div>
 {/if}

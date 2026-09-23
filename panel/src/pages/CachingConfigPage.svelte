@@ -46,7 +46,9 @@
 	let isSaving = $state(false);
 	let error = $state('');
 	let notice = $state('');
+	let isClearing = $state(false);
 	const cacheEnableBlocked = $derived(plugin?.enabled !== true && !vectorStoreConnected);
+	const isMutating = $derived(isSaving || isSavingVectorStore || isClearing);
 
 	function defaults(): CacheForm {
 		return { ttl: 300, threshold: .8, dimension: 1, conversationHistoryThreshold: 3, excludeSystemPrompt: false, cacheByModel: true, cacheByProvider: true, provider: '', embeddingModel: '', vectorStoreNamespace: '', defaultCacheKey: '' };
@@ -124,6 +126,10 @@
 	}
 
 	async function save(enabled = plugin?.enabled === true): Promise<void> {
+		if (isMutating) return;
+		const pluginSnapshot = plugin;
+		const formSnapshot = JSON.stringify(form);
+		const modeSnapshot = mode;
 		isSaving = true;
 		error = '';
 		notice = '';
@@ -138,6 +144,7 @@
 			const response = plugin
 				? await requestJson<JsonRecord>(`/api/plugins/${PLUGIN_NAME}`, { method: 'PUT', body: JSON.stringify(body) })
 				: await requestJson<JsonRecord>('/api/plugins', { method: 'POST', body: JSON.stringify({ name: PLUGIN_NAME, ...body }) });
+			if (pluginSnapshot !== plugin || JSON.stringify(form) !== formSnapshot || mode !== modeSnapshot) return;
 			plugin = pluginFromMutationResponse(response);
 			applyConfig(isJsonRecord(plugin.config) ? plugin.config : {});
 			notice = i18n.t('elygate.saveSuccess');
@@ -150,18 +157,23 @@
 
 	async function saveVectorStore(): Promise<void> {
 		if (!vectorStore || !vectorStore.editable) return;
+		if (isMutating) return;
 		if (vectorStoreForm.enabled && !vectorStoreForm.connectionString.trim()) {
 			error = i18n.t('elygate.vectorStoreConnectionRequired');
 			return;
 		}
 		isSavingVectorStore = true;
+		const vectorStoreSnapshot = vectorStore;
+		const vectorStoreFormSnapshot = JSON.stringify(vectorStoreForm);
 		error = '';
 		notice = '';
 		try {
-			vectorStore = await requestJson<VectorStoreConfigResponse>('/api/vector-store-config', {
+			const response = await requestJson<VectorStoreConfigResponse>('/api/vector-store-config', {
 				method: 'PUT',
 				body: JSON.stringify(vectorStorePayload(vectorStoreForm, vectorStore)),
 			});
+			if (vectorStoreSnapshot !== vectorStore || JSON.stringify(vectorStoreForm) !== vectorStoreFormSnapshot) return;
+			vectorStore = response;
 			vectorStoreForm = vectorStoreDraft(vectorStore);
 			notice = i18n.t('elygate.vectorStoreSaved');
 		} catch (cause) {
@@ -172,44 +184,47 @@
 	}
 
 	async function clearCache(kind: 'id' | 'key'): Promise<void> {
+		if (isMutating) return;
 		const value = (kind === 'id' ? cacheId : cacheKey).trim();
 		if (!value || !window.confirm(i18n.t('elygate.confirmAction'))) return;
+		isClearing = true;
 		try {
 			await requestJson(`/api/cache/${kind === 'id' ? 'clear' : 'clear-by-key'}/${encodeURIComponent(value)}`, { method: 'DELETE' });
 			notice = i18n.t('elygate.cacheCleared');
 			if (kind === 'id') cacheId = ''; else cacheKey = '';
 		} catch (cause) { error = displayError(cause, i18n.t('elygate.operationFailed')); }
+		finally { isClearing = false; }
 	}
 
 	onMount(() => { void load(); });
 </script>
 
 <section class="page-shell">
-	<header class="page-heading"><div><p class="eyebrow">{getAppName()} / {i18n.t('elygate.system')}</p><h1>{i18n.t('elygate.cachingConfig')}</h1><p>{i18n.t('elygate.cachingHint')}</p></div><div class="toggle"><span>{plugin?.enabled === true ? i18n.t('elygate.enabled') : i18n.t('elygate.disabled')}</span><button type="button" onclick={() => void save(plugin?.enabled !== true)} disabled={isSaving || cacheEnableBlocked} title={cacheEnableBlocked ? i18n.t('elygate.vectorStoreRequired') : undefined}>{plugin?.enabled === true ? i18n.t('elygate.disable') : i18n.t('elygate.enable')}</button>{#if cacheEnableBlocked}<span class="toggle-hint">{i18n.t('elygate.vectorStoreRequired')}</span>{/if}</div></header>
+	<header class="page-heading"><div><p class="eyebrow">{getAppName()} / {i18n.t('elygate.system')}</p><h1>{i18n.t('elygate.cachingConfig')}</h1><p>{i18n.t('elygate.cachingHint')}</p></div><div class="toggle"><span>{plugin?.enabled === true ? i18n.t('elygate.enabled') : i18n.t('elygate.disabled')}</span><button type="button" onclick={() => void save(plugin?.enabled !== true)} disabled={isMutating || cacheEnableBlocked} title={cacheEnableBlocked ? i18n.t('elygate.vectorStoreRequired') : undefined}>{plugin?.enabled === true ? i18n.t('elygate.disable') : i18n.t('elygate.enable')}</button>{#if cacheEnableBlocked}<span class="toggle-hint">{i18n.t('elygate.vectorStoreRequired')}</span>{/if}</div></header>
 	{#if !vectorStoreConnected}<div class="notice warning">{i18n.t('elygate.vectorStoreRequired')}</div>{/if}{#if error}<div class="notice error" role="alert">{error}</div>{/if}{#if notice}<div class="notice success" role="status">{notice}</div>{/if}
-	<section class="vector-store-card">
+	<form class="vector-store-card" onsubmit={(event) => { event.preventDefault(); void saveVectorStore(); }}>
 		<header><div><h2>{i18n.t('elygate.vectorStore')}</h2><p>{i18n.t('elygate.vectorStoreHint')}</p></div><span class:ok={vectorStoreConnected}>{vectorStoreConnected ? i18n.t('elygate.conn.connected') : i18n.t('elygate.conn.disconnected')}</span></header>
 		{#if vectorStore?.management_message}<div class="notice warning">{vectorStore.management_message}</div>{/if}
 		{#if vectorStore?.restart_required}<div class="notice warning"><strong>{i18n.t('elygate.restartRequired')}</strong> {vectorStore.restart_reason ?? ''}<p>{i18n.t('elygate.restartInstructions')}</p></div>{/if}
 		<div class="form-grid">
 			<label>{i18n.t('elygate.vectorStoreType')}<input value={vectorStore?.type ?? 'pgvector'} disabled /></label>
 			{#if vectorStore?.supported !== false}
-			<label>{i18n.t('elygate.pgvectorConnection')}<input type="password" autocomplete="new-password" bind:value={vectorStoreForm.connectionString} disabled={vectorStore ? !vectorStore.editable : true} placeholder="postgres://…" /></label>
-			<label>{i18n.t('elygate.pgvectorSchema')}<input bind:value={vectorStoreForm.schema} disabled={vectorStore ? !vectorStore.editable : true} /></label>
+		<label>{i18n.t('elygate.pgvectorConnection')}<input type="password" autocomplete="new-password" bind:value={vectorStoreForm.connectionString} disabled={vectorStore ? !vectorStore.editable || isMutating : true} placeholder="postgres://…" /></label>
+			<label>{i18n.t('elygate.pgvectorSchema')}<input bind:value={vectorStoreForm.schema} disabled={vectorStore ? !vectorStore.editable || isMutating : true} /></label>
 			{/if}
 		</div>
-		{#if vectorStore?.supported !== false}<div class="vector-store-actions"><label><input type="checkbox" bind:checked={vectorStoreForm.enabled} disabled={vectorStore ? !vectorStore.editable : true} />{i18n.t('elygate.enablePgvector')}</label><button class="primary" type="button" onclick={() => void saveVectorStore()} disabled={!vectorStore?.editable || isSavingVectorStore}>{i18n.t('elygate.saveVectorStore')}</button></div>{/if}
-	</section>
-	<form onsubmit={(event) => { event.preventDefault(); void save(); }}>
-		<div class="mode-picker"><button type="button" class:is-active={mode === 'direct'} onclick={() => (mode = 'direct')}>{i18n.t('elygate.directCache')}</button><button type="button" class:is-active={mode === 'semantic'} onclick={() => (mode = 'semantic')}>{i18n.t('elygate.semanticCache')}</button></div>
-		<div class="form-grid">
-			{#if mode === 'semantic'}<label>{i18n.t('elygate.provider')}<select bind:value={form.provider}><option value="">{i18n.t('elygate.selectProvider')}</option>{#each providers as item (String(item.name))}<option value={String(item.name)}>{String(item.name)}</option>{/each}</select></label><label>{i18n.t('elygate.embeddingModel')}<input bind:value={form.embeddingModel} /></label><label>{i18n.t('elygate.embeddingDimension')}<input type="number" min="2" bind:value={form.dimension} /></label>{/if}
-			<label>{i18n.t('elygate.cacheTtl')}<input type="number" min="0" bind:value={form.ttl} /></label><label>{i18n.t('elygate.similarityThreshold')}<input type="number" min="0" max="1" step="0.01" bind:value={form.threshold} /></label><label>{i18n.t('elygate.conversationThreshold')}<input type="number" min="1" max="50" bind:value={form.conversationHistoryThreshold} /></label><label>{i18n.t('elygate.vectorNamespace')}<input bind:value={form.vectorStoreNamespace} /></label><label>{i18n.t('elygate.defaultCacheKey')}<input bind:value={form.defaultCacheKey} /></label>
-		</div>
-		<div class="switches"><label><input type="checkbox" bind:checked={form.excludeSystemPrompt} />{i18n.t('elygate.excludeSystemPrompt')}</label><label><input type="checkbox" bind:checked={form.cacheByModel} />{i18n.t('elygate.cacheByModel')}</label><label><input type="checkbox" bind:checked={form.cacheByProvider} />{i18n.t('elygate.cacheByProvider')}</label></div>
-		<footer><button class="primary" type="submit" disabled={isSaving || isLoading}>{i18n.t('elygate.save')}</button></footer>
+		{#if vectorStore?.supported !== false}<div class="vector-store-actions"><label><input type="checkbox" bind:checked={vectorStoreForm.enabled} disabled={vectorStore ? !vectorStore.editable || isMutating : true} />{i18n.t('elygate.enablePgvector')}</label><button class="primary" type="submit" disabled={!vectorStore?.editable || isMutating}>{i18n.t('elygate.saveVectorStore')}</button></div>{/if}
 	</form>
-	<section class="cache-tools"><h2>{i18n.t('elygate.cacheManagement')}</h2><p>{i18n.t('elygate.cacheManagementHint')}</p><div><input bind:value={cacheId} placeholder={i18n.t('elygate.cacheId')} /><button type="button" onclick={() => void clearCache('id')}>{i18n.t('elygate.clear')}</button></div><div><input bind:value={cacheKey} placeholder={i18n.t('elygate.cacheKey')} /><button type="button" onclick={() => void clearCache('key')}>{i18n.t('elygate.clear')}</button></div></section>
+	<form onsubmit={(event) => { event.preventDefault(); void save(); }}>
+		<div class="mode-picker"><button type="button" class:is-active={mode === 'direct'} disabled={isMutating} onclick={() => (mode = 'direct')}>{i18n.t('elygate.directCache')}</button><button type="button" class:is-active={mode === 'semantic'} disabled={isMutating} onclick={() => (mode = 'semantic')}>{i18n.t('elygate.semanticCache')}</button></div>
+		<div class="form-grid">
+			{#if mode === 'semantic'}<label>{i18n.t('elygate.provider')}<select bind:value={form.provider} disabled={isMutating}><option value="">{i18n.t('elygate.selectProvider')}</option>{#each providers as item (String(item.name))}<option value={String(item.name)}>{String(item.name)}</option>{/each}</select></label><label>{i18n.t('elygate.embeddingModel')}<input bind:value={form.embeddingModel} disabled={isMutating} /></label><label>{i18n.t('elygate.embeddingDimension')}<input type="number" min="2" bind:value={form.dimension} disabled={isMutating} /></label>{/if}
+			<label>{i18n.t('elygate.cacheTtl')}<input type="number" min="0" bind:value={form.ttl} disabled={isMutating} /></label><label>{i18n.t('elygate.similarityThreshold')}<input type="number" min="0" max="1" step="0.01" bind:value={form.threshold} disabled={isMutating} /></label><label>{i18n.t('elygate.conversationThreshold')}<input type="number" min="1" max="50" bind:value={form.conversationHistoryThreshold} disabled={isMutating} /></label><label>{i18n.t('elygate.vectorNamespace')}<input bind:value={form.vectorStoreNamespace} disabled={isMutating} /></label><label>{i18n.t('elygate.defaultCacheKey')}<input bind:value={form.defaultCacheKey} disabled={isMutating} /></label>
+		</div>
+		<div class="switches"><label><input type="checkbox" bind:checked={form.excludeSystemPrompt} disabled={isMutating} />{i18n.t('elygate.excludeSystemPrompt')}</label><label><input type="checkbox" bind:checked={form.cacheByModel} disabled={isMutating} />{i18n.t('elygate.cacheByModel')}</label><label><input type="checkbox" bind:checked={form.cacheByProvider} disabled={isMutating} />{i18n.t('elygate.cacheByProvider')}</label></div>
+		<footer><button class="primary" type="submit" disabled={isMutating || isLoading}>{i18n.t('elygate.save')}</button></footer>
+	</form>
+	<section class="cache-tools"><h2>{i18n.t('elygate.cacheManagement')}</h2><p>{i18n.t('elygate.cacheManagementHint')}</p><div><input bind:value={cacheId} placeholder={i18n.t('elygate.cacheId')} disabled={isMutating} /><button type="button" disabled={isMutating} onclick={() => void clearCache('id')}>{i18n.t('elygate.clear')}</button></div><div><input bind:value={cacheKey} placeholder={i18n.t('elygate.cacheKey')} disabled={isMutating} /><button type="button" disabled={isMutating} onclick={() => void clearCache('key')}>{i18n.t('elygate.clear')}</button></div></section>
 </section>
 
 <style>

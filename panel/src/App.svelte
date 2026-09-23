@@ -25,7 +25,8 @@
 	import BifrostResourcePage from './pages/BifrostResourcePage.svelte';
 	import CachingConfigPage from './pages/CachingConfigPage.svelte';
 	import ConfigPage from './pages/ConfigPage.svelte';
-	import DocsHubPage from './pages/DocsHubPage.svelte';
+	import ControlPlanePage from './pages/ControlPlanePage.svelte';
+	import DocsHubPage from './pages/LazyDocsHubPage.svelte';
 	import EnterprisePublicFallbackPage from './pages/EnterprisePublicFallbackPage.svelte';
 	import EmployeePortalPage from './pages/EmployeePortalPage.svelte';
 	import EmployeesPage from './pages/EmployeesPage.svelte';
@@ -88,12 +89,14 @@
 	const availableEnterpriseResources = $derived([...new Set([...enterprisePageNames, ...runtimeFeatureNames])]);
 
 	async function refreshAppConfig(): Promise<void> {
+		let sessionStatus;
 		try {
-			const sessionStatus = await getSessionStatus();
+			sessionStatus = await getSessionStatus();
 			resolveBranding(sessionStatus as Record<string, unknown>);
 		} catch {
-			// offline or unauthenticated
+			return;
 		}
+		if (sessionStatus.is_auth_enabled && !sessionStatus.has_valid_token) return;
 		try {
 			const config = await requestJson<Record<string, unknown>>('/api/config');
 			resolveBranding(config);
@@ -104,6 +107,8 @@
 
 	async function refreshRuntimeFeatures(): Promise<void> {
 		try {
+			const sessionStatus = await getSessionStatus();
+			if (sessionStatus.is_auth_enabled && !sessionStatus.has_valid_token) return;
 			const payload = await requestJson<unknown>('/api/plugins');
 			runtimeFeatureNames = activePluginFeatures(getListPayload(payload).map(managedPluginFromRecord));
 		} catch (error) {
@@ -112,8 +117,12 @@
 		}
 	}
 
+	async function refreshAuthenticatedBootstrap(): Promise<void> {
+		await Promise.all([refreshAppConfig(), refreshRuntimeFeatures()]);
+	}
+
 	configureRequestErrorFormatter((status) => labelFor(currentLocale, 'elygate.requestFailed').replace('{status}', String(status)));
-	const bifrostAuthProvider = createBifrostAuthProvider(() => currentLocale, refreshRuntimeFeatures);
+	const bifrostAuthProvider = createBifrostAuthProvider(() => currentLocale, refreshAuthenticatedBootstrap);
 	const resources = $derived.by(() =>
 		createResources(currentLocale, includeDevelopmentResources, enterpriseResources),
 	);
@@ -145,6 +154,9 @@
 		employees: { list: EmployeesPage },
 		teams: { list: GovernanceManagementPage },
 		customers: { list: GovernanceManagementPage },
+		'control-plane-projects': { list: ControlPlanePage },
+		'control-plane-applications': { list: ControlPlanePage },
+		'control-plane-usage': { list: ControlPlanePage },
 		'routing-rules': { list: RoutingRulesPage },
 		'model-configs': { list: ModelLimitsPage },
 		'provider-governance': { list: GovernanceManagementPage },
@@ -268,7 +280,7 @@
 {/key}
 
 <style>
-	:global(span[aria-hidden="true"].rounded-lg),
+	:global([data-svadmin-logo]),
 	:global(aside a.group > span[aria-hidden="true"]) {
 		background-image: var(--app-logo, none);
 		background-size: contain;

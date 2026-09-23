@@ -19,6 +19,10 @@ describe('dynamic resource columns', () => {
 
 	test('localizes request-log columns in Chinese', () => {
 		expect(columnLabelFor('zh-CN', 'parent_request_id')).toBe('父请求 ID');
+		expect(columnLabelFor('zh-CN', 'session_id')).toBe('会话 ID');
+		expect(columnLabelFor('zh-CN', 'parent_session_id')).toBe('父会话 ID');
+		expect(columnLabelFor('zh-CN', 'agent_name')).toBe('Agent');
+		expect(columnLabelFor('zh-CN', 'is_subagent')).toBe('子代理');
 		expect(columnLabelFor('zh-CN', 'object')).toBe('请求类型');
 		expect(columnLabelFor('zh-CN', 'nl')).toBe('网络延迟');
 		expect(columnLabelFor('zh-CN', 'number_of_retries')).toBe('重试次数');

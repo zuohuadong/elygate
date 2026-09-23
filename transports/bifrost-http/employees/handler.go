@@ -14,7 +14,6 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/fasthttp/router"
@@ -40,17 +39,11 @@ var batchIDPattern = regexp.MustCompile(`^[a-zA-Z0-9._-]{8,64}$`)
 var ErrEmployeeInactive = errors.New("employee account is inactive")
 
 type Handler struct {
-	store       *Store
-	configStore configstore.ConfigStore
-	logManager  logging.LogManager
-	dummyHash   string
-	loginMu     sync.Mutex
-	loginLimits map[string]loginLimit
-}
-
-type loginLimit struct {
-	Attempts int
-	ResetAt  time.Time
+	store        *Store
+	configStore  configstore.ConfigStore
+	logManager   logging.LogManager
+	dummyHash    string
+	loginLimiter lib.PasswordLimiter
 }
 
 func NewHandler(ctx context.Context, configStore configstore.ConfigStore, logManager logging.LogManager) (*Handler, error) {
@@ -64,7 +57,7 @@ func NewHandler(ctx context.Context, configStore configstore.ConfigStore, logMan
 	}
 	return &Handler{
 		store: store, configStore: configStore, logManager: logManager,
-		dummyHash: dummyHash, loginLimits: make(map[string]loginLimit),
+		dummyHash: dummyHash,
 	}, nil
 }
 
@@ -122,10 +115,11 @@ func sameOriginAdminRequest(ctx *fasthttp.RequestCtx) bool {
 	if err != nil || parsed.Host == "" {
 		return false
 	}
-	host := strings.TrimSpace(string(ctx.Request.Header.Peek("X-Forwarded-Host")))
-	if host == "" {
-		host = string(ctx.Host())
-	}
+	// The request Host is the only trust anchor available here. A client can
+	// supply X-Forwarded-Host directly unless a trusted proxy strips and
+	// rewrites it before this handler, so accepting that header would let a
+	// cross-site request choose an Origin that passes this check.
+	host := string(ctx.Host())
 	return strings.EqualFold(parsed.Host, host)
 }
 
@@ -183,14 +177,7 @@ func (h *Handler) CheckVirtualKeyValueAccess(ctx context.Context, virtualKeyValu
 }
 
 func (h *Handler) virtualKeyID(ctx context.Context, value string) (string, error) {
-	virtualKey, err := h.configStore.GetVirtualKeyByValue(ctx, value)
-	if err != nil || virtualKey == nil {
-		if err != nil {
-			return "", err
-		}
-		return "", gorm.ErrRecordNotFound
-	}
-	return virtualKey.ID, nil
+	return configstore.LookupVirtualKeyID(ctx, h.configStore, value)
 }
 
 type employeePayload struct {
@@ -501,11 +488,13 @@ func (h *Handler) login(ctx *fasthttp.RequestCtx) {
 		sendError(ctx, 400, "请求格式错误")
 		return
 	}
-	limitKey := ctx.RemoteAddr().String() + "|" + normalizeUsername(payload.Username)
-	if !h.allowLoginAttempt(limitKey) {
+	finish, allowed := h.loginLimiter.Begin(ctx.RemoteIP().String(), normalizeUsername(payload.Username))
+	if !allowed {
 		sendError(ctx, 429, "登录尝试过于频繁，请稍后再试")
 		return
 	}
+	authenticated := false
+	defer func() { finish(authenticated) }()
 	employee, err := h.store.GetByUsername(ctx, payload.Username)
 	if err != nil {
 		// 对不存在的用户执行同成本比较，避免明显的用户名枚举时序差异。
@@ -523,7 +512,12 @@ func (h *Handler) login(ctx *fasthttp.RequestCtx) {
 	}
 	matched, compareErr := encrypt.CompareHash(employee.PasswordHash, payload.Password)
 	if compareErr != nil || !matched {
-		_ = h.store.RecordFailedLogin(ctx, employee)
+		if err := h.store.RecordFailedLogin(ctx, employee); err != nil {
+			// Do not hide a failed lockout write behind a normal 401: without
+			// persistence, repeated guesses could bypass the account lockout.
+			sendError(ctx, fasthttp.StatusInternalServerError, "登录状态更新失败，请重试")
+			return
+		}
 		sendError(ctx, 401, "用户名或密码错误")
 		return
 	}
@@ -542,34 +536,13 @@ func (h *Handler) login(ctx *fasthttp.RequestCtx) {
 		sendError(ctx, 500, "创建会话失败")
 		return
 	}
+	// Release the password-attempt reservation only after the session is durable;
+	// a storage failure must not make a failed login look successful to the limiter.
+	authenticated = true
 	_ = h.store.RecordSuccessfulLogin(ctx, employee.ID)
-	h.clearLoginLimit(limitKey)
 	setEmployeeCookie(ctx, token, expires)
 	setCSRFCookie(ctx, csrf, expires)
 	sendJSON(ctx, map[string]any{"employee": employee, "csrf_token": csrf})
-}
-
-func (h *Handler) allowLoginAttempt(key string) bool {
-	h.loginMu.Lock()
-	defer h.loginMu.Unlock()
-	now := time.Now()
-	limit := h.loginLimits[key]
-	if limit.ResetAt.IsZero() || !limit.ResetAt.After(now) {
-		limit = loginLimit{ResetAt: now.Add(15 * time.Minute)}
-	}
-	if limit.Attempts >= 20 {
-		h.loginLimits[key] = limit
-		return false
-	}
-	limit.Attempts++
-	h.loginLimits[key] = limit
-	return true
-}
-
-func (h *Handler) clearLoginLimit(key string) {
-	h.loginMu.Lock()
-	delete(h.loginLimits, key)
-	h.loginMu.Unlock()
 }
 
 func setEmployeeCookie(ctx *fasthttp.RequestCtx, value string, expires time.Time) {
@@ -644,7 +617,10 @@ func (h *Handler) logout(ctx *fasthttp.RequestCtx) {
 	if !ok {
 		return
 	}
-	_ = h.store.DeleteSession(ctx, session.TokenHash)
+	if err := h.store.DeleteSession(ctx, session.TokenHash); err != nil {
+		sendError(ctx, 500, "退出登录失败，请重试")
+		return
+	}
 	clearEmployeeCookie(ctx)
 	ctx.SetStatusCode(fasthttp.StatusNoContent)
 }
@@ -666,6 +642,11 @@ func (h *Handler) changePassword(ctx *fasthttp.RequestCtx) {
 		sendError(ctx, 400, err.Error())
 		return
 	}
+	finish, allowed := h.loginLimiter.Begin(ctx.RemoteIP().String(), normalizeUsername(employee.Username))
+	if !allowed {
+		sendError(ctx, 429, "密码验证过于频繁，请稍后再试")
+		return
+	}
 	matched, _ := encrypt.CompareHash(employee.PasswordHash, payload.CurrentPassword)
 	if !matched {
 		sendError(ctx, 401, "当前密码错误")
@@ -675,6 +656,9 @@ func (h *Handler) changePassword(ctx *fasthttp.RequestCtx) {
 		sendError(ctx, 500, "修改密码失败")
 		return
 	}
+	// Release the reservation only after the password is durable. A storage
+	// failure must remain visible to the limiter so retries cannot bypass it.
+	finish(true)
 	if err := h.store.DeleteOtherSessions(ctx, employee.ID, session.TokenHash); err != nil {
 		sendError(ctx, 500, "密码已更新，但会话清理失败，请重新登录")
 		return

@@ -2,6 +2,7 @@
 	import { getAppName } from '../lib/branding';
 	import { onMount } from 'svelte';
 	import { useTranslation } from '@svadmin/core/i18n';
+	import { TableSummary } from '@svadmin/ui';
 	import { displayError } from '../lib/forms';
 	import { requestJson } from '../lib/api';
 	import { bucketLatencyAverage, providerMetric, sumProviderMetric, weightedAverage } from '../lib/dashboard-metrics';
@@ -39,6 +40,7 @@
 	let dimension = $state('team');
 	let isLoading = $state(true);
 	let error = $state('');
+	let loadSeq = 0;
 
 	const stats = $derived(data?.overview.stats);
 	const cacheHits = $derived((stats?.direct_cache_hits ?? 0) + (stats?.semantic_cache_hits ?? 0));
@@ -53,6 +55,10 @@
 	const providerRows = $derived(providerUsageRows(data));
 	const modelRows = $derived(data?.model_rankings.rankings.rankings ?? []);
 	const dimensionRows = $derived(data?.dimension_rankings[dimension]?.rankings ?? []);
+	const rankingSummaryRows = $derived.by<Record<string, unknown>[]>(() => {
+		const rows = tab === 'providers' ? providerRows : tab === 'models' ? modelRows : dimensionRows;
+		return rows.map((row) => ({ ...row }));
+	});
 
 	function numberValue(value: unknown): number {
 		return typeof value === 'number' && Number.isFinite(value) ? value : 0;
@@ -107,14 +113,18 @@
 	}
 
 	async function load(): Promise<void> {
+		const sequence = ++loadSeq;
+		const requestedPeriod = period;
 		isLoading = true;
 		error = '';
 		try {
-			data = await requestJson<DashboardData>(`/api/logs/dashboard?period=${encodeURIComponent(period)}&limit=20`);
+			const nextData = await requestJson<DashboardData>(`/api/logs/dashboard?period=${encodeURIComponent(requestedPeriod)}&limit=20`);
+			if (sequence !== loadSeq || period !== requestedPeriod) return;
+			data = nextData;
 		} catch (cause) {
-			error = displayError(cause, i18n.t('elygate.loadFailed'));
+			if (sequence === loadSeq && period === requestedPeriod) error = displayError(cause, i18n.t('elygate.loadFailed'));
 		} finally {
-			isLoading = false;
+			if (sequence === loadSeq) isLoading = false;
 		}
 	}
 
@@ -146,13 +156,13 @@
 			<p>{i18n.t('elygate.dashboardHint')}</p>
 		</div>
 		<div class="heading-actions">
-			<select bind:value={period} onchange={() => void load()} aria-label={i18n.t('elygate.timeRange')}>
+				<select bind:value={period} onchange={() => void load()} disabled={isLoading} aria-label={i18n.t('elygate.timeRange')}>
 				<option value="1h">{i18n.t('elygate.lastHour')}</option>
 				<option value="24h">{i18n.t('elygate.lastDay')}</option>
 				<option value="7d">{i18n.t('elygate.lastWeek')}</option>
 				<option value="30d">{i18n.t('elygate.lastMonth')}</option>
 			</select>
-			<button type="button" onclick={exportCsv} disabled={!data}>{i18n.t('elygate.exportCsv')}</button>
+				<button type="button" onclick={exportCsv} disabled={!data || isLoading}>{i18n.t('elygate.exportCsv')}</button>
 			<button class="primary" type="button" onclick={() => void load()} disabled={isLoading}>{i18n.t('elygate.refresh')}</button>
 		</div>
 	</header>
@@ -183,9 +193,35 @@
 			{/each}
 		</div>
 	{:else if tab === 'providers'}
-		{@render RankingTable(providerRows, 'provider', i18n)}
+		<div class="ranking-stack">
+			<TableSummary
+				columns={[
+					{ key: 'total_requests', label: i18n.t('elygate.totalRequests'), align: 'right' },
+					{ key: 'total_tokens', label: i18n.t('elygate.tokenUsage'), align: 'right' },
+					{ key: 'total_cost', label: i18n.t('elygate.totalCost'), align: 'right' },
+				]}
+				data={rankingSummaryRows}
+				aggregations={{ total_requests: 'sum', total_tokens: 'sum', total_cost: 'sum' }}
+				precision={{ total_cost: 4 }}
+				suffix={{ total_cost: ' USD' }}
+			/>
+			{@render RankingTable(providerRows, 'provider', i18n)}
+		</div>
 	{:else if tab === 'models'}
-		{@render RankingTable(modelRows, 'model', i18n)}
+		<div class="ranking-stack">
+			<TableSummary
+				columns={[
+					{ key: 'total_requests', label: i18n.t('elygate.totalRequests'), align: 'right' },
+					{ key: 'total_tokens', label: i18n.t('elygate.tokenUsage'), align: 'right' },
+					{ key: 'total_cost', label: i18n.t('elygate.totalCost'), align: 'right' },
+				]}
+				data={rankingSummaryRows}
+				aggregations={{ total_requests: 'sum', total_tokens: 'sum', total_cost: 'sum' }}
+				precision={{ total_cost: 4 }}
+				suffix={{ total_cost: ' USD' }}
+			/>
+			{@render RankingTable(modelRows, 'model', i18n)}
+		</div>
 	{:else if tab === 'mcp'}
 		<div class="mcp-grid">
 			<article class="chart-card"><div><span>{i18n.t('elygate.mcpCalls')}</span><strong>{integer(chartTotal(data?.mcp.volume.buckets ?? [], 'count'))}</strong></div><svg viewBox="0 0 100 56" preserveAspectRatio="none"><polyline points={chartPoints(data?.mcp.volume.buckets ?? [], 'count')} /></svg></article>
@@ -198,7 +234,20 @@
 				<button type="button" class:is-active={dimension === item} onclick={() => (dimension = item)}>{i18n.t(`elygate.dimension.${item}`)}</button>
 			{/each}
 		</div>
-		{@render RankingTable(dimensionRows, 'name', i18n)}
+		<div class="ranking-stack">
+			<TableSummary
+				columns={[
+					{ key: 'total_requests', label: i18n.t('elygate.totalRequests'), align: 'right' },
+					{ key: 'total_tokens', label: i18n.t('elygate.tokenUsage'), align: 'right' },
+					{ key: 'total_cost', label: i18n.t('elygate.totalCost'), align: 'right' },
+				]}
+				data={rankingSummaryRows}
+				aggregations={{ total_requests: 'sum', total_tokens: 'sum', total_cost: 'sum' }}
+				precision={{ total_cost: 4 }}
+				suffix={{ total_cost: ' USD' }}
+			/>
+			{@render RankingTable(dimensionRows, 'name', i18n)}
+		</div>
 	{/if}
 
 	<p class="updated">{i18n.t('elygate.lastUpdated')}: {data?.meta.generated_at ? new Date(data.meta.generated_at).toLocaleString(i18n.locale) : '—'}</p>
@@ -235,6 +284,7 @@
 	.chart-card svg { display: block; height: 145px; margin-top: .7rem; width: 100%; }
 	polyline { fill: none; stroke: var(--primary); stroke-width: 2; vector-effect: non-scaling-stroke; }
 	.table-wrap { background: var(--card); border: 1px solid var(--border); border-radius: .85rem; overflow-x: auto; }
+	.ranking-stack { display: grid; gap: .75rem; }
 	table { border-collapse: collapse; min-width: 900px; width: 100%; }
 	th, td { border-bottom: 1px solid var(--border); font-size: .8rem; padding: .7rem .8rem; text-align: left; }
 	th { color: var(--muted-foreground); }

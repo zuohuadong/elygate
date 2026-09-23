@@ -1,0 +1,244 @@
+diff --git a/node_modules/@svadmin/ui/.bun-tag-1a5e58c4a01032ea b/.bun-tag-1a5e58c4a01032ea
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/node_modules/@svadmin/ui/.bun-tag-6e392fcc50718d8c b/.bun-tag-6e392fcc50718d8c
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/dist/components/AboutSettings.svelte b/dist/components/AboutSettings.svelte
+index 52cabd2a1e83732c4bb3ba1a3c847a3daae3235a..d2fdcdd9c58943919b6e87962b0b71afea30b610 100644
+--- a/dist/components/AboutSettings.svelte
++++ b/dist/components/AboutSettings.svelte
+@@ -7,15 +7,13 @@
+ 
+   const i18n = useTranslation();
+   const adminContext = captureAdminContext();
+-  const resources = $derived(adminContext.resources);
++  const resources = $derived(adminContext.resources.filter((resource) => resource.meta?.aboutVisible !== false));
+   const providerNames = $derived(adminContext.getDataProviderNames());
+-  let { version: suppliedVersion }: { version?: string } = $props();
+-  const buildVersion = '__SVADMIN_VERSION__';
+-  const version = $derived(suppliedVersion ?? (
+-    buildVersion.startsWith('__')
+-      ? (i18n.locale === 'zh-CN' ? '开发构建（未提供版本）' : 'Development build (version unavailable)')
+-      : buildVersion
+-  ));
++  const version = '0.76.0';
++  const environmentLabel = (value: string): string => {
++    if (i18n.locale !== 'zh-CN') return value;
++    return ({ light: '浅色', dark: '深色', system: '跟随系统', neutral: '中性色', indigo: '靛蓝色', blue: '蓝色', green: '绿色', rose: '玫瑰色', orange: '橙色', violet: '紫罗兰色' } as Record<string, string>)[value] ?? value;
++  };
+ </script>
+ 
+ <div class="svadmin-u-b3542e058833">
+@@ -24,12 +22,12 @@
+     <DescriptionList columns={2} items={[
+       { label: i18n.t('settings.version'), value: version },
+       { label: i18n.t('settings.language'), value: i18n.locale },
+-      { label: i18n.t('settings.themeMode'), value: getResolvedTheme() },
+-      { label: i18n.t('settings.colorAccent'), value: getColorTheme() },
++      { label: i18n.t('settings.themeMode'), value: environmentLabel(getResolvedTheme()) },
++      { label: i18n.t('settings.colorAccent'), value: environmentLabel(getColorTheme()) },
+     ]} />
+     <div class="svadmin-u-b950dda299d3 svadmin-u-18049387f0af svadmin-u-52be28846b5f">
+       <h3 class="svadmin-u-fc7473ca09eb svadmin-u-2689f3958069 svadmin-u-d4108abe6359">{i18n.t('settings.registeredResources')}</h3>
+-      <div class="svadmin-u-eccd13ef4f2f svadmin-u-60fbb7713999 svadmin-u-1eb5c6df38c1 svadmin-u-77a2a20e90d4">{#each resources as resource (resource.name)}<Badge variant="outline" class="svadmin-u-0e65706bcccd svadmin-u-359090c2d529">{resource.name}</Badge>{:else}<span class="svadmin-u-fc7473ca09eb svadmin-u-bfa603190748">—</span>{/each}</div>
++      <div class="svadmin-u-eccd13ef4f2f svadmin-u-60fbb7713999 svadmin-u-1eb5c6df38c1 svadmin-u-77a2a20e90d4">{#each resources as resource (resource.name)}<Badge variant="outline" class="svadmin-u-359090c2d529">{resource.label || resource.name}</Badge>{:else}<span class="svadmin-u-fc7473ca09eb svadmin-u-bfa603190748">—</span>{/each}</div>
+     </div>
+     <div class="svadmin-u-b950dda299d3 svadmin-u-18049387f0af svadmin-u-52be28846b5f">
+       <h3 class="svadmin-u-fc7473ca09eb svadmin-u-2689f3958069 svadmin-u-d4108abe6359">{i18n.t('settings.dataProvider')}</h3>
+diff --git a/dist/components/AdminApp.svelte b/dist/components/AdminApp.svelte
+index 3ccbe5f0981bb5a21999f837e9056c8ca24aae5e..7e5dc8f8c0bbcd0b99cd72d1c8d99332db33c5fb 100644
+--- a/dist/components/AdminApp.svelte
++++ b/dist/components/AdminApp.svelte
+@@ -396,6 +396,8 @@
+       pageLabel = translation.t('auth.login');
+     } else if (renderedRoute === '/' || renderedRoute === '/inventory-dashboard') {
+       pageLabel = translation.t('common.dashboard');
++    } else {
++      pageLabel = translation.t('common.pageNotFound');
+     }
+ 
+     return pageLabel && pageLabel !== title ? `${pageLabel} - ${title}` : title;
+@@ -572,7 +574,7 @@
+             </div>
+           </div>
+         {:else}
+-      {#key renderedRoute + (renderedParams['resource'] ?? '') + (renderedParams['id'] ?? '') + (renderedParams['variant'] ?? '') + (renderedParams['columns'] ?? '')}
++      {#key renderedRoute + (renderedParams.resource ?? '') + (renderedParams['id'] ?? '') + (renderedParams['variant'] ?? '') + (renderedParams['columns'] ?? '')}
+       <div class="svadmin-page-enter">
+       {#if renderedRoute === '/public-profile'}
+         <LazyPage loader={loadPublicProfilePage} props={{ variant: 'default', initialTab: 'projects' } as const} />
+diff --git a/dist/components/ApiSettings.svelte b/dist/components/ApiSettings.svelte
+index 874f9b3d870d8d5fcc175af3f91aa1ce31485d83..42db6a2c5a61f97ff3b1afcd3e45a20a42e8ebd1 100644
+--- a/dist/components/ApiSettings.svelte
++++ b/dist/components/ApiSettings.svelte
+@@ -228,7 +228,7 @@
+     {/snippet}
+     {#snippet secondary()}
+       <SettingsGroup title={i18n.t('api.generateTitle')} description={i18n.t('api.generateDesc')}>
+-        <form onsubmit={handleGenerateKey} class="svadmin-u-b43b4c086d9a"><div class="svadmin-u-6f7e013d6499"><Label for="api-key-name">{i18n.t('api.keyName')}</Label><Input id="api-key-name" placeholder="CI deployment token" bind:value={newKeyName} required disabled={!credentialProvider || submitting} /></div><fieldset class="svadmin-u-6ed543e2fbbb" disabled={!credentialProvider || submitting}><legend class="svadmin-u-fc7473ca09eb svadmin-u-2689f3958069 svadmin-u-d4108abe6359">{i18n.t('api.permissions')}</legend>{#each Object.keys(newKeyPermissions) as permission (permission)}<div class="svadmin-u-60fbb7713999 svadmin-u-3960ffc248d9 svadmin-u-77a2a20e90d4"><Checkbox id={`perm-${permission}`} bind:checked={newKeyPermissions[permission as keyof typeof newKeyPermissions]} /><Label for={`perm-${permission}`} class="svadmin-u-34516836730d svadmin-u-fc7473ca09eb svadmin-u-8ecebc9f80e6">{permission}</Label></div>{/each}</fieldset><Button type="submit" class="svadmin-u-6da6a3c3f741" disabled={!credentialProvider || submitting || !newKeyName.trim()}>{i18n.t('api.generateButton')}</Button></form>
++        <form onsubmit={handleGenerateKey} class="svadmin-u-b43b4c086d9a"><div class="svadmin-u-6f7e013d6499"><Label for="api-key-name">{i18n.t('api.keyName')}</Label><Input id="api-key-name" placeholder={isZh ? 'CI 部署令牌' : 'CI deployment token'} bind:value={newKeyName} required disabled={!credentialProvider || submitting} /></div><fieldset class="svadmin-u-6ed543e2fbbb" disabled={!credentialProvider || submitting}><legend class="svadmin-u-fc7473ca09eb svadmin-u-2689f3958069 svadmin-u-d4108abe6359">{i18n.t('api.permissions')}</legend>{#each Object.keys(newKeyPermissions) as permission (permission)}<div class="svadmin-u-60fbb7713999 svadmin-u-3960ffc248d9 svadmin-u-77a2a20e90d4"><Checkbox id={`perm-${permission}`} bind:checked={newKeyPermissions[permission as keyof typeof newKeyPermissions]} /><Label for={`perm-${permission}`} class="svadmin-u-34516836730d svadmin-u-fc7473ca09eb svadmin-u-8ecebc9f80e6">{isZh ? ({ Read: '读取', Write: '写入', Delete: '删除', Admin: '管理员' }[permission] ?? permission) : permission}</Label></div>{/each}</fieldset><Button type="submit" class="svadmin-u-6da6a3c3f741" disabled={!credentialProvider || submitting || !newKeyName.trim()}>{i18n.t('api.generateButton')}</Button></form>
+       </SettingsGroup>
+     {/snippet}
+   </WorkspaceLayout>
+diff --git a/dist/components/CommandPalette.svelte b/dist/components/CommandPalette.svelte
+index 84f82464f53465a62a39185afec77133d4b96028..ac50b6e5519c83295e80c5794329ae3d0b60749c 100644
+--- a/dist/components/CommandPalette.svelte
++++ b/dist/components/CommandPalette.svelte
+@@ -103,7 +103,7 @@
+             {#if adminContext.accessControlProvider}
+               <CanAccess resource={r.name} action="list">
+                 <Command.Item
+-                  value={r.name}
++                  value={`${r.name} ${r.label}`}
+                   onSelect={() => act(() => navigation.list(r.name))}
+                   class={itemClass}
+                 >
+@@ -113,7 +113,7 @@
+               </CanAccess>
+             {:else}
+               <Command.Item
+-                value={r.name}
++                value={`${r.name} ${r.label}`}
+                 onSelect={() => act(() => navigation.list(r.name))}
+                 class={itemClass}
+               >
+@@ -132,13 +132,13 @@
+             {#if r.canCreate !== false}
+               {#if adminContext.accessControlProvider}
+                 <CanAccess resource={r.name} action="create">
+-                  <Command.Item value={"create-" + r.name} onSelect={() => act(() => navigation.create(r.name))} class={itemClass}>
++                  <Command.Item value={`${"create-" + r.name} ${r.label}`} onSelect={() => act(() => navigation.create(r.name))} class={itemClass}>
+                     <Plus class="svadmin-u-11e59c6d5f6b svadmin-u-dc7972ebf3f3 svadmin-u-bfa603190748" />
+                     {i18n.t('common.create')} {r.label}
+                   </Command.Item>
+                 </CanAccess>
+               {:else}
+-                <Command.Item value={"create-" + r.name} onSelect={() => act(() => navigation.create(r.name))} class={itemClass}>
++                <Command.Item value={`${"create-" + r.name} ${r.label}`} onSelect={() => act(() => navigation.create(r.name))} class={itemClass}>
+                   <Plus class="svadmin-u-11e59c6d5f6b svadmin-u-dc7972ebf3f3 svadmin-u-bfa603190748" />
+                   {i18n.t('common.create')} {r.label}
+                 </Command.Item>
+diff --git a/dist/components/Header.svelte b/dist/components/Header.svelte
+index 847a5be1dc3e2889c4f5353dc0384e4130c3bc5f..87974274fc62955c61921877897b8488d6dce8dc 100644
+--- a/dist/components/Header.svelte
++++ b/dist/components/Header.svelte
+@@ -71,7 +71,7 @@
+       <Button variant="outline" size="sm" onclick={onSearchClick} aria-label={i18n.t('common.search')} class="svadmin-header-search svadmin-u-77a2a20e90d4 svadmin-u-bfa603190748 svadmin-u-e7a768f922d2 svadmin-u-0e17f2bd9074 svadmin-u-5f22e64f2282 svadmin-u-05faf5c801ff">
+         <Search class="svadmin-u-7fc7f732bf7e svadmin-u-bf600f8e029c" />
+         <span class="svadmin-u-99d72c7fc3e2 svadmin-u-ee3c1259a368 svadmin-u-359090c2d529">{i18n.t('common.search')}</span>
+-        <kbd class="svadmin-u-99d72c7fc3e2 svadmin-u-e3fd07f96126 svadmin-u-3960ffc248d9 svadmin-u-a3899220f90e svadmin-u-07389a777c1f svadmin-u-ca6bcd4b6f3f svadmin-u-706701550477 svadmin-u-45d828117213 svadmin-u-465609a240a8 svadmin-u-1dc571a3609f svadmin-u-2689f3958069 svadmin-u-0e65706bcccd svadmin-u-bfa603190748">
++        <kbd style="flex-shrink: 0; white-space: nowrap" class="whitespace-nowrap svadmin-u-99d72c7fc3e2 svadmin-u-e3fd07f96126 svadmin-u-3960ffc248d9 svadmin-u-a3899220f90e svadmin-u-07389a777c1f svadmin-u-ca6bcd4b6f3f svadmin-u-706701550477 svadmin-u-45d828117213 svadmin-u-465609a240a8 svadmin-u-1dc571a3609f svadmin-u-2689f3958069 svadmin-u-0e65706bcccd svadmin-u-bfa603190748">
+           <span class="svadmin-u-359090c2d529">⌘</span>K
+         </kbd>
+       </Button>
+diff --git a/dist/components/Layout.svelte b/dist/components/Layout.svelte
+index 4600fb66aadc24317a91622dbb31fd64791a36ea..488e13fd41bb944611e2ae7dafceaf024544f0d3 100644
+--- a/dist/components/Layout.svelte
++++ b/dist/components/Layout.svelte
+@@ -106,7 +106,7 @@
+ 
+   function handleGlobalKeydown(e: KeyboardEvent) {
+     if (!ownsLayoutEvent(e)) return;
+-    if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
++    if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'k' || e.code === 'KeyK')) {
+       e.preventDefault();
+       commandOpen = true;
+     }
+diff --git a/dist/components/ProfilePage.svelte b/dist/components/ProfilePage.svelte
+index 554c68901189ac4ed89c61382cd676a7299546a4..eb22f836ea0277ac50b6aa76a4531d725ce11a6e 100644
+--- a/dist/components/ProfilePage.svelte
++++ b/dist/components/ProfilePage.svelte
+@@ -289,7 +289,7 @@
+ 
+         <PasswordInput
+           id="new-password"
+-          label={i18n.t('auth.password')}
++          label={i18n.t('profile.newPassword')}
+           bind:value={newPassword}
+           autocomplete="new-password"
+           showStrength
+diff --git a/dist/components/SecuritySettings.svelte b/dist/components/SecuritySettings.svelte
+index 93c701afbde355f5be60e105cc2ab32625252399..156f9db08fa9e52d9a2562eae226a6a6d596e276 100644
+--- a/dist/components/SecuritySettings.svelte
++++ b/dist/components/SecuritySettings.svelte
+@@ -28,6 +28,7 @@
+   let newPassword = $state('');
+   let confirmPassword = $state('');
+   let passwordErrorMessage = $state('');
++  let passwordChangedRecently = $state(false);
+   let changingPassword = $state(false);
+   let requestId = 0;
+   let pendingDanger = $state<{ label: string; run: () => Promise<void> } | null>(null);
+@@ -73,6 +74,7 @@
+     newPassword = '';
+     confirmPassword = '';
+     passwordErrorMessage = '';
++    passwordChangedRecently = false;
+     changingPassword = false;
+     updatingMfa = false;
+     revoking = null;
+@@ -120,6 +122,7 @@
+       if (!result.success) throw new Error(result.error?.message ?? (isZh ? '密码修改失败' : 'Password update failed'));
+       if (currentRequest !== requestId) return;
+       notifyWithProvider({ type: 'success', message: i18n.t('profile.passwordChanged') }, adminContext.notificationProvider);
++      passwordChangedRecently = true;
+       currentPassword = '';
+       newPassword = '';
+       confirmPassword = '';
+@@ -195,6 +198,7 @@
+       <PasswordInput id="security-current-password" label={i18n.t('profile.currentPassword')} bind:value={currentPassword} autocomplete="current-password" disabled={!authProvider?.updatePassword || changingPassword} />
+       <PasswordInput id="security-new-password" label={i18n.t('profile.newPassword')} bind:value={newPassword} autocomplete="new-password" showStrength disabled={!authProvider?.updatePassword || changingPassword} />
+       <PasswordInput id="security-confirm-password" label={i18n.t('auth.confirmPassword')} bind:value={confirmPassword} autocomplete="new-password" disabled={!authProvider?.updatePassword || changingPassword} />
++      {#if passwordChangedRecently}<p class="text-xs text-muted-foreground">{isZh ? '最近修改：刚刚' : 'Last changed: just now'}</p>{/if}
+       <Button type="submit" disabled={!authProvider?.updatePassword || changingPassword}>{changingPassword ? (isZh ? '更新中...' : 'Updating...') : i18n.t('profile.updatePassword')}</Button>
+     </form>
+   </SettingsGroup>
+diff --git a/dist/components/Sidebar.svelte b/dist/components/Sidebar.svelte
+index 1e4ea2dd2b6dc37288bcdffab2648604f7b967ab..4393f8632c097de6100679a1ae40033b4dec41ce 100644
+--- a/dist/components/Sidebar.svelte
++++ b/dist/components/Sidebar.svelte
+@@ -463,7 +463,7 @@
+           />
+           <div class="svadmin-u-36e579c0b41c svadmin-u-7e0b7cdf1a94">
+             <p class="svadmin-u-f283ea9bea0e svadmin-u-a14daebf7748 svadmin-u-2689f3958069 svadmin-u-a7a63217e098">{identity.name}</p>
+-            <p class="svadmin-u-f283ea9bea0e svadmin-u-d058ca6de60f svadmin-u-5f1ff8fe8768">{((identity as Record<string, unknown>)['role'] || (identity as Record<string, unknown>)['roleName']) ?? 'User'}</p>
++            <p class="svadmin-u-f283ea9bea0e svadmin-u-d058ca6de60f svadmin-u-5f1ff8fe8768">{((identity as Record<string, unknown>)['role'] || (identity as Record<string, unknown>)['roleName']) ?? (i18n.locale === 'zh-CN' ? '用户' : 'User')}</p>
+           </div>
+           <button
+             class="svadmin-u-d0a52b312f7d svadmin-u-cbbf90f9a828 svadmin-u-60fbb7713999 svadmin-u-3960ffc248d9 svadmin-u-86843cf1e227 svadmin-u-421ac2be5045 svadmin-u-3e3534b4c5df svadmin-u-646e10356266 svadmin-u-0b48b877be2a svadmin-u-ceb69a6b0e5f"
+diff --git a/dist/components/SvadminLogo.svelte b/dist/components/SvadminLogo.svelte
+index 66d1de69c708067bbbcecdeeff6db987f4635b36..cf97e314c2bc7231d0361c4b1baddbc54ddbeae3 100644
+--- a/dist/components/SvadminLogo.svelte
++++ b/dist/components/SvadminLogo.svelte
+@@ -9,6 +9,7 @@
+ </script>
+ 
+ <span
++  data-svadmin-logo
+   aria-hidden="true"
+   class="svadmin-u-bb0c4bfc52bd svadmin-u-012fbd121f37 svadmin-u-5f22e64f2282 svadmin-u-75b1bec3ea0e svadmin-u-438b2237b8d6 {onDark ? 'svadmin-u-3daca9af0861 svadmin-u-8b434b651a9e' : ''}"
+   style:width={`${size}px`}
+diff --git a/dist/components/ui/sheet/sheet.svelte b/dist/components/ui/sheet/sheet.svelte
+index 90ac7ac490c093a7ba5534706a9619329a730f1c..a087e3bdb13eeafe57edda267e3cb94dbd135d6e 100644
+--- a/dist/components/ui/sheet/sheet.svelte
++++ b/dist/components/ui/sheet/sheet.svelte
+@@ -34,7 +34,9 @@
+ /* eslint-disable svelte/no-unused-svelte-ignore */
+ 	import { tick } from "svelte";
+ 	import { cn, type WithElementRef } from "../../../utils.js";
++	import { useTranslation } from "@svadmin/core/i18n";
+ 	import type { HTMLAttributes } from "svelte/elements";
++	const i18n = useTranslation();
+ 
+ 	const focusableSelector = [
+ 		'a[href]',
+@@ -60,7 +62,7 @@
+ 		side = "right",
+ 		onClose,
+ 		onCloseRequest,
+-		closeLabel = "Close",
++		closeLabel = i18n.locale === "zh-CN" ? "关闭" : "Close",
+ 		class: className,
+ 		tabindex = -1,
+ 		children,

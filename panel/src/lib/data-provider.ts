@@ -43,16 +43,18 @@ function unwrapMutation(resource: string, payload: unknown): JsonRecord {
 
 export const bifrostDataProvider: DataProvider = {
 	getList: async <TData extends BaseRecord>(params: GetListParams) => {
-		const payload = await requestJson<unknown>(listPath(params.resource, params));
+		const signal = (params as GetListParams & { signal?: AbortSignal }).signal;
+		const payload = await requestJson<unknown>(listPath(params.resource, params), { signal });
 		const result = listResponse(params.resource, payload);
 		return result as { data: TData[]; total: number };
 	},
 	getOne: async <TData extends BaseRecord>(params: GetOneParams) => {
+		const signal = (params as GetOneParams & { signal?: AbortSignal }).signal;
 		let path: string;
 		if (params.resource === 'providers') path = `/api/providers/${encodePathSegment(params.id)}`;
 		else if (params.resource === 'virtual-keys') path = `/api/governance/virtual-keys/${encodePathSegment(params.id)}`;
 		else throw new Error(`Unsupported getOne resource: ${params.resource}`);
-		const payload = await requestJson<unknown>(path);
+		const payload = await requestJson<unknown>(path, { signal });
 		const data = params.resource === 'virtual-keys' ? getObjectPayload(payload, 'virtual_key') : getObjectPayload(payload, 'data');
 		return { data: data as TData };
 	},

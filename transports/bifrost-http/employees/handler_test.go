@@ -1,9 +1,13 @@
 package employees
 
 import (
+	"context"
+	"net"
 	"testing"
+	"time"
 
 	"github.com/maximhq/bifrost/core/schemas"
+	"github.com/maximhq/bifrost/framework/encrypt"
 	"github.com/stretchr/testify/require"
 	"github.com/valyala/fasthttp"
 )
@@ -49,6 +53,16 @@ func TestAdminAccessMiddlewareRejectsCrossOriginAndNonJSONWrites(t *testing.T) {
 	middleware(crossOrigin)
 	require.Equal(t, fasthttp.StatusForbidden, crossOrigin.Response.StatusCode())
 
+	spoofedForwardedHost := &fasthttp.RequestCtx{}
+	spoofedForwardedHost.Request.Header.SetMethod(fasthttp.MethodPost)
+	spoofedForwardedHost.Request.Header.SetContentType("application/json")
+	spoofedForwardedHost.Request.SetHost("admin.example.test")
+	spoofedForwardedHost.Request.Header.Set("Origin", "https://attacker.example.test")
+	spoofedForwardedHost.Request.Header.Set("X-Forwarded-Host", "attacker.example.test")
+	spoofedForwardedHost.SetUserValue(schemas.IsLocalAdminContextKey, true)
+	middleware(spoofedForwardedHost)
+	require.Equal(t, fasthttp.StatusForbidden, spoofedForwardedHost.Response.StatusCode())
+
 	sameOrigin := &fasthttp.RequestCtx{}
 	sameOrigin.Request.Header.SetMethod(fasthttp.MethodPost)
 	sameOrigin.Request.Header.SetContentType("application/json")
@@ -57,4 +71,25 @@ func TestAdminAccessMiddlewareRejectsCrossOriginAndNonJSONWrites(t *testing.T) {
 	sameOrigin.SetUserValue(schemas.IsLocalAdminContextKey, true)
 	middleware(sameOrigin)
 	require.Equal(t, fasthttp.StatusNoContent, sameOrigin.Response.StatusCode())
+}
+
+func TestLogoutPreservesSessionCookieWhenDeletionFails(t *testing.T) {
+	store, _ := testStore(t)
+	ctx := context.Background()
+	employee := &Employee{Username: "logout-user", Name: "Logout User", IsActive: true}
+	require.NoError(t, store.Create(ctx, employee, "StrongPassword!123", nil))
+	const token = "employee-session-token"
+	const csrf = "employee-session-csrf"
+	require.NoError(t, store.CreateSession(ctx, employee.ID, encrypt.HashSHA256(token), encrypt.HashSHA256(csrf), time.Now().Add(time.Hour)))
+	require.NoError(t, store.db(ctx).Exec(`CREATE TRIGGER block_employee_session_delete BEFORE DELETE ON elygate_employee_sessions BEGIN SELECT RAISE(ABORT, 'delete blocked'); END`).Error)
+
+	h := &Handler{store: store}
+	req := &fasthttp.RequestCtx{}
+	req.Init(&fasthttp.Request{}, &net.TCPAddr{IP: net.ParseIP("192.0.2.10"), Port: 12001}, nil)
+	req.Request.Header.Set("Cookie", employeeCookieName+"="+token)
+	req.Request.Header.Set("X-CSRF-Token", csrf)
+	h.logout(req)
+
+	require.Equal(t, fasthttp.StatusInternalServerError, req.Response.StatusCode())
+	require.Empty(t, req.Response.Header.Peek("Set-Cookie"))
 }

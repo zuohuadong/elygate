@@ -32,6 +32,13 @@ const (
 	// TraceAttrSessionID holds the session ID from the x-bf-session-id request
 	// header. The key matches the header name because connectors already read it.
 	TraceAttrSessionID = "x-bf-session-id"
+	// TraceAttrParentSessionID is observational parent identity and is never
+	// used as the stickiness key.
+	TraceAttrParentSessionID   = "parent_session_id"
+	TraceAttrAgentName         = "agent_name"
+	TraceAttrSessionClientType = "session_client_type"
+	TraceAttrIsSubagent        = "is_subagent"
+	TraceAttrIsFork            = "is_fork"
 	// TraceAttrDimensions holds the map[string]string of request dimensions
 	// parsed from x-bf-dim-* headers, keyed by bare dimension name.
 	TraceAttrDimensions = "bifrost.dimensions"
@@ -480,6 +487,17 @@ func (s *Span) SetAttribute(key string, value any) {
 		s.Attributes = make(map[string]any)
 	}
 	s.Attributes[key] = value
+}
+
+// GetAttribute reads one attribute under the span's lock.
+func (s *Span) GetAttribute(key string) (any, bool) {
+	if s == nil {
+		return nil, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	v, ok := s.Attributes[key]
+	return v, ok
 }
 
 // SetAttributes merges an already-built attribute map into the span under a
@@ -940,9 +958,8 @@ const (
 	// AttrBifrostWorkerHandoffMs is the scheduling latency between the provider
 	// worker sending the result and tryRequest receiving it (the worker->caller
 	// goroutine hop). It is real wall-time inside the overhead window that sits on
-	// no span, so it otherwise folds into "core"; the breakdown carves it into its
-	// own "worker-handoff" bucket. The reverse hop (enqueue->dequeue) is already the
-	// "queue-wait" span.
+	// no span; the breakdown carves it into its own "worker-handoff" bucket. The
+	// reverse hop (enqueue->dequeue) is already the "queue-wait" span.
 	AttrBifrostWorkerHandoffMs = "bifrost.worker.handoff_ms"
 
 	AttrBifrostProviderName        = "bifrost.provider.name"
@@ -959,6 +976,8 @@ const (
 	AttrBifrostCustomerName        = "bifrost.customer.name"
 	AttrBifrostBusinessUnitID      = "bifrost.business_unit.id"
 	AttrBifrostBusinessUnitName    = "bifrost.business_unit.name"
+	AttrBifrostProjectID           = "bifrost.project.id"
+	AttrBifrostProjectName         = "bifrost.project.name"
 	AttrBifrostTeamIDs             = "bifrost.team.ids"
 	AttrBifrostTeamNames           = "bifrost.team.names"
 	AttrBifrostCustomerIDs         = "bifrost.customer.ids"
@@ -970,9 +989,16 @@ const (
 	AttrBifrostUserEmail           = "bifrost.user.email"
 	AttrBifrostRetries             = "bifrost.retries"
 	AttrBifrostFallbackIndex       = "bifrost.fallback_index"
-	AttrBifrostAlias               = "bifrost.alias"               // original requested model when it differs from the resolved model
-	AttrBifrostRoutingEngineUsed   = "bifrost.routing_engine_used" // comma-joined routing engines that handled the request
+	AttrBifrostAlias               = "bifrost.alias"                // original requested model when it differs from the resolved model
+	AttrBifrostRoutingEngineUsed   = "bifrost.routing_engine_used"  // comma-joined routing engines that handled the request
+	AttrBifrostComplexityTier      = "bifrost.complexity_tier"      // complexity tier used for routing (SIMPLE/MEDIUM/COMPLEX); absent when no rule referenced complexity_tier
+	AttrBifrostComplexityMechanism = "bifrost.complexity_mechanism" // how the complexity tier was classified (semantic, llm, session, skipped)
+	AttrBifrostComplexityScore     = "bifrost.complexity_score"     // numeric confidence score produced by complexity classification
 	AttrBifrostStopSequencesJoined = "bifrost.request.stop_sequences"
+
+	// AttrBifrostErrorType is the normalized ErrorType, so span-derived connectors
+	// classify identically to the metrics. Absent on success.
+	AttrBifrostErrorType = "bifrost.error.type"
 
 	// OTel general semconv (no gen_ai prefix). The canonical error-type key,
 	// emitted from PopulateErrorAttributes.

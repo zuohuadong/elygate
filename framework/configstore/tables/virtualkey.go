@@ -2,6 +2,7 @@ package tables
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -36,12 +37,24 @@ type TableVirtualKeyProviderConfig struct {
 	// Relationships
 	RateLimit *TableRateLimit `gorm:"foreignKey:RateLimitID;onDelete:CASCADE" json:"rate_limit,omitempty"`
 	Budgets   []TableBudget   `gorm:"foreignKey:ProviderConfigID;constraint:OnDelete:CASCADE" json:"budgets,omitempty"`              // Multiple budgets with different reset intervals
-	Keys      []TableKey      `gorm:"many2many:governance_virtual_key_provider_config_keys;constraint:OnDelete:CASCADE" json:"keys"` // Empty means all keys allowed for this provider
+	Keys      []TableKey      `gorm:"many2many:governance_virtual_key_provider_config_keys;constraint:OnDelete:CASCADE" json:"keys"` // Empty means no keys allowed for this provider unless AllowAllKeys is set
 
 	// ModelBudgets carries per-model budgets/rate-limits under this provider for serialization
 	// only. They live in VK-scoped model configs (the source of truth), not this table; the
 	// handler hydrates this field when returning a VK so the sheet can render/edit them.
 	ModelBudgets []VKProviderModelBudget `gorm:"-" json:"model_budgets,omitempty"`
+}
+
+// KeyIDs returns the list of key IDs for this provider config, or ["*"] if AllowAllKeys is true.
+func (pc *TableVirtualKeyProviderConfig) KeyIDs() []string {
+	if pc.AllowAllKeys {
+		return []string{"*"}
+	}
+	keyIDs := make([]string, len(pc.Keys))
+	for i, key := range pc.Keys {
+		keyIDs[i] = key.KeyID
+	}
+	return keyIDs
 }
 
 // VKProviderModelBudget is one per-model budget/rate-limit group under a VK provider config,
@@ -238,12 +251,14 @@ type TableVirtualKey struct {
 	ProviderConfigs []TableVirtualKeyProviderConfig `gorm:"foreignKey:VirtualKeyID;constraint:OnDelete:CASCADE" json:"provider_configs"` // Empty means no providers allowed (deny-by-default)
 	MCPConfigs      []TableVirtualKeyMCPConfig      `gorm:"foreignKey:VirtualKeyID;constraint:OnDelete:CASCADE" json:"mcp_configs"`
 
-	// Foreign key relationships (mutually exclusive: either TeamID or CustomerID, not both)
+	// A team-owned key may also carry the team's parent customer for hierarchical governance.
 	TeamID      *string `gorm:"type:varchar(255);index" json:"team_id,omitempty"`
 	CustomerID  *string `gorm:"type:varchar(255);index" json:"customer_id,omitempty"`
 	RateLimitID *string `gorm:"type:varchar(255);index" json:"rate_limit_id,omitempty"`
 
 	CalendarAligned bool `gorm:"default:false" json:"calendar_aligned"`
+
+	AllowAllProviders bool `gorm:"default:false" json:"allow_all_providers"`
 
 	// Relationships
 	Team      *TableTeam      `gorm:"foreignKey:TeamID" json:"team,omitempty"`
@@ -257,6 +272,23 @@ type TableVirtualKey struct {
 	// Populated on the governance read paths from the external resolver; false in OSS.
 	IsAccessProfileManaged bool `gorm:"-" json:"is_access_profile_managed,omitempty"`
 
+	// AssignedUser is the user this key is assigned to, when any. Like
+	// IsAccessProfileManaged it is read-only and never persisted: the VK-user link
+	// lives in an enterprise table, so it is filled in on the governance read paths
+	// by a downstream resolver and stays nil in OSS. No omitempty - "no assignee" has
+	// to reach the UI as an explicit null. Absence carries the other half of the
+	// meaning, "not resolved", and is produced by MarshalJSON off AssigneeResolved
+	// rather than by a struct tag, which cannot tell the two nils apart.
+	AssignedUser *AssignedUser `gorm:"-" json:"assigned_user"`
+
+	// AssigneeResolved records whether AssignedUser is an answer or an absence of one.
+	// True means the assignee lookup ran and settled the question, so AssignedUser is
+	// authoritative (a user, or nil for genuinely unassigned) and marshals as
+	// `assigned_user`. False means nobody asked, or the resolver failed, and
+	// MarshalJSON drops the field so callers refetch instead of reading nil as
+	// "unassigned". Never persisted; set by the governance read paths.
+	AssigneeResolved bool `gorm:"-" json:"-"`
+
 	// Config hash is used to detect the changes synced from config.json file
 	// Every time we sync the config.json file, we will update the config hash
 	ConfigHash string `gorm:"type:varchar(255);null" json:"config_hash"`
@@ -264,10 +296,31 @@ type TableVirtualKey struct {
 	EncryptionStatus string `gorm:"type:varchar(20);default:'plain_text'" json:"-"`
 	ValueHash        string `gorm:"type:varchar(64);index:idx_virtual_key_value_hash,unique" json:"-"`
 
+	// Rotation grace-period state. When a VK is rotated with a non-zero
+	// vk_rotation_cooldown, the retired value is kept here and keeps
+	// authenticating until PreviousValueExpiresAt. Runtime state only: these
+	// fields are excluded from GenerateVirtualKeyHash so config.json sync never
+	// sees rotation as drift. The hash index is intentionally non-unique - a
+	// retiring value cannot reserve uniqueness against live values.
+	PreviousValue          schemas.SecretVar `gorm:"type:text" json:"-"`
+	PreviousValueHash      string            `gorm:"type:varchar(64);index:idx_virtual_key_previous_value_hash" json:"-"`
+	PreviousValueExpiresAt *time.Time        `gorm:"type:timestamp;null" json:"previous_value_expires_at,omitempty"`
+	RotatedAt              *time.Time        `gorm:"type:timestamp;null" json:"rotated_at,omitempty"`
+
 	CreatedByUserID *string `gorm:"type:varchar(255);index:idx_virtual_key_created_by" json:"created_by_user_id,omitempty"`
 
 	CreatedAt time.Time `gorm:"index;not null" json:"created_at"`
 	UpdatedAt time.Time `gorm:"index;not null" json:"updated_at"`
+}
+
+// AssignedUser is the minimal projection of the user a virtual key is assigned to,
+// carried on read responses so callers do not need a second, per-key lookup. It is
+// deliberately not the full user row: a list response has no business shipping
+// claims, config, or role.
+type AssignedUser struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Email string `json:"email"`
 }
 
 // TableName sets the table name for each model
@@ -295,15 +348,62 @@ func (vk *TableVirtualKey) VaultStoreSelfManaged() {}
 // MarshalJSON serializes TableVirtualKey with Value emitted as a resolved plain string,
 // never as a SecretVar object. This ensures all REST API responses return "bfvk-xxx"
 // rather than {"value":"bfvk-xxx","type":"plain_text"}.
+//
+// It also enforces the tri-state assigned_user contract: the field is emitted (as a user
+// or as null) only when AssigneeResolved says the lookup actually settled the question,
+// and is dropped otherwise. Without that, an unresolved assignee would serialize as null
+// and be indistinguishable from a genuinely unassigned key, so the UI would render "no
+// assignee" for a key that has one instead of refetching it.
 func (vk TableVirtualKey) MarshalJSON() ([]byte, error) {
 	type Alias TableVirtualKey
-	return json.Marshal(&struct {
+	safe := Alias(vk)
+	if vk.Team != nil {
+		team := *vk.Team
+		team.Customer = nil
+		team.VirtualKeys = nil
+		safe.Team = &team
+	}
+	if vk.Customer != nil {
+		customer := *vk.Customer
+		customer.Teams = nil
+		customer.VirtualKeys = nil
+		safe.Customer = &customer
+	}
+	b, err := json.Marshal(&struct {
 		Alias
 		Value string `json:"value"`
 	}{
-		Alias: Alias(vk),
+		Alias: safe,
 		Value: vk.Value.GetValue(),
 	})
+	if err != nil || vk.AssigneeResolved {
+		return b, err
+	}
+	// Unresolved: drop the key. Only this branch pays the extra round-trip, and the
+	// governance read paths mark every key they return as resolved (OSS included, where
+	// "no user tables" is itself a settled answer), so it stays off the common path.
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(b, &fields); err != nil {
+		return nil, err
+	}
+	delete(fields, "assigned_user")
+	return json.Marshal(fields)
+}
+
+// HasActivePreviousValue reports whether the VK carries a rotated-out value
+// that is still inside its grace window. now == expiry is treated as expired.
+func (vk *TableVirtualKey) HasActivePreviousValue(now time.Time) bool {
+	if vk == nil || !vk.PreviousValue.IsSet() || vk.PreviousValueExpiresAt == nil {
+		return false
+	}
+	return now.UTC().Before(vk.PreviousValueExpiresAt.UTC())
+}
+
+// ClearPreviousValue drops the grace-period state, leaving only the current value.
+func (vk *TableVirtualKey) ClearPreviousValue() {
+	vk.PreviousValue = schemas.SecretVar{}
+	vk.PreviousValueHash = ""
+	vk.PreviousValueExpiresAt = nil
 }
 
 // IsExpiredAt reports whether the virtual key has passed its expiry.
@@ -315,13 +415,24 @@ func (vk *TableVirtualKey) IsExpiredAt(now time.Time) bool {
 	return !now.UTC().Before(vk.ExpiresAt.UTC())
 }
 
-// BeforeSave is a GORM hook that enforces mutual exclusion (team vs customer), computes
-// a SHA-256 hash of the plaintext value for indexed lookups, and encrypts the virtual key
-// value before writing to the database.
+// BeforeSave is a GORM hook that computes a SHA-256 hash of the plaintext value
+// for indexed lookups and encrypts the virtual key value before writing to the database.
 func (vk *TableVirtualKey) BeforeSave(tx *gorm.DB) error {
-	// Enforce mutual exclusion: VK can belong to either Team OR Customer, not both
 	if vk.TeamID != nil && vk.CustomerID != nil {
-		return fmt.Errorf("virtual key cannot belong to both team and customer")
+		var team TableTeam
+		if err := tx.Session(&gorm.Session{NewDB: true}).
+			WithContext(tx.Statement.Context).
+			Table("governance_teams").
+			Select("id", "customer_id").
+			First(&team, "id = ?", *vk.TeamID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("virtual key team %q does not exist", *vk.TeamID)
+			}
+			return fmt.Errorf("failed to validate virtual key team/customer ownership: %w", err)
+		}
+		if team.CustomerID == nil || *team.CustomerID != *vk.CustomerID {
+			return fmt.Errorf("virtual key customer_id %q does not match team %q parent customer", *vk.CustomerID, *vk.TeamID)
+		}
 	}
 
 	// Hash must be computed before encryption (from plaintext value).
@@ -331,6 +442,16 @@ func (vk *TableVirtualKey) BeforeSave(tx *gorm.DB) error {
 			return fmt.Errorf("virtual key %s: env/vault ref %q could not be resolved", vk.ID, vk.Value.GetRawRef())
 		}
 		vk.ValueHash = encrypt.HashSHA256(resolved)
+	}
+	// PreviousValue is always a plain retired value (never an env/vault ref at
+	// this point), but guard resolution anyway: persisting a set-but-unresolved
+	// value would leave an empty hash that grace-period auth can never match.
+	if vk.PreviousValue.IsSet() {
+		resolved := vk.PreviousValue.GetValue()
+		if resolved == "" {
+			return fmt.Errorf("virtual key %s: previous env/vault ref %q could not be resolved", vk.ID, vk.PreviousValue.GetRawRef())
+		}
+		vk.PreviousValueHash = encrypt.HashSHA256(resolved)
 	}
 	// Store plaintext SecretVar into vault and rewrite to vault ref before encrypting.
 	if schemas.VaultStoreWriteEnabled() {
@@ -345,6 +466,11 @@ func (vk *TableVirtualKey) BeforeSave(tx *gorm.DB) error {
 		}
 		vk.EncryptionStatus = EncryptionStatusEncrypted
 	}
+	if encrypt.IsEnabled() && vk.PreviousValue.IsSet() {
+		if err := encryptSecretVar(&vk.PreviousValue); err != nil {
+			return fmt.Errorf("failed to encrypt virtual key previous value: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -358,6 +484,11 @@ func (vk *TableVirtualKey) AfterFind(tx *gorm.DB) error {
 	case EncryptionStatusEncrypted:
 		if err := decryptSecretVar(&vk.Value); err != nil {
 			return fmt.Errorf("failed to decrypt virtual key value: %w", err)
+		}
+		if vk.PreviousValue.IsSet() {
+			if err := decryptSecretVar(&vk.PreviousValue); err != nil {
+				return fmt.Errorf("failed to decrypt virtual key previous value: %w", err)
+			}
 		}
 	}
 	StampCalendarAlignment(vk.CalendarAligned, vk.Budgets, vk.RateLimit)

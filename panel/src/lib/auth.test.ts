@@ -2,34 +2,44 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { createBifrostAuthProvider } from './auth';
 
 const originalFetch = globalThis.fetch;
-let authenticatedCallbacks = 0;
-const auth = createBifrostAuthProvider(() => 'zh-CN', async () => { authenticatedCallbacks += 1; });
 
 function respond(payload: unknown, status = 200): Promise<Response> {
-	return Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { 'Content-Type': 'application/json' } }));
+	return Promise.resolve(new Response(JSON.stringify(payload), {
+		status,
+		headers: { 'Content-Type': 'application/json' },
+	}));
 }
 
-afterEach(() => { globalThis.fetch = originalFetch; authenticatedCallbacks = 0; });
+afterEach(() => { globalThis.fetch = originalFetch; });
 
 describe('Bifrost AuthProvider', () => {
 	test('fails closed when server authentication is disabled', async () => {
 		globalThis.fetch = (() => respond({ auth_type: 'none', has_valid_token: false, is_auth_enabled: false })) as typeof fetch;
-		const result = await auth.check();
+		const provider = createBifrostAuthProvider(() => 'zh-CN', async () => {});
+		const result = await provider.check();
 		expect(result.authenticated).toBe(false);
 		expect(result.redirectTo).toBe('/login');
 	});
 
 	test('accepts only an enabled server session with a valid cookie', async () => {
 		globalThis.fetch = (() => respond({ auth_type: 'password', has_valid_token: true, is_auth_enabled: true })) as typeof fetch;
-		expect((await auth.check()).authenticated).toBe(true);
+		const provider = createBifrostAuthProvider(() => 'en', async () => {});
+		expect((await provider.check()).authenticated).toBe(true);
 	});
 
-	test('login uses same-origin cookies without client token persistence', async () => {
+	test('login uses same-origin cookies and refreshes authenticated capabilities', async () => {
 		let credentials: RequestCredentials | undefined;
 		let body = '';
-		globalThis.fetch = ((_input, init) => { credentials = init?.credentials; body = String(init?.body); return respond({ message: 'ok' }); }) as typeof fetch;
-		const result = await auth.login({ username: 'admin', password: 'secret' });
+		let authenticatedCallbacks = 0;
+		globalThis.fetch = ((_input, init) => {
+			credentials = init?.credentials;
+			body = String(init?.body);
+			return respond({ message: 'ok' });
+		}) as typeof fetch;
+		const provider = createBifrostAuthProvider(() => 'zh-CN', async () => { authenticatedCallbacks += 1; });
+		const result = await provider.login({ username: 'admin', password: 'secret' });
 		expect(result.success).toBe(true);
+		expect(result.redirectTo).toBe('/');
 		expect(credentials).toBe('same-origin');
 		expect(JSON.parse(body)).toEqual({ username: 'admin', password: 'secret' });
 		expect(authenticatedCallbacks).toBe(1);
@@ -41,5 +51,22 @@ describe('Bifrost AuthProvider', () => {
 		const en = await createBifrostAuthProvider(() => 'en', async () => {}).login({ username: 'admin', password: 'wrong' });
 		expect(zh.error?.message).toBe('用户名或密码错误');
 		expect(en.error?.message).toBe('Invalid username or password');
+	});
+
+	test.each([200, 204, 401])('logout is idempotent for status %s', async (status) => {
+		globalThis.fetch = (async () => new Response(null, { status })) as typeof fetch;
+		const provider = createBifrostAuthProvider(() => 'en', async () => {});
+		expect(await provider.logout({})).toEqual({ success: true, redirectTo: '/login' });
+	});
+
+	test.each([403, 500, 503, 'offline'])('logout reports failure for %s', async (status) => {
+		globalThis.fetch = (async () => {
+			if (status === 'offline') throw new TypeError('Network unavailable');
+			return new Response(null, { status: Number(status) });
+		}) as typeof fetch;
+		const provider = createBifrostAuthProvider(() => 'en', async () => {});
+		const result = await provider.logout({});
+		expect(result.success).toBe(false);
+		expect(result.redirectTo).toBeUndefined();
 	});
 });

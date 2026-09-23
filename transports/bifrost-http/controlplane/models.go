@@ -39,25 +39,31 @@ type ApplicationVirtualKeyBinding struct {
 func (ApplicationVirtualKeyBinding) TableName() string { return "elygate_control_app_vk_bindings" }
 
 type UsageLedgerEntry struct {
-	ID            string    `gorm:"primaryKey;type:varchar(36)" json:"id"`
-	SourceLogID   string    `gorm:"type:varchar(255);not null;uniqueIndex:idx_cp_usage_source" json:"source_log_id"`
-	OccurredAt    time.Time `gorm:"not null;index" json:"occurred_at"`
-	ProjectID     string    `gorm:"type:varchar(36);not null;index" json:"project_id"`
-	ApplicationID string    `gorm:"type:varchar(36);not null;index" json:"application_id"`
-	VirtualKeyID  string    `gorm:"type:varchar(255);not null;index" json:"virtual_key_id"`
-	TeamID        *string   `gorm:"type:varchar(255);index" json:"team_id,omitempty"`
-	CustomerID    *string   `gorm:"type:varchar(255);index" json:"customer_id,omitempty"`
-	UserID        *string   `gorm:"type:varchar(255);index" json:"user_id,omitempty"`
-	Provider      string    `gorm:"type:varchar(128);not null;index" json:"provider"`
-	Model         string    `gorm:"type:varchar(255);not null;index" json:"model"`
-	Status        string    `gorm:"type:varchar(32);not null;index" json:"status"`
-	PromptTokens  int       `gorm:"not null;default:0" json:"prompt_tokens"`
-	OutputTokens  int       `gorm:"not null;default:0" json:"output_tokens"`
-	TotalTokens   int       `gorm:"not null;default:0" json:"total_tokens"`
-	Cost          float64   `gorm:"not null;default:0" json:"cost"`
-	TraceID       *string   `gorm:"type:varchar(255)" json:"trace_id,omitempty"`
-	ProjectionVer int       `gorm:"not null;default:1" json:"projection_version"`
-	CreatedAt     time.Time `gorm:"not null;index" json:"created_at"`
+	ID                string    `gorm:"primaryKey;type:varchar(36)" json:"id"`
+	SourceLogID       string    `gorm:"type:varchar(255);not null;uniqueIndex:idx_cp_usage_source" json:"source_log_id"`
+	OccurredAt        time.Time `gorm:"not null;index" json:"occurred_at"`
+	ProjectID         string    `gorm:"type:varchar(36);not null;index" json:"project_id"`
+	ApplicationID     string    `gorm:"type:varchar(36);not null;index" json:"application_id"`
+	VirtualKeyID      string    `gorm:"type:varchar(255);not null;index" json:"virtual_key_id"`
+	TeamID            *string   `gorm:"type:varchar(255);index" json:"team_id,omitempty"`
+	CustomerID        *string   `gorm:"type:varchar(255);index" json:"customer_id,omitempty"`
+	UserID            *string   `gorm:"type:varchar(255);index" json:"user_id,omitempty"`
+	SessionID         *string   `gorm:"type:varchar(255);index:idx_cp_usage_session_id" json:"session_id,omitempty"`
+	ParentSessionID   *string   `gorm:"type:varchar(255);index:idx_cp_usage_parent_session_id" json:"parent_session_id,omitempty"`
+	AgentName         *string   `gorm:"type:varchar(255);index:idx_cp_usage_agent_name" json:"agent_name,omitempty"`
+	SessionClientType *string   `gorm:"type:varchar(32)" json:"session_client_type,omitempty"`
+	IsSubagent        bool      `gorm:"not null;default:false;index:idx_cp_usage_is_subagent" json:"is_subagent,omitempty"`
+	IsFork            bool      `gorm:"not null;default:false;index:idx_cp_usage_is_fork" json:"is_fork,omitempty"`
+	Provider          string    `gorm:"type:varchar(128);not null;index" json:"provider"`
+	Model             string    `gorm:"type:varchar(255);not null;index" json:"model"`
+	Status            string    `gorm:"type:varchar(32);not null;index" json:"status"`
+	PromptTokens      int       `gorm:"not null;default:0" json:"prompt_tokens"`
+	OutputTokens      int       `gorm:"not null;default:0" json:"output_tokens"`
+	TotalTokens       int       `gorm:"not null;default:0" json:"total_tokens"`
+	Cost              float64   `gorm:"not null;default:0" json:"cost"`
+	TraceID           *string   `gorm:"type:varchar(255)" json:"trace_id,omitempty"`
+	ProjectionVer     int       `gorm:"not null;default:1" json:"projection_version"`
+	CreatedAt         time.Time `gorm:"not null;index" json:"created_at"`
 }
 
 func (UsageLedgerEntry) TableName() string { return "elygate_control_usage_ledger" }

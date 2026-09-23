@@ -48,14 +48,16 @@ function getErrorMessage(payload: unknown, fallback: string): string {
 }
 
 export async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> {
+	const headers = new Headers(init.headers);
+	if (!headers.has('Accept')) headers.set('Accept', 'application/json');
+	const method = (init.method ?? 'GET').toUpperCase();
+	if (!headers.has('Content-Type') && (init.body != null || ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method))) {
+		headers.set('Content-Type', 'application/json');
+	}
 	const response = await fetch(path, {
 		credentials: 'same-origin',
 		...init,
-		headers: {
-			Accept: 'application/json',
-			...(init.body ? { 'Content-Type': 'application/json' } : {}),
-			...init.headers,
-		},
+		headers,
 	});
 
 	const payload: unknown = await response.json().catch(() => undefined);

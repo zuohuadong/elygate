@@ -21,6 +21,26 @@ describe('panel issue regressions', () => {
 		expect(source).toContain("i18n.t('elygate.providerKeys')");
 	});
 
+	test('credential editors use explicit form and autocomplete semantics', async () => {
+		const providers = await Bun.file(new URL('../pages/ProvidersPage.svelte', import.meta.url)).text();
+		const caching = await Bun.file(new URL('../pages/CachingConfigPage.svelte', import.meta.url)).text();
+		const routing = await Bun.file(new URL('../pages/RoutingNetworkSettingsPage.svelte', import.meta.url)).text();
+		expect(providers).toContain('<form class="key-form" autocomplete="off"');
+		expect(providers).toContain('autocomplete="off" required');
+		expect(caching).toContain('<form class="vector-store-card"');
+		expect(caching).toContain('<button class="primary" type="submit"');
+		expect(routing).toContain('<form class:disabled={!proxyDraft.enabled} class="proxy-grid"');
+	});
+
+	test('credential and caching saves synchronously reject duplicate submissions', async () => {
+		const providers = await Bun.file(new URL('../pages/ProvidersPage.svelte', import.meta.url)).text();
+		const caching = await Bun.file(new URL('../pages/CachingConfigPage.svelte', import.meta.url)).text();
+		expect(providers).toMatch(/async function saveProvider\(\): Promise<void> \{\s*if \(hasActiveMutation\(\)\) return;/);
+		expect(providers).toMatch(/async function saveKey\(\): Promise<void> \{[\s\S]*?if \(hasActiveMutation\(\)\) return;/);
+		expect(caching).toMatch(/async function save\(enabled = plugin\?\.enabled === true\): Promise<void> \{\s*if \(isMutating\) return;/);
+		expect(caching).toMatch(/async function saveVectorStore\(\): Promise<void> \{[\s\S]*?if \(isMutating\) return;/);
+	});
+
 	test('routing weights accept common values like 1 and 0.99', async () => {
 		const source = await Bun.file(new URL('../pages/RoutingRulesPage.svelte', import.meta.url)).text();
 		expect(source).toMatch(/type="number"[^>]*min="0"[^>]*max="1"[^>]*step="any"/);
@@ -128,12 +148,114 @@ describe('panel issue regressions', () => {
 		expect(source).not.toContain('bind:value={form.rateLimit}');
 	});
 
+	test('virtual key editor preserves a team and its parent customer together', async () => {
+		const source = await Bun.file(new URL('../pages/VirtualKeysPage.svelte', import.meta.url)).text();
+		expect(source).not.toContain("throw new Error(i18n.t('elygate.teamCustomerConflict'))");
+		expect(source).toContain("team_id: editing ? (form.teamId.trim() || null) : (form.teamId.trim() || undefined)");
+		expect(source).toContain("customer_id: editing ? (form.customerId.trim() || null) : (form.customerId.trim() || undefined)");
+	});
+
 	test('dashboard CSV uses a mounted link and releases the object URL asynchronously', async () => {
 		const source = await Bun.file(new URL('../pages/DashboardPage.svelte', import.meta.url)).text();
 		expect(source).toContain('document.body.append(link)');
 		expect(source).toContain('link.click()');
 		expect(source).toContain('link.remove()');
 		expect(source).toContain('window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0)');
+	});
+
+	test('dashboard rankings expose svadmin table summaries for each aggregate view', async () => {
+		const source = await Bun.file(new URL('../pages/DashboardPage.svelte', import.meta.url)).text();
+		expect(source).toContain("import { TableSummary } from '@svadmin/ui';");
+		expect(source.match(/<TableSummary/g)?.length).toBe(3);
+		expect(source).toContain("aggregations={{ total_requests: 'sum', total_tokens: 'sum', total_cost: 'sum' }}");
+	});
+
+	test('observability connectors do not advertise plugins absent from the runtime', async () => {
+		const source = await Bun.file(new URL('../pages/ObservabilityConnectorsPage.svelte', import.meta.url)).text();
+		for (const plugin of ['datadog', 'bigquery', 'kafka', 'pubsub']) {
+			expect(source).toContain(`pluginName: '${plugin}'`);
+			expect(source).toContain(`pluginName: '${plugin}', label:`);
+		}
+		expect(source).toMatch(/pluginName: 'datadog',[^\n]*available: false/);
+		expect(source).toMatch(/pluginName: 'bigquery',[^\n]*available: false/);
+		expect(source).toMatch(/pluginName: 'kafka',[^\n]*available: false/);
+		expect(source).toMatch(/pluginName: 'pubsub',[^\n]*available: false/);
+	});
+
+	test('model limits uses bounded virtual-key pagination for lookup data', async () => {
+		const source = await Bun.file(new URL('../pages/ModelLimitsPage.svelte', import.meta.url)).text();
+		expect(source).toContain('/api/governance/virtual-keys?limit=${pageSize}&offset=${offset}');
+		expect(source).toContain('all.length >= expected');
+		expect(source).toContain('offset += page.length');
+		expect(source).toContain('Promise.allSettled([loadLookups(), load()])');
+		expect(source).toContain('let loadSeq = 0;');
+		expect(source).toContain('if (sequence !== loadSeq || offset !== requestedOffset) return;');
+		expect(source).toContain('if (sequence === loadSeq) isLoading = false;');
+		expect(source).toContain('<svelte:window onkeydown={handleModalKeydown} />');
+		expect(source).toContain('if (!isSaving) finishClosingModal();');
+	});
+
+	test('control plane resets dependent selection and guards mutations', async () => {
+		const source = await Bun.file(new URL('../pages/ControlPlanePage.svelte', import.meta.url)).text();
+		expect(source).toContain("selectedApplication = ''");
+		expect(source).toContain('applications = []');
+		expect(source).toContain('saving = true');
+		expect(source).toContain('catch (cause)');
+		expect(source).toContain('disabled={loading || saving || !selectedProject || !applicationName.trim()}');
+		expect(source).toContain('disabled={loading || saving || !selectedApplication || !virtualKeyId.trim()}');
+		expect(source).toContain('Any active binding on another application will be revoked');
+		expect(source).toContain('projectLoadSeq');
+		expect(source).toContain('keyLoadSeq');
+		expect(source).toContain('sequence === projectLoadSeq && selectedProject === requestedProject');
+		expect(source).toContain('sequence === keyLoadSeq && selectedApplication === requestedApplication');
+		expect(source).toContain('loadApplications().catch');
+		expect(source).toContain('showDisclosure');
+		expect(source).toContain('disclosedApplication = applicationID');
+		expect(source).toContain('if (sequence === disclosureSeq) hideDisclosure();');
+	});
+
+	test('control plane usage pagination ignores stale responses', async () => {
+		const source = await Bun.file(new URL('../pages/ControlPlanePage.svelte', import.meta.url)).text();
+		expect(source).toContain('let usageLoadSeq = 0;');
+		expect(source).toContain('let usageLoading = $state(false);');
+		expect(source).toContain('const requested = usageRequestSnapshot();');
+		expect(source).toContain('usageQueryParams(requested.offset)');
+		expect(source).toContain('const requested = usageRequestSnapshot();');
+		expect(source).toContain('if (sequence !== usageLoadSeq || !sameUsageRequest(usageRequestSnapshot(), requested)) return;');
+		expect(source).toContain('const [usageResult, statusResult, auditResult] = await Promise.allSettled([');
+		expect(source).toContain("if (usageResult.status === 'rejected') throw usageResult.reason;");
+		expect(source).toContain("usageStatus = statusResult.status === 'fulfilled' ? statusResult.value : null;");
+		expect(source).toContain('if (sequence === usageLoadSeq && sameUsageRequest(usageRequestSnapshot(), requested)) throw cause;');
+		expect(source).toContain('disabled={saving || loading || usageLoading || usageOffset === 0}');
+	});
+
+	test('control plane usage filters use the backend query contract and persist into CSV export', async () => {
+		const source = await Bun.file(new URL('../pages/ControlPlanePage.svelte', import.meta.url)).text();
+		expect(source).toContain("let usageProjectFilter = $state('');");
+		expect(source).toContain("let usageApplicationFilter = $state('');");
+		expect(source).toContain("params.set('project_id', usageProjectFilter)");
+		expect(source).toContain("params.set('application_id', usageApplicationFilter)");
+		expect(source).toContain("params.set('start_time', start)");
+		expect(source).toContain("params.set('end_time', end)");
+		expect(source).toContain("params.set('session_id', usageSessionFilter.trim())");
+		expect(source).toContain("params.set('parent_session_id', usageParentSessionFilter.trim())");
+		expect(source).toContain("params.set('agent_name', usageAgentFilter.trim())");
+		expect(source).toContain("params.set('is_subagent', 'true')");
+		expect(source).toContain('requestJson<unknown>(`/api/control-plane/usage?${query.toString()}`)');
+		expect(source).toContain('usageQueryParams(0, false)');
+		expect(source).toContain("/api/control-plane/usage/export${suffix ? `?${suffix}` : ''}");
+		expect(source).toContain('document.body.append(link)');
+		expect(source).toContain('link.remove()');
+		expect(source).toContain("text('用量账本', 'Usage Ledger')");
+	});
+
+	test('control plane usage filter changes reset pagination and dependent application choices', async () => {
+		const source = await Bun.file(new URL('../pages/ControlPlanePage.svelte', import.meta.url)).text();
+		expect(source).toContain('function reloadUsageFromFilters(): void');
+		expect(source).toContain('usageOffset = 0;');
+		expect(source).toContain("usageApplicationFilter = '';");
+		expect(source).toContain('usageApplicationOptions = [];');
+		expect(source).toContain('disabled={usageLoading || usageFilterLoading || !usageProjectFilter}');
 	});
 
 	test('MCP settings reads the real client configuration and remains distinct from gateway editing', async () => {
@@ -187,10 +309,27 @@ describe('panel issue regressions', () => {
 		expect(source).toContain("window.addEventListener('hashchange', syncHash)");
 	});
 
+	test('dashboard and unknown-route titles use localized labels', async () => {
+		const translations = await Bun.file(new URL('./i18n.ts', import.meta.url)).text();
+		const adminApp = await Bun.file(`${process.cwd()}/node_modules/@svadmin/ui/dist/components/AdminApp.svelte`).text();
+		expect(translations).toContain("'common.dashboard': '运行概览'");
+		expect(translations).toContain("'common.dashboard': 'Operations overview'");
+		expect(adminApp).toContain("pageLabel = translation.t('common.pageNotFound');");
+	});
+
+	test('global search matches localized resource labels and unknown routes render a fresh 404', async () => {
+		const palette = await Bun.file(`${process.cwd()}/node_modules/@svadmin/ui/dist/components/CommandPalette.svelte`).text();
+		const adminApp = await Bun.file(`${process.cwd()}/node_modules/@svadmin/ui/dist/components/AdminApp.svelte`).text();
+		expect(palette).toContain('value={`${r.name} ${r.label}`}');
+		expect(palette).toContain('value={`${"create-" + r.name} ${r.label}`}');
+		expect(adminApp).toContain('{#key renderedRoute + (renderedParams.resource ?? \'\')');
+		expect(adminApp).toContain('<ErrorComp status="404" />');
+	});
+
 	test('security settings remain editable after configuration loads', async () => {
 		const source = await Bun.file(new URL('../pages/ConfigPage.svelte', import.meta.url)).text();
 		for (const field of ['authEnabled', 'enforceAuthOnInference', 'allowDirectKeys', 'disableDbPingsInHealth', 'dropExcessRequests']) {
-			expect(source).toContain(`bind:checked={form.${field}} disabled={isLoading}`);
+			expect(source).toContain(`bind:checked={form.${field}} disabled={isLoading || isSaving}`);
 			expect(source).not.toContain(`bind:checked={form.${field}} disabled={true}`);
 		}
 	});
@@ -202,6 +341,13 @@ describe('panel issue regressions', () => {
 		expect(source).toContain('currentAppName = name;');
 	});
 
+	test('login bootstrap does not request protected config before authentication', async () => {
+		const source = await Bun.file(new URL('../App.svelte', import.meta.url)).text();
+		expect(source).toContain('sessionStatus.is_auth_enabled && !sessionStatus.has_valid_token');
+		expect(source).toContain("const payload = await requestJson<unknown>('/api/plugins')");
+		expect(source).toContain("const config = await requestJson<Record<string, unknown>>('/api/config')");
+	});
+
 	test('employee editor restores focus and supports escape and tab containment', async () => {
 		const source = await Bun.file(new URL('../pages/EmployeesPage.svelte', import.meta.url)).text();
 		expect(source).toContain('<svelte:window onkeydown={handleModalKeydown} />');
@@ -209,6 +355,7 @@ describe('panel issue regressions', () => {
 		expect(source).toContain("if (event.key !== 'Tab') return;");
 		expect(source).toContain('returnFocusElement?.focus();');
 		expect(source).toContain('aria-modal="true"');
+		expect(source).toMatch(/async function save\(\): Promise<void> \{\s*if \(saving\) return;/);
 	});
 
 	test('employee credential copy failures are surfaced', async () => {
@@ -255,6 +402,9 @@ describe('panel issue regressions', () => {
 		expect(proxy).toContain("text('SCIM 企业目录', 'SCIM Enterprise')");
 		expect(docs).toContain('const chineseDocs: Record<string, string>');
 		expect(docs).toContain("content: zh ? chineseDocs.quickstart : quickstartSource");
+		expect(docs).toContain('`连接服务、客户端和 ${getAppName()}。`');
+		expect(docs).not.toContain('${getAppName()} 网关');
+		expect(docs).not.toContain('${getAppName()} gateway');
 		expect(translations).toContain("'elygate.option.dual.prefer_idp': '优先身份源令牌'");
 		expect(translations).toContain("'elygate.field.compatConvertTextToChat': '文本接口转聊天接口'");
 		const integrations = await Bun.file(`${process.cwd()}/node_modules/@svadmin/ui/dist/components/IntegrationsSettings.svelte`).text();

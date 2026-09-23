@@ -21,10 +21,16 @@
 	let inspected = $state.raw<JsonRecord | null>(null);
 	let draftMode = $state<DraftMode>(null);
 	let draftJson = $state('');
-	let isLoading = $state(true);
+	let isListLoading = $state(true);
+	let isDetailLoading = $state(false);
 	let isSaving = $state(false);
 	let error = $state('');
 	let notice = $state('');
+	let listLoadSeq = 0;
+	let detailLoadSeq = 0;
+	let inspectLoadSeq = 0;
+	let contextSeq = 0;
+	const isLoading = $derived(isListLoading || isDetailLoading);
 
 	function objectPayload(payload: unknown, key: string): JsonRecord {
 		return isJsonRecord(payload) && isJsonRecord(payload[key]) ? payload[key] : isJsonRecord(payload) ? payload : {};
@@ -34,56 +40,85 @@
 		return isJsonRecord(payload) && Array.isArray(payload[key]) ? payload[key].filter(isJsonRecord) : getListPayload(payload);
 	}
 
-	function promptId(): string { return String(selectedPrompt?.id ?? ''); }
+	function promptId(prompt = selectedPrompt): string { return String(prompt?.id ?? ''); }
 
 	async function load(): Promise<void> {
-		isLoading = true;
+		const sequence = ++listLoadSeq;
+		const requestedFolderId = selectedFolderId;
+		const requestedPromptId = promptId();
+		const requestedContextSeq = contextSeq;
+		const requestedInspectSeq = inspectLoadSeq;
+		const requestedDraftMode = draftMode;
+		const requestedDraftJson = draftJson;
+		const requestedSessionId = String(selectedSession?.id ?? '');
+		isListLoading = true;
 		error = '';
 		try {
-			const promptPath = selectedFolderId ? `/api/prompt-repo/prompts?folder_id=${encodeURIComponent(selectedFolderId)}` : '/api/prompt-repo/prompts';
+			const promptPath = requestedFolderId ? `/api/prompt-repo/prompts?folder_id=${encodeURIComponent(requestedFolderId)}` : '/api/prompt-repo/prompts';
 			const [folderPayload, promptPayload] = await Promise.all([
 				requestJson('/api/prompt-repo/folders'),
 				requestJson(promptPath),
 			]);
+			if (sequence !== listLoadSeq || selectedFolderId !== requestedFolderId) return;
 			folders = arrayPayload(folderPayload, 'folders');
 			prompts = arrayPayload(promptPayload, 'prompts');
-			if (selectedPrompt) {
-				const refreshed = prompts.find((item) => item.id === selectedPrompt?.id);
-				if (refreshed) await selectPrompt(refreshed);
-				else clearPrompt();
+			const detailContextMatches = contextSeq === requestedContextSeq && inspectLoadSeq === requestedInspectSeq
+				&& draftMode === requestedDraftMode && draftJson === requestedDraftJson
+				&& String(selectedSession?.id ?? '') === requestedSessionId;
+			if (requestedPromptId && promptId() === requestedPromptId && detailContextMatches) {
+				const refreshed = prompts.find((item) => promptId(item) === requestedPromptId);
+				if (refreshed) await selectPrompt(refreshed, { markContext: false });
+				else if (sequence === listLoadSeq && selectedFolderId === requestedFolderId && promptId() === requestedPromptId && detailContextMatches) clearPrompt(true);
 			}
 		} catch (cause) {
-			error = displayError(cause, i18n.t('elygate.loadFailed'));
+			if (sequence === listLoadSeq && selectedFolderId === requestedFolderId) error = displayError(cause, i18n.t('elygate.loadFailed'));
 		} finally {
-			isLoading = false;
+			if (sequence === listLoadSeq) isListLoading = false;
 		}
 	}
 
-	async function selectPrompt(prompt: JsonRecord): Promise<boolean> {
-		isLoading = true;
+	async function selectPrompt(prompt: JsonRecord, options: { markContext?: boolean } = {}): Promise<boolean> {
+		const requestedPromptId = promptId(prompt);
+		if (!requestedPromptId) return false;
+		if (options.markContext !== false) contextSeq += 1;
+		const requestedContextSeq = contextSeq;
+		const sequence = ++detailLoadSeq;
+		inspectLoadSeq += 1;
+		selectedPrompt = prompt;
+		selectedSession = null;
+		versions = [];
+		sessions = [];
+		inspected = null;
+		draftMode = null;
+		isDetailLoading = true;
 		error = '';
 		try {
-			const id = encodeURIComponent(String(prompt.id));
+			const id = encodeURIComponent(requestedPromptId);
 			const [detailPayload, versionPayload, sessionPayload] = await Promise.all([
 				requestJson(`/api/prompt-repo/prompts/${id}`),
 				requestJson(`/api/prompt-repo/prompts/${id}/versions`),
 				requestJson(`/api/prompt-repo/prompts/${id}/sessions`),
 			]);
-			selectedPrompt = objectPayload(detailPayload, 'prompt');
+			if (sequence !== detailLoadSeq || promptId() !== requestedPromptId || contextSeq !== requestedContextSeq) return false;
+			selectedPrompt = { ...prompt, ...objectPayload(detailPayload, 'prompt') };
 			versions = arrayPayload(versionPayload, 'versions');
 			sessions = arrayPayload(sessionPayload, 'sessions');
 			inspected = null;
 			draftMode = null;
 			return true;
 		} catch (cause) {
-			error = displayError(cause, i18n.t('elygate.loadFailed'));
+			if (sequence === detailLoadSeq && promptId() === requestedPromptId && contextSeq === requestedContextSeq) error = displayError(cause, i18n.t('elygate.loadFailed'));
 			return false;
 		} finally {
-			isLoading = false;
+			if (sequence === detailLoadSeq) isDetailLoading = false;
 		}
 	}
 
-	function clearPrompt(): void {
+	function clearPrompt(internal = false): void {
+		if (!internal) contextSeq += 1;
+		detailLoadSeq += 1;
+		inspectLoadSeq += 1;
+		isDetailLoading = false;
 		selectedPrompt = null;
 		selectedSession = null;
 		versions = [];
@@ -93,62 +128,100 @@
 	}
 
 	async function createFolder(): Promise<void> {
+		if (isSaving) return;
 		const name = window.prompt(i18n.t('elygate.folderName'))?.trim();
 		if (!name) return;
+		isSaving = true; error = ''; notice = '';
 		try {
 			await requestJson('/api/prompt-repo/folders', { method: 'POST', body: JSON.stringify({ name, description: null }) });
 			await load();
 		} catch (cause) { error = displayError(cause, i18n.t('elygate.operationFailed')); }
+		finally { isSaving = false; }
 	}
 
 	async function editFolder(folder: JsonRecord): Promise<void> {
+		if (isSaving) return;
+		const folderId = String(folder.id ?? '');
+		if (!folderId) return;
 		const name = window.prompt(i18n.t('elygate.folderName'), String(folder.name ?? ''))?.trim();
 		if (!name) return;
+		isSaving = true; error = ''; notice = '';
 		try {
-			await requestJson(`/api/prompt-repo/folders/${encodeURIComponent(String(folder.id))}`, { method: 'PUT', body: JSON.stringify({ name, description: folder.description ?? null }) });
+			await requestJson(`/api/prompt-repo/folders/${encodeURIComponent(folderId)}`, { method: 'PUT', body: JSON.stringify({ name, description: folder.description ?? null }) });
 			await load();
 		} catch (cause) { error = displayError(cause, i18n.t('elygate.operationFailed')); }
+		finally { isSaving = false; }
 	}
 
 	async function deleteFolder(folder: JsonRecord): Promise<void> {
+		if (isSaving) return;
+		const folderId = String(folder.id ?? '');
+		if (!folderId) return;
 		if (!window.confirm(i18n.t('elygate.confirmDelete'))) return;
+		isSaving = true; error = ''; notice = '';
 		try {
-			await requestJson(`/api/prompt-repo/folders/${encodeURIComponent(String(folder.id))}`, { method: 'DELETE' });
-			if (selectedFolderId === String(folder.id)) selectedFolderId = '';
+			await requestJson(`/api/prompt-repo/folders/${encodeURIComponent(folderId)}`, { method: 'DELETE' });
+			if (selectedFolderId === folderId) selectedFolderId = '';
 			await load();
 		} catch (cause) { error = displayError(cause, i18n.t('elygate.operationFailed')); }
+		finally { isSaving = false; }
 	}
 
 	async function createPrompt(): Promise<void> {
+		if (isSaving) return;
 		const name = window.prompt(i18n.t('elygate.promptName'))?.trim();
 		if (!name) return;
+		const folderId = selectedFolderId;
+		const requestedPromptId = promptId();
+		const requestedHadSelection = Boolean(requestedPromptId);
+		const requestedContextSeq = contextSeq;
+		const requestedDraftMode = draftMode;
+		const requestedDraftJson = draftJson;
+		const requestedSessionId = String(selectedSession?.id ?? '');
+		isSaving = true; error = ''; notice = '';
 		try {
-			const response = await requestJson('/api/prompt-repo/prompts', { method: 'POST', body: JSON.stringify({ name, folder_id: selectedFolderId || null }) });
+			const response = await requestJson('/api/prompt-repo/prompts', { method: 'POST', body: JSON.stringify({ name, folder_id: folderId || null }) });
+			const createdPrompt = objectPayload(response, 'prompt');
 			await load();
-			await selectPrompt(objectPayload(response, 'prompt'));
+			const selectionUnchanged = requestedHadSelection ? promptId() === requestedPromptId : !selectedPrompt;
+			const detailContextMatches = contextSeq === requestedContextSeq
+				&& draftMode === requestedDraftMode && draftJson === requestedDraftJson
+				&& String(selectedSession?.id ?? '') === requestedSessionId;
+			if (selectedFolderId === folderId && selectionUnchanged && detailContextMatches && promptId(createdPrompt)) {
+				await selectPrompt(createdPrompt);
+			}
 		} catch (cause) { error = displayError(cause, i18n.t('elygate.operationFailed')); }
+		finally { isSaving = false; }
 	}
 
 	async function editPrompt(): Promise<void> {
-		if (!selectedPrompt) return;
+		if (!selectedPrompt || isSaving) return;
+		const requestedPromptId = promptId();
 		const name = window.prompt(i18n.t('elygate.promptName'), String(selectedPrompt.name ?? ''))?.trim();
 		if (!name) return;
+		isSaving = true; error = ''; notice = '';
 		try {
-			await requestJson(`/api/prompt-repo/prompts/${encodeURIComponent(promptId())}`, { method: 'PUT', body: JSON.stringify({ name, folder_id: selectedPrompt.folder_id ?? null }) });
+			await requestJson(`/api/prompt-repo/prompts/${encodeURIComponent(requestedPromptId)}`, { method: 'PUT', body: JSON.stringify({ name, folder_id: selectedPrompt.folder_id ?? null }) });
 			await load();
 		} catch (cause) { error = displayError(cause, i18n.t('elygate.operationFailed')); }
+		finally { isSaving = false; }
 	}
 
 	async function deletePrompt(): Promise<void> {
-		if (!selectedPrompt || !window.confirm(i18n.t('elygate.confirmDelete'))) return;
+		if (!selectedPrompt || isSaving || !window.confirm(i18n.t('elygate.confirmDelete'))) return;
+		const requestedPromptId = promptId();
+		isSaving = true; error = ''; notice = '';
 		try {
-			await requestJson(`/api/prompt-repo/prompts/${encodeURIComponent(promptId())}`, { method: 'DELETE' });
-			clearPrompt();
+			await requestJson(`/api/prompt-repo/prompts/${encodeURIComponent(requestedPromptId)}`, { method: 'DELETE' });
+			if (promptId() === requestedPromptId) clearPrompt();
 			await load();
 		} catch (cause) { error = displayError(cause, i18n.t('elygate.operationFailed')); }
+		finally { isSaving = false; }
 	}
 
 	function openDraft(mode: Exclude<DraftMode, null>, session?: JsonRecord): void {
+		contextSeq += 1;
+		inspectLoadSeq += 1;
 		draftMode = mode;
 		selectedSession = session ?? null;
 		inspected = null;
@@ -162,17 +235,27 @@
 	}
 
 	async function saveDraft(): Promise<void> {
-		if (!selectedPrompt || !draftMode) return;
+		if (!selectedPrompt || !draftMode || isSaving) return;
+		const requestedPromptId = promptId();
+		const requestedMode = draftMode;
+		const requestedSessionId = String(selectedSession?.id ?? '');
+		const requestedContextSeq = contextSeq;
+		const requestedInspectSeq = inspectLoadSeq;
+		const requestedDraftJson = draftJson;
 		isSaving = true;
 		error = '';
 		notice = '';
 		try {
 			const body = parseJsonObject(draftJson, i18n.t('elygate.requestJson'), i18n.t('elygate.invalidJson'));
-			if (draftMode === 'version') await requestJson(`/api/prompt-repo/prompts/${encodeURIComponent(promptId())}/versions`, { method: 'POST', body: JSON.stringify(body) });
-			else if (draftMode === 'session') await requestJson(`/api/prompt-repo/prompts/${encodeURIComponent(promptId())}/sessions`, { method: 'POST', body: JSON.stringify(body) });
-			else if (selectedSession) await requestJson(`/api/prompt-repo/sessions/${encodeURIComponent(String(selectedSession.id))}`, { method: 'PUT', body: JSON.stringify(body) });
+			if (requestedMode === 'version') await requestJson(`/api/prompt-repo/prompts/${encodeURIComponent(requestedPromptId)}/versions`, { method: 'POST', body: JSON.stringify(body) });
+			else if (requestedMode === 'session') await requestJson(`/api/prompt-repo/prompts/${encodeURIComponent(requestedPromptId)}/sessions`, { method: 'POST', body: JSON.stringify(body) });
+			else if (requestedSessionId) await requestJson(`/api/prompt-repo/sessions/${encodeURIComponent(requestedSessionId)}`, { method: 'PUT', body: JSON.stringify(body) });
+			const contextMatches = promptId() === requestedPromptId && contextSeq === requestedContextSeq && inspectLoadSeq === requestedInspectSeq
+				&& draftMode === requestedMode && draftJson === requestedDraftJson
+				&& (requestedMode !== 'edit-session' || String(selectedSession?.id ?? '') === requestedSessionId);
+			if (!contextMatches) { notice = i18n.t('elygate.saveSuccess'); return; }
 			draftMode = null;
-			if (await selectPrompt(selectedPrompt)) notice = i18n.t('elygate.saveSuccess');
+			if (await selectPrompt(selectedPrompt!, { markContext: false })) notice = i18n.t('elygate.saveSuccess');
 			else {
 				error = '';
 				notice = i18n.t('elygate.saveSuccessRefreshFailed');
@@ -182,21 +265,37 @@
 	}
 
 	async function inspectVersion(version: JsonRecord): Promise<void> {
+		const requestedPromptId = promptId();
+		const versionId = String(version.id ?? '');
+		if (!requestedPromptId || !versionId) return;
+		contextSeq += 1;
+		const requestedContextSeq = contextSeq;
+		const sequence = ++inspectLoadSeq;
 		try {
-			inspected = objectPayload(await requestJson(`/api/prompt-repo/versions/${encodeURIComponent(String(version.id))}`), 'version');
+			const detail = objectPayload(await requestJson(`/api/prompt-repo/versions/${encodeURIComponent(versionId)}`), 'version');
+			if (sequence !== inspectLoadSeq || promptId() !== requestedPromptId || contextSeq !== requestedContextSeq) return;
+			inspected = detail;
 			draftMode = null;
-		} catch (cause) { error = displayError(cause, i18n.t('elygate.loadFailed')); }
+		} catch (cause) { if (sequence === inspectLoadSeq && promptId() === requestedPromptId && contextSeq === requestedContextSeq) error = displayError(cause, i18n.t('elygate.loadFailed')); }
 	}
 
 	async function inspectSession(session: JsonRecord): Promise<void> {
+		const requestedPromptId = promptId();
+		const sessionId = String(session.id ?? '');
+		if (!requestedPromptId || !sessionId) return;
+		contextSeq += 1;
+		const requestedContextSeq = contextSeq;
+		const sequence = ++inspectLoadSeq;
 		try {
-			const detail = objectPayload(await requestJson(`/api/prompt-repo/sessions/${encodeURIComponent(String(session.id))}`), 'session');
+			const detail = objectPayload(await requestJson(`/api/prompt-repo/sessions/${encodeURIComponent(sessionId)}`), 'session');
+			if (sequence !== inspectLoadSeq || promptId() !== requestedPromptId || contextSeq !== requestedContextSeq) return;
 			inspected = detail;
 			openDraft('edit-session', detail);
-		} catch (cause) { error = displayError(cause, i18n.t('elygate.loadFailed')); }
+		} catch (cause) { if (sequence === inspectLoadSeq && promptId() === requestedPromptId && contextSeq === requestedContextSeq) error = displayError(cause, i18n.t('elygate.loadFailed')); }
 	}
 
 	async function commitSession(session: JsonRecord): Promise<void> {
+		if (isSaving) return;
 		error = '';
 		notice = '';
 		if (!promptSessionHasCommitMessages(session)) {
@@ -205,22 +304,53 @@
 		}
 		const commitMessage = window.prompt(i18n.t('elygate.commitMessage'))?.trim();
 		if (!commitMessage) return;
+		const requestedPromptId = promptId();
+		const sessionId = String(session.id ?? '');
+		if (!requestedPromptId || !sessionId) return;
+		const requestedContextSeq = contextSeq;
+		const requestedInspectSeq = inspectLoadSeq;
+		const requestedSessionId = String(selectedSession?.id ?? '');
+		const requestedDraftMode = draftMode;
+		const requestedDraftJson = draftJson;
+		isSaving = true;
 		try {
-			await requestJson(`/api/prompt-repo/sessions/${encodeURIComponent(String(session.id))}/commit`, { method: 'POST', body: JSON.stringify({ commit_message: commitMessage }) });
-			if (await selectPrompt(selectedPrompt!)) notice = i18n.t('elygate.saveSuccess');
+			await requestJson(`/api/prompt-repo/sessions/${encodeURIComponent(sessionId)}/commit`, { method: 'POST', body: JSON.stringify({ commit_message: commitMessage }) });
+			const contextMatches = promptId() === requestedPromptId && contextSeq === requestedContextSeq && inspectLoadSeq === requestedInspectSeq
+				&& String(selectedSession?.id ?? '') === requestedSessionId && draftMode === requestedDraftMode && draftJson === requestedDraftJson;
+			if (!contextMatches) { notice = i18n.t('elygate.saveSuccess'); return; }
+			if (await selectPrompt(selectedPrompt!, { markContext: false })) notice = i18n.t('elygate.saveSuccess');
 			else {
 				error = '';
 				notice = i18n.t('elygate.saveSuccessRefreshFailed');
 			}
 		} catch (cause) { error = displayError(cause, i18n.t('elygate.operationFailed')); }
+		finally { isSaving = false; }
 	}
 
 	async function removeChild(kind: 'versions' | 'sessions', id: unknown): Promise<void> {
-		if (!window.confirm(i18n.t('elygate.confirmDelete'))) return;
+		if (isSaving || !window.confirm(i18n.t('elygate.confirmDelete'))) return;
+		const requestedPromptId = promptId();
+		const childId = String(id ?? '');
+		if (!requestedPromptId || !childId) return;
+		const requestedContextSeq = contextSeq;
+		const requestedInspectSeq = inspectLoadSeq;
+		const requestedSessionId = String(selectedSession?.id ?? '');
+		const requestedDraftMode = draftMode;
+		const requestedDraftJson = draftJson;
+		isSaving = true; error = ''; notice = '';
 		try {
-			await requestJson(`/api/prompt-repo/${kind}/${encodeURIComponent(String(id))}`, { method: 'DELETE' });
-			await selectPrompt(selectedPrompt!);
+			await requestJson(`/api/prompt-repo/${kind}/${encodeURIComponent(childId)}`, { method: 'DELETE' });
+			const contextMatches = promptId() === requestedPromptId && contextSeq === requestedContextSeq && inspectLoadSeq === requestedInspectSeq
+				&& String(selectedSession?.id ?? '') === requestedSessionId && draftMode === requestedDraftMode && draftJson === requestedDraftJson;
+			if (contextMatches) await selectPrompt(selectedPrompt!, { markContext: false });
 		} catch (cause) { error = displayError(cause, i18n.t('elygate.operationFailed')); }
+		finally { isSaving = false; }
+	}
+
+	function closeDraft(): void {
+		contextSeq += 1;
+		inspectLoadSeq += 1;
+		draftMode = null;
 	}
 
 	onMount(() => { void load(); });
@@ -237,7 +367,7 @@
 				<header><div><h2>{String(selectedPrompt.name)}</h2><p>{String(selectedPrompt.id)}</p></div><div><button type="button" onclick={() => void editPrompt()}>{i18n.t('elygate.edit')}</button><button class="danger" type="button" onclick={() => void deletePrompt()}>{i18n.t('elygate.delete')}</button></div></header>
 				<div class="actions"><button class="primary" type="button" onclick={() => openDraft('version')}>{i18n.t('elygate.newVersion')}</button><button type="button" onclick={() => openDraft('session')}>{i18n.t('elygate.newSession')}</button></div>
 				<div class="columns"><section><h3>{i18n.t('elygate.versionHistory')}</h3>{#each versions as version (String(version.id))}<div class="row"><button type="button" onclick={() => void inspectVersion(version)}><strong>v{String(version.version_number)}</strong><span>{String(version.commit_message ?? '')}</span></button><button type="button" onclick={() => void removeChild('versions', version.id)}>×</button></div>{:else}<p>{i18n.t('elygate.noVersions')}</p>{/each}</section><section><h3>{i18n.t('elygate.sessions')}</h3>{#each sessions as session (String(session.id))}<div class="row"><button type="button" onclick={() => void inspectSession(session)}><strong>{String(session.name || `#${session.id}`)}</strong><span>{String(session.provider ?? '')} / {String(session.model ?? '')}</span></button><button type="button" disabled={!promptSessionHasCommitMessages(session)} title={promptSessionHasCommitMessages(session) ? i18n.t('elygate.commit') : i18n.t('elygate.promptSessionEmpty')} onclick={() => void commitSession(session)}>✓</button><button type="button" onclick={() => void removeChild('sessions', session.id)}>×</button></div>{:else}<p>{i18n.t('elygate.noSessions')}</p>{/each}</section></div>
-				{#if draftMode}<section class="editor"><h3>{i18n.t(draftMode === 'version' ? 'elygate.newVersion' : draftMode === 'session' ? 'elygate.newSession' : 'elygate.editSession')}</h3><textarea bind:value={draftJson} rows="20"></textarea><footer><button type="button" onclick={() => (draftMode = null)}>{i18n.t('elygate.cancel')}</button><button class="primary" type="button" onclick={() => void saveDraft()} disabled={isSaving}>{i18n.t('elygate.save')}</button></footer></section>{:else if inspected}<section class="editor"><h3>{i18n.t('elygate.inspect')}</h3><pre>{prettyJson(inspected)}</pre></section>{/if}
+				{#if draftMode}<section class="editor"><h3>{i18n.t(draftMode === 'version' ? 'elygate.newVersion' : draftMode === 'session' ? 'elygate.newSession' : 'elygate.editSession')}</h3><textarea bind:value={draftJson} rows="20"></textarea><footer><button type="button" onclick={closeDraft}>{i18n.t('elygate.cancel')}</button><button class="primary" type="button" onclick={() => void saveDraft()} disabled={isSaving}>{i18n.t('elygate.save')}</button></footer></section>{:else if inspected}<section class="editor"><h3>{i18n.t('elygate.inspect')}</h3><pre>{prettyJson(inspected)}</pre></section>{/if}
 			{:else}<div class="empty-state"><h2>{i18n.t('elygate.selectPrompt')}</h2><p>{i18n.t('elygate.selectPromptHint')}</p></div>{/if}
 		</main>
 	</div>

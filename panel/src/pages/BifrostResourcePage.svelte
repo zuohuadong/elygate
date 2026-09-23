@@ -20,14 +20,15 @@
 	let page = $state(1);
 	let pageSize = $state('50');
 	let total = $state(0);
+	let loadSeq = 0;
 	const columns = $derived.by(() => Array.from(new Set(records.flatMap((record) => Object.keys(record)))).slice(0, 8));
 	const hasNext = $derived(page * Number(pageSize) < total);
 	const totalPages = $derived(paginationPageCount(total, Number(pageSize)));
 
-	function endpoint(): string {
-		const params = new URLSearchParams({ limit: pageSize, offset: String((page - 1) * Number(pageSize)) });
-		if (query.trim()) params.set(resourceName === 'logs' ? 'content_search' : 'query', query.trim());
-		if (resourceName === 'logs') {
+	function endpoint(requestedResource: string, requestedPage: number, requestedPageSize: string, requestedQuery: string): string {
+		const params = new URLSearchParams({ limit: requestedPageSize, offset: String((requestedPage - 1) * Number(requestedPageSize)) });
+		if (requestedQuery) params.set(requestedResource === 'logs' ? 'content_search' : 'query', requestedQuery);
+		if (requestedResource === 'logs') {
 			params.set('sort_by', 'timestamp');
 			params.set('order', 'desc');
 			return `/api/logs?${params.toString()}`;
@@ -47,14 +48,20 @@
 	}
 
 	async function load(): Promise<void> {
+		const sequence = ++loadSeq;
+		const requestedResource = resourceName;
+		const requestedPage = page;
+		const requestedPageSize = pageSize;
+		const requestedQuery = query.trim();
 		isLoading = true;
 		error = '';
 		try {
-			const payload: unknown = await requestJson(endpoint());
+			const payload: unknown = await requestJson(endpoint(requestedResource, requestedPage, requestedPageSize, requestedQuery));
+			if (sequence !== loadSeq || resourceName !== requestedResource || page !== requestedPage || pageSize !== requestedPageSize || query.trim() !== requestedQuery) return;
 			const nextRecords = getListPayload(payload);
 			const nextTotal = responseTotal(payload, nextRecords.length);
-			const validPage = clampPaginationPage(page, nextTotal, Number(pageSize));
-			if (validPage !== page) {
+			const validPage = clampPaginationPage(requestedPage, nextTotal, Number(requestedPageSize));
+			if (validPage !== requestedPage) {
 				page = validPage;
 				await load();
 				return;
@@ -62,9 +69,11 @@
 			records = nextRecords;
 			total = nextTotal;
 		} catch (cause) {
-			error = cause instanceof Error ? cause.message : i18n.t('elygate.loadFailed');
+			if (sequence === loadSeq && resourceName === requestedResource && page === requestedPage && pageSize === requestedPageSize && query.trim() === requestedQuery) {
+				error = cause instanceof Error ? cause.message : i18n.t('elygate.loadFailed');
+			}
 		} finally {
-			isLoading = false;
+			if (sequence === loadSeq) isLoading = false;
 		}
 	}
 
@@ -94,7 +103,7 @@
 	</header>
 	<form class="filters" onsubmit={submitSearch}>
 		<label>{i18n.t('elygate.search')}<input bind:value={query} /></label>
-		<label>{i18n.t('elygate.pageSize')}<select bind:value={pageSize} onchange={() => { page = 1; void load(); }}><option value="20">20</option><option value="50">50</option><option value="100">100</option></select></label>
+		<label>{i18n.t('elygate.pageSize')}<select bind:value={pageSize} disabled={isLoading} onchange={() => { page = 1; void load(); }}><option value="20">20</option><option value="50">50</option><option value="100">100</option></select></label>
 		<button type="submit" disabled={isLoading}>{i18n.t('elygate.search')}</button>
 	</form>
 

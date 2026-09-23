@@ -477,6 +477,16 @@ func (t *Tracer) PopulateLLMResponseAttributes(ctx *schemas.BifrostContext, hand
 	}
 	span.SetAttributes(PopulateErrorAttributes(err))
 
+	// Not in PopulateErrorAttributes: that sees only the error, whose
+	// ExtraFields.RequestType is empty until the request settles.
+	if raw, ok := span.GetAttribute(schemas.AttrLegacyRequestType); ok {
+		requestType, _ := raw.(string)
+		if errorType := schemas.ClassifyErrorType(err, schemas.RequestType(requestType)); errorType != "" {
+			// Plain string: readers assert .(string); a defined type is dropped.
+			span.SetAttribute(schemas.AttrBifrostErrorType, string(errorType))
+		}
+	}
+
 	// Enrichment dimensions derivable only post-response, attached here so every
 	// connector reads them from one place (see core/schemas EnrichmentDims):
 	//   - alias: the originally requested model when it differs from the resolved
@@ -491,6 +501,15 @@ func (t *Tracer) PopulateLLMResponseAttributes(ctx *schemas.BifrostContext, hand
 	}
 	if engines, ok := ctx.Value(schemas.BifrostContextKeyRoutingEnginesUsed).([]string); ok && len(engines) > 0 {
 		span.SetAttribute(schemas.AttrBifrostRoutingEngineUsed, strings.Join(engines, ","))
+	}
+	if tier, ok := ctx.Value(schemas.BifrostContextKeyGovernanceComplexityTier).(string); ok && tier != "" {
+		span.SetAttribute(schemas.AttrBifrostComplexityTier, tier)
+	}
+	if mechanism, ok := ctx.Value(schemas.BifrostContextKeyGovernanceComplexityMechanism).(string); ok && mechanism != "" {
+		span.SetAttribute(schemas.AttrBifrostComplexityMechanism, mechanism)
+	}
+	if score, ok := ctx.Value(schemas.BifrostContextKeyGovernanceComplexityScore).(float64); ok {
+		span.SetAttribute(schemas.AttrBifrostComplexityScore, score)
 	}
 
 	// Populate cost attribute using pricing manager. BilledUsage wins when it is
@@ -662,6 +681,14 @@ func (t *Tracer) ClearPausedStreamBuffer(traceID string) error {
 		return nil
 	}
 	return t.accumulator.ClearPausedStreamBuffer(traceID)
+}
+
+// TransformPausedStreamBuffer forwards atomic rewrites of paused client chunks to the streaming accumulator.
+func (t *Tracer) TransformPausedStreamBuffer(traceID string, transform schemas.PausedStreamBufferTransform) error {
+	if t == nil || t.accumulator == nil {
+		return errors.New("stream accumulator is not configured")
+	}
+	return t.accumulator.TransformPausedStreamBuffer(traceID, transform)
 }
 
 // EndStream terminates the streaming response. Any buffered chunks are flushed

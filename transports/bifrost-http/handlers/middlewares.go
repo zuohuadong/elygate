@@ -30,6 +30,9 @@ import (
 var loggingSkipPaths = []string{"/health", "/_next", "/api/dev/"}
 var realtimeTransportPaths = buildRealtimeTransportPathSet()
 
+// apiPathPrefix is the route prefix whose responses must never be served from a shared cache.
+const apiPathPrefix = "/api/"
+
 // SecurityHeadersMiddleware sets security-related HTTP headers on every response.
 // This should wrap the outermost handler so all responses (API, UI, errors) include these headers.
 func SecurityHeadersMiddleware() schemas.BifrostHTTPMiddleware {
@@ -43,6 +46,10 @@ func SecurityHeadersMiddleware() schemas.BifrostHTTPMiddleware {
 			// Only set HSTS when serving over HTTPS (detected via reverse proxy header or direct TLS)
 			if string(ctx.Request.Header.Peek("X-Forwarded-Proto")) == "https" || ctx.IsTLS() {
 				ctx.Response.Header.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+			}
+			// Keep CDNs from caching API responses; handlers may override.
+			if strings.HasPrefix(string(ctx.Path()), apiPathPrefix) {
+				ctx.Response.Header.Set("Cache-Control", "no-store")
 			}
 			next(ctx)
 		}
@@ -158,7 +165,7 @@ func (c *CorsMiddleware) Middleware() schemas.BifrostHTTPMiddleware {
 					}
 					logBuilder := logger.LogHTTPRequest(level, "request completed").
 						Str("http.method", string(ctx.Method())).
-						Str("http.target", string(ctx.RequestURI())).
+						Str("http.target", string(ctx.URI().Path())).
 						Int("http.status_code", statusCode).
 						Int64("http.request_duration_ms", time.Since(startTime).Milliseconds()).
 						Str("http.remote_addr", ctx.RemoteAddr().String()).
@@ -953,6 +960,7 @@ type AuthMiddleware struct {
 	wsTicketStore     *WSTicketStore
 	tempTokensService *temptoken.Service // optional; when nil, temp-token fallback is disabled
 	tempTokensEnabled atomic.Bool
+	passwordLimiter   lib.PasswordLimiter
 	// bootstrapToken gates creation of the very first admin account. It is sourced
 	// from operator config (config.json setup_token or the BIFROST_SETUP_TOKEN env
 	// var) — never generated in-memory — so every node in a multi-node deployment
@@ -1116,6 +1124,9 @@ func (m *AuthMiddleware) APIMiddleware() schemas.BifrostHTTPMiddleware {
 	systemWhitelistedRoutes := []string{
 		"/api/session/is-auth-enabled",
 		"/api/session/login",
+		// Idempotent: the handler clears the cookie and returns 200 whether or
+		// not a session token is present, so a repeat logout must not 401 here.
+		"/api/session/logout",
 		"/api/oauth/callback",
 		"/health",
 		"/login",
@@ -1295,6 +1306,13 @@ func (m *AuthMiddleware) middleware(shouldSkip func(*configstore.AuthConfig, str
 					SendError(ctx, fasthttp.StatusUnauthorized, "Unauthorized")
 					return
 				}
+				finish, allowed := m.passwordLimiter.Begin(ctx.RemoteIP().String(), username)
+				if !allowed {
+					SendError(ctx, fasthttp.StatusTooManyRequests, "Too many login attempts. Please try again later.")
+					return
+				}
+				authenticated := false
+				defer func() { finish(authenticated) }()
 				// Verify the username and password
 				if authConfig.AdminUserName == nil || username != authConfig.AdminUserName.GetValue() {
 					SendError(ctx, fasthttp.StatusUnauthorized, "Unauthorized")
@@ -1314,6 +1332,8 @@ func (m *AuthMiddleware) middleware(shouldSkip func(*configstore.AuthConfig, str
 					return
 				}
 				setAuthenticatedLocalAdmin(ctx, username)
+				authenticated = true
+				finish(true)
 				// Continue with the next handler
 				next(ctx)
 				return
@@ -1336,6 +1356,13 @@ func (m *AuthMiddleware) middleware(shouldSkip func(*configstore.AuthConfig, str
 						SendError(ctx, fasthttp.StatusUnauthorized, "Unauthorized")
 						return
 					}
+					finish, allowed := m.passwordLimiter.Begin(ctx.RemoteIP().String(), username)
+					if !allowed {
+						SendError(ctx, fasthttp.StatusTooManyRequests, "Too many login attempts. Please try again later.")
+						return
+					}
+					authenticated := false
+					defer func() { finish(authenticated) }()
 					// Verify the username and password
 					if authConfig.AdminUserName == nil || username != authConfig.AdminUserName.GetValue() {
 						SendError(ctx, fasthttp.StatusUnauthorized, "Unauthorized")
@@ -1356,6 +1383,8 @@ func (m *AuthMiddleware) middleware(shouldSkip func(*configstore.AuthConfig, str
 					}
 					// Mark as local admin for RBAC bypass
 					setAuthenticatedLocalAdmin(ctx, username)
+					authenticated = true
+					finish(true)
 					// Continue with the next handler
 					next(ctx)
 					return
@@ -1498,6 +1527,23 @@ func (m *TracingMiddleware) Middleware() schemas.BifrostHTTPMiddleware {
 			// the same priority list, so key stickiness and session.id agree.
 			if sessionID := lib.ResolveSessionIDFromRequest(&ctx.Request.Header); sessionID != "" {
 				tracer.SetTraceAttribute(traceID, schemas.TraceAttrSessionID, sessionID)
+			}
+			if tree := lib.SessionTreeFromRequest(&ctx.Request.Header); !tree.Empty() {
+				if tree.ParentSessionID != "" {
+					tracer.SetTraceAttribute(traceID, schemas.TraceAttrParentSessionID, tree.ParentSessionID)
+				}
+				if tree.AgentName != "" {
+					tracer.SetTraceAttribute(traceID, schemas.TraceAttrAgentName, tree.AgentName)
+				}
+				if tree.ClientType != "" {
+					tracer.SetTraceAttribute(traceID, schemas.TraceAttrSessionClientType, tree.ClientType)
+				}
+				if tree.IsSubagent {
+					tracer.SetTraceAttribute(traceID, schemas.TraceAttrIsSubagent, true)
+				}
+				if tree.IsFork {
+					tracer.SetTraceAttribute(traceID, schemas.TraceAttrIsFork, true)
+				}
 			}
 			// Only trace ID goes into context (lightweight, no bloat)
 			ctx.SetUserValue(schemas.BifrostContextKeyTraceID, traceID)

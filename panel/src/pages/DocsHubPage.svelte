@@ -9,7 +9,6 @@
 	import quickstartSource from 'elygate-doc:quickstart/gateway/setting-up.mdx';
 	import architectureSource from 'elygate-doc:architecture/core/request-flow.mdx';
 	import mcpOverviewSource from 'elygate-doc:mcp/overview.mdx';
-	import mcpGatewaySource from 'elygate-doc:mcp/gateway.mdx';
 	import virtualKeysSource from 'elygate-doc:features/governance/virtual-keys.mdx';
 	import routingSource from 'elygate-doc:features/governance/routing.mdx';
 	import webhooksSource from 'elygate-doc:features/webhooks.mdx';
@@ -57,8 +56,8 @@
 		return [
 			{ slug: 'quickstart', title: zh ? '快速开始' : 'Quick start', description: zh ? '安装、启动并发出第一个请求。' : 'Install, start, and send the first request.', category: zh ? '入门' : 'Start', sourcePath: 'quickstart/gateway/setting-up.mdx', content: zh ? chineseDocs.quickstart : quickstartSource },
 			{ slug: 'architecture', title: zh ? '系统架构' : 'Architecture', description: zh ? '理解网关请求链路和核心组件。' : 'Understand the gateway request path and core components.', category: zh ? '核心' : 'Core', sourcePath: 'architecture/core/request-flow.mdx', content: zh ? chineseDocs.architecture : architectureSource },
-			{ slug: 'mcp-overview', title: zh ? 'MCP 概览' : 'MCP overview', description: zh ? `连接服务、客户端和 ${getAppName()} 网关。` : `Connect servers, clients, and the ${getAppName()} gateway.`, category: 'MCP', sourcePath: 'mcp/overview.mdx', content: zh ? chineseDocs['mcp-overview'] : mcpOverviewSource },
-			{ slug: 'mcp-gateway', title: zh ? 'MCP 网关' : 'MCP gateway', description: zh ? '通过统一端点暴露聚合工具。' : 'Expose aggregated tools through one endpoint.', category: 'MCP', sourcePath: 'mcp/gateway.mdx', content: zh ? chineseDocs['mcp-gateway'] : mcpGatewaySource },
+			{ slug: 'mcp-overview', title: zh ? 'MCP 概览' : 'MCP overview', description: zh ? `连接服务、客户端和 ${getAppName()}。` : `Connect servers, clients, and ${getAppName()}.`, category: 'MCP', sourcePath: 'mcp/overview.mdx', content: zh ? chineseDocs['mcp-overview'] : mcpOverviewSource },
+			{ slug: 'mcp-gateway', title: zh ? 'MCP 网关' : 'MCP gateway', description: zh ? '通过统一端点暴露聚合工具。' : 'Expose aggregated tools through one endpoint.', category: 'MCP', sourcePath: 'mcp/overview.mdx', content: zh ? chineseDocs['mcp-gateway'] : mcpOverviewSource },
 			{ slug: 'virtual-keys', title: zh ? '虚拟密钥' : 'Virtual keys', description: zh ? '访问控制、预算、限流和路由。' : 'Access control, budgets, limits, and routing.', category: zh ? '治理' : 'Governance', sourcePath: 'features/governance/virtual-keys.mdx', content: zh ? chineseDocs['virtual-keys'] : virtualKeysSource },
 			{ slug: 'routing', title: zh ? '治理路由' : 'Governance routing', description: zh ? '按供应商、模型和权重分配请求。' : 'Route requests by provider, model, and weight.', category: zh ? '治理' : 'Governance', sourcePath: 'features/governance/routing.mdx', content: zh ? chineseDocs.routing : routingSource },
 			{ slug: 'webhooks', title: 'Webhooks', description: zh ? '异步推理完成后的签名回调。' : 'Signed callbacks for completed async inference.', category: zh ? '集成' : 'Integrations', sourcePath: 'features/webhooks.mdx', content: zh ? chineseDocs.webhooks : webhooksSource },

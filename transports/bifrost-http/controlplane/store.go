@@ -21,6 +21,7 @@ import (
 
 type Store struct {
 	configStore configstore.ConfigStore
+	tx          *gorm.DB
 }
 
 // ApplicationKey is the one-time disclosed credential returned by application
@@ -72,6 +73,20 @@ func NewStore(ctx context.Context, configStore configstore.ConfigStore) (*Store,
 			Migrate:  func(tx *gorm.DB) error { return tx.AutoMigrate(&VirtualKeyRevocation{}) },
 			Rollback: func(tx *gorm.DB) error { return tx.Migrator().DropTable(&VirtualKeyRevocation{}) },
 		},
+		{
+			ID:      "elygate_control_plane_v4_usage_session_tree",
+			Migrate: func(tx *gorm.DB) error { return tx.AutoMigrate(&UsageLedgerEntry{}) },
+			Rollback: func(tx *gorm.DB) error {
+				for _, column := range []string{"session_id", "parent_session_id", "agent_name", "session_client_type", "is_subagent", "is_fork"} {
+					if tx.Migrator().HasColumn(&UsageLedgerEntry{}, column) {
+						if err := tx.Migrator().DropColumn(&UsageLedgerEntry{}, column); err != nil {
+							return err
+						}
+					}
+				}
+				return nil
+			},
+		},
 	}
 	migrationIDs := make([]string, 0, len(migrations))
 	for _, migration := range migrations {
@@ -103,7 +118,12 @@ func NewStore(ctx context.Context, configStore configstore.ConfigStore) (*Store,
 	return &Store{configStore: configStore}, nil
 }
 
-func (s *Store) db(ctx context.Context) *gorm.DB { return s.configStore.DB().WithContext(ctx) }
+func (s *Store) db(ctx context.Context) *gorm.DB {
+	if s.tx != nil {
+		return s.tx.WithContext(ctx)
+	}
+	return s.configStore.DB().WithContext(ctx)
+}
 
 func (s *Store) CreateProject(ctx context.Context, project *Project) error {
 	if err := prepareProject(project); err != nil {
@@ -389,6 +409,8 @@ func (s *Store) bindVirtualKeyTxWithDB(tx *gorm.DB, binding *ApplicationVirtualK
 		}
 	}
 	now := time.Now().UTC()
+	binding.CreatedAt = now
+	binding.UpdatedAt = now
 	if err := tx.Model(&ApplicationVirtualKeyBinding{}).Where("virtual_key_id = ? AND revoked_at IS NULL", binding.VirtualKeyID).Updates(map[string]any{"revoked_at": now, "updated_at": now}).Error; err != nil {
 		return err
 	}
@@ -448,9 +470,173 @@ func (s *Store) ProjectLogs(ctx context.Context, logs []logstore.Log) (int, erro
 
 func (s *Store) projectLogs(ctx context.Context, logs []logstore.Log, advanceCheckpoint bool) (int, error) {
 	count := 0
+	err := s.db(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockUsageProjection(tx); err != nil {
+			return err
+		}
+		projector := &Store{configStore: s.configStore, tx: tx}
+		var err error
+		count, err = projector.projectLogsTx(ctx, logs, advanceCheckpoint)
+		return err
+	})
+	return count, err
+}
+
+func lockUsageProjection(tx *gorm.DB) error {
+	// Acquire the database lock before opening the source snapshot. This also
+	// serializes projectors in different processes and avoids stale overwrites.
+	result := tx.Model(&UsageLedgerCheckpoint{}).Where("id = 1").
+		UpdateColumn("updated_at", gorm.Expr("updated_at"))
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return errors.New("usage projection checkpoint is missing")
+	}
+	return nil
+}
+
+func usageCheckpointHasProjection(checkpoint *UsageLedgerCheckpoint) bool {
+	if checkpoint == nil {
+		return false
+	}
+	return !checkpoint.Watermark.IsZero() || strings.TrimSpace(checkpoint.LastLogID) != ""
+}
+
+func copyOptionalString(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(*value)
+	if trimmed == "" {
+		return nil
+	}
+	copied := trimmed
+	return &copied
+}
+
+func optionalStringsEqual(left, right *string) bool {
+	return optionalStringValue(left) == optionalStringValue(right)
+}
+
+func optionalStringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return strings.TrimSpace(*value)
+}
+
+func (s *Store) ReconcileUsage(ctx context.Context, reader logstore.UsageLogReader, force ...bool) error {
+	// Keep the variadic argument for source compatibility with older callers.
+	// Reuse decisions belong to Handler, where an optional source fingerprint
+	// can prove that no terminal log changed. Store-level calls always reconcile
+	// fully so a direct force=false call can never return a stale projection.
+	return s.db(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockUsageProjection(tx); err != nil {
+			return err
+		}
+		snapshotComplete := false
+		if snapshotReader, ok := reader.(logstore.UsageLogSnapshotReader); ok {
+			snapshotComplete = snapshotReader.UsageLogSnapshotComplete()
+		}
+		if snapshotComplete {
+			if err := tx.Where("status = ?", "processing").Delete(&UsageLedgerEntry{}).Error; err != nil {
+				return err
+			}
+		}
+		projector := &Store{configStore: s.configStore, tx: tx}
+		seenSourceLogs := make(map[string]struct{})
+		if err := reader.ScanUsageLogs(ctx, func(logs []logstore.Log) error {
+			for _, entry := range logs {
+				// ScanUsageLogs normally returns terminal rows only. Keep the
+				// eligibility check here as a contract guard for custom readers:
+				// rows that cannot produce a ledger entry must not keep a stale
+				// projection alive after a virtual key is cleared.
+				if entry.Status != "processing" && entry.VirtualKeyID != nil && *entry.VirtualKeyID != "" {
+					seenSourceLogs[entry.ID] = struct{}{}
+				}
+			}
+			_, err := projector.projectLogsTx(ctx, logs, true)
+			return err
+		}); err != nil {
+			return err
+		}
+		if snapshotComplete {
+			if err := deleteStaleUsageLedgerEntries(tx, seenSourceLogs); err != nil {
+				return err
+			}
+		}
+		return tx.Model(&UsageLedgerCheckpoint{}).Where("id = 1").
+			UpdateColumn("updated_at", time.Now().UTC()).Error
+	})
+}
+
+// deleteStaleUsageLedgerEntries keeps the ledger aligned with a complete
+// source snapshot. Source rows that are deleted, become non-terminal, or lose
+// their virtual key are intentionally absent from seenSourceLogs and must not
+// remain billable in the control plane.
+func deleteStaleUsageLedgerEntries(tx *gorm.DB, seenSourceLogs map[string]struct{}) error {
+	var sourceIDs []string
+	if err := tx.Model(&UsageLedgerEntry{}).Pluck("source_log_id", &sourceIDs).Error; err != nil {
+		return err
+	}
+	stale := make([]string, 0)
+	for _, sourceID := range sourceIDs {
+		if _, ok := seenSourceLogs[sourceID]; !ok {
+			stale = append(stale, sourceID)
+		}
+	}
+	for start := 0; start < len(stale); start += 500 {
+		end := start + 500
+		if end > len(stale) {
+			end = len(stale)
+		}
+		if err := tx.Where("source_log_id IN ?", stale[start:end]).Delete(&UsageLedgerEntry{}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) projectLogsTx(ctx context.Context, logs []logstore.Log, advanceCheckpoint bool) (int, error) {
+	count := 0
 	for _, entry := range logs {
-		if entry.VirtualKeyID == nil || *entry.VirtualKeyID == "" {
+		if entry.VirtualKeyID == nil || *entry.VirtualKeyID == "" || entry.Status == "processing" {
 			continue
+		}
+		cost := 0.0
+		if entry.Cost != nil {
+			cost = *entry.Cost
+		}
+		// Corrections update values, not the original request's ownership.
+		values := map[string]any{
+			"occurred_at": entry.Timestamp, "provider": entry.Provider, "model": entry.Model, "status": entry.Status,
+			"prompt_tokens": entry.PromptTokens, "output_tokens": entry.CompletionTokens,
+			"total_tokens": entry.TotalTokens, "cost": cost, "projection_ver": 2,
+			"session_id": entry.SessionID, "parent_session_id": entry.ParentSessionID,
+			"agent_name": entry.AgentName, "session_client_type": entry.SessionClientType,
+			"is_subagent": entry.IsSubagent, "is_fork": entry.IsFork,
+		}
+		var existing UsageLedgerEntry
+		err := s.db(ctx).Where("source_log_id = ?", entry.ID).First(&existing).Error
+		if err == nil {
+			if !existing.OccurredAt.Equal(entry.Timestamp) || existing.Provider != entry.Provider || existing.Model != entry.Model ||
+				existing.Status != entry.Status || existing.PromptTokens != entry.PromptTokens ||
+				existing.OutputTokens != entry.CompletionTokens || existing.TotalTokens != entry.TotalTokens ||
+				existing.Cost != cost || existing.ProjectionVer != 2 ||
+				!optionalStringsEqual(existing.SessionID, entry.SessionID) ||
+				!optionalStringsEqual(existing.ParentSessionID, entry.ParentSessionID) ||
+				!optionalStringsEqual(existing.AgentName, entry.AgentName) ||
+				!optionalStringsEqual(existing.SessionClientType, entry.SessionClientType) ||
+				existing.IsSubagent != entry.IsSubagent || existing.IsFork != entry.IsFork {
+				if err := s.db(ctx).Model(&existing).Updates(values).Error; err != nil {
+					return count, err
+				}
+			}
+			continue
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return count, err
 		}
 		binding, err := s.BindingAt(ctx, *entry.VirtualKeyID, entry.Timestamp)
 		if err != nil {
@@ -463,11 +649,7 @@ func (s *Store) projectLogs(ctx context.Context, logs []logstore.Log, advanceChe
 		if err != nil {
 			return count, err
 		}
-		cost := 0.0
-		if entry.Cost != nil {
-			cost = *entry.Cost
-		}
-		row := UsageLedgerEntry{ID: uuid.NewString(), SourceLogID: entry.ID, OccurredAt: entry.Timestamp, ProjectID: app.ProjectID, ApplicationID: app.ID, VirtualKeyID: *entry.VirtualKeyID, TeamID: entry.TeamID, CustomerID: entry.CustomerID, UserID: entry.UserID, Provider: entry.Provider, Model: entry.Model, Status: entry.Status, PromptTokens: entry.PromptTokens, OutputTokens: entry.CompletionTokens, TotalTokens: entry.TotalTokens, Cost: cost, ProjectionVer: 1, CreatedAt: time.Now().UTC()}
+		row := UsageLedgerEntry{ID: uuid.NewString(), SourceLogID: entry.ID, OccurredAt: entry.Timestamp, ProjectID: app.ProjectID, ApplicationID: app.ID, VirtualKeyID: *entry.VirtualKeyID, TeamID: entry.TeamID, CustomerID: entry.CustomerID, UserID: entry.UserID, SessionID: copyOptionalString(entry.SessionID), ParentSessionID: copyOptionalString(entry.ParentSessionID), AgentName: copyOptionalString(entry.AgentName), SessionClientType: copyOptionalString(entry.SessionClientType), IsSubagent: entry.IsSubagent, IsFork: entry.IsFork, Provider: entry.Provider, Model: entry.Model, Status: entry.Status, PromptTokens: entry.PromptTokens, OutputTokens: entry.CompletionTokens, TotalTokens: entry.TotalTokens, Cost: cost, ProjectionVer: 2, CreatedAt: time.Now().UTC()}
 		result := s.db(ctx).Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "source_log_id"}}, DoNothing: true}).Create(&row)
 		if result.Error != nil {
 			return count, result.Error
@@ -481,7 +663,7 @@ func (s *Store) projectLogs(ctx context.Context, logs []logstore.Log, advanceChe
 				last = item
 			}
 		}
-		err := s.db(ctx).Transaction(func(tx *gorm.DB) error {
+		err := func(tx *gorm.DB) error {
 			var checkpoint UsageLedgerCheckpoint
 			query := tx.Where("id = 1")
 			if tx.Dialector.Name() == "postgres" {
@@ -494,7 +676,7 @@ func (s *Store) projectLogs(ctx context.Context, logs []logstore.Log, advanceChe
 				return nil
 			}
 			return tx.Model(&checkpoint).Updates(map[string]any{"watermark": last.Timestamp, "last_log_id": last.ID, "updated_at": time.Now().UTC()}).Error
-		})
+		}(s.db(ctx))
 		if err != nil {
 			return count, err
 		}
@@ -503,10 +685,12 @@ func (s *Store) projectLogs(ctx context.Context, logs []logstore.Log, advanceChe
 }
 
 type UsageQuery struct {
-	ProjectID, ApplicationID string
-	StartTime, EndTime       *time.Time
-	Limit, Offset            int
-	Export                   bool
+	ProjectID, ApplicationID                             string
+	SessionID, ParentSessionID, AgentName, TreeSessionID string
+	IsSubagent, IsFork                                   *bool
+	StartTime, EndTime                                   *time.Time
+	Limit, Offset                                        int
+	Export                                               bool
 }
 
 func (s *Store) ListUsage(ctx context.Context, q UsageQuery) ([]UsageLedgerEntry, int64, error) {
@@ -517,6 +701,24 @@ func (s *Store) ListUsage(ctx context.Context, q UsageQuery) ([]UsageLedgerEntry
 	}
 	if q.ApplicationID != "" {
 		db = db.Where("application_id = ?", q.ApplicationID)
+	}
+	if q.SessionID != "" {
+		db = db.Where("session_id = ?", q.SessionID)
+	}
+	if q.ParentSessionID != "" {
+		db = db.Where("parent_session_id = ?", q.ParentSessionID)
+	}
+	if q.AgentName != "" {
+		db = db.Where("agent_name = ?", q.AgentName)
+	}
+	if q.TreeSessionID != "" {
+		db = db.Where("(session_id = ? OR parent_session_id = ?)", q.TreeSessionID, q.TreeSessionID)
+	}
+	if q.IsSubagent != nil {
+		db = db.Where("is_subagent = ?", *q.IsSubagent)
+	}
+	if q.IsFork != nil {
+		db = db.Where("is_fork = ?", *q.IsFork)
 	}
 	if q.StartTime != nil {
 		db = db.Where("occurred_at >= ?", *q.StartTime)
@@ -574,21 +776,18 @@ func (s *Store) CheckVirtualKeyValueAccess(ctx context.Context, value string) er
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
 	}
-	vk, err := s.configStore.GetVirtualKeyByValue(ctx, value)
+	virtualKeyID, err := configstore.LookupVirtualKeyID(ctx, s.configStore, value)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, configstore.ErrNotFound) {
 			return nil
 		}
 		return err
 	}
-	if vk == nil {
-		return nil
-	}
-	hasBinding, err := s.HasBinding(ctx, vk.ID)
+	hasBinding, err := s.HasBinding(ctx, virtualKeyID)
 	if err != nil || !hasBinding {
 		return err
 	}
-	_, err = s.ActiveBindingByVirtualKey(ctx, vk.ID)
+	_, err = s.ActiveBindingByVirtualKey(ctx, virtualKeyID)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return errors.New("application credential binding is revoked or expired")
 	}

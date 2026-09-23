@@ -107,21 +107,28 @@
 	let isSaving = $state(false);
 	let revalidatingKeyId = $state('');
 	let deletingKeyId = $state('');
+	let deletingProviderName = $state('');
 	let error = $state('');
 	let notice = $state('');
 	let warning = $state('');
+	let providerLoadGeneration = 0;
 	let keyLoadGeneration = 0;
 	const providerKeysPage = $derived(resourceName === 'provider-keys');
+	function hasActiveMutation(): boolean {
+		return isSaving || revalidatingKeyId !== '' || deletingKeyId !== '' || deletingProviderName !== '';
+	}
 
 	async function loadProviders(): Promise<void> {
+		const generation = ++providerLoadGeneration;
 		isLoading = true;
 		error = '';
 		try {
-			providers = getListPayload(await requestJson('/api/providers'));
+			const nextProviders = getListPayload(await requestJson('/api/providers'));
+			if (generation === providerLoadGeneration) providers = nextProviders;
 		} catch (cause) {
-			error = displayError(cause, i18n.t('elygate.loadFailed'));
+			if (generation === providerLoadGeneration) error = displayError(cause, i18n.t('elygate.loadFailed'));
 		} finally {
-			isLoading = false;
+			if (generation === providerLoadGeneration) isLoading = false;
 		}
 	}
 
@@ -186,6 +193,7 @@
 	}
 
 	async function saveProvider(): Promise<void> {
+		if (hasActiveMutation()) return;
 		isSaving = true;
 		error = '';
 		try {
@@ -240,7 +248,8 @@
 
 	async function removeProvider(provider: JsonRecord): Promise<void> {
 		const name = stringValue(provider, 'name');
-		if (!name || !window.confirm(i18n.t('elygate.confirmDelete'))) return;
+		if (hasActiveMutation() || !name || !window.confirm(i18n.t('elygate.confirmDelete'))) return;
+		deletingProviderName = name;
 		error = '';
 		try {
 			await requestJson(`/api/providers/${encodePathSegment(name)}`, { method: 'DELETE' });
@@ -248,6 +257,8 @@
 			await loadProviders();
 		} catch (cause) {
 			error = displayError(cause, i18n.t('elygate.operationFailed'));
+		} finally {
+			deletingProviderName = '';
 		}
 	}
 
@@ -292,6 +303,8 @@
 
 	async function saveKey(): Promise<void> {
 		if (!selectedProvider || !keyForm.name.trim()) return;
+		if (hasActiveMutation()) return;
+		const providerContext = selectedProvider;
 		isSaving = true;
 		error = '';
 		try {
@@ -308,17 +321,19 @@
 			else if (editingKey?.value !== undefined) payload.value = editingKey.value;
 			else throw new Error(i18n.t('elygate.keyValueHelp'));
 			if (editingKey) {
-				await requestJson(`/api/providers/${encodePathSegment(selectedProvider)}/keys/${encodePathSegment(stringValue(editingKey, 'id'))}`, {
+				await requestJson(`/api/providers/${encodePathSegment(providerContext)}/keys/${encodePathSegment(stringValue(editingKey, 'id'))}`, {
 					method: 'PUT',
 					body: JSON.stringify(payload),
 				});
 			} else {
-				await requestJson(`/api/providers/${encodePathSegment(selectedProvider)}/keys`, { method: 'POST', body: JSON.stringify(payload) });
+				await requestJson(`/api/providers/${encodePathSegment(providerContext)}/keys`, { method: 'POST', body: JSON.stringify(payload) });
 			}
-			editingKey = null;
-			keyForm = emptyKeyForm();
-			notice = i18n.t('elygate.save');
-			await loadKeys();
+			if (selectedProvider === providerContext) {
+				editingKey = null;
+				keyForm = emptyKeyForm();
+				notice = i18n.t('elygate.save');
+				await loadKeys(providerContext);
+			}
 		} catch (cause) {
 			error = displayError(cause, i18n.t('elygate.operationFailed'));
 		} finally {
@@ -328,19 +343,20 @@
 
 	async function removeKey(key: JsonRecord): Promise<void> {
 		const id = stringValue(key, 'id');
-		if (!selectedProvider || !id || !window.confirm(i18n.t('elygate.confirmDelete'))) return;
+		if (hasActiveMutation() || !selectedProvider || !id || !window.confirm(i18n.t('elygate.confirmDelete'))) return;
+		const providerContext = selectedProvider;
 		deletingKeyId = id;
 		error = '';
 		try {
-			await requestJson(`/api/providers/${encodePathSegment(selectedProvider)}/keys/${encodePathSegment(id)}`, { method: 'DELETE' });
+			await requestJson(`/api/providers/${encodePathSegment(providerContext)}/keys/${encodePathSegment(id)}`, { method: 'DELETE' });
 			clearDeletedKeyFromEditor(id);
 			notice = i18n.t('elygate.delete');
-			await loadKeys();
+			if (selectedProvider === providerContext) await loadKeys(providerContext);
 		} catch (cause) {
 			if (isMissingProviderKeyError(cause)) {
 				clearDeletedKeyFromEditor(id);
 				notice = i18n.t('elygate.keyAlreadyRemoved');
-				await loadKeys();
+				if (selectedProvider === providerContext) await loadKeys(providerContext);
 				return;
 			}
 			error = displayError(cause, i18n.t('elygate.operationFailed'));
@@ -351,7 +367,8 @@
 
 	async function revalidateKey(key: JsonRecord): Promise<void> {
 		const id = stringValue(key, 'id');
-		if (!selectedProvider || !id) return;
+		if (hasActiveMutation() || !selectedProvider || !id) return;
+		const providerContext = selectedProvider;
 		revalidatingKeyId = id;
 		error = '';
 		try {
@@ -364,12 +381,14 @@
 				enabled: key.enabled !== false,
 			};
 			if (key.value !== undefined) payload.value = key.value;
-			await requestJson(`/api/providers/${encodePathSegment(selectedProvider)}/keys/${encodePathSegment(id)}`, {
+			await requestJson(`/api/providers/${encodePathSegment(providerContext)}/keys/${encodePathSegment(id)}`, {
 				method: 'PUT',
 				body: JSON.stringify(payload),
 			});
-			notice = i18n.t('elygate.keyRevalidated');
-			await loadKeys();
+			if (selectedProvider === providerContext) {
+				notice = i18n.t('elygate.keyRevalidated');
+				await loadKeys(providerContext);
+			}
 		} catch (cause) {
 			error = displayError(cause, i18n.t('elygate.operationFailed'));
 		} finally {
@@ -398,8 +417,8 @@
 {#snippet keyWorkspace()}
 	<div class="provider-key-workspace">
 		{#if warning}<div class="notice warning" role="status">{warning}</div>{/if}
-			<div class="key-layout"><div class="table-wrap" aria-busy={isKeysLoading}><table><thead><tr><th>{i18n.t('elygate.keyName')}</th><th>{i18n.t('elygate.status')}</th><th>{i18n.t('elygate.models')}</th><th>{i18n.t('elygate.actions')}</th></tr></thead><tbody>{#each keys as key (stringValue(key, 'id'))}<tr><td>{stringValue(key, 'name')}</td><td title={stringValue(key, 'description')}>{providerKeyStatusLabel(key)}</td><td>{keyModelsLabel(key)}</td><td class="actions"><button type="button" onclick={() => editKey(key)}>{i18n.t('elygate.edit')}</button><button type="button" onclick={() => void revalidateKey(key)} disabled={revalidatingKeyId === stringValue(key, 'id')}>{i18n.t('elygate.revalidate')}</button><button class="danger" type="button" onclick={() => void removeKey(key)} disabled={deletingKeyId === stringValue(key, 'id')}>{i18n.t('elygate.delete')}</button></td></tr>{:else}<tr><td colspan="4" class="empty">{isKeysLoading ? i18n.t('elygate.loading') : i18n.t('elygate.noResults')}</td></tr>{/each}</tbody></table></div>
-			<form class="key-form" onsubmit={submitKey}><h3>{editingKey ? i18n.t('elygate.edit') : i18n.t('elygate.create')} {i18n.t('elygate.keyName')}</h3><label>{i18n.t('elygate.keyName')}<input bind:value={keyForm.name} required /></label><label>{i18n.t('elygate.keyValue')}<input type="password" bind:value={keyForm.value} autocomplete="new-password" /><small>{i18n.t('elygate.keyValueHelp')}</small></label><label>{i18n.t('elygate.modelsCsv')}<input bind:value={keyForm.models} placeholder="*" /><small>{i18n.t('elygate.keyModelsHelp')}</small></label><label>{i18n.t('elygate.blacklistedModelsCsv')}<input bind:value={keyForm.blacklistedModels} /></label><div class="grid-two"><label>{i18n.t('elygate.weight')}<input type="number" min="0" step="0.01" bind:value={keyForm.weight} /></label><label class="check"><input type="checkbox" bind:checked={keyForm.enabled} /> {i18n.t('elygate.enabled')}</label></div><label>{i18n.t('elygate.advancedJson')}<textarea bind:value={keyForm.advanced} rows="5"></textarea></label><footer><button type="button" onclick={() => { editingKey = null; keyForm = emptyKeyForm(); }}>{i18n.t('elygate.cancel')}</button><button class="primary" type="submit" disabled={isSaving}>{i18n.t('elygate.save')}</button></footer></form>
+			<div class="key-layout"><div class="table-wrap" aria-busy={isKeysLoading}><table><thead><tr><th>{i18n.t('elygate.keyName')}</th><th>{i18n.t('elygate.status')}</th><th>{i18n.t('elygate.models')}</th><th>{i18n.t('elygate.actions')}</th></tr></thead><tbody>{#each keys as key (stringValue(key, 'id'))}<tr><td>{stringValue(key, 'name')}</td><td title={stringValue(key, 'description')}>{providerKeyStatusLabel(key)}</td><td>{keyModelsLabel(key)}</td><td class="actions"><button type="button" disabled={hasActiveMutation()} onclick={() => editKey(key)}>{i18n.t('elygate.edit')}</button><button type="button" onclick={() => void revalidateKey(key)} disabled={hasActiveMutation()}>{i18n.t('elygate.revalidate')}</button><button class="danger" type="button" onclick={() => void removeKey(key)} disabled={hasActiveMutation()}>{i18n.t('elygate.delete')}</button></td></tr>{:else}<tr><td colspan="4" class="empty">{isKeysLoading ? i18n.t('elygate.loading') : i18n.t('elygate.noResults')}</td></tr>{/each}</tbody></table></div>
+			<form class="key-form" autocomplete="off" onsubmit={submitKey}><h3>{editingKey ? i18n.t('elygate.edit') : i18n.t('elygate.create')} {i18n.t('elygate.keyName')}</h3><label>{i18n.t('elygate.keyName')}<input bind:value={keyForm.name} autocomplete="off" required disabled={hasActiveMutation()} /></label><label>{i18n.t('elygate.keyValue')}<input type="password" bind:value={keyForm.value} autocomplete="new-password" disabled={hasActiveMutation()} /><small>{i18n.t('elygate.keyValueHelp')}</small></label><label>{i18n.t('elygate.modelsCsv')}<input bind:value={keyForm.models} placeholder="*" disabled={hasActiveMutation()} /><small>{i18n.t('elygate.keyModelsHelp')}</small></label><label>{i18n.t('elygate.blacklistedModelsCsv')}<input bind:value={keyForm.blacklistedModels} disabled={hasActiveMutation()} /></label><div class="grid-two"><label>{i18n.t('elygate.weight')}<input type="number" min="0" step="0.01" bind:value={keyForm.weight} disabled={hasActiveMutation()} /></label><label class="check"><input type="checkbox" bind:checked={keyForm.enabled} disabled={hasActiveMutation()} /> {i18n.t('elygate.enabled')}</label></div><label>{i18n.t('elygate.advancedJson')}<textarea bind:value={keyForm.advanced} rows="5" disabled={hasActiveMutation()}></textarea></label><footer><button type="button" disabled={hasActiveMutation()} onclick={() => { editingKey = null; keyForm = emptyKeyForm(); }}>{i18n.t('elygate.cancel')}</button><button class="primary" type="submit" disabled={hasActiveMutation()}>{i18n.t('elygate.save')}</button></footer></form>
 		</div>
 	</div>
 {/snippet}
@@ -407,19 +426,19 @@
 <section class="page-shell" data-resource={resourceName}>
 	<header class="page-heading">
 		<div><p class="eyebrow">{getAppName()} / {i18n.t('elygate.models')}</p><h1>{providerKeysPage ? i18n.t('elygate.providerKeys') : i18n.t('elygate.providers')}</h1><p>{providerKeysPage ? i18n.t('elygate.apiKeySeparateHint') : i18n.t('elygate.providerNameHelp')}</p></div>
-		<div class="heading-actions"><button class="primary" type="button" onclick={() => void (providerKeysPage ? loadKeys() : loadProviders())} disabled={isLoading || isKeysLoading}>{i18n.t('elygate.refresh')}</button>{#if !providerKeysPage}<button class="primary" type="button" onclick={openCreate}>{i18n.t('elygate.create')}</button>{/if}</div>
+		<div class="heading-actions"><button class="primary" type="button" onclick={() => void (providerKeysPage ? loadKeys() : loadProviders())} disabled={isLoading || isKeysLoading || hasActiveMutation()}>{i18n.t('elygate.refresh')}</button>{#if !providerKeysPage}<button class="primary" type="button" onclick={openCreate} disabled={hasActiveMutation()}>{i18n.t('elygate.create')}</button>{/if}</div>
 	</header>
 	{#if error}<div class="notice error" role="alert">{error}</div>{/if}
 	{#if notice}<div class="notice success" role="status">{notice}</div>{/if}
 	{#if providerKeysPage}
-		<label class="provider-selector">{i18n.t('elygate.providers')}<select bind:value={selectedProvider} onchange={() => void selectProvider(selectedProvider)} disabled={isLoading || providers.length === 0}>{#each providers as provider (stringValue(provider, 'name'))}<option value={stringValue(provider, 'name')}>{stringValue(provider, 'name')}</option>{/each}</select></label>
+		<label class="provider-selector">{i18n.t('elygate.providers')}<select bind:value={selectedProvider} onchange={() => void selectProvider(selectedProvider)} disabled={isLoading || providers.length === 0 || hasActiveMutation()}>{#each providers as provider (stringValue(provider, 'name'))}<option value={stringValue(provider, 'name')}>{stringValue(provider, 'name')}</option>{/each}</select></label>
 		{@render keyWorkspace()}
 	{:else}
 		<div class="table-wrap" aria-busy={isLoading}>
 			<table><thead><tr><th>{i18n.t('elygate.providerName')}</th><th>{i18n.t('elygate.status')}</th><th>{i18n.t('elygate.baseUrl')}</th><th>{i18n.t('elygate.actions')}</th></tr></thead>
 			<tbody>
 			{#each providers as provider (stringValue(provider, 'name'))}
-					<tr><td><strong>{stringValue(provider, 'name')}</strong></td><td title={stringValue(provider, 'description')}>{providerStatusLabel(stringValue(provider, 'provider_status'))}</td><td>{stringValue((provider.network_config as JsonRecord | undefined) ?? {}, 'base_url') || '—'}</td><td class="actions"><button type="button" onclick={() => openEdit(provider)}>{i18n.t('elygate.edit')}</button><button type="button" onclick={() => void openKeys(provider)}>{i18n.t('elygate.manageKeys')}</button><button class="danger" type="button" onclick={() => void removeProvider(provider)}>{i18n.t('elygate.delete')}</button></td></tr>
+					<tr><td><strong>{stringValue(provider, 'name')}</strong></td><td title={stringValue(provider, 'description')}>{providerStatusLabel(stringValue(provider, 'provider_status'))}</td><td>{stringValue((provider.network_config as JsonRecord | undefined) ?? {}, 'base_url') || '—'}</td><td class="actions"><button type="button" disabled={hasActiveMutation()} onclick={() => openEdit(provider)}>{i18n.t('elygate.edit')}</button><button type="button" disabled={hasActiveMutation()} onclick={() => void openKeys(provider)}>{i18n.t('elygate.manageKeys')}</button><button class="danger" type="button" disabled={hasActiveMutation()} onclick={() => void removeProvider(provider)}>{i18n.t('elygate.delete')}</button></td></tr>
 			{:else}<tr><td colspan="4" class="empty">{i18n.t('elygate.noResults')}</td></tr>{/each}
 			</tbody></table>
 		</div>
@@ -428,13 +447,13 @@
 
 {#if modal === 'create' || modal === 'edit'}
 	<div class="modal-backdrop"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="provider-dialog-title"><header><h2 id="provider-dialog-title">{modal === 'create' ? i18n.t('elygate.create') : i18n.t('elygate.edit')} {i18n.t('elygate.providers')}</h2><button type="button" onclick={() => (modal = null)}>{i18n.t('elygate.close')}</button></header>
-		<form onsubmit={submitProvider}><div class="form-hint" role="note">{i18n.t('elygate.apiKeySeparateHint')}</div><label>{i18n.t('elygate.providerName')}<input bind:value={providerForm.name} required disabled={modal === 'edit'} /><small>{i18n.t('elygate.providerNameHelp')}</small></label>
+		<form onsubmit={submitProvider}><div class="form-hint" role="note">{i18n.t('elygate.apiKeySeparateHint')}</div><label>{i18n.t('elygate.providerName')}<input bind:value={providerForm.name} required disabled={modal === 'edit' || hasActiveMutation()} /><small>{i18n.t('elygate.providerNameHelp')}</small></label>
 			<div class="grid-two"><label>{i18n.t('elygate.concurrency')}<input type="number" min="1" bind:value={providerForm.concurrency} /></label><label>{i18n.t('elygate.bufferSize')}<input type="number" min="1" bind:value={providerForm.bufferSize} /></label></div>
 			<label>{i18n.t('elygate.maxRetries')}<input type="number" min="0" step="1" bind:value={providerForm.maxRetries} placeholder={i18n.t('elygate.unset')} /><small>{i18n.t('elygate.maxRetriesHint')}</small></label>
 				<label>{i18n.t('elygate.networkConfig')}<textarea bind:value={providerForm.network} rows="5"></textarea><small>{i18n.t('elygate.providerNetworkHint')}</small></label><label>{i18n.t('elygate.proxyConfig')}<textarea bind:value={providerForm.proxy} rows="3"></textarea></label>
 				<label>{i18n.t('elygate.customConfig')}<textarea bind:value={providerForm.custom} rows="3"></textarea><small>{i18n.t('elygate.providerCustomHint')}</small></label><label>{i18n.t('elygate.openaiConfig')}<textarea bind:value={providerForm.openai} rows="2"></textarea><small>{i18n.t('elygate.providerOpenAIHint')}</small></label>
 			<div class="checks"><label><input type="checkbox" bind:checked={providerForm.sendBackRequest} /> {i18n.t('elygate.sendBackRawRequest')}</label><label><input type="checkbox" bind:checked={providerForm.sendBackResponse} /> {i18n.t('elygate.sendBackRawResponse')}</label><label><input type="checkbox" bind:checked={providerForm.storeRaw} /> {i18n.t('elygate.storeRawRequestResponse')}</label></div>
-			<footer><button type="button" onclick={() => (modal = null)}>{i18n.t('elygate.cancel')}</button><button class="primary" type="submit" disabled={isSaving}>{i18n.t('elygate.save')}</button></footer>
+			<footer><button type="button" disabled={hasActiveMutation()} onclick={() => { if (!hasActiveMutation()) modal = null; }}>{i18n.t('elygate.cancel')}</button><button class="primary" type="submit" disabled={hasActiveMutation()}>{i18n.t('elygate.save')}</button></footer>
 		</form>
 	</div></div>
 {/if}

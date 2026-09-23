@@ -1,5 +1,5 @@
 import type { AuthActionResult, AuthProvider, CheckResult, Identity } from '@svadmin/core';
-import { getSessionStatus, requestJson } from './api';
+import { ApiError, getSessionStatus, requestJson } from './api';
 import { formatBrandText, resolveBranding } from './branding';
 import type { ElygateLocale } from './i18n';
 
@@ -13,6 +13,7 @@ const authCopy = {
 		adminName: '管理员',
 		userRole: '用户',
 		invalidCredentials: '用户名或密码错误',
+		logoutFailed: '安全退出失败，请重试。',
 	},
 	en: {
 		loginRequired: 'Enter a username and password',
@@ -23,6 +24,7 @@ const authCopy = {
 		adminName: 'Administrator',
 		userRole: 'User',
 		invalidCredentials: 'Invalid username or password',
+		logoutFailed: 'Sign-out failed. Please try again.',
 	},
 } as const;
 
@@ -65,8 +67,10 @@ export function createBifrostAuthProvider(
 		async logout(): Promise<AuthActionResult> {
 			try {
 				await requestJson('/api/session/logout', { method: 'POST' });
-			} catch {
-				// 即使服务端会话已过期，也应让前端回到登录页。
+			} catch (error) {
+				if (!(error instanceof ApiError && error.status === 401)) {
+					return failed(authLabel(getLocale(), 'logoutFailed'));
+				}
 			}
 			return { success: true, redirectTo: '/login' };
 		},

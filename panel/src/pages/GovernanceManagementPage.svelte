@@ -47,6 +47,9 @@
 	let editingRecord = $state.raw<JsonRecord | null>(null);
 	let governanceDraft = $state<GovernanceDraft>(emptyGovernanceDraft('team'));
 	let pricingDraft = $state<PricingOverrideDraft>(emptyPricingOverrideDraft());
+	let loadSeq = 0;
+	let providerKeyLoadSeq = 0;
+	let modalContextSeq = 0;
 	const isPricing = $derived(resourceName === 'pricing-overrides');
 	const entityKind = $derived<GovernanceEntityKind>(resourceName === 'provider-governance' ? 'provider' : resourceName === 'customers' ? 'customer' : 'team');
 	const currentPage = $derived(Math.floor(offset / PAGE_SIZE) + 1);
@@ -148,18 +151,34 @@
 	}
 
 	async function loadProviderKeys(provider: string): Promise<void> {
+		const requestedProvider = provider.trim();
+		const sequence = ++providerKeyLoadSeq;
 		providerKeys = [];
-		if (!provider.trim()) return;
-		try { providerKeys = getListPayload(await requestJson<unknown>(`/api/providers/${encodeURIComponent(provider.trim())}/keys`)); }
-		catch { providerKeys = []; }
+		if (!requestedProvider) return;
+		try {
+			const payload = await requestJson<unknown>(`/api/providers/${encodeURIComponent(requestedProvider)}/keys`);
+			if (sequence === providerKeyLoadSeq && modalOpen && pricingDraft.providerId.trim() === requestedProvider) providerKeys = getListPayload(payload);
+		} catch {
+			if (sequence === providerKeyLoadSeq && modalOpen && pricingDraft.providerId.trim() === requestedProvider) providerKeys = [];
+		}
 	}
 
 	async function load(reset = false): Promise<void> {
 		if (reset) offset = 0;
+		const sequence = ++loadSeq;
+		const requestedOffset = offset;
+		const requestedSearch = search.trim();
+		const requestedCustomer = customerFilter;
+		const requestedScope = scopeFilter;
+		const requestedProvider = providerFilter;
+		const requestedResource = resourceName;
+		const requestedEntityKind = entityKind;
+		const requestedPricing = isPricing;
 		isLoading = true; error = '';
 		try {
-			if (entityKind === 'provider' && !isPricing) {
+			if (requestedEntityKind === 'provider' && !requestedPricing) {
 				const payload = await requestJson<unknown>('/api/governance/providers');
+				if (sequence !== loadSeq || resourceName !== requestedResource) return;
 				const configured = getListPayload(payload);
 				const byName = new Map(configured.map((record) => [String(record.provider ?? ''), record]));
 				const providerNames = providers.map((provider) => String(provider.name ?? provider.provider ?? '')).filter(Boolean);
@@ -168,28 +187,38 @@
 				return;
 			}
 			let path: string;
-			if (isPricing) path = `/api/governance/pricing-overrides?${buildPricingOverrideQuery({ search, scopeKind: scopeFilter, providerId: providerFilter, limit: PAGE_SIZE, offset })}`;
+			if (requestedPricing) path = `/api/governance/pricing-overrides?${buildPricingOverrideQuery({ search: requestedSearch, scopeKind: requestedScope, providerId: requestedProvider, limit: PAGE_SIZE, offset: requestedOffset })}`;
 			else {
-				const query = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(offset) });
-				if (search.trim()) query.set('search', search.trim());
-				if (entityKind === 'team' && customerFilter) query.set('customer_id', customerFilter);
-				path = `/api/governance/${resourceName}?${query}`;
+				const query = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(requestedOffset) });
+				if (requestedSearch) query.set('search', requestedSearch);
+				if (requestedEntityKind === 'team' && requestedCustomer) query.set('customer_id', requestedCustomer);
+				path = `/api/governance/${requestedResource}?${query}`;
 			}
 			const payload = await requestJson<unknown>(path);
+			if (sequence !== loadSeq || offset !== requestedOffset || search.trim() !== requestedSearch || customerFilter !== requestedCustomer || scopeFilter !== requestedScope || providerFilter !== requestedProvider || resourceName !== requestedResource) return;
 			records = getListPayload(payload);
 			total = getTotal(payload, records.length);
-			if (total > 0 && offset >= total) { offset = Math.floor((total - 1) / PAGE_SIZE) * PAGE_SIZE; await load(); }
-		} catch (cause) { error = displayError(cause, text('治理数据加载失败。', 'Failed to load governance data.')); }
-		finally { isLoading = false; }
+			if (requestedOffset !== 0 && (total === 0 || requestedOffset >= total)) {
+				offset = total === 0 ? 0 : Math.floor((total - 1) / PAGE_SIZE) * PAGE_SIZE;
+				await load();
+			}
+		} catch (cause) {
+			if (sequence === loadSeq) error = displayError(cause, text('治理数据加载失败。', 'Failed to load governance data.'));
+		}
+		finally { if (sequence === loadSeq) isLoading = false; }
 	}
 
 	function openCreate(): void {
+		if (isSaving || busyId) return;
+		modalContextSeq += 1;
 		editingRecord = null;
 		if (isPricing) pricingDraft = emptyPricingOverrideDraft();
 		else governanceDraft = emptyGovernanceDraft(entityKind, entityKind === 'provider' ? String(providers[0]?.name ?? '') : '');
 		modalOpen = true; error = '';
 	}
 	function openEdit(record: JsonRecord): void {
+		if (isSaving || busyId) return;
+		modalContextSeq += 1;
 		editingRecord = record;
 		if (isPricing) {
 			pricingDraft = pricingOverrideDraftFromRecord(record);
@@ -207,29 +236,40 @@
 	function changePricingProvider(provider: string): void { pricingDraft.providerId = provider; pricingDraft.providerKeyId = ''; void loadProviderKeys(provider); }
 
 	async function save(): Promise<void> {
-		if (isSaving) return;
+		if (isSaving || busyId) return;
+		const contextSequence = modalContextSeq;
+		const contextId = editingRecord ? idOf(editingRecord) : '';
+		const pricingSnapshot = JSON.parse(JSON.stringify(pricingDraft)) as PricingOverrideDraft;
+		const governanceSnapshot = JSON.parse(JSON.stringify(governanceDraft)) as GovernanceDraft;
+		const pricingContext = isPricing;
+		const resourceContext = resourceName;
+		const entityContext = entityKind;
 		isSaving = true; error = ''; notice = '';
 		try {
 			let path: string; let method: 'POST' | 'PUT'; let payload: JsonRecord;
 			if (isPricing) {
-				payload = buildPricingOverridePayload(pricingDraft);
-				path = editingRecord ? `/api/governance/pricing-overrides/${encodeURIComponent(idOf(editingRecord))}` : '/api/governance/pricing-overrides';
+					payload = buildPricingOverridePayload(pricingSnapshot);
+					path = contextId ? `/api/governance/pricing-overrides/${encodeURIComponent(contextId)}` : '/api/governance/pricing-overrides';
 				method = editingRecord ? 'PUT' : 'POST';
 			} else {
-				const wasAligned = editingRecord?.calendar_aligned === true;
-				if (editingRecord && !wasAligned && governanceDraft.calendarAligned && !window.confirm(text('启用日历对齐会把当前周期重置到日/周/月边界，确认继续？', 'Enabling calendar alignment snaps the current period to a day/week/month boundary. Continue?'))) return;
-				payload = buildGovernancePayload(governanceDraft, entityKind, Boolean(editingRecord) || entityKind === 'provider');
-				if (entityKind === 'provider') { path = `/api/governance/providers/${encodeURIComponent(governanceDraft.provider)}`; method = 'PUT'; }
-				else { path = editingRecord ? `/api/governance/${resourceName}/${encodeURIComponent(idOf(editingRecord))}` : `/api/governance/${resourceName}`; method = editingRecord ? 'PUT' : 'POST'; }
-			}
-			await requestJson<unknown>(path, { method, body: JSON.stringify(payload) });
-			modalOpen = false; notice = text('治理配置已保存并同步到运行时。', 'Governance configuration saved and synced to runtime.'); await load();
-		} catch (cause) { error = validationMessage(cause); }
+					const wasAligned = editingRecord?.calendar_aligned === true;
+					if (editingRecord && !wasAligned && governanceSnapshot.calendarAligned && !window.confirm(text('启用日历对齐会把当前周期重置到日/周/月边界，确认继续？', 'Enabling calendar alignment snaps the current period to a day/week/month boundary. Continue?'))) return;
+					payload = buildGovernancePayload(governanceSnapshot, entityKind, Boolean(editingRecord) || entityKind === 'provider');
+					if (entityKind === 'provider') { path = `/api/governance/providers/${encodeURIComponent(governanceSnapshot.provider)}`; method = 'PUT'; }
+					else { path = contextId ? `/api/governance/${resourceName}/${encodeURIComponent(contextId)}` : `/api/governance/${resourceName}`; method = contextId ? 'PUT' : 'POST'; }
+				}
+				await requestJson<unknown>(path, { method, body: JSON.stringify(payload) });
+				if (contextSequence === modalContextSeq && isPricing === pricingContext && resourceName === resourceContext && entityKind === entityContext && (editingRecord ? idOf(editingRecord) : '') === contextId) {
+					modalOpen = false;
+					notice = text('治理配置已保存并同步到运行时。', 'Governance configuration saved and synced to runtime.');
+					await load();
+				}
+			} catch (cause) { if (contextSequence === modalContextSeq) error = validationMessage(cause); }
 		finally { isSaving = false; }
 	}
 
 	async function remove(record: JsonRecord): Promise<void> {
-		const id = idOf(record); if (!id || busyId || !window.confirm(text(`确认删除 ${nameOf(record)} 的治理配置？`, `Delete governance configuration for ${nameOf(record)}?`))) return;
+		const id = idOf(record); if (!id || isSaving || busyId || !window.confirm(text(`确认删除 ${nameOf(record)} 的治理配置？`, `Delete governance configuration for ${nameOf(record)}?`))) return;
 		busyId = id; error = ''; notice = '';
 		try {
 			const path = isPricing ? `/api/governance/pricing-overrides/${encodeURIComponent(id)}` : entityKind === 'provider' ? `/api/governance/providers/${encodeURIComponent(id)}` : `/api/governance/${resourceName}/${encodeURIComponent(id)}`;
@@ -243,12 +283,12 @@
 </script>
 
 <section class="page-shell" data-resource={resourceName}>
-	<header class="page-heading"><div><p class="eyebrow">{getAppName()} / {i18n.t('elygate.enterprise')}</p><h1>{title()}</h1><p>{description()}</p></div>{#if entityKind !== 'provider' || isPricing}<button class="primary" type="button" onclick={openCreate}>+ {isPricing ? text('添加价格覆盖', 'Add pricing override') : entityKind === 'team' ? text('创建团队', 'Create team') : text('创建客户', 'Create customer')}</button>{/if}</header>
+		<header class="page-heading"><div><p class="eyebrow">{getAppName()} / {i18n.t('elygate.enterprise')}</p><h1>{title()}</h1><p>{description()}</p></div>{#if entityKind !== 'provider' || isPricing}<button class="primary" type="button" disabled={isSaving || !!busyId} onclick={openCreate}>+ {isPricing ? text('添加价格覆盖', 'Add pricing override') : entityKind === 'team' ? text('创建团队', 'Create team') : text('创建客户', 'Create customer')}</button>{/if}</header>
 	{#if error}<div class="notice error" role="alert">{error}</div>{/if}
 	{#if notice}<div class="notice success" role="status">{notice}</div>{/if}
 		<form class="toolbar" onsubmit={(event) => { event.preventDefault(); void load(true); }}><label>{text('搜索', 'Search')}<input bind:value={search} placeholder={isPricing ? text('名称或模型模式', 'Name or model pattern') : text('名称', 'Name')} /></label>{#if entityKind === 'team' && !isPricing}<label>{text('客户', 'Customer')}<select bind:value={customerFilter}><option value="">{text('全部', 'All')}</option>{#each customers as customer (idOf(customer))}<option value={idOf(customer)}>{nameOf(customer)}</option>{/each}</select></label>{/if}{#if isPricing}<label>{text('范围', 'Scope')}<select bind:value={scopeFilter}><option value="">{text('全部', 'All')}</option>{#each PRICING_SCOPE_KINDS as scope (scope)}<option value={scope}>{i18n.t(`elygate.scope.${scope}` as 'elygate.scope.global')}</option>{/each}</select></label><label>{text('供应商', 'Provider')}<input list="governance-providers" bind:value={providerFilter} /></label>{/if}<button type="submit">{text('应用筛选', 'Apply')}</button><button type="button" onclick={() => { search = ''; customerFilter = ''; scopeFilter = ''; providerFilter = ''; void load(true); }}>{text('清除', 'Clear')}</button></form>
 
-	<div class="table-wrap" class:loading={isLoading}><table><thead>{#if isPricing}<tr><th>{text('名称', 'Name')}</th><th>{text('范围', 'Scope')}</th><th>{text('目标', 'Target')}</th><th>{text('模型模式', 'Model pattern')}</th><th>{text('请求类型', 'Request types')}</th><th>{text('价格字段', 'Pricing fields')}</th><th>{text('操作', 'Actions')}</th></tr>{:else}<tr><th>{entityKind === 'provider' ? text('供应商', 'Provider') : text('名称', 'Name')}</th>{#if entityKind === 'team'}<th>{text('客户', 'Customer')}</th>{/if}<th>{text('预算', 'Budgets')}</th><th>{text('限流', 'Rate limit')}</th><th>{text('日历对齐', 'Calendar aligned')}</th>{#if entityKind !== 'provider'}<th>{text('虚拟密钥', 'Virtual keys')}</th>{/if}<th>{text('操作', 'Actions')}</th></tr>{/if}</thead><tbody>{#each displayedRecords as record (idOf(record))}{#if isPricing}<tr><td><strong>{nameOf(record)}</strong><small>{idOf(record)}</small></td><td><span class="badge">{scopeLabel(record.scope_kind)}</span></td><td>{displayValue(record.user_id ?? record.virtual_key_id ?? record.provider_key_id ?? record.provider_id)}</td><td><code>{displayValue(record.pattern)}</code><small>{matchTypeLabel(record.match_type)}</small></td><td>{requestTypesLabel(record.request_types)}</td><td>{pricingFieldCount(record)}</td><td><div class="actions"><button type="button" onclick={() => openEdit(record)}>{text('编辑', 'Edit')}</button><button class="danger" type="button" disabled={busyId === idOf(record)} onclick={() => void remove(record)}>{text('删除', 'Delete')}</button></div></td></tr>{:else}<tr><td><strong>{nameOf(record)}</strong></td>{#if entityKind === 'team'}<td>{relationName(record, 'customer', 'customer_id')}</td>{/if}<td><div class="budget-list">{#each objectList(record.budgets) as budget (String(budget.id ?? budget.reset_duration))}<span>{displayValue(budget.max_limit)} / {displayValue(budget.reset_duration)}</span>{:else}<span>—</span>{/each}</div></td><td>{#if isJsonRecord(record.rate_limit)}<span>{text('Token', 'Token')}: {displayValue(record.rate_limit.token_max_limit)}</span><br /><span>{text('请求', 'Requests')}: {displayValue(record.rate_limit.request_max_limit)}</span>{:else}—{/if}</td><td>{record.calendar_aligned === true ? text('是', 'Yes') : text('否', 'No')}</td>{#if entityKind !== 'provider'}<td>{countOf(record, 'virtual_key_count')}</td>{/if}<td><div class="actions"><button type="button" onclick={() => openEdit(record)}>{entityKind === 'provider' && objectList(record.budgets).length === 0 && !isJsonRecord(record.rate_limit) ? text('配置', 'Configure') : text('编辑', 'Edit')}</button><button class="danger" type="button" disabled={busyId === idOf(record)} onclick={() => void remove(record)}>{entityKind === 'provider' ? text('重置', 'Reset') : text('删除', 'Delete')}</button></div></td></tr>{/if}{:else}<tr><td class="empty" colspan="8">{isLoading ? text('加载中…', 'Loading…') : text('没有匹配记录。', 'No matching records.')}</td></tr>{/each}</tbody></table></div>
+		<div class="table-wrap" class:loading={isLoading}><table><thead>{#if isPricing}<tr><th>{text('名称', 'Name')}</th><th>{text('范围', 'Scope')}</th><th>{text('目标', 'Target')}</th><th>{text('模型模式', 'Model pattern')}</th><th>{text('请求类型', 'Request types')}</th><th>{text('价格字段', 'Pricing fields')}</th><th>{text('操作', 'Actions')}</th></tr>{:else}<tr><th>{entityKind === 'provider' ? text('供应商', 'Provider') : text('名称', 'Name')}</th>{#if entityKind === 'team'}<th>{text('客户', 'Customer')}</th>{/if}<th>{text('预算', 'Budgets')}</th><th>{text('限流', 'Rate limit')}</th><th>{text('日历对齐', 'Calendar aligned')}</th>{#if entityKind !== 'provider'}<th>{text('虚拟密钥', 'Virtual keys')}</th>{/if}<th>{text('操作', 'Actions')}</th></tr>{/if}</thead><tbody>{#each displayedRecords as record (idOf(record))}{#if isPricing}<tr><td><strong>{nameOf(record)}</strong><small>{idOf(record)}</small></td><td><span class="badge">{scopeLabel(record.scope_kind)}</span></td><td>{displayValue(record.user_id ?? record.virtual_key_id ?? record.provider_key_id ?? record.provider_id)}</td><td><code>{displayValue(record.pattern)}</code><small>{matchTypeLabel(record.match_type)}</small></td><td>{requestTypesLabel(record.request_types)}</td><td>{pricingFieldCount(record)}</td><td><div class="actions"><button type="button" disabled={isSaving || !!busyId} onclick={() => openEdit(record)}>{text('编辑', 'Edit')}</button><button class="danger" type="button" disabled={busyId === idOf(record) || isSaving} onclick={() => void remove(record)}>{text('删除', 'Delete')}</button></div></td></tr>{:else}<tr><td><strong>{nameOf(record)}</strong></td>{#if entityKind === 'team'}<td>{relationName(record, 'customer', 'customer_id')}</td>{/if}<td><div class="budget-list">{#each objectList(record.budgets) as budget (String(budget.id ?? budget.reset_duration))}<span>{displayValue(budget.max_limit)} / {displayValue(budget.reset_duration)}</span>{:else}<span>—</span>{/each}</div></td><td>{#if isJsonRecord(record.rate_limit)}<span>{text('Token', 'Token')}: {displayValue(record.rate_limit.token_max_limit)}</span><br /><span>{text('请求', 'Requests')}: {displayValue(record.rate_limit.request_max_limit)}</span>{:else}—{/if}</td><td>{record.calendar_aligned === true ? text('是', 'Yes') : text('否', 'No')}</td>{#if entityKind !== 'provider'}<td>{countOf(record, 'virtual_key_count')}</td>{/if}<td><div class="actions"><button type="button" disabled={isSaving || !!busyId} onclick={() => openEdit(record)}>{entityKind === 'provider' && objectList(record.budgets).length === 0 && !isJsonRecord(record.rate_limit) ? text('配置', 'Configure') : text('编辑', 'Edit')}</button><button class="danger" type="button" disabled={busyId === idOf(record) || isSaving} onclick={() => void remove(record)}>{entityKind === 'provider' ? text('重置', 'Reset') : text('删除', 'Delete')}</button></div></td></tr>{/if}{:else}<tr><td class="empty" colspan="8">{isLoading ? text('加载中…', 'Loading…') : text('没有匹配记录。', 'No matching records.')}</td></tr>{/each}</tbody></table></div>
 	{#if entityKind !== 'provider' || isPricing}<footer class="pagination"><span>{formatPagination(currentPage, totalPages, total, i18n.locale)}</span><div><button type="button" disabled={offset === 0 || isLoading} onclick={() => { offset = Math.max(0, offset - PAGE_SIZE); void load(); }}>{text('上一页', 'Previous')}</button><button type="button" disabled={offset + PAGE_SIZE >= total || isLoading} onclick={() => { offset += PAGE_SIZE; void load(); }}>{text('下一页', 'Next')}</button></div></footer>{/if}
 </section>
 
@@ -256,8 +296,9 @@
 <datalist id="governance-virtual-keys">{#each virtualKeys as key (idOf(key))}<option value={idOf(key)}>{nameOf(key)}</option>{/each}</datalist>
 <datalist id="governance-provider-keys">{#each providerKeys as key (idOf(key))}<option value={idOf(key)}>{nameOf(key)}</option>{/each}</datalist>
 
-{#if modalOpen}
-	<div class="modal-backdrop" role="presentation" onclick={(event) => { if (event.target === event.currentTarget && !isSaving) modalOpen = false; }}><div class="modal" role="dialog" aria-modal="true" aria-labelledby="governance-modal-title"><header><div><h2 id="governance-modal-title">{editingRecord ? text('编辑', 'Edit') : text('创建', 'Create')} {title()}</h2><p>{isPricing ? text('价格补丁完整替换；未选范围字段会显式清空。', 'The pricing patch is replaced in full; unused scope IDs are explicitly cleared.') : text('预算数组是完整期望状态，删除预算行会在保存后移除对应周期。', 'Budgets are the full desired state; removing a row removes that window on save.')}</p></div><button type="button" aria-label={text('关闭', 'Close')} onclick={() => (modalOpen = false)}>×</button></header>
+	{#if modalOpen}
+		<div class="modal-backdrop" role="presentation" onclick={(event) => { if (event.target === event.currentTarget && !isSaving) modalOpen = false; }}><div class="modal" role="dialog" aria-modal="true" aria-labelledby="governance-modal-title"><header><div><h2 id="governance-modal-title">{editingRecord ? text('编辑', 'Edit') : text('创建', 'Create')} {title()}</h2><p>{isPricing ? text('价格补丁完整替换；未选范围字段会显式清空。', 'The pricing patch is replaced in full; unused scope IDs are explicitly cleared.') : text('预算数组是完整期望状态，删除预算行会在保存后移除对应周期。', 'Budgets are the full desired state; removing a row removes that window on save.')}</p></div><button type="button" aria-label={text('关闭', 'Close')} disabled={isSaving} onclick={() => { if (!isSaving) modalOpen = false; }}>×</button></header>
+		<fieldset disabled={isSaving}>
 		{#if isPricing}
 			<div class="form-grid"><label>{text('名称', 'Name')}<input bind:value={pricingDraft.name} placeholder="gpt-5-team-pricing" /></label><label>{text('范围', 'Scope')}<select bind:value={pricingDraft.scopeKind}>{#each PRICING_SCOPE_KINDS as scope (scope)}<option value={scope}>{scopeLabel(scope)}</option>{/each}</select></label>{#if pricingDraft.scopeKind.startsWith('user')}<label>{text('用户 ID', 'User ID')}<input bind:value={pricingDraft.userId} /></label>{/if}{#if pricingDraft.scopeKind.startsWith('virtual_key')}<label>{text('虚拟密钥 ID', 'Virtual key ID')}<input list="governance-virtual-keys" bind:value={pricingDraft.virtualKeyId} /></label>{/if}{#if pricingDraft.scopeKind.includes('provider')}<label>{text('供应商', 'Provider')}<input list="governance-providers" value={pricingDraft.providerId} onchange={(event) => changePricingProvider(event.currentTarget.value)} /></label>{/if}{#if pricingDraft.scopeKind.endsWith('provider_key')}<label>{text('供应商密钥 ID', 'Provider key ID')}<input list="governance-provider-keys" bind:value={pricingDraft.providerKeyId} /></label>{/if}<label>{text('匹配方式', 'Match type')}<select bind:value={pricingDraft.matchType}><option value="exact">{matchTypeLabel('exact')}</option><option value="wildcard">{matchTypeLabel('wildcard')}</option></select></label><label>{text('模型模式', 'Model pattern')}<input bind:value={pricingDraft.pattern} placeholder={pricingDraft.matchType === 'wildcard' ? 'gpt-5*' : 'gpt-5'} /></label><fieldset class="span-2"><legend>{text('请求类型（至少选择一个）', 'Request types (select at least one)')}</legend><div class="request-types">{#each REQUEST_TYPES as requestType (requestType)}<label class="check"><input type="checkbox" checked={pricingDraft.requestTypes.includes(requestType)} onchange={() => toggleRequestType(requestType)} />{requestTypeLabel(requestType)}</label>{/each}</div></fieldset><label class="span-2">{text('价格字段（高级）', 'Pricing fields (advanced)')}<textarea class="json-editor" rows="18" bind:value={pricingDraft.patchJson}></textarea><small>{text('使用非负数填写高级价格字段；保存时服务端会校验。', 'Use non-negative numbers for advanced pricing fields; the server validates them on save.')}</small></label></div>
 		{:else}
@@ -265,7 +306,7 @@
 			<section class="editor-section"><div class="section-heading"><div><h3>{text('多周期预算', 'Multi-window budgets')}</h3><p>{text('每个重置周期只能有一个预算。', 'Each reset window may appear only once.')}</p></div><button type="button" onclick={addBudget}>+ {text('添加预算', 'Add budget')}</button></div><div class="budget-editor">{#each governanceDraft.budgets as budget (budget.key)}<div><label>{text('金额', 'Amount')}<input type="number" min="0.01" step="0.01" bind:value={budget.maxLimit} /></label><label>{text('周期', 'Window')}<select bind:value={budget.resetDuration}>{#each RESET_DURATIONS as duration (duration)}<option value={duration}>{duration}</option>{/each}</select></label><button class="danger" type="button" onclick={() => removeBudget(budget.key)}>{text('移除', 'Remove')}</button></div>{:else}<p class="empty-inline">{text('未设置预算。', 'No budgets configured.')}</p>{/each}</div></section>
 			<section class="editor-section"><h3>{text('限流', 'Rate limits')}</h3><div class="form-grid"><label>{text('Token 上限', 'Token limit')}<input type="number" min="1" step="1" bind:value={governanceDraft.tokenMaxLimit} /></label><label>{text('Token 周期', 'Token window')}<select bind:value={governanceDraft.tokenResetDuration}>{#each RESET_DURATIONS as duration (duration)}<option value={duration}>{duration}</option>{/each}</select></label><label>{text('请求上限', 'Request limit')}<input type="number" min="1" step="1" bind:value={governanceDraft.requestMaxLimit} /></label><label>{text('请求周期', 'Request window')}<select bind:value={governanceDraft.requestResetDuration}>{#each RESET_DURATIONS as duration (duration)}<option value={duration}>{duration}</option>{/each}</select></label></div><p>{text('同时清空 Token 和请求上限会移除已有 Rate Limit。', 'Clearing both token and request limits removes the existing rate limit.')}</p></section>
 		{/if}
-		<footer><button type="button" onclick={() => (modalOpen = false)}>{text('取消', 'Cancel')}</button><button class="primary" type="button" disabled={isSaving} onclick={() => void save()}>{isSaving ? text('保存中…', 'Saving…') : text('保存', 'Save')}</button></footer></div></div>
+		</fieldset><footer><button type="button" disabled={isSaving} onclick={() => { if (!isSaving) modalOpen = false; }}>{text('取消', 'Cancel')}</button><button class="primary" type="button" disabled={isSaving || !!busyId} onclick={() => void save()}>{isSaving ? text('保存中…', 'Saving…') : text('保存', 'Save')}</button></footer></div></div>
 {/if}
 
 <style>

@@ -5,6 +5,7 @@ export type ElygateLocale = 'zh-CN' | 'en';
 
 const translations = {
 	'zh-CN': {
+		'common.dashboard': '运行概览',
 		'elygate.dashboard': '运行概览',
 		'elygate.dashboardHint': '统一查看请求量、成本、延迟、Token、供应商、模型、治理维度和 MCP 工具使用情况。',
 		'elygate.timeRange': '时间范围',
@@ -174,6 +175,9 @@ const translations = {
 		'elygate.config': '运行配置',
 		'elygate.complexityAnalyzer': '复杂度分析器',
 		'elygate.enterprise': '企业级管理',
+		'elygate.controlPlaneProjects': '项目',
+		'elygate.controlPlaneApplications': '应用',
+		'elygate.controlPlaneUsage': '用量账本',
 		'elygate.employees': '员工管理',
 		'elygate.users': '用户',
 		'elygate.businessUnits': '业务单元',
@@ -630,6 +634,7 @@ const translations = {
 		'elygate.option.binding.tool': '按工具',
 	},
 	en: {
+		'common.dashboard': 'Operations overview',
 		'elygate.dashboard': 'Operations overview',
 		'elygate.dashboardHint': 'Monitor requests, cost, latency, tokens, providers, models, governance dimensions, and MCP tool usage.',
 		'elygate.timeRange': 'Time range',
@@ -799,6 +804,9 @@ const translations = {
 		'elygate.config': 'Runtime config',
 		'elygate.complexityAnalyzer': 'Complexity analyzer',
 		'elygate.enterprise': 'Enterprise management',
+		'elygate.controlPlaneProjects': 'Projects',
+		'elygate.controlPlaneApplications': 'Applications',
+		'elygate.controlPlaneUsage': 'Usage Ledger',
 		'elygate.employees': 'Employees',
 		'elygate.users': 'Users',
 		'elygate.businessUnits': 'Business units',

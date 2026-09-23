@@ -31,6 +31,8 @@
 	let isMutating = $state(false);
 	let error = $state('');
 	let notice = $state('');
+	let loadSeq = 0;
+	let detailSeq = 0;
 
 	const hasNext = $derived(page * Number(pageSize) < total);
 	const totalPages = $derived(Math.max(1, Math.ceil(total / Number(pageSize))));
@@ -76,30 +78,36 @@
 	}
 
 	async function load(): Promise<void> {
+		const sequence = ++loadSeq;
 		isLoading = true;
 		error = '';
 		try {
 			const params = filterParams().toString();
-			const [listPayload, statsPayload, histogramPayload, toolsPayload] = await Promise.all([
+			const [listResult, statsResult, histogramResult, toolsResult] = await Promise.allSettled([
 				requestJson<unknown>(listEndpoint()),
 				requestJson<McpStats>(`/api/mcp-logs/stats?${params}`),
 				requestJson<JsonRecord>(`/api/mcp-logs/histogram?${params}`).catch((): JsonRecord => ({})),
 				requestJson<JsonRecord>(`/api/mcp-logs/histogram/top-tools?${params}`).catch((): JsonRecord => ({})),
 			]);
+			if (listResult.status === 'rejected') throw listResult.reason;
+			if (sequence !== loadSeq) return;
+			const listPayload = listResult.value;
 			logs = getListPayload(listPayload);
-			stats = statsPayload;
+			stats = statsResult.status === 'fulfilled' ? statsResult.value : {};
 			total = isJsonRecord(listPayload) && isJsonRecord(listPayload.pagination)
 				? getTotal(listPayload.pagination, logs.length)
 				: getTotal(listPayload, logs.length);
+			const histogramPayload = histogramResult.status === 'fulfilled' ? histogramResult.value : {};
+			const toolsPayload = toolsResult.status === 'fulfilled' ? toolsResult.value : {};
 			histogram = Array.isArray(histogramPayload.buckets)
 				? histogramPayload.buckets.filter((bucket): bucket is HistogramBucket => isJsonRecord(bucket))
 				: [];
 			topTools = Array.isArray(toolsPayload.tools) ? toolsPayload.tools.filter(isJsonRecord) : [];
 			selectedIds = selectedIds.filter((id) => logs.some((log) => String(log.id) === id));
 		} catch (cause) {
-			error = displayError(cause, i18n.t('elygate.loadFailed'));
+			if (sequence === loadSeq) error = displayError(cause, i18n.t('elygate.loadFailed'));
 		} finally {
-			isLoading = false;
+			if (sequence === loadSeq) isLoading = false;
 		}
 	}
 
@@ -112,16 +120,24 @@
 	}
 
 	async function openDetail(record: JsonRecord): Promise<void> {
+		const sequence = ++detailSeq;
 		selectedLog = record;
 		try {
-			selectedLog = await requestJson<JsonRecord>(`/api/mcp-logs/${encodeURIComponent(String(record.id))}`);
+			const detail = await requestJson<JsonRecord>(`/api/mcp-logs/${encodeURIComponent(String(record.id))}`);
+			if (sequence !== detailSeq) return;
+			selectedLog = detail;
 		} catch (cause) {
-			error = displayError(cause, i18n.t('elygate.loadFailed'));
+			if (sequence === detailSeq) error = displayError(cause, i18n.t('elygate.loadFailed'));
 		}
 	}
 
+	function closeDetail(): void {
+		detailSeq += 1;
+		selectedLog = null;
+	}
+
 	async function deleteSelected(): Promise<void> {
-		if (selectedIds.length === 0 || !window.confirm(i18n.t('elygate.confirmDeleteSelected'))) return;
+		if (isMutating || selectedIds.length === 0 || !window.confirm(i18n.t('elygate.confirmDeleteSelected'))) return;
 		isMutating = true;
 		error = '';
 		try {
@@ -148,6 +164,11 @@
 
 	function movePage(next: number): void {
 		page = Math.max(1, next);
+		void load();
+	}
+
+	function changePageSize(): void {
+		page = 1;
 		void load();
 	}
 
@@ -190,7 +211,7 @@
 		<label>{i18n.t('elygate.serverLabel')}<select bind:value={serverLabel}><option value="">{i18n.t('elygate.all')}</option>{#each serverLabels as item (item)}<option value={item}>{item}</option>{/each}</select></label>
 		<label>{i18n.t('elygate.status')}<select bind:value={status}><option value="">{i18n.t('elygate.all')}</option><option value="success">{i18n.t('elygate.success')}</option><option value="error">{i18n.t('elygate.error')}</option><option value="cancelled">{i18n.t('elygate.cancelled')}</option><option value="processing">{i18n.t('elygate.processing')}</option></select></label>
 		<label>{i18n.t('elygate.timeRange')}<select bind:value={period}><option value="1h">{i18n.t('elygate.period.1h')}</option><option value="24h">{i18n.t('elygate.period.24h')}</option><option value="7d">{i18n.t('elygate.period.7d')}</option><option value="30d">{i18n.t('elygate.period.30d')}</option></select></label>
-		<label>{i18n.t('elygate.pageSize')}<select bind:value={pageSize}><option value="20">20</option><option value="50">50</option><option value="100">100</option></select></label>
+		<label>{i18n.t('elygate.pageSize')}<select bind:value={pageSize} onchange={changePageSize}><option value="20">20</option><option value="50">50</option><option value="100">100</option></select></label>
 		<button type="submit" disabled={isLoading}>{i18n.t('elygate.search')}</button>
 	</form>
 
@@ -203,9 +224,9 @@
 </section>
 
 {#if selectedLog}
-	<div class="drawer-backdrop" role="presentation" onclick={() => (selectedLog = null)}></div>
+	<div class="drawer-backdrop" role="presentation" onclick={closeDetail}></div>
 	<aside class="drawer" aria-label={i18n.t('elygate.mcpLogDetails')}>
-		<header><div><p>{value(selectedLog, 'server_label')}</p><h2>{value(selectedLog, 'tool_name')}</h2></div><button type="button" onclick={() => (selectedLog = null)}>{i18n.t('elygate.close')}</button></header>
+		<header><div><p>{value(selectedLog, 'server_label')}</p><h2>{value(selectedLog, 'tool_name')}</h2></div><button type="button" onclick={closeDetail}>{i18n.t('elygate.close')}</button></header>
 		<div class="detail-grid"><div><span>{i18n.t('elygate.status')}</span><strong>{statusLabel(value(selectedLog, 'status'))}</strong></div><div><span>{i18n.t('elygate.latency')}</span><strong>{Number(selectedLog.latency ?? 0).toFixed(0)} ms</strong></div><div><span>{i18n.t('elygate.virtualKey')}</span><strong>{value(selectedLog, 'virtual_key_name')}</strong></div><div><span>{i18n.t('elygate.llmRequestId')}</span><strong>{value(selectedLog, 'llm_request_id')}</strong></div></div>
 		<h3>{i18n.t('elygate.arguments')}</h3><pre>{formatted(selectedLog.arguments)}</pre>
 		<h3>{i18n.t('elygate.result')}</h3><pre>{formatted(selectedLog.result)}</pre>

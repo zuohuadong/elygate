@@ -214,6 +214,7 @@ func PopulateContextAttributes(
 	teamID, teamName string,
 	customerID, customerName string,
 	businessUnitID, businessUnitName string,
+	projectID, projectName string,
 	userID, userName, userEmail string,
 	numberOfRetries, fallbackIndex int,
 ) {
@@ -246,6 +247,12 @@ func PopulateContextAttributes(
 	}
 	if businessUnitName != "" {
 		attrs[schemas.AttrBifrostBusinessUnitName] = businessUnitName
+	}
+	if projectID != "" {
+		attrs[schemas.AttrBifrostProjectID] = projectID
+	}
+	if projectName != "" {
+		attrs[schemas.AttrBifrostProjectName] = projectName
 	}
 	if userID != "" {
 		attrs[schemas.AttrBifrostUserID] = userID
@@ -809,6 +816,14 @@ func PopulateResponsesResponseAttributes(resp *schemas.BifrostResponsesResponse,
 		if data, err := schemas.MarshalString(outputMessages); err == nil {
 			attrs[schemas.AttrOutputMessages] = data
 		}
+	}
+
+	// Finish reason: the Responses API carries a single top-level stop_reason
+	// rather than per-choice finish reasons. Emit it under the same
+	// finish_reasons key the chat path uses so the tracer derives the singular
+	// gen_ai.response.finish_reason from it and refusals stay visible in OTEL.
+	if resp.StopReason != nil && *resp.StopReason != "" {
+		attrs[schemas.AttrFinishReasons] = []string{*resp.StopReason}
 	}
 
 	// Additional response fields

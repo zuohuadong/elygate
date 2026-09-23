@@ -2,6 +2,7 @@ package configstore
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -52,6 +53,10 @@ func setupEncryptionTestStore(t *testing.T) (*RDBConfigStore, *gorm.DB) {
 		&tables.TableVirtualKeyMCPConfig{},
 		&tables.TableModel{},
 		&tables.TempToken{},
+		&tables.TableWebhookEndpoint{},
+		&tables.TableMCPOauthFlow{},
+		&tables.TableMCPPerUserHeaderCredential{},
+		&tables.TableGovernanceConfig{},
 	)
 	require.NoError(t, err)
 
@@ -123,9 +128,25 @@ func TestEncryptPlaintextRows_EncryptsAllTables(t *testing.T) {
 		true, "redis", `{"host":"redis.example.com","password":"secret"}`, now, now)
 
 	insertPlaintextRow(t, db,
-		`INSERT INTO config_plugins (name, enabled, version, config_json, encryption_status, created_at, updated_at)
-		 VALUES (?, ?, 1, ?, 'plain_text', ?, ?)`,
+		`INSERT INTO config_plugins (name, enabled, config_json, encryption_status, created_at, updated_at)
+		 VALUES (?, ?, ?, 'plain_text', ?, ?)`,
 		"test-plugin", true, `{"api_key":"plugin-secret"}`, now, now)
+
+	insertPlaintextRow(t, db,
+		`INSERT INTO config_webhook_endpoints (id, name, url, secret, events_json, headers_json, encryption_status, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, 'plain_text', ?, ?)`,
+		"webhook-1", "test-webhook", "https://receiver.example.com/hook", "webhook-plaintext-secret",
+		`["async_job.completed"]`, `{"Authorization":"Bearer webhook-token"}`, now, now)
+
+	insertPlaintextRow(t, db,
+		`INSERT INTO mcp_oauth_flows (id, mcp_client_id, oauth_config_id, state, redirect_uri, code_verifier, flow_mode, status, encryption_status, expires_at, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'plain_text', ?, ?, ?)`,
+		"flow-1", "mcp-1", "oauth-1", "state-1", "https://receiver.example.com/callback", "pkce-plaintext-verifier", "user", "pending", future, now, now)
+
+	insertPlaintextRow(t, db,
+		`INSERT INTO mcp_per_user_header_credentials (id, mcp_client_id, auth_mode, status, headers_json, encryption_status, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, 'plain_text', ?, ?)`,
+		"cred-1", "mcp-1", "user", "active", `{"Authorization":"Bearer user-token"}`, now, now)
 
 	// Run the startup encryption pass
 	err := store.EncryptPlaintextRows(ctx)
@@ -172,6 +193,222 @@ func TestEncryptPlaintextRows_EncryptsAllTables(t *testing.T) {
 	var pluginRow map[string]any
 	db.Table("config_plugins").Where("name = ?", "test-plugin").Take(&pluginRow)
 	assert.Equal(t, "encrypted", pluginRow["encryption_status"])
+
+	var webhookRow map[string]any
+	db.Table("config_webhook_endpoints").Where("id = ?", "webhook-1").Take(&webhookRow)
+	assert.Equal(t, "encrypted", webhookRow["encryption_status"])
+	assert.NotEqual(t, "webhook-plaintext-secret", webhookRow["secret"])
+	assert.NotEqual(t, `{"Authorization":"Bearer webhook-token"}`, webhookRow["headers_json"])
+
+	var webhook tables.TableWebhookEndpoint
+	require.NoError(t, db.Where("id = ?", "webhook-1").First(&webhook).Error)
+	require.NotNil(t, webhook.Secret)
+	assert.Equal(t, "webhook-plaintext-secret", webhook.Secret.GetValue())
+	authorizationHeader := webhook.Headers["Authorization"]
+	assert.Equal(t, "Bearer webhook-token", authorizationHeader.GetValue())
+
+	var flowRow map[string]any
+	db.Table("mcp_oauth_flows").Where("id = ?", "flow-1").Take(&flowRow)
+	assert.Equal(t, "encrypted", flowRow["encryption_status"])
+	assert.NotEqual(t, "pkce-plaintext-verifier", flowRow["code_verifier"])
+	var flow tables.TableMCPOauthFlow
+	require.NoError(t, db.Where("id = ?", "flow-1").First(&flow).Error)
+	assert.Equal(t, "pkce-plaintext-verifier", flow.CodeVerifier)
+
+	var credentialRow map[string]any
+	db.Table("mcp_per_user_header_credentials").Where("id = ?", "cred-1").Take(&credentialRow)
+	assert.Equal(t, "encrypted", credentialRow["encryption_status"])
+	assert.NotEqual(t, `{"Authorization":"Bearer user-token"}`, credentialRow["headers_json"])
+	var credential tables.TableMCPPerUserHeaderCredential
+	require.NoError(t, db.Where("id = ?", "cred-1").First(&credential).Error)
+	headers, err := credential.GetHeaders()
+	require.NoError(t, err)
+	assert.Equal(t, "Bearer user-token", headers["Authorization"])
+}
+
+func TestEncryptPlaintextRows_WebhookLegacyCiphertextWithoutStatus(t *testing.T) {
+	store, db := setupEncryptionTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Format("2006-01-02 15:04:05")
+	secretCiphertext, err := encrypt.Encrypt("legacy-webhook-secret")
+	require.NoError(t, err)
+	headersCiphertext, err := encrypt.Encrypt(`{"Authorization":"Bearer legacy-webhook-token"}`)
+	require.NoError(t, err)
+
+	insertPlaintextRow(t, db,
+		`INSERT INTO config_webhook_endpoints (id, name, url, secret, events_json, headers_json, encryption_status, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, '', ?, ?)`,
+		"webhook-legacy-cipher", "legacy-webhook", "https://receiver.example.com/hook", secretCiphertext,
+		`["async_job.completed"]`, headersCiphertext, now, now)
+
+	require.NoError(t, store.EncryptPlaintextRows(ctx))
+
+	var raw map[string]any
+	require.NoError(t, db.Table("config_webhook_endpoints").Where("id = ?", "webhook-legacy-cipher").Take(&raw).Error)
+	assert.Equal(t, secretCiphertext, raw["secret"], "legacy webhook secret must not be double-encrypted")
+	assert.Equal(t, headersCiphertext, raw["headers_json"], "legacy webhook headers must not be double-encrypted")
+	assert.Equal(t, encryptionStatusEncrypted, raw["encryption_status"])
+
+	var endpoint tables.TableWebhookEndpoint
+	require.NoError(t, db.First(&endpoint, "id = ?", "webhook-legacy-cipher").Error)
+	require.NotNil(t, endpoint.Secret)
+	assert.Equal(t, "legacy-webhook-secret", endpoint.Secret.GetValue())
+	authorizationHeader := endpoint.Headers["Authorization"]
+	assert.Equal(t, "Bearer legacy-webhook-token", authorizationHeader.GetValue())
+}
+
+func TestEncryptPlaintextRows_MCPOAuthFlowLegacyCiphertextWithoutStatus(t *testing.T) {
+	store, db := setupEncryptionTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Format("2006-01-02 15:04:05")
+	future := time.Now().Add(time.Hour).UTC().Format("2006-01-02 15:04:05")
+	ciphertext, err := encrypt.Encrypt("legacy-pkce-verifier")
+	require.NoError(t, err)
+
+	insertPlaintextRow(t, db,
+		`INSERT INTO mcp_oauth_flows (id, mcp_client_id, oauth_config_id, state, redirect_uri, code_verifier, flow_mode, status, encryption_status, expires_at, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)`,
+		"flow-legacy-cipher", "mcp-legacy", "oauth-legacy", "state-legacy", "https://receiver.example.com/callback", ciphertext, "user", "pending", future, now, now)
+
+	require.NoError(t, store.EncryptPlaintextRows(ctx))
+
+	var raw map[string]any
+	require.NoError(t, db.Table("mcp_oauth_flows").Where("id = ?", "flow-legacy-cipher").Take(&raw).Error)
+	assert.Equal(t, ciphertext, raw["code_verifier"], "legacy PKCE verifier must not be double-encrypted")
+	assert.Equal(t, encryptionStatusEncrypted, raw["encryption_status"])
+
+	var flow tables.TableMCPOauthFlow
+	require.NoError(t, db.First(&flow, "id = ?", "flow-legacy-cipher").Error)
+	assert.Equal(t, "legacy-pkce-verifier", flow.CodeVerifier)
+}
+
+func TestEncryptPlaintextRows_MCPHeaderCredentialLegacyCiphertextWithoutStatus(t *testing.T) {
+	store, db := setupEncryptionTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Format("2006-01-02 15:04:05")
+	ciphertext, err := encrypt.Encrypt(`{"Authorization":"Bearer legacy-user-token"}`)
+	require.NoError(t, err)
+
+	insertPlaintextRow(t, db,
+		`INSERT INTO mcp_per_user_header_credentials (id, mcp_client_id, auth_mode, status, headers_json, encryption_status, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, '', ?, ?)`,
+		"credential-legacy-cipher", "mcp-legacy", "user", "active", ciphertext, now, now)
+
+	require.NoError(t, store.EncryptPlaintextRows(ctx))
+
+	var raw map[string]any
+	require.NoError(t, db.Table("mcp_per_user_header_credentials").Where("id = ?", "credential-legacy-cipher").Take(&raw).Error)
+	assert.Equal(t, ciphertext, raw["headers_json"], "legacy MCP headers must not be double-encrypted")
+	assert.Equal(t, encryptionStatusEncrypted, raw["encryption_status"])
+
+	var credential tables.TableMCPPerUserHeaderCredential
+	require.NoError(t, db.First(&credential, "id = ?", "credential-legacy-cipher").Error)
+	headers, err := credential.GetHeaders()
+	require.NoError(t, err)
+	assert.Equal(t, "Bearer legacy-user-token", headers["Authorization"])
+}
+
+func TestEncryptPlaintextRows_EncryptsOAuth2SigningKey(t *testing.T) {
+	store, db := setupEncryptionTestStore(t)
+	ctx := context.Background()
+
+	plaintext := "-----BEGIN PRIVATE KEY-----\nlegacy-signing-key\n-----END PRIVATE KEY-----"
+	data, err := json.Marshal(tables.OAuth2SigningKey{
+		KID:              "legacy-kid",
+		PrivateKeyPEM:    plaintext,
+		PublicKeyPEM:     "public-key",
+		EncryptionStatus: tables.EncryptionStatusPlainText,
+	})
+	require.NoError(t, err)
+	insertPlaintextRow(t, db,
+		`INSERT INTO governance_config (key, value) VALUES (?, ?)`,
+		tables.GovernanceConfigKeyOAuth2SigningKey, string(data))
+
+	require.NoError(t, store.EncryptPlaintextRows(ctx))
+
+	var row tables.TableGovernanceConfig
+	require.NoError(t, db.First(&row, "key = ?", tables.GovernanceConfigKeyOAuth2SigningKey).Error)
+	assert.NotContains(t, row.Value, plaintext)
+
+	var persisted tables.OAuth2SigningKey
+	require.NoError(t, json.Unmarshal([]byte(row.Value), &persisted))
+	assert.Equal(t, tables.EncryptionStatusEncrypted, persisted.EncryptionStatus)
+
+	loaded, err := store.GetOAuth2SigningKey(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, plaintext, loaded.PrivateKeyPEM)
+
+	// The second startup pass must be idempotent and must not re-encrypt the
+	// already-encrypted JSON blob.
+	before := row.Value
+	require.NoError(t, store.EncryptPlaintextRows(ctx))
+	var after tables.TableGovernanceConfig
+	require.NoError(t, db.First(&after, "key = ?", tables.GovernanceConfigKeyOAuth2SigningKey).Error)
+	assert.Equal(t, before, after.Value)
+}
+
+func TestEncryptPlaintextRows_MarksLegacyEncryptedOAuth2SigningKeyWithoutDoubleEncrypting(t *testing.T) {
+	store, db := setupEncryptionTestStore(t)
+	ctx := context.Background()
+
+	plaintext := "-----BEGIN PRIVATE KEY-----\nlegacy-encrypted-signing-key\n-----END PRIVATE KEY-----"
+	ciphertext, err := encrypt.Encrypt(plaintext)
+	require.NoError(t, err)
+	data, err := json.Marshal(tables.OAuth2SigningKey{
+		KID:           "legacy-cipher-kid",
+		PrivateKeyPEM: ciphertext,
+		PublicKeyPEM:  "public-key",
+		// Empty status models rows written before the explicit marker existed.
+	})
+	require.NoError(t, err)
+	insertPlaintextRow(t, db,
+		`INSERT INTO governance_config (key, value) VALUES (?, ?)`,
+		tables.GovernanceConfigKeyOAuth2SigningKey, string(data))
+
+	require.NoError(t, store.EncryptPlaintextRows(ctx))
+
+	var row tables.TableGovernanceConfig
+	require.NoError(t, db.First(&row, "key = ?", tables.GovernanceConfigKeyOAuth2SigningKey).Error)
+	var persisted tables.OAuth2SigningKey
+	require.NoError(t, json.Unmarshal([]byte(row.Value), &persisted))
+	assert.Equal(t, ciphertext, persisted.PrivateKeyPEM, "legacy ciphertext must not be encrypted again")
+	assert.Equal(t, tables.EncryptionStatusEncrypted, persisted.EncryptionStatus)
+
+	loaded, err := store.GetOAuth2SigningKey(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, plaintext, loaded.PrivateKeyPEM)
+}
+
+func TestEncryptPlaintextRows_PreservesCiphertextWithExplicitPlaintextMarker(t *testing.T) {
+	store, db := setupEncryptionTestStore(t)
+	ctx := context.Background()
+
+	plaintext := "-----BEGIN PRIVATE KEY-----\nexplicit-plaintext-marker\n-----END PRIVATE KEY-----"
+	ciphertext, err := encrypt.Encrypt(plaintext)
+	require.NoError(t, err)
+	data, err := json.Marshal(tables.OAuth2SigningKey{
+		KID:              "explicit-plaintext-marker-kid",
+		PrivateKeyPEM:    ciphertext,
+		PublicKeyPEM:     "public-key",
+		EncryptionStatus: tables.EncryptionStatusPlainText,
+	})
+	require.NoError(t, err)
+	insertPlaintextRow(t, db,
+		`INSERT INTO governance_config (key, value) VALUES (?, ?)`,
+		tables.GovernanceConfigKeyOAuth2SigningKey, string(data))
+
+	require.NoError(t, store.EncryptPlaintextRows(ctx))
+
+	var row tables.TableGovernanceConfig
+	require.NoError(t, db.First(&row, "key = ?", tables.GovernanceConfigKeyOAuth2SigningKey).Error)
+	var persisted tables.OAuth2SigningKey
+	require.NoError(t, json.Unmarshal([]byte(row.Value), &persisted))
+	assert.Equal(t, ciphertext, persisted.PrivateKeyPEM, "valid ciphertext must not be double-encrypted")
+	assert.Equal(t, tables.EncryptionStatusEncrypted, persisted.EncryptionStatus)
+
+	loaded, err := store.GetOAuth2SigningKey(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, plaintext, loaded.PrivateKeyPEM)
 }
 
 func TestEncryptPlaintextRows_SkipsAlreadyEncrypted(t *testing.T) {
@@ -256,6 +493,397 @@ func TestEncryptPlaintextRows_HandlesNullEncryptionStatus(t *testing.T) {
 	assert.Equal(t, "encrypted", row2["encryption_status"])
 }
 
+// Legacy databases can contain ciphertext written before encryption_status was
+// introduced (or after a partial migration left it empty). The startup pass
+// must probe raw values before writing so it neither double-encrypts them nor
+// loses lookup hashes for session-like credentials.
+func TestEncryptPlaintextRows_PreservesLegacyCiphertextWithoutStatus(t *testing.T) {
+	store, db := setupEncryptionTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Format("2006-01-02 15:04:05")
+	future := time.Now().Add(time.Hour).UTC().Format("2006-01-02 15:04:05")
+	encrypted := func(plaintext string) string {
+		value, err := encrypt.Encrypt(plaintext)
+		require.NoError(t, err)
+		return value
+	}
+
+	keyCiphertext := encrypted("legacy-key-secret")
+	insertPlaintextRow(t, db,
+		`INSERT INTO config_keys (name, provider_id, provider, key_id, value, encryption_status, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, NULL, ?, ?)`,
+		"legacy-cipher-key", 1, "openai", "legacy-cipher-key-id", keyCiphertext, now, now)
+
+	sessionCiphertext := encrypted("legacy-session-token")
+	insertPlaintextRow(t, db,
+		`INSERT INTO sessions (token, token_hash, encryption_status, expires_at, created_at, updated_at)
+		 VALUES (?, ?, NULL, ?, ?, ?)`,
+		sessionCiphertext, "stale-session-hash", future, now, now)
+
+	tempTokenCiphertext := encrypted("legacy-temp-token")
+	insertPlaintextRow(t, db,
+		`INSERT INTO temp_tokens (id, token, token_hash, scope, resource_id, encryption_status, expires_at, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, '', ?, ?, ?)`,
+		"legacy-cipher-temp", tempTokenCiphertext, "stale-temp-hash", "mcp_auth", "resource-1", future, now, now)
+
+	accessCiphertext := encrypted("legacy-access-token")
+	refreshCiphertext := encrypted("legacy-refresh-token")
+	insertPlaintextRow(t, db,
+		`INSERT INTO mcp_oauth_tokens (id, auth_mode, access_token, refresh_token, token_type, encryption_status, expires_at, created_at, updated_at)
+		 VALUES (?, 'shared', ?, ?, 'Bearer', NULL, ?, ?, ?)`,
+		"legacy-cipher-oauth-token", accessCiphertext, refreshCiphertext, future, now, now)
+
+	clientSecretCiphertext := encrypted("legacy-client-secret")
+	insertPlaintextRow(t, db,
+		`INSERT INTO oauth_configs (id, client_secret, redirect_uri, status, encryption_status, created_at, updated_at)
+		 VALUES (?, ?, ?, 'pending', '', ?, ?)`,
+		"legacy-cipher-oauth-config", clientSecretCiphertext, "https://example.com/callback", now, now)
+
+	connectionCiphertext := encrypted("https://legacy-mcp.example.com/sse")
+	headerCiphertext := encrypted(`{"Authorization":"Bearer legacy-mcp-token"}`)
+	pendingOAuthCiphertext := encrypted(`{"client_secret":"legacy-pending-secret"}`)
+	tokenExchangeCiphertext := encrypted(`{"client_secret":"legacy-exchange-secret"}`)
+	insertPlaintextRow(t, db,
+		`INSERT INTO config_mcp_clients (client_id, name, connection_type, connection_string, headers_json, pending_oauth_config_json, token_exchange_json, encryption_status, created_at, updated_at)
+		 VALUES (?, ?, 'sse', ?, ?, ?, ?, NULL, ?, ?)`,
+		"legacy-cipher-mcp", "legacy-cipher-mcp", connectionCiphertext, headerCiphertext, pendingOAuthCiphertext, tokenExchangeCiphertext, now, now)
+
+	providerCiphertext := encrypted(`{"url":"https://legacy-proxy.example.com","password":"legacy-proxy-secret"}`)
+	insertPlaintextRow(t, db,
+		`INSERT INTO config_providers (name, proxy_config_json, encryption_status, created_at, updated_at)
+		 VALUES (?, ?, NULL, ?, ?)`,
+		"legacy-cipher-provider", providerCiphertext, now, now)
+
+	vectorCiphertext := encrypted(`{"host":"legacy-vector.example.com","password":"legacy-vector-secret"}`)
+	insertPlaintextRow(t, db,
+		`INSERT INTO config_vector_store (enabled, type, config, encryption_status, created_at, updated_at)
+		 VALUES (?, ?, ?, '', ?, ?)`,
+		true, "redis", vectorCiphertext, now, now)
+
+	pluginCiphertext := encrypted(`{"api_key":"legacy-plugin-secret"}`)
+	insertPlaintextRow(t, db,
+		`INSERT INTO config_plugins (name, enabled, version, config_json, encryption_status, created_at, updated_at)
+		 VALUES (?, ?, 1, ?, NULL, ?, ?)`,
+		"legacy-cipher-plugin", true, pluginCiphertext, now, now)
+
+	require.NoError(t, store.EncryptPlaintextRows(ctx))
+
+	assertRaw := func(table, key, column, expected string) {
+		t.Helper()
+		var row map[string]any
+		require.NoError(t, db.Table(table).Where(key).Take(&row).Error)
+		assert.Equal(t, expected, row[column], "%s.%s must not be double-encrypted", table, column)
+		assert.Equal(t, encryptionStatusEncrypted, row["encryption_status"], "%s status", table)
+	}
+	assertRaw("config_keys", "name = 'legacy-cipher-key'", "value", keyCiphertext)
+	assertRaw("sessions", "token_hash = '"+encrypt.HashSHA256("legacy-session-token")+"'", "token", sessionCiphertext)
+	assertRaw("temp_tokens", "id = 'legacy-cipher-temp'", "token", tempTokenCiphertext)
+	assertRaw("mcp_oauth_tokens", "id = 'legacy-cipher-oauth-token'", "access_token", accessCiphertext)
+	assertRaw("oauth_configs", "id = 'legacy-cipher-oauth-config'", "client_secret", clientSecretCiphertext)
+	assertRaw("config_mcp_clients", "client_id = 'legacy-cipher-mcp'", "connection_string", connectionCiphertext)
+	assertRaw("config_providers", "name = 'legacy-cipher-provider'", "proxy_config_json", providerCiphertext)
+	assertRaw("config_vector_store", "type = 'redis'", "config", vectorCiphertext)
+	assertRaw("config_plugins", "name = 'legacy-cipher-plugin'", "config_json", pluginCiphertext)
+
+	var sessionRow struct {
+		Token     string
+		TokenHash string
+	}
+	require.NoError(t, db.Table("sessions").Where("id = 1").Take(&sessionRow).Error)
+	assert.Equal(t, encrypt.HashSHA256("legacy-session-token"), sessionRow.TokenHash)
+
+	var session tables.SessionsTable
+	require.NoError(t, db.First(&session, "id = 1").Error)
+	assert.Equal(t, "legacy-session-token", session.Token)
+	var temp tables.TempToken
+	require.NoError(t, db.First(&temp, "id = ?", "legacy-cipher-temp").Error)
+	assert.Equal(t, "legacy-temp-token", temp.Token)
+	assert.Equal(t, encrypt.HashSHA256("legacy-temp-token"), temp.TokenHash)
+	var key tables.TableKey
+	require.NoError(t, db.First(&key, "name = ?", "legacy-cipher-key").Error)
+	assert.Equal(t, "legacy-key-secret", key.Value.GetValue())
+	var oauthToken tables.TableMCPOauthToken
+	require.NoError(t, db.First(&oauthToken, "id = ?", "legacy-cipher-oauth-token").Error)
+	assert.Equal(t, "legacy-access-token", oauthToken.AccessToken)
+	assert.Equal(t, "legacy-refresh-token", oauthToken.RefreshToken)
+	var oauthConfig tables.TableOauthConfig
+	require.NoError(t, db.First(&oauthConfig, "id = ?", "legacy-cipher-oauth-config").Error)
+	assert.Equal(t, "legacy-client-secret", oauthConfig.ClientSecret.GetValue())
+	var mcpClient tables.TableMCPClient
+	require.NoError(t, db.First(&mcpClient, "client_id = ?", "legacy-cipher-mcp").Error)
+	assert.Equal(t, "https://legacy-mcp.example.com/sse", mcpClient.ConnectionString.GetValue())
+	authorizationHeader := mcpClient.Headers["Authorization"]
+	assert.Equal(t, "Bearer legacy-mcp-token", authorizationHeader.GetValue())
+	var provider tables.TableProvider
+	require.NoError(t, db.First(&provider, "name = ?", "legacy-cipher-provider").Error)
+	require.NotNil(t, provider.ProxyConfig)
+	assert.Equal(t, "legacy-proxy-secret", provider.ProxyConfig.Password.GetValue())
+	var vector tables.TableVectorStoreConfig
+	require.NoError(t, db.First(&vector, "type = ?", "redis").Error)
+	require.NotNil(t, vector.Config)
+	assert.Contains(t, *vector.Config, "legacy-vector-secret")
+	var plugin tables.TablePlugin
+	require.NoError(t, db.First(&plugin, "name = ?", "legacy-cipher-plugin").Error)
+	assert.Contains(t, plugin.ConfigJSON, "legacy-plugin-secret")
+}
+
+func TestEncryptPlaintextRows_EncryptsWhitespaceSensitiveValues(t *testing.T) {
+	store, db := setupEncryptionTestStore(t)
+	now := time.Now().UTC().Format("2006-01-02 15:04:05")
+	const plaintext = "   "
+	insertPlaintextRow(t, db,
+		`INSERT INTO config_keys (name, provider_id, provider, key_id, value, encryption_status, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, 'plain_text', ?, ?)`,
+		"whitespace-key", 1, "openai", "whitespace-key-id", plaintext, now, now)
+
+	count, err := store.encryptPlaintextKeys(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 1, count)
+
+	var stored string
+	require.NoError(t, db.Table("config_keys").Select("value").Where("key_id = ?", "whitespace-key-id").Scan(&stored).Error)
+	assert.NotEqual(t, plaintext, stored, "whitespace must not be treated as an empty value")
+	decrypted, err := encrypt.Decrypt(stored)
+	require.NoError(t, err)
+	assert.Equal(t, plaintext, decrypted)
+}
+
+func TestEncryptPlaintextRows_PreservesUnresolvedVirtualKeyReferenceHash(t *testing.T) {
+	store, db := setupEncryptionTestStore(t)
+	now := time.Now().UTC().Format("2006-01-02 15:04:05")
+	const valueRef = "env.ELYGATE_MISSING_VIRTUAL_KEY"
+	const valueHash = "legacy-unresolved-value-hash"
+	insertPlaintextRow(t, db,
+		`INSERT INTO governance_virtual_keys (id, name, value, value_hash, is_active, encryption_status, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, NULL, ?, ?)`,
+		"unresolved-ref-vk", "unresolved-ref-vk", valueRef, valueHash, true, now, now)
+
+	require.NoError(t, store.EncryptPlaintextRows(context.Background()))
+	var raw struct {
+		Value            string
+		ValueHash        string
+		EncryptionStatus string
+	}
+	require.NoError(t, db.Table("governance_virtual_keys").Where("id = ?", "unresolved-ref-vk").Take(&raw).Error)
+	assert.Equal(t, valueRef, raw.Value)
+	assert.Equal(t, valueHash, raw.ValueHash)
+	assert.Equal(t, encryptionStatusEncrypted, raw.EncryptionStatus)
+}
+
+func TestEncryptPlaintextRows_PreservesVaultStoreContract(t *testing.T) {
+	store, db := setupEncryptionTestStore(t)
+	stored, _ := stubVaultHooks(t)
+	encrypt.Init(testEncryptionKey, bifrost.NewDefaultLogger(schemas.LogLevelInfo))
+	t.Cleanup(func() { encrypt.Init(testEncryptionKey, bifrost.NewDefaultLogger(schemas.LogLevelInfo)) })
+	now := time.Now().UTC().Format("2006-01-02 15:04:05")
+
+	insertPlaintextRow(t, db,
+		`INSERT INTO config_keys (name, provider_id, provider, key_id, value, encryption_status, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, 'plain_text', ?, ?)`,
+		"vault-contract-key", 1, "openai", "vault-contract-key-id", "vault-key-secret", now, now)
+	insertPlaintextRow(t, db,
+		`INSERT INTO governance_virtual_keys (id, name, value, is_active, encryption_status, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, 'plain_text', ?, ?)`,
+		"vault-contract-vk", "vault-contract-vk", "vault-vk-secret", true, now, now)
+	insertPlaintextRow(t, db,
+		`INSERT INTO oauth_configs (id, client_secret, redirect_uri, status, encryption_status, created_at, updated_at)
+		 VALUES (?, ?, ?, 'pending', 'plain_text', ?, ?)`,
+		"vault-contract-oauth", "vault-oauth-secret", "https://example.com/callback", now, now)
+	insertPlaintextRow(t, db,
+		`INSERT INTO config_mcp_clients (client_id, name, connection_type, connection_string, headers_json, encryption_status, created_at, updated_at)
+		 VALUES (?, ?, 'sse', ?, ?, 'plain_text', ?, ?)`,
+		"vault-contract-mcp", "vault-contract-mcp", "https://mcp.example.com/sse", `{"Authorization":"Bearer mcp-secret"}`, now, now)
+
+	require.NoError(t, store.EncryptPlaintextRows(context.Background()))
+
+	keyPath := "bifrost/config_keys/vault-contract-key-id/value"
+	vkPath := "bifrost/governance_virtual_keys/vault-contract-vk/value"
+	oauthPath := "bifrost/oauth_configs/vault-contract-oauth/client_secret"
+	mcpConnectionPath := "bifrost/config_mcp_clients/vault-contract-mcp/connection_string"
+	mcpHeaderPath := "bifrost/config_mcp_clients/vault-contract-mcp/headers/Authorization"
+	assert.Equal(t, "vault-key-secret", stored[keyPath])
+	assert.Equal(t, "vault-vk-secret", stored[vkPath])
+	assert.Equal(t, "vault-oauth-secret", stored[oauthPath])
+	assert.Equal(t, "https://mcp.example.com/sse", stored[mcpConnectionPath])
+	assert.Equal(t, "Bearer mcp-secret", stored[mcpHeaderPath])
+
+	var rawKey struct {
+		Value            string
+		EncryptionStatus string
+	}
+	require.NoError(t, db.Table("config_keys").Where("key_id = ?", "vault-contract-key-id").Take(&rawKey).Error)
+	assert.Equal(t, "vault."+keyPath, rawKey.Value)
+	assert.Equal(t, encryptionStatusEncrypted, rawKey.EncryptionStatus)
+
+	var rawVK struct {
+		Value            string
+		ValueHash        string
+		EncryptionStatus string
+	}
+	require.NoError(t, db.Table("governance_virtual_keys").Where("id = ?", "vault-contract-vk").Take(&rawVK).Error)
+	assert.Equal(t, "vault."+vkPath, rawVK.Value)
+	assert.Equal(t, encrypt.HashSHA256("vault-vk-secret"), rawVK.ValueHash)
+	assert.Equal(t, encryptionStatusEncrypted, rawVK.EncryptionStatus)
+
+	var rawOAuth struct {
+		ClientSecret     string
+		EncryptionStatus string
+	}
+	require.NoError(t, db.Table("oauth_configs").Where("id = ?", "vault-contract-oauth").Take(&rawOAuth).Error)
+	assert.Equal(t, "vault."+oauthPath, rawOAuth.ClientSecret)
+	assert.Equal(t, encryptionStatusEncrypted, rawOAuth.EncryptionStatus)
+
+	var rawMCP struct {
+		ConnectionString string
+		HeadersJSON      string
+		EncryptionStatus string
+	}
+	require.NoError(t, db.Table("config_mcp_clients").Where("client_id = ?", "vault-contract-mcp").Take(&rawMCP).Error)
+	assert.Equal(t, "vault."+mcpConnectionPath, rawMCP.ConnectionString)
+	decryptedHeaders, err := encrypt.Decrypt(rawMCP.HeadersJSON)
+	require.NoError(t, err)
+	var headers map[string]string
+	require.NoError(t, json.Unmarshal([]byte(decryptedHeaders), &headers))
+	assert.Equal(t, "vault."+mcpHeaderPath, headers["Authorization"])
+	assert.Equal(t, encryptionStatusEncrypted, rawMCP.EncryptionStatus)
+}
+
+func TestEncryptPlaintextRows_EncryptsLegacyOAuthSafetyNetTables(t *testing.T) {
+	store, db := setupEncryptionTestStore(t)
+	require.NoError(t, db.AutoMigrate(
+		&tables.TableOauthToken{},
+		&tables.TableOauthUserToken{},
+		&tables.TableOauthUserSession{},
+	))
+
+	now := time.Now().UTC().Format("2006-01-02 15:04:05")
+	future := time.Now().Add(time.Hour).UTC().Format("2006-01-02 15:04:05")
+	insertPlaintextRow(t, db,
+		`INSERT INTO oauth_tokens (id, access_token, refresh_token, token_type, encryption_status, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, 'plain_text', ?, ?)`,
+		"legacy-shared-token", "legacy-shared-access", "legacy-shared-refresh", "Bearer", now, now)
+	insertPlaintextRow(t, db,
+		`INSERT INTO oauth_user_tokens (id, mcp_client_id, auth_mode, status, oauth_config_id, access_token, refresh_token, token_type, encryption_status, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'plain_text', ?, ?)`,
+		"legacy-user-token", "legacy-mcp", "user", "active", "legacy-oauth", "legacy-user-access", "legacy-user-refresh", "Bearer", now, now)
+	insertPlaintextRow(t, db,
+		`INSERT INTO oauth_tokens (id, access_token, refresh_token, token_type, encryption_status, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, NULL, ?, ?)`,
+		"legacy-shared-missing-marker", "legacy-missing-access", "legacy-missing-refresh", "Bearer", now, now)
+	insertPlaintextRow(t, db,
+		`INSERT INTO oauth_user_sessions (id, mcp_client_id, oauth_config_id, state, redirect_uri, code_verifier, flow_mode, status, encryption_status, expires_at, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'plain_text', ?, ?, ?)`,
+		"legacy-user-flow", "legacy-mcp", "legacy-oauth", "legacy-state", "https://example.com/callback", "legacy-code-verifier", "user", "pending", future, now, now)
+
+	count, err := store.encryptPlaintextLegacyOAuthTokens(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 3, count)
+
+	assertLegacyEncrypted := func(table, id string, columns ...string) {
+		t.Helper()
+		var row map[string]any
+		require.NoError(t, db.Table(table).Where("id = ?", id).Take(&row).Error)
+		assert.Equal(t, encryptionStatusEncrypted, row["encryption_status"])
+		for _, column := range columns {
+			assert.NotEqual(t, "", row[column])
+		}
+	}
+	assertLegacyEncrypted("oauth_tokens", "legacy-shared-token", "access_token", "refresh_token")
+	assertLegacyEncrypted("oauth_user_tokens", "legacy-user-token", "access_token", "refresh_token")
+	assertLegacyEncrypted("oauth_user_sessions", "legacy-user-flow", "code_verifier")
+	var skipped map[string]any
+	require.NoError(t, db.Table("oauth_tokens").Where("id = ?", "legacy-shared-missing-marker").Take(&skipped).Error)
+	assert.Nil(t, skipped["encryption_status"])
+	assert.Equal(t, "legacy-missing-access", skipped["access_token"])
+	assert.Equal(t, "legacy-missing-refresh", skipped["refresh_token"])
+
+	var shared tables.TableOauthToken
+	require.NoError(t, db.First(&shared, "id = ?", "legacy-shared-token").Error)
+	assert.Equal(t, "legacy-shared-access", shared.AccessToken)
+	assert.Equal(t, "legacy-shared-refresh", shared.RefreshToken)
+	var userToken tables.TableOauthUserToken
+	require.NoError(t, db.First(&userToken, "id = ?", "legacy-user-token").Error)
+	assert.Equal(t, "legacy-user-access", userToken.AccessToken)
+	assert.Equal(t, "legacy-user-refresh", userToken.RefreshToken)
+	var flow tables.TableOauthUserSession
+	require.NoError(t, db.First(&flow, "id = ?", "legacy-user-flow").Error)
+	assert.Equal(t, "legacy-code-verifier", flow.CodeVerifier)
+}
+
+func TestEncryptPlaintextRows_SkipsIncompleteLegacyOAuthSafetyNetTables(t *testing.T) {
+	store, db := setupEncryptionTestStore(t)
+	// A pre-encryption rollback schema may have the legacy table but no status
+	// marker; encrypting it would make an older binary read ciphertext as
+	// plaintext. Another partial schema may have only the marker and no secret
+	// columns. Both shapes must be ignored safely.
+	insertPlaintextRow(t, db,
+		`CREATE TABLE oauth_tokens (id TEXT PRIMARY KEY, access_token TEXT, refresh_token TEXT)`)
+	insertPlaintextRow(t, db,
+		`INSERT INTO oauth_tokens (id, access_token, refresh_token) VALUES (?, ?, ?)`,
+		"legacy-no-status", "legacy-access", "legacy-refresh")
+	insertPlaintextRow(t, db,
+		`CREATE TABLE oauth_user_tokens (id TEXT PRIMARY KEY, encryption_status TEXT)`)
+
+	_, err := store.encryptPlaintextLegacyOAuthTokens(context.Background())
+	require.NoError(t, err)
+	var row map[string]any
+	require.NoError(t, db.Table("oauth_tokens").Where("id = ?", "legacy-no-status").Take(&row).Error)
+	assert.Equal(t, "legacy-access", row["access_token"])
+	assert.Equal(t, "legacy-refresh", row["refresh_token"])
+}
+
+func TestEncryptPlaintextKeys_CommitsRowsIndividuallyWhenVaultFails(t *testing.T) {
+	store, db := setupEncryptionTestStore(t)
+	prevStore, prevRemove := schemas.VaultStoreHook, schemas.VaultRemoveHook
+	var calls int
+	schemas.VaultStoreHook = func(_ context.Context, path string, value *string) error {
+		calls++
+		if calls == 2 {
+			return fmt.Errorf("vault unavailable")
+		}
+		*value = "vault." + path
+		return nil
+	}
+	schemas.VaultRemoveHook = func(_ context.Context, _ string) error { return nil }
+	t.Cleanup(func() {
+		schemas.VaultStoreHook = prevStore
+		schemas.VaultRemoveHook = prevRemove
+	})
+
+	now := time.Now().UTC().Format("2006-01-02 15:04:05")
+	insertPlaintextRow(t, db,
+		`INSERT INTO config_keys (name, provider_id, provider, key_id, value, encryption_status, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, 'plain_text', ?, ?)`,
+		"vault-row-1", 1, "openai", "vault-row-1-id", "first-secret", now, now)
+	insertPlaintextRow(t, db,
+		`INSERT INTO config_keys (name, provider_id, provider, key_id, value, encryption_status, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, 'plain_text', ?, ?)`,
+		"vault-row-2", 1, "openai", "vault-row-2-id", "second-secret", now, now)
+
+	count, err := store.encryptPlaintextKeys(context.Background())
+	require.Error(t, err)
+	assert.Equal(t, 1, count, "a failed row must not roll back a previously committed row")
+
+	var first, second struct {
+		Value            string
+		EncryptionStatus string
+	}
+	require.NoError(t, db.Table("config_keys").Where("key_id = ?", "vault-row-1-id").Take(&first).Error)
+	require.NoError(t, db.Table("config_keys").Where("key_id = ?", "vault-row-2-id").Take(&second).Error)
+	assert.NotEqual(t, first.EncryptionStatus, second.EncryptionStatus,
+		"exactly one row should commit before the failing Vault call")
+	if first.EncryptionStatus == encryptionStatusEncrypted {
+		assert.Equal(t, "vault.bifrost/config_keys/vault-row-1-id/value", first.Value)
+		assert.Equal(t, encryptionStatusPlainText, second.EncryptionStatus)
+		assert.Equal(t, "second-secret", second.Value)
+	} else {
+		assert.Equal(t, encryptionStatusPlainText, first.EncryptionStatus)
+		assert.Equal(t, "first-secret", first.Value)
+		assert.Equal(t, encryptionStatusEncrypted, second.EncryptionStatus)
+		assert.Equal(t, "vault.bifrost/config_keys/vault-row-2-id/value", second.Value)
+	}
+}
+
 // ============================================================================
 // Individual batch functions
 // ============================================================================
@@ -320,8 +948,8 @@ func TestEncryptPlaintextPlugins(t *testing.T) {
 	now := time.Now().UTC().Format("2006-01-02 15:04:05")
 
 	insertPlaintextRow(t, db,
-		`INSERT INTO config_plugins (name, enabled, version, config_json, encryption_status, created_at, updated_at)
-		 VALUES (?, ?, 1, ?, 'plain_text', ?, ?)`,
+		`INSERT INTO config_plugins (name, enabled, config_json, encryption_status, created_at, updated_at)
+		 VALUES (?, ?, ?, 'plain_text', ?, ?)`,
 		"batch-plugin", true, `{"secret":"value"}`, now, now)
 
 	count, err := store.encryptPlaintextPlugins(ctx)
@@ -341,8 +969,8 @@ func TestEncryptPlaintextPlugins_SkipsEmptyConfig(t *testing.T) {
 
 	// Insert plugin with empty config — should NOT be picked up by the query
 	insertPlaintextRow(t, db,
-		`INSERT INTO config_plugins (name, enabled, version, config_json, encryption_status, created_at, updated_at)
-		 VALUES (?, ?, 1, '{}', 'plain_text', ?, ?)`,
+		`INSERT INTO config_plugins (name, enabled, config_json, encryption_status, created_at, updated_at)
+		 VALUES (?, ?, '{}', 'plain_text', ?, ?)`,
 		"empty-config-plugin", true, now, now)
 
 	count, err := store.encryptPlaintextPlugins(ctx)
@@ -429,6 +1057,37 @@ func TestEncryptPlaintextVirtualKeys_EncryptsAndDecryptsCorrectly(t *testing.T) 
 	var found tables.TableVirtualKey
 	require.NoError(t, db.Where("id = ?", "vk-batch-1").First(&found).Error)
 	assert.Equal(t, "vk-batch-secret", found.Value.GetValue())
+}
+
+func TestVirtualKeyPreviousValue_EncryptsAndDecryptsCorrectly(t *testing.T) {
+	_, db := setupEncryptionTestStore(t)
+	now := time.Now().UTC()
+	exp := now.Add(10 * time.Minute)
+
+	vk := &tables.TableVirtualKey{
+		ID:                     "vk-prev-enc",
+		Name:                   "prev-enc-vk",
+		Value:                  *schemas.NewSecretVar("vk-current-secret"),
+		IsActive:               schemas.Ptr(true),
+		PreviousValue:          *schemas.NewSecretVar("vk-previous-secret"),
+		PreviousValueExpiresAt: &exp,
+		RotatedAt:              &now,
+	}
+	require.NoError(t, db.Create(vk).Error)
+
+	// Raw DB must hold the previous value encrypted, with its hash computed.
+	var raw map[string]any
+	db.Table("governance_virtual_keys").Where("id = ?", "vk-prev-enc").Take(&raw)
+	assert.Equal(t, "encrypted", raw["encryption_status"])
+	assert.NotEqual(t, "vk-previous-secret", raw["previous_value"])
+	assert.NotEmpty(t, raw["previous_value_hash"])
+
+	// GORM hooks should decrypt both values on read.
+	var found tables.TableVirtualKey
+	require.NoError(t, db.Where("id = ?", "vk-prev-enc").First(&found).Error)
+	assert.Equal(t, "vk-current-secret", found.Value.GetValue())
+	assert.Equal(t, "vk-previous-secret", found.PreviousValue.GetValue())
+	assert.True(t, found.HasActivePreviousValue(now))
 }
 
 func TestEncryptPlaintextOAuthConfigs_EncryptsAndDecryptsCorrectly(t *testing.T) {
@@ -1279,6 +1938,74 @@ func TestEncryptPlaintextVirtualKeys_HashComputedDuringStartup(t *testing.T) {
 	assert.Equal(t, encrypt.HashSHA256("vk-hash-startup-value"), raw["value_hash"])
 }
 
+func TestEncryptPlaintextVirtualKeys_PreservesLegacyCiphertextWithoutStatus(t *testing.T) {
+	tests := []struct {
+		name   string
+		status any
+	}{
+		{name: "null status", status: nil},
+		{name: "empty status", status: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store, db := setupEncryptionTestStore(t)
+			now := time.Now().UTC().Format("2006-01-02 15:04:05")
+			plaintext := "vk-legacy-" + tt.name
+			ciphertext, err := encrypt.Encrypt(plaintext)
+			require.NoError(t, err)
+
+			insertPlaintextRow(t, db,
+				`INSERT INTO governance_virtual_keys (id, name, value, is_active, encryption_status, created_at, updated_at)
+				 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+				"vk-legacy-ciphertext", "legacy-ciphertext", ciphertext, true, tt.status, now, now)
+
+			count, err := store.encryptPlaintextVirtualKeys(context.Background())
+			require.NoError(t, err)
+			assert.Equal(t, 1, count)
+
+			var raw struct {
+				Value            string
+				ValueHash        string
+				EncryptionStatus string
+			}
+			require.NoError(t, db.Table("governance_virtual_keys").Where("id = ?", "vk-legacy-ciphertext").Take(&raw).Error)
+			assert.Equal(t, ciphertext, raw.Value)
+			assert.Equal(t, encrypt.HashSHA256(plaintext), raw.ValueHash)
+			assert.Equal(t, encryptionStatusEncrypted, raw.EncryptionStatus)
+
+			var found tables.TableVirtualKey
+			require.NoError(t, db.Where("id = ?", "vk-legacy-ciphertext").First(&found).Error)
+			assert.Equal(t, plaintext, found.Value.GetValue())
+		})
+	}
+}
+
+func TestEncryptPlaintextVirtualKeys_PreservesSecretReference(t *testing.T) {
+	store, db := setupEncryptionTestStore(t)
+	now := time.Now().UTC().Format("2006-01-02 15:04:05")
+	t.Setenv("TEST_LEGACY_VIRTUAL_KEY", "vk-resolved-secret")
+
+	insertPlaintextRow(t, db,
+		`INSERT INTO governance_virtual_keys (id, name, value, is_active, encryption_status, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, NULL, ?, ?)`,
+		"vk-legacy-ref", "legacy-ref", "env.TEST_LEGACY_VIRTUAL_KEY", true, now, now)
+
+	count, err := store.encryptPlaintextVirtualKeys(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 1, count)
+
+	var raw struct {
+		Value            string
+		ValueHash        string
+		EncryptionStatus string
+	}
+	require.NoError(t, db.Table("governance_virtual_keys").Where("id = ?", "vk-legacy-ref").Take(&raw).Error)
+	assert.Equal(t, "env.TEST_LEGACY_VIRTUAL_KEY", raw.Value)
+	assert.Equal(t, encrypt.HashSHA256("vk-resolved-secret"), raw.ValueHash)
+	assert.Equal(t, encryptionStatusEncrypted, raw.EncryptionStatus)
+}
+
 // ============================================================================
 // MCP client env var connection string survives startup pass
 // ============================================================================
@@ -1358,6 +2085,39 @@ func TestEncryptPlaintextRows_SkipsAlreadyEncryptedVirtualKeys(t *testing.T) {
 	var rawAfter map[string]any
 	db.Table("governance_virtual_keys").Where("id = ?", "vk-already-enc").Take(&rawAfter)
 	assert.Equal(t, encryptedBefore, rawAfter["value"])
+}
+
+func TestEncryptPlaintextVirtualKeys_AllowsLegacyDualOwnershipRows(t *testing.T) {
+	store, db := setupEncryptionTestStore(t)
+	now := time.Now().UTC().Format("2006-01-02 15:04:05")
+
+	// Legacy databases may contain rows that predate the mutual-exclusion
+	// invariant. Startup encryption must preserve ownership and only rewrite
+	// the sensitive value plus its lookup metadata.
+	insertPlaintextRow(t, db,
+		`INSERT INTO governance_virtual_keys (id, name, value, is_active, team_id, customer_id, encryption_status, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, 'plain_text', ?, ?)`,
+		"vk-legacy-dual", "legacy-dual", "vk-legacy-secret", true, "team-legacy", "customer-legacy", now, now)
+
+	count, err := store.encryptPlaintextVirtualKeys(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 1, count)
+
+	var raw struct {
+		Value            string
+		TeamID           string
+		CustomerID       string
+		EncryptionStatus string
+	}
+	require.NoError(t, db.Table("governance_virtual_keys").Where("id = ?", "vk-legacy-dual").Take(&raw).Error)
+	assert.Equal(t, "encrypted", raw.EncryptionStatus)
+	assert.NotEqual(t, "vk-legacy-secret", raw.Value)
+	assert.Equal(t, "team-legacy", raw.TeamID)
+	assert.Equal(t, "customer-legacy", raw.CustomerID)
+
+	var found tables.TableVirtualKey
+	require.NoError(t, db.Where("id = ?", "vk-legacy-dual").First(&found).Error)
+	assert.Equal(t, "vk-legacy-secret", found.Value.GetValue())
 }
 
 // ============================================================================

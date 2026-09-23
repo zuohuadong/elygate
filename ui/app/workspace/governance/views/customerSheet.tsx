@@ -84,14 +84,17 @@ export default function CustomerSheet({ open, onOpenChange, customer, onSuccess 
 	const [updateCustomer, { isLoading: isUpdating }] = useUpdateCustomerMutation();
 	const loading = isCreating || isUpdating;
 
+	// Keyed on the customer *id*, not the object: the list behind this sheet is
+	// polled, so an unchanged customer still arrives as a fresh object and an
+	// identity-keyed reset would discard whatever the operator had typed.
 	useEffect(() => {
-		if (open) {
-			const init = createInitialState(customer);
-			setInitialState(init);
-			setFormData({ ...init, isDirty: false });
-			setNameError(null);
-		}
-	}, [open, customer]);
+		if (!open) return;
+		const init = createInitialState(customer);
+		setInitialState(init);
+		setFormData({ ...init, isDirty: false });
+		setNameError(null);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [open, customer?.id]);
 
 	const handleCalendarAlignedChange = (checked: boolean) => {
 		if (checked && isEditing && !initialState.calendarAligned) {
@@ -367,8 +370,8 @@ export default function CustomerSheet({ open, onOpenChange, customer, onSuccess 
 											Align to calendar cycle
 										</Label>
 										<p className="text-muted-foreground text-xs">
-											Reset budgets and rate limits at the start of each period (e.g. 1st of month) instead of rolling from creation date. Quarterly budgets always align to fiscal quarter starts.
-											Applies to durations of a day or longer.
+											Reset budgets and rate limits at the start of each period (e.g. 1st of month) instead of rolling from creation date.
+											Quarterly budgets always align to fiscal quarter starts. Applies to durations of a day or longer.
 										</p>
 									</div>
 									<Switch

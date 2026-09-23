@@ -29,6 +29,11 @@ var (
 	ErrImportBatchConflict = errors.New("employee import batch payload conflict")
 )
 
+const (
+	employeeFailedLoginThreshold = 5
+	employeeLockDuration         = 15 * time.Minute
+)
+
 func acquireEmployeeMigrationLock(ctx context.Context, db *gorm.DB) (*sql.Conn, error) {
 	if db.Dialector.Name() != "postgres" {
 		return nil, nil
@@ -409,14 +414,28 @@ func (s *Store) ChangePassword(ctx context.Context, employeeID, password string)
 }
 
 func (s *Store) RecordFailedLogin(ctx context.Context, employee *Employee) error {
-	now := time.Now()
-	count := employee.FailedLoginCount + 1
-	updates := map[string]any{"failed_login_count": count}
-	if count >= 5 {
-		updates["locked_until"] = now.Add(15 * time.Minute)
-		updates["failed_login_count"] = 0
+	if employee == nil {
+		return errors.New("employee is required")
 	}
-	return s.db(ctx).Model(&Employee{}).Where("id = ?", employee.ID).Updates(updates).Error
+	// Derive the next count in SQL from the row's current value. The handler reads
+	// the employee before hashing the password, so calculating from that snapshot
+	// would let concurrent failures all write the same count and bypass lockout.
+	now := time.Now().UTC()
+	result := s.db(ctx).Model(&Employee{}).Where("id = ?", employee.ID).Updates(map[string]any{
+		"failed_login_count": gorm.Expr(
+			"CASE WHEN failed_login_count + 1 >= ? THEN 0 ELSE failed_login_count + 1 END",
+			employeeFailedLoginThreshold,
+		),
+		"locked_until": gorm.Expr(
+			"CASE WHEN failed_login_count + 1 >= ? THEN ? ELSE locked_until END",
+			employeeFailedLoginThreshold,
+			now.Add(employeeLockDuration),
+		),
+	}).Error
+	if result != nil {
+		return result
+	}
+	return nil
 }
 
 func (s *Store) RecordSuccessfulLogin(ctx context.Context, employeeID string) error {

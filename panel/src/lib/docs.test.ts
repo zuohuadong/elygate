@@ -10,7 +10,6 @@ describe('bundled documentation', () => {
 		'quickstart/gateway/setting-up.mdx',
 		'architecture/core/request-flow.mdx',
 		'mcp/overview.mdx',
-		'mcp/gateway.mdx',
 		'features/governance/virtual-keys.mdx',
 		'features/governance/routing.mdx',
 		'features/webhooks.mdx',

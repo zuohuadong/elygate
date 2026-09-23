@@ -518,12 +518,26 @@
 	let childRecords = $state.raw<JsonRecord[]>([]);
 	let childParent = $state.raw<JsonRecord | null>(null);
 	let isChildLoading = $state(false);
+	let loadSeq = 0;
+	let childLoadSeq = 0;
+	let mutationKeys = $state<string[]>([]);
 	const columns = $derived(config.columns.length ? config.columns : Array.from(new Set(records.flatMap((record) => Object.keys(record)))).slice(0, 8));
 	const hasNext = $derived(page * Number(pageSize) < total);
 	const totalPages = $derived(paginationPageCount(total, Number(pageSize)));
 	const canCreate = $derived(!config.readOnly && config.allowCreate === true);
 	const canEdit = $derived(!config.readOnly && config.allowEdit === true);
 	const canDelete = $derived(config.allowDelete === true);
+
+	function mutationKey(action: ResourceAction | 'delete', record: JsonRecord): string {
+		return `${action === 'delete' ? 'delete' : action.labelKey}:${recordId(record) || rowKey(record)}`;
+	}
+	function isMutating(key: string): boolean { return mutationKeys.includes(key); }
+	function beginMutation(key: string): boolean {
+		if (isMutating(key)) return false;
+		mutationKeys = [...mutationKeys, key];
+		return true;
+	}
+	function endMutation(key: string): void { mutationKeys = mutationKeys.filter((current) => current !== key); }
 
 	function endpoint(): string {
 		const params = new URLSearchParams({ limit: pageSize, offset: String((page - 1) * Number(pageSize)) });
@@ -572,14 +586,19 @@
 	}
 
 	async function load(): Promise<void> {
+		const sequence = ++loadSeq;
+		const requestedPage = page;
+		const requestedPageSize = pageSize;
+		const requestedQuery = query.trim();
 		isLoading = true;
 		error = '';
 		try {
 			const payload: unknown = await requestJson(endpoint());
+			if (sequence !== loadSeq || page !== requestedPage || pageSize !== requestedPageSize || query.trim() !== requestedQuery) return;
 			const nextRecords = responseRecords(payload);
 			const nextTotal = responseTotal(payload, nextRecords.length);
-			const validPage = clampPaginationPage(page, nextTotal, Number(pageSize));
-			if (validPage !== page) {
+			const validPage = clampPaginationPage(requestedPage, nextTotal, Number(requestedPageSize));
+			if (validPage !== requestedPage) {
 				page = validPage;
 				await load();
 				return;
@@ -587,9 +606,11 @@
 			records = nextRecords;
 			total = nextTotal;
 		} catch (cause) {
-			error = displayError(cause, i18n.t('elygate.loadFailed'));
+			if (sequence === loadSeq && page === requestedPage && pageSize === requestedPageSize && query.trim() === requestedQuery) {
+				error = displayError(cause, i18n.t('elygate.loadFailed'));
+			}
 		} finally {
-			isLoading = false;
+			if (sequence === loadSeq) isLoading = false;
 		}
 	}
 
@@ -610,6 +631,7 @@
 	}
 
 	async function save(): Promise<void> {
+		if (isSaving) return;
 		isSaving = true;
 		error = '';
 		try {
@@ -637,6 +659,8 @@
 	async function remove(record: JsonRecord): Promise<void> {
 		const id = recordId(record);
 		if (!id || !window.confirm(i18n.t('elygate.confirmDelete'))) return;
+		const key = mutationKey('delete', record);
+		if (!beginMutation(key)) return;
 		error = '';
 		try {
 			await requestJson(config.deletePath ? config.deletePath(id) : `${config.endpoint}/${encodePathSegment(id)}`, { method: 'DELETE' });
@@ -644,11 +668,17 @@
 			await load();
 		} catch (cause) {
 			error = displayError(cause, i18n.t('elygate.operationFailed'));
+		} finally {
+			endMutation(key);
 		}
 	}
 
 	async function runAction(action: ResourceAction, record: JsonRecord): Promise<void> {
 		if (action.confirm && !window.confirm(i18n.t('elygate.confirmAction'))) return;
+		const key = mutationKey(action, record);
+		if (!beginMutation(key)) return;
+		const childAtStart = childModal;
+		const parentAtStart = childParent;
 		error = '';
 		try {
 			const body = action.body?.(record);
@@ -662,27 +692,42 @@
 					? payload.message
 					: i18n.t(action.labelKey);
 			await load();
-			if (childModal && childParent) await openChildCollection(childModal, childParent);
+			if (childAtStart && parentAtStart && childModal === childAtStart && childParent === parentAtStart) await openChildCollection(childAtStart, parentAtStart);
 		} catch (cause) {
 			error = displayError(cause, i18n.t('elygate.operationFailed'));
+		} finally {
+			endMutation(key);
 		}
 	}
 
 	async function openChildCollection(child: ChildCollectionConfig, record: JsonRecord): Promise<void> {
+		const sequence = ++childLoadSeq;
+		const parentKey = recordId(record) || rowKey(record);
 		childModal = child;
 		childParent = record;
 		isChildLoading = true;
 		error = '';
 		try {
 			const payload = await requestJson<unknown>(child.path(record));
+			if (sequence !== childLoadSeq || childModal !== child || !childParent || (recordId(childParent) || rowKey(childParent)) !== parentKey) return;
 			const candidate = isJsonRecord(payload) ? payload[child.listKey] : undefined;
 			childRecords = Array.isArray(candidate) ? candidate.filter(isJsonRecord) : getListPayload(payload);
 		} catch (cause) {
-			error = displayError(cause, i18n.t('elygate.loadFailed'));
-			childRecords = [];
+			if (sequence === childLoadSeq && childModal === child) {
+				error = displayError(cause, i18n.t('elygate.loadFailed'));
+				childRecords = [];
+			}
 		} finally {
-			isChildLoading = false;
+			if (sequence === childLoadSeq) isChildLoading = false;
 		}
+	}
+
+	function closeChildCollection(): void {
+		childLoadSeq += 1;
+		childModal = null;
+		childParent = null;
+		childRecords = [];
+		isChildLoading = false;
 	}
 
 	function runCollectionAction(action: ResourceAction): void {
@@ -720,7 +765,7 @@
 		<div class="heading-actions">
 			<button class="primary" type="button" onclick={() => void load()} disabled={isLoading}>{i18n.t('elygate.refresh')}</button>
 			{#each config.collectionActions ?? [] as action (action.labelKey)}
-				<button type="button" onclick={() => runCollectionAction(action)}>{i18n.t(action.labelKey)}</button>
+				<button type="button" disabled={isMutating(mutationKey(action, {}))} onclick={() => runCollectionAction(action)}>{i18n.t(action.labelKey)}</button>
 			{/each}
 			{#if canCreate}
 				<button class="primary" type="button" onclick={openCreate}>{i18n.t('elygate.create')}</button>
@@ -748,11 +793,11 @@
 						{/each}
 						<td class="actions">
 							{#if canEdit}<button type="button" onclick={() => openEdit(record)}>{i18n.t('elygate.edit')}</button>{/if}
-							{#if config.childCollection}<button type="button" onclick={() => void openChildCollection(config.childCollection!, record)}>{i18n.t(config.childCollection.labelKey)}</button>{/if}
+							{#if config.childCollection}<button type="button" disabled={isChildLoading} onclick={() => void openChildCollection(config.childCollection!, record)}>{i18n.t(config.childCollection.labelKey)}</button>{/if}
 							{#each config.actions ?? [] as action (action.labelKey)}
-								<button type="button" onclick={() => void runAction(action, record)}>{i18n.t(action.labelKey)}</button>
+								<button type="button" disabled={isMutating(mutationKey(action, record))} onclick={() => void runAction(action, record)}>{i18n.t(action.labelKey)}</button>
 							{/each}
-							{#if canDelete}<button class="danger" type="button" onclick={() => void remove(record)}>{i18n.t('elygate.delete')}</button>{/if}
+							{#if canDelete}<button class="danger" type="button" disabled={isMutating(mutationKey('delete', record))} onclick={() => void remove(record)}>{i18n.t('elygate.delete')}</button>{/if}
 						</td>
 					</tr>
 				{:else}
@@ -773,12 +818,12 @@
 		<div class="modal" role="dialog" aria-modal="true" aria-labelledby="generic-dialog-title">
 			<header>
 				<h2 id="generic-dialog-title">{modal === 'create' ? i18n.t('elygate.create') : i18n.t('elygate.edit')} {pageTitle}</h2>
-				<button type="button" onclick={() => (modal = null)}>{i18n.t('elygate.close')}</button>
+				<button type="button" disabled={isSaving} onclick={() => { if (!isSaving) modal = null; }}>{i18n.t('elygate.close')}</button>
 			</header>
 			<form onsubmit={submitForm}>
 				<label>{i18n.t('elygate.requestJson')}<textarea bind:value={formJson} rows="18" spellcheck="false"></textarea></label>
 				<footer>
-					<button type="button" onclick={() => (modal = null)}>{i18n.t('elygate.cancel')}</button>
+					<button type="button" disabled={isSaving} onclick={() => { if (!isSaving) modal = null; }}>{i18n.t('elygate.cancel')}</button>
 					<button class="primary" type="submit" disabled={isSaving}>{i18n.t('elygate.save')}</button>
 				</footer>
 			</form>
@@ -789,9 +834,9 @@
 {#if childModal}
 	<div class="modal-backdrop">
 		<div class="modal wide" role="dialog" aria-modal="true" aria-labelledby="child-dialog-title">
-			<header><h2 id="child-dialog-title">{i18n.t(childModal.labelKey)}</h2><button type="button" onclick={() => (childModal = null)}>{i18n.t('elygate.close')}</button></header>
+			<header><h2 id="child-dialog-title">{i18n.t(childModal.labelKey)}</h2><button type="button" onclick={closeChildCollection}>{i18n.t('elygate.close')}</button></header>
 			<div class="table-wrap" aria-busy={isChildLoading}><table><thead><tr>{#each childModal.columns as column (column)}<th>{columnLabelFor(i18n.locale as ElygateLocale, column)}</th>{/each}{#if childModal.action}<th>{i18n.t('elygate.actions')}</th>{/if}</tr></thead><tbody>
-				{#each childRecords as record (rowKey(record))}<tr>{#each childModal.columns as column (column)}<td title={columnValueFor(i18n.locale as ElygateLocale, column, record[column])}>{columnValueFor(i18n.locale as ElygateLocale, column, record[column])}</td>{/each}{#if childModal.action}<td><button type="button" onclick={() => void runAction(childModal!.action!, record)}>{i18n.t(childModal.action.labelKey)}</button></td>{/if}</tr>{:else}<tr><td colspan={childModal.columns.length + (childModal.action ? 1 : 0)} class="empty">{isChildLoading ? i18n.t('elygate.loading') : i18n.t('elygate.empty')}</td></tr>{/each}
+				{#each childRecords as record (rowKey(record))}<tr>{#each childModal.columns as column (column)}<td title={columnValueFor(i18n.locale as ElygateLocale, column, record[column])}>{columnValueFor(i18n.locale as ElygateLocale, column, record[column])}</td>{/each}{#if childModal.action}<td><button type="button" disabled={isMutating(mutationKey(childModal.action, record))} onclick={() => void runAction(childModal!.action!, record)}>{i18n.t(childModal.action.labelKey)}</button></td>{/if}</tr>{:else}<tr><td colspan={childModal.columns.length + (childModal.action ? 1 : 0)} class="empty">{isChildLoading ? i18n.t('elygate.loading') : i18n.t('elygate.empty')}</td></tr>{/each}
 			</tbody></table></div>
 		</div>
 	</div>
