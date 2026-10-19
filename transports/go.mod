@@ -247,3 +247,22 @@ require (
 	gorm.io/driver/clickhouse v0.7.0 // indirect
 	gorm.io/driver/postgres v1.6.0 // indirect
 )
+
+// Elygate builds the gateway against the fork's own modules instead of the
+// published Bifrost releases, which do not contain the Elygate runtime wiring.
+// GOWORK=off builds (the default `make build`) still resolve everything locally.
+replace (
+	github.com/maximhq/bifrost/core => ../core
+	github.com/maximhq/bifrost/framework => ../framework
+	github.com/maximhq/bifrost/plugins/compat => ../plugins/compat
+	github.com/maximhq/bifrost/plugins/governance => ../plugins/governance
+	github.com/maximhq/bifrost/plugins/logging => ../plugins/logging
+	github.com/maximhq/bifrost/plugins/maxim => ../plugins/maxim
+	github.com/maximhq/bifrost/plugins/mocker => ../plugins/mocker
+	github.com/maximhq/bifrost/plugins/modelcatalogresolver => ../plugins/modelcatalogresolver
+	github.com/maximhq/bifrost/plugins/otel => ../plugins/otel
+	github.com/maximhq/bifrost/plugins/prompts => ../plugins/prompts
+	github.com/maximhq/bifrost/plugins/routing => ../plugins/routing
+	github.com/maximhq/bifrost/plugins/semanticcache => ../plugins/semanticcache
+	github.com/maximhq/bifrost/plugins/telemetry => ../plugins/telemetry
+)
