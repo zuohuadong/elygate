@@ -581,10 +581,11 @@ func TestInitializeVectorStoreConfigReadsDesiredStateAfterDistributedLock(t *tes
 	runtimeConfig := &Config{ConfigStore: store}
 	configData := &ConfigData{SourceOfTruth: SourceOfTruthSplit, VectorStoreConfig: fileConfig}
 	done := make(chan error, 1)
+	connectCalled := make(chan struct{}, 1)
 	go func() {
 		done <- initializeVectorStoreConfig(context.Background(), runtimeConfig, configData,
 			func(context.Context, *vectorstore.Config, schemas.Logger) (vectorstore.VectorStore, error) {
-				t.Fatal("disabled vector store must not connect")
+				connectCalled <- struct{}{}
 				return nil, nil
 			})
 	}()
@@ -592,6 +593,11 @@ func TestInitializeVectorStoreConfigReadsDesiredStateAfterDistributedLock(t *tes
 	case err := <-done:
 		t.Fatalf("startup reconciliation bypassed the distributed lock: %v", err)
 	case <-time.After(150 * time.Millisecond):
+	}
+	select {
+	case <-connectCalled:
+		t.Fatal("disabled vector store must not connect")
+	default:
 	}
 
 	newDesired := &vectorstore.Config{Enabled: false, Type: vectorstore.VectorStoreTypePgvector, Config: vectorstore.PgvectorConfig{Schema: "new_vectors"}}
@@ -1056,12 +1062,13 @@ func (m *MockConfigStore) UpdateMCPClientConfig(ctx context.Context, id string, 
 	return nil
 }
 
-func (m *MockConfigStore) UpdateMCPClientTools(ctx context.Context, clientID string, tools map[string]schemas.ChatTool, toolNameMapping map[string]string) error {
+func (m *MockConfigStore) UpdateMCPClientTools(ctx context.Context, clientID string, tools map[string]schemas.ChatTool, toolNameMapping map[string]string, instructions string) error {
 	if m.mcpConfig != nil {
 		for _, cfg := range m.mcpConfig.ClientConfigs {
 			if cfg.ID == clientID {
 				cfg.DiscoveredTools = tools
 				cfg.DiscoveredToolNameMapping = toolNameMapping
+				cfg.DiscoveredInstructions = instructions
 				return nil
 			}
 		}
@@ -9453,6 +9460,25 @@ func TestVirtualKeyHashComparison_OptionalFieldsPresence(t *testing.T) {
 
 	if hashWithTeam == hashWithCustomer {
 		t.Error("Expected different hash for team_id vs customer_id")
+	}
+
+	businessUnitID := "bu-1"
+	vkWithBusinessUnit := tables.TableVirtualKey{
+		ID:             "vk-1",
+		Name:           "test-vk",
+		Value:          *schemas.NewSecretVar("vk_abc123"),
+		IsActive:       schemas.Ptr(true),
+		BusinessUnitID: &businessUnitID,
+	}
+	hashWithBusinessUnit, err := configstore.GenerateVirtualKeyHash(vkWithBusinessUnit)
+	if err != nil {
+		t.Fatalf("Failed to generate hash for business_unit_id: %v", err)
+	}
+	if hashNoOptional == hashWithBusinessUnit {
+		t.Error("Expected different hash when business_unit_id is added")
+	}
+	if hashWithTeam == hashWithBusinessUnit || hashWithCustomer == hashWithBusinessUnit {
+		t.Error("Expected different hash for each virtual-key owner kind")
 	}
 
 	// Virtual key with rate_limit_id
@@ -19105,13 +19131,15 @@ var enterpriseSchemaPaths = map[string]bool{
 var excludedGoFields = map[string]map[string]bool{
 	// ClientConfig - MCP fields are managed at MCP level, not client level
 	"configstore.ClientConfig": {
-		"ConfigHash":                   true,
-		"allowed_headers":              true, // Internal use
-		"mcp_agent_depth":              true, // Managed via MCP config
-		"mcp_code_mode_binding_level":  true,
-		"mcp_tool_execution_timeout":   true,
-		"mcp_tool_sync_interval":       true,
-		"mcp_disable_auto_tool_inject": true,
+		"ConfigHash":                      true,
+		"allowed_headers":                 true, // Internal use
+		"mcp_agent_depth":                 true, // Managed via MCP config
+		"mcp_max_instructions_per_client": true, // Managed via MCP tool_manager_config
+		"mcp_max_instructions_total":      true, // Managed via MCP tool_manager_config
+		"mcp_code_mode_binding_level":     true,
+		"mcp_tool_execution_timeout":      true,
+		"mcp_tool_sync_interval":          true,
+		"mcp_disable_auto_tool_inject":    true,
 	},
 	"configstore.ProviderConfig": {"ConfigHash": true},
 	// GovernanceConfig - some fields are internal/enterprise
@@ -19160,6 +19188,7 @@ var excludedGoFields = map[string]map[string]bool{
 		"rate_limit":                true, // GORM relation
 		"team":                      true, // GORM relation
 		"customer":                  true, // GORM relation
+		"business_unit":             true, // Read-only enterprise-resolved owner projection
 		"previous_value_expires_at": true, // Runtime rotation grace-period state; not config.json-settable
 		"rotated_at":                true, // Runtime rotation state; not config.json-settable
 	},

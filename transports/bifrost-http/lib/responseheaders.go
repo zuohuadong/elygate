@@ -7,10 +7,17 @@ package lib
 
 import (
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/maximhq/bifrost/core/schemas"
 	"github.com/valyala/fasthttp"
+)
+
+const (
+	HeaderBifrostRequestID = "x-bifrost-request-id"
+	HeaderBifrostTraceID   = "x-bifrost-trace-id"
+	HeaderRequestID        = "x-request-id"
 )
 
 // HTTP response header names for the routed identity. Set on every successful
@@ -54,6 +61,31 @@ const (
 	HeaderBifrostRoutingInfoPrimaryModel            = "x-bifrost-routing-info-primary-model"
 	HeaderBifrostRoutingInfoServerSideFallbackModel = "x-bifrost-routing-info-server-side-fallback-model"
 )
+
+// ExposedResponseHeaders is the response-header contract visible to browser
+// clients when CORS is enabled. Keep it aligned with every gateway-owned
+// header emitted by this package.
+var ExposedResponseHeaders = strings.Join([]string{
+	HeaderBifrostRequestID,
+	HeaderBifrostTraceID,
+	HeaderRequestID,
+	HeaderBifrostProvider,
+	HeaderBifrostOriginalModel,
+	HeaderBifrostResolvedModel,
+	HeaderBifrostFallbackIndex,
+	HeaderBifrostRequestType,
+	HeaderBifrostUpstreamLatency,
+	HeaderBifrostRoutingInfoProvider,
+	HeaderBifrostRoutingInfoModel,
+	HeaderBifrostRoutingInfoKey,
+	HeaderBifrostRoutingInfoAliasModelID,
+	HeaderBifrostRoutingInfoAliasModelName,
+	HeaderBifrostRoutingInfoAliasModelFamily,
+	HeaderBifrostRoutingInfoIsFallback,
+	HeaderBifrostRoutingInfoPrimaryProvider,
+	HeaderBifrostRoutingInfoPrimaryModel,
+	HeaderBifrostRoutingInfoServerSideFallbackModel,
+}, ", ")
 
 // ApplyBifrostStreamResponseHeaders emits the routed-identity headers for a
 // streaming response, before the first SSE write. Streams only carry

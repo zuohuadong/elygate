@@ -9,11 +9,14 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"runtime"
+	"runtime/debug"
 	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
 
+	ws "github.com/fasthttp/websocket"
 	"github.com/google/uuid"
 	providerUtils "github.com/maximhq/bifrost/core/providers/utils"
 	"github.com/maximhq/bifrost/core/schemas"
@@ -38,22 +41,104 @@ const apiPathPrefix = "/api/"
 func SecurityHeadersMiddleware() schemas.BifrostHTTPMiddleware {
 	return func(next fasthttp.RequestHandler) fasthttp.RequestHandler {
 		return func(ctx *fasthttp.RequestCtx) {
-			ctx.Response.Header.Set("X-Frame-Options", "DENY")
-			ctx.Response.Header.Set("X-Content-Type-Options", "nosniff")
-			ctx.Response.Header.Set("Referrer-Policy", "strict-origin-when-cross-origin")
-			ctx.Response.Header.Set("Content-Security-Policy", "frame-ancestors 'none'")
-			ctx.Response.Header.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-			// Only set HSTS when serving over HTTPS (detected via reverse proxy header or direct TLS)
-			if string(ctx.Request.Header.Peek("X-Forwarded-Proto")) == "https" || ctx.IsTLS() {
-				ctx.Response.Header.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
-			}
-			// Keep CDNs from caching API responses; handlers may override.
-			if strings.HasPrefix(string(ctx.Path()), apiPathPrefix) {
-				ctx.Response.Header.Set("Cache-Control", "no-store")
-			}
+			applySecurityHeaders(ctx)
 			next(ctx)
 		}
 	}
+}
+
+func applySecurityHeaders(ctx *fasthttp.RequestCtx) {
+	ctx.Response.Header.Set("X-Frame-Options", "DENY")
+	ctx.Response.Header.Set("X-Content-Type-Options", "nosniff")
+	ctx.Response.Header.Set("Referrer-Policy", "strict-origin-when-cross-origin")
+	ctx.Response.Header.Set("Content-Security-Policy", "frame-ancestors 'none'")
+	ctx.Response.Header.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+	if string(ctx.Request.Header.Peek("X-Forwarded-Proto")) == "https" || ctx.IsTLS() {
+		ctx.Response.Header.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+	}
+	if strings.HasPrefix(string(ctx.Path()), apiPathPrefix) {
+		ctx.Response.Header.Set("Cache-Control", "no-store")
+	}
+}
+
+// RecoveryMiddleware keeps a request panic from terminating the fasthttp server.
+// It is intentionally inside CORS so the recovered 500 retains the response contract.
+func RecoveryMiddleware(cors *CorsMiddleware) schemas.BifrostHTTPMiddleware {
+	return func(next fasthttp.RequestHandler) fasthttp.RequestHandler {
+		return func(ctx *fasthttp.RequestCtx) {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					logger.Error(fmt.Sprintf("recovered from panic in request handler: %s\n%s", panicSummary(recovered), debug.Stack()))
+					ctx.Response.Reset()
+					applySecurityHeaders(ctx)
+					if cors != nil {
+						if cfg := cors.config.Load(); cfg != nil {
+							cors.applyHeaders(ctx, cfg)
+						}
+					}
+					restoreCorrelationHeaders(ctx)
+					SendError(ctx, fasthttp.StatusInternalServerError, lib.ClientSafeInternalErrorMessage)
+				}
+			}()
+			next(ctx)
+		}
+	}
+}
+
+func restoreCorrelationHeaders(ctx *fasthttp.RequestCtx) {
+	exportTraceID, ok := ctx.UserValue(schemas.BifrostContextKeyExportTraceID).(string)
+	if !ok || exportTraceID == "" {
+		return
+	}
+	requestID := ctx.Request.Header.Peek("x-request-id")
+	ctx.Response.Header.SetBytesV(lib.HeaderBifrostRequestID, requestID)
+	ctx.Response.Header.SetBytesV(lib.HeaderRequestID, requestID)
+	ctx.Response.Header.Set(lib.HeaderBifrostTraceID, exportTraceID)
+}
+
+// recoverWebSocketSession is used inside hijacked upgrade callbacks, which run after
+// the HTTP request handler has returned and therefore sit outside HTTP recovery.
+func recoverWebSocketSession(conn *ws.Conn) {
+	if recovered := recover(); recovered != nil {
+		logger.Error(fmt.Sprintf("recovered from panic in websocket session (%s): %T\n%s", webSocketPeer(conn), recovered, debug.Stack()))
+	}
+}
+
+func runWebSocketRelay(conn *ws.Conn, relay func() error) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			logger.Error(fmt.Sprintf("recovered from panic in websocket session (%s): %T\n%s", webSocketPeer(conn), recovered, debug.Stack()))
+			err = fmt.Errorf("websocket relay panicked: %T", recovered)
+		}
+	}()
+	return relay()
+}
+
+func webSocketPeer(conn *ws.Conn) (remote string) {
+	defer func() {
+		if recover() != nil {
+			remote = ""
+		}
+	}()
+	if conn == nil || conn.RemoteAddr() == nil {
+		return ""
+	}
+	return conn.RemoteAddr().String()
+}
+
+func panicSummary(recovered any) string {
+	if runtimeErr, ok := recovered.(runtime.Error); ok {
+		return runtimeErr.Error()
+	}
+	return fmt.Sprintf("%T", recovered)
+}
+
+func ServerRootHandler(cors *CorsMiddleware, config *lib.Config, router fasthttp.RequestHandler) fasthttp.RequestHandler {
+	return SecurityHeadersMiddleware()(cors.Middleware()(RecoveryMiddleware(cors)(RequestDecompressionMiddleware(config)(router))))
+}
+
+func InferenceOuterMiddlewares(tm *TracingMiddleware, cors *CorsMiddleware) []schemas.BifrostHTTPMiddleware {
+	return []schemas.BifrostHTTPMiddleware{tm.Middleware(), RecoveryMiddleware(cors)}
 }
 
 // clientForwardedIP returns the client-supplied originating IP from reverse-proxy
@@ -107,6 +192,8 @@ func newCorsMiddlewareConfig(config *lib.Config) *corsMiddlewareConfig {
 type CorsMiddleware struct {
 	config atomic.Pointer[corsMiddlewareConfig]
 }
+
+const SetupTokenHeader = "X-Bifrost-Setup-Token"
 
 func NewCorsMiddleware(config *lib.Config) *CorsMiddleware {
 	c := &CorsMiddleware{}
@@ -190,54 +277,7 @@ func (c *CorsMiddleware) Middleware() schemas.BifrostHTTPMiddleware {
 					logBuilder.Send()
 				}()
 			}
-			origin := string(ctx.Request.Header.Peek("Origin"))
-			allowed := origin != "" && IsOriginAllowed(origin, cfg.allowedOrigins)
-			// A wildcard permits public, non-credentialed access. Localhost is credentialed
-			// only as the implicit development fallback when no allowlist is configured.
-			credentialed := (len(cfg.allowedOrigins) == 0 && isLocalhostOrigin(origin)) || slices.Contains(cfg.allowedOrigins, origin) ||
-				slices.ContainsFunc(cfg.allowedOrigins, func(allowedOrigin string) bool {
-					return allowedOrigin != "*" && strings.Contains(allowedOrigin, "*") && matchesWildcardPattern(origin, allowedOrigin)
-				})
-
-			allowedHeaders := []string{"Content-Type", "Authorization", "X-Requested-With", "X-Stainless-Timeout", "X-Api-Key", "X-OpenAI-Agents-SDK", "X-Operation-ID"}
-			if slices.Contains(cfg.allowedHeaders, "*") {
-				if credentialed {
-					// Per the Fetch spec, Access-Control-Allow-Headers: * is NOT treated as a
-					// wildcard when Access-Control-Allow-Credentials: true is set — browsers
-					// interpret it as a literal header name. For credentialed preflight requests,
-					// reflect back the requested headers instead.
-					if requestedHeaders := string(ctx.Request.Header.Peek("Access-Control-Request-Headers")); requestedHeaders != "" {
-						allowedHeaders = []string{requestedHeaders}
-					}
-					// For non-preflight requests (no Access-Control-Request-Headers), keep defaults.
-				} else {
-					allowedHeaders = []string{"*"}
-				}
-			} else if len(cfg.allowedHeaders) > 0 {
-				// append allowed headers from config to the default headers
-				for _, header := range cfg.allowedHeaders {
-					if !slices.Contains(allowedHeaders, header) {
-						allowedHeaders = append(allowedHeaders, header)
-					}
-				}
-			}
-			// Check the configured allowlist; localhost is implicit only when no allowlist exists.
-			if allowed {
-				if credentialed {
-					ctx.Response.Header.Set("Access-Control-Allow-Origin", origin)
-				} else {
-					ctx.Response.Header.Set("Access-Control-Allow-Origin", "*")
-				}
-				ctx.Response.Header.Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD")
-				ctx.Response.Header.Set("Access-Control-Allow-Headers", strings.Join(allowedHeaders, ", "))
-				if credentialed {
-					ctx.Response.Header.Set("Access-Control-Allow-Credentials", "true")
-				}
-				ctx.Response.Header.Set("Access-Control-Max-Age", "86400")
-				// Vary: Origin tells caches that the response varies based on the Origin
-				// request header, preventing incorrect CORS headers from being served.
-				ctx.Response.Header.Set("Vary", "Origin")
-			}
+			allowed := c.applyHeaders(ctx, cfg)
 			// Handle preflight OPTIONS requests
 			if string(ctx.Method()) == "OPTIONS" {
 				if allowed {
@@ -250,6 +290,54 @@ func (c *CorsMiddleware) Middleware() schemas.BifrostHTTPMiddleware {
 			next(ctx)
 		}
 	}
+}
+
+func (c *CorsMiddleware) applyHeaders(ctx *fasthttp.RequestCtx, cfg *corsMiddlewareConfig) bool {
+	origin := string(ctx.Request.Header.Peek("Origin"))
+	allowed := origin != "" && IsOriginAllowed(origin, cfg.allowedOrigins)
+	// A bare wildcard is public and non-credentialed. Explicit origins and the
+	// implicit localhost fallback are credentialed.
+	credentialed := allowed && !slices.Contains(cfg.allowedOrigins, "*") &&
+		((len(cfg.allowedOrigins) == 0 && isLocalhostOrigin(origin)) ||
+			slices.Contains(cfg.allowedOrigins, origin) ||
+			slices.ContainsFunc(cfg.allowedOrigins, func(pattern string) bool {
+				return strings.Contains(pattern, "*") && matchesWildcardPattern(origin, pattern)
+			}))
+
+	allowedHeaders := []string{
+		"Content-Type", "Authorization", "X-Requested-With", "X-Stainless-Timeout",
+		"X-Api-Key", "X-OpenAI-Agents-SDK", "X-Operation-ID", SetupTokenHeader,
+	}
+	if slices.Contains(cfg.allowedHeaders, "*") {
+		if credentialed {
+			if requested := string(ctx.Request.Header.Peek("Access-Control-Request-Headers")); requested != "" {
+				allowedHeaders = []string{requested}
+			}
+		} else {
+			allowedHeaders = []string{"*"}
+		}
+	} else {
+		for _, header := range cfg.allowedHeaders {
+			if !slices.Contains(allowedHeaders, header) {
+				allowedHeaders = append(allowedHeaders, header)
+			}
+		}
+	}
+	if !allowed {
+		return false
+	}
+	if credentialed {
+		ctx.Response.Header.Set("Access-Control-Allow-Origin", origin)
+		ctx.Response.Header.Set("Access-Control-Allow-Credentials", "true")
+	} else {
+		ctx.Response.Header.Set("Access-Control-Allow-Origin", "*")
+	}
+	ctx.Response.Header.Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD")
+	ctx.Response.Header.Set("Access-Control-Allow-Headers", strings.Join(allowedHeaders, ", "))
+	ctx.Response.Header.Set("Access-Control-Max-Age", "86400")
+	ctx.Response.Header.Set("Access-Control-Expose-Headers", lib.ExposedResponseHeaders)
+	ctx.Response.Header.Set("Vary", "Origin")
+	return true
 }
 
 // RequestDecompressionMiddleware transparently decompresses compressed request bodies.
@@ -1557,6 +1645,9 @@ func (m *TracingMiddleware) Middleware() schemas.BifrostHTTPMiddleware {
 			parentSpanID := tracing.ExtractTraceParentSpanID(&ctx.Request.Header)
 			if parentSpanID != "" {
 				ctx.SetUserValue(schemas.BifrostContextKeyParentSpanID, parentSpanID)
+				if traceState := tracing.ExtractTraceState(&ctx.Request.Header); traceState != "" {
+					tracer.SetTraceAttribute(traceID, schemas.TraceAttrTraceState, traceState)
+				}
 			}
 			// Store a trace completion callback for streaming handlers to use.
 			// Accepts transport plugin logs as a parameter so it never reads from

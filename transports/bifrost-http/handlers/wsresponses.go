@@ -109,13 +109,14 @@ func (h *WSResponsesHandler) RegisterRoutes(r *router.Router, middlewares ...sch
 func (h *WSResponsesHandler) handleUpgrade(ctx *fasthttp.RequestCtx) {
 	err := h.upgrader.Upgrade(ctx, func(conn *ws.Conn) {
 		defer conn.Close()
+		defer recoverWebSocketSession(conn)
 
 		session, sessionErr := h.sessions.Create(conn)
 		if sessionErr != nil {
 			writeWSError(conn, 429, "websocket_connection_limit_reached", sessionErr.Error())
 			return
 		}
-		defer h.sessions.Remove(conn)
+		defer h.endSession(conn)
 
 		// Capture auth headers from the upgrade request for per-event context creation
 		authHeaders := captureAuthHeaders(ctx)
@@ -125,6 +126,18 @@ func (h *WSResponsesHandler) handleUpgrade(ctx *fasthttp.RequestCtx) {
 	if err != nil {
 		logger.Warn("websocket upgrade failed for /v1/responses: %v", err)
 	}
+}
+
+func (h *WSResponsesHandler) endSession(conn *ws.Conn) {
+	if session := h.sessions.Get(conn); session != nil {
+		if upstream := session.Upstream(); upstream != nil {
+			session.SetUpstream(nil)
+			if h.pool != nil {
+				h.pool.Discard(upstream)
+			}
+		}
+	}
+	h.sessions.Remove(conn)
 }
 
 // authHeaders holds auth-related headers captured during the WS upgrade.

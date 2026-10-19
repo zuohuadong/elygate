@@ -261,6 +261,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
+  process.stdin.resume();
   console.error("Test Tools MCP Server running on stdio");
 }
 

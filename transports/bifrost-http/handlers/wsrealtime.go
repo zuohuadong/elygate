@@ -117,6 +117,7 @@ func (h *WSRealtimeHandler) handleUpgrade(ctx *fasthttp.RequestCtx) {
 		upgrader := h.websocketUpgrader("")
 		upgradeErr := upgrader.Upgrade(ctx, func(conn *ws.Conn) {
 			defer conn.Close()
+			defer recoverWebSocketSession(conn)
 			clientConn := newRealtimeClientConn(conn)
 			clientConn.writeRealtimeError(newRealtimeWireBifrostError(500, "server_error", "failed to create request context"))
 		})
@@ -171,6 +172,7 @@ func (h *WSRealtimeHandler) handleUpgrade(ctx *fasthttp.RequestCtx) {
 		upgrader := h.websocketUpgrader("")
 		upgradeErr := upgrader.Upgrade(ctx, func(conn *ws.Conn) {
 			defer conn.Close()
+			defer recoverWebSocketSession(conn)
 			clientConn := newRealtimeClientConn(conn)
 			clientConn.writeRealtimeError(newRealtimeWireBifrostError(400, "invalid_request_error", err.Error()))
 		})
@@ -211,6 +213,7 @@ func (h *WSRealtimeHandler) handleUpgrade(ctx *fasthttp.RequestCtx) {
 		upgrader := h.websocketUpgrader("")
 		upgradeErr := upgrader.Upgrade(ctx, func(conn *ws.Conn) {
 			defer conn.Close()
+			defer recoverWebSocketSession(conn)
 			clientConn := newRealtimeClientConn(conn)
 			clientConn.writeRealtimeError(newRealtimeWireBifrostError(400, "invalid_request_error", fmt.Sprintf("no provider could be resolved for model %q (set as provider/model or configure the model catalog)", model)))
 		})
@@ -232,6 +235,7 @@ func (h *WSRealtimeHandler) handleUpgrade(ctx *fasthttp.RequestCtx) {
 		upgrader := h.websocketUpgrader("")
 		upgradeErr := upgrader.Upgrade(ctx, func(conn *ws.Conn) {
 			defer conn.Close()
+			defer recoverWebSocketSession(conn)
 			clientConn := newRealtimeClientConn(conn)
 			clientConn.writeRealtimeError(newRealtimeWireBifrostError(400, "invalid_request_error", "provider does not support realtime: "+string(providerKey)))
 		})
@@ -251,6 +255,7 @@ func (h *WSRealtimeHandler) handleUpgrade(ctx *fasthttp.RequestCtx) {
 	upgrader := h.websocketUpgrader(rtProvider.RealtimeWebSocketSubprotocol())
 	err = upgrader.Upgrade(ctx, func(conn *ws.Conn) {
 		defer conn.Close()
+		defer recoverWebSocketSession(conn)
 		clientConn := newRealtimeClientConn(conn)
 
 		session, sessionErr := h.sessions.Create(conn)
@@ -294,6 +299,7 @@ func (h *WSRealtimeHandler) handleTranscriptionUpgrade(
 	upgrader := h.websocketUpgrader("realtime")
 	err := upgrader.Upgrade(ctx, func(conn *ws.Conn) {
 		defer conn.Close()
+		defer recoverWebSocketSession(conn)
 		clientConn := newRealtimeClientConn(conn)
 
 		frames, rawModel, bootstrapErr := bufferRealtimeTranscriptionBootstrap(clientConn)
@@ -542,10 +548,14 @@ func (h *WSRealtimeHandler) runRealtimeSession(
 
 	errCh := make(chan error, 2)
 	go func() {
-		errCh <- h.relayClientToRealtimeProvider(clientConn, session, upstream, rtProvider, bifrostCtx, providerKey, model, key, intent == "transcription", buffered)
+		errCh <- runWebSocketRelay(clientConn.conn, func() error {
+			return h.relayClientToRealtimeProvider(clientConn, session, upstream, rtProvider, bifrostCtx, providerKey, model, key, intent == "transcription", buffered)
+		})
 	}()
 	go func() {
-		errCh <- h.relayRealtimeProviderToClient(clientConn, session, upstream, rtProvider, bifrostCtx, providerKey, model, key, intent == "transcription")
+		errCh <- runWebSocketRelay(clientConn.conn, func() error {
+			return h.relayRealtimeProviderToClient(clientConn, session, upstream, rtProvider, bifrostCtx, providerKey, model, key, intent == "transcription")
+		})
 	}()
 
 	firstErr := <-errCh
