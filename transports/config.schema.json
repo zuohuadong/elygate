@@ -2368,7 +2368,8 @@
             "qdrant",
             "pinecone",
             "chromem",
-            "pgvector"
+            "pgvector",
+            "sqlite"
           ],
           "description": "Vector store type (use \"redis\" for Redis or Valkey-compatible endpoints). \"chromem\" runs in-process rather than against a service, so its data is local to one node and is not shared between replicas"
         },
@@ -2392,6 +2393,9 @@
             },
             {
               "$ref": "#/$defs/pgvector_config"
+            },
+            {
+              "$ref": "#/$defs/sqlite_vector_config"
             }
           ]
         }
@@ -2522,6 +2526,28 @@
             "properties": {
               "config": {
                 "$ref": "#/$defs/pgvector_config"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "const": "sqlite"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "config"
+            ],
+            "properties": {
+              "config": {
+                "$ref": "#/$defs/sqlite_vector_config"
               }
             }
           }
@@ -9661,6 +9687,20 @@
       "required": [
         "api_key",
         "index_host"
+      ],
+      "additionalProperties": false
+    },
+    "sqlite_vector_config": {
+      "type": "object",
+      "description": "SQLite + sqlite-vec backend. The extension is compiled into the binary; point path at the database file (usually the config store's file) to keep vectors next to the rest of the deployment state.",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "SQLite database file holding the vector tables; use the same file as the config store to keep one deployment artifact"
+        }
+      },
+      "required": [
+        "path"
       ],
       "additionalProperties": false
     },

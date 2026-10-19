@@ -83,7 +83,7 @@ func newPostgresConfigStore(ctx context.Context, config *PostgresConfig, logger 
 	storehooks.PoolOpened(storehooks.RoleConfig, db)
 	logger.Info("configstore: runtime connection pool ready")
 
-	d := &RDBConfigStore{logger: logger}
+	d := &RDBConfigStore{logger: logger, postgresDSN: dsn}
 	d.db.Store(db)
 
 	// migrateOnFreshFn: downstream consumers (e.g. bifrost-enterprise) run

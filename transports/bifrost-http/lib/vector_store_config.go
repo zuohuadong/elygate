@@ -22,6 +22,7 @@ const (
 	vectorStoreSourceNone            vectorStoreConfigSource = "none"
 	vectorStoreSourceDatabase        vectorStoreConfigSource = "database"
 	vectorStoreSourceConfigJSON      vectorStoreConfigSource = "config.json"
+	vectorStoreSourceDatabaseDefault vectorStoreConfigSource = "database-default"
 	vectorStoreInitializationTimeout                         = 30 * time.Second
 	vectorStoreFileHashKey                                   = "vector_store_file_hash"
 	// VectorStoreMutationLockKey serializes dashboard updates with startup
@@ -33,7 +34,7 @@ const (
 	VectorStoreMutationTimeout = 90 * time.Second
 	// VectorStoreRestartReason identifies only the vector-store-owned part of
 	// the shared restart marker.
-	VectorStoreRestartReason = "Vector store configuration has been updated. A restart is required to load the saved pgvector settings."
+	VectorStoreRestartReason = "Vector store configuration has been updated. A restart is required to load the saved vector store settings."
 )
 
 // NewVectorStoreMutationLock returns the shared lock used by both the panel
@@ -117,8 +118,41 @@ func vectorStoreFileChanged(ctx context.Context, store configstore.ConfigStore, 
 	return checkpoint.Value != fileHash, nil
 }
 
+// defaultVectorStoreConfig picks the vector backend that lives in the same
+// database as the config store: pgvector for PostgreSQL, sqlite-vec for SQLite.
+// It is only consulted when no vector store has been configured, so an
+// existing external store is never replaced implicitly.
+func defaultVectorStoreConfig(store configstore.ConfigStore) *vectorstore.Config {
+	type databaseInfo interface {
+		SQLitePath() string
+		PostgresDSN() string
+	}
+	info, ok := store.(databaseInfo)
+	if !ok {
+		return nil
+	}
+	if dsn := strings.TrimSpace(info.PostgresDSN()); dsn != "" {
+		return &vectorstore.Config{
+			Enabled: true,
+			Type:    vectorstore.VectorStoreTypePgvector,
+			Config:  vectorstore.PgvectorConfig{ConnectionString: *schemas.NewSecretVar(dsn)},
+		}
+	}
+	if path := strings.TrimSpace(info.SQLitePath()); path != "" {
+		return &vectorstore.Config{
+			Enabled: true,
+			Type:    vectorstore.VectorStoreTypeSqlite,
+			Config:  vectorstore.SqliteConfig{Path: path},
+		}
+	}
+	return nil
+}
+
 func resolveVectorStoreConfig(ctx context.Context, configData *ConfigData, store configstore.ConfigStore) (*vectorstore.Config, vectorStoreConfigSource, error) {
 	if configData == nil {
+		if fallback := defaultVectorStoreConfig(store); fallback != nil {
+			return fallback, vectorStoreSourceDatabaseDefault, nil
+		}
 		return nil, vectorStoreSourceNone, nil
 	}
 	if store != nil && !configData.vectorStoreManagedByConfigJSON() {
@@ -141,6 +175,9 @@ func resolveVectorStoreConfig(ctx context.Context, configData *ConfigData, store
 	}
 	if configData.VectorStoreConfig != nil {
 		return configData.VectorStoreConfig, vectorStoreSourceConfigJSON, nil
+	}
+	if fallback := defaultVectorStoreConfig(store); fallback != nil {
+		return fallback, vectorStoreSourceDatabaseDefault, nil
 	}
 	return nil, vectorStoreSourceNone, nil
 }
@@ -179,6 +216,12 @@ func initializeResolvedVectorStore(ctx context.Context, config *Config, desired 
 	defer cancelInitialization()
 	store, err := factory(initializationCtx, desired, logger)
 	if err != nil {
+		if source == vectorStoreSourceDatabaseDefault {
+			logger.Warn("the config store's built-in vector backend is unavailable; vector features are disabled until vector_store is configured: %v", err)
+			config.VectorStore = nil
+			config.VectorStoreConfig = nil
+			return true, nil
+		}
 		if source == vectorStoreSourceDatabase {
 			logger.Error("failed to connect to database-managed vector store; cache is disabled until the saved configuration is corrected")
 			config.VectorStore = nil
@@ -205,7 +248,7 @@ func initializeVectorStoreConfig(ctx context.Context, config *Config, configData
 		if err != nil {
 			return err
 		}
-		if config.ConfigStore != nil && source == vectorStoreSourceConfigJSON {
+		if config.ConfigStore != nil && (source == vectorStoreSourceConfigJSON || source == vectorStoreSourceDatabaseDefault) {
 			if err := persistVectorStoreFileConfig(operationCtx, config.ConfigStore, desired); err != nil {
 				return err
 			}
@@ -228,6 +271,11 @@ func VectorStoreConfigMatchesRuntime(desired, active *vectorstore.Config) bool {
 	if desired == nil || active == nil || desired.Enabled != active.Enabled || desired.Type != active.Type {
 		return false
 	}
+	if desired.Type == vectorstore.VectorStoreTypeSqlite {
+		desiredConfig, desiredOK := sqliteVectorConfigValue(desired.Config)
+		activeConfig, activeOK := sqliteVectorConfigValue(active.Config)
+		return desiredOK && activeOK && desiredConfig.Path == activeConfig.Path
+	}
 	if desired.Type != vectorstore.VectorStoreTypePgvector {
 		return true
 	}
@@ -245,6 +293,18 @@ func VectorStoreConfigMatchesRuntime(desired, active *vectorstore.Config) bool {
 		activeSchema = "bifrost_vectors"
 	}
 	return desiredSchema == activeSchema && desiredConfig.ConnectionString.Equals(&activeConfig.ConnectionString)
+}
+
+func sqliteVectorConfigValue(config any) (vectorstore.SqliteConfig, bool) {
+	switch configured := config.(type) {
+	case vectorstore.SqliteConfig:
+		return configured, true
+	case *vectorstore.SqliteConfig:
+		if configured != nil {
+			return *configured, true
+		}
+	}
+	return vectorstore.SqliteConfig{}, false
 }
 
 func pgvectorConfigValue(config any) (vectorstore.PgvectorConfig, bool) {

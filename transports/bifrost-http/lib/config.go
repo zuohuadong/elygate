@@ -9716,7 +9716,8 @@ func (c *Config) GetVectorStoreConfigRedacted(ctx context.Context) (*vectorstore
 	if vectorStoreConfig == nil {
 		return nil, nil
 	}
-	if vectorStoreConfig.Type == vectorstore.VectorStoreTypeWeaviate {
+	switch vectorStoreConfig.Type {
+	case vectorstore.VectorStoreTypeWeaviate:
 		weaviateConfig, ok := vectorStoreConfig.Config.(*vectorstore.WeaviateConfig)
 		if !ok {
 			return nil, fmt.Errorf("failed to cast vector store config to weaviate config")
@@ -9730,8 +9731,30 @@ func (c *Config) GetVectorStoreConfigRedacted(ctx context.Context) (*vectorstore
 		redactedVectorStoreConfig := *vectorStoreConfig
 		redactedVectorStoreConfig.Config = &redactedWeaviateConfig
 		return &redactedVectorStoreConfig, nil
+	case vectorstore.VectorStoreTypePgvector:
+		var pgvectorConfig vectorstore.PgvectorConfig
+		switch configured := vectorStoreConfig.Config.(type) {
+		case vectorstore.PgvectorConfig:
+			pgvectorConfig = configured
+		case *vectorstore.PgvectorConfig:
+			if configured == nil {
+				return nil, fmt.Errorf("failed to cast vector store config to pgvector config")
+			}
+			pgvectorConfig = *configured
+		default:
+			return nil, fmt.Errorf("failed to cast vector store config to pgvector config")
+		}
+		pgvectorConfig.ConnectionString = *pgvectorConfig.ConnectionString.FullyRedacted()
+		redacted := *vectorStoreConfig
+		redacted.Config = pgvectorConfig
+		return &redacted, nil
+	case vectorstore.VectorStoreTypeSqlite:
+		// The file path is not a secret; the panel needs it to show which
+		// database holds the vectors.
+		return vectorStoreConfig, nil
+	default:
+		return nil, nil
 	}
-	return nil, nil
 }
 
 // ValidateCustomProvider validates the custom provider configuration

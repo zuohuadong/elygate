@@ -45,7 +45,7 @@ func newSqliteConfigStore(ctx context.Context, config *SQLiteConfig, logger sche
 	// secrets are cleaned up on delete.
 	RegisterVaultCallbacks(db)
 	storehooks.PoolOpened(storehooks.RoleConfig, db)
-	s := &RDBConfigStore{logger: logger}
+	s := &RDBConfigStore{logger: logger, sqlitePath: config.Path}
 	s.db.Store(db)
 	// SQLite has no server-side prepared-plan cache, and opening a second
 	// handle on the same file would contend for the single-writer lock —

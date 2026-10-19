@@ -3,6 +3,7 @@ package vectorstore
 import (
 	"context"
 	"fmt"
+	"os"
 	"testing"
 	"time"
 
@@ -15,7 +16,7 @@ import (
 const (
 	PineconeTestTimeout          = 30 * time.Second
 	PineconeTestNamespace        = "bifrost-test-namespace"
-	PineconeTestDimension        = 1536 // Matches text-embedding-3-small dimension
+	PineconeTestDimension        = 1536             // Matches text-embedding-3-small dimension
 	PineconeTestDefaultAPIKey    = "pclocal"        // Pinecone Local doesn't validate API keys
 	PineconeTestDefaultIndexHost = "localhost:5081" // Pinecone Local default port
 )
@@ -29,6 +30,10 @@ type PineconeTestSetup struct {
 }
 
 func NewPineconeTestSetup(t *testing.T) *PineconeTestSetup {
+	t.Helper()
+	if os.Getenv("PINECONE_INDEX_HOST") == "" {
+		t.Skip("set PINECONE_INDEX_HOST (and PINECONE_API_KEY) to run Pinecone integration tests")
+	}
 	apiKey := schemas.NewSecretVar(getEnvWithDefault("PINECONE_API_KEY", PineconeTestDefaultAPIKey))
 	indexHost := schemas.NewSecretVar(getEnvWithDefault("PINECONE_INDEX_HOST", PineconeTestDefaultIndexHost))
 

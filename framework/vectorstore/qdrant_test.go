@@ -29,6 +29,10 @@ type QdrantTestSetup struct {
 }
 
 func NewQdrantTestSetup(t *testing.T) *QdrantTestSetup {
+	t.Helper()
+	if os.Getenv("QDRANT_HOST") == "" {
+		t.Skip("set QDRANT_HOST to run Qdrant integration tests")
+	}
 	host := schemas.NewSecretVar(getEnvWithDefault("QDRANT_HOST", QdrantTestDefaultHost))
 	port := schemas.NewSecretVar(getEnvWithDefault("QDRANT_PORT", QdrantTestDefaultPort))
 	apiKey := schemas.NewSecretVar(os.Getenv("QDRANT_API_KEY"))

@@ -42,6 +42,12 @@ type RDBConfigStore struct {
 	logger           schemas.Logger
 	migrateOnFreshFn func(ctx context.Context, fn func(context.Context, *gorm.DB) error) error
 	refreshPoolFn    func(ctx context.Context) error
+
+	// Backing database coordinates, retained so optional subsystems (the
+	// vector store) can live in the same database as the configuration
+	// instead of requiring a second service.
+	sqlitePath  string
+	postgresDSN string
 }
 
 // getWeight safely dereferences a *float64 weight pointer, returning 1.0 as default if nil.
@@ -10801,4 +10807,23 @@ func (s *RDBConfigStore) DeleteWebhookJob(ctx context.Context, id, runnerID stri
 		return fmt.Errorf("webhook job not found or no longer owned by caller")
 	}
 	return nil
+}
+
+// SQLitePath returns the file backing this config store when it is a SQLite
+// store, and an empty string otherwise.
+func (s *RDBConfigStore) SQLitePath() string {
+	if s == nil {
+		return ""
+	}
+	return s.sqlitePath
+}
+
+// PostgresDSN returns the resolved DSN backing this config store when it is a
+// PostgreSQL store, and an empty string otherwise. The DSN may contain
+// credentials and is intended only for in-process subsystem wiring.
+func (s *RDBConfigStore) PostgresDSN() string {
+	if s == nil {
+		return ""
+	}
+	return s.postgresDSN
 }

@@ -40,6 +40,10 @@ type RedisTestSetup struct {
 
 // NewRedisTestSetup creates a test setup with environment-driven configuration
 func NewRedisTestSetup(t *testing.T) *RedisTestSetup {
+	t.Helper()
+	if os.Getenv("REDIS_ADDR") == "" {
+		t.Skip("set REDIS_ADDR to run Redis vector integration tests")
+	}
 	// Get configuration from environment variables
 
 	addr := schemas.NewSecretVar(getEnvWithDefault("REDIS_ADDR", DefaultTestAddr))
@@ -185,6 +189,9 @@ func (ts *RedisTestSetup) cleanupTestData(t *testing.T) {
 // ============================================================================
 
 func TestRedisConfig_Validation(t *testing.T) {
+	if os.Getenv("REDIS_ADDR") == "" {
+		t.Skip("set REDIS_ADDR to run Redis connection validation tests")
+	}
 	logger := bifrost.NewDefaultLogger(schemas.LogLevelInfo)
 	ctx := context.Background()
 
@@ -270,6 +277,9 @@ func readTestCACert(t *testing.T) string {
 }
 
 func TestNewRedisStore_ConfiguresStandaloneTLSClient(t *testing.T) {
+	if os.Getenv("REDIS_ADDR") == "" {
+		t.Skip("set REDIS_ADDR to run Redis integration tests")
+	}
 	logger := bifrost.NewDefaultLogger(schemas.LogLevelInfo)
 
 	store, err := newRedisStore(context.Background(), RedisConfig{
@@ -306,6 +316,9 @@ func TestNewRedisStore_ConfiguresStandaloneTLSClientWithCACert(t *testing.T) {
 }
 
 func TestNewRedisStore_ConfiguresClusterTLSClient(t *testing.T) {
+	if os.Getenv("REDIS_ADDR") == "" {
+		t.Skip("set REDIS_ADDR to run Redis integration tests")
+	}
 	logger := bifrost.NewDefaultLogger(schemas.LogLevelInfo)
 
 	store, err := newRedisStore(context.Background(), RedisConfig{

@@ -40,7 +40,7 @@
 	let cacheKey = $state('');
 	let vectorStoreConnected = $state(false);
 	let vectorStore = $state.raw<VectorStoreConfigResponse | null>(null);
-	let vectorStoreForm = $state<VectorStoreDraft>({ enabled: false, connectionString: '', schema: 'bifrost_vectors' });
+	let vectorStoreForm = $state<VectorStoreDraft>({ enabled: false, type: 'pgvector', connectionString: '', schema: 'bifrost_vectors', path: '' });
 	let isSavingVectorStore = $state(false);
 	let isLoading = $state(true);
 	let isSaving = $state(false);
@@ -207,10 +207,16 @@
 		{#if vectorStore?.management_message}<div class="notice warning">{vectorStore.management_message}</div>{/if}
 		{#if vectorStore?.restart_required}<div class="notice warning"><strong>{i18n.t('elygate.restartRequired')}</strong> {vectorStore.restart_reason ?? ''}<p>{i18n.t('elygate.restartInstructions')}</p></div>{/if}
 		<div class="form-grid">
-			<label>{i18n.t('elygate.vectorStoreType')}<input value={vectorStore?.type ?? 'pgvector'} disabled /></label>
-			{#if vectorStore?.supported !== false}
-		<label>{i18n.t('elygate.pgvectorConnection')}<input type="password" autocomplete="new-password" bind:value={vectorStoreForm.connectionString} disabled={vectorStore ? !vectorStore.editable || isMutating : true} placeholder="postgres://…" /></label>
-			<label>{i18n.t('elygate.pgvectorSchema')}<input bind:value={vectorStoreForm.schema} disabled={vectorStore ? !vectorStore.editable || isMutating : true} /></label>
+			{#if vectorStore?.supported === false}
+				<label>{i18n.t('elygate.vectorStoreType')}<input value={vectorStore?.type ?? 'pgvector'} disabled /></label>
+			{:else}
+				<label>{i18n.t('elygate.vectorStoreType')}<select bind:value={vectorStoreForm.type} disabled={vectorStore ? !vectorStore.editable || isMutating : true}><option value="pgvector">pgvector</option><option value="sqlite">sqlite</option></select></label>
+				{#if vectorStoreForm.type === 'pgvector'}
+					<label>{i18n.t('elygate.pgvectorConnection')}<input type="password" autocomplete="new-password" bind:value={vectorStoreForm.connectionString} disabled={vectorStore ? !vectorStore.editable || isMutating : true} placeholder="postgres://…" /></label>
+					<label>{i18n.t('elygate.pgvectorSchema')}<input bind:value={vectorStoreForm.schema} disabled={vectorStore ? !vectorStore.editable || isMutating : true} /></label>
+				{:else}
+					<label>{i18n.t('elygate.sqliteVectorPath')}<input bind:value={vectorStoreForm.path} disabled={vectorStore ? !vectorStore.editable || isMutating : true} placeholder="/app/data/elygate.db" /></label>
+				{/if}
 			{/if}
 		</div>
 		{#if vectorStore?.supported !== false}<div class="vector-store-actions"><label><input type="checkbox" bind:checked={vectorStoreForm.enabled} disabled={vectorStore ? !vectorStore.editable || isMutating : true} />{i18n.t('elygate.enablePgvector')}</label><button class="primary" type="submit" disabled={!vectorStore?.editable || isMutating}>{i18n.t('elygate.saveVectorStore')}</button></div>{/if}

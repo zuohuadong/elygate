@@ -3512,6 +3512,7 @@ func TestSchemaVectorStoreTypes(t *testing.T) {
 		vectorstore.VectorStoreTypePinecone: "pinecone_config",
 		vectorstore.VectorStoreTypeChromem:  "chromem_config",
 		vectorstore.VectorStoreTypePgvector: "pgvector_config",
+		vectorstore.VectorStoreTypeSqlite:   "sqlite_vector_config",
 	}
 
 	schema := loadSchema(t)
@@ -3564,6 +3565,7 @@ func TestSchemaVectorStoreTypes(t *testing.T) {
 			"pinecone": `{"vector_store": {"enabled": true, "type": "pinecone", "config": {"api_key": "k", "index_host": "h"}}}`,
 			"chromem":  `{"vector_store": {"enabled": true, "type": "chromem", "config": {"path": "/app/data/chromem"}}}`,
 			"pgvector": `{"vector_store": {"enabled": true, "type": "pgvector", "config": {"connection_string": "postgres://db/elygate", "schema": "elygate_vectors"}}}`,
+			"sqlite":   `{"vector_store": {"enabled": true, "type": "sqlite", "config": {"path": "/app/data/elygate.db"}}}`,
 		}
 		for name, config := range valid {
 			if err := validateConfig(t, compiled, config); err != nil {
@@ -3597,7 +3599,7 @@ func TestSchemaVectorStoreTypes(t *testing.T) {
 	t.Run("service-backed types require a config block", func(t *testing.T) {
 		compiled := compileSchema(t)
 
-		for _, storeType := range []string{"weaviate", "redis", "qdrant", "pinecone", "pgvector"} {
+		for _, storeType := range []string{"weaviate", "redis", "qdrant", "pinecone", "pgvector", "sqlite"} {
 			omitted := `{"vector_store": {"enabled": true, "type": "` + storeType + `"}}`
 			if err := validateConfig(t, compiled, omitted); err == nil {
 				t.Errorf("%s with no config block must be rejected: it has no endpoint to dial", storeType)

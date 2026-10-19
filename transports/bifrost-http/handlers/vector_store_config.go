@@ -37,6 +37,18 @@ func vectorStoreManagementMetadata(config *lib.Config) (bool, string, string) {
 	return true, "database", ""
 }
 
+func sqliteVectorConfigValue(config any) (vectorstore.SqliteConfig, bool) {
+	switch configured := config.(type) {
+	case vectorstore.SqliteConfig:
+		return configured, true
+	case *vectorstore.SqliteConfig:
+		if configured != nil {
+			return *configured, true
+		}
+	}
+	return vectorstore.SqliteConfig{}, false
+}
+
 func pgvectorConfigValue(config any) (vectorstore.PgvectorConfig, bool) {
 	switch configured := config.(type) {
 	case vectorstore.PgvectorConfig:
@@ -90,7 +102,7 @@ func (h *ConfigHandler) getVectorStoreConfig(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("failed to get vector store config: %v", err))
 		return
 	}
-	if rawConfig != nil && rawConfig.Type != vectorstore.VectorStoreTypePgvector {
+	if rawConfig != nil && rawConfig.Type != vectorstore.VectorStoreTypePgvector && rawConfig.Type != vectorstore.VectorStoreTypeSqlite {
 		restartRequired := !lib.VectorStoreConfigMatchesRuntime(rawConfig, h.store.VectorStoreConfig)
 		restartReason := ""
 		if restartRequired {
@@ -170,49 +182,71 @@ func (h *ConfigHandler) updateVectorStoreConfig(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, fasthttp.StatusBadRequest, "Invalid request payload")
 		return
 	}
-	if requested.Type != vectorstore.VectorStoreTypePgvector {
-		SendError(ctx, fasthttp.StatusBadRequest, "vector store type must be pgvector")
-		return
-	}
-	pgvectorConfig, ok := pgvectorConfigValue(requested.Config)
-	if !ok {
-		SendError(ctx, fasthttp.StatusBadRequest, "invalid pgvector configuration")
-		return
-	}
 	existing, err := h.store.ConfigStore.GetVectorStoreConfig(mutationCtx)
 	if err != nil {
 		SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("failed to get vector store config: %v", err))
 		return
 	}
-	if pgvectorConfig.ConnectionString.ShouldPreserveStored() {
-		var existingPgvectorConfig vectorstore.PgvectorConfig
-		var exists bool
-		if existing != nil && existing.Type == vectorstore.VectorStoreTypePgvector {
-			existingPgvectorConfig, exists = pgvectorConfigValue(existing.Config)
+	switch requested.Type {
+	case vectorstore.VectorStoreTypePgvector:
+		pgvectorConfig, ok := pgvectorConfigValue(requested.Config)
+		if !ok {
+			SendError(ctx, fasthttp.StatusBadRequest, "invalid pgvector configuration")
+			return
 		}
-		if exists {
-			pgvectorConfig.ConnectionString = existingPgvectorConfig.ConnectionString
-		} else {
-			pgvectorConfig.ConnectionString = *schemas.NewSecretVar("")
+		if pgvectorConfig.ConnectionString.ShouldPreserveStored() {
+			var existingPgvectorConfig vectorstore.PgvectorConfig
+			var exists bool
+			if existing != nil && existing.Type == vectorstore.VectorStoreTypePgvector {
+				existingPgvectorConfig, exists = pgvectorConfigValue(existing.Config)
+			}
+			if exists {
+				pgvectorConfig.ConnectionString = existingPgvectorConfig.ConnectionString
+			} else {
+				pgvectorConfig.ConnectionString = *schemas.NewSecretVar("")
+			}
 		}
-	}
-	if pgvectorConfig.Schema == "" {
-		pgvectorConfig.Schema = "bifrost_vectors"
-	}
-	if err := vectorstore.ValidatePgvectorConfig(&pgvectorConfig, requested.Enabled); err != nil {
-		SendError(ctx, fasthttp.StatusBadRequest, err.Error())
+		if pgvectorConfig.Schema == "" {
+			pgvectorConfig.Schema = "bifrost_vectors"
+		}
+		if err := vectorstore.ValidatePgvectorConfig(&pgvectorConfig, requested.Enabled); err != nil {
+			SendError(ctx, fasthttp.StatusBadRequest, err.Error())
+			return
+		}
+		requested.Config = pgvectorConfig
+	case vectorstore.VectorStoreTypeSqlite:
+		sqliteConfig, ok := sqliteVectorConfigValue(requested.Config)
+		if !ok {
+			SendError(ctx, fasthttp.StatusBadRequest, "invalid sqlite vector configuration")
+			return
+		}
+		if strings.TrimSpace(sqliteConfig.Path) == "" && existing != nil && existing.Type == vectorstore.VectorStoreTypeSqlite {
+			if previous, previousOK := sqliteVectorConfigValue(existing.Config); previousOK {
+				sqliteConfig.Path = previous.Path
+			}
+		}
+		if err := vectorstore.ValidateSqliteConfig(&sqliteConfig, requested.Enabled); err != nil {
+			SendError(ctx, fasthttp.StatusBadRequest, err.Error())
+			return
+		}
+		requested.Config = sqliteConfig
+	default:
+		SendError(ctx, fasthttp.StatusBadRequest, "vector store type must be pgvector or sqlite")
 		return
 	}
-	requested.Config = pgvectorConfig
 	if err := h.store.ConfigStore.UpdateVectorStoreConfig(mutationCtx, &requested); err != nil {
 		SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("failed to update vector store config: %v", err))
 		return
 	}
 	restartRequired := !lib.VectorStoreConfigMatchesRuntime(&requested, h.store.VectorStoreConfig)
 	h.updateVectorStoreRestartMarker(mutationCtx, restartRequired)
-	redacted := pgvectorConfig
-	redacted.ConnectionString = *pgvectorConfig.ConnectionString.FullyRedacted()
 	responseConfig := requested
-	responseConfig.Config = redacted
+	switch config := requested.Config.(type) {
+	case vectorstore.PgvectorConfig:
+		config.ConnectionString = *config.ConnectionString.FullyRedacted()
+		responseConfig.Config = config
+	case vectorstore.SqliteConfig:
+		responseConfig.Config = config
+	}
 	h.sendVectorStoreConfig(ctx, &responseConfig, &requested)
 }

@@ -2,6 +2,7 @@ package vectorstore
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
@@ -34,6 +35,10 @@ type TestSetup struct {
 
 // NewTestSetup creates a test setup with environment-driven configuration
 func NewTestSetup(t *testing.T) *TestSetup {
+	t.Helper()
+	if os.Getenv("WEAVIATE_HOST") == "" {
+		t.Skip("set WEAVIATE_HOST to run Weaviate integration tests")
+	}
 	// Get configuration from environment variables
 	scheme := getEnvWithDefault("WEAVIATE_SCHEME", DefaultTestScheme)
 	host := schemas.NewSecretVar(getEnvWithDefault("WEAVIATE_HOST", DefaultTestHost))

@@ -6,6 +6,7 @@ export interface VectorStoreConfigResponse {
 	config?: {
 		connection_string?: { value?: string; ref?: string; type?: string };
 		schema?: string;
+		path?: string;
 	};
 	supported: boolean;
 	runtime_connected: boolean;
@@ -16,10 +17,14 @@ export interface VectorStoreConfigResponse {
 	management_message?: string;
 }
 
+export type VectorStoreDraftType = 'pgvector' | 'sqlite';
+
 export interface VectorStoreDraft {
 	enabled: boolean;
+	type: VectorStoreDraftType;
 	connectionString: string;
 	schema: string;
+	path: string;
 }
 
 export function pluginFromMutationResponse(value: unknown): JsonRecord {
@@ -38,12 +43,23 @@ export function vectorStoreDraft(config: VectorStoreConfigResponse): VectorStore
 	const hasStoredConnection = Boolean(connection && (connection.value || connection.ref));
 	return {
 		enabled: config.enabled,
+		type: config.type === 'sqlite' ? 'sqlite' : 'pgvector',
 		connectionString: hasStoredConnection ? '<REDACTED>' : '',
 		schema: config.config?.schema?.trim() || 'bifrost_vectors',
+		path: config.config?.path?.trim() || '',
 	};
 }
 
 export function vectorStorePayload(draft: VectorStoreDraft, previous: VectorStoreConfigResponse): JsonRecord {
+	if (draft.type === 'sqlite') {
+		return {
+			enabled: draft.enabled,
+			type: 'sqlite',
+			config: {
+				path: draft.path.trim() || previous.config?.path || '',
+			},
+		};
+	}
 	const connectionString = draft.connectionString.trim();
 	return {
 		enabled: draft.enabled,

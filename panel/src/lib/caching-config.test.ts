@@ -68,6 +68,27 @@ describe('caching plugin mutations', () => {
 		expect(vectorStoreDraft(config).connectionString).toBe('');
 	});
 
+
+	test('round-trips a sqlite vector store without a connection string', () => {
+		const previous = {
+			enabled: true,
+			type: 'sqlite',
+			supported: true,
+			config: { path: '/app/data/elygate.db' },
+			runtime_connected: true,
+			restart_required: false,
+			editable: true,
+			managed_by: 'database' as const,
+		};
+		const draft = vectorStoreDraft(previous);
+		expect(draft.type).toBe('sqlite');
+		expect(draft.path).toBe('/app/data/elygate.db');
+		expect(vectorStorePayload(draft, previous)).toEqual({
+			enabled: true,
+			type: 'sqlite',
+			config: { path: '/app/data/elygate.db' },
+		});
+	});
 	test('disables a broken plugin without validating the editor draft', () => {
 		const storedConfig = { ttl: -1, threshold: 2 };
 		let draftBuilt = false;

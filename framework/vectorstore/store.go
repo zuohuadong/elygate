@@ -17,6 +17,7 @@ const (
 	VectorStoreTypeQdrant   VectorStoreType = "qdrant"
 	VectorStoreTypePinecone VectorStoreType = "pinecone"
 	VectorStoreTypePgvector VectorStoreType = "pgvector"
+	VectorStoreTypeSqlite   VectorStoreType = "sqlite"
 	VectorStoreTypeChromem  VectorStoreType = "chromem"
 )
 
@@ -200,6 +201,12 @@ func (c *Config) UnmarshalJSON(data []byte) error {
 			return fmt.Errorf("failed to unmarshal pgvector config: %w", err)
 		}
 		c.Config = pgvectorConfig
+	case VectorStoreTypeSqlite:
+		var sqliteConfig SqliteConfig
+		if err := json.Unmarshal(temp.Config, &sqliteConfig); err != nil {
+			return fmt.Errorf("failed to unmarshal sqlite config: %w", err)
+		}
+		c.Config = sqliteConfig
 	case VectorStoreTypeChromem:
 		var chromemConfig ChromemConfig
 		// Chromem has no required fields, so a missing config block is valid.
@@ -272,6 +279,15 @@ func NewVectorStore(ctx context.Context, config *Config, logger schemas.Logger) 
 			return nil, fmt.Errorf("invalid pgvector config")
 		}
 		return newPgvectorStore(ctx, &pgvectorConfig, logger)
+	case VectorStoreTypeSqlite:
+		if config.Config == nil {
+			return nil, fmt.Errorf("sqlite config is required")
+		}
+		sqliteConfig, ok := config.Config.(SqliteConfig)
+		if !ok {
+			return nil, fmt.Errorf("invalid sqlite config")
+		}
+		return newSqliteStore(ctx, &sqliteConfig, logger)
 	case VectorStoreTypeChromem:
 		// A nil config block is valid: chromem defaults to memory-only mode.
 		chromemConfig, ok := config.Config.(ChromemConfig)
