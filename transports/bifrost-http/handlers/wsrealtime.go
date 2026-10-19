@@ -40,11 +40,27 @@ type realtimeWebSocketFrame struct {
 
 // WSRealtimeHandler handles bidirectional WebSocket proxying for the Realtime API.
 type WSRealtimeHandler struct {
-	client       *bifrost.Bifrost
-	config       *lib.Config
-	handlerStore lib.HandlerStore
-	pool         *bfws.Pool
-	sessions     *bfws.SessionManager
+	client        *bifrost.Bifrost
+	config        *lib.Config
+	handlerStore  lib.HandlerStore
+	pool          *bfws.Pool
+	sessions      *bfws.SessionManager
+	accessChecker VirtualKeyAccessChecker
+}
+
+func (h *WSRealtimeHandler) SetVirtualKeyAccessChecker(checker VirtualKeyAccessChecker) {
+	h.accessChecker = checker
+}
+
+func (h *WSRealtimeHandler) checkRealtimeVirtualKey(ctx context.Context, bifrostCtx *schemas.BifrostContext) error {
+	if h.accessChecker == nil || bifrostCtx == nil {
+		return nil
+	}
+	virtualKey := bifrost.GetStringFromContext(bifrostCtx, schemas.BifrostContextKeyVirtualKey)
+	if virtualKey == "" {
+		return nil
+	}
+	return h.accessChecker.CheckVirtualKeyValueAccess(ctx, virtualKey)
 }
 
 // NewWSRealtimeHandler creates a new Realtime WebSocket handler.
@@ -467,6 +483,10 @@ func (h *WSRealtimeHandler) runRealtimeSession(
 	if mapped {
 		applyRealtimeEphemeralKeyMapping(bifrostCtx, mapping)
 	}
+	if err := h.checkRealtimeVirtualKey(context.Background(), bifrostCtx); err != nil {
+		clientConn.writeRealtimeError(newRealtimeWireBifrostError(401, "authentication_error", "virtual key access is no longer active"))
+		return
+	}
 
 	bifrostCtx.SetValue(schemas.BifrostContextKeyHTTPRequestType, schemas.RealtimeRequest)
 	if strings.HasPrefix(path, "/openai") {
@@ -613,6 +633,10 @@ func (h *WSRealtimeHandler) relayClientToRealtimeProvider(
 		}
 		if stop, processErr := h.processRealtimeClientMessage(clientConn, session, upstream, provider, bifrostCtx, providerKey, model, key, transcriptionSession, messageType, message); stop {
 			return processErr
+		}
+		if err := h.checkRealtimeVirtualKey(context.Background(), bifrostCtx); err != nil {
+			clientConn.writeRealtimeError(newRealtimeWireBifrostError(401, "authentication_error", "virtual key access is no longer active"))
+			return nil
 		}
 	}
 }

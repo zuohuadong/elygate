@@ -21,10 +21,15 @@ import (
 
 type WebRTCRealtimeHandler struct {
 	webrtcRelayRegistry
-	client       *bifrost.Bifrost
-	config       *lib.Config
-	handlerStore lib.HandlerStore
-	legacyRoutes map[string]schemas.ModelProvider // path → default provider (legacy raw-SDP routes)
+	client        *bifrost.Bifrost
+	config        *lib.Config
+	handlerStore  lib.HandlerStore
+	legacyRoutes  map[string]schemas.ModelProvider // path → default provider (legacy raw-SDP routes)
+	accessChecker VirtualKeyAccessChecker
+}
+
+func (h *WebRTCRealtimeHandler) SetVirtualKeyAccessChecker(checker VirtualKeyAccessChecker) {
+	h.accessChecker = checker
 }
 
 func NewWebRTCRealtimeHandler(client *bifrost.Bifrost, config *lib.Config) *WebRTCRealtimeHandler {

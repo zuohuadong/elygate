@@ -694,7 +694,15 @@ type Config struct {
 	// Stores
 	ConfigStore configstore.ConfigStore
 	VectorStore vectorstore.VectorStore
-	LogsStore   logstore.LogStore
+	// VectorStoreConfig is the effective vector store configuration. It is kept
+	// alongside VectorStore so the panel can compare the saved setting with the
+	// one this process started with and report a restart requirement.
+	VectorStoreConfig *vectorstore.Config
+	// VectorStoreConfigManagedByConfigJSON reports that config.json owns the
+	// vector_store section, which makes it read-only in the panel.
+	VectorStoreConfigManagedByConfigJSON bool
+	vectorStoreStartupDegraded           bool
+	LogsStore                            logstore.LogStore
 	// LogsStoreConfig is the effective logs store configuration used to create LogsStore.
 	LogsStoreConfig *logstore.Config
 	// ConfigStoreConfig is the config.json config store configuration used to
@@ -1379,20 +1387,21 @@ func initStores(ctx context.Context, config *Config, configData *ConfigData, con
 
 	attachWarpHistoryLock(config)
 
-	// Initialize vector store (only if explicitly configured)
-	if configData.VectorStoreConfig != nil && configData.VectorStoreConfig.Enabled {
-		logger.Info("connecting to vectorstore")
-		config.VectorStore, err = vectorstore.NewVectorStore(ctx, configData.VectorStoreConfig, logger)
-		if err != nil {
-			logger.Fatal("failed to connect to vector store: %v", err)
-		}
-		if config.ConfigStore != nil {
-			if err = config.ConfigStore.UpdateVectorStoreConfig(ctx, configData.VectorStoreConfig); err != nil {
-				logger.Warn("failed to update vector store config: %v", err)
-			}
-		}
+	config.VectorStoreConfigManagedByConfigJSON = configData.vectorStoreManagedByConfigJSON()
+	if err := initializeVectorStoreConfig(ctx, config, configData, vectorstore.NewVectorStore); err != nil {
+		return err
 	}
 	return nil
+}
+
+// vectorStoreManagedByConfigJSON reports whether config.json's vector_store
+// section is the source of truth for this process. Only then is the panel
+// setting read-only; a store-managed setting stays editable.
+func (cd *ConfigData) vectorStoreManagedByConfigJSON() bool {
+	if cd == nil || cd.VectorStoreConfig == nil {
+		return false
+	}
+	return normalizeSourceOfTruth(cd.SourceOfTruth) == SourceOfTruthConfigJSON
 }
 
 // attachWarpHistoryLock gives a ClickHouse logs store the config-store lock, so
@@ -6599,22 +6608,22 @@ func ResolveFrameworkPricingConfig(
 	}
 
 	return &configstoreTables.TableFrameworkConfig{
-		ID:                     configID,
-		PricingURL:             resolvedPricingURL,
-		PricingSyncInterval:    resolvedSyncSeconds,
-		ModelParametersURL:     resolvedModelParametersURL,
-		MCPLibraryURL:          resolvedMCPLibraryURL,
-		MCPLibrarySyncInterval: resolvedMCPLibrarySyncInterval,
-		LiveModelsSyncInterval: resolvedLiveModelsSyncInterval,
-		ConfigHash:             persistedHash,
-	}, &modelcatalog.Config{
-		PricingURL:             resolvedPricingURL,
-		PricingSyncInterval:    resolvedSyncSeconds,
-		ModelParametersURL:     resolvedModelParametersURL,
-		MCPLibraryURL:          resolvedMCPLibraryURL,
-		MCPLibrarySyncInterval: resolvedMCPLibrarySyncInterval,
-		LiveModelsSyncInterval: resolvedLiveModelsSyncInterval,
-	}, needsDBUpdate
+			ID:                     configID,
+			PricingURL:             resolvedPricingURL,
+			PricingSyncInterval:    resolvedSyncSeconds,
+			ModelParametersURL:     resolvedModelParametersURL,
+			MCPLibraryURL:          resolvedMCPLibraryURL,
+			MCPLibrarySyncInterval: resolvedMCPLibrarySyncInterval,
+			LiveModelsSyncInterval: resolvedLiveModelsSyncInterval,
+			ConfigHash:             persistedHash,
+		}, &modelcatalog.Config{
+			PricingURL:             resolvedPricingURL,
+			PricingSyncInterval:    resolvedSyncSeconds,
+			ModelParametersURL:     resolvedModelParametersURL,
+			MCPLibraryURL:          resolvedMCPLibraryURL,
+			MCPLibrarySyncInterval: resolvedMCPLibrarySyncInterval,
+			LiveModelsSyncInterval: resolvedLiveModelsSyncInterval,
+		}, needsDBUpdate
 }
 
 // initFrameworkConfig initializes framework config and pricing manager from file
@@ -8163,6 +8172,22 @@ func (c *Config) UpdatePluginOverallStatus(name string, displayName string, stat
 	}
 }
 
+// UpdatePluginMetadata records optional descriptive and capability metadata for a loaded plugin.
+func (c *Config) UpdatePluginMetadata(name string, metadata schemas.PluginMetadata) {
+	c.pluginStatusMu.Lock()
+	defer c.pluginStatusMu.Unlock()
+
+	if c.pluginStatus == nil {
+		c.pluginStatus = make(map[string]schemas.PluginStatus)
+	}
+
+	status := c.pluginStatus[name]
+	status.Description = metadata.Description
+	status.DescriptionZh = metadata.DescriptionZh
+	status.Features = slices.Clone(metadata.Features)
+	c.pluginStatus[name] = status
+}
+
 // UpdatePluginDisplayName updates the display name of a plugin
 func (c *Config) UpdatePluginDisplayName(name string, displayName string) error {
 	c.pluginStatusMu.Lock()
@@ -9553,6 +9578,22 @@ func (c *Config) WebhookEndpointByName(name string) (*configstoreTables.TableWeb
 	}
 	endpoint, ok := c.webhookEndpoints[id]
 	return endpoint, ok
+}
+
+// WebhookEndpointsForEvent returns enabled endpoint snapshots subscribed to event.
+func (c *Config) WebhookEndpointsForEvent(event configstoreTables.WebhookEvent) []*configstoreTables.TableWebhookEndpoint {
+	c.muWebhooks.RLock()
+	defer c.muWebhooks.RUnlock()
+	endpoints := make([]*configstoreTables.TableWebhookEndpoint, 0, len(c.webhookEndpoints))
+	for _, endpoint := range c.webhookEndpoints {
+		if endpoint.Disabled || !slices.Contains(endpoint.Events, event) {
+			continue
+		}
+		copied := *endpoint
+		endpoints = append(endpoints, &copied)
+	}
+	sort.Slice(endpoints, func(i, j int) bool { return endpoints[i].ID < endpoints[j].ID })
+	return endpoints
 }
 
 // SetWebhookEndpoint upserts an endpoint in the in-memory store, replacing

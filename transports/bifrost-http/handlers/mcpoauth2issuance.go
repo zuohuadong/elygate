@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -41,6 +42,18 @@ type OAuth2IssuanceHandler struct {
 	// when user identity is available). May be nil — VK refresh is never blocked
 	// then, matching availableModes which keeps offering vk without a resolver.
 	identityResolver OAuth2IdentityResolver
+	accessChecker    VirtualKeyAccessChecker
+}
+
+func (h *OAuth2IssuanceHandler) SetVirtualKeyAccessChecker(checker VirtualKeyAccessChecker) {
+	h.accessChecker = checker
+}
+
+func (h *OAuth2IssuanceHandler) checkVirtualKeyAccess(ctx context.Context, mode, subject string) error {
+	if h.accessChecker == nil || schemas.MCPAuthMode(mode) != schemas.MCPAuthModeVK {
+		return nil
+	}
+	return h.accessChecker.CheckVirtualKeyAccess(ctx, subject)
 }
 
 // NewOAuth2IssuanceHandler creates a new issuance handler. identityResolver may

@@ -265,14 +265,6 @@ type BifrostHTTPServer struct {
 
 	WebSocketHandler     *handlers.WebSocketHandler
 	NotificationService  *handlers.NotificationService
-	MCPServerHandler     *handlers.MCPServerHandler
-	devPprofHandler      *handlers.DevPprofHandler
-	IntegrationHandler   *handlers.IntegrationHandler
-	EmployeeHandler      *employees.Handler
-	ControlPlaneHandler  *controlplane.Handler
-	BudgetMonitor        *controlplane.BudgetMonitor
-	WebSocketHandler     *handlers.WebSocketHandler
-	NotificationService  *handlers.NotificationService
 	RSSFeedsHandler      *handlers.RSSFeedsHandler
 	WarpHandler          *handlers.WarpHandler
 	MCPServerHandler     *handlers.MCPServerHandler
@@ -282,6 +274,8 @@ type BifrostHTTPServer struct {
 	IntegrationHandler   *handlers.IntegrationHandler
 	wsLiveHandler        *handlers.WSLiveHandler
 	webrtcLiveHandler    *handlers.WebRTCLiveHandler
+	EmployeeHandler      *employees.Handler
+	ControlPlaneHandler  *controlplane.Handler
 
 	AuthMiddleware       *handlers.AuthMiddleware
 	setupLockInstalled   bool // OSS setup-lock gate guards /api (see AuthMiddleware.SetupLockMiddleware); never set on enterprise
@@ -2884,13 +2878,6 @@ func (s *BifrostHTTPServer) notificationPublisher() schemas.NotificationPublishe
 
 // RegisterAPIRoutes initializes the routes for the Bifrost HTTP server.
 func (s *BifrostHTTPServer) RegisterAPIRoutes(ctx context.Context, callbacks ServerCallbacks, middlewares ...schemas.BifrostHTTPMiddleware) error {
-	bindingMode, modeErr := controlplane.ParseApplicationBindingMode(os.Getenv("ELYGATE_APPLICATION_BINDING_MODE"))
-	if modeErr != nil {
-		return modeErr
-	}
-	if bindingMode == controlplane.ApplicationBindingRequired && s.Config.ConfigStore == nil {
-		return errors.New("required application binding mode requires config storage")
-	}
 	var err error
 	// Initializing plugin specific handlers
 	var loggingHandler *handlers.LoggingHandler
@@ -2923,7 +2910,6 @@ func (s *BifrostHTTPServer) RegisterAPIRoutes(ctx context.Context, callbacks Ser
 		if err != nil {
 			return fmt.Errorf("failed to initialize governance handler: %v", err)
 		}
-		governanceHandler.SetPricingOverrideMutationLocker(s.Config.PricingOverrideMutationLocker())
 		// Register the expired-key cleanup job before the dispatcher starts, since
 		// any node may claim it.
 		if s.SidekiqRunner != nil && s.Config != nil && s.Config.ConfigStore != nil {
@@ -2947,13 +2933,13 @@ func (s *BifrostHTTPServer) RegisterAPIRoutes(ctx context.Context, callbacks Ser
 	// references and (worse) skipped route registration entirely when the
 	// plugin wasn't in config.json at startup, causing 405 on all cache-clear
 	// endpoints for the process lifetime.
-	cacheHandler := handlers.NewCacheHandlerWithStore(func() handlers.CacheClearer {
+	cacheHandler := handlers.NewCacheHandler(func() handlers.CacheClearer {
 		p, err := lib.FindPluginAs[*semanticcache.Plugin](s.Config, semanticcache.PluginName)
 		if err != nil || p == nil {
 			return nil
 		}
 		return p
-	}, s.Config.ConfigStore)
+	})
 	// Websocket handler needs to go below UI handler
 	logger.Debug("initializing websocket server")
 	if s.WebSocketHandler == nil {
@@ -3015,24 +3001,8 @@ func (s *BifrostHTTPServer) RegisterAPIRoutes(ctx context.Context, callbacks Ser
 		if err != nil {
 			return fmt.Errorf("failed to initialize employee management: %v", err)
 		}
-		employeeHandler.SetAuditAppenderFactory(func(request *fasthttp.RequestCtx) employees.EmployeeAuditAppender {
-			if !encrypt.IsEnabled() {
-				return nil
-			}
-			base := handlers.GovernanceAuditInput{
-				Principal: handlers.AdminPrincipalFromRequest(request),
-				RequestID: handlers.GovernanceRequestIDFromRequest(request),
-				TraceID:   handlers.GovernanceTraceIDFromRequest(request),
-			}
-			return func(dbCtx context.Context, tx *gorm.DB, action, resource, resourceID, outcome string, before, after, metadata any) error {
-				input := base
-				input.Action, input.Resource, input.ResourceID, input.Outcome = action, resource, resourceID, outcome
-				input.Before, input.After, input.Metadata = before, after, metadata
-				return handlers.AppendGovernanceAudit(dbCtx, s.Config.ConfigStore, tx, input)
-			}
-		})
 		s.EmployeeHandler = employeeHandler
-		controlPlaneStore, storeErr := controlplane.NewStoreWithBindingMode(ctx, s.Config.ConfigStore, bindingMode)
+		controlPlaneStore, storeErr := controlplane.NewStore(ctx, s.Config.ConfigStore)
 		if storeErr != nil {
 			return fmt.Errorf("failed to initialize control plane: %v", storeErr)
 		}
@@ -3786,11 +3756,6 @@ func (s *BifrostHTTPServer) Bootstrap(ctx context.Context) error {
 		// Explain an oversized body (413 naming the configured limit) instead of fasthttp's generic 400.
 		ErrorHandler: lib.RequestErrorHandler(maxRequestBodySizeMB, logger.Warn),
 	}
-	if s.ControlPlaneHandler != nil {
-		s.BudgetMonitor = controlplane.NewBudgetMonitor(s.Ctx, s.ControlPlaneHandler, logger)
-		s.BudgetMonitor.Start()
-		logger.Info("control-plane budget monitor initialized")
-	}
 	startSkillsOrphanCleanupWorker(s.Ctx, s.Config, nil)
 	// Keep the live model catalog current after boot. Without this, a model an
 	// upstream starts serving mid-uptime stays invisible until a restart or a
@@ -3815,9 +3780,6 @@ func (s *BifrostHTTPServer) CloseAgentGateway() {
 func (s *BifrostHTTPServer) Start() error {
 	if s.HTTPClientFactory != nil {
 		defer s.HTTPClientFactory.CloseIdleConnections()
-	}
-	if s.BudgetMonitor != nil {
-		defer s.BudgetMonitor.Stop()
 	}
 	// Printing plugin status in a table
 	for _, pluginStatus := range s.Config.GetPluginStatus() {
@@ -3885,10 +3847,6 @@ func (s *BifrostHTTPServer) Start() error {
 			logger.Info("closing agent gateway...")
 			s.CloseAgentGateway()
 			logger.Info("shutting down bifrost client...")
-			if s.BudgetMonitor != nil {
-				logger.Info("stopping control-plane budget monitor...")
-				s.BudgetMonitor.Stop()
-			}
 			s.Client.Shutdown()
 			logger.Info("bifrost client shutdown completed")
 			logger.Info("cleaning up storage engines...")

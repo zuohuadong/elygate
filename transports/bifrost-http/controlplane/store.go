@@ -470,21 +470,6 @@ func (s *Store) ProjectLogs(ctx context.Context, logs []logstore.Log) (int, erro
 }
 
 func (s *Store) projectLogs(ctx context.Context, logs []logstore.Log, advanceCheckpoint bool) (int, error) {
-	var fallbackApp *Application
-	getFallbackApp := func() (*Application, error) {
-		if fallbackApp != nil {
-			return fallbackApp, nil
-		}
-		project := &Project{ID: "default", OrganizationID: "default", Name: "Default", Status: "active", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
-		if err := s.db(ctx).Where("id = ?", project.ID).FirstOrCreate(project).Error; err != nil {
-			return nil, err
-		}
-		fallbackApp = &Application{ID: "default", ProjectID: project.ID, Name: "Unassigned", Environment: "production", Status: "active", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
-		if err := s.db(ctx).Where("id = ?", fallbackApp.ID).FirstOrCreate(fallbackApp).Error; err != nil {
-			return nil, err
-		}
-		return fallbackApp, nil
-	}
 	count := 0
 	err := s.db(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := lockUsageProjection(tx); err != nil {
@@ -615,6 +600,21 @@ func deleteStaleUsageLedgerEntries(tx *gorm.DB, seenSourceLogs map[string]struct
 }
 
 func (s *Store) projectLogsTx(ctx context.Context, logs []logstore.Log, advanceCheckpoint bool) (int, error) {
+	var fallbackApp *Application
+	getFallbackApp := func() (*Application, error) {
+		if fallbackApp != nil {
+			return fallbackApp, nil
+		}
+		project := &Project{ID: "default", OrganizationID: "default", Name: "Default", Status: "active", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+		if err := s.db(ctx).Where("id = ?", project.ID).FirstOrCreate(project).Error; err != nil {
+			return nil, err
+		}
+		fallbackApp = &Application{ID: "default", ProjectID: project.ID, Name: "Unassigned", Environment: "production", Status: "active", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+		if err := s.db(ctx).Where("id = ?", fallbackApp.ID).FirstOrCreate(fallbackApp).Error; err != nil {
+			return nil, err
+		}
+		return fallbackApp, nil
+	}
 	count := 0
 	for _, entry := range logs {
 		if entry.Status == "processing" {

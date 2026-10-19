@@ -36,6 +36,16 @@ type PluginsLoader interface {
 	ExpandPluginConfigForAPI(name string, config map[string]any) (map[string]any, error)
 }
 
+// PluginConfigurationError marks activation failures caused while constructing a
+// plugin from administrator-supplied configuration. Runtime synchronization errors
+// remain untyped and are reported as server failures after rollback.
+type PluginConfigurationError struct {
+	Err error
+}
+
+func (e *PluginConfigurationError) Error() string { return e.Err.Error() }
+func (e *PluginConfigurationError) Unwrap() error { return e.Err }
+
 // PluginsHandler is the handler for the plugins API
 type PluginsHandler struct {
 	configStore   configstore.ConfigStore

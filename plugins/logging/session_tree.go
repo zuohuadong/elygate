@@ -44,8 +44,8 @@ func applySessionTreeToLog(entry *logstore.Log) {
 		return flag, true
 	}
 
-	if sessionID := liftString("harness_session_id"); sessionID != "" && entry.SessionID == "" {
-		entry.SessionID = sessionID
+	if sessionID := liftString("harness_session_id"); sessionID != "" && entry.SessionID == nil {
+		entry.SessionID = &sessionID
 	}
 	if parent := liftString("parent_session_id"); parent != "" {
 		entry.ParentSessionID = &parent

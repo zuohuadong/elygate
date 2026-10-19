@@ -106,6 +106,24 @@ type HTTPClientFactory struct {
 	logger schemas.Logger
 }
 
+// CloseIdleConnections closes idle connections held by cached net/http
+// clients. fasthttp clients keep their own pools and are left to be replaced by
+// UpdateProxyConfig; this only releases sockets the process would otherwise
+// hold until GC.
+func (f *HTTPClientFactory) CloseIdleConnections() {
+	if f == nil {
+		return
+	}
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	for _, client := range f.liveHTTP {
+		client.CloseIdleConnections()
+	}
+	for _, client := range f.httpClients {
+		client.CloseIdleConnections()
+	}
+}
+
 // FactoryOption customizes an HTTPClientFactory at construction time.
 type FactoryOption func(*HTTPClientFactory)
 

@@ -110,6 +110,9 @@ type ConfigHandler struct {
 	store         *lib.Config
 	configManager ConfigManager
 	saveMu        sync.Mutex // Serializes updateConfig from snapshot through publication
+	// vectorStoreMutationMu serializes vector-store config writes against
+	// startup publication of the resolved config.
+	vectorStoreMutationMu sync.Mutex
 }
 
 // NewConfigHandler creates a new handler for configuration management.

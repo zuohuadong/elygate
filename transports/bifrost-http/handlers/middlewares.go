@@ -242,6 +242,23 @@ type CorsMiddleware struct {
 	config atomic.Pointer[corsMiddlewareConfig]
 }
 
+// VirtualKeyValidationMiddleware rejects unknown virtual keys before inference
+// handlers resolve a provider or select a provider key.
+func VirtualKeyValidationMiddleware(store governance.GovernanceStore) schemas.BifrostHTTPMiddleware {
+	return func(next fasthttp.RequestHandler) fasthttp.RequestHandler {
+		return func(ctx *fasthttp.RequestCtx) {
+			virtualKey := governance.ParseVirtualKeyFromFastHTTPRequest(ctx)
+			if virtualKey != nil && store != nil {
+				if _, exists := store.GetVirtualKey(ctx, *virtualKey); !exists {
+					SendError(ctx, fasthttp.StatusUnauthorized, "virtual key not found. The provided virtual key does not exist or has been revoked.")
+					return
+				}
+			}
+			next(ctx)
+		}
+	}
+}
+
 func NewCorsMiddleware(config *lib.Config) *CorsMiddleware {
 	c := &CorsMiddleware{}
 	c.config.Store(newCorsMiddlewareConfig(config))

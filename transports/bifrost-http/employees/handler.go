@@ -57,7 +57,8 @@ func NewHandler(ctx context.Context, configStore configstore.ConfigStore, logMan
 	}
 	return &Handler{
 		store: store, configStore: configStore, logManager: logManager,
-		dummyHash: dummyHash,
+		dummyHash:    dummyHash,
+		loginLimiter: lib.NewPasswordLimiter(5, 15*time.Minute),
 	}, nil
 }
 
