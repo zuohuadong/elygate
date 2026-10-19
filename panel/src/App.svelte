@@ -27,7 +27,7 @@
 	import CachingConfigPage from './pages/CachingConfigPage.svelte';
 	import ConfigPage from './pages/ConfigPage.svelte';
 	import ControlPlanePage from './pages/ControlPlanePage.svelte';
-	import DocsHubPage from './pages/LazyDocsHubPage.svelte';
+	import DocsHubPage from './pages/DocsHubPage.svelte';
 	import EnterprisePublicFallbackPage from './pages/EnterprisePublicFallbackPage.svelte';
 	import EmployeePortalPage from './pages/EmployeePortalPage.svelte';
 	import EmployeesPage from './pages/EmployeesPage.svelte';
