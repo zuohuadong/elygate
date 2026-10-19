@@ -209,6 +209,12 @@ const FilterSchema = `{
     "user_agents": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1, "maxItems": 50, "description": "Raw User-Agent strings. Prefer apps, which groups them."},
     "metadata_filters": {"type": "object", "additionalProperties": {"type": "string"}, "minProperties": 1, "description": "Request metadata, as key to value, e.g. {\"env\": \"prod\"}. Every pair must match. Keys and values that occur are listed by describe_filter_space (metadata)."},
     "session_id": {"type": "string", "minLength": 1, "description": "Exact Bifrost session id."},
+    "harness_session_id": {"type": "string", "minLength": 1, "description": "Exact harness (agent CLI) session id, distinct from the Bifrost session."},
+    "parent_session_id": {"type": "string", "minLength": 1, "description": "Exact parent harness session id (a subagent or fork's originating session)."},
+    "agent_name": {"type": "string", "minLength": 1, "description": "Exact agent name recorded on the request."},
+    "tree_session_id": {"type": "string", "minLength": 1, "description": "Exact session-tree id shared by a harness session and its subagents/forks."},
+    "is_subagent": {"type": "boolean", "description": "true only requests issued by a subagent; false only top-level ones."},
+    "is_fork": {"type": "boolean", "description": "true only requests belonging to a forked session."},
     "request_id": {"type": "string", "minLength": 1, "description": "Exact request id."},
     "parent_request_id": {"type": "string", "minLength": 1, "description": "Requests spawned by this request, e.g. the fallback attempts of one call."},
     "missing_cost_only": {"type": "boolean", "description": "Only successful requests whose cost could not be computed."},
@@ -257,7 +263,9 @@ func parseFilters(raw map[string]any, now time.Time) (*logstore.SearchFilters, e
 		"error_types": true, "error_codes": true, "status_codes": true, "guardrail_outcomes": true,
 		"routing_rule_ids": true, "routing_engine_used": true, "selected_key_ids": true, "aliases": true,
 		"complexity_tiers": true, "complexity_mechanisms": true, "tool_call_names": true, "user_agents": true,
-		"metadata_filters": true, "session_id": true, "request_id": true, "parent_request_id": true,
+		"metadata_filters": true, "session_id": true, "harness_session_id": true, "parent_session_id": true,
+		"agent_name": true, "tree_session_id": true, "is_subagent": true, "is_fork": true,
+		"request_id": true, "parent_request_id": true,
 		"missing_cost_only": true,
 	}
 	unknown := []string{}
@@ -350,7 +358,10 @@ func parseFilters(raw map[string]any, now time.Time) (*logstore.SearchFilters, e
 		*target = value
 	}
 	for key, target := range map[string]*string{
-		"session_id": &filters.SessionID, "request_id": &filters.RequestID, "parent_request_id": &filters.ParentRequestID,
+		"session_id": &filters.SessionID, "harness_session_id": &filters.HarnessSessionID,
+		"parent_session_id": &filters.ParentSessionID, "agent_name": &filters.AgentName,
+		"tree_session_id": &filters.TreeSessionID,
+		"request_id":      &filters.RequestID, "parent_request_id": &filters.ParentRequestID,
 	} {
 		value, err := exactStringField(raw, key)
 		if err != nil {
@@ -364,6 +375,19 @@ func parseFilters(raw map[string]any, now time.Time) (*logstore.SearchFilters, e
 			return nil, fmt.Errorf("missing_cost_only must be true or false")
 		}
 		filters.MissingCostOnly = flag
+	}
+	for key, target := range map[string]**bool{
+		"is_subagent": &filters.IsSubagent, "is_fork": &filters.IsFork,
+	} {
+		value, present := raw[key]
+		if !present {
+			continue
+		}
+		flag, ok := value.(bool)
+		if !ok {
+			return nil, fmt.Errorf("%s must be true or false", key)
+		}
+		*target = &flag
 	}
 	metadata, err := metadataFiltersField(raw)
 	if err != nil {

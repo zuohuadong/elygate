@@ -12,9 +12,44 @@ import (
 	"github.com/maximhq/bifrost/core/schemas"
 	configtables "github.com/maximhq/bifrost/framework/configstore/tables"
 	"github.com/maximhq/bifrost/framework/logstore"
+	"github.com/maximhq/bifrost/plugins/logging"
 	"github.com/stretchr/testify/require"
 	"github.com/valyala/fasthttp"
 )
+
+// snapshotLogManager is the test double the usage-reconciliation tests build
+// on: it supplies only the optional reader interfaces and leaves the rest of
+// the LogManager contract nil, which the handlers never call on this path.
+type snapshotLogManager struct {
+	logging.LogManager
+	logstore.UsageLogReader
+	logstore.UsageLogSnapshotReader
+	logstore.UsageLogFingerprintReader
+}
+
+func (m *snapshotLogManager) ScanUsageLogs(ctx context.Context, visit func([]logstore.Log) error) error {
+	return m.UsageLogReader.ScanUsageLogs(ctx, visit)
+}
+
+func (m *snapshotLogManager) UsageLogSnapshotComplete() bool {
+	if m.UsageLogSnapshotReader == nil {
+		return true
+	}
+	return m.UsageLogSnapshotReader.UsageLogSnapshotComplete()
+}
+
+func (m *snapshotLogManager) UsageLogFingerprint(ctx context.Context) (logstore.UsageLogFingerprint, error) {
+	if m.UsageLogFingerprintReader == nil {
+		return logstore.UsageLogFingerprint{}, logstore.ErrUsageLogFingerprintUnsupported
+	}
+	return m.UsageLogFingerprintReader.UsageLogFingerprint(ctx)
+}
+
+type fingerprintSnapshotLogManager struct {
+	logging.LogManager
+	logstore.UsageLogReader
+	logstore.UsageLogFingerprintReader
+}
 
 func TestApplicationKeyRouterBodylessMutations(t *testing.T) {
 	store, _ := testControlPlaneStore(t)

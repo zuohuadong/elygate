@@ -1236,7 +1236,7 @@ func TestProcessStreamingChunk_PricesWithRequestUserScope(t *testing.T) {
 				UserID:           &uid,
 				MatchType:        "exact",
 				Pattern:          "unpriced-model",
-				RequestTypes:     []schemas.RequestType{schemas.ChatCompletionRequest, schemas.ChatCompletionStreamRequest},
+				RequestTypes:     []schemas.RequestType{schemas.ChatCompletionRequest},
 				PricingPatchJSON: `{"input_cost_per_token":0.000001,"output_cost_per_token":0.000002}`,
 			}}))
 			tracer := NewTracer(NewTraceStore(time.Hour, nil), catalog, bifrost.NewNoOpLogger())
@@ -1267,7 +1267,7 @@ func TestProcessStreamingChunk_PricesAtRequestStartTime(t *testing.T) {
 		ProviderID:   &providerID,
 		MatchType:    "exact",
 		Pattern:      "unpriced-model",
-		RequestTypes: []schemas.RequestType{schemas.ChatCompletionRequest, schemas.ChatCompletionStreamRequest},
+		RequestTypes: []schemas.RequestType{schemas.ChatCompletionRequest},
 		PricingPatchJSON: `{"input_cost_per_token":0.000001,"output_cost_per_token":0.000002,` +
 			`"off_peak_cost_multiplier":0.5,` +
 			`"peak_hours":{"timezone":"UTC","windows":[{"days":[0,1,2,3,4,5,6],"start":"06:00","end":"00:00"}]}}`,

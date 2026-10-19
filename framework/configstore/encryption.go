@@ -258,6 +258,12 @@ func (s *RDBConfigStore) encryptLegacyRawRowsWithStatus(
 		if err != nil {
 			return count, err
 		}
+		// A batch that moved no row means every candidate was re-pinned to
+		// plain_text (or claimed by a concurrent worker); without this the same
+		// ids would be selected forever and boot would hang.
+		if migrated == 0 {
+			break
+		}
 	}
 	return count, nil
 }
@@ -298,7 +304,19 @@ func (s *RDBConfigStore) encryptLegacyRawRow(
 		if result.Error != nil {
 			return result.Error
 		}
-		migrated = result.RowsAffected > 0
+		if result.RowsAffected == 0 {
+			return nil
+		}
+		// Verify the status marker really advanced. A write hook (or a
+		// concurrent writer) can keep the row in the selected state, and
+		// treating that as progress would make the batch loop spin forever.
+		var remaining []map[string]any
+		if err := tx.WithContext(ctx).Table(table).Select("id").
+			Where(statusWhere, encryptionStatusPlainText).Where("id = ?", id).
+			Limit(1).Find(&remaining).Error; err != nil {
+			return err
+		}
+		migrated = len(remaining) == 0
 		return nil
 	})
 	return migrated, err
@@ -586,6 +604,7 @@ func (s *RDBConfigStore) encryptPlaintextKeys(ctx context.Context) (int, error) 
 		{name: "vertex_project_number", preserveRef: true, vaultSecret: true},
 		{name: "vertex_region", preserveRef: true, vaultSecret: true},
 		{name: "vertex_auth_credentials", preserveRef: true, vaultSecret: true},
+		{name: "vertex_aws_workload_identity_json"},
 		{name: "bedrock_access_key", preserveRef: true, vaultSecret: true},
 		{name: "bedrock_secret_key", preserveRef: true, vaultSecret: true},
 		{name: "bedrock_session_token", preserveRef: true, vaultSecret: true},

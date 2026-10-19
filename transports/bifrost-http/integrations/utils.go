@@ -157,11 +157,14 @@ func (g *GenericRouter) sendStreamError(ctx *fasthttp.RequestCtx, bifrostCtx *sc
 	if bifrostErr == nil {
 		bifrostErr = newBifrostErrorWithCode(nil, lib.ClientSafeInternalErrorMessage, fasthttp.StatusInternalServerError)
 	} else if bifrostErr.StatusCode == nil {
-		// A stream that has not started cannot expose a provider status; keep the
-		// transport failure on the server-error boundary instead of treating it as
-		// a client validation error.
+		// Match the unary path: a provider-attributed error without an explicit
+		// status is a client-visible rejection (400), while a Bifrost-internal
+		// failure stays on the server-error boundary (500).
 		normalized := *bifrostErr
-		statusCode := fasthttp.StatusInternalServerError
+		statusCode := fasthttp.StatusBadRequest
+		if normalized.IsBifrostError {
+			statusCode = fasthttp.StatusInternalServerError
+		}
 		normalized.StatusCode = &statusCode
 		bifrostErr = &normalized
 	} else {

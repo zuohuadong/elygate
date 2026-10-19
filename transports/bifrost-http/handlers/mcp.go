@@ -2286,6 +2286,68 @@ func (h *MCPHandler) addMCPClient(ctx *fasthttp.RequestCtx) {
 	resolvedToolExecutionTimeout := time.Duration(req.ToolExecutionTimeout) * time.Second
 	resolvedMaxInstructionsLength := req.MaxInstructionsLength
 
+	// A disabled client is registered for later activation: persist it and let
+	// the manager park it without dialing upstream. Doing this before the
+	// per-user sample-header requirement matters because a disabled client has
+	// no credentials to verify yet.
+	if req.Disabled {
+		disabledConfig := &schemas.MCPClientConfig{
+			ID:                     req.ClientID,
+			Name:                   req.Name,
+			EndpointSlug:           req.EndpointSlug,
+			IsCodeModeClient:       req.IsCodeModeClient,
+			ConnectionType:         schemas.MCPConnectionType(req.ConnectionType),
+			ConnectionString:       req.ConnectionString,
+			RequirePublicTarget:    req.RequirePublicTarget,
+			StdioConfig:            req.StdioConfig,
+			TLSConfig:              req.TLSConfig,
+			AuthType:               schemas.MCPAuthType(req.AuthType),
+			OauthConfigID:          req.OauthConfigID,
+			PerUserHeaderKeys:      mcputils.CanonicalizeHeaderKeys(req.PerUserHeaderKeys),
+			ToolsToExecute:         req.ToolsToExecute,
+			ToolsToAutoExecute:     req.ToolsToAutoExecute,
+			Headers:                req.Headers,
+			AllowedExtraHeaders:    req.AllowedExtraHeaders,
+			IsPingAvailable:        req.IsPingAvailable,
+			NeedsSessionStickiness: req.NeedsSessionStickiness,
+			ToolSyncInterval:       time.Duration(req.ToolSyncInterval) * time.Minute,
+			ToolExecutionTimeout:   resolvedToolExecutionTimeout,
+			MaxInstructionsLength:  resolvedMaxInstructionsLength,
+			ToolPricing:            req.ToolPricing,
+			AllowByDefault:         req.AllowByDefault,
+			Disabled:               true,
+		}
+		if isOpenAPIClient && preparedOpenAPI != nil {
+			disabledConfig.OpenAPIConfig = preparedOpenAPI.config
+		}
+		if err := h.store.ConfigStore.CreateMCPClientConfig(ctx, disabledConfig); err != nil {
+			switch {
+			case errors.Is(err, configstore.ErrAlreadyExists):
+				SendError(ctx, fasthttp.StatusConflict, "An MCP client with this name already exists")
+			case errors.Is(err, configstore.ErrMCPEndpointSlugExists):
+				SendError(ctx, fasthttp.StatusConflict, "An MCP endpoint with this slug already exists")
+			case errors.Is(err, configstore.ErrMCPEndpointSlugInvalid):
+				SendError(ctx, fasthttp.StatusBadRequest, "Could not derive an endpoint slug from the name; provide an endpoint_slug")
+			default:
+				SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("Failed to create MCP config: %v", err))
+			}
+			return
+		}
+		if err := h.mcpManager.AddMCPClient(bifrostCtx, disabledConfig); err != nil {
+			if delErr := h.store.ConfigStore.DeleteMCPClientConfig(ctx, disabledConfig.ID); delErr != nil {
+				logger.Error(fmt.Sprintf("Failed to roll back disabled MCP client config: %v", delErr))
+			}
+			SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("Failed to register MCP client: %v", err))
+			return
+		}
+		SendJSON(ctx, map[string]any{
+			"status":        "success",
+			"message":       "MCP client registered in disabled state",
+			"mcp_client_id": disabledConfig.ID,
+		})
+		return
+	}
+
 	// Handle per-user headers: admin declares the required key names (schema)
 	// AND supplies a sample set of values inline so the server can verify
 	// upstream + discover tools in a single round-trip. Mirrors the per-user

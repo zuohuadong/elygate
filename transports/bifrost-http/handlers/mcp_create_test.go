@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"encoding/json"
 	"testing"
 
@@ -11,22 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/valyala/fasthttp"
 )
-
-type recordingMCPManager struct {
-	MCPManager
-	addedConfig        *schemas.MCPClientConfig
-	verifyHeadersCalls int
-}
-
-func (m *recordingMCPManager) AddMCPClient(_ context.Context, config *schemas.MCPClientConfig) error {
-	m.addedConfig = config
-	return nil
-}
-
-func (m *recordingMCPManager) VerifyHeadersConnection(_ context.Context, _ *schemas.MCPClientConfig, _ map[string]string) (map[string]schemas.ChatTool, map[string]string, error) {
-	m.verifyHeadersCalls++
-	return nil, nil, nil
-}
 
 func newDisabledMCPTestHandler(t *testing.T) (*MCPHandler, *recordingMCPManager, configstore.ConfigStore) {
 	t.Helper()

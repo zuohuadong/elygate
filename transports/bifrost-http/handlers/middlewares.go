@@ -299,7 +299,7 @@ func (c *CorsMiddleware) Middleware() schemas.BifrostHTTPMiddleware {
 					}
 					logBuilder := logger.LogHTTPRequest(level, "request completed").
 						Str("http.method", string(ctx.Method())).
-						Str("http.target", string(ctx.RequestURI())).
+						Str("http.target", string(ctx.URI().Path())).
 						Int("http.status_code", statusCode).
 						Int64("http.request_duration_ms", time.Since(startTime).Milliseconds()).
 						Str("http.remote_addr", ctx.RemoteAddr().String()).
@@ -344,53 +344,53 @@ func (c *CorsMiddleware) Middleware() schemas.BifrostHTTPMiddleware {
 // resetting a panicked response.
 func (c *CorsMiddleware) applyHeaders(ctx *fasthttp.RequestCtx, cfg *corsMiddlewareConfig) bool {
 	origin := string(ctx.Request.Header.Peek("Origin"))
-	allowed := IsOriginAllowed(origin, cfg.allowedOrigins)
-	// Credentialed responses are sent when the origin is not matched solely by a
-	// wildcard AllowedOrigins — i.e. the origin is localhost or explicitly listed.
-	credentialed := !slices.Contains(cfg.allowedOrigins, "*") ||
-		isLocalhostOrigin(origin) ||
-		slices.Contains(cfg.allowedOrigins, origin)
+	allowed := origin != "" && IsOriginAllowed(origin, cfg.allowedOrigins)
+	// A bare wildcard is public and non-credentialed. Explicit origins and the
+	// implicit localhost fallback are credentialed.
+	credentialed := allowed && !slices.Contains(cfg.allowedOrigins, "*") &&
+		((len(cfg.allowedOrigins) == 0 && isLocalhostOrigin(origin)) ||
+			slices.Contains(cfg.allowedOrigins, origin) ||
+			slices.ContainsFunc(cfg.allowedOrigins, func(pattern string) bool {
+				return strings.Contains(pattern, "*") && matchesWildcardPattern(origin, pattern)
+			}))
 
-	// SetupTokenHeader is sent by the dashboard on every call while the OSS setup lock is
-	// active, so a UI served from another origin must be able to preflight it.
-	allowedHeaders := []string{"Content-Type", "Authorization", "X-Requested-With", "X-Stainless-Timeout", "X-Api-Key", "X-OpenAI-Agents-SDK", "X-Operation-ID", SetupTokenHeader}
+	allowedHeaders := []string{
+		"Content-Type", "Authorization", "X-Requested-With", "X-Stainless-Timeout",
+		"X-Api-Key", "X-OpenAI-Agents-SDK", "X-Operation-ID", SetupTokenHeader,
+	}
 	if slices.Contains(cfg.allowedHeaders, "*") {
 		if credentialed {
-			// Per the Fetch spec, Access-Control-Allow-Headers: * is NOT treated as a
-			// wildcard when Access-Control-Allow-Credentials: true is set — browsers
-			// interpret it as a literal header name. For credentialed preflight requests,
-			// reflect back the requested headers instead.
-			if requestedHeaders := string(ctx.Request.Header.Peek("Access-Control-Request-Headers")); requestedHeaders != "" {
-				allowedHeaders = []string{requestedHeaders}
+			if requested := string(ctx.Request.Header.Peek("Access-Control-Request-Headers")); requested != "" {
+				allowedHeaders = []string{requested}
 			}
-			// For non-preflight requests (no Access-Control-Request-Headers), keep defaults.
 		} else {
 			allowedHeaders = []string{"*"}
 		}
-	} else if len(cfg.allowedHeaders) > 0 {
-		// append allowed headers from config to the default headers
+	} else {
 		for _, header := range cfg.allowedHeaders {
 			if !slices.Contains(allowedHeaders, header) {
 				allowedHeaders = append(allowedHeaders, header)
 			}
 		}
 	}
-	// Check if origin is allowed (localhost always allowed + configured origins)
-	if allowed {
-		ctx.Response.Header.Set("Access-Control-Allow-Origin", origin)
-		ctx.Response.Header.Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD")
-		ctx.Response.Header.Set("Access-Control-Allow-Headers", strings.Join(allowedHeaders, ", "))
-		if credentialed {
-			ctx.Response.Header.Set("Access-Control-Allow-Credentials", "true")
-		}
-		ctx.Response.Header.Set("Access-Control-Max-Age", "86400")
-		// Lets browser clients read the x-bifrost-* headers, which carry extra_fields in headers mode.
-		ctx.Response.Header.Set("Access-Control-Expose-Headers", lib.ExposedResponseHeaders)
-		// Vary: Origin tells caches that the response varies based on the Origin
-		// request header, preventing incorrect CORS headers from being served.
-		ctx.Response.Header.Set("Vary", "Origin")
+	if !allowed {
+		return false
 	}
-	return allowed
+	if credentialed {
+		ctx.Response.Header.Set("Access-Control-Allow-Origin", origin)
+		ctx.Response.Header.Set("Access-Control-Allow-Credentials", "true")
+	} else {
+		ctx.Response.Header.Set("Access-Control-Allow-Origin", "*")
+	}
+	ctx.Response.Header.Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD")
+	ctx.Response.Header.Set("Access-Control-Allow-Headers", strings.Join(allowedHeaders, ", "))
+	ctx.Response.Header.Set("Access-Control-Max-Age", "86400")
+	// Lets browser clients read the x-bifrost-* headers, which carry extra_fields in headers mode.
+	ctx.Response.Header.Set("Access-Control-Expose-Headers", lib.ExposedResponseHeaders)
+	// Vary: Origin tells caches that the response varies based on the Origin
+	// request header, preventing incorrect CORS headers from being served.
+	ctx.Response.Header.Set("Vary", "Origin")
+	return true
 }
 
 const (

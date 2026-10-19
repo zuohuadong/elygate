@@ -68,7 +68,7 @@ func setupGovernanceAuditHandler(t *testing.T) (*GovernanceHandler, configstore.
 	t.Cleanup(func() { require.NoError(t, store.Close(context.Background())) })
 
 	manager := &auditTestGovernanceManager{store: store}
-	handler, err := NewGovernanceHandler(manager, store, nil, nil)
+	handler, err := NewGovernanceHandler(manager, store, nil, nil, nil, nil)
 	require.NoError(t, err)
 	r := router.New()
 	handler.RegisterRoutes(r)
@@ -170,6 +170,12 @@ func TestGovernanceVirtualKeyWriteIgnoresClientClaimedAdminHeaders(t *testing.T)
 	stored, err := store.GetVirtualKey(context.Background(), "vk-client-claims")
 	require.NoError(t, err)
 	require.Equal(t, "sk-bf-client-claims", stored.Value.GetValue())
+}
+
+func setAuthenticatedLocalAdmin(ctx *fasthttp.RequestCtx, username string) {
+	ctx.SetUserValue(schemas.IsLocalAdminContextKey, true)
+	ctx.SetUserValue(schemas.BifrostContextKeyUserID, "local-admin:"+username)
+	ctx.SetUserValue(schemas.BifrostContextKeyUserName, username)
 }
 
 func TestAuthenticatedLocalAdminPrincipalUsesConfiguredUsername(t *testing.T) {
@@ -875,7 +881,7 @@ func TestGovernanceAuditBootstrapPreservesPreKeyringHistoryAcrossRotation(t *tes
 	require.NoError(t, store.DB().Model(&configstoreTables.TableGovernanceAuditPublicKey{}).Count(&publicKeyCount).Error)
 	require.Zero(t, publicKeyCount)
 
-	bootstrapped, err := NewGovernanceHandler(handler.governanceManager, store, nil, nil)
+	bootstrapped, err := NewGovernanceHandler(handler.governanceManager, store, nil, nil, nil, nil)
 	require.NoError(t, err)
 	require.NoError(t, store.DB().Model(&configstoreTables.TableGovernanceAuditPublicKey{}).Count(&publicKeyCount).Error)
 	require.Equal(t, int64(1), publicKeyCount)
@@ -899,7 +905,7 @@ func TestGovernanceAuditBootstrapAllowsMissingEncryptionKey(t *testing.T) {
 	encrypt.Init("", &mockLogger{})
 	require.NoError(t, store.DB().Where("1 = 1").Delete(&configstoreTables.TableGovernanceAuditPublicKey{}).Error)
 
-	bootstrapped, err := NewGovernanceHandler(handler.governanceManager, store, nil, nil)
+	bootstrapped, err := NewGovernanceHandler(handler.governanceManager, store, nil, nil, nil, nil)
 	require.NoError(t, err)
 	require.Nil(t, bootstrapped.audit)
 	r := router.New()

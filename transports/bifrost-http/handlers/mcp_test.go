@@ -110,12 +110,24 @@ func (c *recordingCredentialCache) EvictOauthTokenCacheByMCPClient(_ context.Con
 // recordingMCPManager embeds the interface for the same reason.
 type recordingMCPManager struct {
 	MCPManager
-	closedClients []string
+	closedClients      []string
+	addedConfig        *schemas.MCPClientConfig
+	verifyHeadersCalls int
 }
 
 func (m *recordingMCPManager) CloseAndMarkNeedsReauth(_ context.Context, id string) error {
 	m.closedClients = append(m.closedClients, id)
 	return nil
+}
+
+func (m *recordingMCPManager) AddMCPClient(_ context.Context, config *schemas.MCPClientConfig) error {
+	m.addedConfig = config
+	return nil
+}
+
+func (m *recordingMCPManager) VerifyHeadersConnection(_ context.Context, _ *schemas.MCPClientConfig, _ map[string]string) (map[string]schemas.ChatTool, map[string]string, string, error) {
+	m.verifyHeadersCalls++
+	return nil, nil, "", nil
 }
 
 // flowFailingStore is the real store with one failure scripted in: the flow row

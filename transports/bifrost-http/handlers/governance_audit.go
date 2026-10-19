@@ -318,6 +318,53 @@ func loadVirtualKeyAuditSummary(ctx context.Context, tx *gorm.DB, vkID string) (
 	}, nil
 }
 
+// GovernanceAuditInput is the exported shape used by callers outside this
+// package (employee administration, control-plane tooling) to append an entry
+// to the signed governance audit chain.
+type GovernanceAuditInput struct {
+	Principal  AdminPrincipal
+	Action     string
+	Resource   string
+	ResourceID string
+	Outcome    string
+	RequestID  string
+	TraceID    string
+	Before     any
+	After      any
+	Metadata   any
+}
+
+// AppendGovernanceAudit appends one signed event inside the caller's
+// transaction, so the mutation and its audit entry commit together.
+func AppendGovernanceAudit(ctx context.Context, store configstore.ConfigStore, tx *gorm.DB, input GovernanceAuditInput) error {
+	if store == nil {
+		return fmt.Errorf("governance audit requires config storage")
+	}
+	service := &governanceAuditService{store: store}
+	_, err := service.append(ctx, tx, governanceAuditInput{
+		Principal: input.Principal, Action: input.Action, Resource: input.Resource,
+		ResourceID: input.ResourceID, Outcome: input.Outcome, RequestID: input.RequestID,
+		TraceID: input.TraceID, Before: input.Before, After: input.After, Metadata: input.Metadata,
+	})
+	return err
+}
+
+// AdminPrincipalFromRequest exposes the authenticated admin identity attached
+// to an admin request so other packages can audit with the same principal.
+func AdminPrincipalFromRequest(ctx *fasthttp.RequestCtx) AdminPrincipal {
+	return adminPrincipalFromRequest(ctx)
+}
+
+// GovernanceRequestIDFromRequest returns the request id used in audit entries.
+func GovernanceRequestIDFromRequest(ctx *fasthttp.RequestCtx) string {
+	return governanceRequestID(ctx)
+}
+
+// GovernanceTraceIDFromRequest returns the trace id used in audit entries.
+func GovernanceTraceIDFromRequest(ctx *fasthttp.RequestCtx) string {
+	return governanceTraceID(ctx)
+}
+
 func adminPrincipalFromRequest(ctx *fasthttp.RequestCtx) AdminPrincipal {
 	if bypassed, _ := ctx.UserValue(schemas.BifrostContextKeyAuthBypassed).(bool); bypassed {
 		return AdminPrincipal{ID: "anonymous", Name: "Anonymous", AuthMethod: "bypassed"}

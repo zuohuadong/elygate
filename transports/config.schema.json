@@ -100,6 +100,10 @@
       ],
       "description": "Client configuration settings",
       "properties": {
+        "app_name": {
+          "type": "string",
+          "description": "Display name for this Elygate deployment, surfaced in the panel and logs"
+        },
         "drop_excess_requests": {
           "type": "boolean",
           "description": "Whether to drop excess requests when pool is full"
@@ -2363,7 +2367,8 @@
             "redis",
             "qdrant",
             "pinecone",
-            "chromem"
+            "chromem",
+            "pgvector"
           ],
           "description": "Vector store type (use \"redis\" for Redis or Valkey-compatible endpoints). \"chromem\" runs in-process rather than against a service, so its data is local to one node and is not shared between replicas"
         },
@@ -2384,6 +2389,9 @@
             },
             {
               "$ref": "#/$defs/chromem_config"
+            },
+            {
+              "$ref": "#/$defs/pgvector_config"
             }
           ]
         }
@@ -2492,6 +2500,28 @@
             "properties": {
               "config": {
                 "$ref": "#/$defs/chromem_config"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "const": "pgvector"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "config"
+            ],
+            "properties": {
+              "config": {
+                "$ref": "#/$defs/pgvector_config"
               }
             }
           }
@@ -9631,6 +9661,25 @@
       "required": [
         "api_key",
         "index_host"
+      ],
+      "additionalProperties": false
+    },
+    "pgvector_config": {
+      "type": "object",
+      "description": "PostgreSQL + pgvector backend. Vectors live in the configured PostgreSQL schema, so every replica sharing that database sees the same cache.",
+      "properties": {
+        "connection_string": {
+          "type": "string",
+          "description": "PostgreSQL DSN, or an env./vault secret reference"
+        },
+        "schema": {
+          "type": "string",
+          "description": "Schema that holds the vector tables; defaults to public when empty",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}$"
+        }
+      },
+      "required": [
+        "connection_string"
       ],
       "additionalProperties": false
     },

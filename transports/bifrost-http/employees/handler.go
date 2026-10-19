@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/fasthttp/router"
@@ -38,12 +39,49 @@ var batchIDPattern = regexp.MustCompile(`^[a-zA-Z0-9._-]{8,64}$`)
 
 var ErrEmployeeInactive = errors.New("employee account is inactive")
 
+// EmployeeAuditAppender records one employee-administration event. It runs
+// inside the caller's transaction so the mutation and its audit entry commit
+// together. A nil return value means auditing is disabled for this deployment.
+type EmployeeAuditAppender func(dbCtx context.Context, tx *gorm.DB, action, resource, resourceID, outcome string, before, after, metadata any) error
+
 type Handler struct {
 	store        *Store
 	configStore  configstore.ConfigStore
 	logManager   logging.LogManager
 	dummyHash    string
 	loginLimiter lib.PasswordLimiter
+
+	auditMu              sync.RWMutex
+	auditAppenderFactory func(*fasthttp.RequestCtx) EmployeeAuditAppender
+}
+
+// SetAuditAppenderFactory installs the per-request audit appender factory. The
+// server uses it to sign entries into the governance audit chain when
+// encryption (the signing key source) is configured.
+func (h *Handler) SetAuditAppenderFactory(factory func(*fasthttp.RequestCtx) EmployeeAuditAppender) {
+	h.auditMu.Lock()
+	h.auditAppenderFactory = factory
+	h.auditMu.Unlock()
+}
+
+// appendAudit writes an audit entry after a successful mutation. Audit failures
+// are deliberately non-fatal: the administrative change already committed, and
+// turning a signing problem into a 500 would invite the caller to retry an
+// operation that succeeded.
+func (h *Handler) appendAudit(request *fasthttp.RequestCtx, action, resource, resourceID, outcome string, before, after, metadata any) {
+	h.auditMu.RLock()
+	factory := h.auditAppenderFactory
+	h.auditMu.RUnlock()
+	if factory == nil || h.configStore == nil {
+		return
+	}
+	appender := factory(request)
+	if appender == nil {
+		return
+	}
+	_ = h.configStore.ExecuteTransaction(context.Background(), func(tx *gorm.DB) error {
+		return appender(context.Background(), tx, action, resource, resourceID, outcome, before, after, metadata)
+	})
 }
 
 func NewHandler(ctx context.Context, configStore configstore.ConfigStore, logManager logging.LogManager) (*Handler, error) {
@@ -320,6 +358,8 @@ func (h *Handler) createEmployee(ctx *fasthttp.RequestCtx) {
 		sendError(ctx, 500, "创建员工失败")
 		return
 	}
+	h.appendAudit(ctx, "employee.create", "employee", employee.ID, "success", nil,
+		map[string]any{"username": employee.Username, "is_active": employee.IsActive}, nil)
 	keys, _ := h.virtualKeysForEmployee(ctx, employee.ID)
 	sendJSON(ctx, map[string]any{"employee": EmployeeView{Employee: employee, VirtualKeys: keys}, "temporary_password": password})
 }
@@ -400,6 +440,8 @@ func (h *Handler) importEmployees(ctx *fasthttp.RequestCtx) {
 		sendError(ctx, 500, "导入失败，已整批回滚")
 		return
 	}
+	h.appendAudit(ctx, "employee.import", "employee_batch", request.BatchID, "success", nil,
+		map[string]any{"imported": len(entries), "already_imported": alreadyImported}, nil)
 	sendJSON(ctx, map[string]any{"batch_id": request.BatchID, "imported": len(entries), "already_imported": alreadyImported, "credentials": credentials})
 }
 
@@ -418,6 +460,8 @@ func (h *Handler) rollbackImport(ctx *fasthttp.RequestCtx) {
 		sendError(ctx, 409, "导入批次状态不一致，未执行回滚")
 		return
 	}
+	h.appendAudit(ctx, "employee.import_rollback", "employee_batch", batchID, "success", nil,
+		map[string]any{"disabled": deleted}, nil)
 	sendJSON(ctx, map[string]any{"batch_id": batchID, "disabled": deleted})
 }
 
@@ -441,6 +485,10 @@ func (h *Handler) updateEmployee(ctx *fasthttp.RequestCtx) {
 	}
 	employee := employeeFromPayload(payload)
 	employee.ID, _ = ctx.UserValue("employee_id").(string)
+	var before map[string]any
+	if existing, err := h.store.Get(ctx, employee.ID); err == nil {
+		before = map[string]any{"username": existing.Username, "is_active": existing.IsActive, "name": existing.Name}
+	}
 	if err := h.store.Update(ctx, &employee, payload.VirtualKeyIDs); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			sendError(ctx, 404, "员工不存在")
@@ -457,6 +505,8 @@ func (h *Handler) updateEmployee(ctx *fasthttp.RequestCtx) {
 		sendError(ctx, 500, "更新员工失败")
 		return
 	}
+	h.appendAudit(ctx, "employee.update", "employee", employee.ID, "success", before,
+		map[string]any{"username": employee.Username, "is_active": employee.IsActive, "name": employee.Name}, nil)
 	updated, _ := h.store.Get(ctx, employee.ID)
 	keys, _ := h.virtualKeysForEmployee(ctx, employee.ID)
 	sendJSON(ctx, map[string]any{"employee": EmployeeView{Employee: *updated, VirtualKeys: keys}})
@@ -477,6 +527,7 @@ func (h *Handler) resetPassword(ctx *fasthttp.RequestCtx) {
 		sendError(ctx, 500, "重置密码失败")
 		return
 	}
+	h.appendAudit(ctx, "employee.password_reset", "employee", employeeID, "success", nil, nil, nil)
 	sendJSON(ctx, map[string]string{"temporary_password": password})
 }
 

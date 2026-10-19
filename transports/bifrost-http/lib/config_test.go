@@ -17904,13 +17904,16 @@ func TestGenerateClientConfigHash_RuntimeVsMigrationParity(t *testing.T) {
 
 		// Generate hash from config
 		clientConfig := configstore.ClientConfig{
-			DropExcessRequests:     ccToSave.DropExcessRequests,
-			InitialPoolSize:        ccToSave.InitialPoolSize,
-			PrometheusLabels:       ccToSave.PrometheusLabels,
-			EnableLogging:          ccToSave.EnableLogging,
-			DisableContentLogging:  ccToSave.DisableContentLogging,
-			LogRetentionDays:       ccToSave.LogRetentionDays,
-			EnforceAuthOnInference: ccToSave.EnforceAuthOnInference,
+			DropExcessRequests:    ccToSave.DropExcessRequests,
+			InitialPoolSize:       ccToSave.InitialPoolSize,
+			PrometheusLabels:      ccToSave.PrometheusLabels,
+			EnableLogging:         ccToSave.EnableLogging,
+			DisableContentLogging: ccToSave.DisableContentLogging,
+			LogRetentionDays:      ccToSave.LogRetentionDays,
+			// TableClientConfig carries a DB default of true, so the pre-save
+			// config must use the same value or the parity check compares two
+			// intentionally different configs.
+			EnforceAuthOnInference: true,
 			MaxRequestBodySizeMB:   ccToSave.MaxRequestBodySizeMB,
 			Compat: configstore.CompatConfig{
 				ConvertTextToChat:      ccToSave.CompatConvertTextToChat,

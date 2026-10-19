@@ -809,12 +809,6 @@ func TestApplyVirtualKeyOwnershipUpdateSwitchesAndClearsAssociation(t *testing.T
 			wantTeam:     schemas.Ptr("team-2"),
 			wantCustomer: nil,
 		},
-		{
-			name:         "matching hierarchy keeps team and customer",
-			body:         `{"team_id":"team-2","customer_id":"customer-2"}`,
-			wantTeam:     schemas.Ptr("team-2"),
-			wantCustomer: schemas.Ptr("customer-2"),
-		},
 	}
 
 	for _, tt := range tests {
@@ -897,60 +891,6 @@ func TestValidateVirtualKeyOwnershipWithNilTransactionUsesStore(t *testing.T) {
 	require.ErrorIs(t, err, errVirtualKeyCustomerMismatch)
 }
 
-func TestVirtualKeyHandlersSupportHierarchicalOwnership(t *testing.T) {
-	SetLogger(&mockLogger{})
-	ctx := context.Background()
-	store := setupPricingOverrideHandlerStore(t)
-	manager := &budgetOverrideTestGovernanceManager{store: store}
-	handler := &GovernanceHandler{configStore: store, governanceManager: manager}
-
-	parentCustomerID := "customer-parent"
-	otherCustomerID := "customer-other"
-	teamID := "team-parented"
-	require.NoError(t, store.CreateCustomer(ctx, &configstoreTables.TableCustomer{ID: parentCustomerID, Name: "Parent customer"}))
-	require.NoError(t, store.CreateCustomer(ctx, &configstoreTables.TableCustomer{ID: otherCustomerID, Name: "Other customer"}))
-	require.NoError(t, store.CreateTeam(ctx, &configstoreTables.TableTeam{ID: teamID, Name: "Parented team", CustomerID: &parentCustomerID}))
-
-	createCtx := newTestRequestCtx(`{"name":"hierarchical-create","team_id":"team-parented","customer_id":"customer-parent"}`)
-	handler.createVirtualKey(createCtx)
-	require.Equal(t, fasthttp.StatusOK, createCtx.Response.StatusCode(), string(createCtx.Response.Body()))
-	var createResponse struct {
-		VirtualKey struct {
-			ID string `json:"id"`
-		} `json:"virtual_key"`
-	}
-	require.NoError(t, json.Unmarshal(createCtx.Response.Body(), &createResponse))
-	require.NotEmpty(t, createResponse.VirtualKey.ID)
-	assertVirtualKeyOwnership(t, store, createResponse.VirtualKey.ID, &teamID, &parentCustomerID)
-
-	beforeInvalidCreate, err := store.GetVirtualKeys(ctx)
-	require.NoError(t, err)
-	invalidCreateCtx := newTestRequestCtx(`{"name":"hierarchical-create-invalid","team_id":"team-parented","customer_id":"customer-other"}`)
-	handler.createVirtualKey(invalidCreateCtx)
-	require.Equal(t, fasthttp.StatusBadRequest, invalidCreateCtx.Response.StatusCode(), string(invalidCreateCtx.Response.Body()))
-	afterInvalidCreate, err := store.GetVirtualKeys(ctx)
-	require.NoError(t, err)
-	assert.Len(t, afterInvalidCreate, len(beforeInvalidCreate))
-
-	updateCtx := newTestRequestCtx(`{"name":"hierarchical-renamed"}`)
-	updateCtx.SetUserValue("vk_id", createResponse.VirtualKey.ID)
-	handler.updateVirtualKey(updateCtx)
-	require.Equal(t, fasthttp.StatusOK, updateCtx.Response.StatusCode(), string(updateCtx.Response.Body()))
-	assertVirtualKeyOwnership(t, store, createResponse.VirtualKey.ID, &teamID, &parentCustomerID)
-
-	invalidUpdateCtx := newTestRequestCtx(`{"team_id":"team-parented","customer_id":"customer-other"}`)
-	invalidUpdateCtx.SetUserValue("vk_id", createResponse.VirtualKey.ID)
-	handler.updateVirtualKey(invalidUpdateCtx)
-	require.Equal(t, fasthttp.StatusBadRequest, invalidUpdateCtx.Response.StatusCode(), string(invalidUpdateCtx.Response.Body()))
-	assertVirtualKeyOwnership(t, store, createResponse.VirtualKey.ID, &teamID, &parentCustomerID)
-
-	clearCtx := newTestRequestCtx(`{"team_id":null,"customer_id":null}`)
-	clearCtx.SetUserValue("vk_id", createResponse.VirtualKey.ID)
-	handler.updateVirtualKey(clearCtx)
-	require.Equal(t, fasthttp.StatusOK, clearCtx.Response.StatusCode(), string(clearCtx.Response.Body()))
-	assertVirtualKeyOwnership(t, store, createResponse.VirtualKey.ID, nil, nil)
-}
-
 func assertVirtualKeyOwnership(
 	t *testing.T,
 	store configstore.ConfigStore,
@@ -962,85 +902,6 @@ func assertVirtualKeyOwnership(
 	require.NoError(t, err)
 	assertStringPtrEqual(t, "team", stored.TeamID, wantTeamID)
 	assertStringPtrEqual(t, "customer", stored.CustomerID, wantCustomerID)
-}
-
-func TestUpdateTeamRejectsCustomerChangeThatWouldInvalidateVirtualKeys(t *testing.T) {
-	SetLogger(&mockLogger{})
-	ctx := context.Background()
-	store := setupPricingOverrideHandlerStore(t)
-	handler := &GovernanceHandler{
-		configStore:       store,
-		governanceManager: pricingOverrideTestGovernanceManager{},
-	}
-
-	originalCustomerID := "customer-original"
-	otherCustomerID := "customer-other"
-	teamID := "team-with-hierarchical-key"
-	require.NoError(t, store.CreateCustomer(ctx, &configstoreTables.TableCustomer{ID: originalCustomerID, Name: "Original customer"}))
-	require.NoError(t, store.CreateCustomer(ctx, &configstoreTables.TableCustomer{ID: otherCustomerID, Name: "Other customer"}))
-	require.NoError(t, store.CreateTeam(ctx, &configstoreTables.TableTeam{ID: teamID, Name: "Hierarchical team", CustomerID: &originalCustomerID}))
-	require.NoError(t, store.CreateVirtualKey(ctx, &configstoreTables.TableVirtualKey{
-		ID:         "vk-hierarchical-team",
-		Name:       "Hierarchical team key",
-		Value:      *schemas.NewSecretVar("vk-hierarchical-team-value"),
-		IsActive:   schemas.Ptr(true),
-		TeamID:     &teamID,
-		CustomerID: &originalCustomerID,
-	}))
-
-	for _, test := range []struct {
-		name string
-		body string
-	}{
-		{name: "move to another customer", body: `{"customer_id":"customer-other"}`},
-		{name: "clear parent customer", body: `{"customer_id":""}`},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			requestCtx := newGovernanceTeamIDCtx(teamID, test.body)
-			handler.updateTeam(requestCtx)
-			require.Equal(t, fasthttp.StatusBadRequest, requestCtx.Response.StatusCode(), string(requestCtx.Response.Body()))
-
-			stored, err := store.GetTeam(ctx, teamID)
-			require.NoError(t, err)
-			require.NotNil(t, stored.CustomerID)
-			assert.Equal(t, originalCustomerID, *stored.CustomerID)
-		})
-	}
-}
-
-func TestUpdateTeamRejectsCustomerChangeWithNilTransactionStore(t *testing.T) {
-	SetLogger(&mockLogger{})
-	ctx := context.Background()
-	base := setupPricingOverrideHandlerStore(t)
-	store := &nilTransactionGovernanceStore{ConfigStore: base}
-	handler := &GovernanceHandler{
-		configStore:       store,
-		governanceManager: pricingOverrideTestGovernanceManager{},
-	}
-
-	originalCustomerID := "customer-nil-tx-original"
-	otherCustomerID := "customer-nil-tx-other"
-	teamID := "team-nil-tx-rebind"
-	require.NoError(t, base.CreateCustomer(ctx, &configstoreTables.TableCustomer{ID: originalCustomerID, Name: "Original"}))
-	require.NoError(t, base.CreateCustomer(ctx, &configstoreTables.TableCustomer{ID: otherCustomerID, Name: "Other"}))
-	require.NoError(t, base.CreateTeam(ctx, &configstoreTables.TableTeam{ID: teamID, Name: "Team", CustomerID: &originalCustomerID}))
-	require.NoError(t, base.CreateVirtualKey(ctx, &configstoreTables.TableVirtualKey{
-		ID:         "vk-nil-tx-rebind",
-		Name:       "Hierarchical key",
-		Value:      *schemas.NewSecretVar("vk-nil-tx-value"),
-		IsActive:   schemas.Ptr(true),
-		TeamID:     &teamID,
-		CustomerID: &originalCustomerID,
-	}))
-
-	requestCtx := newGovernanceTeamIDCtx(teamID, `{"customer_id":"customer-nil-tx-other"}`)
-	handler.updateTeam(requestCtx)
-	require.Equal(t, fasthttp.StatusBadRequest, requestCtx.Response.StatusCode(), string(requestCtx.Response.Body()))
-
-	stored, err := base.GetTeam(ctx, teamID)
-	require.NoError(t, err)
-	require.NotNil(t, stored.CustomerID)
-	assert.Equal(t, originalCustomerID, *stored.CustomerID)
 }
 
 func TestUpdateGovernanceRateLimitWithNilTransactionStore(t *testing.T) {

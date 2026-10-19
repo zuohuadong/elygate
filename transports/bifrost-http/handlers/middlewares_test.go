@@ -116,7 +116,11 @@ func TestCorsMiddleware_ExposesBifrostResponseHeaders(t *testing.T) {
 	config := &lib.Config{ClientConfig: &configstore.ClientConfig{AllowedOrigins: []string{"https://app.example.com"}}}
 	handler := NewCorsMiddleware(config).Middleware()(func(ctx *fasthttp.RequestCtx) {})
 
-	for _, origin := range []string{"https://app.example.com", "http://localhost:3000"} {
+	// Localhost is only implicit while no allowlist is configured; with an
+	// explicit allowlist it must be rejected (see
+	// TestCorsMiddleware_ExplicitAllowlistRejectsImplicitLocalhost), so only the
+	// configured origin is checked here.
+	for _, origin := range []string{"https://app.example.com"} {
 		ctx := &fasthttp.RequestCtx{}
 		ctx.Request.Header.Set("Origin", origin)
 		handler(ctx)
@@ -213,7 +217,11 @@ func TestCorsMiddleware_PreflightAllowsSetupTokenHeader(t *testing.T) {
 	for _, origins := range [][]string{{"*"}, {"https://dash.example.com"}} {
 		t.Run(strings.Join(origins, ","), func(t *testing.T) {
 			config := &lib.Config{ClientConfig: &configstore.ClientConfig{AllowedOrigins: origins}}
-			for _, origin := range []string{"http://localhost:3000", "https://dash.example.com"} {
+			originsToCheck := []string{"https://dash.example.com"}
+			if slices.Contains(origins, "*") {
+				originsToCheck = append(originsToCheck, "http://localhost:3000")
+			}
+			for _, origin := range originsToCheck {
 				ctx := &fasthttp.RequestCtx{}
 				ctx.Request.Header.SetMethod("OPTIONS")
 				ctx.Request.Header.Set("Origin", origin)

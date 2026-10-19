@@ -297,8 +297,11 @@ func failuresLink(filters *logstore.SearchFilters, totalRequests int64, successR
 // row still carries its own - rather than one that is silently wider. The same
 // holds for guardrail_outcomes, which only the Guardrail Incidents view reads.
 func linkableInLogsView(filters *logstore.SearchFilters) bool {
+	// The Logs page has no session-tree controls yet, so a query narrowed by
+	// them gets no link rather than one that silently drops the narrowing.
 	return len(filters.ErrorTypes) == 0 && len(filters.ErrorCodes) == 0 && len(filters.StatusCodes) == 0 &&
-		len(filters.GuardrailOutcomes) == 0
+		len(filters.GuardrailOutcomes) == 0 && filters.HarnessSessionID == "" && filters.ParentSessionID == "" &&
+		filters.AgentName == "" && filters.TreeSessionID == "" && filters.IsSubagent == nil && filters.IsFork == nil
 }
 
 // setLogsLink puts logs_link on a result when there is one to give.

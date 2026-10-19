@@ -8164,12 +8164,14 @@ func (c *Config) UpdatePluginOverallStatus(name string, displayName string, stat
 	typesCopy := make([]schemas.PluginType, len(types))
 	copy(typesCopy, types)
 
-	c.pluginStatus[name] = schemas.PluginStatus{
-		Name:   displayName,
-		Status: status,
-		Logs:   logsCopy,
-		Types:  typesCopy,
-	}
+	// Preserve metadata written by UpdatePluginMetadata; a status refresh must
+	// not wipe the plugin description or capabilities.
+	entry := c.pluginStatus[name]
+	entry.Name = displayName
+	entry.Status = status
+	entry.Logs = logsCopy
+	entry.Types = typesCopy
+	c.pluginStatus[name] = entry
 }
 
 // UpdatePluginMetadata records optional descriptive and capability metadata for a loaded plugin.
@@ -8205,13 +8207,9 @@ func (c *Config) UpdatePluginDisplayName(name string, displayName string) error 
 		return fmt.Errorf("display name %s already in use", displayName)
 	}
 
-	if _, ok := c.pluginStatus[name]; ok {
-		c.pluginStatus[name] = schemas.PluginStatus{
-			Name:   displayName,
-			Status: c.pluginStatus[name].Status,
-			Logs:   c.pluginStatus[name].Logs,
-			Types:  c.pluginStatus[name].Types,
-		}
+	if entry, ok := c.pluginStatus[name]; ok {
+		entry.Name = displayName
+		c.pluginStatus[name] = entry
 		return nil
 	}
 	return fmt.Errorf("plugin %s not found", name)

@@ -12,9 +12,9 @@ func TestGetMCPClientFilterDataUsesCompleteNarrowProjection(t *testing.T) {
 	store := setupRDBTestStore(t)
 	ctx := context.Background()
 	clients := []tables.TableMCPClient{
-		{ClientID: "z-client", Name: "Zulu", ConnectionType: "sse", AuthType: "oauth"},
-		{ClientID: "a-client", Name: "Alpha", ConnectionType: "http", AuthType: "none"},
-		{ClientID: "b-client", Name: "Beta", ConnectionType: "http", AuthType: "none"},
+		{ClientID: "z-client", Name: "Zulu", EndpointSlug: "zulu", ConnectionType: "sse", AuthType: "oauth"},
+		{ClientID: "a-client", Name: "Alpha", EndpointSlug: "alpha", ConnectionType: "http", AuthType: "none"},
+		{ClientID: "b-client", Name: "Beta", EndpointSlug: "beta", ConnectionType: "http", AuthType: "none"},
 	}
 	require.NoError(t, store.DB().WithContext(ctx).Create(&clients).Error)
 

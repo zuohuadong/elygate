@@ -23,6 +23,39 @@ import (
 type Store struct {
 	configStore configstore.ConfigStore
 	tx          *gorm.DB
+	// bindingMode decides whether application-key bindings are advisory
+	// (optional), mandatory (required), or not consulted at all (disabled).
+	bindingMode ApplicationBindingMode
+}
+
+// ApplicationBindingMode controls whether an inference request must carry a
+// virtual key that is actively bound to a control-plane application.
+type ApplicationBindingMode string
+
+const (
+	// ApplicationBindingDisabled skips binding checks entirely.
+	ApplicationBindingDisabled ApplicationBindingMode = "disabled"
+	// ApplicationBindingOptional rejects revoked or expired bindings but lets
+	// unbound virtual keys through (the historical behaviour).
+	ApplicationBindingOptional ApplicationBindingMode = "optional"
+	// ApplicationBindingRequired rejects every virtual key without an active
+	// binding, so all inference must come from a managed application.
+	ApplicationBindingRequired ApplicationBindingMode = "required"
+)
+
+// ParseApplicationBindingMode parses ELYGATE_APPLICATION_BINDING_MODE. An empty
+// value keeps the backward-compatible optional mode.
+func ParseApplicationBindingMode(raw string) (ApplicationBindingMode, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", string(ApplicationBindingOptional):
+		return ApplicationBindingOptional, nil
+	case string(ApplicationBindingDisabled), "off", "none":
+		return ApplicationBindingDisabled, nil
+	case string(ApplicationBindingRequired):
+		return ApplicationBindingRequired, nil
+	default:
+		return "", fmt.Errorf("invalid application binding mode %q (want disabled, optional or required)", raw)
+	}
 }
 
 // ApplicationKey is the one-time disclosed credential returned by application
@@ -35,6 +68,20 @@ type ApplicationKey struct {
 	Name          string     `json:"name"`
 	Value         string     `json:"value"`
 	ExpiresAt     *time.Time `json:"expires_at,omitempty"`
+}
+
+// NewStoreWithBindingMode builds a store that enforces the requested binding
+// mode. Required mode needs durable storage so bindings survive restarts.
+func NewStoreWithBindingMode(ctx context.Context, configStore configstore.ConfigStore, mode ApplicationBindingMode) (*Store, error) {
+	if mode == ApplicationBindingRequired && configStore == nil {
+		return nil, errors.New("required application binding mode requires config storage")
+	}
+	store, err := NewStore(ctx, configStore)
+	if err != nil {
+		return nil, err
+	}
+	store.bindingMode = mode
+	return store, nil
 }
 
 func NewStore(ctx context.Context, configStore configstore.ConfigStore) (*Store, error) {
@@ -465,6 +512,16 @@ func (s *Store) HasBinding(ctx context.Context, virtualKeyID string) (bool, erro
 	return count > 0, err
 }
 
+// RevokeExpiredBindings stamps revoked_at on bindings whose expiry has passed
+// so the active-binding index and access checks stop counting them.
+func (s *Store) RevokeExpiredBindings(ctx context.Context) (int64, error) {
+	now := time.Now().UTC()
+	result := s.db(ctx).Model(&ApplicationVirtualKeyBinding{}).
+		Where("revoked_at IS NULL AND expires_at IS NOT NULL AND expires_at <= ?", now).
+		Update("revoked_at", now)
+	return result.RowsAffected, result.Error
+}
+
 func (s *Store) ProjectLogs(ctx context.Context, logs []logstore.Log) (int, error) {
 	return s.projectLogs(ctx, logs, true)
 }
@@ -670,6 +727,11 @@ func (s *Store) projectLogsTx(ctx context.Context, logs []logstore.Log, advanceC
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return count, err
 		}
+		// Unbound logs land in the default application so they remain
+		// billable, but they are not counted as projected bindings: the count
+		// reports how many source rows a caller can attribute to a managed
+		// application.
+		managed := app != nil
 		if app == nil {
 			var err error
 			app, err = getFallbackApp()
@@ -682,7 +744,9 @@ func (s *Store) projectLogsTx(ctx context.Context, logs []logstore.Log, advanceC
 		if result.Error != nil {
 			return count, result.Error
 		}
-		count += int(result.RowsAffected)
+		if managed {
+			count += int(result.RowsAffected)
+		}
 	}
 	// Advance the projector checkpoint for every scanned log batch, including
 	// logs that cannot be projected because they have no virtual-key binding.
@@ -820,6 +884,9 @@ func (s *Store) ListAudit(ctx context.Context, limit int) ([]AuditEvent, error) 
 }
 
 func (s *Store) CheckVirtualKeyValueAccess(ctx context.Context, value string) error {
+	if s.bindingMode == ApplicationBindingDisabled {
+		return nil
+	}
 	var tombstone VirtualKeyRevocation
 	if err := s.db(ctx).First(&tombstone, "value_hash = ?", encrypt.HashSHA256(value)).Error; err == nil {
 		return errors.New("virtual key has been revoked or rotated")
@@ -834,8 +901,14 @@ func (s *Store) CheckVirtualKeyValueAccess(ctx context.Context, value string) er
 		return err
 	}
 	hasBinding, err := s.HasBinding(ctx, virtualKeyID)
-	if err != nil || !hasBinding {
+	if err != nil {
 		return err
+	}
+	if !hasBinding {
+		if s.bindingMode == ApplicationBindingRequired {
+			return errors.New("application credential binding is required")
+		}
+		return nil
 	}
 	_, err = s.ActiveBindingByVirtualKey(ctx, virtualKeyID)
 	if errors.Is(err, gorm.ErrRecordNotFound) {

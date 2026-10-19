@@ -1593,7 +1593,7 @@ func TestCreateVirtualKeyWithTeamAndParentCustomer(t *testing.T) {
 		TeamID:     &teamID,
 		CustomerID: &customerID,
 	}
-	require.NoError(t, store.ExecuteTransaction(ctx, func(tx *gorm.DB) error {
+	err := store.ExecuteTransaction(ctx, func(tx *gorm.DB) error {
 		if err := store.CreateCustomer(ctx, &tables.TableCustomer{ID: customerID, Name: "Parent customer"}, tx); err != nil {
 			return err
 		}
@@ -1601,12 +1601,10 @@ func TestCreateVirtualKeyWithTeamAndParentCustomer(t *testing.T) {
 			return err
 		}
 		return store.CreateVirtualKey(ctx, vk, tx)
-	}))
-
-	stored, err := store.GetVirtualKey(ctx, vk.ID)
-	require.NoError(t, err)
-	require.Equal(t, teamID, *stored.TeamID)
-	require.Equal(t, customerID, *stored.CustomerID)
+	})
+	require.ErrorContains(t, err, "cannot belong to more than one of team, customer or business unit")
+	_, err = store.GetVirtualKey(ctx, vk.ID)
+	require.Error(t, err)
 
 	badTeamID := teamID
 	badCustomerID := "different-customer"
@@ -5537,6 +5535,7 @@ func TestRDBConfigStore_CreatedAtSurvivesConfigSync(t *testing.T) {
 			seed: func(t *testing.T, store *RDBConfigStore) time.Time {
 				require.NoError(t, store.CreatePricingOverride(ctx, &tables.TablePricingOverride{
 					ID: "po-a", Name: "Override A", ScopeKind: "global", MatchType: "exact", Pattern: "gpt-4o",
+					RequestTypes: []schemas.RequestType{schemas.ChatCompletionRequest},
 				}))
 				created, err := store.GetPricingOverrideByID(ctx, "po-a")
 				require.NoError(t, err)
@@ -5545,6 +5544,7 @@ func TestRDBConfigStore_CreatedAtSurvivesConfigSync(t *testing.T) {
 			sync: func(t *testing.T, store *RDBConfigStore) {
 				require.NoError(t, store.UpdatePricingOverride(ctx, &tables.TablePricingOverride{
 					ID: "po-a", Name: "Override A renamed", ScopeKind: "global", MatchType: "exact", Pattern: "gpt-4o",
+					RequestTypes: []schemas.RequestType{schemas.ChatCompletionRequest},
 				}))
 			},
 			verify: func(t *testing.T, store *RDBConfigStore) time.Time {

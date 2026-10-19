@@ -208,6 +208,14 @@ func TestWarpLogsViewLinkCarriesEveryFilter(t *testing.T) {
 		// these once logsViewLink carries agent_names and agent_correlation_id.
 		"agent_names":          "not yet supported by Warp",
 		"agent_correlation_id": "not yet supported by Warp",
+		// Session-tree filters are offered by the tools but the Logs page has no
+		// controls for them yet, so logsViewLink deliberately drops the link.
+		"harness_session_id": "the Logs page has no session-tree filter",
+		"parent_session_id":  "the Logs page has no session-tree filter",
+		"agent_name":         "the Logs page has no session-tree filter",
+		"tree_session_id":    "the Logs page has no session-tree filter",
+		"is_subagent":        "the Logs page has no session-tree filter",
+		"is_fork":            "the Logs page has no session-tree filter",
 	}
 	filters := &logstore.SearchFilters{}
 	value := reflect.ValueOf(filters).Elem()
@@ -577,6 +585,12 @@ func TestWarpLogsLinkPerFilterArgument(t *testing.T) {
 		"user_agents":           {arg: []any{agent, "curl/8.0"}, array: []string{agent, "curl/8.0"}},
 		"metadata_filters":      {arg: map[string]any{"env": "prod", "app": "web"}, want: `{"app":"web","env":"prod"}`},
 		"session_id":            {arg: "sess-1", want: "sess-1"},
+		"harness_session_id":    {arg: "sess-1", noLink: true},
+		"parent_session_id":     {arg: "sess-0", noLink: true},
+		"agent_name":            {arg: "claude-code", noLink: true},
+		"tree_session_id":       {arg: "tree-1", noLink: true},
+		"is_subagent":           {arg: true, noLink: true},
+		"is_fork":               {arg: false, noLink: true},
 		"request_id":            {arg: "req-1", want: "req-1"},
 		"parent_request_id":     {arg: "req-0", want: "req-0"},
 		"missing_cost_only":     {arg: true, want: "true"},
