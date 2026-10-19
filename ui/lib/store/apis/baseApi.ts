@@ -144,6 +144,7 @@ export const baseApi = createApi({
 		"MCPLogs",
 		"Providers",
 		"MCPClients",
+		"MCPClientOpenAPISpec",
 		"Config",
 		"CacheConfig",
 		"VirtualKeys",
@@ -165,6 +166,10 @@ export const baseApi = createApi({
 		"User",
 		"Guardrails",
 		"ClusterNodes",
+		"ClusterMetrics",
+		"ClusterIncidents",
+		"ClusterMonitorConfig",
+		"ClusterStorage",
 		"Users",
 		"GuardrailRules",
 		"Roles",
@@ -181,11 +186,15 @@ export const baseApi = createApi({
 		"UserGovernance",
 		"LargePayloadConfig",
 		"LoadBalancerConfig",
+		"LoadBalancerHistory",
 		"Folders",
 		"Prompts",
 		"Versions",
 		"Sessions",
 		"AccessProfiles",
+		// The profile a team, business unit or customer holds. Separate from AccessProfiles so
+		// attaching to one entity does not refetch every template list on the page.
+		"EntityAccessProfiles",
 		"Projects",
 		"BusinessUnits",
 		"PromptDeployments",
@@ -211,9 +220,26 @@ export const baseApi = createApi({
 		"EdgeMCPServers",
 		"EdgeConfig",
 		"Notifications",
+		"RSSFeeds",
+		"RSSItems",
+		"RSSSettings",
+		"SidekiqJobs",
+		"WarpConfig",
+		"WarpBackfillStatus",
+		"WarpConversations",
+		"Agents",
+		"AgentLogs",
 	],
 	endpoints: () => ({}),
 });
+
+export const getErrorCode = (error: unknown): string | undefined => {
+	if (typeof error !== "object" || !error || !("data" in error)) {
+		return undefined;
+	}
+	const data = (error as { data?: BifrostErrorResponse }).data;
+	return typeof data?.error?.code === "string" ? data.error.code : undefined;
+};
 
 // Helper function to extract error message from RTK Query error
 export const getErrorMessage = (error: unknown): string => {

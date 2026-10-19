@@ -2,7 +2,16 @@ package tables
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
+
+	"github.com/maximhq/bifrost/core/schemas"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 // TestVirtualKeyProviderConfigKeyIDs pins KeyIDs' actual empty-Keys semantics, which the Keys
@@ -96,4 +105,130 @@ func TestVirtualKeyAssignedUserSerialization(t *testing.T) {
 			t.Fatal("expected the remaining fields to survive the omission")
 		}
 	})
+}
+
+// TestVirtualKeyOwnerMutualExclusion pins that a key belongs to at most one owner. The owner is
+// what decides whose money a request spends and whose access profile the key answers to, so a key
+// claiming two of them has no answer to either question.
+//
+// Every pair is exercised rather than just the team/customer one the check originally covered:
+// business_unit_id joined team_id and customer_id as an owner, and a pairwise check is exactly the
+// kind that leaves a new pair unguarded.
+func TestVirtualKeyOwnerMutualExclusion(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&TableVirtualKey{}))
+
+	ptr := func(s string) *string { return &s }
+	newKey := func(name string) TableVirtualKey {
+		return TableVirtualKey{
+			ID:    name,
+			Name:  name,
+			Value: *schemas.NewSecretVar("sk-bf-" + name),
+		}
+	}
+
+	t.Run("one owner is allowed", func(t *testing.T) {
+		for _, tc := range []struct {
+			name  string
+			apply func(*TableVirtualKey)
+		}{
+			{"team", func(vk *TableVirtualKey) { vk.TeamID = ptr("team-1") }},
+			{"customer", func(vk *TableVirtualKey) { vk.CustomerID = ptr("cust-1") }},
+			{"business unit", func(vk *TableVirtualKey) { vk.BusinessUnitID = ptr("bu-1") }},
+			{"none", func(vk *TableVirtualKey) {}},
+		} {
+			vk := newKey("solo-" + tc.name)
+			tc.apply(&vk)
+			require.NoError(t, db.Create(&vk).Error, "a key owned by %s alone must save", tc.name)
+		}
+	})
+
+	t.Run("a blank owner id is no owner", func(t *testing.T) {
+		// JSON decoding turns "team_id": "" into a pointer to an empty string. Counted as an owner it
+		// would store an owner nothing resolves, and would make a body naming one real owner beside a
+		// blank one read as two.
+		vk := newKey("blank-owner")
+		vk.TeamID, vk.CustomerID, vk.BusinessUnitID = ptr(""), ptr("   "), ptr("bu-1")
+		require.NoError(t, db.Create(&vk).Error, "blank owner ids must not count as owners")
+
+		var stored TableVirtualKey
+		require.NoError(t, db.First(&stored, "id = ?", vk.ID).Error)
+		assert.Nil(t, stored.TeamID, "a blank team id is stored as no team")
+		assert.Nil(t, stored.CustomerID, "a whitespace customer id is stored as no customer")
+		require.NotNil(t, stored.BusinessUnitID)
+		assert.Equal(t, "bu-1", *stored.BusinessUnitID, "the one real owner survives")
+	})
+
+	t.Run("two owners are rejected", func(t *testing.T) {
+		for _, tc := range []struct {
+			name  string
+			apply func(*TableVirtualKey)
+		}{
+			{"team and customer", func(vk *TableVirtualKey) {
+				vk.TeamID, vk.CustomerID = ptr("team-1"), ptr("cust-1")
+			}},
+			{"team and business unit", func(vk *TableVirtualKey) {
+				vk.TeamID, vk.BusinessUnitID = ptr("team-1"), ptr("bu-1")
+			}},
+			{"customer and business unit", func(vk *TableVirtualKey) {
+				vk.CustomerID, vk.BusinessUnitID = ptr("cust-1"), ptr("bu-1")
+			}},
+			{"all three", func(vk *TableVirtualKey) {
+				vk.TeamID, vk.CustomerID, vk.BusinessUnitID = ptr("team-1"), ptr("cust-1"), ptr("bu-1")
+			}},
+		} {
+			vk := newKey("dual-" + tc.name)
+			tc.apply(&vk)
+			err := db.Create(&vk).Error
+			require.Error(t, err, "a key owned by %s must be rejected", tc.name)
+			assert.Contains(t, err.Error(), "more than one of team, customer or business unit")
+		}
+	})
+}
+
+// TestValidateVirtualKeyMetadata covers the entry, key and value limits and the reserved keys,
+// including the load balancer's "bifrost_alb_" prefix spelled out literally so a drift from
+// core's schemas.LoadBalancerMetadataPrefix value shows up here.
+func TestValidateVirtualKeyMetadata(t *testing.T) {
+	tooMany := make(map[string]string, MaxVirtualKeyMetadataEntries+1)
+	for i := range MaxVirtualKeyMetadataEntries + 1 {
+		tooMany[fmt.Sprintf("k%d", i)] = "v"
+	}
+	atLimit := make(map[string]string, MaxVirtualKeyMetadataEntries)
+	for i := range MaxVirtualKeyMetadataEntries {
+		atLimit[fmt.Sprintf("k%d", i)] = "v"
+	}
+	tests := []struct {
+		name     string
+		metadata map[string]string
+		wantErr  string
+	}{
+		{name: "nil", metadata: nil},
+		{name: "empty", metadata: map[string]string{}},
+		{name: "valid keys", metadata: map[string]string{"cost_center": "cc-42", "owner.email": "a@example.com", "env-1": ""}},
+		{name: "entries at limit", metadata: atLimit},
+		{name: "key at max length", metadata: map[string]string{strings.Repeat("k", MaxVirtualKeyMetadataKeyLength): "v"}},
+		{name: "value at max length", metadata: map[string]string{"k": strings.Repeat("é", MaxVirtualKeyMetadataValueLength)}},
+		{name: "too many entries", metadata: tooMany, wantErr: "at most 50 entries"},
+		{name: "empty key", metadata: map[string]string{"": "v"}, wantErr: "invalid metadata key"},
+		{name: "key with space", metadata: map[string]string{"cost center": "v"}, wantErr: `invalid metadata key "cost center"`},
+		{name: "key with quote", metadata: map[string]string{`a"b`: "v"}, wantErr: "invalid metadata key"},
+		{name: "key too long", metadata: map[string]string{strings.Repeat("k", MaxVirtualKeyMetadataKeyLength+1): "v"}, wantErr: "invalid metadata key"},
+		{name: "reserved key", metadata: map[string]string{"isAsyncRequest": "true"}, wantErr: "reserved"},
+		{name: "load balancer prefix", metadata: map[string]string{"bifrost_alb_provider": "x"}, wantErr: "reserved"},
+		{name: "value too long", metadata: map[string]string{"k": strings.Repeat("v", MaxVirtualKeyMetadataValueLength+1)}, wantErr: "at most 512 characters"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateVirtualKeyMetadata(tt.metadata)
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorContains(t, err, tt.wantErr)
+		})
+	}
 }

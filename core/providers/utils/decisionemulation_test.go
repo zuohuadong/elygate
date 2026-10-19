@@ -3,6 +3,8 @@ package utils
 import (
 	"math"
 	"reflect"
+	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -10,16 +12,147 @@ import (
 	schemas "github.com/maximhq/bifrost/core/schemas"
 )
 
-func mixedQuestions() map[string]schemas.DecisionQuestion {
-	return map[string]schemas.DecisionQuestion{
-		"is_frustrated": {Kind: schemas.DecisionKindNoul, Instructions: "Is the customer frustrated?"},
+// testQuestion is a question written in the map form these cases were
+// authored in: a kind plus criteria keyed by option or listed by level.
+type testQuestion struct {
+	Kind         string
+	Instructions interface{}
+	Criteria     interface{}
+}
+
+// normalized converts map-form test questions into normalized questions
+// sorted by name, and their names: noul as predicate keeping its criteria,
+// choice criteria as choices sorted by option, and score criteria as levels
+// labelled by index. Criteria of another shape are left unset.
+func normalized(questions map[string]testQuestion) ([]schemas.DecisionQuestion, []string) {
+	names := make([]string, 0, len(questions))
+	for name := range questions {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	converted := make([]schemas.DecisionQuestion, 0, len(names))
+	for _, name := range names {
+		question := questions[name]
+		q := schemas.DecisionQuestion{Name: schemas.Ptr(name), Instructions: testText(question.Instructions)}
+		switch question.Kind {
+		case "noul":
+			q.Type = schemas.DecisionTypePredicate
+			q.Criteria = testCriteria(question.Criteria)
+		case "choice":
+			q.Type = schemas.DecisionTypeChoice
+			options := map[string]interface{}{}
+			switch typed := question.Criteria.(type) {
+			case map[string]interface{}:
+				options = typed
+			case map[string]string:
+				for option, description := range typed {
+					options[option] = description
+				}
+			}
+			keys := make([]string, 0, len(options))
+			for option := range options {
+				keys = append(keys, option)
+			}
+			sort.Strings(keys)
+			q.Choices = []schemas.DecisionChoice{}
+			for _, option := range keys {
+				q.Choices = append(q.Choices, schemas.DecisionChoice{Value: schemas.DecisionScalar{Str: schemas.Ptr(option)}, Description: testText(options[option])})
+			}
+		case "score":
+			q.Type = schemas.DecisionTypeScore
+			var levels []interface{}
+			switch typed := question.Criteria.(type) {
+			case []interface{}:
+				levels = typed
+			case []string:
+				for _, level := range typed {
+					levels = append(levels, level)
+				}
+			}
+			for i, level := range levels {
+				q.Levels = append(q.Levels, schemas.DecisionLevel{Label: strconv.Itoa(i), Description: testText(level)})
+			}
+		default:
+			q.Type = schemas.DecisionType(question.Kind)
+		}
+		converted = append(converted, q)
+	}
+	return converted, names
+}
+
+// testText wraps a test value as decision text: a string as text, anything
+// else non-nil as a structured value.
+func testText(value interface{}) *schemas.DecisionText {
+	switch typed := value.(type) {
+	case nil:
+		return nil
+	case string:
+		return schemas.NewDecisionText(typed)
+	}
+	return &schemas.DecisionText{Structured: value}
+}
+
+// testCriteria converts map-form noul criteria into predicate criteria.
+func testCriteria(criteria interface{}) *schemas.DecisionCriteria {
+	sides := map[string]interface{}{}
+	switch typed := criteria.(type) {
+	case nil:
+		return nil
+	case map[string]interface{}:
+		sides = typed
+	case map[string]string:
+		for key, value := range typed {
+			sides[key] = value
+		}
+	}
+	return &schemas.DecisionCriteria{True: testText(sides["true"]), False: testText(sides["false"])}
+}
+
+// testAnswer is a parsed answer in the map form the assertions read: the
+// probability, option, or score as Value, and probabilities keyed by option
+// or level index.
+type testAnswer struct {
+	Type          schemas.DecisionType
+	Value         interface{}
+	Confidence    *float64
+	Probabilities map[string]float64
+	Legend        map[string]any
+}
+
+// parseAnswers parses tool-call arguments for map-form test questions and
+// keys the normalized answers by name.
+func parseAnswers(argumentsJSON []byte, questions map[string]testQuestion) (map[string]testAnswer, error) {
+	normalizedQuestions, names := normalized(questions)
+	answers, err := ParseDecisionAnswers(argumentsJSON, normalizedQuestions, names)
+	if err != nil {
+		return nil, err
+	}
+	byName := make(map[string]testAnswer, len(answers))
+	for i, answer := range answers {
+		view := testAnswer{Type: answer.Type, Confidence: answer.Confidence, Probabilities: DecisionKeyedProbabilities(answer.Probabilities), Legend: answer.Legend}
+		switch {
+		case answer.Probability != nil:
+			view.Value = *answer.Probability
+		case answer.Choice != nil:
+			view.Value, _ = answer.Choice.Key()
+		case answer.Score != nil:
+			view.Value = *answer.Score
+		}
+		byName[names[i]] = view
+	}
+	return byName, nil
+}
+
+func mixedQuestions() map[string]testQuestion {
+	return map[string]testQuestion{
+		"is_frustrated": {Kind: "noul", Instructions: "Is the customer frustrated?"},
 		"category": {
-			Kind:         schemas.DecisionKindChoice,
+			Kind:         "choice",
 			Instructions: "Pick the ticket category",
 			Criteria:     map[string]interface{}{"billing": "money", "bug": "defects", "other": "else"},
 		},
 		"urgency": {
-			Kind:         schemas.DecisionKindScore,
+			Kind:         "score",
 			Instructions: "How urgent?",
 			Criteria:     []interface{}{"low", "medium", "high"},
 		},
@@ -27,7 +160,7 @@ func mixedQuestions() map[string]schemas.DecisionQuestion {
 }
 
 func TestBuildDecisionSchemaShape(t *testing.T) {
-	params, err := BuildDecisionSchema(mixedQuestions())
+	params, err := BuildDecisionSchema(normalized(mixedQuestions()))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -102,10 +235,10 @@ func containsAnyString(list []interface{}, s string) bool {
 
 // structuredQuestions carries the spec's richer criteria shapes: object and
 // null choice descriptions, and object levels in a score array.
-func structuredQuestions() map[string]schemas.DecisionQuestion {
-	return map[string]schemas.DecisionQuestion{
+func structuredQuestions() map[string]testQuestion {
+	return map[string]testQuestion{
 		"approve": {
-			Kind:         schemas.DecisionKindNoul,
+			Kind:         "noul",
 			Instructions: "Approve the refund?",
 			Criteria: map[string]any{
 				"true":  map[string]any{"meaning": "refund it"},
@@ -113,7 +246,7 @@ func structuredQuestions() map[string]schemas.DecisionQuestion {
 			},
 		},
 		"category": {
-			Kind:         schemas.DecisionKindChoice,
+			Kind:         "choice",
 			Instructions: "Pick the ticket category",
 			Criteria: map[string]any{
 				"billing": map[string]any{"rubric": "money issues"},
@@ -123,7 +256,7 @@ func structuredQuestions() map[string]schemas.DecisionQuestion {
 			},
 		},
 		"urgency": {
-			Kind:         schemas.DecisionKindScore,
+			Kind:         "score",
 			Instructions: "How urgent?",
 			Criteria: []any{
 				"low",
@@ -135,7 +268,7 @@ func structuredQuestions() map[string]schemas.DecisionQuestion {
 }
 
 func TestBuildDecisionSchemaStructuredCriteria(t *testing.T) {
-	params, err := BuildDecisionSchema(structuredQuestions())
+	params, err := BuildDecisionSchema(normalized(structuredQuestions()))
 	if err != nil {
 		t.Fatalf("structured criteria rejected: %v", err)
 	}
@@ -187,7 +320,7 @@ func TestParseDecisionAnswersStructuredScoreLegend(t *testing.T) {
 		"category": {"choice": "other", "confidence": 0.7, "probabilities": {"billing": 0.1, "bug": 0.1, "support": 0.1, "other": 0.7}},
 		"urgency": {"value": 1, "confidence": 0.6, "probabilities": {"0": 0.1, "1": 0.8, "2": 0.1}}
 	}`
-	answers, err := ParseDecisionAnswers([]byte(args), structuredQuestions())
+	answers, err := parseAnswers([]byte(args), structuredQuestions())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -211,19 +344,19 @@ func TestParseDecisionAnswersStructuredScoreLegend(t *testing.T) {
 // TestBuildDecisionSchemaTypedStringMapCriteria covers the map[string]string
 // input branch Go SDK callers use for noul and choice criteria.
 func TestBuildDecisionSchemaTypedStringMapCriteria(t *testing.T) {
-	questions := map[string]schemas.DecisionQuestion{
+	questions := map[string]testQuestion{
 		"approve": {
-			Kind:         schemas.DecisionKindNoul,
+			Kind:         "noul",
 			Instructions: "Approve?",
 			Criteria:     map[string]string{"true": "grant it", "false": "deny it"},
 		},
 		"bucket": {
-			Kind:         schemas.DecisionKindChoice,
+			Kind:         "choice",
 			Instructions: "Bucket?",
 			Criteria:     map[string]string{"a": "first bucket", "b": "second bucket"},
 		},
 	}
-	params, err := BuildDecisionSchema(questions)
+	params, err := BuildDecisionSchema(normalized(questions))
 	if err != nil {
 		t.Fatalf("typed string map criteria rejected: %v", err)
 	}
@@ -253,7 +386,7 @@ func TestBuildDecisionSchemaTypedStringMapCriteria(t *testing.T) {
 // schema-enforcing provider rejects stray keys and out-of-range values before
 // the parser ever sees them.
 func TestBuildDecisionSchemaProbabilitiesClosed(t *testing.T) {
-	params, err := BuildDecisionSchema(mixedQuestions())
+	params, err := BuildDecisionSchema(normalized(mixedQuestions()))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -301,7 +434,7 @@ func TestBuildDecisionSchemaProbabilitiesClosed(t *testing.T) {
 }
 
 func TestBuildDecisionSchemaEmpty(t *testing.T) {
-	if _, err := BuildDecisionSchema(map[string]schemas.DecisionQuestion{}); err == nil {
+	if _, err := BuildDecisionSchema(normalized(map[string]testQuestion{})); err == nil {
 		t.Fatal("expected error for empty questions")
 	}
 }
@@ -309,14 +442,14 @@ func TestBuildDecisionSchemaEmpty(t *testing.T) {
 func TestBuildDecisionSchemaRejectsEmptyChoiceCriteria(t *testing.T) {
 	// An empty criteria map would emit enum: [] and make every answer fail
 	// downstream; it must be a local error before any model is called.
-	questions := map[string]schemas.DecisionQuestion{
-		"pick": {Kind: schemas.DecisionKindChoice, Instructions: "d", Criteria: map[string]any{}},
+	questions := map[string]testQuestion{
+		"pick": {Kind: "choice", Instructions: "d", Criteria: map[string]any{}},
 	}
-	if _, err := BuildDecisionSchema(questions); err == nil || !strings.Contains(err.Error(), "at least one option") {
+	if _, err := BuildDecisionSchema(normalized(questions)); err == nil || !strings.Contains(err.Error(), "at least one option") {
 		t.Fatalf("empty choice criteria must be rejected, got %v", err)
 	}
 	args := `{"pick": {"choice": "anything", "confidence": 0.5, "probabilities": {"anything": 1}}}`
-	if _, err := ParseDecisionAnswers([]byte(args), questions); err == nil || !strings.Contains(err.Error(), "at least one option") {
+	if _, err := parseAnswers([]byte(args), questions); err == nil || !strings.Contains(err.Error(), "at least one option") {
 		t.Fatalf("empty choice criteria must be rejected in the parser too, got %v", err)
 	}
 }
@@ -327,11 +460,11 @@ func TestParseDecisionAnswersValid(t *testing.T) {
 		"category": {"choice": "billing", "confidence": 0.7, "probabilities": {"billing": 0.7, "bug": 0.2, "other": 0.1}},
 		"urgency": {"value": 2, "confidence": 0.6, "probabilities": {"0": 0.1, "1": 0.1, "2": 0.8}}
 	}`
-	answers, err := ParseDecisionAnswers([]byte(args), mixedQuestions())
+	answers, err := parseAnswers([]byte(args), mixedQuestions())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if answers["is_frustrated"].Kind != schemas.DecisionKindNoul || answers["is_frustrated"].Value.(float64) != 0.9 {
+	if answers["is_frustrated"].Type != schemas.DecisionTypePredicate || answers["is_frustrated"].Value.(float64) != 0.9 {
 		t.Errorf("noul = %+v", answers["is_frustrated"])
 	}
 	if *answers["is_frustrated"].Confidence != 0.8 {
@@ -362,7 +495,7 @@ func TestParseDecisionAnswersNoulConfidenceOptional(t *testing.T) {
 		"category": {"choice": "billing", "confidence": 0.7, "probabilities": {"billing": 0.8, "bug": 0.1, "other": 0.1}},
 		"urgency": {"value": 1, "confidence": 0.5, "probabilities": {"0": 0.1, "1": 0.8, "2": 0.1}}
 	}`
-	answers, err := ParseDecisionAnswers([]byte(args), mixedQuestions())
+	answers, err := parseAnswers([]byte(args), mixedQuestions())
 	if err != nil {
 		t.Fatalf("noul answer without confidence rejected: %v", err)
 	}
@@ -376,7 +509,7 @@ func TestParseDecisionAnswersNoulConfidenceOptional(t *testing.T) {
 		"category": {"choice": "billing", "confidence": 0.7, "probabilities": {"billing": 0.8, "bug": 0.1, "other": 0.1}},
 		"urgency": {"value": 1, "confidence": 0.5, "probabilities": {"0": 0.1, "1": 0.8, "2": 0.1}}
 	}`
-	if _, err := ParseDecisionAnswers([]byte(bad), mixedQuestions()); err == nil {
+	if _, err := parseAnswers([]byte(bad), mixedQuestions()); err == nil {
 		t.Fatal("volunteered out-of-range noul confidence must be rejected")
 	}
 }
@@ -390,7 +523,7 @@ func TestParseDecisionAnswersRequiresProbabilities(t *testing.T) {
 		"category": {"choice": "billing", "confidence": 0.7},
 		"urgency": {"value": 1, "confidence": 0.5, "probabilities": {"0": 0.1, "1": 0.8, "2": 0.1}}
 	}`
-	if _, err := ParseDecisionAnswers([]byte(missingChoice), mixedQuestions()); err == nil || !strings.Contains(err.Error(), "probabilities") {
+	if _, err := parseAnswers([]byte(missingChoice), mixedQuestions()); err == nil || !strings.Contains(err.Error(), "probabilities") {
 		t.Fatalf("choice answer without probabilities must be rejected, got %v", err)
 	}
 
@@ -399,7 +532,7 @@ func TestParseDecisionAnswersRequiresProbabilities(t *testing.T) {
 		"category": {"choice": "billing", "confidence": 0.7, "probabilities": {"billing": 0.8, "bug": 0.1, "other": 0.1}},
 		"urgency": {"value": 1, "confidence": 0.5}
 	}`
-	if _, err := ParseDecisionAnswers([]byte(missingScore), mixedQuestions()); err == nil || !strings.Contains(err.Error(), "probabilities") {
+	if _, err := parseAnswers([]byte(missingScore), mixedQuestions()); err == nil || !strings.Contains(err.Error(), "probabilities") {
 		t.Fatalf("score answer without probabilities must be rejected, got %v", err)
 	}
 
@@ -410,7 +543,7 @@ func TestParseDecisionAnswersRequiresProbabilities(t *testing.T) {
 		"category": {"choice": "billing", "confidence": 0.7, "probabilities": {"billing": 1}},
 		"urgency": {"value": 1, "confidence": 0.5, "probabilities": {"0": 0.1, "1": 0.8, "2": 0.1}}
 	}`
-	if _, err := ParseDecisionAnswers([]byte(partialChoice), mixedQuestions()); err == nil || !strings.Contains(err.Error(), "probabilities") {
+	if _, err := parseAnswers([]byte(partialChoice), mixedQuestions()); err == nil || !strings.Contains(err.Error(), "probabilities") {
 		t.Fatalf("one-hot partial choice distribution must be rejected, got %v", err)
 	}
 
@@ -419,7 +552,7 @@ func TestParseDecisionAnswersRequiresProbabilities(t *testing.T) {
 		"category": {"choice": "billing", "confidence": 0.7, "probabilities": {"billing": 0.8, "bug": 0.1, "other": 0.1}},
 		"urgency": {"value": 1, "confidence": 0.5, "probabilities": {"1": 1}}
 	}`
-	if _, err := ParseDecisionAnswers([]byte(partialScore), mixedQuestions()); err == nil || !strings.Contains(err.Error(), "probabilities") {
+	if _, err := parseAnswers([]byte(partialScore), mixedQuestions()); err == nil || !strings.Contains(err.Error(), "probabilities") {
 		t.Fatalf("partial score distribution must be rejected, got %v", err)
 	}
 
@@ -428,7 +561,7 @@ func TestParseDecisionAnswersRequiresProbabilities(t *testing.T) {
 		"category": {"choice": "billing", "confidence": 0.7, "probabilities": {"billing": 0.8, "bug": 0.1, "other": 0.1}},
 		"urgency": {"value": 1, "confidence": 0.5, "probabilities": {"0": 0.1, "1": 0.8, "2": 0.1}}
 	}`
-	answers, err := ParseDecisionAnswers([]byte(complete), mixedQuestions())
+	answers, err := parseAnswers([]byte(complete), mixedQuestions())
 	if err != nil {
 		t.Fatalf("complete answers rejected: %v", err)
 	}
@@ -447,7 +580,7 @@ func TestParseDecisionAnswersDerivesScoreFromDistribution(t *testing.T) {
 		"category": {"choice": "billing", "confidence": 0.7, "probabilities": {"billing": 0.8, "bug": 0.1, "other": 0.1}},
 		"urgency": {"value": 2, "confidence": 0.6, "probabilities": {"0": 0.1, "1": 0.1, "2": 0.8}}
 	}`
-	answers, err := ParseDecisionAnswers([]byte(args), mixedQuestions())
+	answers, err := parseAnswers([]byte(args), mixedQuestions())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -459,26 +592,26 @@ func TestParseDecisionAnswersDerivesScoreFromDistribution(t *testing.T) {
 }
 
 func TestParseDecisionAnswersChoiceMatchesHighestProbability(t *testing.T) {
-	questions := map[string]schemas.DecisionQuestion{
-		"route": {Kind: schemas.DecisionKindChoice, Criteria: map[string]string{"a": "Alpha", "b": "Beta"}},
+	questions := map[string]testQuestion{
+		"route": {Kind: "choice", Criteria: map[string]string{"a": "Alpha", "b": "Beta"}},
 	}
 	wrong := `{"route":{"choice":"a","confidence":0.8,"probabilities":{"a":0.1,"b":0.9}}}`
-	if _, err := ParseDecisionAnswers([]byte(wrong), questions); err == nil || !strings.Contains(err.Error(), "highest probability") {
+	if _, err := parseAnswers([]byte(wrong), questions); err == nil || !strings.Contains(err.Error(), "highest probability") {
 		t.Fatalf("choice below another option must be rejected, got %v", err)
 	}
 	tied := `{"route":{"choice":"a","confidence":0.8,"probabilities":{"a":0.5,"b":0.5}}}`
-	if _, err := ParseDecisionAnswers([]byte(tied), questions); err != nil {
+	if _, err := parseAnswers([]byte(tied), questions); err != nil {
 		t.Fatalf("a choice tied for highest probability must be accepted: %v", err)
 	}
 }
 
 func TestParseDecisionAnswersNormalizesNearOneDistributions(t *testing.T) {
-	questions := map[string]schemas.DecisionQuestion{
-		"route":    {Kind: schemas.DecisionKindChoice, Criteria: map[string]string{"a": "Alpha", "b": "Beta"}},
-		"severity": {Kind: schemas.DecisionKindScore, Criteria: []string{"low", "medium", "high"}},
+	questions := map[string]testQuestion{
+		"route":    {Kind: "choice", Criteria: map[string]string{"a": "Alpha", "b": "Beta"}},
+		"severity": {Kind: "score", Criteria: []string{"low", "medium", "high"}},
 	}
 	args := `{"route":{"choice":"a","confidence":0.8,"probabilities":{"a":0.8,"b":0.19}},"severity":{"value":2,"confidence":0.8,"probabilities":{"0":0,"1":0.05,"2":0.99}}}`
-	answers, err := ParseDecisionAnswers([]byte(args), questions)
+	answers, err := parseAnswers([]byte(args), questions)
 	if err != nil {
 		t.Fatalf("near-one distributions should be accepted: %v", err)
 	}
@@ -495,8 +628,14 @@ func TestParseDecisionAnswersNormalizesNearOneDistributions(t *testing.T) {
 	if score := answers["severity"].Value.(float64); math.Abs(score-wantScore) > 1e-9 {
 		t.Errorf("score = %v, want normalized expected value %v", score, wantScore)
 	}
+	// Exactly 5% below one is within the documented tolerance despite binary
+	// floating-point rounding of decimal probabilities.
+	boundary := `{"route":{"choice":"a","confidence":0.8,"probabilities":{"a":0.9,"b":0.05}},"severity":{"value":2,"confidence":0.8,"probabilities":{"0":0,"1":0.05,"2":0.95}}}`
+	if _, err := parseAnswers([]byte(boundary), questions); err != nil {
+		t.Fatalf("distribution at the tolerance boundary should be accepted: %v", err)
+	}
 	tooFar := `{"route":{"choice":"a","confidence":0.8,"probabilities":{"a":0.8,"b":0.1}},"severity":{"value":2,"confidence":0.8,"probabilities":{"0":0,"1":0.05,"2":0.95}}}`
-	if _, err := ParseDecisionAnswers([]byte(tooFar), questions); err == nil || !strings.Contains(err.Error(), "sum") {
+	if _, err := parseAnswers([]byte(tooFar), questions); err == nil || !strings.Contains(err.Error(), "sum") {
 		t.Fatalf("distribution far from one must be rejected, got %v", err)
 	}
 }
@@ -534,7 +673,7 @@ func TestParseDecisionAnswersRejections(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			_, err := ParseDecisionAnswers([]byte(tc.args), q)
+			_, err := parseAnswers([]byte(tc.args), q)
 			if err == nil {
 				t.Fatalf("expected rejection for %q", name)
 			}
@@ -546,7 +685,7 @@ func TestParseDecisionAnswersRejections(t *testing.T) {
 }
 
 func TestBuildDecisionToolName(t *testing.T) {
-	tool, err := BuildDecisionResponsesTool(mixedQuestions())
+	tool, err := BuildDecisionResponsesTool(normalized(mixedQuestions()))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -558,5 +697,189 @@ func TestBuildDecisionToolName(t *testing.T) {
 	}
 	if tool.ResponsesToolFunction == nil || tool.ResponsesToolFunction.Parameters == nil {
 		t.Errorf("tool function params missing: %+v", tool)
+	}
+}
+
+// flattenedQuestions mirrors the harness decision-emulation matrix request that
+// openrouter/anthropic/claude-opus-4.1 answered in flattened form.
+func flattenedQuestions() map[string]testQuestion {
+	q := map[string]testQuestion{}
+	for _, name := range []string{
+		"expresses_urgency", "has_attached_evidence", "is_angry", "is_billing_related", "is_first_time_issue",
+		"is_frustrated", "is_long_time_customer", "is_polite", "is_repeat_contact", "is_satisfied",
+		"mentions_competitor", "mentions_data_loss", "mentions_refund", "mentions_specific_amount",
+		"reports_product_crash", "requests_human_response", "threatens_cancellation", "threatens_chargeback",
+		"threatens_public_complaint", "willing_to_wait",
+	} {
+		q[name] = testQuestion{Kind: "noul", Instructions: name}
+	}
+	choice := func(opts ...string) testQuestion {
+		criteria := map[string]any{}
+		for _, o := range opts {
+			criteria[o] = o
+		}
+		return testQuestion{Kind: "choice", Instructions: "pick", Criteria: criteria}
+	}
+	score := func(n int) testQuestion {
+		levels := make([]any, n)
+		for i := range levels {
+			levels[i] = strconv.Itoa(i)
+		}
+		return testQuestion{Kind: "score", Instructions: "rate", Criteria: levels}
+	}
+	q["category"] = choice("billing", "bug", "account", "other")
+	q["contact_channel"] = choice("email", "phone", "chat", "social")
+	q["customer_tier"] = choice("free", "pro", "enterprise")
+	q["primary_emotion"] = choice("anger", "confusion", "sadness", "joy")
+	q["recommended_action"] = choice("issue_refund", "request_more_info", "close_ticket", "ignore")
+	q["sentiment"] = choice("positive", "neutral", "negative")
+	q["churn_risk"] = score(4)
+	q["customer_satisfaction"] = score(5)
+	q["severity"] = score(4)
+	q["urgency"] = score(4)
+	return q
+}
+
+// flattenedOpus41Args is the verbatim emit_decision arguments returned by
+// openrouter/anthropic/claude-opus-4.1 (captured 2026-09-23). The model flattened
+// every nested answer object into the top level, leaked its XML
+// "<parameter name=...>" syntax into the first field, and repeated
+// "confidence"/"probabilities" as duplicate keys.
+const flattenedOpus41Args = `{"category": "<parameter name=\"choice\">billing", "confidence": 1.0, "probabilities": {"account":0.0,"billing":1.0,"bug":0.0,"other":0.0}, "churn_risk": "<parameter name=\"value\">3", "confidence": 0.95, "probabilities": {"0":0.0,"1":0.0,"2":0.05,"3":0.95}, "contact_channel": "<parameter name=\"choice\">email", "confidence": 1.0, "probabilities": {"chat":0.0,"email":1.0,"phone":0.0,"social":0.0}, "customer_satisfaction": "<parameter name=\"value\">0", "confidence": 1.0, "probabilities": {"0":1.0,"1":0.0,"2":0.0,"3":0.0,"4":0.0}, "customer_tier": "<parameter name=\"choice\">pro", "confidence": 1.0, "probabilities": {"enterprise":0.0,"free":0.0,"pro":1.0}, "expresses_urgency": "<parameter name=\"value\">1.0", "confidence": 1.0, "has_attached_evidence": "<parameter name=\"value\">1.0", "confidence": 1.0, "is_angry": "<parameter name=\"value\">1.0", "confidence": 0.95, "is_billing_related": "<parameter name=\"value\">1.0", "confidence": 1.0, "is_first_time_issue": "<parameter name=\"value\">0.0", "confidence": 1.0, "is_frustrated": "<parameter name=\"value\">1.0", "confidence": 1.0, "is_long_time_customer": "<parameter name=\"value\">1.0", "confidence": 1.0, "is_polite": "<parameter name=\"value\">0.0", "confidence": 0.95, "is_repeat_contact": "<parameter name=\"value\">1.0", "confidence": 1.0, "is_satisfied": "<parameter name=\"value\">0.0", "confidence": 1.0, "mentions_competitor": "<parameter name=\"value\">1.0", "confidence": 1.0, "mentions_data_loss": "<parameter name=\"value\">0.0", "confidence": 1.0, "mentions_refund": "<parameter name=\"value\">1.0", "confidence": 1.0, "mentions_specific_amount": "<parameter name=\"value\">1.0", "confidence": 1.0, "primary_emotion": "<parameter name=\"choice\">anger", "confidence": 0.95, "probabilities": {"anger":0.95,"confusion":0.0,"joy":0.0,"sadness":0.05}, "recommended_action": "<parameter name=\"choice\">issue_refund", "confidence": 0.95, "probabilities": {"close_ticket":0.0,"ignore":0.0,"issue_refund":0.95,"request_more_info":0.05}, "reports_product_crash": "<parameter name=\"value\">0.0", "confidence": 1.0, "requests_human_response": "<parameter name=\"value\">1.0", "confidence": 1.0, "sentiment": "<parameter name=\"choice\">negative", "confidence": 1.0, "probabilities": {"negative":1.0,"neutral":0.0,"positive":0.0}, "severity": "<parameter name=\"value\">3", "confidence": 0.95, "probabilities": {"0":0.0,"1":0.0,"2":0.05,"3":0.95}, "threatens_cancellation": "<parameter name=\"value\">1.0", "confidence": 1.0, "threatens_chargeback": "<parameter name=\"value\">1.0", "confidence": 1.0, "threatens_public_complaint": "<parameter name=\"value\">1.0", "confidence": 1.0, "urgency": "<parameter name=\"value\">3", "confidence": 1.0, "probabilities": {"0":0.0,"1":0.0,"2":0.0,"3":1.0}, "willing_to_wait": "<parameter name=\"value\">0.0", "confidence": 1.0}`
+
+func TestParseDecisionAnswersRecoversFlattenedParameterTags(t *testing.T) {
+	answers, err := parseAnswers([]byte(flattenedOpus41Args), flattenedQuestions())
+	if err != nil {
+		t.Fatalf("flattened answers must be recovered: %v", err)
+	}
+	if len(answers) != 30 {
+		t.Fatalf("expected 30 answers, got %d", len(answers))
+	}
+	if answers["category"].Value != "billing" || answers["category"].Probabilities["billing"] != 1 {
+		t.Errorf("category = %+v", answers["category"])
+	}
+	if answers["is_polite"].Value != 0.0 || *answers["is_polite"].Confidence != 0.95 {
+		t.Errorf("is_polite = %+v", answers["is_polite"])
+	}
+	if answers["is_angry"].Value != 1.0 || *answers["is_angry"].Confidence != 0.95 {
+		t.Errorf("is_angry = %+v", answers["is_angry"])
+	}
+	// Score derives from its own distribution: 2*0.05 + 3*0.95 = 2.95.
+	if math.Abs(answers["churn_risk"].Value.(float64)-2.95) > 1e-9 || *answers["churn_risk"].Confidence != 0.95 {
+		t.Errorf("churn_risk = %+v", answers["churn_risk"])
+	}
+	if answers["primary_emotion"].Value != "anger" || answers["primary_emotion"].Probabilities["sadness"] != 0.05 {
+		t.Errorf("primary_emotion = %+v", answers["primary_emotion"])
+	}
+}
+
+// The same model sometimes pads the leaked tag with whitespace, as in
+// `{"category": "  <parameter name=...` (seen 2026-09-24 on
+// openrouter/anthropic/claude-opus-4.1).
+func TestParseDecisionAnswersRecoversWhitespacePaddedParameterTags(t *testing.T) {
+	args := `{"category": "  <parameter name=\"choice\">billing", "confidence": 1.0, "probabilities": {"billing":1,"bug":0,"other":0}, "is_frustrated": "\n<parameter name=\"value\">0.9", "confidence": 0.8, "urgency": "\t <parameter name=\"value\">2", "confidence": 0.6, "probabilities": {"0":0.1,"1":0.1,"2":0.8}}`
+	answers, err := parseAnswers([]byte(args), mixedQuestions())
+	if err != nil {
+		t.Fatalf("whitespace-padded answers must be recovered: %v", err)
+	}
+	if answers["category"].Value != "billing" || *answers["category"].Confidence != 1.0 {
+		t.Errorf("category = %+v", answers["category"])
+	}
+	if answers["is_frustrated"].Value != 0.9 || *answers["is_frustrated"].Confidence != 0.8 {
+		t.Errorf("is_frustrated = %+v", answers["is_frustrated"])
+	}
+	if *answers["urgency"].Confidence != 0.6 {
+		t.Errorf("urgency = %+v", answers["urgency"])
+	}
+}
+
+// stringifiedAnswerArgs mirrors emit_decision arguments returned by
+// openrouter/anthropic/claude-opus-4.1 where one answer object arrived
+// JSON-encoded as a string (pretty-printed, with a trailing newline) while its
+// siblings stayed well-formed objects.
+const stringifiedAnswerArgs = `{"category": {"choice": "billing", "confidence": 1.0, "probabilities": {"billing":0.9,"bug":0.05,"other":0.05}}, "contact_channel": "{\n  \"choice\": \"email\",\n  \"confidence\": 0.9,\n  \"probabilities\": {\"email\": 0.9, \"phone\": 0.05, \"chat\": 0.05}\n}\n", "is_frustrated": {"value": 0.8, "confidence": 0.7}, "urgency": {"value": 2, "confidence": 0.6, "probabilities": {"0":0.1,"1":0.1,"2":0.8}}}`
+
+func stringifiedAnswerQuestions() map[string]testQuestion {
+	q := mixedQuestions()
+	q["contact_channel"] = testQuestion{
+		Kind:         "choice",
+		Instructions: "How did the customer reach us?",
+		Criteria:     map[string]interface{}{"email": "email", "phone": "phone", "chat": "chat"},
+	}
+	return q
+}
+
+func TestParseDecisionAnswersRecoversStringifiedAnswerObject(t *testing.T) {
+	answers, err := parseAnswers([]byte(stringifiedAnswerArgs), stringifiedAnswerQuestions())
+	if err != nil {
+		t.Fatalf("stringified answer object must be recovered: %v", err)
+	}
+	if len(answers) != 4 {
+		t.Fatalf("expected 4 answers, got %d", len(answers))
+	}
+	got := answers["contact_channel"]
+	if got.Value != "email" || *got.Confidence != 0.9 || got.Probabilities["email"] != 0.9 {
+		t.Errorf("contact_channel = %+v", got)
+	}
+	if answers["category"].Value != "billing" || answers["is_frustrated"].Value != 0.8 {
+		t.Errorf("siblings = %+v / %+v", answers["category"], answers["is_frustrated"])
+	}
+}
+
+func TestParseDecisionAnswersFlattenedRejections(t *testing.T) {
+	q := mixedQuestions()
+	cases := map[string]struct {
+		args    string
+		wantSub string
+	}{
+		// The recovered answers still pass through every normal check.
+		"recovered choice missing probabilities": {
+			args:    `{"category": "<parameter name=\"choice\">billing", "confidence": 1.0, "is_frustrated": "<parameter name=\"value\">0.9", "urgency": "<parameter name=\"value\">2", "confidence": 0.6, "probabilities": {"0":0.1,"1":0.1,"2":0.8}}`,
+			wantSub: "missing probabilities",
+		},
+		"field before any question": {
+			args:    `{"confidence": 1.0, "category": "<parameter name=\"choice\">billing", "confidence": 1.0, "probabilities": {"billing":1,"bug":0,"other":0}}`,
+			wantSub: "not a JSON object",
+		},
+		"field repeated within one answer": {
+			args:    `{"is_frustrated": "<parameter name=\"value\">0.9", "value": 0.1}`,
+			wantSub: "not a JSON object",
+		},
+		"unknown top-level key": {
+			args:    `{"is_frustrated": "<parameter name=\"value\">0.9", "mood": "bad"}`,
+			wantSub: "not a JSON object",
+		},
+		"string answer without a parameter tag": {
+			args:    `{"is_frustrated": "0.9"}`,
+			wantSub: "not a JSON object",
+		},
+		// A stringified answer is decoded, then validated like any other.
+		"stringified answer with a disallowed choice": {
+			args:    `{"category": "{\"choice\": \"refund\", \"confidence\": 1.0, \"probabilities\": {\"billing\":1}}", "is_frustrated": {"value": 0.9, "confidence": 0.8}, "urgency": {"value": 2, "confidence": 0.6, "probabilities": {"0":0.1,"1":0.1,"2":0.8}}}`,
+			wantSub: "not an allowed option",
+		},
+		"stringified JSON array": {
+			args:    `{"is_frustrated": "[0.9]"}`,
+			wantSub: "not a JSON object",
+		},
+		"stringified malformed object": {
+			args:    `{"is_frustrated": "{\"value\": 0.9"}`,
+			wantSub: "not a JSON object",
+		},
+		"stringified object with a sibling field attached": {
+			args:    `{"is_frustrated": "{\"value\": 0.9}", "confidence": 0.8}`,
+			wantSub: "not a JSON object",
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := parseAnswers([]byte(tc.args), q)
+			if err == nil {
+				t.Fatalf("expected rejection for %q", name)
+			}
+			if !strings.Contains(err.Error(), tc.wantSub) {
+				t.Errorf("error %q does not contain %q", err.Error(), tc.wantSub)
+			}
+		})
 	}
 }

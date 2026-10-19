@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -14,15 +13,18 @@ import (
 	"github.com/maximhq/bifrost/framework/configstore"
 	"github.com/maximhq/bifrost/framework/configstore/tables"
 	"github.com/maximhq/bifrost/framework/encrypt"
-	"github.com/maximhq/bifrost/transports/bifrost-http/lib"
+	"github.com/maximhq/bifrost/transports/v2/bifrost-http/lib"
 	"github.com/valyala/fasthttp"
 )
 
 // SessionHandler manages HTTP requests for session operations
 type SessionHandler struct {
-	configStore     configstore.ConfigStore
-	wsTicketStore   *WSTicketStore
-	passwordLimiter lib.PasswordLimiter
+	configStore   configstore.ConfigStore
+	wsTicketStore *WSTicketStore
+	// setupLock is the OSS setup-lock gate (see AuthMiddleware.SetupLockMiddleware). Nil
+	// when the gate is not installed (enterprise, or no config store), in which case
+	// is-auth-enabled never reports setup_required.
+	setupLock *AuthMiddleware
 }
 
 // NewSessionHandler creates a new session handler instance
@@ -33,129 +35,91 @@ func NewSessionHandler(configStore configstore.ConfigStore, wsTicketStore *WSTic
 	}
 }
 
+// SetSetupLock tells the handler the OSS setup-lock gate is installed, so is-auth-enabled
+// reports setup_required / setup_token_configured and ws-ticket issues setup-token tickets.
+func (h *SessionHandler) SetSetupLock(m *AuthMiddleware) {
+	h.setupLock = m
+}
+
+// setSetupSessionCookie writes (or, with an empty value, expires) the HttpOnly setup session
+// cookie. SameSite=Strict: it only ever needs to ride the dashboard's own requests.
+func setSetupSessionCookie(ctx *fasthttp.RequestCtx, value string, expires time.Time) {
+	cookie := fasthttp.AcquireCookie()
+	defer fasthttp.ReleaseCookie(cookie)
+	cookie.SetKey(SetupSessionCookie)
+	cookie.SetValue(value)
+	cookie.SetExpire(expires)
+	cookie.SetPath("/")
+	cookie.SetHTTPOnly(true)
+	cookie.SetSameSite(fasthttp.CookieSameSiteStrictMode)
+	if ctx.IsTLS() || string(ctx.Request.Header.Peek("X-Forwarded-Proto")) == "https" {
+		cookie.SetSecure(true)
+	}
+	ctx.Response.Header.SetCookie(cookie)
+}
+
+// startSetupSession handles POST /api/session/setup: while the OSS setup lock is active, it
+// trades the setup token (X-Bifrost-Setup-Token, checked here rather than trusting a cookie
+// so a session cannot extend itself) for an HttpOnly setup session cookie. The dashboard
+// keeps no copy of the token; the cookie authenticates its calls until it expires or
+// dashboard auth is enabled.
+func (h *SessionHandler) startSetupSession(ctx *fasthttp.RequestCtx) {
+	if h.setupLock == nil || h.setupLock.IsDashboardAuthActive() {
+		SendError(ctx, fasthttp.StatusConflict, "the setup lock is not active")
+		return
+	}
+	if !h.setupLock.CheckConfiguredSetupToken(string(ctx.Request.Header.Peek(SetupTokenHeader))) {
+		SendError(ctx, fasthttp.StatusForbidden, "invalid setup token")
+		return
+	}
+	value, expires, err := h.setupLock.IssueSetupSession(time.Now())
+	if err != nil {
+		SendError(ctx, fasthttp.StatusInternalServerError, "failed to start setup session")
+		return
+	}
+	setSetupSessionCookie(ctx, value, expires)
+	SendJSON(ctx, map[string]any{"expires_at": expires.UTC().Format(time.RFC3339)})
+}
+
+// setupLockState reports whether the setup-lock gate is currently locking the API and
+// whether the operator configured a setup token.
+func (h *SessionHandler) setupLockState() (setupRequired bool, setupTokenConfigured bool) {
+	if h.setupLock == nil {
+		return false, false
+	}
+	return !h.setupLock.IsDashboardAuthActive(), h.setupLock.HasSetupToken()
+}
+
 // RegisterRoutes registers the session-related routes
 func (h *SessionHandler) RegisterRoutes(r *router.Router, middlewares ...schemas.BifrostHTTPMiddleware) {
 	r.POST("/api/session/login", lib.ChainMiddlewares(h.login, middlewares...))
 	r.POST("/api/session/logout", lib.ChainMiddlewares(h.logout, middlewares...))
 	r.GET("/api/session/is-auth-enabled", lib.ChainMiddlewares(h.isAuthEnabled, middlewares...))
 	r.POST("/api/session/ws-ticket", lib.ChainMiddlewares(h.issueWSTicket, middlewares...))
+	r.POST("/api/session/setup", lib.ChainMiddlewares(h.startSetupSession, middlewares...))
 }
 
 // isAuthEnabled handles GET /api/session/is-auth-enabled - Check if auth is enabled
 func (h *SessionHandler) isAuthEnabled(ctx *fasthttp.RequestCtx) {
-	resp := map[string]any{
-		"is_auth_enabled": false,
-		"has_valid_token": false,
-		"auth_type":       "none",
-	}
-
-	effectiveAppName := ""
-	effectiveShortName := ""
-	effectiveEnName := ""
-	effectiveLogo := ""
-	effectiveFavicon := ""
-
-	if h.configStore != nil {
-		if cc, err := h.configStore.GetClientConfig(ctx); err == nil && cc != nil {
-			if strings.TrimSpace(cc.AppName) != "" {
-				effectiveAppName = strings.TrimSpace(cc.AppName)
-			}
-		}
-		if metadata, err := h.configStore.GetClientMetadata(ctx); err == nil && len(metadata) > 0 {
-			if effectiveAppName == "" {
-				if v, ok := metadata["app_name"].(string); ok && strings.TrimSpace(v) != "" {
-					effectiveAppName = strings.TrimSpace(v)
-				} else if v, ok := metadata["brand_name"].(string); ok && strings.TrimSpace(v) != "" {
-					effectiveAppName = strings.TrimSpace(v)
-				} else if v, ok := metadata["platform_name"].(string); ok && strings.TrimSpace(v) != "" {
-					effectiveAppName = strings.TrimSpace(v)
-				}
-			}
-			if v, ok := metadata["short_name"].(string); ok && strings.TrimSpace(v) != "" {
-				effectiveShortName = strings.TrimSpace(v)
-			} else if v, ok := metadata["brand_short_name"].(string); ok && strings.TrimSpace(v) != "" {
-				effectiveShortName = strings.TrimSpace(v)
-			}
-			if v, ok := metadata["en_name"].(string); ok && strings.TrimSpace(v) != "" {
-				effectiveEnName = strings.TrimSpace(v)
-			} else if v, ok := metadata["brand_en_name"].(string); ok && strings.TrimSpace(v) != "" {
-				effectiveEnName = strings.TrimSpace(v)
-			} else if v, ok := metadata["platform_en_name"].(string); ok && strings.TrimSpace(v) != "" {
-				effectiveEnName = strings.TrimSpace(v)
-			}
-			if v, ok := metadata["logo_url"].(string); ok && strings.TrimSpace(v) != "" {
-				effectiveLogo = strings.TrimSpace(v)
-			} else if v, ok := metadata["app_logo"].(string); ok && strings.TrimSpace(v) != "" {
-				effectiveLogo = strings.TrimSpace(v)
-			}
-			if v, ok := metadata["favicon_url"].(string); ok && strings.TrimSpace(v) != "" {
-				effectiveFavicon = strings.TrimSpace(v)
-			} else if v, ok := metadata["app_favicon"].(string); ok && strings.TrimSpace(v) != "" {
-				effectiveFavicon = strings.TrimSpace(v)
-			}
-		}
-	}
-
-	if effectiveAppName == "" {
-		for _, key := range []string{"APP_NAME", "BRAND_NAME", "PLATFORM_NAME", "ELYGATE_APP_NAME", "BIFROST_APP_NAME"} {
-			if v := strings.TrimSpace(os.Getenv(key)); v != "" {
-				effectiveAppName = v
-				break
-			}
-		}
-	}
-	if effectiveShortName == "" {
-		for _, key := range []string{"APP_SHORT_NAME", "BRAND_SHORT_NAME", "SHORT_NAME"} {
-			if v := strings.TrimSpace(os.Getenv(key)); v != "" {
-				effectiveShortName = v
-				break
-			}
-		}
-	}
-	if effectiveEnName == "" {
-		for _, key := range []string{"APP_EN_NAME", "BRAND_EN_NAME", "PLATFORM_EN_NAME", "EN_NAME"} {
-			if v := strings.TrimSpace(os.Getenv(key)); v != "" {
-				effectiveEnName = v
-				break
-			}
-		}
-	}
-	if effectiveLogo == "" {
-		for _, key := range []string{"APP_LOGO", "BRAND_LOGO", "APP_LOGO_URL", "BRAND_LOGO_URL", "LOGO_URL"} {
-			if v := strings.TrimSpace(os.Getenv(key)); v != "" {
-				effectiveLogo = v
-				break
-			}
-		}
-	}
-	if effectiveFavicon == "" {
-		for _, key := range []string{"APP_FAVICON", "BRAND_FAVICON", "APP_FAVICON_URL", "FAVICON_URL"} {
-			if v := strings.TrimSpace(os.Getenv(key)); v != "" {
-				effectiveFavicon = v
-				break
-			}
-		}
-	}
-
-	if effectiveAppName != "" {
-		resp["app_name"] = effectiveAppName
-	}
-	if effectiveShortName != "" {
-		resp["short_name"] = effectiveShortName
-	}
-	if effectiveEnName != "" {
-		resp["en_name"] = effectiveEnName
-	}
-	if effectiveLogo != "" {
-		resp["logo_url"] = effectiveLogo
-	}
-	if effectiveFavicon != "" {
-		resp["favicon_url"] = effectiveFavicon
-	}
-
+	setupRequired, setupTokenConfigured := h.setupLockState()
 	if h.configStore == nil {
-		SendJSON(ctx, resp)
+		SendJSON(ctx, map[string]any{
+			"is_auth_enabled":         false,
+			"has_valid_token":         false,
+			"auth_type":               "none",
+			"inference_auth_enforced": false,
+			"setup_required":          setupRequired,
+			"setup_token_configured":  setupTokenConfigured,
+		})
 		return
+	}
+	// inference_auth_enforced reports enforce_auth_on_inference - a separate toggle from
+	// dashboard auth (this endpoint's main subject) that gates /v1/* instead of the
+	// dashboard/admin API. Surfaced here so a locked dashboard doesn't look like the whole
+	// gateway is secured when this second, easily-missed control is still off.
+	inferenceAuthEnforced := false
+	if clientConfig, err := h.configStore.GetClientConfig(ctx); err == nil && clientConfig != nil {
+		inferenceAuthEnforced = clientConfig.EnforceAuthOnInference
 	}
 	authConfig, err := h.configStore.GetAuthConfig(ctx)
 	if err != nil {
@@ -163,7 +127,14 @@ func (h *SessionHandler) isAuthEnabled(ctx *fasthttp.RequestCtx) {
 		return
 	}
 	if authConfig == nil {
-		SendJSON(ctx, resp)
+		SendJSON(ctx, map[string]any{
+			"is_auth_enabled":         false,
+			"has_valid_token":         false,
+			"auth_type":               "none",
+			"inference_auth_enforced": inferenceAuthEnforced,
+			"setup_required":          setupRequired,
+			"setup_token_configured":  setupTokenConfigured,
+		})
 		return
 	}
 	// Check if the header has a token and is valid (Authorization header or cookie)
@@ -181,10 +152,14 @@ func (h *SessionHandler) isAuthEnabled(ctx *fasthttp.RequestCtx) {
 			hasValidToken = true
 		}
 	}
-	resp["is_auth_enabled"] = authConfig.IsEnabled
-	resp["has_valid_token"] = hasValidToken
-	resp["auth_type"] = dashboardAuthType(authConfig.IsEnabled)
-	SendJSON(ctx, resp)
+	SendJSON(ctx, map[string]any{
+		"is_auth_enabled":         authConfig.IsEnabled,
+		"has_valid_token":         hasValidToken,
+		"auth_type":               dashboardAuthType(authConfig.IsEnabled),
+		"inference_auth_enforced": inferenceAuthEnforced,
+		"setup_required":          setupRequired,
+		"setup_token_configured":  setupTokenConfigured,
+	})
 }
 
 // dashboardAuthType reports the dashboard session auth mode for frontend flows.
@@ -209,13 +184,6 @@ func (h *SessionHandler) login(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, fasthttp.StatusBadRequest, "Invalid request payload")
 		return
 	}
-	finish, allowed := h.passwordLimiter.Begin(ctx.RemoteIP().String(), payload.Username)
-	if !allowed {
-		SendError(ctx, fasthttp.StatusTooManyRequests, "Too many login attempts. Please try again later.")
-		return
-	}
-	authenticated := false
-	defer func() { finish(authenticated) }()
 
 	// Get auth config
 	authConfig, err := h.configStore.GetAuthConfig(ctx)
@@ -244,6 +212,7 @@ func (h *SessionHandler) login(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, fasthttp.StatusUnauthorized, "Invalid username or password")
 		return
 	}
+
 	// Creating a new session
 	token := uuid.New().String()
 	session := &tables.SessionsTable{
@@ -257,7 +226,6 @@ func (h *SessionHandler) login(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("Failed to create session: %v", err))
 		return
 	}
-	authenticated = true
 
 	// Setting cookies
 	cookie := fasthttp.AcquireCookie()
@@ -294,16 +262,6 @@ func (h *SessionHandler) logout(ctx *fasthttp.RequestCtx) {
 		token = string(ctx.Request.Header.Cookie("token"))
 	}
 
-	// Retain the cookie on storage failure so a retry can invalidate the session.
-	if token != "" {
-		err := h.configStore.DeleteSession(ctx, token)
-		if err != nil && !errors.Is(err, configstore.ErrNotFound) {
-			logger.Error("failed to delete session during logout: %v", err)
-			SendError(ctx, fasthttp.StatusInternalServerError, "Failed to invalidate session. Please try again.")
-			return
-		}
-	}
-
 	// clear token from cookies
 	cookie := fasthttp.AcquireCookie()
 	defer fasthttp.ReleaseCookie(cookie)
@@ -318,6 +276,20 @@ func (h *SessionHandler) logout(ctx *fasthttp.RequestCtx) {
 		cookie.SetSecure(true)
 	}
 	ctx.Response.Header.SetCookie(cookie)
+
+	// Drop any setup session as well, so a later return to the setup lock (auth disabled
+	// again) cannot be re-entered with a cookie from before.
+	setSetupSessionCookie(ctx, "", time.Now().Add(-time.Hour))
+
+	// delete session from database if token exists
+	if token != "" {
+		err := h.configStore.DeleteSession(ctx, token)
+		if err != nil && !errors.Is(err, configstore.ErrNotFound) {
+			logger.Error("failed to delete session during logout: %v", err)
+			SendError(ctx, fasthttp.StatusInternalServerError, "Failed to invalidate session. Please try again.")
+			return
+		}
+	}
 
 	SendJSON(ctx, map[string]any{
 		"message": "Logout successful",

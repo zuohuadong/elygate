@@ -19,6 +19,11 @@ import (
 
 const (
 	encryptionStatusPlainText = "plain_text"
+	// plaintextRowPredicate selects rows whose sensitive columns are still stored in plaintext:
+	// marked plain_text, or written before the status column existed. It is the filter of the
+	// startup encryption pass and of the legacy plaintext lookups that must never match a row
+	// whose column already holds ciphertext.
+	plaintextRowPredicate     = "(encryption_status = 'plain_text' OR encryption_status IS NULL OR encryption_status = '')"
 	encryptionStatusEncrypted = "encrypted"
 	// encryptionBatchSize bounds the candidate scan. Candidates are still
 	// claimed one row per transaction; this only controls read-ahead.

@@ -4,6 +4,7 @@ import {
 	BadgeInfo,
 	BookOpenText,
 	BookUser,
+	Bot,
 	Boxes,
 	BoxIcon,
 	Building,
@@ -11,6 +12,7 @@ import {
 	ChartColumnBig,
 	ChevronsLeftRightEllipsis,
 	CircuitBoard,
+	Database,
 	Construction,
 	DatabaseZap,
 	Flag,
@@ -21,6 +23,7 @@ import {
 	Globe,
 	Hexagon,
 	History,
+	House,
 	KeyRound,
 	Landmark,
 	LaptopMinimalCheck,
@@ -37,6 +40,7 @@ import {
 	Search,
 	SearchCheck,
 	Settings,
+	Server,
 	Settings2Icon,
 	ShieldCheck,
 	Shuffle,
@@ -45,6 +49,7 @@ import {
 	Telescope,
 	ToolCase,
 	TrendingUp,
+	TriangleAlert,
 	UserRoundCheck,
 	Users,
 	Wallet,
@@ -52,6 +57,8 @@ import {
 	Webhook,
 } from "lucide-react";
 
+import { WarpIcon } from "@/components/ui/icons";
+import { cn } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
 	Sidebar,
@@ -69,10 +76,12 @@ import {
 } from "@/components/ui/sidebar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { HIDDEN_UNTIL_NAV_COOKIE, REMIND_LATER_COOKIE, useOnboardingChecklist } from "@/hooks/useOnboardingChecklist";
+import { useFeatureFlag } from "@/hooks/useFeatureFlag";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { IS_ENTERPRISE } from "@/lib/constants/config";
+import { FEATURE_FLAGS } from "@/lib/constants/featureFlags";
 import { useBranding } from "@/lib/hooks/useBranding";
-import { useGetCoreConfigQuery, useGetLatestReleaseQuery, useGetVersionQuery } from "@/lib/store";
+import { useGetCoreConfigQuery, useGetLatestReleaseQuery, useGetVersionQuery, useIsAuthEnabledQuery } from "@/lib/store";
 import PoweredByBifrost from "@enterprise/components/branding/poweredByBifrost";
 import { RbacOperation, RbacResource, useRbac } from "@enterprise/lib";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
@@ -120,20 +129,22 @@ const productionSetupHelpCard = {
 			We offer help with production setup including custom integrations and dedicated support.
 			<br />
 			<br />
-			Book a demo with our team{" "}
 			<a
 				href="https://calendly.com/maximai/bifrost-demo?utm_source=bfd_sdbr"
 				target="_blank"
 				className="text-primary font-medium underline"
 				rel="noopener noreferrer"
 			>
-				here
+				Book a demo with our team
 			</a>
 			.
 		</>
 	),
 	dismissible: true,
 };
+
+const newBadgeClassName =
+	"relative overflow-hidden px-1.5 py-0 text-[10px] leading-4 group-data-[collapsible=icon]:hidden after:pointer-events-none after:absolute after:inset-y-0 after:-left-full after:w-full after:skew-x-[-18deg] after:bg-gradient-to-r after:from-transparent after:via-primary/25 after:to-transparent after:opacity-0 after:content-[''] after:animate-[sidebar-new-badge-shine_1200ms_cubic-bezier(0.22,1,0.36,1)_260ms_both]";
 
 // Sidebar item interface
 interface SidebarItem {
@@ -157,7 +168,7 @@ const getSidebarItemHref = (item: Pick<SidebarItem, "url" | "queryParam">) => {
 
 const slug = (s: string) => s.toLowerCase().replace(/\s+/g, "-");
 
-const TimeFilterPages = new Set(["/workspace/dashboard", "/workspace/logs", "/workspace/mcp-logs"]);
+const TimeFilterPages = new Set(["/workspace/dashboard", "/workspace/logs", "/workspace/mcp-logs", "/workspace/agent-logs"]);
 
 const preserveTimeFilters = (baseHref: string, subItemUrl: string, pathname: string, search: string): string => {
 	if (TimeFilterPages.has(subItemUrl) && TimeFilterPages.has(pathname)) {
@@ -224,7 +235,8 @@ const SidebarItemView = ({
 	const isRouteMatch = (url: string) => {
 		// Exact-match base paths that have sibling tab routes nested under them, so the base
 		// tab isn't also highlighted when a child tab (e.g. /settings) is active.
-		if (url === "/workspace/custom-pricing" || url === "/workspace/adaptive-routing") return pathname === url;
+		if (url === "/workspace/custom-pricing" || url === "/workspace/adaptive-routing" || url === "/workspace/agent-gateway")
+			return pathname === url;
 		// Avoid double-highlighting with "/workspace/mcp-registry/library"
 		if (url === "/workspace/mcp-registry") return !pathname.startsWith("/workspace/mcp-registry/library") && pathname.startsWith(url);
 		return pathname.startsWith(url);
@@ -253,25 +265,30 @@ const SidebarItemView = ({
 
 	const isHighlighted = !hasSubItems && highlightedUrl === item.url;
 
-	const buttonClassName = `group/nav-item relative h-7.5 cursor-pointer rounded-sm border px-3 transition-all duration-200 ${
+	const buttonClassName = `group/nav-item relative h-7 cursor-pointer rounded-sm border px-2 transition-all duration-200 ${
 		isHighlighted
 			? "bg-sidebar-accent text-accent-foreground border-primary/20"
 			: isActive || isAnySubItemActive
 				? "bg-sidebar-accent text-primary border-primary/20"
 				: item.hasAccess
-					? "hover:bg-sidebar-accent hover:text-accent-foreground border-transparent text-slate-500 dark:text-zinc-400"
+					? "hover:bg-sidebar-accent hover:text-accent-foreground border-transparent text-slate-600 dark:text-zinc-400"
 					: "hover:bg-destructive/5 hover:text-muted-foreground text-muted-foreground cursor-not-allowed border-transparent"
 	} `;
 
 	const innerContent = (
 		<div className="flex w-full min-w-0 items-center justify-between">
-			<div className="flex w-full min-w-0 items-center gap-2">
-				<item.icon className={`h-4 w-4 shrink-0 ${isActive || isAnySubItemActive ? "text-primary" : "text-muted-foreground"}`} />
+			<div className="flex w-full min-w-0 items-center gap-2.5">
+				<item.icon className={`h-3.5 w-3.5 shrink-0 ${isActive || isAnySubItemActive ? "stroke-2" : "stroke-[1.5]"}`} />
 				<span
-					className={`min-w-0 truncate text-sm group-data-[collapsible=icon]:hidden ${isActive || isAnySubItemActive ? "font-medium" : "font-normal"}`}
+					className={`min-w-0 truncate text-[13px] group-data-[collapsible=icon]:hidden ${isActive || isAnySubItemActive ? "font-medium" : "font-normal"}`}
 				>
 					{item.title}
 				</span>
+				{item.new && (
+					<Badge data-new-badge="true" className={`${newBadgeClassName} ml-auto ${hasSubItems ? "mr-2" : ""}`}>
+						New
+					</Badge>
+				)}
 				{item.tag && (
 					<Badge variant="secondary" className="text-muted-foreground ml-auto text-xs group-data-[collapsible=icon]:hidden">
 						{item.tag}
@@ -302,14 +319,21 @@ const SidebarItemView = ({
 				tooltip={isSidebarCollapsed ? undefined : item.title}
 				className={buttonClassName}
 				onClick={handleClick}
-				data-testid={`sidebar-item-btn-${slug(item.title)}`}
+				aria-label={item.title}
+				data-testid={`sidebar-item-btn-${item.testId ?? slug(item.title)}`}
 			>
 				{innerContent}
 			</SidebarMenuButton>
 		);
 	} else if (!item.hasAccess) {
 		menuButton = (
-			<SidebarMenuButton tooltip={item.title} data-nav-url={item.url} className={buttonClassName}>
+			<SidebarMenuButton
+				tooltip={item.title}
+				data-nav-url={item.url}
+				className={buttonClassName}
+				aria-disabled="true"
+				aria-label={item.title}
+			>
 				{innerContent}
 			</SidebarMenuButton>
 		);
@@ -320,6 +344,7 @@ const SidebarItemView = ({
 					href={item.url}
 					target="_blank"
 					rel="noopener noreferrer"
+					aria-label={item.title}
 					data-nav-url={item.url}
 					onClick={isSidebarCollapsed ? (e: React.MouseEvent) => e.stopPropagation() : undefined}
 				>
@@ -333,6 +358,7 @@ const SidebarItemView = ({
 				<Link
 					to={item.url}
 					preload="intent"
+					aria-label={item.title}
 					data-nav-url={item.url}
 					onClick={isSidebarCollapsed ? (e: React.MouseEvent) => e.stopPropagation() : undefined}
 				>
@@ -346,9 +372,12 @@ const SidebarItemView = ({
 		<SidebarMenuItem key={item.title}>
 			{isSidebarCollapsed && hasSubItems ? (
 				<Popover open={flyoutOpen} onOpenChange={setFlyoutOpen}>
-					<PopoverTrigger asChild onMouseEnter={openFlyout} onMouseLeave={closeFlyout}>
-						<div data-testid={`sidebar-flyout-trigger-${slug(item.title)}`}>{menuButton}</div>
-					</PopoverTrigger>
+					<div data-testid={`sidebar-flyout-trigger-${item.testId ?? slug(item.title)}`}>
+						{/* The trigger must be the button itself: aria-haspopup/aria-expanded are invalid on a role-less div. */}
+						<PopoverTrigger asChild onMouseEnter={openFlyout} onMouseLeave={closeFlyout}>
+							{menuButton}
+						</PopoverTrigger>
+					</div>
 					<PopoverContent
 						side="right"
 						align="start"
@@ -356,9 +385,9 @@ const SidebarItemView = ({
 						className="w-48 p-1"
 						onMouseEnter={openFlyout}
 						onMouseLeave={closeFlyout}
-						data-testid={`sidebar-flyout-content-${slug(item.title)}`}
+						data-testid={`sidebar-flyout-content-${item.testId ?? slug(item.title)}`}
 					>
-						<div className="text-muted-foreground px-2 py-1.5 text-xs font-medium">{item.title}</div>
+						<div className="text-muted-foreground px-2 py-1.5 text-xs font-normal">{item.title}</div>
 						{item.subItems?.map((subItem) => {
 							const baseHref = getSidebarItemHref(subItem);
 							const href = preserveTimeFilters(baseHref, subItem.url, pathname, search);
@@ -366,15 +395,9 @@ const SidebarItemView = ({
 							const SubItemIcon = subItem.icon;
 							const subSlug = subItem.testId ?? slug(subItem.title);
 							const inner = (
-								<div className="flex min-w-0 items-center gap-2">
-									{SubItemIcon && (
-										<SubItemIcon className={`h-3.5 w-3.5 shrink-0 ${isSubItemActive ? "text-primary" : "text-muted-foreground"}`} />
-									)}
-									<span
-										className={`min-w-0 truncate text-sm ${isSubItemActive ? "text-primary font-medium" : "text-slate-500 dark:text-zinc-400"}`}
-									>
-										{subItem.title}
-									</span>
+								<div className="flex min-w-0 items-center gap-2.5">
+									{SubItemIcon && <SubItemIcon className={`h-3.5 w-3.5 shrink-0 ${isSubItemActive ? "stroke-2" : "stroke-[1.5]"}`} />}
+									<span className={`min-w-0 truncate text-[13px] ${isSubItemActive ? "font-medium" : "font-normal"}`}>{subItem.title}</span>
 									{subItem.tag && (
 										<Badge variant="secondary" className="text-muted-foreground ml-auto text-xs">
 											{subItem.tag}
@@ -383,10 +406,16 @@ const SidebarItemView = ({
 								</div>
 							);
 							return (
-								<div key={subItem.title} data-testid={`sidebar-flyout-subitem-${subSlug}`} onClick={() => setFlyoutOpen(false)}>
+								<div
+									key={subItem.title}
+									data-testid={`sidebar-flyout-subitem-${subSlug}`}
+									role="presentation"
+									onClick={() => setFlyoutOpen(false)}
+								>
 									{subItem.hasAccess === false ? (
 										<div
 											data-testid={`sidebar-subitem-disabled-${subSlug}`}
+											aria-disabled="true"
 											className="text-muted-foreground hover:bg-destructive/5 flex h-7 cursor-not-allowed items-center rounded-sm px-2"
 										>
 											{inner}
@@ -396,7 +425,7 @@ const SidebarItemView = ({
 											to={href}
 											preload="intent"
 											data-testid={`sidebar-subitem-link-${subSlug}`}
-											className={`flex h-7 items-center rounded-sm px-2 ${isSubItemActive ? "bg-sidebar-accent" : "hover:bg-sidebar-accent"}`}
+											className={`flex h-7 items-center rounded-sm px-2 ${isSubItemActive ? "bg-sidebar-accent text-primary" : "hover:bg-sidebar-accent hover:text-accent-foreground text-slate-600 dark:text-zinc-400"}`}
 										>
 											{inner}
 										</Link>
@@ -425,14 +454,12 @@ const SidebarItemView = ({
 									? "bg-sidebar-accent text-primary font-medium"
 									: subItem.hasAccess === false
 										? "hover:bg-destructive/5 hover:text-muted-foreground text-muted-foreground cursor-not-allowed border-transparent"
-										: "hover:bg-sidebar-accent hover:text-accent-foreground text-slate-500 dark:text-zinc-400"
+										: "hover:bg-sidebar-accent hover:text-accent-foreground text-slate-600 dark:text-zinc-400"
 						}`;
 						const subInner = (
-							<div className="flex w-full min-w-0 items-center gap-2">
-								{SubItemIcon && (
-									<SubItemIcon className={`h-3.5 w-3.5 shrink-0 ${isSubItemActive ? "text-primary" : "text-muted-foreground"}`} />
-								)}
-								<span className={`min-w-0 truncate text-sm ${isSubItemActive ? "font-medium" : "font-normal"}`}>{subItem.title}</span>
+							<div className="flex w-full min-w-0 items-center gap-2.5">
+								{SubItemIcon && <SubItemIcon className={`h-3.5 w-3.5 shrink-0 ${isSubItemActive ? "stroke-2" : "stroke-[1.5]"}`} />}
+								<span className={`min-w-0 truncate text-[13px] ${isSubItemActive ? "font-medium" : "font-normal"}`}>{subItem.title}</span>
 								{subItem.tag && (
 									<Badge variant="secondary" className="text-muted-foreground ml-auto text-xs">
 										{subItem.tag}
@@ -447,6 +474,7 @@ const SidebarItemView = ({
 										data-nav-url={subItemHref}
 										data-testid={`sidebar-subitem-disabled-${subItem.testId ?? slug(subItem.title)}`}
 										className={subItemClassName}
+										aria-disabled="true"
 									>
 										{subInner}
 									</SidebarMenuSubButton>
@@ -510,6 +538,25 @@ const compareVersions = (v1: string, v2: string): number => {
 	return 0;
 };
 
+/**
+ * Warp's mark, sized above the settings nav's default.
+ *
+ * The nav sizes every sub-item icon at h-3.5. Warp's is a filled glyph among
+ * lucide's stroked ones, and a filled shape reads smaller at the same box
+ * because its weight sits in the middle rather than on the outline, so it needs
+ * to render larger to match them.
+ *
+ * It is scaled rather than resized, and that is the whole point. A bigger box
+ * moves two things at once: the icon's left edge shifts out of the column its
+ * neighbours share, and every pixel of extra width pushes the label right, so
+ * "Warp" no longer starts where "Security" and "API Keys" do. A transform
+ * changes none of that - layout still sees h-3.5, so the row stays on the grid
+ * while the mark alone grows.
+ */
+function WarpNavIcon({ className, ...props }: React.SVGProps<SVGSVGElement>) {
+	return <WarpIcon className={cn(className, "scale-125")} {...props} />;
+}
+
 export default function AppSidebar() {
 	const pathname = useLocation({ select: (l) => l.pathname });
 	const search = useLocation({ select: (l) => l.searchStr ?? "" });
@@ -542,6 +589,8 @@ export default function AppSidebar() {
 	const hasDashboardAccess = useRbac(RbacResource.Dashboard, RbacOperation.View);
 	const hasModelProvidersAccess = useRbac(RbacResource.ModelProvider, RbacOperation.View);
 	const hasMCPGatewayAccess = useRbac(RbacResource.MCPGateway, RbacOperation.View);
+	const hasAgentGatewayAccess = useRbac(RbacResource.AgentGateway, RbacOperation.View);
+	const hasAgentLogsAccess = useRbac(RbacResource.AgentLogs, RbacOperation.View);
 	const hasVirtualMCPsAccess = useRbac(RbacResource.VirtualMCPs, RbacOperation.View);
 	const hasMCPLogsAccess = useRbac(RbacResource.MCPLogs, RbacOperation.View);
 	const hasPluginsAccess = useRbac(RbacResource.Plugins, RbacOperation.View);
@@ -550,7 +599,7 @@ export default function AppSidebar() {
 	const hasAuditLogsAccess = useRbac(RbacResource.AuditLogs, RbacOperation.View);
 	const hasCustomersAccess = useRbac(RbacResource.Customers, RbacOperation.View);
 	const hasTeamsAccess = useRbac(RbacResource.Teams, RbacOperation.View);
-	const hasBusinessUnitsAccess = useRbac(RbacResource.UserProvisioning, RbacOperation.View);
+	const hasBusinessUnitsAccess = useRbac(RbacResource.BusinessUnits, RbacOperation.View);
 	const hasRbacAccess = useRbac(RbacResource.RBAC, RbacOperation.View);
 	const hasVirtualKeysAccess = useRbac(RbacResource.VirtualKeys, RbacOperation.View);
 	const hasGovernanceLegacyAccess = useRbac(RbacResource.Governance, RbacOperation.View);
@@ -562,6 +611,8 @@ export default function AppSidebar() {
 	const isAdaptiveRoutingAllowed = useRbac(RbacResource.AdaptiveRouter, RbacOperation.View);
 	const hasSettingsAccess = useRbac(RbacResource.Settings, RbacOperation.View);
 	const hasFeatureFlagsAccess = useRbac(RbacResource.FeatureFlags, RbacOperation.View);
+	const isWarpEnabled = useFeatureFlag(FEATURE_FLAGS.warp);
+	const hasWarpAccess = useRbac(RbacResource.Warp, RbacOperation.View);
 	const hasAPIKeyAccess = useRbac(RbacResource.APIKeys, RbacOperation.View);
 	const hasPromptRepositoryAccess = useRbac(RbacResource.PromptRepository, RbacOperation.View);
 	const hasSkillsRepositoryAccess = useRbac(RbacResource.SkillsRepository, RbacOperation.View);
@@ -582,6 +633,10 @@ export default function AppSidebar() {
 		hasProjectsAccess ||
 		hasGovernanceLegacyAccess;
 	const { data: coreConfig } = useGetCoreConfigQuery({});
+	// OSS setup lock: true while dashboard auth is not configured, so management APIs
+	// accept only the setup token. Drives the non-dismissible setup card below.
+	const { data: authState } = useIsAuthEnabledQuery(undefined, { skip: IS_ENTERPRISE });
+	const setupRequired = !IS_ENTERPRISE && !!authState?.setup_required;
 	const isDbConnected = coreConfig?.is_db_connected ?? false;
 	const envLabel = coreConfig?.env_label ?? null;
 
@@ -611,12 +666,24 @@ export default function AppSidebar() {
 
 	const items = useMemo(
 		() => [
+			...(IS_ENTERPRISE
+				? [
+						{
+							title: "Home",
+							url: "/workspace/home",
+							icon: House,
+							description: "Your usage, keys, budgets and access",
+							hasAccess: true,
+						},
+					]
+				: []),
 			{
 				title: "Observability",
 				url: "/workspace/logs",
 				icon: Telescope,
 				description: "Request logs & monitoring",
-				hasAccess: hasLogsAccess,
+				hasAccess:
+					hasLogsAccess || hasDashboardAccess || hasMCPLogsAccess || hasAgentLogsAccess || hasObservabilityAccess || hasSettingsAccess,
 				subItems: [
 					{
 						title: "Dashboard",
@@ -638,6 +705,13 @@ export default function AppSidebar() {
 						icon: MCPIcon,
 						description: "MCP tool execution logs",
 						hasAccess: hasMCPLogsAccess,
+					},
+					{
+						title: "Agent Logs",
+						url: "/workspace/agent-logs",
+						icon: Bot,
+						description: "Agent request logs",
+						hasAccess: hasAgentLogsAccess,
 					},
 					{
 						title: "Connectors",
@@ -721,7 +795,8 @@ export default function AppSidebar() {
 				],
 			},
 			{
-				title: "MCP Gateway",
+				title: "MCP Servers",
+				testId: "mcp-gateway", // keep the pre-rename E2E selector stable
 				icon: MCPIcon,
 				description: "MCP configuration",
 				url: "/workspace/mcp-gateway",
@@ -769,6 +844,37 @@ export default function AppSidebar() {
 						icon: Settings,
 						description: "MCP configuration",
 						hasAccess: hasMCPGatewayAccess,
+					},
+				],
+			},
+			{
+				title: "Agents",
+				url: "/workspace/agent-gateway",
+				icon: Bot,
+				description: "Register and manage A2A agents",
+				hasAccess: hasAgentGatewayAccess,
+				new: true,
+				subItems: [
+					{
+						title: "Agent Catalog",
+						url: "/workspace/agent-gateway",
+						icon: LayoutGrid,
+						description: "Registered A2A agents",
+						hasAccess: hasAgentGatewayAccess,
+					},
+					{
+						title: "Push Configurations",
+						url: "/workspace/agent-gateway/push-configs",
+						icon: Webhook,
+						description: "Stored A2A push callbacks",
+						hasAccess: hasAgentGatewayAccess,
+					},
+					{
+						title: "Agent Settings",
+						url: "/workspace/config/agent-gateway",
+						icon: Settings,
+						description: "Agent Gateway configuration",
+						hasAccess: hasSettingsAccess,
 					},
 				],
 			},
@@ -822,6 +928,15 @@ export default function AppSidebar() {
 						icon: KeyRound,
 						description: "Manage virtual keys & access",
 						hasAccess: hasVirtualKeysAccess,
+					},
+					{
+						title: "Org Chart",
+						url: "/workspace/governance/org-chart",
+						icon: Network,
+						description: "Budgets and usage across business units, teams and users",
+						// The chart is read from business units down, so it follows the Business Units entry.
+						hasAccess: hasBusinessUnitsAccess,
+						new: true,
 					},
 					{
 						title: "Users",
@@ -909,6 +1024,13 @@ export default function AppSidebar() {
 						description: "Guardrail providers configuration",
 						hasAccess: hasGuardrailsProvidersAccess,
 					},
+					{
+						title: "Incidents",
+						url: "/workspace/guardrails/incidents",
+						icon: TriangleAlert,
+						description: "Requests blocked or flagged by guardrails",
+						hasAccess: hasGuardrailsConfigAccess && hasLogsAccess,
+					},
 				],
 			},
 			{
@@ -949,11 +1071,42 @@ export default function AppSidebar() {
 				],
 			},
 			{
-				title: "Cluster Config",
+				title: "Cluster",
 				url: "/workspace/cluster",
 				icon: Network,
-				description: "Manage Bifrost cluster",
+				description: "Monitor the Bifrost cluster",
 				hasAccess: hasClusterConfigAccess,
+				subItems: [
+					{
+						title: "Nodes",
+						url: "/workspace/cluster/overview",
+						icon: Server,
+						description: "Node health, CPU, memory and request rate",
+						hasAccess: hasClusterConfigAccess,
+					},
+					{
+						title: "Storage",
+						url: "/workspace/cluster/storage",
+						icon: Database,
+						description: "Config and logs store databases, pools and slow queries",
+						hasAccess: hasClusterConfigAccess,
+					},
+					{
+						title: "Incidents",
+						url: "/workspace/cluster/incidents",
+						icon: TriangleAlert,
+						description: "Memory, message delivery and database incidents",
+						hasAccess: hasClusterConfigAccess,
+					},
+					{
+						title: "Settings",
+						url: "/workspace/cluster/settings",
+						icon: Settings2Icon,
+						description: "Monitoring, sample retention and memory threshold",
+						// The settings API sits under the Settings resource; saving also needs Settings update.
+						hasAccess: hasClusterConfigAccess && hasSettingsAccess,
+					},
+				],
 			},
 			{
 				title: "Adaptive Routing",
@@ -967,6 +1120,13 @@ export default function AppSidebar() {
 						url: "/workspace/adaptive-routing",
 						icon: ChartColumnBig,
 						description: "Adaptive routing metrics",
+						hasAccess: isAdaptiveRoutingAllowed,
+					},
+					{
+						title: "Incidents",
+						url: "/workspace/adaptive-routing/incidents",
+						icon: TriangleAlert,
+						description: "Adaptive routing incidents",
 						hasAccess: isAdaptiveRoutingAllowed,
 					},
 					{
@@ -988,11 +1148,27 @@ export default function AppSidebar() {
 							hasAccess: hasPromptRepositoryAccess,
 						},
 						{
-							title: "Skills Repository",
+							title: "Skills",
 							url: "/workspace/skills-repo",
 							icon: BookOpenText,
-							description: "Skills repository",
-							hasAccess: hasSkillsRepositoryAccess,
+							description: "Manage skills and marketplace settings",
+							hasAccess: hasSkillsRepositoryAccess || hasSettingsAccess,
+							subItems: [
+								{
+									title: "Skills Repository",
+									url: "/workspace/skills-repo",
+									icon: BookOpenText,
+									description: "Skills repository",
+									hasAccess: hasSkillsRepositoryAccess,
+								},
+								{
+									title: "Skills Settings",
+									url: "/workspace/config/skills",
+									icon: Settings,
+									description: "Skills marketplace configuration",
+									hasAccess: hasSettingsAccess,
+								},
+							],
 						},
 					]
 				: []),
@@ -1001,7 +1177,7 @@ export default function AppSidebar() {
 				url: "/workspace/config",
 				icon: Settings2Icon,
 				description: "Bifrost settings",
-				hasAccess: hasSettingsAccess || hasAuditLogsAccess || hasUserProvisioningAccess,
+				hasAccess: hasSettingsAccess || hasAuditLogsAccess || hasUserProvisioningAccess || (hasWarpAccess && isWarpEnabled),
 				subItems: [
 					{
 						title: "Client Settings",
@@ -1030,6 +1206,13 @@ export default function AppSidebar() {
 						icon: ShieldCheck,
 						description: "Security settings",
 						hasAccess: hasSettingsAccess,
+					},
+					{
+						title: "Warp",
+						url: "/workspace/config/warp",
+						icon: WarpNavIcon,
+						description: "Warp agent configuration",
+						hasAccess: hasWarpAccess && isWarpEnabled,
 					},
 					...(IS_ENTERPRISE
 						? [
@@ -1092,6 +1275,8 @@ export default function AppSidebar() {
 			hasDashboardAccess,
 			hasModelProvidersAccess,
 			hasMCPGatewayAccess,
+			hasAgentGatewayAccess,
+			hasAgentLogsAccess,
 			hasVirtualMCPsAccess,
 			hasMCPLogsAccess,
 			hasPluginsAccess,
@@ -1117,6 +1302,8 @@ export default function AppSidebar() {
 			hasAccessProfilesAccess,
 			hasProjectsAccess,
 			hasFeatureFlagsAccess,
+			isWarpEnabled,
+			hasWarpAccess,
 			hasDevicesAccess,
 			hasInventoryAccess,
 			hasEdgeConfigAccess,
@@ -1178,7 +1365,8 @@ export default function AppSidebar() {
 	useEffect(() => {
 		const newExpandedItems = new Set<string>();
 		const isRouteMatch = (url: string) => {
-			if (url === "/workspace/custom-pricing" || url === "/workspace/adaptive-routing") return pathname === url;
+			if (url === "/workspace/custom-pricing" || url === "/workspace/adaptive-routing" || url === "/workspace/agent-gateway")
+				return pathname === url;
 			return pathname.startsWith(url);
 		};
 		items.forEach((item) => {
@@ -1314,7 +1502,7 @@ export default function AppSidebar() {
 		});
 	};
 
-	const configExceptions = ["/workspace/config/logging"];
+	const configExceptions = ["/workspace/config/logging", "/workspace/config/skills"];
 
 	const isActiveRoute = (url: string) => {
 		if (url === "/" && pathname === "/") return true;
@@ -1342,6 +1530,38 @@ export default function AppSidebar() {
 	// Memoize promo cards array to prevent duplicates and unnecessary re-renders
 	const promoCards = useMemo(() => {
 		const cards = [];
+		// OSS setup lock card - non-dismissible, shown first: until an admin account
+		// exists, management APIs run on the operator's setup token.
+		if (setupRequired) {
+			cards.push({
+				id: "setup-required",
+				title: "Dashboard auth not configured",
+				description: (
+					<div className="flex h-full flex-col gap-2 text-xs text-amber-700 dark:text-amber-300/80" data-testid="setup-required-banner">
+						<p>
+							All management APIs accept the setup token in the <code className="font-semibold">X-Bifrost-Setup-Token</code> header until
+							you create an admin account.
+						</p>
+						<div className="mt-auto flex items-center gap-3 pb-1">
+							<Link to="/workspace/config/security" className="text-primary font-medium underline" data-testid="setup-required-banner-link">
+								Create admin
+							</Link>
+							<a
+								href="https://docs.getbifrost.ai/quickstart/gateway/setting-up-auth"
+								target="_blank"
+								rel="noopener noreferrer"
+								className="text-primary font-medium underline"
+								data-testid="setup-required-banner-docs-link"
+							>
+								Docs
+							</a>
+						</div>
+					</div>
+				),
+				dismissible: false,
+				variant: "warning" as const,
+			});
+		}
 		// Restart required card - non-dismissible, shown first
 		if (coreConfig?.restart_required?.required) {
 			cards.push({
@@ -1409,6 +1629,7 @@ export default function AppSidebar() {
 		}
 		return cards;
 	}, [
+		setupRequired,
 		coreConfig?.restart_required,
 		showNewReleaseBanner,
 		latestRelease,
@@ -1474,12 +1695,14 @@ export default function AppSidebar() {
 					</button>
 				</div>
 				{/* Collapsed state: vertical layout */}
-				<div
+				<button
+					type="button"
 					className="hidden w-full cursor-pointer flex-col items-center gap-2 py-1 group-data-[collapsible=icon]:flex"
+					aria-label="Expand sidebar"
 					onClick={toggleSidebar}
 				>
-					<img className="size-[22px] object-contain" src={iconSrc} alt={logoAlt} width={22} height={22} />
-				</div>
+					<img className="size-[22px] object-contain" src={iconSrc} alt="" width={22} height={22} />
+				</button>
 			</SidebarHeader>
 			{envLabel && (
 				<div className="mx-2 -mt-1 mb-2">

@@ -1,13 +1,13 @@
 package handlers
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/fasthttp/router"
@@ -15,8 +15,10 @@ import (
 	"github.com/maximhq/bifrost/framework/configstore"
 	configstoreTables "github.com/maximhq/bifrost/framework/configstore/tables"
 	"github.com/maximhq/bifrost/framework/plugins"
-	"github.com/maximhq/bifrost/transports/bifrost-http/lib"
+	"github.com/maximhq/bifrost/framework/vectorstore"
+	"github.com/maximhq/bifrost/transports/v2/bifrost-http/lib"
 	"github.com/valyala/fasthttp"
+	"gorm.io/gorm"
 )
 
 type PluginsLoader interface {
@@ -38,29 +40,18 @@ type PluginsLoader interface {
 type PluginsHandler struct {
 	configStore   configstore.ConfigStore
 	pluginsLoader PluginsLoader
-	mutationMu    sync.Mutex
+	pluginLocks   sync.Map // plugin name -> *sync.Mutex, see lockPlugin
 }
 
-// PluginConfigurationError marks activation failures caused while constructing a
-// plugin from administrator-supplied configuration. Runtime synchronization errors
-// deliberately remain untyped and are reported as server failures after rollback.
-type PluginConfigurationError struct {
-	Err error
-}
-
-func (e *PluginConfigurationError) Error() string { return e.Err.Error() }
-func (e *PluginConfigurationError) Unwrap() error { return e.Err }
-
-type bestEffortPluginsStore interface {
-	GetPluginsBestEffort(ctx context.Context) ([]*configstoreTables.TablePlugin, map[string]error, error)
-}
-
-type directPluginDeleteStore interface {
-	DeletePluginDirect(ctx context.Context, name string) error
-}
-
-type directPluginRecordStore interface {
-	PluginRecordExistsDirect(ctx context.Context, name string) (bool, error)
+// lockPlugin serializes the saves of one plugin and returns the unlock. A save writes the row,
+// loads the plugin and, when the load fails, restores the row it found; another save of the same
+// plugin landing in between would have its saved config overwritten by that restore. The lock
+// covers this process only: gateways sharing one config store can still interleave.
+func (h *PluginsHandler) lockPlugin(name string) func() {
+	lock, _ := h.pluginLocks.LoadOrStore(name, &sync.Mutex{})
+	mu := lock.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
 }
 
 // NewPluginsHandler creates a new PluginsHandler
@@ -107,91 +98,15 @@ func (h *PluginsHandler) normalizePluginConfig(name string, config map[string]an
 // expandPluginConfigForAPI calls the loaded plugin's RedactConfig if it implements
 // ConfigMarshallerPlugin. Returns config unchanged if the plugin is not loaded or
 // does not implement the interface. Returns an error if redaction fails.
-func (h *PluginsHandler) expandPluginConfigForAPI(name string, config map[string]any) (result map[string]any, err error) {
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			result = nil
-			err = fmt.Errorf("plugin config redaction panicked")
-		}
-	}()
-
+func (h *PluginsHandler) expandPluginConfigForAPI(name string, config map[string]any) (map[string]any, error) {
 	out, err := h.pluginsLoader.ExpandPluginConfigForAPI(name, config)
 	if err != nil {
 		return nil, err
 	}
-	result = config
 	if out != nil {
-		result = out
+		return out, nil
 	}
-	encoded, err := json.Marshal(result)
-	if err != nil {
-		return nil, fmt.Errorf("plugin config redaction returned invalid JSON: %w", err)
-	}
-	// Decode the validated bytes back to plain JSON values. A custom json.Marshaler
-	// supplied by a plugin must not run a second time inside SendJSON.
-	var safeResult map[string]any
-	decoder := json.NewDecoder(bytes.NewReader(encoded))
-	decoder.UseNumber()
-	if err := decoder.Decode(&safeResult); err != nil {
-		return nil, fmt.Errorf("plugin config redaction returned invalid JSON: %w", err)
-	}
-	return safeResult, nil
-}
-
-func (h *PluginsHandler) pluginRecordExists(ctx context.Context, name string) (bool, error) {
-	if store, ok := h.configStore.(directPluginRecordStore); ok {
-		return store.PluginRecordExistsDirect(ctx, name)
-	}
-	if _, err := h.configStore.GetPlugin(ctx, name); err != nil {
-		if errors.Is(err, configstore.ErrNotFound) {
-			return false, nil
-		}
-		return false, err
-	}
-	return true, nil
-}
-
-func (h *PluginsHandler) deletePluginRecord(ctx context.Context, name string) error {
-	if store, ok := h.configStore.(directPluginDeleteStore); ok {
-		return store.DeletePluginDirect(ctx, name)
-	}
-	return h.configStore.DeletePlugin(ctx, name)
-}
-
-func (h *PluginsHandler) removePluginRuntime(ctx context.Context, name string) error {
-	if err := h.pluginsLoader.RemovePlugin(ctx, name); err != nil && !errors.Is(err, plugins.ErrPluginNotFound) {
-		return err
-	}
-	return nil
-}
-
-func (h *PluginsHandler) rollbackPluginChange(ctx *fasthttp.RequestCtx, name string, previous *configstoreTables.TablePlugin) error {
-	var rollbackErrors []error
-	if previous == nil {
-		if err := h.removePluginRuntime(ctx, name); err != nil {
-			// Keep the persisted row so a later DELETE can retry runtime cleanup.
-			return fmt.Errorf("remove candidate runtime: %w", err)
-		}
-		if err := h.deletePluginRecord(ctx, name); err != nil && !errors.Is(err, configstore.ErrNotFound) {
-			rollbackErrors = append(rollbackErrors, fmt.Errorf("delete candidate config: %w", err))
-		}
-		return errors.Join(rollbackErrors...)
-	}
-
-	if err := h.configStore.UpdatePlugin(ctx, previous); err != nil {
-		rollbackErrors = append(rollbackErrors, fmt.Errorf("restore previous config: %w", err))
-	}
-	if previous.Enabled {
-		if err := h.pluginsLoader.ReloadPlugin(ctx, previous.Name, previous.Path, previous.Config, previous.Placement, previous.Order); err != nil {
-			rollbackErrors = append(rollbackErrors, fmt.Errorf("restore previous runtime: %w", err))
-		}
-	} else {
-		ctx.SetUserValue(PluginDisabledKey, true)
-		if err := h.removePluginRuntime(ctx, previous.Name); err != nil {
-			rollbackErrors = append(rollbackErrors, fmt.Errorf("restore disabled runtime: %w", err))
-		}
-	}
-	return errors.Join(rollbackErrors...)
+	return config, nil
 }
 
 // RegisterRoutes registers the routes for the PluginsHandler
@@ -206,54 +121,15 @@ func (h *PluginsHandler) RegisterRoutes(r *router.Router, middlewares ...schemas
 }
 
 type PluginResponse struct {
-	Name          string                   `json:"name"`
-	ActualName    string                   `json:"actualName"`
-	Enabled       bool                     `json:"enabled"`
-	Config        any                      `json:"config"`
-	IsCustom      bool                     `json:"isCustom"`
-	Path          *string                  `json:"path"`
-	Placement     *schemas.PluginPlacement `json:"placement,omitempty"`
-	Order         *int                     `json:"order,omitempty"`
-	Description   string                   `json:"description,omitempty"`
-	DescriptionZh string                   `json:"descriptionZh,omitempty"`
-	Features      []string                 `json:"features,omitempty"`
-	Status        schemas.PluginStatus     `json:"status"`
-}
-
-func pluginMetadataForResponse(actualName string, status schemas.PluginStatus) schemas.PluginMetadata {
-	for _, name := range []string{actualName, status.Name} {
-		metadata := lib.GetBuiltinPluginMetadata(name)
-		if metadata.Description != "" || metadata.DescriptionZh != "" || len(metadata.Features) > 0 {
-			return metadata
-		}
-	}
-	return schemas.PluginMetadata{
-		Description:   status.Description,
-		DescriptionZh: status.DescriptionZh,
-		Features:      slices.Clone(status.Features),
-	}
-}
-
-// buildRuntimePluginResponse constructs a response for plugins that are known to
-// the running server but do not have a persisted config-store row.
-func buildRuntimePluginResponse(actualName string, status schemas.PluginStatus) PluginResponse {
-	name := status.Name
-	if name == "" {
-		name = actualName
-	}
-	metadata := pluginMetadataForResponse(actualName, status)
-	return PluginResponse{
-		Name:          name,
-		ActualName:    actualName,
-		Enabled:       status.Status != schemas.PluginStatusDisabled,
-		Config:        map[string]any{},
-		IsCustom:      !lib.IsBuiltinPlugin(actualName),
-		Path:          nil,
-		Description:   metadata.Description,
-		DescriptionZh: metadata.DescriptionZh,
-		Features:      slices.Clone(metadata.Features),
-		Status:        status,
-	}
+	Name       string                   `json:"name"`
+	ActualName string                   `json:"actualName"`
+	Enabled    bool                     `json:"enabled"`
+	Config     any                      `json:"config"`
+	IsCustom   bool                     `json:"isCustom"`
+	Path       *string                  `json:"path"`
+	Placement  *schemas.PluginPlacement `json:"placement,omitempty"`
+	Order      *int                     `json:"order,omitempty"`
+	Status     schemas.PluginStatus     `json:"status"`
 }
 
 // buildPluginResponse constructs a PluginResponse, fetching plugin statuses once.
@@ -269,15 +145,18 @@ func (h *PluginsHandler) buildPluginResponseWithStatuses(plugin *configstoreTabl
 		Status: schemas.PluginStatusUninitialized,
 		Logs:   []string{},
 	}
-	actualName := plugin.Name
-	for candidateActualName, status := range pluginStatuses {
-		if plugin.Name == status.Name || plugin.Name == candidateActualName {
-			actualName = candidateActualName
+	// Report the runtime status even when the row says disabled, so a plugin that
+	// loaded against its row shows as enabled=false/status=active instead of being
+	// masked as disabled. Absent from the runtime set means it really is not loaded.
+	loaded := false
+	for _, status := range pluginStatuses {
+		if plugin.Name == status.Name {
 			pluginStatus = status
+			loaded = true
 			break
 		}
 	}
-	if !plugin.Enabled {
+	if !loaded && !plugin.Enabled {
 		pluginStatus.Status = schemas.PluginStatusDisabled
 	}
 	config := plugin.Config
@@ -290,20 +169,16 @@ func (h *PluginsHandler) buildPluginResponseWithStatuses(plugin *configstoreTabl
 			config = redacted
 		}
 	}
-	metadata := pluginMetadataForResponse(actualName, pluginStatus)
 	return PluginResponse{
-		Name:          plugin.Name,
-		ActualName:    actualName,
-		Enabled:       plugin.Enabled,
-		Config:        config,
-		IsCustom:      plugin.IsCustom,
-		Path:          plugin.Path,
-		Placement:     plugin.Placement,
-		Order:         plugin.Order,
-		Description:   metadata.Description,
-		DescriptionZh: metadata.DescriptionZh,
-		Features:      slices.Clone(metadata.Features),
-		Status:        pluginStatus,
+		Name:       plugin.Name,
+		ActualName: pluginStatus.Name,
+		Enabled:    plugin.Enabled,
+		Config:     config,
+		IsCustom:   plugin.IsCustom,
+		Path:       plugin.Path,
+		Placement:  plugin.Placement,
+		Order:      plugin.Order,
+		Status:     pluginStatus,
 	}
 }
 
@@ -327,13 +202,16 @@ func (h *PluginsHandler) getPlugins(ctx *fasthttp.RequestCtx) {
 	if h.configStore == nil {
 		pluginStatus := h.pluginsLoader.GetPluginStatus(ctx)
 		finalPlugins := []PluginResponse{}
-		names := make([]string, 0, len(pluginStatus))
-		for name := range pluginStatus {
-			names = append(names, name)
-		}
-		slices.Sort(names)
-		for _, name := range names {
-			finalPlugins = append(finalPlugins, buildRuntimePluginResponse(name, pluginStatus[name]))
+		for name, pluginStatus := range pluginStatus {
+			finalPlugins = append(finalPlugins, PluginResponse{
+				Name:       pluginStatus.Name,
+				ActualName: name,
+				Enabled:    true,
+				Config:     map[string]any{},
+				IsCustom:   true,
+				Path:       nil,
+				Status:     pluginStatus,
+			})
 		}
 		SendJSON(ctx, map[string]any{
 			"plugins": finalPlugins,
@@ -341,13 +219,7 @@ func (h *PluginsHandler) getPlugins(ctx *fasthttp.RequestCtx) {
 		})
 		return
 	}
-	plugins, diagnostics, err := func() ([]*configstoreTables.TablePlugin, map[string]error, error) {
-		if store, ok := h.configStore.(bestEffortPluginsStore); ok {
-			return store.GetPluginsBestEffort(ctx)
-		}
-		plugins, err := h.configStore.GetPlugins(ctx)
-		return plugins, nil, err
-	}()
+	plugins, err := h.configStore.GetPlugins(ctx)
 	if err != nil {
 		logger.Error("failed to get plugins: %v", err)
 		SendError(ctx, 500, "Failed to retrieve plugins")
@@ -355,34 +227,8 @@ func (h *PluginsHandler) getPlugins(ctx *fasthttp.RequestCtx) {
 	}
 	pluginStatuses := h.pluginsLoader.GetPluginStatus(ctx)
 	finalPlugins := []PluginResponse{}
-	seen := map[string]struct{}{}
 	for _, plugin := range plugins {
-		response := h.buildPluginResponseWithStatuses(plugin, pluginStatuses)
-		if diagnostics[plugin.Name] != nil {
-			response.Config = map[string]any{}
-			response.Status.Status = schemas.PluginStatusError
-			response.Status.Logs = append(response.Status.Logs, "Stored plugin configuration is unreadable. Delete and recreate this plugin configuration.")
-		}
-		finalPlugins = append(finalPlugins, response)
-		seen[plugin.Name] = struct{}{}
-	}
-	statusNames := make([]string, 0, len(pluginStatuses))
-	for actualName, pluginStatus := range pluginStatuses {
-		displayName := pluginStatus.Name
-		if displayName == "" {
-			displayName = actualName
-		}
-		if _, ok := seen[displayName]; ok {
-			continue
-		}
-		if _, ok := seen[actualName]; ok {
-			continue
-		}
-		statusNames = append(statusNames, actualName)
-	}
-	slices.Sort(statusNames)
-	for _, actualName := range statusNames {
-		finalPlugins = append(finalPlugins, buildRuntimePluginResponse(actualName, pluginStatuses[actualName]))
+		finalPlugins = append(finalPlugins, h.buildPluginResponseWithStatuses(plugin, pluginStatuses))
 	}
 	// Creating ephemeral struct
 	SendJSON(ctx, map[string]any{
@@ -396,9 +242,17 @@ func (h *PluginsHandler) getPlugin(ctx *fasthttp.RequestCtx) {
 	if h.configStore == nil {
 		pluginStatus := h.pluginsLoader.GetPluginStatus(ctx)
 		pluginInfo := PluginResponse{}
-		for actualName, status := range pluginStatus {
-			if status.Name == ctx.UserValue("name") || actualName == ctx.UserValue("name") {
-				pluginInfo = buildRuntimePluginResponse(actualName, status)
+		for name, pluginStatus := range pluginStatus {
+			if pluginStatus.Name == ctx.UserValue("name") {
+				pluginInfo = PluginResponse{
+					Name:       pluginStatus.Name,
+					ActualName: name,
+					Enabled:    true,
+					Config:     map[string]any{},
+					IsCustom:   true,
+					Path:       nil,
+					Status:     pluginStatus,
+				}
 				break
 			}
 		}
@@ -448,8 +302,6 @@ func (h *PluginsHandler) createPlugin(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, 400, "Plugins creation is  not supported when configstore is disabled")
 		return
 	}
-	h.mutationMu.Lock()
-	defer h.mutationMu.Unlock()
 	var request CreatePluginRequest
 	if err := json.Unmarshal(ctx.PostBody(), &request); err != nil {
 		logger.Error("failed to unmarshal create plugin request: %v", err)
@@ -475,6 +327,7 @@ func (h *PluginsHandler) createPlugin(ctx *fasthttp.RequestCtx) {
 	if request.Path != nil && *request.Path == "" {
 		request.Path = nil
 	}
+	defer h.lockPlugin(request.Name)()
 	// Check if plugin already exists
 	existingPlugin, err := h.configStore.GetPlugin(ctx, request.Name)
 	if err == nil && existingPlugin != nil {
@@ -504,6 +357,9 @@ func (h *PluginsHandler) createPlugin(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, fasthttp.StatusBadRequest, fmt.Sprintf("Invalid plugin configuration: %v", err))
 		return
 	}
+	if requireGenuineAuthForPluginConfigChange(ctx, nil, normalizedConfig) {
+		return
+	}
 	// Create DB entry first to avoid orphaned in-memory state if DB write fails
 	if err := h.configStore.CreatePlugin(ctx, &configstoreTables.TablePlugin{
 		Name:      request.Name,
@@ -523,17 +379,10 @@ func (h *PluginsHandler) createPlugin(ctx *fasthttp.RequestCtx) {
 	if request.Enabled {
 		if err := h.pluginsLoader.ReloadPlugin(ctx, request.Name, request.Path, normalizedConfig, request.Placement, request.Order); err != nil {
 			logger.Error("failed to load plugin: %v", err)
-			if rollbackErr := h.rollbackPluginChange(ctx, request.Name, nil); rollbackErr != nil {
-				logger.Error("failed to rollback plugin creation after load error %v: %v", err, rollbackErr)
-				SendError(ctx, fasthttp.StatusInternalServerError, "Plugin initialization failed and automatic rollback was incomplete; inspect the plugin status before retrying")
-				return
+			if rbErr := h.configStore.DeletePlugin(ctx, request.Name); rbErr != nil {
+				logger.Error("failed to rollback plugin creation: %v", rbErr)
 			}
-			var configurationError *PluginConfigurationError
-			if errors.As(err, &configurationError) {
-				SendError(ctx, fasthttp.StatusUnprocessableEntity, fmt.Sprintf("Invalid plugin configuration; no changes were applied: %v", err))
-			} else {
-				SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("Plugin activation failed; the candidate was rolled back: %v", err))
-			}
+			SendError(ctx, pluginLoadFailureStatus(err), fmt.Sprintf("Plugin was not created, it failed to load: %v", err))
 			return
 		}
 	}
@@ -558,8 +407,6 @@ func (h *PluginsHandler) updatePlugin(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, 400, "Plugins update is not supported when configstore is disabled")
 		return
 	}
-	h.mutationMu.Lock()
-	defer h.mutationMu.Unlock()
 	// Safely validate the "name" parameter
 	nameValue := ctx.UserValue("name")
 	if nameValue == nil {
@@ -580,6 +427,24 @@ func (h *PluginsHandler) updatePlugin(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, 400, "Empty 'name' parameter not allowed")
 		return
 	}
+	defer h.lockPlugin(name)()
+	var plugin *configstoreTables.TablePlugin
+	var err error
+	// Fetch the existing plugin to enable config merging below.
+	var existingPlugin *configstoreTables.TablePlugin
+	existingPlugin, err = h.configStore.GetPlugin(ctx, name)
+	// A plugin with no row is created, but only once the request has been read, validated and
+	// admitted below: a refused or malformed update must leave nothing behind.
+	missing := false
+	if err != nil {
+		if !errors.Is(err, configstore.ErrNotFound) {
+			logger.Error("failed to get plugin: %v", err)
+			SendError(ctx, 500, "Failed to update plugin")
+			return
+		}
+		missing = true
+	}
+
 	// Unmarshalling the request body
 	var request UpdatePluginRequest
 	if err := json.Unmarshal(ctx.PostBody(), &request); err != nil {
@@ -616,21 +481,6 @@ func (h *PluginsHandler) updatePlugin(ctx *fasthttp.RequestCtx) {
 			return
 		}
 	}
-
-	// Fetch the previous row only after the complete request has been parsed and
-	// validated. UpdatePlugin already supports an absent row, so a rejected request
-	// must never leave an empty placeholder behind.
-	existingPlugin, err := h.configStore.GetPlugin(ctx, name)
-	if err != nil {
-		if errors.Is(err, configstore.ErrNotFound) {
-			existingPlugin = nil
-		} else {
-			logger.Error("failed to get plugin: %v", err)
-			SendError(ctx, fasthttp.StatusInternalServerError, "Failed to update plugin")
-			return
-		}
-	}
-
 	// Merge incoming config over the existing DB config so fields unknown to the
 	// calling form (e.g. plugin_span_filter set by a separate UI sheet) are not wiped.
 	mergedConfig := request.Config
@@ -651,7 +501,38 @@ func (h *PluginsHandler) updatePlugin(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, fasthttp.StatusBadRequest, fmt.Sprintf("Invalid plugin configuration: %v", err))
 		return
 	}
-	candidate := &configstoreTables.TablePlugin{
+	var storedConfig map[string]any
+	if existingPlugin != nil {
+		storedConfig, _ = existingPlugin.Config.(map[string]any)
+	}
+	// The stored config is read the way the update was: a plugin provisioned through config.json
+	// is stored as written (for OTEL, possibly the legacy single-profile shape), while the update
+	// went through the plugin's normalization, so comparing the raw row would report an unchanged
+	// destination as moved. A stored config that does not normalize is compared as it is.
+	if len(storedConfig) > 0 {
+		if normalized, err := h.normalizePluginConfig(name, storedConfig); err == nil {
+			storedConfig = normalized
+		}
+	}
+	if requireGenuineAuthForPluginConfigChange(ctx, storedConfig, mergedConfig) {
+		return
+	}
+	if missing {
+		plugin = &configstoreTables.TablePlugin{
+			Name:     name,
+			Enabled:  false,
+			Config:   map[string]any{},
+			Path:     nil,
+			IsCustom: false,
+		}
+		if err := h.configStore.CreatePlugin(ctx, plugin); err != nil {
+			logger.Error("failed to create plugin: %v", err)
+			SendError(ctx, 500, "Failed to create plugin")
+			return
+		}
+	}
+	// Updating the plugin
+	if err := h.configStore.UpdatePlugin(ctx, &configstoreTables.TablePlugin{
 		Name:      name,
 		Enabled:   request.Enabled,
 		Config:    mergedConfig,
@@ -659,43 +540,79 @@ func (h *PluginsHandler) updatePlugin(ctx *fasthttp.RequestCtx) {
 		IsCustom:  !isBuiltin,
 		Placement: request.Placement,
 		Order:     request.Order,
-	}
-	if err := h.configStore.UpdatePlugin(ctx, candidate); err != nil {
+	}); err != nil {
 		logger.Error("failed to update plugin: %v", err)
 		SendError(ctx, 500, "Failed to update plugin")
 		return
 	}
-
-	// Activate only after persistence succeeds. Any activation failure restores both
-	// the previous row and the previous runtime so a bad candidate cannot poison the
-	// next list, edit, disable, or delete operation.
-	var runtimeErr error
-	if request.Enabled {
-		runtimeErr = h.pluginsLoader.ReloadPlugin(ctx, name, request.Path, mergedConfig, request.Placement, request.Order)
-	} else {
-		ctx.SetUserValue(PluginDisabledKey, true)
-		runtimeErr = h.removePluginRuntime(ctx, name)
-	}
-	if runtimeErr != nil {
-		logger.Error("failed to apply plugin runtime change: %v", runtimeErr)
-		if rollbackErr := h.rollbackPluginChange(ctx, name, existingPlugin); rollbackErr != nil {
-			logger.Error("failed to rollback plugin update after runtime error %v: %v", runtimeErr, rollbackErr)
-			SendError(ctx, fasthttp.StatusInternalServerError, "Plugin initialization failed and automatic rollback was incomplete; inspect the plugin status before retrying")
+	plugin, err = h.configStore.GetPlugin(ctx, name)
+	if err != nil {
+		if errors.Is(err, configstore.ErrNotFound) {
+			SendError(ctx, fasthttp.StatusNotFound, "Plugin not found")
 			return
 		}
-		var configurationError *PluginConfigurationError
-		if errors.As(runtimeErr, &configurationError) {
-			SendError(ctx, fasthttp.StatusUnprocessableEntity, fmt.Sprintf("Invalid plugin configuration; previous configuration was restored: %v", runtimeErr))
-		} else {
-			SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("Plugin activation failed; previous configuration was restored: %v", runtimeErr))
-		}
+		logger.Error("failed to get plugin: %v", err)
+		SendError(ctx, 500, "Failed to retrieve plugin")
 		return
+	}
+	// We reload the plugin if its enabled, otherwise we stop it
+	if request.Enabled {
+		if err := h.pluginsLoader.ReloadPlugin(ctx, name, request.Path, mergedConfig, request.Placement, request.Order); err != nil {
+			logger.Error("failed to load plugin: %v", err)
+			h.restorePluginRow(ctx, name, existingPlugin, err)
+			SendError(ctx, pluginLoadFailureStatus(err), fmt.Sprintf("Plugin update was not applied, it failed to load and the previous configuration was kept: %v", err))
+			return
+		}
+	} else {
+		ctx.SetUserValue(PluginDisabledKey, true)
+		if err := h.pluginsLoader.RemovePlugin(ctx, name); err != nil {
+			if !errors.Is(err, plugins.ErrPluginNotFound) {
+				SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("Plugin updated in database but failed to stop: %v", err))
+				return
+			}
+			// If not found then we don't need to do anything
+		}
 	}
 
 	SendJSON(ctx, map[string]interface{}{
 		"message": "Plugin updated successfully",
-		"plugin":  h.buildPluginResponse(ctx, candidate),
+		"plugin":  h.buildPluginResponse(ctx, plugin),
 	})
+}
+
+// pluginLoadFailureStatus is the status for a plugin that failed to load with the config it was
+// given: 400 when the config itself is what was refused (a config that fails validation, a vector
+// store namespace that already holds vectors of another size), 500 for anything else.
+func pluginLoadFailureStatus(err error) int {
+	if errors.Is(err, lib.ErrInvalidPluginConfig) || errors.Is(err, vectorstore.ErrDimensionMismatch) {
+		return fasthttp.StatusBadRequest
+	}
+	return fasthttp.StatusInternalServerError
+}
+
+// restorePluginRow puts the plugin's saved row back the way it was before an update that then
+// failed to load, so the saved config keeps describing the instance still running (the reload
+// leaves it in place). A row the update created itself is removed instead. When the restore fails
+// the saved config and the running plugin disagree until the next successful save, so it is
+// logged as an error naming the plugin and both failures.
+func (h *PluginsHandler) restorePluginRow(ctx context.Context, name string, previous *configstoreTables.TablePlugin, loadErr error) {
+	var err error
+	if previous == nil {
+		err = h.configStore.DeletePlugin(ctx, name)
+	} else {
+		// UpdatePlugin reads a nil placement or order as "keep the current value", which would
+		// keep whatever the failed update set, so the previous row is written back whole.
+		restored := *previous
+		err = h.configStore.ExecuteTransaction(ctx, func(tx *gorm.DB) error {
+			if err := h.configStore.DeletePlugin(ctx, name, tx); err != nil {
+				return err
+			}
+			return h.configStore.CreatePlugin(ctx, &restored, tx)
+		})
+	}
+	if err != nil {
+		logger.Error("failed to restore plugin %s after a failed update, its saved config no longer matches the running instance: %v (update failed with: %v)", name, err, loadErr)
+	}
 }
 
 // deletePlugin deletes an existing plugin
@@ -704,8 +621,6 @@ func (h *PluginsHandler) deletePlugin(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, 400, "Plugins deletion is not supported when configstore is disabled")
 		return
 	}
-	h.mutationMu.Lock()
-	defer h.mutationMu.Unlock()
 	// Safely validate the "name" parameter
 	nameValue := ctx.UserValue("name")
 	if nameValue == nil {
@@ -726,30 +641,234 @@ func (h *PluginsHandler) deletePlugin(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, 400, "Empty 'name' parameter not allowed")
 		return
 	}
+	defer h.lockPlugin(name)()
 
-	exists, err := h.pluginRecordExists(ctx, name)
-	if err != nil {
-		logger.Error("failed to inspect plugin before delete: %v", err)
-		SendError(ctx, fasthttp.StatusInternalServerError, "Failed to inspect stored plugin configuration")
-		return
-	}
-	if !exists {
-		SendError(ctx, fasthttp.StatusNotFound, "Plugin not found")
+	if err := h.configStore.DeletePlugin(ctx, name); err != nil {
+		if errors.Is(err, configstore.ErrNotFound) {
+			SendError(ctx, fasthttp.StatusNotFound, "Plugin not found")
+			return
+		}
+		logger.Error("failed to delete plugin: %v", err)
+		SendError(ctx, 500, "Failed to delete plugin")
 		return
 	}
 
-	if err := h.removePluginRuntime(ctx, name); err != nil {
-		SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("Plugin runtime could not be stopped; no stored configuration was deleted: %v", err))
-		return
-	}
-	if err := h.deletePluginRecord(ctx, name); err != nil && !errors.Is(err, configstore.ErrNotFound) {
-		logger.Error("failed to delete plugin after stopping runtime: %v", err)
-		SendError(ctx, 500, "Plugin runtime was stopped but its stored configuration could not be deleted; retry the delete operation")
-		return
+	if err := h.pluginsLoader.RemovePlugin(ctx, name); err != nil {
+		if !errors.Is(err, plugins.ErrPluginNotFound) {
+			SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("Plugin deleted in database but failed to stop: %v", err))
+			return
+		}
 	}
 	SendJSON(ctx, map[string]interface{}{
 		"message": "Plugin deleted successfully",
 	})
+}
+
+// pluginEndpointKeys are plugin config keys whose string value is a host the plugin dials with
+// what the rest of its config tells it to send: the OTEL collector and metrics endpoints, the
+// telemetry push gateway, and the generic names a future plugin is likely to use.
+var pluginEndpointKeys = map[string]bool{
+	"collector_url":    true,
+	"metrics_endpoint": true,
+	"push_gateway_url": true,
+	"endpoint":         true,
+	"url":              true,
+	"base_url":         true,
+}
+
+// isPluginEndpointKey reports key as a pluginEndpointKeys key, matched the way the typed plugin
+// loaders match JSON keys to fields: case-insensitively with Unicode case folding, as encoding/json
+// and sonic do, so PUSH_GATEWAY_URL sets the same field as push_gateway_url.
+func isPluginEndpointKey(key string) bool {
+	if pluginEndpointKeys[key] {
+		return true
+	}
+	for endpoint := range pluginEndpointKeys {
+		if strings.EqualFold(key, endpoint) {
+			return true
+		}
+	}
+	return false
+}
+
+// isSecretReference reports an env. or vault. reference by its prefix alone. The value is never
+// handed to NewSecretVar here, which would resolve it from the gateway's environment or vault.
+func isSecretReference(value string) bool {
+	return strings.HasPrefix(value, "env.") || strings.HasPrefix(value, "vault.")
+}
+
+// pluginConfigDialTargets flattens a plugin config into the values that decide where the plugin
+// sends data and what it sends: every env./vault. reference at any depth, keyed by its path, and
+// every non-empty value under a pluginEndpointKeys key. A loaded plugin's normalization turns
+// SecretVar objects into plain strings, but a plugin that is not loaded has no normalizer and its
+// config keeps them as objects ({"value": ...}, {"ref": "env.X"}, or the legacy
+// {"env_var": "X", "from_env": true}), which its loader still reads; such an object counts as
+// the string it stands for.
+func pluginConfigDialTargets(prefix string, value any, out map[string]string) {
+	switch v := value.(type) {
+	case map[string]any:
+		for key, item := range v {
+			path := key
+			if prefix != "" {
+				path = prefix + "." + key
+			}
+			// Any object can stand for a SecretVar: SecretVar.UnmarshalJSON reads ref, type, env_var
+			// and value and ignores other fields, so extra fields cannot hide a reference. An object
+			// made only of those fields may also be a plain map whose keys match them (an OTEL header
+			// named ref), so besides its target, each reference among its values that the target does
+			// not already account for is recorded under its own path; its fields are not walked again,
+			// so an unchanged reference written as an object is not reported as new. An object with
+			// other fields is walked below.
+			if object, ok := item.(map[string]any); ok {
+				target := secretVarObjectTarget(object, isPluginEndpointKey(key))
+				if target != "" {
+					out[path] = target
+				}
+				if isSecretVarFieldsOnly(object) {
+					for field, fieldValue := range object {
+						if ref, ok := fieldValue.(string); ok && isSecretReference(ref) && ref != target {
+							out[path+"."+field] = ref
+						}
+					}
+					continue
+				}
+			}
+			if s, ok := item.(string); ok && isPluginEndpointKey(key) && s != "" {
+				out[path] = s
+				continue
+			}
+			pluginConfigDialTargets(path, item, out)
+		}
+	case []any:
+		for i, item := range v {
+			pluginConfigDialTargets(fmt.Sprintf("%s[%d]", prefix, i), item, out)
+		}
+	case string:
+		if isSecretReference(v) {
+			out[prefix] = v
+		}
+	}
+}
+
+// secretVarObjectTarget is the dial target a SecretVar-shaped object stands for, read with the
+// precedence SecretVar.UnmarshalJSON applies: an explicit type decides (env or vault make the ref
+// the target, plain_text makes the value the target even when a ref is present); without a type a
+// ref is classified by its prefix; without either, the legacy env_var with from_env names an env
+// reference. A plain value is a target under an endpoint key, or when it is itself a reference.
+// Fields are found case-insensitively, as the decoder finds them; two keys that fold to the same
+// field are decided by their order in the request, which the parsed map no longer has, so such an
+// object stands for itself as a whole and any change to it counts. Nothing is resolved here.
+func secretVarObjectTarget(object map[string]any, endpoint bool) string {
+	fields := map[string]any{}
+	for _, name := range secretVarFieldNames {
+		value, ambiguous := secretVarField(object, name)
+		if ambiguous {
+			whole, _ := json.Marshal(object)
+			return "ambiguous SecretVar " + string(whole)
+		}
+		fields[name] = value
+	}
+	ref, _ := fields["ref"].(string)
+	ref = strings.TrimSpace(ref)
+	secretType, _ := fields["type"].(string)
+	switch {
+	case secretType != "":
+		switch schemas.SecretType(secretType) {
+		case schemas.SecretTypeEnv:
+			if ref != "" {
+				return withSecretPrefix("env.", ref)
+			}
+		case schemas.SecretTypeVault:
+			if ref != "" {
+				return withSecretPrefix("vault.", ref)
+			}
+		}
+	case ref != "":
+		if isSecretReference(ref) {
+			return ref
+		}
+	default:
+		if envVar, _ := fields["env_var"].(string); envVar != "" {
+			if fromEnv, _ := fields["from_env"].(bool); fromEnv {
+				return withSecretPrefix("env.", envVar)
+			}
+		}
+	}
+	value, _ := fields["value"].(string)
+	if isSecretReference(value) || endpoint {
+		return value
+	}
+	return ""
+}
+
+// withSecretPrefix returns ref with prefix, unless it already carries an env. or vault. prefix.
+func withSecretPrefix(prefix, ref string) string {
+	if isSecretReference(ref) {
+		return ref
+	}
+	return prefix + ref
+}
+
+// secretVarFieldNames are the fields SecretVar.UnmarshalJSON reads.
+var secretVarFieldNames = []string{"value", "ref", "type", "env_var", "from_env"}
+
+// secretVarField returns the value under the key that folds to name, as the JSON decoder matches
+// it. ambiguous reports more than one such key.
+func secretVarField(object map[string]any, name string) (value any, ambiguous bool) {
+	found := false
+	for key, item := range object {
+		if strings.EqualFold(key, name) {
+			if found {
+				return nil, true
+			}
+			value, found = item, true
+		}
+	}
+	return value, false
+}
+
+// isSecretVarFieldsOnly reports an object whose keys all fold to SecretVar fields.
+func isSecretVarFieldsOnly(object map[string]any) bool {
+	for key := range object {
+		if !slices.ContainsFunc(secretVarFieldNames, func(name string) bool { return strings.EqualFold(key, name) }) {
+			return false
+		}
+	}
+	return len(object) > 0
+}
+
+// requireGenuineAuthForPluginConfigChange refuses a built-in plugin create or update that adds
+// or changes an outbound endpoint or an env./vault. reference when the caller was only let
+// through by the fail-open bypass (dashboard auth disabled, unconfigured, or a whitelisted
+// route), not by a real credential. A plugin's config names where the gateway sends data and
+// what it sends: the OTEL plugin resolves env. references in its headers from the gateway's own
+// process environment and posts them to the collector on every export, and the telemetry plugin
+// does the same for its push gateway and basic auth, so a caller with no credential check must
+// not be able to read the gateway's secrets by naming them, nor redirect exports. This is the
+// plugins counterpart of the MCP, provider, provider-key and webhook gates. stored is the
+// persisted normalized config on update and nil on create; a value identical to the stored one
+// passes, as does removing one, so bypassed callers can still toggle a plugin or edit its other
+// fields. Config.json provisioning is not gated. On rejection the response has been sent and
+// true is returned; callers should return immediately.
+func requireGenuineAuthForPluginConfigChange(ctx *fasthttp.RequestCtx, stored, next map[string]any) bool {
+	if !isAuthBypassed(ctx) {
+		return false
+	}
+	before, after := map[string]string{}, map[string]string{}
+	pluginConfigDialTargets("", stored, before)
+	pluginConfigDialTargets("", next, after)
+	var changed []string
+	for path, value := range after {
+		if before[path] != value {
+			changed = append(changed, path)
+		}
+	}
+	if len(changed) == 0 {
+		return false
+	}
+	slices.Sort(changed)
+	SendError(ctx, fasthttp.StatusForbidden, fmt.Sprintf("Setting a plugin's endpoints or env./vault. references (%s) requires an authenticated admin session; dashboard auth is currently disabled or unconfigured. Enable dashboard authentication, or provision the plugin via config.json instead.", strings.Join(changed, ", ")))
+	return true
 }
 
 // restoreRedactedFromExisting walks the incoming config map and, for any field whose
@@ -796,11 +915,15 @@ func restoreRedactedValue(incoming, existing any) any {
 		}
 		out := make([]any, len(val))
 		for i, item := range val {
-			if i < len(existingSlice) {
-				out[i] = restoreRedactedValue(item, existingSlice[i])
-			} else {
+			// A plain string inside an array is a list entry (header pattern, excluded
+			// attribute, broker), never a redacted scalar: no plugin config stores secrets
+			// as array elements. Restoring them swapped a lone "*" header pattern for the
+			// stored one, because IsRedacted treats an all-asterisk string as a placeholder.
+			if _, isString := item.(string); isString || i >= len(existingSlice) {
 				out[i] = item
+				continue
 			}
+			out[i] = restoreRedactedValue(item, existingSlice[i])
 		}
 		return out
 	case string:
