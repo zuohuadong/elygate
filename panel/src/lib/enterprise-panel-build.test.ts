@@ -63,4 +63,13 @@ describe('enterprise panel build contract', () => {
 		expect(dockerfile).toContain('WORKDIR /app/transports');
 		expect(dockerfile).toContain('COPY --from=builder /app/transports/docker-entrypoint.sh .');
 	});
+
+	test('every release Dockerfile keeps the musl sqlite-vec CGO aliases', async () => {
+		for (const name of ['Dockerfile', 'Dockerfile.local', 'Dockerfile.redhat']) {
+			const dockerfile = await Bun.file(new URL(`../../../transports/${name}`, import.meta.url)).text();
+			expect(dockerfile).toContain('-Du_int8_t=uint8_t');
+			expect(dockerfile).toContain('-Du_int16_t=uint16_t');
+			expect(dockerfile).toContain('-Du_int64_t=uint64_t');
+		}
+	});
 });

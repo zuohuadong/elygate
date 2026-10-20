@@ -28,8 +28,11 @@ RUN if [ -n "$APK_MIRROR" ]; then sed -i "s#https\?://dl-cdn.alpinelinux.org/alp
     apk upgrade --no-cache && \
     apk add --no-cache gcc musl-dev sqlite-dev binutils binutils-gold
 
-# Set environment for CGO-enabled build (required for go-sqlite3)
-ENV CGO_ENABLED=1 GOOS=linux GOWORK=/app/go.work
+# Set environment for CGO-enabled build (required for go-sqlite3). The
+# sqlite-vec C source re-typedefs the BSD u_int*_t aliases, which musl does not
+# define without _GNU_SOURCE; map them to the stdint names it already has.
+ENV CGO_ENABLED=1 GOOS=linux GOWORK=/app/go.work \
+    CGO_CFLAGS="-O2 -g -Du_int8_t=uint8_t -Du_int16_t=uint16_t -Du_int64_t=uint64_t"
 
 # Seed a minimal workspace from module manifests so dependency download stays
 # cacheable while the binary still compiles the exact monorepo sources below.

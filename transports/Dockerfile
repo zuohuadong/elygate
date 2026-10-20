@@ -1,46 +1,119 @@
-# --- UI Build Stage: Build the React + Vite frontend ---
-  FROM node:25-alpine3.23@sha256:bdf2cca6fe3dabd014ea60163eca3f0f7015fbd5c7ee1b0e9ccb4ced6eb02ef4 AS ui-builder
+# Default named context for OSS builds. Buildx can replace this stage with
+# --build-context enterprise_panel=/path/to/private-panel-module.
+FROM scratch AS enterprise_panel
+COPY panel/src/enterprise-fallback/index.ts /index.ts
+
+# --- UI Build Stage: Build the Svelte svadmin panel ---
+  FROM --platform=$BUILDPLATFORM oven/bun:1.3.14-alpine@sha256:5acc90a93e91ff07bf72aa90a7c9f0fa189765aec90b47bdbf2152d2196383c0 AS ui-builder
   WORKDIR /app
 
   # Apply latest alpine security patches before installing packages
-  RUN apk upgrade --no-cache
+  ARG APK_MIRROR
+  RUN if [ -n "$APK_MIRROR" ]; then sed -i "s#https\?://dl-cdn.alpinelinux.org/alpine#$APK_MIRROR#g" /etc/apk/repositories; fi && \
+      apk upgrade --no-cache
 
-  # Copy UI package files and install dependencies
-  COPY ui/package*.json ./
-  RUN npm ci
+  # Install panel dependencies before copying source to preserve the dependency layer.
+  COPY panel/package.json panel/bun.lock ./
+  COPY panel/patches ./patches
+  RUN bun install --frozen-lockfile
 
-  # Copy UI source code
-  COPY ui/ ./
+  COPY panel/ ./
+  COPY docs/ /docs/
 
-  # Build UI (skip the copy-build step)
-  RUN npm run build-enterprise
-  # Skip the copy-build step since we'll copy the files in the Go build stage
+  # The named context is isolated from the default repository context and is
+  # only present in this build stage. Enterprise jobs point the path argument
+  # at /opt/elygate-enterprise-panel/index.ts.
+  COPY --from=enterprise_panel / /opt/elygate-enterprise-panel/
+
+  # Build and type-check without the local copy-build step; the next stage embeds out/.
+  ARG BIFROST_ENTERPRISE_PANEL_PATH
+  ARG BIFROST_REQUIRE_ENTERPRISE_PANEL=false
+  ENV BIFROST_ENTERPRISE_PANEL_PATH=$BIFROST_ENTERPRISE_PANEL_PATH \
+      BIFROST_REQUIRE_ENTERPRISE_PANEL=$BIFROST_REQUIRE_ENTERPRISE_PANEL
+  RUN bunx vite build && bun run check
 
   # --- Go Build Stage: Compile the Go binary ---
+  # Go and runtime stages intentionally use BuildKit's target platform.
   FROM golang:1.27.2-alpine3.24@sha256:f92b6ef800e499660581efdabdf25d9d817a9d124eaf900924f0504e7e27e12d AS builder
   WORKDIR /app
 
   # Install dependencies including gcc for CGO and sqlite (with latest security patches)
-  RUN apk upgrade --no-cache && \
-    apk add --no-cache gcc musl-dev sqlite-dev binutils binutils-gold
+  ARG APK_MIRROR
+  RUN if [ -n "$APK_MIRROR" ]; then sed -i "s#https\?://dl-cdn.alpinelinux.org/alpine#$APK_MIRROR#g" /etc/apk/repositories; fi && \
+      apk upgrade --no-cache && \
+      apk add --no-cache gcc musl-dev sqlite-dev binutils binutils-gold
 
-  # Set environment for CGO-enabled build (required for go-sqlite3)
-  ENV CGO_ENABLED=1 GOOS=linux
+  # Set environment for CGO-enabled build (required for go-sqlite3). The
+  # sqlite-vec C source re-typedefs the BSD u_int*_t aliases, which musl does not
+  # define without _GNU_SOURCE; map them to the stdint names it already has.
+  ENV CGO_ENABLED=1 GOOS=linux GOWORK=/app/go.work \
+      CGO_CFLAGS="-O2 -g -Du_int8_t=uint8_t -Du_int16_t=uint16_t -Du_int64_t=uint64_t"
 
-  COPY transports/go.mod transports/go.sum ./
-  RUN ls
-  RUN cat go.mod
-  RUN go mod download
+  # Seed a minimal workspace from module manifests so dependency download stays
+  # cacheable while the binary still compiles the exact monorepo sources below.
+  COPY core/go.mod core/go.sum ./core/
+  COPY framework/go.mod framework/go.sum ./framework/
+  COPY plugins/compat/go.mod plugins/compat/go.sum ./plugins/compat/
+  COPY plugins/governance/go.mod plugins/governance/go.sum ./plugins/governance/
+  COPY plugins/jsonparser/go.mod plugins/jsonparser/go.sum ./plugins/jsonparser/
+  COPY plugins/logging/go.mod plugins/logging/go.sum ./plugins/logging/
+  COPY plugins/maxim/go.mod plugins/maxim/go.sum ./plugins/maxim/
+  COPY plugins/mocker/go.mod plugins/mocker/go.sum ./plugins/mocker/
+  COPY plugins/modelcatalogresolver/go.mod plugins/modelcatalogresolver/go.sum ./plugins/modelcatalogresolver/
+  COPY plugins/otel/go.mod plugins/otel/go.sum ./plugins/otel/
+  COPY plugins/prompts/go.mod plugins/prompts/go.sum ./plugins/prompts/
+  COPY plugins/routing/go.mod plugins/routing/go.sum ./plugins/routing/
+  COPY plugins/safety/go.mod ./plugins/safety/
+  COPY plugins/semanticcache/go.mod plugins/semanticcache/go.sum ./plugins/semanticcache/
+  COPY plugins/telemetry/go.mod plugins/telemetry/go.sum ./plugins/telemetry/
+  COPY transports/go.mod transports/go.sum ./transports/
+  ARG GOPROXY=https://proxy.golang.org,direct
+  RUN --mount=type=cache,target=/go/pkg/mod \
+      go work init \
+      ./core \
+      ./framework \
+      ./plugins/compat \
+      ./plugins/governance \
+      ./plugins/jsonparser \
+      ./plugins/logging \
+      ./plugins/maxim \
+      ./plugins/mocker \
+      ./plugins/modelcatalogresolver \
+      ./plugins/otel \
+      ./plugins/prompts \
+      ./plugins/routing \
+      ./plugins/safety \
+      ./plugins/semanticcache \
+      ./plugins/telemetry \
+      ./transports && \
+      cd transports && GOPROXY="$GOPROXY" go mod download
 
   # Copy source code and dependencies
-  COPY transports/ ./
+  COPY core/ ./core/
+  COPY framework/ ./framework/
+  COPY plugins/compat/ ./plugins/compat/
+  COPY plugins/governance/ ./plugins/governance/
+  COPY plugins/jsonparser/ ./plugins/jsonparser/
+  COPY plugins/logging/ ./plugins/logging/
+  COPY plugins/maxim/ ./plugins/maxim/
+  COPY plugins/mocker/ ./plugins/mocker/
+  COPY plugins/modelcatalogresolver/ ./plugins/modelcatalogresolver/
+  COPY plugins/otel/ ./plugins/otel/
+  COPY plugins/prompts/ ./plugins/prompts/
+  COPY plugins/routing/ ./plugins/routing/
+  COPY plugins/safety/ ./plugins/safety/
+  COPY plugins/semanticcache/ ./plugins/semanticcache/
+  COPY plugins/telemetry/ ./plugins/telemetry/
+  COPY transports/ ./transports/
 
-  COPY --from=ui-builder /app/out ./bifrost-http/ui
+  COPY --from=ui-builder /app/out ./transports/bifrost-http/ui
 
   # Build the binary with CGO enabled and static SQLite linking
-  ENV GOWORK=off
+  WORKDIR /app/transports
   ARG VERSION=unknown
-  RUN go build \
+  RUN --mount=type=cache,target=/go/pkg/mod \
+      --mount=type=cache,target=/root/.cache/go-build \
+      GOPROXY="$GOPROXY" go build \
     -ldflags="-w -s -X main.Version=v${VERSION} -extldflags '-static'" \
     -a -trimpath \
     -tags "sqlite_static" \
@@ -58,12 +131,15 @@
   # musl: C standard library (required for CGO binaries)
   # libgcc: GCC runtime library
   # ca-certificates: For HTTPS connections
-  RUN apk upgrade --no-cache && \
-    apk add --no-cache musl libgcc ca-certificates zlib
+  # git: smart HTTP serving for Claude Code and Codex skill marketplaces
+  ARG APK_MIRROR
+  RUN if [ -n "$APK_MIRROR" ]; then sed -i "s#https\?://dl-cdn.alpinelinux.org/alpine#$APK_MIRROR#g" /etc/apk/repositories; fi && \
+      apk upgrade --no-cache && \
+      apk add --no-cache musl libgcc ca-certificates zlib git
 
   # Create data directory and set up user
   COPY --from=builder /app/main .
-  COPY --from=builder /app/docker-entrypoint.sh .
+  COPY --from=builder /app/transports/docker-entrypoint.sh .
 
   # Getting arguments
   ARG ARG_APP_PORT=8080
