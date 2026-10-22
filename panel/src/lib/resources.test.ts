@@ -117,7 +117,7 @@ describe('panel resource registry', () => {
 
 	test('keeps the about-page visibility filter in the svadmin patch', async () => {
 		const patchDirectory = fileURLToPath(new URL('../../patches/', import.meta.url));
-		const patch = await Bun.file(`${patchDirectory}@svadmin%2Fui@0.76.0.patch`).text();
+		const patch = await Bun.file(`${patchDirectory}@svadmin%2Fui@0.88.1.patch`).text();
 		expect(patch).toContain('+  const resources = $derived(adminContext.resources.filter((resource) => resource.meta?.aboutVisible !== false));');
 	});
 
