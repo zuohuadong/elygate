@@ -2,6 +2,8 @@ package logstore
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -266,3 +268,82 @@ func containsColumn(clause, column string) bool {
 	}
 	return false
 }
+
+// TestScanUsageLogsStreamsTerminalRows pins the source side of the usage ledger:
+// the control plane rebuilds its projection by scanning the log store, so the
+// scan must yield terminal rows with every field the projector reads, and must
+// never surface in-flight "processing" rows that would be billed twice once
+// they complete.
+func TestScanUsageLogsStreamsTerminalRows(t *testing.T) {
+	ctx := context.Background()
+	store := newProjectionTestStore(t)
+	t.Cleanup(func() { _ = store.Close(ctx) })
+
+	now := time.Now().UTC()
+	vk := "vk-1"
+	for i, status := range []string{"success", "error", "processing", "cancelled"} {
+		entry := &Log{
+			ID:               fmt.Sprintf("log-%d", i),
+			Timestamp:        now.Add(time.Duration(i) * time.Second),
+			Object:           "chat.completion",
+			Provider:         "openai",
+			Model:            "gpt-4o-mini",
+			Status:           status,
+			VirtualKeyID:     &vk,
+			PromptTokens:     10 + i,
+			CompletionTokens: 20 + i,
+			TotalTokens:      30 + 2*i,
+			Cost:             floatPtr(0.5),
+		}
+		require.NoError(t, store.Create(ctx, entry))
+	}
+
+	var scanned []Log
+	require.NoError(t, store.ScanUsageLogs(ctx, func(batch []Log) error {
+		scanned = append(scanned, batch...)
+		return nil
+	}))
+
+	require.Len(t, scanned, 3, "processing rows are not part of the reconciliation snapshot")
+	for _, entry := range scanned {
+		assert.NotEqual(t, "processing", entry.Status)
+		assert.NotEmpty(t, entry.ID)
+		assert.Equal(t, "openai", entry.Provider)
+		assert.Equal(t, "gpt-4o-mini", entry.Model)
+		require.NotNil(t, entry.VirtualKeyID)
+		assert.Equal(t, vk, *entry.VirtualKeyID)
+		assert.Positive(t, entry.PromptTokens)
+		assert.Positive(t, entry.CompletionTokens)
+		assert.Positive(t, entry.TotalTokens)
+		require.NotNil(t, entry.Cost, "cost drives the ledger amount")
+	}
+	assert.True(t, store.UsageLogSnapshotComplete(), "the scan is unbounded, so it is a complete snapshot")
+}
+
+// TestScanUsageLogsPropagatesVisitorError keeps a failing projector from being
+// mistaken for a completed reconciliation: the scan stops at the first error and
+// the caller sees it.
+func TestScanUsageLogsPropagatesVisitorError(t *testing.T) {
+	ctx := context.Background()
+	store := newProjectionTestStore(t)
+	t.Cleanup(func() { _ = store.Close(ctx) })
+	require.NoError(t, store.Create(ctx, &Log{
+		ID: "log-err", Timestamp: time.Now().UTC(), Object: "chat.completion",
+		Provider: "openai", Model: "gpt-4o-mini", Status: "success",
+	}))
+
+	expected := errors.New("projection failed")
+	err := store.ScanUsageLogs(ctx, func([]Log) error { return expected })
+	require.ErrorIs(t, err, expected)
+}
+
+// TestScanUsageLogsRejectsNilVisitor refuses a scan with nowhere to put rows
+// instead of reading the whole store and discarding it.
+func TestScanUsageLogsRejectsNilVisitor(t *testing.T) {
+	ctx := context.Background()
+	store := newProjectionTestStore(t)
+	t.Cleanup(func() { _ = store.Close(ctx) })
+	require.Error(t, store.ScanUsageLogs(ctx, nil))
+}
+
+func floatPtr(v float64) *float64 { return &v }
