@@ -606,11 +606,12 @@ func (s *Store) ReconcileUsage(ctx context.Context, reader logstore.UsageLogRead
 		seenSourceLogs := make(map[string]struct{})
 		if err := reader.ScanUsageLogs(ctx, func(logs []logstore.Log) error {
 			for _, entry := range logs {
-				// ScanUsageLogs normally returns terminal rows only. Keep the
-				// eligibility check here as a contract guard for custom readers:
-				// rows that cannot produce a ledger entry must not keep a stale
-				// projection alive after a virtual key is cleared.
-				if entry.Status != "processing" && entry.VirtualKeyID != nil && *entry.VirtualKeyID != "" {
+				// Every terminal source row is retained in the ledger, including
+				// rows without a virtual key: projectLogsTx files those under the
+				// default application so unbound traffic stays billable (see
+				// TestProjectLogsAdvancesCheckpointForUnboundLogs). Only rows that
+				// are not terminal, or that left the source store, may be stale.
+				if entry.Status != "processing" {
 					seenSourceLogs[entry.ID] = struct{}{}
 				}
 			}
@@ -630,9 +631,10 @@ func (s *Store) ReconcileUsage(ctx context.Context, reader logstore.UsageLogRead
 }
 
 // deleteStaleUsageLedgerEntries keeps the ledger aligned with a complete
-// source snapshot. Source rows that are deleted, become non-terminal, or lose
-// their virtual key are intentionally absent from seenSourceLogs and must not
-// remain billable in the control plane.
+// source snapshot. Source rows that are deleted or become non-terminal are
+// intentionally absent from seenSourceLogs and must not remain billable in the
+// control plane. Rows that lose their virtual key stay: they are re-projected
+// under the default application, not dropped.
 func deleteStaleUsageLedgerEntries(tx *gorm.DB, seenSourceLogs map[string]struct{}) error {
 	var sourceIDs []string
 	if err := tx.Model(&UsageLedgerEntry{}).Pluck("source_log_id", &sourceIDs).Error; err != nil {

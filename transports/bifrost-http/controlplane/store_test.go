@@ -189,6 +189,62 @@ func TestReconcileUsageDoesNotDeleteLedgerForPartialReader(t *testing.T) {
 	require.EqualValues(t, 1, total)
 }
 
+// completeSnapshotReader reports a complete source snapshot, so the reconciler
+// is allowed to delete ledger rows whose source log disappeared.
+type completeSnapshotReader struct {
+	logs []logstore.Log
+}
+
+func (r completeSnapshotReader) ScanUsageLogs(_ context.Context, visit func([]logstore.Log) error) error {
+	return visit(r.logs)
+}
+
+func (completeSnapshotReader) UsageLogSnapshotComplete() bool { return true }
+
+// TestReconcileUsageKeepsUnboundRowsUnderCompleteSnapshot pins the billing
+// contract for unbound traffic: a terminal log without a virtual key is
+// projected under the default application and must survive the stale-entry
+// cleanup that a complete snapshot enables. Deleting it silently drops
+// unassigned usage from the ledger, which is the production regression the
+// audit.3 release deliberately fixed by keeping "Unassigned" attribution.
+func TestReconcileUsageKeepsUnboundRowsUnderCompleteSnapshot(t *testing.T) {
+	store, cs := testControlPlaneStore(t)
+	ctx := context.Background()
+	active := true
+	require.NoError(t, cs.CreateVirtualKey(ctx, &configtables.TableVirtualKey{ID: "vk-complete", Name: "vk-complete", Value: *schemas.NewSecretVar("sk-complete"), IsActive: &active, CreatedAt: time.Now(), UpdatedAt: time.Now()}))
+	project := &Project{Name: "Complete snapshot"}
+	require.NoError(t, store.CreateProject(ctx, project))
+	app := &Application{ProjectID: project.ID, Name: "Worker"}
+	require.NoError(t, store.CreateApplication(ctx, app))
+	_, err := store.BindVirtualKey(ctx, app.ID, "vk-complete", nil)
+	require.NoError(t, err)
+
+	now := time.Now().UTC()
+	require.NoError(t, store.ReconcileUsage(ctx, completeSnapshotReader{logs: []logstore.Log{
+		{ID: "log-bound", Timestamp: now, Status: "success", VirtualKeyID: ptr("vk-complete"), PromptTokens: 1, CompletionTokens: 1, TotalTokens: 2},
+		{ID: "log-unbound", Timestamp: now.Add(time.Second), Status: "success", PromptTokens: 3, CompletionTokens: 4, TotalTokens: 7},
+	}}))
+
+	boundRows, boundTotal, err := store.ListUsage(ctx, UsageQuery{ApplicationID: app.ID})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, boundTotal)
+	require.Equal(t, "log-bound", boundRows[0].SourceLogID)
+
+	unboundRows, unboundTotal, err := store.ListUsage(ctx, UsageQuery{ApplicationID: "default"})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, unboundTotal, "unbound terminal usage must stay billable under the default application")
+	require.Equal(t, "log-unbound", unboundRows[0].SourceLogID)
+	require.Empty(t, unboundRows[0].VirtualKeyID)
+
+	// A source row that is gone from the complete snapshot must be dropped.
+	require.NoError(t, store.ReconcileUsage(ctx, completeSnapshotReader{logs: []logstore.Log{
+		{ID: "log-bound", Timestamp: now, Status: "success", VirtualKeyID: ptr("vk-complete"), PromptTokens: 1, CompletionTokens: 1, TotalTokens: 2},
+	}}))
+	_, unboundTotal, err = store.ListUsage(ctx, UsageQuery{ApplicationID: "default"})
+	require.NoError(t, err)
+	require.Zero(t, unboundTotal, "a source row that left the snapshot is stale and must be deleted")
+}
+
 func TestProjectLogsAdvancesCheckpointForUnboundLogs(t *testing.T) {
 	store, _ := testControlPlaneStore(t)
 	occurred := time.Now().UTC().Add(time.Minute)
