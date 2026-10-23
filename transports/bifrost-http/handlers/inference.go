@@ -387,6 +387,8 @@ var transcriptionParamsKnownFields = map[string]bool{
 	"prompt":          true,
 	"response_format": true,
 	"file_format":     true,
+
+	"timestamp_granularities[]": true,
 }
 
 var batchCreateParamsKnownFields = map[string]bool{
@@ -2028,6 +2030,10 @@ func prepareTranscriptionRequest(ctx *fasthttp.RequestCtx, config *lib.Config) (
 	}
 	if responseFormatValues := form.Value["response_format"]; len(responseFormatValues) > 0 && responseFormatValues[0] != "" {
 		transcriptionParams.ResponseFormat = &responseFormatValues[0]
+	}
+	// Repeated "timestamp_granularities[]" fields, matching the OpenAI SDK's encoding and the /openai route.
+	if granularityValues := form.Value["timestamp_granularities[]"]; len(granularityValues) > 0 {
+		transcriptionParams.TimestampGranularities = granularityValues
 	}
 	if transcriptionParams.ExtraParams == nil {
 		transcriptionParams.ExtraParams = make(map[string]interface{})

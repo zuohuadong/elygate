@@ -1,6 +1,6 @@
 # Upstream synchronization policy
 
-This branch is pinned to Bifrost upstream commit `9c594766d94136adc22aded413b647e8c3f655ef`.
+This branch is pinned to Bifrost upstream commit `9f37d55ea73203367b31457c982f78d6bd295782`.
 
 - Only panel-facing labels, titles, and visual assets use the **Elygate** display name.
 - Gateway, CLI, Helm, environment variables, protocol names, storage identifiers,
