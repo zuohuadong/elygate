@@ -6058,3 +6058,72 @@ func TestGetVirtualKeysPaginated_MetadataFiltersAndSearch(t *testing.T) {
 		})
 	}
 }
+
+// TestFindVirtualKeyByValue_LegacyPlaintextFallbackSharesBaseQuery pins the
+// legacy migration path and the reason each lookup gets its own session.
+//
+// findVirtualKeyByValue issues up to three queries on one caller-supplied base
+// handle: current value hash, rotation-grace hash, then the plaintext fallback
+// for rows that predate hashed lookups. A GORM First() that misses writes
+// "record not found" into that shared handle, and every later query on the same
+// handle returns the stored error without touching the database. Without a
+// session per query, a legacy plaintext key stops authenticating the moment the
+// hashed lookup ships: two misses poison the fallback that would have found it.
+func TestFindVirtualKeyByValue_LegacyPlaintextFallbackSharesBaseQuery(t *testing.T) {
+	store := setupRDBTestStore(t)
+	ctx := context.Background()
+
+	vk := &tables.TableVirtualKey{
+		ID:       "vk-legacy-plaintext",
+		Name:     "Legacy Plaintext Key",
+		Value:    *schemas.NewSecretVar("vk-legacy-current"),
+		IsActive: schemas.Ptr(true),
+	}
+	require.NoError(t, store.CreateVirtualKey(ctx, vk))
+
+	// Simulate a row that was never migrated to hashed lookups: the value column
+	// holds the raw key, no hash is present, and the encryption status is the
+	// legacy plaintext marker. Written through raw SQL so no hook re-hashes it.
+	require.NoError(t, store.DB().Exec(
+		`UPDATE governance_virtual_keys
+		    SET value = ?, value_hash = '', encryption_status = 'plain_text'
+		  WHERE id = ?`,
+		"vk-legacy-current", "vk-legacy-plaintext").Error)
+
+	base := preloadVirtualKeyBaseRelations(store.DB().WithContext(ctx))
+	found, err := store.findVirtualKeyByValue(base, "vk-legacy-current")
+	require.NoError(t, err, "a legacy plaintext row must resolve through the fallback")
+	require.NotNil(t, found)
+	assert.Equal(t, "vk-legacy-plaintext", found.ID)
+	assert.Equal(t, "vk-legacy-current", found.Value.GetValue())
+
+	_, err = store.GetVirtualKeyByValue(ctx, "vk-legacy-unknown")
+	require.ErrorIs(t, err, ErrNotFound)
+}
+
+// TestGetVirtualKeyByValue_PlaintextFallbackSkipsCiphertextRows keeps the
+// fallback from matching an encrypted row's ciphertext: only rows still stored
+// in plaintext may satisfy a plaintext comparison, otherwise a value that
+// happens to equal some ciphertext would authenticate.
+func TestGetVirtualKeyByValue_PlaintextFallbackSkipsCiphertextRows(t *testing.T) {
+	store := setupRDBTestStore(t)
+	ctx := context.Background()
+
+	vk := &tables.TableVirtualKey{
+		ID:       "vk-encrypted-row",
+		Name:     "Encrypted Row",
+		Value:    *schemas.NewSecretVar("vk-encrypted-value"),
+		IsActive: schemas.Ptr(true),
+	}
+	require.NoError(t, store.CreateVirtualKey(ctx, vk))
+
+	const ciphertext = "vault.bifrost.legacy-ciphertext"
+	require.NoError(t, store.DB().Exec(
+		`UPDATE governance_virtual_keys
+		    SET value = ?, value_hash = '', encryption_status = 'encrypted'
+		  WHERE id = ?`,
+		ciphertext, "vk-encrypted-row").Error)
+
+	_, err := store.GetVirtualKeyByValue(ctx, ciphertext)
+	require.ErrorIs(t, err, ErrNotFound, "ciphertext must never satisfy a plaintext lookup")
+}
