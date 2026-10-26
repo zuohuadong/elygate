@@ -3,20 +3,20 @@ set -euo pipefail
 
 export GOTOOLCHAIN=auto
 
-# If go.work exists, skip
+# Refresh the Go version from the existing members without changing a developer's
+# module selection when upstream raises its minimum toolchain requirement.
 if [ -f "go.work" ]; then
-  echo "🔍 Go workspace already exists, skipping initialization"
-  return
+  echo "🔍 Go workspace already exists, refreshing its Go directive"
+  go work use
+  if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    exit 0
+  fi
+  return 0
 fi
-
 
 # Setup Go workspace for CI
 # Usage: source setup-go-workspace.sh
 echo "🔧 Setting up Go workspace..."
-if [ -f "go.work" ]; then
-  echo "✅ Go workspace already exists, skipping init"
-  return 0 2>/dev/null || exit 0
-fi
 go work init
 go work use ./core
 go work use ./framework

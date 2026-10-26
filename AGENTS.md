@@ -20,12 +20,13 @@
 
 ## Task Rules
 
-<<<<<<< HEAD
 - Do not silently shrink scope. Stop and state the tradeoff if the work exceeds the request.
 - Never hardcode secrets, tokens, API keys, credentials, or sensitive URLs in code, logs, templates, or durable memory.
 - Do not auto-commit, push, publish, deploy, or write production state unless the user explicitly requested it.
 - Verify with the narrowest meaningful test first, then broaden for shared CLI behavior, templates, automation, data, security, deployment, or user-facing workflows.
-=======
+
+## Repository Layout
+
 ```
 bifrost/
 ├── core/                           # Go core library — the engine
@@ -138,7 +139,6 @@ bifrost/
 ├── Makefile                       # Build, test, dev commands (1300+ lines)
 └── terraform/                     # Infrastructure as Code
 ```
->>>>>>> upstream/main
 
 ## Delegation Gate
 
@@ -153,7 +153,6 @@ bifrost/
 
 ## Progressive Context
 
-<<<<<<< HEAD
 - Load project prompts, workflows, `references/skills/`, installed skills, and `.agents/docs/AGMESH.md` only when the current task needs them.
 - For stack, deployment, or persistence choices, first select the relevant profile skill (`stack-profile-selector`, `deployment-target-selector`, or `database-profile-selector`), then load concrete framework skills.
 - Keep visual evidence path-based. Inspect images only when visual judgement is essential, summarize the observation, and continue from paths.
@@ -162,7 +161,9 @@ bifrost/
 <!-- AGENT:OVERLAY:START -->
 <!-- Project-specific overlay content goes here. -->
 <!-- AGENT:OVERLAY:END -->
-=======
+
+## Repository Build Notes
+
 ```
 go.work
 ├── core/go.mod              # github.com/maximhq/bifrost/core
@@ -1162,4 +1163,3 @@ cd ui && npm run build
 * Follow **strict folder structure and routing conventions**
 * Use **the right tool for the right problem**
 * Keep code **simple, predictable, and maintainable**
->>>>>>> upstream/main

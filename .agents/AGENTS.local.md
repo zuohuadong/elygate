@@ -2,9 +2,9 @@
 
 ## Elygate 面板与 Bifrost 上游边界
 
-- 总则：保持 `panel/` 作为 Elygate 独立管理面板，不与 Bifrost 上游 `ui/` 混合维护；冻结面板依赖的后端 API 合约，将企业私有功能按需拆为面板扩展包，并持续减少对 Bifrost `core/`、`framework/` 和 HTTP handlers 的直接修改。
+- 总则：保持 `panel/` 作为 Elygate 独立管理面板，不与 Bifrost 上游 `ui/` 混合维护；面板跟随 Bifrost 上游 API 合约，将企业私有功能按需拆为面板扩展包，并持续减少对 Bifrost `core/`、`framework/` 和 HTTP handlers 的直接修改。
 - `panel/` 由 Elygate 自主设计、开发和发布，不把上游 `ui/` 的目录或实现同步到 `panel/`。Bifrost 上游 UI 变化只作为产品和 API 参考，不是 `panel/` 的代码合并目标。
-- 冻结 `panel/` 依赖的后端 API 合约，包括同源 `/api/*` 路径、认证授权、请求与响应结构、分页、错误语义和公共回调流程。涉及这些合约的变更必须保持向后兼容；确需破坏性变更时，必须同时提供迁移方案、更新 `panel/PARITY.md`，并补充前后端契约回归测试。
+- 这是新系统，不保留旧 Elygate 的 API、schema 或管理面板兼容层，只以 Bifrost 上游行为与合约为兼容基线。上游合约调整涉及 `panel/` 时，同步更新面板调用、`panel/PARITY.md` 和前后端契约回归测试，不为旧 Elygate 增加兼容分支或迁移层。
 - Elygate 共享管理能力直接维护在 `panel/`；只有私有授权、客户定制或部署特定的企业功能才按需拆为面板扩展包。不得为了形式上的模块化把稳定的共享面板功能改造成插件。
 - 持续减少对 Bifrost `core/`、`framework/` 和 `transports/bifrost-http/handlers/` 的直接修改。通用能力和修复优先整理为上游 PR；Elygate 专属能力优先通过现有 hook、插件、适配层或 sidecar 实现。
 - 必须修改 Bifrost 上游目录时，保持补丁小、单一且可独立回放，避免无关重构和批量格式化，并补充聚焦回归测试及上游同步风险说明。扩展点不足时，优先上游化通用扩展 ABI，再实现 Elygate 专属模块。
