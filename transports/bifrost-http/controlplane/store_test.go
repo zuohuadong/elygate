@@ -2,6 +2,7 @@ package controlplane
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -17,9 +18,15 @@ import (
 func testControlPlaneStore(t *testing.T) (*Store, configstore.ConfigStore) {
 	t.Helper()
 	ctx := context.Background()
-	cs, err := configstore.NewConfigStore(ctx, &configstore.Config{Enabled: true, Type: configstore.ConfigStoreTypeSQLite, Config: &configstore.SQLiteConfig{Path: filepath.Join(t.TempDir(), "control-plane.db")}}, bifrost.NewDefaultLogger(schemas.LogLevelError))
+	config := &configstore.Config{Enabled: true, Type: configstore.ConfigStoreTypeSQLite, Config: &configstore.SQLiteConfig{Path: filepath.Join(t.TempDir(), "control-plane.db")}}
+	if socket := os.Getenv("ELYGATE_TEST_POSTGRES_SOCKET"); socket != "" {
+		config = testPostgresControlPlaneConfig(t, socket)
+	}
+	cs, err := configstore.NewConfigStore(ctx, config, bifrost.NewDefaultLogger(schemas.LogLevelError))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, cs.Close(ctx)) })
+	require.Equal(t, string(config.Type), cs.DB().Dialector.Name())
+	t.Logf("control-plane test backend: %s", config.Type)
 	store, err := NewStore(ctx, cs)
 	require.NoError(t, err)
 	return store, cs
