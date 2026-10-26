@@ -135,6 +135,25 @@ func NewStore(ctx context.Context, configStore configstore.ConfigStore) (*Store,
 				return nil
 			},
 		},
+		{
+			ID: "elygate_control_plane_v5_budget_alerts",
+			Migrate: func(tx *gorm.DB) error {
+				return tx.AutoMigrate(&Project{}, &Application{}, &BudgetAlert{})
+			},
+			Rollback: func(tx *gorm.DB) error {
+				if err := tx.Migrator().DropTable(&BudgetAlert{}); err != nil {
+					return err
+				}
+				for _, model := range []any{&Project{}, &Application{}} {
+					for _, column := range []string{"daily_budget", "monthly_budget"} {
+						if err := tx.Migrator().DropColumn(model, column); err != nil {
+							return err
+						}
+					}
+				}
+				return nil
+			},
+		},
 	}
 	migrationIDs := make([]string, 0, len(migrations))
 	for _, migration := range migrations {
@@ -193,7 +212,7 @@ func prepareProject(project *Project) error {
 	if project.Name == "" {
 		return errors.New("project name is required")
 	}
-	return nil
+	return (BudgetLimits{project.DailyBudget, project.MonthlyBudget}).validate()
 }
 
 func (s *Store) CreateProjectWithAudit(ctx context.Context, project *Project, actorID string) error {
@@ -237,6 +256,9 @@ func (s *Store) prepareApplication(ctx context.Context, app *Application) error 
 		return errors.New("project_id and application name are required")
 	}
 	if _, err := s.GetProject(ctx, app.ProjectID); err != nil {
+		return err
+	}
+	if err := (BudgetLimits{app.DailyBudget, app.MonthlyBudget}).validate(); err != nil {
 		return err
 	}
 	app.ID = uuid.NewString()

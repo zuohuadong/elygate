@@ -97,8 +97,10 @@ func (h *Handler) RegisterRoutes(r *router.Router, middlewares ...schemas.Bifros
 	}
 	r.GET("/api/control-plane/projects", wrap(h.listProjects))
 	r.POST("/api/control-plane/projects", wrap(h.createProject))
+	r.PUT("/api/control-plane/projects/{project_id}/budgets", wrap(h.setProjectBudgets))
 	r.GET("/api/control-plane/projects/{project_id}/applications", wrap(h.listApplications))
 	r.POST("/api/control-plane/projects/{project_id}/applications", wrap(h.createApplication))
+	r.PUT("/api/control-plane/applications/{application_id}/budgets", wrap(h.setApplicationBudgets))
 	r.GET("/api/control-plane/applications/{application_id}/keys", wrap(h.listApplicationKeys))
 	r.POST("/api/control-plane/applications/{application_id}/keys", wrap(h.createApplicationKey))
 	r.POST("/api/control-plane/applications/{application_id}/keys/{virtual_key_id}/rotate", wrap(h.rotateApplicationKey))
@@ -109,6 +111,8 @@ func (h *Handler) RegisterRoutes(r *router.Router, middlewares ...schemas.Bifros
 	r.GET("/api/control-plane/usage/summary", wrap(h.usageSummary))
 	r.GET("/api/control-plane/usage/export", wrap(h.exportUsage))
 	r.GET("/api/control-plane/usage/status", wrap(h.usageStatus))
+	r.GET("/api/control-plane/usage/budgets", wrap(h.usageBudgets))
+	r.GET("/api/control-plane/budget-alerts", wrap(h.listBudgetAlerts))
 	r.GET("/api/control-plane/audit-events", wrap(h.listAudit))
 }
 
@@ -222,12 +226,13 @@ func (h *Handler) createProject(ctx *fasthttp.RequestCtx) {
 	var req struct {
 		OrganizationID string `json:"organization_id"`
 		Name           string `json:"name"`
+		BudgetLimits
 	}
 	if err := decodeJSON(ctx, &req); err != nil {
 		writeError(ctx, 400, err)
 		return
 	}
-	p := &Project{OrganizationID: req.OrganizationID, Name: req.Name}
+	p := &Project{OrganizationID: req.OrganizationID, Name: req.Name, DailyBudget: req.DailyBudget, MonthlyBudget: req.MonthlyBudget}
 	opCtx, cancel := controlPlaneContext()
 	defer cancel()
 	if err := h.store.CreateProjectWithAudit(opCtx, p, auditActor(ctx)); err != nil {
@@ -255,12 +260,13 @@ func (h *Handler) createApplication(ctx *fasthttp.RequestCtx) {
 	var req struct {
 		Name        string `json:"name"`
 		Environment string `json:"environment"`
+		BudgetLimits
 	}
 	if err := decodeJSON(ctx, &req); err != nil {
 		writeError(ctx, 400, err)
 		return
 	}
-	app := &Application{ProjectID: routeParam(ctx, "project_id"), Name: req.Name, Environment: req.Environment}
+	app := &Application{ProjectID: routeParam(ctx, "project_id"), Name: req.Name, Environment: req.Environment, DailyBudget: req.DailyBudget, MonthlyBudget: req.MonthlyBudget}
 	opCtx, cancel := controlPlaneContext()
 	defer cancel()
 	if err := h.store.CreateApplicationWithAudit(opCtx, app, auditActor(ctx)); err != nil {

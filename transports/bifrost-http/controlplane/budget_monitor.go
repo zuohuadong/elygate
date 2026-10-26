@@ -7,13 +7,12 @@ import (
 	"github.com/maximhq/bifrost/core/schemas"
 )
 
-// BudgetMonitor keeps control-plane state that gates spend current without a
-// request having to trigger the work. Today that means sweeping expired
-// application-key bindings; an expired binding must stop authorizing inference
-// even if no one calls the revoke endpoint.
+// BudgetMonitor refreshes usage and budget alerts without requiring panel reads.
+// Expired bindings are swept independently even when the log store is unavailable.
 type BudgetMonitor struct {
 	ctx      context.Context
 	store    *Store
+	handler  *Handler
 	logger   schemas.Logger
 	interval time.Duration
 	cancel   context.CancelFunc
@@ -27,6 +26,7 @@ func NewBudgetMonitor(ctx context.Context, handler *Handler, logger schemas.Logg
 	m := &BudgetMonitor{ctx: ctx, logger: logger, interval: time.Minute, done: make(chan struct{})}
 	if handler != nil {
 		m.store = handler.store
+		m.handler = handler
 	}
 	return m
 }
@@ -42,17 +42,27 @@ func (m *BudgetMonitor) Start() {
 		defer close(m.done)
 		ticker := time.NewTicker(m.interval)
 		defer ticker.Stop()
+		m.sweep(ctx)
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if _, err := m.store.RevokeExpiredBindings(ctx); err != nil && m.logger != nil {
-					m.logger.Warn("control-plane binding sweep failed: %v", err)
-				}
+				m.sweep(ctx)
 			}
 		}
 	}()
+}
+
+func (m *BudgetMonitor) sweep(ctx context.Context) {
+	opCtx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	if _, err := m.store.RevokeExpiredBindings(opCtx); err != nil && m.logger != nil {
+		m.logger.Warn("control-plane binding sweep failed: %v", err)
+	}
+	if err := m.handler.refreshBudgetAlerts(opCtx); err != nil && m.logger != nil {
+		m.logger.Warn("control-plane budget alert refresh failed: %v", err)
+	}
 }
 
 // Stop terminates the sweep loop and waits for it to exit.

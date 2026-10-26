@@ -8,6 +8,8 @@ type Project struct {
 	OrganizationID string    `gorm:"type:varchar(36);not null;index" json:"organization_id"`
 	Name           string    `gorm:"type:varchar(128);not null" json:"name"`
 	Status         string    `gorm:"type:varchar(32);not null;default:'active';index" json:"status"`
+	DailyBudget    *float64  `json:"daily_budget,omitempty"`
+	MonthlyBudget  *float64  `json:"monthly_budget,omitempty"`
 	CreatedAt      time.Time `gorm:"not null;index" json:"created_at"`
 	UpdatedAt      time.Time `gorm:"not null" json:"updated_at"`
 }
@@ -15,13 +17,15 @@ type Project struct {
 func (Project) TableName() string { return "elygate_control_projects" }
 
 type Application struct {
-	ID          string    `gorm:"primaryKey;type:varchar(36)" json:"id"`
-	ProjectID   string    `gorm:"type:varchar(36);not null;index" json:"project_id"`
-	Name        string    `gorm:"type:varchar(128);not null" json:"name"`
-	Environment string    `gorm:"type:varchar(32);not null;default:'production';index" json:"environment"`
-	Status      string    `gorm:"type:varchar(32);not null;default:'active';index" json:"status"`
-	CreatedAt   time.Time `gorm:"not null;index" json:"created_at"`
-	UpdatedAt   time.Time `gorm:"not null" json:"updated_at"`
+	ID            string    `gorm:"primaryKey;type:varchar(36)" json:"id"`
+	ProjectID     string    `gorm:"type:varchar(36);not null;index" json:"project_id"`
+	Name          string    `gorm:"type:varchar(128);not null" json:"name"`
+	Environment   string    `gorm:"type:varchar(32);not null;default:'production';index" json:"environment"`
+	Status        string    `gorm:"type:varchar(32);not null;default:'active';index" json:"status"`
+	DailyBudget   *float64  `json:"daily_budget,omitempty"`
+	MonthlyBudget *float64  `json:"monthly_budget,omitempty"`
+	CreatedAt     time.Time `gorm:"not null;index" json:"created_at"`
+	UpdatedAt     time.Time `gorm:"not null" json:"updated_at"`
 }
 
 func (Application) TableName() string { return "elygate_control_applications" }
@@ -87,6 +91,20 @@ type AuditEvent struct {
 }
 
 func (AuditEvent) TableName() string { return "elygate_control_audit_events" }
+
+type BudgetAlert struct {
+	ID          string    `gorm:"primaryKey;type:varchar(36)" json:"id"`
+	ScopeType   string    `gorm:"type:varchar(16);not null;uniqueIndex:idx_cp_budget_alert" json:"scope_type"`
+	ScopeID     string    `gorm:"type:varchar(36);not null;uniqueIndex:idx_cp_budget_alert" json:"scope_id"`
+	Window      string    `gorm:"type:varchar(16);not null;uniqueIndex:idx_cp_budget_alert" json:"window"`
+	PeriodStart time.Time `gorm:"not null;uniqueIndex:idx_cp_budget_alert" json:"period_start"`
+	Threshold   float64   `gorm:"not null;uniqueIndex:idx_cp_budget_alert" json:"threshold"`
+	Usage       float64   `gorm:"not null" json:"usage"`
+	Limit       float64   `gorm:"not null" json:"limit"`
+	TriggeredAt time.Time `gorm:"not null;index" json:"triggered_at"`
+}
+
+func (BudgetAlert) TableName() string { return "elygate_control_budget_alerts" }
 
 // VirtualKeyRevocation is a durable deny tombstone for a credential value that
 // must never become valid again after rotation or revocation. It closes the

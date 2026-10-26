@@ -35,3 +35,53 @@ be short enough for Unix sockets. No existing database or Docker daemon is used.
 This covers package-level migration, key lifecycle, audit, usage projection,
 reconciliation, filters and summary contracts. It does not establish real
 provider, browser, production deployment, or backup/restore acceptance.
+
+## Usage Budget APIs
+
+Project and application alert budgets are optional USD amounts. Creation
+requests accept `daily_budget` and `monthly_budget`; existing resources use:
+
+```text
+PUT /api/control-plane/projects/{project_id}/budgets
+PUT /api/control-plane/applications/{application_id}/budgets
+```
+
+The body is a full replacement, for example
+`{"daily_budget":10,"monthly_budget":200}`. Omitted or null windows are cleared;
+`{}` clears both. Zero, negative and non-finite amounts are rejected. Updates
+require the existing authenticated administrator, JSON and same-origin write
+guards. An audit failure rolls back the budget update. Unknown fields, null
+bodies and trailing JSON are rejected so a misspelled amount cannot clear an
+existing budget silently.
+
+```text
+GET /api/control-plane/usage/budgets?project_id=...&application_id=...
+GET /api/control-plane/budget-alerts?project_id=...&application_id=...&limit=100&offset=0
+```
+
+Status returns configured windows, UTC calendar `[period_start, period_end)`
+bounds, ledger cost, limit and `healthy`, `warning` or `exceeded` state. A
+project filter includes that project's application budgets. An application
+filter returns only that application's budgets, not its whole project's.
+Daily windows begin at midnight UTC; monthly windows begin on the first day
+of the month. Costs from all terminal outcomes and all keys in the scope
+count; session/detail pagination and arbitrary usage time filters do not
+reduce the budget total. With configured budgets, status reads reconcile usage
+and fail if the source is missing or fails, rather than presenting an unavailable
+source as zero. With no budgets, status reads return an empty array without
+accessing the usage source.
+
+The monitor reconciles configured budgets on startup and every minute. It
+emits durable events at 80% and 100%, including both on a jump past the limit.
+The unique scope/window/period/threshold key suppresses duplicates across
+retries, concurrent monitors and restarts. Stored events preserve their
+original observed usage and limit; later repricing, budget edits or clearing
+do not rewrite history or retrigger the same threshold in that period.
+Comparisons allow eight binary floating-point ULPs of representation noise,
+without rounding costs to cents.
+
+This is current-period, post-settlement alerting over the Usage Ledger, not a
+second budget enforcement engine. Bifrost Virtual Key/governance budgets still
+own request blocking. Closed-period late settlement/recomputation, panel
+controls, notification delivery/acknowledgement and forecasting remain
+separate follow-ups. No new external notification is sent by these APIs.
