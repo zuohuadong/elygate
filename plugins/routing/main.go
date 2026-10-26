@@ -498,7 +498,7 @@ func (p *RoutingPlugin) applyRoutingRules(ctx *schemas.BifrostContext, req *sche
 	queryParams, _ := ctx.Value(schemas.BifrostContextKeyRequestQuery).(map[string]string)
 	metadata := requestMetadata(req)
 
-	// Set up lazy complexity computation; only runs if a rule references complexity_tier.
+	// Set up lazy complexity computation; only runs if a rule's outcome depends on complexity_tier.
 	var computeComplexity func() *complexity.ComplexityResult
 	if p.complexityAnalyzer.Load() != nil {
 		computeComplexity = func() *complexity.ComplexityResult {

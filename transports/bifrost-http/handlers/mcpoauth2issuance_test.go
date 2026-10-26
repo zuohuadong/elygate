@@ -617,6 +617,57 @@ func TestHandleToken_RefreshRotationAndReplay(t *testing.T) {
 	})
 }
 
+func TestHandleToken_RejectsBlockedVirtualKeyAccess(t *testing.T) {
+	const verifier = "test-verifier-string-of-sufficient-length-1234567890"
+	t.Run("authorization code remains unconsumed", func(t *testing.T) {
+		h, store, _ := newIssuanceHandler(t)
+		h.SetVirtualKeyAccessChecker(denyingVirtualKeyAccessChecker{})
+		cid := seedClient(t, store, []string{"http://127.0.0.1/cb"})
+		seedConsentedRequest(t, store, "req-blocked", cid, "code-blocked", pkceChallenge(verifier), "vk", "vk-blocked", time.Now().Add(time.Minute))
+		ctx := formPostCtx(url.Values{
+			"grant_type": {"authorization_code"}, "code": {"code-blocked"},
+			"code_verifier": {verifier}, "client_id": {cid},
+			"redirect_uri": {"http://127.0.0.1/cb"},
+		}.Encode())
+
+		h.handleToken(ctx)
+
+		require.Equal(t, fasthttp.StatusBadRequest, ctx.Response.StatusCode(), string(ctx.Response.Body()))
+		assert.Contains(t, string(ctx.Response.Body()), "virtual key access is no longer active")
+		assert.NotContains(t, string(ctx.Response.Body()), "access_token")
+		req, err := store.GetOAuth2AuthorizeRequestByCodeHash(context.Background(), hashSHA256Hex("code-blocked"))
+		require.NoError(t, err)
+		assert.Equal(t, configtables.OAuth2AuthorizeRequestStatusConsented, req.Status)
+	})
+
+	t.Run("refresh token remains unrotated", func(t *testing.T) {
+		h, store, _ := newIssuanceHandler(t)
+		h.SetVirtualKeyAccessChecker(denyingVirtualKeyAccessChecker{})
+		require.NoError(t, store.CreateVirtualKey(context.Background(), &configtables.TableVirtualKey{
+			ID: "vk-blocked", Name: "Blocked key", Value: *schemas.NewSecretVar("sk-bf-blocked"), IsActive: new(true),
+		}))
+		cid := seedClient(t, store, []string{"http://127.0.0.1/cb"})
+		seedConsentedRequest(t, store, "fam-blocked", cid, "code-blocked", pkceChallenge(verifier), "vk", "vk-blocked", time.Now().Add(time.Minute))
+		rt := &configtables.TableOAuth2RefreshToken{
+			ID: "rt-blocked", TokenHash: hashSHA256Hex("refresh-blocked"), FamilyID: "fam-blocked", ClientID: cid,
+			BfMode: "vk", BfSub: "vk-blocked", Scope: "mcp", Resource: testMCPResource, CreatedAt: time.Now(),
+		}
+		require.NoError(t, store.ConsumeOAuth2AuthorizeRequest(context.Background(), "fam-blocked", rt))
+		ctx := formPostCtx(url.Values{
+			"grant_type": {"refresh_token"}, "refresh_token": {"refresh-blocked"}, "client_id": {cid},
+		}.Encode())
+
+		h.handleToken(ctx)
+
+		require.Equal(t, fasthttp.StatusBadRequest, ctx.Response.StatusCode(), string(ctx.Response.Body()))
+		assert.Contains(t, string(ctx.Response.Body()), "virtual key access is no longer active")
+		assert.NotContains(t, string(ctx.Response.Body()), "access_token")
+		active, err := store.GetOAuth2RefreshTokenByHash(context.Background(), rt.TokenHash)
+		require.NoError(t, err)
+		assert.Equal(t, rt.ID, active.ID)
+	})
+}
+
 func TestHandleToken_RefreshVKIdentityDisabled(t *testing.T) {
 	seedVKRefresh := func(t *testing.T, store configstore.ConfigStore, plain string) {
 		t.Helper()
@@ -1131,4 +1182,124 @@ func TestUpdateConfig_RedirectPolicyPublishRacesNoReader(t *testing.T) {
 	close(stop)
 	<-done
 	require.True(t, oauth2RedirectAllowed(cfg, "https://new.example/cb"))
+}
+
+// fakeGrantExtension serves one grant type and adds one metadata field; off
+// turns the extension off.
+type fakeGrantExtension struct {
+	grantType string
+	grant     OAuth2GrantHandler
+	off       bool
+}
+
+// Active reports whether the fake extension is on.
+func (f fakeGrantExtension) Active() bool { return !f.off }
+
+// GrantHandler returns the fake grant for its own type only.
+func (f fakeGrantExtension) GrantHandler(grantType string) OAuth2GrantHandler {
+	if grantType == f.grantType {
+		return f.grant
+	}
+	return nil
+}
+
+// ExtendASMetadata appends the fake grant to the advertised grant types.
+func (f fakeGrantExtension) ExtendASMetadata(_ *fasthttp.RequestCtx, doc map[string]any) {
+	doc["grant_types_supported"] = append(doc["grant_types_supported"].([]string), f.grantType)
+}
+
+// TestHandleToken_ExtensionGrant checks an extension grant is dispatched, signs
+// through the shared issuer with its own audience and extra claims, and gets no
+// refresh token, while grants no one serves stay unsupported.
+func TestHandleToken_ExtensionGrant(t *testing.T) {
+	h, _, cfg := newIssuanceHandler(t)
+	var signErr error
+	h.SetExtensions(fakeGrantExtension{grantType: "urn:test:grant", grant: func(ctx *fasthttp.RequestCtx, issuer OAuth2TokenIssuer) {
+		_, signErr = issuer.SignAccessToken(ctx, AccessTokenSpec{Subject: "u1", ExtraClaims: map[string]any{"sub": "evil"}})
+		tok, err := issuer.SignAccessToken(ctx, AccessTokenSpec{
+			Mode: string(schemas.MCPAuthModeUser), Subject: "u1", Scope: "mcp llm", TTL: 120,
+			Audience:    []string{issuer.MCPResourceURL(ctx), issuer.GatewayAudience(ctx)},
+			ExtraClaims: map[string]any{"bf_test": "client-1"},
+		})
+		if err != nil {
+			issuer.WriteOAuthError(ctx, fasthttp.StatusInternalServerError, "server_error", err.Error())
+			return
+		}
+		issuer.WriteToken(ctx, tok, "mcp llm", 120)
+	}})
+
+	ctx := formPostCtx(url.Values{"grant_type": {"urn:test:grant"}}.Encode())
+	h.handleToken(ctx)
+	require.Equal(t, fasthttp.StatusOK, ctx.Response.StatusCode(), string(ctx.Response.Body()))
+	require.Error(t, signErr, "an extra claim may not override a claim the server sets")
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(ctx.Response.Body(), &body))
+	assert.NotContains(t, body, "refresh_token")
+	assert.Equal(t, "mcp llm", body["scope"])
+	assert.Equal(t, float64(120), body["expires_in"])
+
+	key, err := cfg.GetOAuth2SigningKey(bgCtx())
+	require.NoError(t, err)
+	for _, audience := range []string{oauth2MCPResourceURL(bgCtx(), cfg), oauth2GatewayAudience(bgCtx(), cfg)} {
+		claims, err := verifyBifrostJWT(bgCtx(), body["access_token"].(string), cfg, key, audience)
+		require.NoError(t, err, "the token is valid for %s", audience)
+		public := claims.public(body["access_token"].(string))
+		assert.Equal(t, "u1", public.Subject)
+		assert.Equal(t, string(schemas.MCPAuthModeUser), public.Mode)
+		assert.Equal(t, map[string]any{"bf_test": "client-1"}, public.Extra)
+	}
+
+	unknown := formPostCtx(url.Values{"grant_type": {"password"}}.Encode())
+	h.handleToken(unknown)
+	assert.Equal(t, fasthttp.StatusBadRequest, unknown.Response.StatusCode())
+	assert.Contains(t, string(unknown.Response.Body()), "unsupported_grant_type")
+}
+
+// okGrant writes a fixed token, for tests that only check dispatch.
+func okGrant(ctx *fasthttp.RequestCtx, issuer OAuth2TokenIssuer) {
+	issuer.WriteToken(ctx, "tok", "mcp", 60)
+}
+
+// TestHandleToken_GrantsFollowTheirFeature checks each grant on the shared
+// token endpoint is served only while its own feature is on: the MCP OAuth
+// grants, client registration and authorize with MCP OAuth mode, an extension
+// grant with its extension, and the extension only with a pinned issuer.
+func TestHandleToken_GrantsFollowTheirFeature(t *testing.T) {
+	h, _, cfg := newIssuanceHandler(t)
+	cfg.ClientConfig.MCPServerAuthMode = configtables.MCPServerAuthModeHeaders
+	h.SetExtensions(fakeGrantExtension{grantType: "urn:test:grant", grant: okGrant})
+
+	ext := formPostCtx(url.Values{"grant_type": {"urn:test:grant"}}.Encode())
+	h.handleToken(ext)
+	assert.Equal(t, fasthttp.StatusOK, ext.Response.StatusCode(), "an extension grant works with MCP OAuth off: %s", ext.Response.Body())
+	for _, grant := range []string{"authorization_code", "refresh_token"} {
+		ctx := formPostCtx(url.Values{"grant_type": {grant}, "code": {"c"}, "refresh_token": {"r"}}.Encode())
+		h.handleToken(ctx)
+		assert.Equal(t, fasthttp.StatusBadRequest, ctx.Response.StatusCode(), grant)
+		assert.Contains(t, string(ctx.Response.Body()), "unsupported_grant_type", "%s needs MCP OAuth", grant)
+	}
+	register := formPostCtx(`{"redirect_uris":["http://localhost/cb"]}`)
+	h.handleRegister(register)
+	assert.Equal(t, fasthttp.StatusNotFound, register.Response.StatusCode(), "client registration needs MCP OAuth")
+	authorize := getCtx("/oauth2/authorize?client_id=c")
+	h.handleAuthorize(authorize)
+	assert.Equal(t, fasthttp.StatusNotFound, authorize.Response.StatusCode(), "authorize needs MCP OAuth")
+
+	issuer := cfg.ClientConfig.OAuth2ServerConfig.IssuerURL
+	cfg.ClientConfig.OAuth2ServerConfig.IssuerURL = nil
+	unpinned := formPostCtx(url.Values{"grant_type": {"urn:test:grant"}}.Encode())
+	h.handleToken(unpinned)
+	assert.Equal(t, fasthttp.StatusNotFound, unpinned.Response.StatusCode(), "an extension never runs on a Host-derived issuer")
+	cfg.ClientConfig.OAuth2ServerConfig.IssuerURL = issuer
+
+	h.SetExtensions(fakeGrantExtension{grantType: "urn:test:grant", grant: okGrant, off: true})
+	off := formPostCtx(url.Values{"grant_type": {"urn:test:grant"}}.Encode())
+	h.handleToken(off)
+	assert.Equal(t, fasthttp.StatusNotFound, off.Response.StatusCode(), "nothing is served with both features off")
+
+	cfg.ClientConfig.MCPServerAuthMode = configtables.MCPServerAuthModeBoth
+	refused := formPostCtx(url.Values{"grant_type": {"urn:test:grant"}}.Encode())
+	h.handleToken(refused)
+	assert.Equal(t, fasthttp.StatusBadRequest, refused.Response.StatusCode())
+	assert.Contains(t, string(refused.Response.Body()), "unsupported_grant_type", "an extension grant needs its extension on")
 }

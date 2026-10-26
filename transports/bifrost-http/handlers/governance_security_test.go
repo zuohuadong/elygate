@@ -113,6 +113,51 @@ func createGovernanceAuditTestVirtualKey(t *testing.T, store configstore.ConfigS
 	}))
 }
 
+func TestGovernanceSignedAuditEmitsUpstreamChangesAfterCommit(t *testing.T) {
+	cases := []struct {
+		name   string
+		method string
+		path   string
+		body   string
+		event  string
+		count  int
+	}{
+		{"rotate", fasthttp.MethodPost, "/api/governance/virtual-keys/vk-change-a/rotate", "", "virtual_key.rotated", 1},
+		{"bulk rotate", fasthttp.MethodPost, "/api/governance/virtual-keys/rotate", `{"ids":["vk-change-a","vk-change-b"]}`, "virtual_key.rotated", 2},
+		{"delete", fasthttp.MethodDelete, "/api/governance/virtual-keys/vk-change-a", "", "virtual_key.deleted", 1},
+	}
+	for _, tc := range cases {
+		for _, runtimeFailure := range []bool{false, true} {
+			t.Run(tc.name+"/runtime_failure="+strconv.FormatBool(runtimeFailure), func(t *testing.T) {
+				h, store, r := setupGovernanceAuditHandler(t)
+				createGovernanceAuditTestVirtualKey(t, store, "vk-change-a", "sk-bf-change-a")
+				createGovernanceAuditTestVirtualKey(t, store, "vk-change-b", "sk-bf-change-b")
+				if runtimeFailure {
+					manager := h.governanceManager.(*auditTestGovernanceManager)
+					manager.failReloadCall = 1
+					manager.removeVirtualKeyErr = context.Canceled
+				}
+
+				ctx := performGovernanceAuditRequest(r, tc.method, tc.path, tc.body, true)
+
+				expectedStatus := fasthttp.StatusOK
+				if runtimeFailure {
+					expectedStatus = fasthttp.StatusInternalServerError
+					require.Contains(t, string(ctx.Response.Body()), `"committed":true`)
+				}
+				require.Equal(t, expectedStatus, ctx.Response.StatusCode(), string(ctx.Response.Body()))
+				changes := auditChanges(t, ctx)
+				require.Len(t, changes, tc.count)
+				for _, change := range changes {
+					require.Equal(t, tc.event, change.EventName)
+					requireNoSecret(t, change, "sk-bf-change-a")
+					requireNoSecret(t, change, "sk-bf-change-b")
+				}
+			})
+		}
+	}
+}
+
 func TestGovernanceVirtualKeyWriteRejectsAuthBypass(t *testing.T) {
 	_, store, r := setupGovernanceAuditHandler(t)
 	createGovernanceAuditTestVirtualKey(t, store, "vk-bypass", "sk-bf-do-not-log")

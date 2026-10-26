@@ -448,7 +448,7 @@ type CreateVirtualKeyRequest struct {
 	DeleteAfterExpire *bool                   `json:"delete_after_expire,omitempty"` // Omit to inherit client.delete_expired_virtual_keys; true/false override it. Requires expires_at
 	// DisableContentLogging is the key's own content-logging decision. Omit to inherit
 	// client.disable_content_logging; true forces content off for this key's traffic, false forces
-	// it on for the log store.
+	// it on for the log store. A project a request is scoped to can override it either way.
 	DisableContentLogging *bool `json:"disable_content_logging,omitempty"`
 	// Metadata is free-form key/value attribution (cost center, owner, ...). See
 	// configstoreTables.ValidateVirtualKeyMetadata for the rules.
@@ -2725,6 +2725,7 @@ func (h *GovernanceHandler) createVirtualKey(ctx *fasthttp.RequestCtx) {
 	// Reverse-map governance from the model configs just written, for display.
 	h.hydrateVKGovernance(dbCtx, preloadedVk)
 
+	lib.RecordAuditChange(ctx, "virtual_key.created", "virtual_key", vk.ID, vk.Name, nil, auditVirtualKey(preloadedVk))
 	SendJSON(ctx, map[string]any{
 		"message":       "Virtual key created successfully",
 		"virtual_key":   h.governanceVirtualKeyPayload(ctx, preloadedVk),
@@ -2846,6 +2847,21 @@ func (h *GovernanceHandler) deleteVirtualKeyBudgetOverride(ctx *fasthttp.Request
 	h.mutateVirtualKeyBudgetOverride(ctx, true)
 }
 
+// auditBudgetOverride snapshots only a budget's override fields.
+func auditBudgetOverride(b *configstoreTables.TableBudget) map[string]any {
+	if b == nil {
+		return nil
+	}
+	return map[string]any{
+		"budget_id":                 b.ID,
+		"max_limit":                 b.MaxLimit,
+		"override_amount":           b.OverrideAmount,
+		"override_mode":             b.OverrideMode,
+		"override_cycles_remaining": b.OverrideCyclesRemaining,
+		"override_cycles_total":     b.OverrideCyclesTotal,
+	}
+}
+
 // mutateVirtualKeyBudgetOverride replaces or clears an override without changing base budget configuration or usage.
 func (h *GovernanceHandler) mutateVirtualKeyBudgetOverride(ctx *fasthttp.RequestCtx, clear bool) {
 	vkID := ctx.UserValue("vk_id").(string)
@@ -2859,6 +2875,8 @@ func (h *GovernanceHandler) mutateVirtualKeyBudgetOverride(ctx *fasthttp.Request
 	}
 
 	var budget *configstoreTables.TableBudget
+	var beforeOverride map[string]any
+	var vkName string
 	var auditReceipt *governanceAuditReceipt
 	action := "virtual_key.budget_override.update"
 	if clear {
@@ -2870,6 +2888,12 @@ func (h *GovernanceHandler) mutateVirtualKeyBudgetOverride(ctx *fasthttp.Request
 		if err != nil {
 			return err
 		}
+		beforeOverride = auditBudgetOverride(current)
+		var vk configstoreTables.TableVirtualKey
+		if err := tx.WithContext(dbCtx).Select("name").First(&vk, "id = ?", vkID).Error; err != nil {
+			return err
+		}
+		vkName = vk.Name
 		before, err := loadVirtualKeyAuditSummary(dbCtx, tx, vkID)
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -2916,6 +2940,11 @@ func (h *GovernanceHandler) mutateVirtualKeyBudgetOverride(ctx *fasthttp.Request
 		SendError(ctx, fasthttp.StatusInternalServerError, "failed to update budget override")
 		return
 	}
+	event := "virtual_key.budget_override_updated"
+	if clear {
+		event = "virtual_key.budget_override_removed"
+	}
+	lib.RecordAuditChange(ctx, event, "virtual_key", vkID, vkName, beforeOverride, auditBudgetOverride(budget))
 	if _, err := h.governanceManager.ReloadVirtualKey(dbCtx, vkID); err != nil {
 		logger.Error("failed to reload virtual key after budget override: %v", err)
 		SendJSONWithStatus(ctx, map[string]any{
@@ -2986,6 +3015,8 @@ func (h *GovernanceHandler) updateVirtualKey(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, 500, "Failed to retrieve virtual key")
 		return
 	}
+	h.hydrateVKGovernance(ctx, vk)
+	before := auditVirtualKey(vk)
 	providerSet := map[schemas.ModelProvider]struct{}{}
 	if len(req.ProviderConfigs) > 0 {
 		providerSet, err = h.getConfiguredProviderSet(dbCtx)
@@ -3536,6 +3567,7 @@ func (h *GovernanceHandler) updateVirtualKey(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
+	lib.RecordAuditChange(ctx, "virtual_key.updated", "virtual_key", vk.ID, vk.Name, before, auditVirtualKey(preloadedVk))
 	SendJSON(ctx, map[string]interface{}{
 		"message":       "Virtual key updated successfully",
 		"virtual_key":   h.governanceVirtualKeyPayload(ctx, preloadedVk),
@@ -3591,12 +3623,21 @@ func (h *GovernanceHandler) rotateVirtualKeyWithAudit(ctx *fasthttp.RequestCtx, 
 	if err != nil {
 		return nil, nil, false, err
 	}
+	recordVirtualKeyRotated(ctx, rotatedVK)
 	preloadedVk, reloadErr := h.governanceManager.ReloadVirtualKey(dbCtx, rotatedVK.ID)
 	if reloadErr != nil {
 		return rotatedVK, auditReceipt, true, reloadErr
 	}
 	h.hydrateVKGovernance(dbCtx, preloadedVk)
 	return preloadedVk, auditReceipt, true, nil
+}
+
+// recordVirtualKeyRotated records a rotation without either key value.
+func recordVirtualKeyRotated(ctx *fasthttp.RequestCtx, vk *configstoreTables.TableVirtualKey) {
+	if vk == nil {
+		return
+	}
+	lib.RecordAuditChange(ctx, "virtual_key.rotated", "virtual_key", vk.ID, vk.Name, nil, map[string]any{"virtual_key_id": vk.ID, "rotated": true})
 }
 
 // rotateVirtualKey handles POST /api/governance/virtual-keys/{vk_id}/rotate - Rotate only the virtual key value
@@ -3638,6 +3679,7 @@ func (h *GovernanceHandler) rotateVirtualKey(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, 500, fmt.Sprintf("Failed to rotate virtual key: %v", err))
 		return
 	}
+	recordVirtualKeyRotated(ctx, preloadedVk)
 	SendJSON(ctx, map[string]interface{}{
 		"message":     "Virtual key rotated successfully",
 		"virtual_key": preloadedVk,
@@ -3755,6 +3797,7 @@ func (h *GovernanceHandler) rotateVirtualKeys(ctx *fasthttp.RequestCtx) {
 		responseKeys := make([]*configstoreTables.TableVirtualKey, 0, len(rotated))
 		reloadFailures := make(map[string]string)
 		for i := range rotated {
+			recordVirtualKeyRotated(ctx, rotated[i])
 			preloaded, err := h.governanceManager.ReloadVirtualKey(dbCtx, rotated[i].ID)
 			if err != nil {
 				reloadFailures[rotated[i].ID] = "committed but in-memory reload failed"
@@ -3791,6 +3834,7 @@ func (h *GovernanceHandler) rotateVirtualKeys(ctx *fasthttp.RequestCtx) {
 			continue
 		}
 		rotated = append(rotated, vk)
+		recordVirtualKeyRotated(ctx, vk)
 	}
 
 	response := map[string]interface{}{
@@ -3814,6 +3858,7 @@ func (h *GovernanceHandler) deleteVirtualKey(ctx *fasthttp.RequestCtx) {
 	if h.audit != nil {
 		var vk configstoreTables.TableVirtualKey
 		var auditReceipt *governanceAuditReceipt
+		var beforeChange virtualKeyAuditSummary
 		dbCtx := governanceDatabaseContext()
 		err := h.configStore.ExecuteTransaction(dbCtx, func(tx *gorm.DB) error {
 			if err := dbForUpdate(tx.WithContext(dbCtx)).First(&vk, "id = ?", vkID).Error; err != nil {
@@ -3826,6 +3871,7 @@ func (h *GovernanceHandler) deleteVirtualKey(ctx *fasthttp.RequestCtx) {
 			if err != nil {
 				return fmt.Errorf("failed to load virtual key audit summary: %w", err)
 			}
+			beforeChange = before
 			if err := h.configStore.DeleteVirtualKey(dbCtx, vkID, tx); err != nil {
 				return err
 			}
@@ -3847,6 +3893,7 @@ func (h *GovernanceHandler) deleteVirtualKey(ctx *fasthttp.RequestCtx) {
 			SendError(ctx, fasthttp.StatusInternalServerError, "Failed to delete virtual key")
 			return
 		}
+		lib.RecordAuditChange(ctx, "virtual_key.deleted", "virtual_key", vk.ID, vk.Name, beforeChange, nil)
 		if err := h.governanceManager.RemoveVirtualKey(dbCtx, vk.ID); err != nil {
 			logger.Error("failed to remove committed virtual key from memory: %v", err)
 			SendJSONWithStatus(ctx, map[string]any{
@@ -3869,6 +3916,8 @@ func (h *GovernanceHandler) deleteVirtualKey(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, 500, "Failed to retrieve virtual key")
 		return
 	}
+	// Budgets and rate limits live in model configs the delete cascades over, so load them for the audit snapshot first.
+	h.hydrateVKGovernance(ctx, vk)
 	// Deleting key from database
 	if err := h.configStore.DeleteVirtualKey(ctx, vkID); err != nil {
 		if errors.Is(err, configstore.ErrNotFound) {
@@ -3887,6 +3936,7 @@ func (h *GovernanceHandler) deleteVirtualKey(ctx *fasthttp.RequestCtx) {
 		// But we ignore this error because its not
 		logger.Error("failed to remove virtual key: %v", err)
 	}
+	lib.RecordAuditChange(ctx, "virtual_key.deleted", "virtual_key", vk.ID, vk.Name, auditVirtualKey(vk), nil)
 	SendJSON(ctx, map[string]interface{}{
 		"message": "Virtual key deleted successfully",
 	})
@@ -4041,6 +4091,7 @@ func (h *GovernanceHandler) createTeam(ctx *fasthttp.RequestCtx) {
 		logger.Error("failed to reload team: %v", err)
 		preloadedTeam = &team
 	}
+	lib.RecordAuditChange(ctx, "team.created", "team", team.ID, team.Name, nil, auditTeam(preloadedTeam))
 	SendJSON(ctx, map[string]interface{}{
 		"message": "Team created successfully",
 		"team":    preloadedTeam,
@@ -4121,6 +4172,7 @@ func (h *GovernanceHandler) updateTeam(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, 500, "Failed to retrieve team")
 		return
 	}
+	before := auditTeam(team)
 	// Updating team in database
 	if err := h.configStore.ExecuteTransaction(ctx, func(tx *gorm.DB) error {
 		// Re-read the complete row and its owned relations while holding the row lock.
@@ -4379,6 +4431,11 @@ func (h *GovernanceHandler) updateTeam(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, 500, "Team updated but calendar alignment did not take effect")
 		return
 	}
+	after := auditTeam(preloadedTeam)
+	if after == nil {
+		after = auditTeam(team)
+	}
+	lib.RecordAuditChange(ctx, "team.updated", "team", team.ID, team.Name, before, after)
 	SendJSON(ctx, map[string]interface{}{
 		"message": "Team updated successfully",
 		"team":    preloadedTeam,
@@ -4417,6 +4474,7 @@ func (h *GovernanceHandler) deleteTeam(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, 500, "Failed to delete team")
 		return
 	}
+	lib.RecordAuditChange(ctx, "team.deleted", "team", team.ID, team.Name, auditTeam(team), nil)
 	SendJSON(ctx, map[string]interface{}{
 		"message": "Team deleted successfully",
 	})
@@ -4558,6 +4616,7 @@ func (h *GovernanceHandler) createCustomer(ctx *fasthttp.RequestCtx) {
 		logger.Error("failed to reload customer: %v", err)
 		preloadedCustomer = &customer
 	}
+	lib.RecordAuditChange(ctx, "customer.created", "customer", customer.ID, customer.Name, nil, auditCustomer(preloadedCustomer))
 	SendJSON(ctx, map[string]interface{}{
 		"message":  "Customer created successfully",
 		"customer": preloadedCustomer,
@@ -4628,6 +4687,7 @@ func (h *GovernanceHandler) updateCustomer(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, 500, "Failed to retrieve customer")
 		return
 	}
+	before := auditCustomer(customer)
 	// Updating customer in database
 	if err := h.configStore.ExecuteTransaction(ctx, func(tx *gorm.DB) error {
 		// Reload the complete customer snapshot under the transaction lock. The
@@ -4804,6 +4864,11 @@ func (h *GovernanceHandler) updateCustomer(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
+	after := auditCustomer(preloadedCustomer)
+	if after == nil {
+		after = auditCustomer(customer)
+	}
+	lib.RecordAuditChange(ctx, "customer.updated", "customer", customer.ID, customer.Name, before, after)
 	SendJSON(ctx, map[string]interface{}{
 		"message":  "Customer updated successfully",
 		"customer": preloadedCustomer,
@@ -4836,6 +4901,7 @@ func (h *GovernanceHandler) deleteCustomer(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, 500, "Failed to delete customer")
 		return
 	}
+	lib.RecordAuditChange(ctx, "customer.deleted", "customer", customer.ID, customer.Name, auditCustomer(customer), nil)
 	SendJSON(ctx, map[string]interface{}{
 		"message": "Customer deleted successfully",
 	})
@@ -5428,6 +5494,7 @@ func (h *GovernanceHandler) createModelConfig(ctx *fasthttp.RequestCtx) {
 	}
 	h.resolveModelConfigScopeName(ctx, preloadedMC, map[string]string{})
 	h.resolveModelConfigManagedBy(ctx, preloadedMC, map[string]configstoreTables.SourceRef{})
+	lib.RecordAuditChange(ctx, "model_config.created", "model_config", mc.ID, mc.ModelName, nil, preloadedMC)
 	SendJSON(ctx, map[string]interface{}{
 		"message":      "Model config created successfully",
 		"model_config": preloadedMC,
@@ -5455,6 +5522,7 @@ func (h *GovernanceHandler) updateModelConfig(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, 500, "Failed to retrieve model config")
 		return
 	}
+	before := lib.AuditSnapshot(mc)
 	if req.ModelName != nil || req.Provider != nil {
 		nextName, nextProvider := mc.ModelName, mc.Provider
 		if req.ModelName != nil {
@@ -5578,6 +5646,7 @@ func (h *GovernanceHandler) updateModelConfig(ctx *fasthttp.RequestCtx) {
 	}
 	h.resolveModelConfigScopeName(ctx, updatedMC, map[string]string{})
 	h.resolveModelConfigManagedBy(ctx, updatedMC, map[string]configstoreTables.SourceRef{})
+	lib.RecordAuditChange(ctx, "model_config.updated", "model_config", mc.ID, mc.ModelName, before, updatedMC)
 	SendJSON(ctx, map[string]interface{}{
 		"message":      "Model config updated successfully",
 		"model_config": updatedMC,
@@ -5588,7 +5657,7 @@ func (h *GovernanceHandler) updateModelConfig(ctx *fasthttp.RequestCtx) {
 func (h *GovernanceHandler) deleteModelConfig(ctx *fasthttp.RequestCtx) {
 	mcID := ctx.UserValue("mc_id").(string)
 	// Check if model config exists
-	_, err := h.configStore.GetModelConfigByID(ctx, mcID)
+	mc, err := h.configStore.GetModelConfigByID(ctx, mcID)
 	if err != nil {
 		if errors.Is(err, configstore.ErrNotFound) {
 			SendError(ctx, 404, "Model config not found")
@@ -5612,6 +5681,7 @@ func (h *GovernanceHandler) deleteModelConfig(ctx *fasthttp.RequestCtx) {
 		logger.Error("failed to remove model config from memory: %v", err)
 		// Continue anyway, the config is deleted from DB
 	}
+	lib.RecordAuditChange(ctx, "model_config.deleted", "model_config", mc.ID, mc.ModelName, mc, nil)
 	SendJSON(ctx, map[string]interface{}{
 		"message": "Model config deleted successfully",
 	})
@@ -5734,6 +5804,10 @@ func (h *GovernanceHandler) updateProviderGovernance(ctx *fasthttp.RequestCtx) {
 		return
 	}
 	isNew := existing == nil
+	var before json.RawMessage
+	if r, ok := modelConfigToProviderGovernance(existing); ok {
+		before = lib.AuditSnapshot(r)
+	}
 	mc := configstoreTables.TableModelConfig{
 		ID:        uuid.NewString(),
 		ModelName: configstoreTables.ModelConfigAllModels,
@@ -5916,6 +5990,7 @@ func (h *GovernanceHandler) updateProviderGovernance(ctx *fasthttp.RequestCtx) {
 			return
 		}
 	}
+	lib.RecordAuditChange(ctx, "provider_governance.updated", "provider_governance", providerName, providerName, before, resp)
 	SendJSON(ctx, map[string]interface{}{
 		"message":  "Provider governance updated successfully",
 		"provider": resp,
@@ -5950,6 +6025,11 @@ func (h *GovernanceHandler) deleteProviderGovernance(ctx *fasthttp.RequestCtx) {
 	if err := h.governanceManager.RemoveModelConfig(ctx, mc.ID); err != nil {
 		logger.Error("failed to remove provider governance from memory: %v", err)
 	}
+	var before any
+	if r, ok := modelConfigToProviderGovernance(mc); ok {
+		before = r
+	}
+	lib.RecordAuditChange(ctx, "provider_governance.deleted", "provider_governance", providerName, providerName, before, nil)
 	SendJSON(ctx, map[string]interface{}{
 		"message": "Provider governance deleted successfully",
 	})
@@ -6191,6 +6271,7 @@ func (h *GovernanceHandler) createPricingOverride(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, fasthttp.StatusInternalServerError, "Failed to upsert pricing override")
 		return
 	}
+	lib.RecordAuditChange(ctx, "pricing_override.created", "pricing_override", override.ID, override.Name, nil, override)
 	SendJSONWithStatus(ctx, map[string]interface{}{
 		"message":          "Pricing override created successfully",
 		"pricing_override": override,
@@ -6312,6 +6393,7 @@ func (h *GovernanceHandler) updatePricingOverride(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, fasthttp.StatusInternalServerError, "Failed to upsert pricing override")
 		return
 	}
+	lib.RecordAuditChange(ctx, "pricing_override.updated", "pricing_override", override.ID, override.Name, existing, override)
 	SendJSON(ctx, map[string]interface{}{
 		"message":          "Pricing override updated successfully",
 		"pricing_override": override,
@@ -6320,6 +6402,7 @@ func (h *GovernanceHandler) updatePricingOverride(ctx *fasthttp.RequestCtx) {
 
 func (h *GovernanceHandler) deletePricingOverride(ctx *fasthttp.RequestCtx) {
 	id := ctx.UserValue("id").(string)
+	existing, _ := h.configStore.GetPricingOverrideByID(ctx, id)
 	if err := h.configStore.DeletePricingOverride(ctx, id); err != nil {
 		if errors.Is(err, configstore.ErrNotFound) {
 			SendError(ctx, fasthttp.StatusNotFound, "Pricing override not found")
@@ -6333,6 +6416,13 @@ func (h *GovernanceHandler) deletePricingOverride(ctx *fasthttp.RequestCtx) {
 	if err := h.governanceManager.DeletePricingOverride(ctx, id); err != nil {
 		logger.Warn("failed to delete pricing override from memory: %v", err)
 	}
+	targetName := id
+	var before any
+	if existing != nil {
+		targetName = existing.Name
+		before = existing
+	}
+	lib.RecordAuditChange(ctx, "pricing_override.deleted", "pricing_override", id, targetName, before, nil)
 	SendJSON(ctx, map[string]interface{}{
 		"message": "Pricing override deleted successfully",
 	})

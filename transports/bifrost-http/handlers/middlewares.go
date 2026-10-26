@@ -356,7 +356,7 @@ func (c *CorsMiddleware) applyHeaders(ctx *fasthttp.RequestCtx, cfg *corsMiddlew
 
 	allowedHeaders := []string{
 		"Content-Type", "Authorization", "X-Requested-With", "X-Stainless-Timeout",
-		"X-Api-Key", "X-OpenAI-Agents-SDK", "X-Operation-ID", SetupTokenHeader,
+		"X-Api-Key", "X-OpenAI-Agents-SDK", "X-Operation-ID", "X-Bifrost-View-As", SetupTokenHeader,
 	}
 	if slices.Contains(cfg.allowedHeaders, "*") {
 		if credentialed {

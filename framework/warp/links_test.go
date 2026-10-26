@@ -204,12 +204,6 @@ func TestWarpLogsViewLinkCarriesEveryFilter(t *testing.T) {
 		"error_codes":        "the Logs page has no error-code filter",
 		"status_codes":       "the Logs page has no status-code filter",
 		"guardrail_outcomes": "the Logs page has no guardrail-outcome filter",
-		// TODO: Warp does not support the agent filters from #7777 yet; remove
-		// these once logsViewLink carries agent_names and agent_correlation_id.
-		"agent_names":          "not yet supported by Warp",
-		"agent_correlation_id": "not yet supported by Warp",
-		// Session-tree filters are offered by the tools but the Logs page has no
-		// controls for them yet, so logsViewLink deliberately drops the link.
 		"harness_session_id": "the Logs page has no session-tree filter",
 		"parent_session_id":  "the Logs page has no session-tree filter",
 		"agent_name":         "the Logs page has no session-tree filter",
@@ -223,6 +217,9 @@ func TestWarpLogsViewLinkCarriesEveryFilter(t *testing.T) {
 	for i := range value.NumField() {
 		field := value.Field(i)
 		name := strings.Split(value.Type().Field(i).Tag.Get("json"), ",")[0]
+		if name == "-" {
+			continue
+		}
 		if _, skip := notInURL[name]; skip {
 			continue
 		}
@@ -280,10 +277,6 @@ func TestWarpLogsPageParamsMatchTheLogsPage(t *testing.T) {
 	for _, match := range regexp.MustCompile(`(?m)^\t\t\t([a-z_]+): parseAs`).FindAllSubmatch(block[1], -1) {
 		onPage[string(match[1])] = struct{}{}
 	}
-	// TODO: Warp does not support the agent filters from #7777 yet; remove
-	// these deletes once logsPageParams lists them.
-	delete(onPage, "agent_names")
-	delete(onPage, "agent_correlation_id")
 	require.NotEmpty(t, onPage)
 	require.Equal(t, onPage, logsPageParams)
 }
@@ -567,6 +560,7 @@ func TestWarpLogsLinkPerFilterArgument(t *testing.T) {
 		"user_ids":              {arg: []any{"u-1", "u-2"}, want: "u-1,u-2"},
 		"business_unit_ids":     {arg: []any{"bu-1"}, want: "bu-1"},
 		"project_ids":           {arg: []any{"proj-1"}, want: "proj-1"},
+		"topic_ids":             {arg: []any{"topic-1"}, want: "topic-1"},
 		"apps":                  {arg: []any{"support-widget"}, want: "support-widget"},
 		"min_latency":           {arg: float64(400), want: "400"},
 		"max_latency":           {arg: 1500.5, want: "1500.5"},
@@ -593,6 +587,8 @@ func TestWarpLogsLinkPerFilterArgument(t *testing.T) {
 		"is_fork":               {arg: false, noLink: true},
 		"request_id":            {arg: "req-1", want: "req-1"},
 		"parent_request_id":     {arg: "req-0", want: "req-0"},
+		"agent_names":           {arg: []any{"support-bot", "triage-bot"}, want: "support-bot,triage-bot"},
+		"agent_correlation_id":  {arg: "corr-1", want: "corr-1"},
 		"missing_cost_only":     {arg: true, want: "true"},
 		"content_search":        {arg: "payment declined, 50% off", want: "payment declined, 50% off"},
 		"error_types":           {arg: []any{"overloaded_error"}, noLink: true},
@@ -706,6 +702,14 @@ func TestWarpEveryFilteredToolLinksItsFilters(t *testing.T) {
 	}
 	for _, tool := range buildTools() {
 		if !strings.Contains(tool.schemaJSON, `"filters"`) {
+			require.NotContains(t, cases, tool.name)
+			continue
+		}
+		// list_topics counts the window's requests by topic, and a link to the
+		// window alone would open every request, indexed or not - a different
+		// set than any of its rows counts. Each row links to its own topic's
+		// requests instead, which its own test pins.
+		if tool.name == "list_topics" {
 			require.NotContains(t, cases, tool.name)
 			continue
 		}

@@ -1079,7 +1079,7 @@ func (g *GenericRouter) handleNonStreamingRequest(ctx *fasthttp.RequestCtx, conf
 			g.sendError(ctx, bifrostCtx, config.ErrorConverter, newBifrostError(nil, "Bifrost response is nil after post-request callback"))
 			return
 		}
-		g.markDeprecatedListModelsResponse(listModelsResponse)
+		g.modelCatalog().EnrichListModelsResponse(listModelsResponse)
 
 		response, err = config.ListModelsResponseConverter(bifrostCtx, listModelsResponse)
 		bifrostExtraFields = listModelsResponse.ExtraFields
@@ -1101,6 +1101,8 @@ func (g *GenericRouter) handleNonStreamingRequest(ctx *fasthttp.RequestCtx, conf
 			g.sendError(ctx, bifrostCtx, config.ErrorConverter, newBifrostError(nil, "Bifrost response is nil after post-request callback"))
 			return
 		}
+
+		g.modelCatalog().EnrichModelRetrieveResponse(modelRetrieveResponse)
 
 		response, err = config.ModelRetrieveResponseConverter(bifrostCtx, modelRetrieveResponse)
 		bifrostExtraFields = modelRetrieveResponse.ExtraFields
@@ -1989,30 +1991,16 @@ func (g *GenericRouter) handleAsyncJobResponse(ctx *fasthttp.RequestCtx, bifrost
 	}
 }
 
-// markDeprecatedListModelsResponse annotates deprecated models with the
-// IsDeprecated flag using catalog pricing data, without removing them from the
-// response. Clients decide how to surface deprecated entries (e.g. the UI keeps
-// them visible but non-selectable).
-func (g *GenericRouter) markDeprecatedListModelsResponse(resp *schemas.BifrostListModelsResponse) {
-	if resp == nil || len(resp.Data) == 0 {
-		return
+// modelCatalog returns the server's model catalog, or nil when the handler store
+// has none. The catalog's enrich methods are nil-safe, so callers need no check.
+// Drop-in models routes enrich through it exactly as the native /v1/models
+// route does, so an SDK listing reports the same limits, pricing and
+// deprecation as the native one.
+func (g *GenericRouter) modelCatalog() *modelcatalog.ModelCatalog {
+	if provider, ok := g.handlerStore.(modelCatalogProvider); ok {
+		return provider.GetModelCatalog()
 	}
-	catalogProvider, ok := g.handlerStore.(modelCatalogProvider)
-	if !ok || catalogProvider.GetModelCatalog() == nil {
-		return
-	}
-	catalog := catalogProvider.GetModelCatalog()
-	for i := range resp.Data {
-		model := resp.Data[i]
-		provider, modelName := schemas.ParseModelString(model.ID, "")
-		pricingEntry := catalog.GetPricingEntryForModel(modelName, provider)
-		if pricingEntry == nil && model.Alias != nil {
-			pricingEntry = catalog.GetPricingEntryForModel(*model.Alias, provider)
-		}
-		if pricingEntry != nil && pricingEntry.IsDeprecated {
-			resp.Data[i].IsDeprecated = true
-		}
-	}
+	return nil
 }
 
 // handleBatchRequest handles batch API requests (create, list, retrieve, cancel, results)
@@ -3701,12 +3689,6 @@ func (g *GenericRouter) handlePassthrough(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	// Route policy disabled: a hardcoded allowlist blocks new provider endpoints until Bifrost is upgraded.
-	// if !passthroughInferenceRoute(cfg, string(ctx.Method()), path) {
-	// 	g.sendError(ctx, nil, passthroughErr, newBifrostErrorWithCode(nil, "passthrough requires a supported inference endpoint and method", fasthttp.StatusForbidden))
-	// 	return
-	// }
-
 	body := ctx.Request.Body()
 	// Parse body once to get both model and stream flag.
 	contentType := string(ctx.Request.Header.ContentType())
@@ -3720,9 +3702,14 @@ func (g *GenericRouter) handlePassthrough(ctx *fasthttp.RequestCtx) {
 	if cfg.ProviderDetector != nil {
 		provider = cfg.ProviderDetector(ctx, bodyModel)
 	}
-	provider, err = getPassthroughProvider(ctx, provider)
+	// Host-backed routes have a fixed upstream and route list, so only their own provider serves them.
+	provider, err = getPassthroughProvider(ctx, g.handlerStore, provider, cfg.UpstreamURL == "")
 	if err != nil {
-		g.sendError(ctx, nil, passthroughErr, newBifrostErrorWithCode(err, err.Error(), fasthttp.StatusBadRequest))
+		status := fasthttp.StatusBadRequest
+		if errors.Is(err, errPassthroughNotEnabled) {
+			status = fasthttp.StatusForbidden
+		}
+		g.sendError(ctx, nil, passthroughErr, newBifrostErrorWithCode(err, err.Error(), status))
 		return
 	}
 
