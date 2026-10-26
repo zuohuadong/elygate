@@ -57,7 +57,7 @@ export default defineConfig({
 	// svadmin ships Svelte source files, so Vite must transform it directly. Its
 	// CommonJS highlighter still needs pre-bundling for a browser-safe default export.
 	optimizeDeps: {
-		exclude: ['@svadmin/core'],
+		exclude: ['@svadmin/core', '@svadmin/ui', '@tanstack/svelte-query'],
 		include: ['highlight.js'],
 	},
 	build: {

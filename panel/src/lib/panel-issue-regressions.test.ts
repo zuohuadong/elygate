@@ -224,10 +224,10 @@ describe('panel issue regressions', () => {
 		expect(source).toContain('usageQueryParams(requested.offset)');
 		expect(source).toContain('const requested = usageRequestSnapshot();');
 		expect(source).toContain('if (sequence !== usageLoadSeq || !sameUsageRequest(usageRequestSnapshot(), requested)) return;');
-		expect(source).toContain('const [usageResult, statusResult, auditResult] = await Promise.allSettled([');
-		expect(source).toContain("if (usageResult.status === 'rejected') throw usageResult.reason;");
+		expect(source).toContain('const [usageResult, statusResult, auditResult, summaryResult] = await Promise.allSettled([');
+		expect(source).toContain("if (usageResult.status === 'rejected') {");
 		expect(source).toContain("usageStatus = statusResult.status === 'fulfilled' ? statusResult.value : null;");
-		expect(source).toContain('if (sequence === usageLoadSeq && sameUsageRequest(usageRequestSnapshot(), requested)) throw cause;');
+		expect(source).toContain('if (sequence === usageLoadSeq && sameUsageRequest(usageRequestSnapshot(), requested)) {');
 		expect(source).toContain('disabled={saving || loading || usageLoading || usageOffset === 0}');
 	});
 
@@ -249,6 +249,14 @@ describe('panel issue regressions', () => {
 		expect(source).toContain('document.body.append(link)');
 		expect(source).toContain('link.remove()');
 		expect(source).toContain("text('用量账本', 'Usage Ledger')");
+		expect(source).toContain('usageTimeRange(usageStartFilter, usageEndFilter, {');
+		expect(source).toContain('/api/control-plane/usage/summary?${query.toString()}');
+		expect(source).toContain("if (summaryResult.status === 'rejected') throw summaryResult.reason;");
+		expect(source).toContain("text('总 Token', 'Total tokens')");
+		expect(source).toContain("text('输入 Token', 'Prompt tokens')");
+		expect(source).toContain("text('输出 Token', 'Output tokens')");
+		expect(source).toContain("text('总成本', 'Total cost')");
+		expect(source).toContain("text('已取消请求', 'Cancelled requests')");
 	});
 
 	test('control plane usage filter changes reset pagination and dependent application choices', async () => {
@@ -257,7 +265,23 @@ describe('panel issue regressions', () => {
 		expect(source).toContain('usageOffset = 0;');
 		expect(source).toContain("usageApplicationFilter = '';");
 		expect(source).toContain('usageApplicationOptions = [];');
+		expect(source).toContain('let usageApplicationLoadSeq = 0;');
+		expect(source).toContain('if (sequence !== usageApplicationLoadSeq || usageProjectFilter !== requestedProject) return;');
+		expect(source).toContain('usageApplicationError = displayError(cause,');
 		expect(source).toContain('disabled={usageLoading || usageFilterLoading || !usageProjectFilter}');
+	});
+
+	test('usage ledger route reuses the complete control-plane workflow', async () => {
+		const app = await Bun.file(new URL('../App.svelte', import.meta.url)).text();
+		const controlPlane = await Bun.file(new URL('../pages/ControlPlanePage.svelte', import.meta.url)).text();
+		expect(app).toContain("'usage-ledger': { list: ControlPlanePage }");
+		expect(controlPlane).toContain("id: 'usage-ledger'");
+		expect(app).not.toContain("'control-plane-usage'");
+	});
+
+	test('development bundling shares one QueryClient context between core and UI', async () => {
+		const config = await Bun.file(new URL('../../vite.config.ts', import.meta.url)).text();
+		expect(config).toContain("exclude: ['@svadmin/core', '@svadmin/ui', '@tanstack/svelte-query']");
 	});
 
 	test('MCP settings reads the real client configuration and remains distinct from gateway editing', async () => {

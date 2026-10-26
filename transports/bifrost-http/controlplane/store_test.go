@@ -92,6 +92,101 @@ func TestProjectLogsCopiesSessionTreeAndListUsageFilters(t *testing.T) {
 	require.Zero(t, total)
 }
 
+func TestSummarizeUsageHonorsFilters(t *testing.T) {
+	store, _ := testControlPlaneStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	require.NoError(t, store.db(ctx).Create(&UsageLedgerEntry{
+		ID: "summary-success", SourceLogID: "summary-success", OccurredAt: now,
+		ProjectID: "project-summary", ApplicationID: "app-summary", Provider: "openai", Model: "gpt-4o-mini",
+		Status: "success", PromptTokens: 10, OutputTokens: 5, TotalTokens: 15, Cost: 0.42,
+	}).Error)
+	require.NoError(t, store.db(ctx).Create(&UsageLedgerEntry{
+		ID: "summary-failed", SourceLogID: "summary-failed", OccurredAt: now.Add(time.Second),
+		ProjectID: "project-summary", ApplicationID: "other-app", Provider: "openai", Model: "gpt-4o-mini",
+		Status: "error", PromptTokens: 20, OutputTokens: 2, TotalTokens: 22, Cost: 0.18,
+	}).Error)
+
+	summary, err := store.SummarizeUsage(ctx, UsageQuery{ApplicationID: "app-summary"})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, summary.Requests)
+	require.EqualValues(t, 1, summary.SuccessfulRequests)
+	require.Zero(t, summary.FailedRequests)
+	require.EqualValues(t, 10, summary.PromptTokens)
+	require.EqualValues(t, 5, summary.OutputTokens)
+	require.EqualValues(t, 15, summary.TotalTokens)
+	require.InDelta(t, 0.42, summary.Cost, 0.000001)
+}
+
+func TestSummarizeUsageMatchesLedgerAcrossFilters(t *testing.T) {
+	store, _ := testControlPlaneStore(t)
+	ctx := context.Background()
+	start := time.Date(2026, 9, 13, 0, 0, 0, 0, time.UTC)
+	end := start.Add(2 * time.Second)
+	require.NoError(t, store.db(ctx).Create(&[]UsageLedgerEntry{
+		{ID: "summary-root", SourceLogID: "summary-root", OccurredAt: start, ProjectID: "project-1", ApplicationID: "app-1", SessionID: ptr("root"), AgentName: ptr("main"), Status: "success", TotalTokens: 10, Cost: 1},
+		{ID: "summary-child", SourceLogID: "summary-child", OccurredAt: start.Add(time.Second), ProjectID: "project-1", ApplicationID: "app-1", SessionID: ptr("child"), ParentSessionID: ptr("root"), AgentName: ptr("reviewer"), IsSubagent: true, IsFork: true, Status: "error", TotalTokens: 20, Cost: 2},
+		{ID: "summary-other-app", SourceLogID: "summary-other-app", OccurredAt: end, ProjectID: "project-1", ApplicationID: "app-2", IsSubagent: true, Status: "cancelled", TotalTokens: 30, Cost: 3},
+		{ID: "summary-other-project", SourceLogID: "summary-other-project", OccurredAt: end.Add(time.Second), ProjectID: "project-2", ApplicationID: "app-3", Status: "success", TotalTokens: 40, Cost: 4},
+		{ID: "summary-late", SourceLogID: "summary-late", OccurredAt: end.Add(time.Hour), ProjectID: "project-1", ApplicationID: "app-1", Status: "success", TotalTokens: 50, Cost: 5},
+	}).Error)
+
+	// Empty, single and combined filters share [start, end) bounds; paging never limits totals.
+	for _, tc := range []struct {
+		name  string
+		query UsageQuery
+		count int64
+	}{
+		{"all", UsageQuery{}, 5},
+		{"project", UsageQuery{ProjectID: "project-1"}, 4},
+		{"application", UsageQuery{ApplicationID: "app-1"}, 3},
+		{"session", UsageQuery{SessionID: "child"}, 1},
+		{"parent", UsageQuery{ParentSessionID: "root"}, 1},
+		{"agent", UsageQuery{AgentName: "reviewer"}, 1},
+		{"tree", UsageQuery{TreeSessionID: "root"}, 2},
+		{"subagent", UsageQuery{IsSubagent: ptr(true)}, 2},
+		{"not-subagent", UsageQuery{IsSubagent: ptr(false)}, 3},
+		{"fork", UsageQuery{IsFork: ptr(true)}, 1},
+		{"not-fork", UsageQuery{IsFork: ptr(false)}, 4},
+		{"window", UsageQuery{StartTime: &start, EndTime: &end}, 2},
+		{"empty", UsageQuery{EndTime: &start}, 0},
+		{"combined", UsageQuery{ProjectID: "project-1", ApplicationID: "app-1", TreeSessionID: "root", AgentName: "reviewer", IsSubagent: ptr(true), IsFork: ptr(true), StartTime: &start, EndTime: &end}, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			listQuery := tc.query
+			listQuery.Limit, listQuery.Offset, listQuery.Export = 0, 0, false
+			rows, total, err := store.ListUsage(ctx, listQuery)
+			require.NoError(t, err)
+			require.Equal(t, tc.count, total)
+			tc.query.Limit, tc.query.Offset, tc.query.Export = 1, 1000, true
+			summary, err := store.SummarizeUsage(ctx, tc.query)
+			require.NoError(t, err)
+			require.Equal(t, total, summary.Requests)
+			var cost float64
+			var tokens, successes, failures, cancellations int64
+			for _, row := range rows {
+				cost += row.Cost
+				tokens += int64(row.TotalTokens)
+				if row.Status == "success" {
+					successes++
+				} else if row.Status == "error" {
+					failures++
+				} else if row.Status == "cancelled" {
+					cancellations++
+				}
+			}
+			require.Equal(t, successes, summary.SuccessfulRequests)
+			require.Equal(t, failures, summary.FailedRequests)
+			require.Equal(t, cancellations, summary.CancelledRequests)
+			require.Equal(t, tokens, summary.TotalTokens)
+			require.InDelta(t, cost, summary.Cost, 0.000001)
+			if tc.count == 0 {
+				require.Equal(t, UsageSummary{}, summary)
+			}
+		})
+	}
+}
+
 func TestListApplicationsReturnsRows(t *testing.T) {
 	store, _ := testControlPlaneStore(t)
 	project := &Project{Name: "Applications"}

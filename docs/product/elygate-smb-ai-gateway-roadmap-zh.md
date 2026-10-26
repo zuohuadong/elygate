@@ -33,7 +33,7 @@ Elygate 当前定位收敛为：
 | Application 与 Virtual Key 绑定 | Implemented | 支持绑定、过期、撤销；未绑定 Key 仍兼容放行 |
 | Application Key 生命周期 | Implemented | 支持创建、一次性返回值、显式轮换、显式撤销；Key 变更同步到内存治理状态 |
 | 非普通 HTTP 路径绑定校验 | Implemented | WebSocket、WebRTC、MCP、OAuth VK 模式和 Async 已接入 |
-| Usage Ledger | Partial | 支持投影、查询、CSV/API 导出；预测、账单周期和重算治理未完整 |
+| Usage Ledger | Partial | 支持投影、筛选查询、全筛选范围汇总和 CSV/API 导出；预算周期、预测、告警和重算治理未完整 |
 | Control Plane Audit | Partial | 已覆盖当前 Project/Application/Binding mutation；尚未覆盖所有管理员资源 |
 | 企业身份 | Partial | 本地管理员和员工体系可用；OIDC 后续实现，LDAP/SCIM 暂不做 |
 | 统一策略中心 | Partial | 已有 CEL 路由、预算、限流和安全插件；缺统一版本、发布、回滚和仿真 |
@@ -43,6 +43,15 @@ Elygate 当前定位收敛为：
 | Kubernetes / 多节点 HA | Out of scope | 当前产品主线明确不验收 |
 
 结论：**尚未全部实现。** 当前已完成可用的控制面第一条垂直闭环，但不能宣称完整企业治理平台已经交付。
+
+### 2026-10-26 用量账本进展
+
+- 管理面统一使用 `usage-ledger` 入口，不保留重复的旧入口或页面。
+- 明细、汇总与 CSV 共享筛选条件和 `[start, end)` 时间窗口；管理面将本地时间转换为 UTC。
+- 管理员汇总接口返回全筛选范围的成功、失败、取消请求数、输入/输出/总 Token 和成本，不受明细分页限制。
+- 同步、数据库、明细、审计和应用筛选失败会显式呈现；过期请求不会覆盖当前筛选结果。
+- 已通过 Control Plane Go 测试、面板 240 项单元测试、Svelte 检查和生产构建。浏览器路由夹具覆盖筛选、导出、失败组合、乱序返回和响应式布局；这不等同于真实后端或 PostgreSQL 端到端验收。
+- 仍需完成预算周期与告警、所有敏感管理员操作审计、真实 PostgreSQL 集成及单机部署备份恢复验收。
 
 ## 3. 单机部署架构
 

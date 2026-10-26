@@ -4,6 +4,7 @@
 	import { getAppName } from '../lib/branding';
 	import { displayError } from '../lib/forms';
 	import { formatUsdCost } from '../lib/display-format';
+	import { usageTimeRange, type UsageSummary } from '../lib/control-plane-usage';
 	import { encodePathSegment, getListPayload, getTotal, isJsonRecord, requestJson, type JsonRecord } from '../lib/api';
 
 	interface Props { resourceName: string; }
@@ -53,7 +54,7 @@
 			],
 		},
 		{
-			id: 'control-plane-usage',
+			id: 'usage-ledger',
 			label: 'Usage',
 			columns: [
 				{ key: 'occurred_at', label: 'Time' },
@@ -347,6 +348,7 @@
 	let usageRows = $state.raw<JsonRecord[]>([]);
 	let auditEvents = $state.raw<JsonRecord[]>([]);
 	let usageStatus = $state<UsageStatus | null>(null);
+	let usageSummary = $state<UsageSummary | null>(null);
 	let usageProjectFilter = $state('');
 	let usageApplicationFilter = $state('');
 	let usageStartFilter = $state('');
@@ -357,7 +359,12 @@
 	let usageSubagentOnly = $state(false);
 	let usageApplicationOptions = $state.raw<{ id: string; name: string }[]>([]);
 	let usageLoading = $state(false);
+	let usageLoadError = $state('');
+	let usageStatusError = $state('');
+	let usageAuditError = $state('');
+	let usageApplicationError = $state('');
 	let usageFilterLoading = $state(false);
+	let usageApplicationLoadSeq = 0;
 	let usageLoadSeq = 0;
 	let usageOffset = $state(0);
 	let usageTotal = $state(0);
@@ -393,8 +400,11 @@
 		const params = new URLSearchParams();
 		if (usageProjectFilter) params.set('project_id', usageProjectFilter);
 		if (usageApplicationFilter) params.set('application_id', usageApplicationFilter);
-		const start = usageStartFilter.trim();
-		const end = usageEndFilter.trim();
+		const { start, end } = usageTimeRange(usageStartFilter, usageEndFilter, {
+			start: text('开始时间无效', 'Invalid start time'),
+			end: text('结束时间无效', 'Invalid end time'),
+			range: text('开始时间必须早于结束时间', 'Start time must be before end time'),
+		});
 		if (start) params.set('start_time', start);
 		if (end) params.set('end_time', end);
 		if (usageSessionFilter.trim()) params.set('session_id', usageSessionFilter.trim());
@@ -412,22 +422,40 @@
 		const sequence = ++usageLoadSeq;
 		const requested = usageRequestSnapshot();
 		usageLoading = true;
+		usageLoadError = '';
+		usageStatusError = '';
+		usageAuditError = '';
+		usageRows = [];
+		usageTotal = 0;
+		usageStatus = null;
+		auditEvents = [];
+		usageSummary = null;
 		error = '';
 		try {
 			const query = usageQueryParams(requested.offset);
-			const [usageResult, statusResult, auditResult] = await Promise.allSettled([
+			const [usageResult, statusResult, auditResult, summaryResult] = await Promise.allSettled([
 				requestJson<unknown>(`/api/control-plane/usage?${query.toString()}`),
 				requestJson<UsageStatus>('/api/control-plane/usage/status'),
 				requestJson<unknown>('/api/control-plane/audit-events?limit=50'),
+				requestJson<UsageSummary>(`/api/control-plane/usage/summary?${query.toString()}`),
 			]);
 			if (sequence !== usageLoadSeq || !sameUsageRequest(usageRequestSnapshot(), requested)) return;
-			if (usageResult.status === 'rejected') throw usageResult.reason;
+			usageStatus = statusResult.status === 'fulfilled' ? statusResult.value : null;
+			usageSummary = summaryResult.status === 'fulfilled' ? summaryResult.value : null;
+			auditEvents = auditResult.status === 'fulfilled' ? getListPayload(auditResult.value) : [];
+			if (statusResult.status === 'rejected') usageStatusError = displayError(statusResult.reason, text('同步状态不可用', 'Sync status unavailable'));
+			if (auditResult.status === 'rejected') usageAuditError = displayError(auditResult.reason, text('审计事件不可用', 'Audit events unavailable'));
+			if (usageResult.status === 'rejected') {
+				usageLoadError = displayError(usageResult.reason, text('账本数据不可用', 'Ledger data unavailable'));
+				throw usageResult.reason;
+			}
 			usageRows = getListPayload(usageResult.value);
 			usageTotal = readTotal(usageResult.value, usageRows.length);
-			usageStatus = statusResult.status === 'fulfilled' ? statusResult.value : null;
-			auditEvents = auditResult.status === 'fulfilled' ? getListPayload(auditResult.value) : [];
+			if (summaryResult.status === 'rejected') throw summaryResult.reason;
 		} catch (cause) {
-			if (sequence === usageLoadSeq && sameUsageRequest(usageRequestSnapshot(), requested)) throw cause;
+			if (sequence === usageLoadSeq && sameUsageRequest(usageRequestSnapshot(), requested)) {
+				throw cause;
+			}
 		} finally {
 			if (sequence === usageLoadSeq) usageLoading = false;
 		}
@@ -438,32 +466,36 @@
 	}
 
 	async function loadUsageApplicationOptions(): Promise<void> {
+		const sequence = ++usageApplicationLoadSeq;
+		const requestedProject = usageProjectFilter;
 		usageApplicationOptions = [];
 		usageApplicationFilter = '';
-		if (!usageProjectFilter) return;
+		usageApplicationError = '';
+		usageFilterLoading = false;
+		if (!requestedProject) return;
 		usageFilterLoading = true;
 		try {
-			const payload = await requestJson<unknown>(`/api/control-plane/projects/${encodePathSegment(usageProjectFilter)}/applications`);
+			const payload = await requestJson<unknown>(`/api/control-plane/projects/${encodePathSegment(requestedProject)}/applications`);
+			if (sequence !== usageApplicationLoadSeq || usageProjectFilter !== requestedProject) return;
 			usageApplicationOptions = getListPayload(payload).map((row) => ({
 				id: String(row.id ?? ''),
 				name: String(row.name ?? ''),
 			})).filter((row) => row.id !== '');
 		} catch (cause) {
-			handleError(cause, text('加载应用筛选失败', 'Failed to load application filters'));
+			if (sequence === usageApplicationLoadSeq && usageProjectFilter === requestedProject) {
+				usageApplicationError = displayError(cause, text('加载应用筛选失败', 'Failed to load application filters'));
+			}
 		} finally {
-			usageFilterLoading = false;
+			if (sequence === usageApplicationLoadSeq) usageFilterLoading = false;
 		}
 	}
 
 	function reloadUsageFromFilters(): void {
 		usageOffset = 0;
-		usageApplicationFilter = '';
-		usageApplicationOptions = [];
-		if (usageProjectFilter) {
-			void loadUsageApplicationOptions().then(() => refreshUsage());
-		} else {
-			refreshUsage();
-		}
+		const requestedProject = usageProjectFilter;
+		void loadUsageApplicationOptions().then(() => {
+			if (usageProjectFilter === requestedProject) refreshUsage();
+		});
 	}
 
 	function applyUsageFilters(): void {
@@ -493,14 +525,19 @@
 	}
 
 	function exportUsage(): void {
-		const params = usageQueryParams(0, false);
-		const suffix = params.toString();
-		const link = document.createElement('a');
-		link.href = `/api/control-plane/usage/export${suffix ? `?${suffix}` : ''}`;
-		link.download = 'elygate-usage.csv';
-		document.body.append(link);
-		link.click();
-		link.remove();
+		error = '';
+		try {
+			const params = usageQueryParams(0, false);
+			const suffix = params.toString();
+			const link = document.createElement('a');
+			link.href = `/api/control-plane/usage/export${suffix ? `?${suffix}` : ''}`;
+			link.download = 'elygate-usage.csv';
+			document.body.append(link);
+			link.click();
+			link.remove();
+		} catch (cause) {
+			handleError(cause, text('导出用量失败', 'Failed to export usage'));
+		}
 	}
 
 	let loadedTab = '';
@@ -508,8 +545,13 @@
 		const tab = activeTab.id;
 		if (tab === loadedTab) return;
 		loadedTab = tab;
-		if (tab === 'control-plane-usage') refreshUsage();
+		if (tab === 'usage-ledger') refreshUsage();
 	});
+
+	function refreshPage(): void {
+		if (activeTab.id === 'usage-ledger') refreshUsage();
+		else void loadProjects().catch((cause) => handleError(cause, text('刷新失败', 'Refresh failed')));
+	}
 
 	onMount(() => {
 		void loadProjects().catch((cause) => handleError(cause, text('加载控制平面数据失败', 'Failed to load control-plane data')));
@@ -523,10 +565,10 @@
 <section class="page">
 	<header>
 		<div>
-			<h1>{activeTab.id === 'control-plane-usage' ? text('用量账本', 'Usage Ledger') : activeTab.label}</h1>
-			<p>{i18n.t('elygate.controlPlaneHint') || 'Control-plane projects, applications and usage ledger.'}</p>
+			<h1>{activeTab.id === 'usage-ledger' ? text('用量账本', 'Usage Ledger') : activeTab.label}</h1>
+			{#if activeTab.id !== 'usage-ledger'}<p>{i18n.t('elygate.controlPlaneHint') || 'Control-plane projects, applications and usage ledger.'}</p>{/if}
 		</div>
-		<button class="secondary" type="button" onclick={() => void loadProjects().catch((cause) => handleError(cause, text('刷新失败', 'Refresh failed')))} disabled={loading}>{text('刷新', 'Refresh')}</button>
+		<button class="secondary" type="button" onclick={refreshPage} disabled={activeTab.id === 'usage-ledger' ? usageLoading : loading}>{text('刷新', 'Refresh')}</button>
 	</header>
 
 	{#if error}<div class="error" role="alert">{error}</div>{/if}
@@ -605,7 +647,7 @@
 			</section>
 		{/if}
 	{:else}
-		<section class="card filters">
+		<section class="filters">
 			<label>{text('项目', 'Project')}<select bind:value={usageProjectFilter} onchange={() => reloadUsageFromFilters()}><option value="">{text('全部项目', 'All projects')}</option>{#each projects as project (project.id)}<option value={project.id}>{project.name}</option>{/each}</select></label>
 			<label>{text('应用', 'Application')}<select bind:value={usageApplicationFilter} onchange={() => changeUsageApplication()} disabled={usageLoading || usageFilterLoading || !usageProjectFilter}><option value="">{text('全部应用', 'All applications')}</option>{#each usageApplicationOptions as option (option.id)}<option value={option.id}>{option.name}</option>{/each}</select></label>
 			<label>{text('开始时间', 'Start time')}<input type="datetime-local" bind:value={usageStartFilter} /></label>
@@ -616,17 +658,25 @@
 			<label class="check"><input type="checkbox" bind:checked={usageSubagentOnly} />{text('仅子 Agent', 'Subagents only')}</label>
 			<div class="filter-actions"><button type="button" onclick={() => applyUsageFilters()} disabled={usageLoading || usageFilterLoading}>{text('应用筛选', 'Apply filters')}</button><button type="button" class="secondary" onclick={() => resetUsageFilters()} disabled={usageLoading || usageFilterLoading}>{text('重置', 'Reset')}</button><button type="button" class="secondary" onclick={() => exportUsage()}>{text('导出 CSV', 'Export CSV')}</button></div>
 		</section>
+		{#if usageApplicationError}<p class="error" role="alert">{usageApplicationError}</p>{/if}
 
 		<section class="status-strip" aria-busy={usageLoading}>
+			<div><span>{text('请求数', 'Requests')}</span><strong>{usageSummary?.requests.toLocaleString(i18n.locale) ?? '—'}</strong></div>
+			<div><span>{text('成功请求', 'Successful requests')}</span><strong>{usageSummary?.successful_requests.toLocaleString(i18n.locale) ?? '—'}</strong></div>
+			<div><span>{text('失败请求', 'Failed requests')}</span><strong>{usageSummary?.failed_requests.toLocaleString(i18n.locale) ?? '—'}</strong></div>
+			<div><span>{text('已取消请求', 'Cancelled requests')}</span><strong>{usageSummary?.cancelled_requests.toLocaleString(i18n.locale) ?? '—'}</strong></div>
+			<div><span>{text('输入 Token', 'Prompt tokens')}</span><strong>{usageSummary?.prompt_tokens.toLocaleString(i18n.locale) ?? '—'}</strong></div>
+			<div><span>{text('输出 Token', 'Output tokens')}</span><strong>{usageSummary?.output_tokens.toLocaleString(i18n.locale) ?? '—'}</strong></div>
+			<div><span>{text('总 Token', 'Total tokens')}</span><strong>{usageSummary?.total_tokens.toLocaleString(i18n.locale) ?? '—'}</strong></div>
+			<div><span>{text('总成本', 'Total cost')}</span><strong>{formatUsdCost(usageSummary?.cost)}</strong></div>
 			<div><span>{text('同步水位', 'Watermark')}</span><strong>{formatDate(usageStatus?.watermark)}</strong></div>
-			<div><span>{text('同步延迟', 'Lag')}</span><strong>{formatDuration(usageStatus?.lag_seconds)}</strong></div>
-			<div><span>{text('账本条数', 'Ledger rows')}</span><strong>{usageTotal.toLocaleString(i18n.locale)}</strong></div>
-			<div><span>{text('审计事件', 'Audit events')}</span><strong>{auditEvents.length.toLocaleString(i18n.locale)}</strong></div>
+			<div><span>{text('同步延迟', 'Lag')}</span><strong>{usageStatus ? formatDuration(usageStatus.lag_seconds) : '—'}</strong></div>
 		</section>
+		{#if usageStatusError}<p class="error" role="alert">{usageStatusError}</p>{/if}
 
-		<section class="card">
+		<section class="ledger-section">
 			<h2>{text('用量账本', 'Usage Ledger')}</h2>
-			{#if usageLoading}<p class="muted">{text('加载中…', 'Loading…')}</p>{:else if usageRows.length === 0}<p class="muted">{text('暂无账本数据', 'No ledger data')}</p>{:else}
+			{#if usageLoading}<p class="muted">{text('加载中…', 'Loading…')}</p>{:else if usageRows.length === 0}<p class="muted">{usageLoadError ? text('账本数据不可用', 'Ledger data unavailable') : text('暂无账本数据', 'No ledger data')}</p>{:else}
 				<div class="table-wrap"><table><thead><tr>{#each activeTab.columns as column (column.key)}<th>{column.label}</th>{/each}</tr></thead><tbody>
 					{#each usageRows as row, index (String(row.id ?? index))}
 						<tr><td>{formatDate(row.occurred_at)}</td><td>{String(row.application_id ?? '—')}</td><td>{String(row.provider ?? '—')}</td><td>{String(row.model ?? '—')}</td><td>{String(row.status ?? '—')}</td><td>{String(row.total_tokens ?? '—')}</td><td>{formatUsdCost(row.cost)}</td></tr>
@@ -636,9 +686,9 @@
 			<footer class="pagination"><span>{text(`第 ${Math.floor(usageOffset / usageLimit) + 1} 页 · 共 ${usageTotal} 条`, `Page ${Math.floor(usageOffset / usageLimit) + 1} · ${usageTotal} total`)}</span><div><button type="button" disabled={saving || loading || usageLoading || usageOffset === 0} onclick={() => moveUsagePage(usageOffset - usageLimit)}>{text('上一页', 'Previous')}</button><button type="button" disabled={saving || loading || usageLoading || usageOffset + usageLimit >= usageTotal} onclick={() => moveUsagePage(usageOffset + usageLimit)}>{text('下一页', 'Next')}</button></div></footer>
 		</section>
 
-		<section class="card">
+		<section class="ledger-section">
 			<h2>{text('审计事件', 'Audit events')}</h2>
-			{#if auditEvents.length === 0}<p class="muted">{text('暂无审计事件', 'No audit events')}</p>{:else}
+			{#if usageAuditError}<p class="error" role="alert">{usageAuditError}</p>{:else if usageLoading}<p class="muted">{text('加载中…', 'Loading…')}</p>{:else if auditEvents.length === 0}<p class="muted">{text('暂无审计事件', 'No audit events')}</p>{:else}
 				<div class="table-wrap"><table><thead><tr><th>{text('时间', 'Time')}</th><th>{text('操作者', 'Actor')}</th><th>{text('动作', 'Action')}</th><th>{text('资源', 'Resource')}</th><th>ID</th></tr></thead><tbody>
 					{#each auditEvents as row, index (String(row.id ?? index))}
 						<tr><td>{formatDate(row.created_at)}</td><td>{String(row.actor_id ?? '—')}</td><td>{String(row.action ?? '—')}</td><td>{String(row.resource_type ?? '—')}</td><td>{String(row.resource_id ?? '—')}</td></tr>
@@ -650,7 +700,7 @@
 </section>
 
 <style>
-	.page { display: grid; gap: 1rem; }
+	.page { display: grid; gap: 1rem; min-width: 0; }
 	header { display: flex; align-items: end; justify-content: space-between; gap: 1rem; }
 	header.row { align-items: center; }
 	h1 { font-size: 1.35rem; margin: 0; }
@@ -678,11 +728,14 @@
 	.error { background: color-mix(in srgb, var(--destructive) 12%, transparent); border-color: var(--destructive); }
 	.reveal { display: grid; gap: .35rem; }
 	.reveal code { overflow-wrap: anywhere; }
-	.filters { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-	.filter-actions { align-items: end; display: flex; gap: .5rem; }
+	.filters { display: grid; gap: .75rem; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+	.filters label, .filters input, .filters select { min-width: 0; }
+	.filter-actions { align-items: end; display: flex; flex-wrap: wrap; gap: .5rem; grid-column: 1 / -1; }
+	.ledger-section { min-width: 0; }
 	.status-strip { border-bottom: 1px solid var(--border); border-top: 1px solid var(--border); display: grid; gap: 1rem; grid-template-columns: repeat(4, minmax(0, 1fr)); padding: 1rem 0; }
 	.status-strip div { display: grid; gap: .3rem; min-width: 0; }
 	.status-strip span { color: var(--muted-foreground); font-size: .8rem; }
+	.status-strip strong { font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 	.pagination { align-items: center; color: var(--muted-foreground); display: flex; font-size: .82rem; justify-content: space-between; }
 	.pagination div { display: flex; gap: .5rem; }
 	@media (max-width: 900px) {

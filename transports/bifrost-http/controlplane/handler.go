@@ -106,6 +106,7 @@ func (h *Handler) RegisterRoutes(r *router.Router, middlewares ...schemas.Bifros
 	r.POST("/api/control-plane/applications/{application_id}/virtual-key-binding", wrap(h.bindVirtualKey))
 	r.DELETE("/api/control-plane/applications/{application_id}/virtual-key-binding", wrap(h.revokeBinding))
 	r.GET("/api/control-plane/usage", wrap(h.listUsage))
+	r.GET("/api/control-plane/usage/summary", wrap(h.usageSummary))
 	r.GET("/api/control-plane/usage/export", wrap(h.exportUsage))
 	r.GET("/api/control-plane/usage/status", wrap(h.usageStatus))
 	r.GET("/api/control-plane/audit-events", wrap(h.listAudit))
@@ -612,6 +613,27 @@ func (h *Handler) listUsage(ctx *fasthttp.RequestCtx) {
 	}
 	writeJSON(ctx, 200, map[string]any{"data": rows, "pagination": map[string]any{"limit": q.Limit, "offset": q.Offset, "total": total}})
 }
+
+func (h *Handler) usageSummary(ctx *fasthttp.RequestCtx) {
+	opCtx, cancel := controlPlaneContext()
+	defer cancel()
+	q, err := h.usageQuery(ctx)
+	if err != nil {
+		writeError(ctx, 400, err)
+		return
+	}
+	if err := h.syncUsage(opCtx, q.StartTime, q.EndTime, false); err != nil {
+		writeError(ctx, 500, err)
+		return
+	}
+	summary, err := h.store.SummarizeUsage(opCtx, q)
+	if err != nil {
+		writeError(ctx, 500, err)
+		return
+	}
+	writeJSON(ctx, 200, summary)
+}
+
 func (h *Handler) exportUsage(ctx *fasthttp.RequestCtx) {
 	opCtx, cancel := controlPlaneContext()
 	defer cancel()

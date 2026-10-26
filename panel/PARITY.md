@@ -80,7 +80,25 @@ upstream UI.
 | `/workspace/skills-repo` | skills | `/api/skills*` files, versions, serving and cleanup | Dedicated |
 | `/workspace/webhooks` | webhooks | `/api/webhooks*` test, secret rotation, delivery inspect/redeliver | Dedicated |
 | `/workspace/docs` | docs-hub | bundled docs + official documentation links | Dedicated |
+| Elygate control plane | control-plane-projects, control-plane-applications | `/api/control-plane/projects*`, `/api/control-plane/applications*` project/application management and key lifecycle | Dedicated |
+| Elygate usage ledger | usage-ledger | `/api/control-plane/usage*`, `/api/control-plane/audit-events*` paginated ledger, full filtered summary, sync status and CSV export | Dedicated |
 | `/pprof` | pprof | `/api/dev/pprof*` | Dedicated |
+
+### Usage ledger contract
+
+- The list, summary, and CSV accept the same project/application, session tree,
+  agent, subagent/fork and RFC3339 time filters. Time windows are `[start, end)`;
+  the panel converts local date/time input to UTC. All routes require an
+  authenticated administrator; bypassed authentication is rejected.
+- `GET /api/control-plane/usage/summary` returns `requests`,
+  `successful_requests` (`success`), `failed_requests` (`error`),
+  `cancelled_requests` (`cancelled`), `prompt_tokens`, `output_tokens`,
+  `total_tokens`, and `cost`. It aggregates every matching row, ignoring
+  `limit`/`offset`; an empty result returns zeroes. Synchronization or database
+  failures return an error, not zero totals.
+- Summary and list requests use the same filter snapshot and reject stale
+  responses. Summary failures remain visible while successful list results are
+  retained; missing sync/audit data is not shown as successful empty data.
 
 ## Enterprise extension routes
 

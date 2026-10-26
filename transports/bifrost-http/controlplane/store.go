@@ -791,9 +791,18 @@ type UsageQuery struct {
 	Export                                               bool
 }
 
-func (s *Store) ListUsage(ctx context.Context, q UsageQuery) ([]UsageLedgerEntry, int64, error) {
-	var out []UsageLedgerEntry
-	db := s.db(ctx).Order("occurred_at DESC, id DESC")
+type UsageSummary struct {
+	Requests           int64   `json:"requests"`
+	SuccessfulRequests int64   `json:"successful_requests"`
+	FailedRequests     int64   `json:"failed_requests"`
+	CancelledRequests  int64   `json:"cancelled_requests"`
+	PromptTokens       int64   `json:"prompt_tokens"`
+	OutputTokens       int64   `json:"output_tokens"`
+	TotalTokens        int64   `json:"total_tokens"`
+	Cost               float64 `json:"cost"`
+}
+
+func applyUsageFilters(db *gorm.DB, q UsageQuery) *gorm.DB {
 	if q.ProjectID != "" {
 		db = db.Where("project_id = ?", q.ProjectID)
 	}
@@ -824,6 +833,12 @@ func (s *Store) ListUsage(ctx context.Context, q UsageQuery) ([]UsageLedgerEntry
 	if q.EndTime != nil {
 		db = db.Where("occurred_at < ?", *q.EndTime)
 	}
+	return db
+}
+
+func (s *Store) ListUsage(ctx context.Context, q UsageQuery) ([]UsageLedgerEntry, int64, error) {
+	var out []UsageLedgerEntry
+	db := applyUsageFilters(s.db(ctx), q).Order("occurred_at DESC, id DESC")
 	var total int64
 	if err := db.Model(&UsageLedgerEntry{}).Count(&total).Error; err != nil {
 		return nil, 0, err
@@ -840,6 +855,22 @@ func (s *Store) ListUsage(ctx context.Context, q UsageQuery) ([]UsageLedgerEntry
 	}
 	err := db.Limit(q.Limit).Offset(q.Offset).Find(&out).Error
 	return out, total, err
+}
+
+func (s *Store) SummarizeUsage(ctx context.Context, q UsageQuery) (UsageSummary, error) {
+	var summary UsageSummary
+	err := applyUsageFilters(s.db(ctx), q).
+		Model(&UsageLedgerEntry{}).
+		Select(`COUNT(*) AS requests,
+			COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0) AS successful_requests,
+			COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0) AS failed_requests,
+			COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0) AS cancelled_requests,
+			COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+			COALESCE(SUM(output_tokens), 0) AS output_tokens,
+			COALESCE(SUM(total_tokens), 0) AS total_tokens,
+			COALESCE(SUM(cost), 0) AS cost`, "success", "error", "cancelled").
+		Scan(&summary).Error
+	return summary, err
 }
 func (s *Store) Checkpoint(ctx context.Context) (*UsageLedgerCheckpoint, error) {
 	var out UsageLedgerCheckpoint

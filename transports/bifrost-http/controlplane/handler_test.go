@@ -230,6 +230,66 @@ func TestUsageQueryParsesSessionTreeFilters(t *testing.T) {
 	require.EqualError(t, err, "is_subagent must be a boolean")
 }
 
+func TestUsageSummaryRouterRequiresAdminAndValidFilters(t *testing.T) {
+	store, _ := testControlPlaneStore(t)
+	require.NoError(t, store.db(context.Background()).Create(&UsageLedgerEntry{
+		ID: "router-summary", SourceLogID: "router-summary", OccurredAt: time.Now().UTC(),
+		ProjectID: "summary-project", ApplicationID: "summary-app", Status: "success", TotalTokens: 15, Cost: 0.42,
+	}).Error)
+	r := router.New()
+	NewHandler(store, nil).RegisterRoutes(r)
+	for _, tc := range []struct {
+		name, query   string
+		admin, bypass bool
+		status        int
+	}{
+		{"anonymous", "", false, false, fasthttp.StatusUnauthorized},
+		{"bypassed", "", true, true, fasthttp.StatusForbidden},
+		{"malformed-time", "?start_time=not-a-time", true, false, fasthttp.StatusBadRequest},
+		{"reversed-window", "?start_time=2026-09-14T00:00:00Z&end_time=2026-09-13T00:00:00Z", true, false, fasthttp.StatusBadRequest},
+		{"invalid-boolean", "?is_fork=maybe", true, false, fasthttp.StatusBadRequest},
+		{"summary", "?project_id=summary-project&limit=1&offset=1000", true, false, fasthttp.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			request := &fasthttp.RequestCtx{}
+			request.Request.SetRequestURI("http://admin.example.test/api/control-plane/usage/summary" + tc.query)
+			request.SetUserValue(schemas.IsLocalAdminContextKey, tc.admin)
+			request.SetUserValue(schemas.BifrostContextKeyAuthBypassed, tc.bypass)
+			r.Handler(request)
+			require.Equal(t, tc.status, request.Response.StatusCode(), string(request.Response.Body()))
+			if tc.status == fasthttp.StatusOK {
+				var summary UsageSummary
+				require.NoError(t, json.Unmarshal(request.Response.Body(), &summary))
+				require.EqualValues(t, 1, summary.Requests)
+				require.EqualValues(t, 15, summary.TotalTokens)
+				require.InDelta(t, 0.42, summary.Cost, 0.000001)
+			}
+		})
+	}
+}
+
+func TestUsageSummaryPropagatesSyncAndDatabaseFailures(t *testing.T) {
+	t.Run("sync", func(t *testing.T) {
+		store, _ := testControlPlaneStore(t)
+		h := NewHandler(store, &failingFingerprintLogManager{
+			snapshotLogManager: &snapshotLogManager{UsageLogReader: &countingUsageReader{}},
+			err:                errors.New("usage source unavailable"),
+		})
+		request := &fasthttp.RequestCtx{}
+		h.usageSummary(request)
+		require.Equal(t, fasthttp.StatusInternalServerError, request.Response.StatusCode())
+		require.Contains(t, string(request.Response.Body()), "usage source unavailable")
+	})
+	t.Run("database", func(t *testing.T) {
+		store, _ := testControlPlaneStore(t)
+		require.NoError(t, store.db(context.Background()).Migrator().DropTable(&UsageLedgerEntry{}))
+		request := &fasthttp.RequestCtx{}
+		NewHandler(store, nil).usageSummary(request)
+		require.Equal(t, fasthttp.StatusInternalServerError, request.Response.StatusCode())
+		require.NotContains(t, string(request.Response.Body()), `"requests":0`)
+	})
+}
+
 func TestCheckVirtualKeyAccessHonorsApplicationBindingLifecycle(t *testing.T) {
 	store, cs := testControlPlaneStore(t)
 	active := true
