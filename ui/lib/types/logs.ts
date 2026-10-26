@@ -872,7 +872,6 @@ export interface LogEntry {
 	redaction_mapping?: RedactionMapping; // Phase-scoped placeholder-to-original mappings, present only when caller has Logs:Reveal
 	user_agent?: string; // Raw HTTP User-Agent of the calling client
 	app?: string; // Backend-detected client app
-	session_id?: string; // harness session identity; distinct from parent_request_id session grouping
 	parent_session_id?: string;
 	agent_name?: string;
 	session_client_type?: string;
