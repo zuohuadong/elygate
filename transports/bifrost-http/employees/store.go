@@ -17,7 +17,8 @@ import (
 )
 
 type Store struct {
-	configStore configstore.ConfigStore
+	configStore   configstore.ConfigStore
+	auditAppender EmployeeAuditAppender
 }
 
 // Share the configstore migration lock so employee DDL cannot race another
@@ -27,6 +28,7 @@ const employeeMigrationLockKey = 1000001
 var (
 	ErrAssignmentImmutable = errors.New("employee virtual key assignment is immutable")
 	ErrImportBatchConflict = errors.New("employee import batch payload conflict")
+	ErrEmployeeAudit       = errors.New("employee audit persistence failed")
 )
 
 const (
@@ -134,6 +136,23 @@ func (s *Store) db(ctx context.Context) *gorm.DB {
 	return s.configStore.DB().WithContext(ctx)
 }
 
+func (s *Store) appendAudit(tx *gorm.DB, event EmployeeAuditEvent) error {
+	if s.auditAppender == nil {
+		return nil
+	}
+	if err := s.auditAppender(tx.Statement.Context, tx, event); err != nil {
+		return fmt.Errorf("%w: %w", ErrEmployeeAudit, err)
+	}
+	return nil
+}
+
+func employeeAuditSnapshot(employee *Employee) map[string]any {
+	return map[string]any{
+		"username": employee.Username, "name": employee.Name,
+		"is_active": employee.IsActive,
+	}
+}
+
 func normalizeUsername(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
 }
@@ -176,7 +195,10 @@ func (s *Store) Create(ctx context.Context, employee *Employee, password string,
 		if err := replaceAssignments(tx, employee.ID, virtualKeyIDs); err != nil {
 			return err
 		}
-		return nil
+		return s.appendAudit(tx, EmployeeAuditEvent{
+			Action: "employee.create", Resource: "employee", ResourceID: employee.ID,
+			After: employeeAuditSnapshot(employee),
+		})
 	})
 }
 
@@ -225,13 +247,20 @@ func (s *Store) BulkCreateImport(ctx context.Context, batchID, payloadDigest str
 				return err
 			}
 		}
-		return nil
+		return s.appendAudit(tx, EmployeeAuditEvent{
+			Action: "employee.import", Resource: "employee_batch", ResourceID: batchID,
+			After: map[string]any{"imported": len(entries)},
+		})
 	})
 	return alreadyImported, err
 }
 
 func (s *Store) Update(ctx context.Context, employee *Employee, virtualKeyIDs []string) error {
 	return s.db(ctx).Transaction(func(tx *gorm.DB) error {
+		var existing Employee
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&existing, "id = ?", employee.ID).Error; err != nil {
+			return err
+		}
 		var current []EmployeeVirtualKey
 		if err := tx.Where("employee_id = ?", employee.ID).Order("virtual_key_id ASC").Find(&current).Error; err != nil {
 			return err
@@ -264,7 +293,12 @@ func (s *Store) Update(ctx context.Context, employee *Employee, virtualKeyIDs []
 		if err := replaceAssignments(tx, employee.ID, virtualKeyIDs); err != nil {
 			return err
 		}
-		return nil
+		after := existing
+		after.Username, after.Name, after.IsActive = normalizeUsername(employee.Username), strings.TrimSpace(employee.Name), employee.IsActive
+		return s.appendAudit(tx, EmployeeAuditEvent{
+			Action: "employee.update", Resource: "employee", ResourceID: employee.ID,
+			Before: employeeAuditSnapshot(&existing), After: employeeAuditSnapshot(&after),
+		})
 	})
 }
 
@@ -349,7 +383,7 @@ func (s *Store) RollbackImport(ctx context.Context, batchID string) (int64, erro
 	var disabled int64
 	err := s.db(ctx).Transaction(func(tx *gorm.DB) error {
 		var batch EmployeeImportBatch
-		if err := tx.First(&batch, "id = ?", batchID).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&batch, "id = ?", batchID).Error; err != nil {
 			return err
 		}
 		if batch.RolledBackAt != nil {
@@ -373,7 +407,13 @@ func (s *Store) RollbackImport(ctx context.Context, batchID string) (int64, erro
 			}
 		}
 		now := time.Now()
-		return tx.Model(&batch).Update("rolled_back_at", &now).Error
+		if err := tx.Model(&batch).Update("rolled_back_at", &now).Error; err != nil {
+			return err
+		}
+		return s.appendAudit(tx, EmployeeAuditEvent{
+			Action: "employee.import_rollback", Resource: "employee_batch", ResourceID: batchID,
+			After: map[string]any{"disabled": disabled},
+		})
 	})
 	return disabled, err
 }
@@ -384,6 +424,10 @@ func (s *Store) ResetPassword(ctx context.Context, employeeID, password string) 
 		return err
 	}
 	return s.db(ctx).Transaction(func(tx *gorm.DB) error {
+		var employee Employee
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&employee, "id = ?", employeeID).Error; err != nil {
+			return err
+		}
 		result := tx.Model(&Employee{}).Where("id = ?", employeeID).Updates(map[string]any{
 			"password_hash":        hash,
 			"must_change_password": true,
@@ -396,7 +440,12 @@ func (s *Store) ResetPassword(ctx context.Context, employeeID, password string) 
 		if result.RowsAffected == 0 {
 			return gorm.ErrRecordNotFound
 		}
-		return tx.Where("employee_id = ?", employeeID).Delete(&EmployeeSession{}).Error
+		if err := tx.Where("employee_id = ?", employeeID).Delete(&EmployeeSession{}).Error; err != nil {
+			return err
+		}
+		return s.appendAudit(tx, EmployeeAuditEvent{
+			Action: "employee.password_reset", Resource: "employee", ResourceID: employeeID,
+		})
 	})
 }
 

@@ -3048,20 +3048,7 @@ func (s *BifrostHTTPServer) RegisterAPIRoutes(ctx context.Context, callbacks Ser
 			return fmt.Errorf("failed to initialize employee management: %v", err)
 		}
 		employeeHandler.SetAuditAppenderFactory(func(request *fasthttp.RequestCtx) employees.EmployeeAuditAppender {
-			if !encrypt.IsEnabled() {
-				return nil
-			}
-			base := handlers.GovernanceAuditInput{
-				Principal: handlers.AdminPrincipalFromRequest(request),
-				RequestID: handlers.GovernanceRequestIDFromRequest(request),
-				TraceID:   handlers.GovernanceTraceIDFromRequest(request),
-			}
-			return func(dbCtx context.Context, tx *gorm.DB, action, resource, resourceID, outcome string, before, after, metadata any) error {
-				input := base
-				input.Action, input.Resource, input.ResourceID, input.Outcome = action, resource, resourceID, outcome
-				input.Before, input.After, input.Metadata = before, after, metadata
-				return handlers.AppendGovernanceAudit(dbCtx, s.Config.ConfigStore, tx, input)
-			}
+			return employeeAuditAppender(s.Config.ConfigStore, request)
 		})
 		s.EmployeeHandler = employeeHandler
 		controlPlaneStore, storeErr := controlplane.NewStoreWithBindingMode(ctx, s.Config.ConfigStore, bindingMode)

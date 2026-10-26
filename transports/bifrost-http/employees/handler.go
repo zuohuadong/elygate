@@ -41,8 +41,16 @@ var ErrEmployeeInactive = errors.New("employee account is inactive")
 
 // EmployeeAuditAppender records one employee-administration event. It runs
 // inside the caller's transaction so the mutation and its audit entry commit
-// together. A nil return value means auditing is disabled for this deployment.
-type EmployeeAuditAppender func(dbCtx context.Context, tx *gorm.DB, action, resource, resourceID, outcome string, before, after, metadata any) error
+// together. An error aborts the administrative mutation.
+type EmployeeAuditAppender func(context.Context, *gorm.DB, EmployeeAuditEvent) error
+
+type EmployeeAuditEvent struct {
+	Action     string
+	Resource   string
+	ResourceID string
+	Before     any
+	After      any
+}
 
 type Handler struct {
 	store        *Store
@@ -55,33 +63,41 @@ type Handler struct {
 	auditAppenderFactory func(*fasthttp.RequestCtx) EmployeeAuditAppender
 }
 
-// SetAuditAppenderFactory installs the per-request audit appender factory. The
-// server uses it to sign entries into the governance audit chain when
-// encryption (the signing key source) is configured.
+// SetAuditAppenderFactory binds trusted request identity to a transactional
+// appender. The server selects compact or signed persistence.
 func (h *Handler) SetAuditAppenderFactory(factory func(*fasthttp.RequestCtx) EmployeeAuditAppender) {
 	h.auditMu.Lock()
 	h.auditAppenderFactory = factory
 	h.auditMu.Unlock()
 }
 
-// appendAudit writes an audit entry after a successful mutation. Audit failures
-// are deliberately non-fatal: the administrative change already committed, and
-// turning a signing problem into a 500 would invite the caller to retry an
-// operation that succeeded.
-func (h *Handler) appendAudit(request *fasthttp.RequestCtx, action, resource, resourceID, outcome string, before, after, metadata any) {
+func (h *Handler) administrationStore(request *fasthttp.RequestCtx) *Store {
 	h.auditMu.RLock()
 	factory := h.auditAppenderFactory
 	h.auditMu.RUnlock()
-	if factory == nil || h.configStore == nil {
-		return
+	var appender EmployeeAuditAppender
+	if factory != nil {
+		appender = factory(request)
 	}
-	appender := factory(request)
 	if appender == nil {
-		return
+		appender = func(context.Context, *gorm.DB, EmployeeAuditEvent) error {
+			return errors.New("employee administration audit is not configured")
+		}
 	}
-	_ = h.configStore.ExecuteTransaction(context.Background(), func(tx *gorm.DB) error {
-		return appender(context.Background(), tx, action, resource, resourceID, outcome, before, after, metadata)
-	})
+	return &Store{configStore: h.store.configStore, auditAppender: appender}
+}
+
+func employeeMutationContext() (context.Context, context.CancelFunc) {
+	// A standard bounded context avoids fasthttp's server-lifetime Done channel.
+	return context.WithTimeout(context.Background(), 30*time.Second)
+}
+
+func sendAuditFailure(ctx *fasthttp.RequestCtx, err error) bool {
+	if !errors.Is(err, ErrEmployeeAudit) {
+		return false
+	}
+	sendError(ctx, fasthttp.StatusInternalServerError, "审计写入失败，操作未提交")
+	return true
 }
 
 func NewHandler(ctx context.Context, configStore configstore.ConfigStore, logManager logging.LogManager) (*Handler, error) {
@@ -280,7 +296,7 @@ func validateEmployeePayload(payload employeePayload) error {
 	return nil
 }
 
-func (h *Handler) validateVirtualKeys(ctx *fasthttp.RequestCtx, ids []string) error {
+func (h *Handler) validateVirtualKeys(ctx context.Context, ids []string) error {
 	for _, id := range ids {
 		if strings.TrimSpace(id) == "" {
 			continue
@@ -340,7 +356,9 @@ func (h *Handler) createEmployee(ctx *fasthttp.RequestCtx) {
 		sendError(ctx, 400, "每名员工必须绑定一个专属虚拟密钥")
 		return
 	}
-	if err := h.validateVirtualKeys(ctx, payload.VirtualKeyIDs); err != nil {
+	opCtx, cancel := employeeMutationContext()
+	defer cancel()
+	if err := h.validateVirtualKeys(opCtx, payload.VirtualKeyIDs); err != nil {
 		sendError(ctx, 400, err.Error())
 		return
 	}
@@ -350,7 +368,10 @@ func (h *Handler) createEmployee(ctx *fasthttp.RequestCtx) {
 		return
 	}
 	employee := employeeFromPayload(payload)
-	if err := h.store.Create(ctx, &employee, password, payload.VirtualKeyIDs); err != nil {
+	if err := h.administrationStore(ctx).Create(opCtx, &employee, password, payload.VirtualKeyIDs); err != nil {
+		if sendAuditFailure(ctx, err) {
+			return
+		}
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
 			sendError(ctx, 409, "用户名已存在")
 			return
@@ -358,9 +379,7 @@ func (h *Handler) createEmployee(ctx *fasthttp.RequestCtx) {
 		sendError(ctx, 500, "创建员工失败")
 		return
 	}
-	h.appendAudit(ctx, "employee.create", "employee", employee.ID, "success", nil,
-		map[string]any{"username": employee.Username, "is_active": employee.IsActive}, nil)
-	keys, _ := h.virtualKeysForEmployee(ctx, employee.ID)
+	keys, _ := h.virtualKeysForEmployee(opCtx, employee.ID)
 	sendJSON(ctx, map[string]any{"employee": EmployeeView{Employee: employee, VirtualKeys: keys}, "temporary_password": password})
 }
 
@@ -382,6 +401,9 @@ func (h *Handler) importEmployees(ctx *fasthttp.RequestCtx) {
 		sendError(ctx, 400, "批次号需为 8-64 位字母、数字、点、下划线或连字符")
 		return
 	}
+	// A full 500-person batch hashes every password before committing.
+	opCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
 	entries := make([]BulkCreateEntry, 0, len(request.Employees))
 	credentials := make([]map[string]string, 0, len(request.Employees))
 	seenUsers := make(map[string]struct{}, len(request.Employees))
@@ -407,7 +429,7 @@ func (h *Handler) importEmployees(ctx *fasthttp.RequestCtx) {
 			return
 		}
 		seenKeys[keyID] = struct{}{}
-		if err := h.validateVirtualKeys(ctx, []string{keyID}); err != nil {
+		if err := h.validateVirtualKeys(opCtx, []string{keyID}); err != nil {
 			sendError(ctx, 400, err.Error())
 			return
 		}
@@ -427,8 +449,11 @@ func (h *Handler) importEmployees(ctx *fasthttp.RequestCtx) {
 	}
 	digestBytes := sha256.Sum256(digestPayload)
 	digest := hex.EncodeToString(digestBytes[:])
-	alreadyImported, err := h.store.BulkCreateImport(ctx, request.BatchID, digest, entries)
+	alreadyImported, err := h.administrationStore(ctx).BulkCreateImport(opCtx, request.BatchID, digest, entries)
 	if err != nil {
+		if sendAuditFailure(ctx, err) {
+			return
+		}
 		if errors.Is(err, ErrImportBatchConflict) {
 			sendError(ctx, 409, "批次号已被不同清单使用")
 			return
@@ -440,8 +465,6 @@ func (h *Handler) importEmployees(ctx *fasthttp.RequestCtx) {
 		sendError(ctx, 500, "导入失败，已整批回滚")
 		return
 	}
-	h.appendAudit(ctx, "employee.import", "employee_batch", request.BatchID, "success", nil,
-		map[string]any{"imported": len(entries), "already_imported": alreadyImported}, nil)
 	sendJSON(ctx, map[string]any{"batch_id": request.BatchID, "imported": len(entries), "already_imported": alreadyImported, "credentials": credentials})
 }
 
@@ -451,7 +474,12 @@ func (h *Handler) rollbackImport(ctx *fasthttp.RequestCtx) {
 		sendError(ctx, 400, "批次号无效")
 		return
 	}
-	deleted, err := h.store.RollbackImport(ctx, batchID)
+	opCtx, cancel := employeeMutationContext()
+	defer cancel()
+	deleted, err := h.administrationStore(ctx).RollbackImport(opCtx, batchID)
+	if sendAuditFailure(ctx, err) {
+		return
+	}
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		sendError(ctx, 404, "导入批次不存在")
 		return
@@ -460,8 +488,6 @@ func (h *Handler) rollbackImport(ctx *fasthttp.RequestCtx) {
 		sendError(ctx, 409, "导入批次状态不一致，未执行回滚")
 		return
 	}
-	h.appendAudit(ctx, "employee.import_rollback", "employee_batch", batchID, "success", nil,
-		map[string]any{"disabled": deleted}, nil)
 	sendJSON(ctx, map[string]any{"batch_id": batchID, "disabled": deleted})
 }
 
@@ -479,17 +505,18 @@ func (h *Handler) updateEmployee(ctx *fasthttp.RequestCtx) {
 		sendError(ctx, 400, "每名员工必须保留一个专属虚拟密钥")
 		return
 	}
-	if err := h.validateVirtualKeys(ctx, payload.VirtualKeyIDs); err != nil {
+	opCtx, cancel := employeeMutationContext()
+	defer cancel()
+	if err := h.validateVirtualKeys(opCtx, payload.VirtualKeyIDs); err != nil {
 		sendError(ctx, 400, err.Error())
 		return
 	}
 	employee := employeeFromPayload(payload)
 	employee.ID, _ = ctx.UserValue("employee_id").(string)
-	var before map[string]any
-	if existing, err := h.store.Get(ctx, employee.ID); err == nil {
-		before = map[string]any{"username": existing.Username, "is_active": existing.IsActive, "name": existing.Name}
-	}
-	if err := h.store.Update(ctx, &employee, payload.VirtualKeyIDs); err != nil {
+	if err := h.administrationStore(ctx).Update(opCtx, &employee, payload.VirtualKeyIDs); err != nil {
+		if sendAuditFailure(ctx, err) {
+			return
+		}
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			sendError(ctx, 404, "员工不存在")
 			return
@@ -505,10 +532,12 @@ func (h *Handler) updateEmployee(ctx *fasthttp.RequestCtx) {
 		sendError(ctx, 500, "更新员工失败")
 		return
 	}
-	h.appendAudit(ctx, "employee.update", "employee", employee.ID, "success", before,
-		map[string]any{"username": employee.Username, "is_active": employee.IsActive, "name": employee.Name}, nil)
-	updated, _ := h.store.Get(ctx, employee.ID)
-	keys, _ := h.virtualKeysForEmployee(ctx, employee.ID)
+	updated, err := h.store.Get(opCtx, employee.ID)
+	if err != nil {
+		sendError(ctx, 500, "读取更新后的员工失败")
+		return
+	}
+	keys, _ := h.virtualKeysForEmployee(opCtx, employee.ID)
 	sendJSON(ctx, map[string]any{"employee": EmployeeView{Employee: *updated, VirtualKeys: keys}})
 }
 
@@ -519,7 +548,12 @@ func (h *Handler) resetPassword(ctx *fasthttp.RequestCtx) {
 		sendError(ctx, 500, "生成临时密码失败")
 		return
 	}
-	if err := h.store.ResetPassword(ctx, employeeID, password); err != nil {
+	opCtx, cancel := employeeMutationContext()
+	defer cancel()
+	if err := h.administrationStore(ctx).ResetPassword(opCtx, employeeID, password); err != nil {
+		if sendAuditFailure(ctx, err) {
+			return
+		}
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			sendError(ctx, 404, "员工不存在")
 			return
@@ -527,7 +561,6 @@ func (h *Handler) resetPassword(ctx *fasthttp.RequestCtx) {
 		sendError(ctx, 500, "重置密码失败")
 		return
 	}
-	h.appendAudit(ctx, "employee.password_reset", "employee", employeeID, "success", nil, nil, nil)
 	sendJSON(ctx, map[string]string{"temporary_password": password})
 }
 

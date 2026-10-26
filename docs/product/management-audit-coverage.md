@@ -10,6 +10,14 @@ administrator mutation has transactional audit enforcement.
 - Virtual-key governance mutations can append the existing signed governance
   chain when signing is configured. The control-plane feed also reads that
   chain.
+- Employee administrator creation, import, update/disable, import rollback and
+  password reset now append audit inside the employee mutation transaction.
+  Without encryption they write a compact control-plane row; with encryption
+  they write the signed governance chain. Each path produces one feed row.
+  Missing handler audit wiring or persistence failure rolls the mutation back,
+  including bindings, batch state, passwords and session revocations. Unlike
+  the post-commit bridge, these failures return an error without exposing a
+  new temporary credential.
 - Management routes registered by `RegisterAPIRoutes` now persist the upstream
   `RecordAuditChange` records into the control-plane audit table after the
   handler runs. This bridge works without an audit signing key.
@@ -51,6 +59,7 @@ write paths.
 | Feature flags, cache, notification publication and sidekiq cancellation | Respective management handlers | Existing producer records; cache IDs hashed |
 | Warp configuration and backfill | `warp.go` | Existing producer records; topic/conversation coverage remains to audit |
 | RSS feeds and global news setting | `rssfeeds.go` | Added create/update/delete/setting snapshots, redaction and failure-path tests |
+| Employee administrator mutations | `employees/store.go`, `server/employee_audit.go` | Transactional appender; locked update before-state; idempotent import/rollback skip duplicate events; rollback and route regression tests |
 
 ## Remaining Acceptance
 
@@ -60,9 +69,10 @@ write paths.
 2. Audit all route mutations against this inventory, including session/admin
    authentication configuration, Warp topics/conversations and future
    upstream routes. No 100% sensitive-route coverage claim is made.
-3. Employee administration still uses its separate optional post-commit
-   signed appender. Audit failures there are currently ignored and require a
-   transactional follow-up.
+3. Employee login, logout and self-service password changes are outside the
+   administrator mutation audit contract. Richer employee change details and
+   real PostgreSQL concurrent execution still require separate acceptance;
+   focused SQLite tests alone do not prove row-lock behavior.
 4. Add request/trace correlation and deliberate outcome/detail contracts,
    including resource-specific snapshot redaction, before storing richer
    events. Deduplicate signed-chain and bridge representations if the feed
