@@ -107,6 +107,24 @@ type rssFeedCreateRequest struct {
 	Enabled *bool  `json:"enabled,omitempty"`
 }
 
+// auditRSSFeed keeps feed mutations useful without retaining inline logos or
+// credentials that may be embedded in a custom feed URL.
+func auditRSSFeed(feed *tables.TableRSSFeed) map[string]any {
+	if feed == nil {
+		return nil
+	}
+	return map[string]any{
+		"id":           feed.ID,
+		"slug":         feed.Slug,
+		"name":         feed.Name,
+		"url":          lib.RedactURLCredentials(feed.URL),
+		"source":       feed.Source,
+		"enabled":      feed.Enabled,
+		"has_icon":     feed.Icon != "",
+		"has_icon_url": feed.IconURL != "",
+	}
+}
+
 type rssFeedUpdateRequest struct {
 	Name    *string `json:"name,omitempty"`
 	URL     *string `json:"url,omitempty"`
@@ -153,6 +171,7 @@ func (h *RSSFeedsHandler) createFeed(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, fasthttp.StatusInternalServerError, "Failed to create rss feed")
 		return
 	}
+	lib.RecordAuditChange(ctx, "rss_feed.created", "rss_feed", strconv.FormatUint(uint64(feed.ID), 10), feed.Name, nil, auditRSSFeed(feed))
 	SendJSONWithStatus(ctx, feed, fasthttp.StatusCreated)
 }
 
@@ -176,6 +195,7 @@ func (h *RSSFeedsHandler) updateFeed(ctx *fasthttp.RequestCtx) {
 		h.sendStoreError(ctx, err)
 		return
 	}
+	before := auditRSSFeed(feed)
 	if feed.Source == tables.RSSFeedSourceBuiltin && (req.Name != nil || req.URL != nil || req.IconURL != nil) {
 		SendError(ctx, fasthttp.StatusBadRequest, "Built-in feeds can only be enabled or disabled")
 		return
@@ -221,6 +241,7 @@ func (h *RSSFeedsHandler) updateFeed(ctx *fasthttp.RequestCtx) {
 		h.manager.Forget(previousURL)
 	}
 	feed.UpdatedAt = time.Now().UTC()
+	lib.RecordAuditChange(ctx, "rss_feed.updated", "rss_feed", strconv.FormatUint(uint64(feed.ID), 10), feed.Name, before, auditRSSFeed(feed))
 	SendJSON(ctx, feed)
 }
 
@@ -248,6 +269,7 @@ func (h *RSSFeedsHandler) deleteFeed(ctx *fasthttp.RequestCtx) {
 		return
 	}
 	h.manager.Forget(feed.URL)
+	lib.RecordAuditChange(ctx, "rss_feed.deleted", "rss_feed", strconv.FormatUint(uint64(feed.ID), 10), feed.Name, auditRSSFeed(feed), nil)
 	SendJSON(ctx, map[string]string{"message": "Feed deleted"})
 }
 
@@ -313,11 +335,18 @@ func (h *RSSFeedsHandler) updateSettings(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, fasthttp.StatusBadRequest, "enabled is required")
 		return
 	}
+	before, err := h.store.GetRSSNewsEnabled(ctx)
+	if err != nil {
+		logger.Warn("failed to read rss news setting before update: %v", err)
+		SendError(ctx, fasthttp.StatusInternalServerError, "Failed to update news settings")
+		return
+	}
 	if err := h.store.SetRSSNewsEnabled(ctx, *req.Enabled); err != nil {
 		logger.Warn("failed to store rss news setting: %v", err)
 		SendError(ctx, fasthttp.StatusInternalServerError, "Failed to update news settings")
 		return
 	}
+	lib.RecordAuditChange(ctx, "rss_settings.updated", "rss_settings", "rss_news_enabled", "RSS news", map[string]any{"enabled": before}, map[string]any{"enabled": *req.Enabled})
 	SendJSON(ctx, rssSettings{Enabled: *req.Enabled})
 }
 

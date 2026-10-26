@@ -21,17 +21,22 @@ import (
 )
 
 type memoryRSSFeedStore struct {
-	feeds        []tables.TableRSSFeed
-	nextID       uint
-	newsDisabled bool
-	writeErr     error // returned by UpdateRSSFeed and DeleteRSSFeed when set
+	feeds            []tables.TableRSSFeed
+	nextID           uint
+	newsDisabled     bool
+	writeErr         error // returned by UpdateRSSFeed and DeleteRSSFeed when set
+	settingsReadErr  error
+	settingsWriteErr error
 }
 
 func (s *memoryRSSFeedStore) GetRSSNewsEnabled(context.Context) (bool, error) {
-	return !s.newsDisabled, nil
+	return !s.newsDisabled, s.settingsReadErr
 }
 
 func (s *memoryRSSFeedStore) SetRSSNewsEnabled(_ context.Context, enabled bool) error {
+	if s.settingsWriteErr != nil {
+		return s.settingsWriteErr
+	}
 	s.newsDisabled = !enabled
 	return nil
 }
@@ -330,6 +335,80 @@ func TestRSSFeedCreateValidatesAndProbes(t *testing.T) {
 	require.Regexp(t, `^custom-my-releases-`, created.Slug)
 }
 
+func TestRSSFeedMutationsRecordRedactedAuditChanges(t *testing.T) {
+	srv := newRSSFeedTestServer(t)
+	h, store := newTestRSSFeedsHandler(srv,
+		tables.TableRSSFeed{
+			ID: 1, Slug: "custom-x", Name: "X", URL: srv.URL + "/rss",
+			Source: tables.RSSFeedSourceCustom, Enabled: true,
+		},
+	)
+
+	ctx := rssRequest(`{"name":"Created","url":"`+srv.URL+`/atom"}`, 0)
+	h.createFeed(ctx)
+	require.Equal(t, fasthttp.StatusCreated, ctx.Response.StatusCode(), string(ctx.Response.Body()))
+	created := requireSingleAuditChange(t, ctx, "rss_feed.created")
+	require.Equal(t, "rss_feed", created.TargetType)
+	require.Contains(t, string(created.After), `"name":"Created"`)
+
+	ctx = rssRequest(`{"name":"Renamed","enabled":false}`, 1)
+	h.updateFeed(ctx)
+	require.Equal(t, fasthttp.StatusOK, ctx.Response.StatusCode(), string(ctx.Response.Body()))
+	updated := requireSingleAuditChange(t, ctx, "rss_feed.updated")
+	require.Contains(t, string(updated.Before), `"name":"X"`)
+	require.Contains(t, string(updated.After), `"name":"Renamed"`)
+
+	ctx = rssRequest("", 1)
+	h.deleteFeed(ctx)
+	require.Equal(t, fasthttp.StatusOK, ctx.Response.StatusCode(), string(ctx.Response.Body()))
+	deleted := requireSingleAuditChange(t, ctx, "rss_feed.deleted")
+	require.Contains(t, string(deleted.Before), `"name":"Renamed"`)
+	require.Nil(t, deleted.After)
+
+	store.newsDisabled = false
+	ctx = rssRequest(`{"enabled":false}`, 0)
+	h.updateSettings(ctx)
+	require.Equal(t, fasthttp.StatusOK, ctx.Response.StatusCode(), string(ctx.Response.Body()))
+	settings := requireSingleAuditChange(t, ctx, "rss_settings.updated")
+	require.Contains(t, string(settings.Before), `"enabled":true`)
+	require.Contains(t, string(settings.After), `"enabled":false`)
+}
+
+func TestRSSAuditSnapshotMasksCredentialsAndOmitsLogo(t *testing.T) {
+	const secret = "rss-credential-that-must-stay-private"
+	snapshot := auditRSSFeed(&tables.TableRSSFeed{
+		ID: 1, Name: "Private feed", URL: "https://user:" + secret + "@example.com/feed?token=" + secret,
+		IconURL: "data:image/png;base64," + secret, Source: tables.RSSFeedSourceCustom, Enabled: true,
+	})
+	encoded, err := sonic.Marshal(snapshot)
+	require.NoError(t, err)
+	require.NotContains(t, string(encoded), secret)
+	require.Equal(t, true, snapshot["has_icon_url"])
+	require.Equal(t, "https://redacted:redacted@example.com/feed?token=redacted", snapshot["url"])
+}
+
+func TestRSSSettingsFailureDoesNotWriteOrRecordChange(t *testing.T) {
+	srv := newRSSFeedTestServer(t)
+	h, store := newTestRSSFeedsHandler(srv)
+	for _, tc := range []struct {
+		name     string
+		readErr  error
+		writeErr error
+	}{
+		{"snapshot read", errors.New("read failed"), nil},
+		{"settings write", nil, errors.New("write failed")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store.settingsReadErr, store.settingsWriteErr = tc.readErr, tc.writeErr
+			ctx := rssRequest(`{"enabled":false}`, 0)
+			h.updateSettings(ctx)
+			require.Equal(t, fasthttp.StatusInternalServerError, ctx.Response.StatusCode(), string(ctx.Response.Body()))
+			require.False(t, store.newsDisabled)
+			require.Empty(t, auditChanges(t, ctx))
+		})
+	}
+}
+
 // TestRSSFeedCreateAcceptsRDFAndListingPages pins the url contract documented
 // in the OpenAPI schema: RSS 1.0 feeds and news listing pages are accepted too.
 func TestRSSFeedCreateAcceptsRDFAndListingPages(t *testing.T) {
@@ -438,10 +517,12 @@ func TestRSSFeedWriteStoreFailureIs500(t *testing.T) {
 	ctx := rssRequest(`{"enabled":false}`, 1)
 	h.updateFeed(ctx)
 	require.Equal(t, fasthttp.StatusInternalServerError, ctx.Response.StatusCode(), string(ctx.Response.Body()))
+	require.Empty(t, auditChanges(t, ctx), "failed updates must not record an audit change")
 
 	ctx = rssRequest("", 1)
 	h.deleteFeed(ctx)
 	require.Equal(t, fasthttp.StatusInternalServerError, ctx.Response.StatusCode(), string(ctx.Response.Body()))
+	require.Empty(t, auditChanges(t, ctx), "failed deletes must not record an audit change")
 }
 
 func TestRSSFeedsUnavailableWithoutStore(t *testing.T) {

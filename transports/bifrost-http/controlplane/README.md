@@ -82,6 +82,22 @@ without rounding costs to cents.
 
 This is current-period, post-settlement alerting over the Usage Ledger, not a
 second budget enforcement engine. Bifrost Virtual Key/governance budgets still
-own request blocking. Closed-period late settlement/recomputation, panel
-controls, notification delivery/acknowledgement and forecasting remain
+own request blocking. Panel budget creation, replacement, clearing, status and
+alert history are available in the control-plane page. Closed-period late
+settlement/recomputation, notification delivery/acknowledgement and forecasting remain
 separate follow-ups. No new external notification is sent by these APIs.
+
+## Management Audit Bridge
+
+Management routes persist upstream `RecordAuditChange` identities in the
+control-plane audit feed without requiring a signing key. No raw request body,
+target name or snapshot is stored by this bridge; cache keys are hashed.
+Recorded committed changes are retained even when a later step returns an
+error or panics. Audit persistence failure leaves the mutation response intact
+(it may hold a one-time credential), sets `X-Elygate-Audit-Status: failed` and
+logs a content-free error.
+
+This is post-commit persistence, not mutation-and-audit atomicity. Existing
+transactional control-plane audits and signed governance audits retain their
+own guarantees. See `docs/product/management-audit-coverage.md` for the producer
+inventory, duplicate signed-event representations and remaining acceptance.

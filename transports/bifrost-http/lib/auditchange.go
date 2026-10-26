@@ -8,6 +8,16 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
+// FastHTTPUserValueManagementAuditActor is set only after credential
+// verification. It does not grant authorization or local-administrator rights.
+const FastHTTPUserValueManagementAuditActor = "bifrost-management-audit-actor"
+
+// FastHTTPUserValueAuditPersistenceFailed survives a response reset during
+// panic recovery so an already-committed mutation's audit failure stays visible.
+const FastHTTPUserValueAuditPersistenceFailed = "bifrost-audit-persistence-failed"
+
+const HeaderAuditStatus = "X-Elygate-Audit-Status"
+
 // RecordAuditChange attaches an entity change to the in-flight request so an
 // audit layer can record it with a before/after diff. before and after are
 // snapshotted to JSON immediately; pass nil for the side that does not exist.

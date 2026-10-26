@@ -3069,6 +3069,7 @@ func (s *BifrostHTTPServer) RegisterAPIRoutes(ctx context.Context, callbacks Ser
 			return fmt.Errorf("failed to initialize control plane: %v", storeErr)
 		}
 		s.ControlPlaneHandler = controlplane.NewHandler(controlPlaneStore, govLogManager, s)
+		middlewares = append(append([]schemas.BifrostHTTPMiddleware{}, middlewares...), s.ControlPlaneHandler.ManagementAuditMiddleware(logger))
 	}
 	if checker := s.virtualKeyAccessChecker(); checker != nil {
 		if executor := s.Config.GetAsyncJobExecutor(); executor != nil {

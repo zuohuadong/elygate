@@ -96,6 +96,9 @@ func RecoveryMiddleware(cors *CorsMiddleware) schemas.BifrostHTTPMiddleware {
 						cors.applyHeaders(ctx, cfg)
 					}
 					restoreCorrelationHeaders(ctx)
+					if failed, _ := ctx.UserValue(lib.FastHTTPUserValueAuditPersistenceFailed).(bool); failed {
+						ctx.Response.Header.Set(lib.HeaderAuditStatus, "failed")
+					}
 					SendError(ctx, fasthttp.StatusInternalServerError, lib.ClientSafeInternalErrorMessage)
 				}
 			}()
@@ -2087,6 +2090,7 @@ func (m *AuthMiddleware) middleware(shouldSkip func(*configstore.AuthConfig, str
 					SendError(ctx, fasthttp.StatusUnauthorized, "Unauthorized")
 					return
 				}
+				ctx.SetUserValue(lib.FastHTTPUserValueManagementAuditActor, "local-admin:"+authConfig.AdminUserName.GetValue())
 				// Continue with the next handler
 				next(ctx)
 				return
@@ -2129,6 +2133,7 @@ func (m *AuthMiddleware) middleware(shouldSkip func(*configstore.AuthConfig, str
 					}
 					// Mark as local admin for RBAC bypass
 					ctx.SetUserValue(schemas.IsLocalAdminContextKey, true)
+					ctx.SetUserValue(lib.FastHTTPUserValueManagementAuditActor, "local-admin:"+authConfig.AdminUserName.GetValue())
 					// Continue with the next handler
 					next(ctx)
 					return
