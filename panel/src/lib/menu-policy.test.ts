@@ -50,9 +50,10 @@ describe('enterprise menu policy', () => {
 	test('ships a non-claiming OSS enterprise fallback contract', async () => {
 		const fallback = await import('../enterprise-fallback/index');
 		expect(fallback.enterprisePanelAvailable).toBe(false);
-		expect(fallback.enterpriseResourcePages).toEqual({});
-		expect(fallback.enterprisePublicPages).toEqual({});
+		expect(Object.hasOwn(fallback, 'enterpriseResourcePages')).toBe(false);
+		expect(Object.hasOwn(fallback, 'enterprisePublicPages')).toBe(false);
 		expect(fallback.enterprisePanelManifest.resourcePages).toEqual({});
+		expect(fallback.enterprisePanelManifest.publicPages).toEqual({});
 		expect(fallback.enterprisePanelManifest.resources.map((resource) => resource.name).sort()).toEqual(
 			[...expectedEnterpriseResources].sort(),
 		);

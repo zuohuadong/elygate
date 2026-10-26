@@ -23,14 +23,12 @@ const fallback = {
 	resourcePages: {},
 	fallbackResourcePages: { users: { list: fallbackPage } },
 	publicPages: { 'oauth-consent': fallbackPublicPage },
-	translations: { en: { 'enterprise.users': 'Users' } },
+	translations: { 'zh-CN': {}, en: { 'enterprise.users': 'Users' } },
 } as unknown as EnterprisePanelManifest;
 
 describe('enterprise panel manifest', () => {
-	test('keeps legacy page exports compatible while letting the manifest take precedence', () => {
+	test('merges manifest pages, resources and translations with the OSS fallback', () => {
 		const module = {
-			enterpriseResourcePages: { users: { list: legacyPage } },
-			enterprisePublicPages: { 'oauth-consent': legacyPublicPage },
 			enterprisePanelManifest: {
 				resources: [
 					{
@@ -62,17 +60,35 @@ describe('enterprise panel manifest', () => {
 		expect(resolved.translations.en).toEqual({ 'enterprise.users': 'Members' });
 	});
 
-	test('accepts an older module that only exports page maps', () => {
+	test('keeps the OSS fallback when the manifest has no overrides', () => {
+		const resolved = resolveEnterprisePanelManifest(
+			{ enterprisePanelManifest: {} },
+			fallback,
+		);
+
+		expect(resolved).toEqual(fallback);
+	});
+
+	test('rejects modules that only export removed page maps', () => {
+		expect(() => resolveEnterprisePanelManifest(
+			{
+				enterpriseResourcePages: { users: { list: legacyPage } },
+				enterprisePublicPages: { 'oauth-consent': legacyPublicPage },
+			} as unknown as EnterprisePanelModule,
+			fallback,
+		)).toThrow('Enterprise panel modules must export enterprisePanelManifest');
+	});
+
+	test('does not read removed page maps alongside a manifest', () => {
 		const resolved = resolveEnterprisePanelManifest(
 			{
+				enterprisePanelManifest: {},
 				enterpriseResourcePages: { users: { list: legacyPage } },
 				enterprisePublicPages: { 'oauth-consent': legacyPublicPage },
 			} as unknown as EnterprisePanelModule,
 			fallback,
 		);
 
-		expect(resolved.resources).toEqual(fallback.resources);
-		expect(resolved.resourcePages.users?.list).toBe(legacyPage);
-		expect(resolved.publicPages['oauth-consent']).toBe(legacyPublicPage);
+		expect(resolved).toEqual(fallback);
 	});
 });

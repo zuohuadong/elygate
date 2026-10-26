@@ -12,7 +12,7 @@ keeps an explicit OSS fallback, while enterprise builds replace those pages
 without forking `App.svelte`.
 
 Set `BIFROST_ENTERPRISE_PANEL_PATH` to the absolute path of a TypeScript module
-before running `bun run build`. New modules should export one manifest so the
+before running `bun run build`. Modules must export one manifest so the
 resource registry, menu placement, pages, public flows, and translations stay
 inside the extension boundary:
 
@@ -61,10 +61,9 @@ Every page receives the standard svadmin `resourceName` prop and should use
 same-origin `/api/*` requests so server authentication and authorization remain
 authoritative.
 
-For compatibility, modules may still export the legacy
-`enterpriseResourcePages` and `enterprisePublicPages` maps. Manifest entries
-take precedence when both forms provide the same key. New work should use the
-manifest; the legacy maps are migration-only.
+`enterprisePanelManifest` is the only extension entry point. Modules exporting
+only the removed `enterpriseResourcePages` or `enterprisePublicPages` maps are
+rejected; put page overrides in the manifest's `resourcePages` and `publicPages`.
 
 `publicPages` is optional at runtime. It overrides direct-navigation pages that
 must remain outside the svadmin hash router. Each public page receives a

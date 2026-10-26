@@ -11,12 +11,13 @@ upstream UI.
 
 ## Backend API contract policy
 
-- Existing same-origin `/api/*` routes, authentication and authorization
-  behavior, request and response fields, pagination, error semantics, and
-  public callback flows are compatibility contracts for `panel/`.
-- Backend changes used by the panel must be additive or backward compatible.
-  A necessary breaking change requires a documented migration, a coordinated
-  panel update, and regression coverage for both sides of the contract.
+- Bifrost upstream behavior and contracts are the compatibility baseline for
+  same-origin `/api/*` routes, authentication and authorization, request and
+  response fields, pagination, error semantics, and public callback flows.
+- This is a new system, with no compatibility layers for legacy Elygate APIs,
+  schemas, or panel behavior. When an upstream contract changes, update the
+  panel, this matrix, and regression coverage for both sides together instead
+  of adding legacy compatibility branches or migration layers.
 - Add or update the route entry in this matrix whenever the panel starts using
   a new backend API or changes an existing workflow contract.
 - Contract-specific Elygate behavior should live in a narrow adapter, plugin,
@@ -87,8 +88,8 @@ The following legacy routes import private enterprise implementations or need
 private APIs absent from this checkout. Their menu entries appear only when a
 runtime plugin declares the matching manifest resource or
 `enterprisePanelManifest.resourcePages` provides the page. Direct callbacks
-and handoff pages use `enterprisePanelManifest.publicPages`. Legacy page-map
-exports remain supported during migration.
+and handoff pages use `enterprisePanelManifest.publicPages`. The manifest is the
+only extension entry point; legacy page-map exports are not supported.
 
 | Legacy route(s) | Resource/public key | OSS behavior | Enterprise contract |
 | --- | --- | --- | --- |

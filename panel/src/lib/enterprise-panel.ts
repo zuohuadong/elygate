@@ -37,9 +37,7 @@ export interface EnterprisePanelManifest {
 }
 
 export interface EnterprisePanelModule {
-	enterprisePanelManifest?: Partial<EnterprisePanelManifest>;
-	enterpriseResourcePages?: EnterpriseResourcePages;
-	enterprisePublicPages?: EnterprisePublicPages;
+	enterprisePanelManifest: Partial<EnterprisePanelManifest>;
 }
 
 function mergeResources(
@@ -65,7 +63,8 @@ export function resolveEnterprisePanelManifest(
 	module: EnterprisePanelModule,
 	fallback: EnterprisePanelManifest,
 ): EnterprisePanelManifest {
-	const manifest = module.enterprisePanelManifest ?? {};
+	const manifest = module.enterprisePanelManifest;
+	if (!manifest) throw new Error('Enterprise panel modules must export enterprisePanelManifest');
 	return {
 		resources: mergeResources(fallback.resources, manifest.resources),
 		fallbackResourcePages: {
@@ -74,12 +73,10 @@ export function resolveEnterprisePanelManifest(
 		},
 		resourcePages: {
 			...fallback.resourcePages,
-			...module.enterpriseResourcePages,
 			...manifest.resourcePages,
 		},
 		publicPages: {
 			...fallback.publicPages,
-			...module.enterprisePublicPages,
 			...manifest.publicPages,
 		},
 		translations: mergeTranslations(fallback.translations, manifest.translations),

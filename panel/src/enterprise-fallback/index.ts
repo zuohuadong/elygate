@@ -4,8 +4,6 @@ import EnterpriseFeaturePage from '../pages/EnterpriseFeaturePage.svelte';
 import PluginsPage from '../pages/PluginsPage.svelte';
 
 export const enterprisePanelAvailable = false;
-export const enterpriseResourcePages = {};
-export const enterprisePublicPages = {};
 
 type LabelKey = Parameters<typeof labelFor>[1];
 
