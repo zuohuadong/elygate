@@ -81,7 +81,7 @@ upstream UI.
 | `/workspace/webhooks` | webhooks | `/api/webhooks*` test, secret rotation, delivery inspect/redeliver | Dedicated |
 | `/workspace/docs` | docs-hub | bundled docs + official documentation links | Dedicated |
 | Elygate control plane | control-plane-projects, control-plane-applications | `/api/control-plane/projects*`, `/api/control-plane/applications*` project/application management and key lifecycle | Dedicated |
-| Elygate usage ledger | usage-ledger | `/api/control-plane/usage*`, `/api/control-plane/audit-events*` paginated ledger, full filtered summary, sync status and CSV export | Dedicated |
+| Elygate usage ledger | usage-ledger | `/api/control-plane/usage*`, `/api/control-plane/audit-events*`, `/api/control-plane/budget-alerts` paginated ledger, full filtered summary, sync status, budget status/history and CSV export | Dedicated |
 | `/pprof` | pprof | `/api/dev/pprof*` | Dedicated |
 
 ### Usage ledger contract
@@ -99,6 +99,20 @@ upstream UI.
 - Summary and list requests use the same filter snapshot and reject stale
   responses. Summary failures remain visible while successful list results are
   retained; missing sync/audit data is not shown as successful empty data.
+
+### Budget panel contract
+
+- Project/application creation supports optional daily/monthly USD budgets.
+  `PUT /api/control-plane/projects/{id}/budgets` and
+  `PUT /api/control-plane/applications/{id}/budgets` replace both windows;
+  empty fields are sent as explicit nulls. Invalid amounts never become null
+  through JSON serialization. Failures retain the entered values.
+- `GET /api/control-plane/usage/budgets` returns current UTC day/month bounds,
+  usage, limits and healthy/warning/exceeded state. Only project/application
+  filters apply; ledger date/session/agent filters must not reduce budgets.
+- `GET /api/control-plane/budget-alerts` lists stored 80%/100% events with
+  limit/offset paging. Status and history failures are independent; failures
+  are not presented as an empty success or a healthy budget.
 
 ## Enterprise extension routes
 

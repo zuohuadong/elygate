@@ -5,6 +5,7 @@
     "": {
       "name": "@elygate/panel",
       "dependencies": {
+        "@lucide/svelte": "1.37.0",
         "@svadmin/core": "0.62.0",
         "@svadmin/ui": "0.88.1",
         "@tanstack/svelte-query": "^6.3.5",

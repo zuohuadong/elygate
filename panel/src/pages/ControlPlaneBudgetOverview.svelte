@@ -1,0 +1,134 @@
+<script lang="ts">
+	import { onDestroy, untrack } from 'svelte';
+	import { useTranslation } from '@svadmin/core/i18n';
+	import { AlertTriangle, RefreshCw } from '@lucide/svelte';
+	import { displayError } from '../lib/forms';
+	import { requestJson } from '../lib/api';
+	import { budgetProgress, budgetQuery, formatBudgetAmount, parseBudgetAlerts, parseBudgetStatuses, type BudgetAlert, type BudgetStatus } from '../lib/control-plane-budgets';
+
+	let { project = '', application = '' } = $props<{ project?: string; application?: string }>();
+	const i18n = useTranslation();
+	let statuses = $state<BudgetStatus[]>([]);
+	let alerts = $state<BudgetAlert[]>([]);
+	let loading = $state(false);
+	let statusError = $state('');
+	let alertError = $state('');
+	let hasNextPage = $state(false);
+	let alertOffset = $state(0);
+	const alertLimit = 25;
+	let loadSequence = 0;
+
+	function text(zh: string, en: string): string { return i18n.locale === 'zh-CN' ? zh : en; }
+	function date(value: string): string {
+		const parsed = new Date(value);
+		return Number.isNaN(parsed.getTime()) ? value : new Intl.DateTimeFormat(i18n.locale, { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(parsed);
+	}
+	function label(scope: string, window: string): string {
+		return `${scope === 'project' ? text('项目', 'Project') : text('应用', 'Application')} · ${window === 'daily' ? text('日', 'Daily') : text('月', 'Monthly')}`;
+	}
+	function stateLabel(state: BudgetStatus['state']): string {
+		return state === 'exceeded' ? text('已超额', 'Exceeded') : state === 'warning' ? text('预警', 'Warning') : text('正常', 'Healthy');
+	}
+	async function load(scope: { project: string; application: string }, offset: number): Promise<void> {
+		const sequence = ++loadSequence;
+		loading = true;
+		statusError = '';
+		alertError = '';
+		statuses = [];
+		alerts = [];
+		hasNextPage = false;
+		try {
+			const query = budgetQuery(scope.project, scope.application);
+			const alertsQuery = new URLSearchParams(query);
+			alertsQuery.set('limit', String(alertLimit + 1));
+			alertsQuery.set('offset', String(offset));
+			const [statusResult, alertResult] = await Promise.allSettled([
+				requestJson<unknown>(`/api/control-plane/usage/budgets?${query}`).then(parseBudgetStatuses),
+				requestJson<unknown>(`/api/control-plane/budget-alerts?${alertsQuery}`).then(parseBudgetAlerts),
+			]);
+			if (sequence !== loadSequence) return;
+			if (statusResult.status === 'fulfilled') statuses = statusResult.value;
+			else statusError = displayError(statusResult.reason, text('预算状态不可用', 'Budget status unavailable'));
+			if (alertResult.status === 'fulfilled') {
+				alerts = alertResult.value.slice(0, alertLimit);
+				hasNextPage = alertResult.value.length > alertLimit;
+			} else alertError = displayError(alertResult.reason, text('告警记录不可用', 'Alert history unavailable'));
+		} finally {
+			if (sequence === loadSequence) loading = false;
+		}
+	}
+	function reload(): void { void load({ project, application }, alertOffset); }
+	function nextPage(): void { alertOffset += alertLimit; reload(); }
+	function previousPage(): void { alertOffset = Math.max(0, alertOffset - alertLimit); reload(); }
+	$effect(() => {
+		const scope = { project, application };
+		alertOffset = 0;
+		untrack(() => { void load(scope, 0); });
+	});
+	onDestroy(() => { loadSequence += 1; });
+</script>
+
+<section class="budget-overview" aria-busy={loading}>
+	<header class="section-heading">
+		<div>
+			<h2>{text('预算状态', 'Budget status')}</h2>
+			<p class="muted">{text('当前周期 · UTC', 'Current period · UTC')}</p>
+		</div>
+		<button class="icon-button" type="button" onclick={reload} disabled={loading} aria-label={text('刷新预算状态', 'Refresh budget status')} title={text('刷新预算状态', 'Refresh budget status')}><RefreshCw size={16} /></button>
+	</header>
+	{#if statusError}<p class="error" role="alert">{statusError}</p>{:else if loading}<p class="muted">{text('加载预算状态…', 'Loading budget status…')}</p>{:else if statuses.length === 0}<p class="empty">{text('暂无预算配置', 'No budgets configured')}</p>{:else}
+		<div class="budget-status-grid">
+			{#each statuses as status (`${status.scope_type}-${status.scope_id}-${status.window}`)}
+				<article class="budget-status">
+					<div class="status-top"><strong>{label(status.scope_type, status.window)}</strong><span class={`state ${status.state}`}>{stateLabel(status.state)}</span></div>
+					<code class="scope-id">{status.scope_id}</code>
+					<div class="amounts"><strong>{formatBudgetAmount(status.usage, i18n.locale)}</strong><span>/ {formatBudgetAmount(status.limit, i18n.locale)}</span></div>
+					<progress max="100" value={budgetProgress(status.usage, status.limit)} aria-label={`${label(status.scope_type, status.window)} ${status.scope_id}`}></progress>
+					<p class="period">{date(status.period_start)} – {date(status.period_end)}</p>
+				</article>
+			{/each}
+		</div>
+	{/if}
+
+	<div class="alerts">
+		<div class="subheading"><h3><AlertTriangle size={16} aria-hidden="true" />{text('告警记录', 'Alert history')}</h3><span class="muted">{text('80% / 100% 阈值', '80% / 100% thresholds')}</span></div>
+		{#if alertError}<p class="error" role="alert">{alertError}</p>{:else if loading}<p class="muted">{text('加载告警记录…', 'Loading alert history…')}</p>{:else if alerts.length === 0}<p class="empty">{text('暂无告警记录', 'No alert history')}</p>{:else}
+			<div class="table-wrap"><table><thead><tr><th>{text('时间', 'Triggered')}</th><th>{text('范围', 'Scope')}</th><th>{text('周期', 'Window')}</th><th>{text('阈值', 'Threshold')}</th><th>{text('用量 / 限额', 'Usage / limit')}</th></tr></thead><tbody>
+				{#each alerts as alert (alert.id)}<tr><td>{date(alert.triggered_at)}</td><td>{alert.scope_type === 'project' ? text('项目', 'Project') : text('应用', 'Application')} <code>{alert.scope_id}</code></td><td>{alert.window === 'daily' ? text('日', 'Daily') : text('月', 'Monthly')}</td><td>{Math.round(alert.threshold * 100)}%</td><td>{formatBudgetAmount(alert.usage, i18n.locale)} / {formatBudgetAmount(alert.limit, i18n.locale)}</td></tr>{/each}
+			</tbody></table></div>
+		{/if}
+		<footer class="pagination"><span>{text(`第 ${Math.floor(alertOffset / alertLimit) + 1} 页`, `Page ${Math.floor(alertOffset / alertLimit) + 1}`)}</span><div><button type="button" class="secondary" onclick={previousPage} disabled={loading || alertOffset === 0}>{text('上一页', 'Previous')}</button><button type="button" class="secondary" onclick={nextPage} disabled={loading || !hasNextPage}>{text('下一页', 'Next')}</button></div></footer>
+	</div>
+</section>
+
+<style>
+	.budget-overview { border-top: 1px solid var(--border); display: grid; gap: 1rem; padding-top: 1rem; min-width: 0; }
+	.section-heading, .subheading { align-items: center; display: flex; gap: 1rem; justify-content: space-between; }
+	h2, h3 { margin: 0; font-size: 1rem; }
+	h3 { align-items: center; display: flex; gap: .45rem; font-size: .95rem; }
+	.muted, .period, .empty { color: var(--muted-foreground); margin: 0; }
+	.budget-status-grid { display: grid; gap: .75rem; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); }
+	.budget-status { border: 1px solid var(--border); border-radius: .5rem; display: grid; gap: .65rem; padding: .85rem; min-width: 0; }
+	.status-top, .amounts, .pagination { align-items: center; display: flex; gap: .5rem; justify-content: space-between; }
+	.amounts { flex-wrap: wrap; overflow-wrap: anywhere; }
+	.amounts strong { font-size: 1.05rem; font-variant-numeric: tabular-nums; }
+	.amounts span { color: var(--muted-foreground); font-size: .85rem; }
+	.state { border-radius: 999px; font-size: .72rem; padding: .2rem .45rem; }
+	.state.healthy { background: color-mix(in srgb, #2f8f63 14%, transparent); color: #24704f; }
+	.state.warning { background: color-mix(in srgb, #b7791f 16%, transparent); color: #8a5b14; }
+	.state.exceeded { background: color-mix(in srgb, var(--destructive) 14%, transparent); color: var(--destructive); }
+	progress { accent-color: var(--primary); height: .5rem; width: 100%; }
+	.period { font-size: .75rem; }
+	.alerts { display: grid; gap: .75rem; min-width: 0; }
+	.table-wrap { overflow: auto; }
+	table { border-collapse: collapse; width: 100%; font-size: .82rem; }
+	th, td { border-bottom: 1px solid var(--border); padding: .55rem .6rem; text-align: left; white-space: nowrap; }
+	th { color: var(--muted-foreground); font-weight: 600; }
+	code { overflow-wrap: anywhere; }
+	.scope-id { color: var(--muted-foreground); font-size: .75rem; }
+	.icon-button { align-items: center; background: transparent; border: 1px solid var(--border); border-radius: .45rem; color: inherit; cursor: pointer; display: inline-flex; flex-shrink: 0; justify-content: center; height: 2.5rem; width: 2.5rem; padding: .45rem; }
+	button.secondary { background: transparent; border: 1px solid var(--border); border-radius: .45rem; color: inherit; cursor: pointer; font: inherit; padding: .45rem .65rem; }
+	button:disabled { cursor: not-allowed; opacity: .55; }
+	.error { background: color-mix(in srgb, var(--destructive) 12%, transparent); border: 1px solid var(--destructive); border-radius: .5rem; margin: 0; padding: .65rem .8rem; }
+	@media (max-width: 600px) { .section-heading { align-items: flex-start; flex-direction: column; } .subheading { align-items: flex-start; flex-direction: column; } }
+</style>

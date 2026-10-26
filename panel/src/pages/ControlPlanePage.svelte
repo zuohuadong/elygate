@@ -5,7 +5,11 @@
 	import { displayError } from '../lib/forms';
 	import { formatUsdCost } from '../lib/display-format';
 	import { usageTimeRange, type UsageSummary } from '../lib/control-plane-usage';
+	import { budgetEndpoint, budgetLimits, type BudgetLimits } from '../lib/control-plane-budgets';
+	import BudgetFields from '../lib/fields/BudgetFields.svelte';
+	import ControlPlaneBudgetOverview from './ControlPlaneBudgetOverview.svelte';
 	import { encodePathSegment, getListPayload, getTotal, isJsonRecord, requestJson, type JsonRecord } from '../lib/api';
+	import { SaveButton } from '@svadmin/ui';
 
 	interface Props { resourceName: string; }
 	interface ControlPlaneTab {
@@ -13,8 +17,8 @@
 		label: string;
 		columns: { key: string; label: string }[];
 	}
-	interface ProjectRow { id: string; name: string; organization_id: string; status: string; }
-	interface ApplicationRow { id: string; project_id: string; name: string; environment: string; status: string; }
+	interface ProjectRow { id: string; name: string; organization_id: string; status: string; daily_budget?: number | null; monthly_budget?: number | null; }
+	interface ApplicationRow { id: string; project_id: string; name: string; environment: string; status: string; daily_budget?: number | null; monthly_budget?: number | null; }
 	interface BindingRow { id: string; virtual_key_id: string; application_id: string; expires_at?: string; revoked_at?: string; created_at?: string; }
 	interface CreatedKey { virtual_key_id?: string; value?: string; name?: string; }
 	interface UsageStatus { watermark?: string; lag_seconds?: number; last_reconciled_at?: string; }
@@ -34,39 +38,39 @@
 	const i18n = useTranslation();
 	const appName = getAppName();
 
-	const tabs: ControlPlaneTab[] = [
+	const tabs: ControlPlaneTab[] = $derived([
 		{
 			id: 'control-plane-projects',
-			label: 'Projects',
+			label: text('项目', 'Projects'),
 			columns: [
-				{ key: 'name', label: 'Name' },
-				{ key: 'organization_id', label: 'Organization' },
-				{ key: 'status', label: 'Status' },
+				{ key: 'name', label: text('名称', 'Name') },
+				{ key: 'organization_id', label: text('组织', 'Organization') },
+				{ key: 'status', label: text('状态', 'Status') },
 			],
 		},
 		{
 			id: 'control-plane-applications',
-			label: 'Applications',
+			label: text('应用', 'Applications'),
 			columns: [
-				{ key: 'name', label: 'Name' },
-				{ key: 'environment', label: 'Environment' },
-				{ key: 'status', label: 'Status' },
+				{ key: 'name', label: text('名称', 'Name') },
+				{ key: 'environment', label: text('环境', 'Environment') },
+				{ key: 'status', label: text('状态', 'Status') },
 			],
 		},
 		{
 			id: 'usage-ledger',
-			label: 'Usage',
+			label: text('用量', 'Usage'),
 			columns: [
-				{ key: 'occurred_at', label: 'Time' },
-				{ key: 'application_id', label: 'Application' },
-				{ key: 'provider', label: 'Provider' },
-				{ key: 'model', label: 'Model' },
-				{ key: 'status', label: 'Status' },
-				{ key: 'total_tokens', label: 'Tokens' },
-				{ key: 'cost', label: 'Cost' },
+				{ key: 'occurred_at', label: text('时间', 'Time') },
+				{ key: 'application_id', label: text('应用', 'Application') },
+				{ key: 'provider', label: text('提供商', 'Provider') },
+				{ key: 'model', label: text('模型', 'Model') },
+				{ key: 'status', label: text('状态', 'Status') },
+				{ key: 'total_tokens', label: text('Token 数', 'Tokens') },
+				{ key: 'cost', label: text('费用', 'Cost') },
 			],
 		},
-	];
+	]);
 
 	const activeTab = $derived(tabs.find((tab) => tab.id === resourceName) ?? tabs[0]);
 
@@ -109,8 +113,15 @@
 	let selectedApplication = $state('');
 	let organizationId = $state('');
 	let projectName = $state('');
+	let projectDailyBudget = $state('');
+	let projectMonthlyBudget = $state('');
 	let applicationName = $state('');
 	let applicationEnvironment = $state('production');
+	let applicationDailyBudget = $state('');
+	let applicationMonthlyBudget = $state('');
+	let budgetDailyInput = $state('');
+	let budgetMonthlyInput = $state('');
+	let budgetSaving = $state(false);
 	let keyName = $state('');
 	let virtualKeyId = $state('');
 	let loading = $state(true);
@@ -124,8 +135,31 @@
 	let disclosedApplication = $state('');
 
 	function handleError(cause: unknown, fallback: string): void {
-		error = displayError(cause, fallback);
+		error = cause instanceof Error && cause.message === 'invalid-budget-amount'
+			? text('预算必须是大于零的有限 USD 金额，或留空', 'Budgets must be finite USD amounts greater than zero, or empty')
+			: displayError(cause, fallback);
 	}
+
+	const selectedBudgetScope = $derived.by(() => {
+		if (activeTab.id === 'control-plane-projects') {
+			const project = projects.find((row) => row.id === selectedProject);
+			return project ? { type: 'project' as const, id: project.id, daily_budget: project.daily_budget, monthly_budget: project.monthly_budget } : null;
+		}
+		if (activeTab.id === 'control-plane-applications') {
+			const application = applications.find((row) => row.id === selectedApplication);
+			return application ? { type: 'application' as const, id: application.id, daily_budget: application.daily_budget, monthly_budget: application.monthly_budget } : null;
+		}
+		return null;
+	});
+
+	const budgetScopeKey = $derived(selectedBudgetScope ? `${selectedBudgetScope.type}:${selectedBudgetScope.id}` : '');
+	const budgetDailyLimit = $derived(selectedBudgetScope?.daily_budget);
+	const budgetMonthlyLimit = $derived(selectedBudgetScope?.monthly_budget);
+	$effect(() => {
+		budgetScopeKey;
+		budgetDailyInput = budgetDailyLimit == null ? '' : String(budgetDailyLimit);
+		budgetMonthlyInput = budgetMonthlyLimit == null ? '' : String(budgetMonthlyLimit);
+	});
 
 	async function loadProjects(): Promise<void> {
 		loading = true;
@@ -137,6 +171,8 @@
 				name: String(row.name ?? ''),
 				organization_id: String(row.organization_id ?? ''),
 				status: String(row.status ?? ''),
+				daily_budget: typeof row.daily_budget === 'number' ? row.daily_budget : null,
+				monthly_budget: typeof row.monthly_budget === 'number' ? row.monthly_budget : null,
 			})).filter((row) => row.id !== '');
 			if (!selectedProject && projects.length > 0) {
 				selectedProject = projects[0].id;
@@ -167,6 +203,8 @@
 				name: String(row.name ?? ''),
 				environment: String(row.environment ?? ''),
 				status: String(row.status ?? ''),
+				daily_budget: typeof row.daily_budget === 'number' ? row.daily_budget : null,
+				monthly_budget: typeof row.monthly_budget === 'number' ? row.monthly_budget : null,
 			})).filter((row) => row.id !== '');
 			if (!applications.some((application) => application.id === selectedApplication)) {
 				selectedApplication = '';
@@ -235,9 +273,11 @@
 		try {
 			const created = await requestJson<JsonRecord>('/api/control-plane/projects', {
 				method: 'POST',
-				body: JSON.stringify({ organization_id: organizationId.trim(), name: projectName.trim() }),
+				body: JSON.stringify({ organization_id: organizationId.trim(), name: projectName.trim(), ...budgetLimits(projectDailyBudget, projectMonthlyBudget) }),
 			});
 			projectName = '';
+			projectDailyBudget = '';
+			projectMonthlyBudget = '';
 			notice = text('项目已创建', 'Project created');
 			await loadProjects();
 			if (typeof created.id === 'string') {
@@ -257,15 +297,46 @@
 		try {
 			await requestJson<JsonRecord>(`/api/control-plane/projects/${encodePathSegment(selectedProject)}/applications`, {
 				method: 'POST',
-				body: JSON.stringify({ name: applicationName.trim(), environment: applicationEnvironment.trim() || 'production' }),
+				body: JSON.stringify({ name: applicationName.trim(), environment: applicationEnvironment.trim() || 'production', ...budgetLimits(applicationDailyBudget, applicationMonthlyBudget) }),
 			});
 			applicationName = '';
+			applicationDailyBudget = '';
+			applicationMonthlyBudget = '';
 			notice = text('应用已创建', 'Application created');
 			await loadApplications();
 		} catch (cause) {
 			handleError(cause, text('创建应用失败', 'Failed to create application'));
 		} finally {
 			saving = false;
+		}
+	}
+
+	async function replaceBudget(limits: BudgetLimits): Promise<void> {
+		const scope = selectedBudgetScope;
+		if (!scope || budgetSaving) return;
+		budgetSaving = true;
+		error = '';
+		notice = '';
+		try {
+			await requestJson<BudgetLimits>(budgetEndpoint(scope.type, scope.id), { method: 'PUT', body: JSON.stringify(limits) });
+			if (scope.type === 'project') projects = projects.map((row) => row.id === scope.id ? { ...row, ...limits } : row);
+			else applications = applications.map((row) => row.id === scope.id ? { ...row, ...limits } : row);
+			if (selectedBudgetScope?.id === scope.id && selectedBudgetScope.type === scope.type) notice = text('预算已保存', 'Budget saved');
+		} catch (cause) {
+			if (selectedBudgetScope?.id === scope.id && selectedBudgetScope.type === scope.type) handleError(cause, text('保存预算失败', 'Failed to save budget'));
+		} finally {
+			budgetSaving = false;
+		}
+	}
+
+	function saveBudget(): void {
+		try { void replaceBudget(budgetLimits(budgetDailyInput, budgetMonthlyInput)); }
+		catch (cause) { handleError(cause, text('预算金额无效', 'Invalid budget amount')); }
+	}
+
+	function clearBudget(): void {
+		if (window.confirm(text('清除该资源的日预算和月预算？', 'Clear daily and monthly budgets for this resource?'))) {
+			void replaceBudget({ daily_budget: null, monthly_budget: null });
 		}
 	}
 
@@ -566,7 +637,6 @@
 	<header>
 		<div>
 			<h1>{activeTab.id === 'usage-ledger' ? text('用量账本', 'Usage Ledger') : activeTab.label}</h1>
-			{#if activeTab.id !== 'usage-ledger'}<p>{i18n.t('elygate.controlPlaneHint') || 'Control-plane projects, applications and usage ledger.'}</p>{/if}
 		</div>
 		<button class="secondary" type="button" onclick={refreshPage} disabled={activeTab.id === 'usage-ledger' ? usageLoading : loading}>{text('刷新', 'Refresh')}</button>
 	</header>
@@ -580,6 +650,7 @@
 				<h2>{text('新建项目', 'New project')}</h2>
 				<label>{text('组织 ID', 'Organization ID')}<input bind:value={organizationId} placeholder="organization uuid" autocomplete="off" /></label>
 				<label>{text('项目名称', 'Project name')}<input bind:value={projectName} placeholder={text('项目名称', 'Project name')} autocomplete="off" /></label>
+				<BudgetFields bind:daily={projectDailyBudget} bind:monthly={projectMonthlyBudget} disabled={saving} />
 				<button type="submit" disabled={saving || !organizationId.trim() || !projectName.trim()}>{saving ? text('创建中…', 'Creating…') : text('创建项目', 'Create project')}</button>
 			</form>
 			<div class="card">
@@ -593,6 +664,13 @@
 				{/if}
 			</div>
 		</div>
+		{#if selectedProject}
+			<form class="budget-editor" onsubmit={(event) => { event.preventDefault(); saveBudget(); }}>
+				<div class="section-heading"><h2>{text('项目预算', 'Project budget')}</h2><span class="scope-id">{selectedBudgetScope?.id}</span></div>
+				<BudgetFields bind:daily={budgetDailyInput} bind:monthly={budgetMonthlyInput} disabled={budgetSaving} />
+				<div class="budget-actions"><SaveButton loading={budgetSaving} label={text('保存预算', 'Save budget')} /><button class="secondary" type="button" onclick={clearBudget} disabled={budgetSaving}>{text('清除预算', 'Clear budgets')}</button></div>
+			</form>
+		{/if}
 	{:else if activeTab.id === 'control-plane-applications'}
 		<div class="grid">
 			<form class="card" onsubmit={(event) => { event.preventDefault(); void createApplication(); }}>
@@ -600,6 +678,7 @@
 				<label>{text('项目', 'Project')}<select value={selectedProject} onchange={(event) => selectProject(event.currentTarget.value)}><option value="">{text('选择项目', 'Select project')}</option>{#each projects as project (project.id)}<option value={project.id}>{project.name}</option>{/each}</select></label>
 				<label>{text('应用名称', 'Application name')}<input bind:value={applicationName} placeholder={text('应用名称', 'Application name')} autocomplete="off" /></label>
 				<label>{text('环境', 'Environment')}<input bind:value={applicationEnvironment} placeholder="production" autocomplete="off" /></label>
+				<BudgetFields bind:daily={applicationDailyBudget} bind:monthly={applicationMonthlyBudget} disabled={saving} />
 				<button type="submit" disabled={loading || saving || !selectedProject || !applicationName.trim()}>{saving ? text('创建中…', 'Creating…') : text('创建应用', 'Create application')}</button>
 			</form>
 
@@ -614,6 +693,13 @@
 				{/if}
 			</div>
 		</div>
+		{#if selectedApplication}
+			<form class="budget-editor" onsubmit={(event) => { event.preventDefault(); saveBudget(); }}>
+				<div class="section-heading"><h2>{text('应用预算', 'Application budget')}</h2><span class="scope-id">{selectedBudgetScope?.id}</span></div>
+				<BudgetFields bind:daily={budgetDailyInput} bind:monthly={budgetMonthlyInput} disabled={budgetSaving} />
+				<div class="budget-actions"><SaveButton loading={budgetSaving} label={text('保存预算', 'Save budget')} /><button class="secondary" type="button" onclick={clearBudget} disabled={budgetSaving}>{text('清除预算', 'Clear budgets')}</button></div>
+			</form>
+		{/if}
 
 		<div class="grid">
 			<form class="card" onsubmit={(event) => { event.preventDefault(); void createApplicationKey(); }}>
@@ -673,6 +759,7 @@
 			<div><span>{text('同步延迟', 'Lag')}</span><strong>{usageStatus ? formatDuration(usageStatus.lag_seconds) : '—'}</strong></div>
 		</section>
 		{#if usageStatusError}<p class="error" role="alert">{usageStatusError}</p>{/if}
+		<ControlPlaneBudgetOverview project={usageProjectFilter} application={usageApplicationFilter} />
 
 		<section class="ledger-section">
 			<h2>{text('用量账本', 'Usage Ledger')}</h2>
@@ -705,9 +792,12 @@
 	header.row { align-items: center; }
 	h1 { font-size: 1.35rem; margin: 0; }
 	h2 { font-size: 1rem; margin: 0 0 .75rem; }
-	header p { color: var(--muted-foreground); margin: .35rem 0 0; }
 	.grid { display: grid; gap: 1rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 	.card { background: var(--card); border: 1px solid var(--border); border-radius: .8rem; display: grid; gap: .75rem; padding: 1rem; overflow: hidden; }
+	.budget-editor { border-top: 1px solid var(--border); display: grid; gap: .75rem; padding-top: 1rem; min-width: 0; }
+	.section-heading { align-items: center; display: flex; gap: 1rem; justify-content: space-between; }
+	.scope-id { color: var(--muted-foreground); font: .75rem ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+	.budget-actions { align-items: center; display: flex; flex-wrap: wrap; gap: .5rem; }
 	label { display: grid; gap: .35rem; font-size: .85rem; }
 	label.check { align-items: center; display: flex; gap: .5rem; }
 	input, select { background: var(--background); border: 1px solid var(--border); border-radius: .45rem; color: inherit; font: inherit; padding: .5rem .6rem; }
