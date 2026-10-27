@@ -154,6 +154,18 @@ func NewStore(ctx context.Context, configStore configstore.ConfigStore) (*Store,
 				return nil
 			},
 		},
+		{
+			ID: "elygate_control_plane_v6_budget_notification_outbox",
+			Migrate: func(tx *gorm.DB) error {
+				if err := tx.AutoMigrate(&BudgetNotificationOutbox{}); err != nil {
+					return err
+				}
+				return backfillBudgetNotifications(tx)
+			},
+			Rollback: func(*gorm.DB) error {
+				return errors.New("budget notification outbox is non-rollbackable: dropping it loses pending deliveries and replay deduplication; older binaries ignore this additive table")
+			},
+		},
 	}
 	migrationIDs := make([]string, 0, len(migrations))
 	for _, migration := range migrations {

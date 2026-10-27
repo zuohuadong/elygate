@@ -106,6 +106,38 @@ type BudgetAlert struct {
 
 func (BudgetAlert) TableName() string { return "elygate_control_budget_alerts" }
 
+const (
+	BudgetNotificationPending   = "pending"
+	BudgetNotificationDelivered = "delivered"
+)
+
+// BudgetNotificationOutbox is the durable hand-off from threshold evaluation
+// to the dashboard notification service. The alert ID is unique so an
+// evaluation retry cannot enqueue a second delivery for the same threshold.
+type BudgetNotificationOutbox struct {
+	ID            string     `gorm:"primaryKey;type:varchar(36)" json:"id"`
+	AlertID       string     `gorm:"type:varchar(36);not null;uniqueIndex" json:"alert_id"`
+	ScopeType     string     `gorm:"type:varchar(16);not null" json:"scope_type"`
+	ScopeID       string     `gorm:"type:varchar(36);not null" json:"scope_id"`
+	Window        string     `gorm:"type:varchar(16);not null" json:"window"`
+	PeriodStart   time.Time  `gorm:"not null;index" json:"period_start"`
+	Threshold     float64    `gorm:"not null" json:"threshold"`
+	Usage         float64    `gorm:"not null" json:"usage"`
+	Limit         float64    `gorm:"not null" json:"limit"`
+	Status        string     `gorm:"type:varchar(16);not null;index" json:"status"`
+	Attempts      int        `gorm:"not null;default:0" json:"attempts"`
+	NextAttemptAt time.Time  `gorm:"not null;index" json:"next_attempt_at"`
+	LastError     string     `gorm:"type:text" json:"last_error,omitempty"`
+	ClaimedBy     string     `gorm:"type:varchar(255)" json:"-"`
+	ClaimedUntil  *time.Time `gorm:"index" json:"-"`
+	CreatedAt     time.Time  `gorm:"not null" json:"created_at"`
+	UpdatedAt     time.Time  `gorm:"not null" json:"updated_at"`
+}
+
+func (BudgetNotificationOutbox) TableName() string {
+	return "elygate_control_budget_notification_outbox"
+}
+
 // VirtualKeyRevocation is a durable deny tombstone for a credential value that
 // must never become valid again after rotation or revocation. It closes the
 // fail-open window where an old value remains in an in-memory governance cache.

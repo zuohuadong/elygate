@@ -2,11 +2,13 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
 
 	"github.com/bytedance/sonic"
+	"github.com/google/uuid"
 	"github.com/maximhq/bifrost/core/schemas"
 	"github.com/maximhq/bifrost/framework/configstore/tables"
 	"github.com/stretchr/testify/require"
@@ -187,6 +189,8 @@ func TestNotificationVisibleToRole(t *testing.T) {
 	require.True(t, notificationVisibleToRole(&schemas.Notification{Audience: schemas.NotificationAudienceRoles, RoleIDs: []uint{2, 7}}, 7, true))
 	require.False(t, notificationVisibleToRole(&schemas.Notification{Audience: schemas.NotificationAudienceRoles, RoleIDs: []uint{2, 7}}, 3, true))
 	require.False(t, notificationVisibleToRole(&schemas.Notification{Audience: schemas.NotificationAudienceRoles, RoleIDs: []uint{2, 7}}, 0, false))
+	require.False(t, notificationVisibleToRole(&schemas.Notification{Audience: schemas.NotificationAudienceAdmin, RoleIDs: []uint{7}}, 7, true))
+	require.False(t, notificationVisibleToRole(&schemas.Notification{Audience: "unknown", RoleIDs: []uint{7}}, 7, true))
 }
 
 func TestNotificationCursorRoundTrip(t *testing.T) {
@@ -196,4 +200,77 @@ func TestNotificationCursorRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, wantTime, gotTime)
 	require.Equal(t, wantID, gotID)
+}
+
+type idempotentRecordingNotificationStore struct {
+	recordingNotificationStore
+	persisted map[string]tables.TableNotification
+	fail      error
+}
+
+func (s *idempotentRecordingNotificationStore) CreateNotificationIfNotExists(_ context.Context, notification *tables.TableNotification) (bool, error) {
+	if s.fail != nil {
+		return false, s.fail
+	}
+	if previous, ok := s.persisted[notification.ID]; ok {
+		*notification = previous
+		return false, nil
+	}
+	if s.persisted == nil {
+		s.persisted = make(map[string]tables.TableNotification)
+	}
+	s.persisted[notification.ID] = *notification
+	return true, nil
+}
+
+func TestNotificationPublishOnceValidatesAndKeepsFirstPayload(t *testing.T) {
+	now := time.Now().UTC()
+	store := &idempotentRecordingNotificationStore{}
+	service := &NotificationService{store: store, now: func() time.Time { return now }}
+	input := schemas.NotificationInput{Audience: schemas.NotificationAudienceAdmin,
+		Severity: schemas.NotificationSeverityWarning, Title: "Budget warning", Message: "Sensitive budget"}
+	id := uuid.NewString()
+	first, err := service.PublishOnce(context.Background(), id, input)
+	require.NoError(t, err)
+	input.Message = "Changed"
+	now = now.Add(time.Hour)
+	replayed, err := service.PublishOnce(context.Background(), id, input)
+	require.NoError(t, err)
+	require.Equal(t, first, replayed)
+	require.Len(t, store.persisted, 1)
+	_, err = service.PublishOnce(context.Background(), "", input)
+	require.Error(t, err)
+	input.RoleIDs = []uint{7}
+	_, err = service.PublishOnce(context.Background(), uuid.NewString(), input)
+	require.ErrorContains(t, err, "role_ids must be empty")
+	input.RoleIDs = nil
+	store.fail = errors.New("database unavailable")
+	_, err = service.PublishOnce(context.Background(), uuid.NewString(), input)
+	require.ErrorContains(t, err, "persist notification")
+	unavailable := &NotificationService{store: &recordingNotificationStore{}, now: time.Now}
+	_, err = unavailable.PublishOnce(context.Background(), id, input)
+	require.ErrorIs(t, err, ErrNotificationsUnavailable)
+	require.Len(t, store.persisted, 1)
+}
+
+func TestNotificationListAdminAudienceIsPrivate(t *testing.T) {
+	store := &recordingNotificationStore{rows: []tables.TableNotification{
+		{ID: "public", Audience: "all"},
+		{ID: "budget", Audience: "admin", RoleIDs: []uint{7}},
+	}}
+	service := &NotificationService{store: store, now: time.Now}
+	member := &fasthttp.RequestCtx{}
+	member.SetUserValue(schemas.BifrostContextKeyUserRoleID, uint(7))
+	service.list(member)
+	var memberResponse notificationListResponse
+	require.NoError(t, sonic.Unmarshal(member.Response.Body(), &memberResponse))
+	require.Len(t, memberResponse.Notifications, 1)
+	require.Equal(t, "public", memberResponse.Notifications[0].ID)
+
+	admin := &fasthttp.RequestCtx{}
+	admin.SetUserValue(schemas.IsLocalAdminContextKey, true)
+	service.list(admin)
+	var adminResponse notificationListResponse
+	require.NoError(t, sonic.Unmarshal(admin.Response.Body(), &adminResponse))
+	require.Len(t, adminResponse.Notifications, 2)
 }

@@ -17,6 +17,7 @@ type BudgetMonitor struct {
 	interval time.Duration
 	cancel   context.CancelFunc
 	done     chan struct{}
+	publish  BudgetNotificationPublisher
 }
 
 // NewBudgetMonitor returns a monitor bound to the handler's store. A nil
@@ -56,12 +57,18 @@ func (m *BudgetMonitor) Start() {
 
 func (m *BudgetMonitor) sweep(ctx context.Context) {
 	opCtx, cancel := context.WithTimeout(ctx, time.Minute)
-	defer cancel()
 	if _, err := m.store.RevokeExpiredBindings(opCtx); err != nil && m.logger != nil {
 		m.logger.Warn("control-plane binding sweep failed: %v", err)
 	}
 	if err := m.handler.refreshBudgetAlerts(opCtx); err != nil && m.logger != nil {
 		m.logger.Warn("control-plane budget alert refresh failed: %v", err)
+	}
+	cancel()
+	// An unavailable usage source must not starve already committed deliveries.
+	deliveryCtx, cancelDelivery := context.WithTimeout(ctx, 30*time.Second)
+	defer cancelDelivery()
+	if err := m.deliverBudgetNotifications(deliveryCtx); err != nil && m.logger != nil {
+		m.logger.Warn("control-plane budget notification delivery failed: %v", err)
 	}
 }
 

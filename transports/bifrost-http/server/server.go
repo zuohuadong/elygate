@@ -3813,6 +3813,7 @@ func (s *BifrostHTTPServer) Bootstrap(ctx context.Context) error {
 	}
 	if s.ControlPlaneHandler != nil {
 		s.BudgetMonitor = controlplane.NewBudgetMonitor(s.Ctx, s.ControlPlaneHandler, logger)
+		s.BudgetMonitor.SetNotificationPublisher(s.NotificationService.PublishOnce)
 		s.BudgetMonitor.Start()
 		logger.Info("control-plane budget monitor initialized")
 	}

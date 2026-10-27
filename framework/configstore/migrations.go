@@ -468,6 +468,7 @@ var configstoreMigrationSteps = []migrationStep{
 	{IDs: []string{"add_dual_credential_conflict_behavior_column"}, run: migrationAddDualCredentialConflictBehaviorColumn},
 	{IDs: []string{"add_webhook_endpoints_table"}, run: migrationAddWebhookEndpointsTable},
 	{IDs: []string{"add_webhook_jobs_table"}, run: migrationAddWebhookJobsTable},
+	{IDs: []string{"add_webhook_resource_event_columns"}, run: migrationAddWebhookResourceEventColumns},
 	{IDs: []string{"add_webhook_config_client_column"}, run: migrationAddWebhookConfigClientColumn},
 	{IDs: []string{"add_oauth_config_resource_column"}, run: migrationAddOauthConfigResourceColumn},
 	{IDs: []string{"add_use_anthropic_endpoints_column"}, run: migrationAddUseAnthropicEndpointsColumn},
@@ -578,6 +579,7 @@ var configstoreMigrationSteps = []migrationStep{
 	{IDs: []string{"add_azure_use_speech_endpoints_column"}, run: migrationAddAzureUseSpeechEndpointsColumn},
 	{IDs: []string{"add_azure_use_voice_live_endpoints_column"}, run: migrationAddAzureUseVoiceLiveEndpointsColumn},
 	{IDs: []string{"add_sagemaker_key_columns"}, run: migrationAddSageMakerKeyColumns},
+	{IDs: []string{"add_notification_replay_retention"}, run: migrationAddNotificationReplayRetention},
 }
 
 // warpLogEmbeddingColumns are the semantic-search configuration columns added

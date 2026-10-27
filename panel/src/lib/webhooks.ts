@@ -1,7 +1,7 @@
 import { isJsonRecord, type JsonRecord } from './api';
 import { parseJsonObject, prettyJson } from './forms';
 
-export const WEBHOOK_EVENTS = ['async_job.completed', 'async_job.failed'] as const;
+export const WEBHOOK_EVENTS = ['async_job.completed', 'async_job.failed', 'budget.threshold_reached'] as const;
 export type WebhookEvent = typeof WEBHOOK_EVENTS[number];
 
 export interface WebhookDraft {
@@ -62,7 +62,7 @@ export function buildWebhookQuery(filters: WebhookFilters): string {
 
 export function emptyWebhookDraft(): WebhookDraft {
 	return {
-		name: '', url: '', events: [...WEBHOOK_EVENTS], headersJson: '{}', includeResponse: false, allowPrivateNetwork: false, disabled: false,
+		name: '', url: '', events: ['async_job.completed', 'async_job.failed'], headersJson: '{}', includeResponse: false, allowPrivateNetwork: false, disabled: false,
 		maxRetries: '', retryBackoffInitialSeconds: '', retryBackoffMaxSeconds: '', attemptTimeoutSeconds: '', maxResponsePayloadKbs: '', maxConcurrentDeliveries: '',
 	};
 }

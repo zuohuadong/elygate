@@ -10781,11 +10781,19 @@ func (s *RDBConfigStore) CreateWebhookJob(ctx context.Context, job *tables.Table
 	if job.EndpointID == "" {
 		return fmt.Errorf("webhook job endpoint id is required")
 	}
-	if job.AsyncJobID == "" {
-		return fmt.Errorf("webhook job async job id is required")
-	}
 	if !job.Event.IsValid() {
 		return fmt.Errorf("unknown webhook event %q", job.Event)
+	}
+	if job.Event == tables.WebhookEventBudgetThresholdReached {
+		if job.ResourceID == "" || job.AsyncJobID != "" {
+			return fmt.Errorf("budget webhook job requires a resource id and no async job id")
+		}
+		var payload map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(job.PayloadJSON), &payload); err != nil || payload == nil {
+			return fmt.Errorf("budget webhook job payload must be a JSON object")
+		}
+	} else if job.AsyncJobID == "" || job.ResourceID != "" || job.PayloadJSON != "" {
+		return fmt.Errorf("async webhook job requires only an async job id")
 	}
 	// A new job must enter the queue in the initial, unclaimed state: a nonzero
 	// attempt count or a pre-set claim would let it start already hidden behind

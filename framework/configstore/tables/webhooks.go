@@ -24,13 +24,15 @@ const (
 	// WebhookEventAsyncJobCompleted fires when an async inference job finishes successfully.
 	WebhookEventAsyncJobCompleted WebhookEvent = "async_job.completed"
 	// WebhookEventAsyncJobFailed fires when an async inference job reaches a terminal failure.
-	WebhookEventAsyncJobFailed WebhookEvent = "async_job.failed"
+	WebhookEventAsyncJobFailed         WebhookEvent = "async_job.failed"
+	WebhookEventBudgetThresholdReached WebhookEvent = "budget.threshold_reached"
 )
 
 // WebhookEvents lists every supported webhook event.
 var WebhookEvents = []WebhookEvent{
 	WebhookEventAsyncJobCompleted,
 	WebhookEventAsyncJobFailed,
+	WebhookEventBudgetThresholdReached,
 }
 
 // IsValid reports whether e is a supported webhook event.
@@ -313,6 +315,10 @@ type TableWebhookJob struct {
 	EndpointID string       `gorm:"type:varchar(36);not null;index" json:"endpoint_id"`
 	AsyncJobID string       `gorm:"type:varchar(255);not null" json:"async_job_id"`
 	Event      WebhookEvent `gorm:"type:varchar(255);not null" json:"event"`
+	// ResourceID and PayloadJSON identify and snapshot non-inference events.
+	// Async inference keeps its existing fetch-at-delivery contract.
+	ResourceID  string `gorm:"type:varchar(255)" json:"resource_id,omitempty"`
+	PayloadJSON string `gorm:"type:text" json:"-"`
 
 	AttemptCount  int       `gorm:"not null;default:0" json:"attempt_count"`
 	NextAttemptAt time.Time `gorm:"not null;index" json:"next_attempt_at"`

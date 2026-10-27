@@ -84,8 +84,71 @@ This is current-period, post-settlement alerting over the Usage Ledger, not a
 second budget enforcement engine. Bifrost Virtual Key/governance budgets still
 own request blocking. Panel budget creation, replacement, clearing, status and
 alert history are available in the control-plane page. Closed-period late
-settlement/recomputation, notification delivery/acknowledgement and forecasting remain
-separate follow-ups. No new external notification is sent by these APIs.
+settlement/recomputation, acknowledgement and forecasting remain separate
+follow-ups.
+
+### Budget Notification Delivery
+
+Each threshold event and its dashboard outbox row commit in the same
+transaction. The additive v6 migration also queues previously stored alerts
+in bounded batches. An alert has one stable notification UUID; concurrent
+evaluation and migration retries cannot enqueue it twice.
+
+The budget monitor drains at most 32 due deliveries per sweep, even if the
+usage source is unavailable or budgets have since been cleared. Atomic claims
+use a one-minute lease and a fresh fencing token on each attempt. A failed
+publish is retried after 1, 2, 4, 8, 16, 32 and then 60 minutes; retry state
+survives restart. A lost worker's lease expires and a new worker can resume.
+An older token cannot acknowledge or reschedule a newer claim.
+
+Delivery uses the existing notification service's stable-ID publish method.
+The first payload, creation time and 30-day feed expiry are retained on
+replay, including a crash after notification commit but before outbox
+acknowledgement. Stable-ID rows are retained as replay receipts even after
+feed expiry, so a restart after more than 30 days cannot recreate or rebroadcast
+the original notification. Ordinary notifications are still pruned on expiry.
+New rows receive a best-effort WebSocket broadcast; HTTP
+feed reads recover missed broadcasts. This is not a guarantee that a browser
+received or read an event.
+
+Budget notifications use the `admin` audience. Only the existing local-admin
+identity can read them through `/api/notifications` or receive their
+WebSocket event; ordinary authenticated roles cannot. They include the
+immutable scope ID, USD usage/limit and UTC period, not key values or
+request content. The action targets `/#/control-plane-projects`.
+
+The outbox retains delivered rows for deduplication and pending rows for
+recovery. Migration rollback intentionally refuses to drop it; binary
+rollback leaves the additive table intact. No production migration is run
+by the package tests.
+
+External budget webhook delivery now uses the existing signed webhook worker.
+Only enabled endpoints subscribed to `budget.threshold_reached` at alert
+creation receive the immutable alert snapshot. Queue rows are inserted in the
+same transaction as the alert and notification outbox. Later subscriptions do
+not replay old alerts. Resource IDs and snapshots survive retries and explicit
+redelivery; async inference delivery keeps its existing job lookup contract.
+
+`TestBudgetWebhookMonitorPersistentRetryRecovery` covers the production monitor,
+notification publisher, endpoint resolver and dispatcher with real relational
+stores and a local HTTP receiver. The receiver first returns 503; a new
+dispatcher recovers the persisted retry and succeeds with 204. It verifies the
+signature, stable payload, both history rows, queue cleanup and no duplicate
+event on the next monitor sweep.
+
+The default fixture uses SQLite for both control-plane and log stores. With
+`ELYGATE_TEST_POSTGRES_SOCKET`, both use separate private PostgreSQL databases:
+
+```sh
+bash scripts/test-controlplane-postgres.sh \
+  -run '^TestBudgetWebhook' -timeout=15m -p 1 -v
+```
+
+The private socket uses trust authentication. The log-store fixture supplies a
+random one-time password value only to satisfy its constructor, not to prove
+password authentication. Materialized-view refresh is disabled for this test.
+This synthetic-cost, local-receiver check does not establish real provider
+billing, database/host restart, production delivery or cross-store recovery.
 
 ## Management Audit Bridge
 

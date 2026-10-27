@@ -19,6 +19,7 @@ type NotificationAudience string
 const (
 	NotificationAudienceAll   NotificationAudience = "all"
 	NotificationAudienceRoles NotificationAudience = "roles"
+	NotificationAudienceAdmin NotificationAudience = "admin"
 )
 
 // Notification is a persisted dashboard notification. Read and dismissal
@@ -49,14 +50,8 @@ type NotificationInput struct {
 }
 
 // NotificationPublisher persists a notification and pushes it to every
-// connected dashboard the audience covers.
-//
-// This is an extension seam, not a feature with in-tree callers. Nothing in the
-// OSS transport publishes a notification today; the field on lib.Config exists
-// so enterprise builds and plugins can announce events (license expiry, cluster
-// membership changes, budget breaches) without importing the handler package.
-// The only other way to create one is POST /api/notifications, which is
-// admin-gated. If you add the first in-tree producer, publish through this
-// func rather than writing to the store directly, so the WebSocket fan-out and
-// role scoping stay in one place.
+// connected dashboard the audience covers. Producers use the notification
+// service rather than writing feed rows directly, keeping WebSocket fan-out
+// and audience validation together. Durable producers use its stable-ID
+// publisher so a replay cannot insert a second notification.
 type NotificationPublisher func(context.Context, NotificationInput) (*Notification, error)

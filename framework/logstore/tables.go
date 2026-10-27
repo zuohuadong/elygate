@@ -2357,14 +2357,18 @@ func (o WebhookDeliveryOutcome) Value() (driver.Value, error) {
 
 // WebhookDelivery records one webhook delivery attempt. Rows are insert-only
 // — every attempt appends a new record and existing rows are never updated —
-// and carry delivery metadata only, never event payloads or receiver
-// response bodies. WebhookID is the delivery's `webhook-id` wire header,
+// and carry delivery metadata plus non-inference event snapshots, never
+// inference payloads or receiver response bodies. WebhookID is the delivery's `webhook-id` wire header,
 // shared by every attempt of the same delivery.
 type WebhookDelivery struct {
 	ID         string `gorm:"primaryKey;type:varchar(36)" json:"id"`
 	WebhookID  string `gorm:"type:varchar(36);index:idx_webhook_deliveries_webhook_id;not null" json:"webhook_id"`
 	EndpointID string `gorm:"type:varchar(36);index:idx_webhook_deliveries_endpoint_id;index:idx_webhook_deliveries_endpoint_created,priority:1;not null" json:"endpoint_id"`
 	AsyncJobID string `gorm:"type:varchar(255);not null" json:"async_job_id"`
+	ResourceID string `gorm:"type:varchar(255)" json:"resource_id,omitempty"`
+	// Only non-inference event snapshots are retained for exact redelivery.
+	// Inference prompts, responses and receiver bodies are never copied here.
+	PayloadJSON string `gorm:"type:text" json:"-"`
 	// RequestID is the async job's inference request id — the same id the
 	// LLM logs record — copied here at attempt time. Empty when the job row
 	// expired before the attempt.

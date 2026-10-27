@@ -1302,6 +1302,7 @@ func TestTriggerMigrations_FreshDB(t *testing.T) {
 		assert.True(t, migrator.HasTable(table), "table should exist: %T", table)
 	}
 	assert.True(t, migrator.HasColumn(&tables.TableModelPricing{}, "is_deprecated"), "model pricing is_deprecated column should exist")
+	assert.True(t, migrator.HasColumn(&tables.TableNotification{}, "retain_for_replay"), "notification replay retention column should exist")
 	assert.False(t, migrator.HasColumn(&tables.TableVirtualKey{}, "agent_grants"), "agent_grants is a has-many association, not a database column")
 }
 

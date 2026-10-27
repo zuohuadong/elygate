@@ -262,9 +262,29 @@ func createBudgetAlerts(tx *gorm.DB, status BudgetStatus, now time.Time) (int64,
 		if inserted.Error != nil {
 			return 0, inserted.Error
 		}
+		if inserted.RowsAffected == 1 {
+			if err := enqueueBudgetNotification(tx, alert); err != nil {
+				return 0, err
+			}
+			if err := enqueueBudgetWebhooks(tx, alert); err != nil {
+				return 0, err
+			}
+		}
 		created += inserted.RowsAffected
 	}
 	return created, nil
+}
+
+func enqueueBudgetNotification(tx *gorm.DB, alert BudgetAlert) error {
+	now := alert.TriggeredAt.UTC()
+	outbox := BudgetNotificationOutbox{
+		ID:      uuid.NewSHA1(uuid.NameSpaceURL, []byte("elygate:budget-notification:"+alert.ID)).String(),
+		AlertID: alert.ID, ScopeType: alert.ScopeType, ScopeID: alert.ScopeID,
+		Window: alert.Window, PeriodStart: alert.PeriodStart, Threshold: alert.Threshold,
+		Usage: alert.Usage, Limit: alert.Limit, Status: BudgetNotificationPending,
+		NextAttemptAt: now, CreatedAt: now, UpdatedAt: now,
+	}
+	return tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "alert_id"}}, DoNothing: true}).Create(&outbox).Error
 }
 
 func (s *Store) ListBudgetAlerts(ctx context.Context, query UsageQuery) ([]BudgetAlert, error) {

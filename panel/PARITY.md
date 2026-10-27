@@ -78,7 +78,7 @@ upstream UI.
 | `/workspace/plugins` | plugins | `/api/plugins*` built-in/custom install, runtime status/logs, typed hook badges, safe redacted config round-trip, enable/disable/delete, execution sequence | Dedicated |
 | `/workspace/prompt-repo`, `/workspace/prompt-repo/prompts` | prompt-folders, prompts | `/api/prompt-repo/*` versions and draft sessions | Dedicated + Alias |
 | `/workspace/skills-repo` | skills | `/api/skills*` files, versions, serving and cleanup | Dedicated |
-| `/workspace/webhooks` | webhooks | `/api/webhooks*` test, secret rotation, delivery inspect/redeliver | Dedicated |
+| `/workspace/webhooks` | webhooks | `/api/webhooks*` test, secret rotation, delivery inspect/redeliver; explicit budget subscription and resource history | Dedicated |
 | `/workspace/docs` | docs-hub | bundled docs + official documentation links | Dedicated |
 | Elygate control plane | control-plane-projects, control-plane-applications | `/api/control-plane/projects*`, `/api/control-plane/applications*` project/application management and key lifecycle | Dedicated |
 | Elygate usage ledger | usage-ledger | `/api/control-plane/usage*`, `/api/control-plane/audit-events*`, `/api/control-plane/budget-alerts` paginated ledger, full filtered summary, sync status, budget status/history and CSV export | Dedicated |

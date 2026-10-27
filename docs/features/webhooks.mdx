@@ -1,17 +1,17 @@
 ---
 title: "Webhooks"
-description: "Get a signed callback when an async inference job finishes, instead of polling for it."
+description: "Get signed callbacks for async inference and budget threshold events."
 icon: "webhook"
 ---
 
 ## Overview
 
-Webhooks are the push half of [Async Inference](/features/async-inference). Instead of polling `GET /v1/async/.../{job_id}` until a job reaches a terminal state, register an endpoint and name it on submit, and Bifrost delivers a signed HTTP `POST` the moment that job completes or fails.
+Webhooks deliver signed HTTP `POST` callbacks for async inference and control-plane budget events. For async inference, they replace polling `GET /v1/async/.../{job_id}` until a job reaches a terminal state. For budgets, they notify a receiver when a project or application reaches 80% or 100% of its configured limit.
 
 Every delivery is signed in the [Standard Webhooks](https://www.standardwebhooks.com/) format so your receiver can verify it came from your Bifrost instance and was not altered in transit.
 
 <Note>
-Webhooks fire only for async inference jobs. Like Async Inference, this is a gateway-only feature and requires a Logs Store to be configured.
+Webhook delivery requires both Config Store and Logs Store. Budget threshold deliveries are created by the control-plane budget evaluator and carry a saved alert snapshot, so they do not depend on an async job lookup. Logs Store still records each delivery attempt.
 </Note>
 
 **Events:**
@@ -20,6 +20,7 @@ Webhooks fire only for async inference jobs. Like Async Inference, this is a gat
 |---|---|
 | `async_job.completed` | An async job finishes successfully. |
 | `async_job.failed` | An async job finishes with an error. |
+| `budget.threshold_reached` | A project or application budget reaches 80% or 100% of its limit. |
 
 ---
 
@@ -27,11 +28,11 @@ Webhooks fire only for async inference jobs. Like Async Inference, this is a gat
 
 ```mermaid
 sequenceDiagram
-    participant Worker as Async Worker
+    participant Source as Async Worker / Budget Evaluator
     participant Dispatcher as Webhook Dispatcher
     participant Endpoint as Your Endpoint
 
-    Worker->>Dispatcher: Job reached completed / failed
+    Source->>Dispatcher: Subscribed event becomes due
     Dispatcher->>Dispatcher: Render payload + sign (HMAC-SHA256)
     Dispatcher->>Endpoint: POST signed delivery
     alt 2xx response
@@ -48,7 +49,7 @@ Delivery is **at-least-once**: a failed attempt is retried with exponential back
 
 ## Triggering a Delivery
 
-Registering an endpoint does not, by itself, cause any deliveries. Delivery is opt-in per async job: the submit request must carry an `x-bf-async-webhook` header naming the endpoint to notify.
+Registering an endpoint does not replay past events. By default, async jobs notify every enabled endpoint subscribed to the terminal event. Set `x-bf-async-webhook` on a submit request to notify only the named endpoint. Budget delivery is opt-in per endpoint subscription and is queued when the evaluator creates the alert.
 
 ```bash
 curl -X POST http://localhost:8080/v1/async/chat/completions \
@@ -60,7 +61,8 @@ curl -X POST http://localhost:8080/v1/async/chat/completions \
 
 - The name must resolve to an existing, enabled endpoint. If it doesn't, the submit request itself fails, rather than accepting the job and silently dropping the notification.
 - The endpoint must still be enabled and subscribed to the resulting event (`async_job.completed` or `async_job.failed`) when the job finishes. If it isn't, the job completes normally but no delivery is enqueued.
-- Jobs submitted without the header never trigger a webhook, regardless of how many endpoints are registered.
+- Budget alerts are delivered only to enabled endpoints subscribed to `budget.threshold_reached` at alert creation time. Creating a subscription later does not replay historical alerts.
+- Jobs submitted without the header notify all enabled endpoints subscribed to the terminal event.
 
 See [Async Inference](/features/async-inference#webhook-notifications) for the full submit flow.
 
@@ -76,7 +78,7 @@ Each delivery is a `POST` with a JSON body and three signing headers:
 | `webhook-timestamp` | Unix seconds the payload was signed at. |
 | `webhook-signature` | Space-separated list of `v1,<base64>` signatures. |
 
-The body:
+The async inference body:
 
 ```json
 {
@@ -104,6 +106,26 @@ The body:
 | `data.error` | The job's error body, inlined only when the endpoint sets `include_response` and it fits `max_response_payload_kbs`. Present only for `async_job.failed`. |
 | `data.error_omitted` | `true` when an error was too large to inline; fetch it via `result_url` instead. |
 | `data.result_expired` | `true` when the job's result was already gone at delivery time — the outcome is known, but there is nothing left to fetch. |
+
+Budget threshold deliveries use the same envelope but store the alert snapshot in `data`:
+
+```json
+{
+  "event": "budget.threshold_reached",
+  "created_at": "2026-02-19T08:10:19.412Z",
+  "data": {
+    "id": "alert-123",
+    "scope_type": "project",
+    "scope_id": "project-1",
+    "window": "daily",
+    "threshold": 0.8,
+    "usage": 8,
+    "limit": 10
+  }
+}
+```
+
+The `data.id` value is the budget alert/resource id. It is stable across retries and is also exposed as `resource_id` in delivery history.
 
 ---
 
@@ -138,7 +160,7 @@ Open **Webhooks** in the sidebar to see your endpoints and their status.
 
 1. Select **Add Endpoint**.
 2. Enter a unique **Name** and the delivery **URL** (HTTPS unless the endpoint allows private networks).
-3. Choose the **events** to subscribe to (`async_job.completed`, `async_job.failed`).
+3. Choose the **events** to subscribe to (`async_job.completed`, `async_job.failed`, `budget.threshold_reached`).
 4. Optionally add custom **headers** (for example an `Authorization` value your receiver requires) and toggle **Include response** to inline job responses.
 
 <Frame>
@@ -174,7 +196,7 @@ curl -X POST http://localhost:8080/api/webhooks \
   -d '{
     "name": "order-events",
     "url": "https://example.com/webhook",
-    "events": ["async_job.completed", "async_job.failed"],
+    "events": ["async_job.completed", "async_job.failed", "budget.threshold_reached"],
     "include_response": false
   }'
 ```
@@ -221,7 +243,7 @@ Declare endpoints under the top-level `webhooks` array. They are synced into the
 |---|---|---|---|
 | `name` | string | Yes | Unique endpoint name; the reconcile key. |
 | `url` | string | Yes | Delivery URL. HTTPS required unless `allow_private_network` is set. |
-| `events` | array | Yes | Subscribed events: `async_job.completed`, `async_job.failed`. |
+| `events` | array | Yes | Subscribed events: `async_job.completed`, `async_job.failed`, `budget.threshold_reached`. |
 | `secret` | string | No | Signing secret in `whsec_` format. Best supplied as an env reference (`env.MY_VAR`); generated when omitted. |
 | `headers` | object | No | Custom headers sent with every delivery. Values support `env.VAR` syntax and are encrypted at rest when `encryption_key` is configured. Reserved delivery headers cannot be overridden. |
 | `include_response` | boolean | No | Inline the job response into payloads (default `false`). |
