@@ -218,6 +218,7 @@ func TestWarpLogsViewLinkCarriesEveryFilter(t *testing.T) {
 		field := value.Field(i)
 		name := strings.Split(value.Type().Field(i).Tag.Get("json"), ",")[0]
 		if name == "-" {
+			// Internal lookups (RealtimeInputItemID), never sent as a filter.
 			continue
 		}
 		if _, skip := notInURL[name]; skip {

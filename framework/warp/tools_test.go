@@ -2372,6 +2372,7 @@ func TestWarpToolsAcceptEveryLogsFilter(t *testing.T) {
 	for i := range fields.NumField() {
 		name := strings.Split(fields.Field(i).Tag.Get("json"), ",")[0]
 		if name == "-" {
+			// Internal lookups (RealtimeInputItemID), never sent as a filter.
 			continue
 		}
 		if _, skip := notAnArgument[name]; skip {

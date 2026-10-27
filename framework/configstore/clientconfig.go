@@ -779,6 +779,8 @@ func (p *ProviderConfig) Redacted() *ProviderConfig {
 			if len(key.AzureKeyConfig.Scopes) > 0 {
 				azureConfig.Scopes = key.AzureKeyConfig.Scopes
 			}
+			azureConfig.UseSpeechEndpoints = key.AzureKeyConfig.UseSpeechEndpoints
+			azureConfig.UseVoiceLiveEndpoints = key.AzureKeyConfig.UseVoiceLiveEndpoints
 			redactedConfig.Keys[i].AzureKeyConfig = azureConfig
 		}
 

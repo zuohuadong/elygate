@@ -5449,3 +5449,31 @@ func TestTracingMiddleware_CapturesTraceState(t *testing.T) {
 		t.Errorf("tracestate stored with no traceparent: %q", got)
 	}
 }
+
+// All query credentials, including percent-encoded names, stay out of access logs.
+func TestLogRequestTargetRedactsAPIKeyQuery(t *testing.T) {
+	for uri, want := range map[string]string{
+		"/voice-live/realtime?api-version=2026-07-15&model=gpt-realtime-vl&api-key=sk-bf-secret": "/voice-live/realtime",
+		"/v1/chat/completions?stream=true":                                  "/v1/chat/completions",
+		"/voice-live/realtime?%61pi-key=sk-bf-secret&model=gpt-realtime-vl": "/voice-live/realtime",
+		"/azure/voice-live/realtime?api%2Dkey=sk-bf-secret":                 "/azure/voice-live/realtime",
+		"/oauth/callback?token=session&ticket=ticket&code=code&api-key=key": "/oauth/callback",
+		"/v1/chat/completions":                                              "/v1/chat/completions",
+	} {
+		ctx := &fasthttp.RequestCtx{}
+		ctx.Request.SetRequestURI(uri)
+		if got := logRequestTarget(ctx); got != want {
+			t.Errorf("logRequestTarget(%q) = %q, want %q", uri, got, want)
+		}
+	}
+}
+
+// BenchmarkLogRequestTarget measures the access log target on a request without a query string, the common case.
+func BenchmarkLogRequestTarget(b *testing.B) {
+	ctx := &fasthttp.RequestCtx{}
+	ctx.Request.SetRequestURI("/v1/chat/completions")
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = logRequestTarget(ctx)
+	}
+}
