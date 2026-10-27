@@ -2091,6 +2091,7 @@ func mergeProviderKeys(provider schemas.ModelProvider, keysInConfigJSON, dbKeys 
 					VertexKeyConfig:        dbKey.VertexKeyConfig,
 					BedrockKeyConfig:       dbKey.BedrockKeyConfig,
 					BedrockMantleKeyConfig: dbKey.BedrockMantleKeyConfig,
+					SageMakerKeyConfig:     dbKey.SageMakerKeyConfig,
 					ReplicateKeyConfig:     dbKey.ReplicateKeyConfig,
 					Aliases:                dbKey.Aliases,
 					VLLMKeyConfig:          dbKey.VLLMKeyConfig,
@@ -2183,6 +2184,7 @@ func reconcileProviderKeys(provider schemas.ModelProvider, keysInConfigJSON, dbK
 					VertexKeyConfig:        dbKey.VertexKeyConfig,
 					BedrockKeyConfig:       dbKey.BedrockKeyConfig,
 					BedrockMantleKeyConfig: dbKey.BedrockMantleKeyConfig,
+					SageMakerKeyConfig:     dbKey.SageMakerKeyConfig,
 					ReplicateKeyConfig:     dbKey.ReplicateKeyConfig,
 					Aliases:                dbKey.Aliases,
 					VLLMKeyConfig:          dbKey.VLLMKeyConfig,
@@ -9068,6 +9070,19 @@ func (c *Config) GetAllKeys() ([]configstoreTables.TableKey, error) {
 				cfg.ExternalID = cfg.ExternalID.Redacted()
 				cfg.RoleSessionName = cfg.RoleSessionName.Redacted()
 				configStoreKey.BedrockMantleKeyConfig = &cfg
+			}
+			if key.SageMakerKeyConfig != nil {
+				cfg := *key.SageMakerKeyConfig // safe copy
+				cfg.AccessKey = *cfg.AccessKey.Redacted()
+				cfg.SecretKey = *cfg.SecretKey.Redacted()
+				cfg.SessionToken = cfg.SessionToken.Redacted()
+				// The region is a public identifier, not a credential — surface it in plaintext.
+				cfg.Region = cfg.Region.RedactedIfSecret()
+				cfg.RoleARN = cfg.RoleARN.Redacted()
+				cfg.ExternalID = cfg.ExternalID.Redacted()
+				cfg.RoleSessionName = cfg.RoleSessionName.Redacted()
+				cfg.Endpoints = cfg.Endpoints.Redacted()
+				configStoreKey.SageMakerKeyConfig = &cfg
 			}
 			if key.VertexKeyConfig != nil {
 				cfg := *key.VertexKeyConfig // safe copy
