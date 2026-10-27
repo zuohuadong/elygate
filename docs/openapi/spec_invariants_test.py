@@ -18,6 +18,8 @@ from pathlib import Path
 
 import yaml
 
+from bundle import OpenAPIBundler, UniqueKeyLoader
+
 
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parent.parent
@@ -52,7 +54,7 @@ def check(name, fn):
 
 
 def load(path: Path):
-    return yaml.safe_load(path.read_text(encoding="utf-8"))
+    return yaml.load(path.read_text(encoding="utf-8"), Loader=UniqueKeyLoader)
 
 
 spec = load(ENTRY)
@@ -92,6 +94,40 @@ def test_no_duplicate_path_templates():
     assert not dupes, f"paths that collide after parameter normalization: {dupes}"
 
 
+def test_yaml_duplicate_keys_are_rejected():
+    # Root, nested and sequence-contained mappings must all reject overwrites.
+    for source in ("a: 1\na: 2", "paths:\n  /one: 1\n  /one: 2", "- a: 1\n  a: 2"):
+        try:
+            yaml.load(source, Loader=UniqueKeyLoader)
+        except yaml.constructor.ConstructorError as exc:
+            assert "duplicate key" in str(exc), str(exc)
+        else:
+            raise AssertionError(f"duplicate YAML key was accepted: {source}")
+    assert yaml.load("a: 1\nb: 2", Loader=UniqueKeyLoader) == {"a": 1, "b": 2}
+
+
+def referenced_fragments(document):
+    if isinstance(document, dict):
+        ref = document.get("$ref")
+        if isinstance(ref, str):
+            yield ref
+        for child in document.values():
+            yield from referenced_fragments(child)
+    elif isinstance(document, list):
+        for child in document:
+            yield from referenced_fragments(child)
+
+
+def test_fragment_references_are_structural():
+    source = """one:
+  description: "Not a reference: '#/orphan/unused'"
+  parameters:
+    - $ref: "#/shared/a"
+    - $ref: '#/shared/b'
+"""
+    assert set(referenced_fragments(yaml.safe_load(source))) == {"#/shared/a", "#/shared/b"}
+
+
 def resolve_pointer(document, tokens):
     """Walk already-unescaped pointer tokens, returning None when any step is absent."""
     node = document
@@ -115,20 +151,27 @@ def test_every_mounted_fragment_exists():
 
 
 def test_no_orphaned_fragments():
+    documents = {source: load(source) or {} for source in FRAGMENT_FILES}
+    refs = {source: set(referenced_fragments(document)) for source, document in documents.items()}
     orphans = []
-    for source in FRAGMENT_FILES:
+    for source, document in documents.items():
         stem = source.stem
-        defined = set(load(source) or {})
+        defined = set(document)
         referenced = {tokens[0] for name, tokens in mounted_refs if name == stem}
         # A fragment also counts as used when another fragment composes it by $ref -
         # cross-file (the legacy aliases pull in `./governanceextensions.yaml#/x/put`)
         # or same-file (logging.yaml's shared `_*-parameters` blocks).
         composed = set()
-        for other in FRAGMENT_FILES:
-            text = other.read_text(encoding="utf-8")
+        for other, references in refs.items():
             for frag in defined:
-                cross_file = f"{stem}.yaml#/{frag}/" in text
-                same_file = other == source and f"'#/{frag}/" in text
+                token = frag.replace("~", "~0").replace("/", "~1")
+                cross_file = any(
+                    ref.endswith(f"{stem}.yaml#/{token}") or f"{stem}.yaml#/{token}/" in ref
+                    for ref in references
+                )
+                same_file = other == source and any(
+                    ref == f"#/{token}" or ref.startswith(f"#/{token}/") for ref in references
+                )
                 if cross_file or same_file:
                     composed.add(frag)
         unused = sorted(defined - referenced - composed - KNOWN_ORPHANS.get(source.name, set()))
@@ -509,6 +552,34 @@ def test_warp_credential_contract_is_current():
     assert not problems, "Warp credential contract drift:\n    " + "\n    ".join(problems)
 
 
+def warp_error_codes(agent: str) -> set[str]:
+    constants = dict(re.findall(r'(Err[A-Za-z]+)\s+=\s+"([a-z_]+)"', agent))
+    # Error fields, local code assignments and classifier returns all reach
+    # terminal events. Unused declarations must not enlarge the wire enum.
+    references = re.findall(
+        r"\b(?:Code:\s*|code(?:,\s*message)?\s*:?=\s*|return\s+)(Err[A-Za-z]+)\b",
+        agent,
+    )
+    return {constants[name] for name in references if name in constants}
+
+
+def test_warp_error_code_extraction():
+    agent = '''
+const (
+    ErrDirect = "direct"
+    ErrAssigned = "assigned"
+    ErrReturned = "returned"
+    ErrInitial = "initial"
+    ErrUnused = "unused"
+)
+emit(Event{Code: ErrDirect})
+code = ErrAssigned
+code, message := ErrInitial, "message"
+return ErrReturned, "reason", true
+'''
+    assert warp_error_codes(agent) == {"direct", "assigned", "returned", "initial"}
+
+
 def test_warp_chat_response_contract_is_current():
     """WarpSessionResponse mirrors warp.ChatResponse: usage is BifrostLLMUsage, not a bare
     object, and error.code is the closed set the agent actually emits. The chat route is
@@ -525,12 +596,7 @@ def test_warp_chat_response_contract_is_current():
     # The codes the agent emits, read from the Go source rather than restated here:
     # a constant that stops being emitted must not linger in the published enum.
     agent = (REPO_ROOT / "framework" / "warp" / "agent.go").read_text(encoding="utf-8")
-    constants = dict(re.findall(r'(Err[A-Za-z]+)\s+=\s+"([a-z_]+)"', agent))
-    emitted = sorted({
-        constants[name]
-        for name in re.findall(r"Code:\s+(Err[A-Za-z]+)", agent)
-        if name in constants
-    })
+    emitted = sorted(warp_error_codes(agent))
     if not emitted:
         problems.append("could not read any emitted error codes from framework/warp/agent.go")
 
@@ -566,6 +632,10 @@ def test_warp_chat_response_contract_is_current():
     if "WarpSessionResponse" not in bundled:
         problems.append("openapi.json does not define WarpSessionResponse")
     else:
+        bundled_error = (bundled["WarpSessionResponse"].get("properties") or {}).get("error") or {}
+        bundled_codes = ((bundled_error.get("properties") or {}).get("code") or {}).get("enum") or []
+        if sorted(bundled_codes) != emitted:
+            problems.append(f"openapi.json WarpSessionResponse.error.code enum is {bundled_codes}, want {emitted}")
         bundled_usage = (bundled["WarpSessionResponse"].get("properties") or {}).get("usage")
         if bundled_usage is None:
             problems.append("openapi.json WarpSessionResponse has no usage property")
@@ -675,6 +745,8 @@ def test_warp_config_input_models_the_embedding_contract():
 
     assert not problems, "Warp config input contract:\n    " + "\n    ".join(problems)
 
+check("duplicate YAML keys cannot overwrite API definitions", test_yaml_duplicate_keys_are_rejected)
+check("fragment references ignore YAML quoting and descriptions", test_fragment_references_are_structural)
 check("no path key has a null Path Item", test_no_null_path_items)
 check("no two paths collide after parameter normalization", test_no_duplicate_path_templates)
 check("every fragment openapi.yaml mounts exists", test_every_mounted_fragment_exists)
@@ -1053,6 +1125,46 @@ def test_adaptive_routing_put_descriptions_state_the_empty_reroute_target():
     assert not problems, "reroute_target descriptions drift from the settings handler:\n    " + "\n    ".join(problems)
 
 
+def test_budget_webhook_contract_matches_sources_and_bundle():
+    source = load(HERE / "schemas" / "management" / "webhooks.yaml")
+    bundle = json.loads((HERE / "openapi.json").read_text(encoding="utf-8"))
+    schemas = bundle["components"]["schemas"]
+    expected_events = ["async_job.completed", "async_job.failed", "budget.threshold_reached"]
+    for label, definitions in (("source", source), ("bundle", schemas)):
+        assert definitions["WebhookEvent"]["enum"] == expected_events, label
+        properties = definitions["WebhookDelivery"]["properties"]
+        assert properties["resource_id"]["type"] == "string", label
+        assert "budget.threshold_reached" in properties["resource_id"]["description"], label
+        assert "Empty for budget events" in properties["async_job_id"]["description"], label
+        assert "payload_json" not in properties, label
+    source_paths = load(PATHS_DIR / "webhooks.yaml")
+    source_search = source_paths["webhooks-deliveries-search"]["get"]
+    bundled_search = bundle["paths"]["/api/webhooks/deliveries"]["get"]
+    for label, operation in (("source", source_search), ("bundle", bundled_search)):
+        event_filter = next(param for param in operation["parameters"] if param.get("name") == "events")
+        assert "budget.threshold_reached" in event_filter["description"], label
+
+
+def test_bundle_matches_sources():
+    generated = OpenAPIBundler(HERE).bundle()
+    published = json.loads((HERE / "openapi.json").read_text(encoding="utf-8"))
+    assert generated == published, "openapi.json differs from the current split sources; run bundle.py"
+
+
+def test_virtual_key_rotation_retains_cooldown_contract():
+    source = load(PATHS_DIR / "governance.yaml")["virtual-keys-rotate-by-id"]["post"]
+    bundle = json.loads((HERE / "openapi.json").read_text(encoding="utf-8"))
+    published = bundle["paths"]["/api/governance/virtual-keys/{vk_id}/rotate"]["post"]
+    for operation in (source, published):
+        assert operation["operationId"] == "rotateVirtualKey"
+        for term in ("vk_rotation_cooldown", "previous_value_expires_at", "MCP OAuth grants", "same transaction"):
+            assert term in operation["description"], f"rotation contract omits {term}"
+
+
+check("bundle matches all current split sources", test_bundle_matches_sources)
+check("virtual key rotation retains cooldown and OAuth revocation", test_virtual_key_rotation_retains_cooldown_contract)
+check("Warp codes include classifier returns but exclude unused constants", test_warp_error_code_extraction)
+check("budget webhook contract matches sources and bundle", test_budget_webhook_contract_matches_sources_and_bundle)
 check("legacy aliases are mounted and their successors documented", test_legacy_aliases_mount_legacy_fragments)
 check("secret-capable values accept bare strings (EnvVar oneOf)", test_secret_capable_values_accept_bare_strings)
 check("vertex aws_workload_identity matches config.schema.json", test_vertex_aws_workload_identity_contract)

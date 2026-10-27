@@ -39,6 +39,23 @@ except ImportError:
     sys.exit(1)
 
 
+class UniqueKeyLoader(yaml.SafeLoader):
+    """Do not silently publish the last of two conflicting API definitions."""
+
+    def construct_mapping(self, node, deep=False):
+        self.flatten_mapping(node)
+        mapping = {}
+        for key_node, value_node in node.value:
+            key = self.construct_object(key_node, deep=deep)
+            if key in mapping:
+                raise yaml.constructor.ConstructorError(
+                    "while constructing a mapping", node.start_mark,
+                    f"duplicate key {key!r}", key_node.start_mark,
+                )
+            mapping[key] = self.construct_object(value_node, deep=deep)
+        return mapping
+
+
 class OpenAPIBundler:
     """
     Generic OpenAPI bundler that hoists all registered components into
@@ -84,7 +101,7 @@ class OpenAPIBundler:
             if not path.exists():
                 raise FileNotFoundError(f"File not found: {path}")
             with open(path, "r", encoding="utf-8") as f:
-                self.file_cache[key] = yaml.safe_load(f)
+                self.file_cache[key] = yaml.load(f, Loader=UniqueKeyLoader)
         return self.file_cache[key]
 
     # -------------------------------------------------------------------------

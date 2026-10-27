@@ -5,10 +5,12 @@ WebhookEvent:
   enum:
     - async_job.completed
     - async_job.failed
+    - budget.threshold_reached
   description: |
-    A terminal async-job event a webhook endpoint can subscribe to:
+    A server event a webhook endpoint can subscribe to:
     - async_job.completed: an async job finished successfully
     - async_job.failed: an async job finished with an error
+    - budget.threshold_reached: a project or application budget reached 80% or 100%
 
 SecretVarValue:
   description: |
@@ -244,6 +246,10 @@ WebhookDelivery:
       type: string
     async_job_id:
       type: string
+      description: Inference source ID. Empty for budget events.
+    resource_id:
+      type: string
+      description: Budget alert ID for budget.threshold_reached; absent for async inference.
     request_id:
       type: string
       description: The async job's inference request id — the same id the LLM logs record. Empty when the job row expired before the attempt.

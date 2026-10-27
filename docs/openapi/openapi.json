@@ -203,7 +203,7 @@
     },
     {
       "name": "Webhooks",
-      "description": "Webhook endpoint management and signed async-job delivery history"
+      "description": "Webhook endpoint management and signed async-job or budget-event delivery history"
     },
     {
       "name": "Notifications",
@@ -49216,7 +49216,7 @@
           "content": "**Required Permissions**\n\n| Permission | Granted via |\n| --- | --- |\n| `VirtualKeys:Create` | RBAC role or API key scope |\n\n[How permissions work](/api/procuring-api-keys#required-permissions)\n"
         },
         "summary": "Rotate virtual key",
-        "description": "Generates a new value for the virtual key. When the client vk_rotation_cooldown setting is non-zero, the retired value keeps authenticating until previous_value_expires_at; otherwise it stops working immediately.\n",
+        "description": "Generates a new credential value for the virtual key while leaving its configuration,\nassignments, budgets, and rate limits unchanged. When `vk_rotation_cooldown` is non-zero,\nthe retired value keeps authenticating until `previous_value_expires_at`; otherwise it\nstops working immediately on the node handling the request. Repeated rotation replaces\nthe one retained previous value, so the second-oldest value stops working immediately.\n\nIn a clustered deployment, peer invalidation is asynchronous. Until each peer processes the\ncluster update and reloads the virtual key, that peer may continue to accept the previous\nvalue. There is no fixed upper bound when a peer is unavailable, so wait for cluster\nconvergence before treating the previous credential as revoked cluster-wide.\n\nThe new credential is returned in `virtual_key.value`. Store it securely and update clients\nthat use the previous value. MCP OAuth grants and unexchanged authorization codes minted\nwith the virtual key are revoked in the same transaction as the rotation; the cooldown\ndoes not keep those grants alive.\n",
         "tags": [
           "Governance"
         ],
@@ -49242,19 +49242,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "required": [
-                    "message",
-                    "virtual_key"
-                  ],
-                  "properties": {
-                    "message": {
-                      "type": "string"
-                    },
-                    "virtual_key": {
-                      "$ref": "#/components/schemas/VirtualKey"
-                    }
-                  }
+                  "$ref": "#/components/schemas/VirtualKeyResponse"
                 }
               }
             }
@@ -103267,7 +103255,7 @@
             "name": "events",
             "in": "query",
             "required": false,
-            "description": "Comma-separated event names, e.g. `async_job.completed`.",
+            "description": "Comma-separated event names, e.g. `async_job.completed` or `budget.threshold_reached`.",
             "schema": {
               "type": "string"
             }
@@ -117506,7 +117494,7 @@
             "example": "typesafe/jev-1.13.0"
           },
           "input": {
-            "description": "The evidence. A string of text; an array of messages, each with text and\nimage parts (images are read only by providers that accept them);\nan object of structured data (passed to Typesafe-based models as their\nstate); or null.\n",
+            "description": "The evidence. A string of text; a conversation, as an array of messages\n(with text, JSON, and image parts; images are read only by providers\nthat accept them), function and custom tool calls, and their outputs;\nan object of structured data (passed to Typesafe-based models as their\nstate); or null.\n",
             "oneOf": [
               {
                 "type": "string"
@@ -117514,7 +117502,7 @@
               {
                 "type": "array",
                 "items": {
-                  "$ref": "#/components/schemas/DecisionInputMessage"
+                  "$ref": "#/components/schemas/DecisionInputItem"
                 }
               },
               {
@@ -117537,6 +117525,13 @@
           "safety_identifier": {
             "type": "string",
             "description": "Stable end-user identifier, forwarded to providers that accept one (OpenAI)"
+          },
+          "prompt_cache_key": {
+            "type": "string",
+            "description": "Partitions prompt-cache reuse by a caller-chosen key. Forwarded to OpenAI; other providers drop it."
+          },
+          "prompt_cache_options": {
+            "$ref": "#/components/schemas/DecisionPromptCacheOptions"
           },
           "fallbacks": {
             "type": "array",
@@ -117602,10 +117597,16 @@
             "description": "Optional name; the answer carries it back"
           },
           "instructions": {
-            "description": "Instructions for this question. A string, or structured data preserved losslessly for providers that accept it.",
-            "oneOf": [
+            "description": "Instructions for this question. A string; a list of `input_text`, `input_image`, and `input_json` parts, which give the question its own images (OpenAI's decision models read them as parts; other providers receive the list as structured data); or other structured data preserved losslessly for providers that accept it.",
+            "anyOf": [
               {
                 "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/DecisionInstructionPart"
+                }
               },
               {
                 "type": "object",
@@ -117619,7 +117620,7 @@
           },
           "criteria": {
             "type": "object",
-            "description": "Predicate only, read by Typesafe-based models. Optional descriptions of the `true` and `false` outcomes.",
+            "description": "Predicate only, read by Typesafe-based models. Optional descriptions of the `true` and `false` outcomes. Other providers add them to the instructions.",
             "additionalProperties": false,
             "properties": {
               "true": {
@@ -117834,20 +117835,37 @@
                 }
               }
             ]
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "commentary",
+              "final_answer"
+            ],
+            "description": "An assistant message's phase"
           }
         }
       },
       "DecisionInputPart": {
-        "description": "One part of a message's content",
+        "description": "One part of a message's content. User messages take text, JSON, and image parts; assistant messages take output text and refusals.",
         "oneOf": [
           {
             "$ref": "#/components/schemas/DecisionInputText"
+          },
+          {
+            "$ref": "#/components/schemas/DecisionInputJSON"
           },
           {
             "$ref": "#/components/schemas/DecisionInputImage"
           },
           {
             "$ref": "#/components/schemas/DecisionInputImageAsset"
+          },
+          {
+            "$ref": "#/components/schemas/DecisionOutputText"
+          },
+          {
+            "$ref": "#/components/schemas/DecisionRefusal"
           }
         ]
       },
@@ -117879,6 +117897,9 @@
                 "items": {}
               }
             ]
+          },
+          "prompt_cache_breakpoint": {
+            "$ref": "#/components/schemas/DecisionPromptCacheBreakpoint"
           }
         }
       },
@@ -117909,6 +117930,9 @@
               "original"
             ],
             "description": "Image detail level, forwarded to models that read images (OpenAI's defaults to `auto`)"
+          },
+          "prompt_cache_breakpoint": {
+            "$ref": "#/components/schemas/DecisionPromptCacheBreakpoint"
           }
         }
       },
@@ -117950,6 +117974,353 @@
           "name": {
             "type": "string",
             "description": "In a multipart request, the name of the file part that holds the image. A JSON request cannot use it."
+          }
+        }
+      },
+      "DecisionInputItem": {
+        "description": "One item of a conversation input",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/DecisionInputMessage"
+          },
+          {
+            "$ref": "#/components/schemas/DecisionFunctionCall"
+          },
+          {
+            "$ref": "#/components/schemas/DecisionFunctionCallOutput"
+          },
+          {
+            "$ref": "#/components/schemas/DecisionCustomToolCall"
+          },
+          {
+            "$ref": "#/components/schemas/DecisionCustomToolCallOutput"
+          }
+        ]
+      },
+      "DecisionFunctionCall": {
+        "type": "object",
+        "required": [
+          "type",
+          "call_id",
+          "name",
+          "arguments"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "function_call"
+            ]
+          },
+          "call_id": {
+            "type": "string",
+            "description": "The call's ID, which its output names"
+          },
+          "name": {
+            "type": "string"
+          },
+          "arguments": {
+            "type": "string",
+            "description": "The call's arguments, as JSON text"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "in_progress",
+              "completed",
+              "incomplete"
+            ]
+          }
+        }
+      },
+      "DecisionFunctionCallOutput": {
+        "type": "object",
+        "required": [
+          "type",
+          "call_id",
+          "output"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "function_call_output"
+            ]
+          },
+          "call_id": {
+            "type": "string",
+            "description": "The call this output answers"
+          },
+          "output": {
+            "$ref": "#/components/schemas/DecisionToolOutput"
+          },
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "in_progress",
+              "completed",
+              "incomplete"
+            ]
+          }
+        }
+      },
+      "DecisionCustomToolCall": {
+        "type": "object",
+        "required": [
+          "type",
+          "call_id",
+          "name",
+          "input"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "custom_tool_call"
+            ]
+          },
+          "call_id": {
+            "type": "string",
+            "description": "The call's ID, which its output names"
+          },
+          "name": {
+            "type": "string"
+          },
+          "input": {
+            "type": "string",
+            "description": "The call's freeform input"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "in_progress",
+              "completed",
+              "incomplete"
+            ]
+          }
+        }
+      },
+      "DecisionCustomToolCallOutput": {
+        "type": "object",
+        "required": [
+          "type",
+          "call_id",
+          "output"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "custom_tool_call_output"
+            ]
+          },
+          "call_id": {
+            "type": "string",
+            "description": "The call this output answers"
+          },
+          "output": {
+            "$ref": "#/components/schemas/DecisionToolOutput"
+          },
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "in_progress",
+              "completed",
+              "incomplete"
+            ]
+          }
+        }
+      },
+      "DecisionToolOutput": {
+        "description": "A tool's output, as text or as text and image parts",
+        "oneOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/DecisionInputText"
+                },
+                {
+                  "$ref": "#/components/schemas/DecisionInputImage"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "DecisionInputJSON": {
+        "type": "object",
+        "description": "Structured evidence, read as JSON",
+        "required": [
+          "type",
+          "data"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "input_json"
+            ]
+          },
+          "data": {
+            "description": "A JSON object, or an array",
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": true
+              },
+              {
+                "type": "array",
+                "items": {}
+              }
+            ]
+          }
+        }
+      },
+      "DecisionOutputText": {
+        "type": "object",
+        "description": "An assistant message's text",
+        "required": [
+          "type",
+          "text"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "output_text"
+            ]
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      },
+      "DecisionRefusal": {
+        "type": "object",
+        "description": "An assistant message's refusal",
+        "required": [
+          "type",
+          "refusal"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "refusal"
+            ]
+          },
+          "refusal": {
+            "type": "string"
+          }
+        }
+      },
+      "DecisionInstructionPart": {
+        "description": "One part of a question's instructions",
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "type",
+              "text"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "input_text"
+                ]
+              },
+              "text": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "type",
+              "image_url"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "input_image"
+                ]
+              },
+              "image_url": {
+                "type": "string",
+                "description": "A base64 data URL or an HTTP(S) URL"
+              },
+              "detail": {
+                "type": "string",
+                "enum": [
+                  "low",
+                  "high",
+                  "auto",
+                  "original"
+                ]
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/DecisionInputJSON"
+          }
+        ]
+      },
+      "DecisionPromptCacheOptions": {
+        "type": "object",
+        "description": "Prompt-caching options, forwarded to OpenAI; other providers drop them.",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "implicit",
+              "explicit"
+            ],
+            "description": "`implicit` (the default) adds a breakpoint at the end of the shared input; `explicit` uses only the parts marked with `prompt_cache_breakpoint`"
+          },
+          "ttl": {
+            "type": "string",
+            "enum": [
+              "30m"
+            ],
+            "description": "Minimum lifetime of every breakpoint the request writes"
+          }
+        }
+      },
+      "DecisionPromptCacheBreakpoint": {
+        "type": "object",
+        "description": "Marks the end of a reusable prompt prefix on a text or image part of the input. Forwarded to OpenAI.",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "explicit"
+            ]
           }
         }
       },
@@ -118190,7 +118561,7 @@
       },
       "OpenAIDecisionRequest": {
         "type": "object",
-        "description": "OpenAI's Decisions request. A field OpenAI's question, choice, or level does not define (such as Typesafe's `criteria`), a top-level `state`, and a structured or null `input` are rejected with a 400; any other top-level field is forwarded to the provider unchanged, so a field a newer SDK sends still reaches it.",
+        "description": "OpenAI's Decisions request. A field OpenAI's question, choice, or level does not define (such as Typesafe's `criteria`), instructions that are neither a string nor a list of parts, a top-level `state`, and a structured or null `input` are rejected with a 400; any other top-level field is forwarded to the provider unchanged, so a field a newer SDK sends still reaches it.",
         "required": [
           "model",
           "input",
@@ -118203,7 +118574,7 @@
             "example": "gpt-6-luna"
           },
           "input": {
-            "description": "A string of text, or user messages with text and image parts",
+            "description": "A string of text, or a conversation of messages (with text, JSON, and image parts), function and custom tool calls, and their outputs",
             "oneOf": [
               {
                 "type": "string"
@@ -118211,7 +118582,7 @@
               {
                 "type": "array",
                 "items": {
-                  "$ref": "#/components/schemas/DecisionInputMessage"
+                  "$ref": "#/components/schemas/DecisionInputItem"
                 }
               }
             ]
@@ -118230,6 +118601,16 @@
               "null"
             ],
             "description": "Stable end-user identifier, forwarded to OpenAI"
+          },
+          "prompt_cache_key": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Partitions prompt-cache reuse by a caller-chosen key, forwarded to OpenAI"
+          },
+          "prompt_cache_options": {
+            "$ref": "#/components/schemas/DecisionPromptCacheOptions"
           },
           "fallbacks": {
             "type": "array",
@@ -118260,7 +118641,19 @@
             "type": "string"
           },
           "instructions": {
-            "type": "string"
+            "description": "A string, or a list of text, image, and JSON parts that give the question its own images",
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "$ref": "#/components/schemas/DecisionInstructionPart"
+                }
+              }
+            ]
           },
           "choices": {
             "type": "array",
@@ -128492,6 +128885,16 @@
                   "type": "string"
                 },
                 "description": "List of scopes to use for authentication"
+              },
+              "use_speech_endpoints": {
+                "type": "boolean",
+                "default": false,
+                "description": "Send speech and transcription requests to Azure AI Speech (SSML text to speech, fast transcription) instead of Azure OpenAI. An alias can override it with its own use_speech_endpoints."
+              },
+              "use_voice_live_endpoints": {
+                "type": "boolean",
+                "default": false,
+                "description": "Send realtime WebSocket sessions to Azure Voice Live (/voice-live/realtime) instead of Azure OpenAI. The WebRTC and client secret routes reject it. An alias can override it with its own use_voice_live_endpoints."
               }
             }
           },
@@ -138236,9 +138639,10 @@
         "type": "string",
         "enum": [
           "async_job.completed",
-          "async_job.failed"
+          "async_job.failed",
+          "budget.threshold_reached"
         ],
-        "description": "A terminal async-job event a webhook endpoint can subscribe to:\n- async_job.completed: an async job finished successfully\n- async_job.failed: an async job finished with an error\n"
+        "description": "A server event a webhook endpoint can subscribe to:\n- async_job.completed: an async job finished successfully\n- async_job.failed: an async job finished with an error\n- budget.threshold_reached: a project or application budget reached 80% or 100%\n"
       },
       "WebhookEndpointRequest": {
         "type": "object",
@@ -138521,7 +138925,12 @@
             "type": "string"
           },
           "async_job_id": {
-            "type": "string"
+            "type": "string",
+            "description": "Inference source ID. Empty for budget events."
+          },
+          "resource_id": {
+            "type": "string",
+            "description": "Budget alert ID for budget.threshold_reached; absent for async inference."
           },
           "request_id": {
             "type": "string",

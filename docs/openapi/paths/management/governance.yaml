@@ -373,8 +373,10 @@ virtual-keys-rotate-by-id:
     summary: Rotate virtual key
     description: |
       Generates a new credential value for the virtual key while leaving its configuration,
-      assignments, budgets, and rate limits unchanged. On the node handling the request, the
-      previous credential value is invalidated before a successful response is returned.
+      assignments, budgets, and rate limits unchanged. When `vk_rotation_cooldown` is non-zero,
+      the retired value keeps authenticating until `previous_value_expires_at`; otherwise it
+      stops working immediately on the node handling the request. Repeated rotation replaces
+      the one retained previous value, so the second-oldest value stops working immediately.
 
       In a clustered deployment, peer invalidation is asynchronous. Until each peer processes the
       cluster update and reloads the virtual key, that peer may continue to accept the previous
@@ -382,7 +384,9 @@ virtual-keys-rotate-by-id:
       convergence before treating the previous credential as revoked cluster-wide.
 
       The new credential is returned in `virtual_key.value`. Store it securely and update clients
-      that use the previous value.
+      that use the previous value. MCP OAuth grants and unexchanged authorization codes minted
+      with the virtual key are revoked in the same transaction as the rotation; the cooldown
+      does not keep those grants alive.
     tags:
       - Governance
     parameters:
@@ -609,56 +613,6 @@ virtual-keys-rotate:
                   description: Map of virtual key ID to failure reason
                   additionalProperties:
                     type: string
-
-virtual-keys-by-id-rotate:
-  post:
-    operationId: rotateVirtualKey
-    x-mint:
-      content: |
-        **Required Permissions**
-
-        | Permission | Granted via |
-        | --- | --- |
-        | `VirtualKeys:Create` | RBAC role or API key scope |
-
-        [How permissions work](/api/procuring-api-keys#required-permissions)
-    summary: Rotate virtual key
-    description: |
-      Generates a new value for the virtual key. When the client vk_rotation_cooldown setting is non-zero, the retired value keeps authenticating until previous_value_expires_at; otherwise it stops working immediately.
-    tags:
-      - Governance
-    parameters:
-      - name: vk_id
-        in: path
-        required: true
-        description: Virtual key ID
-        schema:
-          type: string
-    security:
-      - ManagementBearerAuth: []
-    responses:
-      "200":
-        description: Virtual key rotated successfully
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - message
-                - virtual_key
-              properties:
-                message:
-                  type: string
-                virtual_key:
-                  $ref: "../../schemas/management/governance.yaml#/VirtualKey"
-      "404":
-        description: Virtual key not found
-        content:
-          application/json:
-            schema:
-              $ref: "../../schemas/inference/common.yaml#/BifrostError"
-      "500":
-        $ref: "../../openapi.yaml#/components/responses/InternalError"
 
 # Teams CRUD
 

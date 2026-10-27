@@ -159,7 +159,7 @@ tags:
   - name: Audit Logs
     description: CADF-compliant audit log search, export, and signature verification endpoints
   - name: Webhooks
-    description: Webhook endpoint management and signed async-job delivery history
+    description: Webhook endpoint management and signed async-job or budget-event delivery history
   - name: Notifications
     description: Role-targeted dashboard notifications, delivered over the dashboard WebSocket
   - name: News Feeds
@@ -897,8 +897,6 @@ paths:
     $ref: "./paths/management/governanceextensions.yaml#/virtual-key-user"
   /api/governance/virtual-keys/rotate:
     $ref: "./paths/management/governance.yaml#/virtual-keys-rotate"
-  /api/governance/virtual-keys/{vk_id}/rotate:
-    $ref: "./paths/management/governance.yaml#/virtual-keys-by-id-rotate"
 
   # Governance - Teams
   /api/governance/teams:

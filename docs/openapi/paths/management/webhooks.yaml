@@ -372,7 +372,7 @@ webhooks-deliveries-search:
       - name: events
         in: query
         required: false
-        description: Comma-separated event names, e.g. `async_job.completed`.
+        description: Comma-separated event names, e.g. `async_job.completed` or `budget.threshold_reached`.
         schema:
           type: string
       - name: outcomes
