@@ -30,6 +30,40 @@ func acknowledgementAudits(t *testing.T, store *Store) []AuditEvent {
 	return events
 }
 
+func TestBudgetAcknowledgementRoutesRejectAmbiguousMutationsWithoutSideEffects(t *testing.T) {
+	store, _ := testControlPlaneStore(t)
+	id := seedBudgetNotifications(t, store, 8)[0].AlertID
+	r := router.New()
+	NewHandler(store, nil).RegisterRoutes(r, func(next fasthttp.RequestHandler) fasthttp.RequestHandler {
+		return func(ctx *fasthttp.RequestCtx) {
+			ctx.SetUserValue(schemas.IsLocalAdminContextKey, true)
+			next(ctx)
+		}
+	})
+	path := "/api/control-plane/budget-alerts/" + id + "/acknowledgement"
+	for _, initial := range []bool{false, true} {
+		body, err := json.Marshal(map[string]bool{"acknowledged": initial})
+		require.NoError(t, err)
+		require.Equal(t, 200, receiptRequest(r, "PUT", path, string(body)).Response.StatusCode())
+		before, err := store.ListBudgetAlerts(context.Background(), UsageQuery{})
+		require.NoError(t, err)
+		audits := acknowledgementAudits(t, store)
+		for _, invalid := range []string{
+			`{"acknowledged":true,"acknowledged":false}`, `{"acknowledged":false,"acknowledged":true}`,
+			`{"acknowledged":true,"acknowledged":true}`, `{"acknowledged":false,"acknowledged":false}`,
+			`{"acknowledged":false,"\u0061cknowledged":true}`, `{"\u0061cknowledged":true,"acknowledged":false}`,
+			`{"Acknowledged":true}`, `{"Acknowledged":false}`, `{"acknowledged":false,"Acknowledged":true}`,
+		} {
+			response := receiptRequest(r, "PUT", path, invalid)
+			require.Equal(t, 400, response.Response.StatusCode(), invalid)
+			after, err := store.ListBudgetAlerts(context.Background(), UsageQuery{})
+			require.NoError(t, err)
+			require.Equal(t, before, after, invalid)
+			require.Equal(t, audits, acknowledgementAudits(t, store), invalid)
+		}
+	}
+}
+
 func TestBudgetAcknowledgementsPersistAndPreserveAlertAndOutbox(t *testing.T) {
 	store, cs := testControlPlaneStore(t)
 	ctx := context.Background()

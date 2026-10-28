@@ -407,12 +407,17 @@ requests follow the existing control-plane administrator guard.
   `read_at` only when read.
 - `PUT /api/control-plane/notification-receipts/{id}` requires JSON containing
   only a mandatory `read` boolean and returns the resulting row. Missing, null,
-  nonboolean, unknown fields and trailing JSON are rejected.
+  nonboolean, unknown, duplicate or case-variant fields and trailing JSON are
+  rejected.
 - Invalid IDs return 400; any missing or expired notification returns 404,
   including when expiry races with loading a feed page. Storage failures return
   500 rather than silently claiming unread.
 
-Both routes require a genuinely authenticated local administrator, rejecting
+Both notification-read and budget-acknowledgement mutations compare decoded
+field names exactly. Standard JSON key escapes remain valid, but a second
+spelling of the same key is rejected before any state or audit mutation.
+
+The receipt routes require a genuinely authenticated local administrator, rejecting
 auth bypass. Writes reuse the existing JSON and request-Host origin check
 (not a newly strengthened full scheme/host/port check). The narrow upstream
 auth patch adds the trusted administrator marker after successful Basic

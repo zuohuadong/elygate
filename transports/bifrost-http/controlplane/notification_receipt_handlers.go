@@ -1,10 +1,7 @@
 package controlplane
 
 import (
-	"bytes"
-	"encoding/json"
 	"errors"
-	"io"
 
 	"github.com/google/uuid"
 	"github.com/valyala/fasthttp"
@@ -65,21 +62,6 @@ func (h *Handler) setNotificationReadState(ctx *fasthttp.RequestCtx) {
 		return
 	}
 	writeJSON(ctx, 200, state)
-}
-
-func decodeNotificationReadMutation(body []byte) (bool, error) {
-	var request struct {
-		Read *bool `json:"read"`
-	}
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&request); err != nil {
-		return false, errors.New("request must contain only a required read boolean")
-	}
-	if request.Read == nil || decoder.Decode(new(any)) != io.EOF {
-		return false, errors.New("request must contain only a required read boolean")
-	}
-	return *request.Read, nil
 }
 
 func writeNotificationReceiptError(ctx *fasthttp.RequestCtx, err error) {

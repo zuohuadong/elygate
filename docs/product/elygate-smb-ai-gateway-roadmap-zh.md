@@ -297,6 +297,25 @@ Elygate 当前定位收敛为：
 - 使用已安装 Svelte 编译器分别生成修复前后的 client/server 代码，两种模式的 JavaScript 与 CSS 均逐字一致：这是擦除后的类型修复，没有增加运行时或推理请求路径成本。`git diff --check` 和代码 guard 通过；没有通过放宽类型检查、忽略诊断或改动依赖来消除错误。
 - 本后续项为本地 `PASS_SCOPED`，未提交、推送或部署；不是全仓测试、浏览器后端联调、生产恢复或完整平台验收。告警处理闭环、多用户、统一策略、完整审计及生产交付等剩余要求不变，原总目标继续 active / PARTIAL。
 
+### 2026-10-29 通知与告警布尔更新严格解析后续项
+
+- follow-up `strict-boolean-mutations`：parent 为通知已读与预算告警确认交付，source 为 `48de02d06` 中通知接口对重复 `read` 字段取最后值、接受大小写别名，而告警确认接口拒绝这些请求，reason 为消除两个状态更新入口的歧义并保证无效请求没有状态或审计副作用。
+- 冻结范围为控制面两个布尔 decoder、共用的单字段 JSON 解析、针对性测试和本验收记录；Native 单 writer、低风险、external=0。仅接受包含一个精确字段名及 boolean 的 JSON 对象，保留标准 JSON 转义字段名、合法 true/false、空白和原错误文案；不变更认证、数据库 schema、面板、依赖或其他功能，不自动提交、推送或部署。
+- 验收要求：先复现旧通知 decoder 的重复/大小写字段问题；验证两个接口的合法与非法输入矩阵；真实路由在已设置/未设置两种初始状态下拒绝歧义请求，前后状态及审计完全一致；SQLite 与私有 PostgreSQL 定向回归；记录正常解析的 `ns/op`、`B/op`、`allocs/op` 前后结果。这里只影响控制面 mutation 的解析，不代表推理请求 RPS/SLA。
+- 已先将两个原 decoder 原样移到独立源码文件，再以真实源码文件运行边界测试：旧通知实现的 7 个歧义用例失败，告警实现通过；修复后两者共 66 个用例通过。严格规则由两个实际调用者共用，不新增依赖；两个固定错误对象只在进程内常驻，不增加凭据、请求或流式内容缓存。
+- Darwin/arm64、Apple M4、Go 1.27.3 的正常 payload 微基准使用 `-benchtime=200ms -count=3 -benchmem`；下表时间取三轮中位数。它只测 decoder，不包含 HTTP、认证、数据库或推理路径：
+
+| Payload | Before ns/op | After ns/op | Before B/op | After B/op | Before allocs/op | After allocs/op |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| read=true | 260.6 | 164.2 | 632 | 536 | 9 | 9 |
+| read=false | 259.8 | 157.1 | 632 | 536 | 9 | 9 |
+| acknowledged=true | 234.0 | 157.5 | 568 | 544 | 12 | 9 |
+| acknowledged=false | 234.4 | 157.2 | 568 | 544 | 12 | 9 |
+
+- 同一最终源码的 SQLite 控制面整包回归通过：125 项顶层测试通过，仅 `TestPostgresControlPlaneBackupRestore` 因未配置 PostgreSQL socket 跳过，测试执行为 60.451s。私有 PostgreSQL 的解析、通知已读及告警确认相关 19 项顶层测试全部通过（102.543s），包括并发、审计失败回滚、Basic/session 主体一致性及两个新增路由回归；fixture 在运行时断言真实 PostgreSQL 后端，runner 检查临时数据库无泄漏并正常停止独立集群，没有连接现有数据库。
+- 两个新增路由测试在 true/false 两种初始状态下共执行 36 次歧义请求，均返回 400，并比较完整状态和审计快照保持不变。日志位于 `.codex-tmp/strict-boolean-sqlite-20261029.jsonl`、`.codex-tmp/strict-boolean-postgres-20261029.log`；私有集群及退出日志位于 `.codex-tmp/elygate-cp-pg.rNFg7V/`。本轮较长的等待主要发生在测试执行前的外盘 Go 缓存装载，没有因观察超时重启测试。
+- decoder 源码与边界测试的命名文件 `go vet` 通过；命名文件测试语句覆盖率为 100%，覆盖文件位于 `.codex-tmp/strict-boolean-coverage-20261029.out`，这不是控制面整包覆盖率。`gofmt`、`git diff --check` 和 clean-code-guard 通过。本后续项为本地 `PASS_SCOPED`，未提交、推送或部署；不构成完整后端包回归、生产迁移、备份恢复、认证环境或多用户验收。其他平台功能及生产验收缺口不变，原总目标继续 active / PARTIAL。
+
 ## 3. 单机部署架构
 
 ```text

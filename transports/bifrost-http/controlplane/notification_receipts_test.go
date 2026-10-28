@@ -223,6 +223,42 @@ func TestNotificationReceiptRoutesValidatePayloadAndIDs(t *testing.T) {
 	require.Equal(t, localAdminReceiptPrincipal, receiptAudits(t, store)[0].ActorID)
 }
 
+func TestNotificationReceiptRoutesRejectAmbiguousMutationsWithoutSideEffects(t *testing.T) {
+	store, _ := testControlPlaneStore(t)
+	id := createReceiptNotification(t, store)
+	r := router.New()
+	NewHandler(store, nil).RegisterRoutes(r, func(next fasthttp.RequestHandler) fasthttp.RequestHandler {
+		return func(ctx *fasthttp.RequestCtx) {
+			ctx.SetUserValue(schemas.IsLocalAdminContextKey, true)
+			next(ctx)
+		}
+	})
+	path := "/api/control-plane/notification-receipts/" + id
+	for _, initial := range []bool{false, true} {
+		body, err := json.Marshal(map[string]bool{"read": initial})
+		require.NoError(t, err)
+		require.Equal(t, 200, receiptRequest(r, "PUT", path, string(body)).Response.StatusCode())
+		before, err := store.NotificationReadStates(context.Background(), []string{id})
+		require.NoError(t, err)
+		audits := receiptAudits(t, store)
+		// Reject duplicate/case-variant keys in either state, including a
+		// repeated identical value that would otherwise look idempotent.
+		for _, invalid := range []string{
+			`{"read":true,"read":false}`, `{"read":false,"read":true}`,
+			`{"read":true,"read":true}`, `{"read":false,"read":false}`,
+			`{"read":false,"\u0072ead":true}`, `{"\u0072ead":true,"read":false}`,
+			`{"Read":true}`, `{"Read":false}`, `{"read":false,"Read":true}`,
+		} {
+			response := receiptRequest(r, "PUT", path, invalid)
+			require.Equal(t, 400, response.Response.StatusCode(), invalid)
+			after, err := store.NotificationReadStates(context.Background(), []string{id})
+			require.NoError(t, err)
+			require.Equal(t, before, after, invalid)
+			require.Equal(t, audits, receiptAudits(t, store), invalid)
+		}
+	}
+}
+
 func TestNotificationReceiptRoutesRequireRealAdminAndJSONHostGuard(t *testing.T) {
 	store, _ := testControlPlaneStore(t)
 	id := createReceiptNotification(t, store)
