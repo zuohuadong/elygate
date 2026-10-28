@@ -131,8 +131,8 @@ func TestSummarizeUsageMatchesLedgerAcrossFilters(t *testing.T) {
 	start := time.Date(2026, 9, 13, 0, 0, 0, 0, time.UTC)
 	end := start.Add(2 * time.Second)
 	require.NoError(t, store.db(ctx).Create(&[]UsageLedgerEntry{
-		{ID: "summary-root", SourceLogID: "summary-root", OccurredAt: start, ProjectID: "project-1", ApplicationID: "app-1", SessionID: ptr("root"), AgentName: ptr("main"), Status: "success", TotalTokens: 10, Cost: 1},
-		{ID: "summary-child", SourceLogID: "summary-child", OccurredAt: start.Add(time.Second), ProjectID: "project-1", ApplicationID: "app-1", SessionID: ptr("child"), ParentSessionID: ptr("root"), AgentName: ptr("reviewer"), IsSubagent: true, IsFork: true, Status: "error", TotalTokens: 20, Cost: 2},
+		{ID: "summary-root", SourceLogID: "summary-root", OccurredAt: start, ProjectID: "project-1", ApplicationID: "app-1", UserID: ptr("alice"), Provider: "openai", Model: "mini", SessionID: ptr("root"), AgentName: ptr("main"), Status: "success", TotalTokens: 10, Cost: 1},
+		{ID: "summary-child", SourceLogID: "summary-child", OccurredAt: start.Add(time.Second), ProjectID: "project-1", ApplicationID: "app-1", UserID: ptr("alice"), Provider: "other", Model: "mini", SessionID: ptr("child"), ParentSessionID: ptr("root"), AgentName: ptr("reviewer"), IsSubagent: true, IsFork: true, Status: "error", TotalTokens: 20, Cost: 2},
 		{ID: "summary-other-app", SourceLogID: "summary-other-app", OccurredAt: end, ProjectID: "project-1", ApplicationID: "app-2", IsSubagent: true, Status: "cancelled", TotalTokens: 30, Cost: 3},
 		{ID: "summary-other-project", SourceLogID: "summary-other-project", OccurredAt: end.Add(time.Second), ProjectID: "project-2", ApplicationID: "app-3", Status: "success", TotalTokens: 40, Cost: 4},
 		{ID: "summary-late", SourceLogID: "summary-late", OccurredAt: end.Add(time.Hour), ProjectID: "project-1", ApplicationID: "app-1", Status: "success", TotalTokens: 50, Cost: 5},
@@ -147,6 +147,9 @@ func TestSummarizeUsageMatchesLedgerAcrossFilters(t *testing.T) {
 		{"all", UsageQuery{}, 5},
 		{"project", UsageQuery{ProjectID: "project-1"}, 4},
 		{"application", UsageQuery{ApplicationID: "app-1"}, 3},
+		{"user", UsageQuery{UserID: "alice"}, 2},
+		{"provider", UsageQuery{Provider: "other"}, 1},
+		{"model", UsageQuery{Model: "mini"}, 2},
 		{"session", UsageQuery{SessionID: "child"}, 1},
 		{"parent", UsageQuery{ParentSessionID: "root"}, 1},
 		{"agent", UsageQuery{AgentName: "reviewer"}, 1},
@@ -157,7 +160,7 @@ func TestSummarizeUsageMatchesLedgerAcrossFilters(t *testing.T) {
 		{"not-fork", UsageQuery{IsFork: ptr(false)}, 4},
 		{"window", UsageQuery{StartTime: &start, EndTime: &end}, 2},
 		{"empty", UsageQuery{EndTime: &start}, 0},
-		{"combined", UsageQuery{ProjectID: "project-1", ApplicationID: "app-1", TreeSessionID: "root", AgentName: "reviewer", IsSubagent: ptr(true), IsFork: ptr(true), StartTime: &start, EndTime: &end}, 1},
+		{"combined", UsageQuery{ProjectID: "project-1", ApplicationID: "app-1", UserID: "alice", Provider: "other", Model: "mini", TreeSessionID: "root", SessionID: "child", ParentSessionID: "root", AgentName: "reviewer", IsSubagent: ptr(true), IsFork: ptr(true), StartTime: &start, EndTime: &end}, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			listQuery := tc.query

@@ -315,6 +315,7 @@ type warpBackfillStatus struct {
 type warpJobSpec struct {
 	kind      string
 	partition string
+	auditType string
 	// conflicts are the kinds whose in-flight job refuses a start, and admit,
 	// when set, takes the lock a start is admitted under from that lookup to
 	// the enqueue.
@@ -333,6 +334,7 @@ func (h *WarpHandler) backfillSpec() warpJobSpec {
 	return warpJobSpec{
 		kind:        warp.BackfillJobKind,
 		partition:   "warp_log_embeddings",
+		auditType:   "warp_backfill",
 		conflicts:   []string{warp.BackfillJobKind},
 		noun:        "backfill",
 		plural:      "backfills",
@@ -345,6 +347,7 @@ func (h *WarpHandler) topicsSpec() warpJobSpec {
 	return warpJobSpec{
 		kind:      warp.TopicsJobKind,
 		partition: warp.TopicsJobPartition,
+		auditType: "warp_topics",
 		// A discovery writes topics in the same partition, so it holds a run
 		// back as another run does, and upkeep starts discoveries under the
 		// same lock.
@@ -426,7 +429,7 @@ func (h *WarpHandler) startJob(ctx *fasthttp.RequestCtx, spec warpJobSpec) {
 		SendError(ctx, fasthttp.StatusInternalServerError, "Failed to start Warp "+spec.noun)
 		return
 	}
-	lib.RecordAuditChange(ctx, "warp_backfill.started", "warp_backfill", id, id, nil, map[string]any{"job_id": id, "start_time": request.StartTime, "end_time": request.EndTime, "restart": request.Restart})
+	lib.RecordAuditChange(ctx, spec.auditType+".started", spec.auditType, id, id, nil, map[string]any{"job_id": id, "start_time": request.StartTime, "end_time": request.EndTime, "restart": request.Restart})
 	ctx.SetStatusCode(fasthttp.StatusAccepted)
 	if job, err := h.backfillStore.GetSidekiqJob(ctx, id); err == nil && job != nil {
 		SendJSON(ctx, warpBackfillStatusFromRow(job))
@@ -557,7 +560,7 @@ func (h *WarpHandler) cancelJob(ctx *fasthttp.RequestCtx, spec warpJobSpec) {
 		status.Status = tables.SidekiqStatusCancelled
 	}
 	if cancelled {
-		lib.RecordAuditChange(ctx, "warp_backfill.cancelled", "warp_backfill", job.ID, job.ID, map[string]any{"job_id": job.ID, "status": job.Status}, map[string]any{"job_id": job.ID, "status": status.Status})
+		lib.RecordAuditChange(ctx, spec.auditType+".cancelled", spec.auditType, job.ID, job.ID, map[string]any{"job_id": job.ID, "status": job.Status}, map[string]any{"job_id": job.ID, "status": status.Status})
 	}
 	SendJSON(ctx, status)
 }

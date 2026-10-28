@@ -53,6 +53,7 @@
 	import SkillsPage from './pages/SkillsPage.svelte';
 	import VirtualKeysPage from './pages/VirtualKeysPage.svelte';
 	import WebhooksPage from './pages/WebhooksPage.svelte';
+	import NotificationPanel from './pages/NotificationPanel.svelte';
 
 	registerElygateTranslations();
 	const enterpriseManifest = resolveEnterprisePanelManifest(enterprisePanel, fallbackEnterprisePanelManifest);
@@ -254,6 +255,7 @@
 				defaultTheme="system"
 				themeConfig={{ layoutPreset: 'clean-flat' }}
 				loginDefaults={{ hint: loginHint }}
+				components={{ NotificationPanel }}
 			>
 				{#snippet dashboard()}
 					<DashboardPage />

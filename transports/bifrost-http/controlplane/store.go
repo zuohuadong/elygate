@@ -36,15 +36,15 @@ const (
 	// ApplicationBindingDisabled skips binding checks entirely.
 	ApplicationBindingDisabled ApplicationBindingMode = "disabled"
 	// ApplicationBindingOptional rejects revoked or expired bindings but lets
-	// unbound virtual keys through (the historical behaviour).
+	// unbound virtual keys through.
 	ApplicationBindingOptional ApplicationBindingMode = "optional"
-	// ApplicationBindingRequired rejects every virtual key without an active
-	// binding, so all inference must come from a managed application.
+	// ApplicationBindingRequired rejects resolved virtual keys without an active
+	// binding. Credential authentication remains the governance layer's job.
 	ApplicationBindingRequired ApplicationBindingMode = "required"
 )
 
 // ParseApplicationBindingMode parses ELYGATE_APPLICATION_BINDING_MODE. An empty
-// value keeps the backward-compatible optional mode.
+// value selects optional mode.
 func ParseApplicationBindingMode(raw string) (ApplicationBindingMode, error) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "", string(ApplicationBindingOptional):
@@ -154,6 +154,40 @@ func NewStore(ctx context.Context, configStore configstore.ConfigStore) (*Store,
 				return nil
 			},
 		},
+		{
+			ID: "elygate_control_plane_v6_budget_notification_outbox",
+			Migrate: func(tx *gorm.DB) error {
+				if err := tx.AutoMigrate(&BudgetNotificationOutbox{}); err != nil {
+					return err
+				}
+				return backfillBudgetNotifications(tx)
+			},
+			Rollback: func(*gorm.DB) error {
+				return errors.New("budget notification outbox is non-rollbackable: dropping it loses pending deliveries and replay deduplication; older binaries ignore this additive table")
+			},
+		},
+		{
+			ID: "elygate_control_plane_v7_budget_policy_history",
+			Migrate: func(tx *gorm.DB) error {
+				if err := tx.AutoMigrate(&BudgetPolicyRevision{}, &BudgetPeriodRecalculation{}); err != nil {
+					return err
+				}
+				return seedBudgetPolicyHistory(tx)
+			},
+			Rollback: func(*gorm.DB) error {
+				return errors.New("budget policy history is non-rollbackable: dropping it loses policy versions and pending recalculations")
+			},
+		},
+		{
+			ID:       "elygate_control_plane_v8_notification_receipts",
+			Migrate:  migrateNotificationReceipts,
+			Rollback: notificationReceiptRollback,
+		},
+		{
+			ID:       "elygate_control_plane_v9_budget_acknowledgements",
+			Migrate:  migrateBudgetAcknowledgements,
+			Rollback: budgetAcknowledgementRollback,
+		},
 	}
 	migrationIDs := make([]string, 0, len(migrations))
 	for _, migration := range migrations {
@@ -196,7 +230,11 @@ func (s *Store) CreateProject(ctx context.Context, project *Project) error {
 	if err := prepareProject(project); err != nil {
 		return err
 	}
-	return s.db(ctx).Create(project).Error
+	return s.db(ctx).Transaction(func(tx *gorm.DB) error {
+		return createBudgetedResourceTx(tx, project, budgetScope{
+			BudgetScope: BudgetScope{"project", project.ID}, Limits: BudgetLimits{project.DailyBudget, project.MonthlyBudget},
+		})
+	})
 }
 
 func prepareProject(project *Project) error {
@@ -220,7 +258,9 @@ func (s *Store) CreateProjectWithAudit(ctx context.Context, project *Project, ac
 		return err
 	}
 	return s.db(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(project).Error; err != nil {
+		if err := createBudgetedResourceTx(tx, project, budgetScope{
+			BudgetScope: BudgetScope{"project", project.ID}, Limits: BudgetLimits{project.DailyBudget, project.MonthlyBudget},
+		}); err != nil {
 			return err
 		}
 		return appendAuditTx(tx, actorID, "project.create", "project", project.ID)
@@ -248,7 +288,11 @@ func (s *Store) CreateApplication(ctx context.Context, app *Application) error {
 	if err := s.prepareApplication(ctx, app); err != nil {
 		return err
 	}
-	return s.db(ctx).Create(app).Error
+	return s.db(ctx).Transaction(func(tx *gorm.DB) error {
+		return createBudgetedResourceTx(tx, app, budgetScope{
+			BudgetScope: BudgetScope{"application", app.ID}, Limits: BudgetLimits{app.DailyBudget, app.MonthlyBudget},
+		})
+	})
 }
 
 func (s *Store) prepareApplication(ctx context.Context, app *Application) error {
@@ -278,7 +322,9 @@ func (s *Store) CreateApplicationWithAudit(ctx context.Context, app *Application
 		return err
 	}
 	return s.db(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(app).Error; err != nil {
+		if err := createBudgetedResourceTx(tx, app, budgetScope{
+			BudgetScope: BudgetScope{"application", app.ID}, Limits: BudgetLimits{app.DailyBudget, app.MonthlyBudget},
+		}); err != nil {
 			return err
 		}
 		return appendAuditTx(tx, actorID, "application.create", "application", app.ID)
@@ -620,7 +666,7 @@ func (s *Store) ReconcileUsage(ctx context.Context, reader logstore.UsageLogRead
 			snapshotComplete = snapshotReader.UsageLogSnapshotComplete()
 		}
 		if snapshotComplete {
-			if err := tx.Where("status = ?", "processing").Delete(&UsageLedgerEntry{}).Error; err != nil {
+			if err := deleteProcessingUsage(tx); err != nil {
 				return err
 			}
 		}
@@ -658,14 +704,17 @@ func (s *Store) ReconcileUsage(ctx context.Context, reader logstore.UsageLogRead
 // control plane. Rows that lose their virtual key stay: they are re-projected
 // under the default application, not dropped.
 func deleteStaleUsageLedgerEntries(tx *gorm.DB, seenSourceLogs map[string]struct{}) error {
-	var sourceIDs []string
-	if err := tx.Model(&UsageLedgerEntry{}).Pluck("source_log_id", &sourceIDs).Error; err != nil {
+	var entries []UsageLedgerEntry
+	if err := tx.Select("source_log_id", "project_id", "application_id", "occurred_at").Find(&entries).Error; err != nil {
 		return err
 	}
 	stale := make([]string, 0)
-	for _, sourceID := range sourceIDs {
-		if _, ok := seenSourceLogs[sourceID]; !ok {
-			stale = append(stale, sourceID)
+	for _, entry := range entries {
+		if _, ok := seenSourceLogs[entry.SourceLogID]; !ok {
+			if err := queueUsageBudgetPeriods(tx, entry); err != nil {
+				return err
+			}
+			stale = append(stale, entry.SourceLogID)
 		}
 	}
 	for start := 0; start < len(stale); start += 500 {
@@ -742,6 +791,11 @@ func (s *Store) projectLogsTx(ctx context.Context, logs []logstore.Log, advanceC
 				!optionalStringsEqual(existing.AgentName, entry.AgentName) ||
 				!optionalStringsEqual(existing.SessionClientType, entry.SessionClientType) ||
 				existing.IsSubagent != entry.IsSubagent || existing.IsFork != entry.IsFork {
+				if existing.Cost != cost || !existing.OccurredAt.Equal(entry.Timestamp) {
+					if err := queueBudgetUsageCorrection(s.db(ctx), existing, entry.Timestamp); err != nil {
+						return count, err
+					}
+				}
 				if err := s.db(ctx).Model(&existing).Updates(values).Error; err != nil {
 					return count, err
 				}
@@ -767,6 +821,11 @@ func (s *Store) projectLogsTx(ctx context.Context, logs []logstore.Log, advanceC
 		result := s.db(ctx).Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "source_log_id"}}, DoNothing: true}).Create(&row)
 		if result.Error != nil {
 			return count, result.Error
+		}
+		if result.RowsAffected == 1 {
+			if err := queueUsageBudgetPeriods(s.db(ctx), row); err != nil {
+				return count, err
+			}
 		}
 		if managed {
 			count += int(result.RowsAffected)
@@ -806,6 +865,7 @@ func (s *Store) projectLogsTx(ctx context.Context, logs []logstore.Log, advanceC
 
 type UsageQuery struct {
 	ProjectID, ApplicationID                             string
+	UserID, Provider, Model                              string
 	SessionID, ParentSessionID, AgentName, TreeSessionID string
 	IsSubagent, IsFork                                   *bool
 	StartTime, EndTime                                   *time.Time
@@ -825,21 +885,17 @@ type UsageSummary struct {
 }
 
 func applyUsageFilters(db *gorm.DB, q UsageQuery) *gorm.DB {
-	if q.ProjectID != "" {
-		db = db.Where("project_id = ?", q.ProjectID)
+	exact := make(map[string]any, 8)
+	for column, filter := range map[string]string{
+		"project_id": q.ProjectID, "application_id": q.ApplicationID,
+		"user_id": q.UserID, "provider": q.Provider, "model": q.Model,
+		"session_id": q.SessionID, "parent_session_id": q.ParentSessionID, "agent_name": q.AgentName,
+	} {
+		if filter != "" {
+			exact[column] = filter
+		}
 	}
-	if q.ApplicationID != "" {
-		db = db.Where("application_id = ?", q.ApplicationID)
-	}
-	if q.SessionID != "" {
-		db = db.Where("session_id = ?", q.SessionID)
-	}
-	if q.ParentSessionID != "" {
-		db = db.Where("parent_session_id = ?", q.ParentSessionID)
-	}
-	if q.AgentName != "" {
-		db = db.Where("agent_name = ?", q.AgentName)
-	}
+	db = db.Where(exact)
 	if q.TreeSessionID != "" {
 		db = db.Where("(session_id = ? OR parent_session_id = ?)", q.TreeSessionID, q.TreeSessionID)
 	}
@@ -954,6 +1010,13 @@ func (s *Store) CheckVirtualKeyValueAccess(ctx context.Context, value string) er
 			return nil
 		}
 		return err
+	}
+	return s.CheckVirtualKeyAccess(ctx, virtualKeyID)
+}
+
+func (s *Store) CheckVirtualKeyAccess(ctx context.Context, virtualKeyID string) error {
+	if s.bindingMode == ApplicationBindingDisabled {
+		return nil
 	}
 	hasBinding, err := s.HasBinding(ctx, virtualKeyID)
 	if err != nil {

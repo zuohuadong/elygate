@@ -166,6 +166,8 @@ func TestMapRealtimeWireErrorFields(t *testing.T) {
 			err: providerUtils.NewUnsupportedOperationError(schemas.LiveRequest, "openai-nolive"), wantType: "invalid_request_error", wantCode: "unsupported_operation"},
 		{name: "a wire error keeps its own type",
 			err: newRealtimeWireBifrostError(400, "invalid_request_error", "bad frame"), wantType: "invalid_request_error", wantCode: "invalid_request_error"},
+		{name: "an authentication refusal keeps its wire type",
+			err: newRealtimeWireBifrostError(401, "authentication_error", "access is no longer active"), wantType: "authentication_error", wantCode: "authentication_error"},
 		{name: "a spent budget is a quota error",
 			err: newRealtimeWireBifrostError(402, "budget_exceeded", "Budget exceeded"), wantType: "insufficient_quota", wantCode: "insufficient_quota"},
 		{name: "anything unclassified is a server error",

@@ -20,14 +20,31 @@ const KEY_ADVANCED_FIELDS = [
 	'vertex_key_config',
 	'bedrock_key_config',
 	'bedrock_mantle_key_config',
+	'sagemaker_key_config',
 	'vllm_key_config',
 	'replicate_key_config',
 	'ollama_key_config',
 	'sgl_key_config',
+	'databricks_key_config',
+	'cloudflare_key_config',
+	'oauth_key_config',
 	'use_for_batch_api',
 	'use_anthropic_endpoints',
+	'use_openai_endpoints',
 	'description',
 ] as const;
+
+const PROVIDERS_WITH_OPTIONAL_KEY_VALUE = new Set([
+	'azure',
+	'bedrock',
+	'bedrock_mantle',
+	'databricks',
+	'ollama',
+	'sagemaker',
+	'sgl',
+	'vertex',
+	'vllm',
+]);
 
 const VIRTUAL_KEY_PROVIDER_FIELDS = new Set(['allow_all_keys', 'key_ids', 'keys']);
 
@@ -54,6 +71,21 @@ export function hasOpenAIBaseURLVersionConflict(network: JsonRecord, custom: Jso
 export function providerKeyModelsForPayload(modelsInput: string): string[] {
 	const models = modelsInput.split(',').map((item) => item.trim()).filter(Boolean);
 	return models.length ? models : ['*'];
+}
+
+export function providerKeyValueCanBeEmpty(provider: JsonRecord, key: JsonRecord): boolean {
+	const custom = provider.custom_provider_config;
+	const baseProvider = isRecord(custom) && typeof custom.base_provider_type === 'string' && custom.base_provider_type !== ''
+		? custom.base_provider_type : provider.name;
+	return (typeof baseProvider === 'string' && PROVIDERS_WITH_OPTIONAL_KEY_VALUE.has(baseProvider))
+		|| isRecord(key.oauth_key_config);
+}
+
+export function providerKeyValueForPayload(inputValue: string, advanced: JsonRecord, existingKey: JsonRecord | null): unknown {
+	if (inputValue.trim()) return { value: inputValue.trim() };
+	// Explicit JSON, including an empty value, must win when changing authentication methods.
+	if (advanced.value !== undefined) return advanced.value;
+	return existingKey?.value;
 }
 
 export type ProviderKeyModelAccess = 'all' | 'none' | 'limited';

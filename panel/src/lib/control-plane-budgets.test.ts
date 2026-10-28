@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { budgetEndpoint, budgetLimits, budgetProgress, budgetQuery, formatBudgetAmount, parseBudgetAlerts, parseBudgetStatuses, validBudgetInput } from './control-plane-budgets';
+import { budgetEndpoint, budgetLimits, budgetProgress, budgetQuery, formatBudgetAmount, parseBudgetAcknowledgement, parseBudgetAlerts, parseBudgetStatuses, validBudgetInput } from './control-plane-budgets';
 
 describe('control-plane budget helpers', () => {
 	test('blank amounts clear windows while positive decimals preserve sub-cent precision', () => {
@@ -49,8 +49,34 @@ describe('control-plane budget helpers', () => {
 		for (const patch of [{ state: 'ok' }, { limit: 0 }, { usage: NaN }, { period_end: 'invalid' }]) {
 			expect(() => parseBudgetStatuses({ data: [{ ...status, ...patch }] })).toThrow();
 		}
-		const alert = { ...status, id: 'a1', threshold: .8, triggered_at: '2026-10-27T12:00:00Z' };
+		const alert = { ...status, id: 'a1', threshold: .8, triggered_at: '2026-10-27T12:00:00Z',
+			acknowledged: false, acknowledged_at: null, acknowledged_by: null };
 		expect(parseBudgetAlerts({ data: [alert] })).toEqual([alert]);
 		expect(() => parseBudgetAlerts({ data: [{ ...alert, threshold: .5 }] })).toThrow();
+	});
+
+	test('acknowledgement states require complete consistent identity/time, never legacy defaults', () => {
+		const alert = {
+			id: 'a1', scope_type: 'project', scope_id: 'p1', window: 'daily',
+			period_start: '2026-10-27T00:00:00Z', threshold: .8, usage: 8, limit: 10,
+			triggered_at: '2026-10-27T12:00:00Z', acknowledged: false, acknowledged_at: null, acknowledged_by: null,
+		};
+		expect(parseBudgetAcknowledgement(alert, 'a1', false)).toEqual(alert);
+		const confirmed = { ...alert, acknowledged: true, acknowledged_at: '2026-10-27T12:01:00Z', acknowledged_by: 'local-admin' };
+		expect(parseBudgetAlerts({ data: [confirmed] })).toEqual([confirmed]);
+		expect(parseBudgetAcknowledgement(confirmed, 'a1', true)).toEqual(confirmed);
+		for (const patch of [
+			{ acknowledged: undefined }, { acknowledged: 'true' }, { acknowledged_at: undefined },
+			{ acknowledged_by: undefined }, { acknowledged_at: '2026-10-27T12:01:00Z' },
+			{ acknowledged: true }, { acknowledged: true, acknowledged_at: 'invalid', acknowledged_by: 'local-admin' },
+			{ acknowledged: true, acknowledged_at: '2026-10-27T12:01:00Z', acknowledged_by: ' ' },
+		]) {
+			expect(() => parseBudgetAlerts({ data: [{ ...alert, ...patch }] })).toThrow();
+			expect(() => parseBudgetAcknowledgement({ ...alert, ...patch }, 'a1', false)).toThrow();
+		}
+		expect(() => parseBudgetAcknowledgement(confirmed, 'other', true)).toThrow();
+		expect(() => parseBudgetAcknowledgement(confirmed, 'a1', false)).toThrow();
+		expect(() => parseBudgetAcknowledgement({ data: confirmed }, 'a1', true)).toThrow();
+		expect(() => parseBudgetAlerts({ data: [alert, alert] })).toThrow();
 	});
 });

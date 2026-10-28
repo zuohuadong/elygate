@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 if [[ -n "${POSTGRES_BIN:-}" ]]; then
 	export PATH="$POSTGRES_BIN:$PATH"
 fi
-for executable in initdb postgres pg_ctl pg_isready psql go; do
+for executable in initdb postgres pg_ctl pg_isready psql pg_dump pg_restore go; do
 	if ! command -v "$executable" >/dev/null 2>&1; then
 		printf 'Missing %s; add PostgreSQL bin and Go to PATH.\n' "$executable" >&2
 		exit 1

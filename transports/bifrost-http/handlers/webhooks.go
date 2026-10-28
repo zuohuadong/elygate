@@ -691,10 +691,12 @@ func (h *WebhookHandler) redeliverWebhook(ctx *fasthttp.RequestCtx) {
 	// Same id as the original delivery: the webhook-id header stays stable,
 	// so receiver-side deduplication of the replay remains intentional.
 	job := &configstoreTables.TableWebhookJob{
-		ID:         delivery.WebhookID,
-		EndpointID: delivery.EndpointID,
-		AsyncJobID: delivery.AsyncJobID,
-		Event:      delivery.Event,
+		ID:          delivery.WebhookID,
+		EndpointID:  delivery.EndpointID,
+		AsyncJobID:  delivery.AsyncJobID,
+		ResourceID:  delivery.ResourceID,
+		PayloadJSON: delivery.PayloadJSON,
+		Event:       delivery.Event,
 	}
 	if err := h.store.ConfigStore.CreateWebhookJob(ctx, job); err != nil {
 		if errors.Is(err, configstore.ErrAlreadyExists) {

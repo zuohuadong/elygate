@@ -7,6 +7,7 @@ import (
 	"github.com/maximhq/bifrost/core/schemas"
 	"github.com/maximhq/bifrost/framework/logstore"
 	"github.com/maximhq/bifrost/framework/warp"
+	"github.com/maximhq/bifrost/transports/v2/bifrost-http/lib"
 	"github.com/valyala/fasthttp"
 )
 
@@ -89,5 +90,6 @@ func (h *WarpHandler) deleteConversation(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, fasthttp.StatusInternalServerError, "Failed to delete conversation")
 		return
 	}
+	lib.RecordAuditChange(ctx, "warp_conversation.deleted", "warp_conversation", id, "", map[string]any{"id": id}, nil)
 	ctx.SetStatusCode(fasthttp.StatusNoContent)
 }

@@ -27,6 +27,9 @@ export interface BudgetAlert {
 	usage: number;
 	limit: number;
 	triggered_at: string;
+	acknowledged: boolean;
+	acknowledged_at: string | null;
+	acknowledged_by: string | null;
 }
 
 export function validBudgetInput(input: string): boolean {
@@ -92,7 +95,12 @@ function isBudgetStatus(row: JsonRecord): row is JsonRecord & BudgetStatus {
 function isBudgetAlert(row: JsonRecord): row is JsonRecord & BudgetAlert {
 	return validBudgetRecord(row) && typeof row.id === 'string' && row.id !== ''
 		&& (row.threshold === .8 || row.threshold === 1)
-		&& typeof row.triggered_at === 'string' && Number.isFinite(Date.parse(row.triggered_at));
+		&& typeof row.triggered_at === 'string' && Number.isFinite(Date.parse(row.triggered_at))
+		&& (row.acknowledged === false
+			? row.acknowledged_at === null && row.acknowledged_by === null
+			: row.acknowledged === true
+				&& typeof row.acknowledged_at === 'string' && Number.isFinite(Date.parse(row.acknowledged_at))
+				&& typeof row.acknowledged_by === 'string' && row.acknowledged_by.trim() !== '');
 }
 
 export function parseBudgetStatuses(payload: unknown): BudgetStatus[] {
@@ -103,6 +111,15 @@ export function parseBudgetStatuses(payload: unknown): BudgetStatus[] {
 
 export function parseBudgetAlerts(payload: unknown): BudgetAlert[] {
 	const rows = budgetRecords(payload);
-	if (!rows.every(isBudgetAlert)) throw new Error('Invalid budget alert response');
+	if (!rows.every(isBudgetAlert) || new Set(rows.map((row) => row.id)).size !== rows.length) {
+		throw new Error('Invalid budget alert response');
+	}
 	return rows;
+}
+
+export function parseBudgetAcknowledgement(payload: unknown, id: string, acknowledged: boolean): BudgetAlert {
+	if (!isJsonRecord(payload) || !isBudgetAlert(payload) || payload.id !== id || payload.acknowledged !== acknowledged) {
+		throw new Error('Invalid budget acknowledgement response');
+	}
+	return payload;
 }

@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -24,6 +26,7 @@ import (
 	"github.com/maximhq/bifrost/core/schemas"
 	"github.com/maximhq/bifrost/framework/configstore"
 	configstoreTables "github.com/maximhq/bifrost/framework/configstore/tables"
+	"github.com/maximhq/bifrost/framework/encrypt"
 	"github.com/maximhq/bifrost/framework/logstore"
 	"github.com/maximhq/bifrost/framework/modelcatalog"
 	"github.com/maximhq/bifrost/framework/vectorstore"
@@ -33,6 +36,7 @@ import (
 	"github.com/maximhq/bifrost/plugins/prompts"
 	"github.com/maximhq/bifrost/plugins/semanticcache"
 	"github.com/maximhq/bifrost/plugins/telemetry"
+	"github.com/maximhq/bifrost/transports/v2/bifrost-http/controlplane"
 	"github.com/maximhq/bifrost/transports/v2/bifrost-http/handlers"
 	"github.com/maximhq/bifrost/transports/v2/bifrost-http/lib"
 	"github.com/stretchr/testify/assert"
@@ -40,6 +44,138 @@ import (
 	"github.com/valyala/fasthttp"
 	"gorm.io/gorm"
 )
+
+type authAuditFailureStore struct {
+	configstore.ConfigStore
+	saveErr  error
+	flushErr error
+}
+
+func (s authAuditFailureStore) UpdateAuthConfig(ctx context.Context, auth *configstore.AuthConfig) error {
+	if s.saveErr != nil {
+		return s.saveErr
+	}
+	return s.ConfigStore.UpdateAuthConfig(ctx, auth)
+}
+
+func (s authAuditFailureStore) FlushSessions(ctx context.Context) error {
+	if s.flushErr != nil {
+		return s.flushErr
+	}
+	return s.ConfigStore.FlushSessions(ctx)
+}
+
+func TestAuthConfigAuditThroughManagementRoute(t *testing.T) {
+	const password = "Route-Audit-Password-123!"
+	hash, err := encrypt.Hash(password)
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name       string
+		enabled    bool
+		saveErr    error
+		flushErr   error
+		wantStatus int
+		wantEvent  bool
+	}{
+		{name: "replace username", enabled: true, wantStatus: 200, wantEvent: true},
+		{name: "disable authentication", wantStatus: 200, wantEvent: true},
+		{name: "failed save", enabled: true, saveErr: errors.New("save failed"), wantStatus: 500},
+		{name: "failed flush after enabled save", enabled: true, flushErr: errors.New("flush failed"), wantStatus: 500, wantEvent: true},
+		{name: "failed flush after disabled save", flushErr: errors.New("flush failed"), wantStatus: 500, wantEvent: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			logger = noopTestLogger{}
+			handlers.SetLogger(noopTestLogger{})
+			storeConfig := &configstore.Config{
+				Enabled: true, Type: configstore.ConfigStoreTypeSQLite,
+				Config: &configstore.SQLiteConfig{Path: filepath.Join(t.TempDir(), "auth-audit.db")},
+			}
+			cs, err := configstore.NewConfigStore(ctx, storeConfig, noopTestLogger{})
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, cs.Close(ctx)) })
+			authConfig := &configstore.AuthConfig{
+				IsEnabled: true, AdminUserName: schemas.NewSecretVar("route-admin"), AdminPassword: schemas.NewSecretVar(hash),
+			}
+			require.NoError(t, cs.UpdateAuthConfig(ctx, authConfig))
+			store, err := controlplane.NewStore(ctx, cs)
+			require.NoError(t, err)
+			require.NoError(t, cs.UpdateClientConfig(ctx, &configstore.ClientConfig{LogRetentionDays: 7}))
+			clientConfig, err := cs.GetClientConfig(ctx)
+			require.NoError(t, err)
+			require.NotNil(t, clientConfig)
+			cfg := &lib.Config{
+				ConfigStore:  authAuditFailureStore{ConfigStore: cs, saveErr: tc.saveErr, flushErr: tc.flushErr},
+				ClientConfig: clientConfig,
+			}
+			auth := &handlers.AuthMiddleware{}
+			auth.UpdateAuthConfig(authConfig)
+			server := &BifrostHTTPServer{Config: cfg, AuthMiddleware: auth}
+			r := router.New()
+			audit := controlplane.NewHandler(store, nil)
+			handlers.NewConfigHandler(server, cfg).RegisterRoutes(r, auth.APIMiddleware(), audit.ManagementAuditMiddleware(noopTestLogger{}))
+			var request fasthttp.Request
+			request.Header.SetMethod("PUT")
+			request.Header.SetContentType("application/json")
+			request.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte("route-admin:"+password)))
+			request.Header.Set("X-User-ID", "forged-actor")
+			request.SetRequestURI("/api/config")
+			body, err := json.Marshal(struct {
+				ClientConfig *configstore.ClientConfig `json:"client_config"`
+				AuthConfig   *configstore.AuthConfig   `json:"auth_config"`
+			}{
+				ClientConfig: clientConfig,
+				AuthConfig:   &configstore.AuthConfig{IsEnabled: tc.enabled, AdminUserName: schemas.NewSecretVar("replacement-admin")},
+			})
+			require.NoError(t, err)
+			request.SetBody(body)
+			var requestCtx fasthttp.RequestCtx
+			requestCtx.Init(&request, nil, nil)
+			r.Handler(&requestCtx)
+			require.Equal(t, tc.wantStatus, requestCtx.Response.StatusCode(), "body=%s", requestCtx.Response.Body())
+			require.Empty(t, requestCtx.Response.Header.Peek(lib.HeaderAuditStatus))
+			events, err := store.ListAudit(ctx, 10)
+			require.NoError(t, err)
+			authEvents := 0
+			for _, event := range events {
+				if event.Action != "auth_config.updated" {
+					continue
+				}
+				authEvents++
+				assert.Equal(t, "auth_config", event.ResourceType)
+				assert.Equal(t, "dashboard", event.ResourceID)
+				assert.Equal(t, "local-admin:route-admin", event.ActorID, "identity must be captured before credential replacement or disabling auth")
+			}
+			if tc.wantEvent {
+				require.Equal(t, 1, authEvents)
+			} else {
+				require.Zero(t, authEvents)
+			}
+			encoded, err := json.Marshal(events)
+			require.NoError(t, err)
+			assert.NotContains(t, string(encoded), password)
+			assert.NotContains(t, string(encoded), hash)
+			assert.NotContains(t, string(encoded), "replacement-admin")
+			persisted, err := cs.GetAuthConfig(ctx)
+			require.NoError(t, err)
+			if tc.saveErr == nil {
+				assert.Equal(t, tc.enabled, persisted.IsEnabled)
+				assert.Equal(t, "replacement-admin", persisted.AdminUserName.GetValue())
+			} else {
+				assert.True(t, persisted.IsEnabled)
+				assert.Equal(t, "route-admin", persisted.AdminUserName.GetValue())
+			}
+			require.NoError(t, cs.Close(ctx))
+			cs, err = configstore.NewConfigStore(ctx, storeConfig, noopTestLogger{})
+			require.NoError(t, err)
+			reopened, err := controlplane.NewStore(ctx, cs)
+			require.NoError(t, err)
+			reloadedEvents, err := reopened.ListAudit(ctx, 10)
+			require.NoError(t, err)
+			assert.Equal(t, events, reloadedEvents, "audit events must survive reopening the database")
+		})
+	}
+}
 
 func TestAgentRegistrationCallbacksRejectUninitializedGateway(t *testing.T) {
 	t.Parallel()

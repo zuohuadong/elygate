@@ -271,6 +271,32 @@ Elygate 当前定位收敛为：
 - ConfigStore、LogStore、Dispatcher、控制面跨批次/回滚及 HTTP redelivery 的定向 Go 测试均已通过；面板 Webhook 测试 6 项、1440/375px 浏览器夹具、Svelte 检查（0 错误、0 警告）和独立生产构建也已通过。OpenAPI 的分片/生成契约检查现为 30 passed / 0 failed，并新增重复 YAML 键、重复 operationId、bundle 漂移和虚拟密钥轮换 cooldown 保护。
 - 该增量仍在本地验收，不等于真实预算接收端、PostgreSQL 生产链路、告警处理闭环、多用户、预测、统一策略、完整审计或备份恢复验收。原总目标继续保持 active / PARTIAL；预算功能仍留在混合工作区，未单独提交、推送或部署。
 
+### 2026-10-28 预算 Webhook 持久化链路验收后续项
+
+- follow-up `budget-webhook-monitor-receiver-recovery`：parent 为预算阈值外部 Webhook，source 为上一节真实接收端验收缺口，reason 为既有签名/重试测试使用内存队列，尚未覆盖后台预算扫描与真实持久化队列、日志库、HTTP 接收端之间的连线。
+- 本轮冻结范围为既有测试文件内新增集成回归及本验收记录；Native 单 writer、低风险、external=0，不新增业务 API、存储抽象或兼容层，不修改生产轮询间隔。
+- 场景使用真实 SQLite 控面库及日志库、生产 `PluginLogManager`、`BudgetMonitor.Start()`、通知发布器、端点 resolver 和 Dispatcher；接收端首次 503 后，重新构造 Dispatcher 从持久化队列恢复，验证 204、签名、稳定 payload、两次历史记录、队列清理及下一次扫描不重复入队，没有手工修改重试到期时间。
+- `go test ./bifrost-http/controlplane -run '^TestBudgetWebhook' -count=1 -p 1 -timeout 3m -v` 通过 5 项顶层测试，包内执行耗时 7.889s，其中新集成场景为 5.45s。保留同源码测试二进制 `.codex-tmp/budget-webhook-controlplane.test`，仅对新场景 `-test.count=3` 连续复跑全部通过（5.73s / 5.41s / 5.25s）；首次命令墙钟时间主要消耗在外盘构建缓存读取和链接，不能把包内执行耗时描述为完整等待时间。
+- `go vet ./bifrost-http/controlplane`、新增测试文件 `gofmt` 及当前 tracked diff 的 `git diff --check` 均通过；新增未跟踪测试文件也单独完成空白检查。代码 guard 未发现本轮阻断项。
+- 本轮为 `PASS_SCOPED`，未运行 `-race`、全控面或全仓套件；未改生产代码、未提交、推送或部署。原总目标仍为 active / PARTIAL；合成费用不代表真实模型计费，Dispatcher 重建不等于整机/数据库重启，且 PostgreSQL 预算 Webhook 链路、生产投递、告警处理闭环、多用户、预测、统一策略、完整审计与备份恢复尚未完成。
+
+### 2026-10-28 预算 Webhook 双 PostgreSQL 后续项
+
+- follow-up `budget-webhook-dual-postgres`：parent 为 `budget-webhook-monitor-receiver-recovery`，source 为上一节 PostgreSQL 链路缺口，reason 为原集成夹具即使选择 PostgreSQL 控面库，日志库仍固定为 SQLite，不能证明 PostgreSQL 投递历史和用量读取路径。
+- 冻结范围为预算 Webhook 既有测试夹具和验收文档；Native 单 writer、低风险、external=0。复用既有 `ELYGATE_TEST_POSTGRES_SOCKET` 与独立测试库创建/清理逻辑，日志库通过生产 `logstore.NewLogStore` 连接另一个私有 PostgreSQL 数据库；默认 SQLite 不变，不新增业务接口、环境开关或 runner 功能。
+- 使用项目原生私有 PostgreSQL runner、`GOWORK=off` 和 `/Volumes/Datas` 缓存/临时目录，不接触现有数据库，不关闭 PostgreSQL 的 fsync、同步提交或 full-page writes。最终双库场景通过（14.99s，包内 16.379s），日志明确断言控面及日志后端均为 PostgreSQL；runner 的测试库泄漏检查和正常关服通过。旧夹具的控面 PostgreSQL / 日志 SQLite 启动已主动停止，不计为通过。
+- 首轮双库测试确实在上游日志库构造器处因 `postgres password is required` 失败（20.449s），没有改生产验证；修正为私有 trust socket 的日志配置生成随机一次性值满足构造器要求，并断言实际 GORM 后端。该填充值不代表密码认证验收；日志物化视图关闭，不修改事务、队列、历史或 PostgreSQL 持久化设置。同一最终源码二进制的默认双 SQLite 场景连续三次通过（5.28s / 5.32s / 5.26s）。
+- 这仍是合成费用到本地 HTTP 接收端的专项验证；不代表真实供应商计费、整机重启、ClickHouse、浏览器、生产投递、跨库备份恢复或完整平台验收。原总目标继续 active / PARTIAL。
+
+### 2026-10-29 已提交面板类型检查修复后续项
+
+- follow-up `panel-budget-props-typecheck`：parent 为预算 Webhook 交付，source 为已推送 `8d0204890` 的面板类型检查失败，reason 为主工作区同一行已随未提交告警确认功能改正，但隔离交付没有包含该类型修复。
+- 冻结范围为独立 `panel/` 的预算概览 props 类型声明和本验收记录；Native 单 writer、低风险、external=0。不调整 API、授权、告警语义、依赖版本、静态嵌入 UI 或其他未提交功能，不自动提交、推送或部署。
+- 隔离候选基于 `origin/dev` 的 `8d0204890771bea9d11a3c7e7477c646d9bc6c76`，位于 `.codex-tmp/panel-typecheck-20261029`；代码 diff 仅为一行类型声明，没有带入告警确认等其他功能。主工作区全部混合改动保留，本地 `dev` 仍落后 `origin/dev` 一个提交，未通过重置索引或覆盖文件进行同步。
+- 候选 `bun run check` 通过（0 errors / 0 warnings）；预算及 Webhook 两个测试文件共 11 项通过（86 次断言）；独立 `vite build` 通过（17.61s），保留大 chunk 警告。输出位于 `.codex-tmp/panel-typecheck-build-20261029`，未执行 `copy-build`，没有覆盖 Go 静态嵌入 UI。主工作区的 Svelte 检查另行通过（0 errors / 0 warnings），不与候选证据混用。
+- 使用已安装 Svelte 编译器分别生成修复前后的 client/server 代码，两种模式的 JavaScript 与 CSS 均逐字一致：这是擦除后的类型修复，没有增加运行时或推理请求路径成本。`git diff --check` 和代码 guard 通过；没有通过放宽类型检查、忽略诊断或改动依赖来消除错误。
+- 本后续项为本地 `PASS_SCOPED`，未提交、推送或部署；不是全仓测试、浏览器后端联调、生产恢复或完整平台验收。告警处理闭环、多用户、统一策略、完整审计及生产交付等剩余要求不变，原总目标继续 active / PARTIAL。
+
 ## 3. 单机部署架构
 
 ```text

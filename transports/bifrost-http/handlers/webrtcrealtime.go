@@ -323,6 +323,13 @@ func (h *WebRTCRealtimeHandler) runWebRTCRelay(
 		SendBifrostError(ctx, authErr)
 		return
 	}
+	virtualKey := bifrost.GetStringFromContext(bifrostCtx, schemas.BifrostContextKeyVirtualKey)
+	if h.accessChecker != nil && virtualKey != "" {
+		if err := h.accessChecker.CheckVirtualKeyValueAccess(bifrostCtx, virtualKey); err != nil {
+			SendBifrostError(ctx, newRealtimeWebRTCError(fasthttp.StatusUnauthorized, "authentication_error", "virtual key access is no longer active", nil))
+			return
+		}
+	}
 
 	authKey, selectedKey, err := h.resolveRealtimeWebRTCKeys(bifrostCtx, providerKey, model, inboundToken, mapping, mapped)
 	if err != nil {
@@ -539,6 +546,7 @@ func (h *WebRTCRealtimeHandler) establishRelay(
 			client:               h.client,
 			session:              session,
 			bifrostCtx:           relayCtx,
+			accessChecker:        h.accessChecker,
 			provider:             provider,
 			providerKey:          providerKey,
 			model:                model,
@@ -564,11 +572,26 @@ type realtimeWebRTCMessages struct {
 	client               *bifrost.Bifrost
 	session              *bfws.Session
 	bifrostCtx           *schemas.BifrostContext
+	accessChecker        VirtualKeyAccessChecker
 	provider             schemas.RealtimeProvider
 	providerKey          schemas.ModelProvider
 	model                string
 	key                  *schemas.Key
 	transcriptionSession bool
+}
+
+func (m *realtimeWebRTCMessages) checkVirtualKeyAccess() *schemas.BifrostError {
+	if m.accessChecker == nil || m.bifrostCtx == nil {
+		return nil
+	}
+	virtualKey := bifrost.GetStringFromContext(m.bifrostCtx, schemas.BifrostContextKeyVirtualKey)
+	if virtualKey == "" {
+		return nil
+	}
+	if err := m.accessChecker.CheckVirtualKeyValueAccess(m.bifrostCtx, virtualKey); err != nil {
+		return newRealtimeWireBifrostError(401, "authentication_error", "virtual key access is no longer active")
+	}
+	return nil
 }
 
 func (m *realtimeWebRTCMessages) fromBrowser(r *webrtcRelay, msg webrtc.DataChannelMessage) {
@@ -578,6 +601,17 @@ func (m *realtimeWebRTCMessages) fromBrowser(r *webrtcRelay, msg webrtc.DataChan
 		r.sendUpstream(msg.Data, msg.IsString)
 		return
 	}
+	startsTurn := m.provider.ShouldStartRealtimeTurn(event)
+	if startsTurn {
+		if m.session.PeekRealtimeTurnHooks() != nil {
+			r.sendDownstream(newRealtimeTurnErrorEventPayload(newRealtimeWireBifrostError(400, "invalid_request_error", "Conversation already has an active response in progress.")), true)
+			return
+		}
+		if bifrostErr := m.checkVirtualKeyAccess(); bifrostErr != nil {
+			r.closeWithErrorEvent(newRealtimeTurnErrorEventPayload(bifrostErr))
+			return
+		}
+	}
 	toolItemID, toolSummary := pendingRealtimeToolOutputUpdate(event)
 	if toolSummary != "" {
 		m.session.RecordRealtimeToolOutput(toolItemID, toolSummary, string(msg.Data))
@@ -586,12 +620,7 @@ func (m *realtimeWebRTCMessages) fromBrowser(r *webrtcRelay, msg webrtc.DataChan
 	if inputSummary != "" {
 		m.session.RecordRealtimeInput(inputItemID, inputSummary, string(msg.Data))
 	}
-	startsTurn := m.provider.ShouldStartRealtimeTurn(event)
 	if startsTurn {
-		if m.session.PeekRealtimeTurnHooks() != nil {
-			r.sendDownstream(newRealtimeTurnErrorEventPayload(newRealtimeWireBifrostError(400, "invalid_request_error", "Conversation already has an active response in progress.")), true)
-			return
-		}
 		if bifrostErr := startRealtimeTurnHooks(m.client, m.bifrostCtx, m.session, m.provider, m.providerKey, m.model, m.key, event); bifrostErr != nil {
 			r.closeWithErrorEvent(newRealtimeTurnErrorEventPayload(bifrostErr))
 			return
@@ -651,6 +680,14 @@ func (m *realtimeWebRTCMessages) fromProvider(r *webrtcRelay, msg webrtc.DataCha
 		return
 	}
 	if event != nil {
+		// Transcription has no response.created event; its unit starts at committed input.
+		startsTurn := m.provider.ShouldStartRealtimeTurn(event) || (m.transcriptionSession && event.Type == schemas.RTEventInputAudioBufferCommitted)
+		if startsTurn && m.session.PeekRealtimeTurnHooks() == nil {
+			if bifrostErr := m.checkVirtualKeyAccess(); bifrostErr != nil {
+				r.closeWithErrorEvent(newRealtimeTurnErrorEventPayload(bifrostErr))
+				return
+			}
+		}
 		if event.Session != nil && event.Session.ID != "" {
 			m.session.SetProviderSessionID(event.Session.ID)
 		}
@@ -668,8 +705,6 @@ func (m *realtimeWebRTCMessages) fromProvider(r *webrtcRelay, msg webrtc.DataCha
 			m.session.AppendRealtimeOutputText(event.Delta.Text)
 			m.session.AppendRealtimeOutputText(event.Delta.Transcript)
 		}
-		// Transcription has no response.created event; its unit starts at committed input.
-		startsTurn := m.provider.ShouldStartRealtimeTurn(event) || (m.transcriptionSession && event.Type == schemas.RTEventInputAudioBufferCommitted)
 		if startsTurn && m.session.PeekRealtimeTurnHooks() == nil {
 			if bifrostErr := startRealtimeTurnHooks(m.client, m.bifrostCtx, m.session, m.provider, m.providerKey, m.model, m.key, event); bifrostErr != nil {
 				r.closeWithErrorEvent(newRealtimeTurnErrorEventPayload(bifrostErr))

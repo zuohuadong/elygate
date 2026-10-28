@@ -25,11 +25,30 @@ func employeeAuditAppender(store configstore.ConfigStore, request *fasthttp.Requ
 	if actor, _ := request.UserValue(lib.FastHTTPUserValueManagementAuditActor).(string); actor != "" && base.Principal.Authenticated {
 		base.Principal.ID = actor
 	}
+	return transactionalEmployeeAuditAppender(store, base)
+}
+
+func employeeSelfServiceAuditAppender(store configstore.ConfigStore, request *fasthttp.RequestCtx, employeeID string) employees.EmployeeAuditAppender {
+	// This principal is an audit value only; never attach it to authorization.
+	return transactionalEmployeeAuditAppender(store, handlers.GovernanceAuditInput{
+		Principal: handlers.AdminPrincipal{
+			ID: "employee:" + employeeID, Name: "Employee",
+			AuthMethod: "employee-session", Authenticated: true,
+		},
+		RequestID: handlers.GovernanceRequestIDFromRequest(request),
+		TraceID:   handlers.GovernanceTraceIDFromRequest(request), Outcome: "success",
+	})
+}
+
+func transactionalEmployeeAuditAppender(store configstore.ConfigStore, base handlers.GovernanceAuditInput) employees.EmployeeAuditAppender {
 	if !encrypt.IsEnabled() {
 		return compactEmployeeAuditAppender(base.Principal.ID)
 	}
 	return func(ctx context.Context, tx *gorm.DB, event employees.EmployeeAuditEvent) error {
 		input := base
+		if event.AuditAuthMethod != "" {
+			input.Principal.AuthMethod = event.AuditAuthMethod
+		}
 		input.Action, input.Resource, input.ResourceID = event.Action, event.Resource, event.ResourceID
 		input.Before, input.After = event.Before, event.After
 		return handlers.AppendGovernanceAudit(ctx, store, tx, input)

@@ -2,8 +2,11 @@ package controlplane
 
 import (
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
+	"net/url"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -288,6 +291,143 @@ func TestUsageSummaryPropagatesSyncAndDatabaseFailures(t *testing.T) {
 		require.Equal(t, fasthttp.StatusInternalServerError, request.Response.StatusCode())
 		require.NotContains(t, string(request.Response.Body()), `"requests":0`)
 	})
+}
+
+func TestUsageDimensionFiltersMatchListSummaryAndExport(t *testing.T) {
+	store, _ := testControlPlaneStore(t)
+	ctx := context.Background()
+	start := time.Date(2026, 10, 27, 0, 0, 0, 0, time.UTC)
+	rows := []UsageLedgerEntry{
+		{ID: "a", UserID: ptr("alice"), Provider: "openai", Model: "mini", Cost: 1},
+		{ID: "b", UserID: ptr("alice"), Provider: "openai", Model: "large", Cost: 2},
+		{ID: "c", UserID: ptr("bob"), Provider: "other", Model: "mini", Cost: 4},
+		{ID: "d", Provider: "openai", Model: "mini", Cost: 8},
+		{ID: "e", UserID: ptr(" alice "), Provider: "custom%_provider", Model: "fine/tuned?x& y", Cost: 16},
+		{ID: "f", UserID: ptr("=2+3"), Provider: "other", Model: "mini", Cost: 32},
+	}
+	for i := range rows {
+		rows[i].SourceLogID = rows[i].ID
+		rows[i].ProjectID, rows[i].ApplicationID = "project", "app"
+		rows[i].OccurredAt = start.Add(time.Duration(i) * time.Second)
+		rows[i].Status, rows[i].TotalTokens = "success", i+1
+	}
+	require.NoError(t, store.db(ctx).Create(&rows).Error)
+	r := router.New()
+	NewHandler(store, nil).RegisterRoutes(r)
+	// 边界：缺省/空/独立/交集/无结果；大小写/空白/通配符/SQL 字面量；分页不限制汇总或导出。
+	for _, tc := range []struct {
+		name, query string
+		ids         string
+	}{
+		{"omitted", "", "fedcba"},
+		{"empty", "user_id=&provider=&model=", "fedcba"},
+		{"user", "user_id=alice", "ba"},
+		{"provider", "provider=openai", "dba"},
+		{"model", "model=mini", "fdca"},
+		{"intersection", "user_id=alice&provider=openai&model=mini", "a"},
+		{"case sensitive", "user_id=ALICE", ""},
+		{"opaque spaces", "user_id=" + url.QueryEscape(" alice "), "e"},
+		{"special model", "model=" + url.QueryEscape("fine/tuned?x& y"), "e"},
+		{"literal wildcard", "provider=" + url.QueryEscape("custom%_provider"), "e"},
+		{"no wildcard expansion", "model=%25", ""},
+		{"SQL literal", "user_id=" + url.QueryEscape("' OR 1=1 --"), ""},
+		{"scope intersection", "user_id=alice&project_id=other", ""},
+		{"time intersection", "model=mini&start_time=2026-10-27T00:00:01Z&end_time=2026-10-27T00:00:03Z", "c"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			call := func(path string) *fasthttp.RequestCtx {
+				request := &fasthttp.RequestCtx{}
+				request.Request.SetRequestURI("http://admin.example.test/api/control-plane/usage" + path + "?" + tc.query + "&limit=1&offset=1")
+				request.SetUserValue(schemas.IsLocalAdminContextKey, true)
+				r.Handler(request)
+				require.Equal(t, fasthttp.StatusOK, request.Response.StatusCode(), "%s", request.Response.Body())
+				return request
+			}
+			var list struct {
+				Data       []UsageLedgerEntry  `json:"data"`
+				Pagination struct{ Total int } `json:"pagination"`
+			}
+			require.NoError(t, json.Unmarshal(call("").Response.Body(), &list))
+			require.Equal(t, len(tc.ids), list.Pagination.Total)
+			if len(tc.ids) > 1 {
+				require.Len(t, list.Data, 1)
+				require.Equal(t, tc.ids[1:2], list.Data[0].ID)
+			} else {
+				require.Empty(t, list.Data)
+			}
+			var summary UsageSummary
+			require.NoError(t, json.Unmarshal(call("/summary").Response.Body(), &summary))
+			require.EqualValues(t, len(tc.ids), summary.Requests)
+			var expectedCost float64
+			var expectedTokens int64
+			for _, row := range rows {
+				if strings.Contains(tc.ids, row.ID) {
+					expectedCost += row.Cost
+					expectedTokens += int64(row.TotalTokens)
+				}
+			}
+			require.EqualValues(t, len(tc.ids), summary.SuccessfulRequests)
+			require.Equal(t, expectedTokens, summary.TotalTokens)
+			require.InDelta(t, expectedCost, summary.Cost, 0.000001)
+			export := call("/export")
+			require.Contains(t, string(export.Response.Header.ContentType()), "text/csv")
+			records, err := csv.NewReader(strings.NewReader(string(export.Response.Body()))).ReadAll()
+			require.NoError(t, err)
+			require.Len(t, records, len(tc.ids)+1)
+			require.Contains(t, records[0], "user_id")
+			for i, id := range tc.ids {
+				userColumn := -1
+				for j, column := range records[0] {
+					if column == "user_id" {
+						userColumn = j
+					}
+				}
+				original := rows[int(id-'a')].UserID
+				wantUser := ""
+				if original != nil {
+					wantUser = *original
+				}
+				if wantUser == "=2+3" {
+					wantUser = "'=2+3"
+				}
+				require.Equal(t, wantUser, records[i+1][userColumn])
+			}
+		})
+	}
+}
+
+func TestUsageCSVTextProtectsFormulaCells(t *testing.T) {
+	// 边界：空/普通/带引号逗号/原始空白；各公式前缀与前导控制符/BOM；可空字符串。
+	for _, tc := range []struct{ raw, want string }{
+		{"", ""}, {"alice", "alice"}, {" alice ", " alice "}, {"a,\"b\"", "a,\"b\""},
+		{"=2+3", "'=2+3"}, {"+cmd", "'+cmd"}, {"-1", "'-1"}, {"@SUM(A1)", "'@SUM(A1)"},
+		{" \t\r\n=cmd", "' \t\r\n=cmd"}, {"\ufeff=cmd", "'\ufeff=cmd"}, {"\tname", "\tname"}, {"'safe", "'safe"},
+	} {
+		require.Equal(t, tc.want, csvText(tc.raw))
+		require.Equal(t, tc.want, csvOptionalString(&tc.raw))
+	}
+	require.Empty(t, csvOptionalString(nil))
+}
+
+func TestUsageCSVExportProtectsTextWithoutRewritingNumericCosts(t *testing.T) {
+	store, _ := testControlPlaneStore(t)
+	require.NoError(t, store.db(context.Background()).Create(&UsageLedgerEntry{
+		ID: "formula", SourceLogID: "formula", OccurredAt: time.Now().UTC(),
+		ProjectID: "=project", ApplicationID: "+app", VirtualKeyID: "-key", UserID: ptr("@user"),
+		Provider: " \t=provider", Model: "\ufeff=model", SessionID: ptr("+session"),
+		ParentSessionID: ptr("-parent"), AgentName: ptr("@agent"), SessionClientType: ptr("=client"),
+		Status: "=status", PromptTokens: 1, OutputTokens: 2, TotalTokens: 3, Cost: -0.1,
+	}).Error)
+	request := &fasthttp.RequestCtx{}
+	NewHandler(store, nil).exportUsage(request)
+	require.Equal(t, fasthttp.StatusOK, request.Response.StatusCode())
+	records, err := csv.NewReader(strings.NewReader(string(request.Response.Body()))).ReadAll()
+	require.NoError(t, err)
+	require.Len(t, records, 2)
+	require.Equal(t, []string{
+		"'=project", "'+app", "'-key", "'@user", "' \t=provider", "'\ufeff=model",
+		"'+session", "'-parent", "'@agent", "'=client", "false", "false", "'=status", "1", "2", "3", "-0.10000000",
+	}, records[1][1:])
 }
 
 func TestCheckVirtualKeyAccessHonorsApplicationBindingLifecycle(t *testing.T) {

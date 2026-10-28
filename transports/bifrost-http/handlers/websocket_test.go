@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/http"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -12,7 +13,11 @@ import (
 
 	"github.com/fasthttp/router"
 	"github.com/fasthttp/websocket"
+	"github.com/google/uuid"
 	"github.com/maximhq/bifrost/core/schemas"
+	"github.com/maximhq/bifrost/framework/configstore"
+	"github.com/maximhq/bifrost/framework/configstore/tables"
+	"github.com/stretchr/testify/require"
 	"github.com/valyala/fasthttp"
 )
 
@@ -74,6 +79,110 @@ func TestBroadcastNotificationTargetsMatchingRole(t *testing.T) {
 	}
 }
 
+func TestNotificationPublishOnceWebSocketAdminOnly(t *testing.T) {
+	h, addr, stop := startWebSocketTestServer(t)
+	defer stop()
+	admin := dialWebSocket(t, addr)
+	defer admin.Close()
+	waitForClientCount(t, h, 1)
+	adminClient := snapshotClients(h)[0]
+	h.mu.Lock()
+	adminClient.localAdmin = true
+	h.mu.Unlock()
+	member := dialWebSocket(t, addr)
+	defer member.Close()
+	waitForClientCount(t, h, 2)
+	h.mu.Lock()
+	for _, client := range h.clients {
+		if client != adminClient {
+			client.roleID, client.hasRole = 7, true
+		}
+	}
+	h.mu.Unlock()
+	service := &NotificationService{store: &idempotentRecordingNotificationStore{}, websocket: h, now: time.Now}
+	id := uuid.NewString()
+	input := schemas.NotificationInput{Audience: schemas.NotificationAudienceAdmin,
+		Severity: schemas.NotificationSeverityWarning, Title: "Budget", Message: "Private amount"}
+	for range 2 {
+		_, err := service.PublishOnce(context.Background(), id, input)
+		require.NoError(t, err)
+	}
+	require.NoError(t, admin.SetReadDeadline(time.Now().Add(time.Second)))
+	_, payload, err := admin.ReadMessage()
+	require.NoError(t, err)
+	require.Contains(t, string(payload), id)
+	require.NoError(t, admin.SetReadDeadline(time.Now().Add(100*time.Millisecond)))
+	_, _, err = admin.ReadMessage()
+	require.Error(t, err, "replays must not broadcast a duplicate")
+	require.NoError(t, member.SetReadDeadline(time.Now().Add(100*time.Millisecond)))
+	_, _, err = member.ReadMessage()
+	require.Error(t, err, "ordinary roles must not receive private budget amounts")
+}
+
+type notificationSessionStore struct {
+	configstore.ConfigStore
+}
+
+func (*notificationSessionStore) GetSession(_ context.Context, token string) (*tables.SessionsTable, error) {
+	switch token {
+	case "admin-session":
+		return &tables.SessionsTable{ExpiresAt: time.Now().Add(time.Hour)}, nil
+	case "expired-session":
+		return &tables.SessionsTable{ExpiresAt: time.Now().Add(-time.Hour)}, nil
+	default:
+		return nil, nil
+	}
+}
+
+func TestNotificationWebSocketAuthenticatedSessionAudience(t *testing.T) {
+	tickets := NewWSTicketStore()
+	defer tickets.Stop()
+	auth := &AuthMiddleware{store: &notificationSessionStore{}, wsTicketStore: tickets}
+	auth.authConfig.Store(&configstore.AuthConfig{IsEnabled: true})
+	h, addr, stop := startWebSocketTestServer(t, auth.APIMiddleware())
+	defer stop()
+	for _, mode := range []string{"ticket", "token", "cookie"} {
+		t.Run(mode, func(t *testing.T) {
+			for _, session := range []string{"admin-session", "expired-session", "invalid-session"} {
+				path := "/ws"
+				headers := http.Header{}
+				switch mode {
+				case "ticket":
+					ticket, err := tickets.Issue(session)
+					require.NoError(t, err)
+					path += "?ticket=" + ticket
+				case "token":
+					path += "?token=" + session
+				case "cookie":
+					headers.Set("Cookie", "token="+session)
+				}
+				conn, response, err := websocket.DefaultDialer.Dial("ws://"+addr+path, headers)
+				if response != nil {
+					require.NoError(t, response.Body.Close())
+				}
+				if session != "admin-session" {
+					require.Error(t, err)
+					require.NotNil(t, response)
+					require.Equal(t, http.StatusUnauthorized, response.StatusCode)
+					continue
+				}
+				require.NoError(t, err)
+				defer conn.Close()
+				waitForClientCount(t, h, 1)
+				notification := &schemas.Notification{ID: uuid.NewString(), Audience: schemas.NotificationAudienceAdmin,
+					Severity: schemas.NotificationSeverityWarning, Title: "Budget", Message: "Private amount"}
+				h.BroadcastNotification(notification)
+				require.NoError(t, conn.SetReadDeadline(time.Now().Add(time.Second)))
+				_, payload, err := conn.ReadMessage()
+				require.NoError(t, err, "validated dashboard sessions receive administrator notifications")
+				require.Contains(t, string(payload), notification.ID)
+				require.NoError(t, conn.Close())
+				waitForClientCount(t, h, 0)
+			}
+		})
+	}
+}
+
 func (l *panicWatchLogger) Error(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	if !strings.Contains(msg, "panic") {
@@ -94,14 +203,14 @@ func (l *panicWatchLogger) recorded() []string {
 }
 
 // startWebSocketTestServer serves the real /ws route on a random local port.
-func startWebSocketTestServer(t *testing.T) (*WebSocketHandler, string, func()) {
+func startWebSocketTestServer(t *testing.T, middlewares ...schemas.BifrostHTTPMiddleware) (*WebSocketHandler, string, func()) {
 	t.Helper()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	h := NewWebSocketHandler(ctx, nil)
 
 	r := router.New()
-	h.RegisterRoutes(r)
+	h.RegisterRoutes(r, middlewares...)
 
 	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", "127.0.0.1:0")
 	if err != nil {

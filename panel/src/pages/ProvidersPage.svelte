@@ -12,6 +12,8 @@
 		providerMaxRetriesForPayload,
 		providerKeyModelAccess,
 		providerKeyModelsForPayload,
+		providerKeyValueCanBeEmpty,
+		providerKeyValueForPayload,
 		unsupportedProviderConfigFields,
 		type ProviderConfigSection,
 	} from '../lib/resource-forms';
@@ -316,10 +318,12 @@
 				blacklisted_models: csv(keyForm.blacklistedModels),
 				weight: Number(keyForm.weight),
 				enabled: keyForm.enabled,
+				value: providerKeyValueForPayload(keyForm.value, advanced, editingKey),
 			};
-			if (keyForm.value.trim()) payload.value = { value: keyForm.value.trim() };
-			else if (editingKey?.value !== undefined) payload.value = editingKey.value;
-			else throw new Error(i18n.t('elygate.keyValueHelp'));
+			const provider = providers.find((entry) => entry.name === providerContext) ?? { name: providerContext };
+			if (payload.value === undefined && !providerKeyValueCanBeEmpty(provider, payload)) {
+				throw new Error(i18n.t('elygate.keyValueHelp'));
+			}
 			if (editingKey) {
 				await requestJson(`/api/providers/${encodePathSegment(providerContext)}/keys/${encodePathSegment(stringValue(editingKey, 'id'))}`, {
 					method: 'PUT',

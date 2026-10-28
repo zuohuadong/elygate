@@ -24,6 +24,9 @@ upstream UI.
   or sidecar when practical. Generic Bifrost improvements should be proposed
   upstream instead of accumulating permanent patches in `core/`, `framework/`,
   or HTTP handlers.
+- The Vite `/api` proxy preserves the browser Host and Origin. It must not
+  rewrite Host to the backend target or rewrite an untrusted Origin; guarded
+  administrator writes use the actual Host as the origin trust anchor.
 
 ## Status legend
 
@@ -42,7 +45,7 @@ upstream UI.
 | `/workspace/logs/connectors`, `/workspace/observability` | connectors | `/api/plugins`, `/api/plugins/{name}` | Dedicated |
 | `/workspace/mcp-logs`, legacy `/workspace/logs/mcp-logs` | mcp-logs | `/api/mcp-logs*` | Dedicated |
 | `/workspace/providers` | providers | `/api/providers*`, provider/key refresh routes | Dedicated |
-| provider API-key fragment under `/workspace/providers` | provider-keys | `/api/providers/{provider}/keys*` | Dedicated + Alias |
+| provider API-key fragment under `/workspace/providers` | provider-keys | `/api/providers/{provider}/keys*`; SageMaker, cloud/OAuth configs, custom-base credential rules and endpoint flags | Dedicated + Alias |
 | provider governance fragment under `/workspace/providers` | provider-governance | `/api/providers`, `/api/governance/providers*` budgets, rate limits and calendar alignment | Dedicated |
 | `/workspace/model-catalog` | model-catalog | `/api/providers`, `/api/models`, `/api/models/details`, `/api/models/catalog`, log stats/histograms | Dedicated |
 | `/workspace/model-limits`, `/workspace/providers/model-limits` | model-configs, budgets, rate-limits | `/api/governance/model-configs*` | Dedicated + Alias |
@@ -78,16 +81,81 @@ upstream UI.
 | `/workspace/plugins` | plugins | `/api/plugins*` built-in/custom install, runtime status/logs, typed hook badges, safe redacted config round-trip, enable/disable/delete, execution sequence | Dedicated |
 | `/workspace/prompt-repo`, `/workspace/prompt-repo/prompts` | prompt-folders, prompts | `/api/prompt-repo/*` versions and draft sessions | Dedicated + Alias |
 | `/workspace/skills-repo` | skills | `/api/skills*` files, versions, serving and cleanup | Dedicated |
-| `/workspace/webhooks` | webhooks | `/api/webhooks*` test, secret rotation, delivery inspect/redeliver | Dedicated |
+| `/workspace/webhooks` | webhooks | `/api/webhooks*` test, secret rotation, delivery inspect/redeliver; explicit budget subscription and resource history | Dedicated |
 | `/workspace/docs` | docs-hub | bundled docs + official documentation links | Dedicated |
 | Elygate control plane | control-plane-projects, control-plane-applications | `/api/control-plane/projects*`, `/api/control-plane/applications*` project/application management and key lifecycle | Dedicated |
 | Elygate usage ledger | usage-ledger | `/api/control-plane/usage*`, `/api/control-plane/audit-events*`, `/api/control-plane/budget-alerts` paginated ledger, full filtered summary, sync status, budget status/history and CSV export | Dedicated |
+| Elygate notifications | shared header notification panel | `/api/notifications?limit=50&cursor=...` server-authorized feed; `/api/control-plane/notification-receipts*` local-admin read state; internal action links | Dedicated |
 | `/pprof` | pprof | `/api/dev/pprof*` | Dedicated |
+
+### Provider key contract
+
+- Editing and revalidation preserve the upstream provider-specific key sections,
+  including SageMaker, Databricks, Cloudflare, OAuth and endpoint selection flags.
+  Secrets retain their redacted reference metadata; the panel does not resolve them.
+- Creation permits an omitted static value for the providers allowed by Bifrost,
+  resolving custom providers against `custom_provider_config.base_provider_type`,
+  or when `oauth_key_config` is an object. Required regions, URLs and complete
+  credentials remain server-validated; an empty config is not proof of valid auth.
+- A blank password input preserves the existing value unless advanced JSON supplies
+  an explicit `value`. An explicit empty value can switch a stored bearer token
+  to cloud/OAuth credentials; a newly typed password takes precedence over JSON.
+
+### Notification feed contract
+
+- The shared header reads `GET /api/notifications` with same-origin session
+  credentials and a page size of 50. Audience filtering belongs to the server;
+  the panel does not invent an administrator identity or broaden visibility.
+- Opaque cursors are encoded without modification. Older pages append in server
+  order with IDs deduplicated. An empty page may still have `next_cursor`.
+  Explicit refresh replaces the loaded pages and cursor with the latest page.
+- A visible tab polls every 60 seconds without overlapping requests. Polling
+  pauses while the open panel is displaying older pages. Failed or malformed
+  responses remain visible as errors and retain previously loaded records.
+- Action links accept internal absolute and hash paths, reject protocol-relative
+  URLs, backslashes and control characters, and map upstream `/workspace/...`
+  actions to the panel hash router. The popover uses the browser top layer so
+  layout containers cannot clip it.
+- Each loaded page separately requests ordered read states from
+  `GET /api/control-plane/notification-receipts?notification_id=...` (1..50
+  distinct canonical UUIDs). The shared upstream notification schema is unchanged.
+- Explicit read/unread toggles use `PUT /api/control-plane/notification-receipts/{id}`
+  with only `{ "read": boolean }`. The server owns identity; current support is
+  one local-admin account shared across its sessions, not enterprise multi-user receipts.
+  Opening or closing the popover does not mark records read.
+- The badge counts loaded unread records, never total unread across the feed.
+  Unknown rows show `?` instead of a fabricated number. Receipt read/save failures
+  make affected states unknown and block toggles until a successful refresh;
+  a lost response may follow a committed write. Loading and saving are mutually
+  exclusive; refresh, paging and polling cannot overwrite a pending mutation.
+- Reading is not budget acknowledgement or resolution. Explicit local-admin
+  budget acknowledgement is separate (see below); resolution remains open.
+  External budget alerts have an explicit `budget.threshold_reached` subscription
+  in the Webhook editor, filters and test event selector. Existing endpoint edits
+  retain their event set, and new endpoints do not opt into budget data by default.
+  Queue/history use a budget `resource_id`, not a fabricated inference identity.
+- Local authenticated production-server acceptance on 2026-10-27 used official
+  log-store writes of synthetic usage, isolated SQLite stores and the current
+  production panel build, without mocked APIs or a shortened monitor interval.
+  Both project/application 80% and 100% alerts reached the feed, WebSocket and
+  browser; polling, refresh and budget navigation passed. IDs remained unchanged
+  after restart and another full monitor interval. Stopped-store reconciliation
+  found four alerts, four delivered outbox rows and four notifications, without
+  retries or duplicates. This does not prove real provider traffic, PostgreSQL
+  browser integration or production delivery.
+- The mobile shell stops animating the desktop sidebar offset below 768px.
+  First-frame content geometry, header control bounds and navigation were
+  checked at 375/390/767px; desktop sidebar collapse/expand still works.
+  Browser fixtures additionally cover dark mode and landscape.
 
 ### Usage ledger contract
 
-- The list, summary, and CSV accept the same project/application, session tree,
-  agent, subagent/fork and RFC3339 time filters. Time windows are `[start, end)`;
+- The list, summary, and CSV accept the same project/application,
+  `user_id`/`provider`/`model`, session tree, agent, subagent/fork and RFC3339
+  time filters. User/provider/model are exact, case-sensitive identities:
+  whitespace and special characters are preserved, not trimmed or expanded as
+  wildcards. Empty values leave that dimension unfiltered, including null users.
+  Time windows are `[start, end)`;
   the panel converts local date/time input to UTC. All routes require an
   authenticated administrator; bypassed authentication is rejected.
 - `GET /api/control-plane/usage/summary` returns `requests`,
@@ -97,8 +165,15 @@ upstream UI.
   `limit`/`offset`; an empty result returns zeroes. Synchronization or database
   failures return an error, not zero totals.
 - Summary and list requests use the same filter snapshot and reject stale
-  responses. Summary failures remain visible while successful list results are
-  retained; missing sync/audit data is not shown as successful empty data.
+  responses, including edits to user/provider/model during a request. Apply
+  (including Enter), pagination, refresh and export retain those dimensions;
+  reset clears them and the page offset. The ledger includes a user ID column.
+  Summary failures remain visible while successful list results are retained;
+  missing sync/audit data is not shown as successful empty data.
+- CSV includes `user_id`, starts at offset zero regardless of list pagination,
+  and retains the existing 100,000-row ceiling, not an unlimited-export promise.
+  Formula-leading text cells receive an apostrophe, also after whitespace/BOM;
+  numeric costs (including negative corrections) remain numeric.
 
 ### Budget panel contract
 
@@ -109,10 +184,39 @@ upstream UI.
   through JSON serialization. Failures retain the entered values.
 - `GET /api/control-plane/usage/budgets` returns current UTC day/month bounds,
   usage, limits and healthy/warning/exceeded state. Only project/application
-  filters apply; ledger date/session/agent filters must not reduce budgets.
+  filters apply; ledger user/provider/model/date/session/agent filters must not
+  reduce budgets.
 - `GET /api/control-plane/budget-alerts` lists stored 80%/100% events with
   limit/offset paging. Status and history failures are independent; failures
   are not presented as an empty success or a healthy budget.
+- Every alert includes required `acknowledged`, `acknowledged_at` and
+  `acknowledged_by`; false requires explicit null time/actor, true requires
+  a valid time and actor. There is no fallback for older Elygate payloads.
+  `PUT /api/control-plane/budget-alerts/{id}/acknowledgement` takes only a
+  required `acknowledged` boolean and returns the complete alert view.
+- Explicit acknowledge/undo controls never change notification read state,
+  budget enforcement or breach severity. Failed/ambiguous saves are unknown,
+  block another toggle, and require refresh. Refresh/paging cannot race a
+  save. Pending writes outlive scope changes and component unmounts; subsequent
+  reads wait for them before querying, including when the new scope still
+  contains the same alert. Keyboard focus remains on the action.
+- Local production-runtime/browser acceptance on 2026-10-27 used authenticated
+  isolated SQLite stores, official synthetic log writes and monitor-generated
+  alerts without API fixtures. Confirm/undo, Basic retry idempotency, a real
+  commit with a dropped response, refresh recovery, restart persistence and
+  desktop/375px rendering passed. Anonymous writes returned 401 and authenticated
+  foreign-Origin writes returned 403. This is not real-provider billing,
+  PostgreSQL-to-browser, production migration or backup/recovery acceptance.
+- `GET /api/control-plane/usage/budgets/history` provides independent closed UTC
+  day/month analysis. The table has its own range and SQL-backed pagination,
+  follows only project/application filters, and shows resource names,
+  usage/limit, unclamped utilization and state. Unknown/null-at-close policies
+  are omitted; zero-usage configured periods remain visible.
+- Historical analysis uses the final pre-close policy and current reconciled
+  ledger, not immutable first-alert payloads. It does not add project and
+  application amounts together. Loading, invalid ranges, malformed responses,
+  source errors and empty pages are distinct; stale/unmounted reads cannot
+  overwrite the active scope.
 
 ## Enterprise extension routes
 

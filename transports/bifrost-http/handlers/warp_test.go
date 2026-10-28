@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"path/filepath"
 	"sync"
@@ -14,6 +15,7 @@ import (
 	"github.com/maximhq/bifrost/core/schemas"
 	"github.com/maximhq/bifrost/framework/configstore"
 	"github.com/maximhq/bifrost/framework/configstore/tables"
+	"github.com/maximhq/bifrost/framework/encrypt"
 	"github.com/maximhq/bifrost/framework/grant"
 	"github.com/maximhq/bifrost/framework/logstore"
 	"github.com/maximhq/bifrost/framework/queryscope"
@@ -21,6 +23,7 @@ import (
 	"github.com/maximhq/bifrost/framework/vectorstore"
 	"github.com/maximhq/bifrost/framework/warp"
 	"github.com/maximhq/bifrost/plugins/governance"
+	"github.com/maximhq/bifrost/transports/v2/bifrost-http/controlplane"
 	"github.com/maximhq/bifrost/transports/v2/bifrost-http/lib"
 	"github.com/stretchr/testify/require"
 	"github.com/valyala/fasthttp"
@@ -380,6 +383,636 @@ func TestWarpTopicsJobEndpoints(t *testing.T) {
 	require.Contains(t, body, `"unassigned":1`)
 	require.Contains(t, body, `"merge_threshold":0.87`)
 	require.Contains(t, body, `"topics":[{"label":"Refund requests","size":9,"cohesion":0.91},{"label":"Password resets","size":3,"cohesion":0.84}]`)
+}
+
+func TestWarpJobAuditMatchesJobKind(t *testing.T) {
+	// 边界：两种任务；普通/重启入队；显式/隐式取消；提交后读取失败；重复取消。
+	for _, tc := range []struct {
+		name      string
+		path      string
+		kind      string
+		auditType string
+	}{
+		{name: "backfill", path: "backfill", kind: warp.BackfillJobKind, auditType: "warp_backfill"},
+		{name: "topics", path: "topics", kind: warp.TopicsJobKind, auditType: "warp_topics"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, restart := range []bool{false, true} {
+				name := "start"
+				if restart {
+					name = "restart"
+				}
+				t.Run(name, func(t *testing.T) {
+					handler, jobs, cleanup := newBackfillTestHandler(t)
+					defer cleanup()
+					r := router.New()
+					handler.RegisterRoutes(r)
+					request := warpBackfillRequest{
+						StartTime: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC),
+						EndTime:   time.Date(2026, 9, 2, 0, 0, 0, 0, time.UTC),
+						Restart:   restart,
+					}
+					body, err := sonic.Marshal(request)
+					require.NoError(t, err)
+					ctx := adminCtx(string(body))
+					ctx.Request.Header.SetMethod("POST")
+					ctx.Request.SetRequestURI("/api/warp/log-index/" + tc.path)
+					ctx.SetUserValue(schemas.BifrostContextKeyUserID, "audit-admin")
+					r.Handler(ctx)
+
+					require.Equal(t, fasthttp.StatusAccepted, ctx.Response.StatusCode(), "%s", ctx.Response.Body())
+					var status warpBackfillStatus
+					require.NoError(t, sonic.Unmarshal(ctx.Response.Body(), &status))
+					require.NotEmpty(t, status.ID)
+					created, err := jobs.GetSidekiqJob(context.Background(), status.ID)
+					require.NoError(t, err)
+					require.NotNil(t, created)
+					require.Equal(t, tc.kind, created.Kind)
+					require.Equal(t, "audit-admin", *created.CreatedByUserID)
+					change := requireSingleAuditChange(t, ctx, tc.auditType+".started")
+					require.Equal(t, tc.auditType, change.TargetType)
+					require.Equal(t, status.ID, change.TargetID)
+					require.Equal(t, status.ID, change.TargetName)
+					require.Empty(t, change.Before)
+					wantAfter, err := sonic.Marshal(map[string]any{
+						"job_id": status.ID, "start_time": request.StartTime,
+						"end_time": request.EndTime, "restart": restart,
+					})
+					require.NoError(t, err)
+					require.JSONEq(t, string(wantAfter), string(change.After))
+				})
+			}
+			for _, cancel := range []struct {
+				name       string
+				body       string
+				status     string
+				failReread bool
+			}{
+				{name: "cancel explicit", body: `{"id":"audit-job"}`, status: tables.SidekiqStatusRunning},
+				{name: "cancel implicit", status: tables.SidekiqStatusPending},
+				{name: "cancel with failed reread", body: `{"id":"audit-job"}`, status: tables.SidekiqStatusRunning, failReread: true},
+			} {
+				t.Run(cancel.name, func(t *testing.T) {
+					handler, jobs, cleanup := newBackfillTestHandler(t)
+					defer cleanup()
+					job := &tables.TableSidekiqJob{ID: "audit-job", Kind: tc.kind, Status: cancel.status, Metadata: `{}`}
+					jobs.jobs[job.ID] = job
+					jobs.inFlight = job
+					jobs.failGetAfterCancel = cancel.failReread
+					r := router.New()
+					handler.RegisterRoutes(r)
+					ctx := adminCtx(cancel.body)
+					ctx.Request.Header.SetMethod("POST")
+					ctx.Request.SetRequestURI("/api/warp/log-index/" + tc.path + "/cancel")
+					r.Handler(ctx)
+
+					require.Equal(t, fasthttp.StatusOK, ctx.Response.StatusCode(), "%s", ctx.Response.Body())
+					require.Contains(t, string(ctx.Response.Body()), `"status":"cancelled"`)
+					change := requireSingleAuditChange(t, ctx, tc.auditType+".cancelled")
+					require.Equal(t, tc.auditType, change.TargetType)
+					require.Equal(t, job.ID, change.TargetID)
+					require.Equal(t, job.ID, change.TargetName)
+					require.JSONEq(t, `{"job_id":"audit-job","status":"`+cancel.status+`"}`, string(change.Before))
+					require.JSONEq(t, `{"job_id":"audit-job","status":"cancelled"}`, string(change.After))
+
+					jobs.failGetAfterCancel = false
+					again := adminCtx(`{"id":"audit-job"}`)
+					again.Request.Header.SetMethod("POST")
+					again.Request.SetRequestURI("/api/warp/log-index/" + tc.path + "/cancel")
+					r.Handler(again)
+					require.Equal(t, fasthttp.StatusOK, again.Response.StatusCode())
+					require.Empty(t, auditChanges(t, again), "repeated cancellation must not claim another transition")
+				})
+			}
+		})
+	}
+}
+
+type warpAuditJobStore struct {
+	*fakeSidekiqStore
+	writeErr  error
+	readErr   error
+	lookupErr error
+}
+
+func (s *warpAuditJobStore) CreateSidekiqJob(ctx context.Context, job *tables.TableSidekiqJob) error {
+	if s.writeErr != nil {
+		return s.writeErr
+	}
+	return s.fakeSidekiqStore.CreateSidekiqJob(ctx, job)
+}
+
+func (s *warpAuditJobStore) CancelSidekiqJob(ctx context.Context, id string) (bool, error) {
+	if s.writeErr != nil {
+		return false, s.writeErr
+	}
+	return s.fakeSidekiqStore.CancelSidekiqJob(ctx, id)
+}
+
+func (s *warpAuditJobStore) GetSidekiqJob(ctx context.Context, id string) (*tables.TableSidekiqJob, error) {
+	if s.readErr != nil {
+		return nil, s.readErr
+	}
+	return s.fakeSidekiqStore.GetSidekiqJob(ctx, id)
+}
+
+func (s *warpAuditJobStore) GetInFlightSidekiqJobByKind(ctx context.Context, kind string) (*tables.TableSidekiqJob, error) {
+	if s.lookupErr != nil {
+		return nil, s.lookupErr
+	}
+	return s.fakeSidekiqStore.GetInFlightSidekiqJobByKind(ctx, kind)
+}
+
+func newWarpAuditTestHandler(t *testing.T) (*WarpHandler, *warpAuditJobStore) {
+	t.Helper()
+	handler, jobs, cleanup := newBackfillTestHandler(t)
+	t.Cleanup(cleanup)
+	store := &warpAuditJobStore{fakeSidekiqStore: jobs}
+	runner := sidekiq.New(store, &mockLogger{}, 1, "")
+	handler.service.RegisterBackfill(runner)
+	t.Cleanup(runner.Shutdown)
+	handler.sidekiqRunner = runner
+	handler.backfillStore = store
+	return handler, store
+}
+
+func TestWarpJobAuditStartSurvivesFailedReread(t *testing.T) {
+	for _, path := range []string{"backfill", "topics"} {
+		t.Run(path, func(t *testing.T) {
+			handler, jobs := newWarpAuditTestHandler(t)
+			jobs.readErr = errors.New("response reread failed")
+			ctx := adminCtx(`{"start_time":"2026-09-01T00:00:00Z","end_time":"2026-09-02T00:00:00Z"}`)
+			r := router.New()
+			handler.RegisterRoutes(r)
+			ctx.Request.Header.SetMethod("POST")
+			ctx.Request.SetRequestURI("/api/warp/log-index/" + path)
+			r.Handler(ctx)
+
+			require.Equal(t, fasthttp.StatusAccepted, ctx.Response.StatusCode(), "%s", ctx.Response.Body())
+			var status warpBackfillStatus
+			require.NoError(t, sonic.Unmarshal(ctx.Response.Body(), &status))
+			require.NotEmpty(t, status.ID)
+			require.Equal(t, tables.SidekiqStatusPending, status.Status)
+			require.Equal(t, 1, jobs.createdCount())
+			auditType := "warp_" + path
+			change := requireSingleAuditChange(t, ctx, auditType+".started")
+			require.Equal(t, auditType, change.TargetType)
+			require.Equal(t, status.ID, change.TargetID)
+		})
+	}
+}
+
+func TestWarpJobAuditDoesNotRecordUncommittedChanges(t *testing.T) {
+	// 边界：拒绝、非法输入、依赖不可用、读写失败、冲突、异类任务、终态及只读查询。
+	const window = `{"start_time":"2026-09-01T00:00:00Z","end_time":"2026-09-02T00:00:00Z"}`
+	for _, jobType := range []struct {
+		path string
+		kind string
+	}{
+		{path: "backfill", kind: warp.BackfillJobKind},
+		{path: "topics", kind: warp.TopicsJobKind},
+	} {
+		t.Run(jobType.path, func(t *testing.T) {
+			for _, tc := range []struct {
+				name      string
+				suffix    string
+				body      string
+				status    int
+				anonymous bool
+				configure func(*WarpHandler, *warpAuditJobStore)
+			}{
+				{name: "start forbidden", body: window, status: 403, anonymous: true},
+				{name: "start malformed", body: `{`, status: 400},
+				{name: "start without window", body: `{}`, status: 400},
+				{name: "start empty window", body: `{"start_time":"2026-09-01T00:00:00Z","end_time":"2026-09-01T00:00:00Z"}`, status: 400},
+				{name: "start inverted window", body: `{"start_time":"2026-09-02T00:00:00Z","end_time":"2026-09-01T00:00:00Z"}`, status: 400},
+				{name: "start disabled", body: window, status: 404, configure: func(h *WarpHandler, _ *warpAuditJobStore) { h.enabled = func() bool { return false } }},
+				{name: "start missing runner", body: window, status: 503, configure: func(h *WarpHandler, _ *warpAuditJobStore) { h.sidekiqRunner = nil }},
+				{name: "start missing store", body: window, status: 503, configure: func(h *WarpHandler, _ *warpAuditJobStore) { h.backfillStore = nil }},
+				{name: "start lookup failed", body: window, status: 500, configure: func(_ *WarpHandler, s *warpAuditJobStore) { s.lookupErr = errors.New("lookup failed") }},
+				{name: "start enqueue failed", body: window, status: 500, configure: func(_ *WarpHandler, s *warpAuditJobStore) { s.writeErr = errors.New("enqueue failed") }},
+				{name: "start conflict", body: window, status: 409, configure: func(_ *WarpHandler, s *warpAuditJobStore) {
+					s.inFlight = &tables.TableSidekiqJob{ID: "already-running", Kind: jobType.kind, Status: tables.SidekiqStatusRunning}
+				}},
+				{name: "cancel forbidden", suffix: "/cancel", body: `{"id":"audit-job"}`, status: 403, anonymous: true},
+				{name: "cancel malformed", suffix: "/cancel", body: `{`, status: 400},
+				{name: "cancel unknown", suffix: "/cancel", body: `{"id":"missing"}`, status: 404},
+				{name: "cancel no active job", suffix: "/cancel", status: 404},
+				{name: "cancel read failed", suffix: "/cancel", body: `{"id":"audit-job"}`, status: 500, configure: func(_ *WarpHandler, s *warpAuditJobStore) { s.readErr = errors.New("read failed") }},
+				{name: "cancel lookup failed", suffix: "/cancel", status: 500, configure: func(_ *WarpHandler, s *warpAuditJobStore) { s.lookupErr = errors.New("lookup failed") }},
+				{name: "cancel write failed", suffix: "/cancel", body: `{"id":"audit-job"}`, status: 500, configure: func(_ *WarpHandler, s *warpAuditJobStore) { s.writeErr = errors.New("cancel failed") }},
+				{name: "cancel foreign job", suffix: "/cancel", body: `{"id":"audit-job"}`, status: 404, configure: func(_ *WarpHandler, s *warpAuditJobStore) { s.jobs["audit-job"].Kind = "pricing_sync" }},
+				{name: "cancel completed", suffix: "/cancel", body: `{"id":"audit-job"}`, status: 200, configure: func(_ *WarpHandler, s *warpAuditJobStore) { s.jobs["audit-job"].Status = tables.SidekiqStatusCompleted }},
+				{name: "cancel failed", suffix: "/cancel", body: `{"id":"audit-job"}`, status: 200, configure: func(_ *WarpHandler, s *warpAuditJobStore) { s.jobs["audit-job"].Status = tables.SidekiqStatusFailed }},
+				{name: "cancel already cancelled", suffix: "/cancel", body: `{"id":"audit-job"}`, status: 200, configure: func(_ *WarpHandler, s *warpAuditJobStore) { s.jobs["audit-job"].Status = tables.SidekiqStatusCancelled }},
+				{name: "status read only", suffix: "/status", status: 200},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					handler, jobs := newWarpAuditTestHandler(t)
+					if tc.suffix == "/cancel" {
+						jobs.jobs["audit-job"] = &tables.TableSidekiqJob{ID: "audit-job", Kind: jobType.kind, Status: tables.SidekiqStatusRunning}
+					}
+					if tc.configure != nil {
+						tc.configure(handler, jobs)
+					}
+					r := router.New()
+					handler.RegisterRoutes(r)
+					ctx := adminCtx(tc.body)
+					if tc.anonymous {
+						ctx.ResetUserValues()
+					}
+					ctx.Request.Header.SetMethod("POST")
+					if tc.suffix == "/status" {
+						ctx.Request.Header.SetMethod("GET")
+					}
+					ctx.Request.SetRequestURI("/api/warp/log-index/" + jobType.path + tc.suffix)
+					r.Handler(ctx)
+
+					require.Equal(t, tc.status, ctx.Response.StatusCode(), "%s", ctx.Response.Body())
+					require.Empty(t, auditChanges(t, ctx), "a rejected write, terminal no-op or read cannot claim a mutation")
+					require.Zero(t, jobs.createdCount())
+					require.False(t, jobs.cancelled)
+				})
+			}
+		})
+	}
+}
+
+func TestWarpJobAuditPersistsThroughManagementRoutes(t *testing.T) {
+	const password = "Warp-Audit-Route-Password-123!"
+	hash, err := encrypt.Hash(password)
+	require.NoError(t, err)
+	for _, path := range []string{"backfill", "topics"} {
+		t.Run(path, func(t *testing.T) {
+			SetLogger(&mockLogger{})
+			ctx := context.Background()
+			storeConfig := &configstore.Config{
+				Enabled: true, Type: configstore.ConfigStoreTypeSQLite,
+				Config: &configstore.SQLiteConfig{Path: filepath.Join(t.TempDir(), "warp-audit.db")},
+			}
+			cs, err := configstore.NewConfigStore(ctx, storeConfig, &mockLogger{})
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, cs.Close(ctx)) })
+			store, err := controlplane.NewStore(ctx, cs)
+			require.NoError(t, err)
+			audit := controlplane.NewHandler(store, nil)
+			auth := &AuthMiddleware{}
+			auth.UpdateAuthConfig(&configstore.AuthConfig{
+				IsEnabled: true, AdminUserName: schemas.NewSecretVar("warp-admin"), AdminPassword: schemas.NewSecretVar(hash),
+			})
+			handler, _, cleanup := newBackfillTestHandler(t)
+			defer cleanup()
+			r := router.New()
+			handler.RegisterRoutes(r, auth.APIMiddleware(), audit.ManagementAuditMiddleware(&mockLogger{}))
+			audit.RegisterRoutes(r, auth.APIMiddleware())
+			authorization := "Basic " + base64.StdEncoding.EncodeToString([]byte("warp-admin:"+password))
+			call := func(method, route, body, credential string) *fasthttp.RequestCtx {
+				request := requestCtx()
+				request.Request.Header.SetMethod(method)
+				request.Request.SetRequestURI(route)
+				request.Request.Header.SetContentType("application/json")
+				request.Request.Header.Set("Authorization", credential)
+				request.Request.Header.Set("X-User-ID", "forged-actor")
+				request.Request.SetBodyString(body)
+				r.Handler(request)
+				return request
+			}
+			route := "/api/warp/log-index/" + path
+			body := `{"start_time":"2026-09-01T00:00:00Z","end_time":"2026-09-02T00:00:00Z"}`
+			denied := call("POST", route, body, "")
+			require.Equal(t, fasthttp.StatusUnauthorized, denied.Response.StatusCode())
+			started := call("POST", route, body, authorization)
+			require.Equal(t, fasthttp.StatusAccepted, started.Response.StatusCode(), "%s", started.Response.Body())
+			require.Empty(t, started.Response.Header.Peek(lib.HeaderAuditStatus))
+			var status warpBackfillStatus
+			require.NoError(t, sonic.Unmarshal(started.Response.Body(), &status))
+			require.NotEmpty(t, status.ID)
+			cancelBody, err := sonic.Marshal(warpBackfillCancelRequest{ID: status.ID})
+			require.NoError(t, err)
+			for range 2 {
+				cancelled := call("POST", route+"/cancel", string(cancelBody), authorization)
+				require.Equal(t, fasthttp.StatusOK, cancelled.Response.StatusCode(), "%s", cancelled.Response.Body())
+				require.Empty(t, cancelled.Response.Header.Peek(lib.HeaderAuditStatus))
+			}
+			feed := call("GET", "/api/control-plane/audit-events", "", authorization)
+			require.Equal(t, fasthttp.StatusOK, feed.Response.StatusCode(), "%s", feed.Response.Body())
+			var events struct {
+				Data []controlplane.AuditEvent `json:"data"`
+			}
+			require.NoError(t, sonic.Unmarshal(feed.Response.Body(), &events))
+			require.Len(t, events.Data, 2, "anonymous rejection, repeated cancel and feed reads must not add events")
+			auditType := "warp_" + path
+			actions := make([]string, 0, 2)
+			for _, event := range events.Data {
+				actions = append(actions, event.Action)
+				require.Equal(t, auditType, event.ResourceType)
+				require.Equal(t, status.ID, event.ResourceID)
+				require.Equal(t, "local-admin:warp-admin", event.ActorID)
+			}
+			require.ElementsMatch(t, []string{auditType + ".started", auditType + ".cancelled"}, actions)
+			require.NoError(t, cs.Close(ctx))
+			cs, err = configstore.NewConfigStore(ctx, storeConfig, &mockLogger{})
+			require.NoError(t, err)
+			reopened, err := controlplane.NewStore(ctx, cs)
+			require.NoError(t, err)
+			reloaded, err := reopened.ListAudit(ctx, 10)
+			require.NoError(t, err)
+			require.Equal(t, events.Data, reloaded, "correct job identities must survive SQLite reopen")
+		})
+	}
+}
+
+func BenchmarkWarpJobAuditRecord(b *testing.B) {
+	at := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	b.Run("fixed_identity_baseline", func(b *testing.B) {
+		ctx := requestCtx()
+		b.ReportAllocs()
+		for b.Loop() {
+			ctx.ResetUserValues()
+			lib.RecordAuditChange(ctx, "warp_backfill.started", "warp_backfill", "job-1", "job-1", nil,
+				map[string]any{"job_id": "job-1", "start_time": at, "end_time": at.Add(time.Hour), "restart": false})
+		}
+	})
+	b.Run("job_spec_identity", func(b *testing.B) {
+		ctx := requestCtx()
+		spec := warpJobSpec{auditType: "warp_backfill"}
+		b.ReportAllocs()
+		for b.Loop() {
+			ctx.ResetUserValues()
+			lib.RecordAuditChange(ctx, spec.auditType+".started", spec.auditType, "job-1", "job-1", nil,
+				map[string]any{"job_id": "job-1", "start_time": at, "end_time": at.Add(time.Hour), "restart": false})
+		}
+	})
+}
+
+type warpConversationAuditStore struct {
+	logstore.LogStore
+	deleteErr error
+}
+
+func (s *warpConversationAuditStore) DeleteWarpConversation(ctx context.Context, ownerID, id string) error {
+	if s.deleteErr != nil {
+		return s.deleteErr
+	}
+	return s.LogStore.DeleteWarpConversation(ctx, ownerID, id)
+}
+
+func newWarpConversationAuditHandler(t *testing.T) (*WarpHandler, *warpConversationAuditStore) {
+	t.Helper()
+	store := &warpConversationAuditStore{LogStore: handlerTopicStore(t)}
+	service := warp.NewService(nil, warp.WithConversationStore(store))
+	t.Cleanup(service.Shutdown)
+	return &WarpHandler{service: service}, store
+}
+
+func seedWarpAuditConversation(t *testing.T, store logstore.WarpConversationStore, ownerID, id string) {
+	t.Helper()
+	ctx := context.Background()
+	require.NoError(t, store.CreateWarpConversation(ctx, &logstore.WarpConversation{
+		ID: id, OwnerID: ownerID, Title: "private-conversation-title",
+	}))
+	require.NoError(t, store.AppendWarpMessages(ctx, ownerID, id, []logstore.WarpMessage{
+		{ID: id + "-user", Role: "user", Content: "private-user-prompt"},
+		{
+			ID: id + "-answer", Role: "assistant", Content: "private-assistant-answer",
+			ToolCallsJSON: `[{"name":"private-tool","arguments":{"token":"private-tool-token"}}]`,
+			QuestionJSON:  `{"prompt":"private-clarification"}`, Error: "private-model-error",
+		},
+	}))
+}
+
+func TestWarpConversationDeleteRecordsOnlyCommittedIdentity(t *testing.T) {
+	// 边界：本人/共享/不透明用户；缺失/异主/重放；存储不可用/失败；伪造归属字段。
+	for _, tc := range []struct {
+		name        string
+		userID      string
+		ownerID     string
+		requestID   string
+		unavailable bool
+		deleteErr   error
+		status      int
+		wantEvent   bool
+	}{
+		{name: "owner", userID: "user-1", ownerID: schemas.WarpOwnerID("user-1"), requestID: "thread-1", status: 204, wantEvent: true},
+		{name: "shared", ownerID: schemas.WarpOwnerID(""), requestID: "thread-1", status: 204, wantEvent: true},
+		{name: "opaque subject", userID: " user-1 ", ownerID: schemas.WarpOwnerID(" user-1 "), requestID: "thread-1", status: 204, wantEvent: true},
+		{name: "foreign owner", userID: "user-1", ownerID: schemas.WarpOwnerID("user-2"), requestID: "thread-1", status: 404},
+		{name: "no shared owner fallback", userID: "user-1", ownerID: schemas.WarpOwnerID(""), requestID: "thread-1", status: 404},
+		{name: "opaque subject is not trimmed", userID: "user-1", ownerID: schemas.WarpOwnerID(" user-1 "), requestID: "thread-1", status: 404},
+		{name: "missing thread", userID: "user-1", ownerID: schemas.WarpOwnerID("user-1"), requestID: "missing", status: 404},
+		{name: "missing ID", userID: "user-1", ownerID: schemas.WarpOwnerID("user-1"), status: 400},
+		{name: "unavailable", ownerID: schemas.WarpOwnerID(""), requestID: "thread-1", unavailable: true, status: 503},
+		{name: "failed delete", ownerID: schemas.WarpOwnerID(""), requestID: "thread-1", deleteErr: errors.New("delete failed"), status: 500},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			SetLogger(&mockLogger{})
+			handler, store := newWarpConversationAuditHandler(t)
+			seedWarpAuditConversation(t, store, tc.ownerID, "thread-1")
+			store.deleteErr = tc.deleteErr
+			if tc.unavailable {
+				handler.service = warp.NewService(nil)
+				t.Cleanup(handler.service.Shutdown)
+			}
+			ctx := requestCtx()
+			ctx.SetUserValue("id", tc.requestID)
+			ctx.SetUserValue(schemas.BifrostContextKeyUserID, tc.userID)
+			ctx.Request.Header.Set("X-User-ID", "user-2")
+			ctx.QueryArgs().Set("owner_id", tc.ownerID)
+			ctx.Request.SetBodyString(`{"owner_id":"` + tc.ownerID + `"}`)
+			handler.deleteConversation(ctx)
+			require.Equal(t, tc.status, ctx.Response.StatusCode(), "%s", ctx.Response.Body())
+
+			if !tc.wantEvent {
+				require.Empty(t, auditChanges(t, ctx))
+				retained, err := store.GetWarpConversation(context.Background(), tc.ownerID, "thread-1")
+				require.NoError(t, err)
+				require.Len(t, retained.Messages, 2, "rejected or failed deletion must preserve the transcript")
+				require.NotContains(t, string(ctx.Response.Body()), "private-")
+				return
+			}
+			change := requireSingleAuditChange(t, ctx, "warp_conversation.deleted")
+			require.Equal(t, "warp_conversation", change.TargetType)
+			require.Equal(t, "thread-1", change.TargetID)
+			require.Empty(t, change.TargetName)
+			require.JSONEq(t, `{"id":"thread-1"}`, string(change.Before))
+			require.Empty(t, change.After)
+			for _, secret := range []string{"private-conversation-title", "private-user-prompt", "private-assistant-answer", "private-tool", "private-tool-token", "private-clarification", "private-model-error", tc.ownerID} {
+				requireNoSecret(t, change, secret)
+			}
+			_, err := store.GetWarpConversation(context.Background(), tc.ownerID, "thread-1")
+			require.ErrorIs(t, err, logstore.ErrWarpConversationNotFound)
+			counts, err := store.CountWarpMessages(context.Background(), []string{"thread-1"})
+			require.NoError(t, err)
+			require.Zero(t, counts["thread-1"], "successful deletion must remove the transcript as well")
+
+			again := requestCtx()
+			again.SetUserValue("id", "thread-1")
+			again.SetUserValue(schemas.BifrostContextKeyUserID, tc.userID)
+			handler.deleteConversation(again)
+			require.Equal(t, fasthttp.StatusNotFound, again.Response.StatusCode())
+			require.Empty(t, auditChanges(t, again), "a repeated deletion must not record another event")
+		})
+	}
+}
+
+func TestWarpConversationReadsAndDisabledDeletesDoNotAudit(t *testing.T) {
+	handler, store := newWarpConversationAuditHandler(t)
+	seedWarpAuditConversation(t, store, schemas.WarpOwnerID(""), "thread-1")
+	r := router.New()
+	handler.RegisterRoutes(r)
+	for _, route := range []string{"/api/warp/conversations", "/api/warp/conversations/thread-1"} {
+		ctx := requestCtx()
+		ctx.Request.Header.SetMethod("GET")
+		ctx.Request.SetRequestURI(route)
+		r.Handler(ctx)
+		require.Equal(t, fasthttp.StatusOK, ctx.Response.StatusCode(), "%s", ctx.Response.Body())
+		require.Empty(t, auditChanges(t, ctx))
+	}
+	handler.enabled = func() bool { return false }
+	disabled := requestCtx()
+	disabled.Request.Header.SetMethod("DELETE")
+	disabled.Request.SetRequestURI("/api/warp/conversations/thread-1")
+	r.Handler(disabled)
+	require.Equal(t, fasthttp.StatusNotFound, disabled.Response.StatusCode())
+	require.Empty(t, auditChanges(t, disabled))
+	_, err := store.GetWarpConversation(context.Background(), schemas.WarpOwnerID(""), "thread-1")
+	require.NoError(t, err)
+}
+
+func TestWarpConversationDeleteAuditThroughManagementRoutes(t *testing.T) {
+	const password = "Warp-History-Route-Password-123!"
+	hash, err := encrypt.Hash(password)
+	require.NoError(t, err)
+	// 边界：Basic 管理员、未启用认证的共享归属、删除提交后审计存储失败。
+	for _, tc := range []struct {
+		name        string
+		authEnabled bool
+		failAudit   bool
+		wantActor   string
+	}{
+		{name: "basic", authEnabled: true, wantActor: "local-admin:history-admin"},
+		{name: "auth disabled", wantActor: "anonymous"},
+		{name: "audit write failed", authEnabled: true, failAudit: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			SetLogger(&mockLogger{})
+			ctx := context.Background()
+			storeConfig := &configstore.Config{
+				Enabled: true, Type: configstore.ConfigStoreTypeSQLite,
+				Config: &configstore.SQLiteConfig{Path: filepath.Join(t.TempDir(), "history-audit.db")},
+			}
+			cs, err := configstore.NewConfigStore(ctx, storeConfig, &mockLogger{})
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, cs.Close(ctx)) })
+			auditStore, err := controlplane.NewStore(ctx, cs)
+			require.NoError(t, err)
+			audit := controlplane.NewHandler(auditStore, nil)
+			auth := &AuthMiddleware{}
+			auth.UpdateAuthConfig(&configstore.AuthConfig{
+				IsEnabled: tc.authEnabled, AdminUserName: schemas.NewSecretVar("history-admin"), AdminPassword: schemas.NewSecretVar(hash),
+			})
+			handler, history := newWarpConversationAuditHandler(t)
+			seedWarpAuditConversation(t, history, schemas.WarpOwnerID(""), "shared-thread")
+			seedWarpAuditConversation(t, history, schemas.WarpOwnerID("foreign-owner"), "foreign-thread")
+			r := router.New()
+			handler.RegisterRoutes(r, auth.APIMiddleware(), audit.ManagementAuditMiddleware(&mockLogger{}))
+			audit.RegisterRoutes(r, auth.APIMiddleware())
+			authorization := ""
+			if tc.authEnabled {
+				authorization = "Basic " + base64.StdEncoding.EncodeToString([]byte("history-admin:"+password))
+				denied := requestCtx()
+				denied.Request.Header.SetMethod("DELETE")
+				denied.Request.SetRequestURI("/api/warp/conversations/shared-thread")
+				r.Handler(denied)
+				require.Equal(t, fasthttp.StatusUnauthorized, denied.Response.StatusCode())
+			}
+			call := func(method, route string) *fasthttp.RequestCtx {
+				request := requestCtx()
+				request.Request.Header.SetMethod(method)
+				request.Request.SetRequestURI(route)
+				request.Request.Header.Set("Authorization", authorization)
+				request.Request.Header.Set("X-User-ID", "foreign-owner")
+				request.QueryArgs().Set("owner_id", schemas.WarpOwnerID("foreign-owner"))
+				if method == "DELETE" {
+					request.Request.SetBodyString(`{"owner_id":"user:foreign-owner","id":"foreign-thread"}`)
+				}
+				r.Handler(request)
+				return request
+			}
+			foreign := call("DELETE", "/api/warp/conversations/foreign-thread")
+			missing := call("DELETE", "/api/warp/conversations/missing-thread")
+			require.Equal(t, fasthttp.StatusNotFound, foreign.Response.StatusCode())
+			require.Equal(t, fasthttp.StatusNotFound, missing.Response.StatusCode())
+			require.Equal(t, string(missing.Response.Body()), string(foreign.Response.Body()), "foreign existence must not be disclosed")
+			events, err := auditStore.ListAudit(ctx, 10)
+			require.NoError(t, err)
+			require.Empty(t, events)
+			if tc.failAudit {
+				require.NoError(t, cs.DB().Migrator().DropTable(&controlplane.AuditEvent{}))
+			}
+			deleted := call("DELETE", "/api/warp/conversations/shared-thread")
+			require.Equal(t, fasthttp.StatusNoContent, deleted.Response.StatusCode(), "%s", deleted.Response.Body())
+			require.Empty(t, deleted.Response.Body())
+			_, err = history.GetWarpConversation(ctx, schemas.WarpOwnerID(""), "shared-thread")
+			require.ErrorIs(t, err, logstore.ErrWarpConversationNotFound)
+			counts, err := history.CountWarpMessages(ctx, []string{"shared-thread"})
+			require.NoError(t, err)
+			require.Zero(t, counts["shared-thread"])
+			retained, err := history.GetWarpConversation(ctx, schemas.WarpOwnerID("foreign-owner"), "foreign-thread")
+			require.NoError(t, err)
+			require.Len(t, retained.Messages, 2)
+			repeated := call("DELETE", "/api/warp/conversations/shared-thread")
+			require.Equal(t, fasthttp.StatusNotFound, repeated.Response.StatusCode())
+			require.Empty(t, repeated.Response.Header.Peek(lib.HeaderAuditStatus))
+			if tc.failAudit {
+				require.Equal(t, "failed", string(deleted.Response.Header.Peek(lib.HeaderAuditStatus)))
+				requireSingleAuditChange(t, deleted, "warp_conversation.deleted")
+				_, err := auditStore.ListAudit(ctx, 10)
+				require.Error(t, err, "failure must remain observable, not claim successful audit persistence")
+				return
+			}
+			require.Empty(t, deleted.Response.Header.Peek(lib.HeaderAuditStatus))
+			persisted, err := auditStore.ListAudit(ctx, 10)
+			require.NoError(t, err)
+			require.Len(t, persisted, 1)
+			event := persisted[0]
+			require.Equal(t, tc.wantActor, event.ActorID)
+			require.Equal(t, "warp_conversation.deleted", event.Action)
+			require.Equal(t, "warp_conversation", event.ResourceType)
+			require.Equal(t, "shared-thread", event.ResourceID)
+			feed := call("GET", "/api/control-plane/audit-events")
+			if tc.authEnabled {
+				require.Equal(t, fasthttp.StatusOK, feed.Response.StatusCode(), "%s", feed.Response.Body())
+				var response struct {
+					Data []controlplane.AuditEvent `json:"data"`
+				}
+				require.NoError(t, sonic.Unmarshal(feed.Response.Body(), &response))
+				require.Equal(t, persisted, response.Data)
+			} else {
+				require.Equal(t, fasthttp.StatusForbidden, feed.Response.StatusCode(), "anonymous mutation auditing must not open the admin feed")
+			}
+			require.NotContains(t, string(feed.Response.Body()), "private-")
+			require.NotContains(t, string(feed.Response.Body()), password)
+			require.NoError(t, cs.Close(ctx))
+			cs, err = configstore.NewConfigStore(ctx, storeConfig, &mockLogger{})
+			require.NoError(t, err)
+			reopened, err := controlplane.NewStore(ctx, cs)
+			require.NoError(t, err)
+			reloaded, err := reopened.ListAudit(ctx, 10)
+			require.NoError(t, err)
+			require.Equal(t, persisted, reloaded, "the compact deletion event must survive SQLite reopen")
+		})
+	}
+}
+
+func BenchmarkWarpConversationDeleteAuditRecord(b *testing.B) {
+	ctx := requestCtx()
+	const id = "11111111-2222-4333-8444-555555555555"
+	b.ReportAllocs()
+	for b.Loop() {
+		ctx.ResetUserValues()
+		lib.RecordAuditChange(ctx, "warp_conversation.deleted", "warp_conversation", id, "", map[string]any{"id": id}, nil)
+	}
 }
 
 // A topics run is refused before anything is queued when the request cannot

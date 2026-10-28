@@ -26,9 +26,10 @@ type Store struct {
 const employeeMigrationLockKey = 1000001
 
 var (
-	ErrAssignmentImmutable = errors.New("employee virtual key assignment is immutable")
-	ErrImportBatchConflict = errors.New("employee import batch payload conflict")
-	ErrEmployeeAudit       = errors.New("employee audit persistence failed")
+	ErrAssignmentImmutable        = errors.New("employee virtual key assignment is immutable")
+	ErrImportBatchConflict        = errors.New("employee import batch payload conflict")
+	ErrEmployeeAudit              = errors.New("employee audit persistence failed")
+	ErrEmployeeCredentialsChanged = errors.New("employee credentials or session changed")
 )
 
 const (
@@ -449,17 +450,59 @@ func (s *Store) ResetPassword(ctx context.Context, employeeID, password string) 
 	})
 }
 
-func (s *Store) ChangePassword(ctx context.Context, employeeID, password string) error {
-	hash, err := encrypt.Hash(password)
+type PasswordChange struct {
+	EmployeeID           string
+	VerifiedPasswordHash string
+	NewPassword          string
+	KeepTokenHash        string
+}
+
+func (s *Store) ChangePassword(ctx context.Context, change PasswordChange) error {
+	hash, err := encrypt.Hash(change.NewPassword)
 	if err != nil {
 		return err
 	}
-	return s.db(ctx).Model(&Employee{}).Where("id = ?", employeeID).Updates(map[string]any{
-		"password_hash":        hash,
-		"must_change_password": false,
-		"failed_login_count":   0,
-		"locked_until":         nil,
-	}).Error
+	return s.db(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := updateVerifiedPassword(tx, change, hash); err != nil {
+			return err
+		}
+		var session EmployeeSession
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&session,
+			"employee_id = ? AND token_hash = ?", change.EmployeeID, change.KeepTokenHash).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrEmployeeCredentialsChanged
+		}
+		if err != nil {
+			return err
+		}
+		if !session.ExpiresAt.After(time.Now().UTC()) {
+			return ErrEmployeeCredentialsChanged
+		}
+		if err := tx.Where("employee_id = ? AND token_hash <> ?", change.EmployeeID, change.KeepTokenHash).Delete(&EmployeeSession{}).Error; err != nil {
+			return err
+		}
+		return s.appendAudit(tx, EmployeeAuditEvent{
+			Action: "employee.password_changed", Resource: "employee", ResourceID: change.EmployeeID,
+		})
+	})
+}
+
+func updateVerifiedPassword(tx *gorm.DB, change PasswordChange, hash string) error {
+	// The conditional write locks before reading sessions on both backends and
+	// rejects password verification made stale by a reset, disable or change.
+	update := tx.Model(&Employee{}).
+		Where("id = ? AND password_hash = ? AND is_active = ?", change.EmployeeID, change.VerifiedPasswordHash, true).
+		Updates(map[string]any{
+			"password_hash": hash, "must_change_password": false,
+			"failed_login_count": 0, "locked_until": nil,
+		})
+	if update.Error != nil {
+		return update.Error
+	}
+	if update.RowsAffected != 1 {
+		return ErrEmployeeCredentialsChanged
+	}
+	return nil
 }
 
 func (s *Store) RecordFailedLogin(ctx context.Context, employee *Employee) error {
@@ -487,13 +530,89 @@ func (s *Store) RecordFailedLogin(ctx context.Context, employee *Employee) error
 	return nil
 }
 
-func (s *Store) RecordSuccessfulLogin(ctx context.Context, employeeID string) error {
-	now := time.Now()
-	return s.db(ctx).Model(&Employee{}).Where("id = ?", employeeID).Updates(map[string]any{
-		"last_login_at":      now,
-		"failed_login_count": 0,
-		"locked_until":       nil,
-	}).Error
+type SessionLogin struct {
+	EmployeeID           string
+	VerifiedPasswordHash string
+	TokenHash            string
+	CSRFTokenHash        string
+	ExpiresAt            time.Time
+}
+
+func (s *Store) LoginSession(ctx context.Context, login SessionLogin) error {
+	return s.db(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := admitVerifiedLogin(tx, login); err != nil {
+			return err
+		}
+		session := EmployeeSession{
+			ID: uuid.NewString(), EmployeeID: login.EmployeeID, TokenHash: login.TokenHash,
+			CSRFTokenHash: login.CSRFTokenHash, ExpiresAt: login.ExpiresAt,
+		}
+		if err := tx.Create(&session).Error; err != nil {
+			return err
+		}
+		return s.appendAudit(tx, EmployeeAuditEvent{
+			Action: "employee_session.created", Resource: "employee_session", ResourceID: session.ID,
+			AuditAuthMethod: "employee-password",
+		})
+	})
+}
+
+func admitVerifiedLogin(tx *gorm.DB, login SessionLogin) error {
+	// Lock the employee before creating a session so a reset/change/disable
+	// either rejects these credentials or revokes the newly committed session.
+	update := tx.Model(&Employee{}).
+		Where("id = ? AND password_hash = ? AND is_active = ?", login.EmployeeID, login.VerifiedPasswordHash, true).
+		UpdateColumn("id", gorm.Expr("id"))
+	if update.Error != nil {
+		return update.Error
+	}
+	if update.RowsAffected != 1 {
+		return ErrEmployeeCredentialsChanged
+	}
+	return recordAdmittedLogin(tx, login.EmployeeID)
+}
+
+func recordAdmittedLogin(tx *gorm.DB, employeeID string) error {
+	var employee Employee
+	if err := tx.Select("locked_until").First(&employee, "id = ?", employeeID).Error; err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	// SQLite's text ordering does not compare instants with different offsets.
+	// The preceding employee write lock makes this typed check race-free.
+	if employee.LockedUntil != nil && employee.LockedUntil.After(now) {
+		return ErrEmployeeCredentialsChanged
+	}
+	return tx.Model(&Employee{}).Where("id = ?", employeeID).
+		Updates(map[string]any{"last_login_at": now, "failed_login_count": 0, "locked_until": nil}).Error
+}
+
+func (s *Store) LogoutSession(ctx context.Context, snapshot EmployeeSession) error {
+	return s.db(ctx).Transaction(func(tx *gorm.DB) error {
+		// Match password mutations' employee -> session lock order without
+		// changing the employee's UpdatedAt during explicit logout.
+		if err := tx.Model(&Employee{}).Where("id = ?", snapshot.EmployeeID).
+			UpdateColumn("id", gorm.Expr("id")).Error; err != nil {
+			return err
+		}
+		var session EmployeeSession
+		match := "id = ? AND employee_id = ? AND token_hash = ?"
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			First(&session, match, snapshot.ID, snapshot.EmployeeID, snapshot.TokenHash).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if err := tx.Where(match, snapshot.ID, snapshot.EmployeeID, snapshot.TokenHash).Delete(&EmployeeSession{}).Error; err != nil {
+			return err
+		}
+		return s.appendAudit(tx, EmployeeAuditEvent{
+			Action: "employee_session.deleted", Resource: "employee_session", ResourceID: session.ID,
+			AuditAuthMethod: "employee-session",
+		})
+	})
 }
 
 func (s *Store) CreateSession(ctx context.Context, employeeID, tokenHash, csrfHash string, expiresAt time.Time) error {
@@ -521,8 +640,4 @@ func (s *Store) Session(ctx context.Context, tokenHash string) (*EmployeeSession
 
 func (s *Store) DeleteSession(ctx context.Context, tokenHash string) error {
 	return s.db(ctx).Where("token_hash = ?", tokenHash).Delete(&EmployeeSession{}).Error
-}
-
-func (s *Store) DeleteOtherSessions(ctx context.Context, employeeID, keepTokenHash string) error {
-	return s.db(ctx).Where("employee_id = ? AND token_hash <> ?", employeeID, keepTokenHash).Delete(&EmployeeSession{}).Error
 }

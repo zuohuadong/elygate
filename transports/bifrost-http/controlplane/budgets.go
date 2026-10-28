@@ -69,6 +69,9 @@ func (s *Store) SetBudgetLimits(ctx context.Context, scope BudgetScope, limits B
 		if updated.RowsAffected != 1 {
 			return gorm.ErrRecordNotFound
 		}
+		if err := appendBudgetPolicyRevision(tx, budgetScope{BudgetScope: scope, Limits: limits}, time.Now().UTC()); err != nil {
+			return err
+		}
 		return appendAuditTx(tx, actor, scope.Type+".budget_update", scope.Type, scope.ID)
 	})
 }
@@ -241,7 +244,9 @@ func (s *Store) EvaluateBudgetAlerts(ctx context.Context, now time.Time) (int64,
 			}
 			created += count
 		}
-		return nil
+		historical, err := reader.evaluateClosedBudgetPeriods(ctx, now)
+		created += historical
+		return err
 	})
 	if err != nil {
 		return 0, err
@@ -262,25 +267,51 @@ func createBudgetAlerts(tx *gorm.DB, status BudgetStatus, now time.Time) (int64,
 		if inserted.Error != nil {
 			return 0, inserted.Error
 		}
+		if inserted.RowsAffected == 1 {
+			if err := enqueueBudgetNotification(tx, alert); err != nil {
+				return 0, err
+			}
+			if err := enqueueBudgetWebhooks(tx, alert); err != nil {
+				return 0, err
+			}
+		}
 		created += inserted.RowsAffected
 	}
 	return created, nil
 }
 
-func (s *Store) ListBudgetAlerts(ctx context.Context, query UsageQuery) ([]BudgetAlert, error) {
-	var alerts []BudgetAlert
-	db := s.db(ctx).Order("triggered_at DESC, id DESC")
+func enqueueBudgetNotification(tx *gorm.DB, alert BudgetAlert) error {
+	now := alert.TriggeredAt.UTC()
+	outbox := BudgetNotificationOutbox{
+		ID:      uuid.NewSHA1(uuid.NameSpaceURL, []byte("elygate:budget-notification:"+alert.ID)).String(),
+		AlertID: alert.ID, ScopeType: alert.ScopeType, ScopeID: alert.ScopeID,
+		Window: alert.Window, PeriodStart: alert.PeriodStart, Threshold: alert.Threshold,
+		Usage: alert.Usage, Limit: alert.Limit, Status: BudgetNotificationPending,
+		NextAttemptAt: now, CreatedAt: now, UpdatedAt: now,
+	}
+	return tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "alert_id"}}, DoNothing: true}).Create(&outbox).Error
+}
+
+func (s *Store) ListBudgetAlerts(ctx context.Context, query UsageQuery) ([]BudgetAlertView, error) {
+	alerts := []BudgetAlertView{}
+	db := s.db(ctx).Table("elygate_control_budget_alerts AS a").
+		Select("a.*, k.acknowledged_at, k.acknowledged_by").
+		Joins("LEFT JOIN " + budgetAcknowledgementTable + " AS k ON k.alert_id = a.id").
+		Order("a.triggered_at DESC, a.id DESC")
 	if query.ApplicationID != "" {
-		db = db.Where("scope_type = ? AND scope_id = ?", "application", query.ApplicationID)
+		db = db.Where("a.scope_type = ? AND a.scope_id = ?", "application", query.ApplicationID)
 	}
 	if query.ProjectID != "" {
 		appIDs := s.db(ctx).Model(&Application{}).Select("id").Where("project_id = ?", query.ProjectID)
-		db = db.Where("(scope_type = ? AND scope_id = ?) OR (scope_type = ? AND scope_id IN (?))", "project", query.ProjectID, "application", appIDs)
+		db = db.Where("(a.scope_type = ? AND a.scope_id = ?) OR (a.scope_type = ? AND a.scope_id IN (?))", "project", query.ProjectID, "application", appIDs)
 	}
 	limit := query.Limit
 	if limit <= 0 || limit > 1000 {
 		limit = 100
 	}
-	err := db.Limit(limit).Offset(max(0, query.Offset)).Find(&alerts).Error
+	err := db.Limit(limit).Offset(max(0, query.Offset)).Scan(&alerts).Error
+	for index := range alerts {
+		alerts[index].normalizeAcknowledgement()
+	}
 	return alerts, err
 }

@@ -944,6 +944,133 @@ func TestHTTPClientFactoryClientsAreLive(t *testing.T) {
 	_ = dialer
 }
 
+func TestHTTPClientFactoryCloseIdleConnectionsWithUnusedClients(t *testing.T) {
+	for _, state := range []string{"unused", "mixed", "after proxy reset"} {
+		t.Run(state, func(t *testing.T) {
+			factory := NewHTTPClientFactory(nil, noopTestLogger{})
+			factory.GetHTTPClient(ClientPurposeAPI)
+			factory.HTTPClientWithTLS(ClientPurposeSCIM, factoryMatrixTLS)
+			if state != "unused" {
+				factory.currentHTTPClient(httpClientKey{purpose: ClientPurposeAPI})
+			}
+			if state == "after proxy reset" {
+				factory.UpdateProxyConfig(nil)
+			}
+			innerCount := len(factory.httpClients)
+			done := make(chan struct{})
+			go func() {
+				factory.CloseIdleConnections()
+				close(done)
+			}()
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
+				t.Fatal("idle cleanup deadlocked on an unused live client")
+			}
+			require.Len(t, factory.httpClients, innerCount, "cleanup must not instantiate unused inner clients")
+		})
+	}
+}
+
+type idleCloseProbe struct {
+	onClose func()
+}
+
+func (p idleCloseProbe) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, fmt.Errorf("idle close probe does not serve requests")
+}
+
+func (p idleCloseProbe) CloseIdleConnections() { p.onClose() }
+
+func TestHTTPClientFactoryCloseIdleConnectionsReentrant(t *testing.T) {
+	var absent *HTTPClientFactory
+	absent.CloseIdleConnections()
+	factory := NewHTTPClientFactory(nil, noopTestLogger{})
+	factory.CloseIdleConnections()
+	factory.GetHTTPClient(ClientPurposeAPI)
+	factory.GetHTTPClient(ClientPurposeSCIM)
+	var closed atomic.Int32
+	for _, purpose := range []ClientPurpose{ClientPurposeAPI, ClientPurposeSCIM} {
+		factory.httpClients[httpClientKey{purpose: purpose}] = &http.Client{
+			Transport: idleCloseProbe{onClose: func() {
+				factory.mu.Lock()
+				closed.Add(1)
+				factory.mu.Unlock()
+			}},
+		}
+	}
+	done := make(chan struct{})
+	go func() {
+		factory.CloseIdleConnections()
+		factory.CloseIdleConnections()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("idle cleanup invoked a reentrant transport while holding the factory lock")
+	}
+	require.Equal(t, int32(4), closed.Load(), "each cached transport closes once per invocation")
+}
+
+func TestHTTPClientFactoryCloseIdleConnectionsReleasesSockets(t *testing.T) {
+	var closed atomic.Int32
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	server.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateClosed {
+			closed.Add(1)
+		}
+	}
+	server.Start()
+	t.Cleanup(server.Close)
+	factory := NewHTTPClientFactory(nil, noopTestLogger{})
+	t.Cleanup(factory.CloseIdleConnections)
+	client := factory.GetHTTPClient(ClientPurposeAPI)
+	for range 2 {
+		response, err := client.Get(server.URL)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusNoContent, response.StatusCode)
+		require.NoError(t, response.Body.Close())
+		factory.CloseIdleConnections()
+	}
+	require.Eventually(t, func() bool { return closed.Load() == 2 }, 2*time.Second, time.Millisecond)
+	require.Same(t, client, factory.GetHTTPClient(ClientPurposeAPI))
+}
+
+func TestHTTPClientFactoryCloseIdleConnectionsConcurrentUpdates(t *testing.T) {
+	factory := NewHTTPClientFactory(nil, noopTestLogger{})
+	factory.GetHTTPClient(ClientPurposeAPI)
+	factory.HTTPClientWithTLS(ClientPurposeSCIM, factoryMatrixTLS)
+	var workers sync.WaitGroup
+	for worker := range 4 {
+		workers.Go(func() {
+			for range 32 {
+				switch worker {
+				case 0:
+					factory.UpdateProxyConfig(nil)
+				case 1:
+					factory.ApplyOptions(WithFasthttpBufferSizes(8192, 8192))
+				default:
+					factory.currentHTTPClient(httpClientKey{purpose: ClientPurposeAPI})
+				}
+				factory.CloseIdleConnections()
+			}
+		})
+	}
+	done := make(chan struct{})
+	go func() {
+		workers.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("idle cleanup deadlocked with concurrent configuration changes")
+	}
+}
+
 // hangingProxy accepts connections and never answers.
 func hangingProxy(t *testing.T) string {
 	t.Helper()

@@ -105,8 +105,14 @@ func (h *Handler) listBudgetAlerts(ctx *fasthttp.RequestCtx) {
 
 func (h *Handler) refreshBudgetAlerts(ctx context.Context) error {
 	configured, err := h.store.HasUsageBudgets(ctx)
-	if err != nil || !configured {
+	if err != nil {
 		return err
+	}
+	if !configured {
+		configured, err = h.store.hasBudgetPolicyHistory(ctx)
+		if err != nil || !configured {
+			return err
+		}
 	}
 	if err := h.syncBudgetUsage(ctx); err != nil {
 		return err

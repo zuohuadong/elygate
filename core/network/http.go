@@ -115,11 +115,15 @@ func (f *HTTPClientFactory) CloseIdleConnections() {
 		return
 	}
 	f.mu.RLock()
-	defer f.mu.RUnlock()
-	for _, client := range f.liveHTTP {
-		client.CloseIdleConnections()
-	}
+	clients := make([]*http.Client, 0, len(f.httpClients))
 	for _, client := range f.httpClients {
+		clients = append(clients, client)
+	}
+	f.mu.RUnlock()
+
+	// Live facades reenter the factory; close only materialized clients, outside
+	// the lock, so transport callbacks cannot deadlock against configuration updates.
+	for _, client := range clients {
 		client.CloseIdleConnections()
 	}
 }

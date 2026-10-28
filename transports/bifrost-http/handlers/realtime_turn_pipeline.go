@@ -641,6 +641,8 @@ func mapRealtimeWireErrorFields(bifrostErr *schemas.BifrostError) (string, strin
 			continue
 		case strings.Contains(lower, "invalid_request_error"):
 			return "invalid_request_error", "invalid_request_error", errorMessage, errorParam
+		case lower == "authentication_error":
+			return "authentication_error", "authentication_error", errorMessage, errorParam
 		case strings.Contains(lower, "unsupported_operation"):
 			// A provider configured not to serve the operation refuses the caller, not itself.
 			return "invalid_request_error", "unsupported_operation", errorMessage, errorParam

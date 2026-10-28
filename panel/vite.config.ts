@@ -44,7 +44,8 @@ export default defineConfig({
 		proxy: {
 			'/api': {
 				target: 'http://localhost:8080',
-				changeOrigin: true,
+				// Control-plane writes compare Origin with Host, not forwarded headers.
+				changeOrigin: false,
 			},
 		},
 	},

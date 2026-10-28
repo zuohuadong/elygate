@@ -79,24 +79,61 @@ func (s *NotificationService) Publish(ctx context.Context, input schemas.Notific
 	if s.store == nil {
 		return nil, ErrNotificationsUnavailable
 	}
-	if err := validateNotificationInput(&input); err != nil {
+	notification, err := s.prepareNotification(uuid.NewString(), input)
+	if err != nil {
 		return nil, err
-	}
-	now := s.now()
-	notification := &schemas.Notification{
-		ID: uuid.NewString(), Audience: input.Audience, RoleIDs: append([]uint(nil), input.RoleIDs...),
-		Severity: input.Severity, Title: input.Title, Message: input.Message,
-		ActionLabel: input.ActionLabel, ActionPath: input.ActionPath,
-		CreatedAt: now, ExpiresAt: now.Add(notificationRetention),
 	}
 	row := notificationToTable(notification)
 	if err := s.store.CreateNotification(ctx, &row); err != nil {
 		return nil, fmt.Errorf("persist notification: %w", err)
 	}
+	s.broadcastNotification(notification)
+	return notification, nil
+}
+
+// PublishOnce is for durable producers whose stable ID survives retries. Only
+// a newly stored row is broadcast; disconnected clients reconcile via the feed.
+func (s *NotificationService) PublishOnce(ctx context.Context, id string, input schemas.NotificationInput) (*schemas.Notification, error) {
+	store, ok := s.store.(configstore.IdempotentNotificationStore)
+	if !ok {
+		return nil, ErrNotificationsUnavailable
+	}
+	if _, err := uuid.Parse(id); err != nil {
+		return nil, errors.New("notification ID must be a UUID")
+	}
+	notification, err := s.prepareNotification(id, input)
+	if err != nil {
+		return nil, err
+	}
+	row := notificationToTable(notification)
+	created, err := store.CreateNotificationIfNotExists(ctx, &row)
+	if err != nil {
+		return nil, fmt.Errorf("persist notification: %w", err)
+	}
+	stored := notificationFromTable(&row)
+	if created {
+		s.broadcastNotification(&stored)
+	}
+	return &stored, nil
+}
+
+func (s *NotificationService) prepareNotification(id string, input schemas.NotificationInput) (*schemas.Notification, error) {
+	if err := validateNotificationInput(&input); err != nil {
+		return nil, err
+	}
+	now := s.now()
+	return &schemas.Notification{
+		ID: id, Audience: input.Audience, RoleIDs: append([]uint(nil), input.RoleIDs...),
+		Severity: input.Severity, Title: input.Title, Message: input.Message,
+		ActionLabel: input.ActionLabel, ActionPath: input.ActionPath,
+		CreatedAt: now, ExpiresAt: now.Add(notificationRetention),
+	}, nil
+}
+
+func (s *NotificationService) broadcastNotification(notification *schemas.Notification) {
 	if s.websocket != nil {
 		s.websocket.BroadcastNotification(notification)
 	}
-	return notification, nil
 }
 
 // validateNotificationInput rejects bad input without rewriting good input: what
@@ -116,16 +153,16 @@ func validateNotificationInput(input *schemas.NotificationInput) error {
 		return errors.New("severity must be one of info, success, warning, or error")
 	}
 	switch input.Audience {
-	case schemas.NotificationAudienceAll:
+	case schemas.NotificationAudienceAll, schemas.NotificationAudienceAdmin:
 		if len(input.RoleIDs) != 0 {
-			return errors.New("role_ids must be empty when audience is all")
+			return errors.New("role_ids must be empty when audience is all or admin")
 		}
 	case schemas.NotificationAudienceRoles:
 		if len(input.RoleIDs) == 0 {
 			return errors.New("role_ids is required when audience is roles")
 		}
 	default:
-		return errors.New("audience must be all or roles")
+		return errors.New("audience must be all, roles, or admin")
 	}
 	hasActionLabel := strings.TrimSpace(input.ActionLabel) != ""
 	hasActionPath := strings.TrimSpace(input.ActionPath) != ""
@@ -279,7 +316,7 @@ func notificationVisibleToRole(notification *schemas.Notification, roleID uint, 
 	if notification.Audience == schemas.NotificationAudienceAll {
 		return true
 	}
-	return hasRole && slices.Contains(notification.RoleIDs, roleID)
+	return notification.Audience == schemas.NotificationAudienceRoles && hasRole && slices.Contains(notification.RoleIDs, roleID)
 }
 
 func encodeNotificationCursor(createdAt time.Time, id string) string {

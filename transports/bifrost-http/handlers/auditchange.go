@@ -78,6 +78,21 @@ func auditProviderConfig(cfg *configstore.ProviderConfig) json.RawMessage {
 	return lib.AuditSnapshot(cfg, "keys")
 }
 
+func auditAuthConfig(cfg *configstore.AuthConfig) json.RawMessage {
+	if cfg == nil {
+		return nil
+	}
+	return lib.AuditSnapshot(struct {
+		IsEnabled          bool `json:"is_enabled"`
+		UsernameConfigured bool `json:"username_configured"`
+		PasswordConfigured bool `json:"password_configured"`
+	}{
+		IsEnabled:          cfg.IsEnabled,
+		UsernameConfigured: cfg.AdminUserName.IsSet(),
+		PasswordConfigured: cfg.AdminPassword.IsSet(),
+	})
+}
+
 // auditMCPClient snapshots a redacted copy of an MCP client config, also masking credentials embedded in its connection URL
 // and STDIO command line: every argument, and the value of each inline KEY=value env entry (the names stay).
 func auditMCPClient(store *lib.Config, cfg *schemas.MCPClientConfig) json.RawMessage {

@@ -8,6 +8,7 @@
 	import { budgetEndpoint, budgetLimits, type BudgetLimits } from '../lib/control-plane-budgets';
 	import BudgetFields from '../lib/fields/BudgetFields.svelte';
 	import ControlPlaneBudgetOverview from './ControlPlaneBudgetOverview.svelte';
+	import ControlPlaneBudgetHistory from './ControlPlaneBudgetHistory.svelte';
 	import { encodePathSegment, getListPayload, getTotal, isJsonRecord, requestJson, type JsonRecord } from '../lib/api';
 	import { SaveButton } from '@svadmin/ui';
 
@@ -26,6 +27,9 @@
 		offset: number;
 		project: string;
 		application: string;
+		user: string;
+		provider: string;
+		model: string;
 		start: string;
 		end: string;
 		session: string;
@@ -63,6 +67,7 @@
 			columns: [
 				{ key: 'occurred_at', label: text('时间', 'Time') },
 				{ key: 'application_id', label: text('应用', 'Application') },
+				{ key: 'user_id', label: text('用户 ID', 'User ID') },
 				{ key: 'provider', label: text('提供商', 'Provider') },
 				{ key: 'model', label: text('模型', 'Model') },
 				{ key: 'status', label: text('状态', 'Status') },
@@ -422,6 +427,9 @@
 	let usageSummary = $state<UsageSummary | null>(null);
 	let usageProjectFilter = $state('');
 	let usageApplicationFilter = $state('');
+	let usageUserFilter = $state('');
+	let usageProviderFilter = $state('');
+	let usageModelFilter = $state('');
 	let usageStartFilter = $state('');
 	let usageEndFilter = $state('');
 	let usageSessionFilter = $state('');
@@ -446,6 +454,9 @@
 			offset: usageOffset,
 			project: usageProjectFilter,
 			application: usageApplicationFilter,
+			user: usageUserFilter,
+			provider: usageProviderFilter,
+			model: usageModelFilter,
 			start: usageStartFilter,
 			end: usageEndFilter,
 			session: usageSessionFilter,
@@ -459,6 +470,9 @@
 		return left.offset === right.offset
 			&& left.project === right.project
 			&& left.application === right.application
+			&& left.user === right.user
+			&& left.provider === right.provider
+			&& left.model === right.model
 			&& left.start === right.start
 			&& left.end === right.end
 			&& left.session === right.session
@@ -471,6 +485,9 @@
 		const params = new URLSearchParams();
 		if (usageProjectFilter) params.set('project_id', usageProjectFilter);
 		if (usageApplicationFilter) params.set('application_id', usageApplicationFilter);
+		if (usageUserFilter) params.set('user_id', usageUserFilter);
+		if (usageProviderFilter) params.set('provider', usageProviderFilter);
+		if (usageModelFilter) params.set('model', usageModelFilter);
 		const { start, end } = usageTimeRange(usageStartFilter, usageEndFilter, {
 			start: text('开始时间无效', 'Invalid start time'),
 			end: text('结束时间无效', 'Invalid end time'),
@@ -570,12 +587,16 @@
 	}
 
 	function applyUsageFilters(): void {
+		if (usageLoading || usageFilterLoading) return;
 		usageOffset = 0;
 		refreshUsage();
 	}
 
 	function resetUsageFilters(): void {
 		usageProjectFilter = '';
+		usageUserFilter = '';
+		usageProviderFilter = '';
+		usageModelFilter = '';
 		usageSessionFilter = '';
 		usageParentSessionFilter = '';
 		usageAgentFilter = '';
@@ -733,17 +754,20 @@
 			</section>
 		{/if}
 	{:else}
-		<section class="filters">
+		<form class="filters" onsubmit={(event) => { event.preventDefault(); applyUsageFilters(); }}>
 			<label>{text('项目', 'Project')}<select bind:value={usageProjectFilter} onchange={() => reloadUsageFromFilters()}><option value="">{text('全部项目', 'All projects')}</option>{#each projects as project (project.id)}<option value={project.id}>{project.name}</option>{/each}</select></label>
 			<label>{text('应用', 'Application')}<select bind:value={usageApplicationFilter} onchange={() => changeUsageApplication()} disabled={usageLoading || usageFilterLoading || !usageProjectFilter}><option value="">{text('全部应用', 'All applications')}</option>{#each usageApplicationOptions as option (option.id)}<option value={option.id}>{option.name}</option>{/each}</select></label>
 			<label>{text('开始时间', 'Start time')}<input type="datetime-local" bind:value={usageStartFilter} /></label>
 			<label>{text('结束时间', 'End time')}<input type="datetime-local" bind:value={usageEndFilter} /></label>
+			<label>{text('用户 ID', 'User ID')}<input bind:value={usageUserFilter} autocomplete="off" autocapitalize="none" spellcheck={false} /></label>
+			<label>{text('提供商', 'Provider')}<input bind:value={usageProviderFilter} autocomplete="off" autocapitalize="none" spellcheck={false} /></label>
+			<label>{text('模型', 'Model')}<input bind:value={usageModelFilter} autocomplete="off" autocapitalize="none" spellcheck={false} /></label>
 			<label>{text('会话 ID', 'Session ID')}<input bind:value={usageSessionFilter} autocomplete="off" /></label>
 			<label>{text('父会话 ID', 'Parent session ID')}<input bind:value={usageParentSessionFilter} autocomplete="off" /></label>
 			<label>{text('Agent', 'Agent')}<input bind:value={usageAgentFilter} autocomplete="off" /></label>
 			<label class="check"><input type="checkbox" bind:checked={usageSubagentOnly} />{text('仅子 Agent', 'Subagents only')}</label>
-			<div class="filter-actions"><button type="button" onclick={() => applyUsageFilters()} disabled={usageLoading || usageFilterLoading}>{text('应用筛选', 'Apply filters')}</button><button type="button" class="secondary" onclick={() => resetUsageFilters()} disabled={usageLoading || usageFilterLoading}>{text('重置', 'Reset')}</button><button type="button" class="secondary" onclick={() => exportUsage()}>{text('导出 CSV', 'Export CSV')}</button></div>
-		</section>
+			<div class="filter-actions"><button type="submit" disabled={usageLoading || usageFilterLoading}>{text('应用筛选', 'Apply filters')}</button><button type="button" class="secondary" onclick={() => resetUsageFilters()} disabled={usageLoading || usageFilterLoading}>{text('重置', 'Reset')}</button><button type="button" class="secondary" onclick={() => exportUsage()}>{text('导出 CSV', 'Export CSV')}</button></div>
+		</form>
 		{#if usageApplicationError}<p class="error" role="alert">{usageApplicationError}</p>{/if}
 
 		<section class="status-strip" aria-busy={usageLoading}>
@@ -760,13 +784,14 @@
 		</section>
 		{#if usageStatusError}<p class="error" role="alert">{usageStatusError}</p>{/if}
 		<ControlPlaneBudgetOverview project={usageProjectFilter} application={usageApplicationFilter} />
+		<ControlPlaneBudgetHistory project={usageProjectFilter} application={usageApplicationFilter} />
 
 		<section class="ledger-section">
 			<h2>{text('用量账本', 'Usage Ledger')}</h2>
 			{#if usageLoading}<p class="muted">{text('加载中…', 'Loading…')}</p>{:else if usageRows.length === 0}<p class="muted">{usageLoadError ? text('账本数据不可用', 'Ledger data unavailable') : text('暂无账本数据', 'No ledger data')}</p>{:else}
 				<div class="table-wrap"><table><thead><tr>{#each activeTab.columns as column (column.key)}<th>{column.label}</th>{/each}</tr></thead><tbody>
 					{#each usageRows as row, index (String(row.id ?? index))}
-						<tr><td>{formatDate(row.occurred_at)}</td><td>{String(row.application_id ?? '—')}</td><td>{String(row.provider ?? '—')}</td><td>{String(row.model ?? '—')}</td><td>{String(row.status ?? '—')}</td><td>{String(row.total_tokens ?? '—')}</td><td>{formatUsdCost(row.cost)}</td></tr>
+						<tr><td>{formatDate(row.occurred_at)}</td><td>{String(row.application_id ?? '—')}</td><td>{String(row.user_id ?? '—')}</td><td>{String(row.provider ?? '—')}</td><td>{String(row.model ?? '—')}</td><td>{String(row.status ?? '—')}</td><td>{String(row.total_tokens ?? '—')}</td><td>{formatUsdCost(row.cost)}</td></tr>
 					{/each}
 				</tbody></table></div>
 			{/if}

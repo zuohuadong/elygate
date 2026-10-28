@@ -2014,6 +2014,7 @@ func (m *AuthMiddleware) middleware(shouldSkip func(*configstore.AuthConfig, str
 							sessionToken := m.wsTicketStore.Consume(ticket)
 							if sessionToken != "" && validateSession(ctx, m.store, sessionToken) {
 								ctx.SetUserValue(schemas.BifrostContextKeySessionToken, sessionToken)
+								ctx.SetUserValue(schemas.IsLocalAdminContextKey, true)
 								next(ctx)
 								return
 							}
@@ -2025,6 +2026,7 @@ func (m *AuthMiddleware) middleware(shouldSkip func(*configstore.AuthConfig, str
 						if token != "" {
 							if validateSession(ctx, m.store, token) {
 								ctx.SetUserValue(schemas.BifrostContextKeySessionToken, token)
+								ctx.SetUserValue(schemas.IsLocalAdminContextKey, true)
 								next(ctx)
 								return
 							}
@@ -2035,6 +2037,7 @@ func (m *AuthMiddleware) middleware(shouldSkip func(*configstore.AuthConfig, str
 						cookieToken := string(ctx.Request.Header.Cookie("token"))
 						if cookieToken != "" && validateSession(ctx, m.store, cookieToken) {
 							ctx.SetUserValue(schemas.BifrostContextKeySessionToken, cookieToken)
+							ctx.SetUserValue(schemas.IsLocalAdminContextKey, true)
 							next(ctx)
 							return
 						}
@@ -2096,6 +2099,7 @@ func (m *AuthMiddleware) middleware(shouldSkip func(*configstore.AuthConfig, str
 					return
 				}
 				ctx.SetUserValue(lib.FastHTTPUserValueManagementAuditActor, "local-admin:"+authConfig.AdminUserName.GetValue())
+				ctx.SetUserValue(schemas.IsLocalAdminContextKey, true)
 				// Continue with the next handler
 				next(ctx)
 				return

@@ -39,17 +39,18 @@ var batchIDPattern = regexp.MustCompile(`^[a-zA-Z0-9._-]{8,64}$`)
 
 var ErrEmployeeInactive = errors.New("employee account is inactive")
 
-// EmployeeAuditAppender records one employee-administration event. It runs
+// EmployeeAuditAppender records one employee mutation event. It runs
 // inside the caller's transaction so the mutation and its audit entry commit
-// together. An error aborts the administrative mutation.
+// together. An error aborts the mutation.
 type EmployeeAuditAppender func(context.Context, *gorm.DB, EmployeeAuditEvent) error
 
 type EmployeeAuditEvent struct {
-	Action     string
-	Resource   string
-	ResourceID string
-	Before     any
-	After      any
+	Action          string
+	Resource        string
+	ResourceID      string
+	Before          any
+	After           any
+	AuditAuthMethod string
 }
 
 type Handler struct {
@@ -59,8 +60,9 @@ type Handler struct {
 	dummyHash    string
 	loginLimiter lib.PasswordLimiter
 
-	auditMu              sync.RWMutex
-	auditAppenderFactory func(*fasthttp.RequestCtx) EmployeeAuditAppender
+	auditMu                         sync.RWMutex
+	auditAppenderFactory            func(*fasthttp.RequestCtx) EmployeeAuditAppender
+	selfServiceAuditAppenderFactory func(*fasthttp.RequestCtx, string) EmployeeAuditAppender
 }
 
 // SetAuditAppenderFactory binds trusted request identity to a transactional
@@ -68,6 +70,14 @@ type Handler struct {
 func (h *Handler) SetAuditAppenderFactory(factory func(*fasthttp.RequestCtx) EmployeeAuditAppender) {
 	h.auditMu.Lock()
 	h.auditAppenderFactory = factory
+	h.auditMu.Unlock()
+}
+
+// SetSelfServiceAuditAppenderFactory receives an employee ID only after password
+// or session authentication. It must not use administrator request identity.
+func (h *Handler) SetSelfServiceAuditAppenderFactory(factory func(*fasthttp.RequestCtx, string) EmployeeAuditAppender) {
+	h.auditMu.Lock()
+	h.selfServiceAuditAppenderFactory = factory
 	h.auditMu.Unlock()
 }
 
@@ -79,9 +89,24 @@ func (h *Handler) administrationStore(request *fasthttp.RequestCtx) *Store {
 	if factory != nil {
 		appender = factory(request)
 	}
+	return h.storeWithAudit(appender)
+}
+
+func (h *Handler) selfServiceStore(request *fasthttp.RequestCtx, employeeID string) *Store {
+	h.auditMu.RLock()
+	factory := h.selfServiceAuditAppenderFactory
+	h.auditMu.RUnlock()
+	var appender EmployeeAuditAppender
+	if factory != nil {
+		appender = factory(request, employeeID)
+	}
+	return h.storeWithAudit(appender)
+}
+
+func (h *Handler) storeWithAudit(appender EmployeeAuditAppender) *Store {
 	if appender == nil {
 		appender = func(context.Context, *gorm.DB, EmployeeAuditEvent) error {
-			return errors.New("employee administration audit is not configured")
+			return errors.New("employee mutation audit is not configured")
 		}
 	}
 	return &Store{configStore: h.store.configStore, auditAppender: appender}
@@ -580,8 +605,14 @@ func (h *Handler) login(ctx *fasthttp.RequestCtx) {
 	}
 	authenticated := false
 	defer func() { finish(authenticated) }()
-	employee, err := h.store.GetByUsername(ctx, payload.Username)
+	mutationCtx, cancel := employeeMutationContext()
+	defer cancel()
+	employee, err := h.store.GetByUsername(mutationCtx, payload.Username)
 	if err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			sendError(ctx, 500, "登录状态读取失败，请重试")
+			return
+		}
 		// 对不存在的用户执行同成本比较，避免明显的用户名枚举时序差异。
 		_, _ = encrypt.CompareHash(h.dummyHash, payload.Password)
 		sendError(ctx, 401, "用户名或密码错误")
@@ -597,7 +628,7 @@ func (h *Handler) login(ctx *fasthttp.RequestCtx) {
 	}
 	matched, compareErr := encrypt.CompareHash(employee.PasswordHash, payload.Password)
 	if compareErr != nil || !matched {
-		if err := h.store.RecordFailedLogin(ctx, employee); err != nil {
+		if err := h.store.RecordFailedLogin(mutationCtx, employee); err != nil {
 			// Do not hide a failed lockout write behind a normal 401: without
 			// persistence, repeated guesses could bypass the account lockout.
 			sendError(ctx, fasthttp.StatusInternalServerError, "登录状态更新失败，请重试")
@@ -617,14 +648,24 @@ func (h *Handler) login(ctx *fasthttp.RequestCtx) {
 		return
 	}
 	expires := time.Now().Add(12 * time.Hour)
-	if err := h.store.CreateSession(ctx, employee.ID, encrypt.HashSHA256(token), encrypt.HashSHA256(csrf), expires); err != nil {
+	err = h.selfServiceStore(ctx, employee.ID).LoginSession(mutationCtx, SessionLogin{
+		EmployeeID: employee.ID, VerifiedPasswordHash: employee.PasswordHash,
+		TokenHash: encrypt.HashSHA256(token), CSRFTokenHash: encrypt.HashSHA256(csrf), ExpiresAt: expires,
+	})
+	if err != nil {
+		if sendAuditFailure(ctx, err) {
+			return
+		}
+		if errors.Is(err, ErrEmployeeCredentialsChanged) {
+			sendError(ctx, 401, "账号状态已变化，请重新登录")
+			return
+		}
 		sendError(ctx, 500, "创建会话失败")
 		return
 	}
 	// Release the password-attempt reservation only after the session is durable;
 	// a storage failure must not make a failed login look successful to the limiter.
 	authenticated = true
-	_ = h.store.RecordSuccessfulLogin(ctx, employee.ID)
 	setEmployeeCookie(ctx, token, expires)
 	setCSRFCookie(ctx, csrf, expires)
 	sendJSON(ctx, map[string]any{"employee": employee, "csrf_token": csrf})
@@ -670,8 +711,14 @@ func (h *Handler) authenticated(ctx *fasthttp.RequestCtx, requireCSRF bool) (*Em
 		sendError(ctx, 401, "请先登录")
 		return nil, nil, false
 	}
-	session, employee, err := h.store.Session(ctx, encrypt.HashSHA256(token))
-	if err != nil || employee == nil || !employee.IsActive {
+	authCtx, cancel := employeeMutationContext()
+	defer cancel()
+	session, employee, err := h.store.Session(authCtx, encrypt.HashSHA256(token))
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		sendError(ctx, 500, "登录状态读取失败，请重试")
+		return nil, nil, false
+	}
+	if err != nil || !employee.IsActive {
 		clearEmployeeCookie(ctx)
 		sendError(ctx, 401, "登录已过期")
 		return nil, nil, false
@@ -698,11 +745,16 @@ func (h *Handler) sessionStatus(ctx *fasthttp.RequestCtx) {
 }
 
 func (h *Handler) logout(ctx *fasthttp.RequestCtx) {
-	session, _, ok := h.authenticated(ctx, true)
+	session, employee, ok := h.authenticated(ctx, true)
 	if !ok {
 		return
 	}
-	if err := h.store.DeleteSession(ctx, session.TokenHash); err != nil {
+	mutationCtx, cancel := employeeMutationContext()
+	defer cancel()
+	if err := h.selfServiceStore(ctx, employee.ID).LogoutSession(mutationCtx, *session); err != nil {
+		if sendAuditFailure(ctx, err) {
+			return
+		}
 		sendError(ctx, 500, "退出登录失败，请重试")
 		return
 	}
@@ -732,22 +784,31 @@ func (h *Handler) changePassword(ctx *fasthttp.RequestCtx) {
 		sendError(ctx, 429, "密码验证过于频繁，请稍后再试")
 		return
 	}
-	matched, _ := encrypt.CompareHash(employee.PasswordHash, payload.CurrentPassword)
-	if !matched {
+	committed := false
+	defer func() { finish(committed) }()
+	matched, compareErr := encrypt.CompareHash(employee.PasswordHash, payload.CurrentPassword)
+	if compareErr != nil || !matched {
 		sendError(ctx, 401, "当前密码错误")
 		return
 	}
-	if err := h.store.ChangePassword(ctx, employee.ID, payload.NewPassword); err != nil {
+	mutationCtx, cancel := employeeMutationContext()
+	defer cancel()
+	err := h.selfServiceStore(ctx, employee.ID).ChangePassword(mutationCtx, PasswordChange{
+		EmployeeID: employee.ID, VerifiedPasswordHash: employee.PasswordHash,
+		NewPassword: payload.NewPassword, KeepTokenHash: session.TokenHash,
+	})
+	if err != nil {
+		if sendAuditFailure(ctx, err) {
+			return
+		}
+		if errors.Is(err, ErrEmployeeCredentialsChanged) {
+			sendError(ctx, 401, "账号状态已变化，请重新登录")
+			return
+		}
 		sendError(ctx, 500, "修改密码失败")
 		return
 	}
-	// Release the reservation only after the password is durable. A storage
-	// failure must remain visible to the limiter so retries cannot bypass it.
-	finish(true)
-	if err := h.store.DeleteOtherSessions(ctx, employee.ID, session.TokenHash); err != nil {
-		sendError(ctx, 500, "密码已更新，但会话清理失败，请重新登录")
-		return
-	}
+	committed = true
 	sendJSON(ctx, map[string]string{"message": "密码已更新"})
 }
 

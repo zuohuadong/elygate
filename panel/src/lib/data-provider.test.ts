@@ -8,6 +8,8 @@ import {
 	keyAdvancedForForm,
 	providerKeyModelAccess,
 	providerKeyModelsForPayload,
+	providerKeyValueCanBeEmpty,
+	providerKeyValueForPayload,
 	providerConfigsForForm,
 	providerMaxRetriesForPayload,
 	removedVirtualKeyProviderConfigCount,
@@ -130,14 +132,57 @@ describe('Bifrost DataProvider', () => {
 			value: { value: 'sk-********' },
 			aliases: { fast: { model: 'gpt-5' } },
 			azure_key_config: { endpoint: { value: 'https://example.test' } },
+			sagemaker_key_config: { region: { value: 'us-east-1' } },
 			use_for_batch_api: false,
 			status: 'active',
 		});
 		expect(advanced).toEqual({
 			aliases: { fast: { model: 'gpt-5' } },
 			azure_key_config: { endpoint: { value: 'https://example.test' } },
+			sagemaker_key_config: { region: { value: 'us-east-1' } },
 			use_for_batch_api: false,
 		});
+	});
+
+	test('matches upstream providers that can use configuration or ambient credentials without a key value', () => {
+		for (const provider of ['azure', 'bedrock', 'bedrock_mantle', 'databricks', 'ollama', 'sagemaker', 'sgl', 'vertex', 'vllm']) {
+			expect(providerKeyValueCanBeEmpty({ name: provider }, {})).toBe(true);
+		}
+		for (const provider of ['openai', 'anthropic', 'cloudflare', '', 'bedrock-mantle']) {
+			expect(providerKeyValueCanBeEmpty({ name: provider }, {})).toBe(false);
+		}
+	});
+
+	test('uses the custom base provider and allows OAuth configuration without a static value', () => {
+		const custom = { name: 'custom-cloud', custom_provider_config: { base_provider_type: 'sagemaker' } };
+		expect(providerKeyValueCanBeEmpty(custom, {})).toBe(true);
+		expect(providerKeyValueCanBeEmpty({ name: 'sagemaker', custom_provider_config: { base_provider_type: 'openai' } }, {})).toBe(false);
+		expect(providerKeyValueCanBeEmpty({ name: 'openai' }, { oauth_key_config: { grant_type: 'client_credentials' } })).toBe(true);
+		expect(providerKeyValueCanBeEmpty({ name: 'openai' }, { oauth_key_config: null })).toBe(false);
+		expect(providerKeyValueCanBeEmpty({ name: 'openai' }, { oauth_key_config: [] })).toBe(false);
+	});
+
+	test('preserves omitted values but permits an explicit authentication change without mutating stored metadata', () => {
+		// Cases: new ambient key / existing masked reference / explicit clear / replacement / JSON reference.
+		const stored = { value: { value: '********', type: 'env', ref: 'env.PROVIDER_TOKEN' } };
+		expect(providerKeyValueForPayload('', {}, null)).toBeUndefined();
+		expect(JSON.parse(JSON.stringify({ value: providerKeyValueForPayload('', {}, null) }))).toEqual({});
+		expect(providerKeyValueForPayload(' ', {}, stored)).toBe(stored.value);
+		expect(providerKeyValueForPayload('', { value: { value: '' } }, stored)).toEqual({ value: '' });
+		expect(providerKeyValueForPayload(' replacement ', { value: { value: '' } }, stored)).toEqual({ value: 'replacement' });
+		expect(providerKeyValueForPayload('', { value: 'env.REPLACEMENT_TOKEN' }, stored)).toBe('env.REPLACEMENT_TOKEN');
+		expect(stored.value).toEqual({ value: '********', type: 'env', ref: 'env.PROVIDER_TOKEN' });
+	});
+
+	test('retains every documented provider-specific key config when editing or revalidating', async () => {
+		const schema = await Bun.file(new URL('../../../docs/openapi/openapi.json', import.meta.url)).json();
+		const sections = Object.keys(schema.components.schemas.Key.properties).filter((field) => field.endsWith('_key_config'));
+		expect(sections).toContain('sagemaker_key_config');
+		for (const section of [...sections, 'databricks_key_config']) {
+			const key = { [section]: { region: { value: 'us-east-1', ref: 'env.AWS_REGION', type: 'env' } } };
+			expect(keyAdvancedForForm(key)).toEqual(key);
+		}
+		expect(keyAdvancedForForm({ use_openai_endpoints: false })).toEqual({ use_openai_endpoints: false });
 	});
 
 	test('reports provider JSON fields that the management API would otherwise discard', () => {

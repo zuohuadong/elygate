@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'bun:test';
 import type { MenuItem } from '@svadmin/core';
-import { fileURLToPath } from 'node:url';
 
 (globalThis as Record<string, unknown>).$state = <Value>(value: Value): Value => value;
 const { createMenu, createResources } = await import('./resources');
@@ -115,10 +114,10 @@ describe('panel resource registry', () => {
 		}
 	});
 
-	test('keeps the about-page visibility filter in the svadmin patch', async () => {
-		const patchDirectory = fileURLToPath(new URL('../../patches/', import.meta.url));
-		const patch = await Bun.file(`${patchDirectory}@svadmin%2Fui@0.88.1.patch`).text();
-		expect(patch).toContain('+  const resources = $derived(adminContext.resources.filter((resource) => resource.meta?.aboutVisible !== false));');
+	test('upstream svadmin respects the about-page visibility filter', async () => {
+		const aboutPath = new URL('../../node_modules/@svadmin/ui/dist/components/AboutSettings.svelte', import.meta.url);
+		const about = await Bun.file(aboutPath).text();
+		expect(about).toContain("const resources = $derived(adminContext.resources.filter((resource) => resource.meta?.['aboutVisible'] !== false));");
 	});
 
 	test('places virtual keys with model access while keeping organization management focused', () => {
@@ -163,6 +162,12 @@ describe('panel resource registry', () => {
 		const appSource = await Bun.file(new URL('../App.svelte', import.meta.url)).text();
 		expect(appSource).not.toContain("'oauth-consent': { list: OAuthConsentPage }");
 		expect(appSource).toContain("publicRoute === 'oauth-consent'");
+	});
+
+	test('injects the administrator notification panel into the shared header', async () => {
+		const appSource = await Bun.file(new URL('../App.svelte', import.meta.url)).text();
+		expect(appSource).toContain("import NotificationPanel from './pages/NotificationPanel.svelte';");
+		expect(appSource).toContain('components={{ NotificationPanel }}');
 	});
 
 	test('hides unavailable enterprise surfaces instead of rendering placeholders', () => {

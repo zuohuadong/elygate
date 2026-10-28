@@ -22,7 +22,6 @@ import (
 	"github.com/maximhq/bifrost/plugins/logging"
 	"github.com/maximhq/bifrost/transports/v2/bifrost-http/lib"
 	"github.com/valyala/fasthttp"
-	"gorm.io/gorm"
 )
 
 type Handler struct {
@@ -112,7 +111,11 @@ func (h *Handler) RegisterRoutes(r *router.Router, middlewares ...schemas.Bifros
 	r.GET("/api/control-plane/usage/export", wrap(h.exportUsage))
 	r.GET("/api/control-plane/usage/status", wrap(h.usageStatus))
 	r.GET("/api/control-plane/usage/budgets", wrap(h.usageBudgets))
+	r.GET("/api/control-plane/usage/budgets/history", wrap(h.usageBudgetHistory))
 	r.GET("/api/control-plane/budget-alerts", wrap(h.listBudgetAlerts))
+	r.PUT("/api/control-plane/budget-alerts/{alert_id}/acknowledgement", wrap(h.setBudgetAcknowledgement))
+	r.GET("/api/control-plane/notification-receipts", wrap(h.notificationReadStates))
+	r.PUT("/api/control-plane/notification-receipts/{notification_id}", wrap(h.setNotificationReadState))
 	r.GET("/api/control-plane/audit-events", wrap(h.listAudit))
 }
 
@@ -135,15 +138,7 @@ func (h *Handler) InferenceAccessMiddleware() schemas.BifrostHTTPMiddleware {
 }
 
 func (h *Handler) CheckVirtualKeyAccess(ctx context.Context, virtualKeyID string) error {
-	hasBinding, err := h.store.HasBinding(ctx, virtualKeyID)
-	if err != nil || !hasBinding {
-		return err
-	}
-	_, err = h.store.ActiveBindingByVirtualKey(ctx, virtualKeyID)
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return errors.New("application credential binding is revoked or expired")
-	}
-	return err
+	return h.store.CheckVirtualKeyAccess(ctx, virtualKeyID)
 }
 
 func (h *Handler) CheckVirtualKeyValueAccess(ctx context.Context, virtualKeyValue string) error {
@@ -569,6 +564,9 @@ func (h *Handler) usageQuery(ctx *fasthttp.RequestCtx) (UsageQuery, error) {
 	return UsageQuery{
 		ProjectID:       strings.TrimSpace(string(ctx.QueryArgs().Peek("project_id"))),
 		ApplicationID:   strings.TrimSpace(string(ctx.QueryArgs().Peek("application_id"))),
+		UserID:          string(ctx.QueryArgs().Peek("user_id")),
+		Provider:        string(ctx.QueryArgs().Peek("provider")),
+		Model:           string(ctx.QueryArgs().Peek("model")),
 		SessionID:       strings.TrimSpace(string(ctx.QueryArgs().Peek("session_id"))),
 		ParentSessionID: strings.TrimSpace(string(ctx.QueryArgs().Peek("parent_session_id"))),
 		AgentName:       strings.TrimSpace(string(ctx.QueryArgs().Peek("agent_name"))),
@@ -598,7 +596,16 @@ func csvOptionalString(value *string) string {
 	if value == nil {
 		return ""
 	}
-	return *value
+	return csvText(*value)
+}
+
+func csvText(value string) string {
+	// CSV quoting alone does not prevent spreadsheet formula execution.
+	leading := strings.TrimLeft(value, "\ufeff \t\r\n")
+	if leading != "" && strings.ContainsRune("=+-@", rune(leading[0])) {
+		return "'" + value
+	}
+	return value
 }
 func (h *Handler) listUsage(ctx *fasthttp.RequestCtx) {
 	opCtx, cancel := controlPlaneContext()
@@ -649,6 +656,7 @@ func (h *Handler) exportUsage(ctx *fasthttp.RequestCtx) {
 		return
 	}
 	q.Limit = 100000
+	q.Offset = 0
 	q.Export = true
 	if err := h.syncUsage(opCtx, q.StartTime, q.EndTime, false); err != nil {
 		writeError(ctx, 500, err)
@@ -661,9 +669,15 @@ func (h *Handler) exportUsage(ctx *fasthttp.RequestCtx) {
 	}
 	var b strings.Builder
 	w := csv.NewWriter(&b)
-	_ = w.Write([]string{"occurred_at", "project_id", "application_id", "virtual_key_id", "provider", "model", "session_id", "parent_session_id", "agent_name", "session_client_type", "is_subagent", "is_fork", "status", "prompt_tokens", "output_tokens", "total_tokens", "cost"})
+	_ = w.Write([]string{"occurred_at", "project_id", "application_id", "virtual_key_id", "user_id", "provider", "model", "session_id", "parent_session_id", "agent_name", "session_client_type", "is_subagent", "is_fork", "status", "prompt_tokens", "output_tokens", "total_tokens", "cost"})
 	for _, row := range rows {
-		_ = w.Write([]string{row.OccurredAt.Format(time.RFC3339), row.ProjectID, row.ApplicationID, row.VirtualKeyID, row.Provider, row.Model, csvOptionalString(row.SessionID), csvOptionalString(row.ParentSessionID), csvOptionalString(row.AgentName), csvOptionalString(row.SessionClientType), strconv.FormatBool(row.IsSubagent), strconv.FormatBool(row.IsFork), row.Status, strconv.Itoa(row.PromptTokens), strconv.Itoa(row.OutputTokens), strconv.Itoa(row.TotalTokens), strconv.FormatFloat(row.Cost, 'f', 8, 64)})
+		_ = w.Write([]string{
+			row.OccurredAt.Format(time.RFC3339), csvText(row.ProjectID), csvText(row.ApplicationID), csvText(row.VirtualKeyID),
+			csvOptionalString(row.UserID), csvText(row.Provider), csvText(row.Model),
+			csvOptionalString(row.SessionID), csvOptionalString(row.ParentSessionID), csvOptionalString(row.AgentName), csvOptionalString(row.SessionClientType),
+			strconv.FormatBool(row.IsSubagent), strconv.FormatBool(row.IsFork), csvText(row.Status),
+			strconv.Itoa(row.PromptTokens), strconv.Itoa(row.OutputTokens), strconv.Itoa(row.TotalTokens), strconv.FormatFloat(row.Cost, 'f', 8, 64),
+		})
 	}
 	w.Flush()
 	ctx.SetStatusCode(200)

@@ -1216,7 +1216,7 @@ func (h *ConfigHandler) updateConfig(ctx *fasthttp.RequestCtx) {
 				}
 			}
 			// Save auth config - this handles both first-time creation and updates
-			err = h.configManager.UpdateAuthConfig(ctx, &payload.AuthConfig.AuthConfig)
+			err = h.updateAuthConfigWithAudit(ctx, authConfig, &payload.AuthConfig.AuthConfig)
 			if err != nil {
 				logger.Warn("failed to update auth config: %v", err)
 				SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("failed to update auth config: %v", err))
@@ -1245,7 +1245,7 @@ func (h *ConfigHandler) updateConfig(ctx *fasthttp.RequestCtx) {
 				}
 				payload.AuthConfig.AdminPassword = hashed
 			}
-			err = h.configManager.UpdateAuthConfig(ctx, &payload.AuthConfig.AuthConfig)
+			err = h.updateAuthConfigWithAudit(ctx, authConfig, &payload.AuthConfig.AuthConfig)
 			if err != nil {
 				logger.Warn("failed to update auth config: %v", err)
 				SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("failed to update auth config: %v", err))
@@ -1280,6 +1280,16 @@ func (h *ConfigHandler) updateConfig(ctx *fasthttp.RequestCtx) {
 		"status":  "success",
 		"message": "configuration updated successfully",
 	})
+}
+
+func (h *ConfigHandler) updateAuthConfigWithAudit(ctx *fasthttp.RequestCtx, before, after *configstore.AuthConfig) error {
+	beforeSnapshot := auditAuthConfig(before)
+	if err := h.configManager.UpdateAuthConfig(ctx, after); err != nil {
+		return err
+	}
+	// 会话清理失败不会撤销已保存的认证配置，因此须在清理前记录。
+	lib.RecordAuditChange(ctx, "auth_config.updated", "auth_config", "dashboard", "", beforeSnapshot, auditAuthConfig(after))
+	return nil
 }
 
 // forceSyncPricing triggers an immediate pricing sync and resets the pricing sync timer

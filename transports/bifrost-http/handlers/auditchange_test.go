@@ -48,6 +48,48 @@ func requireNoSecret(t *testing.T, change configstore.AuditChange, secret string
 	}
 }
 
+func TestAuditAuthConfigAllowsOnlyBooleanMetadata(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		cfg  *configstore.AuthConfig
+		want string
+	}{
+		{name: "absent"},
+		{name: "empty", cfg: &configstore.AuthConfig{}, want: `{"is_enabled":false,"username_configured":false,"password_configured":false}`},
+		{name: "username only", cfg: &configstore.AuthConfig{AdminUserName: schemas.NewSecretVar("private-user")}, want: `{"is_enabled":false,"username_configured":true,"password_configured":false}`},
+		{name: "password only", cfg: &configstore.AuthConfig{AdminPassword: schemas.NewSecretVar("private-password-hash")}, want: `{"is_enabled":false,"username_configured":false,"password_configured":true}`},
+		{name: "empty credentials", cfg: &configstore.AuthConfig{AdminUserName: schemas.NewSecretVar(""), AdminPassword: schemas.NewSecretVar("")}, want: `{"is_enabled":false,"username_configured":false,"password_configured":false}`},
+		{name: "unresolved references", cfg: &configstore.AuthConfig{
+			IsEnabled: true, AdminUserName: schemas.NewSecretVar("env.AUDIT_PRIVATE_USER"), AdminPassword: schemas.NewSecretVar("env.AUDIT_PRIVATE_PASSWORD"),
+		}, want: `{"is_enabled":true,"username_configured":true,"password_configured":true}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			snapshot := auditAuthConfig(tc.cfg)
+			if tc.want == "" {
+				if snapshot != nil {
+					t.Fatalf("absent config must have no snapshot: %s", snapshot)
+				}
+				return
+			}
+			var got, want map[string]bool
+			if err := json.Unmarshal(snapshot, &got); err != nil {
+				t.Fatalf("snapshot must contain only boolean metadata: %v", err)
+			}
+			if err := json.Unmarshal([]byte(tc.want), &want); err != nil {
+				t.Fatal(err)
+			}
+			if len(got) != len(want) {
+				t.Fatalf("unexpected snapshot fields: %s", snapshot)
+			}
+			for field, expected := range want {
+				if actual, exists := got[field]; !exists || actual != expected {
+					t.Fatalf("unexpected %s in snapshot: %s", field, snapshot)
+				}
+			}
+		})
+	}
+}
+
 // auditChangeTestGovernanceManager is budgetOverrideTestGovernanceManager with a no-op RemoveVirtualKey.
 type auditChangeTestGovernanceManager struct {
 	*budgetOverrideTestGovernanceManager

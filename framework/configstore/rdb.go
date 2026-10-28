@@ -7664,49 +7664,17 @@ func (s *RDBConfigStore) ClearRestartRequiredConfig(ctx context.Context) error {
 
 // GetSession retrieves a session from the database.
 func (s *RDBConfigStore) GetSession(ctx context.Context, token string) (*tables.SessionsTable, error) {
-	var session tables.SessionsTable
-	tokenHash := encrypt.HashSHA256(token)
-	err := s.DB().WithContext(ctx).First(&session, "token_hash = ?", tokenHash).Error
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			// Fall back to plaintext lookup for rows written before the hash existed. Only rows
-			// still stored in plaintext qualify: an encrypted row's token column holds
-			// ciphertext, which is not the token and must not resolve the session.
-			if err := s.DB().WithContext(ctx).Where(plaintextRowPredicate).First(&session, "token = ?", token).Error; err != nil {
-				if errors.Is(err, gorm.ErrRecordNotFound) {
-					return nil, nil
-				}
-				return nil, err
-			}
-		} else {
-			return nil, err
-		}
-	}
-	return &session, nil
+	return GetSession(ctx, s.DB(), token)
 }
 
 // CreateSession creates a new session in the database.
 func (s *RDBConfigStore) CreateSession(ctx context.Context, session *tables.SessionsTable) error {
-	return s.DB().WithContext(ctx).Create(session).Error
+	return CreateSession(ctx, s.DB(), session)
 }
 
 // DeleteSession deletes a session from the database.
 func (s *RDBConfigStore) DeleteSession(ctx context.Context, token string) error {
-	tokenHash := encrypt.HashSHA256(token)
-	var session tables.SessionsTable
-	if err := s.DB().WithContext(ctx).First(&session, "token_hash = ?", tokenHash).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			// Fall back to plaintext lookup for rows written before the hash existed, and only for
-			// rows still stored in plaintext (see GetSession).
-			return s.DB().WithContext(ctx).Where(plaintextRowPredicate).Delete(&tables.SessionsTable{}, "token = ?", token).Error
-		}
-		return err
-	}
-	result := s.DB().WithContext(ctx).Delete(&session)
-	if result.Error != nil {
-		return result.Error
-	}
-	return nil
+	return DeleteSession(ctx, s.DB(), token)
 }
 
 // FlushSessions flushes all sessions from the database.
@@ -10781,11 +10749,19 @@ func (s *RDBConfigStore) CreateWebhookJob(ctx context.Context, job *tables.Table
 	if job.EndpointID == "" {
 		return fmt.Errorf("webhook job endpoint id is required")
 	}
-	if job.AsyncJobID == "" {
-		return fmt.Errorf("webhook job async job id is required")
-	}
 	if !job.Event.IsValid() {
 		return fmt.Errorf("unknown webhook event %q", job.Event)
+	}
+	if job.Event == tables.WebhookEventBudgetThresholdReached {
+		if job.ResourceID == "" || job.AsyncJobID != "" {
+			return fmt.Errorf("budget webhook job requires a resource id and no async job id")
+		}
+		var payload map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(job.PayloadJSON), &payload); err != nil || payload == nil {
+			return fmt.Errorf("budget webhook job payload must be a JSON object")
+		}
+	} else if job.AsyncJobID == "" || job.ResourceID != "" || job.PayloadJSON != "" {
+		return fmt.Errorf("async webhook job requires only an async job id")
 	}
 	// A new job must enter the queue in the initial, unclaimed state: a nonzero
 	// attempt count or a pre-set claim would let it start already hidden behind

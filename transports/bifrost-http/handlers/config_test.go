@@ -1105,6 +1105,130 @@ func (m authConfigTestManager) ValidateConfiguredSetupToken(token string) bool {
 	return m.setupToken != "" && token == m.setupToken
 }
 
+type authConfigAuditFailureStore struct {
+	configstore.ConfigStore
+	saveErr  error
+	flushErr error
+}
+
+func (s authConfigAuditFailureStore) UpdateAuthConfig(ctx context.Context, auth *configstore.AuthConfig) error {
+	if s.saveErr != nil {
+		return s.saveErr
+	}
+	return s.ConfigStore.UpdateAuthConfig(ctx, auth)
+}
+
+func (s authConfigAuditFailureStore) FlushSessions(ctx context.Context) error {
+	if s.flushErr != nil {
+		return s.flushErr
+	}
+	return s.ConfigStore.FlushSessions(ctx)
+}
+
+func TestUpdateConfig_AuthConfigAudit(t *testing.T) {
+	SetLogger(&mockLogger{})
+	const (
+		storedUser = "audit-admin"
+		storedPass = "Current-Audit-Pass-1234!"
+		newPass    = "Replacement-Audit-Pass-5678!"
+		setupToken = "audit-operator-setup-token"
+	)
+	hash, err := encrypt.Hash(storedPass)
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name        string
+		authPayload string
+		existing    bool
+		enabled     bool
+		bypassed    bool
+		saveErr     error
+		flushErr    error
+		wantStatus  int
+		wantEvent   bool
+		wantEnabled bool
+		wantUser    string
+		wantPass    string
+	}{
+		{name: "first setup", authPayload: `{"is_enabled":true,"admin_username":"audit-admin","admin_password":"` + newPass + `","setup_token":"` + setupToken + `"}`, wantStatus: 200, wantEvent: true, wantEnabled: true, wantUser: storedUser, wantPass: newPass},
+		{name: "disable preserves credentials", authPayload: `{"is_enabled":false}`, existing: true, enabled: true, wantStatus: 200, wantEvent: true, wantUser: storedUser, wantPass: storedPass},
+		{name: "enable with current password proof", authPayload: `{"is_enabled":true,"admin_username":"audit-admin","current_password":"` + storedPass + `"}`, existing: true, bypassed: true, wantStatus: 200, wantEvent: true, wantEnabled: true, wantUser: storedUser, wantPass: storedPass},
+		{name: "replace username", authPayload: `{"is_enabled":true,"admin_username":"audit-replacement"}`, existing: true, enabled: true, wantStatus: 200, wantEvent: true, wantEnabled: true, wantUser: "audit-replacement", wantPass: storedPass},
+		{name: "replace password", authPayload: `{"is_enabled":true,"admin_username":"audit-admin","admin_password":"` + newPass + `"}`, existing: true, enabled: true, wantStatus: 200, wantEvent: true, wantEnabled: true, wantUser: storedUser, wantPass: newPass},
+		{name: "masked password preserves hash", authPayload: `{"is_enabled":true,"admin_username":"audit-admin","admin_password":"********"}`, existing: true, enabled: true, wantStatus: 200, wantEvent: true, wantEnabled: true, wantUser: storedUser, wantPass: storedPass},
+		{name: "disabled save preserves credentials", authPayload: `{"is_enabled":false}`, existing: true, bypassed: true, wantStatus: 200, wantEvent: true, wantUser: storedUser, wantPass: storedPass},
+		{name: "replace credentials while disabled", authPayload: `{"is_enabled":false,"admin_username":"audit-replacement","admin_password":"` + newPass + `","setup_token":"` + setupToken + `"}`, existing: true, bypassed: true, wantStatus: 200, wantEvent: true, wantUser: "audit-replacement", wantPass: newPass},
+		{name: "auth omitted", existing: true, enabled: true, wantStatus: 200, wantEnabled: true, wantUser: storedUser, wantPass: storedPass},
+		{name: "disabled without stored config", authPayload: `{"is_enabled":false}`, wantStatus: 200},
+		{name: "invalid setup token", authPayload: `{"is_enabled":true,"admin_username":"audit-admin","admin_password":"` + newPass + `","setup_token":"wrong-token"}`, wantStatus: 403},
+		{name: "weak replacement password", authPayload: `{"is_enabled":true,"admin_username":"audit-admin","admin_password":"weak"}`, existing: true, enabled: true, wantStatus: 400, wantEnabled: true, wantUser: storedUser, wantPass: storedPass},
+		{name: "bypassed without proof", authPayload: `{"is_enabled":true,"admin_username":"audit-admin","admin_password":"` + newPass + `"}`, existing: true, bypassed: true, wantStatus: 403, wantUser: storedUser, wantPass: storedPass},
+		{name: "first save fails", authPayload: `{"is_enabled":true,"admin_username":"audit-admin","admin_password":"` + newPass + `","setup_token":"` + setupToken + `"}`, saveErr: errors.New("auth save failed"), wantStatus: 500},
+		{name: "disabled save fails", authPayload: `{"is_enabled":false}`, existing: true, enabled: true, saveErr: errors.New("auth save failed"), wantStatus: 500, wantEnabled: true, wantUser: storedUser, wantPass: storedPass},
+		{name: "session flush fails after enabled save", authPayload: `{"is_enabled":true,"admin_username":"audit-admin","admin_password":"` + newPass + `"}`, existing: true, enabled: true, flushErr: errors.New("session flush failed"), wantStatus: 500, wantEvent: true, wantEnabled: true, wantUser: storedUser, wantPass: newPass},
+		{name: "session flush fails after disabled save", authPayload: `{"is_enabled":false}`, existing: true, enabled: true, flushErr: errors.New("session flush failed"), wantStatus: 500, wantEvent: true, wantUser: storedUser, wantPass: storedPass},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newRealOAuth2Store(t)
+			t.Cleanup(func() { require.NoError(t, store.Close(context.Background())) })
+			if tc.existing {
+				require.NoError(t, store.UpdateAuthConfig(t.Context(), &configstore.AuthConfig{
+					AdminUserName: schemas.NewSecretVar(storedUser),
+					AdminPassword: schemas.NewSecretVar(hash),
+					IsEnabled:     tc.enabled,
+				}))
+			}
+			failingStore := authConfigAuditFailureStore{ConfigStore: store, saveErr: tc.saveErr, flushErr: tc.flushErr}
+			cfg := newTestOAuth2Config(failingStore, configtables.MCPServerAuthModeHeaders, false)
+			h := &ConfigHandler{store: cfg, configManager: authConfigTestManager{store: failingStore, setupToken: setupToken}}
+			body := `{"client_config":{"log_retention_days":7}`
+			if tc.authPayload != "" {
+				body += `,"auth_config":` + tc.authPayload
+			}
+			request := putConfigCtx(body + `}`)
+			request.SetUserValue(schemas.BifrostContextKeyAuthBypassed, tc.bypassed)
+			h.updateConfig(request)
+			require.Equal(t, tc.wantStatus, request.Response.StatusCode(), "body=%s", request.Response.Body())
+
+			var authChanges []configstore.AuditChange
+			for _, change := range auditChanges(t, request) {
+				if change.EventName == "auth_config.updated" {
+					authChanges = append(authChanges, change)
+				}
+			}
+			if tc.wantEvent {
+				require.Len(t, authChanges, 1)
+				change := authChanges[0]
+				assert.Equal(t, "auth_config", change.TargetType)
+				assert.Equal(t, "dashboard", change.TargetID)
+				assert.Empty(t, change.TargetName)
+				if tc.existing {
+					assert.JSONEq(t, fmt.Sprintf(`{"is_enabled":%t,"username_configured":true,"password_configured":true}`, tc.enabled), string(change.Before))
+				} else {
+					assert.Empty(t, change.Before)
+				}
+				assert.JSONEq(t, fmt.Sprintf(`{"is_enabled":%t,"username_configured":true,"password_configured":true}`, tc.wantEnabled), string(change.After))
+				for _, secret := range []string{storedUser, "audit-replacement", storedPass, newPass, hash, setupToken, "current_password", "setup_token"} {
+					requireNoSecret(t, change, secret)
+				}
+			} else {
+				require.Empty(t, authChanges)
+			}
+			persisted, err := store.GetAuthConfig(t.Context())
+			require.NoError(t, err)
+			if tc.wantUser == "" {
+				require.Nil(t, persisted)
+				return
+			}
+			require.NotNil(t, persisted)
+			assert.Equal(t, tc.wantEnabled, persisted.IsEnabled)
+			assert.Equal(t, tc.wantUser, persisted.AdminUserName.GetValue())
+			matches, err := encrypt.CompareHash(persisted.AdminPassword.GetValue(), tc.wantPass)
+			require.NoError(t, err)
+			assert.True(t, matches, "persisted password must reflect the committed config")
+		})
+	}
+}
+
 // TestUpdateConfig_StoredCredentialsRequireProofWhenAuthBypassed pins that an admin account
 // which exists but has dashboard auth switched off cannot be taken over through the open
 // management API: a caller admitted without a credential check may switch auth back on, or

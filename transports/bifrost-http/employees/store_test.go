@@ -2,21 +2,25 @@ package employees
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	bifrost "github.com/maximhq/bifrost/core"
 	"github.com/maximhq/bifrost/core/schemas"
 	"github.com/maximhq/bifrost/framework/configstore"
 	configtables "github.com/maximhq/bifrost/framework/configstore/tables"
 	"github.com/maximhq/bifrost/framework/encrypt"
+	"github.com/maximhq/bifrost/framework/postgresconn"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
 
-func testStore(t *testing.T) (*Store, configstore.ConfigStore) {
+func testStore(t testing.TB) (*Store, configstore.ConfigStore) {
 	t.Helper()
 	ctx := context.Background()
 	logger := bifrost.NewDefaultLogger(schemas.LogLevelError)
@@ -27,6 +31,52 @@ func testStore(t *testing.T) (*Store, configstore.ConfigStore) {
 	}, logger)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, configStore.Close(ctx)) })
+	store, err := NewStore(ctx, configStore)
+	require.NoError(t, err)
+	return store, configStore
+}
+
+func passwordTestStore(t testing.TB) (*Store, configstore.ConfigStore) {
+	t.Helper()
+	socket := os.Getenv("ELYGATE_TEST_POSTGRES_SOCKET")
+	if socket == "" {
+		return testStore(t)
+	}
+	require.True(t, filepath.IsAbs(socket))
+	require.DirExists(t, socket)
+	// Full upstream schema bootstrap is separate from bounded employee
+	// mutations and can exceed 30 seconds on an external test volume.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	cfg := &configstore.PostgresConfig{
+		Host: schemas.NewSecretVar(socket), Port: schemas.NewSecretVar("5432"),
+		User: schemas.NewSecretVar("elygate_controlplane_test"), Password: schemas.NewSecretVar(""),
+		DBName: schemas.NewSecretVar("postgres"), SSLMode: schemas.NewSecretVar("disable"),
+		MaxIdleConns: 2, MaxOpenConns: 4,
+	}
+	admin, err := pgx.Connect(ctx, postgresconn.BuildDSN(cfg))
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		require.NoError(t, admin.Close(ctx))
+	})
+	database := "elygate_employee_test_" + uuid.NewString()
+	identifier := pgx.Identifier{database}.Sanitize()
+	_, err = admin.Exec(ctx, "CREATE DATABASE "+identifier)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_, err := admin.Exec(ctx, "DROP DATABASE "+identifier)
+		require.NoError(t, err)
+	})
+	cfg.DBName = schemas.NewSecretVar(database)
+	configStore, err := configstore.NewConfigStore(ctx, &configstore.Config{
+		Enabled: true, Type: configstore.ConfigStoreTypePostgres, Config: cfg,
+	}, bifrost.NewDefaultLogger(schemas.LogLevelError))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, configStore.Close(context.Background())) })
 	store, err := NewStore(ctx, configStore)
 	require.NoError(t, err)
 	return store, configStore

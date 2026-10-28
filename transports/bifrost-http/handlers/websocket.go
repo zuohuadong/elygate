@@ -137,6 +137,8 @@ func isLocalhost(host string) bool {
 // connectStream handles WebSocket connections for real-time streaming
 func (h *WebSocketHandler) connectStream(ctx *fasthttp.RequestCtx) {
 	upgrader := h.getUpgrader()
+	roleID, hasRole := notificationRoleID(ctx)
+	localAdmin, _ := ctx.UserValue(schemas.IsLocalAdminContextKey).(bool)
 	err := upgrader.Upgrade(ctx, func(ws *websocket.Conn) {
 		// Read safety & liveness
 		ws.SetReadLimit(50 << 20) // 50 MiB
@@ -147,10 +149,8 @@ func (h *WebSocketHandler) connectStream(ctx *fasthttp.RequestCtx) {
 		})
 		// Create a new client with its own mutex
 		client := &WebSocketClient{
-			conn: ws,
+			conn: ws, roleID: roleID, hasRole: hasRole, localAdmin: localAdmin,
 		}
-		client.roleID, client.hasRole = notificationRoleID(ctx)
-		client.localAdmin, _ = ctx.UserValue(schemas.IsLocalAdminContextKey).(bool)
 
 		// Register new client
 		h.mu.Lock()

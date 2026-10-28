@@ -1,0 +1,12 @@
+diff --git a/dist/components/AboutSettings.svelte b/dist/components/AboutSettings.svelte
+--- a/dist/components/AboutSettings.svelte
++++ b/dist/components/AboutSettings.svelte
+@@ -11,7 +11,7 @@
+   const resources = $derived(adminContext.resources.filter((resource) => resource.meta?.['aboutVisible'] !== false));
+   const providerNames = $derived(adminContext.getDataProviderNames());
+   let { version: suppliedVersion, headingLevel = 'h1' }: { version?: string; headingLevel?: 'h1' | 'h2' } = $props();
+-  const buildVersion = '__SVADMIN_VERSION__';
++  const buildVersion = '0.96.1';
+   const version = $derived(suppliedVersion ?? (
+     buildVersion.startsWith('__')
+       ? (i18n.locale === 'zh-CN' ? '开发构建（未提供版本）' : 'Development build (version unavailable)')

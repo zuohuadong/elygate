@@ -12,3 +12,10 @@ body {
 	min-width: 320px;
 	min-height: 100vh;
 }
+
+/* 手机断点不保留桌面侧栏占位的过渡，避免窗口缩小时挤压页头。 */
+@media (width < 48rem) {
+	[data-svadmin-layout] > :is(.svadmin-sidebar-content-expanded, .svadmin-sidebar-content-collapsed) {
+		transition-property: none;
+	}
+}

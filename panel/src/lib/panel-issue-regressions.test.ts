@@ -13,6 +13,10 @@ async function readSvadminUiPatch(): Promise<{ packageJson: PackageManifest; pat
 	return { packageJson, patch: await Bun.file(`${process.cwd()}/${patchPath}`).text() };
 }
 
+function readSvadminComponent(component: string): Promise<string> {
+	return Bun.file(new URL(`../../node_modules/@svadmin/ui/dist/components/${component}.svelte`, import.meta.url)).text();
+}
+
 describe('panel issue regressions', () => {
 	test('provider keys route renders a dedicated key workspace', async () => {
 		const source = await Bun.file(new URL('../pages/ProvidersPage.svelte', import.meta.url)).text();
@@ -271,6 +275,24 @@ describe('panel issue regressions', () => {
 		expect(source).toContain('disabled={usageLoading || usageFilterLoading || !usageProjectFilter}');
 	});
 
+	test('usage dimension filters preserve exact identities in requests, stale guards and reset', async () => {
+		const source = await Bun.file(new URL('../pages/ControlPlanePage.svelte', import.meta.url)).text();
+		for (const [field, query] of [['User', 'user_id'], ['Provider', 'provider'], ['Model', 'model']]) {
+			const property = field.toLowerCase();
+			expect(source).toContain(`let usage${field}Filter = $state('');`);
+			expect(source).toContain(`params.set('${query}', usage${field}Filter)`);
+			expect(source).toContain(`${property}: usage${field}Filter,`);
+			expect(source).toContain(`left.${property} === right.${property}`);
+			expect(source).toContain(`usage${field}Filter = '';`);
+			expect(source).toContain(`bind:value={usage${field}Filter}`);
+			expect(source).not.toContain(`usage${field}Filter.trim()`);
+		}
+		expect(source).toContain("{ key: 'user_id', label: text('用户 ID', 'User ID') }");
+		expect(source).toContain("String(row.user_id ?? '—')");
+		expect(source).toContain('onsubmit={(event) => { event.preventDefault(); applyUsageFilters(); }}');
+		expect(source).toContain('if (usageLoading || usageFilterLoading) return;');
+	});
+
 	test('usage ledger route reuses the complete control-plane workflow', async () => {
 		const app = await Bun.file(new URL('../App.svelte', import.meta.url)).text();
 		const controlPlane = await Bun.file(new URL('../pages/ControlPlanePage.svelte', import.meta.url)).text();
@@ -310,25 +332,56 @@ describe('panel issue regressions', () => {
 		expect(mcpLogs).toContain("statusLabel(value(log, 'status'))");
 	});
 
-	test('the svadmin compatibility patch is pinned and covers reported settings regressions', async () => {
+	test('mobile shell does not animate the desktop content offset', async () => {
+		const stylesheet = await Bun.file(new URL('../app.css', import.meta.url)).text();
+		expect(stylesheet).toMatch(
+			/@media\s*\(width < 48rem\)\s*\{\s*\[data-svadmin-layout\]\s*>\s*:is\(\s*\.svadmin-sidebar-content-expanded,\s*\.svadmin-sidebar-content-collapsed\s*\)\s*\{\s*transition-property:\s*none;/,
+		);
+	});
+
+	test('the svadmin release patch only fills the published build version', async () => {
 		const { packageJson, patch } = await readSvadminUiPatch();
 		const uiVersion = packageJson.dependencies['@svadmin/ui'];
 		expect(packageJson.patchedDependencies[`@svadmin/ui@${uiVersion}`]).toBe(`patches/@svadmin%2Fui@${uiVersion}.patch`);
-		for (const contract of ['profile.newPassword', `const version = '${uiVersion}'`, 'whitespace-nowrap', "'用户' : 'User'", '关闭" : "Close', 'CI 部署令牌']) {
-			expect(patch).toContain(contract);
+		expect(patch).toContain(`+  const buildVersion = '${uiVersion}';`);
+		expect(patch.match(/^diff --git /gm)).toHaveLength(1);
+		const about = await readSvadminComponent('AboutSettings');
+		expect(about).toContain(`const buildVersion = '${uiVersion}';`);
+		expect(about).toContain('const version = $derived(suppliedVersion ?? (');
+		const core = await Bun.file(new URL('../../node_modules/@svadmin/core/package.json', import.meta.url)).json();
+		const ui = await Bun.file(new URL('../../node_modules/@svadmin/ui/package.json', import.meta.url)).json();
+		expect(core.version).toBe(packageJson.dependencies['@svadmin/core']);
+		expect(ui.version).toBe(uiVersion);
+		expect(Bun.semver.satisfies(core.version, ui.peerDependencies['@svadmin/core'])).toBe(true);
+	});
+
+	test('upstream svadmin retains the migrated settings, localization and shortcut fixes', async () => {
+		for (const [component, contract] of [
+			['ProfilePage', "i18n.t('profile.newPassword')"],
+			['Header', 'style="flex-shrink: 0; white-space: nowrap"'],
+			['Sidebar', "i18n.t('common.user')"],
+			['ui/sheet/sheet', 'i18n.t("common.close")'],
+			['ApiSettings', "i18n.t('api.keyNamePlaceholder')"],
+			['ApiSettings', '{permissionLabel(permission)}'],
+			['Layout', "e.key.toLowerCase() === 'k' || e.code === 'KeyK'"],
+			['SecuritySettings', 'passwordChangedRecently = true'],
+			['SecuritySettings', "i18n.t('profile.passwordChangedRecently')"],
+			['SvadminLogo', 'data-svadmin-logo'],
+			['AboutSettings', 'environmentLabel(getResolvedTheme(), themeLabelKeys)'],
+			['AboutSettings', 'environmentLabel(getColorTheme(), accentLabelKeys)'],
+			['AboutSettings', '{resource.label || resource.name}'],
+		]) {
+			expect(await readSvadminComponent(component)).toContain(contract);
 		}
-		expect(patch).toContain("e.key.toLowerCase() === 'k' || e.code === 'KeyK'");
-		expect(patch).toContain('passwordChangedRecently = true');
-		expect(patch).toContain('最近修改：刚刚');
 		const integrations = await Bun.file(`${process.cwd()}/node_modules/@svadmin/ui/dist/components/IntegrationsSettings.svelte`).text();
 		expect(integrations).toContain('onConnectionChange?:');
 		expect(integrations).toContain("i18n.t('integrations.statusProvidedByHost')");
 	});
 
 	test('global search matches localized resource labels', async () => {
-		const { patch } = await readSvadminUiPatch();
-		expect(patch).toContain('value={`${r.name} ${r.label}`}');
-		expect(patch).toContain('value={`${"create-" + r.name} ${r.label}`}');
+		const palette = await readSvadminComponent('CommandPalette');
+		expect(palette).toContain('value={`${r.name} ${r.label}`}');
+		expect(palette).toContain('value={`${"create-" + r.name} ${r.label}`}');
 	});
 
 	test('locale changes update document metadata and theme labels', async () => {
@@ -355,7 +408,7 @@ describe('panel issue regressions', () => {
 		const adminApp = await Bun.file(`${process.cwd()}/node_modules/@svadmin/ui/dist/components/AdminApp.svelte`).text();
 		expect(palette).toContain('value={`${r.name} ${r.label}`}');
 		expect(palette).toContain('value={`${"create-" + r.name} ${r.label}`}');
-		expect(adminApp).toContain('{#key renderedRoute + (renderedParams.resource ?? \'\')');
+		expect(adminApp).toContain("{#key renderedRoute + (renderedParams['resource'] ?? '')");
 		expect(adminApp).toContain('<ErrorComp status="404" />');
 	});
 
@@ -457,7 +510,6 @@ describe('panel issue regressions', () => {
 		const proxy = await Bun.file(new URL('../pages/RoutingNetworkSettingsPage.svelte', import.meta.url)).text();
 		const docs = await Bun.file(new URL('../pages/DocsHubPage.svelte', import.meta.url)).text();
 		const translations = await Bun.file(new URL('./i18n.ts', import.meta.url)).text();
-		const { patch } = await readSvadminUiPatch();
 		expect(generic).toContain('localizedEyebrow(config.eyebrow)');
 		expect(generic).toContain("'Enterprise Governance': '企业级管理'");
 		expect(operational).toContain("'source', flag.source ?? 'default'");

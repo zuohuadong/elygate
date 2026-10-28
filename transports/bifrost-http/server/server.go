@@ -3041,7 +3041,7 @@ func (s *BifrostHTTPServer) RegisterAPIRoutes(ctx context.Context, callbacks Ser
 	}
 	configHandler := handlers.NewConfigHandler(callbacks, s.Config)
 	pluginsHandler := handlers.NewPluginsHandler(callbacks, s.Config.ConfigStore)
-	sessionHandler := handlers.NewSessionHandler(s.Config.ConfigStore, s.WSTicketStore)
+	sessionConfigStore := s.Config.ConfigStore
 	if s.Config.ConfigStore != nil {
 		employeeHandler, err := employees.NewHandler(ctx, s.Config.ConfigStore, govLogManager)
 		if err != nil {
@@ -3050,14 +3050,19 @@ func (s *BifrostHTTPServer) RegisterAPIRoutes(ctx context.Context, callbacks Ser
 		employeeHandler.SetAuditAppenderFactory(func(request *fasthttp.RequestCtx) employees.EmployeeAuditAppender {
 			return employeeAuditAppender(s.Config.ConfigStore, request)
 		})
+		employeeHandler.SetSelfServiceAuditAppenderFactory(func(request *fasthttp.RequestCtx, employeeID string) employees.EmployeeAuditAppender {
+			return employeeSelfServiceAuditAppender(s.Config.ConfigStore, request, employeeID)
+		})
 		s.EmployeeHandler = employeeHandler
 		controlPlaneStore, storeErr := controlplane.NewStoreWithBindingMode(ctx, s.Config.ConfigStore, bindingMode)
 		if storeErr != nil {
 			return fmt.Errorf("failed to initialize control plane: %v", storeErr)
 		}
 		s.ControlPlaneHandler = controlplane.NewHandler(controlPlaneStore, govLogManager, s)
+		sessionConfigStore = controlPlaneStore.ConfigStoreWithSessionAudit()
 		middlewares = append(append([]schemas.BifrostHTTPMiddleware{}, middlewares...), s.ControlPlaneHandler.ManagementAuditMiddleware(logger))
 	}
+	sessionHandler := handlers.NewSessionHandler(sessionConfigStore, s.WSTicketStore)
 	if checker := s.virtualKeyAccessChecker(); checker != nil {
 		if executor := s.Config.GetAsyncJobExecutor(); executor != nil {
 			executor.SetVirtualKeyAccessChecker(checker)
@@ -3813,6 +3818,7 @@ func (s *BifrostHTTPServer) Bootstrap(ctx context.Context) error {
 	}
 	if s.ControlPlaneHandler != nil {
 		s.BudgetMonitor = controlplane.NewBudgetMonitor(s.Ctx, s.ControlPlaneHandler, logger)
+		s.BudgetMonitor.SetNotificationPublisher(s.NotificationService.PublishOnce)
 		s.BudgetMonitor.Start()
 		logger.Info("control-plane budget monitor initialized")
 	}

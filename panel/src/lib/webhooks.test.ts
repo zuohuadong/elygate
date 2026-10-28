@@ -2,6 +2,15 @@ import { describe, expect, test } from 'bun:test';
 import { buildWebhookPayload, buildWebhookQuery, endpointPayload, emptyWebhookDraft, webhookDraftFromEndpoint } from './webhooks';
 
 describe('webhook management helpers', () => {
+	test('preserves an explicit budget subscription in queries, edits and payloads', () => {
+		const endpoint = { name: 'budget', url: 'https://hooks.example.com/budgets', events: ['budget.threshold_reached'], headers: {} };
+		const draft = webhookDraftFromEndpoint(endpoint);
+		expect(draft.events).toEqual(['budget.threshold_reached']);
+		expect(buildWebhookPayload(draft).events).toEqual(endpoint.events);
+		expect(endpointPayload(endpoint, { disabled: true }).events).toEqual(endpoint.events);
+		expect(buildWebhookQuery({ search: '', events: endpoint.events, status: '', limit: 25, offset: 0 })).toContain('event=budget.threshold_reached');
+		expect(emptyWebhookDraft().events).not.toContain('budget.threshold_reached');
+	});
 	test('builds canonical filters', () => {
 		const query = buildWebhookQuery({ search: ' billing ', events: ['async_job.failed', 'unknown', 'async_job.completed'], status: 'disabled', limit: 25, offset: 50 });
 		expect(query).toContain('search=billing');
@@ -50,6 +59,8 @@ describe('webhook management helpers', () => {
 		expect(source).toContain('.deliveries table { min-width: 1120px; }');
 		expect(source).toContain('class="table-wrap endpoints-table"');
 		expect(source).toContain('.deliveries th:nth-child(8) { width: 12%; }');
+		expect(source).toContain("text('来源 ID', 'Source ID')");
+		expect(source).toContain('displayValue(delivery.resource_id || delivery.request_id)');
 		expect(source).not.toContain('<small>{idOf(endpoint)}</small>');
 		expect(source).toMatch(/table\s*\{[^}]*table-layout:\s*fixed/);
 		expect(source).toMatch(/th, td\s*\{[^}]*vertical-align:\s*middle/);

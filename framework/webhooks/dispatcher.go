@@ -224,6 +224,12 @@ func (d *Dispatcher) DeliverTest(ctx context.Context, endpoint *tables.TableWebh
 	}
 	tuning := tuningFor(endpoint)
 	body, err := renderPayload(sample, event, false, tuning.maxResponsePayloadBytes, now)
+	if event == tables.WebhookEventBudgetThresholdReached {
+		body, err = renderResourcePayload(tables.TableWebhookJob{
+			Event: event, CreatedAt: now, ResourceID: "test-alert",
+			PayloadJSON: `{"id":"test-alert","scope_type":"project","scope_id":"test-project","window":"daily","threshold":0.8,"usage":8,"limit":10}`,
+		})
+	}
 	if err != nil {
 		return 0, err
 	}
@@ -402,7 +408,11 @@ func (d *Dispatcher) attempt(job tables.TableWebhookJob, endpoint *tables.TableW
 		// endpoint is already gone or disabled. Carry the async job's request id
 		// so the history row still reconciles with its LLM log.
 		var requestID string
-		asyncJob, findErr := d.logStore.FindAsyncJobByID(d.baseCtx, job.AsyncJobID)
+		var asyncJob *logstore.AsyncJob
+		findErr := logstore.ErrNotFound
+		if job.Event != tables.WebhookEventBudgetThresholdReached {
+			asyncJob, findErr = d.logStore.FindAsyncJobByID(d.baseCtx, job.AsyncJobID)
+		}
 		switch {
 		case findErr == nil:
 			requestID = asyncJob.RequestID
@@ -422,8 +432,14 @@ func (d *Dispatcher) attempt(job tables.TableWebhookJob, endpoint *tables.TableW
 	var body []byte
 	var err error
 	var requestID string
-	asyncJob, findErr := d.logStore.FindAsyncJobByID(d.baseCtx, job.AsyncJobID)
+	var asyncJob *logstore.AsyncJob
+	findErr := logstore.ErrNotFound
+	if job.Event != tables.WebhookEventBudgetThresholdReached {
+		asyncJob, findErr = d.logStore.FindAsyncJobByID(d.baseCtx, job.AsyncJobID)
+	}
 	switch {
+	case job.Event == tables.WebhookEventBudgetThresholdReached:
+		body, err = renderResourcePayload(job)
 	case findErr == nil:
 		requestID = asyncJob.RequestID
 		body, err = renderPayload(asyncJob, job.Event, endpoint.IncludeResponse, tuning.maxResponsePayloadBytes, now)
@@ -468,18 +484,20 @@ func (d *Dispatcher) attempt(job tables.TableWebhookJob, endpoint *tables.TableW
 func (d *Dispatcher) finalize(job tables.TableWebhookJob, attemptNo int, requestID string, result attemptResult, outcome logstore.WebhookDeliveryOutcome, now time.Time, touchCounters bool, tuning endpointTuning, leaseUntil time.Time) {
 	expiresAt := now.Add(d.historyRetention)
 	history := &logstore.WebhookDelivery{
-		ID:         uuid.NewString(),
-		WebhookID:  job.ID,
-		EndpointID: job.EndpointID,
-		AsyncJobID: job.AsyncJobID,
-		RequestID:  requestID,
-		Event:      job.Event,
-		AttemptNo:  attemptNo,
-		Outcome:    outcome,
-		StatusCode: result.statusCode,
-		Error:      result.errText,
-		CreatedAt:  now,
-		ExpiresAt:  &expiresAt,
+		ID:          uuid.NewString(),
+		WebhookID:   job.ID,
+		EndpointID:  job.EndpointID,
+		AsyncJobID:  job.AsyncJobID,
+		ResourceID:  job.ResourceID,
+		PayloadJSON: job.PayloadJSON,
+		RequestID:   requestID,
+		Event:       job.Event,
+		AttemptNo:   attemptNo,
+		Outcome:     outcome,
+		StatusCode:  result.statusCode,
+		Error:       result.errText,
+		CreatedAt:   now,
+		ExpiresAt:   &expiresAt,
 	}
 	if err := d.logStore.CreateWebhookDelivery(d.baseCtx, history); err != nil {
 		d.logger.Warn("webhooks: recording delivery history for job %s failed, attempt will rerun after lease expiry: %v", job.ID, err)
