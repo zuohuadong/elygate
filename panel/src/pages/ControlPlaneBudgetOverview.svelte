@@ -228,10 +228,10 @@
 	.amounts { flex-wrap: wrap; overflow-wrap: anywhere; }
 	.amounts strong { font-size: 1.05rem; font-variant-numeric: tabular-nums; }
 	.amounts span { color: var(--muted-foreground); font-size: .85rem; }
-	.state { border-radius: 999px; font-size: .72rem; padding: .2rem .45rem; }
-	.state.healthy { background: color-mix(in srgb, #2f8f63 14%, transparent); color: #24704f; }
-	.state.warning { background: color-mix(in srgb, #b7791f 16%, transparent); color: #8a5b14; }
-	.state.exceeded { background: color-mix(in srgb, var(--destructive) 14%, transparent); color: var(--destructive); }
+	.state { border-radius: 999px; color: var(--foreground); font-size: .72rem; padding: .2rem .45rem; }
+	.state.healthy { background: color-mix(in srgb, var(--success) 14%, transparent); }
+	.state.warning { background: color-mix(in srgb, var(--warning) 16%, transparent); }
+	.state.exceeded { background: color-mix(in srgb, var(--destructive) 14%, transparent); }
 	progress { accent-color: var(--primary); height: .5rem; width: 100%; }
 	.period { font-size: .75rem; }
 	.alerts { display: grid; gap: .75rem; min-width: 0; }

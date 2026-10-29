@@ -279,6 +279,20 @@ without copy-build, and 23 browser-fixture checks. This is not live
 backend-to-browser, production migration or crash-recovery acceptance; query
 cost measurements and remaining boundaries are recorded in the product roadmap.
 
+A subsequent 2026-10-29 local production-runtime/browser replay passed 16 checks
+without API response fixtures: real session login, background monitor alerts,
+resolve/reopen, independent acknowledgement, Basic retry idempotency, guarded
+Origin, filtered focus recovery, committed-response loss and authoritative
+refresh. A full backend restart preserved the session/state and a further
+monitor interval did not duplicate alerts or audits. Stopped immutable SQLite
+reconciled four alerts, one resolution, zero acknowledgements, five transition
+audits, zero read receipts and four delivered notifications. Both backend
+instances shut down normally. The report is
+`.codex-tmp/budget-resolution-runtime-dO65ou/report.json`; input was official
+synthetic usage logs, not provider calls. This closes the local SQLite
+backend-to-browser gap for resolution at `37da8b23a`, not real-provider billing,
+PostgreSQL-browser, production migration or backup/recovery acceptance.
+
 ### Historical Budget Periods
 
 Budgeted project/application creation and full budget replacements persist

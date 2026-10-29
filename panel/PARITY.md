@@ -186,6 +186,11 @@ upstream UI.
   usage, limits and healthy/warning/exceeded state. Only project/application
   filters apply; ledger user/provider/model/date/session/agent filters must not
   reduce budgets.
+- Status badges retain explicit text and use theme foreground on semantic
+  success/warning/destructive tinted surfaces, not fixed dark text colors.
+  The 2026-10-29 follow-up measured every state at >=11.79:1 in both themes
+  across desktop, 375px and landscape; evidence is in
+  `.codex-tmp/budget-status-theme-browser-verified.log`.
 - `GET /api/control-plane/budget-alerts` lists stored 80%/100% events with
   limit/offset paging and `resolution=all|open|resolved` (default all), applied
   before paging and intersected with project/application scope. Invalid,
@@ -219,6 +224,15 @@ upstream UI.
   desktop/375px rendering passed. Anonymous writes returned 401 and authenticated
   foreign-Origin writes returned 403. This is not real-provider billing,
   PostgreSQL-to-browser, production migration or backup/recovery acceptance.
+- Resolution runtime/browser acceptance on 2026-10-29 additionally passed
+  resolve/reopen, independent acknowledgement, filtered empty/refill and lost
+  focus recovery, dropped committed responses and exact transition audits.
+  State and the real login session survived a full backend restart and another
+  monitor interval. Stopped SQLite reconciled four alerts, one resolution,
+  zero acknowledgements, five transition audits, zero read receipts and four
+  delivered notifications. All 16 checks passed without API response fixtures.
+  This run used the panel before the separately verified badge CSS follow-up;
+  the real-provider, PostgreSQL-browser and production boundaries above remain.
 - `GET /api/control-plane/usage/budgets/history` provides independent closed UTC
   day/month analysis. The table has its own range and SQL-backed pagination,
   follows only project/application filters, and shows resource names,

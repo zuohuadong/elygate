@@ -66,6 +66,17 @@ describe('panel issue regressions', () => {
 		expect(source).toMatch(/\.page-shell\s*\{[^}]*color:\s*var\(--foreground\)/s);
 	});
 
+	test('budget status badges use theme foreground over semantic tinted surfaces', async () => {
+		const source = await Bun.file(new URL('../pages/ControlPlaneBudgetOverview.svelte', import.meta.url)).text();
+		expect(source).toMatch(/\.state\s*\{[^}]*color:\s*var\(--foreground\)/);
+		for (const [state, token] of [['healthy', 'success'], ['warning', 'warning'], ['exceeded', 'destructive']]) {
+			const rule = source.match(new RegExp(`\\.state\\.${state}\\s*\\{([^}]+)\\}`))?.[1] ?? '';
+			expect(rule).toContain(`var(--${token})`);
+			expect(rule).toContain('transparent');
+			expect(rule).not.toMatch(/(?:^|;)\s*color\s*:|#[\da-f]{3,8}\b/i);
+		}
+	});
+
 	test('caching config identifies the system section instead of plugins', async () => {
 		const source = await Bun.file(new URL('../pages/CachingConfigPage.svelte', import.meta.url)).text();
 		expect(source).toMatch(/\{getAppName\(\)\}\s*\/\s*\{i18n\.t\('elygate\.system'\)\}/);

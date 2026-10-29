@@ -344,6 +344,21 @@ Elygate 当前定位收敛为：
 - 请求流成本仅影响管理告警查询/写入，不改推理路径或新增长驻缓存；处理表每个已处理告警最多一行，重开或删除告警后释放。Apple M4、外盘 SQLite、25 条告警、`-benchmem -benchtime=100x -count=3` 的读查询中位数：仅确认 JOIN 为 73897 ns/op、36371 B/op、833 allocs/op；新增处理 JOIN 为 83963 ns/op、40090 B/op、933 allocs/op。两者使用同一当前视图类型，是查询形状比较，不是旧二进制全链路 before/after，也不代表 PostgreSQL 或推理性能。
 - 证据位于 `.codex-tmp/budget-resolutions-{sqlite,postgres,bench}-final.log`、`budget-resolutions-panel-{tests,check-final,build-final}.log`、`budget-resolutions-browser-verified.log` 及 `budget-resolutions-source-final.sha256`。独立只读复核、源码校验、格式与 diff 检查通过。本增量为本地 `PASS_SCOPED`，按用户本轮明确要求提交推送，未部署；真实供应商费用、真实后端浏览器链路、多用户、统一策略、模型治理、全路径撤销、完整审计、生产迁移及整机备份恢复仍未完成，原总目标保持 active / PARTIAL。
 
+### 2026-10-29 预算告警处理真实运行验收后续项
+
+- follow-up `budget-resolution-runtime`：parent 为 `budget-alert-resolution`，source 为上一节真实后端浏览器链路缺口，reason 为数据库回归与浏览器 API 夹具不能替代生产 Bootstrap/Start 到面板的连线验收。范围为已有私有 SQLite 运行夹具、本地协调脚本与验收文档；Native、低风险、root 唯一 writer、external=0，不改业务语义或轮询间隔。
+- 基于 `37da8b23a` 的当前生产后端源码重新构建，复用官方日志库存入合成费用，后台监控独立生成项目/应用 4 条阈值告警；真实登录、同源写入、键盘处理、Basic 幂等、确认与处理独立、筛选后重开及焦点恢复、提交后丢响应的未知态/刷新恢复、精确审计均通过。匿名请求 401、已认证外来 Origin 请求 403，未使用 API fulfilled/mock 响应。桌面、375px、暗色和横屏截图已检查。
+- 完整停止后端进程，再用相同数据重启；真实会话和状态仍有效，额外等待 65 秒监控周期没有重复告警/审计。两次后端均正常退出；停机后 immutable SQLite 对账为 alerts=4、resolved=1、acknowledged=0、audits=5、read_receipts=0、delivered=4、notifications=4，后续只读复核一致，无 WAL 或运行残留进程。
+- 16 项检查全部通过，报告 `.codex-tmp/budget-resolution-runtime-dO65ou/report.json` 的时间为 2026-10-29 02:46:15Z 至 02:48:25Z，errors=[]。证据为 `.codex-tmp/budget-resolutions-runtime-final.log`、对应二进制指纹及 buildinfo；原产品源码清单已全部核对，脚本最终定位器/主题等待修正后的 harness 指纹已刷新。前两轮脚本定位器与主题切换时序失败不计为产品通过，原失败报告保留，没有为它们修改业务代码。
+- 本后续项为本地 `PASS_SCOPED`，关闭上一节的 SQLite 真实后端到浏览器处理链路缺口；不证明真实模型计费、PostgreSQL 浏览器链路、多用户、统一策略、模型治理、全路径撤销、完整审计、生产迁移或整机备份恢复。未部署、未改 Go 静态嵌入 UI；运行截图暴露的暗色徽标可读性单列为 `budget-status-theme` 后续项，不以此报告冒充后来 CSS 的运行证据。原总目标仍 active / PARTIAL。
+
+### 2026-10-29 预算状态徽标主题可读性后续项
+
+- follow-up `budget-status-theme`：parent 为 `budget-resolution-runtime`，source 为真实运行截图中预算 healthy/warning 徽标的暗色可读性缺口；范围冻结为独立面板 CSS、一个回归测试、浏览器主题验收和文档，不改 API、Go、依赖或静态嵌入 UI。Native、低风险、root 唯一 writer、external=0。
+- 修复前暗色固定深色文字在 tinted surface 上约 `2.55:1`；改为现有主题 `--foreground` 与 `--success`、`--warning`、`--destructive` 的语义 tinted surface。修复后真实渲染的三种状态在浅色/暗色及 1440px、375px、横屏均至少 `11.79:1`，文字不重叠、不截断，页面无横向溢出，reduced-motion 开启且无浏览器错误。
+- 面板 280 项测试、1370 次断言通过；`svelte-check` 0 错误/警告；独立 Vite 构建通过并保留既有大 chunk 提示。证据为 `.codex-tmp/budget-status-theme-browser-verified.log`、`.codex-tmp/budget-status-theme-{tests,check,build}.log` 和 `output/playwright/budget-status-theme-{light,dark}-{1440,375,812}.png`。
+- 本后续项为本地 `PASS_SCOPED`，不代表完整平台、真实模型费用、PostgreSQL 浏览器链路、生产部署/恢复或其他 active / PARTIAL 边界已完成。
+
 ## 3. 单机部署架构
 
 ```text
