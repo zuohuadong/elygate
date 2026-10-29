@@ -745,3 +745,205 @@ func TestManagementRoutingAuditAfterPersistence(t *testing.T) {
 		})
 	}
 }
+
+type promptAuditReloader struct {
+	calls       int
+	panicReload bool
+}
+
+func (r *promptAuditReloader) ReloadPromptCache(context.Context) error {
+	r.calls++
+	if r.panicReload {
+		panic("prompt audit reload unavailable")
+	}
+	return nil
+}
+
+type promptAuditMutation struct {
+	name, method, path, body, action, resourceType, resourceID string
+}
+
+func promptAuditMutations(versionID, sessionID uint) []promptAuditMutation {
+	version := strconv.FormatUint(uint64(versionID), 10)
+	session := strconv.FormatUint(uint64(sessionID), 10)
+	const messages = `,"messages":[{"role":"user","content":"private-prompt-content"}],"variables":{"token":"private-prompt-variable"}`
+	return []promptAuditMutation{
+		{"delete-folder", "DELETE", "/api/prompt-repo/folders/audit-folder", "", "prompt_folder.deleted", "prompt_folder", "audit-folder"},
+		{"create-prompt", "POST", "/api/prompt-repo/prompts", `{"name":"new prompt"}`, "prompt.created", "prompt", ""},
+		{"update-prompt", "PUT", "/api/prompt-repo/prompts/audit-prompt", `{"name":"updated prompt"}`, "prompt.updated", "prompt", "audit-prompt"},
+		{"delete-prompt", "DELETE", "/api/prompt-repo/prompts/audit-prompt", "", "prompt.deleted", "prompt", "audit-prompt"},
+		{"create-version", "POST", "/api/prompt-repo/prompts/audit-prompt/versions", `{"commit_message":"new version"` + messages + `}`, "prompt_version.created", "prompt_version", ""},
+		{"delete-version", "DELETE", "/api/prompt-repo/versions/" + version, "", "prompt_version.deleted", "prompt_version", version},
+		{"create-session", "POST", "/api/prompt-repo/prompts/audit-prompt/sessions", `{"name":"new session"` + messages + `}`, "prompt_session.created", "prompt_session", ""},
+		{"update-session", "PUT", "/api/prompt-repo/sessions/" + session, `{"name":"updated session"` + messages + `}`, "prompt_session.updated", "prompt_session", session},
+		{"delete-session", "DELETE", "/api/prompt-repo/sessions/" + session, "", "prompt_session.deleted", "prompt_session", session},
+		{"rename-session", "PUT", "/api/prompt-repo/sessions/" + session + "/rename", `{"name":"renamed session"}`, "prompt_session.renamed", "prompt_session", session},
+		{"commit-session", "POST", "/api/prompt-repo/sessions/" + session + "/commit", `{"commit_message":"published"}`, "prompt_session.committed", "prompt_session", session},
+	}
+}
+
+func seedPromptAudit(t *testing.T, cs configstore.ConfigStore) (uint, uint) {
+	t.Helper()
+	ctx := context.Background()
+	require.NoError(t, cs.CreateFolder(ctx, &configtables.TableFolder{ID: "audit-folder", Name: "original folder"}))
+	folder := "audit-folder"
+	require.NoError(t, cs.CreatePrompt(ctx, &configtables.TablePrompt{ID: "audit-prompt", Name: "original prompt", FolderID: &folder}))
+	message := configtables.PromptMessage(`{"role":"user","content":"private-prompt-content"}`)
+	version := &configtables.TablePromptVersion{PromptID: "audit-prompt", CommitMessage: "original",
+		Variables: configtables.PromptVariables{"token": ""},
+		Messages:  []configtables.TablePromptVersionMessage{{PromptID: "audit-prompt", Message: message}}}
+	require.NoError(t, cs.CreatePromptVersion(ctx, version))
+	session := &configtables.TablePromptSession{PromptID: "audit-prompt", Name: "original session", VersionID: &version.ID,
+		Variables: configtables.PromptVariables{"token": "private-prompt-variable"},
+		Messages:  []configtables.TablePromptSessionMessage{{PromptID: "audit-prompt", Message: message}}}
+	require.NoError(t, cs.CreatePromptSession(ctx, session))
+	return version.ID, session.ID
+}
+
+func promptAuditStoredSnapshot(t *testing.T, cs configstore.ConfigStore) string {
+	t.Helper()
+	var stored struct {
+		Folders         []configtables.TableFolder
+		Prompts         []configtables.TablePrompt
+		Versions        []configtables.TablePromptVersion
+		Sessions        []configtables.TablePromptSession
+		VersionMessages []configtables.TablePromptVersionMessage
+		SessionMessages []configtables.TablePromptSessionMessage
+	}
+	for _, rows := range []any{&stored.Folders, &stored.Prompts, &stored.Versions, &stored.Sessions, &stored.VersionMessages, &stored.SessionMessages} {
+		require.NoError(t, cs.DB().Order("id").Find(rows).Error)
+	}
+	snapshot, err := json.Marshal(stored)
+	require.NoError(t, err)
+	return string(snapshot)
+}
+
+func promptAuditRequest(routes *router.Router, mutation promptAuditMutation, authorization string) *fasthttp.RequestCtx {
+	var httpRequest fasthttp.Request
+	request := &fasthttp.RequestCtx{}
+	request.Init(&httpRequest, nil, nil)
+	request.Request.Header.SetMethod(mutation.method)
+	request.Request.SetRequestURI(mutation.path)
+	request.Request.Header.SetContentType("application/json")
+	request.Request.Header.Set("Authorization", authorization)
+	request.Request.Header.Set("X-User-ID", "forged-prompt-actor")
+	request.Request.SetBodyString(mutation.body)
+	routes.Handler(request)
+	return request
+}
+
+func failPromptAuditWrites(t *testing.T, cs configstore.ConfigStore, outcome string) {
+	t.Helper()
+	fail := func(tx *gorm.DB) {
+		isAudit := tx.Statement.Table == (AuditEvent{}).TableName()
+		if outcome == "write-error" && !isAudit || outcome == "audit-error-panic" && isAudit {
+			tx.AddError(errors.New("prompt audit test write unavailable"))
+		}
+	}
+	require.NoError(t, cs.DB().Callback().Create().Before("gorm:create").Register("test:prompt-audit", fail))
+	require.NoError(t, cs.DB().Callback().Update().Before("gorm:update").Register("test:prompt-audit", fail))
+	require.NoError(t, cs.DB().Callback().Delete().Before("gorm:delete").Register("test:prompt-audit", fail))
+	t.Cleanup(func() {
+		cs.DB().Callback().Create().Remove("test:prompt-audit")
+		cs.DB().Callback().Update().Remove("test:prompt-audit")
+		cs.DB().Callback().Delete().Remove("test:prompt-audit")
+	})
+}
+
+func TestManagementPromptAuditAfterPersistence(t *testing.T) {
+	testLogger := bifrost.NewDefaultLogger(schemas.LogLevelError)
+	handlers.SetLogger(testLogger)
+	hash, err := encrypt.Hash("prompt-audit-test-password")
+	require.NoError(t, err)
+	auth := &handlers.AuthMiddleware{}
+	auth.UpdateAuthConfig(&configstore.AuthConfig{
+		IsEnabled: true, AdminUserName: schemas.NewSecretVar("prompt-admin"), AdminPassword: schemas.NewSecretVar(hash),
+	})
+	authorization := "Basic " + base64.StdEncoding.EncodeToString([]byte("prompt-admin:prompt-audit-test-password"))
+	// Cases: all eleven reload-producing routes; committed success/panic, rejected writes, audit failure during panic.
+	for index, spec := range promptAuditMutations(1, 1) {
+		t.Run(spec.name, func(t *testing.T) {
+			for _, outcome := range []string{"success", "reload-panic", "write-error", "audit-error-panic"} {
+				t.Run(outcome, func(t *testing.T) {
+					store, cs := testControlPlaneStore(t)
+					version, session := seedPromptAudit(t, cs)
+					mutation := promptAuditMutations(version, session)[index]
+					before := promptAuditStoredSnapshot(t, cs)
+					if outcome == "write-error" || outcome == "audit-error-panic" {
+						failPromptAuditWrites(t, cs, outcome)
+					}
+					reloader := &promptAuditReloader{panicReload: outcome == "reload-panic" || outcome == "audit-error-panic"}
+					audit := NewHandler(store, nil)
+					routes := router.New()
+					audit.RegisterRoutes(routes, auth.APIMiddleware())
+					handlers.NewPromptsHandler(cs, reloader).RegisterRoutes(routes,
+						handlers.RecoveryMiddleware(handlers.NewCorsMiddleware(&lib.Config{})),
+						auth.APIMiddleware(), audit.ManagementAuditMiddleware(testLogger))
+					require.Equal(t, 401, promptAuditRequest(routes, mutation, "").Response.StatusCode())
+					require.Equal(t, before, promptAuditStoredSnapshot(t, cs))
+					require.Zero(t, reloader.calls)
+					response := promptAuditRequest(routes, mutation, authorization)
+					status := 500
+					if outcome == "success" {
+						status = 200
+					}
+					require.Equal(t, status, response.Response.StatusCode(), "%s", response.Response.Body())
+					if outcome == "write-error" {
+						require.Equal(t, before, promptAuditStoredSnapshot(t, cs))
+						require.Zero(t, reloader.calls)
+					} else {
+						require.NotEqual(t, before, promptAuditStoredSnapshot(t, cs))
+						require.Equal(t, 1, reloader.calls)
+					}
+					assertPromptAuditFeed(t, routes, response, promptAuditExpectation{mutation, outcome, authorization})
+				})
+			}
+		})
+	}
+}
+
+type promptAuditExpectation struct {
+	mutation               promptAuditMutation
+	outcome, authorization string
+}
+
+func assertPromptAuditFeed(t *testing.T, routes *router.Router, response *fasthttp.RequestCtx, expected promptAuditExpectation) {
+	t.Helper()
+	feedRequest := promptAuditMutation{method: "GET", path: "/api/control-plane/audit-events"}
+	require.Equal(t, 401, promptAuditRequest(routes, feedRequest, "").Response.StatusCode())
+	feed := promptAuditRequest(routes, feedRequest, expected.authorization)
+	require.Equal(t, 200, feed.Response.StatusCode(), "%s", feed.Response.Body())
+	var payload struct {
+		Data []AuditEvent `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(feed.Response.Body(), &payload))
+	changes, _ := response.UserValue(configstore.AuditChangesUserValueKey).([]configstore.AuditChange)
+	if expected.outcome == "write-error" {
+		require.Empty(t, changes)
+		require.Empty(t, payload.Data)
+		return
+	}
+	require.Len(t, changes, 1)
+	require.Equal(t, expected.mutation.action, changes[0].EventName)
+	require.Equal(t, expected.mutation.resourceType, changes[0].TargetType)
+	require.NotEmpty(t, changes[0].TargetID)
+	if expected.mutation.resourceID != "" {
+		require.Equal(t, expected.mutation.resourceID, changes[0].TargetID)
+	}
+	require.NotContains(t, string(changes[0].Before), "private-prompt-")
+	require.NotContains(t, string(changes[0].After), "private-prompt-")
+	if expected.outcome == "audit-error-panic" {
+		require.Empty(t, payload.Data)
+		require.Equal(t, "failed", string(response.Response.Header.Peek(lib.HeaderAuditStatus)))
+	} else {
+		require.Len(t, payload.Data, 1)
+		require.Equal(t, expected.mutation.action, payload.Data[0].Action)
+		require.Equal(t, expected.mutation.resourceType, payload.Data[0].ResourceType)
+		require.Equal(t, changes[0].TargetID, payload.Data[0].ResourceID)
+		require.Equal(t, "local-admin:prompt-admin", payload.Data[0].ActorID)
+		require.Empty(t, response.Response.Header.Peek(lib.HeaderAuditStatus))
+	}
+	for _, forbidden := range []string{"private-prompt-", "prompt-audit-test-password", "forged-prompt-actor", "original session", "commit_message"} {
+		require.NotContains(t, string(feed.Response.Body()), forbidden)
+	}
+}

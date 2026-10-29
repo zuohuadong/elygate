@@ -72,9 +72,16 @@ func (r *countingPromptReloader) ReloadPromptCache(context.Context) error {
 	return r.err
 }
 
+type panicPromptReloader struct{}
+
+func (panicPromptReloader) ReloadPromptCache(context.Context) error {
+	panic("prompt cache reload panic")
+}
+
 // promptMutation is one write endpoint: its handler, route param, and request body.
 type promptMutation struct {
 	name    string
+	action  string
 	invoke  func(h *PromptsHandler, ctx *fasthttp.RequestCtx)
 	routeID string
 	body    any
@@ -84,61 +91,72 @@ func promptMutations() []promptMutation {
 	return []promptMutation{
 		{
 			name:    "deleteFolder",
+			action:  "prompt_folder.deleted",
 			invoke:  (*PromptsHandler).deleteFolder,
 			routeID: "folder-1",
 		},
 		{
 			name:   "createPrompt",
+			action: "prompt.created",
 			invoke: (*PromptsHandler).createPrompt,
 			body:   CreatePromptRequest{Name: "greeting"},
 		},
 		{
 			name:    "updatePrompt",
+			action:  "prompt.updated",
 			invoke:  (*PromptsHandler).updatePrompt,
 			routeID: "prompt-1",
 			body:    UpdatePromptRequest{Name: "greeting v2"},
 		},
 		{
 			name:    "deletePrompt",
+			action:  "prompt.deleted",
 			invoke:  (*PromptsHandler).deletePrompt,
 			routeID: "prompt-1",
 		},
 		{
 			name:    "createVersion",
+			action:  "prompt_version.created",
 			invoke:  (*PromptsHandler).createVersion,
 			routeID: "prompt-1",
 			body:    CreateVersionRequest{CommitMessage: "first", Messages: []tables.PromptMessage{promptTestMessage}},
 		},
 		{
 			name:    "deleteVersion",
+			action:  "prompt_version.deleted",
 			invoke:  (*PromptsHandler).deleteVersion,
 			routeID: "1",
 		},
 		{
 			name:    "createSession",
+			action:  "prompt_session.created",
 			invoke:  (*PromptsHandler).createSession,
 			routeID: "prompt-1",
 			body:    CreateSessionRequest{Name: "scratch", Messages: []tables.PromptMessage{promptTestMessage}},
 		},
 		{
 			name:    "updateSession",
+			action:  "prompt_session.updated",
 			invoke:  (*PromptsHandler).updateSession,
 			routeID: "1",
 			body:    UpdateSessionRequest{Name: "scratch", Messages: []tables.PromptMessage{promptTestMessage}},
 		},
 		{
 			name:    "deleteSession",
+			action:  "prompt_session.deleted",
 			invoke:  (*PromptsHandler).deleteSession,
 			routeID: "1",
 		},
 		{
 			name:    "renameSession",
+			action:  "prompt_session.renamed",
 			invoke:  (*PromptsHandler).renameSession,
 			routeID: "1",
 			body:    RenameSessionRequest{Name: "renamed"},
 		},
 		{
 			name:    "commitSession",
+			action:  "prompt_session.committed",
 			invoke:  (*PromptsHandler).commitSession,
 			routeID: "1",
 			body:    CommitSessionRequest{CommitMessage: "publish"},
@@ -173,6 +191,7 @@ func TestPromptMutationsReloadCache(t *testing.T) {
 
 			require.Equal(t, fasthttp.StatusOK, ctx.Response.StatusCode(), string(ctx.Response.Body()))
 			require.Equal(t, 1, reloader.calls)
+			requireSingleAuditChange(t, ctx, m.action)
 		})
 	}
 }
@@ -189,6 +208,7 @@ func TestPromptMutationsDoNotReloadOnStoreFailure(t *testing.T) {
 
 			require.Equal(t, fasthttp.StatusInternalServerError, ctx.Response.StatusCode())
 			require.Zero(t, reloader.calls, "peers must not be told to reload a write that did not land")
+			require.Empty(t, ctx.UserValue(configstore.AuditChangesUserValueKey))
 		})
 	}
 }
@@ -196,29 +216,76 @@ func TestPromptMutationsDoNotReloadOnStoreFailure(t *testing.T) {
 // A missing plugin or a failed reload must not fail the write itself.
 func TestPromptMutationsSurviveReloaderProblems(t *testing.T) {
 	SetLogger(&mockLogger{})
-	body := CreatePromptRequest{Name: "greeting"}
-	payload, err := json.Marshal(body)
-	require.NoError(t, err)
+	for _, mutation := range promptMutations() {
+		t.Run(mutation.name, func(t *testing.T) {
+			t.Run("nil reloader", func(t *testing.T) {
+				handler := NewPromptsHandler(&promptReloadStore{}, nil)
+				ctx := promptRequestCtx(t, mutation)
 
-	t.Run("nil reloader", func(t *testing.T) {
-		handler := NewPromptsHandler(&promptReloadStore{}, nil)
-		ctx := &fasthttp.RequestCtx{}
-		ctx.Request.SetBody(payload)
+				mutation.invoke(handler, ctx)
 
-		handler.createPrompt(ctx)
+				require.Equal(t, fasthttp.StatusOK, ctx.Response.StatusCode())
+				requireSingleAuditChange(t, ctx, mutation.action)
+			})
+			t.Run("failing reloader", func(t *testing.T) {
+				reloader := &countingPromptReloader{err: errors.New("cluster unreachable")}
+				handler := NewPromptsHandler(&promptReloadStore{}, reloader)
+				ctx := promptRequestCtx(t, mutation)
 
-		require.Equal(t, fasthttp.StatusOK, ctx.Response.StatusCode())
-	})
+				mutation.invoke(handler, ctx)
 
-	t.Run("failing reloader", func(t *testing.T) {
-		reloader := &countingPromptReloader{err: errors.New("cluster unreachable")}
-		handler := NewPromptsHandler(&promptReloadStore{}, reloader)
-		ctx := &fasthttp.RequestCtx{}
-		ctx.Request.SetBody(payload)
+				require.Equal(t, fasthttp.StatusOK, ctx.Response.StatusCode())
+				require.Equal(t, 1, reloader.calls)
+				requireSingleAuditChange(t, ctx, mutation.action)
+			})
+		})
+	}
+}
 
-		handler.createPrompt(ctx)
+func TestPromptMutationsRecordAuditBeforeReloadPanic(t *testing.T) {
+	SetLogger(&mockLogger{})
+	for _, mutation := range promptMutations() {
+		t.Run(mutation.name, func(t *testing.T) {
+			handler := NewPromptsHandler(&promptReloadStore{}, panicPromptReloader{})
+			ctx := promptRequestCtx(t, mutation)
 
-		require.Equal(t, fasthttp.StatusOK, ctx.Response.StatusCode())
-		require.Equal(t, 1, reloader.calls)
-	})
+			require.PanicsWithValue(t, "prompt cache reload panic", func() {
+				mutation.invoke(handler, ctx)
+			})
+
+			change := requireSingleAuditChange(t, ctx, mutation.action)
+			if mutation.name == "renameSession" {
+				var before, after map[string]any
+				require.NoError(t, json.Unmarshal(change.Before, &before))
+				require.NoError(t, json.Unmarshal(change.After, &after))
+				require.Equal(t, "session", before["name"])
+				require.Equal(t, "renamed", after["name"])
+			}
+		})
+	}
+}
+
+func BenchmarkPromptMutationAudit(b *testing.B) {
+	SetLogger(&mockLogger{})
+	for _, mutation := range promptMutations() {
+		b.Run(mutation.name, func(b *testing.B) {
+			handler := NewPromptsHandler(&promptReloadStore{}, &countingPromptReloader{})
+			ctx := &fasthttp.RequestCtx{}
+			if mutation.body != nil {
+				payload, err := json.Marshal(mutation.body)
+				require.NoError(b, err)
+				ctx.Request.SetBody(payload)
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for index := 0; index < b.N; index++ {
+				ctx.ResetUserValues()
+				ctx.Response.Reset()
+				if mutation.routeID != "" {
+					ctx.SetUserValue("id", mutation.routeID)
+				}
+				mutation.invoke(handler, ctx)
+			}
+		})
+	}
 }

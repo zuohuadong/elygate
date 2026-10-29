@@ -403,6 +403,38 @@ Elygate 当前定位收敛为：
 - `.codex-tmp/routing-simulation-live-report.json` 记录源码 SHA、二进制/入口 bundle/夹具指纹、检查项及停机查询；源码为同目录 `routing-simulation-live-runtime.go`、`routing-simulation-live.mjs`，截图和下载位于 `output/playwright/routing-simulation-live-*`。最初链接因系统临时盘不足失败，改用 `/Volumes/Datas` 临时目录后构建通过；首次停机只读探测需改用既有 immutable URI 方式，随后全流程重跑通过。`bun run build` 同时刷新了 ignored HTTP UI 目录，无已跟踪产物变更或部署。
 - 本项为本地 `PASS_SCOPED`，关闭 SQLite 真实管理员后端到面板的连线缺口；PostgreSQL 浏览器链路、真实 Key 授权/计费、多用户、策略版本/发布/回滚/在线 Shadow、其他路线图功能和生产部署/恢复仍未完成。未提交或推送本增量，原总目标保持 active / PARTIAL。
 
+### 2026-10-29 Prompt 仓库刷新失败审计后续项
+
+- follow-up `prompt-audit-reload`：parent 为路由与 Skill 审计回读后续项，source 为当前 `prompts.go` producer inventory，reason 为 11 个 Prompt/Folder/Version/Session 写入口在缓存刷新后才记录审计；刷新 panic 会让已成功落库的变更漏记。
+- 事件现在在写入成功后、`ReloadPromptCache` 前记录；刷新返回错误仍不改变原成功响应，刷新 panic 仍由既有恢复中间件返回 500，但已记录的变更会继续交给管理审计桥接。未改变授权、存储事务、缓存接口、API/schema、推理路径或旧 Elygate 兼容层。
+- 先在未修复源码上确认 11 个 panic 场景均因缺少审计事件失败，再用 `c91a03a43` 原始 `prompts.go` 的 overlay 复验同样红灯。最终 handler race 通过 55 个叶场景，包含 nil/error reloader、写入失败无事件，以及 rename 前后快照；真实注册路由覆盖成功、刷新 panic、写入拒绝、审计失败加 panic、未授权、身份与消息/变量内容排除。
+- SQLite 的 Prompt/Skill 控面 race 合计通过 62 个叶场景（148.785s）；私有 PostgreSQL Prompt 的 44 个叶场景独立通过（165.299s，未启用 race），runner 确认数据库清空并停机。首次合并 PostgreSQL race 运行中 Prompt 44 个场景已通过，但后续 Skill 迁移触及 5 分钟时限，因此该次包级结果是失败，不计作全量 PostgreSQL 通过；超时遗留的 1 个私有测试库已删除，剩余 0，实例已停止。
+- 请求成本仅涉及这 11 个管理员入口：重排已有调用，不新增快照字段、SQL、驻留缓存或推理路径工作。Apple M4、Go 1.27.3、非 race、内存 ConfigStore/reloader 夹具的 handler 微基准，`-benchtime=100ms -count=3 -benchmem`，各列三次中位数如下。计时含请求解析、现有审计序列化和响应，但不含真实数据库、网络、集群缓存刷新或生产签名；小样本不能证明统计显著性或生产 SLA。
+
+| 管理入口 | 原始 / 修复 ns/op | 原始 / 修复 B/op | 原始 / 修复 allocs/op |
+| --- | --- | --- | --- |
+| deleteFolder | 1073 / 1111 | 1506 / 1505 | 25 / 25 |
+| createPrompt | 1846 / 1842 | 2134 / 2112 | 29 / 29 |
+| updatePrompt | 2645 / 2642 | 3074 / 3078 | 50 / 50 |
+| deletePrompt | 1105 / 1126 | 1576 / 1573 | 25 / 25 |
+| createVersion | 3293 / 3433 | 3606 / 3619 | 51 / 51 |
+| deleteVersion | 2075 / 2120 | 2277 / 2290 | 44 / 44 |
+| createSession | 3356 / 3429 | 3656 / 3658 | 50 / 50 |
+| updateSession | 4903 / 4970 | 4829 / 4887 | 83 / 83 |
+| deleteSession | 2083 / 2120 | 2404 / 2392 | 44 / 44 |
+| renameSession | 4554 / 4652 | 4676 / 4625 | 80 / 80 |
+| commitSession | 2696 / 2663 | 3108 / 3138 | 43 / 43 |
+
+- 证据位于 `.codex-tmp/prompt-audit-baseline-red-20261029.jsonl`、`prompt-audit-handlers-race-20261029.jsonl`、`prompt-skill-audit-sqlite-20261029.jsonl`、`prompt-audit-postgres-only-20261029.jsonl`、`prompt-audit-bench-{before,after}-20261029.log` 和 `prompt-audit-timeout-cleanup-20261029.log`；两个相关包的 `go vet`、格式和 diff 检查通过。
+- 本项为本地 `PASS_SCOPED`，未提交、推送或部署新补丁。进程崩溃造成的 mutation/bridge 窗口、完整 transactional outbox、生产部署/恢复、统一策略版本/发布/Shadow/回滚和 provider-harness 管理场景仍未完成；后者的隔离失败注入夹具方案位于 `.codex-tmp/prompt-audit-harness-design-20261029.md`，按项目 skill 待用户确认，集合与付费调用未动。总目标保持 active / PARTIAL。
+
+### 2026-10-29 Skills 回读审计 PostgreSQL 补充验收
+
+- 已推送的 `c91a03a43` 在 Skill 更新/版本切换写入成功后先记录事件，随后回读成功才补充脱敏 `after`；回读错误或 panic 时保留事件且不虚构后状态，失败写入不产生事件，不改变 Skill 版本、serve 或授权规则。
+- 本轮未再修改 Skills 生产代码：复用现有三个入口与六类结果的 18 个场景。SQLite race 已包含在上节 62 场景中，PostgreSQL race 分组独立通过全部 18 场景（113.523s），失败/跳过/竞态报告均为 0，覆盖真实数据库写入、Basic 认证路由、审计 feed、失败响应头及敏感字段排除。
+- 独立 runner 的临时数据库清空和实例正常停机已确认；日志为 `.codex-tmp/skill-audit-postgres-race-20261029.jsonl`，实例日志为 `.codex-tmp/elygate-cp-pg.bcxM2n/postgres.log`。首次混合运行的 5 分钟超时证据继续保留，不用后续通过覆盖失败历史。
+- 此为现有修复的本地 PostgreSQL 验证补充，不代表上传文件全生命周期、进程崩溃原子性、生产备份恢复或总目标完成；provider-harness 方案仍待确认，没有修改集合或执行付费调用。
+
 ## 3. 单机部署架构
 
 ```text

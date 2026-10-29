@@ -160,8 +160,8 @@ write paths.
 | MCP credentials, OAuth consent and sessions | `mcpheaders.go`, `mcpsessions.go`, `mcpoauth2*.go` | Existing producer records; token values excluded by bridge |
 | Logs, mappings and recalculation jobs | `logging.go` | Existing producer records |
 | Routing and complexity configuration | `routing.go` | Existing producer records |
-| Prompts, folders, versions and sessions | `prompts.go` | Existing producer records |
-| Skills and uploaded files | `skills.go` | Existing producer records |
+| Prompts, folders, versions and sessions | `prompts.go` | All 11 cache-reloading mutations record the committed change before cache refresh; SQLite race and private PostgreSQL route matrices cover success, refresh panic, rejected writes, audit failure, authenticated feed and redaction. A process crash before bridge persistence remains outside this boundary |
+| Skills and uploaded files | `skills.go` | Update (serve/save-only) and version-shift record the committed mutation before response reread, filling the sanitized after snapshot only when available; 18 SQLite and private PostgreSQL race cases cover success, reread error/panic, rejected writes, audit failure and authenticated feed. Other file lifecycle paths retain their existing producer boundary |
 | Agents, push configurations and agent logs | `agentgateway.go` | Existing producer records |
 | Webhooks, rotation and redelivery | `webhooks.go` | Existing producer tests |
 | Feature flags, cache, notification publication and sidekiq cancellation | Respective management handlers | Existing producer records; cache IDs hashed |
