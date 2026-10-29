@@ -39,5 +39,35 @@ processes, preserving the proxy test's assertions and timeout.
 embedded UI directory. Use the direct Vite build when only validating the
 panel, without replacing backend build assets.
 
+## Local Relay Runtime Acceptance
+
+From the repository root, build the gateway from the current Go sources, then
+run the opt-in test separately from the fast panel suite:
+
+This entrypoint is not yet a passing release gate: the fresh gateway link was
+interrupted locally. Do not substitute older stdin-driven acceptance wrappers
+for the canonical CLI or count this test as passed without a complete run.
+
+```sh
+mkdir -p .codex-cache/go-build .codex-tmp
+GOCACHE="$PWD/.codex-cache/go-build" GOTMPDIR="$PWD/.codex-tmp" \
+  go build -o .codex-tmp/relay-gateway ./transports/bifrost-http
+ELYGATE_TEST_BINARY="$PWD/.codex-tmp/relay-gateway" \
+  bun run --cwd panel test:relay-runtime
+```
+
+The test uses the panel's serializers and the real gateway API, including
+administrator login, unsaved usage preview, a redacted credential round trip,
+application keys, relay grants, local upstream forwarding, SSE, costs,
+persisted logs, CSV export and application-binding revocation.
+It uses private temporary SQLite databases, random test credentials,
+loopback listeners and local catalog files. Child processes receive only an
+explicit test environment, not the caller's provider credentials.
+Successful completion requires graceful child exits and temporary-directory
+cleanup. A missing binary fails rather than skipping.
+
+This is local API acceptance, not browser rendering, real provider billing,
+PostgreSQL, container-image, production or recovery acceptance.
+
 This migration changes browser dependencies and build output only. It adds
 no work or retained state to the Go inference request path.
