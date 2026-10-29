@@ -2,6 +2,7 @@ package rules
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -11,6 +12,29 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestSimulationStoreCostLimitIsolation(t *testing.T) {
+	ctx := context.Background()
+	simulation, err := NewSimulationStore(ctx, NewMockLogger())
+	require.NoError(t, err)
+	live, err := NewLocalStore(ctx, NewMockLogger(), nil)
+	require.NoError(t, err)
+	headers := map[string]string{}
+	for i := range 100 {
+		headers[fmt.Sprintf("key-%d", i)] = "sample"
+	}
+	rule := &configstoreTables.TableRoutingRule{ID: "cost", CelExpression: `headers.all(k, headers.all(j, true))`}
+	program, err := simulation.GetProgram(ctx, rule)
+	require.NoError(t, err)
+	_, _, err = program.Eval(map[string]any{"headers": headers})
+	require.ErrorContains(t, err, "cost limit")
+	program, err = live.GetProgram(ctx, rule)
+	require.NoError(t, err)
+	decision, _, err := program.Eval(map[string]any{"headers": headers})
+	require.NoError(t, err)
+	require.Equal(t, true, decision.Value())
+	require.Empty(t, live.GetAllRules(ctx))
+}
 
 // TestRuleStore_CreateAndRetrieve tests creating and retrieving routing rules
 func TestRuleStore_CreateAndRetrieve(t *testing.T) {

@@ -46,8 +46,20 @@ type LocalStore struct {
 	rules    sync.Map // string -> []*TableRoutingRule (key: "scope:scopeID", scopeID="" for global)
 	programs sync.Map // string -> cel.Program (key: ruleID)
 
-	celEnv *cel.Env // Singleton CEL environment reused for all compilations
-	logger schemas.Logger
+	celEnv         *cel.Env // Singleton CEL environment reused for all compilations
+	logger         schemas.Logger
+	programOptions []cel.ProgramOption
+}
+
+// NewSimulationStore creates an empty, isolated cache with bounded CEL evaluation.
+// It is never installed in the live routing plugin.
+func NewSimulationStore(ctx context.Context, logger schemas.Logger) (*LocalStore, error) {
+	store, err := NewLocalStore(ctx, logger, nil)
+	if err != nil {
+		return nil, err
+	}
+	store.programOptions = []cel.ProgramOption{cel.CostLimit(10000)}
+	return store, nil
 }
 
 // NewLocalStore builds the rule cache and warms it from configStore. Every rule's CEL
@@ -210,13 +222,11 @@ func (rs *LocalStore) GetProgram(ctx context.Context, rule *configstoreTables.Ta
 	// Create program. Partial evaluation is only needed for complexity rules,
 	// where routing treats unavailable complexity_tier as unknown instead of
 	// leaking an empty-string sentinel.
-	var program cel.Program
-	var err error
+	options := rs.programOptions
 	if celASTReferencesIdentifier(ast, "complexity_tier") {
-		program, err = rs.celEnv.Program(ast, cel.EvalOptions(cel.OptPartialEval))
-	} else {
-		program, err = rs.celEnv.Program(ast)
+		options = append(options, cel.EvalOptions(cel.OptPartialEval))
 	}
+	program, err := rs.celEnv.Program(ast, options...)
 	if err != nil {
 		return nil, fmt.Errorf("CEL program creation error: %w", err)
 	}

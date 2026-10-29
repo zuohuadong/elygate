@@ -3117,6 +3117,7 @@ func (s *BifrostHTTPServer) RegisterAPIRoutes(ctx context.Context, callbacks Ser
 	}
 	if s.ControlPlaneHandler != nil {
 		s.ControlPlaneHandler.RegisterRoutes(s.Router, middlewares...)
+		s.registerRoutingSimulationRoute(middlewares...)
 	}
 	if promptsHandler != nil {
 		promptsHandler.RegisterRoutes(s.Router, middlewares...)
