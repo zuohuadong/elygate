@@ -232,7 +232,18 @@ upstream UI.
   zero acknowledgements, five transition audits, zero read receipts and four
   delivered notifications. All 16 checks passed without API response fixtures.
   This run used the panel before the separately verified badge CSS follow-up;
-  the real-provider, PostgreSQL-browser and production boundaries above remain.
+  the PostgreSQL-browser gap was closed by the following scoped replay.
+- Dual-PostgreSQL runtime/browser acceptance on 2026-10-29 passed 23 checkpoints
+  using the verified retained backend and latest independently built badge CSS.
+  Real config/log pools connected to separate private PostgreSQL 18.4 databases
+  without SQLite files. The same resolution/session state and exact audits
+  survived clean PostgreSQL and backend process restarts and another monitor
+  interval. Stopped SQL counts matched the SQLite replay, with one synthetic
+  source log in the separate logs database. Both databases were removed and all
+  owned processes exited normally. Report:
+  `.codex-tmp/budget-resolution-pg-euoFWz/report.json`.
+  This does not prove real-provider billing, multi-user behavior, password/TLS,
+  external delivery, crash durability, production migration or backup/recovery.
 - `GET /api/control-plane/usage/budgets/history` provides independent closed UTC
   day/month analysis. The table has its own range and SQL-backed pagination,
   follows only project/application filters, and shows resource names,

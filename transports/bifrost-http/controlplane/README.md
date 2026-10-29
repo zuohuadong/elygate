@@ -293,6 +293,25 @@ synthetic usage logs, not provider calls. This closes the local SQLite
 backend-to-browser gap for resolution at `37da8b23a`, not real-provider billing,
 PostgreSQL-browser, production migration or backup/recovery acceptance.
 
+A later 2026-10-29 dual-PostgreSQL replay passed 23 checkpoints with the verified
+retained production-runtime binary and latest independently built panel.
+Configuration and logs used separate new PostgreSQL 18.4 databases on a private
+socket-only cluster with fsync, synchronous_commit and full_page_writes enabled.
+Both live pools were observed before and after restart, without SQLite files.
+The real login, monitor, resolution/acknowledgement, Origin, filter/focus,
+committed-response loss and exact-audit workflow passed without API fixtures.
+Both PostgreSQL and backend processes were cleanly restarted on the same data;
+the session/state survived and a further 65-second monitor interval produced no
+duplicates. Two stopped-backend SQL reconciliations matched the counts above,
+with one official synthetic source log in the separate logs database.
+Both owned databases were removed and all processes were reaped normally.
+Report: `.codex-tmp/budget-resolution-pg-euoFWz/report.json`.
+This closes the local PostgreSQL-to-browser resolution gap, not real-provider
+billing, general PostgreSQL feature coverage, multi-user behavior, password/TLS,
+external delivery, crash durability, production migration or backup/recovery.
+The constructor-only nonempty password value was kept in memory; authentication
+used a private trust socket and log materialized-view maintenance was disabled.
+
 ### Historical Budget Periods
 
 Budgeted project/application creation and full budget replacements persist

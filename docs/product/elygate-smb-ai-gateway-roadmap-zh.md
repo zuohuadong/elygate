@@ -33,7 +33,7 @@ Elygate 当前定位收敛为：
 | Application 与 Virtual Key 绑定 | Implemented | 支持绑定、过期、撤销；optional 允许未绑定 Key，required 拒绝已解析但未绑定的 Key，disabled 跳过绑定检查 |
 | Application Key 生命周期 | Implemented | 支持创建、一次性返回值、显式轮换、显式撤销；Key 变更同步到内存治理状态 |
 | 非普通 HTTP 路径绑定校验 | Partial | WebSocket、WebRTC 接入、MCP、OAuth VK 模式和 Async 已接入；已建立 WebRTC 会话已在受支持的下一 turn 入口重校验，媒体流、活动 turn 内动作和全部路径仍未形成统一强保证 |
-| Usage Ledger | Partial | 支持投影、筛选查询、全筛选范围汇总和 CSV/API 导出；项目/应用日月预算、持久化阈值告警及控制面板已闭环；预算通知已通过本地 SQLite 生产运行链路与浏览器验收，输入为合成日志而非真实模型调用；已有历史周期重算、历史分析、管理员已读、告警确认与人工处理/重开，真实外部投递、多用户、预测及生产交付仍未完整 |
+| Usage Ledger | Partial | 支持投影、筛选查询、全筛选范围汇总和 CSV/API 导出；项目/应用日月预算、持久化阈值告警及控制面板已闭环；预算告警处理已通过本地 SQLite 和双 PostgreSQL 生产运行链路与浏览器验收，输入为合成日志而非真实模型调用；已有历史周期重算、历史分析、管理员已读、告警确认与人工处理/重开，真实外部投递、多用户、预测及生产交付仍未完整 |
 | Control Plane Audit | Partial | 控面与员工管理写操作已有事务内审计；上游管理事件已接持久化桥接，补齐 RSS、管理员认证配置、Warp 任务身份及显式会话删除事件；所有敏感操作覆盖、会话生命周期与跨存储原子性仍未完整 |
 | 企业身份 | Partial | 本地管理员和员工体系可用；OIDC 后续实现，LDAP/SCIM 暂不做 |
 | 统一策略中心 | Partial | 已有 CEL 路由、预算、限流和安全插件；缺统一版本、发布、回滚和仿真 |
@@ -358,6 +358,15 @@ Elygate 当前定位收敛为：
 - 修复前暗色固定深色文字在 tinted surface 上约 `2.55:1`；改为现有主题 `--foreground` 与 `--success`、`--warning`、`--destructive` 的语义 tinted surface。修复后真实渲染的三种状态在浅色/暗色及 1440px、375px、横屏均至少 `11.79:1`，文字不重叠、不截断，页面无横向溢出，reduced-motion 开启且无浏览器错误。
 - 面板 280 项测试、1370 次断言通过；`svelte-check` 0 错误/警告；独立 Vite 构建通过并保留既有大 chunk 提示。证据为 `.codex-tmp/budget-status-theme-browser-verified.log`、`.codex-tmp/budget-status-theme-{tests,check,build}.log` 和 `output/playwright/budget-status-theme-{light,dark}-{1440,375,812}.png`。
 - 本后续项为本地 `PASS_SCOPED`，不代表完整平台、真实模型费用、PostgreSQL 浏览器链路、生产部署/恢复或其他 active / PARTIAL 边界已完成。
+
+### 2026-10-29 预算告警处理双 PostgreSQL 真实运行后续项
+
+- follow-up `budget-resolution-postgres-runtime`：parent 为 `budget-resolution-runtime`，source 为 Phase A 和该后续项的 PostgreSQL 浏览器缺口，reason 为数据库回归及 SQLite 运行证据不能替代 PostgreSQL Bootstrap/Start 到面板验收。范围为复用运行夹具、新增本地协调脚本和文档；Native、低风险、root 唯一 writer、external=0，无业务、Go、依赖或推理路径变更。
+- 私有 PostgreSQL 18.4 集群只监听权限 0700 的 Unix socket，fsync、synchronous_commit、full_page_writes 均为 on；配置和日志各用一个独立新建库。启动及重启后均核对两个库各有真实连接，应用目录不存在 config.db/logs.db；日志库构造器使用内存随机非空值满足校验，连接采用 trust socket，不代表密码认证或 TLS 验收。日志物化视图维护关闭，未改事务和数据库持久化参数。
+- 复用已核验 SHA-256 的 Go 1.27.3 后端二进制；相关 Go 源码与原清单全部一致，唯一面板源码差异为上一节单独验证的徽标修复，本轮使用其独立构建。真实登录、同源管理写入、官方合成费用日志、后台 4 条阈值告警、键盘处理/重开、确认独立、Basic 幂等、匿名 401、外来 Origin 403、筛选焦点恢复、实际提交后丢响应及 5 条精确审计全部通过，无 API fulfilled/mock；桌面、375px、暗色及横屏截图保留，桌面和手机暗色已视觉复核。
+- 首次停止后端后 SQL 对账，再完整停止并重启 PostgreSQL 和后端；同一会话及处理状态有效，额外等待 65 秒监控周期未重复告警或审计。两次停机对账一致：配置库 alerts=4、resolved=1、acknowledged=0、audits=5、read_receipts=0、delivered=4、notifications=4，独立日志库 logs=1。两个私有数据库均删除且剩余 0，两次后端和 PostgreSQL 正常退出并回收，无本轮运行残留。
+- 23 个验收检查点通过，errors=[]，时间为 2026-10-29 03:50:53Z 至 03:53:13Z；报告 `.codex-tmp/budget-resolution-pg-euoFWz/report.json`，日志 `budget-resolutions-postgres-runtime-final.log`，夹具及指纹为 `budget-resolutions-postgres-runtime.mjs` 与 `budget-resolutions-postgres-runtime-final.sha256`。首轮在脚本 trim 尾部空字段的断言处失败、未进入产品流程，已修正并保留失败报告，未改生产代码。
+- 本后续项为本地 `PASS_SCOPED`，关闭预算告警处理的 PostgreSQL 后端到浏览器和干净进程重启缺口，不证明真实模型计费、其他功能的完整 PostgreSQL 集成、多用户、密码/TLS、外部投递、统一策略、全路径撤销、完整审计、生产迁移、崩溃或整机备份恢复。未提交、推送、部署或替换静态嵌入 UI；原总目标仍 active / PARTIAL。
 
 ## 3. 单机部署架构
 
