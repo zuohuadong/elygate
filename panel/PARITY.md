@@ -59,9 +59,21 @@ upstream UI.
   OpenAPI parsing/import contracts, Svelte diagnostics, isolated Vite build and
   fixture browser checks cover editor hydration/preview, failed-save draft
   retention, relay logs and grant clearing across desktop/mobile/landscape
-  light/dark states. OpenAPI browser-flow fixtures remain pending. This does
-  not prove live upstream traffic, external credentials, production relay
-  acceptance or complete governance audit snapshots.
+  light/dark states. The 2026-10-30 OpenAPI browser follow-up also covered
+  JSON/YAML paste, JSON/YAML files, guarded URL fetching, malformed/failed
+  responses, explicit confirmation and auth/base-URL opt-in, existing-setting
+  retention, stale file/parser/URL results, draft-change protection, Escape
+  close, opener focus restoration, bidirectional Tab containment and
+  1440x1000, 375x812 and 812x375 reduced-motion screenshots. The browser
+  fixtures produced 88 passing assertions, zero business writes and zero page
+  errors; the separate race suite adds 13 passing assertions for close/reopen,
+  out-of-order files, cancellation and draft mutation. Evidence scripts are
+  `.codex-tmp/relay-openapi-browser-20261030.mjs` and
+  `.codex-tmp/relay-openapi-races-20261030.mjs`, with the captured result in
+  `.codex-tmp/relay-openapi-browser-verified-20261030.log` and screenshots
+  under `output/playwright/`. This remains local scoped evidence, not proof of
+  live upstream traffic, external credentials, production relay acceptance or
+  complete governance audit snapshots.
 - Remaining panel gaps include structured route/usage editors, full log
   attribution/cost filters and log export. JSON editors expose the existing
   configuration contract without claiming complete upstream UI parity.

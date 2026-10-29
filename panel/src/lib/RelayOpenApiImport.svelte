@@ -47,8 +47,25 @@
 	}
 	function close(): void { invalidate(); onclose(); }
 	function showModal(dialog: HTMLDialogElement): { destroy: () => void } {
+		const returnFocus = document.activeElement;
 		dialog.showModal();
-		return { destroy: () => dialog.close() };
+		return { destroy: () => {
+			dialog.close();
+			if (returnFocus instanceof HTMLElement && returnFocus.isConnected) returnFocus.focus();
+		} };
+	}
+	function containTab(event: KeyboardEvent): void {
+		if (event.key !== 'Tab') return;
+		const dialog = event.currentTarget as HTMLDialogElement;
+		const controls = dialog.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), textarea:not(:disabled)');
+		const first = controls[0], last = controls[controls.length - 1];
+		if (event.shiftKey && document.activeElement === first) {
+			event.preventDefault();
+			last.focus();
+		} else if (!event.shiftKey && document.activeElement === last) {
+			event.preventDefault();
+			first.focus();
+		}
 	}
 	function report(cause: unknown): string {
 		return cause instanceof ApiError ? displayError(cause, text('文档获取失败。', 'Document fetch failed.')) : relayOpenApiError(cause, locale);
@@ -99,7 +116,7 @@
 	onMount(() => () => { sequence += 1; controller?.abort(); });
 </script>
 
-<dialog class="import-dialog" aria-labelledby="relay-openapi-title" use:showModal oncancel={(event) => { event.preventDefault(); close(); }}>
+<dialog class="import-dialog" aria-labelledby="relay-openapi-title" use:showModal onkeydown={containTab} oncancel={(event) => { event.preventDefault(); close(); }}>
 	<header><h2 id="relay-openapi-title">{text('导入 OpenAPI', 'Import OpenAPI')}</h2><Button variant="ghost" size="icon" type="button" title={text('关闭', 'Close')} aria-label={text('关闭导入', 'Close import')} onclick={close}><X size={18} aria-hidden="true" /></Button></header>
 	<form onsubmit={(event) => { event.preventDefault(); void parse(); }}>
 		<div class="source-modes" role="group" aria-label={text('文档来源', 'Document source')}>

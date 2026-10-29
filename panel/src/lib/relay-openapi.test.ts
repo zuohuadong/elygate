@@ -9,6 +9,17 @@ import {
 } from './relay-openapi';
 
 describe('relay OpenAPI import', () => {
+	test('restores the connected opener when the nested dialog is destroyed', async () => {
+		const source = await Bun.file(new URL('./RelayOpenApiImport.svelte', import.meta.url)).text();
+		expect(source).toMatch(/const returnFocus = document\.activeElement;\s+dialog\.showModal\(\)/);
+		expect(source).toMatch(/destroy: \(\) => \{\s+dialog\.close\(\);\s+if \(returnFocus instanceof HTMLElement && returnFocus\.isConnected\) returnFocus\.focus\(\)/);
+		expect(source).toContain('onkeydown={containTab}');
+		expect(source).toContain("if (event.key !== 'Tab') return;");
+		expect(source).toContain('button:not(:disabled), input:not(:disabled), textarea:not(:disabled)');
+		expect(source).toContain('last.focus();');
+		expect(source).toContain('first.focus();');
+	});
+
 	test('parses OpenAPI YAML, maps routes, auth, and server suggestions', async () => {
 		const imported = await parseRelayOpenApi(`
 openapi: 3.0.3
