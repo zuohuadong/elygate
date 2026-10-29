@@ -56,14 +56,15 @@ upstream UI.
   desktop/mobile/landscape light/dark layout. This is local scoped evidence,
   not proof of a live external MCP connection or production acceptance.
 - Relay workflows are locally `PASS_SCOPED`: focused helper contracts,
-  Svelte diagnostics, isolated Vite build and fixture browser checks cover
-  editor hydration/preview, failed-save draft retention, relay logs and grant
-  clearing across desktop/mobile/landscape light/dark states. This does not
-  prove live upstream traffic, external credentials, production relay
+  OpenAPI parsing/import contracts, Svelte diagnostics, isolated Vite build and
+  fixture browser checks cover editor hydration/preview, failed-save draft
+  retention, relay logs and grant clearing across desktop/mobile/landscape
+  light/dark states. OpenAPI browser-flow fixtures remain pending. This does
+  not prove live upstream traffic, external credentials, production relay
   acceptance or complete governance audit snapshots.
-- Remaining panel gaps include OpenAPI import, structured route/usage editors,
-  full log attribution/cost filters and log export. JSON editors expose the
-  existing configuration contract without claiming complete upstream UI parity.
+- Remaining panel gaps include structured route/usage editors, full log
+  attribution/cost filters and log export. JSON editors expose the existing
+  configuration contract without claiming complete upstream UI parity.
 
 ## OSS and shared management routes
 
@@ -73,7 +74,7 @@ upstream UI.
 | `/workspace/dashboard` | dashboard | `/api/logs/dashboard` | Dedicated |
 | `/workspace/logs` | logs | `/api/logs*`, `/api/ws`, cost recalculation and selected deletion | Dedicated |
 | `/workspace/relay-logs` | relay-logs | `/api/relay-logs*`, absolute time bounds, list/stats/histogram/top-endpoints, details and selected deletion | Dedicated, remaining filters/export noted above |
-| `/workspace/relays` | relay-endpoints | `/api/relays*`, full replacement CRUD, all auth schemes, JSON configuration and unsaved usage preview | Dedicated, OpenAPI/structured editors pending |
+| `/workspace/relays` | relay-endpoints | `/api/relays*`, `/api/relays/openapi-spec`, full replacement CRUD, all auth schemes, JSON configuration and unsaved usage preview | Dedicated, OpenAPI import added; structured editors pending |
 | `/workspace/logs/connectors`, `/workspace/observability` | connectors | `/api/plugins`, `/api/plugins/{name}` | Dedicated |
 | `/workspace/mcp-logs`, legacy `/workspace/logs/mcp-logs` | mcp-logs | `/api/mcp-logs*` | Dedicated |
 | `/workspace/providers` | providers | `/api/providers*`, provider/key refresh routes | Dedicated |

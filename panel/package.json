@@ -18,7 +18,8 @@
     "highlight.js": "^11.12.0",
     "isomorphic-dompurify": "^3.23.0",
     "marked": "^18.1.1",
-    "marked-highlight": "^2.2.4"
+    "marked-highlight": "^2.2.4",
+    "yaml": "2.9.1"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^7.3.1",

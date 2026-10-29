@@ -1,11 +1,12 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { Button, ContentPageShell, ContentPageHeader } from '@svadmin/ui';
-	import { Plus, RefreshCw, Pencil, Trash2, FlaskConical, X } from '@lucide/svelte';
+	import { Plus, RefreshCw, Pencil, Trash2, FlaskConical, FileInput, X } from '@lucide/svelte';
 	import { useTranslation } from '@svadmin/core/i18n';
 	import { displayError } from '../lib/forms';
 	import { encodePathSegment, getListPayload, getTotal, isJsonRecord, requestJson, type JsonRecord } from '../lib/api';
 	import { formatPagination } from '../lib/display-format';
+	import RelayOpenApiImport from '../lib/RelayOpenApiImport.svelte';
 	import {
 		buildRelayPayload,
 		emptyRelayDraft,
@@ -29,6 +30,7 @@
 	let draft = $state<RelayDraft>(emptyRelayDraft());
 	let editingName = $state('');
 	let modal = $state<'editor' | 'preview' | null>(null);
+	let importOpen = $state(false);
 	let previewDraft = $state({ method: 'POST', path: '/', headersJson: '{}', accept: '', requestContentType: 'application/json', requestBody: '{}', responseBody: '{}', responseContentType: 'application/json', statusCode: 200, result: '' });
 	let loadSeq = 0;
 	let editorSeq = 0;
@@ -81,6 +83,7 @@
 		selected = null;
 		editingName = '';
 		draft = emptyRelayDraft();
+		importOpen = false;
 		error = '';
 		modal = 'editor';
 	}
@@ -98,12 +101,13 @@
 			if (!isJsonRecord(full) || full.name !== name || typeof full.base_url !== 'string') throw new Error(text('Relay 配置响应格式错误。', 'Invalid relay configuration response.'));
 			selected = full;
 			draft = relayDraftFromConfig(full);
+			importOpen = false;
 			modal = 'editor';
 		} catch (cause) {
 			if (sequence === editorSeq) error = displayError(cause, text('无法读取 Relay 配置。', 'Unable to read relay configuration.'));
 		} finally { if (sequence === editorSeq) isReading = false; }
 	}
-	function closeModal(): void { if (!isSaving && !isPreviewing) { editorSeq += 1; modal = modal === 'preview' && previewReturnToEditor ? 'editor' : null; error = ''; } }
+	function closeModal(): void { if (!isSaving && !isPreviewing) { editorSeq += 1; importOpen = false; modal = modal === 'preview' && previewReturnToEditor ? 'editor' : null; error = ''; } }
 	function showModal(dialog: HTMLDialogElement): { destroy: () => void } {
 		dialog.showModal();
 		return { destroy: () => dialog.close() };
@@ -221,6 +225,7 @@
 				{#if draft.authType !== 'none'}<details><summary>{text('凭据 JSON / 引用', 'Credential JSON / reference')}</summary><label>{text('完整凭据 JSON', 'Complete credential JSON')}<textarea rows="5" bind:value={draft.credentialJson} spellcheck="false"></textarea></label></details>{/if}
 				<label>{text('额外请求头 JSON', 'Extra headers JSON')}<textarea rows="3" bind:value={draft.extraHeadersJson} spellcheck="false"></textarea></label>
 				<div class="checks"><label><input type="checkbox" bind:checked={draft.skipRouteCheck} />{text('未匹配路由时仍转发', 'Relay requests without a matching route')}</label><label><input type="checkbox" bind:checked={draft.ignoreUpstreamCost} />{text('忽略上游成本字段', 'Ignore upstream cost fields')}</label></div>
+				<div><Button variant="outline" type="button" disabled={isSaving} onclick={() => { importOpen = true; }}><FileInput size={16} aria-hidden="true" />{text('导入 OpenAPI', 'Import OpenAPI')}</Button></div>
 				<details><summary>{text('网络与代理', 'Network and proxy')}</summary><div class="grid-two"><label>{text('Network JSON', 'Network JSON')}<textarea rows="5" bind:value={draft.networkJson} spellcheck="false"></textarea></label><label>{text('Proxy JSON', 'Proxy JSON')}<textarea rows="5" bind:value={draft.proxyConfigJson} spellcheck="false"></textarea></label></div></details>
 				<details><summary>{text('用量、流式和路由', 'Usage, streaming and routes')}</summary><label>{text('Usage JSON', 'Usage JSON')}<textarea rows="7" bind:value={draft.usageJson} spellcheck="false"></textarea></label><label>{text('Streaming JSON', 'Streaming JSON')}<textarea rows="4" bind:value={draft.streamingJson} spellcheck="false"></textarea></label><label>{text('Routes JSON（首个匹配优先）', 'Routes JSON (first match wins)')}<textarea rows="10" bind:value={draft.routesJson} spellcheck="false"></textarea></label></details>
 				<footer><button type="button" disabled={isSaving} onclick={closeModal}>{i18n.t('elygate.cancel')}</button><button type="button" disabled={isSaving} onclick={() => openPreview()}>{text('预览计费', 'Preview usage')}</button><button class="primary" type="submit" disabled={isSaving}>{isSaving ? text('保存中…', 'Saving…') : i18n.t('elygate.save')}</button></footer></fieldset>
@@ -241,6 +246,10 @@
 			<footer><button type="button" disabled={isPreviewing} onclick={closeModal}>{i18n.t('elygate.cancel')}</button><button class="primary" type="button" disabled={isPreviewing} onclick={() => void runPreview()}>{text('运行预览', 'Run preview')}</button></footer></fieldset>
 			{#if previewDraft.result}<pre class="json-view">{previewDraft.result}</pre>{/if}
 		</dialog>
+{/if}
+
+{#if modal === 'editor' && importOpen}
+	<RelayOpenApiImport {draft} locale={i18n.locale} onapply={(next) => { draft = next; error = ''; }} onclose={() => { importOpen = false; }} />
 {/if}
 
 <style>
