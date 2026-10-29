@@ -443,7 +443,16 @@ Elygate 当前定位收敛为：
 - 正常停机后对照 SQLite 落盘值，新后端进程打开同一数据库，全部既有事件、时间、操作者及关联值与停机前逐项一致，既有会话仍有效。随后真实登出撤销 feed 访问，重新登录可见携带对应 Request ID 的 session 删除事件；最终 migration 记录唯一且数据库完整性检查通过。没有模拟强杀、掉电或整机恢复。
 - 1440x1000、375x812、812x375 的亮暗主题截图与尺寸检查通过，关联列可在表格内滚动完整查看，长 ID 换行且页面无横向溢出。亮/暗模式标签对比度 7.38:1 / 7.47:1，ID 对比度 14.70:1 / 16.30:1，页面异常为 0。Trace-only/双字段及恶意文本转义使用明确标注的数据库展示夹具，不冒充真实 tracing 链路。面板 295 测试、1528 断言、Svelte 零错误/警告与隔离 Vite 构建通过。
 - 报告 `.codex-tmp/audit-correlation-live-report.json` 记录源码/二进制哈希、三次后端启动、mutation 矩阵及布局数值，截图位于 `output/playwright/audit-correlation-live-*` 和 `audit-correlation-fixtures-*`。全部本轮进程正常停止，未调用供应商、未改 provider-harness、未部署或覆盖 Go 静态嵌入 UI。
-- 本后续项为本地 `PASS_SCOPED`；PostgreSQL 浏览器关联、真实管理 Trace、审计完整覆盖/transactional outbox、策略版本/发布/Shadow/回滚和生产部署/恢复仍未完成。原总目标继续 active / PARTIAL。
+- 本后续项为本地 `PASS_SCOPED`；真实管理 Trace、审计完整覆盖/transactional outbox、策略版本/发布/Shadow/回滚和生产部署/恢复仍未完成。PostgreSQL 浏览器关联见下一个独立验收项，原总目标继续 active / PARTIAL。
+
+### 2026-10-30 审计关联 PostgreSQL 真实浏览器与重启验收
+
+- follow-up `audit-correlation-postgres-visibility`：parent 为同一审计 Request/Trace 关联实现，source 为 PostgreSQL 浏览器可见性边界，reason 为证明生产 `Bootstrap`/`Start` 路径实际使用 PostgreSQL，并在独立进程重启后保留 feed。采用 Native、低风险、root 单 writer、external=0；未修改生产请求路径或认证代码。
+- 从已推送的 `aadb59c48` 重新编译真实运行程序；面板源码未变化，复用前项隔离构建，运行于 10 月 29 日启动、10 月 30 日零点完成。私有 PostgreSQL 18.4 仅 Unix socket、拒绝 host 认证，`fsync`、`synchronous_commit`、`full_page_writes` 默认开启；随机 config/log 两个数据库均由生产配置打开，未生成 SQLite fallback 文件。
+- 匿名 feed 返回 401；真实 Chromium 登录后通过同源请求验证项目/应用、应用密钥创建/轮换/撤销、项目/应用预算、绑定/撤销/重绑和禁用 routing-rule management bridge。13 个 mutation case 均保留各自 Request ID 与 `local-admin`，登录/登出/重登生命周期事件另行检查；128 字节边界原样保留，缺失、恶意、超长 ID 被省略，入站 `traceparent`/`x-bifrost-trace-id` 不会变成可信 Trace。
+- 直接 PostgreSQL SQL 行与浏览器 feed 的 ID、操作者、动作、资源、时间及关联字段逐项一致。后端与 PostgreSQL 独立正常停机/重启后，会话和既有事件全部一致；Trace-only/双字段/缺失字段展示夹具无 HTML 注入。登出事件带 Request ID，重新登录可见，最终 PostgreSQL 重启仍保留登出与重登事件。
+- 1440x1000、375x812、812x375 的亮暗主题和 reduced motion 检查通过，表格内部滚动、长 ID 换行、页面无横向溢出；页面异常为 0。后端两次、PostgreSQL 三次、浏览器、Vite preview 与两个数据库的清理退出均成功。
+- 报告 `.codex-tmp/audit-correlation-postgres-live-report.json` 记录 `PASS_SCOPED_POSTGRES`、源码/二进制哈希、12 项检查、布局与清理状态；截图为 `output/playwright/audit-correlation-postgres-{light,dark}-{1440,375,812}.png`。这是本地 PostgreSQL 浏览器/正常重启证据，不是真实管理 Trace、强杀/掉电恢复、生产迁移、完整审计覆盖、transactional outbox 或生产部署验收。总目标继续 active / PARTIAL。
 
 ## 3. 单机部署架构
 
