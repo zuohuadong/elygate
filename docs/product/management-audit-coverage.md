@@ -16,7 +16,20 @@ administrator mutation has transactional audit enforcement.
   expired-session deletion is anonymous. Empty, unknown, ciphertext and
   repeated logout tokens add no event. Public write errors contain no database
   diagnostics. This wrapper does not globally replace ConfigStore or audit
-  setup/WS tickets, failed login attempts or employee sessions.
+  setup/WS tickets or employee sessions.
+- Dashboard credential rejections use the existing post-handler bridge:
+  username mismatch, hash-comparison error and password mismatch each record
+  one `dashboard_session.login_failed` event for `dashboard_session/dashboard`.
+  The producer uses an empty name and nil snapshots. The bridge forces this
+  event to `anonymous`, even on API-key/enterprise authentication chains, without
+  changing adjacent events' identity. No username, password, hash, cookie,
+  supplied identity or diagnostic is persisted. Malformed payloads,
+  missing/disabled authentication, config lookup errors and session write
+  failures do not produce this event. Audit failure preserves the original 401
+  body, adds `X-Elygate-Audit-Status: failed` and logs a content-free error.
+  This synchronous per-attempt transaction increases unauthenticated database
+  writes (including wrong usernames without bcrypt work); it does not add
+  login rate limiting, automatic audit retention, or a crash-safe outbox.
 - Auth-config changes use a separate, narrowly injected ConfigHandler
   session-flush callback. A single bulk DELETE and one
   `dashboard_sessions.flushed` event for `dashboard_session/all` commit in the
@@ -123,6 +136,7 @@ write paths.
 | Client config, metadata, proxy and pricing sync | `config.go` | Existing producer records; no raw config snapshots persisted by bridge |
 | Dashboard administrator authentication config | `config.go`, `auditchange.go` | Successful-save producer; first setup, enable/disable, credential changes/preservation, rejected/failed save and post-save session-flush failure regressions; real authenticated route/bridge and SQLite reopen coverage |
 | Dashboard administrator login and explicit logout | `controlplane/sessionaudit.go`, SessionHandler-only server wiring | Transactional session and audit writes; registered login/logout and protected feed, rollback and error redaction, encrypted/upstream plaintext lookup, concurrent valid/expired logout and real close/reopen regressions on SQLite and PostgreSQL |
+| Dashboard credential rejection | `handlers/session.go`, management audit bridge | Three fixed-metadata producers; anonymous event attribution even with API-key/verified actor context, mixed-batch identity isolation, unchanged 401 and audit-failure header, repeated attempts, no created session and protected feed regressions |
 | Dashboard session invalidation after administrator auth-config changes | `controlplane/sessionaudit.go`, ConfigHandler-only flush callback | Aggregate event atomic with actual deletion; focused SQLite/PostgreSQL transaction, authenticated-route and reopen regressions pass, with SQLite server-route integration; evidence and local benchmark conditions in the 2026-10-29 product-roadmap follow-up; does not make config save and invalidation one transaction |
 | Plugins | `plugins.go` | Existing producer tests; later reload errors must not hide committed changes |
 | MCP clients, library and virtual MCPs | `mcp.go`, `virtualmcp.go` | Existing producer records; no credential-bearing snapshots persisted |
@@ -160,8 +174,10 @@ transaction/locking behavior, not deployed backup or crash recovery.
 2. Audit all route mutations against this inventory, including the remaining
    session lifecycle and future upstream routes. Password-verified dashboard
    login, explicit logout and auth-config-triggered bulk deletion now have
-   transactional audit implementations; failed logins and setup/WS tickets do
-   not. Login admission against concurrent credential changes is not serialized
+   transactional audit implementations. Failed dashboard credential attempts
+   now have anonymous bridge events, still subject to the process-crash window
+   before audit persistence; setup/WS tickets remain uncovered. Login admission
+   against concurrent credential changes is not serialized
    by the bulk deletion event.
    Explicit Warp conversation deletion
    now has a producer; creation/chat turns and automatic retention are not
@@ -171,7 +187,7 @@ transaction/locking behavior, not deployed backup or crash recovery.
    deletion remain subject to the post-commit crash window above.
    No 100% sensitive-route coverage claim is made.
 3. Employee login, explicit logout and self-service password changes now have
-   transactional implementations. Failed-login audit, automatic expiry cleanup
+   transactional implementations. Employee failed-login audit, automatic expiry cleanup
    and per-session events for bulk reset/disable/change remain outside their
    event contracts. Richer employee change details and PostgreSQL coverage of
    the remaining employee-administration paths still require separate

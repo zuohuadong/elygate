@@ -27,6 +27,10 @@ type SessionHandler struct {
 	setupLock *AuthMiddleware
 }
 
+func recordDashboardLoginFailure(ctx *fasthttp.RequestCtx) {
+	lib.RecordAuditChange(ctx, "dashboard_session.login_failed", "dashboard_session", "dashboard", "", nil, nil)
+}
+
 // NewSessionHandler creates a new session handler instance
 func NewSessionHandler(configStore configstore.ConfigStore, wsTicketStore *WSTicketStore) *SessionHandler {
 	return &SessionHandler{
@@ -200,15 +204,18 @@ func (h *SessionHandler) login(ctx *fasthttp.RequestCtx) {
 
 	// Verify credentials
 	if payload.Username != authConfig.AdminUserName.GetValue() {
+		recordDashboardLoginFailure(ctx)
 		SendError(ctx, fasthttp.StatusUnauthorized, "Invalid username or password")
 		return
 	}
 	compare, err := encrypt.CompareHash(authConfig.AdminPassword.GetValue(), payload.Password)
 	if err != nil {
+		recordDashboardLoginFailure(ctx)
 		SendError(ctx, fasthttp.StatusUnauthorized, "Unauthorized")
 		return
 	}
 	if !compare {
+		recordDashboardLoginFailure(ctx)
 		SendError(ctx, fasthttp.StatusUnauthorized, "Invalid username or password")
 		return
 	}

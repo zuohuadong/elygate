@@ -368,6 +368,15 @@ Elygate 当前定位收敛为：
 - 23 个验收检查点通过，errors=[]，时间为 2026-10-29 03:50:53Z 至 03:53:13Z；报告 `.codex-tmp/budget-resolution-pg-euoFWz/report.json`，日志 `budget-resolutions-postgres-runtime-final.log`，夹具及指纹为 `budget-resolutions-postgres-runtime.mjs` 与 `budget-resolutions-postgres-runtime-final.sha256`。首轮在脚本 trim 尾部空字段的断言处失败、未进入产品流程，已修正并保留失败报告，未改生产代码。
 - 本后续项为本地 `PASS_SCOPED`，关闭预算告警处理的 PostgreSQL 后端到浏览器和干净进程重启缺口，不证明真实模型计费、其他功能的完整 PostgreSQL 集成、多用户、密码/TLS、外部投递、统一策略、全路径撤销、完整审计、生产迁移、崩溃或整机备份恢复。未提交、推送、部署或替换静态嵌入 UI；原总目标仍 active / PARTIAL。
 
+### 2026-10-29 管理员失败登录匿名审计后续项
+
+- follow-up `failed-dashboard-login-audit`：parent 为管理员会话事务审计，source 为审计覆盖清单剩余项 2，reason 为三条凭据拒绝分支缺失事件。root 唯一 writer，认证边界高风险，panel 两位只读 reviewer、两轮收敛；仅增加现有 producer/bridge 的窄补丁和聚焦回归，不增加接口、配置、依赖、schema 或旧系统兼容层。
+- 用户名不匹配、hash 比较错误、密码不匹配各记录一条 `dashboard_session.login_failed`，资源固定 `dashboard_session/dashboard`，空名称、nil 快照；持久化按事件强制 anonymous，API-key/已有可信 actor 不能冒充，且不污染同批其他事件。原 401 文案不变；审计失败保留完整响应并给出失败标头和固定无敏感日志。malformed、未启用/缺失认证、配置读取错误和会话写失败不误记凭据拒绝。
+- 基线二进制仅移除本轮三个调用，新回归准确检出三条分支缺事件；恢复后的 handler 3 个顶层测试和 10 个 producer 子测试通过。SQLite race 与私有 PostgreSQL 各 25 个顶层测试、42 个子测试通过，覆盖既有成功会话、退出/批量失效、失败回滚、受保护 feed 和真实关闭重开。PostgreSQL 测试库清零，服务已正常停止回收；两包 vet、gofmt、diff 检查和两位源码复核通过，`clean-code-guard: clean`。
+- 请求路径成本：Apple M4、Go 1.27.3、bcrypt MinCost 和测试 ConfigStore，无真实网络/数据库；1000 次、3 轮中位数（before → after，ns/op、allocs/op）：错误用户名 1462/10 → 1133/12，错误密码 743243/21 → 743631/23，hash 错误 1070/12 → 1141/14，成功 746089/21 → 737296/21。时间差含本地噪声，不宣称提速；失败 producer 增加 2 次分配、136 B，成功及推理路径无该 producer。单独 SQLite 样本中 producer-only 为 89.29 ns、136 B、2 allocs，含桥接事务为 69550 ns、10996 B、117 allocs；不是 PostgreSQL 或生产吞吐基准。
+- 固定元数据只随 RequestCtx 存活，无新增长期缓存；每次拒绝新增一条持久事件和同步事务，表存储随次数增长，没有新增限流或自动清理。错误用户名不需 bcrypt 即可触发写入，须保留匿名写放大风险。进程崩溃窗口、setup/WS tickets、员工失败登录、其他敏感路由、生产部署/恢复和整体路线图仍未完成。
+- 本项本地 `PASS_SCOPED`，报告 `.codex-tmp/failed-login-audit-results-20261029.json`，源码指纹 `.codex-tmp/failed-login-final-source.sha256`，测试、基线和基准日志均以 `failed-login-` 为前缀。未提交、推送或部署本轮修改，原总目标仍 active / PARTIAL。
+
 ## 3. 单机部署架构
 
 ```text

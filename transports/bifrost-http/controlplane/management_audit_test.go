@@ -74,7 +74,13 @@ func TestDashboardSessionAuditRegisteredLoginLogout(t *testing.T) {
 		require.Contains(t, []int{400, 401}, response.Response.StatusCode())
 		require.Empty(t, response.Response.Header.PeekCookie("token"))
 	}
-	require.Empty(t, dashboardSessionAudits(t, store))
+	failedLogins := dashboardSessionAudits(t, store)
+	require.Len(t, failedLogins, 2)
+	for _, event := range failedLogins {
+		require.Equal(t, "dashboard_session.login_failed", event.Action)
+		require.Equal(t, "anonymous", event.ActorID)
+		require.Equal(t, "dashboard", event.ResourceID)
+	}
 	response := dashboardSessionRequest(r, "/api/session/login",
 		`{"username":"dashboard-admin","password":"dashboard-test-password"}`, "")
 	require.Equal(t, 200, response.Response.StatusCode())
@@ -118,10 +124,11 @@ func TestDashboardSessionAuditRegisteredLoginLogout(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, session)
 	events := dashboardSessionAudits(t, store)
-	require.Len(t, events, 2)
-	require.Equal(t, "dashboard_session.created", events[0].Action)
-	require.Equal(t, "dashboard_session.deleted", events[1].Action)
-	for _, event := range events {
+	require.Len(t, events, 4)
+	require.Equal(t, failedLogins, events[:2])
+	require.Equal(t, "dashboard_session.created", events[2].Action)
+	require.Equal(t, "dashboard_session.deleted", events[3].Action)
+	for _, event := range events[2:] {
 		require.Equal(t, "local-admin", event.ActorID)
 		require.Equal(t, "sha256:"+encrypt.HashSHA256(token), event.ResourceID)
 	}
@@ -132,8 +139,8 @@ func TestDashboardSessionAuditRegisteredLoginLogout(t *testing.T) {
 		Data []AuditEvent `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(feed.Response.Body(), &payload))
-	require.Len(t, payload.Data, 2)
-	require.Equal(t, events[0].ResourceID, payload.Data[0].ResourceID)
+	require.Len(t, payload.Data, 4)
+	require.ElementsMatch(t, events, payload.Data)
 	encoded, err := json.Marshal(events)
 	require.NoError(t, err)
 	for _, secret := range []string{token, hash, "dashboard-admin", "dashboard-test-password", "forged-session-actor"} {
@@ -145,7 +152,7 @@ func TestDashboardSessionAuditRegisteredLoginLogout(t *testing.T) {
 	response = dashboardSessionRequest(r, "/api/session/login",
 		`{"username":"dashboard-admin","password":"dashboard-test-password"}`, "")
 	require.Equal(t, 403, response.Response.StatusCode())
-	require.Len(t, dashboardSessionAudits(t, store), 2)
+	require.Equal(t, events, dashboardSessionAudits(t, store))
 }
 
 func TestDashboardSessionAuditRollbackAndSafeErrors(t *testing.T) {
@@ -304,6 +311,15 @@ func TestDashboardSessionAuditPersistsAfterReopen(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, cs.Close(ctx)) })
 	store, err := NewStore(ctx, cs)
 	require.NoError(t, err)
+	require.NoError(t, cs.UpdateAuthConfig(ctx, &configstore.AuthConfig{IsEnabled: true,
+		AdminUserName: schemas.NewSecretVar("persistent-admin"), AdminPassword: schemas.NewSecretVar("invalid-hash")}))
+	testLogger := bifrost.NewDefaultLogger(schemas.LogLevelError)
+	auth, err := handlers.InitAuthMiddleware(cs, nil, nil, "")
+	require.NoError(t, err)
+	r := router.New()
+	handlers.NewSessionHandler(store.ConfigStoreWithSessionAudit(), nil).RegisterRoutes(r,
+		auth.APIMiddleware(), NewHandler(store, nil).ManagementAuditMiddleware(testLogger))
+	require.Equal(t, 401, dashboardSessionRequest(r, "/api/session/login", `{"username":"unknown"}`, "").Response.StatusCode())
 	const token = "persistent-dashboard-session"
 	require.NoError(t, store.ConfigStoreWithSessionAudit().CreateSession(ctx, &configtables.SessionsTable{
 		Token: token, ExpiresAt: time.Now().Add(time.Hour)}))
@@ -323,7 +339,7 @@ func TestDashboardSessionAuditPersistsAfterReopen(t *testing.T) {
 			require.NotNil(t, session)
 			require.NoError(t, store.ConfigStoreWithSessionAudit().DeleteSession(ctx, token))
 			expected = dashboardSessionAudits(t, store)
-			require.Len(t, expected, 2)
+			require.Len(t, expected, 3)
 		}
 	}
 }

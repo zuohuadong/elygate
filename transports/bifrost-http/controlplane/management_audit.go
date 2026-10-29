@@ -14,7 +14,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// ManagementAuditMiddleware persists the upstream handlers' committed changes.
+// ManagementAuditMiddleware persists committed changes and credential rejections.
 // It deliberately stores identities only: snapshots can include user-authored
 // content and require resource-specific redaction before durable storage.
 func (h *Handler) ManagementAuditMiddleware(logger schemas.Logger) schemas.BifrostHTTPMiddleware {
@@ -33,7 +33,7 @@ func (h *Handler) ManagementAuditMiddleware(logger schemas.Logger) schemas.Bifro
 					// a one-time secret. Do not replace it or invite an unsafe retry.
 					request.SetUserValue(lib.FastHTTPUserValueAuditPersistenceFailed, true)
 					request.Response.Header.Set(lib.HeaderAuditStatus, "failed")
-					logger.Error("failed to persist management audit changes; administrative mutation may already be committed")
+					logger.Error("failed to persist management audit events; prior administrative changes may already be committed")
 				}
 			}()
 			next(request)
@@ -62,12 +62,17 @@ func (s *Store) appendManagementAudit(ctx context.Context, actorID string, chang
 	events := make([]AuditEvent, 0, len(changes))
 	for _, change := range changes {
 		resourceID := change.TargetID
+		eventActor := actorID
+		// Rejected credentials cannot identify an actor, even on an authenticated chain.
+		if change.EventName == "dashboard_session.login_failed" {
+			eventActor = "anonymous"
+		}
 		// Cache keys may contain the original prompt or user-provided secrets.
 		if change.TargetType == "cache" {
 			resourceID = fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(resourceID)))
 		}
 		events = append(events, AuditEvent{
-			ID: uuid.NewString(), ActorID: actorID, Action: change.EventName,
+			ID: uuid.NewString(), ActorID: eventActor, Action: change.EventName,
 			ResourceType: change.TargetType, ResourceID: resourceID, CreatedAt: now,
 		})
 	}

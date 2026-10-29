@@ -530,7 +530,21 @@ error or panics. Audit persistence failure leaves the mutation response intact
 (it may hold a one-time credential), sets `X-Elygate-Audit-Status: failed` and
 logs a content-free error.
 
-This is post-commit persistence, not mutation-and-audit atomicity. Existing
+Dashboard password-login rejections use the same bridge. A username mismatch,
+hash-comparison error or password mismatch records one
+`dashboard_session.login_failed` event for `dashboard_session/dashboard`.
+This event is always anonymous, including on an already-authenticated/API-key
+chain, and contains no credential, supplied identity or failure diagnostic.
+Malformed payloads, unavailable/disabled authentication, config read failures
+and session write failures do not record credential rejection. A failed audit
+write keeps the original 401 response and adds the audit-failure header.
+Every rejected attempt adds a synchronous config-store audit transaction;
+this does not provide login rate limiting, automatic audit retention or
+crash-safe delivery. No failure-audit work is added to successful logins or
+the inference request path.
+
+This is post-handler persistence (post-commit for mutations), not
+mutation-and-audit atomicity. Existing
 transactional control-plane audits and signed governance audits retain their
 own guarantees. See `docs/product/management-audit-coverage.md` for the producer
 inventory, duplicate signed-event representations and remaining acceptance.
