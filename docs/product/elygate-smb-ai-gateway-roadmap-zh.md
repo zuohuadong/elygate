@@ -435,6 +435,16 @@ Elygate 当前定位收敛为：
 - 独立 runner 的临时数据库清空和实例正常停机已确认；日志为 `.codex-tmp/skill-audit-postgres-race-20261029.jsonl`，实例日志为 `.codex-tmp/elygate-cp-pg.bcxM2n/postgres.log`。首次混合运行的 5 分钟超时证据继续保留，不用后续通过覆盖失败历史。
 - 此为现有修复的本地 PostgreSQL 验证补充，不代表上传文件全生命周期、进程崩溃原子性、生产备份恢复或总目标完成；provider-harness 方案仍待确认，没有修改集合或执行付费调用。
 
+### 2026-10-29 审计关联真实浏览器与重启验收
+
+- follow-up `audit-correlation-live-visibility`：parent 为已推送的审计 Request/Trace 关联实现，source 为 `management-audit-coverage.md` 的浏览器可见性缺口，reason 为单元测试尚不能证明真实网络、面板布局及独立进程重启后的持久化。采用 Native、低风险、root 单 writer、external=0，仅做本地验收与文档补充，不改生产请求路径。
+- 从 `0e38df3d5` 源码重新编译真实 `Bootstrap`/`Start` 运行程序与隔离面板，使用 loopback、随机管理员密码和 `/Volumes/Datas` 下临时 SQLite。合成 v10 形状历史表经当前启动过程升级到 v11 后保留原行且不虚构关联；这是隔离迁移夹具，不是真实旧版生产升级。
+- 真实浏览器登录后，通过同源 fetch 验证项目/应用、应用密钥签发/轮换/撤销、项目/应用预算、绑定/撤销/重绑，以及 management bridge 下的禁用路由创建，共 13 项 mutation 保留各自 Request ID 与可信操作者。128 字节边界完整保留，缺失/恶意 ID 被省略，入站 Trace header 不会被冒认为可信 Trace；这不是全部资源表单的交互验收。
+- 正常停机后对照 SQLite 落盘值，新后端进程打开同一数据库，全部既有事件、时间、操作者及关联值与停机前逐项一致，既有会话仍有效。随后真实登出撤销 feed 访问，重新登录可见携带对应 Request ID 的 session 删除事件；最终 migration 记录唯一且数据库完整性检查通过。没有模拟强杀、掉电或整机恢复。
+- 1440x1000、375x812、812x375 的亮暗主题截图与尺寸检查通过，关联列可在表格内滚动完整查看，长 ID 换行且页面无横向溢出。亮/暗模式标签对比度 7.38:1 / 7.47:1，ID 对比度 14.70:1 / 16.30:1，页面异常为 0。Trace-only/双字段及恶意文本转义使用明确标注的数据库展示夹具，不冒充真实 tracing 链路。面板 295 测试、1528 断言、Svelte 零错误/警告与隔离 Vite 构建通过。
+- 报告 `.codex-tmp/audit-correlation-live-report.json` 记录源码/二进制哈希、三次后端启动、mutation 矩阵及布局数值，截图位于 `output/playwright/audit-correlation-live-*` 和 `audit-correlation-fixtures-*`。全部本轮进程正常停止，未调用供应商、未改 provider-harness、未部署或覆盖 Go 静态嵌入 UI。
+- 本后续项为本地 `PASS_SCOPED`；PostgreSQL 浏览器关联、真实管理 Trace、审计完整覆盖/transactional outbox、策略版本/发布/Shadow/回滚和生产部署/恢复仍未完成。原总目标继续 active / PARTIAL。
+
 ## 3. 单机部署架构
 
 ```text

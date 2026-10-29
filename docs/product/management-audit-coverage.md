@@ -130,8 +130,9 @@ administrator mutation has transactional audit enforcement.
   a private PostgreSQL instance, covering migration/idempotence, bridge
   batches/panics, signed projection, native mutations, transaction rollback
   and dashboard sessions. Panel tests (295), type checking and isolated Vite
-  build pass. These checks do not establish browser layout, deployed-runtime
-  migration or recovery acceptance.
+  build pass. The local network/browser and graceful-restart evidence below
+  supplements these tests; deployed migration, crash recovery and the
+  PostgreSQL browser chain remain separate acceptance boundaries.
 - Trusted authentication context supplies identity. Auth-disabled or
   whitelisted requests are anonymous. Basic credentials supply an audit-only
   actor after verification; this marker grants no additional permission.
@@ -204,6 +205,73 @@ limits are retained in `.codex-tmp/employee-session-results-20261027.json`.
 These disposable clusters disable crash-durability settings; they prove
 transaction/locking behavior, not deployed backup or crash recovery.
 
+## Local Correlation Runtime Acceptance
+
+Follow-up `audit-correlation-live-visibility`: parent is the request/trace
+correlation implementation, source is the correlation visibility gap in this
+inventory, and reason is to verify persisted metadata through a real browser
+and a newly started backend process. Native orchestration, low risk, one
+writer and no external verifier were selected for this local validation-only
+scope. No production request-path or authentication code was changed.
+
+On 2026-10-29, source commit `0e38df3d5` was rebuilt into an isolated executable
+using the production `Bootstrap`/`Start` path. A separately rebuilt panel used
+its existing same-origin Vite proxy. All listeners were loopback-only, the
+administrator password was random and supplied over stdin, and the SQLite
+database lived under `.codex-tmp/`. No model provider, paid inference,
+production deployment or provider-harness collection was used.
+
+- With the backend stopped, the disposable audit table was reconstructed into
+  a synthetic v10-shaped schema and given one historical row. Current
+  Bootstrap added the v11 columns and retained that row without inventing
+  correlation; the migration record remained unique after another restart.
+  This is a synthetic migration fixture, not a real deployed-v10 upgrade.
+- A real browser logged in through the panel, then issued same-origin fetch
+  mutations for project/application creation, application-key creation,
+  rotation and revocation, both budget scopes, binding/revocation/rebinding,
+  and a disabled routing-rule creation through the management bridge. Each
+  audit row retained its distinct Request ID and verified `local-admin`
+  identity. These are browser network/API tests, not interaction coverage of
+  every resource form. The 128-byte Request ID boundary survived unchanged;
+  absent and markup IDs were omitted. Supplied `traceparent` and inbound
+  `x-bifrost-trace-id` did not become trusted Trace IDs.
+- After graceful shutdown, the checkpointed SQLite rows were compared with
+  the observed feed. A new backend process reopened the same database and
+  returned every pre-restart event with identical IDs, timestamps, actors and
+  correlation values. The existing authenticated session still worked.
+  Browser logout then revoked feed access, persisted
+  `dashboard_session.deleted` with its own Request ID, and was visible after
+  another real login. Final shutdown and `PRAGMA integrity_check` passed.
+- The actual audit feed rendered Request-only records and historical rows
+  without either field. Seeded SQLite display fixtures separately verified
+  Trace-only/both-field rendering and malicious-text escaping; the latter
+  bypassed normal producer validation deliberately. No script/image was
+  inserted, and no injected code ran. **Trace ID visibility here is a display
+  fixture, not end-to-end tracing evidence**: default management routes do
+  not generate an exported Trace ID.
+- At 1440x1000, 375x812 and 812x375 in both themes with reduced motion,
+  the page width stayed within the viewport, table scrolling fully exposed
+  the correlation cell, and the 128-byte identifier wrapped without cell
+  overflow. Screenshots were inspected. Measured label/identifier contrast
+  was 7.38:1 / 14.70:1 in light mode and 7.47:1 / 16.30:1 in dark mode.
+  Browser page errors were zero. The unchanged panel also passed all 295
+  tests (1528 assertions), zero-error/zero-warning Svelte checking and an
+  isolated Vite build.
+
+Evidence: `.codex-tmp/audit-correlation-live-report.json` contains the source
+commit, executable/source hashes, three backend process identities, mutation
+matrix, contrast values and viewport measurements. Runtime and driver sources
+are `.codex-tmp/audit-correlation-live-runtime.go` and
+`.codex-tmp/audit-correlation-live.mjs`. The six viewport/theme images are
+`output/playwright/audit-correlation-live-{light,dark}-{1440,375,812}.png`;
+two additional `audit-correlation-fixtures-{light,dark}-375.png` images show
+the explicitly seeded display cases.
+
+This is **PASS_SCOPED local SQLite visibility and graceful-restart evidence**.
+It does not establish PostgreSQL-to-browser correlation, real exported
+management tracing, abrupt-crash/whole-machine recovery, production migration,
+complete sensitive-route coverage or transactional-outbox acceptance.
+
 ## Remaining Acceptance
 
 1. Convert sensitive post-commit producers to mutation-and-audit atomicity or
@@ -235,10 +303,14 @@ transaction/locking behavior, not deployed backup or crash recovery.
 4. Add deliberate outcome/detail contracts, including resource-specific
    snapshot redaction, before storing richer events. Deduplicate signed-chain
    and bridge representations if the feed should show one logical row per
-   virtual-key action; request/trace correlation is implemented, but its
-   deployed-runtime and browser evidence remains under item 5.
+   virtual-key action; request/trace correlation is implemented and has local
+   SQLite browser/restart evidence above. Real exported management tracing
+   and deployed-runtime evidence remain under item 5.
 5. Prove real PostgreSQL, deployed runtime, restart/recovery and operator
-   visibility acceptance separately from focused SQLite tests.
+   visibility acceptance separately from focused SQLite tests. Local SQLite
+   correlation visibility and graceful process restart now pass; PostgreSQL
+   browser correlation, abrupt-crash recovery and production acceptance do not
+   follow from that evidence.
 6. Add the repository-required provider-harness management-audit cases after
    scenario/fixture approval. Current Go regressions exercise registered
    management routes in-process, including the HTTP audit-feed shape, but do
