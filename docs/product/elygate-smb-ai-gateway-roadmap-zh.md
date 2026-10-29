@@ -36,7 +36,7 @@ Elygate 当前定位收敛为：
 | Usage Ledger | Partial | 支持投影、筛选查询、全筛选范围汇总和 CSV/API 导出；项目/应用日月预算、持久化阈值告警及控制面板已闭环；预算告警处理已通过本地 SQLite 和双 PostgreSQL 生产运行链路与浏览器验收，输入为合成日志而非真实模型调用；已有历史周期重算、历史分析、管理员已读、告警确认与人工处理/重开，真实外部投递、多用户、预测及生产交付仍未完整 |
 | Control Plane Audit | Partial | 控面与员工管理写操作已有事务内审计；上游管理事件已接持久化桥接，补齐 RSS、管理员认证配置、Warp 任务身份及显式会话删除事件；所有敏感操作覆盖、会话生命周期与跨存储原子性仍未完整 |
 | 企业身份 | Partial | 本地管理员和员工体系可用；OIDC 后续实现，LDAP/SCIM 暂不做 |
-| 统一策略中心 | Partial | 已有 CEL 路由、预算、限流和安全插件；缺统一版本、发布、回滚和仿真 |
+| 统一策略中心 | Partial | 已有 CEL 路由、预算、限流和安全插件，并提供管理员离线路由仿真；仍缺统一版本、发布、回滚和在线 Shadow |
 | 模型能力目录 | Partial | 已有模型、价格和扩展属性；区域、数据等级和健康策略未形成闭环 |
 | Guardrail / DLP | Partial | 插件基础存在；未证明覆盖所有流式、多模态、文件和工具结果 |
 | Capability / Gatekeeper | Not implemented | 保留为后续工具写操作治理，不进入首版阻塞项 |
@@ -385,6 +385,14 @@ Elygate 当前定位收敛为：
 - 覆盖 0/1/5/6 次、用户名及转发头轮换、不同来源、fresh handler、满容量与过期回收、清扫节流、并发同源/多源、malformed 优先级、disabled/config/session/success、finish 回调和原有员工 limiter 语义；控制面真实路由覆盖前五次审计、第六次无审计/无 session、不同来源成功。SQLite 控制面 26 个顶层测试、42 个子测试及 handler/lib race 通过；私有 PostgreSQL 同范围通过，测试库剩余 0、实例已停止；员工认证聚焦 race 通过；四包 vet、gofmt、diff 检查和面板 auth 测试通过。
 - 基准条件为 Apple M4、Go 1.27.3、无真实网络；限流器旧实现 admitted/denied 约 60/64 ns、8 B、1 alloc，修改后原构造路径约 71/78 ns、bounded 约 70/76 ns、8 B、1 alloc；handler 错误用户名中位数约 1.19 µs/12 alloc → 2.18 µs/15 alloc，错误密码约 747 µs/23 alloc → 762 µs/26 alloc，成功约 763 µs/21 alloc → 748 µs/24 alloc。handler 使用 bcrypt MinCost 与测试 ConfigStore，准入样本每五次在计时外换新 limiter，包含每五次一次的冷来源成本；4096 活跃桶强制清扫中位数 36189 ns、16 B、1 alloc，默认最多每秒一次。数字含本地负载噪声，不宣称生产吞吐或提速；结果 `.codex-tmp/dashboard-login-rate-limit-results-20261029.json`，日志 `.codex-tmp/dashboard-login-limit-*`，源码指纹 `.codex-tmp/dashboard-login-limit-source.sha256`。
 - 本项本地 `PASS_SCOPED`，未部署、未做多实例/代理真实环境或生产恢复验收；审计 retention、crash window、setup/WS tickets、员工失败登录事件、其他敏感路由、统一策略和完整产品路线图仍未完成。原总目标保持 active / PARTIAL。
+
+### 2026-10-29 离线路由仿真面板后续项
+
+- follow-up `routing-simulation-panel`：parent 为离线路由仿真后端 checkpoint，reason 为后端已提交推送但独立面板验收仍未闭环。本项保持管理员离线、请求级状态和上游路由引擎边界，不引入实时 Shadow、策略版本、发布、回滚、真实用量读取或供应商调用。
+- 面板从完整 `/api/routing/rules` 快照导入候选规则；拒绝截断/超大快照并保留原草稿，不带入数据库只读字段，不虚构 provider、model、身份或用量。编辑器校验规则、样本、链深和请求体大小，严格校验响应顺序、重复样本名、决策、错误和 trace；支持取消、切换视图、卸载、编辑后的迟到响应丢弃，以及 JSON 导出。
+- `routing-simulation-browser.js` 使用 API 夹具完成 10 个交互检查点，覆盖键盘提交、错误聚焦、导入语义保留、无匹配/失败/决策结果、导出、取消与 stale-response 防护；亮暗主题、1440px、375px、812x375 横屏和 reduced-motion 均通过，无页面错误或横向溢出。截图位于 `output/playwright/routing-simulation-*`。
+- 独立复核发现 malformed fallback 和负数/小数 TTFT 会被当作成功决策，已增加与后端契约一致的校验及正负边界回归；禁用 TTFT、未固定目标 Key、provider-only fallback 和固定 Key 时保留的空白 `provider_key_name` 不被误拒绝，非空配置别名仍拒绝。截图实测发现浅色错误文字仅 `3.73:1`，改用现有语义 token 的局部混色后，亮/暗文字与错误摘要分别为 `6.66:1` / `7.22:1`。不改 API、上游引擎或推理路径，没有新增长期状态。
+- 面板全量测试 294 项、1522 个断言通过，`svelte-check` 零错误/警告，Vite 生产构建通过；Go 路由仿真 handlers/server 定向测试通过。浏览器夹具不是真实管理员后端、数据库、部署或生产验收，真实后端到面板联调仍待补；统一策略的版本、发布、在线 Shadow、回滚仍未完成，原总目标保持 active / PARTIAL。
 
 ## 3. 单机部署架构
 

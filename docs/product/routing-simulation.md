@@ -1,8 +1,8 @@
 # Offline Routing Simulation
 
-Backend checkpoint. The panel simulation editor, persistent drafts, policy
-versions, publishing, rollback and online Shadow are not implemented by this
-endpoint.
+The independent panel provides an offline simulation editor alongside the
+rule list and decision tree. Persistent drafts, policy versions, publishing,
+rollback and online Shadow are not implemented.
 
 `POST /api/control-plane/routing/simulate` requires a verified administrator
 identity, denies auth bypass, and uses the existing control-plane JSON media
@@ -83,6 +83,46 @@ implementation. It does not read real credentials or live usage, invoke a
 provider, classify prompts, or save rules. A decision is not proof of provider
 availability, key authorization, fallback execution or end-to-end TTFT.
 Do not put credentials in sample headers or metadata.
+
+## Panel Workflow
+
+The simulation view imports the complete canonical `/api/routing/rules`
+snapshot, not a page from the rule list. Imports exceeding 32 rules or failing
+the total-count check leave the existing draft unchanged. Read-only database
+fields are removed; scope, disabled state, chain configuration, pinned keys,
+fallbacks and TTFT settings are preserved.
+
+Candidate rules and samples remain editable JSON. The initial sample has no
+chosen model, identity or assumed usage. Drafts live only in the mounted
+page, survive list/tree view switches, and are not saved as policies.
+Editing invalidates results; cancelling, leaving the simulation view or
+unmounting discards late responses.
+
+Results distinguish matches, no-match and sample failures, with full decisions
+and engine traces. Export downloads the submitted input and validated result
+as JSON. Response validation rejects mismatched samples, malformed fallback
+entries and TTFT values outside the integer range `0..300000`; `0` disables
+the deadline. Key-pinned fallbacks may retain an empty or whitespace-only
+`provider_key_name`, matching the backend contract; non-empty config aliases
+are rejected. Supplied input and exported data can contain sensitive metadata.
+
+### Local Verification
+
+On 2026-10-29 the panel suite passed 294 tests and 1522 assertions, Svelte
+checking reported no errors or warnings, and the production build passed.
+The routing-simulation handler/server regressions also passed.
+
+The Playwright API-fixture run covered 10 workflow checks, including
+malformed decisions, cancellation, stale responses, export, keyboard error
+focus and complete imports. Layout checks passed at 1440px, 375px and
+812x375 in both themes with reduced motion. The error text and alert contrast
+measured 6.66:1 in light mode and 7.22:1 in dark mode after a local text-token
+fix; the original light-mode value was 3.73:1.
+
+Evidence: `.codex-tmp/routing-simulation-browser-final.log` and
+`output/playwright/routing-simulation-*`. These browser checks use API
+fixtures, not a live administrator backend, database, provider or deployment.
+They do not close the live backend-to-panel acceptance gap.
 
 ## Bounds And Cost
 

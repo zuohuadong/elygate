@@ -186,7 +186,7 @@
 </div>
 
 <style>
-	.simulation { display: grid; gap: 1rem; min-width: 0; }
+	.simulation { --simulation-error-text: color-mix(in srgb, var(--destructive) 75%, var(--foreground)); display: grid; gap: 1rem; min-width: 0; }
 	.toolbar, .actions { align-items: center; display: flex; flex-wrap: wrap; gap: .5rem; }
 	.toolbar { justify-content: space-between; }
 	button { align-items: center; background: var(--muted); border: 1px solid var(--border); border-radius: .5rem; color: var(--foreground); cursor: pointer; display: inline-flex; font: inherit; font-size: .85rem; font-weight: 650; gap: .45rem; justify-content: center; min-height: 44px; padding: .5rem .75rem; }
@@ -206,8 +206,8 @@
 	.depth { margin-top: .85rem; max-width: 17rem; }
 	input { font: inherit; min-height: 44px; }
 	[aria-invalid="true"] { border-color: var(--destructive); }
-	.field-error { color: var(--destructive); font-size: .85rem; font-weight: 400; overflow-wrap: anywhere; }
-	.notice { border: 1px solid var(--destructive); border-radius: .5rem; color: var(--destructive); overflow-wrap: anywhere; padding: .75rem; }
+	.field-error { color: var(--simulation-error-text); font-size: .85rem; font-weight: 400; overflow-wrap: anywhere; }
+	.notice { border: 1px solid var(--destructive); border-radius: .5rem; color: var(--simulation-error-text); overflow-wrap: anywhere; padding: .75rem; }
 	h2 { font-size: 1.1rem; margin: 0 0 .75rem; }
 	h3, p { margin: 0; }
 	h3 { font-size: 1rem; min-width: 0; overflow-wrap: anywhere; }

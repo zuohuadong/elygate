@@ -112,6 +112,18 @@ describe('routing simulation response contract', () => {
 		expect(parseSimulationResponse(payload, samples)).toEqual(payload);
 	});
 
+	test('accepts disabled TTFT, maximum TTFT, unpinned targets and canonical fallback forms', () => {
+		// Cases: absent / empty / whitespace aliases are legal; named / null / numeric aliases are not.
+		for (const ttft_timeout_ms of [0, 300000]) {
+			for (const fallbacks of [null, [], ['azure/'], [{ provider: 'azure', model: '', key_id: 'pin' }],
+				[{ provider: 'azure', model: 'backup', key_id: 'pin', provider_key_name: '' }],
+				[{ provider: 'azure', model: 'backup', key_id: 'pin', provider_key_name: ' \t' }]]) {
+				const response = { ...payload, results: [{ ...payload.results[0], decision: { ...decision, key_id: '', ttft_timeout_ms, fallbacks } }, ...payload.results.slice(1)] };
+				expect(parseSimulationResponse(response, samples)).toEqual(response);
+			}
+		}
+	});
+
 	test('rejects missing, contradictory, reordered and malformed results', () => {
 		for (const invalid of [
 			null, {}, { ...payload, mode: 'online' }, { ...payload, selection: 'deterministic' },
@@ -120,6 +132,19 @@ describe('routing simulation response contract', () => {
 			{ ...payload, results: [{ ...payload.results[0], decision: null }, ...payload.results.slice(1)] },
 			{ ...payload, results: [{ ...payload.results[0], error: 'failed' }, ...payload.results.slice(1)] },
 			{ ...payload, results: [{ ...payload.results[0], logs: [null] }, ...payload.results.slice(1)] },
+			{ ...payload, results: [{ ...payload.results[0], decision: { ...decision, ttft_timeout_ms: -1.5 } }, ...payload.results.slice(1)] },
+			{ ...payload, results: [{ ...payload.results[0], decision: { ...decision, ttft_timeout_ms: 300001 } }, ...payload.results.slice(1)] },
+			{ ...payload, results: [{ ...payload.results[0], decision: { ...decision, fallbacks: [null, 42] } }, ...payload.results.slice(1)] },
+			{ ...payload, results: [{ ...payload.results[0], decision: { ...decision, fallbacks: [{ provider: '', model: 'backup' }] } }, ...payload.results.slice(1)] },
+			{ ...payload, results: [{ ...payload.results[0], decision: { ...decision, fallbacks: [{ provider: 'azure', unexpected: true }] } }, ...payload.results.slice(1)] },
+			{ ...payload, results: [{ ...payload.results[0], decision: { ...decision, fallbacks: [''] } }, ...payload.results.slice(1)] },
+			{ ...payload, results: [{ ...payload.results[0], decision: { ...decision, fallbacks: [{ provider: 'azure', key_id: 42 }] } }, ...payload.results.slice(1)] },
+			{ ...payload, results: [{ ...payload.results[0], decision: { ...decision, fallbacks: [{ provider: 'azure', key_id: 'pin', provider_key_name: 'config-alias' }] } }, ...payload.results.slice(1)] },
+			{ ...payload, results: [{ ...payload.results[0], decision: { ...decision, fallbacks: [{ provider: 'azure', key_id: 'pin', provider_key_name: null }] } }, ...payload.results.slice(1)] },
+			{ ...payload, results: [{ ...payload.results[0], decision: { ...decision, fallbacks: [{ provider: 'azure', key_id: 'pin', provider_key_name: 42 }] } }, ...payload.results.slice(1)] },
+			{ ...payload, results: [{ ...payload.results[0], decision: { ...decision, ttft_timeout_ms: 1.5 } }, ...payload.results.slice(1)] },
+			{ ...payload, results: [{ ...payload.results[0], decision: { ...decision, ttft_timeout_ms: Number.NaN } }, ...payload.results.slice(1)] },
+			{ ...payload, results: [{ ...payload.results[0], decision: { ...decision, ttft_timeout_ms: Number.POSITIVE_INFINITY } }, ...payload.results.slice(1)] },
 		]) expectInputError(() => parseSimulationResponse(invalid, samples), 'invalid-response', 'response');
 	});
 });

@@ -32,4 +32,11 @@ describe('routing rules page contract', () => {
 		expect(source).toContain("<div hidden={viewMode !== 'simulation'}><RoutingSimulationPanel active={viewMode === 'simulation'} /></div>");
 		expect(source).not.toContain('/api/governance/routing-rules');
 	});
+
+	test('uses a theme-aware readable error text token in simulation fields and alerts', async () => {
+		const source = await Bun.file(new URL('./RoutingSimulationPanel.svelte', import.meta.url)).text();
+		expect(source).toContain('--simulation-error-text: color-mix(in srgb, var(--destructive) 75%, var(--foreground))');
+		expect(source).toMatch(/\.field-error\s*\{[^}]*color:\s*var\(--simulation-error-text\)/);
+		expect(source).toMatch(/\.notice\s*\{[^}]*color:\s*var\(--simulation-error-text\)/);
+	});
 });

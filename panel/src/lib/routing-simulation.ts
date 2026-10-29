@@ -107,11 +107,21 @@ export function importSimulationRules(payload: unknown): JsonRecord[] {
 	});
 }
 
+function validFallback(fallback: unknown): boolean {
+	if (typeof fallback === 'string') return fallback.trim().length > 0;
+	if (!isJsonRecord(fallback)) return false;
+	if (Object.keys(fallback).some((field) => !['provider', 'model', 'key_id', 'provider_key_name'].includes(field))) return false;
+	return typeof fallback.provider === 'string' && fallback.provider.trim().length > 0 &&
+		(fallback.model === undefined || typeof fallback.model === 'string') &&
+		(fallback.key_id === undefined || typeof fallback.key_id === 'string') &&
+		(fallback.provider_key_name === undefined || (typeof fallback.provider_key_name === 'string' && fallback.provider_key_name.trim() === ''));
+}
+
 function validDecision(decision: unknown): decision is SimulationDecision {
 	if (!isJsonRecord(decision)) return false;
 	return ['provider', 'model', 'key_id', 'rule_id', 'rule_name'].every((field) => typeof decision[field] === 'string') &&
-		typeof decision.ttft_timeout_ms === 'number' && Number.isFinite(decision.ttft_timeout_ms) &&
-		(decision.fallbacks === null || Array.isArray(decision.fallbacks));
+		typeof decision.ttft_timeout_ms === 'number' && Number.isInteger(decision.ttft_timeout_ms) && decision.ttft_timeout_ms >= 0 && decision.ttft_timeout_ms <= 300000 &&
+		(decision.fallbacks === null || (Array.isArray(decision.fallbacks) && decision.fallbacks.every(validFallback)));
 }
 
 function validResult(result: unknown): result is SimulationResult {
