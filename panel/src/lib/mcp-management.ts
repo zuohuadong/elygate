@@ -4,6 +4,13 @@ import type { ElygateLocale } from './i18n';
 
 export type McpConnectionType = 'http' | 'sse' | 'stdio';
 export type McpAuthType = 'none' | 'headers' | 'oauth' | 'per_user_oauth' | 'per_user_headers';
+export const mcpMaxProtocolVersions = ['', 'auto', '2026-07-28', '2025-11-25', '2025-06-18'] as const;
+
+interface McpExposurePolicy {
+	maxProtocolVersion: string;
+	promptsToExpose: string[];
+	resourcesToExpose: string[];
+}
 
 type McpCatalogField = 'category' | 'source' | 'tag';
 
@@ -154,6 +161,12 @@ export interface McpClientDraft {
 	toolSyncMinutes: string | number;
 	toolExecutionSeconds: string | number;
 	allowedExtraHeaders: string;
+	maxProtocolVersion: string;
+	promptsExposure: 'all' | 'none' | 'list';
+	promptsToExpose: string;
+	resourcesExposure: 'all' | 'none' | 'list';
+	resourcesToExpose: string;
+	initialExposurePolicy?: McpExposurePolicy;
 	advancedJson: string;
 }
 
@@ -277,6 +290,11 @@ export function createEmptyMcpClientDraft(): McpClientDraft {
 		toolSyncMinutes: '',
 		toolExecutionSeconds: '',
 		allowedExtraHeaders: '',
+		maxProtocolVersion: '',
+		promptsExposure: 'all',
+		promptsToExpose: '[]',
+		resourcesExposure: 'all',
+		resourcesToExpose: '[]',
 		advancedJson: '{}',
 	};
 }
@@ -287,6 +305,60 @@ function optionalSecret(value: string): JsonRecord | undefined {
 
 function compactRecord(value: JsonRecord): JsonRecord {
 	return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined));
+}
+
+function exposureWhitelist(mode: McpClientDraft['promptsExposure'], entries: string): string[] {
+	if (mode === 'all') return ['*'];
+	if (mode === 'none') return [];
+	return validatedExposureList(JSON.parse(entries));
+}
+
+// Preserve exact URI/RE2 strings, including commas; RE2 validity belongs to the server.
+function validatedExposureList(entries: unknown): string[] {
+	if (!Array.isArray(entries) || entries.some((entry) => typeof entry !== 'string')) throw new Error('invalid-exposure-list');
+	const normalized = entries.map((entry) => entry.toLowerCase());
+	if (new Set(normalized).size !== entries.length || (entries.includes('*') && entries.length !== 1)) throw new Error('invalid-exposure-list');
+	return entries;
+}
+
+function exposureMode(entries: string[]): McpClientDraft['promptsExposure'] {
+	if (entries.length === 0) return 'none';
+	return entries.length === 1 && entries[0] === '*' ? 'all' : 'list';
+}
+
+export function mcpOriginalPromptName(promptName: string, clientName: string): string {
+	const prefix = `${clientName}-`;
+	return promptName.startsWith(prefix) ? promptName.slice(prefix.length) : promptName;
+}
+
+export function mcpExposureDraft(config: JsonRecord): Pick<McpClientDraft,
+	'maxProtocolVersion' | 'promptsExposure' | 'promptsToExpose' | 'resourcesExposure' | 'resourcesToExpose' | 'initialExposurePolicy'> {
+	// Upstream's null/omitted exposure is all; explicit [] must remain deny-all.
+	const prompts = validatedExposureList(config.prompts_to_expose ?? ['*']);
+	const resources = validatedExposureList(config.resources_to_expose ?? ['*']);
+	const protocol = config.max_protocol_version ?? '';
+	if (typeof protocol !== 'string' || !mcpMaxProtocolVersions.includes(protocol as typeof mcpMaxProtocolVersions[number])) throw new Error('invalid-protocol-version');
+	return {
+		maxProtocolVersion: protocol,
+		promptsExposure: exposureMode(prompts),
+		promptsToExpose: JSON.stringify(prompts, null, 2),
+		resourcesExposure: exposureMode(resources),
+		resourcesToExpose: JSON.stringify(resources, null, 2),
+		initialExposurePolicy: { maxProtocolVersion: protocol, promptsToExpose: prompts, resourcesToExpose: resources },
+	};
+}
+
+function mcpExposurePayload(draft: McpClientDraft): JsonRecord {
+	if (!mcpMaxProtocolVersions.includes(draft.maxProtocolVersion as typeof mcpMaxProtocolVersions[number])) throw new Error('invalid-protocol-version');
+	const protocol = draft.maxProtocolVersion;
+	const prompts = exposureWhitelist(draft.promptsExposure, draft.promptsToExpose);
+	const resources = exposureWhitelist(draft.resourcesExposure, draft.resourcesToExpose);
+	const initial = draft.initialExposurePolicy;
+	return {
+		max_protocol_version: initial?.maxProtocolVersion === protocol ? undefined : protocol,
+		prompts_to_expose: JSON.stringify(initial?.promptsToExpose) === JSON.stringify(prompts) ? undefined : prompts,
+		resources_to_expose: JSON.stringify(initial?.resourcesToExpose) === JSON.stringify(resources) ? undefined : resources,
+	};
 }
 
 export function buildMcpClientPayload(draft: McpClientDraft, editing: boolean): JsonRecord {
@@ -309,6 +381,7 @@ export function buildMcpClientPayload(draft: McpClientDraft, editing: boolean): 
 		tool_sync_interval: positiveNumber(draft.toolSyncMinutes),
 		tool_execution_timeout: positiveNumber(draft.toolExecutionSeconds),
 		allowed_extra_headers: csv(draft.allowedExtraHeaders),
+		...mcpExposurePayload(draft),
 	};
 
 	if (editing) {

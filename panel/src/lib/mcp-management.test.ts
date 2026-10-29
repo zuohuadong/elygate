@@ -10,6 +10,9 @@ import {
 	createEmptyMcpClientDraft,
 	localizeMcpCatalogDescription,
 	localizeMcpCatalogValue,
+	mcpExposureDraft,
+	mcpMaxProtocolVersions,
+	mcpOriginalPromptName,
 	refreshMcpData,
 } from './mcp-management';
 
@@ -64,12 +67,119 @@ describe('MCP management helpers', () => {
 		draft.name = 'server';
 		draft.disabled = true;
 		draft.toolSyncMinutes = 15;
+		draft.maxProtocolVersion = '2025-11-25';
+		draft.promptsExposure = 'none';
+		draft.resourcesExposure = 'list';
+		draft.resourcesToExpose = '["file://docs", "https://example.test/{id}"]';
 		draft.advancedJson = '{"tools_to_execute":["search"]}';
 		const payload = buildMcpClientPayload(draft, true);
 		expect(payload.tools_to_execute).toEqual(['search']);
 		expect(payload.disabled).toBe(true);
+		expect(payload.max_protocol_version).toBe('2025-11-25');
+		expect(payload.prompts_to_expose).toEqual([]);
+		expect(payload.resources_to_expose).toEqual(['file://docs', 'https://example.test/{id}']);
 		expect(payload.tool_sync_interval).toBe(15);
 		expect(payload.connection_string).toBeUndefined();
+	});
+
+	test('clears the protocol cap while retaining explicit all exposure on edits', () => {
+		const draft = createEmptyMcpClientDraft();
+		draft.name = 'server';
+		const payload = buildMcpClientPayload(draft, true);
+		expect(payload.max_protocol_version).toBe('');
+		expect(payload.prompts_to_expose).toEqual(['*']);
+		expect(payload.resources_to_expose).toEqual(['*']);
+	});
+
+	test('keeps all upstream protocol caps without trimming invalid versions into validity', () => {
+		expect(mcpMaxProtocolVersions).toEqual(['', 'auto', '2026-07-28', '2025-11-25', '2025-06-18']);
+		const draft = createEmptyMcpClientDraft();
+		draft.name = 'server';
+		for (const version of mcpMaxProtocolVersions) {
+			draft.maxProtocolVersion = version;
+			expect(buildMcpClientPayload(draft, true).max_protocol_version).toBe(version);
+		}
+		for (const version of ['latest', ' auto', '2026-07-28 ', '2025-03-26']) {
+			draft.maxProtocolVersion = version;
+			expect(() => buildMcpClientPayload(draft, true)).toThrow('invalid-protocol-version');
+			expect(() => mcpExposureDraft({ max_protocol_version: version })).toThrow('invalid-protocol-version');
+		}
+	});
+
+	test('loads null, missing, none, all and selected exposure without changing PATCH fields', () => {
+		// Omitted/null = all, [] = none, ["*"] = all; non-empty lists remain exact.
+		for (const exposure of [undefined, null, [], ['*'], ['review', 'regex:^release_[0-9]{1,3}$']]) {
+			const draft = {
+				...createEmptyMcpClientDraft(), name: 'server',
+				...mcpExposureDraft({ max_protocol_version: '2025-11-25', prompts_to_expose: exposure, resources_to_expose: exposure }),
+			};
+			expect(draft.promptsExposure).toBe(exposure === undefined || exposure === null || exposure[0] === '*' ? 'all' : exposure.length ? 'list' : 'none');
+			const payload = buildMcpClientPayload(draft, true);
+			expect(Object.hasOwn(payload, 'max_protocol_version')).toBe(false);
+			expect(Object.hasOwn(payload, 'prompts_to_expose')).toBe(false);
+			expect(Object.hasOwn(payload, 'resources_to_expose')).toBe(false);
+		}
+	});
+
+	test('changes each policy independently and explicitly resets protocol and deny-all', () => {
+		const draft = {
+			...createEmptyMcpClientDraft(), name: 'server',
+			...mcpExposureDraft({ max_protocol_version: '2026-07-28', prompts_to_expose: ['review'], resources_to_expose: [] }),
+		};
+		draft.maxProtocolVersion = '';
+		expect(buildMcpClientPayload(draft, true).max_protocol_version).toBe('');
+		expect(buildMcpClientPayload(draft, true).prompts_to_expose).toBeUndefined();
+		draft.promptsExposure = 'none';
+		draft.resourcesExposure = 'all';
+		expect(buildMcpClientPayload(draft, true).prompts_to_expose).toEqual([]);
+		expect(buildMcpClientPayload(draft, true).resources_to_expose).toEqual(['*']);
+		draft.promptsExposure = 'list';
+		draft.promptsToExpose = '["review"]';
+		expect(buildMcpClientPayload(draft, true).prompts_to_expose).toBeUndefined();
+	});
+
+	test('preserves comma-bearing URIs, templates, RE2 and undiscovered exact identities', () => {
+		const entries = ['https://host/items?a=1,b=2', 'file:///docs/{id}', 'regex:^report_[0-9]{1,3}$', ' white space '];
+		const draft = { ...createEmptyMcpClientDraft(), name: 'server', connectionValue: 'https://mcp.example.test' };
+		draft.resourcesExposure = 'list';
+		draft.resourcesToExpose = JSON.stringify(entries);
+		draft.promptsExposure = 'list';
+		draft.promptsToExpose = '["review"]';
+		for (const editing of [false, true]) {
+			const payload = buildMcpClientPayload(draft, editing);
+			expect(payload.resources_to_expose).toEqual(entries);
+			expect(payload.prompts_to_expose).toEqual(['review']);
+		}
+	});
+
+	test('rejects malformed exposure data instead of publishing a broader policy', () => {
+		const draft = { ...createEmptyMcpClientDraft(), name: 'server' };
+		draft.promptsExposure = 'list';
+		for (const malformed of ['null', '{}', '"review"', '[1]', '[null]', '["review","review"]', '["Review","review"]', '["*","review"]', '{']) {
+			draft.promptsToExpose = malformed;
+			expect(() => buildMcpClientPayload(draft, true)).toThrow();
+		}
+		for (const malformed of [false, {}, ['*', 'review'], ['Review', 'review'], [1]]) {
+			expect(() => mcpExposureDraft({ prompts_to_expose: malformed })).toThrow('invalid-exposure-list');
+		}
+	});
+
+	test('dedicated policy controls take precedence over conflicting advanced JSON', () => {
+		const draft = {
+			...createEmptyMcpClientDraft(), name: 'server',
+			...mcpExposureDraft({ prompts_to_expose: ['review'], resources_to_expose: [] }),
+		};
+		draft.advancedJson = '{"max_protocol_version":"auto","prompts_to_expose":["*"],"resources_to_expose":["*"]}';
+		const payload = buildMcpClientPayload(draft, true);
+		expect(Object.hasOwn(payload, 'max_protocol_version')).toBe(false);
+		expect(Object.hasOwn(payload, 'prompts_to_expose')).toBe(false);
+		expect(Object.hasOwn(payload, 'resources_to_expose')).toBe(false);
+	});
+
+	test('uses the original prompt name, removing only the owning client prefix', () => {
+		expect(mcpOriginalPromptName('review_server-review', 'review_server')).toBe('review');
+		expect(mcpOriginalPromptName('review_server-review_server-review', 'review_server')).toBe('review_server-review');
+		expect(mcpOriginalPromptName('another-review', 'review_server')).toBe('another-review');
 	});
 
 	test('turns a catalog entry into an install payload', () => {
@@ -152,6 +262,15 @@ describe('MCP management helpers', () => {
 		expect(source).not.toContain('<option value="connected">Connected</option>');
 		expect(source).toContain('<fieldset class="client-options span-2">');
 		expect(source).toMatch(/\.client-options input\[type=['"]checkbox['"]\][^{]*\{[^}]*width:\s*auto/);
+		expect(source).toContain('maxProtocolVersion');
+		expect(source).toContain('promptsExposure');
+		expect(source).toContain('resourcesExposure');
+		expect(source).toContain("['resources', 'resource_templates', 'prompts']");
+		expect(source).toContain('entry.uri ?? entry.uriTemplate');
+		expect(source).not.toContain('discovered_resources');
+		expect(source).toContain('<div class="notice error" role="alert">{error}</div>');
+		expect(source).toContain('dialog.showModal()');
+		expect(source).toContain('oncancel=');
 	});
 
 	test('keeps library view controls out of the filter form', async () => {

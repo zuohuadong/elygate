@@ -7,6 +7,8 @@
 	import { isSafeOAuthRedirect } from '../lib/oauth-consent';
 	import { columnValueFor } from '../lib/columns';
 	import { formatPagination } from '../lib/display-format';
+	import { X } from '@lucide/svelte';
+	import McpExposureField from '../lib/McpExposureField.svelte';
 	import {
 		buildLibraryClientPayload,
 		buildMcpClientPayload,
@@ -18,6 +20,9 @@
 		createEmptyMcpClientDraft,
 		localizeMcpCatalogDescription,
 		localizeMcpCatalogValue,
+		mcpExposureDraft,
+		mcpMaxProtocolVersions,
+		mcpOriginalPromptName,
 		refreshMcpData,
 		type McpClientDraft,
 	} from '../lib/mcp-management';
@@ -205,6 +210,7 @@
 
 	function openCreateClient(): void {
 		editingClientId = '';
+		selected = null;
 		clientDraft = createEmptyMcpClientDraft();
 		modal = 'client';
 		error = '';
@@ -214,9 +220,14 @@
 		const config = clientConfig(record);
 		const connection = isJsonRecord(config.connection_string) ? config.connection_string : {};
 		const stdio = isJsonRecord(config.stdio_config) ? config.stdio_config : {};
+		let exposureDraft: ReturnType<typeof mcpExposureDraft>;
+		try { exposureDraft = mcpExposureDraft(config); }
+		catch (cause) { error = validationMessage(cause); return; }
+		selected = record;
 		editingClientId = clientId(record);
 		clientDraft = {
 			...createEmptyMcpClientDraft(),
+			...exposureDraft,
 			name: stringValue(config.name),
 			connectionType: config.connection_type === 'stdio' || config.connection_type === 'sse' ? config.connection_type : 'http',
 			connectionValue: stringValue(connection.value || connection.ref),
@@ -240,6 +251,7 @@
 	}
 
 	function validationMessage(cause: unknown): string {
+		if (cause instanceof SyntaxError) return text('名单必须为有效的 JSON 字符串数组。', 'Allowlist must be a valid JSON array of strings.');
 		if (!(cause instanceof Error)) return text('保存失败。', 'Failed to save.');
 		const messages: Record<string, string> = {
 			'name-required': text('名称为必填项。', 'Name is required.'),
@@ -248,6 +260,8 @@
 			'connection-required': text('连接地址为必填项。', 'Connection URL is required.'),
 			'header-keys-required': text('按用户请求头认证至少需要一个请求头名称。', 'Per-user headers require at least one header name.'),
 			'invalid-number': text('时间间隔必须是非负数字。', 'Intervals must be non-negative numbers.'),
+			'invalid-exposure-list': text('暴露名单必须是无重复的字符串 JSON 数组，且 * 不能与其他值混用。', 'Exposure lists must be JSON arrays of unique strings. * cannot be combined with other values.'),
+			'invalid-protocol-version': text('协议版本不在当前服务端支持范围内。', 'Protocol version is not supported by the current server.'),
 		};
 		return messages[cause.message] ?? cause.message;
 	}
@@ -405,6 +419,11 @@
 		try { window.localStorage.setItem('mcp-library-view-mode', next); } catch { /* 保留内存偏好 */ }
 	}
 
+	function showMcpModal(dialog: HTMLDialogElement): { destroy: () => void } {
+		dialog.showModal();
+		return { destroy: () => dialog.close() };
+	}
+
 	onMount(() => {
 		try { const saved = window.localStorage.getItem('mcp-library-view-mode'); if (saved === 'grid' || saved === 'table') viewMode = saved; } catch { /* 使用默认值 */ }
 		void refreshData();
@@ -479,9 +498,9 @@
 </section>
 
 {#if modal}
-	<div class="modal-backdrop" role="presentation" onclick={(event) => { if (event.target === event.currentTarget && !isSaving) modal = null; }}>
-		<div class="modal" role="dialog" aria-modal="true" aria-labelledby="mcp-modal-title">
-			<header><div><h2 id="mcp-modal-title">{modal === 'client' ? (editingClientId ? text('编辑 MCP 客户端', 'Edit MCP client') : text('新增 MCP 客户端', 'New MCP client')) : modal === 'library-create' ? text('发布 MCP 服务', 'Publish MCP server') : modal === 'library-install' ? text('安装 MCP 服务', 'Install MCP server') : modal === 'library-settings' ? text('MCP 目录设置', 'MCP Library Settings') : text('完整详情', 'Full details')}</h2>{#if selected && modal !== 'client' && modal !== 'library-settings'}<p>{displayValue(selected.name || clientConfig(selected).name || selected.client_name)}</p>{/if}</div><button type="button" aria-label={text('关闭', 'Close')} onclick={() => (modal = null)}>×</button></header>
+		<dialog class="modal" aria-labelledby="mcp-modal-title" use:showMcpModal oncancel={(event) => { event.preventDefault(); if (!isSaving) modal = null; }}>
+			<header><div><h2 id="mcp-modal-title">{modal === 'client' ? (editingClientId ? text('编辑 MCP 客户端', 'Edit MCP client') : text('新增 MCP 客户端', 'New MCP client')) : modal === 'library-create' ? text('发布 MCP 服务', 'Publish MCP server') : modal === 'library-install' ? text('安装 MCP 服务', 'Install MCP server') : modal === 'library-settings' ? text('MCP 目录设置', 'MCP Library Settings') : text('完整详情', 'Full details')}</h2>{#if selected && modal !== 'client' && modal !== 'library-settings'}<p>{displayValue(selected.name || clientConfig(selected).name || selected.client_name)}</p>{/if}</div><button type="button" title={text('关闭', 'Close')} aria-label={text('关闭', 'Close')} disabled={isSaving} onclick={() => (modal = null)}><X size={18} aria-hidden="true" /></button></header>
+			{#if error}<div class="notice error" role="alert">{error}</div>{/if}
 			{#if modal === 'detail' && selected}<pre class="json-view">{prettyJson(selected, '{}')}</pre>{/if}
 			{#if modal === 'client'}
 				<div class="form-grid">
@@ -492,12 +511,29 @@
 					<label>{text('工具同步间隔（分钟）', 'Tool sync interval (minutes)')}<input type="number" min="0" bind:value={clientDraft.toolSyncMinutes} /></label>
 					<label>{text('工具超时（秒）', 'Tool timeout (seconds)')}<input type="number" min="0" bind:value={clientDraft.toolExecutionSeconds} /></label>
 					<label>{text('额外请求头白名单', 'Extra-header allowlist')}<input bind:value={clientDraft.allowedExtraHeaders} placeholder="x-tenant-id, x-trace-id" /></label>
+					<label>{text('最高协议版本', 'Maximum protocol version')}<select bind:value={clientDraft.maxProtocolVersion} disabled={isSaving}>{#each mcpMaxProtocolVersions as version (version)}<option value={version}>{version === '' ? text('使用全局设置', 'Use global setting') : version === 'auto' ? text('自动（最新支持版本）', 'Auto (newest supported)') : version}</option>{/each}</select></label>
 					<fieldset class="client-options span-2"><legend>{text('客户端选项', 'Client options')}</legend><div class="client-option-grid"><label class="check"><input type="checkbox" bind:checked={clientDraft.codeMode} />{text('代码模式', 'Code mode')}</label><label class="check"><input type="checkbox" bind:checked={clientDraft.ping} />{text('启用 Ping', 'Enable ping')}</label><label class="check"><input type="checkbox" bind:checked={clientDraft.disabled} />{text('停用客户端', 'Disable client')}</label><label class="check"><input type="checkbox" bind:checked={clientDraft.allVirtualKeys} />{text('全部虚拟密钥可用', 'Available to all virtual keys')}</label>{#if clientDraft.connectionType !== 'stdio'}<label class="check"><input type="checkbox" bind:checked={clientDraft.tlsSkipVerify} />{text('跳过 TLS 校验', 'Skip TLS verification')}</label>{/if}</div></fieldset>
 					{#if clientDraft.connectionType !== 'stdio'}<label class="span-2">{text('CA 证书 PEM', 'CA certificate PEM')}<textarea rows="3" bind:value={clientDraft.caCert}></textarea></label>{/if}
 					{#if clientDraft.authType === 'headers' || clientDraft.authType === 'per_user_headers'}<label class="span-2">{text('共享请求头 JSON', 'Shared headers JSON')}<textarea rows="5" bind:value={clientDraft.headersJson}></textarea></label>{/if}
 					{#if clientDraft.authType === 'per_user_headers'}<label class="span-2">{text('每用户必填请求头名称', 'Required per-user header names')}<input bind:value={clientDraft.perUserHeaderKeys} placeholder="X-Api-Key, X-Tenant" /></label>{#if !editingClientId}<label class="span-2">{text('验证用示例值 JSON', 'Sample values for verification')}<textarea rows="4" bind:value={clientDraft.userHeadersJson}></textarea></label>{/if}{/if}
 					{#if (clientDraft.authType === 'oauth' || clientDraft.authType === 'per_user_oauth')}<label>{text('OAuth Client ID', 'OAuth Client ID')}<input bind:value={clientDraft.oauthClientId} /></label><label>{text('OAuth Client Secret', 'OAuth Client Secret')}<input type="password" bind:value={clientDraft.oauthClientSecret} /></label>{#if !editingClientId}<label class="span-2">{text('授权地址（可自动发现）', 'Authorize URL (optional discovery)')}<input bind:value={clientDraft.authorizeUrl} /></label><label class="span-2">{text('Token 地址（可自动发现）', 'Token URL (optional discovery)')}<input bind:value={clientDraft.tokenUrl} /></label><label>{text('注册地址', 'Registration URL')}<input bind:value={clientDraft.registrationUrl} /></label><label>{text('Scopes', 'Scopes')}<input bind:value={clientDraft.scopes} /></label><label class="span-2">{text('OAuth Resource URI', 'OAuth Resource URI')}<input bind:value={clientDraft.resource} /></label>{/if}{/if}
 				</div>
+				<McpExposureField kind="prompts" locale={locale()} bind:mode={clientDraft.promptsExposure} bind:entries={clientDraft.promptsToExpose} disabled={isSaving} />
+				<McpExposureField kind="resources" locale={locale()} bind:mode={clientDraft.resourcesExposure} bind:entries={clientDraft.resourcesToExpose} disabled={isSaving} />
+				{#if selected}
+					<details class="discovery">
+						<summary>{text('最近发现的资源与提示词', 'Last discovered resources and prompts')}</summary>
+						{#each ['resources', 'resource_templates', 'prompts'] as discoveryKind (discoveryKind)}
+							{@const discovered = recordList(selected, discoveryKind)}
+							<section>
+								<h3>{discoveryKind === 'resources' ? text('资源', 'Resources') : discoveryKind === 'resource_templates' ? text('资源模板', 'Resource templates') : text('提示词', 'Prompts')} <span>({discovered.length})</span></h3>
+								{#each discovered as entry}
+									<div class="discovered-entry"><strong>{displayValue(entry.name)}</strong><code>{discoveryKind === 'prompts' ? mcpOriginalPromptName(stringValue(entry.name), stringValue(clientConfig(selected).name)) : displayValue(entry.uri ?? entry.uriTemplate)}</code>{#if entry.description}<p>{displayValue(entry.description)}</p>{/if}</div>
+								{:else}<p>{text('暂无发现记录', 'No discovery records')}</p>{/each}
+							</section>
+						{/each}
+					</details>
+				{/if}
 				<details><summary>{text('高级字段 JSON', 'Advanced fields JSON')}</summary><p>{text('用于工具白名单、自动执行、定价和虚拟密钥分配。结构化字段会覆盖同名值。', 'Use for tool allowlists, auto-execution, pricing, and virtual-key assignments. Structured fields override matching keys.')}</p><textarea class="json-editor" rows="10" bind:value={clientDraft.advancedJson}></textarea></details>
 			{/if}
 			{#if modal === 'library-create'}
@@ -505,9 +541,8 @@
 			{/if}
 			{#if modal === 'library-install' && selected}<div class="form-grid"><label class="span-2">{text('客户端名称', 'Client name')}<input bind:value={installName} /></label><label class="span-2">{text('安装覆盖 JSON', 'Install overrides JSON')}<textarea class="json-editor" rows="14" bind:value={installOverrides}></textarea><small>{text('填写 OAuth 客户端、共享请求头、按用户验证值、TLS 或其他高级配置。', 'Provide OAuth client settings, shared headers, per-user verification values, TLS, or other advanced options.')}</small></label></div>{/if}
 			{#if modal === 'library-settings'}<div class="form-grid"><label class="span-2">{text('目录同步地址', 'Library sync URL')}<input bind:value={libraryUrl} placeholder="https://getbifrost.ai/mcp-library" /><small>{text(`留空使用 ${getAppName()} 默认目录。`, `Leave empty to use the default ${getAppName()} catalog.`)}</small></label><label>{text('同步周期（小时）', 'Sync interval (hours)')}<input type="number" min="1" max="8760" bind:value={librarySyncHours} /></label></div>{/if}
-			{#if modal !== 'detail'}<footer><button type="button" onclick={() => (modal = null)}>{text('取消', 'Cancel')}</button><button class="primary" type="button" disabled={isSaving} onclick={() => void (modal === 'client' ? saveClient() : modal === 'library-create' ? saveLibraryEntry() : modal === 'library-settings' ? saveLibrarySettings() : installLibraryEntry())}>{isSaving ? text('保存中…', 'Saving…') : modal === 'library-install' ? text('安装', 'Install') : text('保存', 'Save')}</button></footer>{/if}
-		</div>
-	</div>
+			{#if modal !== 'detail'}<footer><button type="button" disabled={isSaving} onclick={() => (modal = null)}>{text('取消', 'Cancel')}</button><button class="primary" type="button" disabled={isSaving} onclick={() => void (modal === 'client' ? saveClient() : modal === 'library-create' ? saveLibraryEntry() : modal === 'library-settings' ? saveLibrarySettings() : installLibraryEntry())}>{isSaving ? text('保存中…', 'Saving…') : modal === 'library-install' ? text('安装', 'Install') : text('保存', 'Save')}</button></footer>{/if}
+		</dialog>
 {/if}
 
 <style>
@@ -551,8 +586,8 @@
 	.server-card-head { align-items: start; display: flex; gap: .6rem; justify-content: space-between; }
 	.server-card footer { border-top: 1px solid var(--border); justify-content: space-between; padding-top: .75rem; }
 	.tag-row { display: flex; flex-wrap: wrap; gap: .3rem; }
-	.modal-backdrop { align-items: center; background: rgb(0 0 0 / .55); display: flex; inset: 0; justify-content: center; padding: 1rem; position: fixed; z-index: 100; }
-	.modal { background: var(--card); border: 1px solid var(--border); border-radius: 1rem; display: grid; gap: 1rem; max-height: 92vh; max-width: 900px; overflow: auto; padding: 1.15rem; width: 100%; }
+	.modal { background: var(--card); border: 1px solid var(--border); border-radius: 8px; color: var(--foreground); display: grid; gap: 1rem; margin: auto; max-height: 92dvh; max-width: 900px; min-width: 0; overflow: auto; padding: 1.15rem; width: calc(100% - 2rem); }
+	.modal::backdrop { background: rgb(0 0 0 / .55); }
 	.modal > header, .modal > footer { align-items: center; display: flex; gap: .7rem; justify-content: space-between; }
 	.modal h2 { margin: 0; }
 	.modal header p { color: var(--muted-foreground); margin: .3rem 0 0; }
@@ -569,5 +604,10 @@
 	details p, label small { color: var(--muted-foreground); font-size: .75rem; }
 	.json-editor, .json-view { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .75rem; line-height: 1.55; width: 100%; }
 	.json-view { background: var(--muted); border-radius: .65rem; margin: 0; max-height: 68vh; overflow: auto; padding: 1rem; white-space: pre-wrap; }
+	.discovery section { margin-top: .8rem; min-width: 0; }
+	.discovery h3 { font-size: .85rem; margin: .5rem 0; }
+	.discovery h3 span, .discovery p { color: var(--muted-foreground); }
+	.discovered-entry { border-bottom: 1px solid var(--border); display: grid; font-size: .8rem; gap: .3rem; min-width: 0; overflow-wrap: anywhere; padding: .6rem 0; }
+	.discovered-entry p { margin: 0; }
 	@media (max-width: 760px) { .page-shell { padding: 1rem; } .page-heading { flex-direction: column; } .heading-actions { width: 100%; } .form-grid, .client-option-grid { grid-template-columns: 1fr; } .span-2 { grid-column: auto; } .pagination { align-items: stretch; flex-direction: column; gap: .6rem; } }
 </style>

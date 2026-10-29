@@ -43,10 +43,17 @@ upstream UI.
 - Relay endpoint management, relay logs and virtual-key `relay_grants` do not
   yet have dedicated panel workflows. Existing virtual-key updates omit this
   field, which preserves grants under the upstream update contract.
-- Per-client MCP protocol limits, resource/prompt exposure and discovery fields
-  still need dedicated panel controls and contract regression coverage. Existing
-  client updates omit these fields rather than clearing them.
-- These are explicit panel parity gaps, not completed features. Production
+- Per-client MCP protocol limits and resource/prompt exposure now have dedicated
+  create/edit controls, with read-only resource/template/prompt discovery.
+  Exposure lists preserve exact JSON strings; unchanged policy fields are
+  omitted from updates, and an empty protocol explicitly restores the global
+  setting. Upstream contracts are the only compatibility baseline.
+- The MCP follow-up passed 22 helper/contract tests, all 303 panel tests, Svelte
+  diagnostics, an isolated Vite production build and
+  route-fixture browser checks for hydration, validation, mutation payloads and
+  desktop/mobile/landscape light/dark layout. This is local scoped evidence,
+  not proof of a live external MCP connection or production acceptance.
+- Relay workflows remain explicit panel parity gaps, not completed features. Production
   relay acceptance and complete governance audit snapshots, including relay
   grants, remain outside this source synchronization's acceptance.
 
