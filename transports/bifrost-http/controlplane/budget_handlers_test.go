@@ -168,7 +168,7 @@ func TestBudgetMonitorProjectsAndAlertsWithoutPanelRead(t *testing.T) {
 		t.Fatal("monitor did not reconcile on startup")
 	}
 	require.Eventually(t, func() bool {
-		alerts, err := store.ListBudgetAlerts(ctx, UsageQuery{})
+		alerts, err := store.ListBudgetAlerts(ctx, BudgetAlertQuery{})
 		return err == nil && len(alerts) == 2
 	}, 20*time.Second, 20*time.Millisecond)
 	monitor.Stop()

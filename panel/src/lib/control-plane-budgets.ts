@@ -30,7 +30,12 @@ export interface BudgetAlert {
 	acknowledged: boolean;
 	acknowledged_at: string | null;
 	acknowledged_by: string | null;
+	resolved: boolean;
+	resolved_at: string | null;
+	resolved_by: string | null;
 }
+
+export type BudgetAlertResolution = 'all' | 'open' | 'resolved';
 
 export function validBudgetInput(input: string): boolean {
 	const value = input.trim();
@@ -100,7 +105,12 @@ function isBudgetAlert(row: JsonRecord): row is JsonRecord & BudgetAlert {
 			? row.acknowledged_at === null && row.acknowledged_by === null
 			: row.acknowledged === true
 				&& typeof row.acknowledged_at === 'string' && Number.isFinite(Date.parse(row.acknowledged_at))
-				&& typeof row.acknowledged_by === 'string' && row.acknowledged_by.trim() !== '');
+				&& typeof row.acknowledged_by === 'string' && row.acknowledged_by.trim() !== '')
+		&& (row.resolved === false
+			? row.resolved_at === null && row.resolved_by === null
+			: row.resolved === true
+				&& typeof row.resolved_at === 'string' && Number.isFinite(Date.parse(row.resolved_at))
+				&& typeof row.resolved_by === 'string' && row.resolved_by.trim() !== '');
 }
 
 export function parseBudgetStatuses(payload: unknown): BudgetStatus[] {
@@ -120,6 +130,13 @@ export function parseBudgetAlerts(payload: unknown): BudgetAlert[] {
 export function parseBudgetAcknowledgement(payload: unknown, id: string, acknowledged: boolean): BudgetAlert {
 	if (!isJsonRecord(payload) || !isBudgetAlert(payload) || payload.id !== id || payload.acknowledged !== acknowledged) {
 		throw new Error('Invalid budget acknowledgement response');
+	}
+	return payload;
+}
+
+export function parseBudgetResolution(payload: unknown, id: string, resolved: boolean): BudgetAlert {
+	if (!isJsonRecord(payload) || !isBudgetAlert(payload) || payload.id !== id || payload.resolved !== resolved) {
+		throw new Error('Invalid budget resolution response');
 	}
 	return payload;
 }

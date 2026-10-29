@@ -148,7 +148,7 @@ existing budget silently.
 
 ```text
 GET /api/control-plane/usage/budgets?project_id=...&application_id=...
-GET /api/control-plane/budget-alerts?project_id=...&application_id=...&limit=100&offset=0
+GET /api/control-plane/budget-alerts?project_id=...&application_id=...&resolution=all&limit=100&offset=0
 ```
 
 Status returns configured windows, UTC calendar `[period_start, period_end)`
@@ -213,7 +213,7 @@ The panel keeps in-flight writes independent of view lifetime and waits for
 them before loading a new scope. Uncertain write responses stay unknown until
 a fresh read; no optimistic acknowledgement is reported.
 
-Final-source validation on 2026-10-27 passed the 103-test SQLite package suite
+Acknowledgement-only validation on 2026-10-27 passed the 103-test SQLite package suite
 and nine PostgreSQL acknowledgement tests using the same retained race binary.
 The private PostgreSQL cluster had no leaked test databases and stopped normally.
 The final independent panel suite passed 269 tests, with zero Svelte diagnostics
@@ -230,6 +230,54 @@ inspection confirmed four alerts, one acknowledgement, three transition audits,
 zero notification-read receipts and four delivered notifications. Desktop and
 375px screenshots were inspected. This does not establish real-provider billing,
 PostgreSQL-to-browser, production migration or backup/recovery acceptance.
+
+### Budget Alert Resolution
+
+```text
+PUT /api/control-plane/budget-alerts/{alert_id}/resolution
+{"resolved":true}
+```
+
+An explicit `false` reopens the alert. The same strict single-boolean body,
+canonical UUID, real-administrator, JSON and Host-origin guards apply.
+Every alert view, including acknowledgement responses, also contains required
+`resolved`, `resolved_at` and `resolved_by`: open rows carry false and two
+explicit nulls, resolved rows carry true, UTC microsecond time and the
+server-selected `local-admin` actor. Neither mutation invents or resets the
+other state. No legacy Elygate payload defaults are provided.
+
+The additive v10 table uses the alert ID as its foreign-key primary key with
+ON DELETE CASCADE. Both mutations lock the same immutable alert row, then
+change state, append audit and read the complete joined view in one transaction.
+Only actual transitions emit `budget-alert.resolve` / `budget-alert.reopen`;
+retries preserve the original resolution time. Audit or state persistence
+failure rolls back the transition. A missing alert returns 404, including an
+attempt to reopen it. Destructive migration rollback is refused.
+
+Alert GET accepts `resolution=all|open|resolved`, defaulting to all. Filtering
+precedes limit/offset paging and intersects project/application constraints.
+Pagination is decimal `limit` 1..1000 (default 100) and nonnegative `offset`
+(default 0). Duplicate, empty or invalid known filter/pagination parameters
+return 400 instead of selecting an arbitrary value.
+
+Manual resolution is a shared administrator workflow state, not evidence that
+costs recovered. It does not acknowledge an alert, mark a notification read,
+change the immutable event, reset threshold deduplication, cancel outbox or
+webhook delivery, suppress new periods, or change upstream budget enforcement.
+The panel offers independent resolve/reopen and acknowledgement controls,
+actor/time and resolution filtering. Ambiguous writes block both controls until
+refresh; pending writes survive scope changes/unmount and gate later reads.
+Removing a filtered row refills from page one; keyboard focus returns to the
+filter only when it was lost with the removed row, not after the user moved it.
+
+Final-source validation on 2026-10-29 passed 145 SQLite package tests (the
+PostgreSQL-only backup test skipped without its socket) and 22 private PostgreSQL
+resolution/acknowledgement/boolean tests using the same non-race binary.
+The private cluster had no leaked test databases and stopped normally. Panel
+validation passed 279 tests, zero Svelte diagnostics, an independent Vite build
+without copy-build, and 23 browser-fixture checks. This is not live
+backend-to-browser, production migration or crash-recovery acceptance; query
+cost measurements and remaining boundaries are recorded in the product roadmap.
 
 ### Historical Budget Periods
 

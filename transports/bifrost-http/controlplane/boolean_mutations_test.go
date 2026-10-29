@@ -12,6 +12,7 @@ func TestBooleanMutationPayloads(t *testing.T) {
 	}{
 		{"read", `\u0072ead`, "Read", decodeNotificationReadMutation},
 		{"acknowledged", `\u0061cknowledged`, "Acknowledged", decodeBudgetAcknowledgement},
+		{"resolved", `\u0072esolved`, "Resolved", decodeBudgetResolution},
 	} {
 		t.Run(mutation.field, func(t *testing.T) {
 			// Missing/null, scalar/container types, duplicate/escaped/case-variant
@@ -80,6 +81,7 @@ func BenchmarkBooleanMutation(b *testing.B) {
 	}{
 		{"read", decodeNotificationReadMutation},
 		{"acknowledged", decodeBudgetAcknowledgement},
+		{"resolved", decodeBudgetResolution},
 	} {
 		for _, literal := range []string{"true", "false"} {
 			b.Run(mutation.field+"/"+literal, func(b *testing.B) {

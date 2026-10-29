@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { budgetEndpoint, budgetLimits, budgetProgress, budgetQuery, formatBudgetAmount, parseBudgetAcknowledgement, parseBudgetAlerts, parseBudgetStatuses, validBudgetInput } from './control-plane-budgets';
+import { budgetEndpoint, budgetLimits, budgetProgress, budgetQuery, formatBudgetAmount, parseBudgetAcknowledgement, parseBudgetResolution, parseBudgetAlerts, parseBudgetStatuses, validBudgetInput } from './control-plane-budgets';
 
 describe('control-plane budget helpers', () => {
 	test('blank amounts clear windows while positive decimals preserve sub-cent precision', () => {
@@ -50,7 +50,8 @@ describe('control-plane budget helpers', () => {
 			expect(() => parseBudgetStatuses({ data: [{ ...status, ...patch }] })).toThrow();
 		}
 		const alert = { ...status, id: 'a1', threshold: .8, triggered_at: '2026-10-27T12:00:00Z',
-			acknowledged: false, acknowledged_at: null, acknowledged_by: null };
+			acknowledged: false, acknowledged_at: null, acknowledged_by: null,
+			resolved: false, resolved_at: null, resolved_by: null };
 		expect(parseBudgetAlerts({ data: [alert] })).toEqual([alert]);
 		expect(() => parseBudgetAlerts({ data: [{ ...alert, threshold: .5 }] })).toThrow();
 	});
@@ -60,6 +61,7 @@ describe('control-plane budget helpers', () => {
 			id: 'a1', scope_type: 'project', scope_id: 'p1', window: 'daily',
 			period_start: '2026-10-27T00:00:00Z', threshold: .8, usage: 8, limit: 10,
 			triggered_at: '2026-10-27T12:00:00Z', acknowledged: false, acknowledged_at: null, acknowledged_by: null,
+			resolved: false, resolved_at: null, resolved_by: null,
 		};
 		expect(parseBudgetAcknowledgement(alert, 'a1', false)).toEqual(alert);
 		const confirmed = { ...alert, acknowledged: true, acknowledged_at: '2026-10-27T12:01:00Z', acknowledged_by: 'local-admin' };
@@ -78,5 +80,30 @@ describe('control-plane budget helpers', () => {
 		expect(() => parseBudgetAcknowledgement(confirmed, 'a1', false)).toThrow();
 		expect(() => parseBudgetAcknowledgement({ data: confirmed }, 'a1', true)).toThrow();
 		expect(() => parseBudgetAlerts({ data: [alert, alert] })).toThrow();
+	});
+
+	test('resolution is required, independent and cannot be inferred from missing fields', () => {
+		const alert = {
+			id: 'a1', scope_type: 'project', scope_id: 'p1', window: 'daily',
+			period_start: '2026-10-27T00:00:00Z', threshold: .8, usage: 8, limit: 10,
+			triggered_at: '2026-10-27T12:00:00Z', acknowledged: false, acknowledged_at: null, acknowledged_by: null,
+			resolved: false, resolved_at: null, resolved_by: null,
+		};
+		expect(parseBudgetResolution(alert, 'a1', false)).toEqual(alert);
+		const resolved = { ...alert, resolved: true, resolved_at: '2026-10-29T12:00:00Z', resolved_by: 'local-admin' };
+		expect(parseBudgetResolution(resolved, 'a1', true)).toEqual(resolved);
+		expect(parseBudgetAcknowledgement(resolved, 'a1', false)).toEqual(resolved);
+		for (const patch of [
+			{ resolved: undefined }, { resolved: 'true' }, { resolved_at: undefined }, { resolved_by: undefined },
+			{ resolved_at: '2026-10-29T12:00:00Z' }, { resolved: true },
+			{ resolved: true, resolved_at: 'invalid', resolved_by: 'local-admin' },
+			{ resolved: true, resolved_at: '2026-10-29T12:00:00Z', resolved_by: ' ' },
+		]) {
+			expect(() => parseBudgetAlerts({ data: [{ ...alert, ...patch }] })).toThrow();
+			expect(() => parseBudgetResolution({ ...alert, ...patch }, 'a1', false)).toThrow();
+			expect(() => parseBudgetAcknowledgement({ ...alert, ...patch }, 'a1', false)).toThrow();
+		}
+		expect(() => parseBudgetResolution(resolved, 'other', true)).toThrow();
+		expect(() => parseBudgetResolution(resolved, 'a1', false)).toThrow();
 	});
 });

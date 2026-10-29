@@ -25,6 +25,9 @@ type BudgetAlertView struct {
 	Acknowledged   bool       `gorm:"-" json:"acknowledged"`
 	AcknowledgedAt *time.Time `json:"acknowledged_at"`
 	AcknowledgedBy *string    `json:"acknowledged_by"`
+	Resolved       bool       `gorm:"-" json:"resolved"`
+	ResolvedAt     *time.Time `json:"resolved_at"`
+	ResolvedBy     *string    `json:"resolved_by"`
 }
 
 type budgetAcknowledgementMutation struct {
@@ -32,11 +35,16 @@ type budgetAcknowledgementMutation struct {
 	Acknowledged bool
 }
 
-func (view *BudgetAlertView) normalizeAcknowledgement() {
+func (view *BudgetAlertView) normalizeState() {
 	view.Acknowledged = view.AcknowledgedAt != nil
 	if view.AcknowledgedAt != nil {
 		utc := view.AcknowledgedAt.UTC()
 		view.AcknowledgedAt = &utc
+	}
+	view.Resolved = view.ResolvedAt != nil
+	if view.ResolvedAt != nil {
+		utc := view.ResolvedAt.UTC()
+		view.ResolvedAt = &utc
 	}
 }
 
@@ -55,47 +63,42 @@ func migrateBudgetAcknowledgements(tx *gorm.DB) error {
 func (s *Store) SetBudgetAcknowledgement(ctx context.Context, mutation budgetAcknowledgementMutation) (*BudgetAlertView, error) {
 	var view BudgetAlertView
 	err := s.db(ctx).Transaction(func(tx *gorm.DB) error {
-		alert, err := lockBudgetAcknowledgementAlert(tx, mutation.AlertID)
-		if err != nil {
+		if err := lockBudgetAlert(tx, mutation.AlertID); err != nil {
 			return err
 		}
-		view.BudgetAlert = *alert
 		if !mutation.Acknowledged {
-			return deleteBudgetAcknowledgement(tx, alert.ID)
+			if err := deleteBudgetAcknowledgement(tx, mutation.AlertID); err != nil {
+				return err
+			}
+		} else {
+			ack := budgetAcknowledgement{AlertID: mutation.AlertID, AcknowledgedAt: time.Now().UTC().Truncate(time.Microsecond), AcknowledgedBy: budgetAcknowledgementActor}
+			if err := insertBudgetAcknowledgement(tx, &ack); err != nil {
+				return err
+			}
 		}
-		ack := budgetAcknowledgement{AlertID: alert.ID, AcknowledgedAt: time.Now().UTC().Truncate(time.Microsecond), AcknowledgedBy: budgetAcknowledgementActor}
-		if err := insertBudgetAcknowledgement(tx, &ack); err != nil {
-			return err
-		}
-		view.AcknowledgedAt, view.AcknowledgedBy = &ack.AcknowledgedAt, &ack.AcknowledgedBy
-		return nil
+		return budgetAlertViews(tx).Where("a.id = ?", mutation.AlertID).Take(&view).Error
 	})
-	view.normalizeAcknowledgement()
+	view.normalizeState()
 	return &view, err
 }
 
-func lockBudgetAcknowledgementAlert(tx *gorm.DB, id string) (*BudgetAlert, error) {
+func lockBudgetAlert(tx *gorm.DB, id string) error {
 	// Acquire the SQLite write lock before a snapshot; PostgreSQL serializes
 	// independent processes on the same immutable alert row.
 	locked := tx.Model(&BudgetAlert{}).Where("id = ?", id).UpdateColumn("id", gorm.Expr("id"))
 	if locked.Error != nil {
-		return nil, locked.Error
+		return locked.Error
 	}
 	if locked.RowsAffected == 0 {
-		return nil, gorm.ErrRecordNotFound
+		return gorm.ErrRecordNotFound
 	}
-	var alert BudgetAlert
-	err := tx.First(&alert, "id = ?", id).Error
-	return &alert, err
+	return nil
 }
 
 func insertBudgetAcknowledgement(tx *gorm.DB, ack *budgetAcknowledgement) error {
 	inserted := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(ack)
-	if inserted.Error != nil {
+	if inserted.Error != nil || inserted.RowsAffected == 0 {
 		return inserted.Error
-	}
-	if inserted.RowsAffected == 0 {
-		return tx.First(ack, "alert_id = ?", ack.AlertID).Error
 	}
 	return appendAuditTx(tx, budgetAcknowledgementActor, "budget-alert.acknowledge", "budget-alert", ack.AlertID)
 }

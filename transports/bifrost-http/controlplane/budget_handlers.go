@@ -93,9 +93,14 @@ func budgetQuery(ctx *fasthttp.RequestCtx) UsageQuery {
 }
 
 func (h *Handler) listBudgetAlerts(ctx *fasthttp.RequestCtx) {
+	query, err := budgetAlertQuery(ctx)
+	if err != nil {
+		writeError(ctx, fasthttp.StatusBadRequest, err)
+		return
+	}
 	opCtx, cancel := controlPlaneContext()
 	defer cancel()
-	alerts, err := h.store.ListBudgetAlerts(opCtx, budgetQuery(ctx))
+	alerts, err := h.store.ListBudgetAlerts(opCtx, query)
 	if err != nil {
 		writeError(ctx, fasthttp.StatusInternalServerError, err)
 		return

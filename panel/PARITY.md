@@ -187,17 +187,29 @@ upstream UI.
   filters apply; ledger user/provider/model/date/session/agent filters must not
   reduce budgets.
 - `GET /api/control-plane/budget-alerts` lists stored 80%/100% events with
-  limit/offset paging. Status and history failures are independent; failures
+  limit/offset paging and `resolution=all|open|resolved` (default all), applied
+  before paging and intersected with project/application scope. Invalid,
+  duplicate or empty known query parameters fail. Status and history failures are independent; failures
   are not presented as an empty success or a healthy budget.
 - Every alert includes required `acknowledged`, `acknowledged_at` and
   `acknowledged_by`; false requires explicit null time/actor, true requires
   a valid time and actor. There is no fallback for older Elygate payloads.
   `PUT /api/control-plane/budget-alerts/{id}/acknowledgement` takes only a
   required `acknowledged` boolean and returns the complete alert view.
+- Every alert also requires `resolved`, `resolved_at`, `resolved_by` with the
+  same false/null and true/time/actor consistency. Resolution is independent
+  of acknowledgement and notification read state, and does not clear a breach.
+  `PUT /api/control-plane/budget-alerts/{id}/resolution` takes only a required
+  `resolved` boolean; false reopens the alert. Both writes return real joined
+  state, serialize on the same alert lock and audit only actual transitions.
+- Resolve/reopen controls expose time and actor; resolution filtering resets
+  paging. A row leaving the filter refills from page one, preserving a lost
+  keyboard focus at the filter without stealing focus moved elsewhere.
 - Explicit acknowledge/undo controls never change notification read state,
   budget enforcement or breach severity. Failed/ambiguous saves are unknown,
   block another toggle, and require refresh. Refresh/paging cannot race a
-  save. Pending writes outlive scope changes and component unmounts; subsequent
+  save. Both mutation types share a pending barrier; failed saves make both
+  state controls unknown until refreshed. Pending writes outlive scope changes and component unmounts; subsequent
   reads wait for them before querying, including when the new scope still
   contains the same alert. Keyboard focus remains on the action.
 - Local production-runtime/browser acceptance on 2026-10-27 used authenticated

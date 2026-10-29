@@ -33,7 +33,7 @@ Elygate 当前定位收敛为：
 | Application 与 Virtual Key 绑定 | Implemented | 支持绑定、过期、撤销；optional 允许未绑定 Key，required 拒绝已解析但未绑定的 Key，disabled 跳过绑定检查 |
 | Application Key 生命周期 | Implemented | 支持创建、一次性返回值、显式轮换、显式撤销；Key 变更同步到内存治理状态 |
 | 非普通 HTTP 路径绑定校验 | Partial | WebSocket、WebRTC 接入、MCP、OAuth VK 模式和 Async 已接入；已建立 WebRTC 会话已在受支持的下一 turn 入口重校验，媒体流、活动 turn 内动作和全部路径仍未形成统一强保证 |
-| Usage Ledger | Partial | 支持投影、筛选查询、全筛选范围汇总和 CSV/API 导出；项目/应用日月预算、持久化阈值告警及控制面板已闭环；预算通知已通过本地 SQLite 生产运行链路与浏览器验收，输入为合成日志而非真实模型调用；已有历史周期重算、历史分析、管理员已读及告警确认，外部投递、告警处理、多用户、预测及生产交付仍未完整 |
+| Usage Ledger | Partial | 支持投影、筛选查询、全筛选范围汇总和 CSV/API 导出；项目/应用日月预算、持久化阈值告警及控制面板已闭环；预算通知已通过本地 SQLite 生产运行链路与浏览器验收，输入为合成日志而非真实模型调用；已有历史周期重算、历史分析、管理员已读、告警确认与人工处理/重开，真实外部投递、多用户、预测及生产交付仍未完整 |
 | Control Plane Audit | Partial | 控面与员工管理写操作已有事务内审计；上游管理事件已接持久化桥接，补齐 RSS、管理员认证配置、Warp 任务身份及显式会话删除事件；所有敏感操作覆盖、会话生命周期与跨存储原子性仍未完整 |
 | 企业身份 | Partial | 本地管理员和员工体系可用；OIDC 后续实现，LDAP/SCIM 暂不做 |
 | 统一策略中心 | Partial | 已有 CEL 路由、预算、限流和安全插件；缺统一版本、发布、回滚和仿真 |
@@ -333,6 +333,16 @@ Elygate 当前定位收敛为：
 | 16 | 38688 | 77533 | 5408 / 63 | 13800 / 147 |
 
 - `gofmt`、`git diff --check` 和 clean-code-guard 通过，本后续项为本地 `PASS_SCOPED`。本次提交和推送按用户明确指令执行，其他工作区改动不混入；未部署，未运行 race 或完整后端包回归，不构成生产迁移、恢复、真实外部账号或多用户验收。原总目标继续 active / PARTIAL。
+
+### 2026-10-29 预算告警处理与重新打开后续项
+
+- follow-up `budget-alert-resolution`：parent 为预算告警确认交付，source 为本路线图与 `panel/PARITY.md` 的人工处理闭环缺口，reason 为确认不等同于处理完成。冻结范围为控制面状态、查询、路由、测试及独立面板和文档；Native、中风险、root 唯一 writer、一位独立只读 verifier。契约位于 `.codex-tmp/budget-alert-resolution-contract-20261029.md`，不新增旧 Elygate 兼容层，不改上游 `ui/`。
+- 新增 v10 独立处理记录表和严格单布尔 `PUT /api/control-plane/budget-alerts/{id}/resolution`；支持处理/重开、首次时间与固定服务端管理员身份、幂等和审计同事务。确认与处理共用告警行锁，事务内回读完整联合视图；处理不改变原始告警、确认、通知已读、预算拦截、阈值去重或 Webhook/outbox。GET 的 all/open/resolved 先筛选后分页，并与项目/应用交集；拒绝已知参数重复、空值及非法分页。
+- 面板提供独立处理按钮、时间/操作者、筛选及未知状态；两种写入共享跨 scope/unmount 的 pending barrier。行退出筛选后补第一页，只在移除行导致焦点丢失且用户未另移焦点时回到筛选器。确认辅助模块直接重命名为 `budget-alert-mutations`，没有旧模块 re-export。
+- 最终 Go 1.27.3 构建及 `-vet=all` 通过，未启用 race。同一最终二进制在 SQLite 控制面整包通过 145 项顶层测试，仅 PostgreSQL 专属备份恢复测试因未配置 socket 跳过；私有 PostgreSQL 18 的处理、确认及布尔解析定向回归通过 22 项顶层测试。覆盖迁移、并发、幂等、失败/取消回滚、外键、授权、Origin 和查询边界；临时测试库剩余 0，实例正常停止。私有集群关闭 fsync 等仅验证 SQL/锁语义，不证明崩溃持久性。
+- 面板 279 项测试、1360 次断言通过，Svelte 检查 0 错误/警告，独立 Vite 构建通过，保留 chunk 体积提示；没有执行 `copy-build` 或覆盖 Go 静态嵌入 UI。Playwright API fixtures 的 23 组交互检查覆盖筛选补页、失败恢复、乱序隔离、写入 barrier、键盘、桌面/手机/横屏/暗色，6 项暗色文字对比度最低 4.822；截图已检查，临时浏览器及开发服务已关闭。这不是实际后端到浏览器联调。
+- 请求流成本仅影响管理告警查询/写入，不改推理路径或新增长驻缓存；处理表每个已处理告警最多一行，重开或删除告警后释放。Apple M4、外盘 SQLite、25 条告警、`-benchmem -benchtime=100x -count=3` 的读查询中位数：仅确认 JOIN 为 73897 ns/op、36371 B/op、833 allocs/op；新增处理 JOIN 为 83963 ns/op、40090 B/op、933 allocs/op。两者使用同一当前视图类型，是查询形状比较，不是旧二进制全链路 before/after，也不代表 PostgreSQL 或推理性能。
+- 证据位于 `.codex-tmp/budget-resolutions-{sqlite,postgres,bench}-final.log`、`budget-resolutions-panel-{tests,check-final,build-final}.log`、`budget-resolutions-browser-verified.log` 及 `budget-resolutions-source-final.sha256`。独立只读复核、源码校验、格式与 diff 检查通过。本增量为本地 `PASS_SCOPED`，按用户本轮明确要求提交推送，未部署；真实供应商费用、真实后端浏览器链路、多用户、统一策略、模型治理、全路径撤销、完整审计、生产迁移及整机备份恢复仍未完成，原总目标保持 active / PARTIAL。
 
 ## 3. 单机部署架构
 

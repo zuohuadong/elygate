@@ -52,7 +52,7 @@ func TestBudgetAlertsUseUTCCalendarWindowsAndDeduplicate(t *testing.T) {
 	created, err = store.EvaluateBudgetAlerts(ctx, now.Add(time.Minute))
 	require.NoError(t, err)
 	require.Zero(t, created)
-	alerts, err := store.ListBudgetAlerts(ctx, UsageQuery{ProjectID: project.ID})
+	alerts, err := store.ListBudgetAlerts(ctx, BudgetAlertQuery{ProjectID: project.ID})
 	require.NoError(t, err)
 	require.Len(t, alerts, 3)
 }
@@ -163,15 +163,15 @@ func TestBudgetAlertBoundariesRolloverAndScopeFilters(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, created)
 	for _, tc := range []struct {
-		query UsageQuery
+		query BudgetAlertQuery
 		count int
 	}{
-		{UsageQuery{}, 8},
-		{UsageQuery{ProjectID: project.ID}, 6},
-		{UsageQuery{ApplicationID: app.ID}, 4},
-		{UsageQuery{ProjectID: project.ID, ApplicationID: app.ID}, 4},
-		{UsageQuery{ProjectID: project.ID, ApplicationID: otherApp.ID}, 0},
-		{UsageQuery{Limit: 1, Offset: 7}, 1},
+		{BudgetAlertQuery{}, 8},
+		{BudgetAlertQuery{ProjectID: project.ID}, 6},
+		{BudgetAlertQuery{ApplicationID: app.ID}, 4},
+		{BudgetAlertQuery{ProjectID: project.ID, ApplicationID: app.ID}, 4},
+		{BudgetAlertQuery{ProjectID: project.ID, ApplicationID: otherApp.ID}, 0},
+		{BudgetAlertQuery{Limit: 1, Offset: 7}, 1},
 	} {
 		alerts, err := store.ListBudgetAlerts(ctx, tc.query)
 		require.NoError(t, err)
@@ -225,7 +225,7 @@ func TestBudgetAlertConcurrentEvaluation(t *testing.T) {
 	for err := range failures {
 		require.NoError(t, err)
 	}
-	alerts, err := store.ListBudgetAlerts(ctx, UsageQuery{})
+	alerts, err := store.ListBudgetAlerts(ctx, BudgetAlertQuery{})
 	require.NoError(t, err)
 	require.Len(t, alerts, 2)
 }
@@ -245,14 +245,14 @@ func TestBudgetMonitorSkipsUnconfiguredAndFailedReconciliation(t *testing.T) {
 	require.ErrorIs(t, h.refreshBudgetAlerts(ctx), errBudgetUsageSourceUnavailable)
 	h.logManager = &failingFingerprintLogManager{snapshotLogManager: &snapshotLogManager{UsageLogReader: reader}, err: sourceErr}
 	require.ErrorIs(t, h.refreshBudgetAlerts(ctx), sourceErr)
-	alerts, err := store.ListBudgetAlerts(ctx, UsageQuery{})
+	alerts, err := store.ListBudgetAlerts(ctx, BudgetAlertQuery{})
 	require.NoError(t, err)
 	require.Empty(t, alerts, "stale ledger cannot trigger an alert after sync failure")
 
 	h.logManager = &snapshotLogManager{UsageLogReader: completeSnapshotReader{logs: []logstore.Log{{ID: "fresh", Timestamp: time.Now().UTC(), Status: "success", Cost: ptr(2.0)}}}}
 	require.NoError(t, h.refreshBudgetAlerts(ctx))
 	// The complete snapshot removes stale project usage; unrelated/default usage must not charge this project.
-	alerts, err = store.ListBudgetAlerts(ctx, UsageQuery{})
+	alerts, err = store.ListBudgetAlerts(ctx, BudgetAlertQuery{})
 	require.NoError(t, err)
 	require.Empty(t, alerts)
 }

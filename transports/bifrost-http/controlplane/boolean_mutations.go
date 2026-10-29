@@ -10,6 +10,7 @@ import (
 var (
 	errNotificationReadMutation      = errors.New("request must contain only a required read boolean")
 	errBudgetAcknowledgementMutation = errors.New("request must contain only a required acknowledged boolean")
+	errBudgetResolutionMutation      = errors.New("request must contain only a required resolved boolean")
 )
 
 func decodeNotificationReadMutation(body []byte) (bool, error) {
@@ -18,6 +19,10 @@ func decodeNotificationReadMutation(body []byte) (bool, error) {
 
 func decodeBudgetAcknowledgement(body []byte) (bool, error) {
 	return decodeBooleanMutation(body, "acknowledged", errBudgetAcknowledgementMutation)
+}
+
+func decodeBudgetResolution(body []byte) (bool, error) {
+	return decodeBooleanMutation(body, "resolved", errBudgetResolutionMutation)
 }
 
 func decodeBooleanMutation(body []byte, field string, invalid error) (bool, error) {

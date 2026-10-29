@@ -114,6 +114,7 @@ func (h *Handler) RegisterRoutes(r *router.Router, middlewares ...schemas.Bifros
 	r.GET("/api/control-plane/usage/budgets/history", wrap(h.usageBudgetHistory))
 	r.GET("/api/control-plane/budget-alerts", wrap(h.listBudgetAlerts))
 	r.PUT("/api/control-plane/budget-alerts/{alert_id}/acknowledgement", wrap(h.setBudgetAcknowledgement))
+	r.PUT("/api/control-plane/budget-alerts/{alert_id}/resolution", wrap(h.setBudgetResolution))
 	r.GET("/api/control-plane/notification-receipts", wrap(h.notificationReadStates))
 	r.PUT("/api/control-plane/notification-receipts/{notification_id}", wrap(h.setNotificationReadState))
 	r.GET("/api/control-plane/audit-events", wrap(h.listAudit))

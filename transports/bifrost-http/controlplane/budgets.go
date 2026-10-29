@@ -292,12 +292,33 @@ func enqueueBudgetNotification(tx *gorm.DB, alert BudgetAlert) error {
 	return tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "alert_id"}}, DoNothing: true}).Create(&outbox).Error
 }
 
-func (s *Store) ListBudgetAlerts(ctx context.Context, query UsageQuery) ([]BudgetAlertView, error) {
-	alerts := []BudgetAlertView{}
-	db := s.db(ctx).Table("elygate_control_budget_alerts AS a").
-		Select("a.*, k.acknowledged_at, k.acknowledged_by").
+type BudgetAlertQuery struct {
+	ProjectID     string
+	ApplicationID string
+	Resolution    string
+	Limit         int
+	Offset        int
+}
+
+func budgetAlertViews(db *gorm.DB) *gorm.DB {
+	return db.Table("elygate_control_budget_alerts AS a").
+		Select("a.*, k.acknowledged_at, k.acknowledged_by, r.resolved_at, r.resolved_by").
 		Joins("LEFT JOIN " + budgetAcknowledgementTable + " AS k ON k.alert_id = a.id").
-		Order("a.triggered_at DESC, a.id DESC")
+		Joins("LEFT JOIN " + budgetResolutionTable + " AS r ON r.alert_id = a.id")
+}
+
+func (s *Store) ListBudgetAlerts(ctx context.Context, query BudgetAlertQuery) ([]BudgetAlertView, error) {
+	alerts := []BudgetAlertView{}
+	db := budgetAlertViews(s.db(ctx)).Order("a.triggered_at DESC, a.id DESC")
+	switch query.Resolution {
+	case "", "all":
+	case "open":
+		db = db.Where("r.alert_id IS NULL")
+	case "resolved":
+		db = db.Where("r.alert_id IS NOT NULL")
+	default:
+		return nil, errInvalidBudgetAlertQuery
+	}
 	if query.ApplicationID != "" {
 		db = db.Where("a.scope_type = ? AND a.scope_id = ?", "application", query.ApplicationID)
 	}
@@ -311,7 +332,7 @@ func (s *Store) ListBudgetAlerts(ctx context.Context, query UsageQuery) ([]Budge
 	}
 	err := db.Limit(limit).Offset(max(0, query.Offset)).Scan(&alerts).Error
 	for index := range alerts {
-		alerts[index].normalizeAcknowledgement()
+		alerts[index].normalizeState()
 	}
 	return alerts, err
 }

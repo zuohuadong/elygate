@@ -64,7 +64,7 @@ func TestBudgetNotificationOutboxAtomicAndIdempotent(t *testing.T) {
 	require.NoError(t, store.db(ctx).Model(&Project{}).Where("id = ?", project.ID).Update("monthly_budget", 10).Error)
 	_, err := store.EvaluateBudgetAlerts(ctx, now)
 	require.Error(t, err)
-	alerts, err := store.ListBudgetAlerts(ctx, UsageQuery{})
+	alerts, err := store.ListBudgetAlerts(ctx, BudgetAlertQuery{})
 	require.NoError(t, err)
 	require.Len(t, alerts, 2, "new monthly alerts roll back with their failed enqueue")
 }
