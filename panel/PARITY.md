@@ -74,9 +74,21 @@ upstream UI.
   under `output/playwright/`. This remains local scoped evidence, not proof of
   live upstream traffic, external credentials, production relay acceptance or
   complete governance audit snapshots.
-- Remaining panel gaps include structured route/usage editors, full log
-  attribution/cost filters and log export. JSON editors expose the existing
-  configuration contract without claiming complete upstream UI parity.
+- Relay-log attribution/app/cost/billable filters now support searchable
+  multi-value facets, exact request/job IDs, reset, sorting and page size.
+  Applied filters retain fixed time bounds across lists, summaries, paging
+  and CSV export; refresh advances only the applied relative window.
+  CSV export supports the current page or up to 10,000 matching metadata rows,
+  cancellation, duplicate-page protection and spreadsheet-formula escaping,
+  without exporting bodies, headers, metadata or plugin logs.
+- The log follow-up passed 27 focused tests, all 342 panel tests, Svelte
+  diagnostics (zero errors/warnings), an isolated Vite production build and
+  diff checks. Complete browser download/cancellation/layout acceptance and
+  live backend/production acceptance remain pending; helper tests and builds
+  do not establish those boundaries.
+- Remaining panel gaps include structured route/usage editors and the pending
+  log workflow acceptance above. JSON editors expose the existing configuration
+  contract without claiming complete upstream UI parity.
 
 ## OSS and shared management routes
 
@@ -85,7 +97,7 @@ upstream UI.
 | `/login` | svadmin login + Bifrost auth provider | `/api/session/is-auth-enabled`, `/api/session/login`, `/api/session/logout` | Dedicated |
 | `/workspace/dashboard` | dashboard | `/api/logs/dashboard` | Dedicated |
 | `/workspace/logs` | logs | `/api/logs*`, `/api/ws`, cost recalculation and selected deletion | Dedicated |
-| `/workspace/relay-logs` | relay-logs | `/api/relay-logs*`, absolute time bounds, list/stats/histogram/top-endpoints, details and selected deletion | Dedicated, remaining filters/export noted above |
+| `/workspace/relay-logs` | relay-logs | `/api/relay-logs*`, fixed applied time bounds, attribution/cost filters, list/stats/histogram/top-endpoints, details, selected deletion and bounded CSV export | Dedicated, complete browser/live acceptance pending |
 | `/workspace/relays` | relay-endpoints | `/api/relays*`, `/api/relays/openapi-spec`, full replacement CRUD, all auth schemes, JSON configuration and unsaved usage preview | Dedicated, OpenAPI import added; structured editors pending |
 | `/workspace/logs/connectors`, `/workspace/observability` | connectors | `/api/plugins`, `/api/plugins/{name}` | Dedicated |
 | `/workspace/mcp-logs`, legacy `/workspace/logs/mcp-logs` | mcp-logs | `/api/mcp-logs*` | Dedicated |

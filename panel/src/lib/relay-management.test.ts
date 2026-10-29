@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { buildRelayPayload, emptyRelayDraft, relayAuthTypes, relayDraftFromConfig, relayLogParams } from './relay-management';
+import { buildRelayPayload, emptyRelayDraft, emptyRelayLogFilters, relayAuthTypes, relayDraftFromConfig, relayLogParams } from './relay-management';
 import { relayGrantNames, relayGrantsPayload } from './relay-grants';
 
 function draft() {
@@ -111,7 +111,7 @@ describe('relay management contracts', () => {
 
 	test('uses server-supported log filters and a deterministic absolute time window', () => {
 		const now = Date.parse('2026-10-30T12:00:00Z');
-		const filters = { search: ' request ', relayName: 'Case', method: 'HEAD', status: 'error', kind: 'call', period: '24h' };
+		const filters = { ...emptyRelayLogFilters(), search: ' request ', relayNames: ['Case'], methods: ['HEAD'], statuses: ['error'], kinds: ['call'] };
 		const params = relayLogParams(filters, now);
 		expect(Object.fromEntries(params)).toEqual({
 			start_time: '2026-10-29T12:00:00.000Z', end_time: '2026-10-30T12:00:00.000Z',
@@ -122,6 +122,47 @@ describe('relay management contracts', () => {
 			expect(Date.parse(relayLogParams({ ...filters, period }, now).get('start_time')!)).toBe(now - hours * 3_600_000);
 		}
 		expect(() => relayLogParams({ ...filters, period: 'invalid' }, now)).toThrow('invalid-log-period');
+	});
+
+	test('encodes upstream attribution, cost and billable filters as repeated values', () => {
+		const params = relayLogParams({
+			...emptyRelayLogFilters(), period: '1h',
+			apps: ['sdk', 'sdk', ' dashboard '], virtualKeyIds: ['vk-1', 'vk-2'], userIds: ['user-1'],
+			teamIds: [], requestId: ' req-1 ', billable: 'true', minCost: '-1', maxCost: '2.5',
+		}, Date.parse('2026-10-30T12:00:00Z'));
+		expect(params.getAll('apps')).toEqual(['sdk', 'dashboard']);
+		expect(params.getAll('virtual_key_ids')).toEqual(['vk-1', 'vk-2']);
+		expect(params.get('request_id')).toBe('req-1');
+		expect(params.get('billable')).toBe('true');
+		expect(params.get('min_cost')).toBe('-1');
+		expect(params.get('max_cost')).toBe('2.5');
+		expect(() => relayLogParams({ ...emptyRelayLogFilters(), minCost: '3', maxCost: '2' })).toThrow('invalid-log-cost-range');
+		expect(() => relayLogParams({ ...emptyRelayLogFilters(), billable: 'maybe' })).toThrow('invalid-billable');
+	});
+
+	test('validates empty, zero, negative, decimal and non-finite cost bounds', () => {
+		for (const minCost of ['', '0', '-0.25', '.5', '1e-6', ' +2 ']) {
+			expect(() => relayLogParams({ ...emptyRelayLogFilters(), minCost })).not.toThrow();
+		}
+		for (const minCost of ['NaN', 'Infinity', '-Infinity', '1e999', '0x10', '1,25', 'cost']) {
+			expect(() => relayLogParams({ ...emptyRelayLogFilters(), minCost })).toThrow('invalid-log-cost');
+		}
+		const params = relayLogParams({
+			...emptyRelayLogFilters(), minCost: '0', maxCost: '0', billable: 'false',
+			teamIds: ['team A', 'team/B'], customerIds: ['customer'], businessUnitIds: ['unit'], projectIds: ['project'],
+			jobId: ' job ', kinds: ['call', 'job'], statuses: ['success', 'cancelled'], methods: ['GET', 'POST'], relayNames: ['Case', 'case'],
+		}, 0);
+		expect(params.getAll('relay_names')).toEqual(['Case', 'case']);
+		expect(params.getAll('methods')).toEqual(['GET', 'POST']);
+		expect(params.getAll('statuses')).toEqual(['success', 'cancelled']);
+		expect(params.getAll('kinds')).toEqual(['call', 'job']);
+		expect(params.getAll('team_ids')).toEqual(['team A', 'team/B']);
+		expect(params.get('customer_ids')).toBe('customer');
+		expect(params.get('business_unit_ids')).toBe('unit');
+		expect(params.get('project_ids')).toBe('project');
+		expect(params.get('job_id')).toBe('job');
+		expect(params.get('billable')).toBe('false');
+		expect(params.get('min_cost')).toBe('0');
 	});
 });
 

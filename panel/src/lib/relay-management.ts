@@ -168,7 +168,55 @@ export function buildRelayPayload(draft: RelayDraft, editingName = ''): JsonReco
 	return Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined));
 }
 
-export function relayLogParams(filters: { search: string; relayName: string; method: string; status: string; kind: string; period: string }, now = Date.now()): URLSearchParams {
+export interface RelayLogFilterInput {
+	search: string;
+	relayNames: string[];
+	methods: string[];
+	statuses: string[];
+	kinds: string[];
+	period: string;
+	apps: string[];
+	virtualKeyIds: string[];
+	userIds: string[];
+	teamIds: string[];
+	customerIds: string[];
+	businessUnitIds: string[];
+	projectIds: string[];
+	requestId: string;
+	jobId: string;
+	billable: string;
+	minCost: string;
+	maxCost: string;
+}
+
+export function emptyRelayLogFilters(): RelayLogFilterInput {
+	return {
+		search: '', relayNames: [], methods: [], statuses: [], kinds: [], period: '24h', apps: [],
+		virtualKeyIds: [], userIds: [], teamIds: [], customerIds: [], businessUnitIds: [], projectIds: [],
+		requestId: '', jobId: '', billable: '', minCost: '', maxCost: '',
+	};
+}
+
+function appendRelayLogValues(params: URLSearchParams, key: string, values: string[]): void {
+	const seen = new Set<string>();
+	for (const raw of values) {
+		const value = raw.trim();
+		if (!value || seen.has(value)) continue;
+		seen.add(value);
+		params.append(key, value);
+	}
+}
+
+function appendRelayLogCost(params: URLSearchParams, key: string, raw: string): number | undefined {
+	const value = raw.trim();
+	if (!value) return undefined;
+	const parsed = Number(value);
+	if (!/^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i.test(value) || !Number.isFinite(parsed)) throw new Error('invalid-log-cost');
+	params.set(key, value);
+	return parsed;
+}
+
+export function relayLogParams(filters: RelayLogFilterInput, now = Date.now()): URLSearchParams {
 	const periods: Record<string, number> = { '1h': 1, '24h': 24, '7d': 168, '30d': 720 };
 	const hours = periods[filters.period];
 	if (!hours) throw new Error('invalid-log-period');
@@ -176,9 +224,27 @@ export function relayLogParams(filters: { search: string; relayName: string; met
 		start_time: new Date(now - hours * 3_600_000).toISOString(),
 		end_time: new Date(now).toISOString(),
 	});
-	for (const [key, value] of Object.entries({
-		search: filters.search.trim(), relay_names: filters.relayName, methods: filters.method, statuses: filters.status, kinds: filters.kind,
-	})) if (value) params.set(key, value);
+	appendRelayLogValues(params, 'search', [filters.search]);
+	appendRelayLogValues(params, 'relay_names', filters.relayNames);
+	appendRelayLogValues(params, 'methods', filters.methods);
+	appendRelayLogValues(params, 'statuses', filters.statuses);
+	appendRelayLogValues(params, 'kinds', filters.kinds);
+	appendRelayLogValues(params, 'apps', filters.apps);
+	appendRelayLogValues(params, 'virtual_key_ids', filters.virtualKeyIds);
+	appendRelayLogValues(params, 'user_ids', filters.userIds);
+	appendRelayLogValues(params, 'team_ids', filters.teamIds);
+	appendRelayLogValues(params, 'customer_ids', filters.customerIds);
+	appendRelayLogValues(params, 'business_unit_ids', filters.businessUnitIds);
+	appendRelayLogValues(params, 'project_ids', filters.projectIds);
+	appendRelayLogValues(params, 'request_id', [filters.requestId]);
+	appendRelayLogValues(params, 'job_id', [filters.jobId]);
+	if (filters.billable) {
+		if (filters.billable !== 'true' && filters.billable !== 'false') throw new Error('invalid-billable');
+		params.set('billable', filters.billable);
+	}
+	const minCost = appendRelayLogCost(params, 'min_cost', filters.minCost);
+	const maxCost = appendRelayLogCost(params, 'max_cost', filters.maxCost);
+	if (minCost !== undefined && maxCost !== undefined && minCost > maxCost) throw new Error('invalid-log-cost-range');
 	return params;
 }
 
