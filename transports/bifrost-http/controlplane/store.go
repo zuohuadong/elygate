@@ -193,6 +193,11 @@ func NewStore(ctx context.Context, configStore configstore.ConfigStore) (*Store,
 			Migrate:  migrateBudgetResolutions,
 			Rollback: budgetResolutionRollback,
 		},
+		{
+			ID:       "elygate_control_plane_v11_audit_correlation",
+			Migrate:  migrateAuditCorrelation,
+			Rollback: auditCorrelationRollback,
+		},
 	}
 	migrationIDs := make([]string, 0, len(migrations))
 	for _, migration := range migrations {
@@ -969,7 +974,11 @@ func appendAuditTx(tx *gorm.DB, actorID, action, resourceType, resourceID string
 	if actorID == "" {
 		actorID = "local-admin"
 	}
-	return tx.Create(&AuditEvent{ID: uuid.NewString(), ActorID: actorID, Action: action, ResourceType: resourceType, ResourceID: resourceID, CreatedAt: time.Now().UTC()}).Error
+	correlation := auditCorrelationFromContext(tx.Statement.Context)
+	return tx.Create(&AuditEvent{
+		ID: uuid.NewString(), ActorID: actorID, Action: action, ResourceType: resourceType, ResourceID: resourceID,
+		RequestID: correlation.requestID, TraceID: correlation.traceID, CreatedAt: time.Now().UTC(),
+	}).Error
 }
 
 func (s *Store) ListAudit(ctx context.Context, limit int) ([]AuditEvent, error) {
@@ -989,7 +998,11 @@ func (s *Store) ListAudit(ctx context.Context, limit int) ([]AuditEvent, error) 
 			return nil, err
 		}
 		for _, event := range governanceEvents {
-			out = append(out, AuditEvent{ID: event.ID, ActorID: event.ActorID, Action: event.Action, ResourceType: event.Resource, ResourceID: event.ResourceID, CreatedAt: event.OccurredAt})
+			correlation := normalizedAuditCorrelation(event.RequestID, event.TraceID)
+			out = append(out, AuditEvent{
+				ID: event.ID, ActorID: event.ActorID, Action: event.Action, ResourceType: event.Resource, ResourceID: event.ResourceID,
+				RequestID: correlation.requestID, TraceID: correlation.traceID, CreatedAt: event.OccurredAt,
+			})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })

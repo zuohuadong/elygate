@@ -36,7 +36,7 @@ func (s *Store) FlushDashboardSessions(request *fasthttp.RequestCtx) error {
 		actor = "anonymous"
 	}
 	// RequestCtx cancellation follows server shutdown, not a single SQL operation.
-	ctx, cancel := controlPlaneContext()
+	ctx, cancel := controlPlaneAuditContext(request)
 	defer cancel()
 	return s.flushDashboardSessions(ctx, actor)
 }

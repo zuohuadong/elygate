@@ -246,6 +246,16 @@ describe('panel issue regressions', () => {
 		expect(source).toContain('disabled={saving || loading || usageLoading || usageOffset === 0}');
 	});
 
+	test('control plane audit exposes optional correlation without rendering raw HTML', async () => {
+		const source = await Bun.file(new URL('../pages/ControlPlanePage.svelte', import.meta.url)).text();
+		expect(source).toContain("text('请求关联', 'Correlation')");
+		expect(source).toContain('{#if row.request_id || row.trace_id}');
+		expect(source).toContain('<code>{String(row.request_id)}</code>');
+		expect(source).toContain('<code>{String(row.trace_id)}</code>');
+		expect(source).toContain('overflow-wrap: anywhere');
+		expect(source).not.toContain('{@html');
+	});
+
 	test('control plane usage filters use the backend query contract and persist into CSV export', async () => {
 		const source = await Bun.file(new URL('../pages/ControlPlanePage.svelte', import.meta.url)).text();
 		expect(source).toContain("let usageProjectFilter = $state('');");

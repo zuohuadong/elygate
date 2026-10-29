@@ -87,6 +87,8 @@ type AuditEvent struct {
 	Action       string    `gorm:"type:varchar(128);not null;index" json:"action"`
 	ResourceType string    `gorm:"type:varchar(64);not null;index" json:"resource_type"`
 	ResourceID   string    `gorm:"type:varchar(255);not null;index" json:"resource_id"`
+	RequestID    string    `gorm:"type:varchar(128)" json:"request_id,omitempty"`
+	TraceID      string    `gorm:"type:varchar(32)" json:"trace_id,omitempty"`
 	CreatedAt    time.Time `gorm:"not null;index" json:"created_at"`
 }
 

@@ -23,7 +23,7 @@ func (h *Handler) setBudgetResolution(ctx *fasthttp.RequestCtx) {
 		writeError(ctx, 400, err)
 		return
 	}
-	opCtx, cancel := controlPlaneContext()
+	opCtx, cancel := controlPlaneAuditContext(ctx)
 	defer cancel()
 	alert, err := h.store.SetBudgetResolution(opCtx, budgetResolutionMutation{id, resolved})
 	if err != nil {

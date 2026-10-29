@@ -229,7 +229,7 @@ func (h *Handler) createProject(ctx *fasthttp.RequestCtx) {
 		return
 	}
 	p := &Project{OrganizationID: req.OrganizationID, Name: req.Name, DailyBudget: req.DailyBudget, MonthlyBudget: req.MonthlyBudget}
-	opCtx, cancel := controlPlaneContext()
+	opCtx, cancel := controlPlaneAuditContext(ctx)
 	defer cancel()
 	if err := h.store.CreateProjectWithAudit(opCtx, p, auditActor(ctx)); err != nil {
 		writeError(ctx, 400, err)
@@ -263,7 +263,7 @@ func (h *Handler) createApplication(ctx *fasthttp.RequestCtx) {
 		return
 	}
 	app := &Application{ProjectID: routeParam(ctx, "project_id"), Name: req.Name, Environment: req.Environment, DailyBudget: req.DailyBudget, MonthlyBudget: req.MonthlyBudget}
-	opCtx, cancel := controlPlaneContext()
+	opCtx, cancel := controlPlaneAuditContext(ctx)
 	defer cancel()
 	if err := h.store.CreateApplicationWithAudit(opCtx, app, auditActor(ctx)); err != nil {
 		writeError(ctx, 400, err)
@@ -282,7 +282,7 @@ func (h *Handler) createApplicationKey(ctx *fasthttp.RequestCtx) {
 		writeError(ctx, http.StatusBadRequest, err)
 		return
 	}
-	opCtx, cancel := controlPlaneContext()
+	opCtx, cancel := controlPlaneAuditContext(ctx)
 	defer cancel()
 	key, err := h.store.CreateApplicationKey(opCtx, routeParam(ctx, "application_id"), req.Name, req.Description, req.ExpiresAt, auditActor(ctx))
 	if err != nil {
@@ -309,7 +309,7 @@ func (h *Handler) listApplicationKeys(ctx *fasthttp.RequestCtx) {
 
 func (h *Handler) rotateApplicationKey(ctx *fasthttp.RequestCtx) {
 	applicationID := routeParam(ctx, "application_id")
-	opCtx, cancel := controlPlaneContext()
+	opCtx, cancel := controlPlaneAuditContext(ctx)
 	defer cancel()
 	key, err := h.store.RotateApplicationKey(opCtx, applicationID, routeParam(ctx, "virtual_key_id"), auditActor(ctx))
 	if err != nil {
@@ -326,7 +326,7 @@ func (h *Handler) rotateApplicationKey(ctx *fasthttp.RequestCtx) {
 func (h *Handler) revokeApplicationKey(ctx *fasthttp.RequestCtx) {
 	applicationID := routeParam(ctx, "application_id")
 	virtualKeyID := routeParam(ctx, "virtual_key_id")
-	opCtx, cancel := controlPlaneContext()
+	opCtx, cancel := controlPlaneAuditContext(ctx)
 	defer cancel()
 	if err := h.store.RevokeApplicationKey(opCtx, applicationID, virtualKeyID, auditActor(ctx)); err != nil {
 		writeError(ctx, http.StatusNotFound, err)
@@ -351,7 +351,7 @@ func (h *Handler) bindVirtualKey(ctx *fasthttp.RequestCtx) {
 		return
 	}
 	appID := routeParam(ctx, "application_id")
-	opCtx, cancel := controlPlaneContext()
+	opCtx, cancel := controlPlaneAuditContext(ctx)
 	defer cancel()
 	binding, err := h.store.BindVirtualKeyWithAudit(opCtx, appID, req.VirtualKeyID, req.ExpiresAt, auditActor(ctx))
 	if err != nil {
@@ -362,7 +362,7 @@ func (h *Handler) bindVirtualKey(ctx *fasthttp.RequestCtx) {
 }
 func (h *Handler) revokeBinding(ctx *fasthttp.RequestCtx) {
 	appID := routeParam(ctx, "application_id")
-	opCtx, cancel := controlPlaneContext()
+	opCtx, cancel := controlPlaneAuditContext(ctx)
 	defer cancel()
 	if err := h.store.RevokeBindingWithAudit(opCtx, appID, auditActor(ctx)); err != nil {
 		writeError(ctx, 404, err)

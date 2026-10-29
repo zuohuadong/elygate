@@ -111,6 +111,27 @@ administrator mutation has transactional audit enforcement.
 - The bridge stores actor, event, resource type, resource ID and UTC timestamp,
   not request bodies, target names or before/after snapshots. Cache resource
   IDs are SHA-256 digests because the key may contain user input.
+- Compact control-plane rows now retain optional bounded `request_id` and
+  exported lowercase W3C `trace_id` values. Request correlation is frozen when
+  the bridge starts, propagated through native mutation and dashboard-session
+  transactions, and preserved when signed governance rows are projected into
+  the feed. Invalid, oversized, private trace-store and raw `traceparent`
+  values are omitted rather than copied or truncated. Historical rows remain
+  unchanged through the additive v11 migration.
+- Correlation is metadata, never authentication evidence; callers must not
+  put credentials into request IDs. At most 160 bytes of identifier content
+  are retained per event, excluding database/JSON overhead, with no resident
+  cache. On the local Apple M4, `BenchmarkAuditCorrelation` measured absent
+  metadata at 79.02 ns/op, 0 B/op, 0 allocs/op; present metadata at 108.4 ns/op,
+  128 B/op, 4 allocs/op; rejected metadata at 78.31 ns/op, 144 B/op, 1 alloc/op.
+  This extraction/context benchmark is not an end-to-end SQL benchmark.
+  The inference path is unchanged.
+- The nine focused correlation tests pass with race detection on SQLite and
+  a private PostgreSQL instance, covering migration/idempotence, bridge
+  batches/panics, signed projection, native mutations, transaction rollback
+  and dashboard sessions. Panel tests (295), type checking and isolated Vite
+  build pass. These checks do not establish browser layout, deployed-runtime
+  migration or recovery acceptance.
 - Trusted authentication context supplies identity. Auth-disabled or
   whitelisted requests are anonymous. Basic credentials supply an audit-only
   actor after verification; this marker grants no additional permission.
@@ -211,10 +232,11 @@ transaction/locking behavior, not deployed backup or crash recovery.
    acceptance; focused SQLite tests alone do not prove row locks. Session feed
    tests inject the administrator marker at the guard, not a full management
    credential-authentication chain or live-network acceptance.
-4. Add request/trace correlation and deliberate outcome/detail contracts,
-   including resource-specific snapshot redaction, before storing richer
-   events. Deduplicate signed-chain and bridge representations if the feed
-   should show one logical row per virtual-key action.
+4. Add deliberate outcome/detail contracts, including resource-specific
+   snapshot redaction, before storing richer events. Deduplicate signed-chain
+   and bridge representations if the feed should show one logical row per
+   virtual-key action; request/trace correlation is implemented, but its
+   deployed-runtime and browser evidence remains under item 5.
 5. Prove real PostgreSQL, deployed runtime, restart/recovery and operator
    visibility acceptance separately from focused SQLite tests.
 6. Add the repository-required provider-harness management-audit cases after

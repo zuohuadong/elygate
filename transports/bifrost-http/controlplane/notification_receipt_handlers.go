@@ -54,7 +54,7 @@ func (h *Handler) setNotificationReadState(ctx *fasthttp.RequestCtx) {
 		writeError(ctx, 400, err)
 		return
 	}
-	opCtx, cancel := controlPlaneContext()
+	opCtx, cancel := controlPlaneAuditContext(ctx)
 	defer cancel()
 	state, err := h.store.SetNotificationReadState(opCtx, notificationReadMutation{NotificationID: id, Read: read})
 	if err != nil {

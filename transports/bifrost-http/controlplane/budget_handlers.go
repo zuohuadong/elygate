@@ -28,7 +28,7 @@ func (h *Handler) setBudgets(ctx *fasthttp.RequestCtx, scope BudgetScope) {
 		writeError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
-	opCtx, cancel := controlPlaneContext()
+	opCtx, cancel := controlPlaneAuditContext(ctx)
 	defer cancel()
 	if err := h.store.SetBudgetLimits(opCtx, scope, limits, auditActor(ctx)); err != nil {
 		status := fasthttp.StatusInternalServerError

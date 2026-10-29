@@ -21,6 +21,7 @@ func (h *Handler) ManagementAuditMiddleware(logger schemas.Logger) schemas.Bifro
 	return func(next fasthttp.RequestHandler) fasthttp.RequestHandler {
 		return func(request *fasthttp.RequestCtx) {
 			actor := managementAuditActor(request)
+			correlation := auditCorrelationFromRequest(request)
 			defer func() {
 				changes, _ := request.UserValue(configstore.AuditChangesUserValueKey).([]configstore.AuditChange)
 				if len(changes) == 0 {
@@ -28,6 +29,7 @@ func (h *Handler) ManagementAuditMiddleware(logger schemas.Logger) schemas.Bifro
 				}
 				ctx, cancel := controlPlaneContext()
 				defer cancel()
+				ctx = withAuditCorrelation(ctx, correlation)
 				if err := h.store.appendManagementAudit(ctx, actor, changes); err != nil {
 					// The mutation may already have committed and its response may hold
 					// a one-time secret. Do not replace it or invite an unsafe retry.
@@ -59,6 +61,7 @@ func managementAuditActor(request *fasthttp.RequestCtx) string {
 
 func (s *Store) appendManagementAudit(ctx context.Context, actorID string, changes []configstore.AuditChange) error {
 	now := time.Now().UTC()
+	correlation := auditCorrelationFromContext(ctx)
 	events := make([]AuditEvent, 0, len(changes))
 	for _, change := range changes {
 		resourceID := change.TargetID
@@ -74,6 +77,7 @@ func (s *Store) appendManagementAudit(ctx context.Context, actorID string, chang
 		events = append(events, AuditEvent{
 			ID: uuid.NewString(), ActorID: eventActor, Action: change.EventName,
 			ResourceType: change.TargetType, ResourceID: resourceID, CreatedAt: now,
+			RequestID: correlation.requestID, TraceID: correlation.traceID,
 		})
 	}
 	return s.db(ctx).Transaction(func(tx *gorm.DB) error {

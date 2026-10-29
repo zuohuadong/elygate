@@ -20,7 +20,7 @@ func (h *Handler) setBudgetAcknowledgement(ctx *fasthttp.RequestCtx) {
 		writeError(ctx, 400, err)
 		return
 	}
-	opCtx, cancel := controlPlaneContext()
+	opCtx, cancel := controlPlaneAuditContext(ctx)
 	defer cancel()
 	alert, err := h.store.SetBudgetAcknowledgement(opCtx, budgetAcknowledgementMutation{id, acknowledged})
 	if err != nil {

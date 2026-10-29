@@ -801,9 +801,16 @@
 		<section class="ledger-section">
 			<h2>{text('审计事件', 'Audit events')}</h2>
 			{#if usageAuditError}<p class="error" role="alert">{usageAuditError}</p>{:else if usageLoading}<p class="muted">{text('加载中…', 'Loading…')}</p>{:else if auditEvents.length === 0}<p class="muted">{text('暂无审计事件', 'No audit events')}</p>{:else}
-				<div class="table-wrap"><table><thead><tr><th>{text('时间', 'Time')}</th><th>{text('操作者', 'Actor')}</th><th>{text('动作', 'Action')}</th><th>{text('资源', 'Resource')}</th><th>ID</th></tr></thead><tbody>
+				<div class="table-wrap"><table><thead><tr><th>{text('时间', 'Time')}</th><th>{text('操作者', 'Actor')}</th><th>{text('动作', 'Action')}</th><th>{text('资源', 'Resource')}</th><th>ID</th><th>{text('请求关联', 'Correlation')}</th></tr></thead><tbody>
 					{#each auditEvents as row, index (String(row.id ?? index))}
-						<tr><td>{formatDate(row.created_at)}</td><td>{String(row.actor_id ?? '—')}</td><td>{String(row.action ?? '—')}</td><td>{String(row.resource_type ?? '—')}</td><td>{String(row.resource_id ?? '—')}</td></tr>
+						<tr><td>{formatDate(row.created_at)}</td><td>{String(row.actor_id ?? '—')}</td><td>{String(row.action ?? '—')}</td><td>{String(row.resource_type ?? '—')}</td><td>{String(row.resource_id ?? '—')}</td><td class="audit-correlation">
+							{#if row.request_id || row.trace_id}
+								<dl>
+									{#if row.request_id}<div><dt>Request ID</dt><dd><code>{String(row.request_id)}</code></dd></div>{/if}
+									{#if row.trace_id}<div><dt>Trace ID</dt><dd><code>{String(row.trace_id)}</code></dd></div>{/if}
+								</dl>
+							{:else}—{/if}
+						</td></tr>
 					{/each}
 				</tbody></table></div>
 			{/if}
@@ -834,6 +841,11 @@
 	.table-wrap { overflow: auto; }
 	table { border-collapse: collapse; width: 100%; font-size: .85rem; }
 	th, td { text-align: left; padding: .55rem .65rem; border-bottom: 1px solid var(--border); white-space: nowrap; }
+	.audit-correlation { min-width: 16rem; max-width: 24rem; white-space: normal; }
+	.audit-correlation dl { margin: 0; display: grid; gap: .35rem; }
+	.audit-correlation dl > div { display: grid; grid-template-columns: 5rem minmax(0, 1fr); gap: .5rem; }
+	.audit-correlation dt { color: var(--muted-foreground); }
+	.audit-correlation dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 	th { color: var(--muted-foreground); font-weight: 600; }
 	tr.selected { background: color-mix(in srgb, var(--primary) 8%, transparent); }
 	.actions { display: flex; gap: .35rem; }

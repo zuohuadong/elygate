@@ -84,7 +84,7 @@ upstream UI.
 | `/workspace/webhooks` | webhooks | `/api/webhooks*` test, secret rotation, delivery inspect/redeliver; explicit budget subscription and resource history | Dedicated |
 | `/workspace/docs` | docs-hub | bundled docs + official documentation links | Dedicated |
 | Elygate control plane | control-plane-projects, control-plane-applications | `/api/control-plane/projects*`, `/api/control-plane/applications*` project/application management and key lifecycle | Dedicated |
-| Elygate usage ledger | usage-ledger | `/api/control-plane/usage*`, `/api/control-plane/audit-events*`, `/api/control-plane/budget-alerts` paginated ledger, full filtered summary, sync status, budget status/history and CSV export | Dedicated |
+| Elygate usage ledger | usage-ledger | `/api/control-plane/usage*`, `/api/control-plane/audit-events*`, `/api/control-plane/budget-alerts` paginated ledger, full filtered summary, sync status, budget status/history and CSV export; audit rows show optional request/trace correlation | Dedicated |
 | Elygate notifications | shared header notification panel | `/api/notifications?limit=50&cursor=...` server-authorized feed; `/api/control-plane/notification-receipts*` local-admin read state; internal action links | Dedicated |
 | `/pprof` | pprof | `/api/dev/pprof*` | Dedicated |
 
