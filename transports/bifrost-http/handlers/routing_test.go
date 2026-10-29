@@ -15,6 +15,7 @@ import (
 	"github.com/maximhq/bifrost/framework/configstore"
 	"github.com/maximhq/bifrost/framework/configstore/tables"
 	"github.com/maximhq/bifrost/plugins/routing/complexity"
+	"github.com/maximhq/bifrost/transports/v2/bifrost-http/lib"
 	"github.com/valyala/fasthttp"
 )
 
@@ -26,6 +27,7 @@ type mockRoutingManager struct {
 	retryStatus    complexity.SemanticStatusInfo
 	retryStarted   bool
 	retryErr       error
+	reloadRuleErr  error
 }
 
 func (m *mockRoutingManager) ValidateComplexityAnalyzerConfig(_ context.Context, _ *complexity.AnalyzerConfig) error {
@@ -52,7 +54,101 @@ func (m *mockRoutingManager) ReloadComplexityAnalyzerConfig(_ context.Context, c
 }
 
 func (m *mockRoutingManager) ReloadRoutingRule(_ context.Context, _ string) error {
-	return nil
+	return m.reloadRuleErr
+}
+
+func TestRoutingRuleAuditSurvivesReloadFailure(t *testing.T) {
+	SetLogger(&mockLogger{})
+	store := setupPricingOverrideHandlerStore(t)
+	handler := &RoutingHandler{
+		configStore: store, routingManager: &mockRoutingManager{reloadRuleErr: errors.New("runtime unavailable")},
+	}
+	create := newTestRequestCtx(`{"name":"saved-rule","targets":[{"provider":"openai","weight":1}]}`)
+	handler.createRoutingRule(create)
+	require.Equal(t, fasthttp.StatusInternalServerError, create.Response.StatusCode())
+	saved, err := store.GetRoutingRules(context.Background())
+	require.NoError(t, err)
+	require.Len(t, saved, 1)
+	created := requireSingleAuditChange(t, create, "routing_rule.created")
+	require.Equal(t, saved[0].ID, created.TargetID)
+	require.Nil(t, created.Before)
+	var snapshot tables.TableRoutingRule
+	require.NoError(t, json.Unmarshal(created.After, &snapshot))
+	require.Equal(t, "saved-rule", snapshot.Name)
+
+	update := newTestRequestCtx(`{"description":"committed despite reload error"}`)
+	update.SetUserValue("rule_id", saved[0].ID)
+	handler.updateRoutingRule(update)
+	require.Equal(t, fasthttp.StatusInternalServerError, update.Response.StatusCode())
+	updated, err := store.GetRoutingRule(context.Background(), saved[0].ID)
+	require.NoError(t, err)
+	require.Equal(t, "committed despite reload error", updated.Description)
+	change := requireSingleAuditChange(t, update, "routing_rule.updated")
+	require.Equal(t, updated.ID, change.TargetID)
+	require.NoError(t, json.Unmarshal(change.Before, &snapshot))
+	require.Empty(t, snapshot.Description)
+	require.NoError(t, json.Unmarshal(change.After, &snapshot))
+	require.Equal(t, updated.Description, snapshot.Description)
+}
+
+func TestComplexityAnalyzerAuditSurvivesReloadFailure(t *testing.T) {
+	SetLogger(&mockLogger{})
+	store := setupPricingOverrideHandlerStore(t)
+	handler := &RoutingHandler{
+		configStore: store, routingManager: &mockRoutingManager{reloadErr: errors.New("runtime unavailable")},
+	}
+	cfg := complexity.DefaultAnalyzerConfig()
+	cfg.TierBoundaries.SimpleMedium = 0.12
+	update := newTestRequestCtx(testComplexityAnalyzerPayload(t, cfg))
+	handler.updateComplexityAnalyzerConfig(update)
+	require.Equal(t, fasthttp.StatusInternalServerError, update.Response.StatusCode())
+	stored, err := store.GetComplexityAnalyzerConfig(context.Background())
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	require.Equal(t, 0.12, stored.TierBoundaries.SimpleMedium)
+	change := requireSingleAuditChange(t, update, "complexity_analyzer_config.updated")
+	require.Equal(t, "complexity_analyzer_config", change.TargetID)
+	require.Nil(t, change.Before)
+	var snapshot complexity.AnalyzerConfig
+	require.NoError(t, json.Unmarshal(change.After, &snapshot))
+	require.Equal(t, 0.12, snapshot.TierBoundaries.SimpleMedium)
+
+	reset := newTestRequestCtx("")
+	handler.resetComplexityAnalyzerConfig(reset)
+	require.Equal(t, fasthttp.StatusInternalServerError, reset.Response.StatusCode())
+	stored, err = store.GetComplexityAnalyzerConfig(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, complexity.DefaultTierBoundaries(), stored.TierBoundaries)
+	change = requireSingleAuditChange(t, reset, "complexity_analyzer_config.reset")
+	require.NoError(t, json.Unmarshal(change.Before, &snapshot))
+	require.Equal(t, 0.12, snapshot.TierBoundaries.SimpleMedium)
+	require.NoError(t, json.Unmarshal(change.After, &snapshot))
+	require.Equal(t, complexity.DefaultTierBoundaries(), snapshot.TierBoundaries)
+}
+
+func BenchmarkRoutingMutationAuditRecord(b *testing.B) {
+	rule := &tables.TableRoutingRule{ID: "benchmark-rule", Name: "Benchmark", Scope: "global",
+		CelExpression: "true", Targets: []tables.TableRoutingTarget{{Weight: 1}}}
+	cfg := complexity.DefaultAnalyzerConfig()
+	for _, mutation := range []struct {
+		action, resourceType, resourceID string
+		before, after                    any
+	}{
+		{"routing_rule.created", "routing_rule", rule.ID, nil, rule},
+		{"routing_rule.updated", "routing_rule", rule.ID, rule, rule},
+		{"complexity_analyzer_config.updated", "complexity_analyzer_config", "complexity_analyzer_config", &cfg, &cfg},
+		{"complexity_analyzer_config.reset", "complexity_analyzer_config", "complexity_analyzer_config", &cfg, &cfg},
+	} {
+		b.Run(mutation.action, func(b *testing.B) {
+			request := newTestRequestCtx("")
+			b.ReportAllocs()
+			b.ResetTimer()
+			for index := 0; index < b.N; index++ {
+				request.ResetUserValues()
+				lib.RecordAuditChange(request, mutation.action, mutation.resourceType, mutation.resourceID, "", mutation.before, mutation.after)
+			}
+		})
+	}
 }
 
 func testComplexityAnalyzerPayload(t *testing.T, cfg complexity.AnalyzerConfig) string {

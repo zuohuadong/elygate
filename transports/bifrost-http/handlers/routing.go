@@ -397,12 +397,12 @@ func (h *RoutingHandler) updateComplexityAnalyzerConfig(ctx *fasthttp.RequestCtx
 		SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("failed to update complexity analyzer config: %v", err))
 		return
 	}
+	lib.RecordAuditChange(ctx, "complexity_analyzer_config.updated", "complexity_analyzer_config", "complexity_analyzer_config", "Complexity analyzer config", auditComplexityConfig(before), normalized)
 	if err := h.reloadComplexityAnalyzerConfig(ctx, normalized); err != nil {
 		SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("failed to reload complexity analyzer config in memory: %v, please restart bifrost to sync with the database", err))
 		return
 	}
 
-	lib.RecordAuditChange(ctx, "complexity_analyzer_config.updated", "complexity_analyzer_config", "complexity_analyzer_config", "Complexity analyzer config", auditComplexityConfig(before), normalized)
 	SendJSON(ctx, normalized)
 }
 
@@ -435,12 +435,12 @@ func (h *RoutingHandler) resetComplexityAnalyzerConfig(ctx *fasthttp.RequestCtx)
 		SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("failed to reset complexity analyzer config: %v", err))
 		return
 	}
+	lib.RecordAuditChange(ctx, "complexity_analyzer_config.reset", "complexity_analyzer_config", "complexity_analyzer_config", "Complexity analyzer config", auditComplexityConfig(before), restored)
 	if err := h.reloadComplexityAnalyzerConfig(ctx, restored); err != nil {
 		SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("failed to reload complexity analyzer config in memory: %v, please restart bifrost to sync with the database", err))
 		return
 	}
 
-	lib.RecordAuditChange(ctx, "complexity_analyzer_config.reset", "complexity_analyzer_config", "complexity_analyzer_config", "Complexity analyzer config", auditComplexityConfig(before), restored)
 	SendJSON(ctx, restored)
 }
 
@@ -716,13 +716,13 @@ func (h *RoutingHandler) createRoutingRule(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
+	lib.RecordAuditChange(ctx, "routing_rule.created", "routing_rule", rule.ID, rule.Name, nil, rule)
 	// Update in-memory store via manager callback
 	if err := h.routingManager.ReloadRoutingRule(ctx, rule.ID); err != nil {
 		SendError(ctx, 500, fmt.Sprintf("Failed to reload routing rule in memory: %v, please restart bifrost to sync with the database", err))
 		return
 	}
 
-	lib.RecordAuditChange(ctx, "routing_rule.created", "routing_rule", rule.ID, rule.Name, nil, rule)
 	SendJSON(ctx, map[string]interface{}{
 		"message": "Routing rule created successfully",
 		"rule":    rule,
@@ -849,13 +849,13 @@ func (h *RoutingHandler) updateRoutingRule(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
+	lib.RecordAuditChange(ctx, "routing_rule.updated", "routing_rule", rule.ID, rule.Name, before, rule)
 	// Update in-memory store via manager callback
 	if err := h.routingManager.ReloadRoutingRule(ctx, rule.ID); err != nil {
 		SendError(ctx, 500, fmt.Sprintf("Failed to reload routing rule in memory: %v, please restart bifrost to sync with the database", err))
 		return
 	}
 
-	lib.RecordAuditChange(ctx, "routing_rule.updated", "routing_rule", rule.ID, rule.Name, before, rule)
 	SendJSON(ctx, map[string]interface{}{
 		"message": "Routing rule updated successfully",
 		"rule":    rule,

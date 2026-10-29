@@ -18,6 +18,7 @@ import (
 	"github.com/maximhq/bifrost/framework/configstore"
 	configtables "github.com/maximhq/bifrost/framework/configstore/tables"
 	"github.com/maximhq/bifrost/framework/encrypt"
+	"github.com/maximhq/bifrost/plugins/routing/complexity"
 	"github.com/maximhq/bifrost/transports/v2/bifrost-http/handlers"
 	"github.com/maximhq/bifrost/transports/v2/bifrost-http/lib"
 	"github.com/stretchr/testify/require"
@@ -545,4 +546,202 @@ func TestManagementAuditFailureHeaderSurvivesPanicRecovery(t *testing.T) {
 	route(request)
 	require.Equal(t, fasthttp.StatusInternalServerError, request.Response.StatusCode())
 	require.Equal(t, "failed", string(request.Response.Header.Peek(lib.HeaderAuditStatus)))
+}
+
+type routingAuditTestStore struct {
+	configstore.ConfigStore
+	writeErr error
+}
+
+func (s routingAuditTestStore) CreateRoutingRule(ctx context.Context, rule *configtables.TableRoutingRule, tx ...*gorm.DB) error {
+	if s.writeErr != nil {
+		return s.writeErr
+	}
+	return s.ConfigStore.CreateRoutingRule(ctx, rule, tx...)
+}
+
+func (s routingAuditTestStore) UpdateRoutingRule(ctx context.Context, rule *configtables.TableRoutingRule, tx ...*gorm.DB) error {
+	if s.writeErr != nil {
+		return s.writeErr
+	}
+	return s.ConfigStore.UpdateRoutingRule(ctx, rule, tx...)
+}
+
+func (s routingAuditTestStore) UpdateComplexityAnalyzerConfig(ctx context.Context, cfg *configstore.ComplexityAnalyzerConfig, tx ...*gorm.DB) error {
+	if s.writeErr != nil {
+		return s.writeErr
+	}
+	return s.ConfigStore.UpdateComplexityAnalyzerConfig(ctx, cfg, tx...)
+}
+
+func (s routingAuditTestStore) ResetComplexityAnalyzerConfig(ctx context.Context, cfg *configstore.ComplexityAnalyzerConfig) (*configstore.ComplexityAnalyzerConfig, error) {
+	if s.writeErr != nil {
+		return nil, s.writeErr
+	}
+	return s.ConfigStore.ResetComplexityAnalyzerConfig(ctx, cfg)
+}
+
+type routingAuditTestManager struct {
+	handlers.RoutingManager
+	reloadErr   error
+	panicReload bool
+	reloadCalls int
+}
+
+func (*routingAuditTestManager) ValidateComplexityAnalyzerConfig(context.Context, *complexity.AnalyzerConfig) error {
+	return nil
+}
+
+func (m *routingAuditTestManager) reload() error {
+	m.reloadCalls++
+	if m.panicReload {
+		panic("routing test reload panic")
+	}
+	return m.reloadErr
+}
+
+func (m *routingAuditTestManager) ReloadRoutingRule(context.Context, string) error {
+	return m.reload()
+}
+
+func (m *routingAuditTestManager) ReloadComplexityAnalyzerConfig(context.Context, *complexity.AnalyzerConfig) error {
+	return m.reload()
+}
+
+func routingAuditStoredSnapshot(t *testing.T, cs configstore.ConfigStore) string {
+	t.Helper()
+	rules, err := cs.GetRoutingRules(context.Background())
+	require.NoError(t, err)
+	cfg, err := cs.GetComplexityAnalyzerConfig(context.Background())
+	require.NoError(t, err)
+	snapshot, err := json.Marshal(struct {
+		Rules  []configtables.TableRoutingRule
+		Config *configstore.ComplexityAnalyzerConfig
+	}{rules, cfg})
+	require.NoError(t, err)
+	return string(snapshot)
+}
+
+func TestManagementRoutingAuditAfterPersistence(t *testing.T) {
+	ctx := context.Background()
+	testLogger := bifrost.NewDefaultLogger(schemas.LogLevelError)
+	handlers.SetLogger(testLogger)
+	passwordHash, err := encrypt.Hash("routing-test-password")
+	require.NoError(t, err)
+	auth := &handlers.AuthMiddleware{}
+	auth.UpdateAuthConfig(&configstore.AuthConfig{
+		IsEnabled: true, AdminUserName: schemas.NewSecretVar("routing-admin"), AdminPassword: schemas.NewSecretVar(passwordHash),
+	})
+	authorization := "Basic " + base64.StdEncoding.EncodeToString([]byte("routing-admin:routing-test-password"))
+	customConfig := complexity.DefaultAnalyzerConfig()
+	customConfig.TierBoundaries.SimpleMedium = 0.12
+	updateConfig := complexity.DefaultAnalyzerConfig()
+	updateConfig.TierBoundaries.SimpleMedium = 0.21
+	updateBody, err := json.Marshal(updateConfig)
+	require.NoError(t, err)
+	// Cases: success / reload error / reload panic / rejected persistence / failed audit persistence.
+	for _, mutation := range []struct {
+		name, method, path, body, action, resourceType string
+	}{
+		{"create", "POST", "/api/routing/rules", `{"name":"saved-rule","priority":1,"targets":[{"provider":"openai","weight":1}]}`, "routing_rule.created", "routing_rule"},
+		{"update", "PUT", "/api/routing/rules/routing-audit", `{"description":"saved change"}`, "routing_rule.updated", "routing_rule"},
+		{"complexity-update", "PUT", "/api/routing/complexity-analyzer-config", string(updateBody), "complexity_analyzer_config.updated", "complexity_analyzer_config"},
+		{"complexity-reset", "POST", "/api/routing/complexity-analyzer-config/reset", `{}`, "complexity_analyzer_config.reset", "complexity_analyzer_config"},
+	} {
+		t.Run(mutation.name, func(t *testing.T) {
+			for _, outcome := range []string{"success", "reload-error", "reload-panic", "write-error", "audit-error"} {
+				t.Run(outcome, func(t *testing.T) {
+					store, cs := testControlPlaneStore(t)
+					require.NoError(t, cs.CreateRoutingRule(ctx, &configtables.TableRoutingRule{
+						ID: "routing-audit", Name: "original-rule", Scope: "global", CelExpression: "true",
+						Targets: []configtables.TableRoutingTarget{{Weight: 1}},
+					}))
+					require.NoError(t, cs.UpdateComplexityAnalyzerConfig(ctx, &customConfig))
+					before := routingAuditStoredSnapshot(t, cs)
+					manager := &routingAuditTestManager{}
+					mutationStore := routingAuditTestStore{ConfigStore: cs}
+					wantStatus := fasthttp.StatusOK
+					switch outcome {
+					case "reload-error", "audit-error":
+						manager.reloadErr = errors.New("routing runtime unavailable")
+						wantStatus = fasthttp.StatusInternalServerError
+					case "reload-panic":
+						manager.panicReload = true
+						wantStatus = fasthttp.StatusInternalServerError
+					case "write-error":
+						mutationStore.writeErr = errors.New("routing write rejected")
+						wantStatus = fasthttp.StatusInternalServerError
+					}
+					if outcome == "audit-error" {
+						require.NoError(t, cs.DB().Callback().Create().Before("gorm:create").Register("test:routing-audit", func(tx *gorm.DB) {
+							if tx.Statement.Table == (AuditEvent{}).TableName() {
+								tx.AddError(errors.New("routing audit unavailable"))
+							}
+						}))
+						t.Cleanup(func() { cs.DB().Callback().Create().Remove("test:routing-audit") })
+					}
+					audit := NewHandler(store, nil)
+					routingHandler, err := handlers.NewRoutingHandler(manager, mutationStore)
+					require.NoError(t, err)
+					routes := router.New()
+					audit.RegisterRoutes(routes, auth.APIMiddleware())
+					routingHandler.RegisterRoutes(routes, handlers.RecoveryMiddleware(handlers.NewCorsMiddleware(&lib.Config{})),
+						auth.APIMiddleware(), audit.ManagementAuditMiddleware(testLogger))
+					request := func(method, path, body, credentials string) *fasthttp.RequestCtx {
+						var httpRequest fasthttp.Request
+						response := &fasthttp.RequestCtx{}
+						response.Init(&httpRequest, nil, nil)
+						response.Request.Header.SetMethod(method)
+						response.Request.SetRequestURI(path)
+						response.Request.Header.SetContentType("application/json")
+						response.Request.Header.Set("Authorization", credentials)
+						response.Request.Header.Set("X-User-ID", "forged-routing-actor")
+						response.Request.SetBodyString(body)
+						routes.Handler(response)
+						return response
+					}
+					require.Equal(t, fasthttp.StatusUnauthorized, request(mutation.method, mutation.path, mutation.body, "").Response.StatusCode())
+					response := request(mutation.method, mutation.path, mutation.body, authorization)
+					require.Equal(t, wantStatus, response.Response.StatusCode(), "%s", response.Response.Body())
+					after := routingAuditStoredSnapshot(t, cs)
+					if outcome == "write-error" {
+						require.Equal(t, before, after)
+						require.Zero(t, manager.reloadCalls)
+					} else {
+						require.NotEqual(t, before, after, "the mutation must remain committed even when runtime reload fails")
+						require.Equal(t, 1, manager.reloadCalls)
+					}
+					require.Equal(t, fasthttp.StatusUnauthorized, request("GET", "/api/control-plane/audit-events", "", "").Response.StatusCode())
+					feed := request("GET", "/api/control-plane/audit-events", "", authorization)
+					require.Equal(t, fasthttp.StatusOK, feed.Response.StatusCode(), "%s", feed.Response.Body())
+					var payload struct {
+						Data []AuditEvent `json:"data"`
+					}
+					require.NoError(t, json.Unmarshal(feed.Response.Body(), &payload))
+					switch outcome {
+					case "write-error":
+						require.Empty(t, payload.Data)
+						require.Empty(t, response.UserValue(configstore.AuditChangesUserValueKey))
+					case "audit-error":
+						require.Empty(t, payload.Data)
+						require.Equal(t, "failed", string(response.Response.Header.Peek(lib.HeaderAuditStatus)))
+						require.Contains(t, string(response.Response.Body()), "restart bifrost")
+					default:
+						require.Len(t, payload.Data, 1)
+						require.Equal(t, mutation.action, payload.Data[0].Action)
+						require.Equal(t, mutation.resourceType, payload.Data[0].ResourceType)
+						require.Equal(t, "local-admin:routing-admin", payload.Data[0].ActorID)
+						changes, ok := response.UserValue(configstore.AuditChangesUserValueKey).([]configstore.AuditChange)
+						require.True(t, ok)
+						require.Len(t, changes, 1)
+						require.Equal(t, changes[0].TargetID, payload.Data[0].ResourceID)
+						require.Empty(t, response.Response.Header.Peek(lib.HeaderAuditStatus))
+					}
+					require.NotContains(t, string(feed.Response.Body()), "routing-test-password")
+					require.NotContains(t, string(feed.Response.Body()), "saved change")
+					require.NotContains(t, string(feed.Response.Body()), "forged-routing-actor")
+				})
+			}
+		})
+	}
 }
