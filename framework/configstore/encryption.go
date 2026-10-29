@@ -584,6 +584,13 @@ func (s *RDBConfigStore) EncryptPlaintextRows(ctx context.Context) error {
 	}
 	totalEncrypted += count
 
+	// config_relays
+	count, err = s.encryptPlaintextRelays(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to encrypt relays: %w", err)
+	}
+	totalEncrypted += count
+
 	if totalEncrypted > 0 && s.logger != nil {
 		s.logger.Info(fmt.Sprintf("encrypted %d plaintext rows across all tables", totalEncrypted))
 	}
@@ -1034,4 +1041,35 @@ func (s *RDBConfigStore) encryptPlaintextOAuth2SigningKey(ctx context.Context) (
 		return 1, nil
 	}
 	return 0, nil
+}
+
+// encryptPlaintextRelays finds all config_relays rows with plaintext
+// encryption status and re-saves them one row per transaction. The TableRelay.BeforeSave
+// hook encrypts the credential, extra headers and proxy secrets.
+func (s *RDBConfigStore) encryptPlaintextRelays(ctx context.Context) (int, error) {
+	var count int
+	cursor := ""
+	for {
+		// Read names only, so no secret column is scanned (and no vault ref resolved) twice.
+		var names []string
+		if err := s.DB().WithContext(ctx).
+			Model(&tables.TableRelay{}).
+			Where("(encryption_status = ? OR encryption_status IS NULL OR encryption_status = '') AND name > ?", encryptionStatusPlainText, cursor).
+			Order("name").
+			Limit(encryptionBatchSize).
+			Pluck("name", &names).Error; err != nil {
+			return count, err
+		}
+		if len(names) == 0 {
+			break
+		}
+		cursor = names[len(names)-1]
+		n, err := encryptClaimedRows(ctx, s, names, "(encryption_status = ? OR encryption_status IS NULL OR encryption_status = '') AND name = ?",
+			func(r *tables.TableRelay) string { return r.EncryptionStatus })
+		count += n
+		if err != nil {
+			return count, err
+		}
+	}
+	return count, nil
 }

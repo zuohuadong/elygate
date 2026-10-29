@@ -785,12 +785,14 @@ bifrost:
   mcp:
     enabled: true
     toolSyncInterval: "10m"
+    maxProtocolVersion: "auto"
     clientConfigs:
       - name: "stdio-server"
         connectionType: "stdio"
         clientId: "client-1"
         isCodeModeClient: true
         toolSyncInterval: "5m"
+        maxProtocolVersion: "2025-06-18"
         isPingAvailable: false
         toolPricing:
           search: 0.05
@@ -815,6 +817,17 @@ bifrost:
           url: "https://mcp.example.com/headers"
         authType: "per_user_headers"
         perUserHeaderKeys: ["Authorization", "X-Api-Key"]
+      - name: "openapi-server"
+        connectionType: "openapi"
+        authType: "headers"
+        openapiConfig:
+          specUrl: "https://api.example.com/openapi.json"
+          baseUrl: "https://api.example.com/v2"
+          securityCredentials:
+            bearerAuth:
+              value: "env.API_TOKEN"
+          includeDeprecated: true
+          maxResponseBytes: 65536
     toolManagerConfig:
       toolExecutionTimeout: 60
       maxAgentDepth: 5
@@ -846,17 +859,28 @@ assert_field_value 'mcp client[3] auth_type' '.mcp.client_configs.[3].auth_type'
 assert_field_value 'mcp client[3] per_user_header_keys[0]' '.mcp.client_configs.[3].per_user_header_keys.[0]' '"Authorization"'
 assert_field_value 'mcp client[3] per_user_header_keys[1]' '.mcp.client_configs.[3].per_user_header_keys.[1]' '"X-Api-Key"'
 
+# openapi client (openapiConfig -> openapi_config)
+assert_field_value 'mcp client[4] connection_type' '.mcp.client_configs.[4].connection_type' '"openapi"'
+assert_field_value 'mcp client[4] auth_type' '.mcp.client_configs.[4].auth_type' '"headers"'
+assert_field_value 'mcp client[4] openapi_config.spec_url' '.mcp.client_configs.[4].openapi_config.spec_url' '"https://api.example.com/openapi.json"'
+assert_field_value 'mcp client[4] openapi_config.base_url' '.mcp.client_configs.[4].openapi_config.base_url' '"https://api.example.com/v2"'
+assert_field_value 'mcp client[4] openapi_config.security_credentials.bearerAuth.value' '.mcp.client_configs.[4].openapi_config.security_credentials.bearerAuth.value' '"env.API_TOKEN"'
+assert_field_value 'mcp client[4] openapi_config.include_deprecated' '.mcp.client_configs.[4].openapi_config.include_deprecated' 'true'
+assert_field_value 'mcp client[4] openapi_config.max_response_bytes' '.mcp.client_configs.[4].openapi_config.max_response_bytes' '65536'
+
 # Tool manager config
 assert_field_value 'mcp tool_manager_config.tool_execution_timeout' '.mcp.tool_manager_config.tool_execution_timeout' '60'
 assert_field_value 'mcp tool_manager_config.max_agent_depth' '.mcp.tool_manager_config.max_agent_depth' '5'
 
 # Gap 6a: Global tool sync interval
 assert_field_value 'mcp tool_sync_interval' '.mcp.tool_sync_interval' '"10m"'
+assert_field_value 'mcp max_protocol_version' '.mcp.max_protocol_version' '"auto"'
 
 # Gap 6b: Per-client new fields
 assert_field_value 'mcp client[0] client_id' '.mcp.client_configs.[0].client_id' '"client-1"'
 assert_field_value 'mcp client[0] is_code_mode_client' '.mcp.client_configs.[0].is_code_mode_client' 'true'
 assert_field_value 'mcp client[0] tool_sync_interval' '.mcp.client_configs.[0].tool_sync_interval' '"5m"'
+assert_field_value 'mcp client[0] max_protocol_version' '.mcp.client_configs.[0].max_protocol_version' '"2025-06-18"'
 assert_field_value 'mcp client[0] is_ping_available' '.mcp.client_configs.[0].is_ping_available' 'false'
 assert_field 'mcp client[0] tool_pricing' '.mcp.client_configs.[0].tool_pricing'
 assert_field_value 'mcp client[0] tool_pricing.search' '.mcp.client_configs.[0].tool_pricing.search' '0.05'

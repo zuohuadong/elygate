@@ -35,6 +35,21 @@ upstream UI.
 - **Enterprise extension**: capability-gated menu plus a build-time page override; direct URLs retain an explicit fallback.
 - **Public flow**: direct-navigation page outside the svadmin hash router.
 
+## Upstream 248db77d0 integration boundary
+
+- The backend includes upstream relay configuration, relay grants, relay logs,
+  MCP protocol-version limits, resources, prompts and expose-list contracts.
+  The independent panel is not replaced by the upstream React console.
+- Relay endpoint management, relay logs and virtual-key `relay_grants` do not
+  yet have dedicated panel workflows. Existing virtual-key updates omit this
+  field, which preserves grants under the upstream update contract.
+- Per-client MCP protocol limits, resource/prompt exposure and discovery fields
+  still need dedicated panel controls and contract regression coverage. Existing
+  client updates omit these fields rather than clearing them.
+- These are explicit panel parity gaps, not completed features. Production
+  relay acceptance and complete governance audit snapshots, including relay
+  grants, remain outside this source synchronization's acceptance.
+
 ## OSS and shared management routes
 
 | Legacy route(s) | Panel surface | API contract | Status |

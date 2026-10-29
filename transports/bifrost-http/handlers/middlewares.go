@@ -221,6 +221,25 @@ type corsMiddlewareConfig struct {
 	dumpErrorsInConsoleLogs bool
 	allowedOrigins          []string
 	allowedHeaders          []string
+	allowHeaders            string // Access-Control-Allow-Headers when nothing is reflected, joined once
+}
+
+// defaultCorsAllowedHeaders are allowed on every route. SetupTokenHeader is sent by the dashboard
+// on every call while the OSS setup lock is active, so a UI served from another origin must be able
+// to preflight it. The MCP Streamable HTTP headers ride on every request a browser MCP client makes
+// after initialize, and on every 2026-07-28 request.
+var defaultCorsAllowedHeaders = []string{"Content-Type", "Authorization", "X-Requested-With", "X-Stainless-Timeout", "X-Api-Key", "X-OpenAI-Agents-SDK", "X-Operation-ID", "X-Bifrost-View-As", SetupTokenHeader,
+	"MCP-Protocol-Version", "Mcp-Session-Id", "Mcp-Method", "Mcp-Name", "Last-Event-ID"}
+
+// corsAllowHeaders joins the default headers with the configured extras, skipping duplicates.
+func corsAllowHeaders(configured []string) string {
+	headers := slices.Clone(defaultCorsAllowedHeaders)
+	for _, header := range configured {
+		if header != "*" && !slices.Contains(headers, header) {
+			headers = append(headers, header)
+		}
+	}
+	return strings.Join(headers, ", ")
 }
 
 // newCorsMiddlewareConfig builds an immutable snapshot from the live config,
@@ -233,6 +252,7 @@ func newCorsMiddlewareConfig(config *lib.Config) *corsMiddlewareConfig {
 		dumpErrorsInConsoleLogs: config.ClientConfig.DumpErrorsInConsoleLogs,
 		allowedOrigins:          slices.Clone(config.ClientConfig.AllowedOrigins),
 		allowedHeaders:          slices.Clone(config.ClientConfig.AllowedHeaders),
+		allowHeaders:            corsAllowHeaders(config.ClientConfig.AllowedHeaders),
 	}
 }
 
@@ -362,27 +382,23 @@ func (c *CorsMiddleware) applyHeaders(ctx *fasthttp.RequestCtx, cfg *corsMiddlew
 				return strings.Contains(pattern, "*") && matchesWildcardPattern(origin, pattern)
 			}))
 
-	allowedHeaders := []string{
-		"Content-Type", "Authorization", "X-Requested-With", "X-Stainless-Timeout",
-		"X-Api-Key", "X-OpenAI-Agents-SDK", "X-Operation-ID", "X-Bifrost-View-As", SetupTokenHeader,
-	}
-	if slices.Contains(cfg.allowedHeaders, "*") {
-		if credentialed {
-			if requested := string(ctx.Request.Header.Peek("Access-Control-Request-Headers")); requested != "" {
-				allowedHeaders = []string{requested}
-			}
-		} else {
-			allowedHeaders = []string{"*"}
-		}
-	} else {
-		for _, header := range cfg.allowedHeaders {
-			if !slices.Contains(allowedHeaders, header) {
-				allowedHeaders = append(allowedHeaders, header)
-			}
-		}
-	}
 	if !allowed {
 		return false
+	}
+	allowHeaders := cfg.allowHeaders
+	requested := ctx.Request.Header.Peek("Access-Control-Request-Headers")
+	if slices.Contains(cfg.allowedHeaders, "*") {
+		if credentialed {
+			// Credentialed preflight treats "*" literally, so reflect the requested headers.
+			if len(requested) > 0 {
+				allowHeaders = string(requested)
+			}
+		} else {
+			// "*" never covers Authorization, so keep the default headers explicitly listed.
+			allowHeaders = cfg.allowHeaders + ", *"
+		}
+	} else if len(requested) > 0 {
+		allowHeaders = appendMCPParamHeaders(allowHeaders, requested)
 	}
 	if credentialed {
 		ctx.Response.Header.Set("Access-Control-Allow-Origin", origin)
@@ -391,7 +407,7 @@ func (c *CorsMiddleware) applyHeaders(ctx *fasthttp.RequestCtx, cfg *corsMiddlew
 		ctx.Response.Header.Set("Access-Control-Allow-Origin", "*")
 	}
 	ctx.Response.Header.Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD")
-	ctx.Response.Header.Set("Access-Control-Allow-Headers", strings.Join(allowedHeaders, ", "))
+	ctx.Response.Header.Set("Access-Control-Allow-Headers", allowHeaders)
 	ctx.Response.Header.Set("Access-Control-Max-Age", "86400")
 	// Lets browser clients read the x-bifrost-* headers, which carry extra_fields in headers mode.
 	ctx.Response.Header.Set("Access-Control-Expose-Headers", lib.ExposedResponseHeaders)
@@ -1703,6 +1719,8 @@ var apiSystemWhitelistedRoutes = []string{
 	// not a session token is present, so a repeat logout must not 401 here.
 	"/api/session/logout",
 	"/api/oauth/callback",
+	// Client ID Metadata Document
+	"/api/oauth/client-metadata.json",
 	"/health",
 	"/login",
 	"/favicon.ico",
@@ -2488,4 +2506,32 @@ func AuthBypassedMiddleware(allowedOrigins, whitelistedRoutes []string) schemas.
 			next(ctx)
 		}
 	}
+}
+
+// appendMCPParamHeaders appends the Mcp-Param-* names a preflight asks for to allowed, which is
+// returned unchanged when it asks for none.
+func appendMCPParamHeaders(allowed string, requested []byte) string {
+	isParam := func(name []byte) bool {
+		return len(name) > len("mcp-param-") && bytes.EqualFold(name[:len("mcp-param-")], []byte("mcp-param-"))
+	}
+	// Sized first so the list is built in one allocation: appending to a string copies it per name.
+	size := 0
+	for name := range bytes.SplitSeq(requested, []byte(",")) {
+		if name = bytes.TrimSpace(name); isParam(name) {
+			size += len(", ") + len(name)
+		}
+	}
+	if size == 0 {
+		return allowed
+	}
+	var out strings.Builder
+	out.Grow(len(allowed) + size)
+	out.WriteString(allowed)
+	for name := range bytes.SplitSeq(requested, []byte(",")) {
+		if name = bytes.TrimSpace(name); isParam(name) {
+			out.WriteString(", ")
+			out.Write(name)
+		}
+	}
+	return out.String()
 }
