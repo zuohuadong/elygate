@@ -18,4 +18,18 @@ describe('routing rules page contract', () => {
 		expect(source).toContain('class="query-editor"');
 		expect(source).toMatch(/\.query-editor[^}]*width:\s*100%/);
 	});
+
+	test('exposes the offline simulation view and canonical control-plane endpoint', async () => {
+		const source = await Bun.file(new URL('../pages/RoutingRulesPage.svelte', import.meta.url)).text();
+		const panel = await Bun.file(new URL('../lib/RoutingSimulationPanel.svelte', import.meta.url)).text();
+
+		expect(source).toContain('RoutingSimulationPanel');
+		expect(source).toContain('elygate.routingSimulation');
+		expect(panel).toContain("requestJson<unknown>('/api/routing/rules'");
+		expect(panel).toContain("requestJson<unknown>('/api/control-plane/routing/simulate'");
+		expect(panel).toContain('AbortController');
+		expect(panel).toContain('onDestroy(cancelRequests)');
+		expect(source).toContain("<div hidden={viewMode !== 'simulation'}><RoutingSimulationPanel active={viewMode === 'simulation'} /></div>");
+		expect(source).not.toContain('/api/governance/routing-rules');
+	});
 });

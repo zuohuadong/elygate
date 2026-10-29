@@ -49,7 +49,7 @@ upstream UI.
 | provider governance fragment under `/workspace/providers` | provider-governance | `/api/providers`, `/api/governance/providers*` budgets, rate limits and calendar alignment | Dedicated |
 | `/workspace/model-catalog` | model-catalog | `/api/providers`, `/api/models`, `/api/models/details`, `/api/models/catalog`, log stats/histograms | Dedicated |
 | `/workspace/model-limits`, `/workspace/providers/model-limits` | model-configs, budgets, rate-limits | `/api/governance/model-configs*` | Dedicated + Alias |
-| `/workspace/routing-rules`, `/workspace/routing-rules/tree`, `/workspace/providers/routing-rules` | routing-rules list/tree | `/api/governance/routing-rules*` | Dedicated + Alias |
+| `/workspace/routing-rules`, `/workspace/routing-rules/tree`, `/workspace/providers/routing-rules` | routing-rules list/tree + offline simulation | `/api/routing/rules*` for CRUD and complete snapshot import; `/api/control-plane/routing/simulate` for administrator-only offline evaluation | Dedicated + Alias |
 | `/workspace/complexity-router` | complexity-router / complexity-analyzer | `/api/governance/complexity-analyzer-config`, ordered tier spectrum, normalized keyword groups, reset and hot reload | Dedicated + Alias |
 | `/workspace/custom-pricing`, `/workspace/custom-pricing/overrides` | pricing-config, model-catalog, pricing-overrides | `/api/config`, `/api/pricing/force-sync`, `/api/governance/pricing-overrides*` scopes, model patterns, request types, full numeric patch | Dedicated |
 | `/workspace/governance/virtual-keys`, `/workspace/virtual-keys` | virtual-keys | `/api/governance/virtual-keys*` | Dedicated + Alias |

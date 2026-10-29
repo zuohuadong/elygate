@@ -2,9 +2,11 @@
 	import { getAppName } from '../lib/branding';
 	import { onMount } from 'svelte';
 	import { useTranslation } from '@svadmin/core/i18n';
+	import { FlaskConical, GitBranch, List, Plus } from '@lucide/svelte';
 	import { displayError, parseJsonObject, prettyJson } from '../lib/forms';
 	import { getListPayload, getTotal, isJsonRecord, requestJson, type JsonRecord } from '../lib/api';
 	import { formatPagination } from '../lib/display-format';
+	import RoutingSimulationPanel from '../lib/RoutingSimulationPanel.svelte';
 
 	interface Props { resourceName: string; }
 	interface TargetForm { provider: string; model: string; key_id: string; weight: number; }
@@ -20,7 +22,7 @@
 	let isLoading = $state(true);
 	let isSaving = $state(false);
 	let modalContextSeq = 0;
-	let viewMode = $state<'list' | 'tree'>('list');
+	let viewMode = $state<'list' | 'tree' | 'simulation'>('list');
 	let error = $state('');
 	let notice = $state('');
 	let loadSeq = 0;
@@ -67,7 +69,7 @@
 		error = '';
 		try {
 			const [rulesPayload, providersPayload] = await Promise.all([
-				requestJson(`/api/governance/routing-rules?limit=${pageSize}&offset=${(requestedPage - 1) * pageSize}`),
+				requestJson(`/api/routing/rules?limit=${pageSize}&offset=${(requestedPage - 1) * pageSize}`),
 				requestJson('/api/providers'),
 			]);
 			if (sequence !== loadSeq || page !== requestedPage) return;
@@ -126,7 +128,7 @@
 				targets: formSnapshot.targets.map((target) => ({ provider: target.provider.trim() || undefined, model: target.model.trim() || undefined, key_id: target.key_id.trim() || undefined, weight: target.weight })),
 				fallbacks: formSnapshot.fallbacks.map((fallback) => fallback.trim()).filter(Boolean), query: parseJsonObject(formSnapshot.query, i18n.t('elygate.queryBuilder'), i18n.t('elygate.invalidJson')),
 			};
-			const path = contextId ? `/api/governance/routing-rules/${encodeURIComponent(contextId)}` : '/api/governance/routing-rules';
+			const path = contextId ? `/api/routing/rules/${encodeURIComponent(contextId)}` : '/api/routing/rules';
 			await requestJson(path, { method: contextId ? 'PUT' : 'POST', body: JSON.stringify(payload) });
 			if (contextSequence === modalContextSeq && (editing ? String(editing.id ?? '') : '') === contextId) {
 				isOpen = false;
@@ -141,7 +143,7 @@
 		const id = String(rule.id ?? '');
 		if (!beginRuleBusy(id)) return;
 		try {
-			await requestJson(`/api/governance/routing-rules/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify({ enabled: rule.enabled === false }) });
+			await requestJson(`/api/routing/rules/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify({ enabled: rule.enabled === false }) });
 			await load();
 		} catch (cause) { error = displayError(cause, i18n.t('elygate.operationFailed')); }
 		finally { endRuleBusy(id); }
@@ -151,7 +153,7 @@
 		if (!window.confirm(i18n.t('elygate.confirmDelete'))) return;
 		const id = String(rule.id ?? '');
 		if (!beginRuleBusy(id)) return;
-		try { await requestJson(`/api/governance/routing-rules/${encodeURIComponent(id)}`, { method: 'DELETE' }); await load(); }
+		try { await requestJson(`/api/routing/rules/${encodeURIComponent(id)}`, { method: 'DELETE' }); await load(); }
 		catch (cause) { error = displayError(cause, i18n.t('elygate.operationFailed')); }
 		finally { endRuleBusy(id); }
 	}
@@ -160,8 +162,22 @@
 </script>
 
 <section class="page-shell">
-	<header class="page-heading"><div><p class="eyebrow">{getAppName()} / {i18n.t('elygate.enterprise')}</p><h1>{i18n.t('elygate.routingRules')}</h1><p>{viewMode === 'tree' ? i18n.t('elygate.routingTreeHint') : i18n.t('elygate.routingRulesStructuredHint')}</p></div><div class="heading-actions"><div class="view-switch"><button type="button" class:is-active={viewMode === 'list'} onclick={() => (viewMode = 'list')}>{i18n.t('elygate.tableView')}</button><button type="button" class:is-active={viewMode === 'tree'} onclick={() => (viewMode = 'tree')}>{i18n.t('elygate.treeView')}</button></div><button class="primary" type="button" onclick={openCreate}>{i18n.t('elygate.create')}</button></div></header>
+	<header class="page-heading">
+		<div><p class="eyebrow">{getAppName()} / {i18n.t('elygate.enterprise')}</p><h1>{i18n.t('elygate.routingRules')}</h1>{#if viewMode !== 'simulation'}<p>{viewMode === 'tree' ? i18n.t('elygate.routingTreeHint') : i18n.t('elygate.routingRulesStructuredHint')}</p>{/if}</div>
+		<div class="heading-actions">
+			<div class="view-switch" role="group" aria-label={i18n.locale === 'zh-CN' ? '路由视图' : 'Routing view'}>
+				<button type="button" class:is-active={viewMode === 'list'} aria-pressed={viewMode === 'list'} onclick={() => (viewMode = 'list')}><List size={16} aria-hidden="true" />{i18n.t('elygate.tableView')}</button>
+				<button type="button" class:is-active={viewMode === 'tree'} aria-pressed={viewMode === 'tree'} onclick={() => (viewMode = 'tree')}><GitBranch size={16} aria-hidden="true" />{i18n.t('elygate.treeView')}</button>
+				<button type="button" class:is-active={viewMode === 'simulation'} aria-pressed={viewMode === 'simulation'} onclick={() => (viewMode = 'simulation')}><FlaskConical size={16} aria-hidden="true" />{i18n.t('elygate.routingSimulation')}</button>
+			</div>
+			{#if viewMode !== 'simulation'}<button class="primary" type="button" onclick={openCreate}><Plus size={16} aria-hidden="true" />{i18n.t('elygate.create')}</button>{/if}
+		</div>
+	</header>
+	{#if viewMode !== 'simulation'}
 	{#if error}<div class="notice error" role="alert">{error}</div>{/if}{#if notice}<div class="notice success" role="status">{notice}</div>{/if}
+	{/if}
+	<div hidden={viewMode !== 'simulation'}><RoutingSimulationPanel active={viewMode === 'simulation'} /></div>
+	{#if viewMode !== 'simulation'}
 	{#if viewMode === 'list'}
 		<div class="rule-list" aria-busy={isLoading}>
 			{#each sortedRules as rule, index (String(rule.id))}
@@ -185,6 +201,7 @@
 		</div>
 		{/if}
 	<footer class="pagination"><span>{formatPagination(page, totalPages, total, i18n.locale)}</span><div><button type="button" disabled={page <= 1 || isLoading} onclick={() => { page -= 1; void load(); }}>{i18n.t('elygate.previous')}</button><button type="button" disabled={page >= totalPages || isLoading} onclick={() => { page += 1; void load(); }}>{i18n.t('elygate.next')}</button></div></footer>
+	{/if}
 </section>
 
 	{#if isOpen}
@@ -205,8 +222,10 @@
 	h1, h2, h3 { margin: 0; } .page-heading p, .rule-main p, small { color: var(--muted-foreground); }
 	button { background: var(--muted); border: 1px solid var(--border); border-radius: .5rem; color: var(--foreground); cursor: pointer; font-weight: 650; padding: .5rem .65rem; }
 	button.primary { background: var(--primary); border-color: var(--primary); color: var(--primary-foreground); } button.danger { color: var(--destructive); }
-	.view-switch { background: var(--muted); border: 1px solid var(--border); border-radius: .6rem; display: flex; padding: .2rem; }
+	.view-switch { background: var(--muted); border: 1px solid var(--border); border-radius: .5rem; display: flex; flex-wrap: wrap; padding: .2rem; }
+	.view-switch button, .heading-actions > button { align-items: center; display: inline-flex; gap: .35rem; justify-content: center; min-height: 44px; }
 	.view-switch button { background: transparent; border: 0; }
+	.view-switch button:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
 	.view-switch button.is-active { background: var(--card); box-shadow: 0 1px 3px rgb(0 0 0 / .12); }
 	.rule-list { display: grid; gap: .65rem; }
 	.rule-list article { align-items: start; background: var(--card); border: 1px solid var(--border); border-radius: .8rem; display: grid; gap: .8rem; grid-template-columns: 54px 1fr auto; padding: .8rem; }
