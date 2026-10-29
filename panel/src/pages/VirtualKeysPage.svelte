@@ -6,6 +6,8 @@
 	import { encodePathSegment, getListPayload, getObjectPayload, getTotal, requestJson, type JsonRecord } from '../lib/api';
 	import { formatPagination } from '../lib/display-format';
 	import { resetDurationLabel } from '../lib/governance-management';
+	import VirtualKeyRelayGrants from '../lib/VirtualKeyRelayGrants.svelte';
+	import { relayGrantNames, relayGrantsPayload } from '../lib/relay-grants';
 
 	interface McpConfigDraft { key: string; id?: number; clientName: string; tools: string; }
 	interface BudgetDraft { key: string; maxLimit: string | number; resetDuration: string; }
@@ -21,6 +23,7 @@
 		teamId: string;
 		customerId: string;
 		mcpConfigs: McpConfigDraft[];
+		relayNames: string[];
 		budgets: BudgetDraft[];
 		rateLimit: RateLimitDraft;
 	}
@@ -28,7 +31,7 @@
 	let draftSequence = 0;
 	function draftKey(prefix: string): string { draftSequence += 1; return `${prefix}-${draftSequence}`; }
 	function emptyForm(): VirtualKeyForm {
-		return { name: '', description: '', isActive: true, calendarAligned: false, expiresAt: '', teamId: '', customerId: '', mcpConfigs: [], budgets: [], rateLimit: { tokenMaxLimit: '', tokenResetDuration: '1h', requestMaxLimit: '', requestResetDuration: '1h' } };
+		return { name: '', description: '', isActive: true, calendarAligned: false, expiresAt: '', teamId: '', customerId: '', mcpConfigs: [], relayNames: [], budgets: [], rateLimit: { tokenMaxLimit: '', tokenResetDuration: '1h', requestMaxLimit: '', requestResetDuration: '1h' } };
 	}
 
 	function stringValue(record: JsonRecord, key: string): string {
@@ -67,6 +70,7 @@
 	let keysByProvider = $state.raw<Record<string, JsonRecord[]>>({});
 	let providerStatusAvailable = $state(false);
 	let form = $state<VirtualKeyForm>(emptyForm());
+	let initialRelayNames: string[] | undefined;
 	let editing = $state<JsonRecord | null>(null);
 	let isOpen = $state(false);
 	let isLoading = $state(true);
@@ -200,6 +204,7 @@
 	function openCreate(): void {
 		editing = null;
 		form = emptyForm();
+		initialRelayNames = undefined;
 		providerRoutes = [];
 		revealedKey = '';
 		error = '';
@@ -219,6 +224,10 @@
 	}
 
 	function openEdit(record: JsonRecord): void {
+		let names: string[];
+		try { names = relayGrantNames(record.relay_grants); }
+		catch { error = i18n.locale === 'zh-CN' ? 'Relay 授权响应格式错误，未打开编辑器。' : 'Invalid relay grants response; editor not opened.'; return; }
+		initialRelayNames = [...names];
 		editing = record;
 		revealedKey = '';
 		providerRoutes = providerConfigsForForm(record.provider_configs).filter((item): item is JsonRecord => !!item && typeof item === 'object' && !Array.isArray(item));
@@ -232,6 +241,7 @@
 			teamId: stringValue(record, 'team_id'),
 			customerId: stringValue(record, 'customer_id'),
 			mcpConfigs: mcpConfigsForForm(record.mcp_configs).map((item) => ({ key: draftKey('mcp'), id: typeof item.id === 'number' ? item.id : undefined, clientName: String(item.mcp_client_name ?? ''), tools: Array.isArray(item.tools_to_execute) ? item.tools_to_execute.map(String).join(', ') : '' })),
+			relayNames: names,
 			budgets: (Array.isArray(record.budgets) ? record.budgets : []).filter((item): item is JsonRecord => !!item && typeof item === 'object' && !Array.isArray(item)).map((item) => ({ key: draftKey('budget'), maxLimit: typeof item.max_limit === 'number' ? item.max_limit : '', resetDuration: String(item.reset_duration ?? '1M') })),
 			rateLimit: { tokenMaxLimit: Number(rateLimitForForm(record.rate_limit).token_max_limit) || '', tokenResetDuration: String(rateLimitForForm(record.rate_limit).token_reset_duration ?? '1h'), requestMaxLimit: Number(rateLimitForForm(record.rate_limit).request_max_limit) || '', requestResetDuration: String(rateLimitForForm(record.rate_limit).request_reset_duration ?? '1h') },
 		};
@@ -288,6 +298,7 @@
 				calendar_aligned: form.calendarAligned,
 				provider_configs: providerConfigs,
 				mcp_configs: mcpConfigs,
+				relay_grants: relayGrantsPayload(form.relayNames, initialRelayNames),
 				budgets,
 				rate_limit: Object.keys(rateLimit).length ? rateLimit : undefined,
 				team_id: editing ? (form.teamId.trim() || null) : (form.teamId.trim() || undefined),
@@ -409,6 +420,7 @@
 					{#each form.mcpConfigs as config, index (config.key)}<div class="structured-row"><label>{i18n.locale === 'zh-CN' ? 'MCP 客户端名称' : 'MCP client name'}<input bind:value={config.clientName} /></label><label>{i18n.locale === 'zh-CN' ? '允许工具（逗号分隔）' : 'Allowed tools (comma-separated)'}<input bind:value={config.tools} /></label><button class="danger" type="button" onclick={() => removeMcpConfig(index)}>{i18n.t('elygate.delete')}</button></div>{:else}<p class="empty">{i18n.locale === 'zh-CN' ? '未授权 MCP 客户端。' : 'No MCP clients are authorized.'}</p>{/each}
 					<button type="button" onclick={addMcpConfig}>+ {i18n.locale === 'zh-CN' ? '添加 MCP 客户端' : 'Add MCP client'}</button>
 				</fieldset>
+				<VirtualKeyRelayGrants bind:names={form.relayNames} locale={i18n.locale === 'zh-CN' ? 'zh-CN' : 'en'} disabled={isSaving} />
 				<fieldset class="structured-editor">
 					<legend>{i18n.t('elygate.budgets')}</legend>
 					{#each form.budgets as budget, index (budget.key)}<div class="structured-row"><label>{i18n.locale === 'zh-CN' ? '金额上限' : 'Amount limit'}<input type="number" min="0.01" step="0.01" bind:value={budget.maxLimit} /></label><label>{i18n.locale === 'zh-CN' ? '重置周期' : 'Reset window'}<select bind:value={budget.resetDuration}>{#each ['1m', '5m', '15m', '30m', '1h', '6h', '1d', '1w', '1M', '1Q'] as duration (duration)}<option value={duration}>{durationLabel(duration)}</option>{/each}</select></label><button class="danger" type="button" onclick={() => removeBudget(index)}>{i18n.t('elygate.delete')}</button></div>{:else}<p class="empty">{i18n.locale === 'zh-CN' ? '未设置预算。' : 'No budgets configured.'}</p>{/each}

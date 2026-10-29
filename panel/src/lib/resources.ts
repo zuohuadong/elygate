@@ -12,6 +12,7 @@ const RESOURCE_SPECS: ResourceSpec[] = [
 	['models', 'elygate.models', 'bot'],
 	['model-catalog', 'elygate.modelCatalog', 'layout-grid'],
 	['logs', 'elygate.logs', 'scroll-text'],
+	['relay-logs', 'elygate.relayLogs', 'activity'],
 	['request-logs', 'elygate.logs', 'scroll-text'],
 	['employees', 'elygate.employees', 'contact-round'],
 	['teams', 'elygate.teams', 'users-round'],
@@ -25,6 +26,7 @@ const RESOURCE_SPECS: ResourceSpec[] = [
 	['budgets', 'elygate.budgetList', 'wallet'],
 	['rate-limits', 'elygate.rateLimits', 'gauge'],
 	['webhooks', 'elygate.webhooks', 'webhook'],
+	['relay-endpoints', 'elygate.relayEndpoints', 'route'],
 	['mcp-clients', 'elygate.mcpClients', 'server-cog'],
 	['mcp-library', 'elygate.mcpLibrary', 'library'],
 	['mcp-sessions', 'elygate.mcpSessions', 'monitor-dot'],
@@ -155,6 +157,7 @@ export function createMenu(
 			icon: 'activity',
 			children: orderedMenuItems(locale, 'observability', enterpriseResources, [
 				menuItem(locale, 'logs', 'elygate.logs', 'scroll-text'),
+				menuItem(locale, 'relay-logs', 'elygate.relayLogs', 'activity'),
 				menuItem(locale, 'mcp-logs', 'elygate.mcpLogs', 'list-tree'),
 				menuItem(locale, 'connectors', 'elygate.connectors', 'cable'),
 				menuItem(locale, 'usage-ledger', 'elygate.usageLedger', 'landmark'),
@@ -221,6 +224,7 @@ export function createMenu(
 			icon: 'plug-zap',
 			children: orderedMenuItems(locale, 'integrations', enterpriseResources, [
 				menuItem(locale, 'webhooks', 'elygate.webhooks', 'webhook'),
+				menuItem(locale, 'relay-endpoints', 'elygate.relayEndpoints', 'route'),
 				menuItem(locale, 'plugins', 'elygate.plugins', 'plug'),
 				menuItem(locale, 'skills', 'elygate.skills', 'sparkles'),
 				menuItem(locale, 'prompts', 'elygate.prompts', 'message-square-text'),

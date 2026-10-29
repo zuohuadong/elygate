@@ -47,6 +47,8 @@
 	import PprofPage from './pages/PprofPage.svelte';
 	import PluginsPage from './pages/PluginsPage.svelte';
 	import ProvidersPage from './pages/ProvidersPage.svelte';
+	import RelayManagementPage from './pages/RelayManagementPage.svelte';
+	import RelayLogsPage from './pages/RelayLogsPage.svelte';
 	import PromptRepositoryPage from './pages/PromptRepositoryPage.svelte';
 	import RoutingRulesPage from './pages/RoutingRulesPage.svelte';
 	import RoutingNetworkSettingsPage from './pages/RoutingNetworkSettingsPage.svelte';
@@ -155,6 +157,7 @@
 		models: { list: BifrostResourcePage },
 		logs: { list: LogsPage },
 		'request-logs': { list: LogsPage },
+		'relay-logs': { list: RelayLogsPage },
 		employees: { list: EmployeesPage },
 		teams: { list: GovernanceManagementPage },
 		customers: { list: GovernanceManagementPage },
@@ -167,6 +170,7 @@
 		budgets: { list: ModelLimitsPage },
 		'rate-limits': { list: ModelLimitsPage },
 		webhooks: { list: WebhooksPage },
+		'relay-endpoints': { list: RelayManagementPage },
 		'mcp-clients': { list: McpManagementPage },
 		'mcp-library': { list: McpManagementPage },
 		'mcp-sessions': { list: McpManagementPage },

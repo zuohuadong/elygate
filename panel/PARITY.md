@@ -40,9 +40,11 @@ upstream UI.
 - The backend includes upstream relay configuration, relay grants, relay logs,
   MCP protocol-version limits, resources, prompts and expose-list contracts.
   The independent panel is not replaced by the upstream React console.
-- Relay endpoint management, relay logs and virtual-key `relay_grants` do not
-  yet have dedicated panel workflows. Existing virtual-key updates omit this
-  field, which preserves grants under the upstream update contract.
+- Relay endpoint management, relay logs and virtual-key `relay_grants` now have
+  dedicated panel workflows. The panel preserves the upstream full-replacement
+  relay PUT contract, redacted credentials and inherited proxy semantics;
+  relay-log queries use absolute time bounds; grant updates omit unchanged
+  values and send `[]` only for an explicit deny-all change.
 - Per-client MCP protocol limits and resource/prompt exposure now have dedicated
   create/edit controls, with read-only resource/template/prompt discovery.
   Exposure lists preserve exact JSON strings; unchanged policy fields are
@@ -53,9 +55,15 @@ upstream UI.
   route-fixture browser checks for hydration, validation, mutation payloads and
   desktop/mobile/landscape light/dark layout. This is local scoped evidence,
   not proof of a live external MCP connection or production acceptance.
-- Relay workflows remain explicit panel parity gaps, not completed features. Production
-  relay acceptance and complete governance audit snapshots, including relay
-  grants, remain outside this source synchronization's acceptance.
+- Relay workflows are locally `PASS_SCOPED`: focused helper contracts,
+  Svelte diagnostics, isolated Vite build and fixture browser checks cover
+  editor hydration/preview, failed-save draft retention, relay logs and grant
+  clearing across desktop/mobile/landscape light/dark states. This does not
+  prove live upstream traffic, external credentials, production relay
+  acceptance or complete governance audit snapshots.
+- Remaining panel gaps include OpenAPI import, structured route/usage editors,
+  full log attribution/cost filters and log export. JSON editors expose the
+  existing configuration contract without claiming complete upstream UI parity.
 
 ## OSS and shared management routes
 
@@ -64,6 +72,8 @@ upstream UI.
 | `/login` | svadmin login + Bifrost auth provider | `/api/session/is-auth-enabled`, `/api/session/login`, `/api/session/logout` | Dedicated |
 | `/workspace/dashboard` | dashboard | `/api/logs/dashboard` | Dedicated |
 | `/workspace/logs` | logs | `/api/logs*`, `/api/ws`, cost recalculation and selected deletion | Dedicated |
+| `/workspace/relay-logs` | relay-logs | `/api/relay-logs*`, absolute time bounds, list/stats/histogram/top-endpoints, details and selected deletion | Dedicated, remaining filters/export noted above |
+| `/workspace/relays` | relay-endpoints | `/api/relays*`, full replacement CRUD, all auth schemes, JSON configuration and unsaved usage preview | Dedicated, OpenAPI/structured editors pending |
 | `/workspace/logs/connectors`, `/workspace/observability` | connectors | `/api/plugins`, `/api/plugins/{name}` | Dedicated |
 | `/workspace/mcp-logs`, legacy `/workspace/logs/mcp-logs` | mcp-logs | `/api/mcp-logs*` | Dedicated |
 | `/workspace/providers` | providers | `/api/providers*`, provider/key refresh routes | Dedicated |
@@ -74,7 +84,7 @@ upstream UI.
 | `/workspace/routing-rules`, `/workspace/routing-rules/tree`, `/workspace/providers/routing-rules` | routing-rules list/tree + offline simulation | `/api/routing/rules*` for CRUD and complete snapshot import; `/api/control-plane/routing/simulate` for administrator-only offline evaluation | Dedicated + Alias |
 | `/workspace/complexity-router` | complexity-router / complexity-analyzer | `/api/governance/complexity-analyzer-config`, ordered tier spectrum, normalized keyword groups, reset and hot reload | Dedicated + Alias |
 | `/workspace/custom-pricing`, `/workspace/custom-pricing/overrides` | pricing-config, model-catalog, pricing-overrides | `/api/config`, `/api/pricing/force-sync`, `/api/governance/pricing-overrides*` scopes, model patterns, request types, full numeric patch | Dedicated |
-| `/workspace/governance/virtual-keys`, `/workspace/virtual-keys` | virtual-keys | `/api/governance/virtual-keys*` | Dedicated + Alias |
+| `/workspace/governance/virtual-keys`, `/workspace/virtual-keys` | virtual-keys | `/api/governance/virtual-keys*`, relay grants with unchanged omission and explicit deny-all `[]` | Dedicated + Alias |
 | `/workspace/governance/teams` | teams | `/api/governance/teams*` customer assignment, multi-budget, rate limits, calendar alignment | Dedicated |
 | `/workspace/governance/customers` | customers | `/api/governance/customers*` multi-budget, rate limits, calendar alignment | Dedicated |
 | `/workspace/governance` | virtual-keys | canonical governance entry | Alias |

@@ -75,7 +75,7 @@ export function getListPayload(value: unknown): JsonRecord[] {
 	if (Array.isArray(value)) return value.filter(isJsonRecord);
 	if (!isJsonRecord(value)) return [];
 
-	for (const key of ['data', 'items', 'employees', 'providers', 'virtual_keys', 'logs', 'models', 'keys', 'teams', 'customers', 'rules', 'model_configs', 'budgets', 'rate_limits', 'pricing_overrides', 'webhooks', 'endpoints', 'sessions', 'plugins', 'skills', 'folders', 'prompts']) {
+	for (const key of ['data', 'items', 'employees', 'providers', 'virtual_keys', 'logs', 'relay_logs', 'relays', 'models', 'keys', 'teams', 'customers', 'rules', 'model_configs', 'budgets', 'rate_limits', 'pricing_overrides', 'webhooks', 'endpoints', 'sessions', 'plugins', 'skills', 'folders', 'prompts']) {
 		const candidate = value[key];
 		if (Array.isArray(candidate)) return candidate.filter(isJsonRecord);
 	}
