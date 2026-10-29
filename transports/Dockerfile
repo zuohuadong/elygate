@@ -4,7 +4,7 @@ FROM scratch AS enterprise_panel
 COPY panel/src/enterprise-fallback/index.ts /index.ts
 
 # --- UI Build Stage: Build the Svelte svadmin panel ---
-  FROM --platform=$BUILDPLATFORM oven/bun:1.3.14-alpine@sha256:5acc90a93e91ff07bf72aa90a7c9f0fa189765aec90b47bdbf2152d2196383c0 AS ui-builder
+  FROM --platform=$BUILDPLATFORM oven/bun:1.4.4-alpine@sha256:4cf82f5686b196504fe119db3fcd9185b191f82ece82c40680e597228ec6070a AS ui-builder
   WORKDIR /app
 
   # Apply latest alpine security patches before installing packages
