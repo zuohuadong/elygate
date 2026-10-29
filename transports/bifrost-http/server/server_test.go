@@ -47,8 +47,7 @@ import (
 
 type authAuditFailureStore struct {
 	configstore.ConfigStore
-	saveErr  error
-	flushErr error
+	saveErr error
 }
 
 func (s authAuditFailureStore) UpdateAuthConfig(ctx context.Context, auth *configstore.AuthConfig) error {
@@ -56,13 +55,6 @@ func (s authAuditFailureStore) UpdateAuthConfig(ctx context.Context, auth *confi
 		return s.saveErr
 	}
 	return s.ConfigStore.UpdateAuthConfig(ctx, auth)
-}
-
-func (s authAuditFailureStore) FlushSessions(ctx context.Context) error {
-	if s.flushErr != nil {
-		return s.flushErr
-	}
-	return s.ConfigStore.FlushSessions(ctx)
 }
 
 func TestAuthConfigAuditThroughManagementRoute(t *testing.T) {
@@ -100,12 +92,24 @@ func TestAuthConfigAuditThroughManagementRoute(t *testing.T) {
 			require.NoError(t, cs.UpdateAuthConfig(ctx, authConfig))
 			store, err := controlplane.NewStore(ctx, cs)
 			require.NoError(t, err)
+			require.NoError(t, cs.CreateSession(ctx, &configstoreTables.SessionsTable{
+				Token: "auth-route-flush-session", ExpiresAt: time.Now().Add(time.Hour),
+			}))
+			if tc.flushErr != nil {
+				db := cs.DB()
+				require.NoError(t, db.Callback().Delete().Before("gorm:delete").Register("test:auth-route-flush", func(tx *gorm.DB) {
+					if tx.Statement.Table == "sessions" {
+						tx.AddError(tc.flushErr)
+					}
+				}))
+				t.Cleanup(func() { db.Callback().Delete().Remove("test:auth-route-flush") })
+			}
 			require.NoError(t, cs.UpdateClientConfig(ctx, &configstore.ClientConfig{LogRetentionDays: 7}))
 			clientConfig, err := cs.GetClientConfig(ctx)
 			require.NoError(t, err)
 			require.NotNil(t, clientConfig)
 			cfg := &lib.Config{
-				ConfigStore:  authAuditFailureStore{ConfigStore: cs, saveErr: tc.saveErr, flushErr: tc.flushErr},
+				ConfigStore:  authAuditFailureStore{ConfigStore: cs, saveErr: tc.saveErr},
 				ClientConfig: clientConfig,
 			}
 			auth := &handlers.AuthMiddleware{}
@@ -113,7 +117,9 @@ func TestAuthConfigAuditThroughManagementRoute(t *testing.T) {
 			server := &BifrostHTTPServer{Config: cfg, AuthMiddleware: auth}
 			r := router.New()
 			audit := controlplane.NewHandler(store, nil)
-			handlers.NewConfigHandler(server, cfg).RegisterRoutes(r, auth.APIMiddleware(), audit.ManagementAuditMiddleware(noopTestLogger{}))
+			configHandler := handlers.NewConfigHandler(server, cfg)
+			configHandler.SetSessionFlusher(store.FlushDashboardSessions)
+			configHandler.RegisterRoutes(r, auth.APIMiddleware(), audit.ManagementAuditMiddleware(noopTestLogger{}))
 			var request fasthttp.Request
 			request.Header.SetMethod("PUT")
 			request.Header.SetContentType("application/json")
@@ -137,7 +143,14 @@ func TestAuthConfigAuditThroughManagementRoute(t *testing.T) {
 			events, err := store.ListAudit(ctx, 10)
 			require.NoError(t, err)
 			authEvents := 0
+			flushEvents := 0
 			for _, event := range events {
+				if event.Action == "dashboard_sessions.flushed" {
+					flushEvents++
+					assert.Equal(t, "dashboard_session", event.ResourceType)
+					assert.Equal(t, "all", event.ResourceID)
+					assert.Equal(t, "local-admin:route-admin", event.ActorID)
+				}
 				if event.Action != "auth_config.updated" {
 					continue
 				}
@@ -151,11 +164,25 @@ func TestAuthConfigAuditThroughManagementRoute(t *testing.T) {
 			} else {
 				require.Zero(t, authEvents)
 			}
+			session, err := cs.GetSession(ctx, "auth-route-flush-session")
+			require.NoError(t, err)
+			if tc.saveErr == nil && tc.flushErr == nil {
+				require.Equal(t, 1, flushEvents)
+				require.Nil(t, session)
+			} else {
+				require.Zero(t, flushEvents)
+				require.NotNil(t, session)
+			}
+			if tc.flushErr != nil {
+				assert.Contains(t, string(requestCtx.Response.Body()), "dashboard session persistence failed")
+				assert.NotContains(t, string(requestCtx.Response.Body()), tc.flushErr.Error())
+			}
 			encoded, err := json.Marshal(events)
 			require.NoError(t, err)
 			assert.NotContains(t, string(encoded), password)
 			assert.NotContains(t, string(encoded), hash)
 			assert.NotContains(t, string(encoded), "replacement-admin")
+			assert.NotContains(t, string(encoded), "auth-route-flush-session")
 			persisted, err := cs.GetAuthConfig(ctx)
 			require.NoError(t, err)
 			if tc.saveErr == nil {

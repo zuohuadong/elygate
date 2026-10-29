@@ -316,6 +316,24 @@ Elygate 当前定位收敛为：
 - 两个新增路由测试在 true/false 两种初始状态下共执行 36 次歧义请求，均返回 400，并比较完整状态和审计快照保持不变。日志位于 `.codex-tmp/strict-boolean-sqlite-20261029.jsonl`、`.codex-tmp/strict-boolean-postgres-20261029.log`；私有集群及退出日志位于 `.codex-tmp/elygate-cp-pg.rNFg7V/`。本轮较长的等待主要发生在测试执行前的外盘 Go 缓存装载，没有因观察超时重启测试。
 - decoder 源码与边界测试的命名文件 `go vet` 通过；命名文件测试语句覆盖率为 100%，覆盖文件位于 `.codex-tmp/strict-boolean-coverage-20261029.out`，这不是控制面整包覆盖率。`gofmt`、`git diff --check` 和 clean-code-guard 通过。本后续项为本地 `PASS_SCOPED`，未提交、推送或部署；不构成完整后端包回归、生产迁移、备份恢复、认证环境或多用户验收。其他平台功能及生产验收缺口不变，原总目标继续 active / PARTIAL。
 
+### 2026-10-29 管理员配置变更后的会话批量失效审计后续项
+
+- follow-up `dashboard-session-flush-audit`：parent 为管理员会话审计与认证配置审计，source 为 `f7d335617` 及管理审计覆盖矩阵剩余项 2，reason 为认证配置改变后的会话批量删除尚未与审计同事务提交。完整冻结契约位于 `.codex-tmp/dashboard-session-flush-contract-20261029.md`。
+- 范围为控制面会话审计、ConfigHandler 窄清理回调、server 注入及对应测试和文档。认证与事务高风险，panel 模式：root 唯一 writer、两位隔离只读 reviewer、最多两轮；升级原因为认证身份与批量删除事务安全。沿用 Go 1.27.3、fasthttp、GORM、SQLite/PostgreSQL，不改 schema、依赖、员工会话或推理路径；不自动提交、推送或部署。
+- 删除与 `dashboard_sessions.flushed`（`dashboard_session/all`）聚合事件同事务，实际删到行才记一条；空表/重复清理不记事件，不逐行加载或解密凭据。身份取自变更前已验证请求的上下文；Basic 保留旧管理员身份，会话使用既有固定管理员身份，首次设置、bypass 与匿名保持匿名，客户端身份 header 不参与解析。
+- 保留上游“保存认证配置后再清理会话”的部分成功边界：删除/审计失败或提交前取消时回滚删除及聚合审计，不回滚已保存配置、运行时发布及原有 `auth_config.updated` 事件；丢失提交确认仍为不确定结果，不能声称必定回滚。SQL 使用独立的 30 秒标准 context，不将 RequestCtx 传给数据库。并发新会话遵循单条 DELETE 的数据库可见性，本项不声称串行化登录与改密，也不补失败登录、自动过期或 setup/WS ticket 审计。
+- 验证结果：Go 1.27.3 下三个相关包构建及 `-vet=all` 通过；最终控制面测试夹具修正后单独重新构建（`-ldflags='-s -w'`，未启用 race）。`^TestDashboardSession` 在 SQLite 和 PostgreSQL 各通过 15 项顶层测试，包含 15 个真实配置路由子场景及取消、并发、失败回滚、加密/损坏密文、数据库重新打开；handlers 的认证配置审计和 bypass 口令证明两组回归通过，server 真实认证路由的 5 个场景通过。两位只读 reviewer 各完成两轮，最终均为静态 `PASS_SCOPED`，不替代上述运行结果。
+- 证据位于 `.codex-tmp/dashboard-flush-{sqlite,postgres}-verified-20261029.log`、`dashboard-flush-handlers-final-20261029.log`、`dashboard-flush-server-final-20261029.log` 和 `dashboard-flush-source-final-20261029.sha256`。PostgreSQL 沿用现有 runner 的私有 Unix socket 生命周期直接运行最终测试二进制，目录为 `.codex-tmp/elygate-cp-pg.gvHaEt/`；剩余测试数据库为 0，实例已停止。早期 RequestCtx 未初始化超时和客户端零值配置意外触发 compat 重载的夹具失败均已修正；原失败日志保留，未计作通过。较长等待主要发生在外盘依赖装载和 Go 链接阶段。
+- 请求流成本：只在管理认证配置变更时运行，不改推理路径，也没有新增长驻缓存；一次 bulk DELETE、最多一个固定形状审计事件及独立 30 秒 context。最终原生非 race 微基准使用本机 Apple M4、外盘 SQLite，`-benchtime=10x -count=3 -benchmem`，各列三次采样中位数如下；日志为 `.codex-tmp/dashboard-flush-bench-verified-20261029.log`。小样本只描述此本地管理操作，不构成推理性能 SLA、生产容量或 PostgreSQL 性能结论。
+
+| 会话数 | 上游 ns/op | 审计版 ns/op | 上游 B/op / allocs/op | 审计版 B/op / allocs/op |
+| --- | ---: | ---: | ---: | ---: |
+| 0 | 38158 | 40825 | 5408 / 63 | 8000 / 81 |
+| 1 | 36167 | 80200 | 5408 / 63 | 13800 / 147 |
+| 16 | 38688 | 77533 | 5408 / 63 | 13800 / 147 |
+
+- `gofmt`、`git diff --check` 和 clean-code-guard 通过，本后续项为本地 `PASS_SCOPED`。本次提交和推送按用户明确指令执行，其他工作区改动不混入；未部署，未运行 race 或完整后端包回归，不构成生产迁移、恢复、真实外部账号或多用户验收。原总目标继续 active / PARTIAL。
+
 ## 3. 单机部署架构
 
 ```text

@@ -107,9 +107,10 @@ type ConfigManager interface {
 // ConfigHandler manages runtime configuration updates for Bifrost.
 // It provides endpoints to update and retrieve settings persisted via the ConfigStore backed by sql database.
 type ConfigHandler struct {
-	store         *lib.Config
-	configManager ConfigManager
-	saveMu        sync.Mutex // Serializes updateConfig from snapshot through publication
+	store          *lib.Config
+	configManager  ConfigManager
+	sessionFlusher func(*fasthttp.RequestCtx) error
+	saveMu         sync.Mutex // Serializes updateConfig from snapshot through publication
 	// vectorStoreMutationMu serializes vector-store config writes against
 	// startup publication of the resolved config.
 	vectorStoreMutationMu sync.Mutex
@@ -122,6 +123,18 @@ func NewConfigHandler(configManager ConfigManager, store *lib.Config) *ConfigHan
 		configManager: configManager,
 		store:         store,
 	}
+}
+
+// SetSessionFlusher installs a transport-owned transactional session invalidator before routes are served.
+func (h *ConfigHandler) SetSessionFlusher(flush func(*fasthttp.RequestCtx) error) {
+	h.sessionFlusher = flush
+}
+
+func (h *ConfigHandler) flushSessions(ctx *fasthttp.RequestCtx) error {
+	if h.sessionFlusher != nil {
+		return h.sessionFlusher(ctx)
+	}
+	return h.store.ConfigStore.FlushSessions(ctx)
 }
 
 // RegisterRoutes registers the configuration-related routes.
@@ -1255,7 +1268,7 @@ func (h *ConfigHandler) updateConfig(ctx *fasthttp.RequestCtx) {
 
 		// Flush all existing sessions if auth details have been changed
 		if authChanged {
-			if err := h.store.ConfigStore.FlushSessions(ctx); err != nil {
+			if err := h.flushSessions(ctx); err != nil {
 				logger.Warn("updated auth config but failed to flush existing sessions, please restart the server: %v", err)
 				SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("updated auth config but failed to flush existing sessions, please restart the server: %v", err))
 				return

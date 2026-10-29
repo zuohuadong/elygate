@@ -3060,6 +3060,7 @@ func (s *BifrostHTTPServer) RegisterAPIRoutes(ctx context.Context, callbacks Ser
 		}
 		s.ControlPlaneHandler = controlplane.NewHandler(controlPlaneStore, govLogManager, s)
 		sessionConfigStore = controlPlaneStore.ConfigStoreWithSessionAudit()
+		configHandler.SetSessionFlusher(controlPlaneStore.FlushDashboardSessions)
 		middlewares = append(append([]schemas.BifrostHTTPMiddleware{}, middlewares...), s.ControlPlaneHandler.ManagementAuditMiddleware(logger))
 	}
 	sessionHandler := handlers.NewSessionHandler(sessionConfigStore, s.WSTicketStore)

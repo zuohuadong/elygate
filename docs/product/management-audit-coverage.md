@@ -1,6 +1,6 @@
 # Management Audit Coverage
 
-Updated: 2026-10-27. This is a coverage inventory, not a claim that every
+Updated: 2026-10-29. This is a coverage inventory, not a claim that every
 administrator mutation has transactional audit enforcement.
 
 ## Persistence Boundaries
@@ -15,8 +15,25 @@ administrator mutation has transactional audit enforcement.
   ciphertext. Creation and valid-session deletion use fixed `local-admin`;
   expired-session deletion is anonymous. Empty, unknown, ciphertext and
   repeated logout tokens add no event. Public write errors contain no database
-  diagnostics. This does not audit bulk FlushSessions, setup/WS tickets,
-  failed login attempts or employee sessions.
+  diagnostics. This wrapper does not globally replace ConfigStore or audit
+  setup/WS tickets, failed login attempts or employee sessions.
+- Auth-config changes use a separate, narrowly injected ConfigHandler
+  session-flush callback. A single bulk DELETE and one
+  `dashboard_sessions.flushed` event for `dashboard_session/all` commit in the
+  same transaction, only when rows were actually removed. Empty/repeated
+  flushes add no event. The operation includes expired sessions and never
+  loads/decrypts token content; no token, digest, ciphertext or per-session
+  event is included. Trusted request metadata retains the pre-change
+  Basic/session identity; bypassed, anonymous and setup-token callers are
+  anonymous. SQL uses a separate bounded standard context, not RequestCtx.
+  Public errors are content-free. Delete/audit failure or cancellation before
+  commit rolls back the session deletion, not the already-saved authentication
+  config, its in-memory publication or its post-commit `auth_config.updated`
+  producer. A lost commit acknowledgement remains indeterminate, not proof
+  that either transaction outcome occurred. This is an
+  aggregate deletion contract, not a login-admission barrier: concurrently
+  created sessions are bounded by the DELETE statement's visibility, as with
+  upstream FlushSessions. Other direct ConfigStore callers remain unchanged.
 - Virtual-key governance mutations can append the existing signed governance
   chain when signing is configured. The control-plane feed also reads that
   chain.
@@ -106,6 +123,7 @@ write paths.
 | Client config, metadata, proxy and pricing sync | `config.go` | Existing producer records; no raw config snapshots persisted by bridge |
 | Dashboard administrator authentication config | `config.go`, `auditchange.go` | Successful-save producer; first setup, enable/disable, credential changes/preservation, rejected/failed save and post-save session-flush failure regressions; real authenticated route/bridge and SQLite reopen coverage |
 | Dashboard administrator login and explicit logout | `controlplane/sessionaudit.go`, SessionHandler-only server wiring | Transactional session and audit writes; registered login/logout and protected feed, rollback and error redaction, encrypted/upstream plaintext lookup, concurrent valid/expired logout and real close/reopen regressions on SQLite and PostgreSQL |
+| Dashboard session invalidation after administrator auth-config changes | `controlplane/sessionaudit.go`, ConfigHandler-only flush callback | Aggregate event atomic with actual deletion; focused SQLite/PostgreSQL transaction, authenticated-route and reopen regressions pass, with SQLite server-route integration; evidence and local benchmark conditions in the 2026-10-29 product-roadmap follow-up; does not make config save and invalidation one transaction |
 | Plugins | `plugins.go` | Existing producer tests; later reload errors must not hide committed changes |
 | MCP clients, library and virtual MCPs | `mcp.go`, `virtualmcp.go` | Existing producer records; no credential-bearing snapshots persisted |
 | MCP credentials, OAuth consent and sessions | `mcpheaders.go`, `mcpsessions.go`, `mcpoauth2*.go` | Existing producer records; token values excluded by bridge |
@@ -141,8 +159,10 @@ transaction/locking behavior, not deployed backup or crash recovery.
    persistence can still lose an event.
 2. Audit all route mutations against this inventory, including the remaining
    session lifecycle and future upstream routes. Password-verified dashboard
-   login and explicit logout now have transactional audit; bulk FlushSessions
-   after auth-config changes, failed logins and setup/WS tickets do not.
+   login, explicit logout and auth-config-triggered bulk deletion now have
+   transactional audit implementations; failed logins and setup/WS tickets do
+   not. Login admission against concurrent credential changes is not serialized
+   by the bulk deletion event.
    Explicit Warp conversation deletion
    now has a producer; creation/chat turns and automatic retention are not
    covered by that deletion event. Topic start/cancel now have distinct
