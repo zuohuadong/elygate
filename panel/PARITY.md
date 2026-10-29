@@ -83,12 +83,28 @@ upstream UI.
   without exporting bodies, headers, metadata or plugin logs.
 - The log follow-up passed 27 focused tests, all 342 panel tests, Svelte
   diagnostics (zero errors/warnings), an isolated Vite production build and
-  diff checks. Complete browser download/cancellation/layout acceptance and
-  live backend/production acceptance remain pending; helper tests and builds
-  do not establish those boundaries.
-- Remaining panel gaps include structured route/usage editors and the pending
-  log workflow acceptance above. JSON editors expose the existing configuration
-  contract without claiming complete upstream UI parity.
+  diff checks. The follow-up browser suites then added 37 interaction/export
+  assertions, 43 boundary assertions and 33 layout/focus assertions across
+  1440x1000, 375x812 light/dark and 812x375 dark reduced-motion views. They
+  verified exact attribution identities, searchable facets beyond the first
+  100 options, retry and late-response isolation, fixed applied windows,
+  bounded 13/2,050/10,000-row CSV downloads, malformed/error/empty/repeated
+  pages, cancellation, unmount, statistics failure isolation, no horizontal
+  overflow, Escape and bidirectional Tab containment, opener-focus restore,
+  zero page errors and zero business writes. PapaParse confirmed 33 columns
+  and exact row counts for the downloaded CSV artifacts. Evidence scripts are
+  `.codex-tmp/relay-logs-browser-followup-20261030.mjs`,
+  `.codex-tmp/relay-logs-browser-boundaries-20261030.mjs` and
+  `.codex-tmp/relay-logs-browser-layout-20261030.mjs`, with captured logs under
+  `.codex-tmp/` and screenshots under `output/playwright/`. This remains local
+  scoped evidence, not proof of live backend traffic, external credentials or
+  production acceptance.
+- The malformed-success browser case also exposed an internal parser code in
+  the UI; it now maps that specific case to localized refresh/retry text and
+  has a focused regression. The total panel test count is now 343.
+- Remaining panel gaps include structured route/usage editors. JSON editors
+  expose the existing configuration contract without claiming complete
+  upstream UI parity.
 
 ## OSS and shared management routes
 
@@ -97,7 +113,7 @@ upstream UI.
 | `/login` | svadmin login + Bifrost auth provider | `/api/session/is-auth-enabled`, `/api/session/login`, `/api/session/logout` | Dedicated |
 | `/workspace/dashboard` | dashboard | `/api/logs/dashboard` | Dedicated |
 | `/workspace/logs` | logs | `/api/logs*`, `/api/ws`, cost recalculation and selected deletion | Dedicated |
-| `/workspace/relay-logs` | relay-logs | `/api/relay-logs*`, fixed applied time bounds, attribution/cost filters, list/stats/histogram/top-endpoints, details, selected deletion and bounded CSV export | Dedicated, complete browser/live acceptance pending |
+| `/workspace/relay-logs` | relay-logs | `/api/relay-logs*`, fixed applied time bounds, attribution/cost filters, list/stats/histogram/top-endpoints, details, selected deletion and bounded CSV export | Dedicated, local browser acceptance PASS_SCOPED; live/production acceptance separate |
 | `/workspace/relays` | relay-endpoints | `/api/relays*`, `/api/relays/openapi-spec`, full replacement CRUD, all auth schemes, JSON configuration and unsaved usage preview | Dedicated, OpenAPI import added; structured editors pending |
 | `/workspace/logs/connectors`, `/workspace/observability` | connectors | `/api/plugins`, `/api/plugins/{name}` | Dedicated |
 | `/workspace/mcp-logs`, legacy `/workspace/logs/mcp-logs` | mcp-logs | `/api/mcp-logs*` | Dedicated |

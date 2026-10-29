@@ -18,6 +18,13 @@ function readSvadminComponent(component: string): Promise<string> {
 }
 
 describe('panel issue regressions', () => {
+	test('relay log malformed responses use localized recovery text rather than an internal error code', async () => {
+		const source = await Bun.file(new URL('../pages/RelayLogsPage.svelte', import.meta.url)).text();
+		expect(source).toContain("cause instanceof Error && cause.message === 'invalid-relay-log-page'");
+		expect(source).toContain("text('日志响应无效，请刷新重试。', 'Invalid log response. Refresh to retry.')");
+		expect(source).toContain("displayError(cause, text('无法加载 Relay 日志。', 'Unable to load relay logs.'))");
+	});
+
 	test('provider keys route renders a dedicated key workspace', async () => {
 		const source = await Bun.file(new URL('../pages/ProvidersPage.svelte', import.meta.url)).text();
 		expect(source).toContain("resourceName === 'provider-keys'");

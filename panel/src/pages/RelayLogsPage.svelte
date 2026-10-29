@@ -106,7 +106,12 @@
 			if (total > 0 && page > totalPages) { page = totalPages; await load(); }
 			else if (total === 0 && page !== 1) { page = 1; await load(); }
 		} catch (cause) {
-			if (sequence === loadSeq) { logs = []; total = 0; stats = {}; histogram = []; topEndpoints = []; selectedIds = []; error = displayError(cause, text('无法加载 Relay 日志。', 'Unable to load relay logs.')); }
+			if (sequence === loadSeq) {
+				logs = []; total = 0; stats = {}; histogram = []; topEndpoints = []; selectedIds = [];
+				error = cause instanceof Error && cause.message === 'invalid-relay-log-page'
+					? text('日志响应无效，请刷新重试。', 'Invalid log response. Refresh to retry.')
+					: displayError(cause, text('无法加载 Relay 日志。', 'Unable to load relay logs.'));
+			}
 		} finally {
 			if (sequence === loadSeq) isLoading = false;
 		}
