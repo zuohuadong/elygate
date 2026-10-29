@@ -56,10 +56,12 @@ upstream UI.
   desktop/mobile/landscape light/dark layout. This is local scoped evidence,
   not proof of a live external MCP connection or production acceptance.
 - Relay workflows are locally `PASS_SCOPED`: focused helper contracts,
+  structured route/usage/streaming editors, Go `path.Match` glob validation,
   OpenAPI parsing/import contracts, Svelte diagnostics, isolated Vite build and
   fixture browser checks cover editor hydration/preview, failed-save draft
-  retention, relay logs and grant clearing across desktop/mobile/landscape
-  light/dark states. The 2026-10-30 OpenAPI browser follow-up also covered
+  retention, invalid-input recovery, keyboard focus trapping, relay logs and
+  grant clearing across desktop/mobile/landscape light/dark states. The
+  2026-10-30 OpenAPI browser follow-up also covered
   JSON/YAML paste, JSON/YAML files, guarded URL fetching, malformed/failed
   responses, explicit confirmation and auth/base-URL opt-in, existing-setting
   retention, stale file/parser/URL results, draft-change protection, Escape
@@ -102,9 +104,21 @@ upstream UI.
 - The malformed-success browser case also exposed an internal parser code in
   the UI; it now maps that specific case to localized refresh/retry text and
   has a focused regression. The total panel test count is now 343.
-- Remaining panel gaps include structured route/usage editors. JSON editors
-  expose the existing configuration contract without claiming complete
-  upstream UI parity.
+- Structured Relay editors now expose all 13 supported usage fields, route
+  ordering/header conditions and streaming paths, preserving unset, `0` and
+  `false` independently. Unknown configuration fields block replacement rather
+  than being silently dropped; async job configuration is not exposed because
+  the upstream field is excluded from JSON.
+- The structured-editor follow-up passed 33 focused tests, Svelte diagnostics
+  (zero errors/warnings), an isolated Vite build and 87 fixture browser
+  assertions across 1440x1000 light, 375x812 light/dark and 812x375 dark
+  reduced-motion views, with 12 screenshots captured and no page errors or
+  business writes. A 47,448-pattern corpus matched Go `path.Match` syntax
+  acceptance. Evidence scripts and logs are under `.codex-tmp/relay-rules-*`;
+  screenshots are under `output/playwright/relay-rules-*`.
+- Live upstream traffic, external credentials, production relay acceptance
+  and complete governance audit snapshots remain separate acceptance
+  boundaries. These editors do not claim complete upstream UI parity.
 
 ## OSS and shared management routes
 
@@ -114,7 +128,7 @@ upstream UI.
 | `/workspace/dashboard` | dashboard | `/api/logs/dashboard` | Dedicated |
 | `/workspace/logs` | logs | `/api/logs*`, `/api/ws`, cost recalculation and selected deletion | Dedicated |
 | `/workspace/relay-logs` | relay-logs | `/api/relay-logs*`, fixed applied time bounds, attribution/cost filters, list/stats/histogram/top-endpoints, details, selected deletion and bounded CSV export | Dedicated, local browser acceptance PASS_SCOPED; live/production acceptance separate |
-| `/workspace/relays` | relay-endpoints | `/api/relays*`, `/api/relays/openapi-spec`, full replacement CRUD, all auth schemes, JSON configuration and unsaved usage preview | Dedicated, OpenAPI import added; structured editors pending |
+| `/workspace/relays` | relay-endpoints | `/api/relays*`, `/api/relays/openapi-spec`, full replacement CRUD, all auth schemes, structured usage/streaming/routes configuration and unsaved usage preview | Dedicated, OpenAPI import and structured editors |
 | `/workspace/logs/connectors`, `/workspace/observability` | connectors | `/api/plugins`, `/api/plugins/{name}` | Dedicated |
 | `/workspace/mcp-logs`, legacy `/workspace/logs/mcp-logs` | mcp-logs | `/api/mcp-logs*` | Dedicated |
 | `/workspace/providers` | providers | `/api/providers*`, provider/key refresh routes | Dedicated |
