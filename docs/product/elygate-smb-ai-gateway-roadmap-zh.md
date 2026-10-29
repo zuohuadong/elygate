@@ -394,6 +394,15 @@ Elygate 当前定位收敛为：
 - 独立复核发现 malformed fallback 和负数/小数 TTFT 会被当作成功决策，已增加与后端契约一致的校验及正负边界回归；禁用 TTFT、未固定目标 Key、provider-only fallback 和固定 Key 时保留的空白 `provider_key_name` 不被误拒绝，非空配置别名仍拒绝。截图实测发现浅色错误文字仅 `3.73:1`，改用现有语义 token 的局部混色后，亮/暗文字与错误摘要分别为 `6.66:1` / `7.22:1`。不改 API、上游引擎或推理路径，没有新增长期状态。
 - 面板全量测试 294 项、1522 个断言通过，`svelte-check` 零错误/警告，Vite 生产构建通过；Go 路由仿真 handlers/server 定向测试通过。浏览器夹具不是真实管理员后端、数据库、部署或生产验收，真实后端到面板联调仍待补；统一策略的版本、发布、在线 Shadow、回滚仍未完成，原总目标保持 active / PARTIAL。
 
+### 2026-10-29 离线路由仿真真实本地联调
+
+- follow-up `routing-simulation-live-local`：parent 为 `routing-simulation-panel`，source 为 `e0eef1f1c` 后仍缺真实管理员后端到面板连线证据，reason 为 API fixture 与单独 Go 回归不能替代实际连线。Native、低风险、root 单 writer、external=0；仅使用临时目录、随机口令、loopback 和已有生产启动入口，不修改业务语义、生产数据或扩展验收框架。
+- 新编译 Go 1.27.3 夹具执行真实 `Bootstrap/Start`，使用独立 SQLite 控面/配置/日志库；当前生产面板 bundle 经保留 Host 的同源 Vite proxy 完成 Cookie 登录和完整规则导入，无浏览器 API 拦截。匿名仿真返回 401，已认证的异 Origin 请求返回 403。
+- 12 项联调检查通过：真实后端的匹配、未匹配和缺用量错误分别呈现；候选目标 Key、1234ms TTFT、空白 fallback alias 与固定 fallback Key、引擎 trace 均保留；下载 JSON 与提交输入和真实响应严格相等；后端 400 保留候选输入、清除结果且禁用导出。1440px/375px、亮/暗主题结果截图已检查，无横向溢出或页面异常。
+- 仿真前后的完整已存规则响应一致，浏览器路由写入仅有仿真 POST；正常停机且 WAL 消失后，以 immutable 只读 URI 再查 SQLite，确认仍只有原始规则、fallback 和未固定 Key 的目标。未配置 provider，样本使用显式合成快照，不代表实际供应商或用量验收。临时后端、preview 和浏览器均已关闭。
+- `.codex-tmp/routing-simulation-live-report.json` 记录源码 SHA、二进制/入口 bundle/夹具指纹、检查项及停机查询；源码为同目录 `routing-simulation-live-runtime.go`、`routing-simulation-live.mjs`，截图和下载位于 `output/playwright/routing-simulation-live-*`。最初链接因系统临时盘不足失败，改用 `/Volumes/Datas` 临时目录后构建通过；首次停机只读探测需改用既有 immutable URI 方式，随后全流程重跑通过。`bun run build` 同时刷新了 ignored HTTP UI 目录，无已跟踪产物变更或部署。
+- 本项为本地 `PASS_SCOPED`，关闭 SQLite 真实管理员后端到面板的连线缺口；PostgreSQL 浏览器链路、真实 Key 授权/计费、多用户、策略版本/发布/回滚/在线 Shadow、其他路线图功能和生产部署/恢复仍未完成。未提交或推送本增量，原总目标保持 active / PARTIAL。
+
 ## 3. 单机部署架构
 
 ```text

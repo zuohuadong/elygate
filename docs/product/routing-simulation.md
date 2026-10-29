@@ -122,7 +122,44 @@ fix; the original light-mode value was 3.73:1.
 Evidence: `.codex-tmp/routing-simulation-browser-final.log` and
 `output/playwright/routing-simulation-*`. These browser checks use API
 fixtures, not a live administrator backend, database, provider or deployment.
-They do not close the live backend-to-panel acceptance gap.
+They do not themselves close the live backend-to-panel acceptance gap.
+
+### Live Local Acceptance
+
+On 2026-10-29 a subsequent run used a freshly built Go 1.27.3 runtime,
+production `Bootstrap`/`Start`, private SQLite config/log stores and the
+current panel production bundle through its same-origin Vite proxy. The
+administrator password was generated for that run, passed over stdin and
+referenced through an environment variable, not saved in the config file.
+Providers were empty; all usage snapshots were synthetic, explicit input.
+No browser API responses were fulfilled by fixtures.
+
+All 12 checks passed: actual cookie login, anonymous 401 and authenticated
+foreign-Origin 403, complete canonical import, match/no-match/missing-usage
+states, key pins and the empty fallback alias, TTFT and engine trace, exact
+download-to-input/response comparison, backend 400 with retained input and
+cleared results/export, and desktop/mobile rendering in both themes. Stored
+rules were identical before and after evaluation. After graceful shutdown
+and WAL removal, an immutable read-only SQLite query independently confirmed
+the original rule, fallback and unpinned target remained unchanged.
+
+Evidence: `.codex-tmp/routing-simulation-live-report.json` records the source
+commit, runtime/bundle/helper hashes and assertions. The helper sources are
+`.codex-tmp/routing-simulation-live-runtime.go` and
+`.codex-tmp/routing-simulation-live.mjs`; screenshots and export use
+`output/playwright/routing-simulation-live-*`. The local `bun run build`
+also refreshed the ignored HTTP UI embed directory; it did not change
+tracked generated UI or deploy anything. An initial default-temp link failed
+for insufficient system-disk space; the successful build used `/Volumes/Datas`
+for its cache and temporary files. An initial stopped-database probe needed
+the existing immutable read-only URI pattern on that volume, then the entire
+run passed again.
+
+This closes the local SQLite administrator backend-to-panel wiring gap.
+It is not PostgreSQL browser acceptance, real provider/key authorization,
+real billing, multi-user isolation, deployment or production recovery.
+Policy versions, publishing, rollback and online Shadow remain unimplemented.
+The temporary backend, preview server and browser were closed after the run.
 
 ## Bounds And Cost
 
