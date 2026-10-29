@@ -27,10 +27,13 @@ Remove the remaining patch once npm ships a populated build version.
 
 ```sh
 bun install --frozen-lockfile
-bun test
+bun run test
 bun run check
 bunx --no-install vite build
 ```
+
+`bun run test` runs unit tests and the Vite proxy integration test in separate
+processes, preserving the proxy test's assertions and timeout.
 
 `bun run build` additionally copies the output into the HTTP transport's
 embedded UI directory. Use the direct Vite build when only validating the

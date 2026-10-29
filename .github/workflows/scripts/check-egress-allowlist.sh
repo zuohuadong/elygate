@@ -39,18 +39,30 @@ python3 - "${FILES[@]}" <<'PY'
 import sys
 import yaml
 
-# Hosts apt-get needs on a GitHub-hosted ubuntu runner. azure.archive.ubuntu.com
-# is the Azure-local mirror the runner images point at (plain HTTP), and
+# Hosts apt-get needs on a GitHub-hosted ubuntu runner once apt-sources-https.sh
+# has moved the sources to HTTPS. The images point at the Azure-local mirror over
+# plain HTTP, which serves no HTTPS, so the script swaps it for archive.ubuntu.com;
 # esm.ubuntu.com serves the Expanded Security Maintenance lists apt refreshes
 # alongside it.
-REQUIRED_APT_HOSTS = ("azure.archive.ubuntu.com:80", "esm.ubuntu.com:443")
+REQUIRED_APT_HOSTS = ("archive.ubuntu.com:443", "esm.ubuntu.com:443")
 # arm64 Ubuntu pulls from the ports mirror (ubuntu-ports), never the archive one;
 # the arm-64-2cpu-8gb image's apt sources point straight at ports.ubuntu.com.
-REQUIRED_ARM64_APT_HOSTS = ("ports.ubuntu.com:80",)
+REQUIRED_ARM64_APT_HOSTS = ("ports.ubuntu.com:443",)
 # install-arm64-runner-deps.sh runs apt-get itself, so a step calling it never
 # shows "apt-get" here; its `docker` component also adds Docker's apt repo.
 ARM64_INSTALLER = "install-arm64-runner-deps.sh"
-DOCKER_APT_HOST = "download.docker.com:443"
+# Installers that run apt-get themselves, and switch the sources to HTTPS first.
+APT_INSTALLERS = (ARM64_INSTALLER, "install-cross-compilers.sh")
+APT_SOURCES_HTTPS = "apt-sources-https.sh"
+# Docker's apt repo, plus apt's SRV probe for it, and the sigstore TUF root that
+# the freshly installed dockerd fetches when buildx bootstraps its builder.
+DOCKER_HOSTS = (
+    "download.docker.com:443",
+    "_https._tcp.download.docker.com:443",
+    "tuf-repo-cdn.sigstore.dev:443",
+)
+# The `aws` component pip-installs awscli into a venv.
+PYPI_HOSTS = ("pypi.org:443", "files.pythonhosted.org:443")
 
 failures = []
 checked = 0
@@ -65,11 +77,16 @@ for path in sys.argv[1:]:
         steps = job.get("steps") or []
 
         runs = [step.get("run") or "" for step in steps if isinstance(step, dict)]
-        uses_apt = any("apt-get" in run or ARM64_INSTALLER in run for run in runs)
+        uses_apt = any("apt-get" in run or any(i in run for i in APT_INSTALLERS) for run in runs)
         if not uses_apt:
             continue
         installs_docker = any(
             ARM64_INSTALLER in line and "docker" in line.split(ARM64_INSTALLER, 1)[1].split()
+            for run in runs
+            for line in run.splitlines()
+        )
+        installs_aws = any(
+            ARM64_INSTALLER in line and "aws" in line.split(ARM64_INSTALLER, 1)[1].split()
             for run in runs
             for line in run.splitlines()
         )
@@ -92,17 +109,29 @@ for path in sys.argv[1:]:
 
         checked += 1
         allowed = set((with_block.get("allowed-endpoints") or "").split())
+        # An inline apt-get update must switch the sources to HTTPS first, in the
+        # same step: otherwise apt reaches for the plain-HTTP mirror, which no
+        # allowlist carries any more, and fails as an opaque fetch timeout.
+        for run in runs:
+            update = run.find("apt-get update")
+            if update != -1 and run.find(APT_SOURCES_HTTPS) not in range(0, update):
+                failures.append((path, job_name, [f"{APT_SOURCES_HTTPS} before apt-get update"]))
+        plain = sorted(e for e in allowed if e.endswith("ubuntu.com:80"))
+        if plain:
+            failures.append((path, job_name, [f"no plain-HTTP apt host ({', '.join(plain)})"]))
         is_arm = "arm" in str(job.get("runs-on") or "").lower()
         required = REQUIRED_ARM64_APT_HOSTS if is_arm else REQUIRED_APT_HOSTS
         if installs_docker:
-            required += (DOCKER_APT_HOST,)
+            required += DOCKER_HOSTS
+        if installs_aws:
+            required += PYPI_HOSTS
         missing = [host for host in required if host not in allowed]
         if missing:
             failures.append((path, job_name, missing))
 
 for path, job_name, missing in failures:
     print(f"FAIL {path} :: job '{job_name}' runs apt-get under egress-policy: block "
-          f"but omits {', '.join(missing)}", file=sys.stderr)
+          f"but needs {', '.join(missing)}", file=sys.stderr)
 
 if failures:
     print(f"\n{len(failures)} of {checked} apt-using blocked-egress job(s) have an "
@@ -163,11 +192,24 @@ HARNESS_MARKERS = ("test-core.sh", "test-provider-harness.sh", "test-proxy-e2e.s
 NOT_DIALLED_HOSTS = {
     # Fetched by the provider's own server-side tooling, never by Bifrost.
     "example.com": "MCP server_url and web_fetch targets - dereferenced by the provider",
+    "mcp.deepwiki.com": "native OpenAI/Anthropic MCP tools - dereferenced by the provider",
     "www.youtube.com": "Gemini video input - Google fetches the URL server-side",
+    "www.wikipedia.org": "Gemini URL-context target - Google fetches the URL server-side",
     "en.wikipedia.org": "googleSearch excludeDomains filter value, not a URL anyone fetches",
     "placeholder.search.windows.net": "Azure AI Search placeholder in a request body; never resolved",
     # Deliberately unresolvable - negative tests assert the failure path.
     "bifrost.invalid": "reserved .invalid TLD; negative-path tests assert it fails to resolve",
+    "auth.example.invalid": "OAuth discovery fixture URL; no external authorization flow runs",
+    "dbx-fixture-workspace.invalid": "Databricks OAuth fixture injects its own transport response",
+    "does-not-exist-h146.search.windows.net": "Azure Search negative fixture - Azure dereferences it",
+    "does-not-exist-h150.invalid": "native MCP negative fixture - OpenAI dereferences it",
+    "does-not-resolve.invalid": "MCP registration negative fixture; resolution must fail",
+    "harness-credential-guard.example.invalid": "credential guard refuses the key before dialing",
+    "harness-endpoint-guard.example.invalid": "endpoint guard refuses the key before dialing",
+    "harness-lib-installed.invalid": "MCP library fixture transport, not a live external server",
+    "harness-plugin-guard.example.invalid": "plugin guard refuses collector changes before dialing",
+    "mcp.example.invalid": "OAuth management fixture, not a live MCP connection",
+    "other-mcp.invalid": "OAuth resource-mismatch fixture must be rejected",
     # Documentation links inside descriptions and comments.
     "anthropic.com": "doc link in a folder description",
     "www.anthropic.com": "doc link in a folder description",
@@ -175,10 +217,23 @@ NOT_DIALLED_HOSTS = {
     "developers.openai.com": "doc link in a folder description",
     "docs.aws.amazon.com": "doc link in a folder description",
     "docs.x.ai": "doc link in a folder description",
+    "ai.google.dev": "Gemini media-resolution and thinking documentation links",
+    "code.claude.com": "Claude safeguards documentation link",
+    "learn.microsoft.com": "Azure prompt-caching and files documentation links",
     "schema.getpostman.com": "Postman collection schema declaration, not fetched at run time",
     # Identifiers that merely look like endpoints.
     "s3.amazonaws.com": "XML namespace URI in a ListBucketResult document; namespaces are names, not fetches",
     "www.googleapis.com": "the cloud-platform OAuth SCOPE string; the token exchange itself goes to oauth2.googleapis.com",
+    "www.ietf.org": "SDP extension identifier in WebRTC fixture, not a fetched URL",
+    "www.w3.org": "SSML namespace identifier, not a fetched URL",
+    "evil.example": "invalid file identifiers and untrusted-origin negative fixtures",
+    "idp.example": "invalid OAuth key configurations rejected at save, before token exchange",
+    "inspector.example.com": "Origin header in an OAuth transport fixture",
+    "unlisted.example": "OAuth redirect URI used to test rejection, never followed",
+    "replace-me.search.windows.net": "unconfigured Azure Search variable default",
+    "s3.us-east-1.amazonaws.com": "SigV4 route-header management test never calls the relay",
+    "iamcredentials.googleapis.com": "Vertex AWS federation is not configured; CI uses service-account credentials",
+    "sts.googleapis.com": "Vertex AWS federation is not configured; CI uses service-account credentials",
 }
 
 HOST_RE = re.compile(r"https?://([A-Za-z0-9._-]+\.[A-Za-z]{2,})")

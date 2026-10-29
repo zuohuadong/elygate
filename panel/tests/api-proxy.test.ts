@@ -13,8 +13,8 @@ test('API proxy preserves browser Host and Origin for guarded administrator writ
 	try {
 		const backendPort = (backend.address() as AddressInfo).port;
 		proxy = await createViteServer({
-			root: new URL('../../', import.meta.url).pathname,
-			configFile: new URL('../../vite.config.ts', import.meta.url).pathname,
+			root: new URL('../', import.meta.url).pathname,
+			configFile: new URL('../vite.config.ts', import.meta.url).pathname,
 			optimizeDeps: { noDiscovery: true, include: [] },
 			server: {
 				host: '127.0.0.1', port: 0, strictPort: true,

@@ -11,9 +11,13 @@ trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/bin" "$WORK/base"
 
 # Only these real tools are visible, so the host's own jq/gcc/docker cannot leak in.
-for tool in awk bash cat grep mktemp rm seq; do ln -s "$(command -v "$tool")" "$WORK/base/$tool"; done
+for tool in awk bash cat chmod cmp cp grep mkdir mktemp rm sed seq; do ln -s "$(command -v "$tool")" "$WORK/base/$tool"; done
 
 printf 'VERSION_CODENAME=jammy\n' > "$WORK/os-release"
+# apt-sources-https.sh rewrites this fixture instead of /etc/apt, unprivileged so
+# the sudo stub does not swallow the copy.
+mkdir -p "$WORK/apt"
+reset_apt() { printf 'deb http://ports.ubuntu.com/ubuntu-ports jammy main\n' > "$WORK/apt/sources.list"; }
 GOOD_FPR=9DC858229FC7DD38854AE2D88D81803C0EBFCD88
 
 cat > "$WORK/base/sudo" <<'EOF'
@@ -44,6 +48,14 @@ for fpr in $TEST_KEY_PRIMARIES; do
   echo "fpr:::::::::D3306A018370199E527AE7997EA0A9C3F273FCD8:"
 done
 EOF
+# python3 stub: `python3 -m venv <dir>` makes <dir>/bin/pip, which logs its args.
+cat > "$WORK/base/python3" <<'EOF'
+#!/usr/bin/env bash
+echo "python3 $*" >> "$TEST_LOG"
+mkdir -p "$3/bin"
+printf '#!/usr/bin/env bash\necho "pip $*" >> "$TEST_LOG"\n' > "$3/bin/pip"
+chmod +x "$3/bin/pip"
+EOF
 cat > "$WORK/base/dpkg" <<'EOF'
 #!/usr/bin/env bash
 echo arm64
@@ -61,7 +73,9 @@ cat > "$WORK/present" <<'EOF'
 #!/usr/bin/env bash
 exit 0
 EOF
-chmod +x "$WORK/base/"* "$WORK/docker-full" "$WORK/docker-bare" "$WORK/present"
+# Only the stubs: $WORK/base also links to real tools, and GNU chmod follows a
+# link into a root-owned binary, so a glob fails for a non-root runner user.
+chmod +x "$WORK/base/"{sudo,ldconfig,curl,gpg,dpkg,python3} "$WORK/docker-full" "$WORK/docker-bare" "$WORK/present"
 
 passed=0
 # run <case-name> <tools on PATH> -- <components>...
@@ -75,23 +89,28 @@ run() {
       *) ln -s "$WORK/present" "$WORK/bin/$tool" ;;
     esac
   done
-  export TEST_LOG="$WORK/log"
+  export TEST_LOG="$WORK/log" RUNNER_TEMP="$WORK" GITHUB_PATH="$WORK/ghpath"
   : > "$TEST_LOG"
-  PATH="$WORK/bin:$WORK/base" OS_RELEASE="$WORK/os-release" \
+  : > "$GITHUB_PATH"
+  rm -rf "${WORK:?}/awscli-venv"
+  reset_apt
+  PATH="$WORK/bin:$WORK/base" OS_RELEASE="$WORK/os-release" APT_ROOT="$WORK/apt" APT_SUDO="" \
     "$BASH" "$SCRIPT_DIR/install-arm64-runner-deps.sh" "$@" > "$WORK/out" 2>&1
 }
 fail() { cat "$WORK/out" "$TEST_LOG" >&2; echo "FAIL: $1" >&2; exit 1; }
 ok() { echo "ok - $1"; passed=$((passed + 1)); }
 
 export TEST_HAS_LIBATOMIC=1 TEST_KEY_PRIMARIES="$GOOD_FPR"
-run "docker jq gh make gcc g++" node docker build jq gh || fail "full image errored"
+run "docker jq gh make gcc g++ aws" node docker build jq gh aws || fail "full image errored"
 [[ ! -s "$TEST_LOG" ]] || fail "full image still called sudo"
+grep -qx "deb http://ports.ubuntu.com/ubuntu-ports jammy main" "$WORK/apt/sources.list" || fail "full image still rewrote apt sources"
 ok "a full runner image installs nothing"
 
 export TEST_HAS_LIBATOMIC=0
 run "" node || fail "node errored"
 grep -qx "sudo apt-get install -y --no-install-recommends libatomic1" "$TEST_LOG" || fail "node did not install exactly libatomic1"
-ok "node installs libatomic1 when ldconfig lacks it"
+grep -qx "deb https://ports.ubuntu.com/ubuntu-ports jammy main" "$WORK/apt/sources.list" || fail "apt sources not switched to https before apt-get update"
+ok "node installs libatomic1 when ldconfig lacks it, after moving apt to https"
 
 run "make gcc" build jq gh || fail "build errored"
 grep -qx "sudo apt-get install -y --no-install-recommends make gcc g++ libc6-dev jq gh" "$TEST_LOG" || fail "build/jq/gh package list wrong"
@@ -113,6 +132,16 @@ done
 ok "a wrong or extra primary key fails before Docker's repo is added"
 
 export TEST_KEY_PRIMARIES="$GOOD_FPR"
+run "" aws || fail "aws errored"
+grep -qx "sudo apt-get install -y --no-install-recommends python3-venv" "$TEST_LOG" || fail "aws did not install python3-venv"
+grep -qx "pip install --no-cache-dir awscli==1.46.2" "$TEST_LOG" || fail "awscli not pinned"
+grep -qx "$WORK/awscli-venv/bin" "$GITHUB_PATH" || fail "venv bin not on GITHUB_PATH"
+ok "aws installs a pinned awscli into a venv on GITHUB_PATH"
+
+run "aws" aws || fail "aws-present errored"
+[[ ! -s "$TEST_LOG" ]] || fail "aws present still installed"
+ok "aws is skipped when already on PATH"
+
 if run "" nodejs; then fail "accepted unknown component"; fi
 [[ ! -s "$TEST_LOG" ]] || fail "unknown component still called sudo"
 ok "an unknown component fails without installing anything"
