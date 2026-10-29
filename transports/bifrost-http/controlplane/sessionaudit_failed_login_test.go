@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"path/filepath"
 	"testing"
 
@@ -49,11 +50,12 @@ func TestDashboardFailedLoginAuditRegisteredRoutes(t *testing.T) {
 		auth.APIMiddleware(), audit.ManagementAuditMiddleware(testLogger))
 
 	// Cases: repeated rejection, valid Basic/cookie headers, API-key bypass, corrupt hash.
-	for _, variant := range []string{"username", "password", "repeat", "basic", "cookie", "api-key", "hash-error"} {
+	for index, variant := range []string{"username", "password", "repeat", "basic", "cookie", "api-key", "hash-error"} {
 		t.Run(variant, func(t *testing.T) {
 			var httpRequest fasthttp.Request
 			request := &fasthttp.RequestCtx{}
-			request.Init(&httpRequest, nil, nil)
+			// Identity scenarios are independent; shared-source throttling has its own test.
+			request.Init(&httpRequest, &net.TCPAddr{IP: net.IPv4(192, 0, 2, byte(index+1))}, nil)
 			request.Request.Header.SetMethod("POST")
 			request.Request.SetRequestURI("/api/session/login")
 			request.Request.Header.Set("X-User-ID", "forged-actor-secret")
@@ -122,6 +124,68 @@ func TestDashboardFailedLoginAuditRegisteredRoutes(t *testing.T) {
 			require.NotContains(t, string(request.Response.Body()), secret)
 		}
 	}
+}
+
+func TestDashboardLoginRateLimitAuditRoutes(t *testing.T) {
+	store, cs := testControlPlaneStore(t)
+	ctx := context.Background()
+	testLogger := bifrost.NewDefaultLogger(schemas.LogLevelError)
+	handlers.SetLogger(testLogger)
+	hash, err := encrypt.Hash("rate-limit-test-password")
+	require.NoError(t, err)
+	require.NoError(t, cs.UpdateAuthConfig(ctx, &configstore.AuthConfig{IsEnabled: true,
+		AdminUserName: schemas.NewSecretVar("admin"), AdminPassword: schemas.NewSecretVar(hash)}))
+	auth, err := handlers.InitAuthMiddleware(cs, nil, nil, "")
+	require.NoError(t, err)
+	audit := NewHandler(store, nil)
+	r := router.New()
+	handlers.NewSessionHandler(store.ConfigStoreWithSessionAudit(), nil).RegisterRoutes(r,
+		auth.APIMiddleware(), audit.ManagementAuditMiddleware(testLogger))
+	login := func(source byte, body string) *fasthttp.RequestCtx {
+		request := &fasthttp.RequestCtx{}
+		request.Init(&fasthttp.Request{}, &net.TCPAddr{IP: net.IPv4(192, 0, 2, source)}, nil)
+		request.Request.Header.SetMethod("POST")
+		request.Request.SetRequestURI("/api/session/login")
+		request.Request.SetBodyString(body)
+		r.Handler(request)
+		return request
+	}
+	for attempt := range 6 {
+		request := login(10, fmt.Sprintf(`{"username":"rotated-%d"}`, attempt))
+		expected := 401
+		if attempt == 5 {
+			expected = 429
+		}
+		require.Equal(t, expected, request.Response.StatusCode())
+		require.Empty(t, request.Response.Header.PeekCookie("token"))
+		require.Empty(t, request.Response.Header.Peek(lib.HeaderAuditStatus))
+		require.Len(t, dashboardSessionAudits(t, store), min(attempt+1, 5))
+	}
+	for _, body := range []string{`{`, `{"username":"admin","password":"rate-limit-test-password"}`} {
+		request := login(10, body)
+		expected := 429
+		if body == `{` {
+			expected = 400
+		}
+		require.Equal(t, expected, request.Response.StatusCode())
+		require.Empty(t, request.Response.Header.PeekCookie("token"))
+		require.Len(t, dashboardSessionAudits(t, store), 5)
+	}
+	var sessions int64
+	require.NoError(t, cs.DB().Table("sessions").Count(&sessions).Error)
+	require.Zero(t, sessions)
+	request := login(11, `{"username":"admin","password":"rate-limit-test-password"}`)
+	require.Equal(t, 200, request.Response.StatusCode())
+	require.NotEmpty(t, request.Response.Header.PeekCookie("token"))
+	events := dashboardSessionAudits(t, store)
+	require.Len(t, events, 6)
+	require.Equal(t, "dashboard_session.created", events[5].Action)
+	for _, event := range events[:5] {
+		require.Equal(t, "anonymous", event.ActorID)
+		require.Equal(t, "dashboard_session.login_failed", event.Action)
+	}
+	require.NoError(t, cs.DB().Table("sessions").Count(&sessions).Error)
+	require.EqualValues(t, 1, sessions)
 }
 
 func TestDashboardFailedLoginAuditFailurePreservesUnauthorized(t *testing.T) {

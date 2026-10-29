@@ -21,6 +21,7 @@ import (
 type SessionHandler struct {
 	configStore   configstore.ConfigStore
 	wsTicketStore *WSTicketStore
+	loginLimiter  lib.PasswordLimiter
 	// setupLock is the OSS setup-lock gate (see AuthMiddleware.SetupLockMiddleware). Nil
 	// when the gate is not installed (enterprise, or no config store), in which case
 	// is-auth-enabled never reports setup_required.
@@ -36,6 +37,7 @@ func NewSessionHandler(configStore configstore.ConfigStore, wsTicketStore *WSTic
 	return &SessionHandler{
 		configStore:   configStore,
 		wsTicketStore: wsTicketStore,
+		loginLimiter:  lib.NewBoundedPasswordLimiter(5, 15*time.Minute, 4096),
 	}
 }
 
@@ -189,6 +191,17 @@ func (h *SessionHandler) login(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
+	authenticated := false
+	if h.loginLimiter != nil {
+		// Do not trust forwarded headers or let username rotation reset a budget.
+		finish, allowed := h.loginLimiter.Begin(ctx.RemoteIP().String(), "")
+		if !allowed {
+			SendError(ctx, fasthttp.StatusTooManyRequests, "Too many login attempts. Please try again later.")
+			return
+		}
+		defer func() { finish(authenticated) }()
+	}
+
 	// Get auth config
 	authConfig, err := h.configStore.GetAuthConfig(ctx)
 	if err != nil {
@@ -233,6 +246,7 @@ func (h *SessionHandler) login(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("Failed to create session: %v", err))
 		return
 	}
+	authenticated = true
 
 	// Setting cookies
 	cookie := fasthttp.AcquireCookie()

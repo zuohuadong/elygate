@@ -18,16 +18,30 @@ type passwordLimiterEntry struct {
 }
 
 type inMemoryPasswordLimiter struct {
-	mu        sync.Mutex
-	limit     int
-	window    time.Duration
-	entries   map[string]*passwordLimiterEntry
-	lastSweep time.Time
+	mu         sync.Mutex
+	limit      int
+	window     time.Duration
+	maxEntries int
+	entries    map[string]*passwordLimiterEntry
+	lastSweep  time.Time
 }
 
-// NewPasswordLimiter builds a fixed-window limiter: at most limit attempts are
+// NewPasswordLimiter builds a rolling-window limiter: at most limit attempts are
 // admitted per key within window.
 func NewPasswordLimiter(limit int, window time.Duration) PasswordLimiter {
+	return newPasswordLimiter(limit, window, 0)
+}
+
+// NewBoundedPasswordLimiter refuses new keys at capacity instead of evicting
+// active budgets. Non-positive maxEntries defaults to 4096 tracked keys.
+func NewBoundedPasswordLimiter(limit int, window time.Duration, maxEntries int) PasswordLimiter {
+	if maxEntries <= 0 {
+		maxEntries = 4096
+	}
+	return newPasswordLimiter(limit, window, maxEntries)
+}
+
+func newPasswordLimiter(limit int, window time.Duration, maxEntries int) *inMemoryPasswordLimiter {
 	if limit <= 0 {
 		limit = 5
 	}
@@ -35,9 +49,10 @@ func NewPasswordLimiter(limit int, window time.Duration) PasswordLimiter {
 		window = 15 * time.Minute
 	}
 	return &inMemoryPasswordLimiter{
-		limit:   limit,
-		window:  window,
-		entries: map[string]*passwordLimiterEntry{},
+		limit:      limit,
+		window:     window,
+		maxEntries: maxEntries,
+		entries:    map[string]*passwordLimiterEntry{},
 	}
 }
 
@@ -46,23 +61,18 @@ func (l *inMemoryPasswordLimiter) Begin(key, username string) (func(bool), bool)
 		return func(bool) {}, true
 	}
 	id := key + "\x00" + username
-	now := time.Now()
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	now := time.Now()
 
-	// Bound memory: drop expired buckets opportunistically.
-	if now.Sub(l.lastSweep) > l.window {
-		for k, entry := range l.entries {
-			if len(entry.attempts) == 0 || now.Sub(entry.attempts[len(entry.attempts)-1]) > l.window {
-				delete(l.entries, k)
-			}
-		}
-		l.lastSweep = now
-	}
+	l.sweepExpired(now)
 
 	entry := l.entries[id]
 	if entry == nil {
+		if l.maxEntries > 0 && len(l.entries) >= l.maxEntries {
+			return func(bool) {}, false
+		}
 		entry = &passwordLimiterEntry{}
 		l.entries[id] = entry
 	}
@@ -79,4 +89,22 @@ func (l *inMemoryPasswordLimiter) Begin(key, username string) (func(bool), bool)
 	}
 	entry.attempts = append(entry.attempts, now)
 	return func(bool) {}, true
+}
+
+func (l *inMemoryPasswordLimiter) sweepExpired(now time.Time) {
+	interval := l.window
+	// A saturated map must recover without waiting another full window, but
+	// rotating denied keys must not trigger an O(capacity) walk per request.
+	if l.maxEntries > 0 && len(l.entries) >= l.maxEntries && interval > time.Second {
+		interval = time.Second
+	}
+	if now.Sub(l.lastSweep) < interval {
+		return
+	}
+	for key, entry := range l.entries {
+		if len(entry.attempts) == 0 || !entry.attempts[len(entry.attempts)-1].After(now.Add(-l.window)) {
+			delete(l.entries, key)
+		}
+	}
+	l.lastSweep = now
 }

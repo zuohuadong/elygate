@@ -53,6 +53,23 @@ describe('Bifrost AuthProvider', () => {
 		expect(en.error?.message).toBe('Invalid username or password');
 	});
 
+	test('reports throttled login without refreshing authenticated capabilities', async () => {
+		const message = 'Too many login attempts. Please try again later.';
+		let requests = 0;
+		let authenticatedCallbacks = 0;
+		globalThis.fetch = (() => {
+			requests += 1;
+			return respond({ error: { message } }, 429);
+		}) as typeof fetch;
+		const provider = createBifrostAuthProvider(() => 'zh-CN', async () => { authenticatedCallbacks += 1; });
+		const result = await provider.login({ username: 'admin', password: 'secret' });
+		expect(result.success).toBe(false);
+		expect(result.redirectTo).toBeUndefined();
+		expect(result.error?.message).toBe(message);
+		expect(requests).toBe(1);
+		expect(authenticatedCallbacks).toBe(0);
+	});
+
 	test.each([200, 204, 401])('logout is idempotent for status %s', async (status) => {
 		globalThis.fetch = (async () => new Response(null, { status })) as typeof fetch;
 		const provider = createBifrostAuthProvider(() => 'en', async () => {});

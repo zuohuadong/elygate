@@ -377,6 +377,15 @@ Elygate 当前定位收敛为：
 - 固定元数据只随 RequestCtx 存活，无新增长期缓存；每次拒绝新增一条持久事件和同步事务，表存储随次数增长，没有新增限流或自动清理。错误用户名不需 bcrypt 即可触发写入，须保留匿名写放大风险。进程崩溃窗口、setup/WS tickets、员工失败登录、其他敏感路由、生产部署/恢复和整体路线图仍未完成。
 - 本项本地 `PASS_SCOPED`，报告 `.codex-tmp/failed-login-audit-results-20261029.json`，源码指纹 `.codex-tmp/failed-login-final-source.sha256`，测试、基线和基准日志均以 `failed-login-` 为前缀。未提交、推送或部署本轮修改，原总目标仍 active / PARTIAL。
 
+### 2026-10-29 Dashboard 登录限流后续项
+
+- follow-up `dashboard-login-rate-limit`：parent 为 `failed-dashboard-login-audit`，source 为失败登录审计的未完成成本边界，reason 为匿名错误凭据会为每次尝试同步写入审计事务。root 唯一 writer；认证和未授权资源放大按高风险处理，两位只读 reviewer 最终通过。本项只扩展现有 `PasswordLimiter` 和 Dashboard SessionHandler，不新增依赖、schema、配置、环境变量、分布式状态或旧 Elygate 兼容层。
+- 生产 `NewSessionHandler` 使用 RemoteIP-only、空 username 的进程内 limiter：每个连接来源滚动 15 分钟最多 5 次，最多保留 4096 个来源桶，每桶最多 5 个时间戳。用户名轮换、`X-Forwarded-For`、`X-Real-IP` 不能重置桶；已存在来源在容量满时仍可消耗余额，新来源在满容量时拒绝且不驱逐活跃桶。满容量扫描最多每秒一次；重启清空，多实例不共享，代理/NAT 共享来源预算，这不是完整分布式安全边界。
+- JSON malformed 仍在 limiter 前返回 400，缺少 config store 仍返回 403；已耗尽请求优先稳定返回 429，不读取认证配置、不比较 bcrypt、不创建 session、不生成失败审计。被准入请求保留既有 200/401/403/500 语义，并且成功、认证关闭、配置读取失败、会话写失败都消费一次预算；失败审计仍只为实际凭据拒绝生成一条事件。生产构造器始终初始化 limiter，现有 direct `SessionHandler` 测试构造的 nil limiter 旁路保持显式且仅限同包测试。
+- 覆盖 0/1/5/6 次、用户名及转发头轮换、不同来源、fresh handler、满容量与过期回收、清扫节流、并发同源/多源、malformed 优先级、disabled/config/session/success、finish 回调和原有员工 limiter 语义；控制面真实路由覆盖前五次审计、第六次无审计/无 session、不同来源成功。SQLite 控制面 26 个顶层测试、42 个子测试及 handler/lib race 通过；私有 PostgreSQL 同范围通过，测试库剩余 0、实例已停止；员工认证聚焦 race 通过；四包 vet、gofmt、diff 检查和面板 auth 测试通过。
+- 基准条件为 Apple M4、Go 1.27.3、无真实网络；限流器旧实现 admitted/denied 约 60/64 ns、8 B、1 alloc，修改后原构造路径约 71/78 ns、bounded 约 70/76 ns、8 B、1 alloc；handler 错误用户名中位数约 1.19 µs/12 alloc → 2.18 µs/15 alloc，错误密码约 747 µs/23 alloc → 762 µs/26 alloc，成功约 763 µs/21 alloc → 748 µs/24 alloc。handler 使用 bcrypt MinCost 与测试 ConfigStore，准入样本每五次在计时外换新 limiter，包含每五次一次的冷来源成本；4096 活跃桶强制清扫中位数 36189 ns、16 B、1 alloc，默认最多每秒一次。数字含本地负载噪声，不宣称生产吞吐或提速；结果 `.codex-tmp/dashboard-login-rate-limit-results-20261029.json`，日志 `.codex-tmp/dashboard-login-limit-*`，源码指纹 `.codex-tmp/dashboard-login-limit-source.sha256`。
+- 本项本地 `PASS_SCOPED`，未部署、未做多实例/代理真实环境或生产恢复验收；审计 retention、crash window、setup/WS tickets、员工失败登录事件、其他敏感路由、统一策略和完整产品路线图仍未完成。原总目标保持 active / PARTIAL。
+
 ## 3. 单机部署架构
 
 ```text

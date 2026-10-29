@@ -29,7 +29,24 @@ administrator mutation has transactional audit enforcement.
   body, adds `X-Elygate-Audit-Status: failed` and logs a content-free error.
   This synchronous per-attempt transaction increases unauthenticated database
   writes (including wrong usernames without bcrypt work); it does not add
-  login rate limiting, automatic audit retention, or a crash-safe outbox.
+  automatic audit retention or a crash-safe outbox.
+- The production dashboard session handler limits parsed login attempts to
+  five per connection-source IP in a rolling fifteen-minute window, before its
+  configuration lookup, password comparison, session write or failure producer.
+  Username changes and forwarded-IP headers cannot reset the budget. A denied
+  request returns 429 without an audit event; malformed JSON remains 400 before
+  limiting (the existing missing-store 403 still takes precedence). Admitted
+  requests retain their existing 200/401/403/500 behavior, and every admitted
+  attempt consumes budget, including successful login or storage failure.
+  State is process-local and caps tracked sources at 4096; a full map rejects
+  new sources rather than evicting live budgets, while known sources retain
+  their remaining attempts. At capacity, expired-bucket sweeping runs at most
+  once per second, so freed capacity may take one second to become available.
+  Source IPs and at most five timestamps per source are held only in bounded
+  memory, not persisted by this limiter. Proxy/NAT users share the connection
+  source's budget; capacity saturation can deny new sources until expiry,
+  restart resets budgets, and replicas do not share counters. This is not
+  a distributed abuse-prevention or audit-retention guarantee.
 - Auth-config changes use a separate, narrowly injected ConfigHandler
   session-flush callback. A single bulk DELETE and one
   `dashboard_sessions.flushed` event for `dashboard_session/all` commit in the

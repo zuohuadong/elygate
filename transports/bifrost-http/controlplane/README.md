@@ -539,9 +539,24 @@ Malformed payloads, unavailable/disabled authentication, config read failures
 and session write failures do not record credential rejection. A failed audit
 write keeps the original 401 response and adds the audit-failure header.
 Every rejected attempt adds a synchronous config-store audit transaction;
-this does not provide login rate limiting, automatic audit retention or
-crash-safe delivery. No failure-audit work is added to successful logins or
+this bridge does not itself provide automatic audit retention or crash-safe
+delivery. No failure-audit work is added to successful logins or
 the inference request path.
+
+Production dashboard password login separately admits at most five parsed
+attempts per connection-source IP in a rolling fifteen-minute window. Username
+rotation and forwarded-IP headers cannot select another budget. A throttled
+request returns 429 before handler config/password/session/audit work; malformed
+JSON still returns 400 first, except the existing missing-config-store 403.
+All admitted attempts consume budget, including successes and storage failures.
+The process-local limiter retains at most 4096 sources with five timestamps
+each (slice capacity at most eight), and refuses new sources at capacity
+without evicting live budgets. Capacity reclamation is swept at most once per
+second; normal expiry sweeps are opportunistic. No new durable state or
+inference-path work is introduced. Proxy/NAT users share a budget, source
+saturation can deny new sources until expiry, restart resets counters, and
+replicas are independent. This does not guarantee distributed login
+availability or bound total retained audit history.
 
 This is post-handler persistence (post-commit for mutations), not
 mutation-and-audit atomicity. Existing
