@@ -633,6 +633,11 @@ func (h *SkillsHandler) shiftVersion(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
+	targetName := id
+	if before != nil {
+		targetName = before.Name
+	}
+	lib.RecordAuditChange(ctx, "skill.version_shifted", "skill", id, targetName, auditSkill(before), nil)
 	skill, err := h.store.GetSkill(ctx, id)
 	if err != nil {
 		logger.Error("failed to reload skill after version shift: %v", err)
@@ -640,7 +645,7 @@ func (h *SkillsHandler) shiftVersion(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	lib.RecordAuditChange(ctx, "skill.version_shifted", "skill", skill.ID, skill.Name, auditSkill(before), auditSkill(skill))
+	updateLastSkillAuditAfter(ctx, auditSkill(skill))
 
 	SendJSON(ctx, map[string]any{
 		"skill": skill,
@@ -708,6 +713,7 @@ func (h *SkillsHandler) updateSkill(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
+	lib.RecordAuditChange(ctx, "skill.updated", "skill", skill.ID, skill.Name, before, nil)
 	reloadedSkill, err := h.store.GetSkill(ctx, id)
 	if err != nil {
 		logger.Error("failed to reload skill after update: %v", err)
@@ -715,7 +721,7 @@ func (h *SkillsHandler) updateSkill(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	lib.RecordAuditChange(ctx, "skill.updated", "skill", reloadedSkill.ID, reloadedSkill.Name, before, auditSkill(reloadedSkill))
+	updateLastSkillAuditAfter(ctx, auditSkill(reloadedSkill))
 
 	SendJSON(ctx, map[string]any{
 		"skill": reloadedSkill,
@@ -786,6 +792,16 @@ func auditSkill(skill *tables.TableSkill) any {
 		"skill_md_bytes":         len(skill.SkillMDBody),
 		"files":                  files,
 	}
+}
+
+func updateLastSkillAuditAfter(ctx *fasthttp.RequestCtx, after any) {
+	changes, ok := ctx.UserValue(configstore.AuditChangesUserValueKey).([]configstore.AuditChange)
+	if !ok || len(changes) == 0 {
+		return
+	}
+	last := len(changes) - 1
+	changes[last].After = lib.AuditSnapshot(after)
+	ctx.SetUserValue(configstore.AuditChangesUserValueKey, changes)
 }
 
 // skillMapKeys lists a map's keys in order. Free-form skill maps are recorded by key only, since their values may hold secrets.
