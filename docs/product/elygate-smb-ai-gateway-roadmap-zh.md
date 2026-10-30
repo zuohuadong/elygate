@@ -498,6 +498,13 @@ Elygate 当前定位收敛为：
 - 定向证据及请求/持久化成本见 [专项记录](employee-login-failure-audit.md)。
   按用户明确要求提交推送；不新增旧 Elygate 兼容层，不涉及推理路径或部署。
   全产品、分布式防滥用、完整审计及生产验收仍保持 active / PARTIAL。
+- 后续项 `employee-login-postgres-matrix-verification` 以 `3acde7884` 为 parent，
+  仅复验先前超时的数据库矩阵：同一 race 二进制的三项顶层测试及十三项
+  拒绝/排除子用例现已通过，未修改业务、夹具或断言；当前源码 server 整包
+  非 race 回归通过；员工 SQLite 整包 race 的 47 项顶层测试及 116 项子测试
+  也已通过，零失败、跳过与 race warning。私有 PostgreSQL 的测试库已清理，
+  确认停机；历史失败日志保留。用户于 2026-10-31 明确要求提交并推送
+  本次证据更新；不涉及部署，不改变原上线目标。
 
 ## 3. 单机部署架构
 
