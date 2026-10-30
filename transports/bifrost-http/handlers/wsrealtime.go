@@ -206,7 +206,11 @@ func (h *WSRealtimeHandler) handleUpgrade(ctx *fasthttp.RequestCtx) {
 			Model:    model,
 		},
 	}
-	h.client.RunPreRequestHooks(preReqCtx, preReq)
+	if refusal := h.client.RunPreRequestHooksChecked(preReqCtx, preReq); refusal != nil {
+		preReqCancel()
+		SendBifrostError(ctx, refusal)
+		return
+	}
 	// Second admission question, now that the pipeline has resolved the request's access: a
 	// presented credential that resolved to nothing (forged or revoked sk-bf-*) is refused with
 	// a plain 401 before the upgrade, before a session slot is allocated, and before an
@@ -266,7 +270,7 @@ func (h *WSRealtimeHandler) handleUpgrade(ctx *fasthttp.RequestCtx) {
 	// fasthttp UserValue slots after HTTPTransportPreHook runs. We snapshot them now
 	// because the fasthttp RequestCtx is recycled after the handler returns — the
 	// WebSocket session outlives it.
-	middlewareContextValues := snapshotRealtimeMiddlewareValues(ctx)
+	middlewareContextValues := snapshotRealtimeMiddlewareValuesWithContext(ctx, preReqCtx)
 
 	upgrader := h.websocketUpgrader(rtProvider.RealtimeWebSocketSubprotocol())
 	err = upgrader.Upgrade(ctx, func(conn *ws.Conn) {
@@ -345,7 +349,11 @@ func (h *WSRealtimeHandler) handleTranscriptionUpgrade(
 				Model:    model,
 			},
 		}
-		h.client.RunPreRequestHooks(preReqCtx, preReq)
+		if refusal := h.client.RunPreRequestHooksChecked(preReqCtx, preReq); refusal != nil {
+			clientConn.writeRealtimeError(refusal)
+			preReqCancel()
+			return
+		}
 		// The transcription model arrives in-band after the upgrade, so the resolution check
 		// necessarily runs post-upgrade here. It still runs before the session slot and the
 		// upstream connection, so an unresolved credential spends nothing beyond the socket.

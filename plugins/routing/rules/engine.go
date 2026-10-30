@@ -136,7 +136,11 @@ func (re *Engine) EvaluateRoutingRules(ctx *schemas.BifrostContext, routingCtx *
 		return nil, fmt.Errorf("routing context cannot be nil")
 	}
 	ruleReader := ReadStore(re.rules)
-	if snapshotter, ok := re.rules.(Snapshotter); ok {
+	if snapshotter, ok := re.rules.(interface {
+		SnapshotForRequest(*schemas.BifrostContext) ReadStore
+	}); ok {
+		ruleReader = snapshotter.SnapshotForRequest(ctx)
+	} else if snapshotter, ok := re.rules.(Snapshotter); ok {
 		ruleReader = snapshotter.Snapshot()
 	}
 	maxDepth := 0

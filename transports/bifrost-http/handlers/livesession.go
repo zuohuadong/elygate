@@ -117,10 +117,12 @@ func (g *liveGateway) resolveSession(ctx *fasthttp.RequestCtx, req *liveRequest)
 		return refuse(bifrostErr)
 	}
 	req.provider, req.providerKey = provider, providerKey
-	g.client.RunPreRequestHooks(req.preReqCtx, &schemas.BifrostRequest{
+	if refusal := g.client.RunPreRequestHooksChecked(req.preReqCtx, &schemas.BifrostRequest{
 		RequestType:      schemas.LiveRequest,
 		ResponsesRequest: &schemas.BifrostResponsesRequest{Provider: providerKey},
-	})
+	}); refusal != nil {
+		return refuse(refusal)
+	}
 	if g.config.ClientConfig.EnforceAuthOnInference && !governance.PresentedCredentialResolved(req.preReqCtx) {
 		return refuse(newRealtimeWireBifrostError(401, "invalid_request_error", realtimeUnresolvedCredentialMessage))
 	}
@@ -264,7 +266,9 @@ func (g *liveGateway) resolveTarget(preReqCtx *schemas.BifrostContext, path stri
 		RequestType:      schemas.LiveRequest,
 		ResponsesRequest: &schemas.BifrostResponsesRequest{Provider: providerKey, Model: voiceModel},
 	}
-	g.client.RunPreRequestHooks(preReqCtx, preReq)
+	if refusal := g.client.RunPreRequestHooksChecked(preReqCtx, preReq); refusal != nil {
+		return liveTarget{}, refusal
+	}
 	if g.config.ClientConfig.EnforceAuthOnInference && !governance.PresentedCredentialResolved(preReqCtx) {
 		return liveTarget{}, newRealtimeWireBifrostError(401, "invalid_request_error", realtimeUnresolvedCredentialMessage)
 	}

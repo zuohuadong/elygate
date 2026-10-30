@@ -304,13 +304,16 @@ func (h *WebRTCRealtimeHandler) runWebRTCRelay(
 	// exactly as the WebSocket path does before its upgrade. The request's provider and model
 	// are already resolved for WebRTC, so routing mutations are not read back; this exists so
 	// the resolution check below reads the same answer the per-turn pipeline will.
-	h.client.RunPreRequestHooks(bifrostCtx, &schemas.BifrostRequest{
+	if refusal := h.client.RunPreRequestHooksChecked(bifrostCtx, &schemas.BifrostRequest{
 		RequestType: schemas.RealtimeRequest,
 		ResponsesRequest: &schemas.BifrostResponsesRequest{
 			Provider: providerKey,
 			Model:    model,
 		},
-	})
+	}); refusal != nil {
+		SendBifrostError(ctx, refusal)
+		return
+	}
 	// Second admission question: a presented credential that resolved to nothing (forged or
 	// revoked sk-bf-*) is refused before any key is selected and before the SDP exchange
 	// reaches the provider.

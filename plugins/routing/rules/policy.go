@@ -13,6 +13,9 @@ import (
 // re-preparing; a conflict is not authorization to overwrite concurrent edits.
 var ErrPolicyConflict = errors.New("routing policy generation changed")
 
+var ErrPolicyAdmissionClosed = errors.New("routing policy admission is closed")
+var ErrPolicyManaged = errors.New("routing policy is managed by complete releases")
+
 // PreparedPolicy owns an unpublished complete policy. It is bound to one store
 // and base generation; retaining it also retains that base until it is released.
 type PreparedPolicy struct {
@@ -33,9 +36,15 @@ func (rs *LocalStore) UpdateChainMaxDepth(depth int) error {
 	}
 	rs.writer.Lock()
 	defer rs.writer.Unlock()
+	if !rs.admissionOpen {
+		return ErrPolicyAdmissionClosed
+	}
 	current := rs.current.Load()
 	if current.chainMaxDepth == depth {
 		return nil
+	}
+	if rs.policyManaged {
+		return ErrPolicyManaged
 	}
 	next := *current
 	next.chainMaxDepth = depth

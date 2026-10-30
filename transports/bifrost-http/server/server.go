@@ -253,8 +253,9 @@ type BifrostHTTPServer struct {
 	LogsCleaner     *logstore.LogsCleaner
 	AsyncJobCleaner *logstore.AsyncJobCleaner
 
-	Client *bifrost.Bifrost
-	Config *lib.Config
+	Client               *bifrost.Bifrost
+	Config               *lib.Config
+	routingPublicationMu sync.Mutex
 
 	// HTTPClientFactory hands out clients for outbound traffic other than provider
 	// inference (webhooks, skills, plugin downloads, MCP, catalog sync) that honour
@@ -1566,9 +1567,14 @@ func (s *BifrostHTTPServer) ReloadComplexityAnalyzerConfig(ctx context.Context, 
 
 // ReloadRoutingRule reloads a routing rule from the database into the routing plugin's rule cache
 func (s *BifrostHTTPServer) ReloadRoutingRule(ctx context.Context, id string) error {
+	s.routingPublicationMu.Lock()
+	defer s.routingPublicationMu.Unlock()
 	routingPlugin, err := s.getRoutingPlugin()
 	if err != nil {
 		return fmt.Errorf("routing plugin not found: %w", err)
+	}
+	if err := checkRoutingPolicyWritable(routingPlugin); err != nil {
+		return err
 	}
 	rule, err := s.Config.ConfigStore.GetRoutingRule(ctx, id)
 	if err != nil {
@@ -1583,6 +1589,8 @@ func (s *BifrostHTTPServer) ReloadRoutingRule(ctx context.Context, id string) er
 
 // RemoveRoutingRule removes a routing rule from the routing plugin's rule cache
 func (s *BifrostHTTPServer) RemoveRoutingRule(ctx context.Context, id string) error {
+	s.routingPublicationMu.Lock()
+	defer s.routingPublicationMu.Unlock()
 	routingPlugin, err := s.getRoutingPlugin()
 	if err != nil {
 		return fmt.Errorf("routing plugin not found: %w", err)
@@ -1697,6 +1705,8 @@ func (s *BifrostHTTPServer) FlushMCPHeaderCredentialCache(ctx context.Context) {
 
 // ReloadClientConfigFromConfigStore reloads the client config from config store
 func (s *BifrostHTTPServer) ReloadClientConfigFromConfigStore(ctx context.Context) error {
+	s.routingPublicationMu.Lock()
+	defer s.routingPublicationMu.Unlock()
 	if s.Config == nil || s.Config.ConfigStore == nil {
 		return fmt.Errorf("config store not found")
 	}
@@ -2629,6 +2639,15 @@ func (s *BifrostHTTPServer) PluginInitContext() context.Context {
 // The plugin is checked for LLM and MCP interfaces independently and registered
 // to the appropriate arrays based on which interfaces it implements.
 func (s *BifrostHTTPServer) ReloadPlugin(ctx context.Context, name string, path *string, pluginConfig any, placement *schemas.PluginPlacement, order *int) error {
+	if name == routing.PluginName {
+		s.routingPublicationMu.Lock()
+		defer s.routingPublicationMu.Unlock()
+		if current, err := s.getRoutingPlugin(); err == nil {
+			if err := checkRoutingPolicyWritable(current); err != nil {
+				return err
+			}
+		}
+	}
 	logger.Debug("reloading plugin %s", name)
 	// 0. A semantic_cache config gets the same validation config.json does, here rather than when
 	// it is saved: the plugins API loads a plugin only when it is enabled, so a cache that no
@@ -2699,6 +2718,15 @@ func (s *BifrostHTTPServer) RemovePlugin(ctx context.Context, displayName string
 	name, ok := s.Config.GetPluginNameByDisplayName(displayName)
 	if !ok {
 		return dynamicPlugins.ErrPluginNotFound
+	}
+	if name == routing.PluginName {
+		s.routingPublicationMu.Lock()
+		defer s.routingPublicationMu.Unlock()
+		if current, err := s.getRoutingPlugin(); err == nil {
+			if err := checkRoutingPolicyWritable(current); err != nil {
+				return err
+			}
+		}
 	}
 
 	// Check if plugin implements ObservabilityPlugin before removal. Disabled
@@ -3649,6 +3677,9 @@ func (s *BifrostHTTPServer) Bootstrap(ctx context.Context) error {
 	})
 	if err != nil {
 		return fmt.Errorf("failed to initialize bifrost: %v", err)
+	}
+	if err := s.configureRoutingAdmission(); err != nil {
+		return fmt.Errorf("failed to initialize routing admission: %w", err)
 	}
 	s.Client.SetMCPInProcessServerFactory(openAPIFactory)
 	logger.Info("bifrost client initialized")

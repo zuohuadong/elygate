@@ -8,6 +8,13 @@ import (
 	"github.com/maximhq/bifrost/plugins/routing/rules"
 )
 
+func checkRoutingPolicyWritable(plugin *routing.RoutingPlugin) error {
+	if controller, ok := plugin.GetRuleStore().(routingPolicyAdmission); ok {
+		return controller.CheckPolicyWritable()
+	}
+	return nil
+}
+
 func (s *BifrostHTTPServer) reloadRoutingChainMaxDepth(config *configstore.ClientConfig) error {
 	if config.RoutingChainMaxDepth == 0 {
 		config.RoutingChainMaxDepth = rules.DefaultChainMaxDepth

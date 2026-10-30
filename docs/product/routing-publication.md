@@ -372,6 +372,38 @@ generation-clone tests cover this checkpoint. This does not publish live rules,
 install a pending version, add a startup recovery gate, or provide rollback/API
 activation. The overall publication contract remains **PARTIAL**.
 
+## Process-Local Admission Checkpoint
+
+The October 31, 2026 checkpoint adds a terminal host admission callback before
+continuation, plugins, fallbacks and provider dispatch. The five direct realtime
+entrypoints also check admission before opening upstream. Nil SDK contexts get
+private request state; a private streaming context survives until stream closure.
+The original upstream pre-request-hook entrypoint remains unchanged; transports
+opening upstream directly must use the checked entrypoint.
+
+Installation closes this process's gate before the database operation. Confirmed
+rejection restores the previous open state; uncertain transaction outcomes and
+post-commit generation installation failures keep it closed. Admitted requests
+retain their generation, including internal requests and copied realtime turns.
+Managed policies reject individual rule/depth mutations and routing-plugin
+replacement/removal.
+
+Request-path cost: disabled admission is an atomic callback load; enabled local
+admission pins one immutable generation under the store writer lock. The context
+holds only a generation pointer. Old rule/program generations remain reachable
+until admitted request/session contexts release them, so retention depends on
+concurrent requests and session lifetime, not stream payload size.
+
+One local Apple M4 `-race -benchmem` run measured disabled/allowed callback checks
+at 38.28/59.46 ns/op, both 0 B/op and 0 allocs/op. Unchecked versus checked-disabled
+pre-request hooks measured 1971/2044 ns/op, both 63 B/op and 0 allocs/op. These
+instrumented measurements isolate the callback overhead but do not establish
+production performance acceptance.
+
+This is a process-local primitive and internal activation path, not cross-process
+fencing or an exposed HTTP/panel publication workflow. Rollback, external runtime
+acceptance and production authorization remain outstanding. Status: **PARTIAL**.
+
 ## Verification
 
 - Stage 1 passed `go test -buildvcs=false ./rules -count=1`, targeted `-race`

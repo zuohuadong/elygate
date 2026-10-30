@@ -61,6 +61,8 @@ type ChainMaxDepthUpdater interface {
 	UpdateChainMaxDepth(depth int) error
 }
 
+type routingGenerationContextKey struct{}
+
 type compiledProgram struct {
 	expression string
 	program    cel.Program
@@ -68,6 +70,7 @@ type compiledProgram struct {
 }
 
 type ruleGeneration struct {
+	owner         *LocalStore
 	enabledScopes map[string][]*configstoreTables.TableRoutingRule
 	allRules      []*configstoreTables.TableRoutingRule
 	programs      map[string]compiledProgram
@@ -78,9 +81,11 @@ type ruleGeneration struct {
 // copy-on-write generation and publish it once; readers only load the atomic
 // pointer and never observe a partially updated scope or program cache.
 type LocalStore struct {
-	current atomic.Pointer[ruleGeneration]
-	writer  sync.Mutex
-	adHoc   sync.Map // string -> compiledProgram for direct GetProgram callers
+	current       atomic.Pointer[ruleGeneration]
+	writer        sync.Mutex
+	admissionOpen bool
+	policyManaged bool
+	adHoc         sync.Map // string -> compiledProgram for direct GetProgram callers
 
 	celEnv         *cel.Env // Singleton CEL environment reused for all compilations
 	logger         schemas.Logger
@@ -113,8 +118,9 @@ func NewLocalStore(ctx context.Context, logger schemas.Logger, configStore confi
 	}
 
 	store := &LocalStore{
-		celEnv: env,
-		logger: logger,
+		celEnv:        env,
+		logger:        logger,
+		admissionOpen: true,
 	}
 
 	if configStore != nil {
@@ -152,6 +158,11 @@ func (rs *LocalStore) load(rules []configstoreTables.TableRoutingRule) error {
 // HasRules checks if there are any routing rules configured.
 // Quick check to determine if we need to run routing evaluation at all.
 func (rs *LocalStore) HasRules(ctx context.Context) bool {
+	if request, ok := ctx.(*schemas.BifrostContext); ok {
+		if generation := rs.pinnedGeneration(request); generation != nil {
+			return len(generation.allRules) > 0
+		}
+	}
 	return len(rs.current.Load().allRules) > 0
 }
 
@@ -245,6 +256,9 @@ func (rs *LocalStore) UpsertRule(ctx context.Context, rule *configstoreTables.Ta
 	}
 	rs.writer.Lock()
 	defer rs.writer.Unlock()
+	if err := rs.policyWriteError(); err != nil {
+		return err
+	}
 	owned, err := cloneRoutingRule(rule)
 	if err != nil {
 		return err
@@ -267,6 +281,9 @@ func (rs *LocalStore) UpsertRule(ctx context.Context, rule *configstoreTables.Ta
 func (rs *LocalStore) DeleteRule(ctx context.Context, id string) error {
 	rs.writer.Lock()
 	defer rs.writer.Unlock()
+	if err := rs.policyWriteError(); err != nil {
+		return err
+	}
 	current := rs.current.Load()
 	nextRules := make([]*configstoreTables.TableRoutingRule, 0, len(current.allRules))
 	for _, existing := range current.allRules {
@@ -281,6 +298,7 @@ func (rs *LocalStore) DeleteRule(ctx context.Context, id string) error {
 
 func (rs *LocalStore) buildGeneration(rules []*configstoreTables.TableRoutingRule, previous *ruleGeneration) *ruleGeneration {
 	generation := &ruleGeneration{
+		owner:         rs,
 		enabledScopes: make(map[string][]*configstoreTables.TableRoutingRule),
 		allRules:      rules,
 		programs:      make(map[string]compiledProgram, len(rules)),

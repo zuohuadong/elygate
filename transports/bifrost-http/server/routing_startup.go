@@ -45,7 +45,12 @@ func initRoutingPlugin(ctx context.Context, options *routing.Config, config *lib
 	}
 	depth := policy.ChainMaxDepth
 	managedOptions.ChainMaxDepth = &depth
-	return routing.InitFromStore(ctx, &managedOptions, logger, config.ConfigStore, store, governancePlugin)
+	plugin, err := routing.InitFromStore(ctx, &managedOptions, logger, config.ConfigStore, store, governancePlugin)
+	if err != nil {
+		return nil, err
+	}
+	store.ManagePolicy()
+	return plugin, nil
 }
 
 func preparedRoutingStore(ctx context.Context, policy *configstore.RoutingPolicySnapshot) (*rules.LocalStore, error) {

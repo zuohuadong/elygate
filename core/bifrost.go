@@ -154,10 +154,11 @@ type Bifrost struct {
 	mcpFactoryMu               sync.Mutex                            // Orders factory registration against lazy MCP manager creation
 	mcpDiscoveryChangeCallback mcpDiscoveryChangeFunc                // Installed on a lazily created or injected manager; guarded by mcpFactoryMu
 	dropExcessRequests         atomic.Bool                           // If true, in cases where the queue is full, requests will not wait for the queue to be empty and will be dropped instead.
-	keySelector                schemas.KeySelector                   // Custom key selector function
-	keyPoolFilter              schemas.KeyPoolFilter                 // optional hook to veto keys before selection (nil = all eligible)
-	kvStore                    schemas.KVStore                       // optional KV store for session stickiness (nil = disabled)
-	sessionAffinity            schemas.SessionAffinity               // decides which key a session stays on; never nil after Init
+	requestAdmission           atomic.Pointer[schemas.RequestAdmission]
+	keySelector                schemas.KeySelector     // Custom key selector function
+	keyPoolFilter              schemas.KeyPoolFilter   // optional hook to veto keys before selection (nil = all eligible)
+	kvStore                    schemas.KVStore         // optional KV store for session stickiness (nil = disabled)
+	sessionAffinity            schemas.SessionAffinity // decides which key a session stays on; never nil after Init
 }
 
 // ProviderQueue wraps a provider's request channel with lifecycle management
@@ -337,6 +338,7 @@ func Init(ctx context.Context, config schemas.BifrostConfig) (*Bifrost, error) {
 	bifrost.providers.Store(&[]schemas.Provider{})
 
 	bifrost.dropExcessRequests.Store(config.DropExcessRequests)
+	bifrost.SetRequestAdmission(config.RequestAdmission)
 
 	if bifrost.keySelector == nil {
 		bifrost.keySelector = keyselectors.WeightedRandom
@@ -1054,6 +1056,10 @@ func (bifrost *Bifrost) ChatCompletionRequest(ctx *schemas.BifrostContext, req *
 	// If ctx is nil, use the bifrost context (defensive check for mcp agent mode)
 	if ctx == nil {
 		ctx = bifrost.ctx
+		if bifrost.requestAdmission.Load() != nil {
+			ctx = schemas.NewBifrostContext(ctx, schemas.NoDeadline)
+			defer ctx.Cancel()
+		}
 	}
 
 	response, err := bifrost.makeChatCompletionRequest(ctx, req)
@@ -1156,6 +1162,10 @@ func (bifrost *Bifrost) ResponsesRequest(ctx *schemas.BifrostContext, req *schem
 	// If ctx is nil, use the bifrost context (defensive check for mcp agent mode)
 	if ctx == nil {
 		ctx = bifrost.ctx
+		if bifrost.requestAdmission.Load() != nil {
+			ctx = schemas.NewBifrostContext(ctx, schemas.NoDeadline)
+			defer ctx.Cancel()
+		}
 	}
 
 	response, err := bifrost.makeResponsesRequest(ctx, req)
@@ -5488,6 +5498,21 @@ func (bifrost *Bifrost) RunPreRequestHooks(ctx *schemas.BifrostContext, req *sch
 	flushPluginLogs(ctx)
 }
 
+// RunPreRequestHooksChecked is the admission-aware entrypoint for transports
+// that open provider sessions without handleRequest/handleStreamRequest.
+// Callers must return a refusal before allocating a session or opening upstream.
+func (bifrost *Bifrost) RunPreRequestHooksChecked(ctx *schemas.BifrostContext, req *schemas.BifrostRequest) *schemas.BifrostError {
+	if ctx == nil || ctx == bifrost.ctx {
+		ctx = schemas.NewBifrostContext(bifrost.ctx, schemas.NoDeadline)
+		defer ctx.Cancel()
+	}
+	if refusal := bifrost.AdmitRequest(ctx, req); refusal != nil {
+		return refusal
+	}
+	bifrost.RunPreRequestHooks(ctx, req)
+	return nil
+}
+
 // RunStreamPreHooks acquires a plugin pipeline, sets up tracing context, runs PreLLMHooks,
 // and returns a PostHookRunner for per-chunk post-processing.
 // Used by WebSocket handlers that bypass the normal inference path but still need plugin hooks.
@@ -6021,10 +6046,18 @@ func populateLatencyExtraFields(ctx *schemas.BifrostContext, resp *schemas.Bifro
 func (bifrost *Bifrost) handleRequest(ctx *schemas.BifrostContext, req *schemas.BifrostRequest) (resp *schemas.BifrostResponse, bifrostErr *schemas.BifrostError) {
 	defer bifrost.releaseBifrostRequest(req)
 	provider, model, fallbacks := req.GetRequestFields()
+	admission := bifrost.requestAdmission.Load()
 
 	// Handle nil context early to prevent blocking
-	if ctx == nil {
+	if ctx == nil || ctx == bifrost.ctx {
 		ctx = bifrost.ctx
+		if admission != nil {
+			ctx = schemas.NewBifrostContext(ctx, schemas.NoDeadline)
+			defer ctx.Cancel()
+		}
+	}
+	if refusal := runRequestAdmission(admission, ctx, req); refusal != nil {
+		return nil, refusal
 	}
 
 	// What the caller asked for, before any hook rewrites it: the name under which a session
@@ -6297,10 +6330,18 @@ func (bifrost *Bifrost) continueOnServedRoute(ctx *schemas.BifrostContext, req *
 func (bifrost *Bifrost) handleStreamRequest(ctx *schemas.BifrostContext, req *schemas.BifrostRequest) (stream chan *schemas.BifrostStreamChunk, bifrostErr *schemas.BifrostError) {
 	defer bifrost.releaseBifrostRequest(req)
 	provider, model, fallbacks := req.GetRequestFields()
+	admission := bifrost.requestAdmission.Load()
 
 	// Handle nil context early to prevent blocking
-	if ctx == nil {
+	if ctx == nil || ctx == bifrost.ctx {
 		ctx = bifrost.ctx
+		if admission != nil {
+			ctx = schemas.NewBifrostContext(ctx, schemas.NoDeadline)
+			defer func() { stream = cancelAdmissionContextAfterStream(ctx, stream) }()
+		}
+	}
+	if refusal := runRequestAdmission(admission, ctx, req); refusal != nil {
+		return nil, refusal
 	}
 
 	// What the caller asked for, before any hook rewrites it: the name under which a session
