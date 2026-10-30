@@ -369,6 +369,9 @@ func (s *RDBConfigStore) UpdateClientConfig(ctx context.Context, config *ClientC
 	// can never set it). Reading it inside the transaction before DELETE keeps
 	// callers from clobbering UI prefs on every config write.
 	return s.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := LockRoutingPolicyWrite(tx); err != nil {
+			return err
+		}
 		if err := lockClientConfigRow(tx); err != nil {
 			return err
 		}
@@ -6374,25 +6377,27 @@ func (s *RDBConfigStore) CreateRoutingRule(ctx context.Context, rule *tables.Tab
 		return fmt.Errorf("scopeID is required for non-global scope '%s'", rule.Scope)
 	}
 
-	// Check if there is already a routing rule with the same priority for the same scope+scopeID
-	var count int64
-	query := database.WithContext(ctx).Where("scope = ? AND priority = ? AND id != ?", rule.Scope, rule.Priority, rule.ID)
-	if rule.ScopeID != nil {
-		query = query.Where("scope_id = ?", *rule.ScopeID)
-	} else {
-		query = query.Where("scope_id IS NULL")
-	}
-	if err := query.Model(&tables.TableRoutingRule{}).Count(&count).Error; err != nil {
-		return s.parseGormError(err)
-	}
-	if count > 0 {
-		if rule.ScopeID != nil {
-			return fmt.Errorf("routing rule with priority %d %w for scope '%s' with scope ID '%s'", rule.Priority, ErrRoutingRulePriorityTaken, rule.Scope, *rule.ScopeID)
-		}
-		return fmt.Errorf("routing rule with priority %d %w for scope '%s'", rule.Priority, ErrRoutingRulePriorityTaken, rule.Scope)
-	}
-
 	return s.parseGormError(database.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := LockRoutingPolicyWrite(tx); err != nil {
+			return err
+		}
+		// Check if there is already a routing rule with the same priority for the same scope+scopeID.
+		var count int64
+		query := tx.Where("scope = ? AND priority = ? AND id != ?", rule.Scope, rule.Priority, rule.ID)
+		if rule.ScopeID != nil {
+			query = query.Where("scope_id = ?", *rule.ScopeID)
+		} else {
+			query = query.Where("scope_id IS NULL")
+		}
+		if err := query.Model(&tables.TableRoutingRule{}).Count(&count).Error; err != nil {
+			return s.parseGormError(err)
+		}
+		if count > 0 {
+			if rule.ScopeID != nil {
+				return fmt.Errorf("routing rule with priority %d %w for scope '%s' with scope ID '%s'", rule.Priority, ErrRoutingRulePriorityTaken, rule.Scope, *rule.ScopeID)
+			}
+			return fmt.Errorf("routing rule with priority %d %w for scope '%s'", rule.Priority, ErrRoutingRulePriorityTaken, rule.Scope)
+		}
 		targets := rule.Targets
 		rule.Targets = nil
 		if err := tx.Omit("Targets").Create(rule).Error; err != nil {
@@ -6427,6 +6432,9 @@ func (s *RDBConfigStore) UpdateRoutingRule(ctx context.Context, rule *tables.Tab
 	}
 
 	return s.parseGormError(database.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := LockRoutingPolicyWrite(tx); err != nil {
+			return err
+		}
 		var existing tables.TableRoutingRule
 		if err := dbForUpdate(tx).First(&existing, "id = ?", rule.ID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -6509,6 +6517,9 @@ func (s *RDBConfigStore) SyncRoutingRules(ctx context.Context, toAdd []tables.Ta
 	}
 
 	return s.parseGormError(database.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := LockRoutingPolicyWrite(tx); err != nil {
+			return err
+		}
 		seen := make(map[string]bool)
 		scopes := make([]scopeRef, 0, len(toAdd)+len(toUpdate))
 		record := func(rule *tables.TableRoutingRule) {
@@ -6612,6 +6623,9 @@ func (s *RDBConfigStore) DeleteRoutingRule(ctx context.Context, id string, tx ..
 	}
 
 	return s.parseGormError(database.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := LockRoutingPolicyWrite(tx); err != nil {
+			return err
+		}
 		var existing tables.TableRoutingRule
 		if err := dbForUpdate(tx).First(&existing, "id = ?", id).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {

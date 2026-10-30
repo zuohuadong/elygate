@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/maximhq/bifrost/framework/configstore"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -101,6 +102,9 @@ func (s *Store) AcceptRoutingRelease(ctx context.Context, request RoutingRelease
 	}
 	var attempt *RoutingReleaseAttempt
 	err := s.db(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := configstore.LockRoutingPolicyWrite(tx); err != nil {
+			return err
+		}
 		head, err := lockRoutingReleaseHead(tx)
 		if err != nil {
 			return err
