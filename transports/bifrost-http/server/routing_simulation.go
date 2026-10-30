@@ -9,4 +9,5 @@ import (
 func (s *BifrostHTTPServer) registerRoutingSimulationRoute(middlewares ...schemas.BifrostHTTPMiddleware) {
 	guarded := append(append([]schemas.BifrostHTTPMiddleware{}, middlewares...), s.ControlPlaneHandler.AdminAccessMiddleware())
 	s.Router.POST("/api/control-plane/routing/simulate", lib.ChainMiddlewares(handlers.SimulateRouting, guarded...))
+	s.ControlPlaneHandler.RegisterRoutingDraftRoutes(s.Router, handlers.ValidateRoutingDraft, middlewares...)
 }
