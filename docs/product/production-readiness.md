@@ -172,6 +172,19 @@ Native、root 单 writer、低风险、external=0；不改生产 Go、鉴权或�
 
 ## 生产交付门
 
+### 单机模板镜像固定检查（2026-10-31）
+
+后续项 `single-node-postgres-image-pin`：parent 为 `edc1a1c08`，source 为交付门 2，
+reason 为模板仍使用可漂移的数据库标签。Native、root 单 writer、低风险、
+external=0；仅修改模板和记录，不涉及生产写入、部署或推理路径。
+
+`examples/single-node-postgres/docker-compose.yml` 现将 PostgreSQL 固定为
+`postgres:16-alpine@sha256:16bc17c64a573ef34162af9298258d1aec548232985b33ed7b1eac33ba35c229`。
+Docker registry manifest 查询确认该 digest 对应多架构镜像，Compose 配置解析、
+健康依赖、持久化卷、只读配置挂载及六项必填环境变量缺失拒绝均通过。
+本机 OrbStack/Docker daemon 当前不可用，因此没有把实际镜像构建、启动、健康检查
+或非 root 运行误报为已完成；`ELYGATE_IMAGE` 仍必须由部署环境提供最终固定 digest。
+
 1. 固定最终代码 SHA、Bun/Go 工具链、平台架构、镜像 digest 和校验和。
    对最终镜像进行实际构建、启动、非 root 权限和健康检查。
 2. 使用 [单机 PostgreSQL 模板](../../examples/single-node-postgres/docker-compose.yml)

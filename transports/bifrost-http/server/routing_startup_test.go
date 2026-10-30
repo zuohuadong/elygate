@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"testing"
 
 	"github.com/maximhq/bifrost/framework/configstore"
@@ -31,13 +30,7 @@ func (s *startupRoutingStore) GetRoutingRules(ctx context.Context) ([]tables.Tab
 func newStartupRoutingStore(t *testing.T) *startupRoutingStore {
 	t.Helper()
 	logger = noopTestLogger{}
-	store, err := configstore.NewConfigStore(t.Context(), &configstore.Config{
-		Enabled: true, Type: configstore.ConfigStoreTypeSQLite,
-		Config: &configstore.SQLiteConfig{Path: filepath.Join(t.TempDir(), "routing.db")},
-	}, logger)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, store.Close(context.Background())) })
-	return &startupRoutingStore{ConfigStore: store}
+	return &startupRoutingStore{ConfigStore: newRoutingTestConfigStore(t)}
 }
 
 func TestRoutingStartupManagedPluginUsesSnapshotWithoutLiveRuleRead(t *testing.T) {

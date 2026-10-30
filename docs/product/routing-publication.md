@@ -570,6 +570,48 @@ and it is not claimed as automatic fencing or takeover. Publication HTTP/panel,
 external crash recovery and all other roadmap/production gates remain open.
 Status: **PARTIAL**.
 
+## PostgreSQL Server Activation Follow-Up
+
+Follow-up `routing-server-postgres-verification` has parent `edc1a1c08`,
+source the rollback verification record and production-readiness gate 4, and
+reason that the previous PostgreSQL evidence covered controlplane transactions,
+not the server's runtime activation path. Root remains the sole writer; this
+test-only change uses Native, low risk and external=0. It does not change the
+publication contract, production code, ownership decision or HTTP routes.
+
+Activation/rollback and startup fixtures now share a config-store factory.
+Without `ELYGATE_TEST_POSTGRES_SOCKET` they retain SQLite coverage. When that
+variable names an absolute local socket directory, each fixture creates a new
+owned PostgreSQL database with a quoted UUID name. The test asserts the actual
+dialect, closes the store before dropping the database and closes its separate
+admin connection last; it does not fall back to SQLite after a PostgreSQL error.
+This adds no inference-path work, allocation or retained production state.
+
+The same race-instrumented server test binary passed 15 top-level tests
+(16 leaf cases) against SQLite, including admission and policy regressions.
+The database-backed activation, rollback and startup selection passed 7
+top-level tests (8 leaf cases) against a private PostgreSQL 18 cluster.
+Both runs exercised eight store fixtures with explicit dialect assertions,
+with zero failures, skips or race warnings.
+The PostgreSQL run enabled `fsync`, `synchronous_commit` and `full_page_writes`,
+used a permission-0700 Unix socket, left zero owned test databases, and shut the
+cluster down cleanly. The test binary was built once and reused for both stores;
+the completed logs are `.codex-tmp/routing-server-sqlite-race-20261031.log` and
+`.codex-tmp/routing-server-postgres-race-20261031.log`. This is runtime
+acceptance for the focused routing path, not a full server suite, process/DB
+restart, cross-process takeover or production deployment proof.
+
+Server `go vet -mod=readonly -p 1 ./bifrost-http/server`, formatting and
+`git diff --check` passed. The only vet output was the existing upstream
+sqlite-vec macOS deprecation warnings. The fixture source hashes are recorded
+in `.codex-tmp/routing-server-store-source-20261031.sha256`; the shared test
+binary's SHA-256 is
+`26c0e8b5778a9317680c758f9dc9b7948a158f332336a5ee85be8de5266c718d`.
+
+The original publication contract remains **PARTIAL**, including cross-process
+ownership, HTTP/panel publication, external crash recovery and final production
+acceptance.
+
 ## Verification
 
 - Stage 1 passed `go test -buildvcs=false ./rules -count=1`, targeted `-race`

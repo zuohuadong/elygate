@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 
 	"github.com/google/uuid"
@@ -271,12 +270,7 @@ func pendingRoutingActivation(t *testing.T, rulesJSON string) (*BifrostHTTPServe
 	t.Helper()
 	logger = noopTestLogger{}
 	ctx := t.Context()
-	cs, err := configstore.NewConfigStore(ctx, &configstore.Config{
-		Enabled: true, Type: configstore.ConfigStoreTypeSQLite,
-		Config: &configstore.SQLiteConfig{Path: filepath.Join(t.TempDir(), "routing-activation.db")},
-	}, logger)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, cs.Close(context.Background())) })
+	cs := newRoutingTestConfigStore(t)
 	releases, err := controlplane.NewStore(ctx, cs)
 	require.NoError(t, err)
 	require.NoError(t, cs.UpdateClientConfig(ctx, &configstore.ClientConfig{RoutingChainMaxDepth: 7}))
