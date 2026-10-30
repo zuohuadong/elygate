@@ -98,6 +98,14 @@ jobs:
 
   api-contracts:
     runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: auto
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-      - run: bash scripts/go-local.sh test -p 1 ./transports/bifrost-http/controlplane ./transports/bifrost-http/employees ./transports/bifrost-http/handlers -run 'Test(ApplicationKeyRouter|UsageReconciliation|LoginLimiter|Session|Auth|CorsAccessLog)' -count=1 -timeout=120s
+      - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417
+        with:
+          go-version: "1.27.3"
+      - name: Initialize Go workspace
+        run: source ./.github/workflows/scripts/setup-go-workspace.sh
+      - name: Run API contracts
+        run: bash scripts/go-local.sh test -p 1 ./transports/bifrost-http/controlplane ./transports/bifrost-http/employees ./transports/bifrost-http/handlers -run 'Test(ApplicationKeyRouter|UsageReconciliation|LoginLimiter|Session|Auth|CorsAccessLog)' -count=1 -timeout=120s

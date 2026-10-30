@@ -90,4 +90,19 @@ describe('enterprise panel build contract', () => {
 			step.name === 'Build image without publishing');
 		expect(imageBuild.with.push).toBe(false);
 	});
+
+	test('API contracts initialize the Go workspace before running on a clean checkout', async () => {
+		const workflow = parse(await Bun.file(new URL('../../../.github/workflows/panel-tests.yml', import.meta.url)).text());
+		const steps = workflow.jobs['api-contracts'].steps;
+		expect(workflow.jobs['api-contracts'].env.GOTOOLCHAIN).toBe('auto');
+		const setupIndex = steps.findIndex((step: { uses?: string }) => step.uses?.startsWith('actions/setup-go@'));
+		const workspaceIndex = steps.findIndex((step: { name?: string }) => step.name === 'Initialize Go workspace');
+		const testIndex = steps.findIndex((step: { name?: string }) => step.name === 'Run API contracts');
+		expect(setupIndex).toBeGreaterThan(0);
+		expect(steps[setupIndex].with['go-version']).toBe('1.27.3');
+		expect(workspaceIndex).toBeGreaterThan(setupIndex);
+		expect(steps[workspaceIndex].run).toBe('source ./.github/workflows/scripts/setup-go-workspace.sh');
+		expect(testIndex).toBeGreaterThan(workspaceIndex);
+		expect(steps[testIndex].run).toBe("bash scripts/go-local.sh test -p 1 ./transports/bifrost-http/controlplane ./transports/bifrost-http/employees ./transports/bifrost-http/handlers -run 'Test(ApplicationKeyRouter|UsageReconciliation|LoginLimiter|Session|Auth|CorsAccessLog)' -count=1 -timeout=120s");
+	});
 });

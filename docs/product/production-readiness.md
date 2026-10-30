@@ -59,9 +59,9 @@
   不外推为掉电/崩溃、密码/TLS、备份恢复、最终镜像或生产验收。
 - 发现并修正面板/镜像 CI 工作流的触发范围：`panel-tests.yml` 的 push
   现在覆盖 `main` 和 `dev`，并由面板契约测试锁定；此前 `dev` 直接提交
-  不会触发这条测试、构建镜像和 API contract 门。修正尚未提交或推送，
-  没有将本地检查视作远端执行成功；独立的 CodSpeed/Snyk job 仍为
-  `queued`，不能计为通过。
+  不会触发这条测试、构建镜像和 API contract 门。修正已随 `7e5a0fa10`
+  提交推送，实际 CI 结果与后续修复见下节；独立的 CodSpeed/Snyk
+  仍不能计为通过。
 
 ## 功能验收门
 
@@ -223,6 +223,36 @@ YAML 结构化回归将核对 `main`/`dev`、原路径过滤和 PR/手动入口�
 本机 Docker context 为 `orbstack`，本轮 `docker info` 仍返回 socket
 不存在；没有启动 daemon、切换到其他 context 或将 Dockerfile 检查当成
 实际构建。最终镜像构建、启动、健康与非 root 验收继续未完成。
+
+### API 契约 CI workspace 修复（2026-10-31）
+
+后续项 `panel-ci-api-workspace`：parent `7e5a0fa10`，source 为
+run `41142015547` 的 `api-contracts` 失败，reason 为 runner 未初始化
+Git 忽略的 Go workspace。Native、root 单 writer、低风险、external=0；
+范围冻结为该 job 的 Go/workspace 初始化、构建契约测试和本清单，
+不修改业务代码、测试筛选/断言、权限、runner、发布或部署规则。
+
+候选 `7e5a0fa10` 的远端 run `41142015547` 中，面板测试、员工门户和
+Docker BuildKit 构建均通过；`api-contracts` 在测试启动前失败，原因是
+干净 runner 没有被跟踪的 `go.work`，而该 job 直接调用 `scripts/go-local.sh`
+后得到“cannot find main module”。这不是业务测试失败，也不能计作 API
+契约通过。Docker job 的日志显示镜像仅留在 runner 的 BuildKit cache，
+没有导出可部署镜像。
+
+后续修复在本地工作树中加入仓库现有的 `setup-go-workspace.sh` 初始化步骤、
+显式 Go `1.27.3` 和 job 级 `GOTOOLCHAIN=auto`，避免包装脚本默认固定
+`go1.27.0`；原 API 契约命令、正则和超时保持不变。
+构建契约 10 项测试、60 个断言及 workspace 初始化脚本自身 4 项测试通过。
+Git 源码导出已成功从无 workspace 初始化为 Go 1.27.3；缓存读取运行
+被显式中断，随后系统盘链接发生 `no space left on device`，均不计通过。
+再将编译目录和缓存置于 `/Volumes/Datas` 的复验也被显式中断（退出码 130），
+没有 API 测试结论；未改写原候选源码。仅将初始化与 YAML 回归记为
+`PASS_SCOPED`，Go API 执行仍为 `PARTIAL`，不把中断记作业务测试失败或成功。
+系统盘仅剩约 300 MiB 时已停止本轮昂贵验证，没有删除共享缓存或其他工作区文件。
+CI 配置与测试不增加推理请求工作、分配或保留状态。
+
+将按新提交的 SHA 重新核对远端 `api-contracts`、面板、Docker 和安全扫描结果。
+当前修复尚未提交或推送，生产清单仍为 **PARTIAL**。
 
 ### 单机模板镜像固定检查（2026-10-31）
 
