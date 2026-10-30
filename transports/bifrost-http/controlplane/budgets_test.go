@@ -146,6 +146,17 @@ func TestBudgetAlertBoundariesRolloverAndScopeFilters(t *testing.T) {
 	now := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
 	start := time.Date(2026, 10, 31, 0, 0, 0, 0, time.UTC)
 	nextMonth := start.AddDate(0, 0, 1)
+	// Resource creation uses wall-clock time; keep policy history and queued
+	// periods on this fixture's clock so unrelated closed days cannot alert.
+	db := store.db(ctx)
+	require.NoError(t, db.Model(&BudgetPolicyRevision{}).Where("1 = 1").Update("effective_at", now).Error)
+	clearBudgetHistoryPeriods(t, store)
+	scopes, err := store.budgetScopes(ctx, UsageQuery{})
+	require.NoError(t, err)
+	for _, scope := range scopes {
+		require.NoError(t, queueBudgetPolicyPeriods(db, scope.BudgetScope, now))
+	}
+	require.Len(t, budgetHistoryPeriods(t, store), 5)
 	require.NoError(t, store.db(ctx).Create(&[]UsageLedgerEntry{
 		{ID: "at-start", SourceLogID: "at-start", ProjectID: project.ID, ApplicationID: app.ID, OccurredAt: start, Cost: 50},
 		{ID: "other-app", SourceLogID: "other-app", ProjectID: project.ID, ApplicationID: "sibling", OccurredAt: now, Cost: 30},

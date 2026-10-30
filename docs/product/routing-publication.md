@@ -164,6 +164,13 @@ Values are one local run with `-benchmem`; benchmark noise is expected.
 - Stage 1 passed `go test -buildvcs=false ./rules -count=1`, targeted `-race`
   tests for `TestRuleGeneration`, `TestRoutingEvaluationKeepsRuleAndProgramGeneration`
   and `TestRuleStore_`, both benchmark runs above, and `git diff --check`.
+- The durable-intent checkpoint passed SQLite `TestRoutingRelease*`, private
+  PostgreSQL `TestRoutingRelease*` with `-race` (45.496s), and controlplane vet.
+  SQLite full controlplane regression passed (129.497s) after fixing host-date
+  coupling in the budget rollover fixture; its original eight-alert, scope,
+  usage and rollover assertions remain intact. That fixture separately passed
+  private PostgreSQL with `-race` (11.130s). Both private instances cleaned up.
+  These checks prove storage acceptance only, not runtime publication.
 - Runtime: routing plugin/rules tests, deterministic paused-evaluation regression,
   concurrent write/read tests and `-race`.
 - Performance: same benchmark source before and after, `-benchmem`, no live calls.
