@@ -63,6 +63,7 @@ type Handler struct {
 	auditMu                         sync.RWMutex
 	auditAppenderFactory            func(*fasthttp.RequestCtx) EmployeeAuditAppender
 	selfServiceAuditAppenderFactory func(*fasthttp.RequestCtx, string) EmployeeAuditAppender
+	loginFailureAuditor             func(context.Context) error
 }
 
 // SetAuditAppenderFactory binds trusted request identity to a transactional
@@ -78,6 +79,14 @@ func (h *Handler) SetAuditAppenderFactory(factory func(*fasthttp.RequestCtx) Emp
 func (h *Handler) SetSelfServiceAuditAppenderFactory(factory func(*fasthttp.RequestCtx, string) EmployeeAuditAppender) {
 	h.auditMu.Lock()
 	h.selfServiceAuditAppenderFactory = factory
+	h.auditMu.Unlock()
+}
+
+// SetLoginFailureAuditor cannot receive request identity or credential content:
+// rejected credentials do not identify an authenticated employee.
+func (h *Handler) SetLoginFailureAuditor(auditor func(context.Context) error) {
+	h.auditMu.Lock()
+	h.loginFailureAuditor = auditor
 	h.auditMu.Unlock()
 }
 
@@ -112,6 +121,19 @@ func (h *Handler) storeWithAudit(appender EmployeeAuditAppender) *Store {
 	return &Store{configStore: h.store.configStore, auditAppender: appender}
 }
 
+func (h *Handler) rejectLogin(request *fasthttp.RequestCtx, ctx context.Context) {
+	h.auditMu.RLock()
+	auditor := h.loginFailureAuditor
+	h.auditMu.RUnlock()
+	// Audit unavailability must not conceal a credential rejection or undo
+	// the account lockout counter that already committed.
+	if auditor == nil || auditor(ctx) != nil {
+		request.SetUserValue(lib.FastHTTPUserValueAuditPersistenceFailed, true)
+		request.Response.Header.Set(lib.HeaderAuditStatus, "failed")
+	}
+	sendError(request, fasthttp.StatusUnauthorized, "用户名或密码错误")
+}
+
 func employeeMutationContext() (context.Context, context.CancelFunc) {
 	// A standard bounded context avoids fasthttp's server-lifetime Done channel.
 	return context.WithTimeout(context.Background(), 30*time.Second)
@@ -137,7 +159,7 @@ func NewHandler(ctx context.Context, configStore configstore.ConfigStore, logMan
 	return &Handler{
 		store: store, configStore: configStore, logManager: logManager,
 		dummyHash:    dummyHash,
-		loginLimiter: lib.NewPasswordLimiter(5, 15*time.Minute),
+		loginLimiter: lib.NewBoundedPasswordLimiter(5, 15*time.Minute, 4096),
 	}, nil
 }
 
@@ -598,7 +620,7 @@ func (h *Handler) login(ctx *fasthttp.RequestCtx) {
 		sendError(ctx, 400, "请求格式错误")
 		return
 	}
-	finish, allowed := h.loginLimiter.Begin(ctx.RemoteIP().String(), normalizeUsername(payload.Username))
+	finish, allowed := h.loginLimiter.Begin(ctx.RemoteIP().String(), "")
 	if !allowed {
 		sendError(ctx, 429, "登录尝试过于频繁，请稍后再试")
 		return
@@ -615,7 +637,7 @@ func (h *Handler) login(ctx *fasthttp.RequestCtx) {
 		}
 		// 对不存在的用户执行同成本比较，避免明显的用户名枚举时序差异。
 		_, _ = encrypt.CompareHash(h.dummyHash, payload.Password)
-		sendError(ctx, 401, "用户名或密码错误")
+		h.rejectLogin(ctx, mutationCtx)
 		return
 	}
 	if !employee.IsActive {
@@ -634,7 +656,7 @@ func (h *Handler) login(ctx *fasthttp.RequestCtx) {
 			sendError(ctx, fasthttp.StatusInternalServerError, "登录状态更新失败，请重试")
 			return
 		}
-		sendError(ctx, 401, "用户名或密码错误")
+		h.rejectLogin(ctx, mutationCtx)
 		return
 	}
 	token, err := randomSecret(32)

@@ -103,8 +103,16 @@ administrator mutation has transactional audit enforcement.
   after successful login/logout commit. Signed events use fixed internal
   `employee-password` or `employee-session` metadata with the employee actor,
   never request-supplied administrator identity. A lost commit acknowledgement
-  remains indeterminate. Failed-login audit, automatic expiry cleanup and
-  per-session events for bulk revocation are not covered by these events.
+  remains indeterminate. Automatic expiry cleanup and per-session events for
+  bulk revocation are not covered by these events.
+- Employee credential rejections now append the fixed anonymous
+  `employee_session.login_failed` event without request identity, username,
+  credentials or correlation headers. Audit failure preserves 401 and any
+  already committed lockout counter, while exposing the audit-failure header.
+  Counter and audit use separate transactions with a crash window. Connection
+  source IP admission is bounded to 4096 keys and five attempts per fifteen
+  minutes; it is process-local, not distributed protection. See
+  [the scoped acceptance record](employee-login-failure-audit.md).
 - Management routes registered by `RegisterAPIRoutes` now persist the upstream
   `RecordAuditChange` records into the control-plane audit table after the
   handler runs. This bridge works without an audit signing key.

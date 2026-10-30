@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/maximhq/bifrost/core/schemas"
 	"github.com/maximhq/bifrost/framework/configstore"
 	"github.com/maximhq/bifrost/framework/encrypt"
 	"github.com/maximhq/bifrost/transports/v2/bifrost-http/controlplane"
@@ -38,6 +39,24 @@ func employeeSelfServiceAuditAppender(store configstore.ConfigStore, request *fa
 		RequestID: handlers.GovernanceRequestIDFromRequest(request),
 		TraceID:   handlers.GovernanceTraceIDFromRequest(request), Outcome: "success",
 	})
+}
+
+func employeeLoginFailureAuditor(store configstore.ConfigStore, logger schemas.Logger) func(context.Context) error {
+	return func(ctx context.Context) error {
+		appendAudit := transactionalEmployeeAuditAppender(store, handlers.GovernanceAuditInput{
+			Principal: handlers.AdminPrincipal{ID: "anonymous", Name: "Anonymous", AuthMethod: "none"},
+			Outcome:   "denied",
+		})
+		err := store.ExecuteTransaction(ctx, func(tx *gorm.DB) error {
+			return appendAudit(ctx, tx, employees.EmployeeAuditEvent{
+				Action: "employee_session.login_failed", Resource: "employee_session", ResourceID: "employee",
+			})
+		})
+		if err != nil {
+			logger.Error("failed to persist employee login rejection audit")
+		}
+		return err
+	}
 }
 
 func transactionalEmployeeAuditAppender(store configstore.ConfigStore, base handlers.GovernanceAuditInput) employees.EmployeeAuditAppender {

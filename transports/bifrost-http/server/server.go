@@ -3216,6 +3216,7 @@ func (s *BifrostHTTPServer) RegisterAPIRoutes(ctx context.Context, callbacks Ser
 		employeeHandler.SetSelfServiceAuditAppenderFactory(func(request *fasthttp.RequestCtx, employeeID string) employees.EmployeeAuditAppender {
 			return employeeSelfServiceAuditAppender(s.Config.ConfigStore, request, employeeID)
 		})
+		employeeHandler.SetLoginFailureAuditor(employeeLoginFailureAuditor(s.Config.ConfigStore, logger))
 		s.EmployeeHandler = employeeHandler
 		controlPlaneStore, storeErr := controlplane.NewStoreWithBindingMode(ctx, s.Config.ConfigStore, bindingMode)
 		if storeErr != nil {
