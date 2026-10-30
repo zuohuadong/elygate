@@ -12,6 +12,8 @@
 		buildRoutingDraftPayload, parseRoutingDraft, parseRoutingDraftPage, routingDraftRevision, RoutingDraftError,
 		routingDraftRecovery, ROUTING_DRAFT_PAGE_SIZE, ROUTING_DRAFT_PATH, type RoutingDraft, type RoutingDraftSummary,
 	} from './routing-drafts';
+	import RoutingPolicyVersions from './RoutingPolicyVersions.svelte';
+	import type { RoutingPolicyVersion } from './routing-policy-versions';
 
 	let { active = true }: { active?: boolean } = $props();
 	const recoveryEpoch = routingDraftRecovery.epoch;
@@ -34,7 +36,8 @@
 	let errorElement = $state<HTMLDivElement | undefined>();
 	let requestSequence = 0;
 	let activeRequest: AbortController | undefined;
-	const busy = $derived(operation !== null);
+	let versionBusy = $state(false);
+	const busy = $derived(operation !== null || versionBusy);
 	const mutating = $derived(operation === 'save-draft' || operation === 'delete-draft');
 
 	function text(zh: string, en: string): string { return i18n.locale === 'zh-CN' ? zh : en; }
@@ -118,6 +121,21 @@
 		draftDirty = false;
 		response = null;
 		lastPayload = null;
+	}
+
+	function loadVersionCandidate(version: RoutingPolicyVersion): boolean {
+		if (!active || operation !== null || recoveryEpoch !== routingDraftRecovery.epoch) return false;
+		if ((draftDirty || uncertainMutation) && !window.confirm(text('当前编辑内容将被版本副本替换，继续？', 'Replace the current local edits with a copy of this version?'))) return false;
+		applyLoadedDraft(null);
+		draftName = version.name;
+		draft.rules = JSON.stringify(version.rules, null, 2);
+		draft.chainMaxDepth = version.chain_max_depth;
+		draftDirty = true;
+		uncertainMutation = false;
+		error = '';
+		errorField = '';
+		status = text('版本已载入为未保存的新草稿。', 'Version loaded as a new unsaved draft.');
+		return true;
 	}
 
 	async function loadDraftList(): Promise<void> {
@@ -363,7 +381,7 @@
 		<div class="actions">
 			<button type="button" onclick={() => void importRules()} disabled={busy}><Import size={16} aria-hidden="true" />{text('导入全部已存规则', 'Import all stored rules')}</button>
 			<button class="primary" type="button" onclick={() => void runSimulation()} disabled={busy}><Play size={16} aria-hidden="true" />{operation === 'run' ? text('运行中', 'Running') : text('运行仿真', 'Run simulation')}</button>
-			{#if busy && !mutating}<button class="icon-button" type="button" onclick={cancel} aria-label={text('取消请求', 'Cancel request')} title={text('取消请求', 'Cancel request')}><Square size={16} aria-hidden="true" /></button>{/if}
+			{#if operation !== null && !mutating}<button class="icon-button" type="button" onclick={cancel} aria-label={text('取消请求', 'Cancel request')} title={text('取消请求', 'Cancel request')}><Square size={16} aria-hidden="true" /></button>{/if}
 			<button class="icon-button" type="button" onclick={exportResults} disabled={!response || busy} aria-label={text('导出结果', 'Export results')} title={text('导出结果', 'Export results')}><Download size={16} aria-hidden="true" /></button>
 		</div>
 		<span class="mode">{text('离线 · 加权抽样', 'Offline · Weighted sample')}</span>
@@ -394,6 +412,7 @@
 	<div class="status" role="status" aria-live="polite">{operation === 'import' ? text('正在导入全部规则', 'Importing all rules') : status}</div>
 	{#if error}<div class="notice error" role="alert" tabindex="-1" bind:this={errorElement}>{error}</div>{/if}
 	{#if uncertainMutation}<div class="notice recovery" role="alert">{text('上一次写入结果未确认。请先刷新列表并重新载入草稿，再继续保存或删除。', 'The previous write outcome is unconfirmed. Refresh the list and reload the draft before saving or deleting again.')}</div>{/if}
+	<RoutingPolicyVersions {active} disabled={operation !== null} draft={selectedDraft} dirty={draftDirty} uncertain={uncertainMutation} bind:busy={versionBusy} onload={loadVersionCandidate} />
 	<form onsubmit={(event) => { event.preventDefault(); void runSimulation(); }}>
 		<fieldset disabled={busy && operation !== 'run'}>
 			<div class="editors">

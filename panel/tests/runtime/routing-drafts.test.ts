@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { test } from 'bun:test';
 import { isJsonRecord } from '../../src/lib/api';
 import { buildRoutingDraftPayload, parseRoutingDraft, parseRoutingDraftPage, ROUTING_DRAFT_PATH, type RoutingDraft, type RoutingDraftSummary } from '../../src/lib/routing-drafts';
+import { buildRoutingVersionPayload, parseRoutingPolicyVersion, parseRoutingPolicyVersionPage, ROUTING_VERSION_PATH, type RoutingPolicyVersion } from '../../src/lib/routing-policy-versions';
 import { PrivatePostgres } from './postgres';
 import { availablePort, trackedChild, stopChild, waitForHTTP, type RuntimeChild } from './process';
 
@@ -51,7 +52,7 @@ function draftClient(origin: string) {
 		assert.equal(response.status, options.status ?? 200, `${options.method ?? 'GET'} ${route}`);
 		const session = response.headers.get('set-cookie');
 		if (session) cookie = session.split(';')[0];
-		if (route.startsWith(ROUTING_DRAFT_PATH)) assert.equal(response.headers.get('cache-control'), 'no-store');
+		if (route.startsWith(ROUTING_DRAFT_PATH) || route.startsWith(ROUTING_VERSION_PATH)) assert.equal(response.headers.get('cache-control'), 'no-store');
 		if (response.status === 204) {
 			assert.equal(await response.text(), '');
 			return null;
@@ -75,6 +76,48 @@ async function draftAudit(api: DraftClient): Promise<unknown[]> {
 	const feed = await api('/api/control-plane/audit-events?limit=100');
 	assert.ok(isJsonRecord(feed) && Array.isArray(feed.data));
 	return feed.data.filter(event => isJsonRecord(event) && event.resource_type === 'routing-draft');
+}
+
+async function versionAudit(api: DraftClient): Promise<unknown[]> {
+	const feed = await api('/api/control-plane/audit-events?limit=100');
+	assert.ok(isJsonRecord(feed) && Array.isArray(feed.data));
+	return feed.data.filter(event => isJsonRecord(event) && event.resource_type === 'routing-version');
+}
+
+async function verifyVersionCapture(api: DraftClient, draft: RoutingDraft): Promise<RoutingPolicyVersion> {
+	const route = `${ROUTING_DRAFT_PATH}/${draft.id}/versions`;
+	const before = await versionAudit(api);
+	const [first, second] = await Promise.all([1, 2].map(() =>
+		api(route, { method: 'POST', body: buildRoutingVersionPayload(draft.revision), status: 201 })));
+	const version = parseRoutingPolicyVersion(first);
+	assert.deepEqual(parseRoutingPolicyVersion(second), version);
+	assert.equal(version.draft_id, draft.id);
+	assert.equal(version.draft_revision, draft.revision);
+	assert.equal(version.name, draft.name);
+	assert.equal(version.chain_max_depth, draft.chain_max_depth);
+	assert.deepEqual(version.rules, draft.rules);
+	assert.deepEqual(parseRoutingPolicyVersion(await api(`${ROUTING_VERSION_PATH}/${version.id}`), version.id), version);
+	assert.equal((await versionAudit(api)).length, before.length + 1);
+	const page = await api(`${ROUTING_VERSION_PATH}?limit=25&offset=0`);
+	const summaries = parseRoutingPolicyVersionPage(page, 0);
+	assert.ok(summaries.some(summary => summary.id === version.id));
+	assert.ok(isJsonRecord(page) && Array.isArray(page.versions) && page.versions.every(summary =>
+		isJsonRecord(summary) && !('rules' in summary) && !('rules_json' in summary)));
+	await api(route, { method: 'POST', body: { expected_revision: draft.revision, rules: [] }, status: 400 });
+	await api(route, { method: 'POST', body: buildRoutingVersionPayload(draft.revision), status: 403, headers: { Origin: 'https://foreign.invalid' } });
+	await api(route, { method: 'POST', body: buildRoutingVersionPayload(draft.revision), status: 415, headers: { 'Content-Type': 'text/plain' } });
+	assert.equal((await versionAudit(api)).length, before.length + 1);
+	return version;
+}
+
+async function verifyVersionRetention(api: DraftClient, version: RoutingPolicyVersion): Promise<void> {
+	const auditBefore = await versionAudit(api);
+	assert.deepEqual(parseRoutingPolicyVersion(await api(`${ROUTING_VERSION_PATH}/${version.id}`), version.id), version);
+	const replay = await api(`${ROUTING_DRAFT_PATH}/${version.draft_id}/versions`, {
+		method: 'POST', body: buildRoutingVersionPayload(version.draft_revision), status: 201,
+	});
+	assert.deepEqual(parseRoutingPolicyVersion(replay), version, 'retry must resolve to the original immutable snapshot');
+	assert.deepEqual(await versionAudit(api), auditBefore, 'replay must not add another audit');
 }
 
 async function verifyCreation(api: DraftClient): Promise<RoutingDraft> {
@@ -177,11 +220,20 @@ test(`panel draft contracts drive the canonical gateway (${postgresBin ? 'Postgr
 		let backend = await startBackend();
 		const api = draftClient(origin);
 		await api(ROUTING_DRAFT_PATH, { status: 401 });
+		await api(ROUTING_VERSION_PATH, { status: 401 });
+		await api(`${ROUTING_VERSION_PATH}/123e4567-e89b-12d3-a456-426614174000`, { status: 401 });
+		await api(`${ROUTING_DRAFT_PATH}/123e4567-e89b-12d3-a456-426614174000/versions`, { method: 'POST', body: { expected_revision: 1 }, status: 401 });
 		await api('/api/session/login', { method: 'POST', body: { username: 'draft-acceptance', password } });
 		const activeBefore = await api('/api/routing/rules');
+		assert.deepEqual(parseRoutingPolicyVersionPage(await api(`${ROUTING_VERSION_PATH}?limit=25&offset=0`), 0), []);
 		const created = await verifyCreation(api);
 		await verifyRejections(api, created);
+		const initialVersion = await verifyVersionCapture(api, created);
 		const saved = await verifyConcurrentRevision(api, created);
+		await verifyVersionRetention(api, initialVersion);
+		const nextVersion = await verifyVersionCapture(api, saved);
+		assert.notEqual(initialVersion.id, nextVersion.id);
+		assert.notEqual(initialVersion.content_sha256, nextVersion.content_sha256);
 		assert.deepEqual(await api('/api/routing/rules'), activeBefore, 'draft edits must never publish a rule');
 		const auditBefore = await draftAudit(api);
 		await stopChild(backend);
@@ -191,12 +243,18 @@ test(`panel draft contracts drive the canonical gateway (${postgresBin ? 'Postgr
 			'full draft and administrator session must survive gateway/database restart');
 		assert.deepEqual(await draftAudit(api), auditBefore);
 		assert.deepEqual(await api('/api/routing/rules'), activeBefore);
+		await verifyVersionRetention(api, initialVersion);
+		await verifyVersionRetention(api, nextVersion);
 		await verifyDeletion(api, saved);
+		await verifyVersionRetention(api, initialVersion);
+		await verifyVersionRetention(api, nextVersion);
 		await stopChild(backend);
 		await startBackend();
 		await api(`${ROUTING_DRAFT_PATH}/${saved.id}`, { status: 404 });
+		await verifyVersionRetention(api, initialVersion);
+		await verifyVersionRetention(api, nextVersion);
 		assert.deepEqual(await api('/api/routing/rules'), activeBefore);
-		console.log('PASS real draft CRUD, validation, competing revisions, audit, restart, deletion persistence and active-rule isolation');
+		console.log('PASS real draft CRUD, concurrent version capture/replay, immutable history, audit, restart, source deletion and active-rule isolation');
 	} catch (cause) {
 		failures.push(cause);
 		for (const runtime of children) console.error(runtime.output()
