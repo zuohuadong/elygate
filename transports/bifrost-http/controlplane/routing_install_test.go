@@ -39,10 +39,15 @@ func TestRoutingInstallationStartupAndReplay(t *testing.T) {
 
 	head, err := store.InstallAcceptedRoutingRelease(ctx, attempt.Epoch, compile, "installer")
 	require.NoError(t, err)
-	require.True(t, head.IsApplied())
+	require.True(t, head.Head.IsApplied())
+	require.Equal(t, version.ChainMaxDepth, head.Policy.ChainMaxDepth)
+	require.Len(t, head.Policy.Rules, 1)
+	require.Equal(t, "installed-rule", head.Policy.Rules[0].ID)
+	require.Equal(t, "true", head.Policy.Rules[0].CelExpression)
 	replayed, err := store.InstallAcceptedRoutingRelease(ctx, attempt.Epoch, compile, "retry")
 	require.NoError(t, err)
-	require.Equal(t, *head, *replayed)
+	require.Equal(t, head.Head, replayed.Head)
+	require.Equal(t, head.Policy, replayed.Policy)
 	require.Len(t, routingReleaseAudits(t, store), 2, "one accept and one apply audit")
 	state, err = CheckRoutingPolicyStartup(ctx, cs, compile)
 	require.NoError(t, err)
@@ -56,9 +61,11 @@ func TestRoutingInstallationStartupAndReplay(t *testing.T) {
 
 	require.NoError(t, cs.DB().Model(&tables.TableRoutingRule{}).
 		Where("id = ?", "installed-rule").UpdateColumn("cel_expression", "false").Error)
+	require.Equal(t, "true", head.Policy.Rules[0].CelExpression, "returned policy does not follow later live edits")
 	_, err = CheckRoutingPolicyStartup(ctx, cs, compile)
 	require.ErrorIs(t, err, ErrRoutingPolicyNotReady, "out-of-band drift fails closed")
-	_, err = store.InstallAcceptedRoutingRelease(ctx, attempt.Epoch, compile, "repair")
+	rejectedInstallation, err := store.InstallAcceptedRoutingRelease(ctx, attempt.Epoch, compile, "repair")
+	require.Nil(t, rejectedInstallation)
 	require.ErrorIs(t, err, ErrRoutingPolicyNotReady, "replay must not silently repair drift")
 	require.Len(t, routingReleaseAudits(t, store), 2)
 }
@@ -79,21 +86,27 @@ func TestRoutingInstallationFailuresRollBack(t *testing.T) {
 		return nil, nil
 	}
 	rejected := errors.New("installation rejected")
-	_, err = store.InstallAcceptedRoutingRelease(ctx, attempt.Epoch, func(context.Context, RoutingPolicyVersion) ([]*tables.TableRoutingRule, error) {
+	rejectedInstallation, err := store.InstallAcceptedRoutingRelease(ctx, attempt.Epoch, func(context.Context, RoutingPolicyVersion) ([]*tables.TableRoutingRule, error) {
 		return nil, rejected
 	}, "installer")
 	require.ErrorIs(t, err, rejected)
-	_, err = store.InstallAcceptedRoutingRelease(ctx, attempt.Epoch+1, empty, "installer")
+	require.NotErrorIs(t, err, ErrRoutingInstallationUncertain)
+	require.Nil(t, rejectedInstallation)
+	rejectedInstallation, err = store.InstallAcceptedRoutingRelease(ctx, attempt.Epoch+1, empty, "installer")
 	require.ErrorIs(t, err, ErrRoutingReleaseConflict)
+	require.NotErrorIs(t, err, ErrRoutingInstallationUncertain)
+	require.Nil(t, rejectedInstallation)
 	const callback = "test:routing-install-audit"
 	require.NoError(t, cs.DB().Callback().Create().After("gorm:create").Register(callback, func(tx *gorm.DB) {
 		if tx.Statement.Table == (AuditEvent{}).TableName() {
 			tx.AddError(rejected)
 		}
 	}))
-	_, err = store.InstallAcceptedRoutingRelease(ctx, attempt.Epoch, empty, "installer")
+	rejectedInstallation, err = store.InstallAcceptedRoutingRelease(ctx, attempt.Epoch, empty, "installer")
 	require.NoError(t, cs.DB().Callback().Create().Remove(callback))
 	require.ErrorIs(t, err, rejected)
+	require.NotErrorIs(t, err, ErrRoutingInstallationUncertain)
+	require.Nil(t, rejectedInstallation)
 	requirePendingRoutingHead(t, store, attempt)
 	live, err := cs.GetRoutingRules(ctx)
 	require.NoError(t, err)
@@ -112,10 +125,11 @@ func TestRoutingInstallationMissingClientLeavesReleasePending(t *testing.T) {
 		VersionID: version.ID, IdempotencyKey: uuid.NewString(),
 	})
 	require.NoError(t, err)
-	_, err = store.InstallAcceptedRoutingRelease(t.Context(), attempt.Epoch, func(context.Context, RoutingPolicyVersion) ([]*tables.TableRoutingRule, error) {
+	installed, err := store.InstallAcceptedRoutingRelease(t.Context(), attempt.Epoch, func(context.Context, RoutingPolicyVersion) ([]*tables.TableRoutingRule, error) {
 		return nil, nil
 	}, "installer")
 	require.ErrorIs(t, err, gorm.ErrRecordNotFound)
+	require.Nil(t, installed)
 	requirePendingRoutingHead(t, store, attempt)
 	var clients int64
 	require.NoError(t, cs.DB().Model(&tables.TableClientConfig{}).Count(&clients).Error)

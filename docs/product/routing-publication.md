@@ -215,6 +215,58 @@ retains at most one validated startup snapshot until plugin construction; the
 plugin owns its compiled generation and a separate depth value, not the source
 snapshot. This management-only change does not need a request-path benchmark.
 
+## Installation Transaction Handoff
+
+Follow-up `routing-installation-handoff` has parent `20dca0494`, source stage 2
+and the original production-readiness goal, and reason that a head-only return
+cannot hand a validated policy to runtime, while a lost commit receipt cannot
+be treated as a rollback. The original goal, non-goals and acceptance remain
+unchanged. This is high-risk panel work with root as the sole writer and the
+existing runtime/transaction read-only reviewers; it does not add an HTTP route,
+enable online publication, deploy, or authorize automatic commit/push.
+
+`InstallAcceptedRoutingRelease` now returns `RoutingReleaseInstallation`:
+the acknowledged head and the complete rules/depth snapshot compared in the
+same transaction. Both pending installation and applied replay use that
+transaction's compiled policy, never a post-commit live-table read. An empty
+policy is an explicit snapshot with an empty rule slice. Compiler output belongs
+to the caller; nested objects must remain read-only until the existing runtime
+preparation boundary deep-copies them. The result proves the policy matched
+the committed transaction, not that other processes cannot subsequently drift.
+
+Installation rejects transaction-bound stores and transaction-backed config
+stores before compiling or writing. Root Begin failures and work failures with
+a confirmed rollback return the original error, without an installable policy.
+Commit receipt errors, including cancellation reported by Commit, return
+`ErrRoutingInstallationUncertain` and no policy, whether or not the database
+actually committed. A rollback receipt failure also keeps both original errors
+and returns uncertain; GORM's sticky query error is not used as the SQL rollback
+receipt. Cancellation automatically rolled back by `database/sql` before any
+commit attempt is not a commit ambiguity. In contrast, pgx may attempt rollback
+with the canceled transaction context and return a failed receipt; that remains
+uncertain and preserves both errors. The cancellation test checks the actual
+rollback receipt as well as zero commit attempts, a nil policy, and unchanged
+durable state. A compiler panic attempts rollback
+and propagates unchanged; its regression verifies normal lock release and a
+successful retry. No rollback is attempted after a
+failed commit receipt to guess its outcome.
+
+This is a management-only handoff: no inference hook, per-request allocation,
+new cache or retained release history is added. The returned rules/depth have
+the existing bounded candidate size; their lifetime belongs to the caller.
+Online admission/failure closing, complete generation installation, reload
+isolation, cross-process fencing, rollback, HTTP/panel publication and final
+production gates remain required. A successful durable acknowledgement is not
+current-process readiness. The publication contract remains **PARTIAL**.
+
+Validation for this handoff passed `TestRouting(Installation|Release)` with
+`-race -count=1` on SQLite (28.885s) and a private PostgreSQL instance (119.514s).
+The PostgreSQL runner also verified test-database cleanup and stopped the
+instance. Runtime and transaction read-only reviewers accepted this scoped
+handoff; the cancellation assertion was corrected after PostgreSQL exposed a
+failed rollback receipt, without changing the conservative production behavior.
+These checks do not validate online activation or production readiness.
+
 ## Runtime Policy Preparation Checkpoint
 
 This follow-on checkpoint adds the process-local primitive needed by stage 2.
