@@ -1922,6 +1922,7 @@ type routingTargetHashPayload struct {
 	Model    string  `json:"model"`
 	KeyID    string  `json:"key_id"`
 	Weight   float64 `json:"weight"`
+	Position *int    `json:"position,omitempty"`
 	// TTFTTimeoutMs is omitted when unset so targets without it keep their hash.
 	TTFTTimeoutMs int `json:"ttft_timeout_ms,omitempty"`
 }
@@ -1969,8 +1970,8 @@ func GenerateRoutingRuleHash(r tables.TableRoutingRule) (string, error) {
 	targets := make([]tables.TableRoutingTarget, len(r.Targets))
 	copy(targets, r.Targets)
 	sort.Slice(targets, func(i, j int) bool {
-		pi := routingTargetHashPayload{Provider: derefStr(targets[i].Provider), Model: derefStr(targets[i].Model), KeyID: derefStr(targets[i].KeyID), Weight: targets[i].Weight, TTFTTimeoutMs: derefInt(targets[i].TTFTTimeoutMs)}
-		pj := routingTargetHashPayload{Provider: derefStr(targets[j].Provider), Model: derefStr(targets[j].Model), KeyID: derefStr(targets[j].KeyID), Weight: targets[j].Weight, TTFTTimeoutMs: derefInt(targets[j].TTFTTimeoutMs)}
+		pi := routingTargetHashPayload{Provider: derefStr(targets[i].Provider), Model: derefStr(targets[i].Model), KeyID: derefStr(targets[i].KeyID), Weight: targets[i].Weight, Position: targets[i].Position, TTFTTimeoutMs: derefInt(targets[i].TTFTTimeoutMs)}
+		pj := routingTargetHashPayload{Provider: derefStr(targets[j].Provider), Model: derefStr(targets[j].Model), KeyID: derefStr(targets[j].KeyID), Weight: targets[j].Weight, Position: targets[j].Position, TTFTTimeoutMs: derefInt(targets[j].TTFTTimeoutMs)}
 		di, err := sonic.Marshal(pi)
 		if err != nil {
 			return false
@@ -1982,7 +1983,7 @@ func GenerateRoutingRuleHash(r tables.TableRoutingRule) (string, error) {
 		return string(di) < string(dj)
 	})
 	for _, t := range targets {
-		payload := routingTargetHashPayload{Provider: derefStr(t.Provider), Model: derefStr(t.Model), KeyID: derefStr(t.KeyID), Weight: t.Weight, TTFTTimeoutMs: derefInt(t.TTFTTimeoutMs)}
+		payload := routingTargetHashPayload{Provider: derefStr(t.Provider), Model: derefStr(t.Model), KeyID: derefStr(t.KeyID), Weight: t.Weight, Position: t.Position, TTFTTimeoutMs: derefInt(t.TTFTTimeoutMs)}
 		data, err := sonic.Marshal(payload)
 		if err != nil {
 			return "", err

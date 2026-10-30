@@ -25,6 +25,7 @@ func TestRuleGenerationOwnsInput(t *testing.T) {
 	rule.Targets[0].KeyID = bifrost.Ptr("original-key")
 	rule.Targets[0].ProviderKeyName = bifrost.Ptr("original-alias")
 	rule.Targets[0].RuleID = rule.ID
+	rule.Targets[0].Position = bifrost.Ptr(0)
 	rule.Targets[0].TTFTTimeoutMs = bifrost.Ptr(200)
 	rule.ParsedFallbacks = []tables.RoutingFallback{{
 		Fallback:        schemas.Fallback{Provider: schemas.OpenAI, Model: "fallback"},
@@ -41,6 +42,7 @@ func TestRuleGenerationOwnsInput(t *testing.T) {
 	*rule.Targets[0].Provider = "anthropic"
 	*rule.Targets[0].KeyID = "changed-key"
 	*rule.Targets[0].ProviderKeyName = "changed-alias"
+	*rule.Targets[0].Position = 9
 	*rule.Targets[0].TTFTTimeoutMs = 900
 	rule.Targets[0].RuleID = "changed-id"
 	*rule.ParsedFallbacks[0].ProviderKeyName = "changed-fallback-alias"
@@ -54,6 +56,7 @@ func TestRuleGenerationOwnsInput(t *testing.T) {
 	require.Equal(t, "openai", *owned[0].Targets[0].Provider)
 	require.Equal(t, "original-key", *owned[0].Targets[0].KeyID)
 	require.Equal(t, "original-alias", *owned[0].Targets[0].ProviderKeyName)
+	require.Equal(t, 0, *owned[0].Targets[0].Position)
 	require.Equal(t, 200, *owned[0].Targets[0].TTFTTimeoutMs)
 	require.Equal(t, "owned", owned[0].Targets[0].RuleID)
 	require.Equal(t, "fallback-alias", *owned[0].ParsedFallbacks[0].ProviderKeyName)

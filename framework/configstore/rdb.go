@@ -6225,8 +6225,8 @@ func (s *RDBConfigStore) UpdateRateLimitUsage(ctx context.Context, id string, to
 	return nil
 }
 
-// loadRoutingRulesOrdered loads routing rules with Targets preloaded, using consistent ordering:
-// rules by priority ASC, created_at DESC, id ASC; targets by weight DESC for deterministic ordering.
+// loadRoutingRulesOrdered loads routing rules with Targets preloaded, using consistent ordering.
+// Published targets use their explicit position; legacy targets retain weight ordering.
 func (s *RDBConfigStore) loadRoutingRulesOrdered(ctx context.Context, dest *[]tables.TableRoutingRule, scopes ...func(*gorm.DB) *gorm.DB) error {
 	// ScopedDB, not DB: routing-rule reads must honor any row-visibility
 	// QueryScope stashed on ctx (the enterprise DAC wrapper attaches one for
@@ -6234,7 +6234,9 @@ func (s *RDBConfigStore) loadRoutingRulesOrdered(ctx context.Context, dest *[]ta
 	// reloads on context.Background) carry no scope and stay unfiltered.
 	q := s.ScopedDB(ctx).
 		Preload("Targets", func(db *gorm.DB) *gorm.DB {
-			return db.Order("weight DESC").
+			return db.Order("CASE WHEN position IS NULL THEN 1 ELSE 0 END ASC").
+				Order("position ASC").
+				Order("weight DESC").
 				Order("COALESCE(provider, '') ASC").
 				Order("COALESCE(model, '') ASC").
 				Order("COALESCE(key_id, '') ASC")
@@ -6289,7 +6291,9 @@ func (s *RDBConfigStore) GetRoutingRulesPaginated(ctx context.Context, params Ro
 	var rules []tables.TableRoutingRule
 	if err := baseQuery.
 		Preload("Targets", func(db *gorm.DB) *gorm.DB {
-			return db.Order("weight DESC").
+			return db.Order("CASE WHEN position IS NULL THEN 1 ELSE 0 END ASC").
+				Order("position ASC").
+				Order("weight DESC").
 				Order("COALESCE(provider, '') ASC").
 				Order("COALESCE(model, '') ASC").
 				Order("COALESCE(key_id, '') ASC")
@@ -6357,6 +6361,9 @@ func (s *RDBConfigStore) GetRedactedRoutingRules(ctx context.Context, ids []stri
 
 // CreateRoutingRule creates a new routing rule in the database.
 func (s *RDBConfigStore) CreateRoutingRule(ctx context.Context, rule *tables.TableRoutingRule, tx ...*gorm.DB) error {
+	if err := validateRoutingTargetPositions(rule.Targets); err != nil {
+		return err
+	}
 	database := s.DB()
 	if len(tx) > 0 && tx[0] != nil {
 		database = tx[0]
@@ -6406,6 +6413,9 @@ func (s *RDBConfigStore) CreateRoutingRule(ctx context.Context, rule *tables.Tab
 // UpdateRoutingRule updates an existing routing rule in the database.
 // It enforces the same unique-priority-per-scope invariant as CreateRoutingRule.
 func (s *RDBConfigStore) UpdateRoutingRule(ctx context.Context, rule *tables.TableRoutingRule, tx ...*gorm.DB) error {
+	if err := validateRoutingTargetPositions(rule.Targets); err != nil {
+		return err
+	}
 	database := s.DB()
 	if len(tx) > 0 && tx[0] != nil {
 		database = tx[0]
@@ -6484,6 +6494,9 @@ func (s *RDBConfigStore) SyncRoutingRules(ctx context.Context, toAdd []tables.Ta
 	// Validate scopeID is required for non-global scope (same guard as CreateRoutingRule/UpdateRoutingRule).
 	for _, list := range [][]tables.TableRoutingRule{toAdd, toUpdate} {
 		for i := range list {
+			if err := validateRoutingTargetPositions(list[i].Targets); err != nil {
+				return err
+			}
 			if list[i].Scope != "" && list[i].Scope != "global" && list[i].ScopeID == nil {
 				return fmt.Errorf("scopeID is required for non-global scope '%s'", list[i].Scope)
 			}

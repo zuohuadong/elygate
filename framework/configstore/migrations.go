@@ -531,6 +531,7 @@ var configstoreMigrationSteps = []migrationStep{
 	{IDs: []string{"add_warp_temperature_reasoning_columns"}, run: migrationAddWarpTemperatureReasoningColumns},
 	{IDs: []string{"add_virtual_key_disable_content_logging_column"}, run: migrationAddVirtualKeyDisableContentLoggingColumn},
 	{IDs: []string{"add_ttft_timeout_ms_column_to_routing_targets"}, run: migrationAddTTFTTimeoutMsColumnToRoutingTargets},
+	{IDs: []string{"add_position_column_to_routing_targets"}, run: migrationAddRoutingTargetPositionColumn},
 	{IDs: []string{"add_web_search_cost_per_request_column"}, run: migrationAddWebSearchCostPerRequestColumn},
 	{IDs: []string{"move_pricing_override_search_context_to_web_search"}, run: migrationMovePricingOverrideSearchContextToWebSearch},
 	{IDs: []string{"add_warp_additional_models_column"}, run: migrationAddWarpAdditionalModelsColumn},
@@ -14990,6 +14991,27 @@ func migrationAddTTFTTimeoutMsColumnToRoutingTargets(ctx context.Context, db *go
 	}})
 	if err := m.Migrate(); err != nil {
 		return fmt.Errorf("error running %s migration: %s", migrationName, err.Error())
+	}
+	return nil
+}
+
+// migrationAddRoutingTargetPositionColumn adds nullable published target order.
+// Existing rows remain NULL and therefore retain the legacy weight ordering.
+func migrationAddRoutingTargetPositionColumn(ctx context.Context, db *gorm.DB, logger schemas.Logger) error {
+	const migrationName = "add_position_column_to_routing_targets"
+	logger.Info("[configstore] starting migration %s", migrationName)
+	defer logger.Info("[configstore] finished migration %s", migrationName)
+	m := migrator.New(db, migrator.DefaultOptions, []*migrator.Migration{{
+		ID: migrationName,
+		Migrate: func(tx *gorm.DB) error {
+			return addColumnIfNotExists(tx.WithContext(ctx), logger, &tables.TableRoutingTarget{}, "position")
+		},
+		Rollback: func(*gorm.DB) error {
+			return fmt.Errorf("routing target positions are non-rollbackable: dropping them changes published weighted selection order")
+		},
+	}})
+	if err := m.Migrate(); err != nil {
+		return fmt.Errorf("error running %s migration: %w", migrationName, err)
 	}
 	return nil
 }

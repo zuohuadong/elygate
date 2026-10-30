@@ -184,6 +184,7 @@ type TableRoutingTarget struct {
 	Model           *string `gorm:"type:varchar(255);uniqueIndex:idx_routing_target_config" json:"model,omitempty"`    // nil = use incoming model
 	KeyID           *string `gorm:"type:varchar(255);uniqueIndex:idx_routing_target_config" json:"key_id,omitempty"`   // persisted key pin
 	ProviderKeyName *string `gorm:"-" json:"provider_key_name,omitempty"`                                              // config-only alias; resolved to key_id during load
+	Position        *int    `gorm:"column:position" json:"-"`                                                         // published target order; nil preserves legacy ordering
 	Weight          float64 `gorm:"not null;default:1" json:"weight"`                                                  // must sum to 1 across all targets in a rule
 	TTFTTimeoutMs   *int    `gorm:"column:ttft_timeout_ms" json:"ttft_timeout_ms,omitempty"`                           // streaming first-token deadline; nil = off
 }

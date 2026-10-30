@@ -190,3 +190,39 @@ func TestGenerateRoutingRuleHash_FallbackIdentity(t *testing.T) {
 	assert.Equal(t, hash(`["vertex/m"]`), hash(`[{"provider":"vertex","model":"m"}]`), "an unpinned object must hash like its string form")
 	assert.Equal(t, hash(`["anthropic/"]`), hash(`[{"provider":"anthropic"}]`), "an unpinned provider-only object must hash like its string form")
 }
+
+func TestGenerateRoutingRuleHash_TargetPositions(t *testing.T) {
+	firstModel, secondModel := "first", "second"
+	firstPosition, secondPosition := 0, 1
+	rule := tables.TableRoutingRule{
+		ID:            "positioned-rule",
+		Name:          "Positioned",
+		CelExpression: "true",
+		Scope:         "global",
+		Targets: []tables.TableRoutingTarget{
+			{Model: &firstModel, Position: &firstPosition, Weight: 0.1},
+			{Model: &secondModel, Position: &secondPosition, Weight: 0.9},
+		},
+	}
+	positionedHash, err := GenerateRoutingRuleHash(rule)
+	require.NoError(t, err)
+
+	reordered := rule
+	reordered.Targets = []tables.TableRoutingTarget{rule.Targets[1], rule.Targets[0]}
+	reorderedHash, err := GenerateRoutingRuleHash(reordered)
+	require.NoError(t, err)
+	assert.Equal(t, positionedHash, reorderedHash, "hashing must be independent of slice order")
+
+	reordered.Targets[0].Position = &firstPosition
+	reordered.Targets[1].Position = &secondPosition
+	changedOrderHash, err := GenerateRoutingRuleHash(reordered)
+	require.NoError(t, err)
+	assert.NotEqual(t, positionedHash, changedOrderHash, "changing target order must change the hash")
+
+	legacy := rule
+	legacy.Targets[0].Position = nil
+	legacy.Targets[1].Position = nil
+	legacyHash, err := GenerateRoutingRuleHash(legacy)
+	require.NoError(t, err)
+	assert.NotEqual(t, positionedHash, legacyHash, "published target order must be part of the hash")
+}

@@ -79,6 +79,8 @@ func TestCompileRoutingPolicyCanonicalizesWithoutCallerMutation(t *testing.T) {
 	require.Equal(t, createdAt.UTC().Truncate(time.Microsecond), compiled[0].CreatedAt)
 	require.Equal(t, "first", *compiled[0].Targets[0].Model)
 	require.Equal(t, "second", *compiled[0].Targets[1].Model)
+	require.Equal(t, 0, *compiled[0].Targets[0].Position)
+	require.Equal(t, 1, *compiled[0].Targets[1].Position)
 	require.Equal(t, "openai", *compiled[1].Targets[0].Provider)
 	require.Equal(t, "anthropic", *compiled[1].Targets[1].Provider)
 }

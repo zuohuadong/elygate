@@ -105,10 +105,12 @@ func normalizeRoutingPolicyRule(draft simulationRule) (*configtables.TableRoutin
 		ParsedQuery: draft.Query, ParsedFallbacks: draft.Fallbacks,
 		Targets: make([]configtables.TableRoutingTarget, 0, len(draft.Targets)),
 	}
-	for _, target := range draft.Targets {
+	for targetIndex, target := range draft.Targets {
+		position := targetIndex
 		rule.Targets = append(rule.Targets, configtables.TableRoutingTarget{
 			Provider: nonemptyRoutingField(target.Provider), Model: nonemptyRoutingField(target.Model),
-			KeyID: nonemptyRoutingField(target.KeyID), Weight: target.Weight, TTFTTimeoutMs: nilIfZero(target.TTFTTimeoutMs),
+			KeyID: nonemptyRoutingField(target.KeyID), Position: &position, Weight: target.Weight,
+			TTFTTimeoutMs: nilIfZero(target.TTFTTimeoutMs),
 		})
 	}
 	for index := range rule.ParsedFallbacks {

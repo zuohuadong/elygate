@@ -248,6 +248,30 @@ Values are one local run with `-benchmem`; benchmark noise is expected.
 | evaluate unmatched | 2802 ns/op, 5751 B/op, 72 allocs/op | 2659 ns/op, 5768 B/op, 71 allocs/op |
 | chain three | 7471 ns/op, 15080 B/op, 210 allocs/op | 7044 ns/op, 15057 B/op, 209 allocs/op |
 
+## Target Order Persistence Checkpoint
+
+The October 30, 2026 follow-up adds the prerequisite needed to preserve weighted
+selection boundaries across a database reload. Published candidates carry an
+internal nullable `position` on each target; the strict candidate compiler
+assigns `0..n-1` in caller order, while legacy rows remain `NULL` and retain the
+existing weight/provider/model/key ordering. SQLite and PostgreSQL use the same
+explicit NULL ordering, and CRUD/sync reject mixed, duplicate, negative, or
+gapped positions before writing.
+
+The position column is additive and intentionally has no destructive rollback:
+dropping it would silently change published weighted selection. Position is
+excluded from public JSON/config payloads but included in hashes only when set,
+so legacy hashes remain stable while explicit order changes are durable.
+The added work runs during candidate compilation, configuration writes/reloads,
+and generation cloning only; the per-request selection path is unchanged.
+Retained state is one optional integer per positioned target, bounded by the
+installed rules and in-flight generations.
+
+Focused SQLite reload, scoped, paginated, legacy-order, hash, compiler, and
+generation-clone tests cover this checkpoint. This does not publish live rules,
+install a pending version, add a startup recovery gate, or provide rollback/API
+activation. The overall publication contract remains **PARTIAL**.
+
 ## Verification
 
 - Stage 1 passed `go test -buildvcs=false ./rules -count=1`, targeted `-race`

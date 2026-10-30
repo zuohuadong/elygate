@@ -342,6 +342,7 @@ func cloneRoutingRule(rule *configstoreTables.TableRoutingRule) (*configstoreTab
 	owned.Query = copyRoutingPointer(rule.Query)
 	for index := range owned.Targets {
 		owned.Targets[index].RuleID = rule.Targets[index].RuleID
+		owned.Targets[index].Position = copyRoutingPointer(rule.Targets[index].Position)
 	}
 	return &owned, nil
 }
