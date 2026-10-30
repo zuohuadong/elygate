@@ -28,7 +28,12 @@ describe('routing rules page contract', () => {
 		expect(panel).toContain("requestJson<unknown>('/api/routing/rules'");
 		expect(panel).toContain("requestJson<unknown>('/api/control-plane/routing/simulate'");
 		expect(panel).toContain('AbortController');
-		expect(panel).toContain('onDestroy(cancelRequests)');
+		expect(panel).toContain('onDestroy(preserveAndCancel)');
+		expect(panel).toContain('uncertain: uncertainMutation || mutating');
+		expect(panel).toContain("requestJson<unknown>(`${ROUTING_DRAFT_PATH}?limit=${ROUTING_DRAFT_PAGE_SIZE}&offset=${offset}`");
+		expect(panel).toContain('buildRoutingDraftPayload');
+		expect(panel).toContain('expected_revision');
+		expect(panel).toContain('active routing was not changed');
 		expect(source).toContain("<div hidden={viewMode !== 'simulation'}><RoutingSimulationPanel active={viewMode === 'simulation'} /></div>");
 		expect(source).not.toContain('/api/governance/routing-rules');
 	});

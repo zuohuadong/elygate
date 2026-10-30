@@ -2,6 +2,7 @@ import type { AuthActionResult, AuthProvider, CheckResult, Identity } from '@sva
 import { ApiError, getSessionStatus, requestJson } from './api';
 import { formatBrandText, resolveBranding } from './branding';
 import type { ElygateLocale } from './i18n';
+import { clearRoutingDraftRecovery } from './routing-drafts';
 
 const authCopy = {
 	'zh-CN': {
@@ -52,6 +53,7 @@ export function createBifrostAuthProvider(
 			const password = typeof params.password === 'string' ? params.password : '';
 			if (!username || !password) return failed(authLabel(getLocale(), 'loginRequired'));
 
+			clearRoutingDraftRecovery();
 			try {
 				await requestJson('/api/session/login', {
 					method: 'POST',
@@ -65,6 +67,7 @@ export function createBifrostAuthProvider(
 		},
 
 		async logout(): Promise<AuthActionResult> {
+			clearRoutingDraftRecovery();
 			try {
 				await requestJson('/api/session/logout', { method: 'POST' });
 			} catch (error) {
@@ -80,6 +83,7 @@ export function createBifrostAuthProvider(
 				const status = await getSessionStatus();
 				resolveBranding(status as unknown as Record<string, unknown>);
 				if (status.is_auth_enabled && status.has_valid_token) return { authenticated: true };
+				clearRoutingDraftRecovery();
 				return {
 					authenticated: false,
 					redirectTo: '/login',
@@ -90,6 +94,7 @@ export function createBifrostAuthProvider(
 					},
 				};
 			} catch (error) {
+				clearRoutingDraftRecovery();
 				return {
 					authenticated: false,
 					redirectTo: '/login',
@@ -100,7 +105,10 @@ export function createBifrostAuthProvider(
 
 		async getIdentity(): Promise<Identity | null> {
 			const status = await getSessionStatus();
-			if (!status.is_auth_enabled || !status.has_valid_token) return null;
+			if (!status.is_auth_enabled || !status.has_valid_token) {
+				clearRoutingDraftRecovery();
+				return null;
+			}
 			return { id: 'admin', name: authLabel(getLocale(), 'adminName'), role: authLabel(getLocale(), 'userRole') };
 		},
 	};

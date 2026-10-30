@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { createBifrostAuthProvider } from './auth';
+import { routingDraftRecovery } from './routing-drafts';
 
 const originalFetch = globalThis.fetch;
 
@@ -16,7 +17,9 @@ describe('Bifrost AuthProvider', () => {
 	test('fails closed when server authentication is disabled', async () => {
 		globalThis.fetch = (() => respond({ auth_type: 'none', has_valid_token: false, is_auth_enabled: false })) as typeof fetch;
 		const provider = createBifrostAuthProvider(() => 'zh-CN', async () => {});
+		const epoch = routingDraftRecovery.epoch;
 		const result = await provider.check();
+		expect(routingDraftRecovery.epoch).toBeGreaterThan(epoch);
 		expect(result.authenticated).toBe(false);
 		expect(result.redirectTo).toBe('/login');
 	});
@@ -37,7 +40,9 @@ describe('Bifrost AuthProvider', () => {
 			return respond({ message: 'ok' });
 		}) as typeof fetch;
 		const provider = createBifrostAuthProvider(() => 'zh-CN', async () => { authenticatedCallbacks += 1; });
+		const epoch = routingDraftRecovery.epoch;
 		const result = await provider.login({ username: 'admin', password: 'secret' });
+		expect(routingDraftRecovery.epoch).toBeGreaterThan(epoch);
 		expect(result.success).toBe(true);
 		expect(result.redirectTo).toBe('/');
 		expect(credentials).toBe('same-origin');
@@ -73,7 +78,9 @@ describe('Bifrost AuthProvider', () => {
 	test.each([200, 204, 401])('logout is idempotent for status %s', async (status) => {
 		globalThis.fetch = (async () => new Response(null, { status })) as typeof fetch;
 		const provider = createBifrostAuthProvider(() => 'en', async () => {});
+		const epoch = routingDraftRecovery.epoch;
 		expect(await provider.logout({})).toEqual({ success: true, redirectTo: '/login' });
+		expect(routingDraftRecovery.epoch).toBeGreaterThan(epoch);
 	});
 
 	test.each([403, 500, 503, 'offline'])('logout reports failure for %s', async (status) => {

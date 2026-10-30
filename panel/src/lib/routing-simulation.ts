@@ -71,15 +71,20 @@ function simulationArray(source: string, field: 'rules' | 'samples'): JsonRecord
 	return parsed;
 }
 
-export function buildSimulationPayload(draft: SimulationDraft): SimulationPayload {
+export function buildCandidateRules(draft: Pick<SimulationDraft, 'rules' | 'chainMaxDepth'>): Pick<SimulationPayload, 'rules' | 'chain_max_depth'> {
 	const rules = simulationArray(draft.rules, 'rules');
-	const samples = simulationArray(draft.samples, 'samples');
 	if (rules.length > 32) throw new SimulationInputError('rule-count', 'rules');
-	if (samples.length < 1 || samples.length > 16) throw new SimulationInputError('sample-count', 'samples');
 	if (!Number.isInteger(draft.chainMaxDepth) || draft.chainMaxDepth < 1 || draft.chainMaxDepth > 20) {
 		throw new SimulationInputError('depth', 'depth');
 	}
-	const payload = { rules, samples, chain_max_depth: draft.chainMaxDepth };
+	return { rules, chain_max_depth: draft.chainMaxDepth };
+}
+
+export function buildSimulationPayload(draft: SimulationDraft): SimulationPayload {
+	const candidate = buildCandidateRules(draft);
+	const samples = simulationArray(draft.samples, 'samples');
+	if (samples.length < 1 || samples.length > 16) throw new SimulationInputError('sample-count', 'samples');
+	const payload = { ...candidate, samples };
 	if (new TextEncoder().encode(JSON.stringify(payload)).byteLength > 128 * 1024) {
 		throw new SimulationInputError('size', 'request');
 	}
