@@ -143,17 +143,26 @@ function apiClient(origin: string) {
 
 type ApiClient = ReturnType<typeof apiClient>;
 
-async function applicationKey(api: ApiClient): Promise<{ applicationID: string; key: string; virtualKeyID: string }> {
+interface RuntimeApplicationKey {
+	applicationID: string;
+	key: string;
+	virtualKeyID: string;
+	expiresAt?: string;
+}
+
+async function applicationKey(api: ApiClient, lifetimeMs?: number): Promise<RuntimeApplicationKey> {
 	const project = await api.json('/api/control-plane/projects', { method: 'POST', body: { name: 'Relay acceptance' }, status: 201 });
 	const application = await api.json(`/api/control-plane/projects/${project.id}/applications`, {
 		method: 'POST', body: { name: 'Relay runtime' }, status: 201,
 	});
 	const key = await api.json(`/api/control-plane/applications/${application.id}/keys`, {
-		method: 'POST', body: { name: 'Relay runtime key' }, status: 201,
+		method: 'POST', body: { name: `Relay runtime ${application.id}`,
+			...(lifetimeMs === undefined ? {} : { expires_at: new Date(Date.now() + lifetimeMs).toISOString() }) }, status: 201,
 	});
 	assert.equal(typeof key.value, 'string');
 	assert.equal(typeof key.virtual_key_id, 'string');
-	return { applicationID: String(application.id), key: String(key.value), virtualKeyID: String(key.virtual_key_id) };
+	return { applicationID: String(application.id), key: String(key.value), virtualKeyID: String(key.virtual_key_id),
+		expiresAt: typeof key.expires_at === 'string' ? key.expires_at : undefined };
 }
 
 async function verifyPreviewAndSave(api: ApiClient, upstream: string): Promise<void> {
@@ -176,12 +185,68 @@ async function verifyPreviewAndSave(api: ApiClient, upstream: string): Promise<v
 }
 
 async function verifyDeniedGrant(api: ApiClient, key: string, upstream: string): Promise<void> {
-	const headers = { 'x-bf-vk': key, 'X-Operation': 'search', 'User-Agent': 'codex-cli/relay-runtime-test' };
 	// 未授权请求必须在触达上游前被拦截，而不只是返回一个错误状态。
-	const denied = await api.request('/relay/runtime-acceptance/v1/search?tag=no-grant', { method: 'POST', body: '{}', headers });
-	assert.equal(denied.status, 403);
-	await denied.arrayBuffer();
-	assert.equal((await (await fetch(`${upstream}/__relay/hits?tag=no-grant`)).json()).hits, 0);
+	await verifySearch(api, { key, tag: 'no-grant', status: 403 });
+	await verifyUpstreamHits(upstream, 'no-grant', 0);
+}
+
+async function verifySearch(api: ApiClient, call: { key: string; tag: string; status: number }): Promise<void> {
+	const response = await api.request(`/relay/runtime-acceptance/v1/search?tag=${call.tag}`, {
+		method: 'POST', body: '{}', headers: { 'x-bf-vk': call.key, 'X-Operation': 'search' },
+	});
+	assert.equal(response.status, call.status, call.tag);
+	await response.arrayBuffer();
+}
+
+async function verifyUpstreamHits(upstream: string, tag: string, expected: number): Promise<void> {
+	const hits = await fetch(`${upstream}/__relay/hits?tag=${tag}`, { signal: AbortSignal.timeout(5_000) });
+	assert.equal(hits.status, 200);
+	assert.equal((await hits.json()).hits, expected, `${tag} upstream hits`);
+}
+
+async function grantRelay(api: ApiClient, virtualKeyID: string): Promise<void> {
+	await api.json(`/api/governance/virtual-keys/${virtualKeyID}`, {
+		method: 'PUT', body: { relay_grants: [{ relay_name: 'runtime-acceptance' }] },
+	});
+}
+
+async function verifyKeyRotation(api: ApiClient, current: RuntimeApplicationKey, upstream: string): Promise<string> {
+	const rotated = await api.json(`/api/control-plane/applications/${current.applicationID}/keys/${current.virtualKeyID}/rotate`, {
+		method: 'POST',
+	});
+	assert.equal(rotated.virtual_key_id, current.virtualKeyID);
+	assert.ok(typeof rotated.value === 'string' && rotated.value !== current.key, 'rotation must return a new key value');
+	const key = String(rotated.value);
+	await verifySearch(api, { key: current.key, tag: 'rotation-old', status: 401 });
+	await verifyUpstreamHits(upstream, 'rotation-old', 0);
+	await verifySearch(api, { key, tag: 'rotation-new', status: 200 });
+	await verifyUpstreamHits(upstream, 'rotation-new', 1);
+	return key;
+}
+
+async function verifyKeyExpiry(api: ApiClient, upstream: string): Promise<void> {
+	const expiring = await applicationKey(api, 10_000);
+	assert.ok(expiring.expiresAt && Number.isFinite(Date.parse(expiring.expiresAt)), 'key expiry must be returned');
+	await grantRelay(api, expiring.virtualKeyID);
+	await verifySearch(api, { key: expiring.key, tag: 'expiry-active', status: 200 });
+	await verifyUpstreamHits(upstream, 'expiry-active', 1);
+	await delay(Math.max(0, Date.parse(expiring.expiresAt) + 100 - Date.now()));
+	await verifySearch(api, { key: expiring.key, tag: 'expiry-expired', status: 401 });
+	await verifyUpstreamHits(upstream, 'expiry-expired', 0);
+}
+
+async function verifyKeyRevocation(api: ApiClient, upstream: string): Promise<void> {
+	const active = await applicationKey(api);
+	await grantRelay(api, active.virtualKeyID);
+	await verifySearch(api, { key: active.key, tag: 'revocation-active', status: 200 });
+	await verifyUpstreamHits(upstream, 'revocation-active', 1);
+	const revoked = await api.request(`/api/control-plane/applications/${active.applicationID}/keys/${active.virtualKeyID}`, {
+		method: 'DELETE',
+	});
+	assert.equal(revoked.status, 204);
+	await revoked.arrayBuffer();
+	await verifySearch(api, { key: active.key, tag: 'revocation-revoked', status: 401 });
+	await verifyUpstreamHits(upstream, 'revocation-revoked', 0);
 }
 
 async function verifyCalls(api: ApiClient, key: string, upstreamKey: string): Promise<void> {
@@ -214,9 +279,7 @@ async function verifyRouteDenials(api: ApiClient, key: string, upstream: string)
 		});
 		assert.equal(response.status, 404, tag);
 		await response.arrayBuffer();
-		const hits = await fetch(`${upstream}/__relay/hits?tag=${tag}`, { signal: AbortSignal.timeout(5_000) });
-		assert.equal(hits.status, 200);
-		assert.equal((await hits.json()).hits, 0, `${tag} reached upstream`);
+		await verifyUpstreamHits(upstream, tag, 0);
 	}
 }
 
@@ -241,7 +304,7 @@ async function verifyLogs(api: ApiClient): Promise<void> {
 	let logs: JsonRecord[] = [];
 	await waitFor(async () => {
 		logs = relayLogPage(await api.json(relayLogListUrl(settling.toString(), pagination))).logs;
-		return logs.some(log => log.path === '/v1/stream') && logs.some(log => log.path === '/v1/echo');
+		return logs.some(log => log.path === '/v1/stream') && logs.some(log => log.path === '/v1/echo?q=kept');
 	}, 'persisted relay log rows');
 	// 等异步日志落地后冻结时间窗，避免把较晚记录永久排除在重试范围外。
 	const query = relayLogParams(filters).toString();
@@ -303,20 +366,21 @@ test('panel contracts drive an isolated real gateway relay lifecycle', async () 
 		await anonymous.arrayBuffer();
 		await api.json('/api/session/login', { method: 'POST', body: { username: 'relay-acceptance', password } });
 		await verifyPreviewAndSave(api, upstream);
-		const { key, virtualKeyID, applicationID } = await applicationKey(api);
+		const application = await applicationKey(api);
+		const { key, virtualKeyID, applicationID } = application;
 		await verifyDeniedGrant(api, key, upstream);
-		await api.json(`/api/governance/virtual-keys/${virtualKeyID}`, {
-			method: 'PUT', body: { relay_grants: [{ relay_name: 'runtime-acceptance' }] },
-		});
+		await grantRelay(api, virtualKeyID);
 		await verifyRouteDenials(api, key, upstream);
 		await verifyCalls(api, key, upstreamKey);
 		await verifyLogs(api);
+		const rotatedKey = await verifyKeyRotation(api, application, upstream);
+		await verifyKeyExpiry(api, upstream);
+		await verifyKeyRevocation(api, upstream);
 		const revoked = await api.request(`/api/control-plane/applications/${applicationID}/virtual-key-binding`, { method: 'DELETE' });
 		assert.equal(revoked.status, 204);
 		await revoked.arrayBuffer();
-		const refused = await api.request('/relay/runtime-acceptance/v1/search', { method: 'POST', body: '{}', headers: { 'x-bf-vk': key } });
-		assert.equal(refused.status, 401, 'revoking the application binding must revoke relay access immediately');
-		await refused.arrayBuffer();
+		await verifySearch(api, { key: rotatedKey, tag: 'binding-revoked', status: 401 });
+		await verifyUpstreamHits(upstream, 'binding-revoked', 0);
 		const removed = await api.request('/api/relays/runtime-acceptance', { method: 'DELETE' });
 		assert.equal(removed.status, 204);
 		await removed.arrayBuffer();

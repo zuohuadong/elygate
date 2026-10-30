@@ -42,24 +42,28 @@ panel, without replacing backend build assets.
 ## Local Relay Runtime Acceptance
 
 From the repository root, build the gateway from the current Go sources, then
-run the opt-in test separately from the fast panel suite:
+run the opt-in test separately from the fast panel suite. This macOS native
+example uses the same PIE/external-link parameters as the Makefile:
 
-This entrypoint is not yet a passing release gate: the fresh gateway link was
-interrupted locally. Do not substitute older stdin-driven acceptance wrappers
-for the canonical CLI or count this test as passed without a complete run.
+Do not substitute older stdin-driven acceptance wrappers for the canonical CLI
+or count the test as passed without a complete run. For other platforms, use
+the corresponding native build parameters from the Makefile.
 
 ```sh
 mkdir -p .codex-cache/go-build .codex-tmp
 GOCACHE="$PWD/.codex-cache/go-build" GOTMPDIR="$PWD/.codex-tmp" \
-  go build -o .codex-tmp/relay-gateway ./transports/bifrost-http
+  go build -trimpath -buildmode=pie -ldflags="-linkmode=external -w -s" \
+    -tags=sqlite_static -o .codex-tmp/relay-gateway ./transports/bifrost-http
 ELYGATE_TEST_BINARY="$PWD/.codex-tmp/relay-gateway" \
   bun run --cwd panel test:relay-runtime
 ```
 
 The test uses the panel's serializers and the real gateway API, including
 administrator login, unsaved usage preview, a redacted credential round trip,
-application keys, relay grants, local upstream forwarding, SSE, costs,
-persisted logs, CSV export and application-binding revocation.
+application key creation/rotation/expiry/revocation, relay grants, local
+upstream forwarding, SSE, costs, persisted logs, CSV export and
+application-binding revocation. Each denied lifecycle request must leave
+the local upstream's hit counter at zero.
 It uses private temporary SQLite databases, random test credentials,
 loopback listeners and local catalog files. Child processes receive only an
 explicit test environment, not the caller's provider credentials.
