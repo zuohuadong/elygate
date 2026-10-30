@@ -1,10 +1,10 @@
 # Offline Routing Simulation
 
 The independent panel provides an offline simulation editor alongside the
-rule list and decision tree. A separate administrator
-[routing draft API](routing-drafts.md) persists candidates; the panel does not
-yet use it. Policy versions, publishing, rollback and online Shadow are not
-implemented.
+rule list and decision tree. Its administrator draft controls use the separate
+[routing draft API](routing-drafts.md) to list, create, load, update and delete
+candidates with optimistic revisions. Policy versions, publishing, rollback
+and online Shadow are not implemented.
 
 `POST /api/control-plane/routing/simulate` requires a verified administrator
 identity, denies auth bypass, and uses the existing control-plane JSON media
@@ -95,10 +95,17 @@ fields are removed; scope, disabled state, chain configuration, pinned keys,
 fallbacks and TTFT settings are preserved.
 
 Candidate rules and samples remain editable JSON. The initial sample has no
-chosen model, identity or assumed usage. Drafts live only in the mounted
-page, survive list/tree view switches, and are not saved as policies.
-Editing invalidates results; cancelling, leaving the simulation view or
-unmounting discards late responses.
+chosen model, identity or assumed usage. Saved drafts contain only the name,
+candidate rules and chain depth; simulation samples are never sent to the
+draft API. Editing invalidates results, revision conflicts preserve local
+edits, and an unconfirmed write blocks blind retries until the draft is
+reloaded. A single in-memory recovery snapshot preserves local edits across
+SPA remounts and is invalidated when the authentication epoch changes.
+It is not persistent storage: a full page reload discards this recovery slot.
+The mounted editor warns before unloading with dirty or unconfirmed state;
+after navigating away, that editor-specific unload guard is no longer active.
+Cancelling, leaving the simulation view or unmounting still discards late
+responses.
 
 Results distinguish matches, no-match and sample failures, with full decisions
 and engine traces. Export downloads the submitted input and validated result
@@ -110,9 +117,12 @@ are rejected. Supplied input and exported data can contain sensitive metadata.
 
 ### Local Verification
 
-On 2026-10-29 the panel suite passed 294 tests and 1522 assertions, Svelte
-checking reported no errors or warnings, and the production build passed.
-The routing-simulation handler/server regressions also passed.
+On 2026-10-30 the focused draft, simulation, routing-page and auth contracts
+passed 34 tests and 262 assertions. A subsequent complete run on `b508f90e7`
+passed 366 unit tests with 2196 assertions and one API proxy integration test
+with 12 assertions. The proxy test previously timed out; the isolated rerun
+and complete rerun passed without changing the test or increasing its timeout.
+Svelte checking reported no errors or warnings, and the production build passed.
 
 The Playwright API-fixture run covered 10 workflow checks, including
 malformed decisions, cancellation, stale responses, export, keyboard error
@@ -157,7 +167,9 @@ for its cache and temporary files. An initial stopped-database probe needed
 the existing immutable read-only URI pattern on that volume, then the entire
 run passed again.
 
-This closes the local SQLite administrator backend-to-panel wiring gap.
+This closes the local SQLite simulation backend-to-panel wiring gap, not the
+new draft API's live browser integration gap. Draft browser evidence is
+described separately in [Routing Policy Drafts](routing-drafts.md).
 It is not PostgreSQL browser acceptance, real provider/key authorization,
 real billing, multi-user isolation, deployment or production recovery.
 Policy versions, publishing, rollback and online Shadow remain unimplemented.

@@ -2,8 +2,9 @@
 
 Routing drafts are administrator-owned, durable candidates. They do not change
 the active Bifrost rule store, install a routing plugin, or call a provider.
-Policy publication, immutable release versions, rollback, online Shadow and
-the independent panel's draft workflow remain separate unfinished work.
+The independent panel provides a saved-draft workflow in its offline simulation
+view. Policy publication, immutable release versions, rollback and online Shadow
+remain separate unfinished work.
 
 ## API
 
@@ -80,6 +81,37 @@ across concurrent edits.
 
 ## Verification Boundary
 
+### Independent Panel
+
+Panel implementation `b508f90e7` adds paginated list/create/load/update/rename/
+delete and reload controls. Only name, rules, chain depth and the expected
+revision are submitted; simulation samples are not persisted by the draft API.
+Conflicts preserve edits. Network failures, server failures and malformed
+successful save responses leave the write outcome unconfirmed and block
+subsequent save/delete until recovery or explicit abandonment.
+
+A single in-memory slot preserves local editor state when SPA navigation or
+locale changes rebuild the component. A pending write is restored as unconfirmed,
+not automatically retried. Authentication changes clear the slot and invalidate
+old components' ability to write it back. This is not persistent autosave:
+reloading from another page loses this slot without the editor's unload guard.
+Candidate text and samples may contain sensitive data; no browser persistent
+storage is used.
+
+On 2026-10-30 the focused panel contracts passed 34 tests and 262 assertions,
+Svelte checking reported zero errors/warnings, and the production build passed.
+The subsequent complete panel run passed 366 unit tests (2196 assertions) and
+one API proxy integration test (12 assertions); an earlier proxy timeout is not
+counted as a pass. No test timeout or assertions were weakened.
+API-fixture browser checks covered create, selection/load, 409 edit retention,
+unconfirmed-write protection, SPA recovery and no horizontal overflow at 1440,
+375 and 812 pixels. Screenshots use
+`output/playwright/routing-drafts-fixture-*`; the phone image was inspected.
+These checks do not prove draft CRUD against a real gateway, PostgreSQL browser
+integration, complete theme/keyboard acceptance or production readiness.
+
+### Backend
+
 The implementation baseline `826067def` was pushed with interrupted Go tests,
 not with a passing runtime receipt. The subsequent follow-up adds
 registered HTTP, server-compiler, audit-failure and database-close/reopen
@@ -98,6 +130,9 @@ Assertions now compare every draft field with timestamps normalized to UTC;
 the updated SQLite suite passed again. The targeted PostgreSQL rerun and
 three-package `go vet` were interrupted after prolonged waits without a result.
 PostgreSQL and static-analysis acceptance remain incomplete.
+A later default-vet control-plane rerun on `b508f90e7` was explicitly
+interrupted with exit 130 while vet was still running and before test results
+were available. It supplies no new backend pass receipt.
 
 Run the focused contracts from `transports/`:
 
