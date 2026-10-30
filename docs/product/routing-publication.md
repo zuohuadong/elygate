@@ -460,12 +460,69 @@ must preserve rollback and replay evidence.
 
 The focused non-race controlplane and server tests passed (7.805s and 1.708s),
 and both independent scoped reviews found no blocking issue. Formatting and
-diff checks also passed. The race build stalled and was interrupted without a
-result; race execution, private PostgreSQL verification and go vet remain
-unverified. A later non-race rerun also stalled during the build phase and was
-interrupted, not counted as a pass. This follow-up does not yet close HTTP/panel
-publication, cross-process fencing, crash recovery or production acceptance;
-the full contract remains **PARTIAL**.
+diff checks also passed. Earlier interrupted build attempts have no verification
+result and do not count as a pass. The later race build was observed through
+compilation, linking and artifact handoff without restarting it on an observation
+timeout; it completed successfully on October 31, 2026.
+
+### Rollback Verification Record
+
+This verification record belongs to the continuing production-readiness goal
+and closes the current checkpoint's missing race/store evidence. It only runs
+local checks and records their results; it does not change routing behavior,
+authorize deployment, open publication routes or reduce the original acceptance
+scope. The high-risk publication design review remains separate.
+
+The `ca3d25e80` controlplane race binary passed all 27 top-level tests matching
+`^TestRouting(Release|Installation|Rollback)` on SQLite and again on a private
+PostgreSQL 18 instance, with zero failures and zero skips in either run. Coverage
+includes concurrent acceptance, historical replay, application/audit rollback,
+compiler and scope revalidation, uncertain commit/rollback receipts, migration
+history preservation and database close/reopen. These are in-process tests, not
+an external multi-process crash/fencing test.
+
+The private PostgreSQL instance used only a permission-0700 Unix socket,
+rejected host authentication, and enabled `fsync`, `synchronous_commit` and
+`full_page_writes`. The runner verified zero remaining owned test databases,
+waited for PostgreSQL to exit and recorded its completed shutdown. This does
+not prove password/TLS authentication, power-loss recovery or production state.
+Logs are `.codex-tmp/routing-rollback-sqlite-race-verified-20261031.log` and
+`.codex-tmp/routing-rollback-postgres-race-verified-20261031.log`; build evidence
+is `.codex-tmp/routing-rollback-race-build-verified-20261031.log`.
+
+The same source passed server
+`^TestRouting(ReleaseActivation|RollbackActivation|Startup|Policy)` with
+`-race -count=1` (7.229s). This covers complete generation/depth replacement,
+confirmed rejection, failed-closed post-commit swap, managed startup/reload
+and retention of the pinned pre-rollback generation. The server fixtures use
+SQLite; PostgreSQL results above belong to the controlplane tests, not a
+PostgreSQL server-runtime test.
+The server log is
+`.codex-tmp/routing-rollback-server-race-verified-20261031.log`.
+
+From `transports/`, `go vet -mod=readonly -p 1
+./bifrost-http/controlplane ./bifrost-http/server` completed with exit code zero.
+Its log contains only two upstream sqlite-vec cgo deprecation warnings on macOS;
+the earlier canceled vet commands do not count as verification results.
+The completed log is `.codex-tmp/routing-rollback-vet-verified-20261031.log`.
+Future checks should reuse `.codex-cache/go-build-vet-routing` for this
+non-race vet configuration rather than create another cold cache. The race
+configuration separately uses `.codex-cache/go-build-routing-release-race`.
+No production Go source changed during these verification runs, and the final
+documentation diff passed `git diff --check`.
+
+HTTP/panel publication, process ownership/fencing, external crash recovery and
+production acceptance remain open. The full contract remains **PARTIAL**.
+
+The next-stage ownership review did not establish an accepted takeover protocol.
+A successful lease response cannot by itself authorize reopening admission:
+response delay, expiry, process suspension and clock-domain differences still
+need a consistent safety argument. A transaction lock, durable application
+receipt or process-local mutex is not that argument. Epoch-zero instances and
+already-pinned requests also require explicit handling. The first release
+remains a single gateway with PostgreSQL, not a new multi-node HA requirement;
+neither that deployment scope nor the allowed pinned-generation behavior is
+silently changed by this review. Publication HTTP routes remain unregistered.
 
 ## Verification
 
