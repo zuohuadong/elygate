@@ -119,6 +119,94 @@ Current-source full `go test ./transports/bifrost-http/server -count=1
 not a full PostgreSQL server suite or registered-route/network acceptance.
 The previous failures remain historical evidence and are not relabeled passes.
 
+## Registered-Route Runtime Follow-Up
+
+Follow-up `employee-login-canonical-runtime`: parent `ffc591530`, source the
+remaining full HTTP-server acceptance gap, reason that manually wired callbacks
+do not prove Bootstrap and `RegisterAPIRoutes` integration. Native, low risk,
+root is the sole writer, external=0. Scope: a local SQLite runtime acceptance
+script, its package entry point and scoped acceptance/usage documentation.
+No production behavior,
+authentication policy, upstream contract, deployment or inference-path changes.
+The full production-readiness goal remains active / PARTIAL.
+
+Run `bun run --cwd panel test:employee-runtime` with an absolute, freshly built
+`ELYGATE_TEST_BINARY`. Each compact/signed run owns its temporary directory,
+uses random in-memory credentials, listens only on loopback and inherits no host
+provider credentials. The audit-failure trigger is created only in that stopped,
+fresh SQLite fixture and removed before recovery verification. Startup, normal
+restart, source admission, account lockout, signed-chain verification and
+graceful child/directory cleanup must all complete; an interrupted build or
+unexecuted test is not a pass.
+
+Status: **PASS_SCOPED**. On October 31, 2026, the freshly built canonical CLI
+(`ffc591530`, SHA-256
+`fe8c28ea2412f6373c580de6ecd6b13d89dcbf5bd9010e357ad1e6f0e43213b2`) passed
+both compact and signed SQLite runs: 2 tests, 0 failures, 33.11 seconds.
+The registered routes covered administrator login, employee creation and
+login/logout, anonymous failed-login audit, source admission exhaustion,
+account lockout, injected audit failure with 401 preservation, normal restart,
+signed-chain verification and graceful child/temporary-directory cleanup.
+The health response asserted `status=ok` and `components.db_pings=ok` on
+every startup. The complete final log is
+`.codex-tmp/employee-login-runtime-20261031.log`.
+Go build metadata records Go 1.27.3, darwin/arm64, PIE, `sqlite_static` and
+`vcs.modified=true`; the local edits affect only test/usage/evidence files,
+not Go implementation or dependencies. The binary is not a released image.
+
+The first runtime run failed because the script incorrectly assumed a
+successful login would release a source attempt. The existing limiter counts
+all attempts; the corrected scenario strictly verifies one successful and
+four rejected attempts before exhaustion, without altering production policy.
+On the next process, two audit-rejected password failures still advance the
+durable employee counter and lock the account. A third process retains that
+lock and, after removing only the fixture trigger, writes a new anonymous audit.
+An independent `tsc` invocation could not resolve the uninstalled Bun module
+type declarations; it is not counted as a type-check pass.
+The script adds no work, allocations or retained state to the inference path.
+This is not PostgreSQL, crash/power-loss, reverse-proxy, container,
+true-provider or production acceptance. This follow-up remains local and is
+not automatically committed, pushed or deployed.
+
+## PostgreSQL Registered-Route Follow-Up
+
+Follow-up `employee-login-canonical-postgres-runtime`: parent
+`employee-login-canonical-runtime` / `ffc591530`, source the remaining PostgreSQL
+network-runtime gap, reason that SQLite network evidence and separately wired
+PostgreSQL callback tests do not prove the complete registered PostgreSQL flow.
+Native, low risk, root is the sole writer, external=0. Scope: extend the same
+opt-in runtime assertions to the existing private PostgreSQL helper and update
+scoped acceptance/usage records. No production Go, dependencies, upstream
+contract, authentication policy, inference work or deployment changes.
+
+Status: **PASS_SCOPED**. On October 31, 2026, the unchanged canonical CLI and
+the extended final script passed both modes on private PostgreSQL 18.4:
+2 tests, 0 failures, 39.77 seconds. The same extended script also passed both
+SQLite modes again: 2 tests, 0 failures, 49.01 seconds. Full logs:
+`.codex-tmp/employee-login-runtime-postgres-20261031.log` and
+`.codex-tmp/employee-login-runtime-sqlite-20261031.log`.
+
+Each PostgreSQL mode created its own UTF8 cluster with two fresh databases.
+Host authentication was rejected; the listener was a private permission-0700
+Unix socket with TCP disabled. `fsync`, `synchronous_commit` and
+`full_page_writes` were verified enabled. Every gateway start asserted two live
+configured PostgreSQL databases, no SQLite fallback files and a successful
+enabled database health ping. The two normal database/gateway restarts retained
+the original administrator session, exact failed-login audit feed and active
+employee lock. Two trigger-rejected audits left no event, did not undo the
+committed counter or lock, retained 401 without cookies and reported audit
+failure. Removing only the fixture trigger allowed audit writing to resume.
+The signed chain remained valid throughout.
+
+Successful completion required each mode's owned databases to reach zero,
+the private PostgreSQL and gateway processes to stop gracefully and their
+temporary directory to be removed. No existing cluster, host connection
+credentials, production state or provider endpoint was used. The binary
+SHA-256 above is unchanged; Go sources and dependencies remain unchanged.
+This closes the employee PostgreSQL registered-route/normal-restart gap,
+not crash, backup/restore, password/TLS, final-image or production acceptance.
+No commit, push or deployment was performed for this follow-up.
+
 ## Request-Flow Cost
 
 Apple M4, darwin/arm64, Go 1.27.3, 30 iterations, `-benchmem`. The table records

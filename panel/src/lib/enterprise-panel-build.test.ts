@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { parse } from 'yaml';
 import { resolveEnterprisePanelModule } from '../../vite-enterprise-panel.mjs';
 
 describe('enterprise panel build contract', () => {
@@ -71,5 +72,22 @@ describe('enterprise panel build contract', () => {
 			expect(dockerfile).toContain('-Du_int16_t=uint16_t');
 			expect(dockerfile).toContain('-Du_int64_t=uint64_t');
 		}
+	});
+
+	test('panel and Docker gates cover main and dev without expanding publishing permissions', async () => {
+		const workflow = parse(await Bun.file(new URL('../../../.github/workflows/panel-tests.yml', import.meta.url)).text());
+		expect(new Set(workflow.on.push.branches)).toEqual(new Set(['main', 'dev']));
+		expect(workflow.on.push.paths).toEqual(workflow.on.pull_request.paths);
+		for (const path of ['.bun-version', 'panel/**', 'enterprise/employee-portal/**',
+			'transports/bifrost-http/**', 'framework/configstore/**', 'framework/logstore/**',
+			'plugins/logging/**', 'Makefile', 'transports/Dockerfile*', '.github/workflows/panel-tests.yml']) {
+			expect(workflow.on.push.paths).toContain(path);
+		}
+		expect(workflow.on).toHaveProperty('workflow_dispatch');
+		expect(workflow.permissions).toEqual({ contents: 'read' });
+		expect(workflow.jobs.docker.needs).toBe('panel');
+		const imageBuild = workflow.jobs.docker.steps.find((step: { name?: string }) =>
+			step.name === 'Build image without publishing');
+		expect(imageBuild.with.push).toBe(false);
 	});
 });

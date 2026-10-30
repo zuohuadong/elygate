@@ -51,6 +51,11 @@ export class PrivatePostgres {
 		return this.run('psql', [...this.connection(database), '-X', '-v', 'ON_ERROR_STOP=1', '-At', '-c', sql]);
 	}
 
+	async queryConfig(sql: string): Promise<string> {
+		assert.ok(this.initialized, 'configuration queries require an initialized private cluster');
+		return this.query(this.databases[0], sql);
+	}
+
 	async initialize(): Promise<void> {
 		await mkdir(this.socket, { recursive: true, mode: 0o700 });
 		await this.run('initdb', ['-D', path.join(this.directory, 'data'), `--username=${pgUser}`,

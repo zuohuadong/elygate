@@ -135,3 +135,41 @@ It adds no hooks, allocations or retained state to the inference path.
 
 This migration changes browser dependencies and build output only. It adds
 no work or retained state to the Go inference request path.
+
+## Local Employee Login Runtime Acceptance
+
+After building the current canonical CLI, run:
+
+```sh
+ELYGATE_TEST_BINARY="$PWD/.codex-tmp/relay-gateway" \
+  bun run --cwd panel test:employee-runtime
+```
+
+This opt-in suite drives the registered employee routes through the real
+gateway. It covers administrator login, employee creation and login/logout,
+anonymous failed-login audit records, source admission exhaustion, account
+lockout, audit persistence failure with 401 preservation, compact and signed
+SQLite audit modes, restart persistence and signed-chain verification. It uses
+fresh loopback-only SQLite fixtures, random credentials, an isolated trigger
+for the failure-injection case and requires graceful process and directory
+cleanup.
+
+For PostgreSQL, set the same absolute `ELYGATE_TEST_POSTGRES_BIN` tool directory
+described above. Do not pass a connection string or point it at an existing
+cluster:
+
+```sh
+ELYGATE_TEST_BINARY="$PWD/.codex-tmp/relay-gateway" \
+ELYGATE_TEST_POSTGRES_BIN=/opt/homebrew/opt/postgresql@18/bin \
+  bun run --cwd panel test:employee-runtime
+```
+
+Each mode owns a new socket-only UTF8 cluster with two databases, keeps
+durability enabled and checks both configured connections and the absence of
+SQLite fallback files. Two normal database/gateway restarts must retain the
+administrator session, audit feed and active employee lock. Only this private
+database receives the audit-rejection trigger; removing it must restore audit
+writing. Success also requires database, process and temporary-directory
+cleanup. This is scoped local HTTP/runtime evidence, not reverse-proxy,
+container, crash/power-loss, backup/restore, password/TLS, real-provider or
+production acceptance.

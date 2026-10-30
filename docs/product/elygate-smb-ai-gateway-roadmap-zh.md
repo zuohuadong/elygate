@@ -505,6 +505,23 @@ Elygate 当前定位收敛为：
   也已通过，零失败、跳过与 race warning。私有 PostgreSQL 的测试库已清理，
   确认停机；历史失败日志保留。用户于 2026-10-31 明确要求提交并推送
   本次证据更新；不涉及部署，不改变原上线目标。
+- 后续项 `employee-login-canonical-runtime` 以 `ffc591530` 为 parent，
+  补标准 CLI、真实注册路由的 SQLite 网络证据：compact/signed 两项均通过。
+  覆盖员工创建与登录/退出、匿名失败审计、来源限流、审计故障保留 401、
+  锁定与审计的正常重启持久化，以及签名链、数据库健康和子进程/目录清理。
+  仅新增 opt-in 脚本、执行入口与文档，不修改业务或推理路径；
+  PostgreSQL 网络链路、最终镜像和生产交付仍未完成，本后续项未提交、推送或部署。
+- 后续项 `employee-login-canonical-postgres-runtime` 承接上项 PostgreSQL 缺口，
+  同一标准 CLI 和同组断言现已通过 PostgreSQL 18.4 compact/signed 两种模式，
+  各用独立 socket-only UTF8 集群和两个新库，持久化参数保持开启。
+  双库连接、无 SQLite 回退、审计故障保留 401、两轮数据库/网关正常重启后
+  审计与锁定持久化、签名链及库/进程/目录清理均通过；扩展后 SQLite 两项
+  也复验通过。未修改 Go、依赖、业务或推理路径，未提交、推送或部署。
+  此证据只关闭该员工链路缺口，不改变其余功能和生产交付的 active / PARTIAL。
+- 发现 `panel-tests.yml` 的 push 仅监听 `main`，导致 `dev` 的直接提交不会
+  触发面板、镜像和 API contract 门；现已扩展为 `main`/`dev` 并加入契约测试。
+  这只是 CI 触发修正，当前 CodSpeed/Snyk 运行仍排队，镜像 daemon 和生产
+  验收仍未完成。
 
 ## 3. 单机部署架构
 
