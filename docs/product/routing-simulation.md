@@ -1,8 +1,10 @@
 # Offline Routing Simulation
 
 The independent panel provides an offline simulation editor alongside the
-rule list and decision tree. Persistent drafts, policy versions, publishing,
-rollback and online Shadow are not implemented.
+rule list and decision tree. A separate administrator
+[routing draft API](routing-drafts.md) persists candidates; the panel does not
+yet use it. Policy versions, publishing, rollback and online Shadow are not
+implemented.
 
 `POST /api/control-plane/routing/simulate` requires a verified administrator
 identity, denies auth bypass, and uses the existing control-plane JSON media

@@ -4,10 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 
 	"github.com/google/uuid"
+	bifrost "github.com/maximhq/bifrost/core"
+	"github.com/maximhq/bifrost/core/schemas"
+	"github.com/maximhq/bifrost/framework/configstore"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
@@ -18,6 +23,16 @@ func routingDraftAudits(t *testing.T, store *Store) []AuditEvent {
 	require.NoError(t, store.db(context.Background()).Where("resource_type = ?", "routing-draft").
 		Order("created_at, id").Find(&events).Error)
 	return events
+}
+
+func requireRoutingDraftEqual(t *testing.T, expected, actual *RoutingDraft) {
+	t.Helper()
+	require.NotNil(t, expected)
+	require.NotNil(t, actual)
+	expectedUTC, actualUTC := *expected, *actual
+	expectedUTC.CreatedAt, expectedUTC.UpdatedAt = expected.CreatedAt.UTC(), expected.UpdatedAt.UTC()
+	actualUTC.CreatedAt, actualUTC.UpdatedAt = actual.CreatedAt.UTC(), actual.UpdatedAt.UTC()
+	require.Equal(t, expectedUTC, actualUTC)
 }
 
 func TestRoutingDraftLifecycleAndRestart(t *testing.T) {
@@ -33,7 +48,7 @@ func TestRoutingDraftLifecycleAndRestart(t *testing.T) {
 	require.NoError(t, err)
 	saved, err := restarted.GetRoutingDraft(ctx, created.ID)
 	require.NoError(t, err)
-	require.Equal(t, created, saved)
+	requireRoutingDraftEqual(t, created, saved)
 	listed, err := restarted.ListRoutingDrafts(ctx, 1, 0)
 	require.NoError(t, err)
 	require.Len(t, listed, 1)
@@ -45,7 +60,7 @@ func TestRoutingDraftLifecycleAndRestart(t *testing.T) {
 	require.EqualValues(t, 2, updated.Revision)
 	require.Equal(t, content.Name, updated.Name)
 	require.Equal(t, content.ChainMaxDepth, updated.ChainMaxDepth)
-	require.Equal(t, created.CreatedAt, updated.CreatedAt)
+	require.True(t, created.CreatedAt.Equal(updated.CreatedAt), "creation time must not change")
 	_, err = restarted.UpdateRoutingDraft(ctx, created.ID, RoutingDraftUpdate{content, 1})
 	require.ErrorIs(t, err, ErrRoutingDraftConflict)
 	require.ErrorIs(t, restarted.DeleteRoutingDraft(ctx, created.ID, 1, ""), ErrRoutingDraftConflict)
@@ -97,7 +112,7 @@ func TestRoutingDraftAuditFailuresRollbackEveryMutation(t *testing.T) {
 			require.NoError(t, db.Callback().Create().Remove(callback))
 			saved, err := store.GetRoutingDraft(ctx, original.ID)
 			require.NoError(t, err)
-			require.Equal(t, original, saved)
+			requireRoutingDraftEqual(t, original, saved)
 			rows, err := store.ListRoutingDrafts(ctx, 100, 0)
 			require.NoError(t, err)
 			require.Len(t, rows, 1)
@@ -150,6 +165,7 @@ func TestRoutingDraftMigrationPreservesExistingControlPlane(t *testing.T) {
 	ctx := context.Background()
 	project := &Project{Name: "Existing"}
 	require.NoError(t, store.CreateProject(ctx, project))
+	require.NoError(t, store.db(ctx).Where("id = ?", project.ID).Take(project).Error)
 	before := acknowledgementAudits(t, store)
 	db := store.db(ctx)
 	require.NoError(t, db.Migrator().DropTable(&RoutingDraft{}))
@@ -166,8 +182,52 @@ func TestRoutingDraftMigrationPreservesExistingControlPlane(t *testing.T) {
 	require.NoError(t, err)
 	saved, err := restarted.GetRoutingDraft(ctx, draft.ID)
 	require.NoError(t, err)
-	require.Equal(t, draft, saved)
+	requireRoutingDraftEqual(t, draft, saved)
 	encoded, err := json.Marshal(saved)
 	require.NoError(t, err)
 	require.NotContains(t, string(encoded), "rules_json")
+}
+
+func TestRoutingDraftSurvivesDatabaseCloseAndReopen(t *testing.T) {
+	ctx := context.Background()
+	config := &configstore.Config{
+		Enabled: true, Type: configstore.ConfigStoreTypeSQLite,
+		Config: &configstore.SQLiteConfig{Path: filepath.Join(t.TempDir(), "draft-reopen.db")},
+	}
+	if socket := os.Getenv("ELYGATE_TEST_POSTGRES_SOCKET"); socket != "" {
+		config = testPostgresControlPlaneConfig(t, socket)
+	}
+	var cs configstore.ConfigStore
+	t.Cleanup(func() {
+		if cs != nil {
+			require.NoError(t, cs.Close(ctx))
+		}
+	})
+	openStore := func() *Store {
+		t.Helper()
+		var err error
+		cs, err = configstore.NewConfigStore(ctx, config, bifrost.NewDefaultLogger(schemas.LogLevelError))
+		require.NoError(t, err)
+		require.Equal(t, string(config.Type), cs.DB().Dialector.Name())
+		store, err := NewStore(ctx, cs)
+		require.NoError(t, err)
+		return store
+	}
+	store := openStore()
+	content := RoutingDraftContent{Name: "Durable candidate", RulesJSON: "[]", ChainMaxDepth: 10}
+	created, err := store.CreateRoutingDraft(ctx, content)
+	require.NoError(t, err)
+	content.Name = "Latest candidate"
+	updated, err := store.UpdateRoutingDraft(ctx, created.ID, RoutingDraftUpdate{content, 1})
+	require.NoError(t, err)
+	audits := routingDraftAudits(t, store)
+	require.NoError(t, cs.Close(ctx))
+	cs = nil
+	reopened := openStore()
+	saved, err := reopened.GetRoutingDraft(ctx, created.ID)
+	require.NoError(t, err)
+	requireRoutingDraftEqual(t, updated, saved)
+	require.Equal(t, audits, routingDraftAudits(t, reopened))
+	require.ErrorIs(t, reopened.DeleteRoutingDraft(ctx, created.ID, 1, ""), ErrRoutingDraftConflict)
+	require.NoError(t, reopened.DeleteRoutingDraft(ctx, created.ID, 2, ""))
 }
