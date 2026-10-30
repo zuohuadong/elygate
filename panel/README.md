@@ -70,8 +70,42 @@ explicit test environment, not the caller's provider credentials.
 Successful completion requires graceful child exits and temporary-directory
 cleanup. A missing binary fails rather than skipping.
 
-This is local API acceptance, not browser rendering, real provider billing,
-PostgreSQL, container-image, production or recovery acceptance.
+For PostgreSQL, set only the absolute tool directory, not a connection string
+or an existing database. The test creates and owns an isolated cluster:
+
+```sh
+ELYGATE_TEST_BINARY="$PWD/.codex-tmp/relay-gateway" \
+ELYGATE_TEST_POSTGRES_BIN=/opt/homebrew/opt/postgresql@18/bin \
+  bun run --cwd panel test:relay-runtime
+```
+
+The directory must contain `initdb`, `postgres`, `pg_ctl`, `pg_isready`,
+`psql`, `pg_dump` and `pg_restore` from the same PostgreSQL installation.
+The cluster listens only on its private 0700 Unix socket, rejects host
+authentication and keeps `fsync`, `synchronous_commit` and
+`full_page_writes` enabled. Configuration and logs use distinct new databases;
+both live connections and the absence of SQLite fallback files are checked.
+
+After the lifecycle, this variant restarts PostgreSQL and the canonical
+gateway without logging in again. It checks the saved relay, grants, active,
+expired and revoked keys, audit feed and logs. Startup's intentional
+expired-binding revocation is asserted separately, not mistaken for data loss.
+With the gateway stopped and both pools closed, it uses `pg_dump`/`pg_restore`
+to restore both databases into different fresh databases and copies the app
+directory from its backup. All public table rows and sequence state are
+compared before boot; source databases must remain unchanged, including after
+restored writes. The restored gateway must retain the admin session, deny
+expired/revoked keys before upstream access, forward with the active key,
+read/export logs and create a new application key. A local upload-directory
+probe verifies copied bytes, not the Skills/upload API lifecycle.
+
+All private databases and processes must be removed before the workspace is
+deleted, including the temporary dumps and app copy. No existing database,
+real provider credentials or deployment is involved.
+This is scoped local Relay API/recovery acceptance, not browser rendering,
+real provider billing, password/TLS authentication, encrypted-key recovery,
+other product workflows, crash recovery, version rollback, container-image
+or production acceptance.
 
 This migration changes browser dependencies and build output only. It adds
 no work or retained state to the Go inference request path.

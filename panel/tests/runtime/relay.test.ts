@@ -1,9 +1,6 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { once } from 'node:events';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { createServer, type AddressInfo } from 'node:net';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -12,79 +9,18 @@ import { buildRelayPayload, emptyRelayDraft, relayDraftFromConfig, relayLogParam
 import { relayRulesFromJson, relayRulesToJson } from '../../src/lib/relay-rules';
 import { collectRelayLogExport, relayLogListUrl, relayLogPage, relayLogsToCsv } from '../../src/lib/relay-log-export';
 import type { JsonRecord } from '../../src/lib/api';
+import { availablePort, trackedChild, stopChild, waitFor, waitForHTTP, type RuntimeChild } from './process';
+import { PrivatePostgres } from './postgres';
 
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 
-async function availablePort(): Promise<number> {
-	const listener = createServer();
-	listener.listen(0, '127.0.0.1');
-	await once(listener, 'listening');
-	const port = (listener.address() as AddressInfo).port;
-	await new Promise<void>((resolve, reject) => listener.close(error => error ? reject(error) : resolve()));
-	return port;
-}
-
-function trackedChild(command: string, args: string[], env: NodeJS.ProcessEnv) {
-	const child = spawn(command, args, { cwd: root, env, stdio: 'pipe' });
-	let output = '';
-	let failure: Error | undefined;
-	child.stdout.on('data', chunk => { output = (output + chunk.toString()).slice(-16_384); });
-	child.stderr.on('data', chunk => { output = (output + chunk.toString()).slice(-16_384); });
-	const exit = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
-		child.once('error', error => { failure = error; resolve({ code: null, signal: null }); });
-		child.once('exit', (code, signal) => resolve({ code, signal }));
-	});
-	child.stdin.end();
-	return { child, exit, output: () => output, failure: () => failure };
-}
-
-type RuntimeChild = ReturnType<typeof trackedChild>;
-
-async function stopChild(runtime: RuntimeChild): Promise<void> {
-	if (runtime.child.exitCode === null && runtime.child.signalCode === null) runtime.child.kill('SIGTERM');
-	const status = await Promise.race([runtime.exit, delay(40_000, null, { ref: false })]);
-	if (status === null) {
-		runtime.child.kill('SIGKILL');
-		await runtime.exit;
-		throw new Error('isolated runtime did not stop gracefully within 40 seconds');
-	}
-	assert.ifError(runtime.failure());
-	assert.deepEqual(status, { code: 0, signal: null }, 'isolated runtime exited unsuccessfully');
-}
-
-async function waitFor(probe: () => Promise<boolean>, description: string): Promise<void> {
-	const deadline = Date.now() + 90_000;
-	while (Date.now() < deadline) {
-		if (await probe()) return;
-		await delay(250);
-	}
-	throw new Error(`timed out waiting for ${description}`);
-}
-
-async function waitForHTTP(url: string, runtime: RuntimeChild): Promise<void> {
-	await waitFor(async () => {
-		assert.ifError(runtime.failure());
-		assert.equal(runtime.child.exitCode, null, 'runtime exited during startup');
-		assert.equal(runtime.child.signalCode, null, 'runtime was killed during startup');
-		try {
-			const response = await fetch(url, { signal: AbortSignal.timeout(2_000) });
-			await response.arrayBuffer();
-			return response.status === 200;
-		} catch (cause) {
-			const code = (cause as { cause?: { code?: string }; code?: string }).cause?.code
-				?? (cause as { code?: string }).code;
-			if (code === 'ECONNREFUSED' || code === 'ConnectionRefused') return false;
-			throw cause;
-		}
-	}, url);
-}
-
-async function prepareConfig(appDir: string): Promise<void> {
+async function prepareConfig(appDir: string, postgres?: PrivatePostgres): Promise<void> {
 	for (const [name, content] of Object.entries({ pricing: '{}', parameters: '{}', library: '{"servers":[]}' })) {
 		await writeFile(path.join(appDir, `${name}.json`), content, { mode: 0o600 });
 	}
 	const catalogURL = (name: string) => pathToFileURL(path.join(appDir, `${name}.json`)).href;
 	await writeFile(path.join(appDir, 'config.json'), JSON.stringify({
+		...postgres?.stores(),
 		client: { allowed_origins: [], log_retention_days: 0 },
 		providers: {},
 		governance: { auth_config: {
@@ -224,7 +160,7 @@ async function verifyKeyRotation(api: ApiClient, current: RuntimeApplicationKey,
 	return key;
 }
 
-async function verifyKeyExpiry(api: ApiClient, upstream: string): Promise<void> {
+async function verifyKeyExpiry(api: ApiClient, upstream: string): Promise<RuntimeApplicationKey> {
 	const expiring = await applicationKey(api, 10_000);
 	assert.ok(expiring.expiresAt && Number.isFinite(Date.parse(expiring.expiresAt)), 'key expiry must be returned');
 	await grantRelay(api, expiring.virtualKeyID);
@@ -233,9 +169,10 @@ async function verifyKeyExpiry(api: ApiClient, upstream: string): Promise<void> 
 	await delay(Math.max(0, Date.parse(expiring.expiresAt) + 100 - Date.now()));
 	await verifySearch(api, { key: expiring.key, tag: 'expiry-expired', status: 401 });
 	await verifyUpstreamHits(upstream, 'expiry-expired', 0);
+	return expiring;
 }
 
-async function verifyKeyRevocation(api: ApiClient, upstream: string): Promise<void> {
+async function verifyKeyRevocation(api: ApiClient, upstream: string): Promise<RuntimeApplicationKey> {
 	const active = await applicationKey(api);
 	await grantRelay(api, active.virtualKeyID);
 	await verifySearch(api, { key: active.key, tag: 'revocation-active', status: 200 });
@@ -247,6 +184,7 @@ async function verifyKeyRevocation(api: ApiClient, upstream: string): Promise<vo
 	await revoked.arrayBuffer();
 	await verifySearch(api, { key: active.key, tag: 'revocation-revoked', status: 401 });
 	await verifyUpstreamHits(upstream, 'revocation-revoked', 0);
+	return active;
 }
 
 async function verifyCalls(api: ApiClient, key: string, upstreamKey: string): Promise<void> {
@@ -334,32 +272,118 @@ async function verifyLogs(api: ApiClient): Promise<void> {
 	await verifyLogSummaries(api, query, logs);
 }
 
-test('panel contracts drive an isolated real gateway relay lifecycle', async () => {
+async function persistedState(api: ApiClient, keys: RuntimeApplicationKey[]): Promise<JsonRecord[]> {
+	return Promise.all([
+		api.json('/api/relays/runtime-acceptance'),
+		api.json('/api/control-plane/projects'),
+		api.json('/api/control-plane/audit-events?limit=100'),
+		...keys.map(async key => {
+			const saved = await api.json(`/api/control-plane/applications/${key.applicationID}/keys`);
+			assert.ok(keyRows(saved).some(row => row.virtual_key_id === key.virtualKeyID),
+				'issued key binding must remain in the administrator listing');
+			return saved;
+		}),
+	]);
+}
+
+function keyRows(state: JsonRecord): JsonRecord[] {
+	const rows = state.data;
+	assert.ok(Array.isArray(rows));
+	return rows.map(row => {
+		assert.ok(row && typeof row === 'object' && !Array.isArray(row));
+		return { ...(row as JsonRecord), revoked_at: (row as JsonRecord).revoked_at ?? null };
+	});
+}
+
+function assertExpiredOnRestart(before: JsonRecord, after: JsonRecord): void {
+	if (before.revoked_at !== null) {
+		assert.deepEqual(after, before, 'previously revoked key metadata must not change');
+		return;
+	}
+	const { revoked_at: beforeRevoked, updated_at: beforeUpdated, ...beforeMetadata } = before;
+	const { revoked_at: afterRevoked, updated_at: afterUpdated, ...afterMetadata } = after;
+	assert.equal(beforeRevoked, null);
+	assert.ok(Date.parse(String(afterRevoked)) >= Date.parse(String(before.expires_at)),
+		'startup must persist revocation after key expiry');
+	assert.ok(Date.parse(String(afterUpdated)) >= Date.parse(String(beforeUpdated)));
+	assert.deepEqual(afterMetadata, beforeMetadata, 'startup must retain all other expired-key metadata');
+}
+
+function assertRestartState(before: JsonRecord[], after: JsonRecord[], expiredKey: string): void {
+	assert.equal(after.length, before.length);
+	assert.deepEqual(after.slice(0, 3), before.slice(0, 3),
+		'relay, project and audit state must survive full restart');
+	for (let index = 3; index < before.length; index += 1) {
+		const beforeKeys = keyRows(before[index]);
+		const afterKeys = keyRows(after[index]);
+		const beforeExpired = beforeKeys.find(row => row.virtual_key_id === expiredKey);
+		if (beforeExpired) {
+			const afterExpired = afterKeys.find(row => row.virtual_key_id === expiredKey);
+			assert.ok(afterExpired);
+			assert.equal(afterKeys.length, beforeKeys.length);
+			assertExpiredOnRestart(beforeExpired, afterExpired);
+		}
+		assert.deepEqual(
+			beforeKeys.filter(row => row.virtual_key_id !== expiredKey),
+			afterKeys.filter(row => row.virtual_key_id !== expiredKey),
+			'non-expired key metadata must survive full restart',
+		);
+	}
+}
+
+async function verifyRetainedKeys(api: ApiClient, upstream: string, keys: {
+	active: string; rotated: string; expired: string; revoked: string; phase: string;
+}): Promise<void> {
+	for (const [name, key, status] of [
+		['active', keys.active, 200], ['rotated', keys.rotated, 401],
+		['expired', keys.expired, 401], ['revoked', keys.revoked, 401],
+	] as const) {
+		const tag = `${keys.phase}-${name}`;
+		await verifySearch(api, { key, tag, status });
+		await verifyUpstreamHits(upstream, tag, status === 200 ? 1 : 0);
+	}
+}
+
+const postgresBin = process.env.ELYGATE_TEST_POSTGRES_BIN;
+test(`panel contracts drive an isolated real gateway relay lifecycle (${postgresBin ? 'PostgreSQL + restore' : 'SQLite'})`, async () => {
 	const binary = process.env.ELYGATE_TEST_BINARY;
 	assert.ok(binary && path.isAbsolute(binary), 'ELYGATE_TEST_BINARY must name an absolute, freshly built gateway executable');
 	const tempRoot = path.join(root, '.codex-tmp');
 	await mkdir(tempRoot, { recursive: true });
-	const appDir = await mkdtemp(path.join(tempRoot, 'relay-runtime-'));
+	const workspace = await mkdtemp(path.join(tempRoot, 'relay-runtime-'));
+	const appDir = path.join(workspace, 'app');
+	await mkdir(appDir, { mode: 0o700 });
 	const password = randomBytes(32).toString('base64url');
 	const upstreamKey = randomBytes(32).toString('base64url');
+	const pgPassword = randomBytes(32).toString('base64url');
+	let postgres: PrivatePostgres | undefined;
 	const children: RuntimeChild[] = [];
 	const failures: unknown[] = [];
 	try {
-		await prepareConfig(appDir);
+		if (postgresBin !== undefined) postgres = new PrivatePostgres(postgresBin, workspace);
+		await postgres?.initialize();
+		await prepareConfig(appDir, postgres);
 		const env = { PATH: process.env.PATH, HOME: appDir, TMPDIR: appDir };
 		const fixturePort = await availablePort();
 		const upstream = `http://127.0.0.1:${fixturePort}`;
 		const fixture = trackedChild(process.execPath, ['tests/e2e/api/runners/relay-upstream-fixture.mjs'],
-			{ ...env, RELAY_UPSTREAM_FIXTURE_PORT: String(fixturePort) });
+			{ cwd: root, env: { ...env, RELAY_UPSTREAM_FIXTURE_PORT: String(fixturePort) } });
 		children.push(fixture);
 		await waitForHTTP(`${upstream}/__relay/health`, fixture);
 		const port = await availablePort();
-		const backend = trackedChild(binary, ['-app-dir', appDir, '-host', '127.0.0.1', '-port', String(port)],
-			{ ...env, ELYGATE_APPLICATION_BINDING_MODE: 'required',
-				ELYGATE_RELAY_TEST_PASSWORD: password, ELYGATE_RELAY_TEST_UPSTREAM_KEY: upstreamKey });
-		children.push(backend);
 		const origin = `http://127.0.0.1:${port}`;
-		await waitForHTTP(`${origin}/health`, backend);
+		const startBackend = async () => {
+			const runtime = trackedChild(binary, ['-app-dir', appDir, '-host', '127.0.0.1', '-port', String(port)], {
+				cwd: root, env: { ...env, ELYGATE_APPLICATION_BINDING_MODE: 'required',
+					ELYGATE_RELAY_TEST_PASSWORD: password, ELYGATE_RELAY_TEST_UPSTREAM_KEY: upstreamKey,
+					ELYGATE_RELAY_TEST_PG_PASSWORD: pgPassword },
+			});
+			children.push(runtime);
+			await waitForHTTP(`${origin}/health`, runtime);
+			await postgres?.verifyLiveStores(appDir);
+			return runtime;
+		};
+		let backend = await startBackend();
 		const api = apiClient(origin);
 		const anonymous = await api.request('/api/relays');
 		assert.equal(anonymous.status, 401);
@@ -374,8 +398,40 @@ test('panel contracts drive an isolated real gateway relay lifecycle', async () 
 		await verifyCalls(api, key, upstreamKey);
 		await verifyLogs(api);
 		const rotatedKey = await verifyKeyRotation(api, application, upstream);
-		await verifyKeyExpiry(api, upstream);
-		await verifyKeyRevocation(api, upstream);
+		const expiring = await verifyKeyExpiry(api, upstream);
+		const revokedKey = await verifyKeyRevocation(api, upstream);
+		if (postgres) {
+			const allKeys = [application, expiring, revokedKey];
+			const beforeRestart = await persistedState(api, allKeys);
+			await stopChild(backend);
+			await postgres.restart();
+			backend = await startBackend();
+			assertRestartState(beforeRestart, await persistedState(api, allKeys), expiring.virtualKeyID);
+			await verifyLogs(api);
+			await verifyRetainedKeys(api, upstream, {
+				active: rotatedKey, rotated: key, expired: expiring.key, revoked: revokedKey.key, phase: 'restart',
+			});
+			console.log('PASS PostgreSQL and gateway restart: session, relay, grants, active/expired/revoked keys, logs, audit');
+			const beforeRestore = await persistedState(api, allKeys);
+			await mkdir(path.join(appDir, 'uploads'), { mode: 0o700 });
+			const uploadProbe = randomBytes(64);
+			await writeFile(path.join(appDir, 'uploads', 'recovery-probe.bin'), uploadProbe, { mode: 0o600 });
+			await stopChild(backend);
+			await postgres.restoreBackup(appDir);
+			assert.deepEqual(await readFile(path.join(appDir, 'uploads', 'recovery-probe.bin')), uploadProbe);
+			backend = await startBackend();
+			assert.deepEqual(await persistedState(api, allKeys), beforeRestore,
+				'restored configuration, sessions, key metadata and audit must match the backup');
+			await verifyLogs(api);
+			await verifyRetainedKeys(api, upstream, {
+				active: rotatedKey, rotated: key, expired: expiring.key, revoked: revokedKey.key, phase: 'restore',
+			});
+			const restoredNewKey = await applicationKey(api);
+			await grantRelay(api, restoredNewKey.virtualKeyID);
+			await verifySearch(api, { key: restoredNewKey.key, tag: 'restored-new-key', status: 200 });
+			await verifyUpstreamHits(upstream, 'restored-new-key', 1);
+			console.log('PASS restored gateway: file bytes, session, key policy, forwarding, logs/export and new writes');
+		}
 		const revoked = await api.request(`/api/control-plane/applications/${applicationID}/virtual-key-binding`, { method: 'DELETE' });
 		assert.equal(revoked.status, 204);
 		await revoked.arrayBuffer();
@@ -390,14 +446,19 @@ test('panel contracts drive an isolated real gateway relay lifecycle', async () 
 	} catch (cause) {
 		failures.push(cause);
 		for (const runtime of children) {
-			console.error(runtime.output().replaceAll(password, '[REDACTED_SECRET]').replaceAll(upstreamKey, '[REDACTED_SECRET]'));
+			console.error(runtime.output().replaceAll(password, '[REDACTED_SECRET]')
+				.replaceAll(upstreamKey, '[REDACTED_SECRET]').replaceAll(pgPassword, '[REDACTED_SECRET]'));
 		}
 	} finally {
 		const stopped = await Promise.allSettled(children.toReversed().map(stopChild));
 		failures.push(...stopped.filter(status => status.status === 'rejected').map(status => status.reason));
-		const removed = await Promise.allSettled([rm(appDir, { recursive: true, force: true })]);
+		if (postgres) {
+			try { await postgres.verifyCleanup(); } catch (cause) { failures.push(cause); }
+			try { await postgres.stop(); } catch (cause) { failures.push(cause); }
+		}
+		const removed = await Promise.allSettled([rm(workspace, { recursive: true, force: true })]);
 		failures.push(...removed.filter(status => status.status === 'rejected').map(status => status.reason));
 	}
 	if (failures.length === 1) throw failures[0];
 	if (failures.length > 1) throw new AggregateError(failures, 'relay acceptance or cleanup failed');
-}, 330_000);
+}, 900_000);
