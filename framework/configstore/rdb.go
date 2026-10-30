@@ -38,10 +38,11 @@ import (
 // can swap it out without tearing callers down. migrateOnFreshFn and refreshPoolFn
 // are backend-specific hooks installed by the constructor (postgres vs sqlite).
 type RDBConfigStore struct {
-	db               atomic.Pointer[gorm.DB]
-	logger           schemas.Logger
-	migrateOnFreshFn func(ctx context.Context, fn func(context.Context, *gorm.DB) error) error
-	refreshPoolFn    func(ctx context.Context) error
+	db                      atomic.Pointer[gorm.DB]
+	logger                  schemas.Logger
+	migrateOnFreshFn        func(ctx context.Context, fn func(context.Context, *gorm.DB) error) error
+	refreshPoolFn           func(ctx context.Context) error
+	routingPolicyWriteGuard atomic.Pointer[RoutingPolicyWriteGuard]
 
 	// Backing database coordinates, retained so optional subsystems (the
 	// vector store) can live in the same database as the configuration
@@ -370,6 +371,9 @@ func (s *RDBConfigStore) UpdateClientConfig(ctx context.Context, config *ClientC
 	// callers from clobbering UI prefs on every config write.
 	return s.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := LockRoutingPolicyWrite(tx); err != nil {
+			return err
+		}
+		if err := s.checkRoutingPolicyWrite(tx, &config.RoutingChainMaxDepth); err != nil {
 			return err
 		}
 		if err := lockClientConfigRow(tx); err != nil {
@@ -6235,16 +6239,7 @@ func (s *RDBConfigStore) loadRoutingRulesOrdered(ctx context.Context, dest *[]ta
 	// QueryScope stashed on ctx (the enterprise DAC wrapper attaches one for
 	// request-driven reads). Background callers (engine bootstrap, cache
 	// reloads on context.Background) carry no scope and stay unfiltered.
-	q := s.ScopedDB(ctx).
-		Preload("Targets", func(db *gorm.DB) *gorm.DB {
-			return db.Order("CASE WHEN position IS NULL THEN 1 ELSE 0 END ASC").
-				Order("position ASC").
-				Order("weight DESC").
-				Order("COALESCE(provider, '') ASC").
-				Order("COALESCE(model, '') ASC").
-				Order("COALESCE(key_id, '') ASC")
-		}).
-		Order("priority ASC, created_at DESC, id ASC")
+	q := orderedRoutingRules(s.ScopedDB(ctx))
 	for _, scope := range scopes {
 		q = scope(q)
 	}
@@ -6381,6 +6376,9 @@ func (s *RDBConfigStore) CreateRoutingRule(ctx context.Context, rule *tables.Tab
 		if err := LockRoutingPolicyWrite(tx); err != nil {
 			return err
 		}
+		if err := s.checkRoutingPolicyWrite(tx, nil); err != nil {
+			return err
+		}
 		// Check if there is already a routing rule with the same priority for the same scope+scopeID.
 		var count int64
 		query := tx.Where("scope = ? AND priority = ? AND id != ?", rule.Scope, rule.Priority, rule.ID)
@@ -6433,6 +6431,9 @@ func (s *RDBConfigStore) UpdateRoutingRule(ctx context.Context, rule *tables.Tab
 
 	return s.parseGormError(database.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := LockRoutingPolicyWrite(tx); err != nil {
+			return err
+		}
+		if err := s.checkRoutingPolicyWrite(tx, nil); err != nil {
 			return err
 		}
 		var existing tables.TableRoutingRule
@@ -6494,6 +6495,9 @@ func (s *RDBConfigStore) UpdateRoutingRule(ctx context.Context, rule *tables.Tab
 // swapping two rules' priorities) succeed despite a transient intermediate collision, while a
 // genuine end-state duplicate still errors. Used by config-file reloads that apply many rules at once.
 func (s *RDBConfigStore) SyncRoutingRules(ctx context.Context, toAdd []tables.TableRoutingRule, toUpdate []tables.TableRoutingRule, tx ...*gorm.DB) error {
+	if len(toAdd) == 0 && len(toUpdate) == 0 {
+		return nil
+	}
 	database := s.DB()
 	if len(tx) > 0 && tx[0] != nil {
 		database = tx[0]
@@ -6518,6 +6522,9 @@ func (s *RDBConfigStore) SyncRoutingRules(ctx context.Context, toAdd []tables.Ta
 
 	return s.parseGormError(database.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := LockRoutingPolicyWrite(tx); err != nil {
+			return err
+		}
+		if err := s.checkRoutingPolicyWrite(tx, nil); err != nil {
 			return err
 		}
 		seen := make(map[string]bool)
@@ -6624,6 +6631,9 @@ func (s *RDBConfigStore) DeleteRoutingRule(ctx context.Context, id string, tx ..
 
 	return s.parseGormError(database.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := LockRoutingPolicyWrite(tx); err != nil {
+			return err
+		}
+		if err := s.checkRoutingPolicyWrite(tx, nil); err != nil {
 			return err
 		}
 		var existing tables.TableRoutingRule

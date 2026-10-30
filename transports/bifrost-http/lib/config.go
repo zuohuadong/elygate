@@ -702,7 +702,9 @@ type Config struct {
 	muEnabledAgents sync.RWMutex
 	client          *bifrost.Bifrost
 
-	configPath string
+	configPath           string
+	routingPolicyGuard   func(context.Context, configstore.ConfigStore) (bool, error)
+	routingPolicyManaged bool
 
 	// GovernanceFileSync is what the last LoadConfig wrote from config.json's teams and customers.
 	GovernanceFileSync GovernanceFileSync
@@ -1094,7 +1096,7 @@ func (c *Config) ConfigDir() string {
 	return filepath.Dir(c.configPath)
 }
 
-func LoadConfig(ctx context.Context, configDirPath string) (*Config, error) {
+func LoadConfig(ctx context.Context, configDirPath string, options ...ConfigLoadOption) (*Config, error) {
 	configFilePath := filepath.Join(configDirPath, "config.json")
 	configDBPath := filepath.Join(configDirPath, "config.db")
 	logsDBPath := filepath.Join(configDirPath, "logs.db")
@@ -1103,6 +1105,9 @@ func LoadConfig(ctx context.Context, configDirPath string) (*Config, error) {
 		configPath: configFilePath,
 		Providers:  make(map[schemas.ModelProvider]configstore.ProviderConfig),
 		LLMPlugins: atomic.Pointer[[]schemas.LLMPlugin]{},
+	}
+	for _, option := range options {
+		option(config)
 	}
 	// Register feature flags before any file/DB-driven init so the
 	// registry is populated even when config.json is absent. initFeatureFlags
@@ -1193,6 +1198,10 @@ func LoadConfig(ctx context.Context, configDirPath string) (*Config, error) {
 	if err := initStores(ctx, config, &configData, configDBPath, logsDBPath); err != nil {
 		return nil, err
 	}
+	if err := config.checkRoutingPolicyStartup(ctx); err != nil {
+		config.Close(ctx)
+		return nil, err
+	}
 	// 3. KV store
 	if err := initKVStore(config); err != nil {
 		return nil, err
@@ -1253,6 +1262,12 @@ func LoadConfig(ctx context.Context, configDirPath string) (*Config, error) {
 	// 9b. Warp config from the file, applied later by the server through the Warp service
 	config.warpFileConfig = configData.Warp
 	config.warpFileIsSourceOfTruth = configData.isConfigJSONSourceOfTruth()
+	// Recheck after file reconciliation so scope deletions or concurrent
+	// acceptance cannot pass an earlier check and then initialize plugins.
+	if err := config.checkRoutingPolicyStartup(ctx); err != nil {
+		config.Close(ctx)
+		return nil, err
+	}
 	// 10. Plugins
 	loadPlugins(ctx, config, &configData)
 	// 11. Skills registry (after plugins, before framework)
@@ -1622,6 +1637,11 @@ func loadClientConfig(ctx context.Context, config *Config, configData *ConfigDat
 		if err != nil && !errors.Is(err, configstore.ErrNotFound) {
 			return fmt.Errorf("failed to get client config from store: %w", err)
 		}
+	}
+	if config.routingPolicyManaged && configData.Client != nil && clientConfig != nil {
+		fileClient := *configData.Client
+		fileClient.RoutingChainMaxDepth = clientConfig.RoutingChainMaxDepth
+		configData.Client = &fileClient
 	}
 
 	// toolManagerFromFile returns the mcp.tool_manager_config section of the file, or nil.
@@ -3551,6 +3571,9 @@ func syncAgentRegistrationsFromFile(ctx context.Context, config *Config, fileAge
 
 // loadGovernanceConfig loads and merges governance config from file
 func loadGovernanceConfig(ctx context.Context, config *Config, configData *ConfigData) {
+	if config.routingPolicyManaged && configData.Governance != nil {
+		configData.Governance.RoutingRules = nil
+	}
 	if configData.Governance != nil {
 		if err := resolveGovernanceKeyReferences(ctx, config, configData.Governance); err != nil {
 			logger.Fatal("failed to resolve governance key references: %v", err)
@@ -4185,6 +4208,9 @@ func mergeGovernanceConfig(ctx context.Context, config *Config, configData *Conf
 	}
 
 	routingRulesToDelete := routingRulePruneCandidates(governanceConfig.RoutingRules, configData)
+	if config.routingPolicyManaged {
+		routingRulesToDelete = nil
+	}
 	// Merge PricingOverrides by ID with hash comparison
 	pricingOverridesToAdd := make([]configstoreTables.TablePricingOverride, 0)
 	pricingOverridesToUpdate := make([]configstoreTables.TablePricingOverride, 0)

@@ -87,9 +87,9 @@ fallback order remains unchanged. Simulation retains its existing empty-CEL
 behavior. Scope/key existence and authorization still require publication-time
 checks. No live table, release head or runtime generation is changed.
 
-The startup path currently reads live rules and client depth without consulting
-the release head. Live-table replacement, transactional framework APIs and a
-startup recovery gate must therefore land together in a later checkpoint.
+At that checkpoint, startup read live rules and client depth without consulting
+the release head. The installation/startup checkpoint below adds live-table
+replacement, transactional framework APIs and a fail-closed startup gate together.
 Pending acceptance must not write desired rules into live tables.
 
 Cost: this compiler runs only during administrator draft validation, outside the
@@ -166,6 +166,41 @@ write upstream rules, targets or client config, does not reload plugins, and exp
 no new HTTP route. Whole-policy/depth installation, CAS-protected application
 acknowledgements, restart-before-serving recovery, live drift detection, rollback,
 and API/panel acceptance still belong to the remaining stages.
+
+## Installation And Startup Checkpoint
+
+This October 30, 2026 checkpoint remains **PARTIAL**. The user's commit/push
+request authorizes delivery to `dev`, not deployment or production activation.
+
+Framework snapshot/replacement primitives require the shared routing transaction
+lock. Replacement owns only rules, targets and client depth, preserves unrelated
+client fields, and creates a minimal client row when absent. Ordinary store
+writers can be guarded under that same lock.
+
+`InstallAcceptedRoutingRelease` is a before-serving primitive with no HTTP route.
+It rechecks epoch, immutable content hash and rule scopes, compiles through an
+injected compiler, replaces the policy, compares the stored projection, CAS
+acknowledges the pending head and appends one apply audit in a single transaction.
+Applied replay compares live state without another audit. It does not repair
+drift. Desired/applied fingerprints remain immutable version hashes; there is
+no additional stored live fingerprint.
+
+Server startup checks before file reconciliation and again before plugin
+initialization. Epoch zero remains file-owned. Pending or drifted managed state
+fails closed without installation or repair. Managed file sync preserves stored
+depth and skips rule writes/pruning; store guards reject rule mutations and depth
+changes while allowing unrelated client settings.
+
+Targeted SQLite tests cover replacement/rollback, empty policies, missing client
+rows, guarded writers, installation replay, pending/drift rejection and audit
+rollback. Transport routing/config regressions and `go vet` passed. This does not
+establish complete startup/file-sync integration, PostgreSQL installation,
+crash recovery, concurrent activation or production acceptance.
+
+Runtime generation installation after database commit, failure recovery,
+rollback, publication API/panel flows and broader integration tests remain open.
+No inference-path work or stream-sized retained state is added: compilation and
+fingerprinting run only at startup or inside management transactions.
 
 ## Runtime Policy Preparation Checkpoint
 
