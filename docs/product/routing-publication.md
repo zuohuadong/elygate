@@ -74,6 +74,29 @@ All stages remain part of this contract. Incomplete stages keep it PARTIAL.
 Online Shadow and the remaining production-readiness gates stay on the original
 roadmap; they are not silently waived by completion of this contract.
 
+## Candidate Compiler Checkpoint
+
+The October 30, 2026 follow-up to `14678b809` adds strict, in-memory candidate
+compilation and a pending-version restart regression. The user's explicit
+commit/push request authorizes this checkpoint on `dev`, not activation.
+
+Draft validation now uses the candidate compiler, rejecting blank CEL and
+duplicate names/priorities within a scope. Candidate rules receive version-local
+UUID v5 identities, canonical scope ordering and explicit defaults; target and
+fallback order remains unchanged. Simulation retains its existing empty-CEL
+behavior. Scope/key existence and authorization still require publication-time
+checks. No live table, release head or runtime generation is changed.
+
+The startup path currently reads live rules and client depth without consulting
+the release head. Live-table replacement, transactional framework APIs and a
+startup recovery gate must therefore land together in a later checkpoint.
+Pending acceptance must not write desired rules into live tables.
+
+Cost: this compiler runs only during administrator draft validation, outside the
+inference request path. Its temporary rule/program state is bounded by 128 KiB
+of input and 32 rules and is not retained after validation. No inference-path
+work or long-lived cache is added.
+
 ## Runtime Generation Checkpoint
 
 The October 30, 2026 checkpoint implements stage 1 only. The user's explicit
@@ -237,6 +260,12 @@ Values are one local run with `-benchmem`; benchmark noise is expected.
   usage and rollover assertions remain intact. That fixture separately passed
   private PostgreSQL with `-race` (11.130s). Both private instances cleaned up.
   These checks prove storage acceptance only, not runtime publication.
+- The restart regression now seeds a live rule and chain depth, accepts a
+  different pending version, closes and reopens the store, and initializes the
+  real routing plugin. The serving generation still contains only the live rule
+  and depth; the pending version does not route traffic. This proves the
+  current non-installing acceptance path is restart-safe, not that publication
+  or activation is complete.
 - Runtime: routing plugin/rules tests, deterministic paused-evaluation regression,
   concurrent write/read tests and `-race`.
 - Performance: same benchmark source before and after, `-benchmem`, no live calls.

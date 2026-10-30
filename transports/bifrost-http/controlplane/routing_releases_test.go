@@ -16,15 +16,21 @@ import (
 	"github.com/maximhq/bifrost/core/schemas"
 	"github.com/maximhq/bifrost/framework/configstore"
 	configtables "github.com/maximhq/bifrost/framework/configstore/tables"
+	"github.com/maximhq/bifrost/plugins/routing"
+	"github.com/maximhq/bifrost/plugins/routing/rules"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
 
 func routingReleaseVersion(t *testing.T, store *Store) *RoutingPolicyVersion {
+	return routingReleaseVersionWithRules(t, store, "[]")
+}
+
+func routingReleaseVersionWithRules(t *testing.T, store *Store, rulesJSON string) *RoutingPolicyVersion {
 	t.Helper()
 	ctx := context.Background()
 	draft, err := store.CreateRoutingDraft(ctx, RoutingDraftContent{
-		Name: "Release candidate", RulesJSON: "[]", ChainMaxDepth: 3,
+		Name: "Release candidate", RulesJSON: rulesJSON, ChainMaxDepth: 3,
 	})
 	require.NoError(t, err)
 	version, err := store.CreateRoutingPolicyVersion(ctx, draft.ID, 1, "sealing-admin")
@@ -350,7 +356,13 @@ func TestRoutingReleaseSurvivesDatabaseCloseAndReopen(t *testing.T) {
 		return store
 	}
 	store := openStore()
-	version := routingReleaseVersion(t, store)
+	require.NoError(t, cs.UpdateClientConfig(ctx, &configstore.ClientConfig{RoutingChainMaxDepth: 7}))
+	require.NoError(t, cs.CreateRoutingRule(ctx, &configtables.TableRoutingRule{
+		ID: "live-before-restart", Name: "Live before restart", Scope: "global",
+		CelExpression: "model == 'live'", Enabled: new(true),
+		Targets: []configtables.TableRoutingTarget{{Model: ptr("live-model"), Weight: 1}},
+	}))
+	version := routingReleaseVersionWithRules(t, store, `[{"id":"desired-only","name":"Desired only","cel_expression":"model == 'desired'","targets":[{"model":"desired-model","weight":1}]}]`)
 	request := RoutingReleaseRequest{VersionID: version.ID, IdempotencyKey: uuid.NewString()}
 	accepted, err := store.AcceptRoutingRelease(ctx, request)
 	require.NoError(t, err)
@@ -363,9 +375,39 @@ func TestRoutingReleaseSurvivesDatabaseCloseAndReopen(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, *accepted, *replayed)
 	require.Equal(t, audits, routingReleaseAudits(t, reopened))
-	rules, err := cs.GetRoutingRules(ctx)
+	liveRules, err := cs.GetRoutingRules(ctx)
 	require.NoError(t, err)
-	require.Empty(t, rules, "restart must not install a pending intent")
+	require.Len(t, liveRules, 1)
+	require.Equal(t, "live-before-restart", liveRules[0].ID)
+	clientConfig, err := cs.GetClientConfig(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 7, clientConfig.RoutingChainMaxDepth)
+	plugin, err := routing.Init(ctx, &routing.Config{ChainMaxDepth: &clientConfig.RoutingChainMaxDepth},
+		rules.NewMockLogger(), cs, routing.NewMockGovernance())
+	require.NoError(t, err)
+	defer func() { require.NoError(t, plugin.Cleanup()) }()
+	runtimeStore := plugin.GetRuleStore().(*rules.LocalStore)
+	runtimeRules := runtimeStore.GetAllRules(ctx)
+	require.Len(t, runtimeRules, 1, "restart must load the durable live policy, not the pending desired version")
+	require.Equal(t, "live-before-restart", runtimeRules[0].ID)
+	require.Equal(t, 7, runtimeStore.Snapshot().(interface{ ChainMaxDepth() int }).ChainMaxDepth(),
+		"pending desired depth must not enter the serving generation")
+	engine, err := rules.NewEngine(runtimeStore, rules.NewMockGovernanceStore(), rules.NewMockLogger(), &clientConfig.RoutingChainMaxDepth)
+	require.NoError(t, err)
+	for _, model := range []string{"live", "desired"} {
+		requestCtx, cancel := schemas.NewBifrostContextWithCancel(ctx)
+		decision, err := engine.EvaluateRoutingRules(requestCtx, &rules.EvaluationContext{
+			Provider: schemas.OpenAI, Model: model, RequestType: "chat_completion",
+		})
+		cancel()
+		require.NoError(t, err)
+		if model == "live" {
+			require.NotNil(t, decision)
+			require.Equal(t, "live-model", decision.Model)
+		} else {
+			require.Nil(t, decision, "pending candidate must not route traffic after restart")
+		}
+	}
 }
 
 func TestRoutingReleaseMigrationPreservesHistory(t *testing.T) {
