@@ -703,8 +703,9 @@ type Config struct {
 	client          *bifrost.Bifrost
 
 	configPath           string
-	routingPolicyGuard   func(context.Context, configstore.ConfigStore) (bool, error)
+	routingPolicyGuard   func(context.Context, configstore.ConfigStore) (configstore.RoutingPolicyStartupState, error)
 	routingPolicyManaged bool
+	routingPolicyStartup *configstore.RoutingPolicyStartupState
 
 	// GovernanceFileSync is what the last LoadConfig wrote from config.json's teams and customers.
 	GovernanceFileSync GovernanceFileSync

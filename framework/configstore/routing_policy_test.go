@@ -84,7 +84,7 @@ func TestRoutingPolicyReplacementRollbackAndEmpty(t *testing.T) {
 	})
 }
 
-func TestRoutingPolicyRequiresTransactionAndCreatesMissingClient(t *testing.T) {
+func TestRoutingPolicyRequiresTransactionAndInitializedClient(t *testing.T) {
 	store := setupRDBTestStore(t)
 	_, err := SnapshotRoutingPolicy(nil)
 	require.Error(t, err)
@@ -92,12 +92,17 @@ func TestRoutingPolicyRequiresTransactionAndCreatesMissingClient(t *testing.T) {
 	require.Error(t, err)
 	require.Error(t, ReplaceRoutingPolicy(nil, RoutingPolicySnapshot{ChainMaxDepth: 1}))
 	require.Error(t, ReplaceRoutingPolicy(store.DB(), RoutingPolicySnapshot{ChainMaxDepth: 1}))
-	require.NoError(t, store.DB().Transaction(func(tx *gorm.DB) error {
+	require.NoError(t, store.CreateRoutingRule(t.Context(), routingRuleFixture("existing", 1, "openai")))
+	require.ErrorIs(t, store.DB().Transaction(func(tx *gorm.DB) error {
 		return ReplaceRoutingPolicy(tx, RoutingPolicySnapshot{ChainMaxDepth: 1})
-	}))
-	client, err := store.GetClientConfig(t.Context())
+	}), gorm.ErrRecordNotFound)
+	var clients int64
+	require.NoError(t, store.DB().Model(&tables.TableClientConfig{}).Count(&clients).Error)
+	require.Zero(t, clients, "installation must not bypass transport-owned client defaults")
+	rules, err := store.GetRoutingRules(t.Context())
 	require.NoError(t, err)
-	require.Equal(t, 1, client.RoutingChainMaxDepth)
+	require.Len(t, rules, 1)
+	require.Equal(t, "existing", rules[0].ID)
 }
 
 func TestRoutingPolicyWriteGuardCoversEveryWriter(t *testing.T) {

@@ -20,6 +20,14 @@ type RoutingPolicySnapshot struct {
 	ChainMaxDepth int
 }
 
+// RoutingPolicyStartupState is the coherent policy view proven by one startup
+// transaction. Managed callers must initialize runtime state from this snapshot
+// instead of reading the live tables again after the transaction releases.
+type RoutingPolicyStartupState struct {
+	Managed bool
+	Policy  *RoutingPolicySnapshot
+}
+
 // RoutingPolicyWriteGuard runs after the shared transaction lock. A nil depth
 // denotes a rule mutation; otherwise it is the requested client-config depth.
 // It must use tx exclusively, never another connection or external I/O.
@@ -78,15 +86,9 @@ func ReplaceRoutingPolicy(tx *gorm.DB, policy RoutingPolicySnapshot) error {
 	}
 	var client tables.TableClientConfig
 	if err := tx.Select("id").First(&client).Error; err != nil {
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return err
-		}
-		// A freshly migrated store may not have a client row yet. Create the
-		// policy-owned minimum row so the replacement remains atomic.
-		client = tables.TableClientConfig{RoutingChainMaxDepth: policy.ChainMaxDepth}
-		if err := tx.Create(&client).Error; err != nil {
-			return err
-		}
+		// Client defaults belong to the transport's startup reconciliation.
+		// Creating a zero-valued row here would bypass those defaults.
+		return fmt.Errorf("routing policy requires initialized client config: %w", err)
 	}
 	for _, model := range []any{&tables.TableRoutingTarget{}, &tables.TableRoutingRule{}} {
 		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(model).Error; err != nil {

@@ -174,8 +174,9 @@ request authorizes delivery to `dev`, not deployment or production activation.
 
 Framework snapshot/replacement primitives require the shared routing transaction
 lock. Replacement owns only rules, targets and client depth, preserves unrelated
-client fields, and creates a minimal client row when absent. Ordinary store
-writers can be guarded under that same lock.
+client fields, and requires the transport-owned client row to exist so startup
+defaults are not bypassed. Ordinary store writers can be guarded under that same
+lock.
 
 `InstallAcceptedRoutingRelease` is a before-serving primitive with no HTTP route.
 It rechecks epoch, immutable content hash and rule scopes, compiles through an
@@ -191,16 +192,28 @@ fails closed without installation or repair. Managed file sync preserves stored
 depth and skips rule writes/pruning; store guards reject rule mutations and depth
 changes while allowing unrelated client settings.
 
+The follow-up to `0d5f62742` passes the final validated startup snapshot directly
+to routing plugin construction. Managed rules, compiled programs and chain depth
+are initialized from that snapshot without another live-rule read. Later plugin
+reloads revalidate before constructing a new generation. This is startup-only
+coherence, not live publication or cross-process fencing.
+
 Targeted SQLite tests cover replacement/rollback, empty policies, missing client
 rows, guarded writers, installation replay, pending/drift rejection and audit
-rollback. Transport routing/config regressions and `go vet` passed. This does not
-establish complete startup/file-sync integration, PostgreSQL installation,
-crash recovery, concurrent activation or production acceptance.
+rollback. Transport routing/config regressions and `go vet` passed. Snapshot
+handoff, managed/empty plugin initialization, unmanaged loading and guard failure
+are covered by focused lib/server tests, including the race detector. Focused
+PostgreSQL installation, replay, audit rollback and missing-client rejection
+also pass under the race detector. Complete startup/file-sync integration,
+crash recovery, concurrent activation and production acceptance remain open.
 
 Runtime generation installation after database commit, failure recovery,
 rollback, publication API/panel flows and broader integration tests remain open.
 No inference-path work or stream-sized retained state is added: compilation and
-fingerprinting run only at startup or inside management transactions.
+fingerprinting run only at startup or inside management transactions. Config
+retains at most one validated startup snapshot until plugin construction; the
+plugin owns its compiled generation and a separate depth value, not the source
+snapshot. This management-only change does not need a request-path benchmark.
 
 ## Runtime Policy Preparation Checkpoint
 

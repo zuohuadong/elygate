@@ -172,18 +172,18 @@ func validateRoutingPolicyScope(tx *gorm.DB, rule tables.TableRoutingRule) error
 
 // CheckRoutingPolicyStartup never installs or repairs. A pending or drifted
 // policy fails before client/config reconciliation or plugin initialization.
-func CheckRoutingPolicyStartup(ctx context.Context, cs configstore.ConfigStore, compile RoutingPolicyCompiler) (bool, error) {
+func CheckRoutingPolicyStartup(ctx context.Context, cs configstore.ConfigStore, compile RoutingPolicyCompiler) (configstore.RoutingPolicyStartupState, error) {
 	if cs == nil {
-		return false, nil
+		return configstore.RoutingPolicyStartupState{}, nil
 	}
 	if compile == nil {
-		return false, ErrRoutingReleaseRequest
+		return configstore.RoutingPolicyStartupState{}, ErrRoutingReleaseRequest
 	}
 	store, err := NewStore(ctx, cs)
 	if err != nil {
-		return false, err
+		return configstore.RoutingPolicyStartupState{}, err
 	}
-	var managed bool
+	state := configstore.RoutingPolicyStartupState{}
 	err = cs.ExecuteTransaction(ctx, func(tx *gorm.DB) error {
 		if err := configstore.LockRoutingPolicyWrite(tx); err != nil {
 			return err
@@ -192,8 +192,8 @@ func CheckRoutingPolicyStartup(ctx context.Context, cs configstore.ConfigStore, 
 		if err != nil {
 			return err
 		}
-		managed = head.Epoch > 0
-		if !managed {
+		state.Managed = head.Epoch > 0
+		if !state.Managed {
 			return nil
 		}
 		if !head.IsApplied() {
@@ -203,19 +203,23 @@ func CheckRoutingPolicyStartup(ctx context.Context, cs configstore.ConfigStore, 
 		if err != nil {
 			return err
 		}
-		return compareLiveRoutingPolicy(tx, *desired)
+		if err := compareLiveRoutingPolicy(tx, *desired); err != nil {
+			return err
+		}
+		state.Policy = desired
+		return nil
 	})
 	if err != nil {
-		return false, err
+		return configstore.RoutingPolicyStartupState{}, err
 	}
 	setter, ok := cs.(interface {
 		SetRoutingPolicyWriteGuard(configstore.RoutingPolicyWriteGuard)
 	})
 	if !ok {
-		return false, errors.New("config store does not support routing write protection")
+		return configstore.RoutingPolicyStartupState{}, errors.New("config store does not support routing write protection")
 	}
 	setter.SetRoutingPolicyWriteGuard(store.guardRoutingPolicyWrite)
-	return managed, nil
+	return state, nil
 }
 
 func (s *Store) guardRoutingPolicyWrite(tx *gorm.DB, depth *int) error {

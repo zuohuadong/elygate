@@ -21,9 +21,10 @@ func TestRoutingInstallationStartupAndReplay(t *testing.T) {
 			Enabled: new(true), Targets: []tables.TableRoutingTarget{{Provider: ptr("openai"), Weight: 1}},
 		}}, nil
 	}
-	managed, err := CheckRoutingPolicyStartup(ctx, cs, compile)
+	state, err := CheckRoutingPolicyStartup(ctx, cs, compile)
 	require.NoError(t, err)
-	require.False(t, managed)
+	require.False(t, state.Managed)
+	require.Nil(t, state.Policy)
 	require.NoError(t, cs.UpdateClientConfig(ctx, &configstore.ClientConfig{RoutingChainMaxDepth: 7}))
 	version := routingReleaseVersion(t, store)
 	attempt, err := store.AcceptRoutingRelease(ctx, RoutingReleaseRequest{
@@ -43,9 +44,10 @@ func TestRoutingInstallationStartupAndReplay(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, *head, *replayed)
 	require.Len(t, routingReleaseAudits(t, store), 2, "one accept and one apply audit")
-	managed, err = CheckRoutingPolicyStartup(ctx, cs, compile)
+	state, err = CheckRoutingPolicyStartup(ctx, cs, compile)
 	require.NoError(t, err)
-	require.True(t, managed)
+	require.True(t, state.Managed)
+	require.NotNil(t, state.Policy)
 	require.ErrorIs(t, cs.DeleteRoutingRule(ctx, "installed-rule"), ErrRoutingPolicyManaged)
 	require.ErrorIs(t, cs.UpdateClientConfig(ctx, &configstore.ClientConfig{RoutingChainMaxDepth: 9}), ErrRoutingPolicyManaged)
 	require.NoError(t, cs.UpdateClientConfig(ctx, &configstore.ClientConfig{
@@ -101,4 +103,22 @@ func TestRoutingInstallationFailuresRollBack(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 7, client.RoutingChainMaxDepth)
 	require.Len(t, routingReleaseAudits(t, store), 1)
+}
+
+func TestRoutingInstallationMissingClientLeavesReleasePending(t *testing.T) {
+	store, cs := testControlPlaneStore(t)
+	version := routingReleaseVersion(t, store)
+	attempt, err := store.AcceptRoutingRelease(t.Context(), RoutingReleaseRequest{
+		VersionID: version.ID, IdempotencyKey: uuid.NewString(),
+	})
+	require.NoError(t, err)
+	_, err = store.InstallAcceptedRoutingRelease(t.Context(), attempt.Epoch, func(context.Context, RoutingPolicyVersion) ([]*tables.TableRoutingRule, error) {
+		return nil, nil
+	}, "installer")
+	require.ErrorIs(t, err, gorm.ErrRecordNotFound)
+	requirePendingRoutingHead(t, store, attempt)
+	var clients int64
+	require.NoError(t, cs.DB().Model(&tables.TableClientConfig{}).Count(&clients).Error)
+	require.Zero(t, clients)
+	require.Len(t, routingReleaseAudits(t, store), 1, "failed installation cannot acknowledge apply")
 }
