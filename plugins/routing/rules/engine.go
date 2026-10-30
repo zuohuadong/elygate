@@ -135,6 +135,10 @@ func (re *Engine) EvaluateRoutingRules(ctx *schemas.BifrostContext, routingCtx *
 	if routingCtx == nil {
 		return nil, fmt.Errorf("routing context cannot be nil")
 	}
+	ruleReader := ReadStore(re.rules)
+	if snapshotter, ok := re.rules.(Snapshotter); ok {
+		ruleReader = snapshotter.Snapshot()
+	}
 
 	re.logger.Debug("[Engine] Starting rule evaluation for provider=%s, model=%s", routingCtx.Provider, routingCtx.Model)
 
@@ -155,7 +159,7 @@ func (re *Engine) EvaluateRoutingRules(ctx *schemas.BifrostContext, routingCtx *
 	// and we re-evaluate the scope hierarchy on subsequent steps.
 	rulesPerScope := make(map[ScopeLevel][]*configstoreTables.TableRoutingRule, len(scopeChain))
 	for _, scope := range scopeChain {
-		rules := re.rules.GetScopedRules(ctx, scope.ScopeName, scope.ScopeID)
+		rules := ruleReader.GetScopedRules(ctx, scope.ScopeName, scope.ScopeID)
 		if len(rules) == 0 {
 			continue
 		}
@@ -238,7 +242,7 @@ func (re *Engine) EvaluateRoutingRules(ctx *schemas.BifrostContext, routingCtx *
 
 				referencesComplexity := celExpressionReferencesIdentifier(rule.CelExpression, "complexity_tier")
 
-				program, err := re.rules.GetProgram(ctx, rule)
+				program, err := ruleReader.GetProgram(ctx, rule)
 				if err != nil {
 					re.logger.Warn("[Engine] Failed to compile rule %s: %v", rule.Name, err)
 					ctx.AppendRoutingEngineLog(schemas.RoutingEngineRoutingRule, schemas.LogLevelError, fmt.Sprintf("Rule '%s' skipped: compile error: %v", rule.Name, err))

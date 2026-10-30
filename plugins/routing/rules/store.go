@@ -2,9 +2,11 @@ package rules
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"sync"
+	"sync/atomic"
 
 	"github.com/google/cel-go/cel"
 	"github.com/maximhq/bifrost/core/schemas"
@@ -25,9 +27,10 @@ type Store interface {
 	// returns false the request skips rule evaluation entirely.
 	HasRules(ctx context.Context) bool
 	// GetAllRules returns every cached rule, sorted by priority ascending and, within a
-	// priority, newest first.
+	// priority, newest first. Returned rule objects are read-only.
 	GetAllRules(ctx context.Context) []*configstoreTables.TableRoutingRule
 	// GetScopedRules returns the enabled rules for one scope level, priority ASC.
+	// Returned rules and slices are read-only; edit through UpsertRule instead.
 	GetScopedRules(ctx context.Context, scope string, scopeID string) []*configstoreTables.TableRoutingRule
 	// GetProgram returns the compiled CEL program for a rule, compiling and caching on
 	// first use.
@@ -39,12 +42,38 @@ type Store interface {
 	DeleteRule(ctx context.Context, id string) error
 }
 
-// LocalStore is the in-process Store implementation. Reads are lock-free: both
-// maps are sync.Maps holding immutable slices, so a rule edit swaps a whole slice rather
-// than mutating one in place while requests read it.
+// ReadStore is the read-only part of Store used by one routing evaluation.
+// Returned slices and rule objects are borrowed and must not be modified.
+type ReadStore interface {
+	GetScopedRules(ctx context.Context, scope string, scopeID string) []*configstoreTables.TableRoutingRule
+	GetProgram(ctx context.Context, rule *configstoreTables.TableRoutingRule) (cel.Program, error)
+}
+
+// Snapshotter lets an evaluator pin one immutable rule/program generation.
+// Stores that do not implement it retain the historical per-read behavior.
+type Snapshotter interface {
+	Snapshot() ReadStore
+}
+
+type compiledProgram struct {
+	expression string
+	program    cel.Program
+	err        error
+}
+
+type ruleGeneration struct {
+	enabledScopes map[string][]*configstoreTables.TableRoutingRule
+	allRules      []*configstoreTables.TableRoutingRule
+	programs      map[string]compiledProgram
+}
+
+// LocalStore is the in-process Store implementation. Writers build a complete
+// copy-on-write generation and publish it once; readers only load the atomic
+// pointer and never observe a partially updated scope or program cache.
 type LocalStore struct {
-	rules    sync.Map // string -> []*TableRoutingRule (key: "scope:scopeID", scopeID="" for global)
-	programs sync.Map // string -> cel.Program (key: ruleID)
+	current atomic.Pointer[ruleGeneration]
+	writer  sync.Mutex
+	adHoc   sync.Map // string -> compiledProgram for direct GetProgram callers
 
 	celEnv         *cel.Env // Singleton CEL environment reused for all compilations
 	logger         schemas.Logger
@@ -86,7 +115,11 @@ func NewLocalStore(ctx context.Context, logger schemas.Logger, configStore confi
 		if err != nil {
 			return nil, fmt.Errorf("failed to load routing rules: %w", err)
 		}
-		store.load(ctx, rules)
+		if err := store.load(rules); err != nil {
+			return nil, fmt.Errorf("failed to copy routing rules: %w", err)
+		}
+	} else {
+		store.current.Store(store.buildGeneration(nil))
 	}
 
 	return store, nil
@@ -94,113 +127,77 @@ func NewLocalStore(ctx context.Context, logger schemas.Logger, configStore confi
 
 // load rebuilds the scope groups and pre-compiles every program. Called once at
 // construction; a live edit goes through UpsertRule/DeleteRule instead.
-func (rs *LocalStore) load(ctx context.Context, rules []configstoreTables.TableRoutingRule) {
-	// Group by scope in a single pass. Key format: "scope:scopeID" (scopeID empty for global).
-	grouped := make(map[string][]*configstoreTables.TableRoutingRule)
-	for i := range rules {
-		rule := &rules[i]
-		grouped[scopeKeyFromRule(rule)] = append(grouped[scopeKeyFromRule(rule)], rule)
-	}
-
-	for key, group := range grouped {
-		sort.Slice(group, func(i, j int) bool {
-			return group[i].Priority < group[j].Priority
-		})
-		rs.rules.Store(key, group)
-	}
-
-	// Pre-compile all routing rule programs to avoid first-request latency
-	rs.rules.Range(func(_, value any) bool {
-		group, ok := value.([]*configstoreTables.TableRoutingRule)
-		if !ok {
-			return true
+func (rs *LocalStore) load(rules []configstoreTables.TableRoutingRule) error {
+	rs.writer.Lock()
+	defer rs.writer.Unlock()
+	ownedRules := make([]*configstoreTables.TableRoutingRule, 0, len(rules))
+	for index := range rules {
+		owned, err := cloneRoutingRule(&rules[index])
+		if err != nil {
+			return err
 		}
-		for _, rule := range group {
-			if _, err := rs.GetProgram(ctx, rule); err != nil {
-				rs.logger.Warn("Failed to pre-compile routing program for rule %s: %v", rule.Name, err)
-			}
-		}
-		return true
-	})
+		ownedRules = append(ownedRules, owned)
+	}
+	rs.current.Store(rs.buildGeneration(ownedRules))
+	return nil
 }
 
 // HasRules checks if there are any routing rules configured.
 // Quick check to determine if we need to run routing evaluation at all.
 func (rs *LocalStore) HasRules(ctx context.Context) bool {
-	hasAny := false
-	rs.rules.Range(func(_, _ any) bool {
-		hasAny = true
-		return false // stop after first entry
-	})
-	return hasAny
+	return len(rs.current.Load().allRules) > 0
 }
 
 // GetAllRules gets all routing rules from the in-memory cache.
 func (rs *LocalStore) GetAllRules(ctx context.Context) []*configstoreTables.TableRoutingRule {
-	var result []*configstoreTables.TableRoutingRule
-
-	rs.rules.Range(func(_, value any) bool {
-		group, ok := value.([]*configstoreTables.TableRoutingRule)
-		if !ok {
-			return true
-		}
-		result = append(result, group...)
-		return true
-	})
-
-	// Sort by priority ASC (0 is highest priority, higher numbers are lower priority), then
-	// newest first within a priority, so a rule added later shadows an equally-prioritised
-	// older one in listings.
-	sort.Slice(result, func(i, j int) bool {
-		if result[i].Priority != result[j].Priority {
-			return result[i].Priority < result[j].Priority
-		}
-		return result[i].CreatedAt.After(result[j].CreatedAt)
-	})
-
-	return result
+	rules := rs.current.Load().allRules
+	return append([]*configstoreTables.TableRoutingRule(nil), rules...)
 }
 
 // GetScopedRules retrieves routing rules by scope and scope ID from the in-memory cache.
 // Rules are already sorted by priority ASC (0 is highest priority).
 func (rs *LocalStore) GetScopedRules(ctx context.Context, scope string, scopeID string) []*configstoreTables.TableRoutingRule {
-	value, ok := rs.rules.Load(scopeKey(scope, scopeID))
-	if !ok {
-		return nil
-	}
-
-	group, ok := value.([]*configstoreTables.TableRoutingRule)
-	if !ok {
-		return nil
-	}
-
-	var enabledRules []*configstoreTables.TableRoutingRule
-	for _, rule := range group {
-		if rule.EnabledValue() {
-			enabledRules = append(enabledRules, rule)
-		}
-	}
-
-	return enabledRules
+	return rs.current.Load().GetScopedRules(ctx, scope, scopeID)
 }
 
-// GetProgram compiles a CEL expression and caches the resulting program.
-// Uses the singleton CEL environment for efficiency.
-// Returns error if compilation fails.
+// GetProgram returns the installed program when the expression matches. Direct
+// callers may also compile an uninstalled rule without changing live routing.
 func (rs *LocalStore) GetProgram(ctx context.Context, rule *configstoreTables.TableRoutingRule) (cel.Program, error) {
 	if rule == nil {
 		return nil, fmt.Errorf("routing rule cannot be nil")
 	}
 
-	// Check cache first to avoid recompilation
-	if prog, ok := rs.programs.Load(rule.ID); ok {
-		if celProg, ok := prog.(cel.Program); ok {
-			return celProg, nil
-		}
+	if cached, ok := rs.current.Load().programs[rule.ID]; ok && cached.expression == rule.CelExpression {
+		return cached.program, cached.err
 	}
 
+	// Direct callers can compile rules not installed in the store. Keep their
+	// cache separate so an old rule ID cannot poison a live generation.
+	rs.writer.Lock()
+	defer rs.writer.Unlock()
+	if cached, ok := rs.adHoc.Load(rule.ID); ok {
+		program := cached.(compiledProgram)
+		if program.expression == rule.CelExpression {
+			return program.program, program.err
+		}
+	}
+	compiled := rs.compileRule(rule)
+	rs.adHoc.Store(rule.ID, compiled)
+	return compiled.program, compiled.err
+}
+
+// Snapshot pins the current immutable generation for one evaluation.
+func (rs *LocalStore) Snapshot() ReadStore {
+	return rs.current.Load()
+}
+
+func (rs *LocalStore) compileRule(rule *configstoreTables.TableRoutingRule) compiledProgram {
+	program, err := rs.compileProgram(rule.CelExpression)
+	return compiledProgram{expression: rule.CelExpression, program: program, err: err}
+}
+
+func (rs *LocalStore) compileProgram(expr string) (cel.Program, error) {
 	// Get CEL expression, default to "true" if empty
-	expr := rule.CelExpression
 	if expr == "" {
 		expr = "true"
 	}
@@ -222,7 +219,7 @@ func (rs *LocalStore) GetProgram(ctx context.Context, rule *configstoreTables.Ta
 	// Create program. Partial evaluation is only needed for complexity rules,
 	// where routing treats unavailable complexity_tier as unknown instead of
 	// leaking an empty-string sentinel.
-	options := rs.programOptions
+	options := append([]cel.ProgramOption(nil), rs.programOptions...)
 	if celASTReferencesIdentifier(ast, "complexity_tier") {
 		options = append(options, cel.EvalOptions(cel.OptPartialEval))
 	}
@@ -230,9 +227,6 @@ func (rs *LocalStore) GetProgram(ctx context.Context, rule *configstoreTables.Ta
 	if err != nil {
 		return nil, fmt.Errorf("CEL program creation error: %w", err)
 	}
-
-	// Cache the compiled program
-	rs.programs.Store(rule.ID, program)
 
 	return program, nil
 }
@@ -242,71 +236,113 @@ func (rs *LocalStore) UpsertRule(ctx context.Context, rule *configstoreTables.Ta
 	if rule == nil {
 		return fmt.Errorf("routing rule cannot be nil")
 	}
-	// First, remove the rule from ALL scopes (in case it was moved from one scope to another)
-	rs.removeFromAllScopes(rule.ID)
-
-	key := scopeKeyFromRule(rule)
-	// Load existing rules for the rule's current scope
-	var group []*configstoreTables.TableRoutingRule
-	if value, ok := rs.rules.Load(key); ok {
-		if existing, ok := value.([]*configstoreTables.TableRoutingRule); ok {
-			group = existing
+	rs.writer.Lock()
+	defer rs.writer.Unlock()
+	owned, err := cloneRoutingRule(rule)
+	if err != nil {
+		return err
+	}
+	current := rs.current.Load()
+	nextRules := make([]*configstoreTables.TableRoutingRule, 0, len(current.allRules)+1)
+	for _, existing := range current.allRules {
+		if existing.ID != rule.ID {
+			nextRules = append(nextRules, existing)
 		}
 	}
-	// Copy before appending: the loaded slice is being read by in-flight requests,
-	// and append can write into its spare capacity.
-	updated := make([]*configstoreTables.TableRoutingRule, 0, len(group)+1)
-	updated = append(updated, group...)
-	updated = append(updated, rule)
-	// Sort by priority ASC (0 is highest priority, higher numbers are lower priority)
-	sort.Slice(updated, func(i, j int) bool {
-		return updated[i].Priority < updated[j].Priority
-	})
-	rs.rules.Store(key, updated)
-
-	// Invalidate compiled program cache for this rule (expression may have changed)
-	rs.programs.Delete(rule.ID)
-	// Recompile the program immediately to update cache with fresh compilation
-	if _, err := rs.GetProgram(ctx, rule); err != nil {
-		rs.logger.Warn("Failed to recompile routing program for rule %s: %v", rule.Name, err)
-	}
+	nextRules = append(nextRules, owned)
+	next := rs.buildGeneration(nextRules)
+	rs.adHoc.Delete(rule.ID)
+	rs.current.Store(next)
 	return nil
 }
 
 // DeleteRule removes a routing rule from the in-memory cache.
 func (rs *LocalStore) DeleteRule(ctx context.Context, id string) error {
-	rs.removeFromAllScopes(id)
-	// Invalidate compiled program cache for this rule
-	rs.programs.Delete(id)
+	rs.writer.Lock()
+	defer rs.writer.Unlock()
+	current := rs.current.Load()
+	nextRules := make([]*configstoreTables.TableRoutingRule, 0, len(current.allRules))
+	for _, existing := range current.allRules {
+		if existing.ID != id {
+			nextRules = append(nextRules, existing)
+		}
+	}
+	rs.adHoc.Delete(id)
+	rs.current.Store(rs.buildGeneration(nextRules))
 	return nil
 }
 
-// removeFromAllScopes drops every copy of a rule ID from the scope groups, deleting a
-// group entirely once it becomes empty so HasRules stays accurate.
-func (rs *LocalStore) removeFromAllScopes(id string) {
-	rs.rules.Range(func(key, value any) bool {
-		group, ok := value.([]*configstoreTables.TableRoutingRule)
-		if !ok {
-			return true
+func (rs *LocalStore) buildGeneration(rules []*configstoreTables.TableRoutingRule) *ruleGeneration {
+	generation := &ruleGeneration{
+		enabledScopes: make(map[string][]*configstoreTables.TableRoutingRule),
+		allRules:      rules,
+		programs:      make(map[string]compiledProgram, len(rules)),
+	}
+	sort.SliceStable(generation.allRules, func(i, j int) bool {
+		if generation.allRules[i].Priority != generation.allRules[j].Priority {
+			return generation.allRules[i].Priority < generation.allRules[j].Priority
 		}
-
-		filtered := make([]*configstoreTables.TableRoutingRule, 0, len(group))
-		for _, r := range group {
-			if r.ID != id {
-				filtered = append(filtered, r)
+		return generation.allRules[i].CreatedAt.After(generation.allRules[j].CreatedAt)
+	})
+	previous := rs.current.Load()
+	for _, rule := range generation.allRules {
+		key := scopeKeyFromRule(rule)
+		if rule.EnabledValue() {
+			generation.enabledScopes[key] = append(generation.enabledScopes[key], rule)
+		}
+		if previous != nil {
+			if cached, ok := previous.programs[rule.ID]; ok && cached.expression == rule.CelExpression {
+				generation.programs[rule.ID] = cached
+				continue
 			}
 		}
+		generation.programs[rule.ID] = rs.compileRule(rule)
+		if generation.programs[rule.ID].err != nil {
+			rs.logger.Warn("Failed to pre-compile routing program for rule %s: %v", rule.Name, generation.programs[rule.ID].err)
+		}
+	}
+	return generation
+}
 
-		if len(filtered) == len(group) {
-			return true
-		}
-		if len(filtered) == 0 {
-			rs.rules.Delete(key)
-		} else {
-			rs.rules.Store(key, filtered)
-		}
-		return true
-	})
+func (generation *ruleGeneration) GetScopedRules(_ context.Context, scope string, scopeID string) []*configstoreTables.TableRoutingRule {
+	return generation.enabledScopes[scopeKey(scope, scopeID)]
+}
+
+func (generation *ruleGeneration) GetProgram(_ context.Context, rule *configstoreTables.TableRoutingRule) (cel.Program, error) {
+	if rule == nil {
+		return nil, fmt.Errorf("routing rule cannot be nil")
+	}
+	cached, ok := generation.programs[rule.ID]
+	if !ok {
+		return nil, fmt.Errorf("routing rule %q is not part of this generation", rule.ID)
+	}
+	return cached.program, cached.err
+}
+
+func cloneRoutingRule(rule *configstoreTables.TableRoutingRule) (*configstoreTables.TableRoutingRule, error) {
+	encoded, err := json.Marshal(rule)
+	if err != nil {
+		return nil, fmt.Errorf("failed to copy routing rule: %w", err)
+	}
+	var owned configstoreTables.TableRoutingRule
+	if err := json.Unmarshal(encoded, &owned); err != nil {
+		return nil, fmt.Errorf("failed to decode routing rule copy: %w", err)
+	}
+	// These persistence fields are omitted by the public JSON representation.
+	owned.Fallbacks = copyRoutingPointer(rule.Fallbacks)
+	owned.Query = copyRoutingPointer(rule.Query)
+	for index := range owned.Targets {
+		owned.Targets[index].RuleID = rule.Targets[index].RuleID
+	}
+	return &owned, nil
+}
+
+func copyRoutingPointer[T any](source *T) *T {
+	if source == nil {
+		return nil
+	}
+	owned := *source
+	return &owned
 }
 
 // scopeKey builds the cache key for a scope level. Global rules always key to "global:"
