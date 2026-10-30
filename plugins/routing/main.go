@@ -49,7 +49,8 @@ const noSemanticClassifierLog = "Complexity analysis skipped: no embedding model
 // Config is the configuration for the routing plugin
 type Config struct {
 	// ChainMaxDepth caps how many times a chain_rule may re-enter evaluation.
-	// Pointer to live config value; changes are reflected immediately without restart.
+	// LocalStore snapshots it at initialization; hosts publish subsequent edits
+	// through UpdateChainMaxDepth. Custom stores may retain the live pointer.
 	ChainMaxDepth *int `json:"routing_chain_max_depth"`
 	// ComplexityAnalyzerConfig overrides the analyzer defaults. When nil, the persisted
 	// config is used, falling back to the built-in defaults.
@@ -60,7 +61,7 @@ type Config struct {
 }
 
 // chainMaxDepthOrDefault resolves the configured chain depth, falling back to the default.
-// The pointer is kept live so a config edit takes effect without a restart.
+// Custom stores without snapshot-managed depth retain the pointer.
 func (c *Config) chainMaxDepthOrDefault() *int {
 	if c != nil && c.ChainMaxDepth != nil {
 		return c.ChainMaxDepth
@@ -166,6 +167,11 @@ func InitFromStore(
 	engine, err := rules.NewEngine(ruleStore, governancePlugin, logger, chainMaxDepth)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize routing engine: %w", err)
+	}
+	if updater, ok := ruleStore.(rules.ChainMaxDepthUpdater); ok {
+		if err := updater.UpdateChainMaxDepth(*chainMaxDepth); err != nil {
+			return nil, fmt.Errorf("failed to initialize routing chain depth: %w", err)
+		}
 	}
 
 	plugin := &RoutingPlugin{

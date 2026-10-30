@@ -144,6 +144,72 @@ no new HTTP route. Whole-policy/depth installation, CAS-protected application
 acknowledgements, restart-before-serving recovery, live drift detection, rollback,
 and API/panel acceptance still belong to the remaining stages.
 
+## Runtime Policy Preparation Checkpoint
+
+This follow-on checkpoint adds the process-local primitive needed by stage 2.
+It does not mark durable publication, activation or any remaining acceptance item
+complete, and it exposes no publication HTTP endpoint.
+
+`LocalStore` generations now carry rules, compiled programs and effective chain
+depth together. `RoutingPlugin.InitFromStore` opts stores implementing the optional
+`ChainMaxDepthUpdater` into managed depth. Client-config reload publishes the new
+depth through that interface before replacing the live config. Persisted zero uses
+the same effective default as startup, including the config seen by custom stores.
+Explicit nonpositive depth passed to `NewEngine` retains its upstream rejection.
+
+`NewEngine` does not mutate the store. Direct SDK calls and custom stores without
+managed snapshots retain their live pointer between evaluations; one evaluation
+captures depth once before reading scopes. Managed evaluations use only the pinned
+generation and never read the mutable pointer, including between chained rules.
+
+`PreparePolicy` clones the entire candidate and compiles outside the writer lock.
+Nonpositive depth, nil rules, duplicate IDs, failed copies and cancellation leave
+live state untouched. Invalid CEL remains a cached compile failure skipped by the
+engine, preserving upstream semantics rather than silently changing validation.
+`InstallPreparedPolicy` verifies store ownership and the exact base generation under
+the writer lock, clears the direct-compilation cache and swaps the complete policy
+once. Concurrent CRUD, depth edits or another policy installation invalidate stale
+candidates. Reusing a successful candidate conflicts; this token is not durable
+idempotency. Callers must revalidate publication preconditions before preparing again.
+
+A depth-only change shallow-copies the generation header and shares immutable
+rule/program storage; CRUD preserves managed depth. The extra retained state is one
+integer per generation and one owner/base/candidate handle per retained preparation.
+The store keeps no preparation or release-history cache. Callers must release
+preparations promptly, because a retained token also retains its base generation.
+No-rule requests keep their existing gate, without additional request allocations.
+
+Deterministic coverage includes complete/empty replacement, input isolation,
+preparation/installation failure, cancellation, cross-store use, competing candidates,
+stale CRUD/depth edits, paused evaluation across installation, independent SDK depth
+pointers, chain-local pointer changes, custom stores and client-config reload.
+Both read-only reviewers returned `PASS_SCOPED` for the final runtime source.
+Database commit/acknowledgement, crash recovery, drift invalidation, rollback and
+API/panel acceptance remain required and are not supplied by this primitive.
+
+The final routing `go test -race -buildvcs=false ./... -count=1` passed
+(routing 4.453s, complexity 6.020s, rules 3.087s). The server's targeted
+`TestRoutingPolicy|TestGetRoutingPlugin` race run passed (2.598s).
+Formatting and `git diff --check` also passed.
+
+For this depth-management checkpoint, the unchanged snapshot benchmark was run
+once before and after on the same Apple M4:
+
+| Case | Before | After | After allocations |
+| --- | --- | --- | --- |
+| empty | 1.605 ns/op | 1.727 ns/op | 0 B/op, 0 allocs/op |
+| program | 7.814 ns/op | 8.102 ns/op | 0 B/op, 0 allocs/op |
+| scope | 4.705 ns/op | 4.772 ns/op | 0 B/op, 0 allocs/op |
+| evaluate incoming | 2414 ns/op | 2597 ns/op | 5797 B/op, 76 allocs/op |
+| evaluate unmatched | 2726 ns/op | 2850 ns/op | 5747 B/op, 71 allocs/op |
+| chain three | 7036 ns/op | 7672 ns/op | 15057 B/op, 209 allocs/op |
+
+The managed-policy benchmark measured incoming at 2587 ns/op, 5797 B/op,
+76 allocs/op, and unmatched at 2839 ns/op, 5747 B/op, 71 allocs/op.
+Allocation counts did not increase, but evaluation timings rose roughly 5-9%
+in these single runs. This is not evidence of performance non-regression;
+repeated measurements and attribution remain necessary for performance acceptance.
+
 ## Runtime Request-Path Benchmark (`darwin/arm64`, Apple M4)
 
 The same `BenchmarkRoutingRuleSnapshots` source was run against the parent

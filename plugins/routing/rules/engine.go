@@ -94,7 +94,7 @@ type Engine struct {
 	rules         Store
 	governance    GovernanceStore
 	logger        schemas.Logger
-	chainMaxDepth *int // pointer to live config value; changes are reflected immediately
+	chainMaxDepth *int // fallback for stores without snapshot-managed depth
 }
 
 // NewEngine creates a new Engine
@@ -139,6 +139,15 @@ func (re *Engine) EvaluateRoutingRules(ctx *schemas.BifrostContext, routingCtx *
 	if snapshotter, ok := re.rules.(Snapshotter); ok {
 		ruleReader = snapshotter.Snapshot()
 	}
+	maxDepth := 0
+	if policy, ok := ruleReader.(interface{ ChainMaxDepth() int }); ok {
+		maxDepth = policy.ChainMaxDepth()
+	}
+	if maxDepth <= 0 {
+		// Direct SDK/custom stores keep their live pointer contract between
+		// evaluations. Managed snapshots never read that mutable pointer.
+		maxDepth = *re.chainMaxDepth
+	}
 
 	re.logger.Debug("[Engine] Starting rule evaluation for provider=%s, model=%s", routingCtx.Provider, routingCtx.Model)
 
@@ -182,7 +191,6 @@ func (re *Engine) EvaluateRoutingRules(ctx *schemas.BifrostContext, routingCtx *
 
 	for chainStep := 0; ; chainStep++ {
 		// TERMINATION 4: Chain exceeded configured max depth.
-		maxDepth := *re.chainMaxDepth
 		if chainStep >= maxDepth {
 			re.logger.Warn("[Engine] Routing rule chain exceeded max depth (%d), stopping", maxDepth)
 			ctx.AppendRoutingEngineLog(schemas.RoutingEngineRoutingRule, schemas.LogLevelWarn, fmt.Sprintf("Chain exceeded max depth (%d) at step %d, stopping. Final resolved: provider=%s, model=%s", maxDepth, chainStep, currentProvider, currentModel))

@@ -55,6 +55,12 @@ type Snapshotter interface {
 	Snapshot() ReadStore
 }
 
+// ChainMaxDepthUpdater opts a Store into generation-managed depth updates.
+// Stores that do not implement it retain the Engine pointer contract.
+type ChainMaxDepthUpdater interface {
+	UpdateChainMaxDepth(depth int) error
+}
+
 type compiledProgram struct {
 	expression string
 	program    cel.Program
@@ -65,6 +71,7 @@ type ruleGeneration struct {
 	enabledScopes map[string][]*configstoreTables.TableRoutingRule
 	allRules      []*configstoreTables.TableRoutingRule
 	programs      map[string]compiledProgram
+	chainMaxDepth int // zero leaves depth management to the Engine caller
 }
 
 // LocalStore is the in-process Store implementation. Writers build a complete
@@ -119,7 +126,7 @@ func NewLocalStore(ctx context.Context, logger schemas.Logger, configStore confi
 			return nil, fmt.Errorf("failed to copy routing rules: %w", err)
 		}
 	} else {
-		store.current.Store(store.buildGeneration(nil))
+		store.current.Store(store.buildGeneration(nil, nil))
 	}
 
 	return store, nil
@@ -138,7 +145,7 @@ func (rs *LocalStore) load(rules []configstoreTables.TableRoutingRule) error {
 		}
 		ownedRules = append(ownedRules, owned)
 	}
-	rs.current.Store(rs.buildGeneration(ownedRules))
+	rs.current.Store(rs.buildGeneration(ownedRules, rs.current.Load()))
 	return nil
 }
 
@@ -250,7 +257,7 @@ func (rs *LocalStore) UpsertRule(ctx context.Context, rule *configstoreTables.Ta
 		}
 	}
 	nextRules = append(nextRules, owned)
-	next := rs.buildGeneration(nextRules)
+	next := rs.buildGeneration(nextRules, current)
 	rs.adHoc.Delete(rule.ID)
 	rs.current.Store(next)
 	return nil
@@ -268,15 +275,18 @@ func (rs *LocalStore) DeleteRule(ctx context.Context, id string) error {
 		}
 	}
 	rs.adHoc.Delete(id)
-	rs.current.Store(rs.buildGeneration(nextRules))
+	rs.current.Store(rs.buildGeneration(nextRules, current))
 	return nil
 }
 
-func (rs *LocalStore) buildGeneration(rules []*configstoreTables.TableRoutingRule) *ruleGeneration {
+func (rs *LocalStore) buildGeneration(rules []*configstoreTables.TableRoutingRule, previous *ruleGeneration) *ruleGeneration {
 	generation := &ruleGeneration{
 		enabledScopes: make(map[string][]*configstoreTables.TableRoutingRule),
 		allRules:      rules,
 		programs:      make(map[string]compiledProgram, len(rules)),
+	}
+	if previous != nil {
+		generation.chainMaxDepth = previous.chainMaxDepth
 	}
 	sort.SliceStable(generation.allRules, func(i, j int) bool {
 		if generation.allRules[i].Priority != generation.allRules[j].Priority {
@@ -284,7 +294,6 @@ func (rs *LocalStore) buildGeneration(rules []*configstoreTables.TableRoutingRul
 		}
 		return generation.allRules[i].CreatedAt.After(generation.allRules[j].CreatedAt)
 	})
-	previous := rs.current.Load()
 	for _, rule := range generation.allRules {
 		key := scopeKeyFromRule(rule)
 		if rule.EnabledValue() {
