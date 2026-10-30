@@ -107,5 +107,28 @@ real provider billing, password/TLS authentication, encrypted-key recovery,
 other product workflows, crash recovery, version rollback, container-image
 or production acceptance.
 
+## Local Routing Draft Runtime Acceptance
+
+After building the current canonical CLI with the parameters above, run:
+
+```sh
+ELYGATE_TEST_BINARY="$PWD/.codex-tmp/relay-gateway" \
+  bun run --cwd panel test:routing-drafts-runtime
+```
+
+Add `ELYGATE_TEST_POSTGRES_BIN` as above for a new private PostgreSQL cluster.
+This opt-in suite drives the real draft API with the panel's payload builders
+and response parsers. It checks authentication, foreign Origin and media-type
+rejection, strict rule validation, list/create/read/update/delete, competing
+revisions, audit records and no changes to active rules. Simulation samples
+are excluded from saved payloads. A gateway restart (plus PostgreSQL restart
+when selected) must retain the complete draft and the existing administrator
+session; a subsequent restart must retain deletion.
+
+Only this test's temporary databases and processes are used and cleaned up.
+A missing executable fails. This is local API/serializer acceptance, not
+browser interaction, publication, online Shadow, rollback or production proof.
+It adds no hooks, allocations or retained state to the inference path.
+
 This migration changes browser dependencies and build output only. It adds
 no work or retained state to the Go inference request path.

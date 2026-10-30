@@ -100,15 +100,26 @@ storage is used.
 
 On 2026-10-30 the focused panel contracts passed 34 tests and 262 assertions,
 Svelte checking reported zero errors/warnings, and the production build passed.
-The subsequent complete panel run passed 366 unit tests (2196 assertions) and
+The subsequent complete panel run passed 367 unit tests (2198 assertions) and
 one API proxy integration test (12 assertions); an earlier proxy timeout is not
 counted as a pass. No test timeout or assertions were weakened.
 API-fixture browser checks covered create, selection/load, 409 edit retention,
 unconfirmed-write protection, SPA recovery and no horizontal overflow at 1440,
 375 and 812 pixels. Screenshots use
 `output/playwright/routing-drafts-fixture-*`; the phone image was inspected.
-These checks do not prove draft CRUD against a real gateway, PostgreSQL browser
-integration, complete theme/keyboard acceptance or production readiness.
+The current canonical gateway was then rebuilt and the runtime suite passed for
+both isolated SQLite and PostgreSQL 18 stores. Each run verified the
+administrator session, request validation, strict unknown-field rejection,
+CRUD, competing revisions, audit records, gateway/database restart persistence,
+deletion persistence and active-rule isolation. Live browser acceptance passed
+against both stores for keyboard create, stale-revision conflict retention,
+SPA recovery, response-loss retry locking, reload, delete, light/dark themes
+and 1440/812/375 layouts. These are local runtime and browser checks; they do
+not prove publication, online Shadow, rollback or production readiness.
+The selected option now uses the loaded draft's name and revision, including
+after response-loss recovery, instead of displaying a stale list snapshot.
+Live screenshots use `output/playwright/routing-drafts-live-*`; temporary
+browser scripts, reports and binaries are not release artifacts.
 
 ### Backend
 
@@ -124,15 +135,16 @@ The administrator-only validation benchmark on Apple M4 with `GOMAXPROCS=2`
 measured `43848 ns/op`, `54065 B/op` and `756 allocs/op`. It is not an inference
 benchmark and adds no work to inference requests.
 
-The PostgreSQL run exposed a timestamp-location comparison mismatch in the
-tests, plus database create/drop timeouts and the five-minute suite timeout.
-Assertions now compare every draft field with timestamps normalized to UTC;
-the updated SQLite suite passed again. The targeted PostgreSQL rerun and
-three-package `go vet` were interrupted after prolonged waits without a result.
-PostgreSQL and static-analysis acceptance remain incomplete.
+The PostgreSQL run initially exposed a timestamp-location comparison mismatch;
+assertions now compare every draft field with timestamps normalized to UTC.
+Using the rebuilt canonical gateway, the complete SQLite and PostgreSQL 18
+runtime acceptance suites passed and confirmed temporary-store cleanup.
 A later default-vet control-plane rerun on `b508f90e7` was explicitly
 interrupted with exit 130 while vet was still running and before test results
-were available. It supplies no new backend pass receipt.
+were available. That interrupted attempt supplies no pass receipt. Subsequent
+private PostgreSQL `TestRoutingDraft*` tests and separate `go vet` for
+controlplane, handlers and server completed successfully. No Go source changed
+in the current panel/runtime-test increment.
 
 Run the focused contracts from `transports/`:
 

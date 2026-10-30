@@ -9,6 +9,7 @@
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "test": "bun test src/lib/*.test.ts && bun test tests/*.test.ts",
     "test:relay-runtime": "bun test tests/runtime/relay.test.ts",
+    "test:routing-drafts-runtime": "bun test tests/runtime/routing-drafts.test.ts",
     "copy-build": "rm -rf ../transports/bifrost-http/ui && cp -R out ../transports/bifrost-http/ui"
   },
   "dependencies": {

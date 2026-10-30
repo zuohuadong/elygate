@@ -373,7 +373,10 @@
 			<select id="routing-draft-select" bind:value={selectedDraftId} onchange={selectDraftFromEvent} disabled={busy}>
 				<option value="">{text('新建草稿', 'New draft')}</option>
 				{#if selectedDraft && !drafts.some((item) => item.id === selectedDraft?.id)}<option value={selectedDraft.id}>{selectedDraft.name} · v{selectedDraft.revision}</option>{/if}
-				{#each drafts as item (item.id)}<option value={item.id}>{item.name} · v{item.revision}</option>{/each}
+				{#each drafts as item (item.id)}
+					{@const summary = selectedDraft?.id === item.id ? selectedDraft : item}
+					<option value={item.id}>{summary.name} · v{summary.revision}</option>
+				{/each}
 			</select>
 		</label>
 		<label class="draft-name" for="routing-draft-name">{text('草稿名称', 'Draft name')}

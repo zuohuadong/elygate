@@ -44,4 +44,10 @@ describe('routing rules page contract', () => {
 		expect(source).toMatch(/\.field-error\s*\{[^}]*color:\s*var\(--simulation-error-text\)/);
 		expect(source).toMatch(/\.notice\s*\{[^}]*color:\s*var\(--simulation-error-text\)/);
 	});
+
+	test('labels the selected draft with the loaded revision rather than a stale list snapshot', async () => {
+		const source = await Bun.file(new URL('./RoutingSimulationPanel.svelte', import.meta.url)).text();
+		expect(source).toContain('{@const summary = selectedDraft?.id === item.id ? selectedDraft : item}');
+		expect(source).toContain('<option value={item.id}>{summary.name} · v{summary.revision}</option>');
+	});
 });
