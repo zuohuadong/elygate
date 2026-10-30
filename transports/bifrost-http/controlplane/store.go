@@ -203,6 +203,11 @@ func NewStore(ctx context.Context, configStore configstore.ConfigStore) (*Store,
 			Migrate:  migrateRoutingDrafts,
 			Rollback: routingDraftRollback,
 		},
+		{
+			ID:       "elygate_control_plane_v13_routing_versions",
+			Migrate:  migrateRoutingPolicyVersions,
+			Rollback: routingPolicyVersionRollback,
+		},
 	}
 	migrationIDs := make([]string, 0, len(migrations))
 	for _, migration := range migrations {
