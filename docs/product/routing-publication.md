@@ -14,7 +14,8 @@ Status: **PARTIAL**, not available for production activation.
   cover runtime consistency and transaction/recovery. At most two review rounds.
   High-risk reviewers use the available `gpt-5.5` runtime; no runtime fallback.
 - Existing stack: Go 1.27.3, upstream CEL/routing, GORM, SQLite/PostgreSQL.
-  No dependency, framework, provider or database migration is authorized.
+  No dependency, framework, provider or database replacement is included.
+  Additive control-plane schema migrations are required by the durable stage.
 - `agmesh` and the stack/database profile-selector skills are unavailable in this
   environment. The existing profiles are retained; local deterministic checks
   and host-native reviewers remain available.
@@ -100,7 +101,50 @@ Both independent reviewers returned `PASS_SCOPED` for this stage, with no blocki
 findings. `chainMaxDepth`, durable publication, rollback and restart recovery
 remain outside this checkpoint.
 
-### Request-Path Benchmark (`darwin/arm64`, Apple M4)
+## Durable Intent Checkpoint
+
+Stage 2 begins with storage-only acceptance, not publication. It does not complete
+any of the remaining end-to-end acceptance items above. The two read-only reviewers
+reconciled their initial transaction/runtime design disagreement around this
+boundary before implementation.
+
+Migration `elygate_control_plane_v14_routing_release_intents` adds a singleton
+head and immutable acceptance receipts. The seed has epoch `0`, state `pending`
+and empty desired/applied identities. An empty seed is not a recoverable install.
+Migration replay preserves existing head/history; migration rollback refuses to
+discard pending intent or idempotency history.
+
+`AcceptRoutingRelease` takes a version ID, expected head epoch and nonblank
+idempotency key of at most 128 bytes. The head epoch is independent of draft
+revision. SQLite reserves its writer before reading; PostgreSQL locks the singleton
+row. Inside that lock, an identical key/version/expected-epoch replay returns the
+original receipt without moving the head or emitting another audit. Reusing a key
+for a different version or expected epoch conflicts. Different keys racing with the
+same expected epoch have only one winner.
+
+A new acceptance atomically appends its receipt, advances the head by one, copies
+the immutable version's already-stored SHA-256 into desired state, clears applied
+identities, sets `pending`, and appends `routing-release.accept` audit. The version
+hash covers name, rules JSON and chain depth; it is not a live runtime fingerprint.
+Any failed write, cancellation or audit failure rolls the entire acceptance back.
+No version or draft is mutated. Old receipts remain replayable after the head moves.
+
+`IsApplied` requires a positive epoch, `state=applied`, and matching nonempty desired
+and applied version IDs and fingerprints. It reports durable acknowledgement only,
+not current-process readiness or freedom from upstream configuration drift. No
+application acknowledgement or failure writer exists at this checkpoint, so neither
+the seed nor an accepted intent can satisfy it. Reopening storage preserves pending
+state and does not activate routing.
+
+This stage adds no inference-path work or retained runtime cache. Head storage is
+one fixed row; receipt history grows by one small row per accepted intent and must
+remain durable for replay/audit. There is no in-memory history cache. It does not
+write upstream rules, targets or client config, does not reload plugins, and exposes
+no new HTTP route. Whole-policy/depth installation, CAS-protected application
+acknowledgements, restart-before-serving recovery, live drift detection, rollback,
+and API/panel acceptance still belong to the remaining stages.
+
+## Runtime Request-Path Benchmark (`darwin/arm64`, Apple M4)
 
 The same `BenchmarkRoutingRuleSnapshots` source was run against the parent
 (`55a86a494`) through a Go overlay and against this generation implementation.
