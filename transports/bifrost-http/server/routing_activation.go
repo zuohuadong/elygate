@@ -82,7 +82,11 @@ func routingRequestAdmission(controller routingPolicyAdmission) schemas.RequestA
 }
 
 func (s *BifrostHTTPServer) configureRoutingAdmission() error {
+	if s == nil || s.Config == nil || s.Client == nil {
+		return errors.New("routing request admission is not initialized")
+	}
 	if !s.Config.IsPluginLoaded(routing.PluginName) {
+		s.Client.SetRequestAdmission(nil)
 		return nil
 	}
 	plugin, err := s.getRoutingPlugin()
@@ -90,10 +94,14 @@ func (s *BifrostHTTPServer) configureRoutingAdmission() error {
 		return err
 	}
 	if controller, ok := plugin.GetRuleStore().(routingPolicyAdmission); ok {
-		if errors.Is(controller.CheckPolicyWritable(), rules.ErrPolicyManaged) {
-			s.Client.SetRequestAdmission(routingRequestAdmission(controller))
-		}
+		// Install the host gate for unmanaged and epoch-zero stores as well.
+		// Publication must be able to close new admissions before its first
+		// durable intent, so the callback cannot be installed only after
+		// managed policy state exists.
+		s.Client.SetRequestAdmission(routingRequestAdmission(controller))
+		return nil
 	}
+	s.Client.SetRequestAdmission(nil)
 	return nil
 }
 

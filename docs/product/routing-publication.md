@@ -524,6 +524,52 @@ remains a single gateway with PostgreSQL, not a new multi-node HA requirement;
 neither that deployment scope nor the allowed pinned-generation behavior is
 silently changed by this review. Publication HTTP routes remain unregistered.
 
+## Epoch-Zero Admission Follow-Up
+
+Follow-up `routing-admission-bootstrap` has parent `60d0261ae`, source the
+continuing production-readiness goal and ownership review, and reason that the
+first publication needs a host gate before managed state exists. The original
+goal, non-goals and acceptance remain unchanged. Root is the only writer; the
+runtime and lifecycle reviewers independently reviewed the local changes.
+This is a prerequisite, not approval of publication or cross-process ownership.
+
+`configureRoutingAdmission` now binds the loaded local routing store even when
+it is unmanaged or has no rules. Rebinding preserves its open/closed state.
+Plugin replacement rebinds the callback to the replacement store; successful
+removal clears it. A failed client removal does not clear the callback. Custom
+stores without the admission interface keep their upstream behavior.
+Already-pinned contexts may finish after closure, while new contexts receive
+503 with fallbacks disabled. No publication write route has been registered.
+
+The final server routing admission/activation/rollback/startup/policy race run
+passed (6.708s); the focused rule-store admission race run passed (1.802s).
+The full server package also passed without race instrumentation (6.446s).
+Server `go vet -mod=readonly ./bifrost-http/server` and `git diff --check` passed.
+Both independent scoped reviews passed; the first test attempt exposed a fixture
+without its server-lifetime context and was corrected before the successful runs.
+
+The same `BenchmarkRoutingAdmissionBootstrap` source was run three times with
+`-benchmem -benchtime=200ms`, against the parent admission file through a Go
+overlay and against this local implementation, on Apple M4 without race
+instrumentation. The configured case's median increased from 241.1 to 264.0 ns/op.
+Both retain 1576 B/op and 6 allocs/op, including context creation and pre-existing
+request metadata. The after-run disabled control's median was 248.1 ns/op.
+These numbers show no additional allocation for that gateway-context fixture,
+not zero total allocations, full inference performance acceptance or nil-context
+SDK/stream costs. The gate takes the existing store writer mutex and retains one
+generation pointer per admitted context; older generations live only as long as
+their in-flight request/session contexts. It performs no database operation.
+Evidence is in `.codex-tmp/routing-admission-bootstrap-20261031/`.
+
+Ownership remains a human decision. A session advisory lock, like a cached lease,
+cannot prove that a surviving process has stopped admitting after its backend
+connection disappears. The proposed first-release operational boundary is
+externally verified stop-before-start: the old OS process must be confirmed gone
+before a new gateway starts. This proposal has not been approved or implemented,
+and it is not claimed as automatic fencing or takeover. Publication HTTP/panel,
+external crash recovery and all other roadmap/production gates remain open.
+Status: **PARTIAL**.
+
 ## Verification
 
 - Stage 1 passed `go test -buildvcs=false ./rules -count=1`, targeted `-race`

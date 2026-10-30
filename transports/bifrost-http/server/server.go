@@ -2603,6 +2603,11 @@ func (s *BifrostHTTPServer) SyncLoadedPlugin(ctx context.Context, name string, p
 	if err := s.Client.ReloadPlugin(plugin, InferPluginTypes(plugin)); err != nil {
 		return s.updatePluginErrorStatus(plugin.GetName(), "reloading bifrost config for", err)
 	}
+	if plugin.GetName() == routing.PluginName {
+		if err := s.configureRoutingAdmission(); err != nil {
+			return s.updatePluginErrorStatus(plugin.GetName(), "refreshing routing admission for", err)
+		}
+	}
 	// 3b. Sync plugin execution order from config to core
 	s.Client.ReorderPlugins(s.Config.GetPluginOrder())
 	// 4. Special handling for observability plugins
@@ -2750,6 +2755,8 @@ func (s *BifrostHTTPServer) RemovePlugin(ctx context.Context, displayName string
 	if unregisterErr == nil {
 		if err := s.Client.RemovePlugin(name, InferPluginTypes(plugin)); err != nil {
 			logger.Warn("failed to reload bifrost config after plugin removal: %v", err)
+		} else if name == routing.PluginName {
+			s.Client.SetRequestAdmission(nil)
 		}
 	}
 

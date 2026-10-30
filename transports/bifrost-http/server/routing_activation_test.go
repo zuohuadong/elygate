@@ -74,6 +74,103 @@ func TestRoutingReleaseActivationSwapsGenerationThenMemoryDepth(t *testing.T) {
 	require.Equal(t, []string{"openai/mini"}, tables.RoutingFallbackStrings(restartedRules[0].ParsedFallbacks))
 }
 
+func TestRoutingAdmissionConfiguredBeforeReleaseManagement(t *testing.T) {
+	server, store := routingAdmissionFixture(t)
+	require.NoError(t, server.configureRoutingAdmission())
+	require.Nil(t, activationAdmission(server, t))
+
+	pinned := schemas.NewBifrostContext(context.Background(), schemas.NoDeadline)
+	defer pinned.Cancel()
+	require.Nil(t, server.Client.AdmitRequest(pinned, nil))
+	before := store.SnapshotForRequest(pinned)
+	require.True(t, store.CloseAdmission())
+	refusal := activationAdmission(server, t)
+	require.NotNil(t, refusal)
+	require.Equal(t, 503, refusal.EffectiveHTTPStatus())
+	require.False(t, *refusal.AllowFallbacks)
+	require.NoError(t, server.configureRoutingAdmission(), "rewiring must not reopen a closed store")
+	require.NotNil(t, activationAdmission(server, t))
+	require.Nil(t, server.Client.AdmitRequest(pinned, nil), "already-pinned requests may finish")
+	require.Same(t, before, store.SnapshotForRequest(pinned))
+	store.OpenAdmission()
+	require.Nil(t, activationAdmission(server, t))
+}
+
+func TestRoutingAdmissionFollowsUnmanagedPluginLifecycle(t *testing.T) {
+	server, previous := routingAdmissionFixture(t)
+	require.NoError(t, server.configureRoutingAdmission())
+	replacement, err := routing.Init(t.Context(), nil, rules.NewMockLogger(), nil, routing.NewMockGovernance())
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, replacement.Cleanup()) })
+	require.NoError(t, server.SyncLoadedPlugin(t.Context(), routing.PluginName, replacement, nil, nil))
+	current := replacement.GetRuleStore().(*rules.LocalStore)
+	previous.CloseAdmission()
+	require.Nil(t, activationAdmission(server, t), "the retired store cannot gate new requests")
+	current.CloseAdmission()
+	require.NotNil(t, activationAdmission(server, t), "reload must bind admission to the replacement store")
+	current.OpenAdmission()
+	require.NoError(t, server.RemovePlugin(t.Context(), routing.PluginName))
+	current.CloseAdmission()
+	require.Nil(t, activationAdmission(server, t), "a removed plugin must not retain its admission callback")
+}
+
+func TestRoutingAdmissionCustomStoreKeepsUpstreamContract(t *testing.T) {
+	server, previous := routingAdmissionFixture(t)
+	require.NoError(t, server.configureRoutingAdmission())
+	custom, err := routing.InitFromStore(t.Context(), nil, rules.NewMockLogger(), nil,
+		routingPolicyCustomStore{previous}, routing.NewMockGovernance())
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, custom.Cleanup()) })
+	require.NoError(t, server.SyncLoadedPlugin(t.Context(), routing.PluginName, custom, nil, nil))
+	previous.CloseAdmission()
+	require.Nil(t, activationAdmission(server, t), "a custom store without admission keeps upstream semantics")
+}
+
+func routingAdmissionFixture(t testing.TB) (*BifrostHTTPServer, *rules.LocalStore) {
+	t.Helper()
+	logger = noopTestLogger{}
+	plugin, err := routing.Init(t.Context(), nil, rules.NewMockLogger(), nil, routing.NewMockGovernance())
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, plugin.Cleanup()) })
+	config := &lib.Config{ClientConfig: &configstore.ClientConfig{}}
+	plugins := []schemas.BasePlugin{plugin}
+	config.BasePlugins.Store(&plugins)
+	client, err := bifrost.Init(t.Context(), schemas.BifrostConfig{
+		Account: lib.NewBaseAccount(config), Logger: rules.NewMockLogger(), InitialPoolSize: 1,
+	})
+	require.NoError(t, err)
+	t.Cleanup(client.Shutdown)
+	serverContext := schemas.NewBifrostContext(context.Background(), schemas.NoDeadline)
+	t.Cleanup(serverContext.Cancel)
+	return &BifrostHTTPServer{Ctx: serverContext, Config: config, Client: client}, plugin.GetRuleStore().(*rules.LocalStore)
+}
+
+func BenchmarkRoutingAdmissionBootstrap(b *testing.B) {
+	for _, configured := range []bool{false, true} {
+		name := "disabled"
+		if configured {
+			name = "configured"
+		}
+		b.Run(name, func(b *testing.B) {
+			server, _ := routingAdmissionFixture(b)
+			if configured {
+				require.NoError(b, server.configureRoutingAdmission())
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				ctx := schemas.NewBifrostContext(context.Background(), schemas.NoDeadline)
+				// Gateway requests already carry metadata before admission.
+				ctx.SetValue(schemas.BifrostContextKeyRequestID, "benchmark")
+				if refusal := server.Client.AdmitRequest(ctx, nil); refusal != nil {
+					b.Fatal(refusal.Error.Message)
+				}
+				ctx.Cancel()
+			}
+		})
+	}
+}
+
 func TestRoutingReleaseActivationConflictLeavesCommittedPolicy(t *testing.T) {
 	server, releases, cs, attempt := pendingRoutingActivation(t, activationRoutingRules)
 	plugin, err := server.getRoutingPlugin()
