@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/maximhq/bifrost/framework/configstore"
 	"github.com/maximhq/bifrost/framework/configstore/tables"
@@ -112,6 +113,9 @@ func installRoutingReleaseTx(tx *gorm.DB, epoch int64, compile RoutingPolicyComp
 		return nil, err
 	}
 	if head.IsApplied() {
+		if err := checkRoutingReleaseApplication(tx, *head, *policy); err != nil {
+			return nil, err
+		}
 		if err := compareLiveRoutingPolicy(tx, *policy); err != nil {
 			return nil, err
 		}
@@ -137,7 +141,14 @@ func persistRoutingInstallation(tx *gorm.DB, head *RoutingReleaseHead, policy co
 	if err := acknowledgeRoutingInstallation(tx, head); err != nil {
 		return err
 	}
-	return appendAuditTx(tx, actor, "routing-release.apply", "routing-release", head.DesiredVersionID)
+	attempt, err := routingReleaseAttemptForHead(tx, *head)
+	if err != nil {
+		return err
+	}
+	if err := recordRoutingReleaseApplication(tx, *attempt, policy); err != nil {
+		return err
+	}
+	return appendAuditTx(tx, actor, "routing-release.apply", "routing-release", attempt.ID)
 }
 
 func acknowledgeRoutingInstallation(tx *gorm.DB, head *RoutingReleaseHead) error {
@@ -157,7 +168,24 @@ func acknowledgeRoutingInstallation(tx *gorm.DB, head *RoutingReleaseHead) error
 	return nil
 }
 
+func recordRoutingReleaseApplication(tx *gorm.DB, attempt RoutingReleaseAttempt, policy configstore.RoutingPolicySnapshot) error {
+	fingerprint, err := configstore.RoutingPolicyFingerprint(policy)
+	if err != nil {
+		return err
+	}
+	application := &RoutingReleaseApplication{
+		AttemptID: attempt.ID, Epoch: attempt.Epoch, VersionID: attempt.VersionID,
+		Fingerprint: attempt.Fingerprint, PolicyFingerprint: fingerprint,
+		RecordedAt: time.Now().UTC().Truncate(time.Microsecond),
+	}
+	return tx.Create(application).Error
+}
+
 func desiredRoutingPolicy(ctx context.Context, tx *gorm.DB, head *RoutingReleaseHead, compile RoutingPolicyCompiler) (*configstore.RoutingPolicySnapshot, error) {
+	attempt, err := routingReleaseAttemptForHead(tx, *head)
+	if err != nil {
+		return nil, err
+	}
 	var version RoutingPolicyVersion
 	if err := tx.Where("id = ?", head.DesiredVersionID).Take(&version).Error; err != nil {
 		return nil, err
@@ -187,7 +215,24 @@ func desiredRoutingPolicy(ctx context.Context, tx *gorm.DB, head *RoutingRelease
 		}
 		policy.Rules = append(policy.Rules, *rule)
 	}
+	if attempt.Operation == string(RoutingReleaseRollback) {
+		if err := checkRollbackRoutingPolicy(tx, *attempt, *policy); err != nil {
+			return nil, err
+		}
+	}
 	return policy, ctx.Err()
+}
+
+func checkRollbackRoutingPolicy(tx *gorm.DB, attempt RoutingReleaseAttempt, policy configstore.RoutingPolicySnapshot) error {
+	target, err := rollbackRoutingReleaseTarget(tx, attempt.RollbackOfEpoch)
+	if err != nil {
+		return err
+	}
+	if target.AttemptID != attempt.RollbackOfAttempt || target.VersionID != attempt.VersionID ||
+		target.Fingerprint != attempt.Fingerprint {
+		return ErrRoutingPolicyNotReady
+	}
+	return compareRoutingApplicationPolicy(*target, policy)
 }
 
 func compareLiveRoutingPolicy(tx *gorm.DB, desired configstore.RoutingPolicySnapshot) error {
@@ -268,6 +313,9 @@ func CheckRoutingPolicyStartup(ctx context.Context, cs configstore.ConfigStore, 
 		}
 		desired, err := desiredRoutingPolicy(ctx, tx, head, compile)
 		if err != nil {
+			return err
+		}
+		if err := checkRoutingReleaseApplication(tx, *head, *desired); err != nil {
 			return err
 		}
 		if err := compareLiveRoutingPolicy(tx, *desired); err != nil {

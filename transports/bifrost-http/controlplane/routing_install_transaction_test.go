@@ -180,11 +180,15 @@ func TestRoutingInstallationTransactionOutcomes(t *testing.T) {
 				require.True(t, head.IsApplied(), "commit may have succeeded even when its receipt is an error")
 				require.Empty(t, live)
 				require.Len(t, routingReleaseAudits(t, store), 2)
+				applications := routingApplications(t, store)
+				require.Len(t, applications, 1, "durable application receipt follows the real commit outcome")
+				require.Equal(t, attempt.ID, applications[0].AttemptID)
 			} else {
 				requirePendingRoutingHead(t, store, attempt)
 				require.Len(t, live, 1)
 				require.Equal(t, "old-rule", live[0].ID)
 				require.Len(t, routingReleaseAudits(t, store), 1)
+				require.Empty(t, routingApplications(t, store), "failed installation cannot manufacture an applied release")
 			}
 		})
 	}

@@ -404,6 +404,69 @@ This is a process-local primitive and internal activation path, not cross-proces
 fencing or an exposed HTTP/panel publication workflow. Rollback, external runtime
 acceptance and production authorization remain outstanding. Status: **PARTIAL**.
 
+## Audited Rollback Follow-Up
+
+Follow-up `routing-release-rollback-receipts` has parent `2a4f8e2ff`, source
+stages 2/3 and production-readiness gate 4, and reason that acceptance history
+cannot prove a prior release was ever installed. The original objective and all
+acceptance items remain unchanged. Risk is high; root remains the sole writer,
+with the existing independent transaction and runtime reviewers and at most two
+review rounds. Existing Go/GORM/SQLite/PostgreSQL profiles are retained because
+the profile-selector skills and agmesh CLI are unavailable.
+
+Migration `elygate_control_plane_v15_routing_release_applications` adds immutable
+application receipts and explicit `publish`/`rollback` provenance on acceptance
+attempts. Each receipt identifies the unique attempt/epoch, version/content hash,
+compiled policy fingerprint and recording time. Installation writes the receipt,
+whole policy, depth, head acknowledgement and apply audit in one transaction.
+The apply audit references the release attempt, not just its reusable version.
+Applied replay and startup require a matching receipt and policy fingerprint;
+neither path manufactures missing evidence or silently repairs drift.
+
+A rollback request specifies `operation=rollback`, a prior `rollback_of_epoch`,
+the expected current epoch and an idempotency key. It cannot supply a different
+version. The target must have an application receipt matching its immutable
+acceptance and version content. The current head must also be applied, with its
+receipt and live policy still matching. The target must be strictly older than
+the current release, not a pending attempt, current release or future epoch.
+Acceptance creates a new attempt/epoch, stores the source epoch and attempt ID,
+clears the head's applied identity, sets it pending and appends one rollback
+audit. It does not change live rules, depth or a serving generation.
+
+Replay keys bind the operation, target and expected epoch; publish and rollback
+cannot reuse each other's keys. Historical replays return the original receipt
+without moving the head. The installer checks the current epoch before invoking
+the compiler, so that receipt cannot reactivate an obsolete release.
+Rollback installation freshly compiles the immutable version, rechecks scopes
+and compares the target's compiled policy fingerprint, then uses the existing
+transaction and process-local admission/generation swap. A now-invalid scope,
+changed compiler result, missing receipt or audit/storage failure leaves the
+previous live policy intact. Lost commit receipts remain uncertain and cannot
+expose an installable policy.
+
+This is a new system, not a legacy Elygate compatibility migration. V15 adds
+structure only and does not infer application history from an older head or
+audit. A pre-V15 applied head without a receipt fails closed on startup/replay.
+Any such preproduction state needs an explicitly reviewed compiler-aware recovery
+or a new isolated installation; do not upgrade a serving managed instance
+expecting an automatic backfill. Schema rollback refuses to discard release
+history. No deployment or destructive reset is authorized by this follow-up.
+
+Cost: these queries, hashes and transactions run only on management/startup paths.
+There is no new inference hook, allocation or request cache. One durable receipt
+is retained per applied release, alongside unbounded durable release/audit
+history; there is no in-memory history cache. Production retention/backup policy
+must preserve rollback and replay evidence.
+
+The focused non-race controlplane and server tests passed (7.805s and 1.708s),
+and both independent scoped reviews found no blocking issue. Formatting and
+diff checks also passed. The race build stalled and was interrupted without a
+result; race execution, private PostgreSQL verification and go vet remain
+unverified. A later non-race rerun also stalled during the build phase and was
+interrupted, not counted as a pass. This follow-up does not yet close HTTP/panel
+publication, cross-process fencing, crash recovery or production acceptance;
+the full contract remains **PARTIAL**.
+
 ## Verification
 
 - Stage 1 passed `go test -buildvcs=false ./rules -count=1`, targeted `-race`
