@@ -2,9 +2,9 @@
 
 Routing drafts are administrator-owned, durable candidates. They do not change
 the active Bifrost rule store, install a routing plugin, or call a provider.
-The independent panel provides a saved-draft workflow in its offline simulation
-view. Policy publication, immutable release versions, rollback and online Shadow
-remain separate unfinished work.
+The independent panel provides a saved-draft workflow and immutable version
+history in its offline simulation view. Policy publication, rollback and online
+Shadow remain separate unfinished work.
 
 ## API
 
@@ -78,6 +78,93 @@ across concurrent edits.
   global draft compilation cache.
 - Schema rollback refuses to delete administrator candidates. Binary downgrade
   and production upgrade/restore safety require their own acceptance evidence.
+
+## Immutable Version Snapshots
+
+Backend baseline `d5669bde5` and panel baseline `d4a4be649` add:
+
+```text
+POST /api/control-plane/routing/drafts/{draft_id}/versions
+GET  /api/control-plane/routing/versions?limit=25&offset=0
+GET  /api/control-plane/routing/versions/{version_id}
+```
+
+The same administrator, Origin, JSON, canonical UUID, revision and `no-store`
+boundaries apply. Capture accepts only `{"expected_revision": 1}`. HTTP 201
+returns an immutable snapshot with `id`, `draft_id`, `draft_revision`, `name`,
+`rules`, `chain_max_depth`, `content_sha256` and `created_at`. Missing source
+drafts return 404; uncaptured stale revisions return 409. The server does not
+accept replacement rule bodies on this endpoint.
+
+Capturing the same draft/revision concurrently or retrying it returns the same
+version, without another audit event. Existing captures remain retrievable and
+replayable after the source draft is updated or deleted. The v13 migration
+creates `elygate_control_routing_versions`; insertion and `routing-version.create`
+audit commit together. There is no update/delete API, foreign-key cascade from
+drafts, or destructive schema rollback for history.
+
+Version pages contain summaries only, ordered by creation time descending and
+ID ascending. Pagination uses the same 1..100 limit and nonnegative offset
+contract as drafts; the panel uses pages of 25. The SHA-256 covers the stored
+name/rules/chain-depth JSON snapshot, not deployment state or a publication.
+Versions are retained without automatic pruning; only one row is allowed per
+draft/revision. No history cache or inference hook is installed.
+
+The panel captures only a saved, unchanged, confirmed draft. After a lost
+response, retry uses the originally sent draft ID/revision even if the source
+has moved on. Loading history requires confirmation before replacing local
+edits, preserves simulation samples and creates an unsaved new candidate.
+Saving it creates a new draft; it never changes the original version, source
+draft or active routing. Pending captures are component-local, not durable
+browser storage; after reload, administrators can inspect server history.
+
+### Version History Browser Follow-Up
+
+Follow-up `routing-version-history-live` has parent `d4a4be649`, source
+production-readiness gate 4 and reason that the first version-history browser
+run stopped at restart/reload. Native, root single writer, low risk, external=0.
+The original production objective is unchanged.
+
+Waiting for the selector to be enabled and contain the target option still
+failed on the original panel. The version child could take the shared busy
+state before the parent's initial draft request; that request was then skipped.
+The local fix gates automatic version loading on the initial draft-list result.
+It changes no authentication, database, upstream contract or inference path.
+
+On 2026-10-30 the rebuilt panel passed the complete browser flow against SQLite
+and private PostgreSQL 18: keyboard draft/capture, revision conflicts, SPA
+recovery, committed writes with lost responses, fixed-revision capture retry
+after a later source update, historical overwrite confirmation, save-as-new,
+gateway/database restart with existing session, source deletion with loadable
+history and unchanged active rules. Both runs reported zero page exceptions;
+1440x1000, 375x812 and 812x375 light/dark screenshots had no page-level
+horizontal overflow. Desktop, phone light/dark and landscape artifacts were
+inspected. No timeout or business assertion was weakened.
+
+Evidence is `.codex-tmp/routing-drafts-live.ts`,
+`.codex-tmp/routing-versions-live-{sqlite,postgres}-report.json` and
+`output/playwright/routing-versions-live-*`. The reports identify HEAD
+`d4a4be649` plus the local initialization fix, canonical CLI SHA-256
+`8b071c052a0ddafdccd725ab89e7f303ce62697e07b1ec7fc1194987a78a1a4a`
+and embedded `index.html` SHA-256
+`9694700b2abd916160d81b250e1169f4b50a891f1981723d74ff50ad368267b5`.
+The rebuilt CLI records source baseline `d4a4be649`, `vcs.modified=true`,
+Go 1.27.3 and the Makefile's macOS PIE/external-link/`sqlite_static` parameters.
+After the independent-preview runs passed, both browser flows were repeated
+directly against this gateway's embedded UI, without Vite or a development
+proxy. The script checks the actual served HTML against the panel index hash
+before login. This is a locally built binary, not a released image.
+Both runs required successful child-process and private-store cleanup.
+Temporary scripts, reports and screenshots are local evidence, not releases.
+The final panel suite passed 371 unit tests (2229 assertions) and one proxy
+integration test (12 assertions); Svelte diagnostics were clean and the
+production build passed. Separate SQLite and PostgreSQL canonical-gateway runtime
+runs also passed concurrent capture, replay, audit, restart and source-deletion
+contracts. The selector initialization guard has a focused source regression
+as well as the real browser reproducer; a source assertion alone does not prove
+reactive scheduling.
+Publication, online Shadow, rollback and final production acceptance remain
+unimplemented or unverified.
 
 ## Verification Boundary
 

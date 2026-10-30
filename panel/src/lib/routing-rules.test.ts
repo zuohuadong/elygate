@@ -50,4 +50,11 @@ describe('routing rules page contract', () => {
 		expect(source).toContain('{@const summary = selectedDraft?.id === item.id ? selectedDraft : item}');
 		expect(source).toContain('<option value={item.id}>{summary.name} · v{summary.revision}</option>');
 	});
+
+	test('defers automatic version history until the initial draft list has settled', async () => {
+		const panel = await Bun.file(new URL('./RoutingSimulationPanel.svelte', import.meta.url)).text();
+		const versions = await Bun.file(new URL('./RoutingPolicyVersions.svelte', import.meta.url)).text();
+		expect(panel).toContain('<RoutingPolicyVersions {active} draftsReady={draftsLoaded}');
+		expect(versions).toContain('if (active && draftsReady && !disabled && !busy && !loaded)');
+	});
 });

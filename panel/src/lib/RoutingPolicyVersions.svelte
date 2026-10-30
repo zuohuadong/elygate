@@ -12,10 +12,11 @@
 	} from './routing-policy-versions';
 
 	let {
-		active, disabled, draft, dirty, uncertain, busy = $bindable(false), onload,
+		active, disabled, draftsReady, draft, dirty, uncertain, busy = $bindable(false), onload,
 	}: {
 		active: boolean;
 		disabled: boolean;
+		draftsReady: boolean;
 		draft: RoutingDraft | null;
 		dirty: boolean;
 		uncertain: boolean;
@@ -165,7 +166,7 @@
 	}
 
 	$effect(() => { if (!active && operation !== 'capture') untrack(cancelRead); });
-	$effect(() => { if (active && !disabled && !busy && !loaded) untrack(() => void pageVersions()); });
+	$effect(() => { if (active && draftsReady && !disabled && !busy && !loaded) untrack(() => void pageVersions()); });
 	onMount(() => {
 		const guard = (event: BeforeUnloadEvent): void => { if (operation === 'capture') event.preventDefault(); };
 		window.addEventListener('beforeunload', guard);

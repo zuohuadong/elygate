@@ -120,10 +120,13 @@ Add `ELYGATE_TEST_POSTGRES_BIN` as above for a new private PostgreSQL cluster.
 This opt-in suite drives the real draft API with the panel's payload builders
 and response parsers. It checks authentication, foreign Origin and media-type
 rejection, strict rule validation, list/create/read/update/delete, competing
-revisions, audit records and no changes to active rules. Simulation samples
-are excluded from saved payloads. A gateway restart (plus PostgreSQL restart
-when selected) must retain the complete draft and the existing administrator
-session; a subsequent restart must retain deletion.
+revisions, concurrent immutable version capture, idempotent replay, audit records
+and no changes to active rules. Simulation samples are excluded from saved
+payloads. A gateway restart (plus PostgreSQL restart when selected) must retain
+the complete draft, immutable versions and the existing administrator session;
+a subsequent restart must retain deletion. Historical versions must remain
+readable and replayable after the source draft is updated or deleted, without
+appending another capture audit.
 
 Only this test's temporary databases and processes are used and cleaned up.
 A missing executable fails. This is local API/serializer acceptance, not

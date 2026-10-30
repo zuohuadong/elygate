@@ -36,7 +36,7 @@ Elygate 当前定位收敛为：
 | Usage Ledger | Partial | 支持投影、筛选查询、全筛选范围汇总和 CSV/API 导出；项目/应用日月预算、持久化阈值告警及控制面板已闭环；预算告警处理已通过本地 SQLite 和双 PostgreSQL 生产运行链路与浏览器验收，输入为合成日志而非真实模型调用；已有历史周期重算、历史分析、管理员已读、告警确认与人工处理/重开，真实外部投递、多用户、预测及生产交付仍未完整 |
 | Control Plane Audit | Partial | 控面与员工管理写操作已有事务内审计；上游管理事件已接持久化桥接，补齐 RSS、管理员认证配置、Warp 任务身份及显式会话删除事件；所有敏感操作覆盖、会话生命周期与跨存储原子性仍未完整 |
 | 企业身份 | Partial | 本地管理员和员工体系可用；OIDC 后续实现，LDAP/SCIM 暂不做 |
-| 统一策略中心 | Partial | 已有 CEL 路由、预算、限流、安全插件、管理员离线路由仿真及独立面板草稿 CRUD；草稿后端定向回归与面板夹具通过，真实草稿网关联调仍待补；仍缺统一版本、发布、回滚和在线 Shadow |
+| 统一策略中心 | Partial | 已有 CEL 路由、预算、限流、安全插件、管理员离线路由仿真、草稿 CRUD 和不可变版本历史；SQLite/PostgreSQL canonical gateway 与真实浏览器联调通过；仍缺发布、回滚和在线 Shadow |
 | 模型能力目录 | Partial | 已有模型、价格和扩展属性；区域、数据等级和健康策略未形成闭环 |
 | Guardrail / DLP | Partial | 插件基础存在；未证明覆盖所有流式、多模态、文件和工具结果 |
 | Capability / Gatekeeper | Not implemented | 保留为后续工具写操作治理，不进入首版阻塞项 |
@@ -468,6 +468,23 @@ Elygate 当前定位收敛为：
 - 直接 PostgreSQL SQL 行与浏览器 feed 的 ID、操作者、动作、资源、时间及关联字段逐项一致。后端与 PostgreSQL 独立正常停机/重启后，会话和既有事件全部一致；Trace-only/双字段/缺失字段展示夹具无 HTML 注入。登出事件带 Request ID，重新登录可见，最终 PostgreSQL 重启仍保留登出与重登事件。
 - 1440x1000、375x812、812x375 的亮暗主题和 reduced motion 检查通过，表格内部滚动、长 ID 换行、页面无横向溢出；页面异常为 0。后端两次、PostgreSQL 三次、浏览器、Vite preview 与两个数据库的清理退出均成功。
 - 报告 `.codex-tmp/audit-correlation-postgres-live-report.json` 记录 `PASS_SCOPED_POSTGRES`、源码/二进制哈希、12 项检查、布局与清理状态；截图为 `output/playwright/audit-correlation-postgres-{light,dark}-{1440,375,812}.png`。这是本地 PostgreSQL 浏览器/正常重启证据，不是真实管理 Trace、强杀/掉电恢复、生产迁移、完整审计覆盖、transactional outbox 或生产部署验收。总目标继续 active / PARTIAL。
+
+### 2026-10-30 路由版本历史与重启验收
+
+- follow-up `routing-version-history-live`：parent `d4a4be649`，source 为生产
+  功能验收门 4，reason 为面板版本历史的重启后验收尚未闭环；Native、低风险、
+  root 单 writer、external=0，原产品 goal/non-goals/acceptance 不变。
+- `d5669bde5` 已实现不可变草稿修订快照和事务内审计；`d4a4be649` 增加独立
+  面板分页历史、已保存修订 capture、固定修订重试和载入为新候选。
+  本地修复版本子组件先占 busy 导致首次草稿列表永久跳过的初始化竞态；
+  不改认证、上游 API、数据库或请求数据面。
+- SQLite 与 PostgreSQL 18 真实浏览器均通过响应丢失、源修订前进后重试、
+  历史覆盖确认、新草稿另存、正常重启后的会话/草稿/历史保留和源删除后版本载入。
+  1440/375/812 亮暗主题无页面横向溢出，页面异常为零，私有进程/存储清理通过。
+  详细边界和证据见 [草稿与版本](routing-drafts.md#immutable-version-snapshots)。
+- 不可变快照不等于发布版本，仍未实现发布、回滚、在线 Shadow；
+  本项不能替代真实供应商、最终镜像、TLS、完整备份恢复、升级回滚或生产切换授权。
+  本项尚未部署，整体保持 active / PARTIAL。
 
 ## 3. 单机部署架构
 

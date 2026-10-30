@@ -412,7 +412,7 @@
 	<div class="status" role="status" aria-live="polite">{operation === 'import' ? text('正在导入全部规则', 'Importing all rules') : status}</div>
 	{#if error}<div class="notice error" role="alert" tabindex="-1" bind:this={errorElement}>{error}</div>{/if}
 	{#if uncertainMutation}<div class="notice recovery" role="alert">{text('上一次写入结果未确认。请先刷新列表并重新载入草稿，再继续保存或删除。', 'The previous write outcome is unconfirmed. Refresh the list and reload the draft before saving or deleting again.')}</div>{/if}
-	<RoutingPolicyVersions {active} disabled={operation !== null} draft={selectedDraft} dirty={draftDirty} uncertain={uncertainMutation} bind:busy={versionBusy} onload={loadVersionCandidate} />
+	<RoutingPolicyVersions {active} draftsReady={draftsLoaded} disabled={operation !== null} draft={selectedDraft} dirty={draftDirty} uncertain={uncertainMutation} bind:busy={versionBusy} onload={loadVersionCandidate} />
 	<form onsubmit={(event) => { event.preventDefault(); void runSimulation(); }}>
 		<fieldset disabled={busy && operation !== 'run'}>
 			<div class="editors">
