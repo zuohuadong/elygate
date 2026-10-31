@@ -8,7 +8,18 @@
 
 ## 候选版本
 
-- 当前候选为 `b5b90cf3192dc6fe56d15e80071dc7fd7c559295`，CI run
+- 当前已推送候选为 `836f43c0614b3d22241dc733c0cff7d99b178193`，
+  CI run `41197421345` 于 2026-10-31 11:34:34 UTC 启动，
+  11:41:55 UTC 成功结束。面板、员工门户、既有 API contracts 和
+  镜像构建/运行四个 job 全部通过；镜像 manifest digest 为
+  `sha256:9264da7e8ed5097e7e555dc98fcc2459c7fcbb41431794bfd76056f9183fdd0d`。
+  非 root、双 PostgreSQL、health、版本、登录/退出、正常重启及清理步骤成功；
+  候选 artifact `13041451371` 已上传，大小 `162919348` 字节，
+  于 2026-11-07 11:41:30 UTC 过期。本次没有独立下载或运行该归档，
+  也没有发布 registry 或部署生产。该 SHA 的既有 API 筛选
+  **不包含** `TestModelCatalog`；不能将整个 CI 成功当作新增目录审计专项通过。
+  下述本地 CI 入口修复不包含在该候选或该次 run 中。
+- 此前候选为 `b5b90cf3192dc6fe56d15e80071dc7fd7c559295`，CI run
   `41193109692` 于 2026-10-31 10:31:42 UTC 启动，10:38:49 UTC 已成功结束。面板、
   员工门户、API contracts 和生产镜像构建/运行四个 job 全部通过；镜像
   manifest digest 为
@@ -763,6 +774,40 @@ Svelte 检查 0 errors / 0 warnings，`git diff --check` 通过。
 本轮 Pi 收到结构化模型目录实施请求后，以 `Connection error` / 退出 1
 结束且未产生文件；root 随后只接管上述已复现缺陷。没有自定治理字段的
 枚举或强制约束，也不把该修复或失败调用记为 Pi 实施完成。
+
+### 模型目录验证入口修正（2026-10-31）
+
+后续项 `model-catalog-verification-entrypoints`：parent 为 `836f43c06`，
+source 为模型目录审计专项与生产验证门，reason 为本地 Go wrapper 的
+默认 `go1.27.0` 低于模块要求，且现有 CI 筛选没有包含新目录审计测试。
+范围仅为 wrapper、既有面板 CI、构建契约测试和本记录；
+Native、低风险、root 单 writer、external=0，不修改业务行为或生产状态。
+
+默认工具链改为 `go1.27.3`，保留调用方的显式工具链覆盖。
+三个实际执行 wrapper 的命令夹具覆盖默认、`auto` 和显式版本，
+并核对已跟踪的 `core/go.mod`；不依赖干净 checkout 中不存在的 `go.work`。
+面板 CI 为 `^TestModelCatalog` 增加独立 handlers/server 步骤，
+wrapper 变更本身也会触发该 workflow，保持 `contents: read` 和不发布镜像。
+
+构建契约回归 31 pass / 0 fail（210 assertions），Svelte 检查
+0 errors / 0 warnings，Bash 语法、ShellCheck、actionlint 和 diff 检查通过。
+真实默认 wrapper 的 `go version` 已输出 `go1.27.3`。
+Go 专项使用 `/Volumes/Datas` 下缓存和临时目录及 macOS 外部链接，
+等待超过 8 分钟仍停留在链接阶段，随后中止/退出 130，**不计测试通过或失败**。
+这不关闭模型目录完整 HTTP/数据库专项边界；新 CI 步骤须以推送后
+同一 SHA 的实际运行结果核实，不能用本节本地结果替代。
+同 SHA 的 Snyk `41197421464` 和 CodSpeed `41197421344` 查询时仍 queued，
+不计安全扫描或性能通过。
+
+本轮按请求调用 Pi 默认 `deepseek/deepseek-v4-flash` 实施，仍以
+`Connection error` / 退出 1 结束且未改文件，随后由 root 接管上述可复现缺口；
+不将 root 修改记作 Pi 实施成功。后续最小无工具、无项目上下文请求仍然失败；
+已配置 provider 目标的独立 TCP 与无凭据 HTTP 读取均超时，
+本地 `auth check` 的 ready 状态并非远端连通证明。未修改 Pi 全局配置、
+切换 provider、输出凭据或操作该内网服务。
+只有构建/CI 工作量增加，无推理请求、数据库或常驻内存开销。
+完整功能、真实供应商、备份恢复、升级回滚和生产切换门保持未完成，
+原目标继续 active / PARTIAL；本增量没有部署生产。
 
 ### 单机模板镜像固定检查（2026-10-31）
 

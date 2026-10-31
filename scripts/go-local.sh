@@ -4,7 +4,7 @@ set -euo pipefail
 # Keep local Go builds deterministic on macOS and avoid linker pressure from
 # concurrent cgo packages. Override any variable when a different toolchain is
 # intentionally required.
-export GOTOOLCHAIN="${GOTOOLCHAIN:-go1.27.0}"
+export GOTOOLCHAIN="${GOTOOLCHAIN:-go1.27.3}"
 export CGO_ENABLED="${CGO_ENABLED:-1}"
 export GOMAXPROCS="${GOMAXPROCS:-4}"
 # Do not inherit a global cache placed on /Volumes/Data: metadata-heavy Go

@@ -101,7 +101,7 @@ describe('enterprise panel build contract', () => {
 			'transports/bifrost-http/**', 'framework/configstore/**', 'framework/logstore/**',
 			'plugins/logging/**', 'Makefile', 'transports/Dockerfile*', '.github/workflows/panel-tests.yml',
 			'.github/workflows/scripts/smoke-elygate-image.sh', 'examples/single-node-postgres/**',
-			'scripts/production/**']) {
+			'scripts/production/**', 'scripts/go-local.sh']) {
 			expect(workflow.on.push.paths).toContain(path);
 		}
 		expect(workflow.on).toHaveProperty('workflow_dispatch');
@@ -411,6 +411,35 @@ esac
 		30_000,
 	);
 
+	test.each([
+		{ name: 'default', requested: '', expected: 'go1.27.3' },
+		{ name: 'automatic override', requested: 'auto', expected: 'auto' },
+		{ name: 'explicit override', requested: 'go1.27.4', expected: 'go1.27.4' },
+	])('local Go wrapper respects the module toolchain: $name', async ({ requested, expected }) => {
+		const workspace = mkdtempSync(join(tmpdir(), 'elygate-go-toolchain-'));
+		try {
+			const executable = join(workspace, 'go');
+			await Bun.write(executable, '#!/usr/bin/env bash\nprintf \'%s\\n\' "$GOTOOLCHAIN" "$@"\n');
+			chmodSync(executable, 0o755);
+			const wrapper = new URL('../../../scripts/go-local.sh', import.meta.url).pathname;
+			const child = Bun.spawn(['bash', wrapper, 'version'], {
+				env: { ...process.env, PATH: `${workspace}:${process.env.PATH}`, GOTOOLCHAIN: requested },
+				stdout: 'pipe',
+				stderr: 'pipe',
+			});
+			const [stdout, stderr, status] = await Promise.all([
+				new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited,
+			]);
+			expect(stderr).toBe('');
+			expect(status).toBe(0);
+			expect(stdout).toBe(`${expected}\nversion\n`);
+			const coreModule = await Bun.file(new URL('../../../core/go.mod', import.meta.url)).text();
+			expect(coreModule).toMatch(/^go 1\.27\.3$/m);
+		} finally {
+			rmSync(workspace, { recursive: true, force: true });
+		}
+	});
+
 	test('API contracts initialize the Go workspace before running on a clean checkout', async () => {
 		const workflow = parse(await Bun.file(new URL('../../../.github/workflows/panel-tests.yml', import.meta.url)).text());
 		const steps = workflow.jobs['api-contracts'].steps;
@@ -427,5 +456,8 @@ esac
 		const exportIndex = steps.findIndex((step: { name?: string }) => step.name === 'Run usage CSV export regression');
 		expect(exportIndex).toBeGreaterThan(testIndex);
 		expect(steps[exportIndex].run).toBe("bash scripts/go-local.sh test -p 1 ./transports/bifrost-http/controlplane -run '^TestUsageCSVExport' -count=1 -timeout=180s");
+		const catalogIndex = steps.findIndex((step: { name?: string }) => step.name === 'Run model catalog audit regressions');
+		expect(catalogIndex).toBeGreaterThan(exportIndex);
+		expect(steps[catalogIndex].run).toBe("bash scripts/go-local.sh test -p 1 ./transports/bifrost-http/handlers ./transports/bifrost-http/server -run '^TestModelCatalog' -count=1 -timeout=180s");
 	});
 });

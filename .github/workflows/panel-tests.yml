@@ -16,6 +16,7 @@ on:
       - ".github/workflows/scripts/smoke-elygate-image.sh"
       - "examples/single-node-postgres/**"
       - "scripts/production/**"
+      - "scripts/go-local.sh"
   push:
     branches: [main, dev]
     paths:
@@ -32,6 +33,7 @@ on:
       - ".github/workflows/scripts/smoke-elygate-image.sh"
       - "examples/single-node-postgres/**"
       - "scripts/production/**"
+      - "scripts/go-local.sh"
   workflow_dispatch:
 
 permissions:
@@ -178,3 +180,5 @@ jobs:
         run: bash scripts/go-local.sh test -p 1 ./transports/bifrost-http/controlplane ./transports/bifrost-http/employees ./transports/bifrost-http/handlers -run 'Test(ApplicationKeyRouter|UsageReconciliation|LoginLimiter|Session|Auth|CorsAccessLog)' -count=1 -timeout=120s
       - name: Run usage CSV export regression
         run: bash scripts/go-local.sh test -p 1 ./transports/bifrost-http/controlplane -run '^TestUsageCSVExport' -count=1 -timeout=180s
+      - name: Run model catalog audit regressions
+        run: bash scripts/go-local.sh test -p 1 ./transports/bifrost-http/handlers ./transports/bifrost-http/server -run '^TestModelCatalog' -count=1 -timeout=180s
