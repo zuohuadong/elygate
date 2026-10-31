@@ -452,9 +452,13 @@ async function main(args) {
 		for (const side of ['source', 'target']) prepareProject(ctx, side);
 		phase = 'source startup';
 		compose(ctx, 'source', 'up', '-d', '--wait', '--wait-timeout', '120', 'postgres');
+		phase = 'source gateway creation';
 		compose(ctx, 'source', 'create', '--no-deps', 'elygate');
+		phase = 'source runtime seed';
 		prepareSourceFiles(ctx);
+		phase = 'source gateway start';
 		compose(ctx, 'source', 'start', 'elygate');
+		phase = 'source readiness and login';
 		const api = await authenticatedClient(ctx, 'source');
 		phase = 'source business persistence';
 		await seedBusiness(ctx, api);
