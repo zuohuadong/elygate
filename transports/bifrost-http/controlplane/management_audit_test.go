@@ -409,23 +409,30 @@ func TestManagementAuditCapturesIdentityAndDoesNotMisattributeBypass(t *testing.
 	store, _ := testControlPlaneStore(t)
 	h := NewHandler(store, nil)
 	for _, tc := range []struct {
-		name   string
-		local  bool
-		bypass bool
-		actor  string
-		want   string
+		name        string
+		local       bool
+		bypass      bool
+		setupAuthed bool
+		actor       string
+		want        string
 	}{
-		{"local", true, false, "", "local-admin"},
-		{"bypassed", true, true, "forged-user", "anonymous"},
-		{"anonymous", false, false, "", "anonymous"},
+		{"local", true, false, false, "", "local-admin"},
+		{"bypassed", true, true, false, "forged-user", "anonymous"},
+		{"setup", true, false, true, "forged-user", "anonymous"},
+		{"setup-bypassed", true, true, true, "forged-user", "anonymous"},
+		{"anonymous", false, false, false, "", "anonymous"},
+		{"verified", true, false, false, "verified-before-entry", "verified-before-entry"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			request := &fasthttp.RequestCtx{}
 			request.SetUserValue(schemas.IsLocalAdminContextKey, tc.local)
 			request.SetUserValue(schemas.BifrostContextKeyAuthBypassed, tc.bypass)
+			request.SetUserValue(schemas.BifrostContextKeySetupTokenAuthenticated, tc.setupAuthed)
 			request.SetUserValue(schemas.BifrostContextKeyUserID, tc.actor)
+			request.SetUserValue(lib.FastHTTPUserValueManagementAuditActor, tc.actor)
 			h.ManagementAuditMiddleware(bifrost.NewDefaultLogger(schemas.LogLevelError))(func(ctx *fasthttp.RequestCtx) {
 				ctx.SetUserValue(schemas.BifrostContextKeyUserID, "changed-after-entry")
+				ctx.SetUserValue(lib.FastHTTPUserValueManagementAuditActor, "changed-after-entry")
 				lib.RecordAuditChange(ctx, "feature_flag.updated", "feature_flag", tc.name, "", nil, nil)
 			})(request)
 			var event AuditEvent
@@ -454,6 +461,25 @@ func TestManagementAuditFailurePreservesCommittedResponse(t *testing.T) {
 		ctx.SetStatusCode(fasthttp.StatusBadRequest)
 	})(request)
 	require.Empty(t, request.Response.Header.Peek("X-Elygate-Audit-Status"), "rejected requests must not attempt persistence")
+}
+
+func TestManagementAuditContextLeavesWebSocketTicketLifetime(t *testing.T) {
+	ctx, cancel := managementAuditContext([]configstore.AuditChange{{
+		EventName: "dashboard_ws_ticket.created",
+	}})
+	defer cancel()
+	deadline, ok := ctx.Deadline()
+	require.True(t, ok)
+	require.Greater(t, time.Until(deadline), time.Second)
+	require.Less(t, time.Until(deadline), 3*time.Second)
+
+	ctx, cancel = managementAuditContext([]configstore.AuditChange{{
+		EventName: "provider.updated",
+	}})
+	defer cancel()
+	deadline, ok = ctx.Deadline()
+	require.True(t, ok)
+	require.Greater(t, time.Until(deadline), 29*time.Second)
 }
 
 func TestManagementAuditSurvivesHandlerPanic(t *testing.T) {

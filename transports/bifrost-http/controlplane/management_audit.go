@@ -14,6 +14,18 @@ import (
 	"gorm.io/gorm"
 )
 
+const wsTicketAuditTimeout = 2 * time.Second
+
+func managementAuditContext(changes []configstore.AuditChange) (context.Context, context.CancelFunc) {
+	for _, change := range changes {
+		if change.EventName == "dashboard_ws_ticket.created" {
+			// A synchronous audit must leave time to use the 30-second ticket.
+			return context.WithTimeout(context.Background(), wsTicketAuditTimeout)
+		}
+	}
+	return controlPlaneContext()
+}
+
 // ManagementAuditMiddleware persists committed changes and credential rejections.
 // It deliberately stores identities only: snapshots can include user-authored
 // content and require resource-specific redaction before durable storage.
@@ -27,7 +39,7 @@ func (h *Handler) ManagementAuditMiddleware(logger schemas.Logger) schemas.Bifro
 				if len(changes) == 0 {
 					return
 				}
-				ctx, cancel := controlPlaneContext()
+				ctx, cancel := managementAuditContext(changes)
 				defer cancel()
 				ctx = withAuditCorrelation(ctx, correlation)
 				if err := h.store.appendManagementAudit(ctx, actor, changes); err != nil {
@@ -45,6 +57,9 @@ func (h *Handler) ManagementAuditMiddleware(logger schemas.Logger) schemas.Bifro
 
 func managementAuditActor(request *fasthttp.RequestCtx) string {
 	if bypassed, _ := request.UserValue(schemas.BifrostContextKeyAuthBypassed).(bool); bypassed {
+		return "anonymous"
+	}
+	if setupAuthenticated, _ := request.UserValue(schemas.BifrostContextKeySetupTokenAuthenticated).(bool); setupAuthenticated {
 		return "anonymous"
 	}
 	if actor, _ := request.UserValue(lib.FastHTTPUserValueManagementAuditActor).(string); actor != "" {
@@ -66,8 +81,9 @@ func (s *Store) appendManagementAudit(ctx context.Context, actorID string, chang
 	for _, change := range changes {
 		resourceID := change.TargetID
 		eventActor := actorID
-		// Rejected credentials cannot identify an actor, even on an authenticated chain.
-		if change.EventName == "dashboard_session.login_failed" {
+		// Rejected credentials and setup credentials do not identify an administrator.
+		if change.EventName == "dashboard_session.login_failed" ||
+			change.EventName == "dashboard_setup_session.created" {
 			eventActor = "anonymous"
 		}
 		// Cache keys may contain the original prompt or user-provided secrets.

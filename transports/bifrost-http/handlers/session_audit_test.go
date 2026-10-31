@@ -2,8 +2,10 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/maximhq/bifrost/core/schemas"
 	"github.com/maximhq/bifrost/framework/configstore"
@@ -100,6 +102,99 @@ func TestDashboardLoginFailureAuditProducer(t *testing.T) {
 	}
 }
 
+func TestDashboardSetupSessionIssuanceAuditProducer(t *testing.T) {
+	const setupToken = "setup-issuance-test-token"
+	// Cases: successful issuance, wrong/missing token, missing gate, and inactive gate.
+	for _, state := range []string{"success", "wrong token", "missing token", "missing gate", "inactive gate"} {
+		t.Run(state, func(t *testing.T) {
+			auth := &AuthMiddleware{}
+			configuredToken := setupToken
+			auth.setupToken.Store(&configuredToken)
+			handler := &SessionHandler{setupLock: auth}
+			request := &fasthttp.RequestCtx{}
+			request.Request.Header.Set(SetupTokenHeader, setupToken)
+			status := fasthttp.StatusOK
+			switch state {
+			case "wrong token":
+				request.Request.Header.Set(SetupTokenHeader, "wrong-test-token")
+				status = fasthttp.StatusForbidden
+			case "missing token":
+				request.Request.Header.Del(SetupTokenHeader)
+				status = fasthttp.StatusForbidden
+			case "missing gate":
+				handler.setupLock = nil
+				status = fasthttp.StatusConflict
+			case "inactive gate":
+				auth.UpdateAuthConfig(&configstore.AuthConfig{IsEnabled: true})
+				status = fasthttp.StatusConflict
+			}
+			handler.startSetupSession(request)
+			require.Equal(t, status, request.Response.StatusCode())
+			if state != "success" {
+				require.Empty(t, auditChanges(t, request))
+				require.Empty(t, request.Response.Header.PeekCookie(SetupSessionCookie))
+				return
+			}
+			require.Equal(t, []configstore.AuditChange{{
+				EventName: "dashboard_setup_session.created", TargetType: "dashboard_setup_session", TargetID: "setup",
+			}}, auditChanges(t, request))
+			cookie := fasthttp.Cookie{}
+			cookie.SetKey(SetupSessionCookie)
+			require.True(t, request.Response.Header.Cookie(&cookie))
+			require.True(t, auth.validSetupSession(string(cookie.Value()), time.Now()))
+			requireNoSecret(t, auditChanges(t, request)[0], string(cookie.Value()))
+			requireNoSecret(t, auditChanges(t, request)[0], setupToken)
+		})
+	}
+}
+
+func TestDashboardWSTicketIssuanceAuditProducer(t *testing.T) {
+	// Cases: memory/signed issuance, auth-off dummy session, missing identity/store.
+	for _, state := range []string{"memory", "signed", "auth disabled", "missing identity", "missing store"} {
+		t.Run(state, func(t *testing.T) {
+			tickets := NewWSTicketStore()
+			t.Cleanup(tickets.Stop)
+			if state == "signed" {
+				tickets = NewSignedWSTicketStore([]byte("session-audit-test-signing-key"))
+				t.Cleanup(tickets.Stop)
+			}
+			handler := &SessionHandler{wsTicketStore: tickets}
+			request := &fasthttp.RequestCtx{}
+			sessionToken := "ws-issuance-test-session"
+			request.SetUserValue(schemas.BifrostContextKeySessionToken, sessionToken)
+			status := fasthttp.StatusOK
+			switch state {
+			case "auth disabled":
+				sessionToken = "dummy-session"
+				request.SetUserValue(schemas.BifrostContextKeySessionToken, "")
+			case "missing identity":
+				request.RemoveUserValue(schemas.BifrostContextKeySessionToken)
+				status = fasthttp.StatusUnauthorized
+			case "missing store":
+				handler.wsTicketStore = nil
+				status = fasthttp.StatusServiceUnavailable
+			}
+			handler.issueWSTicket(request)
+			require.Equal(t, status, request.Response.StatusCode())
+			if status != fasthttp.StatusOK {
+				require.Empty(t, auditChanges(t, request))
+				return
+			}
+			require.Equal(t, []configstore.AuditChange{{
+				EventName: "dashboard_ws_ticket.created", TargetType: "dashboard_ws_ticket", TargetID: "ws-ticket",
+			}}, auditChanges(t, request))
+			var response struct {
+				Ticket string `json:"ticket"`
+			}
+			require.NoError(t, json.Unmarshal(request.Response.Body(), &response))
+			require.NotEmpty(t, response.Ticket)
+			require.Equal(t, sessionToken, tickets.Consume(response.Ticket))
+			requireNoSecret(t, auditChanges(t, request)[0], response.Ticket)
+			requireNoSecret(t, auditChanges(t, request)[0], sessionToken)
+		})
+	}
+}
+
 func BenchmarkDashboardLoginAudit(b *testing.B) {
 	hash, err := bcrypt.GenerateFromPassword([]byte("benchmark-password"), bcrypt.MinCost)
 	require.NoError(b, err)
@@ -123,6 +218,45 @@ func BenchmarkDashboardLoginAudit(b *testing.B) {
 				request.ResetUserValues()
 				request.Response.Reset()
 				handler.login(request)
+			}
+		})
+	}
+}
+
+func BenchmarkDashboardIssuanceAudit(b *testing.B) {
+	for _, variant := range []string{"setup", "ws-memory", "ws-signed"} {
+		b.Run(variant, func(b *testing.B) {
+			setupToken := "benchmark-setup-token"
+			auth := &AuthMiddleware{}
+			auth.setupToken.Store(&setupToken)
+			tickets := NewWSTicketStore()
+			b.Cleanup(tickets.Stop)
+			if variant == "ws-signed" {
+				tickets = NewSignedWSTicketStore([]byte("benchmark-ticket-signing-key"))
+				b.Cleanup(tickets.Stop)
+			}
+			handler := &SessionHandler{setupLock: auth, wsTicketStore: tickets}
+			request := &fasthttp.RequestCtx{}
+			request.Request.Header.Set(SetupTokenHeader, setupToken)
+			b.ReportAllocs()
+			for b.Loop() {
+				request.ResetUserValues()
+				request.Response.Reset()
+				if variant == "setup" {
+					handler.startSetupSession(request)
+				} else {
+					request.SetUserValue(schemas.BifrostContextKeySessionToken, "benchmark-session")
+					handler.issueWSTicket(request)
+					var payload struct {
+						Ticket string `json:"ticket"`
+					}
+					if err := json.Unmarshal(request.Response.Body(), &payload); err != nil {
+						b.Fatal(err)
+					}
+					if tickets.Consume(payload.Ticket) != "benchmark-session" {
+						b.Fatal("issued ticket is not usable")
+					}
+				}
 			}
 		})
 	}

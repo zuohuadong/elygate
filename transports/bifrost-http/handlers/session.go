@@ -84,6 +84,7 @@ func (h *SessionHandler) startSetupSession(ctx *fasthttp.RequestCtx) {
 		return
 	}
 	setSetupSessionCookie(ctx, value, expires)
+	lib.RecordAuditChange(ctx, "dashboard_setup_session.created", "dashboard_setup_session", "setup", "", nil, nil)
 	SendJSON(ctx, map[string]any{"expires_at": expires.UTC().Format(time.RFC3339)})
 }
 
@@ -340,6 +341,7 @@ func (h *SessionHandler) issueWSTicket(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, fasthttp.StatusInternalServerError, "Failed to issue WebSocket ticket")
 		return
 	}
+	lib.RecordAuditChange(ctx, "dashboard_ws_ticket.created", "dashboard_ws_ticket", "ws-ticket", "", nil, nil)
 	SendJSON(ctx, map[string]any{
 		"ticket": ticket,
 	})

@@ -1,6 +1,6 @@
 # Management Audit Coverage
 
-Updated: 2026-10-29. This is a coverage inventory, not a claim that every
+Updated: 2026-10-31. This is a coverage inventory, not a claim that every
 administrator mutation has transactional audit enforcement.
 
 ## Persistence Boundaries
@@ -15,8 +15,28 @@ administrator mutation has transactional audit enforcement.
   ciphertext. Creation and valid-session deletion use fixed `local-admin`;
   expired-session deletion is anonymous. Empty, unknown, ciphertext and
   repeated logout tokens add no event. Public write errors contain no database
-  diagnostics. This wrapper does not globally replace ConfigStore or audit
-  setup/WS tickets or employee sessions.
+  diagnostics. This wrapper does not globally replace ConfigStore; setup/WS
+  ticket issuance uses the bridge below and employee sessions are handled
+  separately.
+- Successful setup-session and WebSocket-ticket issuance record
+  `dashboard_setup_session.created` for `dashboard_setup_session/setup` and
+  `dashboard_ws_ticket.created` for `dashboard_ws_ticket/ws-ticket` through the
+  post-handler bridge. Producers use empty names and nil snapshots, never
+  tokens, tickets, cookies, hashes or expiry data. Rejected or unavailable
+  issuance records no success event. Setup-token and auth-bypassed requests
+  are anonymous throughout the bridge; verified session identity is frozen
+  before issuance. Setup-session events are anonymous even in mixed batches.
+  Basic-only callers still cannot request a WS ticket.
+- WS-ticket audit uses a two-second database context instead of the normal
+  thirty-second budget, leaving time to use the existing thirty-second
+  ticket. Audit failure or timeout preserves the issued response and adds
+  `X-Elygate-Audit-Status: failed`; it does not reissue credentials or extend
+  their expiry. Credential issuance and audit are not atomic and retain a
+  crash window. Signed tickets remain reusable within their lifetime;
+  in-memory tickets retain their single-consumption behavior. Auth-disabled
+  enterprise issuance adds anonymous synchronous database writes without a
+  new limiter or automatic audit retention. No inference-path changes or
+  new resident credential cache are introduced.
 - Dashboard credential rejections use the existing post-handler bridge:
   username mismatch, hash-comparison error and password mismatch each record
   one `dashboard_session.login_failed` event for `dashboard_session/dashboard`.
@@ -345,7 +365,10 @@ sensitive-route coverage or transactional-outbox acceptance.
    login, explicit logout and auth-config-triggered bulk deletion now have
    transactional audit implementations. Failed dashboard credential attempts
    now have anonymous bridge events, still subject to the process-crash window
-   before audit persistence; setup/WS tickets remain uncovered. Login admission
+   before audit persistence. Successful setup-session and WS-ticket issuance
+   now have bridge events with the same crash window; rejected issuance,
+   ticket consumption and automatic expiry remain outside those contracts.
+   Login admission
    against concurrent credential changes is not serialized
    by the bulk deletion event.
    Explicit Warp conversation deletion

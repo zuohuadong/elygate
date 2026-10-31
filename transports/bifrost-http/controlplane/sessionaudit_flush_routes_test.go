@@ -179,7 +179,7 @@ func TestDashboardSessionFlushAuditConfigRoutes(t *testing.T) {
 				if event.Action == "auth_config.updated" {
 					authEvents++
 					if tc.credential == "setup" {
-						require.Equal(t, "local-admin", event.ActorID, "the existing bridge actor contract is unchanged")
+						require.Equal(t, "anonymous", event.ActorID, "setup credentials do not identify an administrator")
 					}
 				}
 			}
