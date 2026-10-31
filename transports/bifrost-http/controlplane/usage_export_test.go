@@ -369,16 +369,44 @@ func BenchmarkUsageCSVExport(b *testing.B) {
 	b.Cleanup(func() { require.NoError(b, cs.Close(ctx)) })
 	store, err := NewStore(ctx, cs)
 	require.NoError(b, err)
-	b.Setenv("TMPDIR", b.TempDir())
+	directory := b.TempDir()
+	b.Setenv("TMPDIR", directory)
 	for i := range 1000 {
 		id := fmt.Sprintf("bench-%06d", i)
 		require.NoError(b, store.db(ctx).Create(&UsageLedgerEntry{
-			ID: id, SourceLogID: id, OccurredAt: time.Date(2026, 10, 31, 0, 0, 0, 0, time.UTC),
-			ProjectID: "p", ApplicationID: "a", Provider: "openai", Model: "mini",
+			ID: id, SourceLogID: id, VirtualKeyID: id,
+			OccurredAt: time.Date(2026, 10, 31, 0, 0, 0, 0, time.UTC).Add(time.Duration(i) * time.Second),
+			ProjectID:  "p", ApplicationID: "a", Provider: "openai", Model: "mini",
 			Status: "success", PromptTokens: 10, OutputTokens: 5, TotalTokens: 15, Cost: 0.125,
 		}).Error)
 	}
 	handler := NewHandler(store, nil)
+	// 计时前核对完整输出，避免把空响应、截断和资源泄漏误计为导出性能。
+	request := &fasthttp.RequestCtx{}
+	handler.exportUsage(request)
+	require.Equal(b, fasthttp.StatusOK, request.Response.StatusCode())
+	defer request.Response.CloseBodyStream()
+	var body io.Reader = request.Response.BodyStream()
+	if body == nil {
+		body = bytes.NewReader(request.Response.Body())
+	}
+	records, err := csv.NewReader(body).ReadAll()
+	require.NoError(b, err)
+	require.Len(b, records, 1001)
+	require.Equal(b, []string{
+		"occurred_at", "project_id", "application_id", "virtual_key_id", "user_id",
+		"provider", "model", "session_id", "parent_session_id", "agent_name",
+		"session_client_type", "is_subagent", "is_fork", "status", "prompt_tokens",
+		"output_tokens", "total_tokens", "cost",
+	}, records[0])
+	for i, record := range records[1:] {
+		require.Equal(b, fmt.Sprintf("bench-%06d", 999-i), record[3])
+		require.Equal(b, "0.12500000", record[17])
+	}
+	require.NoError(b, request.Response.CloseBodyStream())
+	files, err := os.ReadDir(directory)
+	require.NoError(b, err)
+	require.Empty(b, files)
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {

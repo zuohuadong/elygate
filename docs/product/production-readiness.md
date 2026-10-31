@@ -8,13 +8,26 @@
 
 ## 候选版本
 
-- 当前候选为 `757409947517026f81779f477a0887381bdfc58b`，CI run
+- 当前已推送候选为 `84fb36401327946f1b284714f051d2bc1dd54d42`，CI run
+  `41185192165` 于 2026-10-31 08:34:56 UTC 启动，08:42:02 UTC 成功结束。
+  独立面板、员工门户、API contracts、生产镜像构建及运行 smoke 四个 job
+  均成功；镜像 digest 为
+  `sha256:9cf22dc79b5d1720ae039dfb61170f9d9e66de13d8304193453cc5b0595cbb0e`。
+  镜像仅在隔离 runner 加载，非 root、双 PostgreSQL、health、版本、
+  登录/退出和正常重启检查通过；工作流为 `push: false`，没有发布或部署。
+- 该 CI 的 API contract 筛选没有包含 `TestUsageCSVExport`，不能据此声称
+  新 CSV 行为已通过 CI。已补本地独立导出回归步骤，构建契约 18 项测试通过，
+  PostgreSQL 导出专项亦通过；本次提交包含该本地测试/工作流修正，推送后等待
+  新 CI 运行，不把本地证据提前记为 hosted CI 通过。
+  具体范围、基准代价和剩余边界见 [CSV 导出记录](usage-export.md#verification-follow-up)。
+  同 SHA 的 CodSpeed/Snyk 查询时仍排队，不记为通过。
+- 上一候选为 `757409947517026f81779f477a0887381bdfc58b`，CI run
   `41179795162` 于 2026-10-31 07:14:06 UTC 启动并于 07:20:34 UTC 成功结束。
   面板测试、员工门户、API contracts 和生产镜像门均通过；镜像实际 digest 为
   `sha256:addecf57df4bb27fe0ea5c05386ba8e1925d6d0796acee057da2f3ee5e1ea52f`。
   CI smoke 已验证非 root、双 PostgreSQL、health、版本、登录/退出和正常重启；
   该镜像尚未发布到生产或执行生产切换。
-- 同 SHA 的本地 macOS arm64 标准网关使用 Go 1.27.3、`sqlite_static`、
+- `757409947` 的本地 macOS arm64 标准网关使用 Go 1.27.3、`sqlite_static`、
   external linking 构建，二进制 SHA-256 为
   `8d040be8e1f1c1d6735972cbc557394c4b0912221537155f7e66eb168af0db69`。
   独立面板、嵌入目录和实际服务页面仍一致（SHA-256

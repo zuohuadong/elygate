@@ -273,5 +273,8 @@ esac
 		expect(steps[workspaceIndex].run).toBe('source ./.github/workflows/scripts/setup-go-workspace.sh');
 		expect(testIndex).toBeGreaterThan(workspaceIndex);
 		expect(steps[testIndex].run).toBe("bash scripts/go-local.sh test -p 1 ./transports/bifrost-http/controlplane ./transports/bifrost-http/employees ./transports/bifrost-http/handlers -run 'Test(ApplicationKeyRouter|UsageReconciliation|LoginLimiter|Session|Auth|CorsAccessLog)' -count=1 -timeout=120s");
+		const exportIndex = steps.findIndex((step: { name?: string }) => step.name === 'Run usage CSV export regression');
+		expect(exportIndex).toBeGreaterThan(testIndex);
+		expect(steps[exportIndex].run).toBe("bash scripts/go-local.sh test -p 1 ./transports/bifrost-http/controlplane -run '^TestUsageCSVExport' -count=1 -timeout=180s");
 	});
 });
