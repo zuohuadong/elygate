@@ -36,13 +36,27 @@ export function candidateManifest(index, readBlob, imageID) {
 }
 
 export function command(binary, args, options = {}) {
+	const { failureMessages = [], ...spawnOptions } = options;
 	const child = spawnSync(binary, args, {
 		encoding: 'utf8', timeout: 180_000, maxBuffer: 32 * 1024 * 1024,
-		stdio: ['pipe', 'pipe', 'pipe'], ...options,
+		stdio: ['pipe', 'pipe', 'pipe'], ...spawnOptions,
 	});
 	// A timed-out PTY/daemon call can report status=0 alongside ETIMEDOUT.
-	check(!child.error && !child.signal && child.status === 0, `${binary} command failed (output suppressed)`);
+	if (child.error || child.signal || child.status !== 0) {
+		const lines = child.stderr?.split('\n') ?? [];
+		const fixedFailure = failureMessages.find(message => lines.includes(message));
+		throw new RecoveryFailure(fixedFailure ?? `${binary} command failed (output suppressed)`);
+	}
 	return child.stdout?.trim() ?? '';
+}
+
+export function runProductionScript(ctx, operation, args) {
+	check(['backup', 'restore'].includes(operation), 'unknown recovery operation');
+	const script = join(ctx.repo, `scripts/production/single-node-${operation}.sh`);
+	// Only exact literal errors already in the trusted script may leave the private subprocess.
+	const literals = readFileSync(script, 'utf8').matchAll(/\bfail "([^"$`\\\r\n]+)"/g);
+	const failureMessages = [...literals].map(match => `FAIL ${operation}: ${match[1]}`);
+	return command('bash', [script, ...args], { env: ctx.env, failureMessages });
 }
 
 export function recoveryEnvironment(environment) {
@@ -348,19 +362,24 @@ function stopGateway(ctx, side) {
 }
 
 function backupAndRestore(ctx) {
+	ctx.phase = 'source shutdown and backup fingerprint';
 	stopGateway(ctx, 'source');
 	ctx.frozenDatabase = databaseFingerprint(ctx, 'source');
 	ctx.marker = runtimeMarker(ctx, 'source');
 	check(ctx.marker === `${sha256(ctx.prefix)}  /runtime/recovery-marker\n1000:0:600`, 'source marker must have expected hash and ownership');
-	command('bash', [join(ctx.repo, 'scripts/production/single-node-backup.sh'),
-		join(ctx.work, 'source'), '--confirm-no-writers'], { env: ctx.env });
+	ctx.phase = 'production backup';
+	runProductionScript(ctx, 'backup', [join(ctx.work, 'source'), '--confirm-no-writers']);
 	const backups = readdirSync(join(ctx.work, 'source/backups'));
 	check(backups.length === 1 && backups[0].startsWith('elygate-backup-'), 'expected one real backup');
 	check(databaseFingerprint(ctx, 'source') === ctx.frozenDatabase, 'backup must not change source tables or sequences');
+	ctx.phase = 'target PostgreSQL startup';
 	compose(ctx, 'target', 'up', '-d', '--wait', '--wait-timeout', '120', 'postgres');
+	ctx.phase = 'target gateway creation';
 	compose(ctx, 'target', 'create', '--no-recreate', 'elygate');
-	command('bash', [join(ctx.repo, 'scripts/production/single-node-restore.sh'),
-		join(ctx.work, 'source/backups', backups[0]), join(ctx.work, 'target'), '--confirm-isolated-no-writers'], { env: ctx.env });
+	ctx.phase = 'isolated restore';
+	runProductionScript(ctx, 'restore', [
+		join(ctx.work, 'source/backups', backups[0]), join(ctx.work, 'target'), '--confirm-isolated-no-writers']);
+	ctx.phase = 'restored pre-start integrity';
 	check(!inspect(ctx, container(ctx, 'target')).State.Running, 'restore must leave target stopped');
 	check(databaseFingerprint(ctx, 'target') === ctx.frozenDatabase, 'all restored table rows and sequences must match before startup');
 	check(runtimeMarker(ctx, 'target') === ctx.marker, 'restored runtime hash, UID, GID and mode must match');
@@ -441,27 +460,27 @@ async function main(args) {
 		work: mkdtempSync(join(process.env.RUNNER_TEMP ?? tmpdir(), 'elygate-recovery-')),
 		secrets: { ENCRYPTION_KEY: secret(), SETUP_TOKEN: secret(), POSTGRES_USER: 'recovery',
 			POSTGRES_DB: 'recovery', POSTGRES_PASSWORD: secret(), ELYGATE_RECOVERY_PASSWORD: `Aa1!${secret()}` } };
-	let phase = 'candidate identity';
+	ctx.phase = 'candidate identity';
 	try {
 		const context = JSON.parse(command('docker', ['context', 'inspect'], { env: ctx.env }));
 		check(context.length === 1 && context[0].Endpoints?.docker?.Host?.startsWith('unix:///'),
 			'recovery smoke requires a local Docker Unix socket');
 		ctx.localDocker = true;
 		nameCandidate(ctx);
-		phase = 'isolated project preflight';
+		ctx.phase = 'isolated project preflight';
 		await startUpstream(ctx);
 		for (const side of ['source', 'target']) prepareProject(ctx, side);
-		phase = 'source startup';
+		ctx.phase = 'source startup';
 		compose(ctx, 'source', 'up', '-d', '--wait', '--wait-timeout', '120', 'postgres');
-		phase = 'source gateway creation';
+		ctx.phase = 'source gateway creation';
 		compose(ctx, 'source', 'create', '--no-recreate', 'elygate');
-		phase = 'source runtime seed';
+		ctx.phase = 'source runtime seed';
 		prepareSourceFiles(ctx);
-		phase = 'source gateway start';
+		ctx.phase = 'source gateway start';
 		compose(ctx, 'source', 'start', 'elygate');
-		phase = 'source readiness and login';
+		ctx.phase = 'source readiness and login';
 		const api = await authenticatedClient(ctx, 'source');
-		phase = 'source business persistence';
+		ctx.phase = 'source business persistence';
 		await seedBusiness(ctx, api);
 		await verifyRelay(ctx, api);
 		await verifyUsageLedger(ctx, api);
@@ -470,12 +489,12 @@ async function main(args) {
 		check(ctx.auditEvents.data?.some(event => event.resource_id === ctx.application.projectID) &&
 			ctx.auditEvents.data.some(event => event.resource_id === ctx.application.id), 'audit feed must contain project and application mutations');
 		ctx.ciphertext = encryptedStore(ctx, 'source');
-		phase = 'production backup and isolated restore';
+		ctx.phase = 'production backup and isolated restore';
 		backupAndRestore(ctx);
-		phase = 'recovered business continuity';
+		ctx.phase = 'recovered business continuity';
 		await verifyRecovered(ctx);
 	} catch (error) {
-		console.error(`FAIL recovery ${phase}: ${error instanceof RecoveryFailure ? error.message : 'unexpected runtime error (details suppressed)'}`);
+		console.error(`FAIL recovery ${ctx.phase}: ${error instanceof RecoveryFailure ? error.message : 'unexpected runtime error (details suppressed)'}`);
 		process.exitCode = 1;
 	} finally {
 		try { await cleanup(ctx); }

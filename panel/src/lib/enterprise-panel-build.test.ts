@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import { chmodSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parse } from 'yaml';
 import { resolveEnterprisePanelModule } from '../../vite-enterprise-panel.mjs';
-import { candidateManifest, command, recoveryEnvironment, seedBusiness, validateCandidate } from '../../../.github/workflows/scripts/smoke-elygate-recovery.mjs';
+import { candidateManifest, command, recoveryEnvironment, runProductionScript, seedBusiness, validateCandidate } from '../../../.github/workflows/scripts/smoke-elygate-recovery.mjs';
 
 describe('enterprise panel build contract', () => {
 	test('uses the OSS fallback for ordinary builds', () => {
@@ -236,6 +236,41 @@ describe('enterprise panel build contract', () => {
 			SETUP_TOKEN: 'PRIVATE_RECOVERY_SENTINEL' };
 		expect(recoveryEnvironment(inherited)).toEqual({ PATH: '/bin' });
 		expect(inherited.COMPOSE_PROJECT_NAME).toBe('production');
+	});
+
+	test('recovery reports only exact trusted script errors, never arbitrary stderr or interpolated failures', async () => {
+		const workspace = mkdtempSync(join(tmpdir(), 'elygate-recovery-errors-'));
+		try {
+			const ctx = { repo: workspace, env: process.env };
+			mkdirSync(join(workspace, 'scripts/production'), { recursive: true });
+			for (const failure of [
+				'FAIL backup: fixed safety gate',
+				'FAIL backup: fixed safety gate PRIVATE_RECOVERY_SENTINEL',
+				'FAIL backup: dynamic PRIVATE_RECOVERY_SENTINEL',
+			]) {
+				await Bun.write(join(workspace, 'scripts/production/single-node-backup.sh'), `
+fail() { printf 'FAIL backup: %s\\n' "$1" >&2; exit 1; }
+if false; then fail "fixed safety gate"; fi
+if false; then fail "dynamic $SECRET"; fi
+printf '%s\\n' '${failure}' >&2
+exit 1
+`);
+				expect(() => runProductionScript(ctx, 'backup', []))
+					.toThrow(failure === 'FAIL backup: fixed safety gate'
+						? failure : 'bash command failed (output suppressed)');
+			}
+			expect(() => runProductionScript(ctx, '../untrusted', [])).toThrow('unknown recovery operation');
+		} finally {
+			rmSync(workspace, { recursive: true, force: true });
+		}
+	});
+
+	test('recovery identifies each backup and restore phase without logging subprocess contents', async () => {
+		const source = await Bun.file(new URL('../../../.github/workflows/scripts/smoke-elygate-recovery.mjs', import.meta.url)).text();
+		for (const phase of ['source shutdown and backup fingerprint', 'production backup',
+			'target PostgreSQL startup', 'target gateway creation', 'isolated restore', 'restored pre-start integrity']) {
+			expect(source).toContain(`ctx.phase = '${phase}'`);
+		}
 	});
 
 	test('recovery creates stopped gateways without recreating the running databases', async () => {
