@@ -283,9 +283,13 @@ esac
 		const preflight = steps[preflightIndex];
 		expect(preflight.shell).toBe('bash');
 		expect(preflight.run.trim().split('\n')).toEqual([
-			'bash -n scripts/production/single-node-preflight.sh scripts/production/single-node-preflight.test.sh',
-			'shellcheck scripts/production/single-node-preflight.sh scripts/production/single-node-preflight.test.sh',
+			'bash -n scripts/production/single-node-preflight.sh',
+			'bash -n scripts/production/single-node-preflight.test.sh',
+			'bash -n scripts/production/single-node-backup.sh',
+			'bash -n scripts/production/single-node-backup.test.sh',
+			'shellcheck scripts/production/single-node-preflight.sh scripts/production/single-node-preflight.test.sh scripts/production/single-node-backup.sh scripts/production/single-node-backup.test.sh',
 			'bash scripts/production/single-node-preflight.test.sh',
+			'bash scripts/production/single-node-backup.test.sh',
 		]);
 		expect(preflight['working-directory'] ?? job.defaults?.run?.['working-directory'] ??
 			workflow.defaults?.run?.['working-directory']).toBeUndefined();
