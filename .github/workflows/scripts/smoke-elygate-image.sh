@@ -125,16 +125,21 @@ docker run --detach --name "$gateway" --network "$network" --publish 127.0.0.1::
   --volume "$workspace/catalog:/app/catalog:ro" \
   --health-interval 2s --health-timeout 5s --health-start-period 5s --health-retries 60 \
   "$image" >/dev/null
-if ! port=$(docker inspect "$gateway" --format '{{json .NetworkSettings.Ports}}' |
-  jq -er '[."8080/tcp"[]? | select(.HostIp == "127.0.0.1")] |
-    select(length == 1) | .[0].HostPort |
-    select(test("^[0-9]+$")) | select(tonumber > 0 and tonumber <= 65535)'); then
-  echo "gateway has no unique published loopback HTTP port" >&2
-  exit 1
-fi
-origin="http://127.0.0.1:$port"
+resolve_gateway_origin() {
+  local port
+  if ! port=$(docker inspect "$gateway" --format '{{json .NetworkSettings.Ports}}' |
+    jq -er '[."8080/tcp"[]? | select(.HostIp == "127.0.0.1")] |
+      select(length == 1) | .[0].HostPort |
+      select(test("^[0-9]+$")) | select(tonumber > 0 and tonumber <= 65535)'); then
+    echo "gateway has no unique published loopback HTTP port" >&2
+    return 1
+  fi
+  origin="http://127.0.0.1:$port"
+}
 
 wait_for_gateway() {
+  # Docker can allocate a different ephemeral host port after stop/start.
+  resolve_gateway_origin
   for ((attempt = 0; attempt < 60; attempt++)); do
     test "$(docker inspect "$gateway" --format '{{.State.Running}}')" = true
     if [ "$(docker inspect "$gateway" --format '{{.State.Health.Status}}')" = healthy ] &&

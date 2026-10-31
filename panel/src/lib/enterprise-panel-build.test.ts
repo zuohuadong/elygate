@@ -111,8 +111,9 @@ describe('enterprise panel build contract', () => {
 		expect(await new Response(child.stderr).text()).toContain('expected a full Git commit SHA');
 	});
 
-	test.each([null, { '8080/tcp': [{ HostIp: '0.0.0.0', HostPort: '49152' }] }])(
-		'image smoke rejects unsafe or missing port mappings and cleans resources (%j)', async (ports) => {
+	test.each([null, { '8080/tcp': [{ HostIp: '0.0.0.0', HostPort: '49152' }] },
+		{ '8080/tcp': [{ HostIp: '127.0.0.1', HostPort: '49152' }] }])(
+		'image smoke validates loopback mappings, refreshes them on restart and cleans resources (%j)', async (ports) => {
 			const workspace = mkdtempSync(join(tmpdir(), 'elygate-image-test-'));
 			try {
 				const calls = join(workspace, 'calls');
@@ -123,39 +124,99 @@ printf '%s\\n' "$*" >> "$MOCK_CALLS"
 case "$1:\${2:-}" in
   compose:*) printf '{"services":{"postgres":{"image":"postgres@sha256:%064d"}}}\\n' 0 ;;
   image:inspect) printf '1000:0\\n' ;;
-  inspect:*) printf '%s\\n' "$MOCK_PORTS" ;;
+  inspect:*)
+    case "\${@: -1}" in
+      '{{json .NetworkSettings.Ports}}')
+        if [ -e "$TMPDIR/restarted" ]; then
+          printf '{"8080/tcp":[{"HostIp":"127.0.0.1","HostPort":"49153"}]}\\n'
+        else
+          printf '%s\\n' "$MOCK_PORTS"
+        fi ;;
+      '{{.State.Running}}') printf 'true\\n' ;;
+      '{{.State.Health.Status}}') printf 'healthy\\n' ;;
+      '{{.State.ExitCode}}'|'{{.RestartCount}}') printf '0\\n' ;;
+      '{{.State.OOMKilled}}') printf 'false\\n' ;;
+    esac ;;
+  exec:*)
+    case "$3" in
+      id) printf '1000\\n' ;;
+      psql) printf '2\\n' ;;
+    esac ;;
+  start:*-gateway) touch "$TMPDIR/restarted" ;;
   logs:*) printf 'postgres_password=%s\\nencryption_key=%s\\nsetup_token=%s\\nimage_password=%s\\n' \\
     "$POSTGRES_PASSWORD" "$ENCRYPTION_KEY" "$SETUP_TOKEN" "$ELYGATE_IMAGE_PASSWORD" ;;
 esac
 `);
 				chmodSync(docker, 0o700);
+				const curl = join(workspace, 'curl');
+				await Bun.write(curl, `#!/usr/bin/env bash
+set -euo pipefail
+url="\${!#}"
+printf 'http %s\\n' "$url" >> "$MOCK_CALLS"
+port=49152
+if [ -e "$TMPDIR/restarted" ]; then port=49153; fi
+[[ "$url" == "http://127.0.0.1:$port/"* ]] || exit 22
+if [[ "$url" == */health ]]; then
+  printf '{"status":"ok","components":{"db_pings":"ok"}}\\n'
+  exit
+fi
+output=
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "-o" ]; then output=$2; break; fi
+  shift
+done
+printf '{}\\n' > "$output"
+case "$url" in
+  */api/session/login) touch "$TMPDIR/logged-in"; printf 200 ;;
+  */api/session/logout) rm "$TMPDIR/logged-in"; printf 200 ;;
+  */api/version) printf '"v%s"\\n' "$MOCK_COMMIT" > "$output"; printf 200 ;;
+  */api/config) if [ -e "$TMPDIR/logged-in" ]; then printf 200; else printf 401; fi ;;
+  *) exit 22 ;;
+esac
+`);
+				chmodSync(curl, 0o700);
+				await Bun.write(join(workspace, 'sleep'), '#!/bin/sh\nexit 1\n');
+				chmodSync(join(workspace, 'sleep'), 0o700);
 				const script = new URL('../../../.github/workflows/scripts/smoke-elygate-image.sh', import.meta.url);
-				const child = Bun.spawn(['/bin/bash', script.pathname, 'elygate:panel-ci', '1'.repeat(40)], {
+				const commit = '1'.repeat(40);
+				const child = Bun.spawn(['/bin/bash', script.pathname, 'elygate:panel-ci', commit], {
 					env: { ...process.env, PATH: `${workspace}:${process.env.PATH}`, TMPDIR: workspace,
-						MOCK_CALLS: calls, MOCK_PORTS: JSON.stringify(ports) },
+						MOCK_CALLS: calls, MOCK_PORTS: JSON.stringify(ports), MOCK_COMMIT: commit },
 					stdout: 'pipe', stderr: 'pipe',
 				});
 				const [status, stdout, stderr] = await Promise.all([
 					child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
 				]);
-				expect(status).toBe(1);
-				expect(stderr).toContain('gateway has no unique published loopback HTTP port');
-				for (const key of ['postgres_password', 'encryption_key', 'setup_token', 'image_password']) {
-					expect(stderr).toContain(`${key}=[REDACTED_SECRET]`);
-				}
-				expect(stdout).not.toContain('PASS');
 				const commands = (await Bun.file(calls).text()).split('\n');
+				const valid = ports?.['8080/tcp'][0].HostIp === '127.0.0.1';
+				if (valid) {
+					expect(status).toBe(0);
+					expect(stderr).toBe('');
+					expect(stdout).toContain('PASS image assertions');
+					expect(commands.filter((line) => line.includes('{{json .NetworkSettings.Ports}}'))).toHaveLength(2);
+					expect(commands).toContain('http http://127.0.0.1:49152/health');
+					expect(commands).toContain('http http://127.0.0.1:49153/health');
+					expect(commands).toContain('http http://127.0.0.1:49153/api/session/logout');
+				} else {
+					expect(status).toBe(1);
+					expect(stderr).toContain('gateway has no unique published loopback HTTP port');
+					for (const key of ['postgres_password', 'encryption_key', 'setup_token', 'image_password']) {
+						expect(stderr).toContain(`${key}=[REDACTED_SECRET]`);
+					}
+					expect(stdout).not.toContain('PASS');
+				}
 				expect(commands.some((line) => line.startsWith('network create elygate-image-'))).toBe(true);
 				expect(commands.some((line) => line.includes('--internal'))).toBe(false);
 				expect(commands.some((line) => line.includes('--publish 127.0.0.1::8080'))).toBe(true);
 				expect(commands.filter((line) => line.startsWith('rm --force --volumes '))).toHaveLength(2);
 				expect(commands.filter((line) => line.startsWith('volume rm '))).toHaveLength(2);
 				expect(commands.filter((line) => line.startsWith('network rm '))).toHaveLength(1);
-				expect(readdirSync(workspace).sort()).toEqual(['calls', 'docker']);
+				expect(readdirSync(workspace).filter((name) => name.startsWith('elygate-image.'))).toEqual([]);
 			} finally {
 				rmSync(workspace, { recursive: true, force: true });
 			}
 		},
+		30_000,
 	);
 
 	test('API contracts initialize the Go workspace before running on a clean checkout', async () => {
