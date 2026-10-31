@@ -34,9 +34,9 @@ examples/single-node-postgres/
 Create the local environment file and replace every placeholder before starting:
 
 ```bash
-cd examples/single-node-postgres
+cd examples/single-node-postgres || exit
 cp .env.example .env
-docker compose config
+docker compose config --quiet
 docker compose up -d
 ```
 
@@ -54,33 +54,62 @@ After the initial administrator setup, create a Project and Application, bind a 
 
 ## Backup
 
-Back up PostgreSQL before every upgrade. The database is the durable source of truth for this profile.
+Back up PostgreSQL before every upgrade. Stop Elygate and exclude all other writers for a consistent backup window. Confirm a normal gateway shutdown before taking the backup; do not continue after a failed command.
+
+The default template uses the same `POSTGRES_DB` for configuration and logs, so one dump covers both stores. If you configured separate databases, dump and restore both while all writers remain stopped. A database dump alone does not preserve local uploads, Skills files, or external encryption/signing material.
 
 ```bash
+(
+set -eu
+umask 077
+backup_dir="elygate-backup-$(date +%Y%m%d-%H%M%S)"
+mkdir -m 700 "$backup_dir"
+docker compose stop --timeout 60 elygate
+test "$(docker inspect --format '{{.State.ExitCode}}' "$(docker compose ps -aq elygate)")" = 0
 docker compose exec -T postgres \
-  pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc \
-  > "elygate-$(date +%Y%m%d-%H%M%S).dump"
+  sh -ec 'exec pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' \
+  > "$backup_dir/database.dump"
+docker compose exec -T postgres pg_restore --list \
+  < "$backup_dir/database.dump" > "$backup_dir/database.list"
+mkdir -m 700 "$backup_dir/runtime"
+docker compose cp elygate:/app/data/. "$backup_dir/runtime/"
+cp config.json docker-compose.yml "$backup_dir/"
+docker compose start elygate
+)
 ```
 
-Also retain the deployed `config.json`, `.env` through your secret-management process, and the exact Elygate image tag or digest. Never place `.env` inside the database dump archive.
+The quoted `sh -ec` command expands credentials inside PostgreSQL's container, where Compose has injected them. It does not require sourcing `.env` in the host shell. Do not print rendered Compose configuration or use shell tracing when credentials are present.
+
+Retain the exact Elygate image digest and configuration with the backup. Keep `.env`, `ENCRYPTION_KEY`, and any separately configured audit-signing or storage credentials through your secret-management process, with access restricted to recovery operators. Do not commit backup files, put `.env` in the dump archive, or publish backup contents. Keep the entire backup directory private; runtime files and database dumps can contain sensitive data.
+
+Listing the dump only checks that its archive can be read. Restore and reconcile it on an isolated target before treating it as a verified backup.
 
 ## Restore
 
-Restore into an empty database using the same Elygate version that produced the backup, then start Elygate and allow migrations to run:
+Restore only on a separate test server or explicitly isolated deployment with new PostgreSQL and runtime volumes. Keep the original databases, files and image intact. Configure that target's `.env` and `config.json` with a new database name and the original stable encryption/signing material. Use the exact Elygate image version that produced the backup for the first recovery boot.
+
+The following is the database-import step, not a complete environment restore. In the isolated deployment, Compose creates `POSTGRES_DB` only when PostgreSQL's data volume is empty. Confirm the target is empty before importing. The command below waits for its configured health check; never point these commands at the only production copy.
 
 ```bash
-docker compose stop elygate
+(
+set -eu
+backup_dir="/private/path/to/elygate-backup"
+docker compose up -d --wait --wait-timeout 120 postgres
+docker compose ps postgres
 docker compose exec -T postgres \
-  dropdb -U "$POSTGRES_USER" --if-exists "$POSTGRES_DB"
-docker compose exec -T postgres \
-  createdb -U "$POSTGRES_USER" "$POSTGRES_DB"
-docker compose exec -T postgres \
-  pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists \
-  < elygate-backup.dump
-docker compose start elygate
+  sh -ec 'exec pg_restore --exit-on-error --single-transaction --no-owner --no-acl \
+    -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
+  < "$backup_dir/database.dump"
+)
 ```
 
-Perform restore drills on a test server. A backup that has never been restored is not recovery evidence.
+Do not drop or clean the original database to make a restore succeed. An import conflict or error must abort recovery; inspect the isolated target rather than deleting production state.
+
+Before starting Elygate, also restore the backed-up local runtime files into the new runtime volume, preserve their required ownership and permissions for the chosen image, and restore `config.json` through its separate read-only mount. Restore the stable encryption/signing material through the target's secret-management process. Do not assume importing SQL restores uploaded files or makes encrypted values readable.
+
+Only after all stores, files and secrets are restored, start the isolated gateway. Verify database-backed `/health`, administrator login, Application Key bindings, Usage Ledger, audit history, local files and encrypted credentials. Exercise a new authorized write, verify the original source has not changed, and record cleanup of the test target.
+
+A backup that has never been restored is not recovery evidence. This guide and a readable dump alone do not prove full recovery, crash safety, version upgrades or production acceptance.
 
 ## Upgrade and rollback
 
