@@ -582,6 +582,25 @@ func (failingReloadWebhookManager) ReloadWebhookEndpoint(context.Context, string
 	return errors.New("reload failed")
 }
 
+type missingReloadWebhookManager struct{ configWebhookManager }
+
+func (m missingReloadWebhookManager) ReloadWebhookEndpoint(_ context.Context, id string) error {
+	m.config.RemoveWebhookEndpoint(id)
+	return nil
+}
+
+type panickingReloadWebhookManager struct{ configWebhookManager }
+
+func (panickingReloadWebhookManager) ReloadWebhookEndpoint(context.Context, string) error {
+	panic("reload panic")
+}
+
+type failingRemoveWebhookManager struct{ configWebhookManager }
+
+func (failingRemoveWebhookManager) RemoveWebhookEndpoint(context.Context, string) error {
+	return errors.New("remove failed")
+}
+
 func TestWebhookHandlerAuditsCommittedChangesWhenReloadFails(t *testing.T) {
 	handler, config := newWebhookTestHandler(t)
 	id, _ := createTestWebhookEndpoint(t, handler, "reload-fail")
@@ -601,4 +620,97 @@ func TestWebhookHandlerAuditsCommittedChangesWhenReloadFails(t *testing.T) {
 	failing.rotateWebhookEndpointSecret(rotateCtx)
 	require.Equal(t, fasthttp.StatusInternalServerError, rotateCtx.Response.StatusCode())
 	requireSingleAuditChange(t, rotateCtx, "webhook.secret_rotated")
+}
+
+func TestWebhookHandlerAuditsCommittedChangesBeforeMemoryReconciliation(t *testing.T) {
+	handler, config := newWebhookTestHandler(t)
+	id, _ := createTestWebhookEndpoint(t, handler, "memory-boundary")
+
+	var persisted configstoreTables.TableWebhookEndpoint
+	require.NoError(t, config.ConfigStore.DB().Where("id = ?", id).First(&persisted).Error)
+	persisted.ConsecutiveFailures = 7
+	lastFailure := time.Unix(1_700_000_000, 0).UTC()
+	persisted.LastFailureAt = &lastFailure
+	require.NoError(t, config.ConfigStore.DB().Save(&persisted).Error)
+
+	normalCtx := newWebhookRequestCtx(`{"name":"memory-boundary","url":"https://93.184.216.34/hook","events":["async_job.completed"]}`, map[string]string{"id": id})
+	handler.updateWebhookEndpoint(normalCtx)
+	require.Equal(t, fasthttp.StatusOK, normalCtx.Response.StatusCode())
+	normalChange := requireSingleAuditChange(t, normalCtx, "webhook.updated")
+	canonical, err := config.ConfigStore.GetWebhookEndpointByID(context.Background(), id)
+	require.NoError(t, err)
+	require.JSONEq(t, string(auditWebhookEndpoint(canonical)), string(normalChange.After))
+	var canonicalAfter map[string]any
+	require.NoError(t, json.Unmarshal(normalChange.After, &canonicalAfter))
+	require.Equal(t, float64(7), canonicalAfter["consecutive_failures"])
+	require.NotEqual(t, "0001-01-01T00:00:00Z", canonicalAfter["created_at"])
+	require.NotEqual(t, "0001-01-01T00:00:00Z", canonicalAfter["updated_at"])
+
+	missing := NewWebhookHandler(missingReloadWebhookManager{configWebhookManager{config}}, config, nil)
+	missingCtx := newWebhookRequestCtx(`{"name":"memory-boundary","url":"https://93.184.216.34/hook","events":["async_job.completed"]}`, map[string]string{"id": id})
+	missing.updateWebhookEndpoint(missingCtx)
+	require.Equal(t, fasthttp.StatusInternalServerError, missingCtx.Response.StatusCode())
+	change := requireSingleAuditChange(t, missingCtx, "webhook.updated")
+	var after map[string]any
+	require.NoError(t, json.Unmarshal(change.After, &after))
+	require.NotContains(t, after, "consecutive_failures")
+	require.NotContains(t, after, "created_at")
+	require.NotContains(t, after, "updated_at")
+	require.NotContains(t, after, "last_success_at")
+	require.NotContains(t, after, "last_failure_at")
+	require.NotContains(t, after, "config_hash")
+
+	panicking := NewWebhookHandler(panickingReloadWebhookManager{configWebhookManager{config}}, config, nil)
+	panicCtx := newWebhookRequestCtx(`{"name":"memory-boundary","url":"https://93.184.216.34/hook","events":["async_job.completed"]}`, map[string]string{"id": id})
+	require.PanicsWithValue(t, "reload panic", func() {
+		panicking.updateWebhookEndpoint(panicCtx)
+	})
+	requireSingleAuditChange(t, panicCtx, "webhook.updated")
+}
+
+func TestWebhookHandlerAuditsDeleteBeforeMemoryRemoval(t *testing.T) {
+	handler, config := newWebhookTestHandler(t)
+	id, _ := createTestWebhookEndpoint(t, handler, "remove-boundary")
+	failing := NewWebhookHandler(failingRemoveWebhookManager{configWebhookManager{config}}, config, nil)
+
+	deleteCtx := newWebhookRequestCtx("", map[string]string{"id": id})
+	failing.deleteWebhookEndpoint(deleteCtx)
+	require.Equal(t, fasthttp.StatusOK, deleteCtx.Response.StatusCode())
+	requireSingleAuditChange(t, deleteCtx, "webhook.deleted")
+}
+
+type webhookUpdateBenchmarkStore struct {
+	configstore.ConfigStore
+	endpoint *configstoreTables.TableWebhookEndpoint
+}
+
+func (s *webhookUpdateBenchmarkStore) UpdateWebhookEndpoint(_ context.Context, endpoint *configstoreTables.TableWebhookEndpoint) error {
+	s.endpoint = endpoint
+	return nil
+}
+
+func (s *webhookUpdateBenchmarkStore) GetWebhookEndpointByID(context.Context, string) (*configstoreTables.TableWebhookEndpoint, error) {
+	return s.endpoint, nil
+}
+
+// Benchmark the management handler and audit snapshots, excluding SQL and delivery.
+func BenchmarkWebhookHandlerUpdateAudit(b *testing.B) {
+	store := &webhookUpdateBenchmarkStore{endpoint: &configstoreTables.TableWebhookEndpoint{
+		ID: "benchmark-webhook", Name: "benchmark-webhook", URL: "https://93.184.216.34/hook",
+		Events: []configstoreTables.WebhookEvent{configstoreTables.WebhookEventAsyncJobCompleted},
+	}}
+	config := &lib.Config{ConfigStore: store}
+	config.SetWebhookEndpoint(store.endpoint)
+	handler := NewWebhookHandler(configWebhookManager{config}, config, nil)
+	request := newWebhookRequestCtx(`{"name":"benchmark-webhook","url":"https://93.184.216.34/hook","events":["async_job.completed"],"headers":{"Authorization":"test-only-benchmark-header"}}`, nil)
+	b.ReportAllocs()
+	for b.Loop() {
+		request.ResetUserValues()
+		request.Response.Reset()
+		request.SetUserValue("id", "benchmark-webhook")
+		handler.updateWebhookEndpoint(request)
+		if request.Response.StatusCode() != fasthttp.StatusOK {
+			b.Fatalf("update failed: status=%d", request.Response.StatusCode())
+		}
+	}
 }

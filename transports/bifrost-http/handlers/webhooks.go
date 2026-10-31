@@ -283,14 +283,12 @@ func (h *WebhookHandler) createWebhookEndpoint(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("Failed to create webhook endpoint: %v", err))
 		return
 	}
+	lib.RecordAuditChange(ctx, "webhook.created", "webhook", endpoint.ID, endpoint.Name, nil, auditWebhookEndpoint(endpoint))
 	// Refresh memory so the delivery worker can serve this endpoint.
 	if err := h.manager.ReloadWebhookEndpoint(ctx, endpoint.ID); err != nil {
-		// The row is committed, so record the change even though the in-memory refresh failed.
-		lib.RecordAuditChange(ctx, "webhook.created", "webhook", endpoint.ID, endpoint.Name, nil, auditWebhookEndpoint(endpoint))
 		SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("Failed to reload webhook endpoint in memory: %v, please restart bifrost to sync with the database", err))
 		return
 	}
-	lib.RecordAuditChange(ctx, "webhook.created", "webhook", endpoint.ID, endpoint.Name, nil, auditWebhookEndpoint(endpoint))
 	// The store left the plaintext secret on the struct after commit, so this
 	// response can show it exactly once.
 	SendJSONWithStatus(ctx, map[string]any{
@@ -356,12 +354,20 @@ func (h *WebhookHandler) updateWebhookEndpoint(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("Failed to update webhook endpoint: %v", err))
 		return
 	}
+	// A failed refresh must not lose the committed change or invent DB-maintained fields.
+	var after json.RawMessage
+	defer func() {
+		if after == nil {
+			req.Headers = redactedWebhookEndpoint(endpoint).Headers
+			req.URL = lib.RedactURLCredentials(endpoint.URL)
+			after = lib.AuditSnapshot(req)
+		}
+		lib.RecordAuditChange(ctx, "webhook.updated", "webhook", endpoint.ID, endpoint.Name, before, after)
+	}()
 	// Reconcile memory from the canonical row in a single post-commit read, then
 	// serve the response from that in-memory row — so a successful update never
 	// leaves workers on stale config behind a second read that could fail.
 	if err := h.manager.ReloadWebhookEndpoint(ctx, id); err != nil {
-		// The row is committed, so record the change even though the in-memory refresh failed.
-		lib.RecordAuditChange(ctx, "webhook.updated", "webhook", endpoint.ID, endpoint.Name, before, auditWebhookEndpoint(endpoint))
 		SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("Failed to reload webhook endpoint in memory: %v, please restart bifrost to sync with the database", err))
 		return
 	}
@@ -370,7 +376,7 @@ func (h *WebhookHandler) updateWebhookEndpoint(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, fasthttp.StatusInternalServerError, "Webhook endpoint missing from memory after reload, please restart bifrost to sync with the database")
 		return
 	}
-	lib.RecordAuditChange(ctx, "webhook.updated", "webhook", updated.ID, updated.Name, before, auditWebhookEndpoint(updated))
+	after = auditWebhookEndpoint(updated)
 	SendJSON(ctx, redactedWebhookEndpoint(updated))
 }
 
@@ -399,11 +405,11 @@ func (h *WebhookHandler) deleteWebhookEndpoint(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("Failed to delete webhook endpoint: %v", err))
 		return
 	}
+	lib.RecordAuditChange(ctx, "webhook.deleted", "webhook", id, targetName, before, nil)
 	// Remove from in-memory store via manager callback (non-fatal: DB already updated).
 	if err := h.manager.RemoveWebhookEndpoint(ctx, id); err != nil {
 		logger.Error("failed to remove webhook endpoint from memory: %v", err)
 	}
-	lib.RecordAuditChange(ctx, "webhook.deleted", "webhook", id, targetName, before, nil)
 	SendJSON(ctx, map[string]any{"status": "success"})
 }
 
@@ -427,14 +433,12 @@ func (h *WebhookHandler) rotateWebhookEndpointSecret(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("Failed to rotate webhook secret: %v", err))
 		return
 	}
+	lib.RecordAuditChange(ctx, "webhook.secret_rotated", "webhook", rotated.ID, rotated.Name, nil, map[string]any{"webhook_id": rotated.ID, "secret_rotated": true})
 	// Memory must sign with the new secret from this moment on.
 	if err := h.manager.ReloadWebhookEndpoint(ctx, id); err != nil {
-		// The row is committed, so record the change even though the in-memory refresh failed.
-		lib.RecordAuditChange(ctx, "webhook.secret_rotated", "webhook", rotated.ID, rotated.Name, nil, map[string]any{"webhook_id": rotated.ID, "secret_rotated": true})
 		SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("Failed to reload webhook endpoint in memory: %v, please restart bifrost to sync with the database", err))
 		return
 	}
-	lib.RecordAuditChange(ctx, "webhook.secret_rotated", "webhook", rotated.ID, rotated.Name, nil, map[string]any{"webhook_id": rotated.ID, "secret_rotated": true})
 	SendJSON(ctx, map[string]any{
 		"endpoint": redactedWebhookEndpoint(rotated),
 		"secret":   rotated.Secret.GetValue(),
