@@ -164,11 +164,11 @@ func TestSummarizeUsageMatchesLedgerAcrossFilters(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			listQuery := tc.query
-			listQuery.Limit, listQuery.Offset, listQuery.Export = 0, 0, false
+			listQuery.Limit, listQuery.Offset = 0, 0
 			rows, total, err := store.ListUsage(ctx, listQuery)
 			require.NoError(t, err)
 			require.Equal(t, tc.count, total)
-			tc.query.Limit, tc.query.Offset, tc.query.Export = 1, 1000, true
+			tc.query.Limit, tc.query.Offset = 1, 1000
 			summary, err := store.SummarizeUsage(ctx, tc.query)
 			require.NoError(t, err)
 			require.Equal(t, total, summary.Requests)

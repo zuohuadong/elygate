@@ -2,7 +2,6 @@ package controlplane
 
 import (
 	"context"
-	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -650,44 +649,6 @@ func (h *Handler) usageSummary(ctx *fasthttp.RequestCtx) {
 	writeJSON(ctx, 200, summary)
 }
 
-func (h *Handler) exportUsage(ctx *fasthttp.RequestCtx) {
-	opCtx, cancel := controlPlaneContext()
-	defer cancel()
-	q, err := h.usageQuery(ctx)
-	if err != nil {
-		writeError(ctx, 400, err)
-		return
-	}
-	q.Limit = 100000
-	q.Offset = 0
-	q.Export = true
-	if err := h.syncUsage(opCtx, q.StartTime, q.EndTime, false); err != nil {
-		writeError(ctx, 500, err)
-		return
-	}
-	rows, _, err := h.store.ListUsage(opCtx, q)
-	if err != nil {
-		writeError(ctx, 500, err)
-		return
-	}
-	var b strings.Builder
-	w := csv.NewWriter(&b)
-	_ = w.Write([]string{"occurred_at", "project_id", "application_id", "virtual_key_id", "user_id", "provider", "model", "session_id", "parent_session_id", "agent_name", "session_client_type", "is_subagent", "is_fork", "status", "prompt_tokens", "output_tokens", "total_tokens", "cost"})
-	for _, row := range rows {
-		_ = w.Write([]string{
-			row.OccurredAt.Format(time.RFC3339), csvText(row.ProjectID), csvText(row.ApplicationID), csvText(row.VirtualKeyID),
-			csvOptionalString(row.UserID), csvText(row.Provider), csvText(row.Model),
-			csvOptionalString(row.SessionID), csvOptionalString(row.ParentSessionID), csvOptionalString(row.AgentName), csvOptionalString(row.SessionClientType),
-			strconv.FormatBool(row.IsSubagent), strconv.FormatBool(row.IsFork), csvText(row.Status),
-			strconv.Itoa(row.PromptTokens), strconv.Itoa(row.OutputTokens), strconv.Itoa(row.TotalTokens), strconv.FormatFloat(row.Cost, 'f', 8, 64),
-		})
-	}
-	w.Flush()
-	ctx.SetStatusCode(200)
-	ctx.Response.Header.SetContentType("text/csv; charset=utf-8")
-	ctx.Response.Header.Set("Content-Disposition", `attachment; filename="elygate-usage.csv"`)
-	ctx.SetBodyString(b.String())
-}
 func (h *Handler) usageStatus(ctx *fasthttp.RequestCtx) {
 	opCtx, cancel := controlPlaneContext()
 	defer cancel()

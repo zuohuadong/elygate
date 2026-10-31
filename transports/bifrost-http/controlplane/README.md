@@ -102,11 +102,19 @@ or empty value does not filter that dimension, including rows with a null user.
 There is no special null-user-only selector.
 
 List pagination does not constrain summary totals. CSV ignores `limit`/`offset`
-and exports the filtered rows from offset zero, up to the existing 100,000-row
-ceiling; larger result sets are not a complete export. CSV includes `user_id`;
+and exports every filtered row in deterministic `occurred_at DESC, id DESC`
+order, including more than 100,000 rows. The gateway scans one database cursor
+and writes a private temporary file before streaming the response, so a
+generation error cannot produce a successful partial download. CSV includes `user_id`;
 null users produce an empty cell. Text beginning with `=`, `+`, `-` or `@`,
 including after spaces, tabs, CR/LF or BOM, is prefixed with an apostrophe for
 spreadsheet safety. Numeric token and cost columns are not rewritten.
+
+The temporary file is mode `0600` and is removed when the response stream
+completes, is reset, or is closed early. Disk use is proportional to one CSV
+export; the control-plane operation context remains bounded and this is not a
+resumable background job. See [the product contract](../../../docs/product/usage-export.md)
+for the evidence boundary.
 
 The independent panel retains these dimensions for apply, Enter submission,
 refresh, pagination and export, and clears them on reset. Editing any dimension

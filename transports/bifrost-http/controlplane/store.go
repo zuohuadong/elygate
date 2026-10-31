@@ -900,7 +900,6 @@ type UsageQuery struct {
 	IsSubagent, IsFork                                   *bool
 	StartTime, EndTime                                   *time.Time
 	Limit, Offset                                        int
-	Export                                               bool
 }
 
 type UsageSummary struct {
@@ -951,11 +950,7 @@ func (s *Store) ListUsage(ctx context.Context, q UsageQuery) ([]UsageLedgerEntry
 	if err := db.Model(&UsageLedgerEntry{}).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-	maxLimit := 1000
-	if q.Export {
-		maxLimit = 100000
-	}
-	if q.Limit <= 0 || q.Limit > maxLimit {
+	if q.Limit <= 0 || q.Limit > 1000 {
 		q.Limit = 100
 	}
 	if q.Offset < 0 {
