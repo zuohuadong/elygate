@@ -8,7 +8,17 @@
 
 ## 候选版本
 
-- 当前已验证候选为 `37479df3fa95a5efa68088816db20978a9cd41e7`，
+- 当前完成 CI 的代码候选为 `7bc4b770c06e36cf4b5d720ec6eae8be863011c2`，
+  run `41212521367` 于 2026-10-31 14:57:29 UTC 启动、
+  15:05:43 UTC 成功结束，四个 job 全部成功。新增 Relay 删除审计专项
+  实际执行 handlers（`0.049s`）和 controlplane（`3.906s`），没有
+  `[no tests to run]`。manifest digest 为
+  `sha256:7486ce8dc3f39be119a029a17560567dc30c848960e7dc8ced178d4debb4575b`；
+  镜像非 root、双 PostgreSQL、health、版本、登录/退出、正常重启及清理
+  均通过，未发布 registry 或部署生产。artifact ID 为 `13047575404`，
+  上传包大小 `162918888` 字节，预计于 2026-11-07 15:04:06 UTC 过期。
+  后续仅记录验收结果的文档提交不属于该已运行镜像的来源 SHA。
+- 此前已验证候选为 `37479df3fa95a5efa68088816db20978a9cd41e7`，
   CI run `41209424680` 于 2026-10-31 14:17:17 UTC 启动、
   14:23:26 UTC 成功结束，四个 job 均通过。镜像运行检查为非 root、
   双 PostgreSQL、health、版本、登录/退出及正常重启，不是生产部署。
@@ -463,17 +473,22 @@ provenance SHA-256 为
 没有 `ok` 结果，不计通过；`-timeout=180s` 只约束测试执行，不含构建时间。
 31 项 workflow contract 测试（214 断言）和 actionlint 通过。
 读取 HEAD 原始 YAML 可复现专项缺失；最终 YAML 的步骤顺序与完整命令断言通过。
-该 workflow 补丁尚未进入候选
-CI，需在提交后以新 SHA 重新核对该 step 的真实输出。Pi `gomodel/code`
+上述本地构建中断保留为历史证据，不被后续 CI 成功改写。
+workflow 补丁随后以 `7bc4b770c` 提交并推送到 `origin/dev`，
+run `41212521367` 的 Relay 专项实际输出 handlers `ok`（`0.049s`）、
+controlplane `ok`（`3.906s`），独立步骤及四个 job 全部成功。
+该执行只证明 SQLite 专项，不是 PostgreSQL、race、全路由审计或生产验收。
+Pi `gomodel/code`
 两次调用均在执行前返回 `Connection error`，未产出文件；本次由 root
 按同一窄范围接管。
 无凭据输出的认证检查仅返回 `ready`，不代表模型连接或实施成功。
+同一已配置端点的无凭据 HEAD 检查在 5 秒后超时；未改全局配置或切换模型。
 独立 handlers `go vet` 等待超过 13 分钟后被有界终止（退出 143），
 只出现 sqlite-vec 的 macOS CGO 弃用警告；该次不计通过或业务测试失败。
 控面独立 vet 未执行；此前命令中断的记录不因此被改写为通过。生产部署、
 完整审计原子性、策略 ownership/发布/Shadow/回滚等原始门继续未闭合。
-`clean-code-guard: clean`，最终 diff 检查通过。本轮修改仅在本地，
-未提交、推送或部署，总目标继续 **active / PARTIAL**。
+`clean-code-guard: clean`，最终 diff 检查通过。提交、推送状态以 Git
+记录为准；未部署，总目标继续 **active / PARTIAL**。
 
 ### 当前 Relay 面板真实链路（2026-10-31）
 
