@@ -29,7 +29,7 @@ export function buildModelAttributes(description: string, rows: ModelAttributeRo
 		seen.add(row.key);
 	}
 
-	const attributes: Record<string, string> = {};
+	const attributes = Object.create(null) as Record<string, string>;
 	const normalizedDescription = description.trim();
 	if (normalizedDescription) attributes.description = normalizedDescription;
 	for (const row of cleaned) attributes[row.key] = row.value;

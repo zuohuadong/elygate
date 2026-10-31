@@ -9,6 +9,27 @@ describe('model catalog helpers', () => {
 		});
 	});
 
+	test.each(['__proto__', 'constructor', 'prototype', 'toString', 'hasOwnProperty'])(
+		'preserves the custom attribute %s as an own JSON property', (key) => {
+			const attributes = buildModelAttributes('Model description', [{ key: ` ${key} `, value: ' retained ' }]);
+			expect(Object.hasOwn(attributes, key)).toBe(true);
+			expect(attributes[key]).toBe(' retained ');
+			expect(Object.getPrototypeOf(attributes)).toBeNull();
+			expect(JSON.parse(JSON.stringify(attributes))).toEqual(
+				JSON.parse(`{"description":"Model description","${key}":" retained "}`),
+			);
+		},
+	);
+
+	test('round-trips server attributes without losing prototype-named or empty values', () => {
+		const persisted = JSON.parse('{"description":"Model description","__proto__":"restricted","constructor":"","region":"cn"}');
+		const rows = Object.entries(persisted as Record<string, string>)
+			.filter(([key]) => key !== 'description')
+			.map(([key, value]) => ({ key, value }));
+		expect(JSON.parse(JSON.stringify(buildModelAttributes(persisted.description, rows)))).toEqual(persisted);
+		expect(buildModelAttributes('', [])).toEqual({});
+	});
+
 	test('rejects missing, duplicate, and reserved keys', () => {
 		for (const [rows, issue] of [
 			[[{ key: '', value: 'value' }], 'missing-key'],

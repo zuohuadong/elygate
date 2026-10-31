@@ -8,7 +8,20 @@
 
 ## 候选版本
 
-- 当前已推送候选为 `eef56dbb4fed91a1f8bf6a22ca243557b3b43ce6`，CI run
+- 当前候选为 `b5b90cf3192dc6fe56d15e80071dc7fd7c559295`，CI run
+  `41193109692` 于 2026-10-31 10:31:42 UTC 启动，10:38:49 UTC 已成功结束。面板、
+  员工门户、API contracts 和生产镜像构建/运行四个 job 全部通过；镜像
+  manifest digest 为
+  `sha256:35394adb5d6091dfa45f3ebaa820f9e3de5728898205d1b0bc3c01be7cf74cdc`。
+  新增候选 artifact
+  `elygate-candidate-b5b90cf3192dc6fe56d15e80071dc7fd7c559295-41193109692-1`
+  已上传，artifact ID 为 `13040091760`，大小 `162914469` 字节，预计
+  于 2026-11-07 10:38:13 UTC 过期。下载后的 `SHA256SUMS`、gzip、Docker
+  `manifest.json`、OCI `index.json` 和 `provenance.json` 已独立核对通过；
+  来源清单确认完整源码 SHA、`linux/amd64` 和 image ID，无浮动 tag。
+  该归档可重新获取，但仍是 7 天 CI artifact，不是正式 registry 发布或
+  生产部署制品。
+- 此前已推送候选为 `eef56dbb4fed91a1f8bf6a22ca243557b3b43ce6`，CI run
   `41191339255` 于 2026-10-31 10:12:25 UTC 成功结束。独立面板、
   员工门户、API contracts（含单独的 `TestUsageCSVExport` 步骤）和
   生产镜像构建/运行四个 job 全部通过。构建日志中的 manifest digest 为
@@ -670,7 +683,7 @@ source 为 Phase D 固定版本/校验和与交付门 1，reason 为已有 CI �
 本地配置检查仅确认默认 deepseek provider 存在凭据，不证明远端可用；
 没有更换 provider、打印凭据、部署或把失败调用记为 Pi 实施通过。
 
-Docker job 先将构建标签解析为不可变的 `sha256:<image-config-id>`，
+Docker job 先将构建标签解析为不可变的 `docker image inspect .Id`，
 同一 ID 用于已有运行门及后续导出。仅运行门完整成功才生成
 `image.tar.gz`、`provenance.json` 和 `SHA256SUMS`；来源清单仅包含
 完整源码 SHA、镜像 ID、OS、架构和归档格式，不导出 inspect 的环境/config
@@ -679,8 +692,10 @@ Docker job 先将构建标签解析为不可变的 `sha256:<image-config-id>`，
 上传名包含源码 SHA、run ID、attempt，保留 7 天；`push: false`、
 `contents: read`、原镜像内容和生产授权边界不变。
 
-Docker image ID 是配置内容哈希，不是 registry manifest digest；
-压缩文件 SHA-256 也不是镜像拉取凭据。归档由 image ID 导出，
+不能将 `docker image inspect .Id` 一律解释为配置内容哈希，也不能把它
+直接作为已发布 registry digest：本次 runner 的 ID 实际匹配归档 OCI
+manifest，而 config blob 另有独立哈希。压缩文件 SHA-256 也不是镜像拉取凭据。
+归档由 runner 返回的 image ID 导出，
 加载后可能没有标签。下载后应先在独立目录执行
 `sha256sum --check SHA256SUMS`，核对来源 SHA/目标平台，再用
 `docker image load --input image.tar.gz` 载入并按来源清单的 ID 检查。
@@ -695,11 +710,59 @@ registry digest，不能把 `image_id` 填作该 digest。
 1 pass / 0 fail（12 assertions）；Svelte 检查为 0 errors / 0 warnings。
 `actionlint`、smoke 脚本 Bash 语法与 `git diff --check` 通过；
 独立只读复核为 `PASS_SCOPED`，提交前 clean-code-guard 未发现新增问题。
-本机 Docker daemon 缺少 socket，因此没有真实 save/load、上传、下载或
-新归档的独立环境启动证据，旧候选 CI 不关闭本项远端边界。
+提交时本机 Docker daemon 缺少 socket，且新候选 CI 尚未完成，因此当时
+没有真实 save/load、上传、下载或独立环境启动证据；旧候选 CI 不关闭本项边界。
 本增量仅增加 CI 打包磁盘/CPU/短期 artifact 存储，不增加推理请求开销。
 生产功能、模型治理、MCP 审批、策略发布、TLS/代理、升级回滚与真实生产
 切换仍未完成，总目标继续 **active / PARTIAL**。
+
+后续真实证据：`b5b90cf31` 的 run `41193109692` 四个 job 全部成功；
+镜像 smoke、实际 save/load、三个文件上传和 runner 清理均通过。候选
+artifact `13040091760` 下载到
+`.codex-tmp/candidate-b5b90cf-20261031.GJubay/` 后，两个文件的校验和、
+gzip 和 tar 完整读取通过。归档大小 `162913678` 字节、SHA-256 为
+`b92f894139991aba9b86292c5052d1fd2a54455c1b03a992cbe9cc36dcdfc9a7`；
+来源清单 SHA-256 为
+`ec62ff084bf2ef44ac1714a16ba1086887e7cdc7f98fb7a66b49123ef1f68bcc`。
+归档所有 8 个 blob 的内容哈希均逐一核对通过；OCI manifest、Docker
+兼容清单、config 和 6 个 layer 引用一致，无重复/路径越界成员。
+源码 SHA 和 `linux/amd64` 一致，镜像用户为 `1000:0`，`RepoTags` 为 null；
+独立 config digest 为
+`sha256:987cabf07927247db1ffd048db4c69b6957ebe3820ffe89ea1be5ab5cc7562e7`。
+这些证据关闭本候选的远端归档生成、上传、下载和字节完整性边界，
+但不是下载后在独立 Docker daemon 中启动或 registry 发布/生产部署证明。
+同 SHA 的 Snyk `41193109684` 和 CodSpeed `41193109707` 查询时仍 queued，
+不能记为安全扫描或性能通过；既有 setup-go 缓存警告也不代表缓存命中。
+
+本轮另按持续目标重新调用 Pi 实施策略发布/回滚 HTTP 增量，仍以
+`Connection error` / 退出 1 结束，没有产生文件。进一步核对现有发布合同后，
+确认单机进程 ownership / stop-before-start 约束仍等待人工批准，因此
+没有开放任何发布写路由，也没有把只读页面或已完成的内部原语当作发布完成。
+本轮为 Native 单 owner、只读验证与文档证据补充，无请求路径开销；
+不自动提交、推送、部署或缩减原产品范围。
+
+### 模型目录属性原型键往返修复（2026-10-31）
+
+后续项 `model-catalog-attribute-roundtrip`：parent 为 `b5b90cf31`，
+source 为原模型目录与生产完整性目标，reason 为当前序列化复现丢键；
+Native 单 writer、低风险、external=0，范围仅为面板 helper、测试和本文。
+
+发现面板模型目录的 `buildModelAttributes` 使用普通对象收集用户自定义
+属性；`__proto__` 触发原型 setter，字符串值未形成自有属性，在保存前丢失。
+修复改用无原型对象，同时覆盖 `constructor`、`prototype`、`toString`
+和 `hasOwnProperty` 等同名键，
+保留 Bifrost 上游允许的任意字符串属性键；未改变后端 API、数据库结构、
+推理路径或旧 Elygate 兼容范围。
+
+新增回归覆盖五个原型敏感键、空值和服务端属性完整往返。面板定向测试
+10 pass / 0 fail（32 assertions），完整面板回归 408 pass / 0 fail
+（2470 assertions），代理集成 1 pass / 0 fail（12 assertions），
+Svelte 检查 0 errors / 0 warnings，`git diff --check` 通过。
+`clean-code-guard: clean`。该修复只关闭属性序列化边界，不等同模型目录
+区域、数据等级、能力、健康约束或策略治理完成；本项尚未提交、推送或部署。
+本轮 Pi 收到结构化模型目录实施请求后，以 `Connection error` / 退出 1
+结束且未产生文件；root 随后只接管上述已复现缺陷。没有自定治理字段的
+枚举或强制约束，也不把该修复或失败调用记为 Pi 实施完成。
 
 ### 单机模板镜像固定检查（2026-10-31）
 
