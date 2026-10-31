@@ -25,6 +25,12 @@ postgres_volume="$prefix-database"
 cleanup() {
   local status=$?
   trap - EXIT
+  if [ "$status" -ne 0 ]; then
+    for container in "$gateway" "$postgres"; do
+      docker inspect "$container" --format \
+        '{{.Name}}: status={{.State.Status}} exit_code={{.State.ExitCode}} oom_killed={{.State.OOMKilled}} restarts={{.RestartCount}} ports={{json .NetworkSettings.Ports}}' >&2 || true
+    done
+  fi
   for container in "$gateway" "$postgres"; do
     if docker container inspect "$container" >/dev/null 2>&1; then
       docker rm --force --volumes "$container" >/dev/null || status=1
@@ -62,7 +68,9 @@ pg_image=$(docker compose -f "$root/examples/single-node-postgres/docker-compose
   jq -er '.services.postgres.image | select(test("@sha256:[a-f0-9]{64}$"))')
 test "$(docker image inspect "$image" --format '{{.Config.User}}')" = "1000:0"
 
-docker network create --internal "$network" >/dev/null
+# Keep the network isolated to this smoke run while allowing Docker to publish
+# the gateway's ephemeral loopback port for host-side HTTP assertions.
+docker network create "$network" >/dev/null
 docker volume create "$gateway_volume" >/dev/null
 docker volume create "$postgres_volume" >/dev/null
 docker run --detach --name "$postgres" --network "$network" --network-alias postgres \
@@ -110,7 +118,13 @@ docker run --detach --name "$gateway" --network "$network" --publish 127.0.0.1::
   --volume "$workspace/catalog:/app/catalog:ro" \
   --health-interval 2s --health-timeout 5s --health-start-period 5s --health-retries 60 \
   "$image" >/dev/null
-port=$(docker inspect "$gateway" --format '{{(index (index .NetworkSettings.Ports "8080/tcp") 0).HostPort}}')
+if ! port=$(docker inspect "$gateway" --format '{{json .NetworkSettings.Ports}}' |
+  jq -er '[."8080/tcp"[]? | select(.HostIp == "127.0.0.1")] |
+    select(length == 1) | .[0].HostPort |
+    select(test("^[0-9]+$")) | select(tonumber > 0 and tonumber <= 65535)'); then
+  echo "gateway has no unique published loopback HTTP port" >&2
+  exit 1
+fi
 origin="http://127.0.0.1:$port"
 
 wait_for_gateway() {

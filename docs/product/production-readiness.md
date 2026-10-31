@@ -283,6 +283,25 @@ external=0；仅修改面板 CI、契约测试、冒烟脚本和本清单，不�
 容器运行验收。该后续项在提交前为 `PASS_SCOPED`，推送后必须以新 SHA 的
 Docker job 实际日志确认运行时冒烟通过；CodSpeed/Snyk 排队不计通过。
 
+#### 端口映射修复
+
+后续项 `panel-ci-image-runtime-network`：parent 为 `6dd667eba`，source 为
+run `41149350716` 的 Docker runtime 失败，reason 为脚本在 `--internal`
+网络上请求宿主端口发布，Docker 29.4.2 runner 未生成端口映射。
+Native、root 单 writer、低风险、external=0，范围仅为冒烟脚本、
+构建契约回归和本清单；不修改业务代码、镜像内容、权限或生产状态。
+
+该 SHA 的面板测试/检查/构建（58s）、员工门户（21s）、API 契约（6m6s）
+和 Docker 构建加载均已通过，但冒烟在读取端口时报 Go template 空值错误，
+尚未进入健康、登录或重启断言，不能记作运行通过。
+改用本次独享的普通用户自定义 bridge；PostgreSQL 不发布端口，网关仍只
+绑定 `127.0.0.1` 临时端口。网络允许出口，不再宣称禁止外连；脚本仍使用
+空供应商配置、本地目录夹具和临时凭据，不继承供应商凭据。
+端口映射改为结构化校验唯一回环映射及有效端口，失败时只打印容器运行状态
+和端口信息，不输出容器环境、配置、Cookie 或密码。
+模拟 Docker 的本地回归验证空值/非回环映射均明确失败，且清理资源和临时目录；
+这不替代真实容器运行。新候选仍需推送后核对 CI，整体保持 **PARTIAL**。
+
 ### 单机模板镜像固定检查（2026-10-31）
 
 后续项 `single-node-postgres-image-pin`：parent 为 `edc1a1c08`，source 为交付门 2，
