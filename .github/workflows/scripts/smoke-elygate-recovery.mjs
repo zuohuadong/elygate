@@ -357,7 +357,7 @@ function backupAndRestore(ctx) {
 	check(backups.length === 1 && backups[0].startsWith('elygate-backup-'), 'expected one real backup');
 	check(databaseFingerprint(ctx, 'source') === ctx.frozenDatabase, 'backup must not change source tables or sequences');
 	compose(ctx, 'target', 'up', '-d', '--wait', '--wait-timeout', '120', 'postgres');
-	compose(ctx, 'target', 'create', '--no-deps', 'elygate');
+	compose(ctx, 'target', 'create', '--no-recreate', 'elygate');
 	command('bash', [join(ctx.repo, 'scripts/production/single-node-restore.sh'),
 		join(ctx.work, 'source/backups', backups[0]), join(ctx.work, 'target'), '--confirm-isolated-no-writers'], { env: ctx.env });
 	check(!inspect(ctx, container(ctx, 'target')).State.Running, 'restore must leave target stopped');
@@ -453,7 +453,7 @@ async function main(args) {
 		phase = 'source startup';
 		compose(ctx, 'source', 'up', '-d', '--wait', '--wait-timeout', '120', 'postgres');
 		phase = 'source gateway creation';
-		compose(ctx, 'source', 'create', '--no-deps', 'elygate');
+		compose(ctx, 'source', 'create', '--no-recreate', 'elygate');
 		phase = 'source runtime seed';
 		prepareSourceFiles(ctx);
 		phase = 'source gateway start';

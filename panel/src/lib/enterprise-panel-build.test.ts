@@ -238,6 +238,14 @@ describe('enterprise panel build contract', () => {
 		expect(inherited.COMPOSE_PROJECT_NAME).toBe('production');
 	});
 
+	test('recovery creates stopped gateways without recreating the running databases', async () => {
+		const source = await Bun.file(new URL('../../../.github/workflows/scripts/smoke-elygate-recovery.mjs', import.meta.url)).text();
+		for (const side of ['source', 'target']) {
+			expect(source).toContain(`compose(ctx, '${side}', 'create', '--no-recreate', 'elygate')`);
+		}
+		expect(source).not.toContain("'--no-deps'");
+	});
+
 	test.each(['success', 'invalid-identity', 'invalid-commit', 'save-failure', 'inspect-mismatch', 'load-failure'])(
 		'candidate export executes the workflow shell and fails closed (%s)', async (scenario) => {
 			const workflow = parse(await Bun.file(new URL('../../../.github/workflows/panel-tests.yml', import.meta.url)).text());
