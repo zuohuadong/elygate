@@ -244,6 +244,7 @@ describe('enterprise panel build contract', () => {
 			expect(source).toContain(`compose(ctx, '${side}', 'create', '--no-recreate', 'elygate')`);
 		}
 		expect(source).not.toContain("'--no-deps'");
+		expect(source).toContain("'--cap-drop', 'ALL', '--cap-add', 'CHOWN', '--cap-add', 'FOWNER'");
 	});
 
 	test.each(['success', 'invalid-identity', 'invalid-commit', 'save-failure', 'inspect-mismatch', 'load-failure'])(

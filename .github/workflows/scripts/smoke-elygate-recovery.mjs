@@ -176,8 +176,8 @@ function prepareSourceFiles(ctx) {
 		writePrivate(filename, content);
 		command('docker', ['cp', filename, `${container(ctx, 'source')}:/app/data/${name}`], { env: ctx.env });
 	}
-	// Only this test volume needs ownership preparation; production entrypoints stay unchanged.
-	command('docker', ['run', '--rm', '--name', `${ctx.prefix}-prepare`, '--network', 'none', '--read-only', '--cap-drop', 'ALL', '--cap-add', 'CHOWN', '--user', '0',
+	// Docker can retain host file ownership, so chmod also requires FOWNER on this test volume.
+	command('docker', ['run', '--rm', '--name', `${ctx.prefix}-prepare`, '--network', 'none', '--read-only', '--cap-drop', 'ALL', '--cap-add', 'CHOWN', '--cap-add', 'FOWNER', '--user', '0',
 		'--mount', `type=volume,source=${ctx.prefix}-source_elygate-runtime,target=/runtime,volume-nocopy`,
 		'--entrypoint', '/bin/sh', ctx.image, '-ec',
 		'chmod 644 /runtime/*.json; chmod 600 /runtime/recovery-marker; chown 1000:0 /runtime/*.json /runtime/recovery-marker'], { env: ctx.env });
