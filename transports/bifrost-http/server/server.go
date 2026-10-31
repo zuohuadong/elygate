@@ -2474,7 +2474,7 @@ func (s *BifrostHTTPServer) UpsertModelPricingAttributes(ctx context.Context, en
 		return err
 	}
 	if err := s.Config.ModelCatalog.ReloadPricing(ctx); err != nil {
-		return fmt.Errorf("failed to reload pricing cache after attribute write: %w", err)
+		return &handlers.ModelCatalogRefreshError{Err: err}
 	}
 	return nil
 }

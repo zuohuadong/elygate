@@ -86,6 +86,16 @@ type ModelPricingAttributesEntry struct {
 	AdditionalAttributes map[string]string `json:"additional_attributes,omitempty"`
 }
 
+// ModelCatalogRefreshError means the attribute transaction committed but its
+// cache refresh failed. The committed mutation must still be audited.
+type ModelCatalogRefreshError struct{ Err error }
+
+func (e *ModelCatalogRefreshError) Error() string {
+	return fmt.Sprintf("failed to reload pricing cache after attribute write: %v", e.Err)
+}
+
+func (e *ModelCatalogRefreshError) Unwrap() error { return e.Err }
+
 // ProviderHandler manages HTTP requests for provider operations
 type ProviderHandler struct {
 	dbStore       configstore.ConfigStore
@@ -1846,11 +1856,19 @@ func (h *ProviderHandler) upsertModelCatalogEntries(ctx *fasthttp.RequestCtx) {
 	}
 
 	if err := h.modelsManager.UpsertModelPricingAttributes(ctx, payload); err != nil {
+		var refreshErr *ModelCatalogRefreshError
+		if errors.As(err, &refreshErr) {
+			recordModelCatalogUpdate(ctx, payload)
+		}
 		SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("failed to upsert catalog entries: %v", err))
 		return
 	}
-	lib.RecordAuditChange(ctx, "model_catalog.updated", "model_catalog", "model_catalog", "Model catalog", nil, map[string]any{"count": len(payload), "entries": payload})
+	recordModelCatalogUpdate(ctx, payload)
 	ctx.SetStatusCode(fasthttp.StatusNoContent)
+}
+
+func recordModelCatalogUpdate(ctx *fasthttp.RequestCtx, entries []ModelPricingAttributesEntry) {
+	lib.RecordAuditChange(ctx, "model_catalog.updated", "model_catalog", "model_catalog", "Model catalog", nil, map[string]any{"count": len(entries), "entries": entries})
 }
 
 // providerInterceptionChanges returns the settings next adds or changes, relative to old, that
