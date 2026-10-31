@@ -469,5 +469,8 @@ esac
 		const relayAuditIndex = steps.findIndex((step: { name?: string }) => step.name === 'Run relay log deletion audit regressions');
 		expect(relayAuditIndex).toBeGreaterThan(catalogIndex);
 		expect(steps[relayAuditIndex].run).toBe("bash scripts/go-local.sh test -p 1 ./transports/bifrost-http/handlers ./transports/bifrost-http/controlplane -run '^TestRelayLogsDeletionAudit' -count=1 -timeout=180s");
+		const webhookAuditIndex = steps.findIndex((step: { name?: string }) => step.name === 'Run webhook management audit regressions');
+		expect(webhookAuditIndex).toBeGreaterThan(relayAuditIndex);
+		expect(steps[webhookAuditIndex].run).toBe("bash scripts/go-local.sh test -p 1 ./transports/bifrost-http/handlers ./transports/bifrost-http/controlplane -run '^Test(ManagementWebhookAuditAfterPersistence|WebhookHandlerAuditsCommittedChangesBeforeMemoryReconciliation|WebhookHandlerAuditsDeleteBeforeMemoryRemoval)$' -count=1 -timeout=180s");
 	});
 });

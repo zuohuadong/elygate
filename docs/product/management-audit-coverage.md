@@ -1,6 +1,6 @@
 # Management Audit Coverage
 
-Updated: 2026-10-31. This is a coverage inventory, not a claim that every
+Updated: 2026-11-01. This is a coverage inventory, not a claim that every
 administrator mutation has transactional audit enforcement.
 
 ## Persistence Boundaries
@@ -214,7 +214,7 @@ write paths.
 | Prompts, folders, versions and sessions | `prompts.go` | All 11 cache-reloading mutations record the committed change before cache refresh; SQLite race and private PostgreSQL route matrices cover success, refresh panic, rejected writes, audit failure, authenticated feed and redaction. A process crash before bridge persistence remains outside this boundary |
 | Skills and uploaded files | `skills.go` | Update (serve/save-only) and version-shift record the committed mutation before response reread, filling the sanitized after snapshot only when available; 18 SQLite and private PostgreSQL race cases cover success, reread error/panic, rejected writes, audit failure and authenticated feed. Other file lifecycle paths retain their existing producer boundary |
 | Agents, push configurations and agent logs | `agentgateway.go` | Existing producer records |
-| Webhooks, rotation and redelivery | `webhooks.go` | Existing producer tests |
+| Webhooks, rotation and redelivery | `webhooks.go` | Create/delete/rotate record after commit and before reconciliation; update retains the canonical snapshot or a redacted editable-field fallback. SQLite handlers and 33 registered-route scenarios on SQLite/private PostgreSQL cover errors, panics, missing cache, rejected writes and audit failure. Test deliveries/redelivery retain their existing producer boundary; see the scoped acceptance below |
 | Feature flags, cache, notification publication and sidekiq cancellation | Respective management handlers | Existing producer records; cache IDs hashed |
 | Warp configuration, backfill and topic clustering | `warp.go` | Explicit per-kind identities; focused race regressions cover start/restart, explicit/implicit/repeated cancel, post-write reread failures, rejected/failed writes, authenticated audit-feed routes and SQLite reopen |
 | Explicit Warp conversation deletion | `warpconversations.go` | ID-only successful-deletion producer; 14 new leaf scenarios cover ownership, failure, repeated-delete, auth/bridge/feed and SQLite reopen; all 53 Warp top-level tests pass with race detection, handlers vet and metadata-record microbenchmark pass |
@@ -380,6 +380,60 @@ The existing cross-store post-commit crash window remains. No new audit
 retention policy is introduced: each successful command appends one durable
 row. The request-path cost and single-sample benchmark limitations are recorded
 in the product roadmap's `relay-log-deletion-audit` follow-up.
+
+## Webhook Post-Commit Reconciliation Acceptance
+
+Follow-up `webhook-committed-audit`, based on `4d421b50b`, addresses the
+sensitive-administrator audit gap when an in-memory callback panics after a
+successful database write. Commit `3e6b1f609` records create, delete and
+secret-rotation changes before reload/removal. Update registers its audit
+producer immediately after persistence, retaining the full canonical snapshot
+on success. A reload error, panic or missing cached endpoint instead records
+only the caller-editable request fields with redacted headers and URL
+credentials; it does not invent database timestamps or failure counters.
+Each committed mutation produces exactly one change, and rejected or failed
+writes produce none.
+
+All `TestWebhookHandler*` regressions and 33 SQLite registered-route scenarios
+pass. The latter cover all four mutations, verified administrator attribution,
+request correlation, protected feed access, real persisted rows, rejected
+authentication/payloads, missing targets, write failure, callback
+error/panic/missing cache, producer uniqueness and audit-write failure.
+Audit failure preserves the existing response and exposes the failure header.
+No database reread or inference-path work was added. The management-only
+update benchmark, excluding SQL and delivery, measured 6319 ns/op,
+10546 B/op and 69 allocs/op on the local Apple M4. The same benchmark with a
+Go overlay of the unchanged `4d421b50b` handler measured 6069 ns/op,
+10642 B/op and 69 allocs/op. Each is a single sample, not statistical evidence
+of unchanged latency or a production-load comparison.
+
+Follow-up `webhook-audit-ci`, parent `3e6b1f609`, adds an explicit workflow
+selection and build-contract assertion because the previous API-contract
+regular expression selected none of these tests. This local workflow change
+is not part of that commit's CI run; remote execution remains a separate gate.
+Pi was invoked for the documentation work but exited with `Connection error`
+and no changes; root then took over the same writer scope.
+
+Follow-up `webhook-audit-postgres-race`, parent `3e6b1f609`, adds checks against
+the actual newly issued signing secret, not just preloaded fixture secrets:
+successful create/rotate responses retain their one-time value while the
+producer snapshots and protected feed exclude it. The updated 33-route matrix
+passes on SQLite (8.712s) and private PostgreSQL 18 (117.205s).
+The PostgreSQL harness verifies no owned databases remain, waits for the server
+to stop, and exits successfully; `pg_controldata` independently reports
+`shut down`. This uses local module replacements and the production
+ConfigStore, not SQLite fallback, Docker or a deployed gateway.
+The updated SQLite matrix also passes with race detection (52.397s).
+The earlier interrupted race invocation is not a test result; the completed
+run reused `.codex-cache/go-build-routing-release-race`. PostgreSQL race
+and other route groups remain outside this scoped result.
+
+This is **PASS_SCOPED SQLite/private PostgreSQL in-process route evidence**,
+including SQLite race, not PostgreSQL/full-suite race, live-network,
+provider-harness, abrupt-crash or production acceptance.
+The database mutation and bridge audit still use separate transactions: a
+process crash between them can lose an event. No outbox, automatic audit
+retention or new always-resident state is introduced.
 
 ## Remaining Acceptance
 

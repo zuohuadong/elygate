@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/fasthttp/router"
@@ -228,7 +229,14 @@ func TestManagementWebhookAuditAfterPersistence(t *testing.T) {
 				}
 				if mutation.name == "create" || mutation.name == "rotate" {
 					if wantStatus < 300 {
-						require.Contains(t, string(response.Response.Body()), `"secret":"whsec_`)
+						var responsePayload struct {
+							Secret string `json:"secret"`
+						}
+						require.NoError(t, json.Unmarshal(response.Response.Body(), &responsePayload))
+						require.True(t, strings.HasPrefix(responsePayload.Secret, "whsec_"))
+						require.NotContains(t, string(serialized), responsePayload.Secret)
+						require.NotContains(t, string(feed.Response.Body()), responsePayload.Secret)
+						require.Contains(t, string(response.Response.Body()), responsePayload.Secret)
 					} else {
 						require.NotContains(t, string(response.Response.Body()), "whsec_")
 					}

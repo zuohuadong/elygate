@@ -6,9 +6,51 @@
 不以本次已实现的功能重新定义完成标准。新系统只兼容 Bifrost 上游契约，
 不增加旧 Elygate 兼容层；独立 `panel/` 不替换为上游 `ui/`。
 
+## 当前执行状态与剩余门禁
+
+2026-11-01 用户明确要求“不使用 pi agent 继续”，并重申持续完善功能、
+准备上线生产环境。当前执行恢复为 **active / PARTIAL**：root 使用 Native
+模式、单 writer 继续，不再调用 Pi，也不以恢复 Pi 服务作为实施前提。
+此前 `Connection error`、无产出与 TCP 超时仅保留为历史失败证据；
+不切换 provider 或修改 Pi 配置、凭据，不把本次恢复解释为功能交付或生产批准。
+
+后续项 `native-production-readiness-resume`：parent 为
+`webhook-audit-postgres-race`，source 为上述人工恢复指令，reason 为取消 Pi
+依赖后继续收口现有 webhook CI 接入和准确的验收状态。范围冻结为当前五个
+已修改文件及其针对性验证；Native、低风险、root 单 writer、external=0。
+不扩展业务行为、部署范围或远端写入权限，不以该窄后续项缩减原总目标。
+策略发布仍等待用户确认首版单实例 stop-before-start 约束，不能从自动续行消息
+推断批准；现有 release API 仍仅为只读，不开放发布/回滚写路由。
+
+Docker daemon 不可用，正式制品发布、真实供应商、整机恢复/升级回滚和生产切换
+也未验收；生产目标、窗口、回滚负责人及授权必须另外确认。原始发布/Shadow/
+回滚、模型治理、MCP 审批与完整审计范围不缩减，不用额外局部校验替代功能实现。
+本后续项开始时五个文件尚未提交，后续 CI 专项尚未远端执行。提交推送按用户
+此前明确要求进行，只包含这五个文件；新专项是否执行必须绑定新提交的 CI
+结果另行核验，不能沿用父 run。此前额外 vet 和重复 CI 复跑曾中止
+（退出 130），不计通过或代码失败；此前成功证据保留。
+取消 Pi 后原样复跑 workflow 的 webhook 命令，handlers `1.476s`、
+controlplane `8.734s` 均通过且没有空筛选；面板构建契约 31 项、
+216 个断言通过，actionlint、gofmt 和 diff 检查通过。
+本后续项仅涉及测试、CI 和文档，无 wire-visible 行为变更，豁免新增
+provider-harness case；无推理路径或常驻内存增量。
+
 ## 候选版本
 
-- 当前完成 CI 的代码候选为 `486a272b3d7585158f8be5049787debe3bb6017d`，
+- 当前已推送候选为 `3e6b1f6098a14bae8723e7aa68f7e69fda51148d`，
+  run `41222969336` 于 2026-10-31 17:07:22 UTC 创建，最后于
+  17:16:11 UTC 完成；面板、员工门户、API contracts 和镜像构建/运行四个 job
+  均成功。候选 artifact ID 为 `13050728318`，上传包大小 `162921569`
+  字节，于 2026-11-07 17:13:32 UTC 过期；未独立下载或运行此归档，
+  未发布 registry 或部署生产。该 SHA 的既有筛选不执行新增 webhook 审计专项；
+  下方本地 `webhook-audit-ci` 补丁不属于该候选或该 run。
+- 此前完成 CI 的代码候选为 `4d421b50bd9438f82a8e6b76879be3c2ef430edc`，
+  run `41219185774` 于 2026-10-31 16:20:12 UTC 创建，四个 job 均成功，
+  最后于 16:28:42 UTC 完成。候选 artifact ID 为 `13050025192`，
+  上传包大小 `162918331` 字节，于 2026-11-07 16:27:12 UTC 过期。
+  该 run 已包含单机备份专项；未独立下载或运行此归档，未发布 registry
+  或部署生产。
+- 此前完成 CI 的代码候选为 `486a272b3d7585158f8be5049787debe3bb6017d`，
   run `41217564331` 于 2026-10-31 16:00:44 UTC 创建，最后一个 job
   于 16:09:46 UTC 成功结束（北京时间 2026-11-01 00:09:46）。
   面板、员工门户、API contracts、生产镜像四个 job 均为 success。
@@ -874,9 +916,74 @@ ShellCheck、既有预检回归和 30 项备份回归，面板构建契约同步
 本地构建契约 31 项（214 个断言）、两组生产脚本回归、ShellCheck、actionlint
 和 diff 检查通过；面板全量 411 项（2489 个断言）、代理集成 1 项（12 个断言）
 通过，Svelte 检查 0 错误、0 警告。最终逐文件语法命令与构建契约另已复跑通过。
-该改动尚未形成新的远端 CI 候选，不能把 `486a272b3` 的旧 run 结果外推
-到本改动。成本仅为 CI 测试时间；无推理请求或常驻内存开销，没有新增提交、
-推送或部署，原总目标保持 **active / PARTIAL**。
+该改动随后以 `4d421b50b` 提交推送，run `41219185774` 四个 job 全部成功，
+其中生产预检步骤包含新增备份专项；不能用更早的 `486a272b3` run 替代。
+这关闭 CI 执行缺口，不证明真实备份恢复或生产部署。成本仅为 CI 测试时间；
+无推理请求或常驻内存开销，原总目标保持 **active / PARTIAL**。
+
+### Webhook 已提交变更审计与 CI 后续项（2026-11-01）
+
+后续项 `webhook-committed-audit`：parent 为 `4d421b50b`，source 为敏感管理员
+操作审计门，reason 为数据库写入成功后，reload/remove callback 的 panic
+可能丢失成功变更的审计。Native、中风险、root 单 writer，加一次独立只读
+verifier；先前 Pi 调用均以 `Connection error`、退出 1 结束且未产生代码，
+root 在调用终止后接管，不能记作 Pi 实施成功。
+
+`3e6b1f609` 将 create/delete/rotate 的 producer 放在提交后、callback 前；
+update 在提交后注册 defer，正常路径保留 canonical row 的完整脱敏快照，
+reload error/panic 或缺缓存时只记录既有请求的可编辑字段，并脱敏 Headers/URL，
+不伪造数据库时间戳或失败计数。失败写入与拒绝请求不记成功事件，已提交变更
+只记一次；没有新增数据库读取、依赖、接口、推理路径工作或常驻状态。
+
+SQLite 全部 `^TestWebhookHandler` 和 33 个真实管理注册路由场景通过，
+覆盖鉴权、非法请求、缺失对象、写入失败、reload/remove 错误与 panic、
+缺缓存、producer 去重、实际数据库写入、受保护 feed、身份/关联与脱敏，
+并验证审计失败不改写一次性凭据响应、返回失败标记。
+独立只读源码复核为 `PASS_SCOPED`，不替代运行结果。
+管理端 update 基准（不含 SQL/投递）为 `6319 ns/op、10546 B/op、
+69 allocs/op`；同一 benchmark 使用经 SHA-256 核对的 `4d421b50b` 原 handler
+overlay 测得 `6069 ns/op、10642 B/op、69 allocs/op`。各为 Apple M4 单次
+采样，不能据此声称延迟无退化或提供生产性能保证。
+格式及 diff 检查通过。当时 PostgreSQL 与 race 尚未验证；下方后续项补充
+PostgreSQL 证据，真实网络、跨事务原子性、崩溃恢复与生产验收仍未完成。
+
+独立后续项 `webhook-audit-ci`：parent 为 `3e6b1f609`，source 为本次持续上线
+目标与 CI 筛选复核，reason 为现有 API contracts 正则不执行上述 webhook 测试。
+范围冻结为既有 workflow、面板构建契约、两份验收记录；Native、低风险、
+root 单 writer、external=0，不改变业务行为或发布权限。新增明确专项步骤，
+构建契约锁定实际包、正则和执行顺序，保留既有检查且不发布镜像。
+本地构建契约 31 项、216 个断言通过，actionlint 与 diff 检查通过。
+实际执行新增步骤的 Go 命令，handlers `1.645s`、controlplane `8.765s`
+均返回 `ok`，没有空筛选；这仍是本地 SQLite 结果。
+完整面板测试链路复跑通过：411 项单测、2491 个断言，另有代理集成
+1 项、12 个断言。首轮单测通过但代理集成超时，随后原样单独及完整复跑
+均通过，未改断言或放宽 30 秒超时；首轮失败不计为通过。
+本地 workflow 补丁尚未提交、推送或实际执行远端 CI，不能将父 run 的成功
+当作此专项已执行。增量只增加 CI 时间，无推理请求或常驻内存开销。
+
+本轮 Pi 收到两份验收文档的窄范围实施请求，再次以 `Connection error`、
+退出 1 结束且未改文件，root 随后接管文档。未改全局 Pi 配置、切换 provider、
+输出凭据或部署生产。原始功能范围、策略 ownership 的人工批准、真实供应商、
+完整恢复/升级回滚和生产授权边界不变，原目标继续 **active / PARTIAL**。
+
+后续项 `webhook-audit-postgres-race`：parent 为 `3e6b1f609`，source 为持续上线
+目标，reason 为该专项尚缺 PostgreSQL 与 race 运行证据。Native、低风险、
+root 单 writer、external=0；范围仅为既有专项测试、运行验证及两份验收记录，
+不改业务或外部环境。另补新生成 signing secret 的审计/feed 排除断言，
+不改变成功响应按既有合约返回一次性 secret 的行为。
+本轮 Pi 实施调用仍以 `Connection error`、退出 1 结束且未改文件；
+独立检查显示本地认证为 ready，但配置的私网端口 TCP 连接在 5 秒内超时。
+ready 不是服务可达或瞬时故障证明，恢复 Pi 服务仍依赖外部状态变化。
+新增断言后的 SQLite 33 场景通过（`8.712s`），私有 PostgreSQL 18 同一矩阵
+通过（`117.205s`）；此前未加动态 secret 断言的 PostgreSQL 运行也通过
+（`113.626s`），不将旧结果替代新断言的验证。harness 确认测试库清理完成，
+等待实例正常停止并退出 0，两次 `pg_controldata` 均为 `shut down`。
+这不证明真实网络、密码/TLS、生产迁移、崩溃恢复或其他 PostgreSQL 路径。
+SQLite 与 race 各有一次因命令配置修正而中止的运行，退出 130，均不计通过
+或代码失败；随后复用缓存的 SQLite 复验通过，SQLite `-race` controlplane
+矩阵也通过（`52.397s`）。成功 race 使用既有
+`.codex-cache/go-build-routing-release-race`；PostgreSQL race、全量 race
+和生产性能不在此次证据范围内。
 
 ### 候选镜像归档后续项（2026-10-31）
 
