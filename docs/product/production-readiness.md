@@ -30,6 +30,27 @@ reason 为完成既定模型目录元数据编辑。范围冻结为模型目录 
 
 ## 当前执行状态与剩余门禁
 
+### 2026-11-01 隔离卷恢复演练结果
+
+后续项 `single-node-docker-recovery`，parent 为 `model-governance-annotations`，
+source 为用户“不使用 pi agent 继续”，reason 为 Docker 恢复后验证既定单机卷恢复
+边界。Native、root 单 owner、测试与证据整理，不修改业务实现，不发布镜像或部署
+生产。本后续项以本机运行时阻塞记为 `blocked / PARTIAL`，不启动无限重试。
+
+使用 CI 已验证的候选 `6dd8128632acec8d24108ad71b3d9c7ab2c1c443`（镜像
+`sha256:4d0da2801ae7a59c23f8202561af1913708de735ec65188a7956ee80c163066d`）
+在 `/Volumes/Datas/.codex-tmp/` 准备了随机项目名、独立 PostgreSQL 卷、只读配置
+挂载和 `0700/0600` 私有文件。`single-node-preflight.test.sh` 与
+`single-node-backup.test.sh` 全部通过；真实演练也通过了私有 Compose 预检。
+随后本机 OrbStack 在 `docker compose up --wait` 阶段出现超时/延迟：PostgreSQL
+容器最终启动且日志报告可接受连接，但 Compose 调用未在 120 秒窗口内返回；
+清理 Compose 调用同样超时，改为按本轮明确名称删除并核对。未进入真实
+`pg_dump`、备份发布或恢复导入。临时项目、容器、卷、网络及私有凭据已清理；
+这次结果记为
+`PARTIAL`，不能证明整机卷恢复、恢复后登录、Application Key、Usage Ledger、
+Audit 或源环境不变。报告保留在本机临时目录
+`/Volumes/Datas/.codex-tmp/elygate-recovery-6dd812863/report.json`，不进入提交。
+
 2026-11-01 用户明确要求“不使用 pi agent 继续”，并重申持续完善功能、
 准备上线生产环境。当前执行恢复为 **active / PARTIAL**：root 使用 Native
 模式、单 writer 继续，不再调用 Pi，也不以恢复 Pi 服务作为实施前提。
@@ -44,8 +65,10 @@ reason 为完成既定模型目录元数据编辑。范围冻结为模型目录 
 策略发布仍等待用户确认首版单实例 stop-before-start 约束，不能从自动续行消息
 推断批准；现有 release API 仍仅为只读，不开放发布/回滚写路由。
 
-Docker daemon 不可用，正式制品发布、真实供应商、整机恢复/升级回滚和生产切换
-也未验收；生产目标、窗口、回滚负责人及授权必须另外确认。原始发布/Shadow/
+该后续项启动时 Docker daemon 不可用；截至本次隔离演练，`orbstack` context 的
+Docker Server `29.8.2` 已可响应并成功加载候选镜像，但本地容器启动/清理超时，
+不能据此关闭恢复验收。正式制品发布、真实供应商、整机恢复/升级回滚和生产切换
+仍未验收；生产目标、窗口、回滚负责人及授权必须另外确认。原始发布/Shadow/
 回滚、模型治理、MCP 审批与完整审计范围不缩减，不用额外局部校验替代功能实现。
 本后续项开始时五个文件尚未提交，提交推送按用户此前明确要求进行，只包含
 这五个文件。新提交 `91f183438` 的 run `41229428442` 已实际执行新专项；
@@ -59,7 +82,19 @@ provider-harness case；无推理路径或常驻内存增量。
 
 ## 候选版本
 
-- 当前完成 CI 的代码候选为 `db031515121a34a9f638a96e7cbfb67e5b4e014e`，
+- 当前完成 CI 的代码候选为 `6dd8128632acec8d24108ad71b3d9c7ab2c1c443`，
+  run `41238139793` 于 2026-10-31 20:16:36 UTC 创建，20:25:29 UTC
+  全部成功完成（北京时间 2026-11-01 04:25:29）；Panel、员工门户、
+  API contracts 和镜像构建/运行四个 job 全部通过。artifact ID
+  `13055788696` 的候选归档已独立下载、通过 `SHA256SUMS`，并成功加载到
+  本机 Docker。归档 SHA-256 为
+  `30cd24df8e1b3da221574ce945e388c36c251fde2314a2923d1d6820373295fe`；
+  来源清单绑定上述源码 SHA、`linux/amd64`，镜像 ID 为
+  `sha256:4d0da2801ae7a59c23f8202561af1913708de735ec65188a7956ee80c163066d`，
+  镜像用户为 `1000:0`。本机整套恢复未通过，详见上节；没有正式 registry
+  发布或生产部署。后续文档提交 `487de76a2` 不属于该镜像的源码身份；
+  其未触发 Panel workflow，不能记为又一份通过 CI 的代码候选。
+- 此前完成 CI 的代码候选为 `db031515121a34a9f638a96e7cbfb67e5b4e014e`，
   run `41233788107` 于 2026-10-31 19:20:53 UTC 创建，19:30:04 UTC 成功完成
   （北京时间 2026-11-01 03:30:04）；面板、员工门户、API contracts 和镜像
   构建/运行四个 job 全部成功。生产预检步骤实际执行备份/恢复专项，
