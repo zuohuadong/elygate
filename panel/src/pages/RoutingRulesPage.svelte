@@ -2,11 +2,12 @@
 	import { getAppName } from '../lib/branding';
 	import { onMount } from 'svelte';
 	import { useTranslation } from '@svadmin/core/i18n';
-	import { FlaskConical, GitBranch, List, Plus } from '@lucide/svelte';
+	import { FlaskConical, GitBranch, History, List, Plus } from '@lucide/svelte';
 	import { displayError, parseJsonObject, prettyJson } from '../lib/forms';
 	import { getListPayload, getTotal, isJsonRecord, requestJson, type JsonRecord } from '../lib/api';
 	import { formatPagination } from '../lib/display-format';
 	import RoutingSimulationPanel from '../lib/RoutingSimulationPanel.svelte';
+	import RoutingReleases from '../lib/RoutingReleases.svelte';
 
 	interface Props { resourceName: string; }
 	interface TargetForm { provider: string; model: string; key_id: string; weight: number; }
@@ -22,7 +23,7 @@
 	let isLoading = $state(true);
 	let isSaving = $state(false);
 	let modalContextSeq = 0;
-	let viewMode = $state<'list' | 'tree' | 'simulation'>('list');
+	let viewMode = $state<'list' | 'tree' | 'simulation' | 'releases'>('list');
 	let error = $state('');
 	let notice = $state('');
 	let loadSeq = 0;
@@ -163,21 +164,23 @@
 
 <section class="page-shell">
 	<header class="page-heading">
-		<div><p class="eyebrow">{getAppName()} / {i18n.t('elygate.enterprise')}</p><h1>{i18n.t('elygate.routingRules')}</h1>{#if viewMode !== 'simulation'}<p>{viewMode === 'tree' ? i18n.t('elygate.routingTreeHint') : i18n.t('elygate.routingRulesStructuredHint')}</p>{/if}</div>
+		<div><p class="eyebrow">{getAppName()} / {i18n.t('elygate.enterprise')}</p><h1>{i18n.t('elygate.routingRules')}</h1>{#if viewMode === 'list' || viewMode === 'tree'}<p>{viewMode === 'tree' ? i18n.t('elygate.routingTreeHint') : i18n.t('elygate.routingRulesStructuredHint')}</p>{/if}</div>
 		<div class="heading-actions">
 			<div class="view-switch" role="group" aria-label={i18n.locale === 'zh-CN' ? '路由视图' : 'Routing view'}>
 				<button type="button" class:is-active={viewMode === 'list'} aria-pressed={viewMode === 'list'} onclick={() => (viewMode = 'list')}><List size={16} aria-hidden="true" />{i18n.t('elygate.tableView')}</button>
 				<button type="button" class:is-active={viewMode === 'tree'} aria-pressed={viewMode === 'tree'} onclick={() => (viewMode = 'tree')}><GitBranch size={16} aria-hidden="true" />{i18n.t('elygate.treeView')}</button>
 				<button type="button" class:is-active={viewMode === 'simulation'} aria-pressed={viewMode === 'simulation'} onclick={() => (viewMode = 'simulation')}><FlaskConical size={16} aria-hidden="true" />{i18n.t('elygate.routingSimulation')}</button>
+				<button type="button" class:is-active={viewMode === 'releases'} aria-pressed={viewMode === 'releases'} onclick={() => (viewMode = 'releases')}><History size={16} aria-hidden="true" />{i18n.locale === 'zh-CN' ? '发布记录' : 'Releases'}</button>
 			</div>
-			{#if viewMode !== 'simulation'}<button class="primary" type="button" onclick={openCreate}><Plus size={16} aria-hidden="true" />{i18n.t('elygate.create')}</button>{/if}
+			{#if viewMode === 'list' || viewMode === 'tree'}<button class="primary" type="button" onclick={openCreate}><Plus size={16} aria-hidden="true" />{i18n.t('elygate.create')}</button>{/if}
 		</div>
 	</header>
-	{#if viewMode !== 'simulation'}
+	{#if viewMode === 'list' || viewMode === 'tree'}
 	{#if error}<div class="notice error" role="alert">{error}</div>{/if}{#if notice}<div class="notice success" role="status">{notice}</div>{/if}
 	{/if}
 	<div hidden={viewMode !== 'simulation'}><RoutingSimulationPanel active={viewMode === 'simulation'} /></div>
-	{#if viewMode !== 'simulation'}
+	<div hidden={viewMode !== 'releases'}><RoutingReleases active={viewMode === 'releases'} /></div>
+	{#if viewMode === 'list' || viewMode === 'tree'}
 	{#if viewMode === 'list'}
 		<div class="rule-list" aria-busy={isLoading}>
 			{#each sortedRules as rule, index (String(rule.id))}

@@ -342,6 +342,21 @@ upstream UI.
   source errors and empty pages are distinct; stale/unmounted reads cannot
   overwrite the active scope.
 
+## Routing Release Read Model
+
+- The routing-rules release view reads
+  `GET /api/control-plane/routing/releases?limit=25&offset=0`.
+  The response contains `head`, descending `releases`, `limit` and `offset`
+  from one database snapshot. The separate authenticated
+  `GET /api/control-plane/routing/releases/head` validates the same durable
+  evidence but is not combined with a separately fetched history in the panel.
+- Current pending, current acknowledged and superseded generations are distinct.
+  Application receipts prove historical installation, not process readiness;
+  readiness remains explicitly unverified. Corrupt/missing current installation
+  evidence fails closed. Idempotency keys are never serialized.
+- This is a read-only checkpoint, not publication/rollback UI completion or
+  production acceptance. Browser acceptance for this new view remains open.
+
 ## Enterprise extension routes
 
 The following legacy routes import private enterprise implementations or need

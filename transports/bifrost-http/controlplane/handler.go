@@ -119,6 +119,7 @@ func (h *Handler) RegisterRoutes(r *router.Router, middlewares ...schemas.Bifros
 	r.PUT("/api/control-plane/notification-receipts/{notification_id}", wrap(h.setNotificationReadState))
 	r.GET("/api/control-plane/audit-events", wrap(h.listAudit))
 	h.RegisterRoutingPolicyVersionRoutes(r, middlewares...)
+	h.RegisterRoutingReleaseReadRoutes(r, middlewares...)
 }
 
 func (h *Handler) InferenceAccessMiddleware() schemas.BifrostHTTPMiddleware {

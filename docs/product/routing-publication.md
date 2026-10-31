@@ -612,6 +612,45 @@ The original publication contract remains **PARTIAL**, including cross-process
 ownership, HTTP/panel publication, external crash recovery and final production
 acceptance.
 
+## Read-Only Release Inspection Checkpoint
+
+Follow-up `routing-release-read-model` retains the original publication scope
+and ownership blockers. Authenticated administrator GET endpoints now expose
+`/api/control-plane/routing/releases/head` and
+`/api/control-plane/routing/releases?limit=25&offset=0`.
+Limits are 1..100 and offsets are nonnegative; responses are `no-store`.
+Storage errors are generic and acceptance idempotency keys are omitted.
+
+The history response includes its validated durable head in the same read-only,
+repeatable-read transaction. An applied head requires matching desired/applied
+fields and a matching application receipt. The panel consumes this one snapshot,
+distinguishes pending/current-installed/superseded generations and never infers
+process readiness from a durable receipt. Pagination reads a fresh snapshot per
+page, not a cursor pinned across requests. SQL uses the existing bounded
+control-plane context; browser cancellation does not cancel that SQL operation.
+
+These are administrator read operations only: no inference-path code, schema,
+publication/rollback write endpoint, process takeover or deployment changes.
+Each read retains at most 100 history entries plus their application receipts
+for the request lifetime; there is no new cache or per-inference allocation.
+The requested Pi implementation attempt produced no output or file changes and
+was stopped before the root agent took writer ownership. It is not a successful
+Pi implementation result.
+
+This checkpoint remains **PARTIAL** pending browser acceptance for the new view.
+Publication writes, approved process ownership, crash recovery and final
+production acceptance remain separate open gates.
+
+On 2026-10-31, `TestRoutingReleaseRead*` passed against SQLite (2.599s) and
+private PostgreSQL (136.885s); the PostgreSQL runner cleaned up its databases
+and stopped its owned cluster normally. Focused panel contracts passed 11 tests,
+Svelte diagnostics reported zero errors/warnings and the independent Vite build
+passed without copying output into the embedded transport UI. The full panel
+run reported 383 passes and one 30-second API-proxy timeout; that unchanged
+test then passed alone with its original timeout (21.904s). This is a recorded
+retry, not a claim that the original full run was green. The build retains its
+large-chunk warning.
+
 ## Verification
 
 - Stage 1 passed `go test -buildvcs=false ./rules -count=1`, targeted `-race`
