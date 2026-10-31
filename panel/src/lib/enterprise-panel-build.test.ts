@@ -80,7 +80,8 @@ describe('enterprise panel build contract', () => {
 		expect(workflow.on.push.paths).toEqual(workflow.on.pull_request.paths);
 		for (const path of ['.bun-version', 'panel/**', 'enterprise/employee-portal/**',
 			'transports/bifrost-http/**', 'framework/configstore/**', 'framework/logstore/**',
-			'plugins/logging/**', 'Makefile', 'transports/Dockerfile*', '.github/workflows/panel-tests.yml']) {
+			'plugins/logging/**', 'Makefile', 'transports/Dockerfile*', '.github/workflows/panel-tests.yml',
+			'.github/workflows/scripts/smoke-elygate-image.sh', 'examples/single-node-postgres/**']) {
 			expect(workflow.on.push.paths).toContain(path);
 		}
 		expect(workflow.on).toHaveProperty('workflow_dispatch');
@@ -89,6 +90,22 @@ describe('enterprise panel build contract', () => {
 		const imageBuild = workflow.jobs.docker.steps.find((step: { name?: string }) =>
 			step.name === 'Build image without publishing');
 		expect(imageBuild.with.push).toBe(false);
+		expect(imageBuild.with.load).toBe(true);
+		expect(imageBuild.with['build-args']).toContain('VERSION=${{ github.sha }}');
+		const runtime = workflow.jobs.docker.steps.find((step: { name?: string }) =>
+			step.name === 'Start image and verify runtime health');
+		expect(runtime.env.IMAGE_COMMIT).toBe('${{ github.sha }}');
+		expect(runtime.run).toBe('bash .github/workflows/scripts/smoke-elygate-image.sh elygate:panel-ci "$IMAGE_COMMIT"');
+		expect(workflow.jobs.docker['timeout-minutes']).toBe(20);
+	});
+
+	test('image smoke rejects an invalid candidate before Docker allocation', async () => {
+		const script = new URL('../../../.github/workflows/scripts/smoke-elygate-image.sh', import.meta.url);
+		const child = Bun.spawn(['/bin/bash', script.pathname, 'elygate:panel-ci', 'not-a-commit'], {
+			env: { PATH: '/definitely/no/docker' }, stdout: 'pipe', stderr: 'pipe',
+		});
+		expect(await child.exited).toBe(2);
+		expect(await new Response(child.stderr).text()).toContain('expected a full Git commit SHA');
 	});
 
 	test('API contracts initialize the Go workspace before running on a clean checkout', async () => {

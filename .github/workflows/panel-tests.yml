@@ -13,6 +13,8 @@ on:
       - "Makefile"
       - "transports/Dockerfile*"
       - ".github/workflows/panel-tests.yml"
+      - ".github/workflows/scripts/smoke-elygate-image.sh"
+      - "examples/single-node-postgres/**"
   push:
     branches: [main, dev]
     paths:
@@ -26,6 +28,8 @@ on:
       - "Makefile"
       - "transports/Dockerfile*"
       - ".github/workflows/panel-tests.yml"
+      - ".github/workflows/scripts/smoke-elygate-image.sh"
+      - "examples/single-node-postgres/**"
   workflow_dispatch:
 
 permissions:
@@ -67,6 +71,7 @@ jobs:
     name: Build production Docker image
     needs: panel
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner
         uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
@@ -82,7 +87,14 @@ jobs:
           context: .
           file: ./transports/Dockerfile
           push: false
+          load: true
           tags: elygate:panel-ci
+          build-args: |
+            VERSION=${{ github.sha }}
+      - name: Start image and verify runtime health
+        env:
+          IMAGE_COMMIT: ${{ github.sha }}
+        run: bash .github/workflows/scripts/smoke-elygate-image.sh elygate:panel-ci "$IMAGE_COMMIT"
 
   employee-portal:
     runs-on: ubuntu-latest

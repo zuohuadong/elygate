@@ -263,6 +263,26 @@ Docker BuildKit 构建 4m34s。已检查 API job 确实经过 Go 安装、worksp
 上传的 `.dockerbuild` 只是构建记录，不是可部署镜像，也未执行容器启动、
 健康或非 root 验收。该 CI 修复为 `PASS_SCOPED`，生产清单仍为 **PARTIAL**。
 
+### Docker 镜像运行时冒烟后续项（2026-10-31）
+
+后续项 `panel-ci-image-runtime-smoke`：parent 为 `336582902`，source 为
+交付门 1/2 的镜像运行证据缺口，reason 为此前 Docker job 只保留 BuildKit
+缓存，未加载、启动或重启候选容器。Native、root 单 writer、低风险、
+external=0；仅修改面板 CI、契约测试、冒烟脚本和本清单，不修改业务请求路径、
+权限、发布推送或生产配置。
+
+`panel-tests.yml` 现在以 `load: true` 加载本次构建镜像，传入完整提交 SHA，
+并调用独立的 `smoke-elygate-image.sh`。脚本从固定 digest 的单机 PostgreSQL
+模板启动隔离配置库和日志库，验证镜像非 root、双库健康、无 SQLite 回退、
+匿名管理接口 401、管理员登录/配置/版本、网关和数据库正常停止重启后的会话
+读取、退出登录失效以及容器无 OOM/意外重启；退出时清理容器、卷、网络和临时目录。
+脚本只生成临时密码和加密 key，不写入仓库或日志。
+
+本地已通过 `actionlint`、`bash -n`、`shellcheck`、`git diff --check` 及
+面板构建契约定向测试；本机 OrbStack/Docker daemon 不可用，因此本地未执行
+容器运行验收。该后续项在提交前为 `PASS_SCOPED`，推送后必须以新 SHA 的
+Docker job 实际日志确认运行时冒烟通过；CodSpeed/Snyk 排队不计通过。
+
 ### 单机模板镜像固定检查（2026-10-31）
 
 后续项 `single-node-postgres-image-pin`：parent 为 `edc1a1c08`，source 为交付门 2，
