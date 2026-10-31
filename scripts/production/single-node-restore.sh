@@ -19,7 +19,7 @@ compose() {
 }
 
 container_snapshot() {
-	jq -ce '[.[] | {Id, Image, Mounts, Config, State:
+	jq -ce '[.[] | {Id, Image, Mounts: (.Mounts | sort_by(.Destination)), Config, State:
 		(.State | {Status, Running, Restarting, OOMKilled, ExitCode, StartedAt, FinishedAt})}]'
 }
 

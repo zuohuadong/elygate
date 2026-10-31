@@ -87,6 +87,19 @@ Application Key 默认拒绝所有供应商，夹具此前只授予 Relay，遗�
 增加固定 backup、target startup/create、restore 和恢复前完整性阶段标签；
 只转述可信脚本中原有固定 `fail` 字面量且 stderr 完整行精确匹配的错误，
 动态插值和任意子进程输出继续抑制，不改生产脚本或放宽安全门禁。
+`7e76525e0` 的 run `41251387910` 三个非 Docker job 和 image smoke 均成功，
+精确失败为 `production backup: source containers changed during backup`。
+后续项 `single-node-snapshot-ordering`：parent 为 `single-node-recovery-ci`，
+source 为上述真实 CI 失败，reason 为修正已复现的等价挂载顺序误报；范围冻结为
+backup/restore 两处快照、对应 shell 回归和本节，Native、中风险、root 单 writer、
+复用既有只读 verifier。不部署、不发布、不执行生产备份或恢复。
+后续诊断发现容器快照直接比较 Docker 返回的 `Mounts` 数组，等价挂载顺序变化
+会误报 `source containers changed during backup`。仅在 backup/restore 快照函数中
+按挂载目标排序，保留挂载内容、容器身份、镜像、环境、生命周期、健康和 OOM/重启
+检查；新增 fake-Docker 顺序变化和真实挂载变更拒绝回归。原快照已实际在新增
+顺序变化测试中失败，修正后整套 shell 回归、ShellCheck、43 项 Panel 契约和
+diff 检查通过；真实 CI 恢复仍待新 SHA，不放宽源端不变或目标隔离断言。
+代价：仅离线备份/恢复的两次 inspect 结果排序，无推理路径或常驻内存增量。
 既有 `9edd2ca54` 的 run `41242882512` 已于 2026-10-31 21:26:31 UTC
 （北京时间 2026-11-01 05:26:31）全部成功，但没有执行本新增恢复步骤。
 本项只有 CI 测试耗时和测试进程的临时内存/磁盘，无推理生产路径或常驻内存增量。

@@ -26,7 +26,7 @@ hash_file() {
 }
 
 container_snapshot() {
-	jq -ce '[.[] | {Id, Image, Mounts, Config: (.Config | {Image, Env, Cmd, Entrypoint}),
+	jq -ce '[.[] | {Id, Image, Mounts: (.Mounts | sort_by(.Destination)), Config: (.Config | {Image, Env, Cmd, Entrypoint}),
 		State: (.State | {Status, Running, Restarting, OOMKilled, ExitCode,
 			StartedAt, FinishedAt, Health: .Health.Status})}]'
 }

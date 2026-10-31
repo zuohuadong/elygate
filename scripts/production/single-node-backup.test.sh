@@ -190,6 +190,8 @@ if [[ "${FAKE_RESTORE:-}" == 1 ]]; then
 				cat >"$FAKE_TEST_ROOT/restored-database.dump"
 				[[ "$scenario" != restore-db-failure ]] || exit 1
 				if [[ "$scenario" == target-change ]]; then touch "$FAKE_TEST_ROOT/source-changed"; fi
+				if [[ "$scenario" == target-mount-change ]]; then touch "$FAKE_TEST_ROOT/source-changed"; fi
+				if [[ "$scenario" == mount-order-only ]]; then touch "$FAKE_TEST_ROOT/mounts-permuted"; fi
 				exit
 			fi ;;
 	esac
@@ -206,6 +208,8 @@ if [[ "${1:-}" == "inspect" ]]; then
 			.[1].Mounts[0].Name = $compose[0].volumes["postgres-data"].name |
 			.[1].Mounts[0].RW = true
 		else . end' |
+		jq --arg permuted "$(test -f "$FAKE_TEST_ROOT/mounts-permuted" && printf yes)" \
+			'if $permuted == "yes" then .[0].Mounts |= reverse else . end' |
 		jq --arg scenario "$scenario" \
 		--arg changed "$(test -f "$FAKE_TEST_ROOT/source-changed" && printf yes)" '
 		if $scenario == "running" then .[0].State.Status = "running" | .[0].State.Running = true
@@ -225,6 +229,7 @@ if [[ "${1:-}" == "inspect" ]]; then
 		elif $scenario == "stale-command" then .[0].Config.Cmd = ["/app/main", "-app-dir", "/other"]
 		elif $scenario == "stale-entrypoint" then .[0].Config.Entrypoint = ["/other-entrypoint.sh"]
 		elif ($scenario == "source-change" or $scenario == "target-change") and $changed == "yes" then .[0].State.StartedAt = "2026-10-31T01:00:00Z"
+		elif ($scenario == "source-mount-change" or $scenario == "target-mount-change") and $changed == "yes" then .[0].Mounts[0].Name = "changed-runtime"
 		else . end'
 	exit 0
 fi
@@ -245,6 +250,8 @@ if [[ "${1:-}" == "cp" && "$*" == *":/app/data/."* ]]; then
 	if [[ "$scenario" == "cp-failure" ]]; then printf '%s\n' "$secret" >&2; exit 1; fi
 	if [[ "$scenario" == "cp-corrupt" ]]; then printf 'not a tar archive\n'; exit 0; fi
 	if [[ "$scenario" == "source-change" ]]; then touch "$FAKE_TEST_ROOT/source-changed"; fi
+	if [[ "$scenario" == "source-mount-change" ]]; then touch "$FAKE_TEST_ROOT/source-changed"; fi
+	if [[ "$scenario" == "mount-order-only" ]]; then touch "$FAKE_TEST_ROOT/mounts-permuted"; fi
 	if [[ "$scenario" == "config-change" ]]; then printf '{}\n' >"$config_file"; fi
 	tar -cf - -C "$FAKE_RUNTIME" .
 	exit 0
@@ -318,16 +325,17 @@ for scenario in missing-gateway multiple-gateways; do
 done
 expect_failure "inspect failure" "container state" env FAKE_SCENARIO=inspect-failure \
 	bash "$backup_script" "$compose_dir" --confirm-no-writers
-for scenario in dump-failure dump-empty list-failure list-empty cp-failure cp-corrupt source-change config-change; do
+for scenario in dump-failure dump-empty list-failure list-empty cp-failure cp-corrupt source-change source-mount-change config-change; do
 	case "$scenario" in
 		dump-*) diagnostic="pg_dump" ;;
 		list-*) diagnostic="archive" ;;
 		cp-*) diagnostic="runtime" ;;
-		source-change) diagnostic="source containers changed" ;;
+		source-change|source-mount-change) diagnostic="source containers changed" ;;
 		config-change) diagnostic="deployment files changed" ;;
 	esac
 	expect_failure "$scenario" "$diagnostic" env FAKE_SCENARIO="$scenario" \
 		bash "$backup_script" "$compose_dir" --confirm-no-writers
+	rm -f "$test_root/source-changed"
 	[[ -z "$(find "$backup_root" -mindepth 1 -maxdepth 1 -print)" ]] ||
 		fail "$scenario left an incomplete or final backup"
 done
@@ -338,6 +346,13 @@ cp "$test_root/external-config.json" "$compose_dir/config.json"
 expect_failure "same database name on external instance" "only the template" \
 	bash "$backup_script" "$compose_dir" --confirm-no-writers
 cp "$repo_root/examples/single-node-postgres/config.json" "$compose_dir/config.json"
+
+mkdir -m 700 "$test_root/ordering-backups"
+env FAKE_SCENARIO=mount-order-only BACKUP_ROOT="$test_root/ordering-backups" \
+	bash "$backup_script" "$compose_dir" --confirm-no-writers >/dev/null ||
+	fail "equivalent backup mount ordering"
+rm -f "$test_root/mounts-permuted"
+pass "equivalent backup mount ordering"
 
 bash "$backup_script" "$compose_dir" --confirm-no-writers >/dev/null || fail "valid backup"
 backup_dir="$(find "$backup_root" -mindepth 1 -maxdepth 1 -type d ! -name '.*' -print)"
@@ -420,7 +435,7 @@ for scenario in aliased-volume runtime-nonempty runtime-newline-only runtime-enu
 		bash "$restore_script" "$backup_dir" "$target_dir" --confirm-isolated-no-writers
 	assert_no_restore_writes
 done
-for scenario in restore-db-failure create-failure restore-cp-failure target-change cleanup-failure; do
+for scenario in restore-db-failure create-failure restore-cp-failure target-change target-mount-change cleanup-failure; do
 	case "$scenario" in
 		restore-db-*) diagnostic="database import failed" ;;
 		create-*) diagnostic="container creation failed" ;;
@@ -525,6 +540,13 @@ assert_no_matches "restore started services or removed source data" -E -- \
 	'(^| )(stop|start|down|up|restart|--clean)( |$)' "$test_root/docker.calls"
 (cd "$backup_dir" && sha256sum -c SHA256SUMS >/dev/null) || fail "restore changed source backup"
 pass "valid isolated restore"
+
+env FAKE_SCENARIO=mount-order-only bash "$restore_script" "$backup_dir" "$target_dir" \
+	--confirm-isolated-no-writers >/dev/null || fail "equivalent restore mount ordering"
+cmp -s "$test_root/restored-database.dump" "$backup_dir/database.dump" || fail "reordered database input differs"
+cmp -s "$test_root/restored-runtime.tar" "$backup_dir/runtime.tar" || fail "reordered runtime input differs"
+rm -f "$test_root/mounts-permuted" "$test_root/restored-database.dump" "$test_root/restored-runtime.tar"
+pass "equivalent restore mount ordering"
 
 printf 'changed\n' >>"$backup_dir/database.dump"
 if (cd "$backup_dir" && sha256sum -c SHA256SUMS >/dev/null 2>&1); then
