@@ -461,8 +461,11 @@ esac
 		const employeeIndex = steps.findIndex((step: { name?: string }) => step.name === 'Run employee contracts');
 		expect(employeeIndex).toBeGreaterThan(testIndex);
 		expect(steps[employeeIndex].run).toBe("bash scripts/go-local.sh test -p 1 ./transports/bifrost-http/employees -run '^Test' -count=1 -timeout=180s");
+		const employeeAuditIndex = steps.findIndex((step: { name?: string }) => step.name === 'Run employee audit correlation regressions');
+		expect(employeeAuditIndex).toBeGreaterThan(employeeIndex);
+		expect(steps[employeeAuditIndex].run).toBe("bash scripts/go-local.sh test -p 1 ./transports/bifrost-http/server -run '^TestEmployee(AuditCorrelationSourcesAndCapture|AuditAppenderUsesCallerTransactionAndTrustedIdentity|SelfServicePasswordAuditUsesEmployeeIdentityAndCallerTransaction|SessionRoutesUseTransactionalTrustedAudit|LoginFailureAuditPersistenceAndIdentity)$' -count=1 -timeout=180s");
 		const exportIndex = steps.findIndex((step: { name?: string }) => step.name === 'Run usage CSV export regression');
-		expect(exportIndex).toBeGreaterThan(employeeIndex);
+		expect(exportIndex).toBeGreaterThan(employeeAuditIndex);
 		expect(steps[exportIndex].run).toBe("bash scripts/go-local.sh test -p 1 ./transports/bifrost-http/controlplane -run '^TestUsageCSVExport' -count=1 -timeout=180s");
 		const catalogIndex = steps.findIndex((step: { name?: string }) => step.name === 'Run model catalog audit regressions');
 		expect(catalogIndex).toBeGreaterThan(exportIndex);

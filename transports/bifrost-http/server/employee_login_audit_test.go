@@ -54,10 +54,14 @@ func employeeRejectedLoginRequest(source byte, body string) *fasthttp.RequestCtx
 	request.Request.Header.SetContentType("application/json")
 	request.Request.Header.Set("X-User-ID", "forged-header-secret")
 	request.Request.Header.Set("X-Request-ID", "forged-correlation-secret")
+	request.Response.Header.Set(lib.HeaderBifrostRequestID, "forged-response-request")
+	request.Response.Header.Set(lib.HeaderBifrostTraceID, "0123456789abcdef0123456789abcdef")
 	request.Request.Header.SetCookie("employee_token", "forged-cookie-secret")
 	request.Request.SetBodyString(body)
 	request.SetUserValue(schemas.IsLocalAdminContextKey, true)
 	request.SetUserValue(schemas.BifrostContextKeyUserID, "forged-admin-secret")
+	request.SetUserValue(schemas.BifrostContextKeyRequestID, "forged-context-request")
+	request.SetUserValue(schemas.BifrostContextKeyExportTraceID, "fedcba9876543210fedcba9876543210")
 	request.SetUserValue(lib.FastHTTPUserValueManagementAuditActor, "forged-audit-secret")
 	return request
 }
@@ -164,6 +168,8 @@ func TestEmployeeLoginFailureAuditPersistenceAndIdentity(t *testing.T) {
 				require.Empty(t, event.RoleID)
 				require.Equal(t, "none", event.AuthMethod)
 				require.Equal(t, "denied", event.Outcome)
+				require.Empty(t, event.RequestID)
+				require.Empty(t, event.TraceID)
 				require.NotEmpty(t, event.Signature)
 				require.Equal(t, "{}", event.BeforeJSON)
 				require.Equal(t, "{}", event.AfterJSON)

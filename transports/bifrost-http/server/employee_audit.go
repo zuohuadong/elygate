@@ -17,10 +17,11 @@ import (
 )
 
 func employeeAuditAppender(store configstore.ConfigStore, request *fasthttp.RequestCtx) employees.EmployeeAuditAppender {
+	requestID, traceID := controlplane.AuditCorrelationFromRequest(request)
 	base := handlers.GovernanceAuditInput{
 		Principal: handlers.AdminPrincipalFromRequest(request),
-		RequestID: handlers.GovernanceRequestIDFromRequest(request),
-		TraceID:   handlers.GovernanceTraceIDFromRequest(request),
+		RequestID: requestID,
+		TraceID:   traceID,
 		Outcome:   "success",
 	}
 	if actor, _ := request.UserValue(lib.FastHTTPUserValueManagementAuditActor).(string); actor != "" && base.Principal.Authenticated {
@@ -31,13 +32,13 @@ func employeeAuditAppender(store configstore.ConfigStore, request *fasthttp.Requ
 
 func employeeSelfServiceAuditAppender(store configstore.ConfigStore, request *fasthttp.RequestCtx, employeeID string) employees.EmployeeAuditAppender {
 	// This principal is an audit value only; never attach it to authorization.
+	requestID, traceID := controlplane.AuditCorrelationFromRequest(request)
 	return transactionalEmployeeAuditAppender(store, handlers.GovernanceAuditInput{
 		Principal: handlers.AdminPrincipal{
 			ID: "employee:" + employeeID, Name: "Employee",
 			AuthMethod: "employee-session", Authenticated: true,
 		},
-		RequestID: handlers.GovernanceRequestIDFromRequest(request),
-		TraceID:   handlers.GovernanceTraceIDFromRequest(request), Outcome: "success",
+		RequestID: requestID, TraceID: traceID, Outcome: "success",
 	})
 }
 
@@ -61,7 +62,7 @@ func employeeLoginFailureAuditor(store configstore.ConfigStore, logger schemas.L
 
 func transactionalEmployeeAuditAppender(store configstore.ConfigStore, base handlers.GovernanceAuditInput) employees.EmployeeAuditAppender {
 	if !encrypt.IsEnabled() {
-		return compactEmployeeAuditAppender(base.Principal.ID)
+		return compactEmployeeAuditAppender(base.Principal.ID, base.RequestID, base.TraceID)
 	}
 	return func(ctx context.Context, tx *gorm.DB, event employees.EmployeeAuditEvent) error {
 		input := base
@@ -74,11 +75,12 @@ func transactionalEmployeeAuditAppender(store configstore.ConfigStore, base hand
 	}
 }
 
-func compactEmployeeAuditAppender(actorID string) employees.EmployeeAuditAppender {
+func compactEmployeeAuditAppender(actorID, requestID, traceID string) employees.EmployeeAuditAppender {
 	return func(ctx context.Context, tx *gorm.DB, event employees.EmployeeAuditEvent) error {
 		return tx.WithContext(ctx).Create(&controlplane.AuditEvent{
 			ID: uuid.NewString(), ActorID: actorID, Action: event.Action,
 			ResourceType: event.Resource, ResourceID: event.ResourceID,
+			RequestID: requestID, TraceID: traceID,
 			CreatedAt: time.Now().UTC(),
 		}).Error
 	}

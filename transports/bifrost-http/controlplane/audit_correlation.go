@@ -18,6 +18,13 @@ type auditCorrelation struct {
 
 type auditCorrelationContextKey struct{}
 
+// AuditCorrelationFromRequest freezes validated identifiers so audit appenders
+// can retain them beyond the lifetime of the request's reusable buffers.
+func AuditCorrelationFromRequest(request *fasthttp.RequestCtx) (requestID, traceID string) {
+	correlation := auditCorrelationFromRequest(request)
+	return correlation.requestID, correlation.traceID
+}
+
 func auditCorrelationFromRequest(request *fasthttp.RequestCtx) auditCorrelation {
 	requestID, _ := request.UserValue(schemas.BifrostContextKeyRequestID).(string)
 	if requestID == "" {

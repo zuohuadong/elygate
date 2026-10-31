@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,6 +23,147 @@ import (
 	"github.com/valyala/fasthttp"
 	"gorm.io/gorm"
 )
+
+func TestEmployeeAuditCorrelationSourcesAndCapture(t *testing.T) {
+	traceID := strings.Repeat("a", 32)
+	for _, key := range []string{"", "employee-correlation-test-only-key"} {
+		mode := "compact"
+		if key != "" {
+			mode = "signed"
+		}
+		t.Run(mode, func(t *testing.T) {
+			logger := bifrost.NewDefaultLogger(schemas.LogLevelError)
+			encrypt.Init(key, logger)
+			t.Cleanup(func() { encrypt.Init("", logger) })
+			store := newRoutingTestConfigStore(t)
+			controlStore, err := controlplane.NewStore(t.Context(), store)
+			require.NoError(t, err)
+			for _, factory := range []struct {
+				name   string
+				create func(configstore.ConfigStore, *fasthttp.RequestCtx) employees.EmployeeAuditAppender
+			}{
+				{"management", employeeAuditAppender},
+				{"self_service", func(store configstore.ConfigStore, request *fasthttp.RequestCtx) employees.EmployeeAuditAppender {
+					return employeeSelfServiceAuditAppender(store, request, "correlation-employee")
+				}},
+			} {
+				t.Run(factory.name, func(t *testing.T) {
+					// Cover absent, all source priorities, invalid selected sources, and byte limits.
+					for _, scenario := range []struct {
+						name, headerRequest, responseRequest, contextRequest string
+						responseTrace, contextTrace, wantRequest, wantTrace  string
+					}{
+						{name: "absent"},
+						{name: "header", headerRequest: "header-request", wantRequest: "header-request"},
+						{name: "response", headerRequest: "header-request", responseRequest: "gateway-request", responseTrace: traceID, wantRequest: "gateway-request", wantTrace: traceID},
+						{name: "context", headerRequest: "header-request", responseRequest: "gateway-request", contextRequest: "context-request", responseTrace: strings.Repeat("b", 32), contextTrace: traceID, wantRequest: "context-request", wantTrace: traceID},
+						{name: "invalid_context", headerRequest: "header-request", responseRequest: "gateway-request", contextRequest: "invalid request", responseTrace: traceID, contextTrace: "invalid-trace"},
+						{name: "invalid_response", headerRequest: "header-request", responseRequest: "invalid request", responseTrace: "invalid-trace"},
+						{name: "overlong_header", headerRequest: strings.Repeat("x", 129)},
+						{name: "maximum_request", headerRequest: strings.Repeat("x", 128), contextTrace: traceID, wantRequest: strings.Repeat("x", 128), wantTrace: traceID},
+						{name: "uppercase_trace", contextTrace: strings.Repeat("A", 32), responseTrace: traceID},
+						{name: "zero_trace", contextTrace: strings.Repeat("0", 32), responseTrace: traceID},
+					} {
+						t.Run(scenario.name, func(t *testing.T) {
+							request := &fasthttp.RequestCtx{}
+							request.SetUserValue(schemas.IsLocalAdminContextKey, true)
+							request.Request.Header.Set(lib.HeaderRequestID, scenario.headerRequest)
+							request.Response.Header.Set(lib.HeaderBifrostRequestID, scenario.responseRequest)
+							request.Response.Header.Set(lib.HeaderBifrostTraceID, scenario.responseTrace)
+							request.SetUserValue(schemas.BifrostContextKeyRequestID, scenario.contextRequest)
+							request.SetUserValue(schemas.BifrostContextKeyExportTraceID, scenario.contextTrace)
+							request.Request.Header.Set(lib.HeaderBifrostTraceID, traceID)
+							request.Request.Header.Set("traceparent", "00-"+traceID+"-"+strings.Repeat("b", 16)+"-01")
+							request.SetUserValue(schemas.BifrostContextKeyTraceID, traceID)
+							appender := factory.create(store, request)
+							request.Request.Header.Set(lib.HeaderRequestID, "changed-after-capture")
+							request.Response.Header.Set(lib.HeaderBifrostRequestID, "changed-after-capture")
+							request.Response.Header.Set(lib.HeaderBifrostTraceID, strings.Repeat("c", 32))
+							request.SetUserValue(schemas.BifrostContextKeyRequestID, "changed-after-capture")
+							request.SetUserValue(schemas.BifrostContextKeyExportTraceID, strings.Repeat("d", 32))
+							event := employees.EmployeeAuditEvent{
+								Action: "employee.updated", Resource: "employee", ResourceID: factory.name + "/" + scenario.name,
+							}
+							rollback := errors.New("rollback correlation event")
+							require.ErrorIs(t, store.ExecuteTransaction(t.Context(), func(tx *gorm.DB) error {
+								if err := appender(t.Context(), tx, event); err != nil {
+									return err
+								}
+								return rollback
+							}), rollback)
+							rows, err := controlStore.ListAudit(t.Context(), 100)
+							require.NoError(t, err)
+							for _, row := range rows {
+								require.NotEqual(t, event.ResourceID, row.ResourceID)
+							}
+							require.NoError(t, store.ExecuteTransaction(t.Context(), func(tx *gorm.DB) error {
+								return appender(t.Context(), tx, event)
+							}))
+							if key == "" {
+								var raw controlplane.AuditEvent
+								require.NoError(t, store.DB().Where("resource_id = ?", event.ResourceID).First(&raw).Error)
+								require.Equal(t, scenario.wantRequest, raw.RequestID)
+								require.Equal(t, scenario.wantTrace, raw.TraceID)
+							} else {
+								var raw configtables.TableGovernanceAuditEvent
+								require.NoError(t, store.DB().Where("resource_id = ?", event.ResourceID).First(&raw).Error)
+								require.Equal(t, scenario.wantRequest, raw.RequestID)
+								require.Equal(t, scenario.wantTrace, raw.TraceID)
+								require.NotEmpty(t, raw.Signature)
+							}
+							rows, err = controlStore.ListAudit(t.Context(), 100)
+							require.NoError(t, err)
+							matches := 0
+							for _, row := range rows {
+								if row.ResourceID == event.ResourceID {
+									matches++
+									require.Equal(t, scenario.wantRequest, row.RequestID)
+									require.Equal(t, scenario.wantTrace, row.TraceID)
+								}
+							}
+							require.Equal(t, 1, matches)
+						})
+					}
+				})
+			}
+		})
+	}
+}
+
+var benchmarkEmployeeAuditAppender employees.EmployeeAuditAppender
+
+func BenchmarkEmployeeAuditAppenderCapture(b *testing.B) {
+	logger := bifrost.NewDefaultLogger(schemas.LogLevelError)
+	for _, key := range []string{"", "employee-correlation-benchmark-only-key"} {
+		mode := "compact"
+		if key != "" {
+			mode = "signed"
+		}
+		b.Run(mode, func(b *testing.B) {
+			encrypt.Init(key, logger)
+			b.Cleanup(func() { encrypt.Init("", logger) })
+			for _, variant := range []string{"absent", "present", "invalid"} {
+				b.Run(variant, func(b *testing.B) {
+					request := &fasthttp.RequestCtx{}
+					request.SetUserValue(schemas.IsLocalAdminContextKey, true)
+					if variant != "absent" {
+						request.Request.Header.Set(lib.HeaderRequestID, "employee-request")
+						request.SetUserValue(schemas.BifrostContextKeyExportTraceID, strings.Repeat("a", 32))
+					}
+					if variant == "invalid" {
+						request.Request.Header.Set(lib.HeaderRequestID, strings.Repeat("x", 129))
+						request.SetUserValue(schemas.BifrostContextKeyExportTraceID, "invalid-trace")
+					}
+					b.ReportAllocs()
+					b.ResetTimer()
+					for range b.N {
+						benchmarkEmployeeAuditAppender = employeeAuditAppender(nil, request)
+					}
+				})
+			}
+		})
+	}
+}
 
 func TestEmployeeAuditAppenderUsesCallerTransactionAndTrustedIdentity(t *testing.T) {
 	for _, key := range []string{"", "employee-audit-test-key-not-a-production-secret"} {
@@ -144,6 +286,8 @@ func TestEmployeeSelfServicePasswordAuditUsesEmployeeIdentityAndCallerTransactio
 				request.Request.Header.SetCookie("employee_token", "self-retained")
 				request.Request.Header.Set("X-CSRF-Token", "self-csrf")
 				request.Request.Header.Set("X-User-ID", "forged-user")
+				request.Request.Header.Set(lib.HeaderRequestID, "password-request")
+				request.SetUserValue(schemas.BifrostContextKeyExportTraceID, strings.Repeat("a", 32))
 				request.SetUserValue(schemas.IsLocalAdminContextKey, true)
 				request.SetUserValue(schemas.BifrostContextKeyUserID, "forged-admin")
 				request.SetUserValue(lib.FastHTTPUserValueManagementAuditActor, "forged-management-actor")
@@ -169,6 +313,8 @@ func TestEmployeeSelfServicePasswordAuditUsesEmployeeIdentityAndCallerTransactio
 				require.Equal(t, "employee:"+employee.ID, rows[0].ActorID)
 				require.Equal(t, "employee.password_changed", rows[0].Action)
 				require.Equal(t, employee.ID, rows[0].ResourceID)
+				require.Equal(t, "password-request", rows[0].RequestID)
+				require.Equal(t, strings.Repeat("a", 32), rows[0].TraceID)
 				encoded, err := json.Marshal(rows)
 				require.NoError(t, err)
 				for _, secret := range []string{"forged", "changed-after-capture", employee.Name, employee.Username, "OriginalPassword!123", "ReplacementPassword!123", employee.PasswordHash, current.PasswordHash, "self-retained", "self-csrf"} {
@@ -180,6 +326,8 @@ func TestEmployeeSelfServicePasswordAuditUsesEmployeeIdentityAndCallerTransactio
 					require.False(t, signed.LocalAdmin)
 					require.Empty(t, signed.RoleID)
 					require.Equal(t, "employee-session", signed.AuthMethod)
+					require.Equal(t, "password-request", signed.RequestID)
+					require.Equal(t, strings.Repeat("a", 32), signed.TraceID)
 					require.NotEmpty(t, signed.Signature)
 					raw, err := json.Marshal(signed)
 					require.NoError(t, err)
@@ -256,6 +404,8 @@ func TestEmployeeSessionRoutesUseTransactionalTrustedAudit(t *testing.T) {
 					request.Request.Header.SetMethod(fasthttp.MethodPost)
 					request.Request.Header.SetContentType("application/json")
 					request.Request.Header.Set("X-User-ID", "forged-user")
+					request.Request.Header.Set(lib.HeaderRequestID, "session-request")
+					request.SetUserValue(schemas.BifrostContextKeyExportTraceID, strings.Repeat("a", 32))
 					request.SetUserValue(schemas.IsLocalAdminContextKey, true)
 					request.SetUserValue(schemas.BifrostContextKeyUserID, "forged-admin")
 					request.SetUserValue(lib.FastHTTPUserValueManagementAuditActor, "forged-management")
@@ -308,6 +458,8 @@ func TestEmployeeSessionRoutesUseTransactionalTrustedAudit(t *testing.T) {
 						require.Equal(t, "employee_session", event.ResourceType)
 						require.NotEmpty(t, event.ResourceID)
 						require.NotEqual(t, employee.ID, event.ResourceID)
+						require.Equal(t, "session-request", event.RequestID)
+						require.Equal(t, strings.Repeat("a", 32), event.TraceID)
 					}
 					for _, secret := range []string{"forged", "changed-after-capture", employee.Name, employee.Username, employee.PasswordHash, "OriginalPassword!123"} {
 						require.NotContains(t, string(feed.Response.Body()), secret)
@@ -336,6 +488,8 @@ func TestEmployeeSessionRoutesUseTransactionalTrustedAudit(t *testing.T) {
 					require.Empty(t, event.RoleID)
 					require.NotEmpty(t, event.Signature)
 					require.Equal(t, []string{"employee-password", "employee-session"}[index], event.AuthMethod)
+					require.Equal(t, "session-request", event.RequestID)
+					require.Equal(t, strings.Repeat("a", 32), event.TraceID)
 					raw, err := json.Marshal(event)
 					require.NoError(t, err)
 					for _, secret := range []string{token, csrf, encrypt.HashSHA256(token), encrypt.HashSHA256(csrf), employee.PasswordHash, "OriginalPassword!123", "forged", employee.Name} {

@@ -1276,6 +1276,47 @@ source 为 run `41199224310` 的实际 API 日志，reason 为混合正则
 新步骤仍需推送后实际执行，不能把已成功的父 run 当作新增员工测试证明。
 成本仅为 CI 测试时间，无请求路径或常驻内存开销，原目标继续 active / PARTIAL。
 
+### 员工事务审计关联修复（2026-11-01）
+
+后续项 `employee-audit-correlation`：parent 为 `f7f87ccef`，source 为员工审计
+关联缺口复核，reason 为员工管理、登录/退出和自助改密在紧凑审计模式丢失
+Request ID / Trace ID，签名模式也未统一采用控面的来源和校验规则。Native、
+中风险、root 单 writer，并完成一次独立只读 verifier；明确不使用 Pi agent。
+
+新增 `controlplane.AuditCorrelationFromRequest` 窄桥接，复用现有来源优先级、
+ASCII/小写 hex 校验和 `strings.Clone` 冻结逻辑。员工管理与 self-service appender
+在创建时捕获关联；compact 与 signed 审计写入同一组值，仍使用 caller transaction。
+匿名失败登录继续不接收 request 关联，身份、授权、审计 schema 和事务边界未改变。
+
+新增回归覆盖 admin/self-service、compact/signed、来源优先级、非法值不回退、
+捕获后 request mutation、原始签名表字段及事务回滚；员工登录/退出与改密路由也
+断言关联字段，匿名失败登录断言伪造 header/context/response 仍不落库。
+旧实现 overlay 已先红；当前定向 server 测试、control-plane correlation 测试、
+`-race` 定向测试、`go vet`（server/controlplane）及 `git diff --check` 通过。
+本轮使用隔离 SQLite 和进程内真实路由，不代表 PostgreSQL、真实网络或生产验收。
+构建契约 31 pass / 0 fail、218 assertions，actionlint 与独立复核通过。
+
+员工管理 appender capture 基准（Apple M4、Go 1.27.3，`-benchtime=1s`；
+同一测试的旧 HEAD overlay 与当前实现，数值为前 / 后）：
+
+| 模式/输入 | ns/op | B/op | allocs/op |
+| --- | --- | --- | --- |
+| compact/absent | 108.1 / 136.3 | 248 / 288 | 2 / 2 |
+| compact/present | 98.69 / 158.7 | 264 / 336 | 3 / 4 |
+| compact/invalid | 111.6 / 145.9 | 392 / 432 | 3 / 3 |
+| signed/absent | 107.8 / 144.8 | 256 / 256 | 2 / 2 |
+| signed/present | 98.48 / 158.7 | 272 / 304 | 3 / 4 |
+| signed/invalid | 114.6 / 145.3 | 400 / 400 | 3 / 3 |
+
+该基准不含数据库写入或签名运算。增量是员工 appender 创建时的来源校验与
+字符串冻结，不进入推理请求路径；没有新增缓存，两个关联标识最多持有
+160 字节字符串内容，随 appender 生命周期释放，不捕获 RequestCtx。
+
+CI 增加独立 `Run employee audit correlation regressions` 步骤；必须在推送后以
+同一 SHA 实际执行，不能把本地或父 run 结果替代 CI 证据。本机 Docker 缓存探针
+此前仍超时，未重跑完整恢复；生产路由发布、真实凭据、整机恢复和最终切换授权
+继续未完成，原目标保持 **active / PARTIAL**。
+
 ### 单机模板镜像固定检查（2026-10-31）
 
 后续项 `single-node-postgres-image-pin`：parent 为 `edc1a1c08`，source 为交付门 2，
