@@ -409,8 +409,11 @@ of unchanged latency or a production-load comparison.
 
 Follow-up `webhook-audit-ci`, parent `3e6b1f609`, adds an explicit workflow
 selection and build-contract assertion because the previous API-contract
-regular expression selected none of these tests. This local workflow change
-is not part of that commit's CI run; remote execution remains a separate gate.
+regular expression selected none of these tests. Commit `91f183438` carries
+the workflow change; remote run `41229428442` completed all four jobs
+successfully. Its webhook step ran handlers (0.485s) and controlplane (9.489s)
+without an empty selection. This closes the SQLite CI execution gap, not
+PostgreSQL CI, audit atomicity or production acceptance.
 Pi was invoked for the documentation work but exited with `Connection error`
 and no changes; root then took over the same writer scope.
 
