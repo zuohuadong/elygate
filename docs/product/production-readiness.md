@@ -30,6 +30,40 @@ reason 为完成既定模型目录元数据编辑。范围冻结为模型目录 
 
 ## 当前执行状态与剩余门禁
 
+### 2026-11-01 同候选真实恢复 CI
+
+后续项 `single-node-recovery-ci`：parent 为 `9edd2ca54`，source 为生产交付门 7，
+reason 为本机 Docker 短探针仍超时，但现有 CI runner 已能实际启动候选容器。
+范围冻结为恢复 smoke、Panel workflow、构建契约和本节证据；Native、中风险、
+root 单 writer、复用一次独立只读 verifier，不调用 Pi，不修改生产备份/恢复逻辑，
+不发布 registry、不改变生产服务或路由发布授权。
+
+新增 Node 内置库恢复入口，在现有镜像 smoke 之后、候选归档之前运行，绑定同一
+`IMAGE_ID` / `IMAGE_COMMIT`；失败不允许导出 verified candidate。由本地 OCI
+manifest 给候选命名，校验其 config ID 与输入 image ID 相等，不把 config ID
+冒充 manifest digest，也不启动 registry 或外部 push。
+两个随机 Compose project 使用独立卷、网络、容器及私有 `0700/0600` 文件，
+继承环境中的 Compose、备份目录和凭据覆盖被清除。源网关正常停止后实际调用
+生产 backup；目标网关保持未启动、runtime 显式禁止 Docker copy-up，由生产
+restore 检查空库/空卷并执行导入。目标第一次启动前对比全部业务表和 sequences
+逻辑指纹，以及 runtime marker 的 SHA-256、UID/GID、权限和加密凭据。
+
+同一隔离 HTTP fixture 分别接收真实 Relay 和 OpenAI-compatible 推理请求：
+Relay 核验解密后 credential、Application Key、日志费用/令牌；
+推理请求核验 Usage Ledger 的项目、应用、Key 归属和令牌。
+现有 Ledger 只投影 LLM 日志，不能把 Relay 日志伪称 Ledger 记录。
+恢复后核验登录/退出、原 Key、原审计 feed、完整签名链与公钥，继续写入用量和
+签名事件，再证明源端表、sequences 和 marker 未变。日志不输出 subprocess
+原文、SQL 数据、HTTP body、secret 或备份；最终成功必须晚于清理和残留资源检查。
+
+本地构建契约 39 pass / 0 fail（262 assertions）、Node 语法、actionlint 和
+diff 检查通过。它们不是 Docker 恢复证据；该入口仍需推送后同 SHA CI 真正执行。
+既有 `9edd2ca54` 的 run `41242882512` 已于 2026-10-31 21:26:31 UTC
+（北京时间 2026-11-01 05:26:31）全部成功，但没有执行本新增恢复步骤。
+本项只有 CI 测试耗时和测试进程的临时内存/磁盘，无推理生产路径或常驻内存增量。
+真实供应商、升级回滚、正式发布、策略发布和最终生产切换继续未验收，
+原总目标保持 **active / PARTIAL**。
+
 ### 2026-11-01 隔离卷恢复演练结果
 
 后续项 `single-node-docker-recovery`，parent 为 `model-governance-annotations`，
@@ -82,7 +116,12 @@ provider-harness case；无推理路径或常驻内存增量。
 
 ## 候选版本
 
-- 当前完成 CI 的代码候选为 `6dd8128632acec8d24108ad71b3d9c7ab2c1c443`，
+- 当前完成 CI 的代码候选为 `9edd2ca547fe9164a8d4d9fb41e92e3f765f1b86`，
+  run `41242882512` 的 Panel、员工门户、API contracts 和生产镜像四个 job
+  全部成功；新增员工事务审计关联专项已实际执行。镜像完成非 root、
+  双 PostgreSQL、health、版本、登录/退出、正常重启及候选归档，
+  不是新增真实卷恢复、registry 发布或生产切换证明。
+- 此前完成 CI 的代码候选为 `6dd8128632acec8d24108ad71b3d9c7ab2c1c443`，
   run `41238139793` 于 2026-10-31 20:16:36 UTC 创建，20:25:29 UTC
   全部成功完成（北京时间 2026-11-01 04:25:29）；Panel、员工门户、
   API contracts 和镜像构建/运行四个 job 全部通过。artifact ID

@@ -14,6 +14,7 @@ on:
       - "transports/Dockerfile*"
       - ".github/workflows/panel-tests.yml"
       - ".github/workflows/scripts/smoke-elygate-image.sh"
+      - ".github/workflows/scripts/smoke-elygate-recovery.mjs"
       - "examples/single-node-postgres/**"
       - "scripts/production/**"
       - "scripts/go-local.sh"
@@ -31,6 +32,7 @@ on:
       - "transports/Dockerfile*"
       - ".github/workflows/panel-tests.yml"
       - ".github/workflows/scripts/smoke-elygate-image.sh"
+      - ".github/workflows/scripts/smoke-elygate-recovery.mjs"
       - "examples/single-node-postgres/**"
       - "scripts/production/**"
       - "scripts/go-local.sh"
@@ -121,6 +123,11 @@ jobs:
           IMAGE_ID: ${{ steps.candidate.outputs.image_id }}
           IMAGE_COMMIT: ${{ github.sha }}
         run: bash .github/workflows/scripts/smoke-elygate-image.sh "$IMAGE_ID" "$IMAGE_COMMIT"
+      - name: Verify isolated production backup and recovery
+        env:
+          IMAGE_ID: ${{ steps.candidate.outputs.image_id }}
+          IMAGE_COMMIT: ${{ github.sha }}
+        run: node .github/workflows/scripts/smoke-elygate-recovery.mjs "$IMAGE_ID" "$IMAGE_COMMIT"
       - name: Export verified candidate image
         shell: bash
         env:

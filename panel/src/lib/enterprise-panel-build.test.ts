@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parse } from 'yaml';
 import { resolveEnterprisePanelModule } from '../../vite-enterprise-panel.mjs';
+import { candidateManifest, command, recoveryEnvironment, validateCandidate } from '../../../.github/workflows/scripts/smoke-elygate-recovery.mjs';
 
 describe('enterprise panel build contract', () => {
 	test('uses the OSS fallback for ordinary builds', () => {
@@ -100,7 +101,8 @@ describe('enterprise panel build contract', () => {
 		for (const path of ['.bun-version', 'panel/**', 'enterprise/employee-portal/**',
 			'transports/bifrost-http/**', 'framework/configstore/**', 'framework/logstore/**',
 			'plugins/logging/**', 'Makefile', 'transports/Dockerfile*', '.github/workflows/panel-tests.yml',
-			'.github/workflows/scripts/smoke-elygate-image.sh', 'examples/single-node-postgres/**',
+			'.github/workflows/scripts/smoke-elygate-image.sh', '.github/workflows/scripts/smoke-elygate-recovery.mjs',
+			'examples/single-node-postgres/**',
 			'scripts/production/**', 'scripts/go-local.sh']) {
 			expect(workflow.on.push.paths).toContain(path);
 		}
@@ -126,19 +128,25 @@ describe('enterprise panel build contract', () => {
 		const buildIndex = steps.findIndex((step: { name?: string }) => step.name === 'Build image without publishing');
 		const identityIndex = steps.findIndex((step: { id?: string }) => step.id === 'candidate');
 		const runtimeIndex = steps.findIndex((step: { name?: string }) => step.name === 'Start image and verify runtime health');
+		const recoveryIndex = steps.findIndex((step: { name?: string }) => step.name === 'Verify isolated production backup and recovery');
 		const exportIndex = steps.findIndex((step: { name?: string }) => step.name === 'Export verified candidate image');
 		const uploadIndex = steps.findIndex((step: { name?: string }) => step.name === 'Retain verified candidate image');
 		expect(identityIndex).toBeGreaterThan(buildIndex);
 		expect(runtimeIndex).toBeGreaterThan(identityIndex);
-		expect(exportIndex).toBeGreaterThan(runtimeIndex);
+		expect(recoveryIndex).toBeGreaterThan(runtimeIndex);
+		expect(exportIndex).toBeGreaterThan(recoveryIndex);
 		expect(uploadIndex).toBeGreaterThan(exportIndex);
-		for (const step of [steps[identityIndex], steps[runtimeIndex], steps[exportIndex], steps[uploadIndex]]) {
+		for (const step of [steps[identityIndex], steps[runtimeIndex], steps[recoveryIndex], steps[exportIndex], steps[uploadIndex]]) {
 			expect(step.if).toBeUndefined();
 			expect(step['continue-on-error']).not.toBe(true);
 		}
 		expect(workflow.jobs.docker['continue-on-error']).not.toBe(true);
 		expect(steps[identityIndex].shell).toBe('bash');
 		expect(steps[identityIndex].run).toContain("docker image inspect elygate:panel-ci --format '{{.Id}}'");
+		expect(steps[recoveryIndex].env).toEqual({
+			IMAGE_ID: '${{ steps.candidate.outputs.image_id }}', IMAGE_COMMIT: '${{ github.sha }}',
+		});
+		expect(steps[recoveryIndex].run).toBe('node .github/workflows/scripts/smoke-elygate-recovery.mjs "$IMAGE_ID" "$IMAGE_COMMIT"');
 		const archive = steps[exportIndex];
 		expect(archive.shell).toBe('bash');
 		expect(archive.env).toEqual({
@@ -158,6 +166,75 @@ describe('enterprise panel build contract', () => {
 		expect(upload.with['if-no-files-found']).toBe('error');
 		expect(upload.with['compression-level']).toBe(0);
 		expect(upload.with['retention-days']).toBe(7);
+	});
+
+	test.each([{ args: [] }, { args: ['floating:latest', 'b'.repeat(40)] },
+		{ args: [`sha256:${'a'.repeat(64)}`, 'bad'] },
+		{ args: [`sha256:${'a'.repeat(64)}\nother=untrusted`, 'b'.repeat(40)] },
+		{ args: [`sha256:${'a'.repeat(64)}`, 'b'.repeat(40), 'extra'] }])(
+		'recovery rejects invalid candidate input before Docker allocation (%j)', async ({ args }) => {
+			expect(() => validateCandidate(args)).toThrow('expected immutable image ID');
+			const script = new URL('../../../.github/workflows/scripts/smoke-elygate-recovery.mjs', import.meta.url);
+			const child = Bun.spawn([process.execPath, script.pathname, ...args], {
+				env: { PATH: '/definitely/no/docker' }, stdout: 'pipe', stderr: 'pipe',
+			});
+			expect(await child.exited).toBe(2);
+			expect(await new Response(child.stdout).text()).toBe('');
+			expect(await new Response(child.stderr).text()).toContain('expected immutable image ID');
+		},
+	);
+
+	test('recovery selects the matching OCI manifest, never the config ID or an unrelated platform', () => {
+		const imageID = `sha256:${'a'.repeat(64)}`;
+		expect(() => validateCandidate([imageID, 'b'.repeat(40)])).not.toThrow();
+		const bytes = new TextEncoder().encode(JSON.stringify({ config: { digest: imageID } }));
+		const hash = new Bun.CryptoHasher('sha256').update(bytes).digest('hex');
+		const descriptor = { digest: `sha256:${hash}`, size: bytes.length };
+		const blobs = new Map([[hash, bytes]]);
+		const readBlob = (name: string) => {
+			const blob = blobs.get(name);
+			if (!blob) throw new Error('missing test blob');
+			return blob;
+		};
+		expect(candidateManifest({ manifests: [descriptor] }, readBlob, imageID)).toEqual(descriptor);
+		expect(descriptor.digest).not.toBe(imageID);
+		expect(candidateManifest({ manifests: [descriptor] }, readBlob, `sha256:${'b'.repeat(64)}`)).toBeUndefined();
+		const nested = new TextEncoder().encode(JSON.stringify({ manifests: [descriptor] }));
+		const nestedHash = new Bun.CryptoHasher('sha256').update(nested).digest('hex');
+		blobs.set(nestedHash, nested);
+		expect(candidateManifest({ manifests: [{ digest: `sha256:${nestedHash}` }] }, readBlob, imageID)).toEqual(descriptor);
+		expect(() => candidateManifest({ manifests: [descriptor, descriptor] }, readBlob, imageID)).toThrow('ambiguous');
+		expect(() => candidateManifest({ manifests: [{ digest: imageID }] }, () => bytes, imageID)).toThrow('checksum');
+		expect(() => candidateManifest({ manifests: [{ digest: '../escape' }] }, readBlob, imageID)).toThrow('descriptor');
+		expect(candidateManifest({ manifests: [] }, readBlob, imageID)).toBeUndefined();
+	});
+
+	test('recovery commands fail closed on exit, spawn and timeout errors without exposing subprocess output', () => {
+		expect(command('/bin/sh', ['-c', 'printf success'])).toBe('success');
+		for (const [binary, args, options] of [
+			['/bin/sh', ['-c', 'printf PRIVATE_RECOVERY_SENTINEL >&2; exit 1'], {}],
+			['/definitely/no/docker', [], {}],
+			['/bin/sh', ['-c', 'printf PRIVATE_RECOVERY_SENTINEL; exec sleep 5'], { timeout: 20 }],
+		] as const) {
+			try {
+				command(binary, [...args], options);
+				throw new Error('expected command failure');
+			} catch (error) {
+				expect((error as Error).message).toContain('command failed (output suppressed)');
+				expect((error as Error).message).not.toContain('PRIVATE_RECOVERY_SENTINEL');
+			}
+		}
+	});
+
+	test('recovery cannot inherit a caller deployment target or secret environment override', () => {
+		const inherited = { PATH: '/bin', DOCKER_HOST: 'unix:///test/docker.sock', DOCKER_CONTEXT: 'production',
+			COMPOSE_FILE: '/production.yml', COMPOSE_PROJECT_NAME: 'production',
+			ENV_FILE: '/production.env', BACKUP_ROOT: '/production', BACKUP_DIR: '/production',
+			ELYGATE_IMAGE: 'floating:latest', BIFROST_ENCRYPTION_KEY: 'PRIVATE_RECOVERY_SENTINEL',
+			POSTGRES_PASSWORD: 'PRIVATE_RECOVERY_SENTINEL', ENCRYPTION_KEY: 'PRIVATE_RECOVERY_SENTINEL',
+			SETUP_TOKEN: 'PRIVATE_RECOVERY_SENTINEL' };
+		expect(recoveryEnvironment(inherited)).toEqual({ PATH: '/bin' });
+		expect(inherited.COMPOSE_PROJECT_NAME).toBe('production');
 	});
 
 	test.each(['success', 'invalid-identity', 'invalid-commit', 'save-failure', 'inspect-mismatch', 'load-failure'])(
