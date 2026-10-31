@@ -8,7 +8,21 @@
 
 ## 候选版本
 
-- 当前已推送候选为 `836f43c0614b3d22241dc733c0cff7d99b178193`，
+- 已完成本轮 CI 验收的候选为 `3c2b96a723e091be25007adde8e2093ba3dbce8d`，
+  run `41199224310` 于 2026-10-31 12:00:56 UTC 启动，
+  12:08:04 UTC 成功结束，四个 job 全部通过。新增目录审计步骤实际输出
+  handlers `ok`（0.035s）、server `ok`（2.894s），没有
+  `[no tests to run]`，关闭该 SHA 的 SQLite 专项 CI 执行缺口，不代表 PostgreSQL
+  目录专项、race、真实供应商或全部审计原子性通过。
+  镜像 manifest digest 为
+  `sha256:c71963f0790dd4a58d5fd17e98ee232052124a410e0251a655030642a28e5b8e`；
+  非 root、双 PostgreSQL、health、版本、登录/退出、正常重启和清理均成功。
+  候选 artifact `13041918067` 大小 `162918742` 字节，
+  于 2026-11-07 12:07:41 UTC 过期；本轮没有独立下载或运行该归档，
+  未发布 registry 或部署生产。该 run 的既有混合筛选在 employees 包输出
+  `[no tests to run]`，员工门户 job 成功不能替代员工 Go 后端测试；
+  后续独立员工回归入口不包含在该 SHA 或该次执行中。
+- 此前已推送候选为 `836f43c0614b3d22241dc733c0cff7d99b178193`，
   CI run `41197421345` 于 2026-10-31 11:34:34 UTC 启动，
   11:41:55 UTC 成功结束。面板、员工门户、既有 API contracts 和
   镜像构建/运行四个 job 全部通过；镜像 manifest digest 为
@@ -808,6 +822,23 @@ Go 专项使用 `/Volumes/Datas` 下缓存和临时目录及 macOS 外部链接�
 只有构建/CI 工作量增加，无推理请求、数据库或常驻内存开销。
 完整功能、真实供应商、备份恢复、升级回滚和生产切换门保持未完成，
 原目标继续 active / PARTIAL；本增量没有部署生产。
+
+### 员工后端 CI 空筛选修正（2026-10-31）
+
+后续项 `employee-ci-test-selection`：parent 为 `3c2b96a72`，
+source 为 run `41199224310` 的实际 API 日志，reason 为混合正则
+`Test(ApplicationKeyRouter|UsageReconciliation|LoginLimiter|Session|Auth|CorsAccessLog)`
+不匹配员工包测试名，该包实际零测试执行。范围仅为既有面板 CI、
+构建契约测试和本记录；Native、低风险、root 单 writer、external=0，
+不修改员工业务、鉴权或数据库行为。
+
+增加独立 `Run employee contracts` 步骤，对 employees 包运行 `^Test`，
+涵盖当前源码的全部 47 个顶层测试，包括会话、凭据修改、管理写入、
+审计原子性、登录准入和失败事件；保留原混合步骤，不削减其他包的检查。
+命令使用独立临时 SQLite，不调用外部模型，不代表 PostgreSQL 或真实网络验收。
+构建契约 31 pass / 0 fail（212 assertions）、actionlint 和 diff 检查通过；
+新步骤仍需推送后实际执行，不能把已成功的父 run 当作新增员工测试证明。
+成本仅为 CI 测试时间，无请求路径或常驻内存开销，原目标继续 active / PARTIAL。
 
 ### 单机模板镜像固定检查（2026-10-31）
 
