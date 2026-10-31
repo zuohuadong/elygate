@@ -8,8 +8,8 @@
 
 ## 候选版本
 
-- 最近完成 CI 镜像运行验收的候选为 `fd2f18affc64f74e864972ab02d6dd4be45d7d67`，
-  run `41160000132` 于 2026-10-31 10:32:31（北京时间）整体成功。
+- 最近完成 CI 镜像运行验收的候选为 `cb2af42309e45dd0f61beb8d6cc4608c1d9dd4d0`，
+  run `41165399877` 于 2026-10-31 11:47:54（北京时间）整体成功。
   镜像已在隔离 runner 中实际加载、启动和正常重启，详见下方运行时记录；
   未发布镜像或部署生产，不将后续本地修改或文档提交视为同一镜像 SHA。
 - 草稿 API 初始源码基线：`dev` / `826067def`，包含 Bifrost `c34bd4360`。
@@ -276,11 +276,12 @@ Bash 语法、ShellCheck、46 个预检用例和 `git diff --check` 通过，
 测试目录已清理。此为本地 `PASS_SCOPED`，只验证默认单机同库模板的静态前提；
 自定义双库、真实连接、TLS、升级回滚和完整产品功能仍按原交付门验收。
 脚本只在上线前执行，无请求路径 CPU/分配或常驻缓存开销。
-本后续项未提交、推送或部署，原总目标继续 **active / PARTIAL**。
+本后续项已随 `99ba2372c` 提交并推送到 `dev`，未部署，
+原总目标继续 **active / PARTIAL**。
 
 ## 生产交付门
 
-### 当前候选 CI 复验（2026-10-31）
+### `fd2f18aff` 候选 CI 复验（2026-10-31）
 
 `fd2f18affc64f74e864972ab02d6dd4be45d7d67` 的 run `41160000132`
 已整体完成成功：面板单测/Svelte/构建、员工门户和 API contracts 均通过。
@@ -293,9 +294,51 @@ Bash 语法、ShellCheck、46 个预检用例和 `git diff --check` 通过，
 该 job 不执行上节 compact/signed Relay 恢复矩阵，不能替代当前候选的加密
 备份恢复证明，也未发布可拉取的生产制品。Snyk `41160000090` 和
 CodSpeed `41160000108` 当前仍 queued，不计为安全或性能验收通过。
-本地未提交预检变更不包含在该镜像内；整体保持 **active / PARTIAL**。
+该镜像不包含其后 `99ba2372c` 的预检变更；整体保持 **active / PARTIAL**。
 
-### Dev CI 触发后续项（2026-10-31）
+### 生产预检 CI 接入后续项（2026-10-31）
+
+后续项 `single-node-preflight-ci`：parent 为 `99ba2372c`，
+source 为交付门 1/2 与持续推进指令，reason 为预检脚本变更尚未进入
+工作流路径过滤器和远端必跑检查。范围为 `panel-tests.yml`、既有构建契约测试
+与本记录，Native、root 单 writer、低风险；不修改生产请求路径、发布权限或部署状态。
+
+两次 Pi 实施请求分别使用 `deepseek/deepseek-v4.1-flash` 和精简上下文的
+`deepseek/deepseek-flash`，均以 `Request timed out` 退出，工具执行前未产生改动。
+另一个无工具的 `gomodel/deepseek-v4.1-flash` 最小连通请求也超时；
+凭据 readiness 的 `ready` 不证明远端调用可用。确认所有请求退出且工作区无
+Pi 产物后，root 接管同一 writer scope；Pi 实施要求仍未完成。
+
+`cb2af4230` 已提交推送到 `dev`：push/PR 同时监听 `scripts/production/**`，
+面板 job 在安装依赖前从仓库根执行 Bash 语法、ShellCheck 和全部预检用例，
+不静默跳过工具缺失或错误。新增 YAML 契约锁定命令、执行顺序、根目录和
+失败传播；既有只读权限、Docker 不发布及镜像运行门保持不变。
+本地构建契约 15 项、预检 46 项、Bash 语法、ShellCheck 与 diff 检查通过，
+`clean-code-guard: clean`。远端 run `41165399877` 已整体成功：
+预检 46 项、面板单测 378 项和代理集成 1 项、Svelte 零错误/警告、面板构建、
+员工门户与 Go API contracts 均通过。Docker job 对同 SHA 实际构建、加载、
+启动并通过非 root、双 PostgreSQL、健康、版本、登录退出、正常重启与清理；
+镜像 digest 为 `sha256:c6232e9c883ff8bd258661a5a630bf710871d026255b5961624cb3377ff55c87`。
+该镜像未发布或部署，不替代 Relay compact/signed 恢复矩阵。
+API job 仍有 setup-go 未找到根 `go.mod` 的缓存警告，测试成功但没有缓存命中证明；
+Snyk `41165399889` 和 CodSpeed `41165399902` 本轮查询仍 queued，不计验收通过。
+本项只增加 CI 检查，没有推理路径 CPU、分配或常驻缓存开销。
+
+作为前置证据，`99ba2372c` 的 run `41164546335` 已整体成功，包含面板、
+员工门户、Go API contracts 及同 SHA Docker 实际构建、加载、启动与正常重启。
+镜像 digest 为 `sha256:4ec3530629972f390add224067abd2b39c1b9f980f75a8430a7cd202e99835b0`，
+运行门核对非 root、双 PostgreSQL 连接、数据库 health ping、版本、登录退出与清理；
+没有发布该镜像或部署生产，也没有执行 compact/signed Relay 恢复矩阵。
+
+本轮再次使用 Go 1.27.3、PIE、外部链接、`sqlite_static`、`-buildvcs=false`
+与完整 `99ba2372c` 版本注入重建本地网关；Go 源码和模块输入相对 HEAD 无差异。
+采样仍主要为 `read/stat/pread`，持续低 CPU 后主动停止，退出 143，
+没有生成新的候选可执行文件，不记为编译失败或通过；采样位于
+`.codex-tmp/current-candidate-build.sample.txt`，不纳入提交。
+当前候选的加密恢复、策略发布/Shadow/回滚、完整敏感审计、TLS/反向代理、
+升级回滚及显式生产切换授权均未被本项替代，原目标保持 **active / PARTIAL**。
+
+### Dev CI 触发后续项（已由 `cb2af4230` 闭合，2026-10-31）
 
 后续项 `panel-ci-dev-trigger`：parent 为员工双存储运行验收 / `ffc591530`，
 source 为交付门 1 的 CI 证据缺口，reason 为既有面板工作流只监听
@@ -303,9 +346,10 @@ source 为交付门 1 的 CI 证据缺口，reason 为既有面板工作流只�
 低风险、external=0。范围仅为 push 分支、既有构建契约回归和验收文档；
 不修改 job 内容、路径过滤、权限、runner 配置、密钥或部署规则。
 
-YAML 结构化回归将核对 `main`/`dev`、原路径过滤和 PR/手动入口，
-`contents: read` 及 Docker `push: false` 保持不变。修正仍在本地，
-不能作为远端工作流已执行或镜像已构建的证据。
+YAML 结构化回归核对了 `main`/`dev`、原路径过滤和 PR/手动入口，
+`contents: read` 及 Docker `push: false` 保持不变。该历史后续项的修正
+已随 `99ba2372c` 推送并在 `41164546335` 完成远端验证；随后由
+`cb2af4230` 接入生产预检并重新跑通完整工作流。
 本地 YAML 回归已通过：构建契约包 9 项测试、53 项断言；对照 HEAD
 确认旧分支列表仅为 `main`，当前为 `main`/`dev`。变更前本轮完整面板
 371 项测试、2229 项断言以及独立代理集成 1 项、12 项断言通过；
@@ -313,8 +357,8 @@ YAML 结构化回归将核对 `main`/`dev`、原路径过滤和 PR/手动入口�
 当前面板 Svelte 检查零错误、零警告，server 整包非 race 回归通过
 （7.770 秒），`git diff --check` 通过。
 仅修改 CI 触发与测试/文档，不增加请求路径工作、分配或保留状态。
-本后续项本地为 `PASS_SCOPED`，远端执行仍为 `PARTIAL`；没有提交、
-推送、dispatch 或发布。下一次获准推送后仍须核对对应 SHA 的实际 run。
+本后续项已由后续提交取代；当前远端执行证据见
+`41165399877`，仍没有发布镜像、dispatch 生产切换或部署生产。
 本次只读查询中，`ffc591530` 的 CodSpeed run `41137143692` 四个 job
 等待 `codspeed-macro` label，Snyk run `41137143713` 两个 job 等待
 `builder-8-32` label，均为 queued、无已分配 runner；这不证明仓库或组织
