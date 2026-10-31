@@ -197,6 +197,7 @@ describe('enterprise panel build contract', () => {
 			return blob;
 		};
 		expect(candidateManifest({ manifests: [descriptor] }, readBlob, imageID)).toEqual(descriptor);
+		expect(candidateManifest({ manifests: [descriptor] }, readBlob, descriptor.digest)).toEqual(descriptor);
 		expect(descriptor.digest).not.toBe(imageID);
 		expect(candidateManifest({ manifests: [descriptor] }, readBlob, `sha256:${'b'.repeat(64)}`)).toBeUndefined();
 		const nested = new TextEncoder().encode(JSON.stringify({ manifests: [descriptor] }));

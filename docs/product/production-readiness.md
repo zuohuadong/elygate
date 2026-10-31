@@ -40,8 +40,9 @@ root 单 writer、复用一次独立只读 verifier，不调用 Pi，不修改�
 
 新增 Node 内置库恢复入口，在现有镜像 smoke 之后、候选归档之前运行，绑定同一
 `IMAGE_ID` / `IMAGE_COMMIT`；失败不允许导出 verified candidate。由本地 OCI
-manifest 给候选命名，校验其 config ID 与输入 image ID 相等，不把 config ID
-冒充 manifest digest，也不启动 registry 或外部 push。
+manifest 给候选命名，输入 Docker identity 可严格匹配唯一 manifest digest 或
+config digest（两者不混淆），加载后再校验 `.Id` 与输入 identity 完全相等；
+不启动 registry 或外部 push。
 两个随机 Compose project 使用独立卷、网络、容器及私有 `0700/0600` 文件，
 继承环境中的 Compose、备份目录和凭据覆盖被清除。源网关正常停止后实际调用
 生产 backup；目标网关保持未启动、runtime 显式禁止 Docker copy-up，由生产
@@ -56,8 +57,15 @@ Relay 核验解密后 credential、Application Key、日志费用/令牌；
 签名事件，再证明源端表、sequences 和 marker 未变。日志不输出 subprocess
 原文、SQL 数据、HTTP body、secret 或备份；最终成功必须晚于清理和残留资源检查。
 
-本地构建契约 39 pass / 0 fail（262 assertions）、Node 语法、actionlint 和
+本地构建契约 39 pass / 0 fail（263 assertions）、Node 语法、actionlint 和
 diff 检查通过。它们不是 Docker 恢复证据；该入口仍需推送后同 SHA CI 真正执行。
+首次候选 `b441fe7cc58a7a1ef40d834674b4f2ff94af6423` 的 run `41245840468`
+中 Panel、员工门户和 API contracts 成功，现有镜像 smoke 成功；新增恢复在
+candidate identity 阶段失败，导出及归档被跳过。日志明确 Docker 29 `.Id`
+是 manifest digest `5d7d51f81ec125f1dda444c262c0f347985f9af950700eb7d646f3bb13b5a557`，
+config digest 则为 `05824d96f3f446a677692c0439b09c85c05b3f5f51a91592735cd318af04335f`。
+修正为识别两种严格匹配的身份并保留原始 OCI 校验、唯一候选、加载后 `.Id`
+一致性检查；不重建 manifest、不改变生产逻辑或放宽恢复断言。仍需新 SHA 运行。
 既有 `9edd2ca54` 的 run `41242882512` 已于 2026-10-31 21:26:31 UTC
 （北京时间 2026-11-01 05:26:31）全部成功，但没有执行本新增恢复步骤。
 本项只有 CI 测试耗时和测试进程的临时内存/磁盘，无推理生产路径或常驻内存增量。

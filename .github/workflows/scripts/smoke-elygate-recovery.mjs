@@ -16,7 +16,7 @@ export function validateCandidate(args) {
 		/^[a-f0-9]{40}$/.test(args[1]), 'expected immutable image ID and full Git commit SHA');
 }
 
-// Docker config IDs and OCI manifest digests identify different objects.
+// Docker .Id can identify a config or manifest depending on the image store.
 export function candidateManifest(index, readBlob, imageID) {
 	const candidates = [];
 	for (const descriptor of index.manifests ?? []) {
@@ -27,7 +27,7 @@ export function candidateManifest(index, readBlob, imageID) {
 		if (manifest.manifests) {
 			const nested = candidateManifest(manifest, readBlob, imageID);
 			if (nested) candidates.push(nested);
-		} else if (manifest.config?.digest === imageID) {
+		} else if (descriptor.digest === imageID || manifest.config?.digest === imageID) {
 			candidates.push(descriptor);
 		}
 	}
@@ -70,7 +70,7 @@ function nameCandidate(ctx) {
 	command('tar', ['-xf', archive, '-C', layout], { env: ctx.env });
 	const index = JSON.parse(readFileSync(join(layout, 'index.json'), 'utf8'));
 	const descriptor = candidateManifest(index, hash => readFileSync(join(layout, 'blobs/sha256', hash)), ctx.imageID);
-	check(descriptor, 'candidate must have an OCI manifest matching its config ID');
+	check(descriptor, 'candidate must have an OCI manifest matching its immutable image identity');
 	const reference = `localhost/${ctx.prefix}@${descriptor.digest}`;
 	ctx.loadedReference = reference;
 	index.manifests = [{ ...descriptor, annotations: {
