@@ -103,6 +103,12 @@ printf '%s' "$image_metadata" | jq -e --arg gateway "$gateway_image" --arg postg
 		(.architecture | type == "string" and length > 0))
 ' >/dev/null 2>&1 || fail "actual container image metadata is invalid"
 
+source_project="$(printf '%s' "$resolved_json" | jq -er '.name')" ||
+	fail "Compose project name is unavailable"
+source_runtime_volume="$(printf '%s' "$resolved_json" | jq -er '.volumes["elygate-runtime"].name')" ||
+	fail "runtime volume name is unavailable"
+source_postgres_volume="$(printf '%s' "$resolved_json" | jq -er '.volumes["postgres-data"].name')" ||
+	fail "PostgreSQL volume name is unavailable"
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 temporary_dir="$(mktemp -d "$backup_root/.elygate-backup-$timestamp.XXXXXXXX")" ||
 	fail "private backup directory could not be created"
@@ -151,7 +157,13 @@ jq -n --arg created "$timestamp" '{
 	format: "elygate-single-node-backup-v1", created_at: $created,
 	topology: "single-database", writers_excluded: "operator-confirmed",
 	secrets: "restore from separate secret management", recovery_verified: false
-}' > "$temporary_dir/manifest.json"
+}' |
+	jq --arg project "$source_project" --arg runtime "$source_runtime_volume" \
+		--arg postgres "$source_postgres_volume" --arg gateway_id "$gateway_id" \
+		--arg postgres_id "$postgres_id" \
+		'. + {source_project: $project, source_volumes: {
+			elygate_runtime: $runtime, postgres_data: $postgres
+		}, source_containers: {elygate: $gateway_id, postgres: $postgres_id}}' > "$temporary_dir/manifest.json"
 chmod 600 "$temporary_dir"/*
 (
 	cd "$temporary_dir"

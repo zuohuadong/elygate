@@ -287,7 +287,8 @@ esac
 			'bash -n scripts/production/single-node-preflight.test.sh',
 			'bash -n scripts/production/single-node-backup.sh',
 			'bash -n scripts/production/single-node-backup.test.sh',
-			'shellcheck scripts/production/single-node-preflight.sh scripts/production/single-node-preflight.test.sh scripts/production/single-node-backup.sh scripts/production/single-node-backup.test.sh',
+			'bash -n scripts/production/single-node-restore.sh',
+			'shellcheck scripts/production/single-node-preflight.sh scripts/production/single-node-preflight.test.sh scripts/production/single-node-backup.sh scripts/production/single-node-backup.test.sh scripts/production/single-node-restore.sh',
 			'bash scripts/production/single-node-preflight.test.sh',
 			'bash scripts/production/single-node-backup.test.sh',
 		]);

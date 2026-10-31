@@ -109,32 +109,59 @@ Listing the dump only checks that its archive can be read. Restore and reconcile
 
 ## Restore
 
-Restore only on a separate test server or explicitly isolated deployment with new PostgreSQL and runtime volumes. Keep the original databases, files and image intact. Configure that target's `.env` and `config.json` with a new database name and the original stable encryption/signing material. Use the exact Elygate image version that produced the backup for the first recovery boot.
+Restore only on a separate test server or explicitly isolated deployment with new
+PostgreSQL and runtime volumes. Keep the original databases, files and image intact.
+Use a different Compose project name and different `container_name` values for both
+services. Change the gateway's published port to an unused loopback-only port.
+Use fresh, distinct local volumes without driver options; never point an external
+volume declaration at an existing source volume. Exclude every other client and
+writer from the recovery database for the entire operation.
 
-The following is the database-import step, not a complete environment restore. In the isolated deployment, Compose creates `POSTGRES_DB` only when PostgreSQL's data volume is empty. Confirm the target is empty before importing. The command below waits for its configured health check; never point these commands at the only production copy.
+Copy the backup's `config.json` into the isolated deployment unchanged, and restore
+the original `.env` values, including database credentials and stable encryption/signing
+material, through secret management. A different project and new volumes provide the
+isolation; the database name inside the isolated PostgreSQL instance stays unchanged.
+Use the exact backed-up image references and image IDs for both services. Do not
+print secrets or rendered Compose/inspect output.
+
+The repository restore entry point requires Docker Compose, `jq` and Python 3.
+Only use backups from a trusted source: SHA-256 checksums detect corruption, not
+authenticity, and PostgreSQL dumps can execute database code. Existing backups
+without source project/container/volume identity in `manifest.json` are rejected;
+there is no legacy restore fallback.
+
+From the prepared isolated Compose directory, start only PostgreSQL and create,
+but do not start, the gateway. These commands assume `ENV_FILE` is unset or points
+to this target's private `.env`, and that all names, volumes and ports were already
+changed as described above:
 
 ```bash
 (
 set -eu
 backup_dir="/private/path/to/elygate-backup"
+target_dir="$PWD"
+bash /path/to/elygate/scripts/production/single-node-preflight.sh "$target_dir"
 docker compose up -d --wait --wait-timeout 120 postgres
-docker compose ps postgres
-docker compose exec -T postgres \
-  sh -ec 'exec pg_restore --exit-on-error --single-transaction --no-owner --no-acl \
-    -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
-  < "$backup_dir/database.dump"
+docker compose create --no-deps elygate
+bash /path/to/elygate/scripts/production/single-node-restore.sh \
+  "$backup_dir" "$target_dir" --confirm-isolated-no-writers
 )
 ```
 
-Do not drop or clean the original database to make a restore succeed. An import conflict or error must abort recovery; inspect the isolated target rather than deleting production state.
+The entry point checks the complete private artifact set and checksums, archive paths
+and links, source/target identity, actual container images/environment/mounts, an
+empty runtime volume, and a database with no user objects or other connected clients.
+Absolute paths, parent-relative link targets, duplicate entries, entries below links,
+special files and setuid/setgid permissions in `runtime.tar` are rejected. Internal
+symbolic links and hard links to archived regular files are allowed.
 
-Before starting Elygate, also restore the backed-up local runtime files from
-`runtime.tar` into the **new isolated runtime volume**, preserving their archived
-ownership and permissions for the chosen image, and restore `config.json` through
-its separate read-only mount. Never extract the archive into the source volume or
-an arbitrary host directory. Restore the stable encryption/signing material through
-the target's secret-management process. Do not assume importing SQL restores uploaded
-files or makes encrypted values readable.
+It imports SQL transactionally with `--exit-on-error`, then imports runtime files
+into the new volume using a stopped temporary container and `docker cp -a`, preserving
+ownership and permissions without extracting onto the host. It does not overwrite
+the separately mounted `config.json`, start the gateway, drop/clean a database or
+modify source services. Failure can leave a partially restored target: retain that
+target isolated for investigation. Do not retry against its now nonempty volumes,
+delete production data or treat a successful import as verified recovery.
 
 Only after all stores, files and secrets are restored, start the isolated gateway. Verify database-backed `/health`, administrator login, Application Key bindings, Usage Ledger, audit history, local files and encrypted credentials. Exercise a new authorized write, verify the original source has not changed, and record cleanup of the test target.
 

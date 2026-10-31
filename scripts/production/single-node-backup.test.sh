@@ -4,6 +4,7 @@ set -euo pipefail
 script_dir="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(CDPATH='' cd -- "$script_dir/../.." && pwd)"
 backup_script="$script_dir/single-node-backup.sh"
+restore_script="$script_dir/single-node-restore.sh"
 test_root="$repo_root/.codex-tmp/single-node-backup-test-$$"
 fake_bin="$test_root/bin"
 compose_dir="$test_root/compose"
@@ -27,7 +28,8 @@ pass() {
 	printf 'PASS test: %s\n' "$1"
 }
 
-mkdir -p "$fake_bin" "$compose_dir" "$backup_root" "$test_root/runtime"
+mkdir -p "$fake_bin" "$compose_dir" "$backup_root" "$test_root/runtime" "$test_root/newline-runtime"
+touch "$test_root/newline-runtime/"$'\n'
 chmod 700 "$backup_root"
 cat >"$compose_dir/docker-compose.yml" <<'EOF'
 services:
@@ -91,6 +93,10 @@ config_file="$FAKE_CONFIG_FILE"
 scenario="${FAKE_SCENARIO:-valid}"
 gateway_state="exited"
 compose_json="$FAKE_COMPOSE_JSON"
+if [[ "${FAKE_RESTORE:-}" == 1 ]]; then
+	gateway_id='restored-gateway-id'
+	postgres_id='restored-postgres-id'
+fi
 printf '%q ' "$@" >>"$FAKE_TEST_ROOT/docker.calls"
 printf '\n' >>"$FAKE_TEST_ROOT/docker.calls"
 
@@ -138,12 +144,58 @@ if [[ "${1:-}" == "image" && "${2:-}" == "inspect" ]]; then
 	printf '%s\n' '{"Id":"sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff","Os":"linux","Architecture":"amd64","Config":{"User":"999:999"}}'
 	exit 0
 fi
+if [[ "${FAKE_RESTORE:-}" == 1 ]]; then
+	case "${1:-}" in
+		volume)
+			if [[ "$scenario" == aliased-volume ]]; then
+				printf '[{"Name":"recovery-runtime","Mountpoint":"/source","Driver":"local","Scope":"local","Options":null},{"Name":"recovery-postgres","Mountpoint":"/source","Driver":"local","Scope":"local","Options":null}]\n'
+			else
+				printf '[{"Name":"recovery-runtime","Mountpoint":"/runtime","Driver":"local","Scope":"local","Options":null},{"Name":"recovery-postgres","Mountpoint":"/postgres","Driver":"local","Scope":"local","Options":null}]\n'
+			fi
+			exit ;;
+		run)
+			sh -ec "${!#}"
+			exit ;;
+		create)
+			[[ "$scenario" != create-failure ]] || exit 1
+			printf '%064d\n' 3
+			exit ;;
+		cp)
+			if [[ "${2:-}" == -a && "${3:-}" == - ]]; then
+				cat >"$FAKE_TEST_ROOT/restored-runtime.tar"
+				[[ "$scenario" != restore-cp-failure ]]
+				exit
+			fi ;;
+		rm)
+			[[ "${2:-}" == "$(printf '%064d' 3)" ]] || exit 1
+			[[ "$scenario" != cleanup-failure ]]
+			exit ;;
+		exec)
+			if [[ "$*" == *psql* ]]; then
+				if [[ "$scenario" == database-not-empty ]]; then printf 'f\n'; else printf 't\n'; fi
+				exit
+			fi
+			if [[ "$*" == *"pg_restore --no-password"* ]]; then
+				cat >"$FAKE_TEST_ROOT/restored-database.dump"
+				[[ "$scenario" != restore-db-failure ]] || exit 1
+				if [[ "$scenario" == target-change ]]; then touch "$FAKE_TEST_ROOT/source-changed"; fi
+				exit
+			fi ;;
+	esac
+fi
 if [[ "${1:-}" == "inspect" ]]; then
 	if [[ "$scenario" == "inspect-failure" ]]; then
 		printf '%s\n' "$secret" >&2
 		exit 1
 	fi
-	container_json | jq --arg scenario "$scenario" \
+	container_json | jq --argjson restore "${FAKE_RESTORE:-0}" --slurpfile compose "$compose_json" \
+		'if $restore == 1 then
+			.[0].Mounts[0].Name = $compose[0].volumes["elygate-runtime"].name |
+			.[0].Mounts[0].RW = true |
+			.[1].Mounts[0].Name = $compose[0].volumes["postgres-data"].name |
+			.[1].Mounts[0].RW = true
+		else . end' |
+		jq --arg scenario "$scenario" \
 		--arg changed "$(test -f "$FAKE_TEST_ROOT/source-changed" && printf yes)" '
 		if $scenario == "running" then .[0].State.Status = "running" | .[0].State.Running = true
 		elif $scenario == "bad-exit" then .[0].State.ExitCode = 137
@@ -161,7 +213,7 @@ if [[ "${1:-}" == "inspect" ]]; then
 		elif $scenario == "duplicate-app-dir" then .[0].Config.Env += ["APP_DIR=/tmp/other-runtime"]
 		elif $scenario == "stale-command" then .[0].Config.Cmd = ["/app/main", "-app-dir", "/other"]
 		elif $scenario == "stale-entrypoint" then .[0].Config.Entrypoint = ["/other-entrypoint.sh"]
-		elif $scenario == "source-change" and $changed == "yes" then .[0].State.StartedAt = "2026-10-31T01:00:00Z"
+		elif ($scenario == "source-change" or $scenario == "target-change") and $changed == "yes" then .[0].State.StartedAt = "2026-10-31T01:00:00Z"
 		else . end'
 	exit 0
 fi
@@ -200,6 +252,22 @@ if [[ "$*" == *"ps --all --quiet postgres" ]]; then printf '%s\n' "$postgres_id"
 exit 1
 EOF
 chmod 700 "$fake_bin/docker"
+cat >"$fake_bin/ls" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${2:-}" == /restore ]]; then
+	case "${FAKE_SCENARIO:-valid}" in
+		runtime-nonempty) printf 'existing-state\n' ;;
+		runtime-newline-only) exec "$FAKE_REAL_LS" "$1" "$FAKE_TEST_ROOT/newline-runtime" ;;
+		runtime-enumeration-failure) exit 1 ;;
+	esac
+	exit 0
+fi
+exec "$FAKE_REAL_LS" "$@"
+EOF
+chmod 700 "$fake_bin/ls"
+export FAKE_REAL_LS
+FAKE_REAL_LS="$(command -v ls)"
 export PATH="$fake_bin:$PATH"
 export FAKE_COMPOSE_JSON="$test_root/compose.json"
 export FAKE_CONFIG_FILE="$compose_dir/config.json"
@@ -274,15 +342,181 @@ for artifact in "$backup_dir"/*; do
 done
 jq -e '.recovery_verified == false and .topology == "single-database"' \
 	"$backup_dir/manifest.json" >/dev/null || fail "recovery boundary"
+jq -e '.source_project == "single-node-postgres" and
+	.source_volumes.elygate_runtime == "single-node-postgres_elygate-runtime" and
+	.source_volumes.postgres_data == "single-node-postgres_postgres-data" and
+	.source_containers == {"elygate":"gateway-id","postgres":"postgres-id"}' \
+	"$backup_dir/manifest.json" >/dev/null || fail "backup source identity"
 if rg -q "$secret" "$backup_dir/"*.json "$backup_dir/docker-compose.yml"; then
 	fail "metadata contains rendered credentials"
 fi
 if rg -q '(^| )(stop|start|rm|down|up|restart|pg_restore --clean)( |$)' "$test_root/docker.calls"; then
 	fail "backup mutated the source services"
 fi
+pass "valid backup"
+
+target_dir="$test_root/recovery"
+mkdir -p "$target_dir/backups"
+chmod 700 "$target_dir/backups"
+cp "$compose_dir/config.json" "$target_dir/config.json"
+cp "$compose_dir/docker-compose.yml" "$target_dir/docker-compose.yml"
+cp "$env_file" "$target_dir/.env"
+chmod 600 "$target_dir/.env"
+jq '.name = "recovery" |
+	.volumes["elygate-runtime"].name = "recovery-runtime" |
+	.volumes["postgres-data"].name = "recovery-postgres"' \
+	"$test_root/compose.json" >"$test_root/recovery.json"
+cp "$test_root/recovery.json" "$test_root/valid-recovery.json"
+export FAKE_RESTORE=1
+export FAKE_COMPOSE_JSON="$test_root/recovery.json"
+export FAKE_CONFIG_FILE="$target_dir/config.json"
+export ENV_FILE="$target_dir/.env"
+restore() {
+	bash "$restore_script" "$backup_dir" "$target_dir" --confirm-isolated-no-writers
+}
+assert_no_restore_writes() {
+	[[ ! -e "$test_root/restored-database.dump" && ! -e "$test_root/restored-runtime.tar" ]] ||
+		fail "rejected restore wrote target data"
+}
+expect_failure "restore confirmation" "usage" bash "$restore_script" "$backup_dir" "$target_dir"
+for scenario in running bad-exit oom unhealthy wrong-image wrong-db-env wrong-encryption-env \
+	wrong-mount extra-mount stale-app-dir missing-app-dir duplicate-app-dir stale-command stale-entrypoint \
+	stale-runtime-volume stale-postgres-volume; do
+	expect_failure "restore $scenario" "target containers must match" env FAKE_SCENARIO="$scenario" \
+		bash "$restore_script" "$backup_dir" "$target_dir" --confirm-isolated-no-writers
+	assert_no_restore_writes
+done
+for filter in '.name = "single-node-postgres"' \
+	'.volumes["elygate-runtime"].name = "single-node-postgres_elygate-runtime"' \
+	'.volumes["postgres-data"].name = "single-node-postgres_postgres-data"' \
+	'.volumes["elygate-runtime"].name = "single-node-postgres_postgres-data"' \
+	'.volumes["postgres-data"].name = .volumes["elygate-runtime"].name'; do
+	jq "$filter" "$test_root/valid-recovery.json" >"$test_root/recovery.json"
+	expect_failure "source or shared target volume" "not isolated" restore
+	assert_no_restore_writes
+done
+cp "$test_root/valid-recovery.json" "$test_root/recovery.json"
+for scenario in aliased-volume runtime-nonempty runtime-newline-only runtime-enumeration-failure database-not-empty list-failure; do
+	case "$scenario" in
+		aliased-*) diagnostic="local volumes without driver options" ;;
+		runtime-*) diagnostic="runtime volume is not empty" ;;
+		database-*) diagnostic="database must be empty" ;;
+		list-*) diagnostic="archive could not be listed" ;;
+	esac
+	expect_failure "restore $scenario" "$diagnostic" env FAKE_SCENARIO="$scenario" \
+		bash "$restore_script" "$backup_dir" "$target_dir" --confirm-isolated-no-writers
+	assert_no_restore_writes
+done
+for scenario in restore-db-failure create-failure restore-cp-failure target-change cleanup-failure; do
+	case "$scenario" in
+		restore-db-*) diagnostic="database import failed" ;;
+		create-*) diagnostic="container creation failed" ;;
+		restore-cp-*) diagnostic="runtime import failed" ;;
+		target-*) diagnostic="changed during restore" ;;
+		cleanup-*) diagnostic="cleanup failed" ;;
+	esac
+	expect_failure "restore $scenario" "$diagnostic" env FAKE_SCENARIO="$scenario" \
+		bash "$restore_script" "$backup_dir" "$target_dir" --confirm-isolated-no-writers
+	rm -f "$test_root/restored-database.dump" "$test_root/restored-runtime.tar" "$test_root/source-changed"
+done
+
+# Complete checksums are required even when every individual line is otherwise valid.
+cp "$backup_dir/SHA256SUMS" "$test_root/complete-checksums"
+sed '/database.dump$/d' "$test_root/complete-checksums" >"$backup_dir/SHA256SUMS"
+expect_failure "incomplete checksums" "backup permissions, checksums" restore
+assert_no_restore_writes
+cp "$test_root/complete-checksums" "$backup_dir/SHA256SUMS"
+printf '%064d  ../outside\n' 0 >>"$backup_dir/SHA256SUMS"
+expect_failure "checksum path escape" "backup permissions, checksums" restore
+assert_no_restore_writes
+cp "$test_root/complete-checksums" "$backup_dir/SHA256SUMS"
+cp "$backup_dir/runtime.tar" "$test_root/original-runtime.tar"
+refresh_checksums() {
+	(
+		cd "$backup_dir"
+		sha256sum database.dump database.list runtime.tar config.json docker-compose.yml \
+			image-refs.json image-metadata.json manifest.json
+	) >"$backup_dir/SHA256SUMS"
+}
+for archive_case in parent absolute duplicate symlink-escape symlink-graph link-child special setuid; do
+	python3 - "$backup_dir/runtime.tar" "$archive_case" <<'PY'
+import io
+import sys
+import tarfile
+
+with tarfile.open(sys.argv[1], "w") as archive:
+    case = sys.argv[2]
+    if case == "symlink-graph":
+        first = tarfile.TarInfo("a")
+        first.type = tarfile.SYMTYPE
+        first.linkname = "."
+        archive.addfile(first)
+        second = tarfile.TarInfo("escape")
+        second.type = tarfile.SYMTYPE
+        second.linkname = "a/../outside"
+        archive.addfile(second)
+        raise SystemExit
+    entry = tarfile.TarInfo({"parent": "../outside", "absolute": "/outside"}.get(case, "state"))
+    if case in ("symlink-escape", "link-child"):
+        entry.type = tarfile.SYMTYPE
+        entry.linkname = "../outside" if case == "symlink-escape" else "inside"
+    elif case == "special":
+        entry.type = tarfile.FIFOTYPE
+    elif case == "setuid":
+        entry.mode = 0o4755
+    archive.addfile(entry, io.BytesIO(b""))
+    if case == "duplicate":
+        archive.addfile(entry, io.BytesIO(b""))
+    if case == "link-child":
+        archive.addfile(tarfile.TarInfo("state/child"), io.BytesIO(b""))
+PY
+	refresh_checksums
+	expect_failure "unsafe runtime $archive_case" "backup permissions, checksums" restore
+	assert_no_restore_writes
+done
+python3 - "$backup_dir/runtime.tar" <<'PY'
+import io
+import sys
+import tarfile
+
+with tarfile.open(sys.argv[1], "w") as archive:
+    regular = tarfile.TarInfo("inside")
+    regular.size = 5
+    archive.addfile(regular, io.BytesIO(b"state"))
+    symlink = tarfile.TarInfo("alias")
+    symlink.type = tarfile.SYMTYPE
+    symlink.linkname = "inside"
+    archive.addfile(symlink)
+    hardlink = tarfile.TarInfo("copy")
+    hardlink.type = tarfile.LNKTYPE
+    hardlink.linkname = "inside"
+    archive.addfile(hardlink)
+PY
+refresh_checksums
+restore >/dev/null || fail "valid internal links restore"
+cmp -s "$test_root/restored-runtime.tar" "$backup_dir/runtime.tar" ||
+	fail "internal links archive differs"
+rm -f "$test_root/restored-database.dump" "$test_root/restored-runtime.tar"
+pass "valid internal links restore"
+cp "$test_root/original-runtime.tar" "$backup_dir/runtime.tar"
+refresh_checksums
+chmod 644 "$backup_dir/database.dump"
+expect_failure "public backup artifact" "backup permissions, checksums" restore
+assert_no_restore_writes
+chmod 600 "$backup_dir/database.dump"
+restore >/dev/null || fail "valid isolated restore"
+cmp -s "$test_root/restored-database.dump" "$backup_dir/database.dump" || fail "database input differs"
+cmp -s "$test_root/restored-runtime.tar" "$backup_dir/runtime.tar" || fail "runtime input differs"
+rg -q 'cp -a - ' "$test_root/docker.calls" || fail "runtime archive ownership was not preserved"
+if rg -q '(^| )(stop|start|down|up|restart|--clean)( |$)' "$test_root/docker.calls"; then
+	fail "restore started services or removed source data"
+fi
+(cd "$backup_dir" && sha256sum -c SHA256SUMS >/dev/null) || fail "restore changed source backup"
+pass "valid isolated restore"
+
 printf 'changed\n' >>"$backup_dir/database.dump"
 if (cd "$backup_dir" && sha256sum -c SHA256SUMS >/dev/null 2>&1); then
 	fail "corrupted backup passed checksum validation"
 fi
-pass "valid backup"
+expect_failure "corrupted restore archive" "backup permissions, checksums" restore
 pass "all single-node backup cases"

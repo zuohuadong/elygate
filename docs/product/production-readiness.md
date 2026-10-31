@@ -995,6 +995,56 @@ SQLite 与 race 各有一次因命令配置修正而中止的运行，退出 130
 `.codex-cache/go-build-routing-release-race`；PostgreSQL race、全量 race
 和生产性能不在此次证据范围内。
 
+### 单机隔离恢复入口后续项（2026-11-01）
+
+后续项 `single-node-isolated-restore`：parent 为 `single-node-consistent-backup`
+（当前交付记录为 `42c990caa`），source 为生产交付门 7，reason 为备份入口虽
+已固定产物，但既有手册仍需操作者手工导入数据库和运行文件，缺少目标隔离、
+源身份、空卷和恢复中途变化的确定性门禁。Native、中风险、root 单 writer，
+加一次独立只读 verifier；明确不使用 Pi agent，范围为恢复脚本、专项回归、
+CI/构建契约、部署手册和本记录。
+
+新增 `scripts/production/single-node-restore.sh`。它要求备份目录和目标 Compose
+目录物理分离，并要求目标使用不同 project/container/volume 身份；目标必须先
+只启动健康 PostgreSQL、创建但不启动网关。入口验证私有目录、固定八个 artifact、
+完整 SHA-256 清单和实际 hash，校验 source identity、目标 config 精确一致、
+镜像/环境/挂载/标准启动参数、实际容器 ID、local volume driver/scope/options、
+不同 Mountpoint，以及目标运行卷和数据库为空。数据库空性检查覆盖用户 namespace、
+relation、procedure、type、非 `plpgsql` extension 和其他连接，不只检查
+`public` 表；dump list 必须与备份一致，导入使用单事务、遇错退出、无 owner/ACL。
+
+运行文件通过不运行的临时容器和 `docker cp -a` 导入新卷，避免写入只读
+`config.json` 挂载；多次对账 Compose、容器和 config 未变化；失败不自动清理
+部分恢复目标，成功清理临时容器后才输出 PASS。归档拒绝绝对/父级路径、重复
+条目、条目位于链接下、特殊文件、setuid/setgid 以及逃逸链接图；内部指向归档
+普通文件的符号链接和硬链接保留为允许的正向用例。入口不会启动网关、覆盖
+config、drop/clean 源库或修改源服务，成功也只表示“导入完成，网关仍停机，
+recovery 尚未验证”。
+
+新增回归覆盖源/目标身份交叉复用、换名 bind alias、异常容器/卷/数据库、
+导入及清理失败、目标中途变化、校验清单和权限、恶意 tar（含精确双符号链接
+图）与内部链接正向路径。最终 fake-Docker 备份/恢复专项、既有预检、
+逐文件 Bash 语法、ShellCheck、actionlint、构建契约 31 项/216 个断言和
+`git diff --check` 均通过。专属 PostgreSQL 18 Unix-socket 验证覆盖 fresh、
+schema、table、sequence、view、function、domain、enum、extension、其他连接
+共 10 类空库判定，并完成实际 custom dump 的事务化导入和行对账；实例已正常
+停止。本机 Docker daemon 不可用，尚未获得真实 Docker/完整卷恢复、启动后
+health/login/Key/Usage/Audit、新写入以及源环境未变化证据。因此本项保持
+**PARTIAL**，不替代策略发布、模型治理、MCP 审批/Kill Switch、TLS/供应商和
+升级回滚验收。独立只读 verifier 先后指出双符号链接图逃逸与 `ls` 失败被误判
+空卷的缺口；现已分别拒绝父级链接目标、显式传播枚举错误，并增加针对性回归。
+fake Docker 对空卷检查实际执行原 shell 命令，不再只硬编码成功/失败；
+另使用 `ls -Aq` 防止纯换行文件名被命令替换吞掉，并以真实宿主 `ls` 和
+换行文件名作为负向回归，仍要求在任何数据导入前拒绝。
+修复复核为 `PASS_SCOPED`。PostgreSQL harness 首轮因 `exec` 绕过 shell 函数而
+误连 TCP，退出 2，不计通过；改为外部 socket wrapper 后完整复跑通过，
+只改变连接位置，不改空性 SQL 或事务化导入参数。该局部验证不证明生产密码、
+网络、TLS 或 Docker 集成。
+
+成本仅为恢复期间的顺序 hash/tar 检查、dump list、数据库事务和卷导入，
+不改变推理请求路径或常驻内存；磁盘需求为保留的备份加全新目标数据库/运行卷，
+Python archive 元数据内存与条目数相关，hash 与 tar 内容按流读取。
+
 ### 候选镜像归档后续项（2026-10-31）
 
 后续项 `panel-ci-candidate-image-artifact`：parent 为 `eef56dbb4`，
