@@ -580,6 +580,42 @@ PostgreSQL 16+
 
 单机版仍允许数据库与 Elygate 运行在同一台服务器的不同容器中。PostgreSQL 是唯一必须持久化和备份的基础服务。
 
+### 2026-10-31 Relay 日志删除审计后续项
+
+- 后续项 `relay-log-deletion-audit`：parent 为 `29d896aaa`，source 为首版
+  敏感管理员 mutation 审计和 `management-audit-coverage.md`，reason 为
+  `DELETE /api/relay-logs` 成功后未产生管理审计。范围冻结为既有 Relay handler、
+  handler 回归、控面注册路由集成回归及两份产品文档；Native、低风险、root
+  单 writer、external=0，不改变删除/鉴权规则、schema、依赖或推理路径。
+- 本轮按要求调用 Pi `gomodel/code`，在工具执行前返回 `Connection error`、
+  退出 1，没有文件产出；确认终止后 root 接管。agmesh CLI 和本地
+  profile-selector skill 仍不可用；沿用既有 Go、fasthttp、ConfigStore 和
+  审计桥接，不安装工具或更换技术栈。
+- 成功删除命令新增 `relay_logs.deleted`，资源身份固定为 `relay_logs`，
+  空名称、空快照，不保存待删日志 ID、日志内容、额外请求字段或存储诊断。
+  `deleted` 仍是请求 ID 数量，不等于实际受影响行数；缺失/重复 ID 的上游
+  no-op 行为不变。输入拒绝、存储不可用或删除报错不产生成功事件。
+- Handler 定向回归（含新增 9 个边界场景）通过；真实注册路由 6 场景在
+  SQLite 审计库和私有 PostgreSQL 审计库分别通过（包内执行 `4.459s` /
+  `31.534s`）。两轮日志库均为真实 SQLite，不称作双 PostgreSQL 验收；
+  PostgreSQL runner 的测试库清理和实例正常停机通过。鉴权、可信操作者、
+  Request ID、受保护 feed、存储拒绝、脱敏以及审计失败仍保留已完成删除均有断言。
+- 生产代码仅增加一个管理删除事件，推理请求、Relay 转发和自动清理不变。
+  没有新增常驻缓存；单条事件仅在当前管理请求生命周期保留，持久化仍使用
+  既有同步审计桥接。删除与审计跨库提交，进程崩溃窗口、生产部署和全敏感
+  路由覆盖仍未闭合。每次成功命令追加一行审计，没有新增自动保留或清理策略。
+- 使用 `29d896aaa` 的原始 Relay handler 作为 Go overlay，对照产物中两个
+  成功删除场景都因缺失事件而失败，七个错误/拒绝场景仍通过；工作区未被
+  旧版覆盖。Apple M4 单样本 `-benchmem` 前后分别为
+  `715.9 ns/op, 935 B/op, 11 allocs/op` 与
+  `738.8 ns/op, 1086 B/op, 13 allocs/op`。夹具使用假删除存储，不含 SQL、
+  审计桥接事务或网络，不代表端到端开销、推理性能或生产容量。
+- 最终 Go 格式、tracked 与新增测试文件的 diff 空白检查通过，
+  `clean-code-guard: clean`。构建等待和被中断的早期验证不记作通过，
+  上述耗时仅是成功执行的包内时间。未运行本增量的 `-race`、全仓、
+  双 PostgreSQL、浏览器或生产验收；未提交、推送、部署，
+  总目标保持 **active / PARTIAL**。
+
 ## 4. 当前版本范围
 
 ### Must

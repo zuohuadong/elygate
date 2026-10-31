@@ -19,6 +19,8 @@ import (
 	"github.com/maximhq/bifrost/core/network"
 	"github.com/maximhq/bifrost/core/relay"
 	"github.com/maximhq/bifrost/framework/configstore"
+	"github.com/maximhq/bifrost/framework/logstore"
+	"github.com/maximhq/bifrost/transports/v2/bifrost-http/lib"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/valyala/fasthttp"
@@ -44,6 +46,74 @@ func pteRequest(method, body string, name string) *fasthttp.RequestCtx {
 		ctx.SetUserValue("name", name)
 	}
 	return ctx
+}
+
+type relayLogsAuditStore struct {
+	logstore.LogStore
+	ids []string
+	err error
+}
+
+func (s *relayLogsAuditStore) DeleteRelayLogs(_ context.Context, ids []string) error {
+	s.ids = append([]string(nil), ids...)
+	return s.err
+}
+
+func TestRelayLogsDeletionAudit(t *testing.T) {
+	// Preserve upstream parsing and no-op semantics; audit only successful commands.
+	for _, tc := range []struct {
+		name        string
+		body        string
+		storeErr    error
+		unavailable bool
+		status      int
+		ids         []string
+	}{
+		{name: "success", body: `{"ids":["private-log-id"],"credential":"private-payload"}`, status: 200, ids: []string{"private-log-id"}},
+		{name: "duplicate and missing IDs", body: `{"ids":["unknown","unknown"]}`, status: 200, ids: []string{"unknown", "unknown"}},
+		{name: "storage failure", body: `{"ids":["private-log-id"]}`, storeErr: errors.New("private-storage-error"), status: 500, ids: []string{"private-log-id"}},
+		{name: "unavailable storage", body: `{"ids":["private-log-id"]}`, unavailable: true, status: 503},
+		{name: "malformed", body: `{`, status: 400},
+		{name: "missing IDs", body: `{}`, status: 400},
+		{name: "empty IDs", body: `{"ids":[]}`, status: 400},
+		{name: "null IDs", body: `{"ids":null}`, status: 400},
+		{name: "invalid ID type", body: `{"ids":[1]}`, status: 400},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &relayLogsAuditStore{err: tc.storeErr}
+			h := &RelaysHandler{config: &lib.Config{}}
+			if !tc.unavailable {
+				h.config.LogsStore = store
+			}
+			request := pteRequest(fasthttp.MethodDelete, tc.body, "")
+			h.deleteLogs(request)
+			require.Equal(t, tc.status, request.Response.StatusCode())
+			require.Equal(t, tc.ids, store.ids)
+			require.NotContains(t, string(request.Response.Body()), "private-storage-error")
+			changes, _ := request.UserValue(configstore.AuditChangesUserValueKey).([]configstore.AuditChange)
+			if tc.status != 200 {
+				require.Empty(t, changes)
+				return
+			}
+			var response map[string]int
+			require.NoError(t, json.Unmarshal(request.Response.Body(), &response))
+			require.Equal(t, map[string]int{"deleted": len(tc.ids)}, response)
+			require.Equal(t, []configstore.AuditChange{{
+				EventName: "relay_logs.deleted", TargetType: "relay_logs", TargetID: "relay_logs",
+			}}, changes)
+		})
+	}
+}
+
+func BenchmarkRelayLogsDeletionAudit(b *testing.B) {
+	h := &RelaysHandler{config: &lib.Config{LogsStore: &relayLogsAuditStore{}}}
+	request := pteRequest(fasthttp.MethodDelete, `{"ids":["log-id"]}`, "")
+	b.ReportAllocs()
+	for b.Loop() {
+		request.ResetUserValues()
+		request.Response.Reset()
+		h.deleteLogs(request)
+	}
 }
 
 func TestRelaysHandlerCRUD(t *testing.T) {

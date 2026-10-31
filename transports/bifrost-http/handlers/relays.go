@@ -578,6 +578,7 @@ func (h *RelaysHandler) deleteLogs(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, fasthttp.StatusInternalServerError, "failed to delete relay logs")
 		return
 	}
+	lib.RecordAuditChange(ctx, "relay_logs.deleted", "relay_logs", "relay_logs", "", nil, nil)
 	SendJSON(ctx, map[string]any{"deleted": len(req.IDs)})
 }
 

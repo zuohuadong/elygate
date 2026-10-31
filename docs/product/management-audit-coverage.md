@@ -209,6 +209,7 @@ write paths.
 | MCP clients, library and virtual MCPs | `mcp.go`, `virtualmcp.go` | Existing producer records; no credential-bearing snapshots persisted |
 | MCP credentials, OAuth consent and sessions | `mcpheaders.go`, `mcpsessions.go`, `mcpoauth2*.go` | Existing producer records; token values excluded by bridge |
 | Logs, mappings and recalculation jobs | `logging.go` | Existing producer records |
+| Explicit Relay log deletion | `relays.go` | Fixed aggregate `relay_logs.deleted`, no snapshots or submitted IDs. Nine handler cases and six registered-route cases pass on SQLite and private PostgreSQL audit stores; both route runs use a real SQLite log store. See the scoped acceptance below |
 | Routing and complexity configuration | `routing.go` | Existing producer records |
 | Prompts, folders, versions and sessions | `prompts.go` | All 11 cache-reloading mutations record the committed change before cache refresh; SQLite race and private PostgreSQL route matrices cover success, refresh panic, rejected writes, audit failure, authenticated feed and redaction. A process crash before bridge persistence remains outside this boundary |
 | Skills and uploaded files | `skills.go` | Update (serve/save-only) and version-shift record the committed mutation before response reread, filling the sanitized after snapshot only when available; 18 SQLite and private PostgreSQL race cases cover success, reread error/panic, rejected writes, audit failure and authenticated feed. Other file lifecycle paths retain their existing producer boundary |
@@ -354,6 +355,31 @@ This is **PASS_SCOPED local PostgreSQL browser correlation and graceful
 restart evidence**. It does not establish real exported management tracing,
 abrupt-crash/whole-machine recovery, production migration, complete
 sensitive-route coverage or transactional-outbox acceptance.
+
+## Relay Log Deletion Acceptance
+
+Follow-up `relay-log-deletion-audit` is based on `29d896aaa` and the sensitive
+administrator-mutation requirement. Only a successful
+`DELETE /api/relay-logs` command emits `relay_logs.deleted` for the fixed
+`relay_logs` aggregate. Names and snapshots are empty; submitted log IDs,
+body fields, log content and storage diagnostics do not enter the producer.
+The existing response still counts submitted IDs, not affected rows. A
+successful no-op command may therefore emit an event, as for existing bulk
+log deletion. Automatic retention is not covered.
+
+The six registered-route cases pass with SQLite and private PostgreSQL audit
+stores, using an independent SQLite log store in both runs. They verify the
+actual stored log, compact audit row, verified Basic actor, request correlation,
+protected feed, failure redaction and post-delete audit failure header without
+replacing the successful delete response. PostgreSQL test database cleanup and
+graceful shutdown pass. This is in-process route and database evidence, not a
+live-network, dual-PostgreSQL, crash-recovery or production-deployment receipt.
+An overlay of the original handler reproduces the missing event in both
+successful-command cases; the seven rejection/failure cases remain unchanged.
+The existing cross-store post-commit crash window remains. No new audit
+retention policy is introduced: each successful command appends one durable
+row. The request-path cost and single-sample benchmark limitations are recorded
+in the product roadmap's `relay-log-deletion-audit` follow-up.
 
 ## Remaining Acceptance
 
