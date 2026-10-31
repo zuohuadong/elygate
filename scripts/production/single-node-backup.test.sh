@@ -28,6 +28,17 @@ pass() {
 	printf 'PASS test: %s\n' "$1"
 }
 
+assert_no_matches() {
+	local diagnostic="$1" status=0
+	shift
+	grep "$@" >/dev/null 2>&1 || status=$?
+	case "$status" in
+		1) return ;;
+		0) fail "$diagnostic" ;;
+		*) fail "$diagnostic (scan failed)" ;;
+	esac
+}
+
 mkdir -p "$fake_bin" "$compose_dir" "$backup_root" "$test_root/runtime" "$test_root/newline-runtime"
 touch "$test_root/newline-runtime/"$'\n'
 chmod 700 "$backup_root"
@@ -289,6 +300,10 @@ expect_failure() {
 	pass "$name"
 }
 
+expect_failure "scan detects forbidden content" "forbidden content" \
+	assert_no_matches "forbidden content" -F -- "$secret" "$env_file"
+expect_failure "scan error fails closed" "scan failed" \
+	assert_no_matches "test artifact scan" -F -- "$secret" "$test_root/missing-artifact"
 expect_failure "missing confirmation" "usage" bash "$backup_script" "$compose_dir"
 # Cases: missing/multiple/stale containers, abnormal shutdown, storage/copy errors and source changes.
 for scenario in running bad-exit oom unhealthy wrong-image wrong-db-env wrong-encryption-env wrong-mount extra-mount \
@@ -347,12 +362,10 @@ jq -e '.source_project == "single-node-postgres" and
 	.source_volumes.postgres_data == "single-node-postgres_postgres-data" and
 	.source_containers == {"elygate":"gateway-id","postgres":"postgres-id"}' \
 	"$backup_dir/manifest.json" >/dev/null || fail "backup source identity"
-if rg -q "$secret" "$backup_dir/"*.json "$backup_dir/docker-compose.yml"; then
-	fail "metadata contains rendered credentials"
-fi
-if rg -q '(^| )(stop|start|rm|down|up|restart|pg_restore --clean)( |$)' "$test_root/docker.calls"; then
-	fail "backup mutated the source services"
-fi
+assert_no_matches "metadata contains rendered credentials" -F -- \
+	"$secret" "$backup_dir/"*.json "$backup_dir/docker-compose.yml"
+assert_no_matches "backup mutated the source services" -E -- \
+	'(^| )(stop|start|rm|down|up|restart|pg_restore --clean)( |$)' "$test_root/docker.calls"
 pass "valid backup"
 
 target_dir="$test_root/recovery"
@@ -507,10 +520,9 @@ chmod 600 "$backup_dir/database.dump"
 restore >/dev/null || fail "valid isolated restore"
 cmp -s "$test_root/restored-database.dump" "$backup_dir/database.dump" || fail "database input differs"
 cmp -s "$test_root/restored-runtime.tar" "$backup_dir/runtime.tar" || fail "runtime input differs"
-rg -q 'cp -a - ' "$test_root/docker.calls" || fail "runtime archive ownership was not preserved"
-if rg -q '(^| )(stop|start|down|up|restart|--clean)( |$)' "$test_root/docker.calls"; then
-	fail "restore started services or removed source data"
-fi
+grep -Fq -- 'cp -a - ' "$test_root/docker.calls" || fail "runtime archive ownership was not preserved"
+assert_no_matches "restore started services or removed source data" -E -- \
+	'(^| )(stop|start|down|up|restart|--clean)( |$)' "$test_root/docker.calls"
 (cd "$backup_dir" && sha256sum -c SHA256SUMS >/dev/null) || fail "restore changed source backup"
 pass "valid isolated restore"
 

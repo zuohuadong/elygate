@@ -1045,6 +1045,16 @@ fake Docker 对空卷检查实际执行原 shell 命令，不再只硬编码成�
 不改变推理请求路径或常驻内存；磁盘需求为保留的备份加全新目标数据库/运行卷，
 Python archive 元数据内存与条目数相关，hash 与 tar 内容按流读取。
 
+后续项 `single-node-restore-ci-portability`：parent 为 `7929ee64b`，
+source 为 run `41233217469` 的生产预检失败，reason 为 Runner 没有 `rg`。
+该 run 的 panel job 在最终 runtime ownership 断言失败，Docker job 被跳过；
+其中两处更早的负向断言也将缺少扫描器误当作无匹配，不能计为安全检查通过。
+Native、低风险、root 单 writer、external=0；仅修复专项测试和本记录，
+不改生产恢复行为或放宽断言，不使用 Pi agent。扫描改用系统 `grep`，
+负向检查显式区分 exit 1（无匹配）与其他错误（失败退出），正向检查仍要求匹配。
+本轮在禁用 `rg` 的环境下重新执行全专项，再以新提交的 CI 结果验收；
+`7929ee64b` 的失败结果不被本地通过或父提交 CI 覆盖。
+
 ### 候选镜像归档后续项（2026-10-31）
 
 后续项 `panel-ci-candidate-image-artifact`：parent 为 `eef56dbb4`，
