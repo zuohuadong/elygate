@@ -84,7 +84,8 @@ describe('enterprise panel build contract', () => {
 		for (const path of ['.bun-version', 'panel/**', 'enterprise/employee-portal/**',
 			'transports/bifrost-http/**', 'framework/configstore/**', 'framework/logstore/**',
 			'plugins/logging/**', 'Makefile', 'transports/Dockerfile*', '.github/workflows/panel-tests.yml',
-			'.github/workflows/scripts/smoke-elygate-image.sh', 'examples/single-node-postgres/**']) {
+			'.github/workflows/scripts/smoke-elygate-image.sh', 'examples/single-node-postgres/**',
+			'scripts/production/**']) {
 			expect(workflow.on.push.paths).toContain(path);
 		}
 		expect(workflow.on).toHaveProperty('workflow_dispatch');
@@ -100,6 +101,30 @@ describe('enterprise panel build contract', () => {
 		expect(runtime.env.IMAGE_COMMIT).toBe('${{ github.sha }}');
 		expect(runtime.run).toBe('bash .github/workflows/scripts/smoke-elygate-image.sh elygate:panel-ci "$IMAGE_COMMIT"');
 		expect(workflow.jobs.docker['timeout-minutes']).toBe(20);
+	});
+
+	test('production preflight checks run from the root before panel dependency installation', async () => {
+		const workflow = parse(await Bun.file(new URL('../../../.github/workflows/panel-tests.yml', import.meta.url)).text());
+		const job = workflow.jobs.panel;
+		const steps = job.steps;
+		const checkoutIndex = steps.findIndex((step: { name?: string }) => step.name === 'Checkout repository');
+		const preflightIndex = steps.findIndex((step: { name?: string }) => step.name === 'Verify production preflight');
+		const installIndex = steps.findIndex((step: { name?: string }) => step.name === 'Install dependencies');
+		expect(checkoutIndex).toBeGreaterThanOrEqual(0);
+		expect(preflightIndex).toBeGreaterThan(checkoutIndex);
+		expect(installIndex).toBeGreaterThan(preflightIndex);
+		const preflight = steps[preflightIndex];
+		expect(preflight.shell).toBe('bash');
+		expect(preflight.run.trim().split('\n')).toEqual([
+			'bash -n scripts/production/single-node-preflight.sh scripts/production/single-node-preflight.test.sh',
+			'shellcheck scripts/production/single-node-preflight.sh scripts/production/single-node-preflight.test.sh',
+			'bash scripts/production/single-node-preflight.test.sh',
+		]);
+		expect(preflight['working-directory'] ?? job.defaults?.run?.['working-directory'] ??
+			workflow.defaults?.run?.['working-directory']).toBeUndefined();
+		expect(preflight.if).toBeUndefined();
+		expect(preflight['continue-on-error']).not.toBe(true);
+		expect(job['continue-on-error']).not.toBe(true);
 	});
 
 	test('image smoke rejects an invalid candidate before Docker allocation', async () => {

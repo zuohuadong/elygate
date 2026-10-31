@@ -15,6 +15,7 @@ on:
       - ".github/workflows/panel-tests.yml"
       - ".github/workflows/scripts/smoke-elygate-image.sh"
       - "examples/single-node-postgres/**"
+      - "scripts/production/**"
   push:
     branches: [main, dev]
     paths:
@@ -30,6 +31,7 @@ on:
       - ".github/workflows/panel-tests.yml"
       - ".github/workflows/scripts/smoke-elygate-image.sh"
       - "examples/single-node-postgres/**"
+      - "scripts/production/**"
   workflow_dispatch:
 
 permissions:
@@ -50,6 +52,12 @@ jobs:
           egress-policy: audit
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Verify production preflight
+        shell: bash
+        run: |
+          bash -n scripts/production/single-node-preflight.sh scripts/production/single-node-preflight.test.sh
+          shellcheck scripts/production/single-node-preflight.sh scripts/production/single-node-preflight.test.sh
+          bash scripts/production/single-node-preflight.test.sh
       - name: Set up Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
