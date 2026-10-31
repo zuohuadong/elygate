@@ -676,6 +676,45 @@ confirmed owned database cleanup. The tested binary was
 This proves the real API/session path, not live-gateway browser acceptance,
 publication writes, process ownership, crash recovery or production deployment.
 
+## Embedded Artifact Verification Follow-Up
+
+Follow-up `routing-release-live-browser` has parent `9b8d03d1f`, source the
+continuing production-readiness goal and gate 4, and reason that an API runtime
+pass does not prove the gateway embeds the release page. This is local,
+low-risk, single-writer verification; it does not authorize publication writes,
+process takeover, deployment or automatic commit/push.
+
+On 2026-10-31, the existing canonical binary with SHA-256
+`83abd810267851b99a466a5a7d5e0d94090ddf200e2aa6c79da13bf96eb41d7a`
+passed real browser administrator login, but its routing page had no Releases
+button. The release-view click timed out; this is a failed UI acceptance, not a
+pass. Its actual served index SHA-256 was
+`9694700b2abd916160d81b250e1169f4b50a891f1981723d74ff50ad368267b5`.
+The earlier API/runtime results remain API evidence only. The diagnostic image
+is `output/playwright/routing-releases-old-artifact-missing-view.png`.
+
+A fresh panel build from clean `9b8d03d1f` succeeded with index SHA-256
+`3ed7f24c0e6fb94ed131d800fcd163b7d6c94da37fc91241befa0f6568868a35`;
+the generated transport embedding directory matched it after copy-build.
+Both subsequent canonical-CLI builds were explicitly interrupted with exit 130
+while cache/file I/O was observed, without a completed artifact. Neither is
+recorded as a compiler failure or successful build. External panel edits and a
+new `panel/out` then appeared; those changes were preserved and are not covered
+by the earlier clean-source panel build.
+
+The temporary fixture now requires an explicit expected panel SHA-256 and
+compares it with the actual served index. It does not silently substitute an
+older embedded UI. The diagnostic run's gateway, isolated SQLite app directory,
+private metadata and temporary secret file were cleaned up with exit 0.
+Both Pi implementation invocations returned `Connection error`, exit 1, without
+file changes; root implemented the temporary fixture after reclaiming ownership.
+No successful Pi implementation or new-view live-browser pass is claimed.
+
+The remaining local gate is a completed canonical artifact with the fixed panel
+bundle, followed by real release-page/browser checks and graceful restart
+against SQLite and private PostgreSQL. Original ownership, publication,
+rollback, crash-recovery, Shadow and production gates remain **PARTIAL**.
+
 ## Verification
 
 - Stage 1 passed `go test -buildvcs=false ./rules -count=1`, targeted `-race`

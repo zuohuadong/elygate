@@ -47,6 +47,11 @@
 - 本地 Relay 双 PostgreSQL 真实生命周期、数据库/网关正常重启和停机备份恢复
   已通过，详见下节。这不等于整机、其他功能、升级回滚或生产恢复验收。
 - CI、镜像 digest、部署状态和生产数据均需针对最终候选重新核实。
+- 路由发布记录页的真实浏览器验收发现旧本地二进制仍嵌入不含该入口的 UI：
+  管理员登录成功，但“发布记录”按钮不存在。此前 API/runtime 通过不覆盖此 UI
+  边界。当前面板单独构建成功不等于 canonical CLI 已嵌入；两次后续 CLI
+  重建均被显式中断，未取得可验收的新产物。具体二进制、页面哈希和清理证据见
+  [嵌入产物复验](routing-publication.md#embedded-artifact-verification-follow-up)。
 - 员工凭据拒绝已补固定匿名审计和有界来源 IP 限流，详见
   [专项记录](employee-login-failure-audit.md)。失败计数与审计仍为独立事务，
   未关闭 crash window；进程本地限流不替代多实例或反向代理环境验收。
