@@ -28,8 +28,15 @@ cleanup() {
   if [ "$status" -ne 0 ]; then
     for container in "$gateway" "$postgres"; do
       docker inspect "$container" --format \
-        '{{.Name}}: status={{.State.Status}} exit_code={{.State.ExitCode}} oom_killed={{.State.OOMKilled}} restarts={{.RestartCount}} ports={{json .NetworkSettings.Ports}}' >&2 || true
+        '{{.Name}}: status={{.State.Status}} exit_code={{.State.ExitCode}} oom_killed={{.State.OOMKilled}} restarts={{.RestartCount}} ports={{json .NetworkSettings.Ports}} health={{json .State.Health}}' >&2 || true
     done
+    docker logs --tail 100 "$gateway" 2>&1 |
+      jq -Rr --arg pg "${POSTGRES_PASSWORD:-}" --arg encryption "${ENCRYPTION_KEY:-}" \
+        --arg setup "${SETUP_TOKEN:-}" --arg admin "${ELYGATE_IMAGE_PASSWORD:-}" '
+        def hide($secret):
+          if $secret == "" then . else split($secret) | join("[REDACTED_SECRET]") end;
+        hide($pg) | hide($encryption) | hide($setup) | hide($admin)
+      ' >&2 || true
   fi
   for container in "$gateway" "$postgres"; do
     if docker container inspect "$container" >/dev/null 2>&1; then

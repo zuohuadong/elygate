@@ -124,6 +124,8 @@ case "$1:\${2:-}" in
   compose:*) printf '{"services":{"postgres":{"image":"postgres@sha256:%064d"}}}\\n' 0 ;;
   image:inspect) printf '1000:0\\n' ;;
   inspect:*) printf '%s\\n' "$MOCK_PORTS" ;;
+  logs:*) printf 'postgres_password=%s\\nencryption_key=%s\\nsetup_token=%s\\nimage_password=%s\\n' \\
+    "$POSTGRES_PASSWORD" "$ENCRYPTION_KEY" "$SETUP_TOKEN" "$ELYGATE_IMAGE_PASSWORD" ;;
 esac
 `);
 				chmodSync(docker, 0o700);
@@ -138,6 +140,9 @@ esac
 				]);
 				expect(status).toBe(1);
 				expect(stderr).toContain('gateway has no unique published loopback HTTP port');
+				for (const key of ['postgres_password', 'encryption_key', 'setup_token', 'image_password']) {
+					expect(stderr).toContain(`${key}=[REDACTED_SECRET]`);
+				}
 				expect(stdout).not.toContain('PASS');
 				const commands = (await Bun.file(calls).text()).split('\n');
 				expect(commands.some((line) => line.startsWith('network create elygate-image-'))).toBe(true);
