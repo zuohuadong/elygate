@@ -8,7 +8,17 @@
 
 ## 候选版本
 
-- 当前最新候选为 `005eb22dcce570dd1941225cb71cf6dbf6cc1eea`，CI run
+- 当前已验证候选为 `37479df3fa95a5efa68088816db20978a9cd41e7`，
+  CI run `41209424680` 于 2026-10-31 14:17:17 UTC 启动、
+  14:23:26 UTC 成功结束，四个 job 均通过。镜像运行检查为非 root、
+  双 PostgreSQL、health、版本、登录/退出及正常重启，不是生产部署。
+  manifest digest 为
+  `sha256:3ce8fbfdc273f416ea1247acf1ad78beb4b0d0621d0af0afbc6fadc08710f2ad`；
+  artifact ID 为 `13045709186`，上传包大小 `162919783` 字节，
+  预计于 2026-11-07 14:22:54 UTC 过期。独立归档校验见下方
+  `relay-log-audit-ci` 后续项；该候选的 CI 尚未执行新增 Relay 删除审计专项，
+  本地 workflow 补丁不包含在该 SHA、该次 run 或镜像中。
+- 此前已验证候选为 `005eb22dcce570dd1941225cb71cf6dbf6cc1eea`，CI run
   `41200254012` 于 2026-10-31 12:15:05 UTC 启动、12:22:45 UTC 成功结束；
   面板、员工门户、API contracts 和生产镜像四个 job 全部通过。API contracts
   实际执行员工后端整包（`63.088s`）、Usage CSV 导出（`8.375s`）和模型目录
@@ -422,6 +432,48 @@ source 为生产交付门 2/3，reason 为原预检会放过缺失健康检查�
 本后续项的提交、推送状态以 Git 记录为准；未部署，总目标继续 **active / PARTIAL**。
 
 ## 生产交付门
+
+### Relay 删除审计的候选验证补齐（2026-10-31）
+
+后续项 `relay-log-audit-ci`：parent 为 `37479df3f`，source 为敏感管理员
+审计与最终 SHA 回归门，reason 为已发布 CI 的测试筛选未覆盖 Relay 删除
+审计。范围冻结为 workflow、既有 workflow 契约测试和本验收记录；Native、
+低风险、root 单 writer（Pi 已终止后接管），不改 Go、schema、依赖、
+推理路径或生产状态，不产生请求开销或新增常驻缓存。
+
+`37479df3f` 的候选归档已从 CI artifact 独立下载并校验：来源
+commit、`SHA256SUMS`、gzip、Docker archive、OCI index、manifest、config
+和 6 个 layer blob 一致；镜像为 `linux/amd64`、运行用户 `1000:0`，
+image ID 为 `sha256:3ce8fbfdc273f416ea1247acf1ad78beb4b0d0621d0af0afbc6fadc08710f2ad`。
+CI 的 panel、employee-portal、api-contracts 和 Docker runtime 四个 job
+均成功，runtime 通过非 root、双 PostgreSQL、health、版本、登录/退出及
+正常重启检查；artifact 不是 registry 发布或生产部署证明。
+归档位于 `.codex-tmp/candidate-37479df-41209424680/`；8 个 blob 的
+SHA-256 全部匹配，未解包到文件系统或在本地 Docker daemon 中加载运行。
+`image.tar.gz` 为 `162918992` 字节，SHA-256 为
+`d0c6d31fe5bef965346b9c62264b9307b032345d730c48a7544465aab154188c`；
+provenance SHA-256 为
+`85aabddcd71b1fe597fd4af508817e81f59c27459f9102499a2f42f61ef98a04`。
+
+复核发现该候选的 `api-contracts` job 尚未专门执行新增的
+`TestRelayLogsDeletionAudit` / `TestRelayLogsDeletionAuditThroughManagementRoute`。
+本地已补充独立 workflow step 和 panel contract 断言；当前本地命令
+`bash scripts/go-local.sh test -p 1 ./transports/bifrost-http/handlers ./transports/bifrost-http/controlplane -run '^TestRelayLogsDeletionAudit' -count=1 -timeout=180s`
+在编译依赖等待超过 10 分钟后被有界终止（退出 143），未进入业务测试、
+没有 `ok` 结果，不计通过；`-timeout=180s` 只约束测试执行，不含构建时间。
+31 项 workflow contract 测试（214 断言）和 actionlint 通过。
+读取 HEAD 原始 YAML 可复现专项缺失；最终 YAML 的步骤顺序与完整命令断言通过。
+该 workflow 补丁尚未进入候选
+CI，需在提交后以新 SHA 重新核对该 step 的真实输出。Pi `gomodel/code`
+两次调用均在执行前返回 `Connection error`，未产出文件；本次由 root
+按同一窄范围接管。
+无凭据输出的认证检查仅返回 `ready`，不代表模型连接或实施成功。
+独立 handlers `go vet` 等待超过 13 分钟后被有界终止（退出 143），
+只出现 sqlite-vec 的 macOS CGO 弃用警告；该次不计通过或业务测试失败。
+控面独立 vet 未执行；此前命令中断的记录不因此被改写为通过。生产部署、
+完整审计原子性、策略 ownership/发布/Shadow/回滚等原始门继续未闭合。
+`clean-code-guard: clean`，最终 diff 检查通过。本轮修改仅在本地，
+未提交、推送或部署，总目标继续 **active / PARTIAL**。
 
 ### 当前 Relay 面板真实链路（2026-10-31）
 

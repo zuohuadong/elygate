@@ -184,3 +184,5 @@ jobs:
         run: bash scripts/go-local.sh test -p 1 ./transports/bifrost-http/controlplane -run '^TestUsageCSVExport' -count=1 -timeout=180s
       - name: Run model catalog audit regressions
         run: bash scripts/go-local.sh test -p 1 ./transports/bifrost-http/handlers ./transports/bifrost-http/server -run '^TestModelCatalog' -count=1 -timeout=180s
+      - name: Run relay log deletion audit regressions
+        run: bash scripts/go-local.sh test -p 1 ./transports/bifrost-http/handlers ./transports/bifrost-http/controlplane -run '^TestRelayLogsDeletionAudit' -count=1 -timeout=180s

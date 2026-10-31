@@ -462,5 +462,8 @@ esac
 		const catalogIndex = steps.findIndex((step: { name?: string }) => step.name === 'Run model catalog audit regressions');
 		expect(catalogIndex).toBeGreaterThan(exportIndex);
 		expect(steps[catalogIndex].run).toBe("bash scripts/go-local.sh test -p 1 ./transports/bifrost-http/handlers ./transports/bifrost-http/server -run '^TestModelCatalog' -count=1 -timeout=180s");
+		const relayAuditIndex = steps.findIndex((step: { name?: string }) => step.name === 'Run relay log deletion audit regressions');
+		expect(relayAuditIndex).toBeGreaterThan(catalogIndex);
+		expect(steps[relayAuditIndex].run).toBe("bash scripts/go-local.sh test -p 1 ./transports/bifrost-http/handlers ./transports/bifrost-http/controlplane -run '^TestRelayLogsDeletionAudit' -count=1 -timeout=180s");
 	});
 });
