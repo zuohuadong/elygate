@@ -1,18 +1,5 @@
 import { describe, expect, test } from 'bun:test';
 
-interface PackageManifest {
-	dependencies: Record<string, string>;
-	patchedDependencies?: Record<string, string>;
-}
-
-async function readSvadminUiPatch(): Promise<{ packageJson: PackageManifest; patch: string }> {
-	const packageJson = await Bun.file(new URL('../../package.json', import.meta.url)).json() as PackageManifest;
-	const patchKey = `@svadmin/ui@${packageJson.dependencies?.['@svadmin/ui']}`;
-	const patchPath = packageJson.patchedDependencies?.[patchKey];
-	expect(typeof patchPath).toBe('string');
-	return { packageJson, patch: await Bun.file(`${process.cwd()}/${patchPath}`).text() };
-}
-
 function readSvadminComponent(component: string): Promise<string> {
 	return Bun.file(new URL(`../../node_modules/@svadmin/ui/dist/components/${component}.svelte`, import.meta.url)).text();
 }
@@ -70,7 +57,8 @@ describe('panel issue regressions', () => {
 
 	test('runtime config inherits the active theme foreground color', async () => {
 		const source = await Bun.file(new URL('../pages/ConfigPage.svelte', import.meta.url)).text();
-		expect(source).toMatch(/\.page-shell\s*\{[^}]*color:\s*var\(--foreground\)/s);
+		expect(source).toContain('<ContentPageShell pageId={resourceName} width="wide">');
+		expect(source).not.toContain('.page-shell');
 	});
 
 	test('budget status badges use theme foreground over semantic tinted surfaces', async () => {
@@ -367,14 +355,15 @@ describe('panel issue regressions', () => {
 		);
 	});
 
-	test('the svadmin release patch only fills the published build version', async () => {
-		const { packageJson, patch } = await readSvadminUiPatch();
+	test('the published svadmin package owns the build version', async () => {
+		const packageJson = await Bun.file(new URL('../../package.json', import.meta.url)).json() as {
+			dependencies: Record<string, string>;
+			patchedDependencies?: Record<string, string>;
+		};
 		const uiVersion = packageJson.dependencies['@svadmin/ui'];
-		expect(packageJson.patchedDependencies[`@svadmin/ui@${uiVersion}`]).toBe(`patches/@svadmin%2Fui@${uiVersion}.patch`);
-		expect(patch).toContain(`+  const buildVersion = '${uiVersion}';`);
-		expect(patch.match(/^diff --git /gm)).toHaveLength(1);
+		expect(packageJson.patchedDependencies).toBeUndefined();
 		const about = await readSvadminComponent('AboutSettings');
-		expect(about).toContain(`const buildVersion = '${uiVersion}';`);
+		expect(about).toContain(`const buildVersion = "${uiVersion}";`);
 		expect(about).toContain('const version = $derived(suppliedVersion ?? (');
 		const core = await Bun.file(new URL('../../node_modules/@svadmin/core/package.json', import.meta.url)).json();
 		const ui = await Bun.file(new URL('../../node_modules/@svadmin/ui/package.json', import.meta.url)).json();

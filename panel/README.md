@@ -5,23 +5,26 @@ contracts and capability boundaries are documented in [PARITY.md](PARITY.md).
 
 ## SVAdmin Dependencies
 
-Versions verified against the npm `latest` tags on 2026-10-29:
+Versions verified against the npm `latest` tags on 2026-10-31:
 
 | Package | Version |
 | --- | --- |
-| `@svadmin/core` | `0.66.2` |
-| `@svadmin/ui` | `0.96.1` |
+| `@svadmin/core` | `0.67.0` |
+| `@svadmin/ui` | `0.102.0` |
 
-The UI peer dependency requires `@svadmin/core ^0.66.2`. Both packages share
+The UI peer dependency requires `@svadmin/core ^0.67.0`. Both packages share
 the panel's Svelte and TanStack Query instances; keep the Vite dependency
 optimization exclusions when upgrading.
 
-The Bun patch only fills the UI package's unreplaced `__SVADMIN_VERSION__`
-in `AboutSettings`, preserving the component's explicit version override.
+The published UI package now contains its build version in `AboutSettings`.
 The earlier localization, resource visibility, search, shortcut, logo and
-settings fixes are now upstream. Regression tests check the installed
-components rather than requiring those fixes to remain in a local patch.
-Remove the remaining patch once npm ships a populated build version.
+settings fixes are upstream; regression tests inspect the installed package
+instead of carrying a local `dist` patch.
+
+Config pages, shared settings fields and the model list reuse SVAdmin's default
+page, form, table, feedback and pagination components. The panel retains its
+backend serializers, unknown config fields, redacted credentials, JSON mode
+and request-race guards. Restart notices remain visible alongside save errors.
 
 ## Local Validation
 
@@ -38,6 +41,23 @@ processes, preserving the proxy test's assertions and timeout.
 `bun run build` additionally copies the output into the HTTP transport's
 embedded UI directory. Use the direct Vite build when only validating the
 panel, without replacing backend build assets.
+
+For browser migration acceptance, start Vite on loopback port 3011, open a
+dedicated Playwright CLI session, then run the fixture from the repository root:
+
+```sh
+bunx --no-install vite --host 127.0.0.1 --port 3011 --strictPort
+# In another terminal, from the repository root:
+playwright-cli -s=svadmin-migration open about:blank
+playwright-cli -s=svadmin-migration run-code --filename panel/tests/svadmin-migration.browser.mjs
+playwright-cli -s=svadmin-migration close
+```
+
+The suite intercepts all `/api/*` calls before loading the app. Its 64 checks
+cover bindings, label/keyboard access, duplicate-submit prevention, failure
+recovery, restart notices, page-size changes, paging and responsive light/dark
+layouts. Screenshots are written under `output/playwright/svadmin-*.png`.
+This is fixture acceptance, not a live backend or production receipt.
 
 ## Local Relay Runtime Acceptance
 

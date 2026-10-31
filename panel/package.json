@@ -15,8 +15,8 @@
   },
   "dependencies": {
     "@lucide/svelte": "1.37.0",
-    "@svadmin/core": "0.66.2",
-    "@svadmin/ui": "0.96.1",
+    "@svadmin/core": "0.67.0",
+    "@svadmin/ui": "0.102.0",
     "@tanstack/svelte-query": "^6.3.5",
     "highlight.js": "^11.12.0",
     "isomorphic-dompurify": "^3.23.0",
@@ -33,8 +33,5 @@
     "tailwindcss": "^4.3.3",
     "typescript": "^6.0.3",
     "vite": "^8.3.5"
-  },
-  "patchedDependencies": {
-    "@svadmin/ui@0.96.1": "patches/@svadmin%2Fui@0.96.1.patch"
   }
 }

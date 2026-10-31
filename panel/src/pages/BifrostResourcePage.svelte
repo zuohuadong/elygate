@@ -2,9 +2,11 @@
 	import { getAppName } from '../lib/branding';
 	import { onMount } from 'svelte';
 	import { useTranslation } from '@svadmin/core/i18n';
+	import { Button, ContentPageHeader, ContentPageShell, DataTableShell, FeedbackNotice, Input, ListPagination, Select } from '@svadmin/ui';
+	import { RefreshCw, Search } from '@lucide/svelte';
 	import { displayValue, getListPayload, getTotal, isJsonRecord, requestJson, type JsonRecord } from '../lib/api';
 	import { columnLabelFor, columnValueFor } from '../lib/columns';
-	import { clampPaginationPage, formatPagination, paginationPageCount } from '../lib/display-format';
+	import { clampPaginationPage, paginationPageCount } from '../lib/display-format';
 	import type { ElygateLocale } from '../lib/i18n';
 
 	interface Props {
@@ -22,7 +24,7 @@
 	let total = $state(0);
 	let loadSeq = 0;
 	const columns = $derived.by(() => Array.from(new Set(records.flatMap((record) => Object.keys(record)))).slice(0, 8));
-	const hasNext = $derived(page * Number(pageSize) < total);
+	const title = $derived(resourceName === 'virtual-keys' ? i18n.t('elygate.virtualKeys') : i18n.t(`elygate.${resourceName}`));
 	const totalPages = $derived(paginationPageCount(total, Number(pageSize)));
 
 	function endpoint(requestedResource: string, requestedPage: number, requestedPageSize: string, requestedQuery: string): string {
@@ -88,63 +90,66 @@
 	}
 
 	function movePage(nextPage: number): void {
-		page = Math.max(1, nextPage);
+		if (isLoading) return;
+		page = Math.max(1, Math.min(totalPages, nextPage));
 		void load();
 	}
 </script>
 
-<section class="page-shell">
-	<header>
-		<div>
-		<p class="eyebrow">{getAppName()} / {i18n.locale === 'zh-CN' ? '模型管理' : 'Model management'}</p>
-			<h1>{resourceName === 'virtual-keys' ? i18n.t('elygate.virtualKeys') : i18n.t(`elygate.${resourceName}`)}</h1>
-		</div>
-		<button type="button" onclick={() => void load()} disabled={isLoading}>{i18n.t('elygate.refresh')}</button>
-	</header>
+<ContentPageShell pageId={resourceName} width="wide">
+	<ContentPageHeader {title} eyebrow={`${getAppName()} / ${i18n.locale === 'zh-CN' ? '模型管理' : 'Model management'}`}>
+		{#snippet actions()}
+			<Button type="button" variant="outline" onclick={() => void load()} disabled={isLoading}>
+				<RefreshCw size={16} aria-hidden="true" />{i18n.t('elygate.refresh')}
+			</Button>
+		{/snippet}
+	</ContentPageHeader>
 	<form class="filters" onsubmit={submitSearch}>
-		<label>{i18n.t('elygate.search')}<input bind:value={query} /></label>
-		<label>{i18n.t('elygate.pageSize')}<select bind:value={pageSize} disabled={isLoading} onchange={() => { page = 1; void load(); }}><option value="20">20</option><option value="50">50</option><option value="100">100</option></select></label>
-		<button type="submit" disabled={isLoading}>{i18n.t('elygate.search')}</button>
+		<label>{i18n.t('elygate.search')}<Input bind:value={query} disabled={isLoading} /></label>
+		<label>{i18n.t('elygate.pageSize')}<Select bind:value={pageSize} disabled={isLoading} onchange={() => { page = 1; void load(); }}><option value="20">20</option><option value="50">50</option><option value="100">100</option></Select></label>
+		<Button type="submit" disabled={isLoading}><Search size={16} aria-hidden="true" />{i18n.t('elygate.search')}</Button>
 	</form>
 
 	{#if error}
-		<div class="notice" role="alert">{error}</div>
+		<FeedbackNotice tone="danger" message={error} />
 	{:else if records.length === 0 && !isLoading}
 		<p class="empty">{i18n.t('elygate.empty')}</p>
 	{:else}
-		<div class="table-wrap" aria-busy={isLoading}>
-			<table>
+		<DataTableShell caption={title}>
+			<table aria-busy={isLoading}>
 				<thead><tr>{#each columns as column (column)}<th>{columnLabelFor(i18n.locale as ElygateLocale, column)}</th>{/each}</tr></thead>
 				<tbody>
 					{#each records as record (rowKey(record))}
 						<tr>{#each columns as column (column)}<td title={displayValue(record[column])}>{columnValueFor(i18n.locale as ElygateLocale, column, record[column])}</td>{/each}</tr>
+					{:else}
+						<tr><td>{i18n.t('elygate.loading')}</td></tr>
 					{/each}
 				</tbody>
 			</table>
-		</div>
+		</DataTableShell>
 	{/if}
-	<footer class="pagination"><span>{formatPagination(page, totalPages, total, i18n.locale)}</span><div><button type="button" onclick={() => movePage(page - 1)} disabled={page <= 1 || isLoading}>{i18n.t('elygate.previous')}</button><button type="button" onclick={() => movePage(page + 1)} disabled={!hasNext || isLoading}>{i18n.t('elygate.next')}</button></div></footer>
-</section>
+	<fieldset disabled={isLoading} class="pagination" aria-busy={isLoading}>
+		<ListPagination
+			label={title}
+			page={page}
+			{totalPages}
+			{total}
+			rangeStart={total === 0 ? 0 : (page - 1) * Number(pageSize) + 1}
+			rangeEnd={Math.min(page * Number(pageSize), total)}
+			onPageChange={movePage}
+		/>
+	</fieldset>
+</ContentPageShell>
 
 <style>
-	.page-shell { max-width: 1200px; margin: 0 auto; padding: 1.5rem; }
-	header { align-items: center; display: flex; justify-content: space-between; gap: 1rem; margin-bottom: 1.25rem; }
-	.eyebrow { color: var(--primary); font-size: .75rem; font-weight: 700; letter-spacing: .12em; margin: 0 0 .45rem; text-transform: uppercase; }
-	h1 { font-size: 1.75rem; letter-spacing: -.03em; margin: 0; }
-	button { border: 0; border-radius: .7rem; background: var(--primary); color: var(--primary-foreground); cursor: pointer; font-weight: 650; padding: .7rem 1rem; }
-	button:disabled { cursor: wait; opacity: .55; }
 	.filters { align-items: end; display: grid; gap: .75rem; grid-template-columns: minmax(240px, 1fr) 130px auto; margin-bottom: 1rem; }
 	.filters label { color: var(--muted-foreground); display: grid; font-size: .8rem; font-weight: 650; gap: .35rem; }
-	.filters input, .filters select { background: var(--background); border: 1px solid var(--border); border-radius: .5rem; color: var(--foreground); font: inherit; padding: .6rem .7rem; }
-	.table-wrap { background: var(--card); border: 1px solid var(--border); border-radius: 1rem; overflow-x: auto; }
 	table { border-collapse: collapse; min-width: 740px; width: 100%; }
 	th, td { border-bottom: 1px solid var(--border); max-width: 260px; overflow: hidden; padding: .8rem 1rem; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
-	th { background: var(--muted); color: var(--muted-foreground); font-size: .75rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+	th { background: var(--muted); color: var(--muted-foreground); font-size: .75rem; font-weight: 700; }
 	td { font-size: .875rem; }
 	tbody tr:last-child td { border-bottom: 0; }
-	.notice, .empty { background: var(--muted); border-radius: .75rem; color: var(--muted-foreground); padding: 1rem; }
-	.notice { color: var(--destructive); }
-	.pagination { align-items: center; color: var(--muted-foreground); display: flex; justify-content: space-between; margin-top: 1rem; }
-	.pagination div { display: flex; gap: .5rem; }
-	@media (max-width: 600px) { header { align-items: flex-start; flex-direction: column; } .filters { grid-template-columns: 1fr; } }
+	.empty { color: var(--muted-foreground); padding: 1rem 0; }
+	.pagination { border: 0; margin: 1rem 0 0; min-width: 0; padding: 0; }
+	@media (max-width: 600px) { .filters { grid-template-columns: 1fr; } }
 </style>

@@ -9,6 +9,30 @@ Bifrost `ui/`. This matrix records the backend API contract consumed by the
 independent panel; it does not create a source-level parity obligation with the
 upstream UI.
 
+## SVAdmin 0.102.0 migration boundary
+
+- On 2026-10-31 the panel moved from `@svadmin/core` 0.66.2 /
+  `@svadmin/ui` 0.96.1 to the published `0.67.0` / `0.102.0` pair. The UI
+  peer range was checked against the installed core package before editing.
+- The local `@svadmin/ui` build-version patch was removed because the published
+  package now owns the stamped `AboutSettings` version. No local patch remains
+  for the migrated UI package.
+- Config and resource pages now use the published `ContentPageShell`,
+  `ContentPageHeader`, `SettingsGroup`, `SettingsFieldRow`, `Input`, `Select`,
+  `Switch`, `SaveButton`, `FeedbackNotice`, `DataTableShell` and
+  `ListPagination` components where their contracts fit. Elygate form
+  serialization, redacted credential handling, JSON editing, stale-response
+  guards and backend pagination remain local behavior.
+- Migration coverage includes installed-package contract tests, focused
+  field/config/resource regressions, frozen dependency installation,
+  `svelte-check`, isolated Vite production build, and the fixture browser suite
+  `tests/svadmin-migration.browser.mjs`. The browser suite covers 64 checks
+  across 1440x1000, 375x812 and 812x375 light/dark states, with zero page
+  errors, three fixture-only config writes and no real backend writes.
+- This is local panel evidence only. It does not prove live backend
+  compatibility, external provider behavior, production deployment or release
+  acceptance.
+
 ## Backend API contract policy
 
 - Bifrost upstream behavior and contracts are the compatibility baseline for

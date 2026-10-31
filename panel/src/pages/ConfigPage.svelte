@@ -1,6 +1,9 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { useTranslation } from '@svadmin/core/i18n';
+	import { useNotification } from '@svadmin/core';
+	import { Button, ContentPageHeader, ContentPageShell, FeedbackNotice, SaveButton, SettingsGroup } from '@svadmin/ui';
+	import { RefreshCw, RotateCw } from '@lucide/svelte';
 	import { displayError, parseJsonObject, prettyJson } from '../lib/forms';
 	import { isJsonRecord, requestJson, type JsonRecord } from '../lib/api';
 	import { getAppName, resolveAppName, setAppName } from '../lib/branding';
@@ -25,6 +28,7 @@
 
 	let { resourceName }: Props = $props();
 	const i18n = useTranslation();
+	const notification = useNotification();
 	const sectionMap: Record<string, ConfigSection[]> = {
 		'client-settings': ['security', 'performance'],
 		'compatibility-config': ['compat'],
@@ -173,7 +177,7 @@
 			setAppName(saveAppName);
 			if (result.document) {
 				applyDocument(result.document);
-				notice = i18n.t('elygate.saveSuccess');
+				notification.success(i18n.t('elygate.saveSuccess'), 3000);
 			} else {
 				notice = i18n.t('elygate.configSavedRefreshFailed');
 			}
@@ -199,7 +203,7 @@
 		error = '';
 		try {
 			await requestJson('/api/pricing/force-sync', { method: 'POST' });
-			notice = i18n.t('elygate.pricingSyncStarted');
+			notification.open(i18n.t('elygate.pricingSyncStarted'), 3000);
 		} catch (cause) {
 			error = displayError(cause, i18n.t('elygate.operationFailed'));
 		} finally {
@@ -212,26 +216,29 @@
 	});
 </script>
 
-<section class="page-shell">
-	<header class="page-heading">
-		<div>
-			<p class="eyebrow">{eyebrow}</p>
-			<h1>{i18n.t(titleKey)}</h1>
-			<p>{i18n.t('elygate.configHint')}</p>
-		</div>
+<ContentPageShell pageId={resourceName} width="wide">
+	<ContentPageHeader title={i18n.t(titleKey)} {eyebrow}>
+		{#snippet actions()}
 		<div class="heading-actions">
-			{#if resourceName === 'pricing-config'}<button type="button" onclick={() => void forcePricingSync()} disabled={isSaving}>{i18n.t('elygate.syncPricing')}</button>{/if}
+			{#if resourceName === 'pricing-config'}
+				<Button type="button" variant="outline" onclick={() => void forcePricingSync()} disabled={isLoading || isSaving}>
+					<RotateCw size={16} aria-hidden="true" />{i18n.t('elygate.syncPricing')}
+				</Button>
+			{/if}
 			<div class="mode-switch" role="group" aria-label={i18n.t('elygate.config')}>
-				<button type="button" class:is-active={mode === 'form'} onclick={() => switchMode('form')} disabled={isLoading || isSaving}>
+				<button type="button" class:is-active={mode === 'form'} aria-pressed={mode === 'form'} onclick={() => switchMode('form')} disabled={isLoading || isSaving}>
 					{i18n.t('elygate.formMode')}
 				</button>
-				<button type="button" class:is-active={mode === 'json'} onclick={() => switchMode('json')} disabled={isLoading || isSaving}>
+				<button type="button" class:is-active={mode === 'json'} aria-pressed={mode === 'json'} onclick={() => switchMode('json')} disabled={isLoading || isSaving}>
 					{i18n.t('elygate.jsonMode')}
 				</button>
 			</div>
-			<button class="primary" type="button" onclick={() => void load()} disabled={isLoading || isSaving}>{i18n.t('elygate.refresh')}</button>
+			<Button variant="outline" type="button" onclick={() => void load()} disabled={isLoading || isSaving}>
+				<RefreshCw size={16} aria-hidden="true" />{i18n.t('elygate.refresh')}
+			</Button>
 		</div>
-	</header>
+		{/snippet}
+	</ContentPageHeader>
 
 	<div class="status-grid" aria-label={i18n.t('elygate.connectionStatus')}>
 		{#each statusItems as item (item.key)}
@@ -249,19 +256,19 @@
 		{/each}
 	</div>
 
-	{#if restartRequired !== null}
-		<div class="notice warning" role="status">
-			{i18n.t('elygate.restartRequired')}{restartRequired ? ` ${restartRequired}` : ''}
-		</div>
+	{#if error}
+		<FeedbackNotice tone="danger" message={error} />
+	{:else if notice}
+		<FeedbackNotice tone="warning" message={notice} />
 	{/if}
-	{#if error}<div class="notice error" role="alert">{error}</div>{/if}
-	{#if notice}<div class="notice success" role="status">{notice}</div>{/if}
+	{#if restartRequired !== null}
+		<FeedbackNotice tone="warning" message={`${i18n.t('elygate.restartRequired')}${restartRequired ? ` ${restartRequired}` : ''}`} />
+	{/if}
 
 	<form onsubmit={submit}>
 		{#if mode === 'form'}
 			<div class="section-grid">
-				{#if shows('auth')}<section class="config-section">
-					<h2>{i18n.t('elygate.section.auth')}</h2>
+				{#if shows('auth')}<SettingsGroup title={i18n.t('elygate.section.auth')}>
 					<SwitchField label={i18n.t('elygate.field.authEnabled')} bind:checked={form.authEnabled} disabled={isLoading || isSaving} />
 					<TextField label={i18n.t('elygate.field.adminUsername')} bind:value={form.adminUsername} autocomplete="username" disabled={isLoading || isSaving} />
 					<TextField
@@ -272,10 +279,9 @@
 						autocomplete="new-password"
 						disabled={isLoading || isSaving}
 					/>
-				</section>{/if}
+				</SettingsGroup>{/if}
 
-				{#if shows('logging')}<section class="config-section">
-					<h2>{i18n.t('elygate.section.logging')}</h2>
+				{#if shows('logging')}<SettingsGroup title={i18n.t('elygate.section.logging')}>
 					<SwitchField label={i18n.t('elygate.field.enableLogging')} bind:checked={form.enableLogging} disabled={isLoading || isSaving} />
 					<SwitchField label={i18n.t('elygate.field.disableContentLogging')} bind:checked={form.disableContentLogging} disabled={isLoading || isSaving} />
 					<SwitchField label={i18n.t('elygate.field.retainContentInObjectStorage')} bind:checked={form.retainContentInObjectStorage} disabled={isLoading || isSaving} />
@@ -283,10 +289,9 @@
 					<SwitchField label={i18n.t('elygate.field.allowPerRequestRawOverride')} bind:checked={form.allowPerRequestRawOverride} disabled={isLoading || isSaving} />
 					<SwitchField label={i18n.t('elygate.field.dumpErrorsInConsoleLogs')} bind:checked={form.dumpErrorsInConsoleLogs} disabled={isLoading || isSaving} />
 					<NumberField label={i18n.t('elygate.field.logRetentionDays')} bind:value={form.logRetentionDays} min={0} disabled={isLoading || isSaving} />
-				</section>{/if}
+				</SettingsGroup>{/if}
 
-				{#if shows('security')}<section class="config-section">
-					<h2>{i18n.t('elygate.section.security')}</h2>
+				{#if shows('security')}<SettingsGroup title={i18n.t('elygate.section.security')}>
 					<TextField label={i18n.t('elygate.field.appName')} hint={i18n.t('elygate.field.appNameHint')} bind:value={form.appName} placeholder={getAppName()} disabled={isLoading || isSaving} />
 					<SwitchField label={i18n.t('elygate.field.allowDirectKeys')} bind:checked={form.allowDirectKeys} disabled={isLoading || isSaving} />
 					<SwitchField label={i18n.t('elygate.field.enforceAuthOnInference')} bind:checked={form.enforceAuthOnInference} disabled={isLoading || isSaving} />
@@ -295,27 +300,24 @@
 					<SelectField label={i18n.t('elygate.field.dualCredentialConflictBehavior')} bind:value={form.dualCredentialConflictBehavior} options={dualCredentialOptions} disabled={isLoading || isSaving} />
 					<TextField label={i18n.t('elygate.field.allowedOrigins')} hint={i18n.t('elygate.field.csvHint')} bind:value={form.allowedOrigins} placeholder="*" disabled={isLoading || isSaving} />
 					<NumberField label={i18n.t('elygate.field.maxRequestBodySizeMb')} bind:value={form.maxRequestBodySizeMb} min={1} disabled={isLoading || isSaving} />
-				</section>{/if}
+				</SettingsGroup>{/if}
 
-				{#if shows('performance')}<section class="config-section">
-					<h2>{i18n.t('elygate.section.performance')}</h2>
+				{#if shows('performance')}<SettingsGroup title={i18n.t('elygate.section.performance')}>
 					<NumberField label={i18n.t('elygate.field.initialPoolSize')} bind:value={form.initialPoolSize} min={0} disabled={isLoading || isSaving} />
 					<TextField label={i18n.t('elygate.field.prometheusLabels')} hint={i18n.t('elygate.field.csvHint')} bind:value={form.prometheusLabels} disabled={isLoading || isSaving} />
 					<NumberField label={i18n.t('elygate.field.asyncJobResultTtl')} bind:value={form.asyncJobResultTtl} min={0} disabled={isLoading || isSaving} />
 					<NumberField label={i18n.t('elygate.field.routingChainMaxDepth')} bind:value={form.routingChainMaxDepth} min={1} disabled={isLoading || isSaving} />
 					<SwitchField label={i18n.t('elygate.field.hideDeletedVirtualKeysInFilters')} bind:checked={form.hideDeletedVirtualKeysInFilters} disabled={isLoading || isSaving} />
-				</section>{/if}
+				</SettingsGroup>{/if}
 
-				{#if shows('compat')}<section class="config-section">
-					<h2>{i18n.t('elygate.section.compat')}</h2>
+				{#if shows('compat')}<SettingsGroup title={i18n.t('elygate.section.compat')}>
 					<SwitchField label={i18n.t('elygate.field.compatConvertTextToChat')} bind:checked={form.compatConvertTextToChat} disabled={isLoading || isSaving} />
 					<SwitchField label={i18n.t('elygate.field.compatConvertChatToResponses')} bind:checked={form.compatConvertChatToResponses} disabled={isLoading || isSaving} />
 					<SwitchField label={i18n.t('elygate.field.compatShouldDropParams')} bind:checked={form.compatShouldDropParams} disabled={isLoading || isSaving} />
 					<SwitchField label={i18n.t('elygate.field.compatShouldConvertParams')} bind:checked={form.compatShouldConvertParams} disabled={isLoading || isSaving} />
-				</section>{/if}
+				</SettingsGroup>{/if}
 
-				{#if shows('mcp')}<section class="config-section">
-					<h2>{i18n.t('elygate.section.mcp')}</h2>
+				{#if shows('mcp')}<SettingsGroup title={i18n.t('elygate.section.mcp')}>
 					<NumberField label={i18n.t('elygate.field.mcpAgentDepth')} bind:value={form.mcpAgentDepth} min={0} disabled={isLoading || isSaving} />
 					<NumberField label={i18n.t('elygate.field.mcpToolExecutionTimeout')} bind:value={form.mcpToolExecutionTimeout} min={0} disabled={isLoading || isSaving} />
 					<SelectField label={i18n.t('elygate.field.mcpCodeModeBindingLevel')} bind:value={form.mcpCodeModeBindingLevel} options={codeModeBindingOptions} disabled={isLoading || isSaving} />
@@ -324,16 +326,15 @@
 					<SwitchField label={i18n.t('elygate.field.mcpEnableTempTokenAuth')} bind:checked={form.mcpEnableTempTokenAuth} disabled={isLoading || isSaving} />
 					<TextField label={i18n.t('elygate.field.mcpExternalClientUrl')} bind:value={form.mcpExternalClientUrl} disabled={isLoading || isSaving} />
 					<SelectField label={i18n.t('elygate.field.mcpServerAuthMode')} bind:value={form.mcpServerAuthMode} options={mcpAuthModeOptions} disabled={isLoading || isSaving} />
-				</section>{/if}
+				</SettingsGroup>{/if}
 
-				{#if shows('framework')}<section class="config-section">
-					<h2>{i18n.t('elygate.section.framework')}</h2>
+				{#if shows('framework')}<SettingsGroup title={i18n.t('elygate.section.framework')}>
 					<TextField label={i18n.t('elygate.field.pricingUrl')} bind:value={form.pricingUrl} disabled={isLoading || isSaving} />
 					<NumberField label={i18n.t('elygate.field.pricingSyncInterval')} bind:value={form.pricingSyncInterval} min={0} disabled={isLoading || isSaving} />
 					<TextField label={i18n.t('elygate.field.modelParametersUrl')} bind:value={form.modelParametersUrl} disabled={isLoading || isSaving} />
 					<TextField label={i18n.t('elygate.field.mcpLibraryUrl')} bind:value={form.mcpLibraryUrl} disabled={isLoading || isSaving} />
 					<NumberField label={i18n.t('elygate.field.mcpLibrarySyncInterval')} bind:value={form.mcpLibrarySyncInterval} min={0} disabled={isLoading || isSaving} />
-				</section>{/if}
+				</SettingsGroup>{/if}
 			</div>
 		{:else}
 			<label class="json-editor">
@@ -342,27 +343,19 @@
 			</label>
 		{/if}
 
-		<footer class="save-bar">
-			<button class="primary" type="submit" disabled={isSaving || isLoading}>
-				{isSaving ? i18n.t('elygate.saving') : i18n.t('elygate.save')}
-			</button>
-		</footer>
+		<fieldset class="save-bar" disabled={isLoading || isSaving}>
+			<SaveButton loading={isSaving} label={isSaving ? i18n.t('elygate.saving') : i18n.t('elygate.save')} />
+		</fieldset>
 	</form>
-</section>
+</ContentPageShell>
 
 <style>
-	.page-shell { color: var(--foreground); max-width: 1180px; margin: 0 auto; padding: 1.5rem; }
-	.page-heading { align-items: flex-start; display: flex; justify-content: space-between; gap: 1rem; margin-bottom: 1.25rem; }
-	.eyebrow { color: var(--primary); font-size: .75rem; font-weight: 700; letter-spacing: .12em; margin: 0 0 .45rem; text-transform: uppercase; }
-	h1 { margin: 0; font-size: clamp(1.5rem, 3vw, 2.15rem); }
-	.page-heading p { color: var(--muted-foreground); margin: .55rem 0 0; max-width: 760px; }
 	.heading-actions { align-items: center; display: flex; flex-wrap: wrap; gap: .5rem; justify-content: flex-end; }
-	.mode-switch { background: var(--muted); border: 1px solid var(--border); border-radius: .55rem; display: flex; gap: .15rem; padding: .18rem; }
+	.mode-switch { background: var(--muted); border: 1px solid var(--border); border-radius: .5rem; display: flex; gap: .15rem; padding: .18rem; }
 	.mode-switch button { background: transparent; border: 0; border-radius: .4rem; color: var(--muted-foreground); cursor: pointer; font-weight: 600; padding: .4rem .7rem; white-space: nowrap; }
 	.mode-switch button.is-active { background: var(--background); color: var(--foreground); box-shadow: 0 1px 2px rgb(0 0 0 / .08); }
-	button { background: var(--muted); border: 1px solid var(--border); border-radius: .55rem; color: var(--foreground); cursor: pointer; font-weight: 600; padding: .55rem .75rem; white-space: nowrap; }
-	button.primary { background: var(--primary); border-color: var(--primary); color: var(--primary-foreground); }
-	button:disabled { cursor: wait; opacity: .55; }
+	.mode-switch button:disabled { cursor: wait; opacity: .55; }
+	.mode-switch button:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 
 	.status-grid { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1.25rem; }
 	.status-item { align-items: center; border: 1px solid var(--border); border-radius: .55rem; display: grid; flex: 1 1 170px; gap: .45rem; grid-template-columns: auto minmax(0, 1fr) auto; min-height: 2.65rem; padding: .55rem .7rem; }
@@ -380,23 +373,16 @@
 	.unknown-text { color: var(--muted-foreground); }
 
 	form { display: grid; gap: 1rem; }
-	.section-grid { align-items: stretch; display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); }
-	.config-section { border: 1px solid var(--border); border-radius: .65rem; height: 100%; padding: .35rem 1rem .8rem; }
-	.config-section h2 { font-size: .95rem; margin: .65rem 0 .25rem; }
+	.section-grid { display: grid; gap: 1.5rem; min-width: 0; }
 	.json-editor { color: var(--foreground); display: grid; font-size: .85rem; font-weight: 650; gap: .35rem; }
-	textarea { background: var(--background); border: 1px solid var(--border); border-radius: .65rem; color: var(--foreground); font: 0.8rem ui-monospace, SFMono-Regular, Menlo, monospace; padding: .85rem; resize: vertical; width: 100%; }
+	textarea { background: var(--background); border: 1px solid var(--border); border-radius: .5rem; box-sizing: border-box; color: var(--foreground); font: 0.8rem ui-monospace, SFMono-Regular, Menlo, monospace; padding: .85rem; resize: vertical; width: 100%; }
+	textarea:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 
-	.notice { border-radius: .65rem; margin-bottom: 1rem; padding: .75rem 1rem; }
-	.notice.error { background: color-mix(in oklch, var(--destructive) 10%, transparent); color: var(--destructive); }
-	.notice.success { background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); }
-	.notice.warning { background: color-mix(in oklch, var(--warning, #d97706) 12%, transparent); color: var(--warning, #b45309); }
-
-	.save-bar { border-top: 1px solid var(--border); display: flex; justify-content: flex-end; padding: .75rem 0; }
+	.save-bar { border: 0; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; margin: 0; min-width: 0; padding: .75rem 0; }
 
 	@media (max-width: 760px) {
-		.page-heading { align-items: stretch; flex-direction: column; }
 		.heading-actions { justify-content: stretch; }
-		.heading-actions > button { flex: 1; }
+		.heading-actions :global([data-slot='button']) { flex: 1; }
 		.mode-switch { flex: 1; }
 		.mode-switch button { flex: 1; }
 	}
