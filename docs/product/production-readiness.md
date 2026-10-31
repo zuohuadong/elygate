@@ -12,11 +12,15 @@
   run `41165399877` 于 2026-10-31 11:47:54（北京时间）整体成功。
   镜像已在隔离 runner 中实际加载、启动和正常重启，详见下方运行时记录；
   未发布镜像或部署生产，不将后续本地修改或文档提交视为同一镜像 SHA。
+- 同 SHA 的本地 Go 二进制已通过 SQLite 与 PostgreSQL 18.4
+  compact/signed 四项运行回归，PostgreSQL 包含停机备份恢复。
+  此为 **PASS_SCOPED**；构建输入限制和证据路径见下方本地复验记录，
+  不代替正式镜像、其他产品功能或生产验收。
 - 草稿 API 初始源码基线：`dev` / `826067def`，包含 Bifrost `c34bd4360`。
   面板草稿接入基线为 `b508f90e7`；不可变版本 API 为 `d5669bde5`，
   面板版本历史为 `d4a4be649`，另有本地初始化竞态修复与验收文档。
   最终发布前仍需重新固定候选 SHA、构建产物和部署镜像。
-- 以下既有 Relay 运行/恢复证据来自 `9635d01a3` 及其验收脚本后续增量；
+- 以下历史 Relay 运行/恢复证据来自 `9635d01a3` 及其验收脚本后续增量；
   旧构建不包含新增草稿 API，不能复用于该 API 的运行证明。
   最终发布前需重新固定 SHA 并对其复验，不将本地二进制视为已发布制品。
 - 草稿面板阶段全量回归：367 单测、2198 断言及 1 代理集成测试
@@ -211,7 +215,8 @@ external=0；仅修改既有本地运行测试、本清单和只读发布预检�
 与完整链，并证明恢复后的登录/退出、转发、日志和新写入。SQLite 同一生命周期
 回归另行运行；不把 SQLite 作为 PostgreSQL 失败时的回退。
 
-当前状态：**历史二进制运行矩阵通过，当前候选验证仍为 PARTIAL**。
+当时状态：**历史二进制运行矩阵通过，当前候选验证仍为 PARTIAL**；
+后续当前候选证据见下方 `cb2af4230` 本地构建与恢复复验记录。
 扩展后的脚本已通过 SQLite compact/signed（2 pass）及 PostgreSQL 18 双库
 compact/signed（2 pass），覆盖正常重启、停机备份恢复、恢复后登录/退出、
 转发与新写入，以及 signed 模式的密文和签名链延续；临时进程与目录已清理。
@@ -236,7 +241,7 @@ Relay 运行验收现在还必须显式传入 `ELYGATE_TEST_COMMIT` 的 40 位�
 构建命令用 `-X main.Version=v<sha>` 注入版本；首次登录、PostgreSQL 正常重启
 和备份恢复后都会核对 `/api/version`。缺少 SHA 或使用旧二进制会在业务验收前
 拒绝，版本字符串仍不是供应链签名或镜像来源证明。当前候选的旧 `v15` 二进制
-已被该门禁拒绝；当前源码重建在本机外置卷上停滞后停止，尚无可接受的新二进制。
+已被该门禁拒绝；当时源码重建在本机外置卷上停滞后停止，未产出可接受的新二进制。
 
 该增量为后续项 `relay-current-candidate-recovery`，parent 为 `fd2f18aff`，
 source 为交付门 7 的候选绑定缺口，reason 为历史二进制与当前 Go 代码已有差异。
@@ -249,7 +254,8 @@ PIE/外部链接/`sqlite_static` 和 `-buildvcs=false`，显式注入完整候�
 退出 143，不能记为编译失败、编译通过或恢复验收通过。
 本轮本地 Svelte 复查也在持续 I/O 等待后停止，退出 143，不计为通过；
 下节 `fd2f18aff` 的远端 Svelte 成功是另一份已完成证据，二者不能混用。
-完整 compact/signed SQLite 与双 PostgreSQL 当前候选矩阵继续为 **PARTIAL**。
+截至该次中止，完整 compact/signed SQLite 与双 PostgreSQL 当前候选矩阵为
+**PARTIAL**，不覆盖下方后续重建与复验结果。
 
 ### 单机预检存储一致性后续项（2026-10-31）
 
@@ -335,8 +341,50 @@ Snyk `41165399889` 和 CodSpeed `41165399902` 本轮查询仍 queued，不计验
 采样仍主要为 `read/stat/pread`，持续低 CPU 后主动停止，退出 143，
 没有生成新的候选可执行文件，不记为编译失败或通过；采样位于
 `.codex-tmp/current-candidate-build.sample.txt`，不纳入提交。
-当前候选的加密恢复、策略发布/Shadow/回滚、完整敏感审计、TLS/反向代理、
+截至该次构建中止，候选加密恢复、策略发布/Shadow/回滚、完整敏感审计、TLS/反向代理、
 升级回滚及显式生产切换授权均未被本项替代，原目标保持 **active / PARTIAL**。
+
+### `cb2af4230` 本地构建与恢复复验（2026-10-31）
+
+承接后续项 `relay-current-candidate-recovery`，parent/source/reason 和原验收范围
+保持不变。Native、root 单 writer、低风险、external=0；本次只补充执行证据，
+不修改业务代码、不发布镜像、不部署生产。
+
+外置卷构建停滞后，在本机临时磁盘创建干净稀疏 clone，精确 detached 到
+`cb2af42309e45dd0f61beb8d6cc4608c1d9dd4d0`，成功构建标准网关。
+使用 Go 1.27.3、CGO、`-p 1 -mod=readonly -buildvcs=false -trimpath`、
+PIE、外部链接和 `sqlite_static`，注入 `main.Version=v<完整候选 SHA>`。
+`go.work` 和 `go.work.sum` 从原工作区复制；Go/模块目录及 Relay 运行脚本
+相对文档提交 `0ac361e55` 无差异。嵌入 UI 复用原工作区现有约 32 MB 静态资源，
+不是该 clone 重新构建的面板，因此本地制品只证明下述 API/恢复行为，
+不证明新前端、可复现发布构建或正式镜像。
+
+二进制复制回 Datas 后 SHA-256 一致：
+`9db84e075be360320945a7e6db27cfb90ef1d5a2bb09c8fa0f8afe80721a867c`。
+本地证据目录为 `.codex-tmp/relay-cb2-proof-20261031.ltXiXt/`，
+包含 `relay-gateway`、`build-info.txt`、`source-trees.txt`、
+`workspace-inputs.txt` 和运行日志；这些本地制品不纳入 Git。
+
+临时 clone 已通过 SQLite compact/signed（2 pass / 0 fail）和
+PostgreSQL 18.4 compact/signed（2 pass / 0 fail）。复制回 Datas 后，
+从原工作区再次执行同一运行脚本，SQLite compact/signed 为
+**2 pass / 0 fail**，PostgreSQL 18.4 compact/signed 为 **2 pass / 0 fail**，
+日志分别为 `sqlite.log` 与 `postgres.log`。PostgreSQL 核对全部表/序列、
+源库不变、正常重启与双库停机备份恢复、文件和秘密材料恢复、会话/Key/
+转发/日志/新写入，signed 模式另核对密文、原签名公钥及审计链延续。
+私有库、测试子进程和临时测试目录清理通过，未残留运行中的网关或夹具进程。
+以上四项为当前 Go API/恢复范围的 **PASS_SCOPED**，
+不是最终发布验收；SQLite 不替代 PostgreSQL 恢复。
+首次登录、PostgreSQL 正常重启和恢复后均要求 `/api/version` 等于完整候选 SHA。
+这些证据不代表 PostgreSQL 16、真实供应商、TLS/反向代理、崩溃恢复、
+升级回滚或整机恢复；总目标继续 **active / PARTIAL**。
+
+Pi 诊断补充：`gomodel/qwen3.8-flash-next` 无工具最小请求仍超时，
+已配置的 deepseek/gomodel 端点无凭据 TCP 检查均连接超时；
+Pi 的 `anthropic/claude-sonnet-4-6` 最小请求返回
+`401 invalid x-api-key`。没有修改 provider 配置或输出地址与凭据，
+没有 Pi 实施产物；该要求仍未满足，需要恢复端点或更新有效凭据。
+本次仅记录验证结果，无请求路径 CPU/分配或常驻缓存开销。
 
 ### Dev CI 触发后续项（已由 `cb2af4230` 闭合，2026-10-31）
 
