@@ -66,27 +66,42 @@ Back up PostgreSQL before every upgrade. Stop Elygate and exclude all other writ
 
 The default template uses the same `POSTGRES_DB` for configuration and logs, so one dump covers both stores. If you configured separate databases, dump and restore both while all writers remain stopped. A database dump alone does not preserve local uploads, Skills files, or external encryption/signing material.
 
+Stop the gateway yourself, exclude every other database writer, and verify a normal
+exit before invoking the repository backup entry point. It never stops, starts, drops,
+or overwrites a service or database:
+
 ```bash
 (
 set -eu
-umask 077
-backup_dir="elygate-backup-$(date +%Y%m%d-%H%M%S)"
-mkdir -m 700 "$backup_dir"
 docker compose stop --timeout 60 elygate
 test "$(docker inspect --format '{{.State.ExitCode}}' "$(docker compose ps -aq elygate)")" = 0
-docker compose exec -T postgres \
-  sh -ec 'exec pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' \
-  > "$backup_dir/database.dump"
-docker compose exec -T postgres pg_restore --list \
-  < "$backup_dir/database.dump" > "$backup_dir/database.list"
-mkdir -m 700 "$backup_dir/runtime"
-docker compose cp elygate:/app/data/. "$backup_dir/runtime/"
-cp config.json docker-compose.yml "$backup_dir/"
+BACKUP_ROOT="$PWD/backups" \
+  bash ../../scripts/production/single-node-backup.sh . --confirm-no-writers
 docker compose start elygate
 )
 ```
 
-The quoted `sh -ec` command expands credentials inside PostgreSQL's container, where Compose has injected them. It does not require sourcing `.env` in the host shell. Do not print rendered Compose configuration or use shell tracing when credentials are present.
+The command requires the explicit `--confirm-no-writers` acknowledgement, checks the
+default single-database PostgreSQL topology, normally stopped gateway, healthy database
+and actual container image/environment/mounts against Compose. The running image must
+use the repository's standard entrypoint and command, with exactly one actual
+`APP_DIR=/app/data`; stale overrides from an older container are rejected. It writes a custom
+`pg_dump` archive, lists it with `pg_restore --list`, streams `/app/data` into
+`runtime.tar` without extracting it on the host, and records both container image
+references/IDs and SHA-256 checksums. The tar retains runtime ownership and permissions.
+It rejects deployment-file changes and container restarts during capture.
+No `.env` or raw rendered Compose/inspect output is archived. Runtime files and dumps
+remain sensitive. An incomplete run is removed; only a complete capture is published,
+with `recovery_verified: false` in its manifest. A failure leaves the gateway stopped
+for operator investigation instead of automatically restarting it.
+
+`pg_dump` expands credentials inside the selected PostgreSQL container and connects to
+its loopback port, rather than trusting `PGHOST` or host-shell variables. It does not
+require sourcing `.env`. Do not print rendered Compose configuration or use shell
+tracing when credentials are present. Set `ENV_FILE` or `BACKUP_ROOT` for alternate
+private paths; the backup root must already exist with mode `0700`. Custom dual-database
+or external PostgreSQL profiles require separate reviewed backup procedures and are
+rejected by this entry point.
 
 Retain the exact Elygate image digest and configuration with the backup. Keep `.env`, `ENCRYPTION_KEY`, and any separately configured audit-signing or storage credentials through your secret-management process, with access restricted to recovery operators. Do not commit backup files, put `.env` in the dump archive, or publish backup contents. Keep the entire backup directory private; runtime files and database dumps can contain sensitive data.
 
@@ -113,7 +128,13 @@ docker compose exec -T postgres \
 
 Do not drop or clean the original database to make a restore succeed. An import conflict or error must abort recovery; inspect the isolated target rather than deleting production state.
 
-Before starting Elygate, also restore the backed-up local runtime files into the new runtime volume, preserve their required ownership and permissions for the chosen image, and restore `config.json` through its separate read-only mount. Restore the stable encryption/signing material through the target's secret-management process. Do not assume importing SQL restores uploaded files or makes encrypted values readable.
+Before starting Elygate, also restore the backed-up local runtime files from
+`runtime.tar` into the **new isolated runtime volume**, preserving their archived
+ownership and permissions for the chosen image, and restore `config.json` through
+its separate read-only mount. Never extract the archive into the source volume or
+an arbitrary host directory. Restore the stable encryption/signing material through
+the target's secret-management process. Do not assume importing SQL restores uploaded
+files or makes encrypted values readable.
 
 Only after all stores, files and secrets are restored, start the isolated gateway. Verify database-backed `/health`, administrator login, Application Key bindings, Usage Ledger, audit history, local files and encrypted credentials. Exercise a new authorized write, verify the original source has not changed, and record cleanup of the test target.
 

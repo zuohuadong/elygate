@@ -818,6 +818,38 @@ Native 单 writer；不执行数据库、Docker、部署或生产写入。
 文档命令只作 Bash 语法和边界检查，未执行真实备份恢复；这不关闭交付门 7/8，
 也不改变原产品功能范围或整体 **active / PARTIAL**。
 
+### 单机一致性备份入口（2026-10-31）
+
+后续项 `single-node-consistent-backup`：parent 为
+`single-node-recovery-guide`，source 为生产交付门 7，reason 为既有手册只有
+内联命令，容易在网关仍运行、双库拓扑或备份产物权限不满足时误用。
+Pi 实施调用在工具执行前返回 `Connection error`、退出码 1，未产生改动；
+随后由 root 按同一冻结范围接手，未执行生产写入。
+本项为中风险 Native 单 writer 加一次独立只读 verifier；范围为备份脚本、
+专项测试、部署手册与本记录，并为默认备份目录补充模板专属 Git 忽略规则，
+避免敏感产物被误暂存，不改变其他未跟踪目录。
+
+新增 `scripts/production/single-node-backup.sh` 及确定性 shell 回归。入口要求
+操作者显式确认已停掉 Elygate 且排除了其他数据库写入者；它只接受预检通过、
+默认同库 PostgreSQL 配置、网关已正常退出、PostgreSQL 健康运行和不可变镜像，
+不会自动停止/启动服务、删除数据库或归档 `.env`。备份在私有临时目录中生成，
+包含 custom `pg_dump`、`pg_restore --list`、未在宿主展开的 `runtime.tar`、
+配置、Compose 文件、实际容器镜像元数据和 `SHA256SUMS`，成功后才原子改名；
+失败不留下成功目录，并拒绝捕获期间的源文件或容器状态变化。
+
+本项仅证明静态边界和 fake-Docker 错误/成功路径，不证明真实 Docker、
+数据库恢复、掉电安全、升级回滚或生产验收；原目标保持 **active / PARTIAL**。
+30 项备份场景与既有预检回归、shellcheck、Bash 语法及 diff 检查通过，
+包含源容器与部署文件变化拒绝、失败清理、权限、元数据脱敏和校验和损坏检测。
+独立复核指出旧容器残留 `APP_DIR` 可能使归档目录偏离真实数据目录；
+后续已改为核对实际容器的唯一 `APP_DIR=/app/data` 和标准启动命令/entrypoint，
+并增加残留、缺失、重复值及两个启动覆盖拒绝场景。
+实际容器的运行卷和 PostgreSQL 卷名也必须与 Compose 解析结果一致，
+旧卷残留的两个拒绝场景已加入回归。容器状态恢复正常不能替代数据卷一致性。
+本机有界 Docker daemon 检查返回不可用，未启动真实容器或操作生产环境。
+推理路径与常驻内存不变；备份期间仅运行一次 dump、归档和顺序校验和计算，
+磁盘需求取决于数据库逻辑 dump 加运行目录 tar 大小，须由操作者提前留足空间。
+
 ### 候选镜像归档后续项（2026-10-31）
 
 后续项 `panel-ci-candidate-image-artifact`：parent 为 `eef56dbb4`，
