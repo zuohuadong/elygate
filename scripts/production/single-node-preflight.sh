@@ -100,6 +100,32 @@ postgres_resolved_image="$(printf '%s' "$resolved_json" | jq -r '.services.postg
 	fail "postgres.image" "image must use a sha256 digest"
 pass "immutable image references"
 
+for service in elygate postgres; do
+	printf '%s' "$resolved_json" | jq -e --arg service "$service" '
+		.services[$service].healthcheck |
+		.disable != true and
+		(.test | type == "array" and length > 1 and
+			all(.[]; type == "string") and
+			(.[0] == "CMD" or .[0] == "CMD-SHELL") and
+			(.[1] | test("\\S")))
+	' >/dev/null 2>&1 ||
+		fail "$service.healthcheck" "an enabled command healthcheck is required"
+	printf '%s' "$resolved_json" | jq -e --arg service "$service" '
+		.services[$service].restart | . == "always" or . == "unless-stopped"
+	' >/dev/null 2>&1 ||
+		fail "$service.restart" "must use always or unless-stopped"
+done
+printf '%s' "$resolved_json" | jq -e \
+	'.services.elygate.depends_on.postgres.condition == "service_healthy"' >/dev/null 2>&1 ||
+	fail "elygate.depends_on" "must wait for PostgreSQL health"
+printf '%s' "$resolved_json" | jq -e \
+	'(.services.postgres.ports // []) | type == "array" and length == 0' >/dev/null 2>&1 ||
+	fail "postgres.ports" "PostgreSQL must not publish a host port"
+printf '%s' "$resolved_json" | jq -e \
+	'.services.postgres.network_mode != "host"' >/dev/null 2>&1 ||
+	fail "postgres.network_mode" "PostgreSQL must not use host networking"
+pass "service health, restart and database network isolation"
+
 for field in BIFROST_ENCRYPTION_KEY BIFROST_SETUP_TOKEN POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB; do
 	field_value="$(resolved_env_value elygate "$field")" || fail "$field" "missing or invalid value"
 	minimum=1

@@ -49,6 +49,9 @@ jq -n --arg secret "$secret" '{
 	services: {
 		elygate: {
 			image: ("registry.test/elygate@sha256:" + ("b" * 64)),
+			restart: "unless-stopped",
+			depends_on: {postgres: {condition: "service_healthy"}},
+			healthcheck: {test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health"]},
 			environment: {
 				BIFROST_ENCRYPTION_KEY: $secret, BIFROST_SETUP_TOKEN: $secret,
 				POSTGRES_USER: "elygate", POSTGRES_PASSWORD: $secret, POSTGRES_DB: "elygate"
@@ -56,6 +59,8 @@ jq -n --arg secret "$secret" '{
 		},
 		postgres: {
 			image: ("postgres:16-alpine@sha256:" + ("a" * 64)),
+			restart: "unless-stopped",
+			healthcheck: {test: ["CMD-SHELL", "pg_isready"]},
 			environment: {
 				POSTGRES_USER: "elygate", POSTGRES_PASSWORD: $secret, POSTGRES_DB: "elygate"
 			}
@@ -127,6 +132,31 @@ chmod 755 "$backup_dir"
 expect_failure "private backup mode" "backup_dir" bash "$preflight" "$compose_dir"
 chmod 700 "$backup_dir"
 for service in elygate postgres; do
+	# Missing, disabled and empty probes must not count as startup/recovery evidence.
+	for probe in 'null' '{"disable":true,"test":["CMD","true"]}' '{"test":["NONE"]}' '{"test":[]}' '{"test":["CMD",""]}' '{"test":["CMD-SHELL","   "]}'; do
+		jq --arg service "$service" --argjson probe "$probe" '.services[$service].healthcheck = $probe' \
+			"$test_root/compose-original.json" >"$test_root/compose.json"
+		expect_failure "$service invalid healthcheck $probe" "$service.healthcheck" bash "$preflight" "$compose_dir"
+	done
+	for policy in 'null' '"no"' '"on-failure"'; do
+		jq --arg service "$service" --argjson policy "$policy" '.services[$service].restart = $policy' \
+			"$test_root/compose-original.json" >"$test_root/compose.json"
+		expect_failure "$service invalid restart policy $policy" "$service.restart" bash "$preflight" "$compose_dir"
+	done
+done
+jq '.services.elygate.depends_on.postgres.condition = "service_started"' \
+	"$test_root/compose-original.json" >"$test_root/compose.json"
+expect_failure "gateway starts before database health" "elygate.depends_on" bash "$preflight" "$compose_dir"
+jq 'del(.services.elygate.depends_on)' "$test_root/compose-original.json" >"$test_root/compose.json"
+expect_failure "gateway missing database dependency" "elygate.depends_on" bash "$preflight" "$compose_dir"
+jq '.services.postgres.ports = [{target: 5432, published: "5432"}]' \
+	"$test_root/compose-original.json" >"$test_root/compose.json"
+expect_failure "database host port" "postgres.ports" bash "$preflight" "$compose_dir"
+jq '.services.postgres.network_mode = "host"' \
+	"$test_root/compose-original.json" >"$test_root/compose.json"
+expect_failure "database host network" "postgres.network_mode" bash "$preflight" "$compose_dir"
+cp "$test_root/compose-original.json" "$test_root/compose.json"
+for service in elygate postgres; do
 	jq --arg service "$service" '.services[$service].image = "floating:latest"' \
 		"$test_root/compose-original.json" >"$test_root/compose.json"
 	expect_failure "$service floating image" "$service.image" bash "$preflight" "$compose_dir"
@@ -178,6 +208,10 @@ for field in BIFROST_ENCRYPTION_KEY BIFROST_SETUP_TOKEN POSTGRES_PASSWORD; do
 done
 cp "$test_root/compose-original.json" "$test_root/compose.json"
 expect_failure "compose failure" "docker compose config" env FAKE_COMPOSE_FAIL=1 bash "$preflight" "$compose_dir"
+jq '.services.elygate.restart = "always" | .services.postgres.restart = "always" |
+	.services.postgres.ports = []' "$test_root/compose-original.json" >"$test_root/compose.json"
+expect_success "always restart and explicitly empty database ports"
+cp "$test_root/compose-original.json" "$test_root/compose.json"
 jq '.client.disable_db_pings_in_health = false' "$test_root/config-original.json" >"$compose_dir/config.json"
 expect_success "explicit database health pings enabled"
 pass "all single-node preflight cases"

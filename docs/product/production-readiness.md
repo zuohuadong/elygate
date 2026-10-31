@@ -8,7 +8,30 @@
 
 ## 候选版本
 
-- 已完成本轮 CI 验收的候选为 `3c2b96a723e091be25007adde8e2093ba3dbce8d`，
+- 当前最新候选为 `005eb22dcce570dd1941225cb71cf6dbf6cc1eea`，CI run
+  `41200254012` 于 2026-10-31 12:15:05 UTC 启动、12:22:45 UTC 成功结束；
+  面板、员工门户、API contracts 和生产镜像四个 job 全部通过。API contracts
+  实际执行员工后端整包（`63.088s`）、Usage CSV 导出（`8.375s`）和模型目录
+  handlers/server 专项（`0.051s` / `4.692s`）；混合 API 筛选中的员工包仍
+  显示 `[no tests to run]`，不能替代独立员工步骤。镜像运行门确认非 root、
+  双 PostgreSQL、health、版本、登录/退出和正常重启；runner 生成的镜像
+  manifest digest 为
+  `sha256:3c8319c6b477f990979f5991874b4e8ca77c9c3c13633e46dd9fa1d8630be9f0`。
+  候选 artifact ID 为 `13042491792`，上传包大小 `162917902` 字节，预计
+  于 2026-11-07 12:20:14 UTC 过期。已下载到
+  `.codex-tmp/candidate-005eb22-41200254012/` 并独立核验：
+  `SHA256SUMS`、gzip、Docker/OCI 清单和 8 个 blob 均通过；解压后的
+  `image.tar.gz` 为 `162917111` 字节，SHA-256 为
+  `5c24de5b9da477bb5563e6d50518d5fe92cf4a342419538518285e4a801635ec`，
+  config digest 为
+  `sha256:ba1083aaa1b3ede0ecdb1f401553a776662b59401ed1a4d913774cdf3040dd9b`，
+  provenance SHA-256 为
+  `50f83776f8f7cda0febab2f3d792ea6e1a8353d37c2b81c3805ac24674db4596`。
+  来源清单仍绑定完整源码 SHA、`linux/amd64` 和用户 `1000:0`，`RepoTags`
+  为空；这些是 **PASS_SCOPED** 的 CI/归档证据，不是正式 registry 发布、
+  独立 Docker daemon 启动或生产部署证据。
+
+- 此前已完成 CI 验收的候选为 `3c2b96a723e091be25007adde8e2093ba3dbce8d`，
   run `41199224310` 于 2026-10-31 12:00:56 UTC 启动，
   12:08:04 UTC 成功结束，四个 job 全部通过。新增目录审计步骤实际输出
   handlers `ok`（0.035s）、server `ok`（2.894s），没有
@@ -314,10 +337,11 @@ Svelte 检查零错误/警告、Relay 四份合约测试 56 pass，均不能替�
 
 只读预检入口为 `bash scripts/production/single-node-preflight.sh [compose目录]`，
 默认检查 `examples/single-node-postgres`；可用 `ENV_FILE`、`BACKUP_DIR` 指定路径。
-它仅核对必需文件、私有权限、Compose 解析、镜像 digest 及必需环境值，
-不启动服务、不拉取镜像、不输出秘密值。Bash 语法、ShellCheck 和
-`bash scripts/production/single-node-preflight.test.sh` 的基础用例已通过；
-这些测试使用假 Docker 命令，不代表生产 Compose、TLS 或部署验收。
+它核对必需文件、私有权限、Compose 解析、镜像 digest、必需环境值，以及网关和
+PostgreSQL 的命令 healthcheck、重启策略、网关等待数据库健康，以及 PostgreSQL
+不发布宿主端口/不使用 host network；不启动服务、不拉取镜像、
+不输出秘密值。静态预检不能证明 healthcheck 命令确实检测了目标服务，也不能替代
+真实连接、TLS、恢复或部署验收。后续静态服务契约的范围与验证见下节。
 
 Relay 运行验收现在还必须显式传入 `ELYGATE_TEST_COMMIT` 的 40 位候选 SHA，
 构建命令用 `-X main.Version=v<sha>` 注入版本；首次登录、PostgreSQL 正常重启
@@ -366,6 +390,36 @@ Bash 语法、ShellCheck、46 个预检用例和 `git diff --check` 通过，
 脚本只在上线前执行，无请求路径 CPU/分配或常驻缓存开销。
 本后续项已随 `99ba2372c` 提交并推送到 `dev`，未部署，
 原总目标继续 **active / PARTIAL**。
+
+### 单机服务契约预检后续项（2026-10-31）
+
+后续项 `single-node-preflight-service-contracts`：parent 为 `005eb22dc`，
+source 为生产交付门 2/3，reason 为原预检会放过缺失健康检查、错误重启策略、
+不等待数据库健康以及数据库宿主网络暴露的配置。范围冻结为两个既有预检脚本、
+单机部署手册和本文；Native、低风险、root 单 writer、external=0。
+原功能及生产目标不变；不修改上游业务、数据库、推理路径或生产状态。
+本轮已调用 Pi 实施，但其在工具执行前以 `Connection error` / 退出 1 结束，
+没有文件产出；确认进程终止后由 root 接管，不将 root 修改记作 Pi 实施成功。
+所需 profile-selector skill 和 agmesh CLI 在当前环境仍不可用；
+沿用既有单机 Compose/PostgreSQL 配置，不引入新的技术栈或部署方案。
+
+新增负向回归先在旧脚本中复现：
+`elygate invalid healthcheck null unexpectedly passed`。
+修复要求两个服务有启用的非空 `CMD`/`CMD-SHELL` healthcheck，
+重启策略为 `always` 或 `unless-stopped`；网关依赖 `service_healthy`，
+本地 PostgreSQL 不发布宿主端口、不使用 host networking。
+本轮验证仅使用合成凭据，沿用既有不输出环境值的脱敏错误。部署手册将预检接入启动命令，
+只有预检成功才执行 `compose up`；不改变网关对外监听或端口选择。
+
+69 个预检用例通过，覆盖缺失/禁用/空健康检查、启动条件、端口/host network、
+不合格重启策略及 `always` 的正向用例。Bash 语法、ShellCheck、
+31 项面板构建契约（212 assertions）和 `git diff --check` 通过。
+真实 Docker Compose CLI 使用合成环境渲染当前模板，
+核对两服务 healthcheck/重启策略、数据库健康依赖和未暴露数据库网络通过；
+该命令不连接 Docker daemon，也没有启动服务。
+`clean-code-guard: clean`。脚本仅在运维预检时运行，无推理请求开销或常驻缓存。
+静态契约不证明探针业务语义、真实健康、主机启动、备份恢复或生产验收；
+本后续项的提交、推送状态以 Git 记录为准；未部署，总目标继续 **active / PARTIAL**。
 
 ## 生产交付门
 

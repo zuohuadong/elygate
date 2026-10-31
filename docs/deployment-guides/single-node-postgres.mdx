@@ -35,12 +35,20 @@ Create the local environment file and replace every placeholder before starting:
 
 ```bash
 cd examples/single-node-postgres || exit
-cp .env.example .env
-docker compose config --quiet
-docker compose up -d
+test -e .env || cp .env.example .env
+chmod 600 .env
+mkdir -p -m 700 backups
+bash ../../scripts/production/single-node-preflight.sh . && docker compose up -d
 ```
 
 Do not commit `.env`. Keep `ENCRYPTION_KEY` stable across restarts, upgrades, backups, and restores.
+
+Replace the placeholders before running the preflight. It checks private file permissions,
+immutable image references, storage settings, enabled command health checks, restart
+policies, and the gateway's dependency on PostgreSQL health. The local PostgreSQL service
+must not publish host ports or use host networking. This static check does not start
+containers, verify the health probe's behavior, create a backup, or establish recovery readiness.
+If a private `backups` directory already exists, retain it rather than replacing it.
 
 ## Verify
 
