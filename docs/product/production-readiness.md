@@ -57,7 +57,7 @@ Relay 核验解密后 credential、Application Key、日志费用/令牌；
 签名事件，再证明源端表、sequences 和 marker 未变。日志不输出 subprocess
 原文、SQL 数据、HTTP body、secret 或备份；最终成功必须晚于清理和残留资源检查。
 
-本地构建契约 39 pass / 0 fail（263 assertions）、Node 语法、actionlint 和
+本地构建契约 41 pass / 0 fail（271 assertions）、Node 语法、actionlint 和
 diff 检查通过。它们不是 Docker 恢复证据；该入口仍需推送后同 SHA CI 真正执行。
 首次候选 `b441fe7cc58a7a1ef40d834674b4f2ff94af6423` 的 run `41245840468`
 中 Panel、员工门户和 API contracts 成功，现有镜像 smoke 成功；新增恢复在
@@ -75,6 +75,13 @@ config digest 则为 `05824d96f3f446a677692c0439b09c85c05b3f5f51a91592735cd318af
 Docker copy 的测试文件保留宿主 `501:20`；root helper 丢弃全部 capability 后
 只有 `CHOWN`，无法 chmod 非自己所有的文件。仅隔离测试 helper 增加 `FOWNER`，
 保留无网络、只读根文件系统和专用卷；不更改生产 entrypoint 或恢复逻辑。
+候选 `a540df135` 的 run `41249451522` 中三个非 Docker job、镜像身份和
+现有镜像 smoke 均成功；恢复已通过文件准备、网关启动、登录和真实 Relay，
+在源端 `/v1/chat/completions` 失败，导出/归档被阻止。代码核对发现新建
+Application Key 默认拒绝所有供应商，夹具此前只授予 Relay，遗漏模型授权。
+仅测试 Key 增加 `openai` / `gpt-4o-mini` 与该唯一配置供应商的密钥授权，
+不打开全部供应商、不改变生产默认拒绝规则；补执行级请求体回归。尚需新 SHA
+的完整真实恢复结果，不能将此原因判断记为恢复通过。
 既有 `9edd2ca54` 的 run `41242882512` 已于 2026-10-31 21:26:31 UTC
 （北京时间 2026-11-01 05:26:31）全部成功，但没有执行本新增恢复步骤。
 本项只有 CI 测试耗时和测试进程的临时内存/磁盘，无推理生产路径或常驻内存增量。

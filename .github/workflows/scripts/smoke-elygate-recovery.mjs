@@ -218,7 +218,7 @@ function apiClient(origin) {
 				...(cookie ? { Cookie: cookie } : {}), ...options.headers },
 			body: options.body === undefined ? undefined : JSON.stringify(options.body),
 		});
-		check(response.status === (options.status ?? 200), `unexpected HTTP status at ${route.split('?')[0]}`);
+		check(response.status === (options.status ?? 200), `unexpected HTTP status ${response.status} at ${route.split('?')[0]}`);
 		const session = response.headers.get('set-cookie');
 		if (session) cookie = session.split(';')[0];
 		return response.status === 204 ? null : response.json();
@@ -271,7 +271,7 @@ function startUpstream(ctx) {
 	});
 }
 
-async function seedBusiness(ctx, api) {
+export async function seedBusiness(ctx, api) {
 	const relay = await api('/api/relays', { method: 'POST', status: 201, body: {
 		name: 'recovery', base_url: `http://host.docker.internal:${ctx.upstream.address().port}`,
 		auth: { type: 'bearer' }, credential: { value: ctx.upstreamKey },
@@ -288,7 +288,8 @@ async function seedBusiness(ctx, api) {
 		{ method: 'POST', body: { name: 'Recovery' }, status: 201 });
 	check(typeof ctx.key.value === 'string' && ctx.key.value.length > 0, 'Application Key must be returned');
 	await api(`/api/governance/virtual-keys/${ctx.key.virtual_key_id}`, { method: 'PUT',
-		body: { relay_grants: [{ relay_name: 'recovery' }] } });
+		body: { relay_grants: [{ relay_name: 'recovery' }],
+			provider_configs: [{ provider: 'openai', allowed_models: ['gpt-4o-mini'], allow_all_keys: true }] } });
 }
 
 async function verifyRelay(ctx, api) {

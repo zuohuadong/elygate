@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parse } from 'yaml';
 import { resolveEnterprisePanelModule } from '../../vite-enterprise-panel.mjs';
-import { candidateManifest, command, recoveryEnvironment, validateCandidate } from '../../../.github/workflows/scripts/smoke-elygate-recovery.mjs';
+import { candidateManifest, command, recoveryEnvironment, seedBusiness, validateCandidate } from '../../../.github/workflows/scripts/smoke-elygate-recovery.mjs';
 
 describe('enterprise panel build contract', () => {
 	test('uses the OSS fallback for ordinary builds', () => {
@@ -245,6 +245,30 @@ describe('enterprise panel build contract', () => {
 		}
 		expect(source).not.toContain("'--no-deps'");
 		expect(source).toContain("'--cap-drop', 'ALL', '--cap-add', 'CHOWN', '--cap-add', 'FOWNER'");
+	});
+
+	test('recovery explicitly grants its Application Key only the fixture provider, model and relay', async () => {
+		const requests: { route: string; options: { method?: string; body?: unknown } }[] = [];
+		const replies = [{ name: 'recovery' }, { id: 'project' }, { id: 'application' },
+			{ virtual_key_id: 'key-id', value: 'PRIVATE_RECOVERY_SENTINEL' }, {}];
+		const fixture = {
+			upstream: { address: () => ({ port: 12345 }) }, upstreamKey: 'PRIVATE_UPSTREAM_SENTINEL',
+			application: undefined, key: undefined,
+		};
+		await seedBusiness(fixture, async (route: string, options: { method?: string; body?: unknown }) => {
+			requests.push({ route, options });
+			return replies[requests.length - 1];
+		});
+		expect(requests.map(request => request.route)).toEqual([
+			'/api/relays', '/api/control-plane/projects', '/api/control-plane/projects/project/applications',
+			'/api/control-plane/applications/application/keys', '/api/governance/virtual-keys/key-id',
+		]);
+		expect(requests[4].options).toEqual({ method: 'PUT', body: {
+			relay_grants: [{ relay_name: 'recovery' }],
+			provider_configs: [{ provider: 'openai', allowed_models: ['gpt-4o-mini'], allow_all_keys: true }],
+		} });
+		expect(fixture.application).toEqual({ projectID: 'project', id: 'application' });
+		expect(fixture.key).toEqual(replies[3]);
 	});
 
 	test.each(['success', 'invalid-identity', 'invalid-commit', 'save-failure', 'inspect-mismatch', 'load-failure'])(
