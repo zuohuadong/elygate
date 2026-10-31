@@ -197,6 +197,41 @@ Native、root 单 writer、低风险、external=0；不改生产 Go、鉴权或�
 密码/TLS、真实供应商费用、其他产品工作流、崩溃/掉电、版本升级回滚、完整整机
 恢复或生产部署。生产交付门 7、8 仍未整体完成，不能据此批准切换。
 
+### 加密运行材料恢复后续项（2026-10-31）
+
+后续项 `relay-encrypted-materials-recovery`：parent 为 `c3d90e379`，
+source 为交付门 7 的加密/签名材料缺口，reason 为此前 Relay 恢复仅覆盖未加密
+凭据，且启动所需秘密一直保留在测试进程内。采用 Native、低风险、root 单 writer、
+external=0；仅修改既有本地运行测试、本清单和只读发布预检脚本，
+不修改生产请求路径或外部状态。
+
+验收范围固定为 compact/signed 两种模式的隔离网关与私有双 PostgreSQL：
+停写后备份全部表、序列及应用目录，恢复到独立空库/目录，从权限受限的恢复文件
+重新读取启动凭据与加密/签名材料，核对密文、原有会话和 Key 生命周期、签名公钥
+与完整链，并证明恢复后的登录/退出、转发、日志和新写入。SQLite 同一生命周期
+回归另行运行；不把 SQLite 作为 PostgreSQL 失败时的回退。
+
+当前状态：**历史二进制运行矩阵通过，当前候选验证仍为 PARTIAL**。
+扩展后的脚本已通过 SQLite compact/signed（2 pass）及 PostgreSQL 18 双库
+compact/signed（2 pass），覆盖正常重启、停机备份恢复、恢复后登录/退出、
+转发与新写入，以及 signed 模式的密文和签名链延续；临时进程与目录已清理。
+这些运行使用 `relay-gateway-v15`，其构建版本为 `d4a4be649`，
+不能当作当前源码基线 `c3d90e379` 的最终候选证明。
+当前源码构建先因 VCS 扫描主动中止，再以 `-buildvcs=false` 重试；
+重试长时间停留在 Go 链接阶段后也已停止，未产出可接受的新候选。
+中止不算编译失败或成功，仍需重新构建当前候选并绑定运行证据。
+Svelte 检查零错误/警告、Relay 四份合约测试 56 pass，均不能替代该候选运行证明。
+此项不涉及付费供应商、TLS、外部 KMS、
+崩溃/掉电、其他产品工作流、版本升级回滚、最终镜像或生产切换。
+原目标保持 **active / PARTIAL**。
+
+只读预检入口为 `bash scripts/production/single-node-preflight.sh [compose目录]`，
+默认检查 `examples/single-node-postgres`；可用 `ENV_FILE`、`BACKUP_DIR` 指定路径。
+它仅核对必需文件、私有权限、Compose 解析、镜像 digest 及必需环境值，
+不启动服务、不拉取镜像、不输出秘密值。Bash 语法、ShellCheck 和
+`bash scripts/production/single-node-preflight.test.sh` 的 20 个用例已通过；
+这些测试使用假 Docker 命令，不代表生产 Compose、TLS 或部署验收。
+
 ## 生产交付门
 
 ### Dev CI 触发后续项（2026-10-31）

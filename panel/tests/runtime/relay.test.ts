@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -78,6 +78,69 @@ function apiClient(origin: string) {
 }
 
 type ApiClient = ReturnType<typeof apiClient>;
+
+async function runtimeSecrets(appDir: string): Promise<Record<string, string>> {
+	const secretsDir = path.join(appDir, 'private');
+	const filename = path.join(secretsDir, 'runtime-env.json');
+	assert.equal((await stat(secretsDir)).mode & 0o777, 0o700);
+	assert.equal((await stat(filename)).mode & 0o777, 0o600);
+	const bundle: unknown = JSON.parse(await readFile(filename, 'utf8'));
+	assert.ok(bundle && typeof bundle === 'object' && !Array.isArray(bundle));
+	assert.ok(['ELYGATE_RELAY_TEST_PASSWORD', 'ELYGATE_RELAY_TEST_UPSTREAM_KEY', 'ELYGATE_RELAY_TEST_PG_PASSWORD']
+		.every(name => name in bundle), 'runtime secret bundle must contain all required credentials');
+	assert.ok(Object.values(bundle).every(secret => typeof secret === 'string' && secret.length > 0),
+		'restored runtime secrets must contain nonempty strings');
+	return bundle as Record<string, string>;
+}
+
+async function useLiteralRelayCredential(api: ApiClient, upstreamKey: string): Promise<void> {
+	const saved = await api.json('/api/relays/runtime-acceptance');
+	const draft = { ...relayDraftFromConfig(saved), credentialValue: upstreamKey,
+		extraHeadersJson: JSON.stringify({ 'X-Recovery-Secret': upstreamKey }) };
+	const updated = await api.json('/api/relays/runtime-acceptance', {
+		method: 'PUT', body: buildRelayPayload(draft, 'runtime-acceptance'),
+	});
+	assert.ok(!JSON.stringify(updated).includes(upstreamKey), 'literal credentials must stay redacted');
+	const roundTrip = await api.json('/api/relays/runtime-acceptance', {
+		method: 'PUT', body: buildRelayPayload(relayDraftFromConfig(updated), 'runtime-acceptance'),
+	});
+	assert.ok(!JSON.stringify(roundTrip).includes(upstreamKey), 'redacted updates must not expose credentials');
+}
+
+async function verifyEncryptedStore(postgres: PrivatePostgres, upstreamKey: string): Promise<void> {
+	const relay = JSON.parse(await postgres.queryConfig(`SELECT row_to_json(snapshot) FROM
+		(SELECT encryption_status, credential_value, extra_headers_json FROM config_relays
+			WHERE name = 'runtime-acceptance') AS snapshot`));
+	assert.equal(relay.encryption_status, 'encrypted');
+	for (const column of ['credential_value', 'extra_headers_json']) {
+		assert.ok(typeof relay[column] === 'string' && relay[column].length > 0 && !relay[column].includes(upstreamKey),
+			`${column} must retain encrypted, not plaintext, literal credentials`);
+	}
+	for (const table of ['sessions', 'governance_virtual_keys']) {
+		const rows = JSON.parse(await postgres.queryConfig(`SELECT json_build_object('rows', count(*),
+			'encrypted', bool_and(encryption_status = 'encrypted')) FROM ${table}`));
+		assert.ok(rows.rows > 0 && rows.encrypted === true, `${table} must contain encrypted credentials`);
+	}
+}
+
+async function signedAuditSnapshot(api: ApiClient): Promise<{ chain: JsonRecord; publicKey: JsonRecord }> {
+	const chain = await api.json('/api/governance/audit-logs/verify');
+	assert.equal(chain.valid, true);
+	assert.ok(Number(chain.head_sequence) > 0, 'signed audit chain must not be empty');
+	assert.equal(chain.checked_through_sequence, chain.head_sequence);
+	return { chain, publicKey: await api.json('/api/governance/audit-logs/public-key') };
+}
+
+async function verifyRecoveredLogin(origin: string, appDir: string): Promise<void> {
+	const secrets = await runtimeSecrets(appDir);
+	const api = apiClient(origin);
+	await api.json('/api/session/login', { method: 'POST', body: {
+		username: 'relay-acceptance', password: secrets.ELYGATE_RELAY_TEST_PASSWORD,
+	} });
+	await api.json('/api/relays/runtime-acceptance');
+	await api.json('/api/session/logout', { method: 'POST' });
+	await api.json('/api/relays/runtime-acceptance', { status: 401 });
+}
 
 interface RuntimeApplicationKey {
 	applicationID: string;
@@ -187,7 +250,10 @@ async function verifyKeyRevocation(api: ApiClient, upstream: string): Promise<Ru
 	return active;
 }
 
-async function verifyCalls(api: ApiClient, key: string, upstreamKey: string): Promise<void> {
+async function verifyCalls(api: ApiClient, credentials: {
+	key: string; upstreamKey: string; auditMode: 'compact' | 'signed';
+}): Promise<void> {
+	const { key, upstreamKey, auditMode } = credentials;
 	const headers = { 'x-bf-vk': key, 'X-Operation': 'search', 'User-Agent': 'codex-cli/relay-runtime-test' };
 	for (const [suffix, status] of [['search', 200], ['free', 200], ['fail', 500]] as const) {
 		const response = await api.request(`/relay/runtime-acceptance/v1/${suffix}`, { method: 'POST', body: '{}', headers });
@@ -207,6 +273,9 @@ async function verifyCalls(api: ApiClient, key: string, upstreamKey: string): Pr
 	assert.deepEqual(echo.query, { q: 'kept' });
 	assert.equal(forwarded.cookie, undefined, 'dashboard session must not reach upstream');
 	assert.equal(forwarded['x-bf-vk'], undefined, 'gateway key must not reach upstream');
+	if (auditMode === 'signed') {
+		assert.ok(forwarded['x-recovery-secret'] === upstreamKey, 'encrypted extra header must survive restart and restore');
+	}
 }
 
 async function verifyRouteDenials(api: ApiClient, key: string, upstream: string): Promise<void> {
@@ -345,7 +414,7 @@ async function verifyRetainedKeys(api: ApiClient, upstream: string, keys: {
 }
 
 const postgresBin = process.env.ELYGATE_TEST_POSTGRES_BIN;
-test(`panel contracts drive an isolated real gateway relay lifecycle (${postgresBin ? 'PostgreSQL + restore' : 'SQLite'})`, async () => {
+test.each(['compact', 'signed'] as const)(`panel contracts drive an isolated real gateway relay lifecycle (%s ${postgresBin ? 'PostgreSQL + restore' : 'SQLite'})`, async (auditMode) => {
 	const binary = process.env.ELYGATE_TEST_BINARY;
 	assert.ok(binary && path.isAbsolute(binary), 'ELYGATE_TEST_BINARY must name an absolute, freshly built gateway executable');
 	const tempRoot = path.join(root, '.codex-tmp');
@@ -356,6 +425,12 @@ test(`panel contracts drive an isolated real gateway relay lifecycle (${postgres
 	const password = randomBytes(32).toString('base64url');
 	const upstreamKey = randomBytes(32).toString('base64url');
 	const pgPassword = randomBytes(32).toString('base64url');
+	const encryptionKey = randomBytes(32).toString('base64url');
+	const secrets = {
+		ELYGATE_RELAY_TEST_PASSWORD: password, ELYGATE_RELAY_TEST_UPSTREAM_KEY: upstreamKey,
+		ELYGATE_RELAY_TEST_PG_PASSWORD: pgPassword,
+		...(auditMode === 'signed' ? { BIFROST_ENCRYPTION_KEY: encryptionKey } : {}),
+	};
 	let postgres: PrivatePostgres | undefined;
 	const children: RuntimeChild[] = [];
 	const failures: unknown[] = [];
@@ -363,6 +438,8 @@ test(`panel contracts drive an isolated real gateway relay lifecycle (${postgres
 		if (postgresBin !== undefined) postgres = new PrivatePostgres(postgresBin, workspace);
 		await postgres?.initialize();
 		await prepareConfig(appDir, postgres);
+		await mkdir(path.join(appDir, 'private'), { mode: 0o700 });
+		await writeFile(path.join(appDir, 'private', 'runtime-env.json'), JSON.stringify(secrets), { mode: 0o600 });
 		const env = { PATH: process.env.PATH, HOME: appDir, TMPDIR: appDir };
 		const fixturePort = await availablePort();
 		const upstream = `http://127.0.0.1:${fixturePort}`;
@@ -373,13 +450,19 @@ test(`panel contracts drive an isolated real gateway relay lifecycle (${postgres
 		const port = await availablePort();
 		const origin = `http://127.0.0.1:${port}`;
 		const startBackend = async () => {
+			const recoveredSecrets = await runtimeSecrets(appDir);
+			if (auditMode === 'signed') assert.ok(recoveredSecrets.BIFROST_ENCRYPTION_KEY,
+				'signed runtime must load its encryption/signing material from the restored bundle');
 			const runtime = trackedChild(binary, ['-app-dir', appDir, '-host', '127.0.0.1', '-port', String(port)], {
 				cwd: root, env: { ...env, ELYGATE_APPLICATION_BINDING_MODE: 'required',
-					ELYGATE_RELAY_TEST_PASSWORD: password, ELYGATE_RELAY_TEST_UPSTREAM_KEY: upstreamKey,
-					ELYGATE_RELAY_TEST_PG_PASSWORD: pgPassword },
+					...recoveredSecrets },
 			});
 			children.push(runtime);
 			await waitForHTTP(`${origin}/health`, runtime);
+			const health = await apiClient(origin).json('/health');
+			assert.equal(health.status, 'ok');
+			assert.equal((health.components as JsonRecord).db_pings, 'ok',
+				'startup must verify configured storage, not just process liveness');
 			await postgres?.verifyLiveStores(appDir);
 			return runtime;
 		};
@@ -390,39 +473,55 @@ test(`panel contracts drive an isolated real gateway relay lifecycle (${postgres
 		await anonymous.arrayBuffer();
 		await api.json('/api/session/login', { method: 'POST', body: { username: 'relay-acceptance', password } });
 		await verifyPreviewAndSave(api, upstream);
+		if (auditMode === 'signed') await useLiteralRelayCredential(api, upstreamKey);
 		const application = await applicationKey(api);
 		const { key, virtualKeyID, applicationID } = application;
 		await verifyDeniedGrant(api, key, upstream);
 		await grantRelay(api, virtualKeyID);
 		await verifyRouteDenials(api, key, upstream);
-		await verifyCalls(api, key, upstreamKey);
+		await verifyCalls(api, { key, upstreamKey, auditMode });
 		await verifyLogs(api);
 		const rotatedKey = await verifyKeyRotation(api, application, upstream);
 		const expiring = await verifyKeyExpiry(api, upstream);
 		const revokedKey = await verifyKeyRevocation(api, upstream);
+		if (auditMode === 'signed') await signedAuditSnapshot(api);
 		if (postgres) {
 			const allKeys = [application, expiring, revokedKey];
 			const beforeRestart = await persistedState(api, allKeys);
+			const auditBeforeRestart = auditMode === 'signed' ? await signedAuditSnapshot(api) : undefined;
+			if (auditMode === 'signed') await verifyEncryptedStore(postgres, upstreamKey);
 			await stopChild(backend);
 			await postgres.restart();
 			backend = await startBackend();
 			assertRestartState(beforeRestart, await persistedState(api, allKeys), expiring.virtualKeyID);
+			if (auditBeforeRestart) assert.deepEqual(await signedAuditSnapshot(api), auditBeforeRestart);
 			await verifyLogs(api);
 			await verifyRetainedKeys(api, upstream, {
 				active: rotatedKey, rotated: key, expired: expiring.key, revoked: revokedKey.key, phase: 'restart',
 			});
 			console.log('PASS PostgreSQL and gateway restart: session, relay, grants, active/expired/revoked keys, logs, audit');
 			const beforeRestore = await persistedState(api, allKeys);
+			const secretBackup = await readFile(path.join(appDir, 'private', 'runtime-env.json'));
+			const auditBeforeRestore = auditMode === 'signed' ? await signedAuditSnapshot(api) : undefined;
 			await mkdir(path.join(appDir, 'uploads'), { mode: 0o700 });
 			const uploadProbe = randomBytes(64);
 			await writeFile(path.join(appDir, 'uploads', 'recovery-probe.bin'), uploadProbe, { mode: 0o600 });
 			await stopChild(backend);
 			await postgres.restoreBackup(appDir);
 			assert.deepEqual(await readFile(path.join(appDir, 'uploads', 'recovery-probe.bin')), uploadProbe);
+			assert.equal((await stat(path.join(appDir, 'uploads', 'recovery-probe.bin'))).mode & 0o777, 0o600);
+			assert.ok((await readFile(path.join(appDir, 'private', 'runtime-env.json'))).equals(secretBackup),
+				'recovery must restore the exact runtime secret bundle, not reuse in-memory credentials');
 			backend = await startBackend();
 			assert.deepEqual(await persistedState(api, allKeys), beforeRestore,
 				'restored configuration, sessions, key metadata and audit must match the backup');
+			if (auditBeforeRestore) {
+				assert.deepEqual(await signedAuditSnapshot(api), auditBeforeRestore);
+				await verifyEncryptedStore(postgres, upstreamKey);
+			}
+			await verifyRecoveredLogin(origin, appDir);
 			await verifyLogs(api);
+			await verifyCalls(api, { key: rotatedKey, upstreamKey, auditMode });
 			await verifyRetainedKeys(api, upstream, {
 				active: rotatedKey, rotated: key, expired: expiring.key, revoked: revokedKey.key, phase: 'restore',
 			});
@@ -430,6 +529,14 @@ test(`panel contracts drive an isolated real gateway relay lifecycle (${postgres
 			await grantRelay(api, restoredNewKey.virtualKeyID);
 			await verifySearch(api, { key: restoredNewKey.key, tag: 'restored-new-key', status: 200 });
 			await verifyUpstreamHits(upstream, 'restored-new-key', 1);
+			if (auditBeforeRestore) {
+				const appended = await signedAuditSnapshot(api);
+				assert.ok(Number(appended.chain.head_sequence) > Number(auditBeforeRestore.chain.head_sequence),
+					'restored signing material must append to the original verified chain');
+				assert.deepEqual(appended.publicKey, auditBeforeRestore.publicKey);
+				await verifyEncryptedStore(postgres, upstreamKey);
+				console.log('PASS encrypted recovery: private secret bundle, ciphertext, original signing key and chain continuation');
+			}
 			console.log('PASS restored gateway: file bytes, session, key policy, forwarding, logs/export and new writes');
 		}
 		const revoked = await api.request(`/api/control-plane/applications/${applicationID}/virtual-key-binding`, { method: 'DELETE' });
@@ -447,7 +554,8 @@ test(`panel contracts drive an isolated real gateway relay lifecycle (${postgres
 		failures.push(cause);
 		for (const runtime of children) {
 			console.error(runtime.output().replaceAll(password, '[REDACTED_SECRET]')
-				.replaceAll(upstreamKey, '[REDACTED_SECRET]').replaceAll(pgPassword, '[REDACTED_SECRET]'));
+				.replaceAll(upstreamKey, '[REDACTED_SECRET]').replaceAll(pgPassword, '[REDACTED_SECRET]')
+				.replaceAll(encryptionKey, '[REDACTED_SECRET]'));
 		}
 	} finally {
 		const stopped = await Promise.allSettled(children.toReversed().map(stopChild));
