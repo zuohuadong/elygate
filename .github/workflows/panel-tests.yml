@@ -99,10 +99,57 @@ jobs:
           tags: elygate:panel-ci
           build-args: |
             VERSION=${{ github.sha }}
+      - name: Fix candidate image identity
+        id: candidate
+        shell: bash
+        run: |
+          image_id=$(docker image inspect elygate:panel-ci --format '{{.Id}}')
+          if [[ ! "$image_id" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+            echo "expected an immutable Docker image ID" >&2
+            exit 2
+          fi
+          printf 'image_id=%s\n' "$image_id" >> "$GITHUB_OUTPUT"
       - name: Start image and verify runtime health
         env:
+          IMAGE_ID: ${{ steps.candidate.outputs.image_id }}
           IMAGE_COMMIT: ${{ github.sha }}
-        run: bash .github/workflows/scripts/smoke-elygate-image.sh elygate:panel-ci "$IMAGE_COMMIT"
+        run: bash .github/workflows/scripts/smoke-elygate-image.sh "$IMAGE_ID" "$IMAGE_COMMIT"
+      - name: Export verified candidate image
+        shell: bash
+        env:
+          IMAGE_ID: ${{ steps.candidate.outputs.image_id }}
+          IMAGE_COMMIT: ${{ github.sha }}
+        run: |
+          if [[ ! "$IMAGE_ID" =~ ^sha256:[a-f0-9]{64}$ ]] ||
+            [[ ! "$IMAGE_COMMIT" =~ ^[a-f0-9]{40}$ ]]; then
+            echo "expected immutable image and source identities" >&2
+            exit 2
+          fi
+          mkdir "$RUNNER_TEMP/elygate-candidate"
+          cd "$RUNNER_TEMP/elygate-candidate"
+          docker image save "$IMAGE_ID" | gzip -n > image.tar.gz
+          docker image inspect "$IMAGE_ID" |
+            jq -e --arg image "$IMAGE_ID" --arg commit "$IMAGE_COMMIT" '
+              .[0] |
+              select(.Id == $image and .Os == "linux" and
+                (.Architecture | type == "string" and length > 0)) |
+              {format: "docker-archive", archive: "image.tar.gz",
+                source_commit: $commit, image_id: .Id, os: .Os,
+                architecture: .Architecture}
+            ' > provenance.json
+          sha256sum image.tar.gz provenance.json > SHA256SUMS
+          docker image load --input image.tar.gz > /dev/null
+      - name: Retain verified candidate image
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: elygate-candidate-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/elygate-candidate/image.tar.gz
+            ${{ runner.temp }}/elygate-candidate/provenance.json
+            ${{ runner.temp }}/elygate-candidate/SHA256SUMS
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
 
   employee-portal:
     runs-on: ubuntu-latest

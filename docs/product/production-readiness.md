@@ -8,17 +8,25 @@
 
 ## 候选版本
 
-- 当前已推送候选为 `84fb36401327946f1b284714f051d2bc1dd54d42`，CI run
+- 当前已推送候选为 `eef56dbb4fed91a1f8bf6a22ca243557b3b43ce6`，CI run
+  `41191339255` 于 2026-10-31 10:12:25 UTC 成功结束。独立面板、
+  员工门户、API contracts（含单独的 `TestUsageCSVExport` 步骤）和
+  生产镜像构建/运行四个 job 全部通过。构建日志中的 manifest digest 为
+  `sha256:94790a6a3a83e51b6a935fe2b51bd2f1f59ca804b48365a7de98e2b93aee1713`。
+  镜像运行门核对非 root、双 PostgreSQL、health、版本、登录/退出和正常重启，
+  最终步骤及清理成功；该历史 run 未导出镜像归档、发布 registry 或部署生产。
+  本地新增的归档保留配置不包含在该 SHA 或该次 CI 证据中。
+- 此前已推送候选为 `84fb36401327946f1b284714f051d2bc1dd54d42`，CI run
   `41185192165` 于 2026-10-31 08:34:56 UTC 启动，08:42:02 UTC 成功结束。
   独立面板、员工门户、API contracts、生产镜像构建及运行 smoke 四个 job
   均成功；镜像 digest 为
   `sha256:9cf22dc79b5d1720ae039dfb61170f9d9e66de13d8304193453cc5b0595cbb0e`。
   镜像仅在隔离 runner 加载，非 root、双 PostgreSQL、health、版本、
   登录/退出和正常重启检查通过；工作流为 `push: false`，没有发布或部署。
-- 该 CI 的 API contract 筛选没有包含 `TestUsageCSVExport`，不能据此声称
-  新 CSV 行为已通过 CI。已补本地独立导出回归步骤，构建契约 18 项测试通过，
-  PostgreSQL 导出专项亦通过；本次提交包含该本地测试/工作流修正，推送后等待
-  新 CI 运行，不把本地证据提前记为 hosted CI 通过。
+- 该历史 CI 的 API contract 筛选没有包含 `TestUsageCSVExport`，不能据此声称
+  新 CSV 行为已通过 CI。后续 `b32733c22` 增加独立导出回归步骤，
+  本地构建契约 18 项测试及 PostgreSQL 导出专项通过；上列
+  `eef56dbb4` 的 run 已实际成功执行该步骤，不以历史或本地结果替代。
   具体范围、基准代价和剩余边界见 [CSV 导出记录](usage-export.md#verification-follow-up)。
   同 SHA 的 CodSpeed/Snyk 查询时仍排队，不记为通过。
 - 上一候选为 `757409947517026f81779f477a0887381bdfc58b`，CI run
@@ -650,6 +658,48 @@ Native 单 writer；不执行数据库、Docker、部署或生产写入。
 同时明确运行文件、加密/签名材料、权限、恢复后对账与写入缺一不可。
 文档命令只作 Bash 语法和边界检查，未执行真实备份恢复；这不关闭交付门 7/8，
 也不改变原产品功能范围或整体 **active / PARTIAL**。
+
+### 候选镜像归档后续项（2026-10-31）
+
+后续项 `panel-ci-candidate-image-artifact`：parent 为 `eef56dbb4`，
+source 为 Phase D 固定版本/校验和与交付门 1，reason 为已有 CI 只构建、
+加载和运行镜像，job 结束后没有可重新获取的镜像字节。
+范围冻结为现有 Docker job、构建契约回归及本记录；Native、低风险、
+单 writer。Pi 受明确请求承担实施，但两次只读调用和一次实施调用均以
+`Connection error` / 退出码 1 结束且没有改动，终止后由 root 接管。
+本地配置检查仅确认默认 deepseek provider 存在凭据，不证明远端可用；
+没有更换 provider、打印凭据、部署或把失败调用记为 Pi 实施通过。
+
+Docker job 先将构建标签解析为不可变的 `sha256:<image-config-id>`，
+同一 ID 用于已有运行门及后续导出。仅运行门完整成功才生成
+`image.tar.gz`、`provenance.json` 和 `SHA256SUMS`；来源清单仅包含
+完整源码 SHA、镜像 ID、OS、架构和归档格式，不导出 inspect 的环境/config
+字段或任何运行数据。校验清单覆盖归档和来源清单，生成后要求
+`docker image load` 成功，再上传这三个明确文件。
+上传名包含源码 SHA、run ID、attempt，保留 7 天；`push: false`、
+`contents: read`、原镜像内容和生产授权边界不变。
+
+Docker image ID 是配置内容哈希，不是 registry manifest digest；
+压缩文件 SHA-256 也不是镜像拉取凭据。归档由 image ID 导出，
+加载后可能没有标签。下载后应先在独立目录执行
+`sha256sum --check SHA256SUMS`，核对来源 SHA/目标平台，再用
+`docker image load --input image.tar.gz` 载入并按来源清单的 ID 检查。
+校验清单只用于完整性，不提供签名或真实性证明。该短期 CI artifact
+不是正式发布页或长期回滚库；生产 Compose 仍要求经授权发布后固定的
+registry digest，不能把 `image_id` 填作该 digest。
+
+本地测试直接执行工作流中的 Bash，使用模拟 Docker 覆盖正常导出、
+非法身份、输出注入、save 部分失败、inspect 身份失配及 load 失败；
+核对实际压缩字节、两个文件的 SHA-256、脱敏字段和命令顺序。
+最终面板回归为 402 pass / 0 fail（2448 assertions），代理集成另为
+1 pass / 0 fail（12 assertions）；Svelte 检查为 0 errors / 0 warnings。
+`actionlint`、smoke 脚本 Bash 语法与 `git diff --check` 通过；
+独立只读复核为 `PASS_SCOPED`，提交前 clean-code-guard 未发现新增问题。
+本机 Docker daemon 缺少 socket，因此没有真实 save/load、上传、下载或
+新归档的独立环境启动证据，旧候选 CI 不关闭本项远端边界。
+本增量仅增加 CI 打包磁盘/CPU/短期 artifact 存储，不增加推理请求开销。
+生产功能、模型治理、MCP 审批、策略发布、TLS/代理、升级回滚与真实生产
+切换仍未完成，总目标继续 **active / PARTIAL**。
 
 ### 单机模板镜像固定检查（2026-10-31）
 

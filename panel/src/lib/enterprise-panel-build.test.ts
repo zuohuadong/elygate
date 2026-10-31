@@ -115,9 +115,160 @@ describe('enterprise panel build contract', () => {
 		const runtime = workflow.jobs.docker.steps.find((step: { name?: string }) =>
 			step.name === 'Start image and verify runtime health');
 		expect(runtime.env.IMAGE_COMMIT).toBe('${{ github.sha }}');
-		expect(runtime.run).toBe('bash .github/workflows/scripts/smoke-elygate-image.sh elygate:panel-ci "$IMAGE_COMMIT"');
+		expect(runtime.env.IMAGE_ID).toBe('${{ steps.candidate.outputs.image_id }}');
+		expect(runtime.run).toBe('bash .github/workflows/scripts/smoke-elygate-image.sh "$IMAGE_ID" "$IMAGE_COMMIT"');
 		expect(workflow.jobs.docker['timeout-minutes']).toBe(20);
 	});
+
+	test('retains only the successfully tested immutable candidate without publishing it', async () => {
+		const workflow = parse(await Bun.file(new URL('../../../.github/workflows/panel-tests.yml', import.meta.url)).text());
+		const steps = workflow.jobs.docker.steps;
+		const buildIndex = steps.findIndex((step: { name?: string }) => step.name === 'Build image without publishing');
+		const identityIndex = steps.findIndex((step: { id?: string }) => step.id === 'candidate');
+		const runtimeIndex = steps.findIndex((step: { name?: string }) => step.name === 'Start image and verify runtime health');
+		const exportIndex = steps.findIndex((step: { name?: string }) => step.name === 'Export verified candidate image');
+		const uploadIndex = steps.findIndex((step: { name?: string }) => step.name === 'Retain verified candidate image');
+		expect(identityIndex).toBeGreaterThan(buildIndex);
+		expect(runtimeIndex).toBeGreaterThan(identityIndex);
+		expect(exportIndex).toBeGreaterThan(runtimeIndex);
+		expect(uploadIndex).toBeGreaterThan(exportIndex);
+		for (const step of [steps[identityIndex], steps[runtimeIndex], steps[exportIndex], steps[uploadIndex]]) {
+			expect(step.if).toBeUndefined();
+			expect(step['continue-on-error']).not.toBe(true);
+		}
+		expect(workflow.jobs.docker['continue-on-error']).not.toBe(true);
+		expect(steps[identityIndex].shell).toBe('bash');
+		expect(steps[identityIndex].run).toContain("docker image inspect elygate:panel-ci --format '{{.Id}}'");
+		const archive = steps[exportIndex];
+		expect(archive.shell).toBe('bash');
+		expect(archive.env).toEqual({
+			IMAGE_ID: '${{ steps.candidate.outputs.image_id }}', IMAGE_COMMIT: '${{ github.sha }}',
+		});
+		expect(archive.run).toContain('docker image save "$IMAGE_ID" | gzip -n > image.tar.gz');
+		expect(archive.run).toContain('sha256sum image.tar.gz provenance.json > SHA256SUMS');
+		expect(archive.run).toContain('docker image load --input image.tar.gz');
+		const upload = steps[uploadIndex];
+		expect(upload.uses).toBe('actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f');
+		expect(upload.with.name).toBe('elygate-candidate-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}');
+		expect(upload.with.path.trim().split('\n')).toEqual([
+			'${{ runner.temp }}/elygate-candidate/image.tar.gz',
+			'${{ runner.temp }}/elygate-candidate/provenance.json',
+			'${{ runner.temp }}/elygate-candidate/SHA256SUMS',
+		]);
+		expect(upload.with['if-no-files-found']).toBe('error');
+		expect(upload.with['compression-level']).toBe(0);
+		expect(upload.with['retention-days']).toBe(7);
+	});
+
+	test.each(['success', 'invalid-identity', 'invalid-commit', 'save-failure', 'inspect-mismatch', 'load-failure'])(
+		'candidate export executes the workflow shell and fails closed (%s)', async (scenario) => {
+			const workflow = parse(await Bun.file(new URL('../../../.github/workflows/panel-tests.yml', import.meta.url)).text());
+			const archive = workflow.jobs.docker.steps.find((step: { name?: string }) => step.name === 'Export verified candidate image');
+			const workspace = mkdtempSync(join(tmpdir(), 'elygate-candidate-test-'));
+			try {
+				const docker = join(workspace, 'docker');
+				const calls = join(workspace, 'calls');
+				const imageID = `sha256:${'a'.repeat(64)}`;
+				const commit = 'b'.repeat(40);
+				await Bun.write(docker, `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >> "$MOCK_CALLS"
+case "$1:\${2:-}" in
+  image:save)
+    [ "$3" = "$MOCK_IMAGE" ]
+    printf 'test-owned docker archive bytes\\n'
+    [ "$MOCK_SCENARIO" != "save-failure" ] ;;
+  image:inspect)
+    [ "$3" = "$MOCK_IMAGE" ]
+    image="$MOCK_IMAGE"
+    if [ "$MOCK_SCENARIO" = "inspect-mismatch" ]; then image="sha256:wrong"; fi
+    printf '[{"Id":"%s","Os":"linux","Architecture":"amd64","Config":{"Env":["PRIVATE_EXPORT_SENTINEL"]}}]\\n' "$image" ;;
+  image:load)
+    [ "$3" = "--input" ] && [ "$4" = "image.tar.gz" ]
+    gzip -t "$4"
+    [ "$MOCK_SCENARIO" != "load-failure" ] ;;
+  *) exit 2 ;;
+esac
+`);
+				chmodSync(docker, 0o700);
+				const child = Bun.spawn(['/bin/bash', '-euo', 'pipefail', '-c', archive.run], {
+					env: { ...process.env, PATH: `${workspace}:${process.env.PATH}`, RUNNER_TEMP: workspace,
+						IMAGE_ID: scenario === 'invalid-identity' ? 'floating:latest' : imageID,
+						IMAGE_COMMIT: scenario === 'invalid-commit' ? 'invalid' : commit,
+						MOCK_CALLS: calls, MOCK_IMAGE: imageID, MOCK_SCENARIO: scenario },
+					stdout: 'pipe', stderr: 'pipe',
+				});
+				const [status, stdout, stderr] = await Promise.all([
+					child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
+				]);
+				expect(stdout + stderr).not.toContain('PRIVATE_EXPORT_SENTINEL');
+				const candidateDir = join(workspace, 'elygate-candidate');
+				if (scenario === 'success') {
+					expect(status).toBe(0);
+					const provenance = await Bun.file(join(candidateDir, 'provenance.json')).json();
+					expect(provenance).toEqual({
+						format: 'docker-archive', archive: 'image.tar.gz', source_commit: commit,
+						image_id: imageID, os: 'linux', architecture: 'amd64',
+					});
+					const archiveBytes = await Bun.file(join(candidateDir, 'image.tar.gz')).arrayBuffer();
+					const provenanceBytes = await Bun.file(join(candidateDir, 'provenance.json')).arrayBuffer();
+					expect(await Bun.file(join(candidateDir, 'SHA256SUMS')).text()).toBe(
+						`${new Bun.CryptoHasher('sha256').update(archiveBytes).digest('hex')}  image.tar.gz\n` +
+						`${new Bun.CryptoHasher('sha256').update(provenanceBytes).digest('hex')}  provenance.json\n`,
+					);
+					expect((await Bun.file(calls).text()).trim().split('\n')).toEqual([
+						`image save ${imageID}`, `image inspect ${imageID}`, 'image load --input image.tar.gz',
+					]);
+					expect(readdirSync(candidateDir).sort()).toEqual(['SHA256SUMS', 'image.tar.gz', 'provenance.json']);
+				} else {
+					expect(status).not.toBe(0);
+					if (scenario === 'invalid-identity' || scenario === 'invalid-commit') {
+						expect(await Bun.file(calls).exists()).toBe(false);
+						expect(readdirSync(workspace)).not.toContain('elygate-candidate');
+					} else if (scenario === 'save-failure') {
+						expect(await Bun.file(join(candidateDir, 'provenance.json')).exists()).toBe(false);
+						expect(await Bun.file(join(candidateDir, 'SHA256SUMS')).exists()).toBe(false);
+					} else if (scenario === 'inspect-mismatch') {
+						expect(await Bun.file(join(candidateDir, 'SHA256SUMS')).exists()).toBe(false);
+						expect(await Bun.file(calls).text()).not.toContain('image load');
+					}
+				}
+			} finally {
+				rmSync(workspace, { recursive: true, force: true });
+			}
+		},
+		30_000,
+	);
+
+	test.each([`sha256:${'a'.repeat(64)}`, 'floating:latest', `sha256:${'a'.repeat(64)}\nother=untrusted`])(
+		'candidate identity cannot forward a tag or inject workflow outputs (%j)', async (imageID) => {
+			const workflow = parse(await Bun.file(new URL('../../../.github/workflows/panel-tests.yml', import.meta.url)).text());
+			const identity = workflow.jobs.docker.steps.find((step: { id?: string }) => step.id === 'candidate');
+			const workspace = mkdtempSync(join(tmpdir(), 'elygate-identity-test-'));
+			try {
+				const docker = join(workspace, 'docker');
+				const output = join(workspace, 'outputs');
+				await Bun.write(docker, '#!/bin/sh\nprintf "%s\\n" "$MOCK_ID"\n');
+				chmodSync(docker, 0o700);
+				const child = Bun.spawn(['/bin/bash', '-euo', 'pipefail', '-c', identity.run], {
+					env: { ...process.env, PATH: `${workspace}:${process.env.PATH}`,
+						GITHUB_OUTPUT: output, MOCK_ID: imageID }, stdout: 'pipe', stderr: 'pipe',
+				});
+				const [status] = await Promise.all([
+					child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
+				]);
+				if (/^sha256:[a-f0-9]{64}$/.test(imageID)) {
+					expect(status).toBe(0);
+					expect(await Bun.file(output).text()).toBe(`image_id=${imageID}\n`);
+				} else {
+					expect(status).toBe(2);
+					expect(await Bun.file(output).exists()).toBe(false);
+				}
+			} finally {
+				rmSync(workspace, { recursive: true, force: true });
+			}
+		},
+	);
 
 	test('production preflight checks run from the root before panel dependency installation', async () => {
 		const workflow = parse(await Bun.file(new URL('../../../.github/workflows/panel-tests.yml', import.meta.url)).text());
