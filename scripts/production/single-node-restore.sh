@@ -214,7 +214,9 @@ runtime_mount="type=volume,source=$runtime_volume,target=/restore,volume-nocopy"
 
 docker run --rm --network none --read-only --cap-drop ALL --user 0 \
 	--mount "$runtime_mount" --entrypoint /bin/sh "$gateway_image" \
-	-ec 'entries="$(ls -Aq /restore)" || exit 1; test -z "$entries"' >/dev/null 2>&1 ||
+	-ec 'entries="$(find /restore -mindepth 1 -maxdepth 1 -exec printf x \;)" ||
+		exit 1
+	test -z "$entries"' >/dev/null 2>&1 ||
 	fail "target runtime volume is not empty"
 empty_database="$(docker exec "$postgres_id" sh -ec '
 	PGPASSWORD="$POSTGRES_PASSWORD" exec psql -X --no-password --host=127.0.0.1 --port=5432 \

@@ -39,8 +39,10 @@ assert_no_matches() {
 	esac
 }
 
-mkdir -p "$fake_bin" "$compose_dir" "$backup_root" "$test_root/runtime" "$test_root/newline-runtime"
+mkdir -p "$fake_bin" "$compose_dir" "$backup_root" "$test_root/runtime" "$test_root/newline-runtime" \
+	"$test_root/hidden-runtime" "$test_root/empty-runtime"
 touch "$test_root/newline-runtime/"$'\n'
+touch "$test_root/hidden-runtime/.state"
 chmod 700 "$backup_root"
 cat >"$compose_dir/docker-compose.yml" <<'EOF'
 services:
@@ -270,16 +272,30 @@ if [[ "$*" == *"ps --all --quiet postgres" ]]; then printf '%s\n' "$postgres_id"
 exit 1
 EOF
 chmod 700 "$fake_bin/docker"
+cat >"$fake_bin/find" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" == /restore ]]; then
+	shift
+	case "${FAKE_SCENARIO:-valid}" in
+		runtime-nonempty) exec "$FAKE_REAL_FIND" "$FAKE_TEST_ROOT/runtime" "$@" ;;
+		runtime-newline-only) exec "$FAKE_REAL_FIND" "$FAKE_TEST_ROOT/newline-runtime" "$@" ;;
+		runtime-hidden) exec "$FAKE_REAL_FIND" "$FAKE_TEST_ROOT/hidden-runtime" "$@" ;;
+		runtime-enumeration-failure) exit 1 ;;
+		*) exec "$FAKE_REAL_FIND" "$FAKE_TEST_ROOT/empty-runtime" "$@" ;;
+	esac
+fi
+exec "$FAKE_REAL_FIND" "$@"
+EOF
+chmod 700 "$fake_bin/find"
+export FAKE_REAL_FIND
+FAKE_REAL_FIND="$(command -v find)"
 cat >"$fake_bin/ls" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 if [[ "${2:-}" == /restore ]]; then
-	case "${FAKE_SCENARIO:-valid}" in
-		runtime-nonempty) printf 'existing-state\n' ;;
-		runtime-newline-only) exec "$FAKE_REAL_LS" "$1" "$FAKE_TEST_ROOT/newline-runtime" ;;
-		runtime-enumeration-failure) exit 1 ;;
-	esac
-	exit 0
+	printf 'ls: unrecognized option: q\n' >&2
+	exit 1
 fi
 exec "$FAKE_REAL_LS" "$@"
 EOF
@@ -424,7 +440,7 @@ for filter in '.name = "single-node-postgres"' \
 	assert_no_restore_writes
 done
 cp "$test_root/valid-recovery.json" "$test_root/recovery.json"
-for scenario in aliased-volume runtime-nonempty runtime-newline-only runtime-enumeration-failure database-not-empty list-failure; do
+for scenario in aliased-volume runtime-nonempty runtime-newline-only runtime-hidden runtime-enumeration-failure database-not-empty list-failure; do
 	case "$scenario" in
 		aliased-*) diagnostic="local volumes without driver options" ;;
 		runtime-*) diagnostic="runtime volume is not empty" ;;

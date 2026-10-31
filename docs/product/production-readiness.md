@@ -100,6 +100,22 @@ backup/restore 两处快照、对应 shell 回归和本节，Native、中风险�
 顺序变化测试中失败，修正后整套 shell 回归、ShellCheck、43 项 Panel 契约和
 diff 检查通过；真实 CI 恢复仍待新 SHA，不放宽源端不变或目标隔离断言。
 代价：仅离线备份/恢复的两次 inspect 结果排序，无推理路径或常驻内存增量。
+`ab09617a2` 的 run `41252559705` 三个非 Docker job 和 image smoke 均成功，
+已越过真实推理、持久化及生产备份；恢复在
+`isolated restore: target runtime volume is not empty` 失败，候选导出/归档被阻止。
+后续项 `single-node-busybox-enumeration`：parent 为 `single-node-snapshot-ordering`，
+source 为上述真实 CI 失败，reason 为修复候选 Alpine 镜像目录枚举命令不支持的
+选项；范围冻结为 restore 空卷检查、对应 shell 回归及本节。Native、中风险、
+root 单 writer、一次独立只读 verifier；不调用 Pi，不发布或部署生产。
+本机既有候选镜像实际复现 BusyBox `ls` 不支持 `-q`，原 `ls -Aq` 无法判断空卷；
+不能把该命令错误解释为已发现目标数据。改为镜像支持的 `find`，对每个直接子项
+输出固定 sentinel，枚举失败仍拒绝；空卷才允许继续，不删除或忽略已有内容。
+回归通过真实目录覆盖普通、隐藏和仅换行文件名，并保留枚举失败拒绝与无导入
+写入断言；fake `ls` 明确模拟 BusyBox 不支持选项。整套 shell 回归、ShellCheck、
+43 项 Panel 契约（281 assertions）、diff 检查通过；本机既有候选镜像执行同一
+新检查，验证空卷通过且上述三类非空卷均拒绝，临时探针已清理。独立 verifier
+为 `PASS_SCOPED`。这些证据不是新候选完整恢复成功，仍须新 SHA 的真实 CI。
+代价：仅离线恢复前枚举直接子项，无推理请求路径或常驻服务端内存增量。
 既有 `9edd2ca54` 的 run `41242882512` 已于 2026-10-31 21:26:31 UTC
 （北京时间 2026-11-01 05:26:31）全部成功，但没有执行本新增恢复步骤。
 本项只有 CI 测试耗时和测试进程的临时内存/磁盘，无推理生产路径或常驻内存增量。
