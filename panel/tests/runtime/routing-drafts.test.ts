@@ -7,6 +7,7 @@ import { test } from 'bun:test';
 import { isJsonRecord } from '../../src/lib/api';
 import { buildRoutingDraftPayload, parseRoutingDraft, parseRoutingDraftPage, ROUTING_DRAFT_PATH, type RoutingDraft, type RoutingDraftSummary } from '../../src/lib/routing-drafts';
 import { buildRoutingVersionPayload, parseRoutingPolicyVersion, parseRoutingPolicyVersionPage, ROUTING_VERSION_PATH, type RoutingPolicyVersion } from '../../src/lib/routing-policy-versions';
+import { parseRoutingReleaseHead, parseRoutingReleaseSnapshot, ROUTING_RELEASE_PATH } from '../../src/lib/routing-releases';
 import { PrivatePostgres } from './postgres';
 import { availablePort, trackedChild, stopChild, waitForHTTP, type RuntimeChild } from './process';
 
@@ -52,7 +53,14 @@ function draftClient(origin: string) {
 		assert.equal(response.status, options.status ?? 200, `${options.method ?? 'GET'} ${route}`);
 		const session = response.headers.get('set-cookie');
 		if (session) cookie = session.split(';')[0];
-		if (route.startsWith(ROUTING_DRAFT_PATH) || route.startsWith(ROUTING_VERSION_PATH)) assert.equal(response.headers.get('cache-control'), 'no-store');
+		if (route.startsWith(ROUTING_DRAFT_PATH) || route.startsWith(ROUTING_VERSION_PATH) ||
+			(route.startsWith(ROUTING_RELEASE_PATH) && (options.method ?? 'GET') === 'GET')) {
+			assert.equal(response.headers.get('cache-control'), 'no-store');
+		}
+		if (response.status === 405) {
+			await response.arrayBuffer();
+			return null;
+		}
 		if (response.status === 204) {
 			assert.equal(await response.text(), '');
 			return null;
@@ -62,6 +70,25 @@ function draftClient(origin: string) {
 }
 
 type DraftClient = ReturnType<typeof draftClient>;
+
+async function verifyUnmanagedReleaseReads(api: DraftClient): Promise<void> {
+	const page = parseRoutingReleaseSnapshot(await api(`${ROUTING_RELEASE_PATH}?limit=25&offset=0`), 0);
+	assert.deepEqual(page, {
+		head: { epoch: 0, state: 'pending', desired_version_id: '', desired_fingerprint: '', applied_version_id: '', applied_fingerprint: '' },
+		releases: [],
+	});
+	assert.deepEqual(parseRoutingReleaseHead(await api(`${ROUTING_RELEASE_PATH}/head`)), page.head);
+	assert.deepEqual(parseRoutingReleaseSnapshot(await api(`${ROUTING_RELEASE_PATH}?limit=25&offset=25`), 25), page);
+	for (const query of ['limit=0', 'limit=101', 'offset=-1', 'limit=25&limit=25']) {
+		await api(`${ROUTING_RELEASE_PATH}?${query}`, { status: 400 });
+	}
+	for (const route of [ROUTING_RELEASE_PATH, `${ROUTING_RELEASE_PATH}/head`]) {
+		for (const method of ['POST', 'PUT', 'DELETE']) {
+			await api(route, { method, body: {}, status: 405 });
+		}
+	}
+	assert.deepEqual(parseRoutingReleaseSnapshot(await api(`${ROUTING_RELEASE_PATH}?limit=25&offset=0`), 0), page);
+}
 
 function canonicalTimestamps(draft: RoutingDraftSummary) {
 	// PostgreSQL may return a different offset; compare instants without losing fractional precision.
@@ -221,10 +248,13 @@ test(`panel draft contracts drive the canonical gateway (${postgresBin ? 'Postgr
 		const api = draftClient(origin);
 		await api(ROUTING_DRAFT_PATH, { status: 401 });
 		await api(ROUTING_VERSION_PATH, { status: 401 });
+		await api(ROUTING_RELEASE_PATH, { status: 401 });
+		await api(`${ROUTING_RELEASE_PATH}/head`, { status: 401 });
 		await api(`${ROUTING_VERSION_PATH}/123e4567-e89b-12d3-a456-426614174000`, { status: 401 });
 		await api(`${ROUTING_DRAFT_PATH}/123e4567-e89b-12d3-a456-426614174000/versions`, { method: 'POST', body: { expected_revision: 1 }, status: 401 });
 		await api('/api/session/login', { method: 'POST', body: { username: 'draft-acceptance', password } });
 		const activeBefore = await api('/api/routing/rules');
+		await verifyUnmanagedReleaseReads(api);
 		assert.deepEqual(parseRoutingPolicyVersionPage(await api(`${ROUTING_VERSION_PATH}?limit=25&offset=0`), 0), []);
 		const created = await verifyCreation(api);
 		await verifyRejections(api, created);
@@ -243,6 +273,7 @@ test(`panel draft contracts drive the canonical gateway (${postgresBin ? 'Postgr
 			'full draft and administrator session must survive gateway/database restart');
 		assert.deepEqual(await draftAudit(api), auditBefore);
 		assert.deepEqual(await api('/api/routing/rules'), activeBefore);
+		await verifyUnmanagedReleaseReads(api);
 		await verifyVersionRetention(api, initialVersion);
 		await verifyVersionRetention(api, nextVersion);
 		await verifyDeletion(api, saved);
@@ -254,7 +285,8 @@ test(`panel draft contracts drive the canonical gateway (${postgresBin ? 'Postgr
 		await verifyVersionRetention(api, initialVersion);
 		await verifyVersionRetention(api, nextVersion);
 		assert.deepEqual(await api('/api/routing/rules'), activeBefore);
-		console.log('PASS real draft CRUD, concurrent version capture/replay, immutable history, audit, restart, source deletion and active-rule isolation');
+		await verifyUnmanagedReleaseReads(api);
+		console.log('PASS real draft CRUD, version capture/replay, unmanaged release reads, read-only method guards, audit, restart, source deletion and active-rule isolation');
 	} catch (cause) {
 		failures.push(cause);
 		for (const runtime of children) console.error(runtime.output()

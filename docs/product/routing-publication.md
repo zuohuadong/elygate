@@ -657,10 +657,24 @@ panel preview: 18 read-only requests, no non-GET requests or page errors, and
 checks for empty/unmanaged, pending, installed, superseded, malformed, 401/403,
 pagination, cancellation, deactivation/unmount, reduced motion, light/dark and
 1440x1000, 375x812 and 812x375 layouts. Evidence is in
-`.codex-tmp/routing-releases-browser-report.txt` and
+`output/playwright/routing-releases-browser-report.txt` and
 `output/playwright/routing-releases-{light,dark}-{1440,375,812}.png`.
 This uses API fixtures rather than a live gateway/database, so the live
 administrator route and real session remain open.
+The subsequent Pi browser implementation invocation returned `Connection error`
+without file changes; the root agent implemented and ran the fixture script.
+This is not a successful Pi implementation receipt.
+
+The canonical-gateway runtime contract also passed against isolated SQLite and
+private PostgreSQL on 2026-10-31. It verifies anonymous reads return 401,
+administrator history/head reads, pagination validation, `no-store`, rejected
+POST/PUT/DELETE methods (405), and unchanged unmanaged head and active routing
+rules across gateway/database restart. The PostgreSQL run passed in 56.20s and
+confirmed owned database cleanup. The tested binary was
+`.codex-tmp/bifrost-http-routing-runtime`, SHA-256
+`83abd810267851b99a466a5a7d5e0d94090ddf200e2aa6c79da13bf96eb41d7a`.
+This proves the real API/session path, not live-gateway browser acceptance,
+publication writes, process ownership, crash recovery or production deployment.
 
 ## Verification
 
