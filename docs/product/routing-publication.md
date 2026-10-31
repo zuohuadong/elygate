@@ -710,10 +710,53 @@ Both Pi implementation invocations returned `Connection error`, exit 1, without
 file changes; root implemented the temporary fixture after reclaiming ownership.
 No successful Pi implementation or new-view live-browser pass is claimed.
 
-The remaining local gate is a completed canonical artifact with the fixed panel
-bundle, followed by real release-page/browser checks and graceful restart
-against SQLite and private PostgreSQL. Original ownership, publication,
-rollback, crash-recovery, Shadow and production gates remain **PARTIAL**.
+At that checkpoint the local embedded-artifact/browser gate remained open.
+The later verification below closes that local gate, not the original ownership,
+publication, rollback, crash-recovery, Shadow or production gates.
+
+### Current Embedded Panel Verification
+
+Follow-up `routing-release-current-panel-live` has parent `86235f58d`, source the
+embedded-artifact gap and production-readiness gate 4, and reason that the newly
+committed SVAdmin migration must be verified as the actual embedded UI rather
+than reusing the earlier bundle. This is Native, low-risk, single-writer local
+verification, with no deployment, publication writes or inference-path changes.
+The requested Pi `gomodel/code` implementation attempt again exited 1 with
+`Connection error` and produced no files; credential readiness was not counted
+as a successful invocation.
+
+On 2026-10-31, a completed canonical CLI build used Go 1.27.3, macOS arm64 PIE,
+external linking, `sqlite_static`, `-mod=readonly` and the local workspace.
+Its VCS revision is `86235f58dd5febc07c5ff0c86933d9223f2b7693`, with
+`vcs.modified=true`; the Go source and module inputs have no diff against that
+commit. Local Dockerfile/test changes are not claimed as part of a built image.
+The binary SHA-256 is
+`d58f4a917d8aeafaa0e95da21e4e52e9ab3f9275a38d568d99617bc344da0300`.
+The independently built panel, transport embedding directory and actual served
+index all have SHA-256
+`2f3a9845087b96299732c81a6998652053f3382e99798e08cad748dac29f05fa`.
+
+That binary passed real administrator browser login and the release-page flow
+against isolated SQLite and private, socket-only PostgreSQL 18.4 with durability
+enabled. Both backends passed again after graceful restart; the PostgreSQL run
+also restarted its owned database process and verified both live stores without
+SQLite fallback. Each browser run checks keyboard refresh, six 1440/375/812
+light/dark layouts, reduced motion, no overflow or page exceptions, GET-only
+snapshot reads with `no-store`, and unchanged active rules. The live database is
+unmanaged with empty release history; pending/applied/superseded states remain
+covered by the separate API fixtures, not by this live-browser run.
+
+The first PostgreSQL restart client disconnected because the fixture's
+`Bun.serve` control endpoint used its default 10-second idle timeout. The gateway
+remained healthy and cleanup exited 0. After setting only that local control
+timeout to 180 seconds, a fresh isolated run passed the entire browser/restart
+flow and cleanup; no product timeout or assertion was relaxed.
+Evidence reports are
+`output/playwright/routing-releases-live-{sqlite,sqlite-restart,postgres,postgres-restart}-report.json`,
+with matching layout screenshots beside them. Owned gateway/database processes,
+temporary app directories, metadata and generated secret files were removed.
+This is **PASS_SCOPED** for the embedded read-only view, not live publication,
+crash recovery, final-image or production approval.
 
 ## Verification
 

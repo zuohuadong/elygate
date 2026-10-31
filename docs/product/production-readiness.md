@@ -47,10 +47,11 @@
 - 本地 Relay 双 PostgreSQL 真实生命周期、数据库/网关正常重启和停机备份恢复
   已通过，详见下节。这不等于整机、其他功能、升级回滚或生产恢复验收。
 - CI、镜像 digest、部署状态和生产数据均需针对最终候选重新核实。
-- 路由发布记录页的真实浏览器验收发现旧本地二进制仍嵌入不含该入口的 UI：
-  管理员登录成功，但“发布记录”按钮不存在。此前 API/runtime 通过不覆盖此 UI
-  边界。当前面板单独构建成功不等于 canonical CLI 已嵌入；两次后续 CLI
-  重建均被显式中断，未取得可验收的新产物。具体二进制、页面哈希和清理证据见
+- 路由发布记录页此前因旧二进制缺少入口而验收失败；现已从 `86235f58d`
+  完成标准 CLI 重建，核对独立面板、嵌入目录与实际服务页面哈希一致，
+  并通过 SQLite、私有 PostgreSQL 的真实登录/只读页/正常重启浏览器复验。
+  覆盖 unmanaged 空历史、键盘刷新、1440/375/812 亮暗主题和活动路由不变，
+  不等同发布写入、崩溃恢复、最终镜像或生产验收。哈希与清理证据见
   [嵌入产物复验](routing-publication.md#embedded-artifact-verification-follow-up)。
 - 员工凭据拒绝已补固定匿名审计和有界来源 IP 限流，详见
   [专项记录](employee-login-failure-audit.md)。失败计数与审计仍为独立事务，
@@ -291,6 +292,25 @@ Bash 语法、ShellCheck、46 个预检用例和 `git diff --check` 通过，
 原总目标继续 **active / PARTIAL**。
 
 ## 生产交付门
+
+### SVAdmin 迁移镜像输入修复（2026-10-31）
+
+后续项 `svadmin-unpatched-image-inputs`：parent 为 `86235f58d`，source 为
+run `41177876822` 与交付门 1，reason 为最后一个包补丁移除后 Git 不保留
+`panel/patches` 空目录，但三个 Dockerfile 仍强制 COPY 该路径。
+该 SHA 的 Docker job 在复制阶段失败，未生成镜像；不计为镜像运行验收通过。
+
+本地修复仅删除三个镜像入口的失效 COPY，保持 manifest/lockfile 先复制、
+`bun install --frozen-lockfile`、随后复制源码的分层顺序不变。
+构建契约同步核对无补丁的 manifest、三个入口的安装顺序和失效路径拒绝；
+构建契约与路由只读模型合计 23 项测试通过，Svelte 检查零错误/警告，
+`git diff --check` 通过，`clean-code-guard: clean`。
+Native、root 单 writer、低风险，修改只在镜像构建时生效，
+无推理路径 CPU/分配或常驻内存开销。
+
+本机 Docker daemon 不可用，不能把静态契约通过当作镜像构建通过；
+修复候选仍需远端 CI 的实际构建、加载和运行证明。Pi 实施调用仍因
+`Connection error` 未产出文件，不计成功。原总目标保持 **active / PARTIAL**。
 
 ### `fd2f18aff` 候选 CI 复验（2026-10-31）
 

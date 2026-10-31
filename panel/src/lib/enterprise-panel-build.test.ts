@@ -32,9 +32,25 @@ describe('enterprise panel build contract', () => {
 		})).toBe(modulePath);
 	});
 
+	test.each(['Dockerfile', 'Dockerfile.local', 'Dockerfile.redhat'])(
+		'%s installs unpatched panel dependencies before copying application sources',
+		async (name) => {
+			const manifest = await Bun.file(new URL('../../package.json', import.meta.url)).json();
+			expect(manifest.patchedDependencies).toBeUndefined();
+			const dockerfile = await Bun.file(new URL(`../../../transports/${name}`, import.meta.url)).text();
+			const manifests = dockerfile.indexOf('COPY panel/package.json panel/bun.lock ./');
+			const install = dockerfile.indexOf('RUN bun install --frozen-lockfile');
+			const sources = dockerfile.indexOf('COPY panel/ ./');
+			expect(manifests).toBeGreaterThanOrEqual(0);
+			expect(install).toBeGreaterThan(manifests);
+			expect(sources).toBeGreaterThan(install);
+			expect(dockerfile).not.toMatch(/^\s*COPY\s+panel\/patches(?:\/|\s)/m);
+		},
+	);
+
 	test('Docker build supports an isolated named enterprise panel context', async () => {
 		const dockerfile = await Bun.file(new URL('../../../transports/Dockerfile', import.meta.url)).text();
-		expect(dockerfile).toContain('COPY panel/patches ./patches');
+		expect(dockerfile).not.toContain('COPY panel/patches ./patches');
 		expect(dockerfile).toContain('FROM scratch AS enterprise_panel');
 		expect(dockerfile).toContain('COPY --from=enterprise_panel / /opt/elygate-enterprise-panel/');
 		expect(dockerfile).toContain('COPY docs/ /docs/');
@@ -48,14 +64,14 @@ describe('enterprise panel build contract', () => {
 
 	test('local release Dockerfile includes the panel documentation sources', async () => {
 		const dockerfile = await Bun.file(new URL('../../../transports/Dockerfile.local', import.meta.url)).text();
-		expect(dockerfile).toContain('COPY panel/patches ./patches');
+		expect(dockerfile).not.toContain('COPY panel/patches ./patches');
 		expect(dockerfile).toContain('COPY docs/ /docs/');
 		expect(dockerfile.match(/apk add --no-cache[^\n]*git/g)).toHaveLength(2);
 	});
 
 	test('Red Hat release Dockerfile includes panel docs and the local Go workspace', async () => {
 		const dockerfile = await Bun.file(new URL('../../../transports/Dockerfile.redhat', import.meta.url)).text();
-		expect(dockerfile).toContain('COPY panel/patches ./patches');
+		expect(dockerfile).not.toContain('COPY panel/patches ./patches');
 		expect(dockerfile).toContain('COPY docs/ /docs/');
 		expect(dockerfile).toContain('GOWORK=/app/go.work');
 		expect(dockerfile).toContain('go work init');

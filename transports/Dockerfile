@@ -14,7 +14,6 @@ COPY panel/src/enterprise-fallback/index.ts /index.ts
 
   # Install panel dependencies before copying source to preserve the dependency layer.
   COPY panel/package.json panel/bun.lock ./
-  COPY panel/patches ./patches
   RUN bun install --frozen-lockfile
 
   COPY panel/ ./
