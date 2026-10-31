@@ -3,6 +3,30 @@ export interface ModelAttributeRow {
 	value: string;
 }
 
+export const MODEL_GOVERNANCE_KEYS = ['region', 'data_class', 'capabilities', 'health'] as const;
+export type ModelGovernanceKey = typeof MODEL_GOVERNANCE_KEYS[number];
+export type ModelGovernanceFields = Record<ModelGovernanceKey, string>;
+
+export function readModelAttributes(attributes: Record<string, string> = {}): {
+	description: string;
+	governance: ModelGovernanceFields;
+	rows: ModelAttributeRow[];
+} {
+	const ownValue = (key: string): string => Object.hasOwn(attributes, key) ? attributes[key] : '';
+	return {
+		description: ownValue('description'),
+		governance: {
+			region: ownValue('region'),
+			data_class: ownValue('data_class'),
+			capabilities: ownValue('capabilities'),
+			health: ownValue('health'),
+		},
+		rows: Object.entries(attributes)
+			.filter(([key]) => key !== 'description' && !MODEL_GOVERNANCE_KEYS.some((reserved) => reserved === key))
+			.map(([key, value]) => ({ key, value })),
+	};
+}
+
 export type ModelAttributeIssue = 'missing-key' | 'duplicate-key' | 'reserved-key';
 
 export class ModelAttributeError extends Error {
@@ -15,7 +39,11 @@ export class ModelAttributeError extends Error {
 	}
 }
 
-export function buildModelAttributes(description: string, rows: ModelAttributeRow[]): Record<string, string> {
+export function buildModelAttributes(
+	description: string,
+	rows: ModelAttributeRow[],
+	governance: ModelGovernanceFields = readModelAttributes().governance,
+): Record<string, string> {
 	const cleaned = rows
 		.map((row) => ({ key: row.key.trim(), value: row.value }))
 		.filter((row) => row.key !== '' || row.value !== '');
@@ -24,7 +52,9 @@ export function buildModelAttributes(description: string, rows: ModelAttributeRo
 
 	const seen = new Set<string>();
 	for (const row of cleaned) {
-		if (row.key === 'description') throw new ModelAttributeError('reserved-key', row.key);
+		if (row.key === 'description' || MODEL_GOVERNANCE_KEYS.some((reserved) => reserved === row.key)) {
+			throw new ModelAttributeError('reserved-key', row.key);
+		}
 		if (seen.has(row.key)) throw new ModelAttributeError('duplicate-key', row.key);
 		seen.add(row.key);
 	}
@@ -32,6 +62,9 @@ export function buildModelAttributes(description: string, rows: ModelAttributeRo
 	const attributes = Object.create(null) as Record<string, string>;
 	const normalizedDescription = description.trim();
 	if (normalizedDescription) attributes.description = normalizedDescription;
+	for (const key of MODEL_GOVERNANCE_KEYS) {
+		if (governance[key] !== '') attributes[key] = governance[key];
+	}
 	for (const row of cleaned) attributes[row.key] = row.value;
 	return attributes;
 }
