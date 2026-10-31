@@ -32,8 +32,8 @@ require_command() {
 }
 
 resolved_env_value() {
-	printf '%s' "$resolved_json" | jq -er --arg field "$1" \
-		'.services.elygate.environment[$field] | select(type == "string" and length > 0)' 2>/dev/null
+	printf '%s' "$resolved_json" | jq -er --arg service "$1" --arg field "$2" \
+		'.services[$service].environment[$field] | select(type == "string" and length > 0)' 2>/dev/null
 }
 
 validate_secret() {
@@ -59,9 +59,29 @@ validate_secret() {
 [[ "$(file_mode "$env_file")" == "600" ]] || fail ".env" "file mode must be 0600"
 [[ "$(file_mode "$backup_dir")" == "700" ]] || fail "backup_dir" "directory mode must be 0700"
 pass "required files and private permissions"
+require_command jq
+jq -e -s 'length == 1 and (.[0] | type == "object")' "$config_file" >/dev/null 2>&1 ||
+	fail "config.json" "must contain a JSON object"
+jq -e '(.client // {} | .disable_db_pings_in_health != true)' "$config_file" >/dev/null 2>&1 ||
+	fail "config.json" "database health pings must remain enabled"
+for store in config_store logs_store; do
+	jq -e --arg store "$store" \
+		'.[$store] | type == "object" and .enabled == true and .type == "postgres"' \
+		"$config_file" >/dev/null 2>&1 ||
+		fail "$store" "must be an enabled PostgreSQL store"
+	jq -e --arg store "$store" \
+		'.[$store].config | type == "object"' "$config_file" >/dev/null 2>&1 ||
+		fail "$store" "config must be an object"
+	jq -e --arg store "$store" \
+		'(.[$store].config.user == "env.POSTGRES_USER" and
+		  .[$store].config.password == "env.POSTGRES_PASSWORD" and
+		  .[$store].config.db_name == "env.POSTGRES_DB")' \
+		"$config_file" >/dev/null 2>&1 ||
+		fail "$store" "user, password and db_name must use the PostgreSQL environment references"
+done
+pass "PostgreSQL storage configuration and database health pings"
 
 require_command docker
-require_command jq
 docker compose version >/dev/null 2>&1 || fail "docker compose" "Compose plugin is unavailable"
 pass "docker compose and jq availability"
 
@@ -81,13 +101,20 @@ postgres_resolved_image="$(printf '%s' "$resolved_json" | jq -r '.services.postg
 pass "immutable image references"
 
 for field in BIFROST_ENCRYPTION_KEY BIFROST_SETUP_TOKEN POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB; do
-	field_value="$(resolved_env_value "$field")" || fail "$field" "missing or invalid value"
+	field_value="$(resolved_env_value elygate "$field")" || fail "$field" "missing or invalid value"
 	minimum=1
 	case "$field" in
 		BIFROST_ENCRYPTION_KEY|BIFROST_SETUP_TOKEN|POSTGRES_PASSWORD) minimum=32 ;;
 	esac
 	validate_secret "$field" "$field_value" "$minimum"
+	if [[ "$field" == POSTGRES_* ]]; then
+		postgres_value="$(resolved_env_value postgres "$field")" ||
+			fail "postgres.$field" "missing or invalid value"
+		[[ "$postgres_value" == "$field_value" ]] ||
+			fail "postgres.$field" "must match the gateway environment value"
+		validate_secret "postgres.$field" "$postgres_value" "$minimum"
+	fi
 done
-pass "required environment values"
+pass "required environment values and storage alignment"
 
 pass "single-node production preflight"

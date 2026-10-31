@@ -52,9 +52,10 @@ the corresponding native build parameters from the Makefile.
 ```sh
 mkdir -p .codex-cache/go-build .codex-tmp
 GOCACHE="$PWD/.codex-cache/go-build" GOTMPDIR="$PWD/.codex-tmp" \
-  go build -trimpath -buildmode=pie -ldflags="-linkmode=external -w -s" \
+  go build -buildvcs=false -trimpath -buildmode=pie -ldflags="-linkmode=external -w -s -X main.Version=v$(git rev-parse HEAD)" \
     -tags=sqlite_static -o .codex-tmp/relay-gateway ./transports/bifrost-http
 ELYGATE_TEST_BINARY="$PWD/.codex-tmp/relay-gateway" \
+ELYGATE_TEST_COMMIT="$(git rev-parse HEAD)" \
   bun run --cwd panel test:relay-runtime
 ```
 
@@ -68,13 +69,18 @@ It uses private temporary SQLite databases, random test credentials,
 loopback listeners and local catalog files. Child processes receive only an
 explicit test environment, not the caller's provider credentials.
 Successful completion requires graceful child exits and temporary-directory
-cleanup. A missing binary fails rather than skipping.
+cleanup. A missing binary or full candidate commit fails rather than skipping.
+The authenticated version endpoint must match that commit at first login and
+after PostgreSQL restart and restore; an older executable cannot count as the
+current candidate's receipt. The version label is not a build attestation:
+also retain build inputs, command, binary checksum and source-diff evidence.
 
 For PostgreSQL, set only the absolute tool directory, not a connection string
 or an existing database. The test creates and owns an isolated cluster:
 
 ```sh
 ELYGATE_TEST_BINARY="$PWD/.codex-tmp/relay-gateway" \
+ELYGATE_TEST_COMMIT="$(git rev-parse HEAD)" \
 ELYGATE_TEST_POSTGRES_BIN=/opt/homebrew/opt/postgresql@18/bin \
   bun run --cwd panel test:relay-runtime
 ```
@@ -99,11 +105,17 @@ expired/revoked keys before upstream access, forward with the active key,
 read/export logs and create a new application key. A local upload-directory
 probe verifies copied bytes, not the Skills/upload API lifecycle.
 
+Both compact and signed audit modes run. Signed mode stores literal relay
+credentials and an extra header encrypted, restores the permission-restricted
+runtime secret bundle from the application backup, and checks the original
+signing public key, audit chain and subsequent chain extension. Restored login,
+logout and new writes must also succeed.
+
 All private databases and processes must be removed before the workspace is
 deleted, including the temporary dumps and app copy. No existing database,
 real provider credentials or deployment is involved.
 This is scoped local Relay API/recovery acceptance, not browser rendering,
-real provider billing, password/TLS authentication, encrypted-key recovery,
+real provider billing, password/TLS authentication, external key-management recovery,
 other product workflows, crash recovery, version rollback, container-image
 or production acceptance.
 

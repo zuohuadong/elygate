@@ -79,6 +79,12 @@ function apiClient(origin: string) {
 
 type ApiClient = ReturnType<typeof apiClient>;
 
+async function verifyCandidateVersion(api: ApiClient, commit: string): Promise<void> {
+	const response = await api.request('/api/version');
+	assert.equal(response.status, 200);
+	assert.equal(await response.json(), `v${commit}`, 'gateway version must match the expected candidate commit');
+}
+
 async function runtimeSecrets(appDir: string): Promise<Record<string, string>> {
 	const secretsDir = path.join(appDir, 'private');
 	const filename = path.join(secretsDir, 'runtime-env.json');
@@ -417,6 +423,8 @@ const postgresBin = process.env.ELYGATE_TEST_POSTGRES_BIN;
 test.each(['compact', 'signed'] as const)(`panel contracts drive an isolated real gateway relay lifecycle (%s ${postgresBin ? 'PostgreSQL + restore' : 'SQLite'})`, async (auditMode) => {
 	const binary = process.env.ELYGATE_TEST_BINARY;
 	assert.ok(binary && path.isAbsolute(binary), 'ELYGATE_TEST_BINARY must name an absolute, freshly built gateway executable');
+	const commit = process.env.ELYGATE_TEST_COMMIT;
+	assert.ok(commit && /^[0-9a-f]{40}$/.test(commit), 'ELYGATE_TEST_COMMIT must name the full candidate Git commit SHA');
 	const tempRoot = path.join(root, '.codex-tmp');
 	await mkdir(tempRoot, { recursive: true });
 	const workspace = await mkdtemp(path.join(tempRoot, 'relay-runtime-'));
@@ -472,6 +480,7 @@ test.each(['compact', 'signed'] as const)(`panel contracts drive an isolated rea
 		assert.equal(anonymous.status, 401);
 		await anonymous.arrayBuffer();
 		await api.json('/api/session/login', { method: 'POST', body: { username: 'relay-acceptance', password } });
+		await verifyCandidateVersion(api, commit);
 		await verifyPreviewAndSave(api, upstream);
 		if (auditMode === 'signed') await useLiteralRelayCredential(api, upstreamKey);
 		const application = await applicationKey(api);
@@ -493,6 +502,7 @@ test.each(['compact', 'signed'] as const)(`panel contracts drive an isolated rea
 			await stopChild(backend);
 			await postgres.restart();
 			backend = await startBackend();
+			await verifyCandidateVersion(api, commit);
 			assertRestartState(beforeRestart, await persistedState(api, allKeys), expiring.virtualKeyID);
 			if (auditBeforeRestart) assert.deepEqual(await signedAuditSnapshot(api), auditBeforeRestart);
 			await verifyLogs(api);
@@ -513,6 +523,7 @@ test.each(['compact', 'signed'] as const)(`panel contracts drive an isolated rea
 			assert.ok((await readFile(path.join(appDir, 'private', 'runtime-env.json'))).equals(secretBackup),
 				'recovery must restore the exact runtime secret bundle, not reuse in-memory credentials');
 			backend = await startBackend();
+			await verifyCandidateVersion(api, commit);
 			assert.deepEqual(await persistedState(api, allKeys), beforeRestore,
 				'restored configuration, sessions, key metadata and audit must match the backup');
 			if (auditBeforeRestore) {

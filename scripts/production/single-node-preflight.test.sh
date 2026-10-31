@@ -10,6 +10,7 @@ compose_dir="$test_root/compose"
 backup_dir="$compose_dir/backups"
 env_file="$compose_dir/.env"
 secret="test-secret-value-that-is-longer-than-thirty-two-characters"
+other_secret="another-secret-value-that-is-longer-than-thirty-two-characters"
 
 cleanup() {
 	rm -rf "$test_root"
@@ -34,7 +35,7 @@ services:
   postgres:
     image: postgres:16-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 EOF
-printf '{}\n' >"$compose_dir/config.json"
+cp "$repo_root/examples/single-node-postgres/config.json" "$compose_dir/config.json"
 cat >"$env_file" <<EOF
 ELYGATE_IMAGE=registry.example/elygate@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 ENCRYPTION_KEY=$secret
@@ -53,10 +54,16 @@ jq -n --arg secret "$secret" '{
 				POSTGRES_USER: "elygate", POSTGRES_PASSWORD: $secret, POSTGRES_DB: "elygate"
 			}
 		},
-		postgres: { image: ("postgres:16-alpine@sha256:" + ("a" * 64)) }
+		postgres: {
+			image: ("postgres:16-alpine@sha256:" + ("a" * 64)),
+			environment: {
+				POSTGRES_USER: "elygate", POSTGRES_PASSWORD: $secret, POSTGRES_DB: "elygate"
+			}
+		}
 	}
 }' >"$test_root/compose-original.json"
 cp "$test_root/compose-original.json" "$test_root/compose.json"
+cp "$compose_dir/config.json" "$test_root/config-original.json"
 cat >"$fake_bin/docker" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -97,13 +104,22 @@ expect_failure() {
 	fi
 	[[ "$output" == *"$expected"* ]] || fail "$name missing diagnostic"
 	[[ "$output" != *"$secret"* ]] || fail "$name leaked a secret"
+	[[ "$output" != *"$other_secret"* ]] || fail "$name leaked a mismatched secret"
 	pass "$name"
 }
 
 expect_success "valid configuration"
 rm "$compose_dir/config.json"
 expect_failure "missing config" "config.json" bash "$preflight" "$compose_dir"
+printf '{invalid\n' >"$compose_dir/config.json"
+expect_failure "invalid config JSON" "config.json" bash "$preflight" "$compose_dir"
+printf '[]\n' >"$compose_dir/config.json"
+expect_failure "non-object config JSON" "config.json" bash "$preflight" "$compose_dir"
 printf '{}\n' >"$compose_dir/config.json"
+expect_failure "empty config object" "config_store" bash "$preflight" "$compose_dir"
+printf '{}\n{}\n' >"$compose_dir/config.json"
+expect_failure "multiple config objects" "config.json" bash "$preflight" "$compose_dir"
+cp "$test_root/config-original.json" "$compose_dir/config.json"
 chmod 644 "$env_file"
 expect_failure "private env mode" ".env" bash "$preflight" "$compose_dir"
 chmod 600 "$env_file"
@@ -115,6 +131,38 @@ for service in elygate postgres; do
 		"$test_root/compose-original.json" >"$test_root/compose.json"
 	expect_failure "$service floating image" "$service.image" bash "$preflight" "$compose_dir"
 done
+for store in config_store logs_store; do
+	jq --arg store "$store" '.[ $store ].enabled = false' \
+		"$test_root/config-original.json" >"$compose_dir/config.json"
+	expect_failure "$store disabled" "$store" bash "$preflight" "$compose_dir"
+	jq --arg store "$store" '.[ $store ].type = "sqlite"' \
+		"$test_root/config-original.json" >"$compose_dir/config.json"
+	expect_failure "$store wrong type" "$store" bash "$preflight" "$compose_dir"
+	for field in user password db_name; do
+		jq --arg store "$store" --arg field "$field" '.[$store].config[$field] = "wrong-reference"' \
+			"$test_root/config-original.json" >"$compose_dir/config.json"
+		expect_failure "$store $field broken environment reference" "$store" bash "$preflight" "$compose_dir"
+	done
+done
+jq '.client.disable_db_pings_in_health = true' "$test_root/config-original.json" >"$compose_dir/config.json"
+expect_failure "database health pings disabled" "health pings" bash "$preflight" "$compose_dir"
+cp "$test_root/config-original.json" "$compose_dir/config.json"
+for field in POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB; do
+	jq --arg field "$field" 'del(.services.postgres.environment[$field])' \
+		"$test_root/compose-original.json" >"$test_root/compose.json"
+	expect_failure "postgres $field missing" "postgres.$field" bash "$preflight" "$compose_dir"
+	jq --arg field "$field" '.services.postgres.environment[$field] = 1' \
+		"$test_root/compose-original.json" >"$test_root/compose.json"
+	expect_failure "postgres $field invalid type" "postgres.$field" bash "$preflight" "$compose_dir"
+	jq --arg field "$field" --arg other "$other_secret" \
+		'.services.postgres.environment[$field] = (if $field == "POSTGRES_PASSWORD" then $other else "different" end)' \
+		"$test_root/compose-original.json" >"$test_root/compose.json"
+	expect_failure "postgres $field mismatch" "postgres.$field" bash "$preflight" "$compose_dir"
+done
+jq '.services.postgres.environment.POSTGRES_PASSWORD = "replace-me-placeholder-value-with-more-than-32-characters"' \
+	"$test_root/compose-original.json" >"$test_root/compose.json"
+expect_failure "postgres password placeholder" "postgres.POSTGRES_PASSWORD" bash "$preflight" "$compose_dir"
+cp "$test_root/compose-original.json" "$test_root/compose.json"
 for field in BIFROST_ENCRYPTION_KEY BIFROST_SETUP_TOKEN POSTGRES_PASSWORD POSTGRES_USER POSTGRES_DB; do
 	jq --arg field "$field" 'del(.services.elygate.environment[$field])' \
 		"$test_root/compose-original.json" >"$test_root/compose.json"
@@ -130,4 +178,6 @@ for field in BIFROST_ENCRYPTION_KEY BIFROST_SETUP_TOKEN POSTGRES_PASSWORD; do
 done
 cp "$test_root/compose-original.json" "$test_root/compose.json"
 expect_failure "compose failure" "docker compose config" env FAKE_COMPOSE_FAIL=1 bash "$preflight" "$compose_dir"
+jq '.client.disable_db_pings_in_health = false' "$test_root/config-original.json" >"$compose_dir/config.json"
+expect_success "explicit database health pings enabled"
 pass "all single-node preflight cases"

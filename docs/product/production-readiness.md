@@ -8,10 +8,10 @@
 
 ## 候选版本
 
-- 最近完成 CI 镜像运行验收的候选为 `b597d945b69e6b06948b1da8fdd8d615c6cf8883`，
-  run `41153100098` 于 2026-10-31 09:06:22（北京时间）整体成功。
+- 最近完成 CI 镜像运行验收的候选为 `fd2f18affc64f74e864972ab02d6dd4be45d7d67`，
+  run `41160000132` 于 2026-10-31 10:32:31（北京时间）整体成功。
   镜像已在隔离 runner 中实际加载、启动和正常重启，详见下方运行时记录；
-  未发布镜像或部署生产，不将后续仅记录证据的文档提交视为同一镜像 SHA。
+  未发布镜像或部署生产，不将后续本地修改或文档提交视为同一镜像 SHA。
 - 草稿 API 初始源码基线：`dev` / `826067def`，包含 Bifrost `c34bd4360`。
   面板草稿接入基线为 `b508f90e7`；不可变版本 API 为 `d5669bde5`，
   面板版本历史为 `d4a4be649`，另有本地初始化竞态修复与验收文档。
@@ -229,10 +229,71 @@ Svelte 检查零错误/警告、Relay 四份合约测试 56 pass，均不能替�
 默认检查 `examples/single-node-postgres`；可用 `ENV_FILE`、`BACKUP_DIR` 指定路径。
 它仅核对必需文件、私有权限、Compose 解析、镜像 digest 及必需环境值，
 不启动服务、不拉取镜像、不输出秘密值。Bash 语法、ShellCheck 和
-`bash scripts/production/single-node-preflight.test.sh` 的 20 个用例已通过；
+`bash scripts/production/single-node-preflight.test.sh` 的基础用例已通过；
 这些测试使用假 Docker 命令，不代表生产 Compose、TLS 或部署验收。
 
+Relay 运行验收现在还必须显式传入 `ELYGATE_TEST_COMMIT` 的 40 位候选 SHA，
+构建命令用 `-X main.Version=v<sha>` 注入版本；首次登录、PostgreSQL 正常重启
+和备份恢复后都会核对 `/api/version`。缺少 SHA 或使用旧二进制会在业务验收前
+拒绝，版本字符串仍不是供应链签名或镜像来源证明。当前候选的旧 `v15` 二进制
+已被该门禁拒绝；当前源码重建在本机外置卷上停滞后停止，尚无可接受的新二进制。
+
+该增量为后续项 `relay-current-candidate-recovery`，parent 为 `fd2f18aff`，
+source 为交付门 7 的候选绑定缺口，reason 为历史二进制与当前 Go 代码已有差异。
+Native、root 单 writer、低风险、external=0；范围为既有 Relay 运行测试、
+执行说明与本记录，不修改 Go 或生产状态。缺失 SHA、非法 SHA 和历史网关
+三个真实拒绝检查通过；Relay 合约 56 项和预检 46 项复跑通过。
+当前 Go 生产源码与模块输入对照 HEAD 无差异；重建使用 Go 1.27.3、
+PIE/外部链接/`sqlite_static` 和 `-buildvcs=false`，显式注入完整候选版本。
+进程采样显示仍在读取外置卷的源码/构建缓存，超过 12 分钟后主动停止，
+退出 143，不能记为编译失败、编译通过或恢复验收通过。
+本轮本地 Svelte 复查也在持续 I/O 等待后停止，退出 143，不计为通过；
+下节 `fd2f18aff` 的远端 Svelte 成功是另一份已完成证据，二者不能混用。
+完整 compact/signed SQLite 与双 PostgreSQL 当前候选矩阵继续为 **PARTIAL**。
+
+### 单机预检存储一致性后续项（2026-10-31）
+
+后续项 `single-node-preflight-storage-alignment`：parent 为 `fd2f18aff`，
+source 为交付门 2/3，reason 为原预检只检查配置文件存在，`{}` 和数据库服务
+与网关服务的凭据不一致也可能通过。范围为两个预检脚本与本记录，
+Native、root 单 writer、低风险、external=0；不改生产请求路径或上游合约。
+
+已实际调用 Pi Agent，`gomodel/deepseek-v4-flash` 含自动重试及
+`deepseek/deepseek-v4-flash` 均在工具执行前超时，未读取、编辑或产生文件；
+本轮另以 `deepseek/deepseek-v4-pro` 复试同一隔离任务，也在工具执行前超时。
+进程终止后才由 root 接管同一 writer scope。Pi 实施要求尚未完成，
+不能将 root 实现归功于 Pi，也没有修改 provider 配置或泄露凭据。
+
+预检现在要求配置是单个 JSON 对象，两类存储启用 PostgreSQL，
+使用模板的 PostgreSQL 环境引用且不显式关闭数据库 health ping；
+数据库服务的用户名、密码与库名必须是非空字符串并与网关值一致。
+默认同库模板与 health ping 显式启用均有正向用例；空对象、多 JSON 文档、
+非法 JSON、错误后端、禁用存储、三个损坏引用及缺失/类型错误/不一致的
+数据库环境值均有拒绝用例。错误不输出配置正文或任一侧凭据。
+主机和端口仍由部署审阅决定，不声称静态检查证明实际连接。
+
+Bash 语法、ShellCheck、46 个预检用例和 `git diff --check` 通过，
+测试目录已清理。此为本地 `PASS_SCOPED`，只验证默认单机同库模板的静态前提；
+自定义双库、真实连接、TLS、升级回滚和完整产品功能仍按原交付门验收。
+脚本只在上线前执行，无请求路径 CPU/分配或常驻缓存开销。
+本后续项未提交、推送或部署，原总目标继续 **active / PARTIAL**。
+
 ## 生产交付门
+
+### 当前候选 CI 复验（2026-10-31）
+
+`fd2f18affc64f74e864972ab02d6dd4be45d7d67` 的 run `41160000132`
+已整体完成成功：面板单测/Svelte/构建、员工门户和 API contracts 均通过。
+生产 Docker job 对同一 SHA 实际构建、加载并启动镜像，
+构建 digest 为 `sha256:e36f1e0130ed6eb72e648807895fc99cc0f04901dd82fcc18ef2c24b0e0beda7`。
+镜像阶段核对非 root、双 PostgreSQL 实际连接、数据库 health ping、
+版本等于候选 SHA、匿名管理拒绝、管理员登录、数据库/网关正常重启后会话保留、
+退出及后续拒绝；测试退出与容器/卷/网络清理成功。
+
+该 job 不执行上节 compact/signed Relay 恢复矩阵，不能替代当前候选的加密
+备份恢复证明，也未发布可拉取的生产制品。Snyk `41160000090` 和
+CodSpeed `41160000108` 当前仍 queued，不计为安全或性能验收通过。
+本地未提交预检变更不包含在该镜像内；整体保持 **active / PARTIAL**。
 
 ### Dev CI 触发后续项（2026-10-31）
 
