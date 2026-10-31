@@ -355,7 +355,8 @@ upstream UI.
   readiness remains explicitly unverified. Corrupt/missing current installation
   evidence fails closed. Idempotency keys are never serialized.
 - This is a read-only checkpoint, not publication/rollback UI completion or
-  production acceptance. Browser acceptance for this new view remains open.
+  production acceptance. The API-fixture browser matrix passes, while live
+  gateway/session browser acceptance remains open.
 
 ## Enterprise extension routes
 

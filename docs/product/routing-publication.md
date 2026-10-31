@@ -637,7 +637,8 @@ The requested Pi implementation attempt produced no output or file changes and
 was stopped before the root agent took writer ownership. It is not a successful
 Pi implementation result.
 
-This checkpoint remains **PARTIAL** pending browser acceptance for the new view.
+This checkpoint remains **PARTIAL** pending live-gateway browser acceptance for
+the new view.
 Publication writes, approved process ownership, crash recovery and final
 production acceptance remain separate open gates.
 
@@ -650,6 +651,16 @@ run reported 383 passes and one 30-second API-proxy timeout; that unchanged
 test then passed alone with its original timeout (21.904s). This is a recorded
 retry, not a claim that the original full run was green. The build retains its
 large-chunk warning.
+
+The browser fixture acceptance then passed with Playwright against the built
+panel preview: 18 read-only requests, no non-GET requests or page errors, and
+checks for empty/unmanaged, pending, installed, superseded, malformed, 401/403,
+pagination, cancellation, deactivation/unmount, reduced motion, light/dark and
+1440x1000, 375x812 and 812x375 layouts. Evidence is in
+`.codex-tmp/routing-releases-browser-report.txt` and
+`output/playwright/routing-releases-{light,dark}-{1440,375,812}.png`.
+This uses API fixtures rather than a live gateway/database, so the live
+administrator route and real session remain open.
 
 ## Verification
 
