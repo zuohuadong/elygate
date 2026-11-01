@@ -28,6 +28,13 @@ diff 检查通过。首轮 6 项子进程测试触及 5 秒超时，不计通过
 设为 `/Volumes/Datas/.codex-tmp` 后完整重跑通过（默认超时，69.16s）。
 本地 Svelte 检查长时间无结果后中断，不计通过，须以本候选 CI 补齐。
 
+候选提交 `3150b91d1` 的 run `41269166750` 于 2026-11-01 03:50:22 UTC
+（北京时间 11:50:22）完成且四个 job 全部成功。API contracts 在固定的
+Ubuntu 24.04 runner 上实际安装 `postgresql-16`，SQLite 与 PostgreSQL
+路由发布/启动/激活/回滚/策略回归均通过；Panel、员工门户和隔离生产
+Docker 构建/恢复也通过。该回执只闭合本次 CI 环境修复，不等于正式制品
+发布、生产升级/回滚或生产切换授权。
+
 ## 2026-11-01 路由双存储 CI 覆盖
 
 后续项 `routing-startup-store-ci`：parent 为 `5b5e7e65a`，source 为持续上线
