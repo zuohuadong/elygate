@@ -5163,8 +5163,14 @@ func updateGovernanceConfigInStore(
 ) error {
 	logger.Debug("updating governance config in store with merged items")
 	err := config.ConfigStore.ExecuteTransaction(ctx, func(tx *gorm.DB) error {
-		if err := configstore.LockRoutingPolicyWrite(tx); err != nil {
-			return err
+		// Real config stores always provide a transaction. A few lightweight
+		// adapters use a nil transaction to model an in-memory write; there is
+		// no database lock to acquire in that case, so keep the write path
+		// usable while preserving the lock for every real transaction.
+		if tx != nil {
+			if err := configstore.LockRoutingPolicyWrite(tx); err != nil {
+				return err
+			}
 		}
 		// Owner-scoped budgets require owner rows to exist first:
 		// - team_id -> governance_teams

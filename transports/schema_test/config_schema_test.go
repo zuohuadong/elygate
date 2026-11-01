@@ -1855,19 +1855,11 @@ func copilotKeyConfig(keyBody string) string {
 	}`, keyBody)
 }
 
-// TestSchemaGithubCopilotCredentialRequired pins that the schema demands one of the two
-// credential forms. core/utils.go rejects a key carrying neither, and the schema is the
-// source of truth for config fields, so it has to reject the same shape rather than
-// deferring the failure to boot.
+// TestSchemaGithubCopilotCredentialRequired pins the upstream credential contract:
+// GitHub App installation authentication was removed, so every Copilot key must
+// carry a non-empty value and the retired app-config block must be rejected.
 func TestSchemaGithubCopilotCredentialRequired(t *testing.T) {
 	compiled := compileSchema(t)
-
-	const appConfig = `"github_copilot_key_config": {
-		"app_id": "123456",
-		"installation_id": "87654321",
-		"repository_id": "999000111",
-		"private_key": "pem"
-	}`
 
 	valid := []struct {
 		name   string
@@ -1876,14 +1868,6 @@ func TestSchemaGithubCopilotCredentialRequired(t *testing.T) {
 		{
 			name:   "direct token alone",
 			config: copilotKeyConfig(`"name": "k", "value": "tid=abc", "models": ["*"], "weight": 1.0`),
-		},
-		{
-			name:   "github app config alone",
-			config: copilotKeyConfig(`"name": "k", "models": ["*"], "weight": 1.0, ` + appConfig),
-		},
-		{
-			name:   "both forms together",
-			config: copilotKeyConfig(`"name": "k", "value": "tid=abc", "models": ["*"], "weight": 1.0, ` + appConfig),
 		},
 	}
 	for _, tt := range valid {
@@ -1910,6 +1894,11 @@ func TestSchemaGithubCopilotCredentialRequired(t *testing.T) {
 			name: "app config missing the private key",
 			config: copilotKeyConfig(`"name": "k", "models": ["*"], "weight": 1.0,
 				"github_copilot_key_config": {"app_id": "1", "installation_id": "2", "repository_id": "3"}`),
+		},
+		{
+			name: "retired github app config",
+			config: copilotKeyConfig(`"name": "k", "models": ["*"], "weight": 1.0,
+				"github_copilot_key_config": {"app_id": "1", "installation_id": "2", "repository_id": "3", "private_key": "pem"}`),
 		},
 	}
 	for _, tt := range invalid {
