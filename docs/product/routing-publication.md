@@ -758,6 +758,48 @@ temporary app directories, metadata and generated secret files were removed.
 This is **PASS_SCOPED** for the embedded read-only view, not live publication,
 crash recovery, final-image or production approval.
 
+## Installer Process Crash Follow-Up
+
+Follow-up `routing-installation-process-crash` has parent `ac58254a6`, source
+the continuing production-readiness goal and the user's November 1, 2026
+Native-only instruction, and reason that graceful close/reopen and injected
+transaction errors do not prove behavior after an externally killed writer.
+This is test-only, low-risk Native work with root as sole writer, external=0.
+The original high-risk publication contract, ownership decision and acceptance
+remain unchanged. No Pi invocation, production behavior or write route is added.
+
+`TestRoutingInstallationProcessCrash` starts the actual test executable as a
+separate installer process against a parent-owned isolated database. The parent
+closes its connection pool first. For publish and rollback, the child pauses
+after the apply audit insert but before SQL commit, or after a real SQL commit
+but before returning its receipt. The parent waits for that exact checkpoint,
+forcibly kills the child, waits for its exit and opens fresh storage connections.
+Deadline cancellation or normal child exit cannot count as the intended crash.
+Child processes and database pools are reaped before fixture cleanup.
+
+Before commit, the complete previous policy fingerprint, application receipts
+and audit history remain unchanged. The pending head fails the startup guard
+without yielding a serving snapshot. After commit, startup validates the complete
+installed policy and exactly one new receipt/audit, despite the lost response.
+Both cases replay the original acceptance and explicitly retry installation;
+the final policy, receipt count and audit count agree without duplication.
+The test uses the existing fixture compiler and startup guard, not an HTTP
+publication endpoint or a running gateway's admission path.
+
+On November 1, 2026, all four cases passed with `-race -count=1` on SQLite
+(5.044s package time) and private PostgreSQL 18 (18.344s package time).
+The existing PostgreSQL runner verified no owned test databases remained and
+stopped its instance normally. A prior attempt using the repository-volume Go
+cache was interrupted before producing a result and is not counted as a pass.
+The workflow now selects this exact test with the race detector on its SQLite
+API-contract runner; remote CI for this change is not yet claimed.
+
+Cost is test execution only, with no inference-path allocation or retained
+production memory. This closes only the installer-process crash subcase.
+Database/host power loss, canonical-gateway crash/restart with real runtime
+generation handoff, process ownership/fencing, publication/rollback HTTP/panel
+writes and production acceptance remain open. Status: **PARTIAL**.
+
 ## Verification
 
 - Stage 1 passed `go test -buildvcs=false ./rules -count=1`, targeted `-race`

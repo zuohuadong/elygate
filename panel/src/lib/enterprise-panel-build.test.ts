@@ -660,5 +660,8 @@ esac
 		const webhookAuditIndex = steps.findIndex((step: { name?: string }) => step.name === 'Run webhook management audit regressions');
 		expect(webhookAuditIndex).toBeGreaterThan(relayAuditIndex);
 		expect(steps[webhookAuditIndex].run).toBe("bash scripts/go-local.sh test -p 1 ./transports/bifrost-http/handlers ./transports/bifrost-http/controlplane -run '^Test(ManagementWebhookAuditAfterPersistence|WebhookHandlerAuditsCommittedChangesBeforeMemoryReconciliation|WebhookHandlerAuditsDeleteBeforeMemoryRemoval)$' -count=1 -timeout=180s");
+		const routingCrashIndex = steps.findIndex((step: { name?: string }) => step.name === 'Run routing installation process crash regressions');
+		expect(routingCrashIndex).toBeGreaterThan(webhookAuditIndex);
+		expect(steps[routingCrashIndex].run).toBe("bash scripts/go-local.sh test -race -p 1 ./transports/bifrost-http/controlplane -run '^TestRoutingInstallationProcessCrash$' -count=1 -timeout=360s");
 	});
 });
