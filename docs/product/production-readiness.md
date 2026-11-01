@@ -32,6 +32,17 @@ reason 为完成既定模型目录元数据编辑。范围冻结为模型目录 
 
 ### 2026-11-01 同候选真实恢复 CI
 
+最新回执：代码候选 `bfeb1940ca723acff777df1a3498d6918ef0aa1b` 的 run
+`41260137746` 于 2026-11-01 01:22:40 UTC（北京时间 09:22:40）全部成功：
+Panel、员工门户、API contracts 和生产 Docker 四个 job 均通过。
+真实恢复已验证数据库表/sequences、文件与根目录权限、加密凭据、
+Application Key、Usage、普通审计和签名审计续写、源端不变以及清理。
+候选归档 artifact ID 为 `13064648974`，大小 `162914587` 字节；
+本轮核对 CI 日志和归档元数据，未独立下载该归档，不计 registry 发布或生产部署。
+本后续项的代码与同候选 CI 验收闭合；以下失败记录保留为历史，后续文档提交
+不是新镜像的源码身份。整体生产目标仍为 **PARTIAL**：策略发布授权、
+正式制品发布、真实供应商、生产升级/回滚和生产切换仍须单独完成。
+
 后续项 `single-node-recovery-ci`：parent 为 `9edd2ca54`，source 为生产交付门 7，
 reason 为本机 Docker 短探针仍超时，但现有 CI runner 已能实际启动候选容器。
 范围冻结为恢复 smoke、Panel workflow、构建契约和本节证据；Native、中风险、
@@ -232,7 +243,12 @@ provider-harness case；无推理路径或常驻内存增量。
 
 ## 候选版本
 
-- 当前完成 CI 的代码候选为 `9edd2ca547fe9164a8d4d9fb41e92e3f765f1b86`，
+- 当前完成 CI 的代码候选为 `bfeb1940ca723acff777df1a3498d6918ef0aa1b`，
+  run `41260137746` 四个 job 全部成功，并实际完成生产备份/隔离恢复、业务续写、
+  源端不变和清理验证。候选归档为
+  `elygate-candidate-bfeb1940ca723acff777df1a3498d6918ef0aa1b-41260137746-1`，
+  artifact ID `13064648974`。本轮未独立下载该归档，未发布 registry 或部署生产。
+- 此前完成 CI 的代码候选为 `9edd2ca547fe9164a8d4d9fb41e92e3f765f1b86`，
   run `41242882512` 的 Panel、员工门户、API contracts 和生产镜像四个 job
   全部成功；新增员工事务审计关联专项已实际执行。镜像完成非 root、
   双 PostgreSQL、health、版本、登录/退出、正常重启及候选归档，
