@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -112,12 +113,93 @@ func (m *Manager) configureOutboundTransport(tr *http.Transport, policy outbound
 // outboundHTTPTransport keeps direct and proxied pools separate. It retains at
 // most one proxy pool, replacing it when operator proxy configuration changes.
 type outboundHTTPTransport struct {
-	direct   *http.Transport
-	proxy    func(*http.Request) (*url.URL, error)
-	policy   outboundPolicy
-	mu       sync.Mutex
-	proxyURL string
-	proxied  *http.Transport
+	direct    *http.Transport
+	proxy     func(*http.Request) (*url.URL, error)
+	policy    outboundPolicy
+	mu        sync.Mutex
+	proxyURL  string
+	proxied   *http.Transport
+	proxyPool *retiringHTTPTransport
+}
+
+// retiringHTTPTransport drains a pool after it is replaced. Transport
+// CloseIdleConnections only closes connections that are idle at the instant it
+// is called, so a response that is still being read could otherwise return its
+// connection to a retired pool forever.
+type retiringHTTPTransport struct {
+	transport *http.Transport
+
+	mu      sync.Mutex
+	active  int
+	retired bool
+}
+
+func newRetiringHTTPTransport(transport *http.Transport) *retiringHTTPTransport {
+	return &retiringHTTPTransport{transport: transport}
+}
+
+func (t *retiringHTTPTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	t.mu.Lock()
+	t.active++
+	t.mu.Unlock()
+
+	resp, err := t.transport.RoundTrip(req)
+	if err != nil {
+		t.release()
+		return nil, err
+	}
+	if resp.Body == nil {
+		t.release()
+		return resp, nil
+	}
+	resp.Body = &retiringResponseBody{
+		ReadCloser: resp.Body,
+		release:    t.release,
+	}
+	return resp, nil
+}
+
+func (t *retiringHTTPTransport) release() {
+	t.mu.Lock()
+	if t.active > 0 {
+		t.active--
+	}
+	closeIdle := t.retired && t.active == 0
+	t.mu.Unlock()
+	if closeIdle {
+		t.transport.CloseIdleConnections()
+	}
+}
+
+func (t *retiringHTTPTransport) retire() {
+	t.mu.Lock()
+	t.retired = true
+	t.mu.Unlock()
+	t.transport.CloseIdleConnections()
+}
+
+func (t *retiringHTTPTransport) closeIdleConnections() {
+	t.transport.CloseIdleConnections()
+}
+
+type retiringResponseBody struct {
+	io.ReadCloser
+	release func()
+	once    sync.Once
+}
+
+func (b *retiringResponseBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if err != nil {
+		b.once.Do(b.release)
+	}
+	return n, err
+}
+
+func (b *retiringResponseBody) Close() error {
+	err := b.ReadCloser.Close()
+	b.once.Do(b.release)
+	return err
 }
 
 // RoundTrip selects the proxy from the actual request, including its scheme,
@@ -135,28 +217,40 @@ func (t *outboundHTTPTransport) RoundTrip(req *http.Request) (*http.Response, er
 		return t.direct.RoundTrip(req)
 	}
 	t.mu.Lock()
+	if t.proxyPool == nil && t.proxied != nil {
+		t.proxyPool = newRetiringHTTPTransport(t.proxied)
+	}
 	if t.proxied == nil || t.proxyURL != proxyURL.String() {
-		if t.proxied != nil {
-			t.proxied.CloseIdleConnections()
+		if t.proxyPool != nil {
+			t.proxyPool.retire()
 		}
 		tr := t.direct.Clone()
+		// The wrapper selected the proxy for this request. Do not let a cloned
+		// transport select HTTP_PROXY/HTTPS_PROXY a second time and bypass the
+		// destination policy.
+		tr.Proxy = nil
 		tr.DialContext = func(ctx context.Context, netw, addr string) (net.Conn, error) {
 			return t.policy.dial.DialContext(ctx, netw, addr, proxyURL)
 		}
 		t.proxied, t.proxyURL = tr, proxyURL.String()
+		t.proxyPool = newRetiringHTTPTransport(tr)
 	}
-	tr := t.proxied
+	pool := t.proxyPool
 	t.mu.Unlock()
-	return tr.RoundTrip(req)
+	return pool.RoundTrip(req)
 }
 
 // CloseIdleConnections releases both pools without disrupting in-flight calls.
 func (t *outboundHTTPTransport) CloseIdleConnections() {
 	t.direct.CloseIdleConnections()
 	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.proxied != nil {
-		t.proxied.CloseIdleConnections()
+	pool := t.proxyPool
+	transport := t.proxied
+	t.mu.Unlock()
+	if pool != nil {
+		pool.closeIdleConnections()
+	} else if transport != nil {
+		transport.CloseIdleConnections()
 	}
 }
 
