@@ -191,6 +191,8 @@ type GovernancePlugin struct {
 	disableAutoToolInject *bool
 
 	objectOwnershipEnforcedFn func() bool
+
+	mcpKillSwitches mcpKillSwitchCache
 }
 
 // Init initializes and returns a governance plugin instance.
@@ -1723,6 +1725,24 @@ func (p *GovernancePlugin) PreMCPHook(ctx *schemas.BifrostContext, req *schemas.
 		return req, nil, nil
 	}
 	stampMCPGovernanceAudit(ctx, req)
+
+	// Kill switches are evaluated before codemode or any client connection
+	// work. They are persisted in the shared config store and refreshed on a
+	// short interval, so every gateway replica converges on the same emergency
+	// decision without relying on an in-process callback.
+	if req.RequestType.IsExecuteTool() {
+		if rule, active := p.mcpKillSwitchDecision(ctx, req); active {
+			ctx.SetValue(governanceRejectedContextKey, true)
+			finishMCPGovernanceAudit(ctx, "deny", formatMCPKillSwitchReason(rule))
+			return req, &schemas.MCPPluginShortCircuit{Error: &schemas.BifrostError{
+				Type:       bifrost.Ptr(string(DecisionMCPToolBlocked)),
+				StatusCode: bifrost.Ptr(403),
+				Error: &schemas.ErrorField{
+					Message: fmt.Sprintf("MCP execution blocked by %s kill switch (%s)", rule.Scope, rule.Target),
+				},
+			}}, nil
+		}
+	}
 
 	// Codemode meta-tools are not governed as tool executions, but their
 	// discovery side (listToolFiles, readToolFile, getToolDocs) enumerates tools

@@ -185,6 +185,35 @@ reconcile 新字段。
 参数级限制、在线 Shadow、跨进程 ownership/fencing、正式制品或生产切换授权；
 MCP 生产门禁仍保持 **PARTIAL**。
 
+### 2026-11-02 MCP Kill Switch 后端闭环（本地 PASS_SCOPED）
+
+新增共享 `governance_config` 键 `mcp_kill_switches`，支持 `global`、`tenant`、
+`agent`、`application` 和 `tool` 五类范围。MCP 工具执行（包括 codemode
+元工具）在工具调用前检查启用状态；过期规则不生效，拒绝返回 403 /
+`mcp_tool_blocked`，并沿现有治理审计链进入 `MCPToolLog`。管理接口为：
+
+```text
+GET    /api/governance/mcp/kill-switches
+PUT    /api/governance/mcp/kill-switches
+DELETE /api/governance/mcp/kill-switches?scope=...&target=...
+```
+
+更新和删除使用现有 ConfigStore 事务；PostgreSQL 更新读取使用行锁。节点每秒
+刷新一次共享配置；配置被删除时会清空已观测缓存，临时存储错误则保留最后一次
+有效规则并限制重试频率。管理写入生成 `mcp_kill_switch.updated/deleted` 审计
+变更，规则的 scope/target/reason 会在持久化前规范化。
+
+本地证据：`plugins/governance` Kill Switch 定向测试通过，
+`transports/bifrost-http/handlers` Kill Switch API 定向测试通过，`gofmt` 与
+`git diff --check` 通过；测试覆盖五类范围、过期/禁用、codemode 全局阻断、
+跨刷新读取、删除清缓存、存储错误保留、事务更新/删除、重复更新和审计事件。
+Apple M4 单样本 `BenchmarkMCPKillSwitchDecision -benchmem` 为
+`377.1 ns/op`、`961 B/op`、`13 allocs/op`；无规则缓存命中为
+`58.58 ns/op`、`0 B/op`、`0 allocs/op`。这些数值只描述 Kill Switch 判断
+本身，不代表完整 MCP 请求或生产容量。
+本项没有生产部署、真实多实例 PostgreSQL、真实供应商/TLS 或正式制品证据，
+因此只记为 `PASS_SCOPED`，MCP 生产门禁继续保持 **PARTIAL**。
+
 ## 当前执行状态与剩余门禁
 
 ### 2026-11-01 同候选真实恢复 CI

@@ -2046,6 +2046,12 @@ func (h *GovernanceHandler) RegisterRoutesWithOverrides(r *router.Router, overri
 	r.GET("/api/governance/audit-logs/verify", lib.ChainMiddlewares(h.requireGovernancePermission("audit.verify", "governance_audit", nil, h.verifyGovernanceAuditChain), middlewares...))
 	r.GET("/api/governance/audit-logs/{audit_id}/verify", lib.ChainMiddlewares(h.requireGovernancePermission("audit.verify", "governance_audit", auditEventID, h.verifyGovernanceAuditLog), middlewares...))
 
+	// MCP emergency controls. The values are stored in the shared governance
+	// config row so every gateway replica converges on the same deny decision.
+	r.GET("/api/governance/mcp/kill-switches", lib.ChainMiddlewares(h.requireGovernancePermission("mcp.kill_switch.read", "mcp_kill_switch", nil, h.getMCPKillSwitches), middlewares...))
+	r.PUT("/api/governance/mcp/kill-switches", lib.ChainMiddlewares(h.requireGovernancePermission("mcp.kill_switch.update", "mcp_kill_switch", nil, h.updateMCPKillSwitch), middlewares...))
+	r.DELETE("/api/governance/mcp/kill-switches", lib.ChainMiddlewares(h.requireGovernancePermission("mcp.kill_switch.update", "mcp_kill_switch", nil, h.deleteMCPKillSwitch), middlewares...))
+
 	// Team CRUD operations. Enterprise replaces this family with a superset
 	// registrar so the router sees exactly one handler per method/path.
 	h.registerTeamRoutes(r, overrides.Teams, middlewares...)
