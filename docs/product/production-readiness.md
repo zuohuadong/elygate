@@ -6,6 +6,16 @@
 不以本次已实现的功能重新定义完成标准。新系统只兼容 Bifrost 上游契约，
 不增加旧 Elygate 兼容层；独立 `panel/` 不替换为上游 `ui/`。
 
+## 2026-11-01 异步 Key 修复候选 CI 收口
+
+候选提交 `5a4f78bcac4f7b7c07b04f0dc4b4224d55ec9e13`（`5a4f78bca`）对应
+GitHub Actions run `41275633397` 已完成且四个 job 全部成功：API contracts
+（含 SQLite 与 PostgreSQL 16 routing publication regressions）、Panel、
+employee portal，以及生产 Docker 构建和隔离备份/恢复。该 run 证明异步
+Application Key 提交前拒绝修复与当前主线构建契约一致；不等同于 Snyk、
+CodSpeed、正式 registry 制品发布、真实供应商、生产升级/回滚或生产切换授权。
+整体目标继续保持 **active / PARTIAL**。
+
 ## 2026-11-01 PostgreSQL 16 CI 环境固定
 
 后续项 `routing-postgres16-runner-pin`：parent 为 `f7d8bd4ec`，source 为用户
