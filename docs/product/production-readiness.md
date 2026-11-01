@@ -1677,7 +1677,7 @@ root 单 writer、external=0；不改变 Bifrost 上游异步协议，不增加�
 
 ### 2026-11-02 异步门禁与模型健康回归验证
 
-当前候选 `63edc3ae55b0e899ed6ddcb8e654f3e72e0d3f26` 已在 `/Volumes/Datas`
+功能候选源码 `63edc3ae55b0e899ed6ddcb8e654f3e72e0d3f26` 已在 `/Volumes/Datas`
 缓存和临时目录下完成以下定向复验：
 
 - `framework/logstore` 的 `TestSubmitJob_` / `TestRetrieveJob_` 通过；
@@ -1693,3 +1693,6 @@ root 单 writer、external=0；不改变 Bifrost 上游异步协议，不增加�
 同一候选的 Snyk run `41345415433` 已成功；CodSpeed run `41345415406` 在
 2026-11-02 仍为 `queued`，不计性能验收。生产状态继续保持 **ACTIVE / PARTIAL**，
 未开放生产切换，也未把队列中的性能任务当作通过证据。
+
+本节证据记录随文档提交 `549fe310c` 推送到 `dev`；该提交只改验收文档，
+不改变上述功能源码。
