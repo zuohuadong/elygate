@@ -1623,6 +1623,7 @@ func TestValidateRoutingCELExpression(t *testing.T) {
 		{name: "contains", expr: `model.contains("fable")`, wantErr: false},
 		{name: "header lookup", expr: `headers["x-tier"] == "premium"`, wantErr: false},
 		{name: "conjunction", expr: `model == "gpt-4o" && provider == "openai"`, wantErr: false},
+		{name: "model governance metadata", expr: `model_data_class == "restricted" && "vision" in model_capabilities`, wantErr: false},
 		{name: "unknown identifier", expr: `nonexistent_field == "x"`, wantErr: true},
 		{name: "syntax error unbalanced paren", expr: `model == "gpt-4o" && (provider == "openai"`, wantErr: true},
 		{name: "type mismatch string vs number", expr: `model == 5`, wantErr: true},
@@ -1657,6 +1658,32 @@ func TestExtractRoutingVariables_BasicContext(t *testing.T) {
 	assert.Equal(t, "openai", variables["provider"])
 	assert.Equal(t, map[string]string{"x-tier": "premium"}, variables["headers"])
 	assert.Equal(t, map[string]string{"key": "value"}, variables["params"])
+}
+
+func TestExtractRoutingVariables_ModelGovernance(t *testing.T) {
+	ctx := &EvaluationContext{
+		Provider: schemas.OpenAI,
+		Model:    "gpt-4o",
+		ModelAttributes: map[string]string{
+			"region":       "eu",
+			"data_class":   "restricted",
+			"capabilities": "vision, tools; reasoning",
+			"health":       "approved",
+		},
+	}
+
+	variables, err := extractRoutingVariables(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{
+		"region":       "eu",
+		"data_class":   "restricted",
+		"capabilities": "vision, tools; reasoning",
+		"health":       "approved",
+	}, variables["model_attributes"])
+	assert.Equal(t, "eu", variables["model_region"])
+	assert.Equal(t, "restricted", variables["model_data_class"])
+	assert.Equal(t, "approved", variables["model_health"])
+	assert.Equal(t, []string{"vision", "tools", "reasoning"}, variables["model_capabilities"])
 }
 
 // TestExtractRoutingVariables_WithVirtualKey tests extracting with VirtualKey context

@@ -513,9 +513,16 @@ func (p *RoutingPlugin) applyRoutingRules(ctx *schemas.BifrostContext, req *sche
 	}
 
 	routingCtx := &rules.EvaluationContext{
-		Scope:                    scope,
-		Provider:                 provider,
-		Model:                    model,
+		Scope:    scope,
+		Provider: provider,
+		Model:    model,
+		ModelInfo: func(provider schemas.ModelProvider, model string) map[string]string {
+			info := ctx.GetModelInfo(provider, model)
+			if info == nil || len(info.AdditionalAttributes) == 0 {
+				return nil
+			}
+			return info.AdditionalAttributes
+		},
 		RequestType:              requestType,
 		Headers:                  headers,
 		QueryParams:              queryParams,

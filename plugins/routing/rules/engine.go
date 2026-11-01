@@ -67,16 +67,18 @@ type GovernanceScope struct {
 
 // EvaluationContext holds all data needed for routing rule evaluation
 type EvaluationContext struct {
-	Scope                    GovernanceScope                      // who the request is governed as
-	Provider                 schemas.ModelProvider                // Current provider
-	Model                    string                               // Current model
-	RequestType              string                               // Request type (e.g., "chat_completion", "embedding"); streaming requests carry a distinct "_stream" suffix (e.g., "chat_completion_stream")
-	Metadata                 map[string]string                    // Request metadata exposed to CEL (for example request.metadata["tier"])
-	Fallbacks                []configstoreTables.RoutingFallback  // Fallback chain, each optionally pinning a provider key
-	Headers                  map[string]string                    // Request headers for dynamic routing
-	QueryParams              map[string]string                    // Query parameters for dynamic routing
-	BudgetAndRateLimitStatus *governance.BudgetAndRateLimitStatus // Budget and rate limit status by provider/model
-	ComputeComplexity        func() *complexity.ComplexityResult  // Lazy complexity computation; called at most once when a rule references "complexity_tier"
+	Scope                    GovernanceScope                                                      // who the request is governed as
+	Provider                 schemas.ModelProvider                                                // Current provider
+	Model                    string                                                               // Current model
+	ModelAttributes          map[string]string                                                    // Catalog governance metadata for the current model
+	ModelInfo                func(provider schemas.ModelProvider, model string) map[string]string // Resolves metadata for chained targets
+	RequestType              string                                                               // Request type (e.g., "chat_completion", "embedding"); streaming requests carry a distinct "_stream" suffix (e.g., "chat_completion_stream")
+	Metadata                 map[string]string                                                    // Request metadata exposed to CEL (for example request.metadata["tier"])
+	Fallbacks                []configstoreTables.RoutingFallback                                  // Fallback chain, each optionally pinning a provider key
+	Headers                  map[string]string                                                    // Request headers for dynamic routing
+	QueryParams              map[string]string                                                    // Query parameters for dynamic routing
+	BudgetAndRateLimitStatus *governance.BudgetAndRateLimitStatus                                 // Budget and rate limit status by provider/model
+	ComputeComplexity        func() *complexity.ComplexityResult                                  // Lazy complexity computation; called at most once when a rule references "complexity_tier"
 }
 
 // GovernanceStore is the slice of governance state routing rules read: the virtual key
@@ -209,6 +211,9 @@ func (re *Engine) EvaluateRoutingRules(ctx *schemas.BifrostContext, routingCtx *
 		iterCtx := *routingCtx
 		iterCtx.Provider = currentProvider
 		iterCtx.Model = currentModel
+		if routingCtx.ModelInfo != nil {
+			iterCtx.ModelAttributes = routingCtx.ModelInfo(currentProvider, currentModel)
+		}
 		// Refresh budget/rate-limit status for the current provider/model so chained
 		// rules that test budget_used, tokens_used, or request see fresh data.
 		iterCtx.BudgetAndRateLimitStatus = re.governance.GetBudgetAndRateLimitStatus(ctx, currentProvider, currentModel, nil, nil, nil)
@@ -507,6 +512,15 @@ func extractRoutingVariables(ctx *EvaluationContext) (map[string]interface{}, er
 	variables["model"] = ctx.Model
 	variables["provider"] = string(ctx.Provider)
 	variables["request_type"] = ctx.RequestType // Request type as-is; streaming variants keep their "_stream" suffix (e.g., "chat_completion_stream")
+	modelAttributes := make(map[string]string, len(ctx.ModelAttributes))
+	for key, value := range ctx.ModelAttributes {
+		modelAttributes[strings.ToLower(strings.TrimSpace(key))] = value
+	}
+	variables["model_attributes"] = modelAttributes
+	variables["model_region"] = modelAttributes["region"]
+	variables["model_data_class"] = modelAttributes["data_class"]
+	variables["model_health"] = modelAttributes["health"]
+	variables["model_capabilities"] = splitModelCapabilities(modelAttributes["capabilities"])
 
 	// Headers and params - normalize headers to lowercase keys for case-insensitive CEL matching
 	// This allows CEL expressions like headers["content-type"] to work regardless of how the header was sent
@@ -562,6 +576,23 @@ func extractRoutingVariables(ctx *EvaluationContext) (map[string]interface{}, er
 	variables["complexity_tier"] = ""
 
 	return variables, nil
+}
+
+func splitModelCapabilities(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return []string{}
+	}
+	parts := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == ';' || r == '\n'
+	})
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.ToLower(strings.TrimSpace(part))
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }
 
 // scopeChainToStrings converts a scope chain to a string representation for logging
@@ -683,6 +714,11 @@ func createCELEnvironment() (*cel.Env, error) {
 		cel.Variable("model", cel.StringType),
 		cel.Variable("provider", cel.StringType),
 		cel.Variable("request_type", cel.StringType), // Request type (e.g., "chat_completion", "embedding"); streaming variants are distinct values with a "_stream" suffix
+		cel.Variable("model_attributes", cel.MapType(cel.StringType, cel.StringType)),
+		cel.Variable("model_region", cel.StringType),
+		cel.Variable("model_data_class", cel.StringType),
+		cel.Variable("model_health", cel.StringType),
+		cel.Variable("model_capabilities", cel.ListType(cel.StringType)),
 
 		// Headers and params (dynamic from request)
 		cel.Variable("headers", cel.MapType(cel.StringType, cel.StringType)),
