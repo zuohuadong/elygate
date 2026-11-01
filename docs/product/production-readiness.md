@@ -128,9 +128,10 @@ ownership/fencing 或生产部署验收。
 冲突、幂等键复用、版本缺失、非法 JSON 和跨源/非管理员请求均有定向回归。
 
 独立 panel 的发布记录页面现在加载不可变版本、发布选中版本，并且只对有
-安装回执的旧代次提供确认后的回滚；动作后重新读取 head/history 快照，仍把
-持久 `pending` 与当前进程就绪状态分开显示。control-plane 定向 Go 测试、
-panel routing contract 测试及 `svelte-check` 均通过。
+安装回执的旧代次提供确认后的回滚；每个新动作使用新的幂等键，未确认的网络/
+运行时结果会保留同键供安全重试，完成后重新读取 head/history 快照，仍把持久
+`pending` 与当前进程就绪状态分开显示。control-plane 定向 Go 测试、panel
+routing contract 测试及 `svelte-check` 均通过。
 
 本项只闭合“写 API + 面板动作”边界，不等于跨进程 ownership/fencing、崩溃
 恢复、在线 Shadow、模型治理硬阻断、MCP 审批/Kill Switch、正式 registry

@@ -184,9 +184,11 @@ JSON content-type and same-origin protections.
 
 The independent panel's release view now loads immutable versions, publishes a
 selected version, and offers rollback only to an older release with a verified
-installation receipt. Every action uses a fresh idempotency key, the expected
-head epoch, confirmation for rollback, and a post-action snapshot refresh;
-pending installation remains visibly distinct from process readiness.
+installation receipt. Each new action uses a fresh idempotency key and the
+expected head epoch; an unconfirmed transport/runtime result retains that key
+for a safe retry. Rollback requires confirmation and every completed action
+refreshes one snapshot; pending installation remains visibly distinct from
+process readiness.
 
 Targeted control-plane tests cover authentication/content-type/origin guards,
 strict payload rejection, publish success, idempotent replay, optimistic
