@@ -214,6 +214,23 @@ Apple M4 单样本 `BenchmarkMCPKillSwitchDecision -benchmem` 为
 本项没有生产部署、真实多实例 PostgreSQL、真实供应商/TLS 或正式制品证据，
 因此只记为 `PASS_SCOPED`，MCP 生产门禁继续保持 **PARTIAL**。
 
+### 2026-11-02 MCP Kill Switch 独立面板工作流（本地 PASS_SCOPED）
+
+独立 `panel/` 现在提供 `mcp-kill-switches` 管理入口，与现有 MCP 管理页并列，
+不替换上游 `ui/`。管理员可读取和刷新五类 scope（`global`、`tenant`、
+`agent`、`application`、`tool`），创建/编辑启用状态、目标、原因和可选过期
+时间，并执行状态切换和删除。全局目标在浏览器端规范化为 `*`；非全局目标、
+目标/原因长度、无效过期时间在发请求前拒绝。页面沿用现有同源会话和
+`mcp.kill_switch.*` 服务端权限，不在前端复制治理判断。
+
+本地证据：MCP Kill Switch 纯函数与 malformed-response 契约 4 项通过，资源/
+菜单/页面标题契约与既有 API 定向测试共 26 项通过；`svelte-check` 0 错误/
+0 警告；`bun run build` 成功并完成静态资源复制；`git diff --check` 通过。
+这只证明 panel 代码和上游管理 API 的本地契约，不证明真实管理员会话、真实
+PostgreSQL 多实例读取、浏览器到生产后端的权限/持久化、正式 registry 制品或
+生产切换授权。MCP 审批签发 API/UI、跨进程授权存储、ownership/fencing、在线
+Shadow 以及真实供应商/TLS 仍保持未完成；总目标继续 **active / PARTIAL**。
+
 ## 当前执行状态与剩余门禁
 
 ### 2026-11-01 同候选真实恢复 CI

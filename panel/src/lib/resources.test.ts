@@ -39,6 +39,7 @@ const requiredParityResources = [
 	'mcp-library',
 	'mcp-sessions',
 	'oauth-grants',
+	'mcp-kill-switches',
 	'mcp-tool-groups',
 	'mcp-settings',
 	'mcp-auth-config',
@@ -141,7 +142,7 @@ describe('panel resource registry', () => {
 
 		expect(mcpNames).toEqual([
 			'mcp-clients', 'mcp-library', 'mcp-tool-groups', 'mcp-sessions', 'oauth-grants',
-			'mcp-settings', 'mcp-auth-config', 'mcp-usage-guide',
+			'mcp-kill-switches', 'mcp-auth-config', 'mcp-settings', 'mcp-usage-guide',
 		]);
 		expect(systemNames?.indexOf('api-keys')).toBe((systemNames?.indexOf('security-config') ?? -2) + 1);
 		expect(systemNames?.slice(-4)).toEqual(['license-info', 'cluster', 'agent-handover', 'docs-hub']);

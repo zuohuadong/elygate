@@ -33,6 +33,7 @@
 	import EmployeesPage from './pages/EmployeesPage.svelte';
 	import GovernanceManagementPage from './pages/GovernanceManagementPage.svelte';
 	import LogsPage from './pages/LogsPage.svelte';
+	import McpKillSwitchesPage from './pages/McpKillSwitchesPage.svelte';
 	import McpLogsPage from './pages/McpLogsPage.svelte';
 	import McpManagementPage from './pages/McpManagementPage.svelte';
 	import McpUsageGuidePage from './pages/McpUsageGuidePage.svelte';
@@ -176,6 +177,7 @@
 		'mcp-sessions': { list: McpManagementPage },
 		'oauth-grants': { list: McpManagementPage },
 		'mcp-logs': { list: McpLogsPage },
+		'mcp-kill-switches': { list: McpKillSwitchesPage },
 		plugins: { list: PluginsPage },
 		skills: { list: SkillsPage },
 		'prompt-folders': { list: PromptRepositoryPage },

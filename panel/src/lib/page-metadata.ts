@@ -27,6 +27,7 @@ const ROUTE_LABEL_KEYS = {
 	'mcp-sessions': 'elygate.mcpSessions',
 	'oauth-grants': 'elygate.oauthGrants',
 	'mcp-logs': 'elygate.mcpLogs',
+	'mcp-kill-switches': 'elygate.mcpKillSwitches',
 	'mcp-settings': 'elygate.mcpSettings',
 	'mcp-usage-guide': 'elygate.mcpUsageGuide',
 	plugins: 'elygate.plugins',
