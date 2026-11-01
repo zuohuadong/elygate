@@ -379,10 +379,13 @@ function backupAndRestore(ctx) {
 	ctx.phase = 'isolated restore';
 	runProductionScript(ctx, 'restore', [
 		join(ctx.work, 'source/backups', backups[0]), join(ctx.work, 'target'), '--confirm-isolated-no-writers']);
-	ctx.phase = 'restored pre-start integrity';
+	ctx.phase = 'restored pre-start gateway state';
 	check(!inspect(ctx, container(ctx, 'target')).State.Running, 'restore must leave target stopped');
+	ctx.phase = 'restored pre-start database fingerprint';
 	check(databaseFingerprint(ctx, 'target') === ctx.frozenDatabase, 'all restored table rows and sequences must match before startup');
+	ctx.phase = 'restored pre-start runtime marker';
 	check(runtimeMarker(ctx, 'target') === ctx.marker, 'restored runtime hash, UID, GID and mode must match');
+	ctx.phase = 'restored pre-start encrypted store';
 	check(encryptedStore(ctx, 'target') === ctx.ciphertext, 'restored credential ciphertext must match');
 }
 

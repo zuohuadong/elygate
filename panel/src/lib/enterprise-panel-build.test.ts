@@ -268,7 +268,9 @@ exit 1
 	test('recovery identifies each backup and restore phase without logging subprocess contents', async () => {
 		const source = await Bun.file(new URL('../../../.github/workflows/scripts/smoke-elygate-recovery.mjs', import.meta.url)).text();
 		for (const phase of ['source shutdown and backup fingerprint', 'production backup',
-			'target PostgreSQL startup', 'target gateway creation', 'isolated restore', 'restored pre-start integrity']) {
+			'target PostgreSQL startup', 'target gateway creation', 'isolated restore',
+			'restored pre-start gateway state', 'restored pre-start database fingerprint',
+			'restored pre-start runtime marker', 'restored pre-start encrypted store']) {
 			expect(source).toContain(`ctx.phase = '${phase}'`);
 		}
 	});
