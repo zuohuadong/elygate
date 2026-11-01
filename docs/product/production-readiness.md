@@ -1674,3 +1674,22 @@ root 单 writer、external=0；不改变 Bifrost 上游异步协议，不增加�
 文件 I/O 等待，本轮未将中断的本地 Go 命令记为通过或失败；提交前需在已有
 依赖缓存或 CI 以同一 SHA 重跑 `framework/logstore` 与 HTTP 定向测试。
 整体生产目标继续保持 **active / PARTIAL**。
+
+### 2026-11-02 异步门禁与模型健康回归验证
+
+当前候选 `63edc3ae55b0e899ed6ddcb8e654f3e72e0d3f26` 已在 `/Volumes/Datas`
+缓存和临时目录下完成以下定向复验：
+
+- `framework/logstore` 的 `TestSubmitJob_` / `TestRetrieveJob_` 通过；
+- HTTP integrations 与 handlers 中的 Async、Application Key、
+  Virtual Key access 定向测试通过；
+- `plugins/governance` 与 `framework/modelcatalog` 的模型治理/目录定向测试通过。
+
+这些命令均使用 `-mod=readonly`，构建期间仅出现 macOS SQLite 扩展弃用警告，
+没有测试失败或跳过。它们证明异步提交前门禁、提交后/读取时重校验以及模型健康
+硬阻断在当前源码上的局部回归成立，不替代 PostgreSQL、真实供应商、跨进程恢复
+或生产部署验收。
+
+同一候选的 Snyk run `41345415433` 已成功；CodSpeed run `41345415406` 在
+2026-11-02 仍为 `queued`，不计性能验收。生产状态继续保持 **ACTIVE / PARTIAL**，
+未开放生产切换，也未把队列中的性能任务当作通过证据。
