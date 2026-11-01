@@ -17,6 +17,17 @@ import (
 
 func newRoutingTestConfigStore(t *testing.T) configstore.ConfigStore {
 	t.Helper()
+	config := routingTestStoreConfig(t)
+	store, err := configstore.NewConfigStore(t.Context(), config, noopTestLogger{})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close(context.Background())) })
+	require.Equal(t, string(config.Type), store.DB().Dialector.Name())
+	t.Logf("routing test backend: %s", config.Type)
+	return store
+}
+
+func routingTestStoreConfig(t *testing.T) *configstore.Config {
+	t.Helper()
 	config := &configstore.Config{
 		Enabled: true, Type: configstore.ConfigStoreTypeSQLite,
 		Config: &configstore.SQLiteConfig{Path: filepath.Join(t.TempDir(), "routing.db")},
@@ -25,12 +36,7 @@ func newRoutingTestConfigStore(t *testing.T) configstore.ConfigStore {
 		config.Type = configstore.ConfigStoreTypePostgres
 		config.Config = routingPostgresTestConfig(t, socket)
 	}
-	store, err := configstore.NewConfigStore(t.Context(), config, noopTestLogger{})
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, store.Close(context.Background())) })
-	require.Equal(t, string(config.Type), store.DB().Dialector.Name())
-	t.Logf("routing test backend: %s", config.Type)
-	return store
+	return config
 }
 
 func routingPostgresTestConfig(t *testing.T, socket string) *configstore.PostgresConfig {
