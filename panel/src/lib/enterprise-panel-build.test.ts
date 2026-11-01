@@ -632,6 +632,7 @@ esac
 	test('API contracts initialize the Go workspace before running on a clean checkout', async () => {
 		const workflow = parse(await Bun.file(new URL('../../../.github/workflows/panel-tests.yml', import.meta.url)).text());
 		const steps = workflow.jobs['api-contracts'].steps;
+		expect(workflow.jobs['api-contracts']['runs-on']).toBe('ubuntu-24.04');
 		expect(workflow.jobs['api-contracts'].env.GOTOOLCHAIN).toBe('auto');
 		const setupIndex = steps.findIndex((step: { uses?: string }) => step.uses?.startsWith('actions/setup-go@'));
 		const workspaceIndex = steps.findIndex((step: { name?: string }) => step.name === 'Initialize Go workspace');

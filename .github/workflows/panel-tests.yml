@@ -180,7 +180,8 @@ jobs:
         working-directory: enterprise/employee-portal
 
   api-contracts:
-    runs-on: ubuntu-latest
+    # Keep PostgreSQL 16 available when ubuntu-latest advances.
+    runs-on: ubuntu-24.04
     env:
       GOTOOLCHAIN: auto
     steps:

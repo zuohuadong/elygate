@@ -6,6 +6,28 @@
 不以本次已实现的功能重新定义完成标准。新系统只兼容 Bifrost 上游契约，
 不增加旧 Elygate 兼容层；独立 `panel/` 不替换为上游 `ui/`。
 
+## 2026-11-01 PostgreSQL 16 CI 环境固定
+
+后续项 `routing-postgres16-runner-pin`：parent 为 `f7d8bd4ec`，source 为用户
+“不使用 pi agent 继续”和 run `41266827575` 的失败日志，reason 为
+`ubuntu-latest` 已切换至 Ubuntu 26.04，默认 apt 源无法安装 `postgresql-16`。
+Native、低风险、root 单 writer、external=0；范围冻结为 API contracts
+job 的 runner、已有构建契约断言及本节文档，不使用 Pi，不改变业务逻辑、
+数据库主版本、生产授权或进程 ownership/fencing 决策。
+
+该 run 的 Panel、员工门户、生产 Docker 构建及隔离备份/恢复均成功，
+API contracts 的 SQLite 路由回归也成功；PostgreSQL 工具安装失败，
+后续数据库双包回归被跳过，因此不能计作 PostgreSQL 16 验收。
+现将该 job 固定为 `ubuntu-24.04`，保留 PostgreSQL 16 安装及全部原有
+测试命令，并用 YAML 解析契约锁住 runner 选择；不影响其他 job 的环境，
+没有推理请求路径或常驻内存成本。修复仍须新候选 SHA 的完整 CI 回执，
+不能用本机 PostgreSQL 18 或父提交结果替代；整体保持 **active / PARTIAL**。
+
+本地构建契约 53 项 / 326 断言通过，actionlint、ShellCheck、Bash 语法和
+diff 检查通过。首轮 6 项子进程测试触及 5 秒超时，不计通过；将临时目录
+设为 `/Volumes/Datas/.codex-tmp` 后完整重跑通过（默认超时，69.16s）。
+本地 Svelte 检查长时间无结果后中断，不计通过，须以本候选 CI 补齐。
+
 ## 2026-11-01 路由双存储 CI 覆盖
 
 后续项 `routing-startup-store-ci`：parent 为 `5b5e7e65a`，source 为持续上线
