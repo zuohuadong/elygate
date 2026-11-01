@@ -213,6 +213,11 @@ func (re *Engine) EvaluateRoutingRules(ctx *schemas.BifrostContext, routingCtx *
 		iterCtx.Model = currentModel
 		if routingCtx.ModelInfo != nil {
 			iterCtx.ModelAttributes = routingCtx.ModelInfo(currentProvider, currentModel)
+		} else if chainStep > 0 {
+			// Without a resolver, metadata supplied for the initial model cannot
+			// be proven to describe a chained target. Do not let region,
+			// data-class, health, or capability policy leak across the hop.
+			iterCtx.ModelAttributes = nil
 		}
 		// Refresh budget/rate-limit status for the current provider/model so chained
 		// rules that test budget_used, tokens_used, or request see fresh data.

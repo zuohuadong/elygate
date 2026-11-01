@@ -45,3 +45,35 @@ func TestRoutingEvaluationRefreshesModelGovernanceAcrossChain(t *testing.T) {
 	require.Equal(t, "azure", decision.Provider)
 	require.Equal(t, "restricted-model", decision.Model)
 }
+
+func TestRoutingEvaluationDoesNotReuseInitialModelGovernanceAcrossChain(t *testing.T) {
+	store, err := NewLocalStore(context.Background(), NewMockLogger(), nil)
+	require.NoError(t, err)
+
+	first := snapshotTestRule("select-candidate-without-resolver")
+	first.CelExpression = `model == "incoming"`
+	first.ChainRule = true
+	first.Targets = []tables.TableRoutingTarget{{Model: bifrost.Ptr("unresolved-target"), Weight: 1}}
+	require.NoError(t, store.UpsertRule(context.Background(), first))
+
+	second := snapshotTestRule("must-not-inherit-data-class")
+	second.CelExpression = `model_data_class == "restricted"`
+	second.Targets = []tables.TableRoutingTarget{{Provider: bifrost.Ptr("azure"), Model: bifrost.Ptr("unresolved-target"), Weight: 1}}
+	require.NoError(t, store.UpsertRule(context.Background(), second))
+
+	engine, err := NewEngine(store, NewMockGovernanceStore(), NewMockLogger(), bifrost.Ptr(3))
+	require.NoError(t, err)
+	ctx, cancel := schemas.NewBifrostContextWithCancel(context.Background())
+	defer cancel()
+
+	decision, err := engine.EvaluateRoutingRules(ctx, &EvaluationContext{
+		Provider:        schemas.OpenAI,
+		Model:           "incoming",
+		ModelAttributes: map[string]string{"data_class": "restricted"},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, decision)
+	require.Equal(t, string(schemas.OpenAI), decision.Provider)
+	require.Equal(t, "unresolved-target", decision.Model)
+	require.Equal(t, "select-candidate-without-resolver", decision.MatchedRuleName)
+}
