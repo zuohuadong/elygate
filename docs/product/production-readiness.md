@@ -154,6 +154,23 @@ access 不能绕过；透传、批处理和服务端工具先逐个评估可见�
 尚需随最终候选 SHA 重新取得 CI 回执，并不证明真实供应商/TLS、正式制品或生产
 切换授权。
 
+### 2026-11-02 MCP 风险分类与短期授权局部收口
+
+MCP 工具的上游 `readOnlyHint`、`destructiveHint`、`idempotentHint` 和
+`openWorldHint` 现在由 core 在执行前从已发现工具目录复制到受保护的请求上下文，
+并归类为 `unknown`、`low`、`medium` 或 `high`。只有明确
+`destructiveHint=true` 的工具进入 `high`；缺少注解的既有工具保持原执行路径，
+避免把上游未标注工具误判为新策略。
+
+治理插件对 `high` 工具要求可信来源提供的精确 client/tool 短期授权；
+`SetMCPExecutionAuthorizationWithTTL` 的授权过期或改目标都会拒绝，原有无 TTL
+API 继续保留用于现有工具许可路径，但不能满足 destructive 工具的短期审批门。
+风险分类、元数据复制隔离、缺失/过期/改目标拒绝和未标注回归均有定向 Go 测试。
+
+本项只闭合风险信号到执行前治理和一次性短期授权的局部边界，不等同于审批
+签发 API/UI、跨进程授权存储、Kill Switch、结果审计、在线 Shadow、正式制品
+或生产切换授权；MCP 生产门禁仍保持 **PARTIAL**。
+
 ## 当前执行状态与剩余门禁
 
 ### 2026-11-01 同候选真实恢复 CI

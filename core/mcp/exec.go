@@ -82,6 +82,26 @@ func (m *MCPManager) executeToolWithHooks(
 		}
 	}
 
+	// Core resolves annotations from the discovered tool map before plugins run.
+	// The metadata is protected while the hook pipeline is active so a request
+	// cannot forge or retarget the risk classification.
+	var previousMetadata any
+	if ctx != nil {
+		previousMetadata = ctx.Value(schemas.BifrostContextKeyMCPToolExecutionMetadata)
+		ctx.SetMCPToolExecutionMetadata(m.mcpToolExecutionMetadata(request))
+		defer func() {
+			if previousMetadata == nil {
+				ctx.ClearMCPToolExecutionMetadata()
+			} else {
+				if metadata, ok := previousMetadata.(*schemas.MCPToolExecutionMetadata); ok {
+					ctx.SetMCPToolExecutionMetadata(metadata)
+				} else {
+					ctx.ClearMCPToolExecutionMetadata()
+				}
+			}
+		}()
+	}
+
 	resp, bErr := m.RunWithPluginPipeline(ctx, request, func(preReq *schemas.BifrostMCPRequest) (*schemas.BifrostMCPResponse, error) {
 		// Resolve and acquire after PreMCPHook so policy plugins can reject denied
 		// MCP clients before any auth or transport work.
@@ -115,6 +135,33 @@ func (m *MCPManager) executeToolWithHooks(
 		return nil, bErr
 	}
 	return resp, nil
+}
+
+func (m *MCPManager) mcpToolExecutionMetadata(request *schemas.BifrostMCPRequest) *schemas.MCPToolExecutionMetadata {
+	metadata := &schemas.MCPToolExecutionMetadata{
+		ClientName: request.ClientName,
+		ToolName:   request.GetToolName(),
+		RiskLevel:  schemas.MCPToolRiskUnknown,
+	}
+	if state := m.GetClientForTool(request.GetToolName()); state != nil {
+		if tool, ok := state.ToolMap[request.GetToolName()]; ok {
+			metadata.RiskLevel = schemas.ClassifyMCPToolRisk(tool.Annotations)
+			if tool.Annotations != nil {
+				cloneBool := func(value *bool) *bool {
+					if value == nil {
+						return nil
+					}
+					cloned := *value
+					return &cloned
+				}
+				metadata.ReadOnlyHint = cloneBool(tool.Annotations.ReadOnlyHint)
+				metadata.DestructiveHint = cloneBool(tool.Annotations.DestructiveHint)
+				metadata.IdempotentHint = cloneBool(tool.Annotations.IdempotentHint)
+				metadata.OpenWorldHint = cloneBool(tool.Annotations.OpenWorldHint)
+			}
+		}
+	}
+	return metadata
 }
 
 // prepareToolExecution resolves the tool to its owning MCP client and

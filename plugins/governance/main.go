@@ -1771,13 +1771,30 @@ func (p *GovernancePlugin) PreMCPHook(ctx *schemas.BifrostContext, req *schemas.
 	// disagree. What is left is a question about the tool, which the access answers whatever granted it.
 	// A request carrying no access is unrestricted and may execute any tool, as it always could.
 	access := ctx.Grant().Access()
-	if access != nil && !access.IsMCPToolAllowed(toolName) && !hasMCPExecutionAuthorization(ctx, req) {
+	hasExactAuthorization := hasMCPExecutionAuthorization(ctx, req)
+	hasShortLivedAuthorization := hasMCPShortLivedExecutionAuthorization(ctx, req)
+	if access != nil && !access.IsMCPToolAllowed(toolName) && !hasExactAuthorization {
 		ctx.SetValue(governanceRejectedContextKey, true)
 		return req, &schemas.MCPPluginShortCircuit{Error: &schemas.BifrostError{
 			Type:       bifrost.Ptr(string(DecisionMCPToolBlocked)),
 			StatusCode: bifrost.Ptr(403),
 			Error: &schemas.ErrorField{
 				Message: denialReason(fmt.Sprintf("MCP tool '%s' is not allowed", toolName), access.DeniedPermitsForMCPTool(toolName)),
+			},
+		}}, nil
+	}
+
+	// A server that explicitly marks a tool destructive must receive a
+	// trusted, exact-match, short-lived approval for this invocation. Missing
+	// annotations stay on the existing path for upstream compatibility.
+	if metadata, _ := ctx.Value(schemas.BifrostContextKeyMCPToolExecutionMetadata).(*schemas.MCPToolExecutionMetadata); metadata != nil &&
+		metadata.RiskLevel == schemas.MCPToolRiskHigh && !hasShortLivedAuthorization {
+		ctx.SetValue(governanceRejectedContextKey, true)
+		return req, &schemas.MCPPluginShortCircuit{Error: &schemas.BifrostError{
+			Type:       bifrost.Ptr(string(DecisionMCPToolBlocked)),
+			StatusCode: bifrost.Ptr(403),
+			Error: &schemas.ErrorField{
+				Message: fmt.Sprintf("MCP tool '%s' is destructive and requires an unexpired short-term authorization", toolName),
 			},
 		}}, nil
 	}

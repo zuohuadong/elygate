@@ -2,10 +2,26 @@ package governance
 
 import (
 	"testing"
+	"time"
 
 	"github.com/maximhq/bifrost/core/schemas"
 	"github.com/stretchr/testify/require"
 )
+
+func destructiveMCPRequest(clientName, toolName string) (*schemas.BifrostMCPRequest, *schemas.MCPToolExecutionMetadata) {
+	return &schemas.BifrostMCPRequest{
+			RequestType: schemas.MCPRequestTypeChatToolCall,
+			ClientName:  clientName,
+			ChatAssistantMessageToolCall: &schemas.ChatAssistantMessageToolCall{
+				Function: schemas.ChatAssistantMessageToolCallFunction{Name: &toolName, Arguments: "{}"},
+			},
+		},
+		&schemas.MCPToolExecutionMetadata{
+			ClientName: clientName,
+			ToolName:   toolName,
+			RiskLevel:  schemas.MCPToolRiskHigh,
+		}
+}
 
 // TestMCPExecutionAuthorization preserves governance while replacing only the exact tool permit.
 func TestMCPExecutionAuthorization(t *testing.T) {
@@ -98,6 +114,80 @@ func TestMCPExecutionAuthorizationRejectsForgedInjectedMarker(t *testing.T) {
 	_, short, err := p.PreMCPHook(ctx, req)
 	require.NoError(t, err)
 	require.NotNil(t, short, "a marker written through public SetValue must not bypass the virtual key's tool permits")
+}
+
+func TestMCPDestructiveToolRequiresShortLivedAuthorization(t *testing.T) {
+	p := newPluginForMCPStamping(t, buildVKForMCPStamping(nil), false)
+
+	t.Run("missing approval", func(t *testing.T) {
+		ctx := emptyCtx()
+		req, metadata := destructiveMCPRequest("local", "local-delete")
+		ctx.SetValue(schemas.BifrostContextKeyMCPToolExecutionMetadata, metadata)
+		_, short, err := p.PreMCPHook(ctx, req)
+		require.NoError(t, err)
+		require.NotNil(t, short)
+		require.Contains(t, short.Error.Error.Message, "short-term authorization")
+	})
+
+	t.Run("legacy approval is insufficient", func(t *testing.T) {
+		ctx := presentCtx(mcpTestVKValue)
+		req, metadata := destructiveMCPRequest("local", "local-delete")
+		ctx.SetValue(schemas.BifrostContextKeyMCPToolExecutionMetadata, metadata)
+		SetMCPExecutionAuthorization(ctx, "local", "local-delete")
+		_, short, err := p.PreMCPHook(ctx, req)
+		require.NoError(t, err)
+		require.NotNil(t, short)
+	})
+
+	t.Run("unexpired exact approval is accepted", func(t *testing.T) {
+		ctx := presentCtx(mcpTestVKValue)
+		req, metadata := destructiveMCPRequest("local", "local-delete")
+		ctx.SetValue(schemas.BifrostContextKeyMCPToolExecutionMetadata, metadata)
+		SetMCPExecutionAuthorizationWithTTL(ctx, "local", "local-delete", time.Minute)
+		_, short, err := p.PreMCPHook(ctx, req)
+		require.NoError(t, err)
+		require.Nil(t, short)
+	})
+
+	t.Run("expired approval is rejected", func(t *testing.T) {
+		ctx := presentCtx(mcpTestVKValue)
+		req, metadata := destructiveMCPRequest("local", "local-delete")
+		ctx.SetValue(schemas.BifrostContextKeyMCPToolExecutionMetadata, metadata)
+		SetMCPExecutionAuthorizationWithTTL(ctx, "local", "local-delete", -time.Second)
+		_, short, err := p.PreMCPHook(ctx, req)
+		require.NoError(t, err)
+		require.NotNil(t, short)
+	})
+
+	t.Run("retargeted approval is rejected", func(t *testing.T) {
+		ctx := presentCtx(mcpTestVKValue)
+		SetMCPExecutionAuthorizationWithTTL(ctx, "local", "local-delete", time.Minute)
+		otherReq, otherMetadata := destructiveMCPRequest("local", "local-update")
+		ctx.SetValue(schemas.BifrostContextKeyMCPToolExecutionMetadata, otherMetadata)
+		_, short, err := p.PreMCPHook(ctx, otherReq)
+		require.NoError(t, err)
+		require.NotNil(t, short)
+	})
+
+	t.Run("unannotated tool path remains compatible", func(t *testing.T) {
+		ctx := emptyCtx()
+		toolName := "local-legacy"
+		req := &schemas.BifrostMCPRequest{
+			RequestType: schemas.MCPRequestTypeChatToolCall,
+			ClientName:  "local",
+			ChatAssistantMessageToolCall: &schemas.ChatAssistantMessageToolCall{
+				Function: schemas.ChatAssistantMessageToolCallFunction{Name: &toolName, Arguments: "{}"},
+			},
+		}
+		ctx.SetValue(schemas.BifrostContextKeyMCPToolExecutionMetadata, &schemas.MCPToolExecutionMetadata{
+			ClientName: "local",
+			ToolName:   toolName,
+			RiskLevel:  schemas.MCPToolRiskUnknown,
+		})
+		_, short, err := p.PreMCPHook(ctx, req)
+		require.NoError(t, err)
+		require.Nil(t, short)
+	})
 }
 
 // BenchmarkPreMCPHook measures governing one MCP call: a tool call, the baseline, beside the prompt

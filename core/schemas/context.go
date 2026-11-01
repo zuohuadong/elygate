@@ -56,6 +56,10 @@ var reservedKeys = map[BifrostContextKey]struct{}{
 	BifrostContextKeyMCPInstructionsText:     {},
 }
 
+var additionalReservedKeys = map[BifrostContextKey]struct{}{
+	BifrostContextKeyMCPToolExecutionMetadata: {},
+}
+
 // isReservedKey reports whether key is a reserved context key whose writes are
 // blocked while blockRestrictedWrites is set. Non-BifrostContextKey keys (which
 // may be non-comparable) are never reserved and must not reach the map index.
@@ -64,7 +68,10 @@ func isReservedKey(key any) bool {
 	if !ok {
 		return false
 	}
-	_, ok = reservedKeys[contextKey]
+	if _, ok = reservedKeys[contextKey]; ok {
+		return true
+	}
+	_, ok = additionalReservedKeys[contextKey]
 	return ok
 }
 
@@ -654,6 +661,19 @@ func (bc *BifrostContext) SetRoutingInfoSnapshot(ri RoutingInfo) {
 // SetFallbackPinnedAPIKeyID pins a fallback's provider key, bypassing the restricted-writes guard (set by core - DO NOT SET THIS MANUALLY).
 func (bc *BifrostContext) SetFallbackPinnedAPIKeyID(keyID string) {
 	bc.setReservedValue(BifrostContextKeyAPIKeyID, keyID)
+}
+
+// SetMCPToolExecutionMetadata writes the discovered MCP tool metadata while
+// the MCP plugin pipeline may have restricted public context writes.
+// Bifrost-internal (set by core - DO NOT SET THIS MANUALLY).
+func (bc *BifrostContext) SetMCPToolExecutionMetadata(metadata *MCPToolExecutionMetadata) {
+	bc.setReservedValue(BifrostContextKeyMCPToolExecutionMetadata, metadata)
+}
+
+// ClearMCPToolExecutionMetadata removes the core-owned MCP execution metadata.
+// Bifrost-internal (set by core - DO NOT SET THIS MANUALLY).
+func (bc *BifrostContext) ClearMCPToolExecutionMetadata() {
+	bc.setReservedValue(BifrostContextKeyMCPToolExecutionMetadata, nil)
 }
 
 // ClearValue clears a value from the internal userValues map.

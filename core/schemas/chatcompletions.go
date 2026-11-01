@@ -411,6 +411,48 @@ type MCPToolAnnotations struct {
 	OpenWorldHint   *bool  `json:"openWorldHint,omitempty"`   // If true, the tool interacts with external entities
 }
 
+// MCPToolRiskLevel is the execution-risk classification derived from the
+// upstream MCP annotations. Only an explicit destructiveHint=true is high
+// risk; missing annotations remain compatible with existing tool execution.
+type MCPToolRiskLevel string
+
+const (
+	MCPToolRiskUnknown MCPToolRiskLevel = "unknown"
+	MCPToolRiskLow     MCPToolRiskLevel = "low"
+	MCPToolRiskMedium  MCPToolRiskLevel = "medium"
+	MCPToolRiskHigh    MCPToolRiskLevel = "high"
+)
+
+// ClassifyMCPToolRisk maps upstream MCP hints to a compatibility-preserving
+// risk level. Conflicting read-only and destructive hints fail closed as high.
+func ClassifyMCPToolRisk(annotations *MCPToolAnnotations) MCPToolRiskLevel {
+	if annotations == nil {
+		return MCPToolRiskUnknown
+	}
+	if annotations.DestructiveHint != nil && *annotations.DestructiveHint {
+		return MCPToolRiskHigh
+	}
+	if annotations.ReadOnlyHint != nil && *annotations.ReadOnlyHint {
+		return MCPToolRiskLow
+	}
+	if annotations.ReadOnlyHint != nil || annotations.DestructiveHint != nil {
+		return MCPToolRiskMedium
+	}
+	return MCPToolRiskUnknown
+}
+
+// MCPToolExecutionMetadata is Bifrost-owned execution metadata made available
+// to MCP governance hooks. Core populates it from the discovered tool map.
+type MCPToolExecutionMetadata struct {
+	ClientName      string
+	ToolName        string
+	RiskLevel       MCPToolRiskLevel
+	ReadOnlyHint    *bool
+	DestructiveHint *bool
+	IdempotentHint  *bool
+	OpenWorldHint   *bool
+}
+
 // ChatTool represents a tool definition.
 //
 // Three shapes coexist under this type:
