@@ -2051,6 +2051,9 @@ func (h *GovernanceHandler) RegisterRoutesWithOverrides(r *router.Router, overri
 	r.GET("/api/governance/mcp/kill-switches", lib.ChainMiddlewares(h.requireGovernancePermission("mcp.kill_switch.read", "mcp_kill_switch", nil, h.getMCPKillSwitches), middlewares...))
 	r.PUT("/api/governance/mcp/kill-switches", lib.ChainMiddlewares(h.requireGovernancePermission("mcp.kill_switch.update", "mcp_kill_switch", nil, h.updateMCPKillSwitch), middlewares...))
 	r.DELETE("/api/governance/mcp/kill-switches", lib.ChainMiddlewares(h.requireGovernancePermission("mcp.kill_switch.update", "mcp_kill_switch", nil, h.deleteMCPKillSwitch), middlewares...))
+	r.GET("/api/governance/mcp/approvals", lib.ChainMiddlewares(h.requireGovernancePermission("mcp.approval.read", "mcp_approval", nil, h.getMCPApprovals), middlewares...))
+	r.POST("/api/governance/mcp/approvals", lib.ChainMiddlewares(h.requireGovernancePermission("mcp.approval.issue", "mcp_approval", nil, h.issueMCPApproval), middlewares...))
+	r.DELETE("/api/governance/mcp/approvals/{approval_id}", lib.ChainMiddlewares(h.requireGovernancePermission("mcp.approval.revoke", "mcp_approval", mcpApprovalID, h.revokeMCPApproval), middlewares...))
 
 	// Team CRUD operations. Enterprise replaces this family with a superset
 	// registrar so the router sees exactly one handler per method/path.

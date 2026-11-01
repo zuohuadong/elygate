@@ -231,6 +231,32 @@ PostgreSQL 多实例读取、浏览器到生产后端的权限/持久化、正�
 生产切换授权。MCP 审批签发 API/UI、跨进程授权存储、ownership/fencing、在线
 Shadow 以及真实供应商/TLS 仍保持未完成；总目标继续 **active / PARTIAL**。
 
+### 2026-11-02 MCP 短期审批签发与撤销（本地 PASS_SCOPED）
+
+新增管理员审批接口：
+
+```text
+GET    /api/governance/mcp/approvals
+POST   /api/governance/mcp/approvals
+DELETE /api/governance/mcp/approvals/{approval_id}
+```
+
+签发请求必须精确提供 `client_name`、`tool_name` 和 1 到 900 秒的 TTL。服务端
+只在响应中返回一次高熵令牌，持久化文档仅保存 SHA-256 哈希、目标、签发/过期/
+撤销时间和原因；撤销保留记录而令牌立即失效。MCP 执行请求通过
+`x-bf-mcp-approval` 携带令牌，治理插件仅对上游明确标注为 destructive 的
+同一 `client/tool` 目标读取共享 ConfigStore，并将有效令牌转换为既有短期、
+精确绑定的 request-scoped 授权。令牌不会进入审计元数据，观测层将该请求头按
+敏感凭据脱敏。
+
+独立 `panel/` 的 MCP 治理页新增审批签发、一次性令牌展示/复制、有效审批列表和
+撤销操作；前端在请求前校验目标和 TTL，服务端 malformed response 也会失败关闭。
+本地证据：治理、HTTP handler、schema 定向 Go 测试通过；Panel MCP 治理契约
+7 项通过，`svelte-check` 0 错误/0 警告，生产构建成功，`git diff --check`
+通过。该证据只覆盖本地 SQLite/测试夹具和静态面板，不证明真实管理员会话、
+多实例 PostgreSQL 延迟/故障恢复、跨进程 fencing、正式制品、真实供应商/TLS
+或生产切换授权；生产 MCP 门禁仍为 **PARTIAL**。
+
 ## 当前执行状态与剩余门禁
 
 ### 2026-11-01 同候选真实恢复 CI

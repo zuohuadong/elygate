@@ -1,10 +1,13 @@
 package governance
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/maximhq/bifrost/core/schemas"
+	"github.com/maximhq/bifrost/framework/configstore"
+	configstoreTables "github.com/maximhq/bifrost/framework/configstore/tables"
 	"github.com/stretchr/testify/require"
 )
 
@@ -202,6 +205,54 @@ func TestMCPDestructiveToolRequiresShortLivedAuthorization(t *testing.T) {
 		require.NoError(t, err)
 		require.Nil(t, short)
 	})
+}
+
+func TestMCPDurableApprovalHeaderHydratesExactShortLivedAuthorization(t *testing.T) {
+	store, err := configstore.NewConfigStore(context.Background(), &configstore.Config{
+		Enabled: true,
+		Type:    configstore.ConfigStoreTypeSQLite,
+		Config:  &configstore.SQLiteConfig{Path: t.TempDir() + "/mcp-approval.db"},
+	}, NewMockLogger())
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close(context.Background())) })
+
+	plugin := newAccessTestPlugin(t, buildVKForMCPStamping(nil), nil)
+	plugin.configStore = store
+	now := time.Now().UTC()
+	token := "approval-token"
+	record := MCPExecutionApprovalRecord{
+		MCPExecutionApproval: MCPExecutionApproval{
+			ID:         "approval-1",
+			ClientName: "local",
+			ToolName:   "local-delete",
+			IssuedAt:   now,
+			ExpiresAt:  now.Add(time.Minute),
+		},
+		TokenHash: HashMCPApprovalToken(token),
+	}
+	value, err := EncodeMCPApprovalRecords([]MCPExecutionApprovalRecord{record}, now)
+	require.NoError(t, err)
+	require.NoError(t, store.UpdateConfig(context.Background(), &configstoreTables.TableGovernanceConfig{
+		Key: MCPApprovalConfigKey, Value: value,
+	}))
+
+	ctx := presentCtx(mcpTestVKValue)
+	ctx.SetValue(schemas.BifrostContextKeyRequestHeaders, map[string]string{MCPApprovalHeader: token})
+	req, metadata := destructiveMCPRequest("local", "local-delete")
+	ctx.SetValue(schemas.BifrostContextKeyMCPToolExecutionMetadata, metadata)
+	_, short, err := plugin.PreMCPHook(ctx, req)
+	require.NoError(t, err)
+	require.Nil(t, short)
+	audit, _ := ctx.Value(schemas.BifrostContextKeyMCPGovernanceAudit).(*schemas.MCPGovernanceAudit)
+	require.Equal(t, mcpApprovalApproved, audit.ApprovalState)
+
+	ctx = presentCtx(mcpTestVKValue)
+	ctx.SetValue(schemas.BifrostContextKeyRequestHeaders, map[string]string{MCPApprovalHeader: token})
+	req, metadata = destructiveMCPRequest("local", "other-tool")
+	ctx.SetValue(schemas.BifrostContextKeyMCPToolExecutionMetadata, metadata)
+	_, short, err = plugin.PreMCPHook(ctx, req)
+	require.NoError(t, err)
+	require.NotNil(t, short)
 }
 
 // BenchmarkPreMCPHook measures governing one MCP call: a tool call, the baseline, beside the prompt

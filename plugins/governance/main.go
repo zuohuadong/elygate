@@ -1724,6 +1724,12 @@ func (p *GovernancePlugin) PreMCPHook(ctx *schemas.BifrostContext, req *schemas.
 	if !req.RequestType.IsExecuteTool() && !isRead {
 		return req, nil, nil
 	}
+	// Resolve a durable operator-issued approval before stamping the audit
+	// record. The resolver only reads storage for explicitly destructive tools;
+	// all other requests retain the existing hot path.
+	if req.RequestType.IsExecuteTool() {
+		p.resolveMCPApprovalFromHeaders(ctx, req)
+	}
 	stampMCPGovernanceAudit(ctx, req)
 
 	// Kill switches are evaluated before codemode or any client connection

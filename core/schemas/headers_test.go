@@ -54,6 +54,13 @@ func TestRedactSensitiveHeaders_VirtualKeyHeader(t *testing.T) {
 	}
 }
 
+func TestRedactSensitiveHeaders_MCPApprovalHeader(t *testing.T) {
+	out := RedactSensitiveHeaders(map[string]string{"x-bf-mcp-approval": "approval-secret"})
+	if out["x-bf-mcp-approval"] != RedactedAttrValue {
+		t.Fatalf("x-bf-mcp-approval = %q, want %q", out["x-bf-mcp-approval"], RedactedAttrValue)
+	}
+}
+
 // Ocp-Apim-Subscription-Key carries an Azure AI Speech key or a virtual key, and no generic pattern names it.
 func TestIsSensitiveHeader_AzureSpeechKeyHeader(t *testing.T) {
 	for _, name := range []string{"ocp-apim-subscription-key", "Ocp-Apim-Subscription-Key"} {

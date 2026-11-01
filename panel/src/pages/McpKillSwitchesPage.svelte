@@ -5,6 +5,13 @@
 	import { requestJson } from '../lib/api';
 	import { displayError } from '../lib/forms';
 	import {
+		buildMcpApprovalPayload,
+		emptyMcpApprovalDraft,
+		mcpApprovalsFromPayload,
+		type McpApprovalDraft,
+		type McpApprovalRecord,
+	} from '../lib/mcp-approval';
+	import {
 		buildMcpKillSwitchPayload,
 		emptyMcpKillSwitchDraft,
 		mcpKillSwitchDraftFromRecord,
@@ -27,6 +34,11 @@
 	let busyKey = $state('');
 	let error = $state('');
 	let notice = $state('');
+	let approvals = $state<McpApprovalRecord[]>([]);
+	let approvalDraft = $state<McpApprovalDraft>(emptyMcpApprovalDraft());
+	let isIssuingApproval = $state(false);
+	let approvalBusyID = $state('');
+	let issuedToken = $state('');
 
 	function text(zh: string, en: string): string {
 		return i18n.locale === 'zh-CN' ? zh : en;
@@ -59,6 +71,15 @@
 		editingKey = '';
 	}
 
+	function resetApprovalDraft(): void {
+		approvalDraft = emptyMcpApprovalDraft();
+	}
+
+	function approvalDate(value: string): string {
+		const date = new Date(value);
+		return Number.isNaN(date.getTime()) ? value : date.toLocaleString(i18n.locale === 'zh-CN' ? 'zh-CN' : 'en-US');
+	}
+
 	function editRule(rule: McpKillSwitchRecord): void {
 		draft = mcpKillSwitchDraftFromRecord(rule);
 		editingKey = keyOf(rule);
@@ -71,12 +92,80 @@
 		isLoading = true;
 		error = '';
 		try {
-			switches = mcpKillSwitchesFromPayload(await requestJson<unknown>('/api/governance/mcp/kill-switches'));
+			const [killSwitchPayload, approvalPayload] = await Promise.all([
+				requestJson<unknown>('/api/governance/mcp/kill-switches'),
+				requestJson<unknown>('/api/governance/mcp/approvals'),
+			]);
+			switches = mcpKillSwitchesFromPayload(killSwitchPayload);
+			approvals = mcpApprovalsFromPayload(approvalPayload);
 		} catch (cause) {
-			error = displayError(cause, text('Kill Switch 加载失败。', 'Failed to load kill switches.'));
+			error = displayError(cause, text('MCP 治理数据加载失败。', 'Failed to load MCP governance data.'));
 		} finally {
 			isLoading = false;
 		}
+	}
+
+	async function issueApproval(): Promise<void> {
+		if (isIssuingApproval) return;
+		isIssuingApproval = true;
+		error = '';
+		notice = '';
+		issuedToken = '';
+		try {
+			const response = await requestJson<{
+				approval?: McpApprovalRecord;
+				token?: string;
+			}>('/api/governance/mcp/approvals', {
+				method: 'POST',
+				body: JSON.stringify(buildMcpApprovalPayload(approvalDraft)),
+			});
+			if (!response.approval || typeof response.token !== 'string' || !response.token) throw new Error('malformed-response');
+			approvals = [response.approval, ...approvals];
+			issuedToken = response.token;
+			resetApprovalDraft();
+			notice = text('审批已签发。令牌只显示这一次。', 'Approval issued. The token is shown once.');
+		} catch (cause) {
+			if (cause instanceof Error) {
+				const messages: Record<string, [string, string]> = {
+					'client-required': ['必须填写 MCP client。', 'MCP client is required.'],
+					'tool-required': ['必须填写工具名。', 'Tool name is required.'],
+					'target-too-long': ['client 和工具名不能超过 255 个字符。', 'Client and tool names must be 255 characters or fewer.'],
+					'ttl-invalid': ['有效期必须是 1 到 900 秒。', 'TTL must be between 1 and 900 seconds.'],
+					'reason-too-long': ['原因不能超过 512 个字符。', 'Reason must be 512 characters or fewer.'],
+					'malformed-response': ['服务端返回了无效审批。', 'The server returned a malformed approval.'],
+				};
+				const message = messages[cause.message];
+				error = message ? text(...message) : displayError(cause, text('审批签发失败。', 'Failed to issue approval.'));
+			} else {
+				error = displayError(cause, text('审批签发失败。', 'Failed to issue approval.'));
+			}
+		} finally {
+			isIssuingApproval = false;
+		}
+	}
+
+	async function revokeApproval(approval: McpApprovalRecord): Promise<void> {
+		if (approvalBusyID || isIssuingApproval || !window.confirm(text(`撤销 ${approval.client_name}/${approval.tool_name} 的审批？`, `Revoke approval for ${approval.client_name}/${approval.tool_name}?`))) return;
+		approvalBusyID = approval.id;
+		error = '';
+		notice = '';
+		try {
+			await requestJson<unknown>(`/api/governance/mcp/approvals/${encodeURIComponent(approval.id)}`, { method: 'DELETE' });
+			approvals = approvals.map((entry) => entry.id === approval.id
+				? { ...entry, revoked_at: new Date().toISOString(), status: 'revoked' }
+				: entry);
+			notice = text('审批已撤销。', 'Approval revoked.');
+		} catch (cause) {
+			error = displayError(cause, text('审批撤销失败。', 'Failed to revoke approval.'));
+		} finally {
+			approvalBusyID = '';
+		}
+	}
+
+	async function copyIssuedToken(): Promise<void> {
+		if (!issuedToken || !navigator.clipboard) return;
+		await navigator.clipboard.writeText(issuedToken);
+		notice = text('令牌已复制。', 'Token copied.');
 	}
 
 	function validationMessage(cause: unknown): string {
@@ -217,6 +306,51 @@
 			</tbody>
 		</table>
 	</section>
+
+	<section class="editor" aria-labelledby="mcp-approval-editor-title">
+		<header>
+			<div>
+				<h2 id="mcp-approval-editor-title">{text('MCP 短期审批', 'MCP short-term approvals')}</h2>
+				<p>{text('仅为精确的 client/tool 签发限时令牌；令牌只返回一次，执行请求通过 x-bf-mcp-approval 携带。', 'Issue a time-limited token for one exact client/tool pair. The token is returned once and sent as x-bf-mcp-approval on execution requests.')}</p>
+			</div>
+		</header>
+		<form onsubmit={(event) => { event.preventDefault(); void issueApproval(); }}>
+			<div class="form-grid">
+				<label>{text('MCP client', 'MCP client')}<input bind:value={approvalDraft.clientName} disabled={isIssuingApproval || !!approvalBusyID} placeholder="client-name" /></label>
+				<label>{text('工具名', 'Tool name')}<input bind:value={approvalDraft.toolName} disabled={isIssuingApproval || !!approvalBusyID} placeholder="client-tool" /></label>
+				<label>{text('有效期（秒）', 'TTL (seconds)')}<input type="number" min="1" max="900" step="1" bind:value={approvalDraft.ttlSeconds} disabled={isIssuingApproval || !!approvalBusyID} /></label>
+				<label>{text('原因（可选）', 'Reason (optional)')}<input bind:value={approvalDraft.reason} maxlength="512" disabled={isIssuingApproval || !!approvalBusyID} /></label>
+			</div>
+			<footer><button class="primary" type="submit" disabled={isIssuingApproval || !!approvalBusyID}>{isIssuingApproval ? text('签发中…', 'Issuing…') : text('签发审批', 'Issue approval')}</button></footer>
+		</form>
+		{#if issuedToken}
+			<div class="token-box" role="status">
+				<strong>{text('一次性令牌', 'One-time token')}</strong>
+				<code>{issuedToken}</code>
+				<button type="button" onclick={() => void copyIssuedToken()}>{text('复制', 'Copy')}</button>
+			</div>
+		{/if}
+	</section>
+
+	<section class="table-wrap" class:loading={isLoading}>
+		<table>
+			<thead><tr><th>{text('MCP client', 'MCP client')}</th><th>{text('工具', 'Tool')}</th><th>{text('状态', 'Status')}</th><th>{text('过期时间', 'Expires')}</th><th>{text('原因', 'Reason')}</th><th>{text('操作', 'Actions')}</th></tr></thead>
+			<tbody>
+				{#each approvals as approval (approval.id)}
+					<tr class:disabled-row={approval.status !== 'active'}>
+						<td><code>{approval.client_name}</code></td>
+						<td><code>{approval.tool_name}</code></td>
+						<td><span class="badge">{approval.status === 'active' ? text('有效', 'Active') : approval.status === 'revoked' ? text('已撤销', 'Revoked') : text('已过期', 'Expired')}</span></td>
+						<td>{approvalDate(approval.expires_at)}</td>
+						<td class="reason">{approval.reason || '—'}</td>
+						<td><button class="danger" type="button" disabled={approval.status !== 'active' || approvalBusyID === approval.id || isIssuingApproval} onclick={() => void revokeApproval(approval)}>{text('撤销', 'Revoke')}</button></td>
+					</tr>
+				{:else}
+					<tr><td class="empty" colspan="6">{isLoading ? text('加载中…', 'Loading…') : text('尚未签发短期审批。', 'No short-term approvals issued.')}</td></tr>
+				{/each}
+			</tbody>
+		</table>
+	</section>
 </section>
 
 <style>
@@ -235,6 +369,8 @@
 	.notice { border-radius: .65rem; padding: .75rem 1rem; }
 	.notice.error { background: color-mix(in oklch, var(--destructive) 12%, transparent); color: var(--destructive); }
 	.notice.success { background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); }
+	.token-box { align-items: center; background: color-mix(in oklch, var(--primary) 10%, transparent); border: 1px solid var(--primary); border-radius: .65rem; display: flex; flex-wrap: wrap; gap: .6rem; padding: .75rem; }
+	.token-box code { flex: 1 1 18rem; overflow-wrap: anywhere; }
 	.editor { background: var(--card); border: 1px solid var(--border); border-radius: .8rem; display: grid; gap: 1rem; padding: 1rem; }
 	.form-grid { display: grid; gap: .8rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 	.form-grid label { color: var(--muted-foreground); display: grid; font-size: .78rem; gap: .3rem; }

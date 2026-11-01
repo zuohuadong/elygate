@@ -1440,6 +1440,8 @@ func IsSensitiveHeader(name string) bool {
 	case "authorization", "proxy-authorization", "cookie", "set-cookie",
 		// Bifrost's own virtual key header: a credential that no generic pattern below names.
 		"x-bf-vk",
+		// Short-lived MCP execution approvals are bearer credentials.
+		"x-bf-mcp-approval",
 		// Azure AI Speech's key header, which also carries a virtual key.
 		"ocp-apim-subscription-key":
 		return true
