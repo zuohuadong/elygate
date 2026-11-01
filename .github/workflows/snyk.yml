@@ -33,6 +33,7 @@ jobs:
             proxy.golang.org:443
             raw.githubusercontent.com:443
             registry.npmjs.org:443
+            registry.npmmirror.com:443
             release-assets.githubusercontent.com:443
             releases.astral.sh:443
             static.snyk.io:443
@@ -113,6 +114,7 @@ jobs:
             proxy.golang.org:443
             raw.githubusercontent.com:443
             registry.npmjs.org:443
+            registry.npmmirror.com:443
             release-assets.githubusercontent.com:443
             releases.astral.sh:443
             static.snyk.io:443
