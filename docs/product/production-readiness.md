@@ -224,7 +224,7 @@ Apple M4 单样本 `BenchmarkMCPKillSwitchDecision -benchmem` 为
 `mcp.kill_switch.*` 服务端权限，不在前端复制治理判断。
 
 本地证据：MCP Kill Switch 纯函数与 malformed-response 契约 4 项通过，资源/
-菜单/页面标题契约与既有 API 定向测试共 26 项通过；`svelte-check` 0 错误/
+菜单/页面标题契约与既有 API 定向集合共 35 项、210 个断言通过；`svelte-check` 0 错误/
 0 警告；`bun run build` 成功并完成静态资源复制；`git diff --check` 通过。
 这只证明 panel 代码和上游管理 API 的本地契约，不证明真实管理员会话、真实
 PostgreSQL 多实例读取、浏览器到生产后端的权限/持久化、正式 registry 制品或
