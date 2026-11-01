@@ -22,6 +22,14 @@ type routingPolicyPublisher interface {
 	InstallPreparedPolicy(context.Context, *rules.PreparedPolicy) error
 }
 
+// ActivateRoutingRelease is the control-plane callback used by the
+// authenticated publish/rollback API. The store is supplied by the handler so
+// isolated control-plane tests and the production server share one activation
+// path.
+func (s *BifrostHTTPServer) ActivateRoutingRelease(ctx context.Context, releases *controlplane.Store, epoch int64, actor string) error {
+	return s.installAcceptedRoutingRelease(ctx, releases, epoch, actor)
+}
+
 type routingPolicyAdmission interface {
 	Admit(*schemas.BifrostContext, *schemas.BifrostRequest) bool
 	CloseAdmission() bool

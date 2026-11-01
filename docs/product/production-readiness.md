@@ -116,6 +116,27 @@ CEL；未知模型或缺少字段返回空值，不改变现有上游模型选�
 通过；这闭合的是请求上下文与规则执行边界，不等同于统一策略发布、Shadow、
 ownership/fencing 或生产部署验收。
 
+### 2026-11-02 路由发布写 API 与独立面板动作
+
+本轮补齐 canonical control-plane 的管理员发布/回滚写入口：
+`POST /api/control-plane/routing/releases/publish` 与
+`POST /api/control-plane/routing/releases/rollback`。请求使用严格 JSON、
+期望持久代次、不可变版本或已确认安装的历史回滚目标，以及幂等键；先写入
+持久 intent，再调用 server-owned 的 admission close、安装和完整运行时生成
+切换。成功响应为 `activation_state=applied`；运行时失败或提交结果不确定时
+返回 503，并保留同一 pending 回执，使用相同幂等键重试不会新增发布或审计。
+冲突、幂等键复用、版本缺失、非法 JSON 和跨源/非管理员请求均有定向回归。
+
+独立 panel 的发布记录页面现在加载不可变版本、发布选中版本，并且只对有
+安装回执的旧代次提供确认后的回滚；动作后重新读取 head/history 快照，仍把
+持久 `pending` 与当前进程就绪状态分开显示。control-plane 定向 Go 测试、
+panel routing contract 测试及 `svelte-check` 均通过。
+
+本项只闭合“写 API + 面板动作”边界，不等于跨进程 ownership/fencing、崩溃
+恢复、在线 Shadow、模型治理硬阻断、MCP 审批/Kill Switch、正式 registry
+制品、真实供应商/TLS、生产升级/回滚或生产切换授权；总目标继续
+**active / PARTIAL**。
+
 ## 当前执行状态与剩余门禁
 
 ### 2026-11-01 同候选真实恢复 CI

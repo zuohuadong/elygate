@@ -126,8 +126,8 @@ func (s *Store) GetRoutingReleaseHead(ctx context.Context) (*RoutingReleaseHead,
 }
 
 // AcceptRoutingRelease does not install rules, change depth or acknowledge
-// application. There is deliberately no HTTP entry point until installation
-// and recovery can make those changes coherently.
+// application. HTTP mutation handlers call this first and then pass the
+// durable epoch through the server-owned activation callback.
 func (s *Store) AcceptRoutingRelease(ctx context.Context, request RoutingReleaseRequest) (*RoutingReleaseAttempt, error) {
 	if err := request.validate(); err != nil {
 		return nil, err

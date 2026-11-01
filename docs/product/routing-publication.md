@@ -167,6 +167,36 @@ no new HTTP route. Whole-policy/depth installation, CAS-protected application
 acknowledgements, restart-before-serving recovery, live drift detection, rollback,
 and API/panel acceptance still belong to the remaining stages.
 
+## HTTP Publication And Panel Mutation Checkpoint (2026-11-02)
+
+The canonical control-plane now exposes administrator-only `POST`
+`/api/control-plane/routing/releases/publish` and `/rollback` mutations.
+Requests use strict JSON, an expected durable epoch, an immutable version or
+durably applied rollback target, and a caller-supplied idempotency key. The
+handler first records the intent transactionally, then invokes the server-owned
+admission-close/install/complete-generation-swap callback. A successful
+response reports `activation_state=applied`; a runtime or commit uncertainty
+returns `503` with the same durable attempt and `activation_state=pending`, so a
+retry with the same key can complete or replay it without another release or
+audit event. Conflicts, key reuse, missing versions and malformed payloads have
+separate status handling. Requests retain the existing administrator identity,
+JSON content-type and same-origin protections.
+
+The independent panel's release view now loads immutable versions, publishes a
+selected version, and offers rollback only to an older release with a verified
+installation receipt. Every action uses a fresh idempotency key, the expected
+head epoch, confirmation for rollback, and a post-action snapshot refresh;
+pending installation remains visibly distinct from process readiness.
+
+Targeted control-plane tests cover authentication/content-type/origin guards,
+strict payload rejection, publish success, idempotent replay, optimistic
+conflict, pending activation followed by safe retry, and rollback. Panel
+routing contract tests and `svelte-check` pass with zero diagnostics. This
+checkpoint does not prove cross-process ownership/fencing, crash recovery
+between processes, online Shadow/model enforcement, MCP approval/Kill Switch,
+registry delivery, or production deployment and real-account acceptance; the
+overall publication and production contracts remain **PARTIAL**.
+
 ## Installation And Startup Checkpoint
 
 This October 30, 2026 checkpoint remains **PARTIAL**. The user's commit/push

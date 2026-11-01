@@ -27,6 +27,7 @@ type Handler struct {
 	store      *Store
 	logManager logging.LogManager
 	lifecycle  VirtualKeyLifecycle
+	releases   RoutingReleaseActivator
 	usageSync  usageSyncState
 }
 
@@ -71,6 +72,9 @@ func NewHandler(store *Store, logManager logging.LogManager, lifecycle ...Virtua
 	h := &Handler{store: store, logManager: logManager}
 	if len(lifecycle) > 0 {
 		h.lifecycle = lifecycle[0]
+		if activator, ok := lifecycle[0].(RoutingReleaseActivator); ok {
+			h.releases = activator
+		}
 	}
 	return h
 }
@@ -119,6 +123,7 @@ func (h *Handler) RegisterRoutes(r *router.Router, middlewares ...schemas.Bifros
 	r.GET("/api/control-plane/audit-events", wrap(h.listAudit))
 	h.RegisterRoutingPolicyVersionRoutes(r, middlewares...)
 	h.RegisterRoutingReleaseReadRoutes(r, middlewares...)
+	h.RegisterRoutingReleaseWriteRoutes(r, middlewares...)
 }
 
 func (h *Handler) InferenceAccessMiddleware() schemas.BifrostHTTPMiddleware {
