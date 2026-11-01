@@ -20,6 +20,12 @@ const (
 	DefaultAsyncJobResultTTL = 3600
 )
 
+// ErrVirtualKeyAccessDenied marks an async submission rejected before a job
+// record is created because the caller's virtual key is not currently active.
+// The HTTP transport maps it to a stable authentication response without
+// exposing checker or storage details.
+var ErrVirtualKeyAccessDenied = errors.New("virtual key access denied")
+
 const (
 	asyncJobCleanupInterval      = 1 * time.Minute
 	asyncJobCleanupTimeout       = 1 * time.Minute
@@ -128,6 +134,11 @@ func (e *AsyncJobExecutor) SubmitJob(bifrostCtx *schemas.BifrostContext, resultT
 			return nil, fmt.Errorf("virtual key not found")
 		}
 		virtualKeyID = &vk.ID
+		if e.accessChecker != nil {
+			if err := e.accessChecker.CheckVirtualKeyAccess(bifrostCtx, *virtualKeyID); err != nil {
+				return nil, ErrVirtualKeyAccessDenied
+			}
+		}
 	}
 
 	endpoint, err := e.getWebhookEndpointIfPresent(bifrostCtx)

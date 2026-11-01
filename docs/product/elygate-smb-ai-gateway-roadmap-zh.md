@@ -32,7 +32,7 @@ Elygate 当前定位收敛为：
 | Project / Application | Implemented | 已有控制面 API、存储和管理页面 |
 | Application 与 Virtual Key 绑定 | Implemented | 支持绑定、过期、撤销；optional 允许未绑定 Key，required 拒绝已解析但未绑定的 Key，disabled 跳过绑定检查 |
 | Application Key 生命周期 | Implemented | 支持创建、一次性返回值、显式轮换、显式撤销；Key 变更同步到内存治理状态 |
-| 非普通 HTTP 路径绑定校验 | Partial | WebSocket、WebRTC 接入、MCP、OAuth VK 模式和 Async 已接入；已建立 WebRTC 会话已在受支持的下一 turn 入口重校验，媒体流、活动 turn 内动作和全部路径仍未形成统一强保证 |
+| 非普通 HTTP 路径绑定校验 | Partial | WebSocket、WebRTC 接入、MCP、OAuth VK 模式和 Async 已接入；Async 提交、后台执行和结果读取均会重校验，已建立 WebRTC 会话已在受支持的下一 turn 入口重校验，媒体流、活动 turn 内动作和全部路径仍未形成统一强保证 |
 | Usage Ledger | Partial | 支持投影、筛选查询、全筛选范围汇总和 CSV/API 导出；项目/应用日月预算、持久化阈值告警及控制面板已闭环；预算告警处理已通过本地 SQLite 和双 PostgreSQL 生产运行链路与浏览器验收，输入为合成日志而非真实模型调用；已有历史周期重算、历史分析、管理员已读、告警确认与人工处理/重开，真实外部投递、多用户、预测及生产交付仍未完整 |
 | Control Plane Audit | Partial | 控面与员工管理写操作已有事务内审计；上游管理事件已接持久化桥接，补齐 RSS、管理员认证配置、Warp 任务身份及显式会话删除事件；所有敏感操作覆盖、会话生命周期与跨存储原子性仍未完整 |
 | 企业身份 | Partial | 本地管理员和员工体系可用；OIDC 后续实现，LDAP/SCIM 暂不做 |

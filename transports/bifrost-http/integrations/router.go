@@ -1900,6 +1900,11 @@ func (g *GenericRouter) handleAsyncCreate(
 
 	job, err := executor.SubmitJob(bifrostCtx, resultTTL, operation, operationType)
 	if err != nil {
+		if errors.Is(err, logstore.ErrVirtualKeyAccessDenied) {
+			g.sendError(ctx, bifrostCtx, config.ErrorConverter,
+				newBifrostErrorWithCode(nil, "virtual key access is no longer active", fasthttp.StatusUnauthorized))
+			return
+		}
 		// An unusable webhook reference is the caller's mistake, not a
 		// server failure.
 		if errors.Is(err, logstore.ErrInvalidWebhookReference) {

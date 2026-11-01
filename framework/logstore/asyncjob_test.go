@@ -39,6 +39,17 @@ func (denyingAsyncAccessChecker) CheckVirtualKeyAccess(context.Context, string) 
 	return assert.AnError
 }
 
+type denyAfterFirstAsyncAccessChecker struct {
+	calls atomic.Int32
+}
+
+func (c *denyAfterFirstAsyncAccessChecker) CheckVirtualKeyAccess(context.Context, string) error {
+	if c.calls.Add(1) > 1 {
+		return assert.AnError
+	}
+	return nil
+}
+
 func (t *testGovernanceStore) GetVirtualKey(_ context.Context, vkValue string) (*configstoreTables.TableVirtualKey, bool) {
 	vk, ok := t.virtualKeys[vkValue]
 	return vk, ok
@@ -126,7 +137,7 @@ func TestSubmitJob_PropagatesContextValues(t *testing.T) {
 
 func TestSubmitJob_RechecksVirtualKeyAccessBeforeExecution(t *testing.T) {
 	executor := newTestAsyncExecutor(t)
-	executor.SetVirtualKeyAccessChecker(denyingAsyncAccessChecker{})
+	executor.SetVirtualKeyAccessChecker(&denyAfterFirstAsyncAccessChecker{})
 	ctx := schemas.NewBifrostContext(context.Background(), schemas.NoDeadline)
 	ctx.SetValue(schemas.BifrostContextKeyVirtualKey, "sk-bf-test")
 	var called atomic.Bool
@@ -141,6 +152,25 @@ func TestSubmitJob_RechecksVirtualKeyAccessBeforeExecution(t *testing.T) {
 	require.False(t, called.Load())
 	require.Equal(t, schemas.AsyncJobStatusFailed, stored.Status)
 	require.Equal(t, fasthttp.StatusUnauthorized, stored.StatusCode)
+}
+
+func TestSubmitJob_RejectsInactiveVirtualKeyBeforeCreatingJob(t *testing.T) {
+	executor := newTestAsyncExecutor(t)
+	executor.SetVirtualKeyAccessChecker(denyingAsyncAccessChecker{})
+	ctx := schemas.NewBifrostContext(context.Background(), schemas.NoDeadline)
+	ctx.SetValue(schemas.BifrostContextKeyVirtualKey, "sk-bf-test")
+	var called atomic.Bool
+
+	job, err := executor.SubmitJob(ctx, 3600, func(*schemas.BifrostContext) (interface{}, *schemas.BifrostError) {
+		called.Store(true)
+		return nil, nil
+	}, schemas.ChatCompletionRequest)
+	require.Nil(t, job)
+	require.ErrorIs(t, err, ErrVirtualKeyAccessDenied)
+	require.False(t, called.Load())
+
+	_, err = executor.logstore.FindAsyncJobByID(context.Background(), "missing")
+	require.ErrorIs(t, err, ErrNotFound)
 }
 
 func TestRetrieveJob_RechecksVirtualKeyAccess(t *testing.T) {

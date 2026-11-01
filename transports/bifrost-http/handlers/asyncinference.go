@@ -555,6 +555,10 @@ func getResultTTLFromHeaderWithDefault(ctx *fasthttp.RequestCtx, defaultTTL int)
 // sendSubmitJobError maps a submit failure to HTTP: an unusable webhook
 // reference is the caller's mistake, everything else is server-side.
 func sendSubmitJobError(ctx *fasthttp.RequestCtx, err error) {
+	if errors.Is(err, logstore.ErrVirtualKeyAccessDenied) {
+		SendError(ctx, fasthttp.StatusUnauthorized, "virtual key access is no longer active")
+		return
+	}
 	if errors.Is(err, logstore.ErrInvalidWebhookReference) {
 		SendError(ctx, fasthttp.StatusBadRequest, err.Error())
 		return

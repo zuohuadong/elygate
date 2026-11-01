@@ -1589,3 +1589,25 @@ Docker registry manifest 查询确认该 digest 对应多架构镜像，Compose 
 
 只有最终候选的全部必需证据已归档、所有阻断项已解决，
 才能将此清单改为可发布；本地通过、CI 通过、镜像通过和生产验收是不同边界。
+
+## 2026-11-01 异步 Application Key 提交前阻断
+
+后续项 `application-binding-async-submit-gate`：parent 为当前生产准备目标，
+source 为异步任务全路径绑定复核，reason 为此前只在后台执行和结果读取时重查
+Virtual Key，撤销或过期的 Key 仍可能先收到 `202 Accepted`。Native、低风险、
+root 单 writer、external=0；不改变 Bifrost 上游异步协议，不增加旧 Elygate
+兼容层，也不涉及路由发布、MCP 审批或生产部署。
+
+`framework/logstore.AsyncJobExecutor.SubmitJob` 现在在创建 durable job 记录前
+调用已注入的 `VirtualKeyAccessChecker`。拒绝使用稳定的内部 sentinel，HTTP
+提交路径统一返回 `401` 和固定消息 `virtual key access is no longer active`，
+不泄漏存储层错误；后台执行时的二次校验和结果读取时的校验仍保留，用于覆盖
+提交后撤销和轮询期间撤销。无 Virtual Key 的直接密钥路径不增加检查。
+
+新增回归覆盖：提交前拒绝不创建可执行任务、提交后撤销仍将任务标记为
+`401` 失败，以及既有结果读取重校验。该改动只增加一次异步提交阶段的控制面
+访问查询，不进入同步推理请求路径；持有的 Key ID 仍是已有 job 行字段，没有
+新的常驻缓存。由于本机首次 Go 依赖初始化在 `/Volumes/Datas` 上进入长时间
+文件 I/O 等待，本轮未将中断的本地 Go 命令记为通过或失败；提交前需在已有
+依赖缓存或 CI 以同一 SHA 重跑 `framework/logstore` 与 HTTP 定向测试。
+整体生产目标继续保持 **active / PARTIAL**。
