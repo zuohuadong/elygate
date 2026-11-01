@@ -164,6 +164,16 @@ UID/GID/mode，绝不修改子项；专项覆盖 helper 失败、非法/缺失 r
 启动、业务恢复、清理和候选归档，整体继续 **PARTIAL**。
 代价：仅恢复期间读取一个 tar 根目录元数据并执行一次受限 chmod/chown，无推理
 请求路径或常驻服务端内存增量。
+新 SHA `6d9ac7678` 已越过前一轮的网关启动失败，Panel、API 合约、镜像构建、
+健康检查和恢复前置完整性均通过；完整恢复随后发现 smoke 将普通控制面项目创建
+误当作签名治理审计事件，失败于 `restored audit sequence must accept new signed events`。
+后续项 `single-node-signed-audit-producer`：parent 为
+`single-node-runtime-root-metadata`，source 为 run `41259046988`，reason 为纠正两套
+审计存储的 smoke 写入源。Native、低风险、单 writer，范围仅本 smoke、契约回归与记录；
+不修改服务端或审计事务语义。保留项目创建并核对普通审计事件，另用虚拟 key 描述更新
+推进签名链，校验新签名回执和链头；专项覆盖缺失/陈旧/非法回执、未前进链头及验签失败。
+代价仅 CI 测试请求与临时资源，无推理请求路径和常驻内存增量。仍须新的同 SHA CI
+重新通过完整恢复、清理和候选归档；在此之前整体保持 **PARTIAL**。
 既有 `9edd2ca54` 的 run `41242882512` 已于 2026-10-31 21:26:31 UTC
 （北京时间 2026-11-01 05:26:31）全部成功，但没有执行本新增恢复步骤。
 本项只有 CI 测试耗时和测试进程的临时内存/磁盘，无推理生产路径或常驻内存增量。

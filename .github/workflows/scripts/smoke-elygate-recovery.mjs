@@ -256,6 +256,19 @@ async function auditSnapshot(api) {
 	return { chain, publicKey: await api('/api/governance/audit-logs/public-key') };
 }
 
+export async function verifySignedAuditContinuation(ctx, api, restoredAudit) {
+	const mutation = await api(`/api/governance/virtual-keys/${ctx.key.virtual_key_id}`, {
+		method: 'PUT', body: { description: 'After recovery' },
+	});
+	const receipt = mutation.audit_receipt;
+	check(Number.isSafeInteger(receipt?.sequence) &&
+		receipt.sequence > Number(restoredAudit.chain.head_sequence),
+		'restored governance mutation must return a new signed audit receipt');
+	const continuedAudit = await auditSnapshot(api);
+	check(Number(continuedAudit.chain.head_sequence) >= receipt.sequence,
+		'restored audit sequence must accept new signed events');
+}
+
 function startUpstream(ctx) {
 	ctx.relayHits = 0;
 	ctx.inferenceHits = 0;
@@ -405,9 +418,12 @@ async function verifyRecovered(ctx) {
 		'retained audit feed must preserve original events');
 	await verifyRelay(ctx, api);
 	await verifyUsageLedger(ctx, api);
-	await api('/api/control-plane/projects', { method: 'POST', body: { name: 'After recovery' }, status: 201 });
-	const continuedAudit = await auditSnapshot(api);
-	check(Number(continuedAudit.chain.head_sequence) > Number(restoredAudit.chain.head_sequence), 'restored audit sequence must accept new signed events');
+	const project = await api('/api/control-plane/projects', { method: 'POST', body: { name: 'After recovery' }, status: 201 });
+	const continuedEvents = await api('/api/control-plane/audit-events?limit=100');
+	check(continuedEvents.data?.some(event => event.action === 'project.create' &&
+		event.resource_type === 'project' && event.resource_id === project.id),
+		'restored project creation must persist its control-plane audit event');
+	await verifySignedAuditContinuation(ctx, api, restoredAudit);
 	await api('/api/session/logout', { method: 'POST' });
 	await api('/api/config', { status: 401 });
 	stopGateway(ctx, 'target');

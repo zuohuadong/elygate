@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parse } from 'yaml';
 import { resolveEnterprisePanelModule } from '../../vite-enterprise-panel.mjs';
-import { candidateManifest, command, recoveryEnvironment, runProductionScript, seedBusiness, validateCandidate } from '../../../.github/workflows/scripts/smoke-elygate-recovery.mjs';
+import { candidateManifest, command, recoveryEnvironment, runProductionScript, seedBusiness, validateCandidate, verifySignedAuditContinuation } from '../../../.github/workflows/scripts/smoke-elygate-recovery.mjs';
 
 describe('enterprise panel build contract', () => {
 	test('uses the OSS fallback for ordinary builds', () => {
@@ -310,6 +310,39 @@ exit 1
 		expect(fixture.application).toEqual({ projectID: 'project', id: 'application' });
 		expect(fixture.key).toEqual(replies[3]);
 	});
+
+	test.each(['success', 'missing-receipt', 'stale-receipt', 'invalid-receipt', 'stale-head', 'invalid-chain'])(
+		'recovery advances signed audit with a real governance operation (%s)', async (scenario) => {
+			const requests: { route: string; options: unknown }[] = [];
+			const receipt = scenario === 'missing-receipt' ? undefined :
+				{ sequence: scenario === 'stale-receipt' ? 10 : scenario === 'invalid-receipt' ? '11' : 11 };
+			const head = scenario === 'stale-head' ? 10 : 11;
+			const replies = [
+				{ audit_receipt: receipt },
+				{ valid: scenario !== 'invalid-chain', head_sequence: head, checked_through_sequence: head },
+				{ key_id: 'restored-key' },
+			];
+			const api = async (route: string, options?: unknown) => {
+				requests.push({ route, options });
+				return replies[requests.length - 1];
+			};
+			const verification = verifySignedAuditContinuation({ key: { virtual_key_id: 'restored-vk' } },
+				api, { chain: { head_sequence: 10 } });
+			if (scenario === 'success') await verification;
+			else await expect(verification).rejects.toThrow(scenario === 'invalid-chain'
+				? 'full signed audit chain must verify' : scenario === 'stale-head'
+					? 'restored audit sequence must accept new signed events'
+					: 'restored governance mutation must return a new signed audit receipt');
+			expect(requests[0]).toEqual({
+				route: '/api/governance/virtual-keys/restored-vk',
+				options: { method: 'PUT', body: { description: 'After recovery' } },
+			});
+			if (scenario === 'success') expect(requests.map(request => request.route)).toEqual([
+				'/api/governance/virtual-keys/restored-vk', '/api/governance/audit-logs/verify',
+				'/api/governance/audit-logs/public-key',
+			]);
+		},
+	);
 
 	test.each(['success', 'invalid-identity', 'invalid-commit', 'save-failure', 'inspect-mismatch', 'load-failure'])(
 		'candidate export executes the workflow shell and fails closed (%s)', async (scenario) => {
