@@ -39,6 +39,20 @@ type RoutingPolicyCompiler func(context.Context, RoutingPolicyVersion) ([]*table
 // publication API. Call only before serving; a running process additionally
 // needs a fenced runtime generation swap and fail-closed handling after commit.
 func (s *Store) InstallAcceptedRoutingRelease(ctx context.Context, epoch int64, compile RoutingPolicyCompiler, actor string) (*RoutingReleaseInstallation, error) {
+	return s.installAcceptedRoutingRelease(ctx, epoch, compile, actor, nil)
+}
+
+// InstallAcceptedRoutingReleaseFenced is the serving-process variant. The
+// durable fence is checked in the same transaction as the policy replacement,
+// so a token takeover cannot commit an installation from an old process.
+func (s *Store) InstallAcceptedRoutingReleaseFenced(ctx context.Context, epoch int64, compile RoutingPolicyCompiler, actor string, fence RoutingRuntimeFenceToken) (*RoutingReleaseInstallation, error) {
+	if fence.Token <= 0 || fence.OwnerID == "" {
+		return nil, ErrRoutingRuntimeFenceRequest
+	}
+	return s.installAcceptedRoutingRelease(ctx, epoch, compile, actor, &fence)
+}
+
+func (s *Store) installAcceptedRoutingRelease(ctx context.Context, epoch int64, compile RoutingPolicyCompiler, actor string, fence *RoutingRuntimeFenceToken) (*RoutingReleaseInstallation, error) {
 	if epoch <= 0 || compile == nil {
 		return nil, ErrRoutingReleaseRequest
 	}
@@ -49,10 +63,10 @@ func (s *Store) InstallAcceptedRoutingRelease(ctx context.Context, epoch int64, 
 	if _, nested := db.Statement.ConnPool.(gorm.TxCommitter); nested {
 		return nil, ErrRoutingInstallationNestedTransaction
 	}
-	return installRoutingReleaseRootTransaction(db, epoch, compile, actor)
+	return installRoutingReleaseRootTransaction(db, epoch, compile, actor, fence)
 }
 
-func installRoutingReleaseRootTransaction(db *gorm.DB, epoch int64, compile RoutingPolicyCompiler, actor string) (*RoutingReleaseInstallation, error) {
+func installRoutingReleaseRootTransaction(db *gorm.DB, epoch int64, compile RoutingPolicyCompiler, actor string, fence *RoutingRuntimeFenceToken) (*RoutingReleaseInstallation, error) {
 	tx := db.Begin()
 	if tx.Error != nil {
 		return nil, tx.Error
@@ -63,7 +77,7 @@ func installRoutingReleaseRootTransaction(db *gorm.DB, epoch int64, compile Rout
 			_ = rollbackRoutingInstallationTransaction(tx)
 		}
 	}()
-	installation, callbackErr := installRoutingReleaseTx(tx, epoch, compile, actor)
+	installation, callbackErr := installRoutingReleaseTx(tx, epoch, compile, actor, fence)
 	workCompleted = true
 	if callbackErr != nil {
 		if rollbackErr := rollbackRoutingInstallationTransaction(tx); rollbackErr != nil {
@@ -97,9 +111,14 @@ func rollbackRoutingInstallationTransaction(tx *gorm.DB) error {
 	return err
 }
 
-func installRoutingReleaseTx(tx *gorm.DB, epoch int64, compile RoutingPolicyCompiler, actor string) (*RoutingReleaseInstallation, error) {
+func installRoutingReleaseTx(tx *gorm.DB, epoch int64, compile RoutingPolicyCompiler, actor string, fence *RoutingRuntimeFenceToken) (*RoutingReleaseInstallation, error) {
 	if err := configstore.LockRoutingPolicyWrite(tx); err != nil {
 		return nil, err
+	}
+	if fence != nil {
+		if err := validateRoutingRuntimeFenceTx(tx, *fence); err != nil {
+			return nil, err
+		}
 	}
 	head, err := lockRoutingReleaseHead(tx)
 	if err != nil {
@@ -124,6 +143,11 @@ func installRoutingReleaseTx(tx *gorm.DB, epoch int64, compile RoutingPolicyComp
 	}
 	if err := tx.Statement.Context.Err(); err != nil {
 		return nil, err
+	}
+	if fence != nil {
+		if err := validateRoutingRuntimeFenceTx(tx, *fence); err != nil {
+			return nil, err
+		}
 	}
 	return &RoutingReleaseInstallation{Head: *head, Policy: *policy}, nil
 }

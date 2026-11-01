@@ -256,6 +256,8 @@ type BifrostHTTPServer struct {
 	Client               *bifrost.Bifrost
 	Config               *lib.Config
 	routingPublicationMu sync.Mutex
+	routingFence         *controlplane.RoutingRuntimeFenceLease
+	stopRoutingFence     func()
 
 	// HTTPClientFactory hands out clients for outbound traffic other than provider
 	// inference (webhooks, skills, plugin downloads, MCP, catalog sync) that honour
@@ -4001,6 +4003,9 @@ func (s *BifrostHTTPServer) Bootstrap(ctx context.Context) error {
 	// upstream starts serving mid-uptime stays invisible until a restart or a
 	// key edit, since nothing else re-fetches list-models.
 	s.RestartLiveModelRefresher(s.Ctx)
+	if err := s.initializeRoutingRuntimeFence(s.Ctx); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -4018,6 +4023,7 @@ func (s *BifrostHTTPServer) CloseAgentGateway() {
 // Start starts the HTTP server at the specified host and port
 // Also watches signals and errors
 func (s *BifrostHTTPServer) Start() error {
+	defer s.stopRoutingRuntimeFence()
 	if s.HTTPClientFactory != nil {
 		defer s.HTTPClientFactory.CloseIdleConnections()
 	}
@@ -4144,6 +4150,7 @@ func (s *BifrostHTTPServer) Start() error {
 				s.wsPool.Close()
 			}
 			// Cleanup Config and all its background components
+			s.stopRoutingRuntimeFence()
 			if s.Config != nil {
 				s.Config.Close(shutdownCtx)
 			}
@@ -4169,6 +4176,7 @@ func (s *BifrostHTTPServer) Start() error {
 // Close removes. The graceful-shutdown path above does the same as part of
 // its full teardown.
 func (s *BifrostHTTPServer) cleanupAfterServeError() {
+	s.stopRoutingRuntimeFence()
 	if s.IntegrationHandler != nil {
 		s.IntegrationHandler.Close()
 	}

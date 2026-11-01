@@ -436,6 +436,31 @@ This is a process-local primitive and internal activation path, not cross-proces
 fencing or an exposed HTTP/panel publication workflow. Rollback, external runtime
 acceptance and production authorization remain outstanding. Status: **PARTIAL**.
 
+## Runtime Fence Checkpoint (2026-11-02)
+
+Migration `elygate_control_plane_v16_routing_runtime_fence` adds a durable
+singleton runtime owner with a monotonically increasing fencing token and a
+30-second renewal lease. A gateway instance claims the row during bootstrap,
+renews it at one-third of the lease, and releases it during orderly shutdown.
+An unexpired owner blocks a second instance; an expired owner can be taken over
+with a new token so a crash does not permanently strand the gateway.
+
+The publish/rollback activation path validates the exact owner/token before
+closing admission, inside the installation transaction, after the durable
+commit, before the in-memory generation swap and after the swap. A stale token
+cannot install a release. If renewal or validation loses ownership, the
+process closes routing admission and remains fail-closed; requests already
+pinned to an existing generation retain the existing upstream completion
+behavior.
+
+SQLite control-plane tests cover exclusivity, takeover, renewal rejection and
+stale-token installation rejection. Server tests cover admission closure after
+fence loss. This closes the local durable-token primitive, but it does not
+prove power-loss fencing under an unbounded network partition, external
+multi-process crash timing, or production stop-before-start authorization.
+The publication and production-readiness contracts therefore remain
+**PARTIAL**.
+
 ## Audited Rollback Follow-Up
 
 Follow-up `routing-release-rollback-receipts` has parent `2a4f8e2ff`, source

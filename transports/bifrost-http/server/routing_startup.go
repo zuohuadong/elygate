@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/maximhq/bifrost/framework/configstore"
@@ -25,6 +26,42 @@ func compileRoutingRelease(ctx context.Context, version controlplane.RoutingPoli
 
 func checkRoutingPolicyStartup(ctx context.Context, store configstore.ConfigStore) (configstore.RoutingPolicyStartupState, error) {
 	return controlplane.CheckRoutingPolicyStartup(ctx, store, compileRoutingRelease)
+}
+
+func (s *BifrostHTTPServer) initializeRoutingRuntimeFence(ctx context.Context) error {
+	if s == nil || s.Config == nil || s.Config.ConfigStore == nil ||
+		!s.Config.IsPluginLoaded(routing.PluginName) {
+		return nil
+	}
+	releases, err := controlplane.NewStore(ctx, s.Config.ConfigStore)
+	if err != nil {
+		return fmt.Errorf("initialize routing runtime fence store: %w", err)
+	}
+	lease, err := releases.AcquireRoutingRuntimeFence(
+		ctx, uuid.NewString(), controlplane.DefaultRoutingRuntimeFenceTTL,
+	)
+	if err != nil {
+		return fmt.Errorf("acquire routing runtime fence: %w", err)
+	}
+	s.routingFence = lease
+	s.stopRoutingFence = lease.StartRenewal(s.Ctx, s.markRoutingFenceLost)
+	if err := s.configureRoutingAdmission(); err != nil {
+		s.stopRoutingRuntimeFence()
+		return fmt.Errorf("bind routing runtime fence admission: %w", err)
+	}
+	return nil
+}
+
+func (s *BifrostHTTPServer) stopRoutingRuntimeFence() {
+	if s == nil {
+		return
+	}
+	if s.stopRoutingFence != nil {
+		stop := s.stopRoutingFence
+		s.stopRoutingFence = nil
+		stop()
+	}
+	s.routingFence = nil
 }
 
 func initRoutingPlugin(ctx context.Context, options *routing.Config, config *lib.Config, governancePlugin routing.Governance) (*routing.RoutingPlugin, error) {

@@ -60,24 +60,46 @@ func (s *BifrostHTTPServer) installAcceptedRoutingRelease(ctx context.Context, r
 	if !ok {
 		return errors.New("routing store cannot swap a prepared policy")
 	}
-	s.Client.SetRequestAdmission(routingRequestAdmission(publisher))
+	s.Client.SetRequestAdmission(s.routingRequestAdmission(publisher))
 	wasOpen := publisher.CloseAdmission()
-	installation, err := releases.InstallAcceptedRoutingRelease(ctx, epoch, compileRoutingRelease, actor)
+	if err := s.validateRoutingFence(ctx, releases); err != nil {
+		publisher.CloseAdmission()
+		return s.routingFenceFailure(err)
+	}
+	var installation *controlplane.RoutingReleaseInstallation
+	if s.routingFence == nil {
+		installation, err = releases.InstallAcceptedRoutingRelease(ctx, epoch, compileRoutingRelease, actor)
+	} else {
+		installation, err = releases.InstallAcceptedRoutingReleaseFenced(ctx, epoch, compileRoutingRelease, actor, s.routingFence.Token())
+	}
 	if err != nil {
-		if wasOpen && !errors.Is(err, controlplane.ErrRoutingInstallationUncertain) {
+		if wasOpen && !errors.Is(err, controlplane.ErrRoutingInstallationUncertain) &&
+			!errors.Is(err, controlplane.ErrRoutingRuntimeFenceLost) {
 			publisher.OpenAdmission()
 		}
 		return err
 	}
+	if err := s.validateRoutingFence(ctx, releases); err != nil {
+		publisher.CloseAdmission()
+		return s.routingFenceFailure(err)
+	}
 	publisher.ManagePolicy()
+	if err := s.validateRoutingFence(ctx, releases); err != nil {
+		publisher.CloseAdmission()
+		return s.routingFenceFailure(err)
+	}
 	if err := activateCommittedRoutingPolicy(ctx, s.Config, publisher, installation.Policy); err != nil {
 		return fmt.Errorf("routing release committed but this process failed closed: %w", err)
+	}
+	if err := s.validateRoutingFence(ctx, releases); err != nil {
+		publisher.CloseAdmission()
+		return s.routingFenceFailure(err)
 	}
 	publisher.OpenAdmission()
 	return nil
 }
 
-func routingRequestAdmission(controller routingPolicyAdmission) schemas.RequestAdmission {
+func (s *BifrostHTTPServer) routingRequestAdmission(controller routingPolicyAdmission) schemas.RequestAdmission {
 	return func(ctx *schemas.BifrostContext, req *schemas.BifrostRequest) *schemas.BifrostError {
 		if controller.Admit(ctx, req) {
 			return nil
@@ -106,11 +128,50 @@ func (s *BifrostHTTPServer) configureRoutingAdmission() error {
 		// Publication must be able to close new admissions before its first
 		// durable intent, so the callback cannot be installed only after
 		// managed policy state exists.
-		s.Client.SetRequestAdmission(routingRequestAdmission(controller))
+		s.Client.SetRequestAdmission(s.routingRequestAdmission(controller))
 		return nil
 	}
 	s.Client.SetRequestAdmission(nil)
 	return nil
+}
+
+func (s *BifrostHTTPServer) validateRoutingFence(ctx context.Context, releases *controlplane.Store) error {
+	if s == nil || s.routingFence == nil {
+		return nil
+	}
+	if !s.routingFence.Valid() {
+		return controlplane.ErrRoutingRuntimeFenceLost
+	}
+	if releases == nil {
+		return controlplane.ErrRoutingRuntimeFenceLost
+	}
+	if err := releases.ValidateRoutingRuntimeFence(ctx, s.routingFence.Token()); err != nil {
+		s.routingFence.MarkLost()
+		return err
+	}
+	return nil
+}
+
+func (s *BifrostHTTPServer) routingFenceFailure(err error) error {
+	if errors.Is(err, controlplane.ErrRoutingRuntimeFenceLost) {
+		return fmt.Errorf("routing runtime ownership was lost; process failed closed: %w", err)
+	}
+	return fmt.Errorf("routing runtime ownership could not be verified; process failed closed: %w", err)
+}
+
+// markRoutingFenceLost is called by the renewal loop. It closes admission
+// under the same publication mutex used by all generation swaps.
+func (s *BifrostHTTPServer) markRoutingFenceLost() {
+	if s == nil {
+		return
+	}
+	s.routingPublicationMu.Lock()
+	defer s.routingPublicationMu.Unlock()
+	if plugin, err := s.getRoutingPlugin(); err == nil {
+		if controller, ok := plugin.GetRuleStore().(routingPolicyAdmission); ok {
+			controller.CloseAdmission()
+		}
+	}
 }
 
 func activateCommittedRoutingPolicy(ctx context.Context, config *lib.Config, publisher routingPolicyPublisher, policy configstore.RoutingPolicySnapshot) error {
