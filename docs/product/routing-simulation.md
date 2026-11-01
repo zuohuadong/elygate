@@ -4,7 +4,9 @@ The independent panel provides an offline simulation editor alongside the
 rule list and decision tree. Its administrator draft controls use the separate
 [routing draft API](routing-drafts.md) to list, create, load, update and delete
 candidates with optimistic revisions and immutable policy version history.
-Publishing, rollback and online Shadow are not implemented.
+Administrator publication and rollback now use the canonical release mutation
+API and the independent release view; online Shadow remains out of this
+offline workflow and is not implemented.
 
 `POST /api/control-plane/routing/simulate` requires a verified administrator
 identity, denies auth bypass, and uses the existing control-plane JSON media
@@ -172,8 +174,11 @@ new draft API's live browser integration gap. Draft browser evidence is
 described separately in [Routing Policy Drafts](routing-drafts.md).
 It is not PostgreSQL browser acceptance, real provider/key authorization,
 real billing, multi-user isolation, deployment or production recovery.
-Publishing, rollback and online Shadow remain unimplemented. Immutable version
-capture and history are covered separately in [Routing Policy Drafts](routing-drafts.md).
+Online Shadow remains unimplemented. Immutable version capture, publication and
+rollback history are covered separately in [Routing Policy Drafts](routing-drafts.md)
+and [Routing Publication](routing-publication.md). The mutation API and panel
+actions still require the process-local activation path, external recovery and
+production authorization described there.
 The temporary backend, preview server and browser were closed after the run.
 
 ## Bounds And Cost
