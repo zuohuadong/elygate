@@ -66,6 +66,15 @@ jobs:
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
           go-version: "1.27.3"
+          cache-dependency-path: |
+            cli/go.sum
+            core/go.sum
+            framework/go.sum
+            plugins/*/go.sum
+            tests/cmd/e2eseed/go.sum
+            tests/cmd/seed/go.sum
+            tests/cmd/seedvks/go.sum
+            transports/go.sum
 
       - name: Setup Go workspace
         run: make setup-workspace
@@ -146,6 +155,15 @@ jobs:
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
           go-version: "1.27.3"
+          cache-dependency-path: |
+            cli/go.sum
+            core/go.sum
+            framework/go.sum
+            plugins/*/go.sum
+            tests/cmd/e2eseed/go.sum
+            tests/cmd/seed/go.sum
+            tests/cmd/seedvks/go.sum
+            transports/go.sum
 
       - name: Setup Go workspace
         run: make setup-workspace
