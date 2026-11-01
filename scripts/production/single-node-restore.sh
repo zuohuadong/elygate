@@ -250,7 +250,8 @@ created_container_id="$(docker create --network none --read-only --cap-drop ALL 
 [[ "$created_container_id" =~ ^[a-f0-9]{64}$ ]] ||
 	fail "temporary runtime container identity is invalid"
 runtime_container_id="$created_container_id"
-docker cp -a - "$runtime_container_id:/restore" < "$backup_dir/runtime.tar" >/dev/null 2>&1 ||
+# For stdin tar, -a remaps archive owners to this root helper's UID/GID.
+docker cp - "$runtime_container_id:/restore" < "$backup_dir/runtime.tar" >/dev/null 2>&1 ||
 	fail "runtime import failed; keep the partially restored target isolated"
 assert_target_unchanged
 docker rm "$runtime_container_id" >/dev/null 2>&1 ||

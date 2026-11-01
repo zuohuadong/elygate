@@ -174,7 +174,7 @@ if [[ "${FAKE_RESTORE:-}" == 1 ]]; then
 			printf '%064d\n' 3
 			exit ;;
 		cp)
-			if [[ "${2:-}" == -a && "${3:-}" == - ]]; then
+			if [[ "${2:-}" == - || ("${2:-}" == -a && "${3:-}" == -) ]]; then
 				cat >"$FAKE_TEST_ROOT/restored-runtime.tar"
 				[[ "$scenario" != restore-cp-failure ]]
 				exit
@@ -543,6 +543,17 @@ cmp -s "$test_root/restored-runtime.tar" "$backup_dir/runtime.tar" ||
 rm -f "$test_root/restored-database.dump" "$test_root/restored-runtime.tar"
 pass "valid internal links restore"
 cp "$test_root/original-runtime.tar" "$backup_dir/runtime.tar"
+python3 - "$backup_dir/runtime.tar" <<'PY'
+import io
+import sys
+import tarfile
+
+with tarfile.open(sys.argv[1], "a") as archive:
+    marker = tarfile.TarInfo("recovery-marker")
+    marker.uid, marker.gid, marker.mode = 1000, 0, 0o600
+    marker.size = len(b"runtime-marker")
+    archive.addfile(marker, io.BytesIO(b"runtime-marker"))
+PY
 refresh_checksums
 chmod 644 "$backup_dir/database.dump"
 expect_failure "public backup artifact" "backup permissions, checksums" restore
@@ -551,7 +562,17 @@ chmod 600 "$backup_dir/database.dump"
 restore >/dev/null || fail "valid isolated restore"
 cmp -s "$test_root/restored-database.dump" "$backup_dir/database.dump" || fail "database input differs"
 cmp -s "$test_root/restored-runtime.tar" "$backup_dir/runtime.tar" || fail "runtime input differs"
-grep -Fq -- 'cp -a - ' "$test_root/docker.calls" || fail "runtime archive ownership was not preserved"
+grep -Fq -- 'cp - ' "$test_root/docker.calls" || fail "runtime archive was not imported without ownership remapping"
+assert_no_matches "runtime archive import remapped ownership" -F -- 'cp -a - ' "$test_root/docker.calls"
+python3 - "$test_root/restored-runtime.tar" <<'PY'
+import sys
+import tarfile
+
+with tarfile.open(sys.argv[1]) as archive:
+    marker = archive.getmember("recovery-marker")
+    assert (marker.uid, marker.gid, marker.mode) == (1000, 0, 0o600)
+    assert archive.extractfile(marker).read() == b"runtime-marker"
+PY
 assert_no_matches "restore started services or removed source data" -E -- \
 	'(^| )(stop|start|down|up|restart|--clean)( |$)' "$test_root/docker.calls"
 (cd "$backup_dir" && sha256sum -c SHA256SUMS >/dev/null) || fail "restore changed source backup"

@@ -126,6 +126,23 @@ root 单 writer、一次独立只读 verifier；不调用 Pi，不发布或部�
 对应契约测试和本节，不放宽任何完整性断言，不输出 subprocess 原文或 secret，
 不调用 Pi，不发布或部署生产。
 代价：仅 CI 恢复脚本增加固定诊断标签，无推理请求路径或常驻服务端内存增量。
+`a543ad30b` 的 run `41255183717` 三个非 Docker job 均成功；恢复已通过目标
+停机状态和数据库指纹，在 `restored pre-start runtime marker` 失败。
+后续项 `single-node-runtime-archive-ownership`：parent 为
+`single-node-recovery-prestart-phases`，source 为该次真实 CI 失败，reason 为
+修复 stdin tar 导入时的 UID/GID 改写。范围冻结为恢复脚本、专项回归与本记录，
+Native、中风险、root 单 writer、复用一次独立只读 verifier；不调用 Pi，
+不增加 capability、不放宽归档/空卷/隔离门禁，不发布或部署生产。
+去掉 `docker cp -a -` 的 `-a`，由归档保留原始所有者，不做统一 `chown`。
+fake-Docker 专项验证参数和 tar 输入的 marker `1000:0:600`，不冒充实际解包证明。
+本机 Docker 29.8.2 真实探针对比两种参数：旧参数将 `1000:0` 和 `1001:42`
+都改为 `0:0`；新参数分别保留两者，`0600/0640` 与 mtime 也保持不变。
+此为元数据断言的局部证据：首轮进程因清理失败退出 1，随后按本轮明确名称
+确认容器/卷已删除；补跑在 Docker create 超时，未重获完整进程成功，不计通过。
+专项回归、ShellCheck、43 项构建契约（284 assertions）、Node 语法和 diff
+检查通过；独立复核为 `PASS_SCOPED`。仍须新 SHA 的真实完整恢复 CI，
+本次探针不替代业务恢复、registry、升级回滚和生产切换验收。
+代价：仅离线恢复的 Docker 导入选项变化，无推理路径或常驻内存增量。
 既有 `9edd2ca54` 的 run `41242882512` 已于 2026-10-31 21:26:31 UTC
 （北京时间 2026-11-01 05:26:31）全部成功，但没有执行本新增恢复步骤。
 本项只有 CI 测试耗时和测试进程的临时内存/磁盘，无推理生产路径或常驻内存增量。
@@ -1187,7 +1204,7 @@ CI/构建契约、部署手册和本记录。
 relation、procedure、type、非 `plpgsql` extension 和其他连接，不只检查
 `public` 表；dump list 必须与备份一致，导入使用单事务、遇错退出、无 owner/ACL。
 
-运行文件通过不运行的临时容器和 `docker cp -a` 导入新卷，避免写入只读
+运行文件通过不运行的临时容器和 `docker cp` 导入新卷，避免写入只读
 `config.json` 挂载；多次对账 Compose、容器和 config 未变化；失败不自动清理
 部分恢复目标，成功清理临时容器后才输出 PASS。归档拒绝绝对/父级路径、重复
 条目、条目位于链接下、特殊文件、setuid/setgid 以及逃逸链接图；内部指向归档
