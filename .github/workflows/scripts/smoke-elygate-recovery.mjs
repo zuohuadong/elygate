@@ -201,7 +201,7 @@ function runtimeMarker(ctx, side) {
 	return command('docker', ['run', '--rm', '--name', `${ctx.prefix}-marker-${side}`, '--network', 'none', '--read-only', '--cap-drop', 'ALL', '--user', '1000:0',
 		'--mount', `type=volume,source=${ctx.prefix}-${side}_elygate-runtime,target=/runtime,volume-nocopy,readonly`,
 		'--entrypoint', '/bin/sh', ctx.image, '-ec',
-		'sha256sum /runtime/recovery-marker; stat -c "%u:%g:%a" /runtime/recovery-marker'], { env: ctx.env });
+		'sha256sum /runtime/recovery-marker; stat -c "%u:%g:%a" /runtime/recovery-marker; stat -c "%u:%g:%a" /runtime'], { env: ctx.env });
 }
 
 async function healthyOrigin(ctx, side) {
@@ -366,7 +366,10 @@ function backupAndRestore(ctx) {
 	stopGateway(ctx, 'source');
 	ctx.frozenDatabase = databaseFingerprint(ctx, 'source');
 	ctx.marker = runtimeMarker(ctx, 'source');
-	check(ctx.marker === `${sha256(ctx.prefix)}  /runtime/recovery-marker\n1000:0:600`, 'source marker must have expected hash and ownership');
+	const markerLines = ctx.marker.split('\n');
+	check(markerLines.length === 3 && markerLines[0] === `${sha256(ctx.prefix)}  /runtime/recovery-marker` &&
+		markerLines[1] === '1000:0:600' && /^\d+:\d+:[0-7]+$/.test(markerLines[2]),
+		'source marker must have expected hash and ownership with runtime root metadata');
 	ctx.phase = 'production backup';
 	runProductionScript(ctx, 'backup', [join(ctx.work, 'source'), '--confirm-no-writers']);
 	const backups = readdirSync(join(ctx.work, 'source/backups'));
@@ -384,7 +387,7 @@ function backupAndRestore(ctx) {
 	ctx.phase = 'restored pre-start database fingerprint';
 	check(databaseFingerprint(ctx, 'target') === ctx.frozenDatabase, 'all restored table rows and sequences must match before startup');
 	ctx.phase = 'restored pre-start runtime marker';
-	check(runtimeMarker(ctx, 'target') === ctx.marker, 'restored runtime hash, UID, GID and mode must match');
+	check(runtimeMarker(ctx, 'target') === ctx.marker, 'restored runtime hash, file and root UID, GID and mode must match');
 	ctx.phase = 'restored pre-start encrypted store';
 	check(encryptedStore(ctx, 'target') === ctx.ciphertext, 'restored credential ciphertext must match');
 }

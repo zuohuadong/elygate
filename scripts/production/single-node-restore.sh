@@ -57,7 +57,7 @@ target_dir="$(CDPATH='' cd -- "$target_dir" && pwd -P)" || fail "target director
 compose_file="$target_dir/docker-compose.yml"
 config_file="$target_dir/config.json"
 
-python3 - "$backup_dir" >/dev/null 2>&1 <<'PY' ||
+runtime_root_metadata="$(python3 - "$backup_dir" 2>/dev/null <<'PY'
 import hashlib
 import pathlib
 import posixpath
@@ -95,6 +95,7 @@ for name, expected in checksums.items():
 
 members = {}
 links = {}
+runtime_root = None
 with tarfile.open(root / "runtime.tar", mode="r|*") as archive:
     for member in archive:
         name = posixpath.normpath(member.name)
@@ -105,6 +106,10 @@ with tarfile.open(root / "runtime.tar", mode="r|*") as archive:
             raise ValueError("special archive entry")
         if member.mode & 0o6000 or (name == "." and not member.isdir()):
             raise ValueError("unsafe archive permissions")
+        if name == ".":
+            if not (0 <= member.uid < 4294967295 and 0 <= member.gid < 4294967295):
+                raise ValueError("invalid root ownership")
+            runtime_root = member
         members[name] = "file" if member.isfile() else "directory" if member.isdir() else "link"
         if member.issym() or member.islnk():
             target = member.linkname
@@ -116,16 +121,18 @@ with tarfile.open(root / "runtime.tar", mode="r|*") as archive:
             if target.startswith("/") or target == ".." or target.startswith("../"):
                 raise ValueError("escaping archive link")
             links[name] = (target, member.islnk())
-if not members:
-    raise ValueError("empty runtime archive")
+if runtime_root is None:
+    raise ValueError("runtime archive lacks root metadata")
 for name in members:
     if any(parent.as_posix() in links for parent in pathlib.PurePosixPath(name).parents):
         raise ValueError("archive entry below a link")
 for target, hardlink in links.values():
     if hardlink and members.get(target) != "file":
         raise ValueError("hard link does not reference an archived file")
+print(f"{runtime_root.uid}:{runtime_root.gid} {runtime_root.mode:o}")
 PY
-	fail "backup permissions, checksums or runtime archive are invalid"
+)" || fail "backup permissions, checksums or runtime archive are invalid"
+read -r runtime_root_owner runtime_root_mode <<< "$runtime_root_metadata"
 jq -e '
 	.format == "elygate-single-node-backup-v1" and .topology == "single-database" and
 	.recovery_verified == false and
@@ -253,6 +260,12 @@ runtime_container_id="$created_container_id"
 # For stdin tar, -a remaps archive owners to this root helper's UID/GID.
 docker cp - "$runtime_container_id:/restore" < "$backup_dir/runtime.tar" >/dev/null 2>&1 ||
 	fail "runtime import failed; keep the partially restored target isolated"
+# Docker skips the archive's "." entry; restore only the mounted root, never its children.
+docker run --rm --network none --read-only --cap-drop ALL --cap-add CHOWN --cap-add FOWNER --user 0 \
+	--mount "$runtime_mount" --entrypoint /bin/sh "$gateway_image" \
+	-ec 'chmod "$2" /restore && chown "$1" /restore' restore-root \
+	"$runtime_root_owner" "$runtime_root_mode" >/dev/null 2>&1 ||
+	fail "runtime root metadata restoration failed; keep the partially restored target isolated"
 assert_target_unchanged
 docker rm "$runtime_container_id" >/dev/null 2>&1 ||
 	fail "temporary runtime container cleanup failed"

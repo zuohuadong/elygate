@@ -167,7 +167,12 @@ if [[ "${FAKE_RESTORE:-}" == 1 ]]; then
 			fi
 			exit ;;
 		run)
-			sh -ec "${!#}"
+			while [[ "$#" -gt 0 && "$1" != -ec ]]; do shift; done
+			[[ "$#" -gt 1 ]] || exit 1
+			shift
+			program="$1"
+			shift
+			sh -ec "$program" "$@"
 			exit ;;
 		create)
 			[[ "$scenario" != create-failure ]] || exit 1
@@ -300,6 +305,23 @@ fi
 exec "$FAKE_REAL_LS" "$@"
 EOF
 chmod 700 "$fake_bin/ls"
+for executable in chmod chown; do
+	cat >"$fake_bin/$executable" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+executable="${0##*/}"
+if [[ "${2:-}" == /restore && "$#" == 2 ]]; then
+	printf '%s %s /restore\n' "$executable" "$1" >>"$FAKE_TEST_ROOT/root-metadata.calls"
+	[[ "${FAKE_SCENARIO:-}" != root-metadata-failure ]]
+	exit
+fi
+if [[ "$executable" == chmod ]]; then exec "$FAKE_REAL_CHMOD" "$@"; fi
+exit 1
+EOF
+	chmod 700 "$fake_bin/$executable"
+done
+export FAKE_REAL_CHMOD
+FAKE_REAL_CHMOD="$(command -v chmod)"
 export FAKE_REAL_LS
 FAKE_REAL_LS="$(command -v ls)"
 export PATH="$fake_bin:$PATH"
@@ -451,11 +473,12 @@ for scenario in aliased-volume runtime-nonempty runtime-newline-only runtime-hid
 		bash "$restore_script" "$backup_dir" "$target_dir" --confirm-isolated-no-writers
 	assert_no_restore_writes
 done
-for scenario in restore-db-failure create-failure restore-cp-failure target-change target-mount-change cleanup-failure; do
+for scenario in restore-db-failure create-failure restore-cp-failure root-metadata-failure target-change target-mount-change cleanup-failure; do
 	case "$scenario" in
 		restore-db-*) diagnostic="database import failed" ;;
 		create-*) diagnostic="container creation failed" ;;
 		restore-cp-*) diagnostic="runtime import failed" ;;
+		root-metadata-*) diagnostic="runtime root metadata restoration failed" ;;
 		target-*) diagnostic="changed during restore" ;;
 		cleanup-*) diagnostic="cleanup failed" ;;
 	esac
@@ -482,7 +505,7 @@ refresh_checksums() {
 			image-refs.json image-metadata.json manifest.json
 	) >"$backup_dir/SHA256SUMS"
 }
-for archive_case in parent absolute duplicate symlink-escape symlink-graph link-child special setuid; do
+for archive_case in parent absolute duplicate symlink-escape symlink-graph link-child special setuid root-uid root-gid missing-root; do
 	python3 - "$backup_dir/runtime.tar" "$archive_case" <<'PY'
 import io
 import sys
@@ -490,6 +513,17 @@ import tarfile
 
 with tarfile.open(sys.argv[1], "w") as archive:
     case = sys.argv[2]
+    if case in ("root-uid", "root-gid"):
+        root = tarfile.TarInfo(".")
+        root.type = tarfile.DIRTYPE
+        root.uid = -1 if case == "root-uid" else 0
+        root.gid = 4294967295 if case == "root-gid" else 0
+        archive.addfile(root)
+        raise SystemExit
+    if case != "missing-root":
+        root = tarfile.TarInfo(".")
+        root.type = tarfile.DIRTYPE
+        archive.addfile(root)
     if case == "symlink-graph":
         first = tarfile.TarInfo("a")
         first.type = tarfile.SYMTYPE
@@ -524,6 +558,10 @@ import sys
 import tarfile
 
 with tarfile.open(sys.argv[1], "w") as archive:
+    root = tarfile.TarInfo(".")
+    root.type = tarfile.DIRTYPE
+    root.uid, root.gid, root.mode = 1234, 42, 0o750
+    archive.addfile(root)
     regular = tarfile.TarInfo("inside")
     regular.size = 5
     archive.addfile(regular, io.BytesIO(b"state"))
@@ -537,9 +575,17 @@ with tarfile.open(sys.argv[1], "w") as archive:
     archive.addfile(hardlink)
 PY
 refresh_checksums
+: >"$test_root/root-metadata.calls"
 restore >/dev/null || fail "valid internal links restore"
 cmp -s "$test_root/restored-runtime.tar" "$backup_dir/runtime.tar" ||
 	fail "internal links archive differs"
+grep -Fxq -- 'chmod 750 /restore' "$test_root/root-metadata.calls" ||
+	fail "runtime root mode was not restored"
+grep -Fxq -- 'chown 1234:42 /restore' "$test_root/root-metadata.calls" ||
+	fail "runtime root ownership was not restored"
+assert_no_matches "runtime root metadata changed child entries" -F -- '-R' "$test_root/root-metadata.calls"
+grep -Fq -- '--cap-drop ALL --cap-add CHOWN --cap-add FOWNER --user 0' "$test_root/docker.calls" ||
+	fail "runtime root helper lacks restricted capabilities"
 rm -f "$test_root/restored-database.dump" "$test_root/restored-runtime.tar"
 pass "valid internal links restore"
 cp "$test_root/original-runtime.tar" "$backup_dir/runtime.tar"

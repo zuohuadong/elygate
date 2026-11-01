@@ -143,6 +143,27 @@ fake-Docker 专项验证参数和 tar 输入的 marker `1000:0:600`，不冒充�
 检查通过；独立复核为 `PASS_SCOPED`。仍须新 SHA 的真实完整恢复 CI，
 本次探针不替代业务恢复、registry、升级回滚和生产切换验收。
 代价：仅离线恢复的 Docker 导入选项变化，无推理路径或常驻内存增量。
+`d7f867485` 的 run `41257220262` 已通过三个非 Docker job、镜像构建与健康检查，
+并越过目标停机、数据库指纹、runtime marker（含 `1000:0:600`）和加密存储；
+恢复后启动阶段失败于 `gateway must stay running without restarts`。本机探针和
+Moby 解包行为确认：Docker 会跳过 tar 的 `.` 根条目，`docker cp` 无法把归档
+根目录的 `1000:0/0775` 应用到已经存在的目标挂载点，`nocopy` 空卷根目录仍为
+`0:0/0755`，非 root 网关随后无法写入 APP_DIR。该失败不是放宽启动断言的理由。
+后续项 `single-node-runtime-root-metadata`：parent 为
+`single-node-runtime-archive-ownership`，source 为该次真实 CI 失败，reason 为
+恢复运行卷根目录元数据。范围冻结为 restore 的 root tar 元数据解析、一次性
+隔离 helper、专项回归、CI 根目录元数据对账、构建契约与本记录；Native、中风险、
+root 单 writer、复用一次独立
+只读 verifier。不调用 Pi，不递归 chown，不硬编码 `1000:0`，不放宽空卷、
+归档安全或目标隔离门禁。
+restore 现在要求 runtime archive 有唯一合法 `.` 目录条目，导入后仅在无网络、
+只读 rootfs、`cap-drop ALL` 的临时容器中用 `CHOWN`/`FOWNER` 恢复该挂载根的
+UID/GID/mode，绝不修改子项；专项覆盖 helper 失败、非法/缺失 root 元数据和
+`1000:0/0600` 文件保留。恢复 smoke 同时对账源/目标根目录数值元数据，不把 marker
+可读误当作根目录可写；本轮测试结果待最终复验。仍须新 SHA 的真实 CI 重新通过网关
+启动、业务恢复、清理和候选归档，整体继续 **PARTIAL**。
+代价：仅恢复期间读取一个 tar 根目录元数据并执行一次受限 chmod/chown，无推理
+请求路径或常驻服务端内存增量。
 既有 `9edd2ca54` 的 run `41242882512` 已于 2026-10-31 21:26:31 UTC
 （北京时间 2026-11-01 05:26:31）全部成功，但没有执行本新增恢复步骤。
 本项只有 CI 测试耗时和测试进程的临时内存/磁盘，无推理生产路径或常驻内存增量。

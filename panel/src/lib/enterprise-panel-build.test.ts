@@ -273,6 +273,9 @@ exit 1
 			'restored pre-start runtime marker', 'restored pre-start encrypted store']) {
 			expect(source).toContain(`ctx.phase = '${phase}'`);
 		}
+		expect(source).toContain('stat -c "%u:%g:%a" /runtime/recovery-marker; stat -c "%u:%g:%a" /runtime');
+		expect(source).toContain("markerLines[1] === '1000:0:600'");
+		expect(source).toContain("check(runtimeMarker(ctx, 'target') === ctx.marker");
 	});
 
 	test('recovery creates stopped gateways without recreating the running databases', async () => {
