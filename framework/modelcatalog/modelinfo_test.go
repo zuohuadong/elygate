@@ -9,10 +9,40 @@ import (
 
 	bifrost "github.com/maximhq/bifrost/core"
 	"github.com/maximhq/bifrost/core/schemas"
+	configstoreTables "github.com/maximhq/bifrost/framework/configstore/tables"
 	"github.com/maximhq/bifrost/framework/modelcatalog/datasheet"
 	"github.com/maximhq/bifrost/framework/modelcatalog/keyconfig"
 	"github.com/maximhq/bifrost/framework/modelcatalog/live"
 )
+
+func TestModelGovernanceBlockReasonRecognizesOnlyExplicitExecutionRevocations(t *testing.T) {
+	ds := datasheet.NewTestStore(nil)
+	ds.SetPricingRowsForTest([]configstoreTables.TableModelPricing{
+		{
+			Model:                "blocked-model",
+			Provider:             string(schemas.OpenAI),
+			Mode:                 "chat",
+			AdditionalAttributes: map[string]string{"health": " BLOCKED "},
+		},
+		{
+			Model:                "degraded-model",
+			Provider:             string(schemas.OpenAI),
+			Mode:                 "chat",
+			AdditionalAttributes: map[string]string{"health": "degraded"},
+		},
+	})
+	mc := NewTestCatalogWithDatasheet(ds)
+
+	if got := mc.ModelGovernanceBlockReason(schemas.OpenAI, "blocked-model"); got != "blocked" {
+		t.Fatalf("blocked model reason = %q, want blocked", got)
+	}
+	if got := mc.ModelGovernanceBlockReason(schemas.OpenAI, "degraded-model"); got != "" {
+		t.Fatalf("informational health unexpectedly blocked model: %q", got)
+	}
+	if got := mc.ModelGovernanceBlockReason(schemas.OpenAI, "unknown-model"); got != "" {
+		t.Fatalf("unknown model reason = %q, want empty", got)
+	}
+}
 
 func modelInfoCatalog(t testing.TB) *ModelCatalog {
 	t.Helper()

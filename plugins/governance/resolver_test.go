@@ -14,9 +14,72 @@ import (
 	configstoreTables "github.com/maximhq/bifrost/framework/configstore/tables"
 	"github.com/maximhq/bifrost/framework/grant"
 	"github.com/maximhq/bifrost/framework/modelcatalog"
+	"github.com/maximhq/bifrost/framework/modelcatalog/datasheet"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func governanceCatalogWithHealth(t *testing.T, health string) *modelcatalog.ModelCatalog {
+	t.Helper()
+	ds := datasheet.NewTestStore(nil)
+	ds.SetPricingRowsForTest([]configstoreTables.TableModelPricing{{
+		Model:                "gpt-governed",
+		Provider:             string(schemas.OpenAI),
+		Mode:                 "chat",
+		AdditionalAttributes: map[string]string{"health": health},
+	}})
+	return modelcatalog.NewTestCatalogWithDatasheet(ds)
+}
+
+func TestBudgetResolver_EvaluateAccess_EnforcesExplicitModelHealthBlocks(t *testing.T) {
+	logger := NewMockLogger()
+	resolver := NewBudgetResolver(nil, governanceCatalogWithHealth(t, "blocked"), logger, nil)
+	ctx := schemas.NewBifrostContext(context.Background(), schemas.NoDeadline)
+
+	result := resolver.evaluateAccess(ctx, &EvaluationRequest{
+		RequestType: schemas.ChatCompletionRequest,
+		Provider:    schemas.OpenAI,
+		Model:       "gpt-governed",
+	}, nil)
+
+	require.Equal(t, DecisionModelBlocked, result.Decision)
+	assert.Equal(t, "Model 'gpt-governed' is blocked by model governance (health=blocked)", result.Reason)
+}
+
+func TestBudgetResolver_EvaluateAccess_HealthBlockIsScopedToModelExecution(t *testing.T) {
+	logger := NewMockLogger()
+	resolver := NewBudgetResolver(nil, governanceCatalogWithHealth(t, "disabled"), logger, nil)
+	ctx := schemas.NewBifrostContext(context.Background(), schemas.NoDeadline)
+
+	for _, requestType := range []schemas.RequestType{
+		schemas.ListModelsRequest,
+		schemas.ModelRetrieveRequest,
+		schemas.ResponsesRetrieveRequest,
+	} {
+		t.Run(string(requestType), func(t *testing.T) {
+			result := resolver.evaluateAccess(ctx, &EvaluationRequest{
+				RequestType: requestType,
+				Provider:    schemas.OpenAI,
+				Model:       "gpt-governed",
+			}, nil)
+			assert.Equal(t, DecisionAllow, result.Decision, "metadata/resource operations must not execute the model")
+		})
+	}
+}
+
+func TestBudgetResolver_EvaluateAccess_InformationalHealthDoesNotBlock(t *testing.T) {
+	logger := NewMockLogger()
+	resolver := NewBudgetResolver(nil, governanceCatalogWithHealth(t, "degraded"), logger, nil)
+	ctx := schemas.NewBifrostContext(context.Background(), schemas.NoDeadline)
+
+	result := resolver.evaluateAccess(ctx, &EvaluationRequest{
+		RequestType: schemas.ChatCompletionRequest,
+		Provider:    schemas.OpenAI,
+		Model:       "gpt-governed",
+	}, nil)
+
+	assert.Equal(t, DecisionAllow, result.Decision)
+}
 
 // TestBudgetResolver_EvaluateRequest_AllowedRequest tests happy path
 func TestBudgetResolver_EvaluateRequest_AllowedRequest(t *testing.T) {

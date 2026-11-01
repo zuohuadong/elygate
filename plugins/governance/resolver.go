@@ -90,6 +90,25 @@ func NewBudgetResolver(store GovernanceStore, modelCatalog *modelcatalog.ModelCa
 // whether one that resolved to nothing should be refused, are settled before this; see the funnel's
 // identity step, which asks what was presented.
 func (r *BudgetResolver) evaluateAccess(ctx *schemas.BifrostContext, evaluationRequest *EvaluationRequest, access schemas.Access) *EvaluationResult {
+	// Model health is a deployment-wide execution gate, not a virtual-key
+	// allowlist. Apply it before access resolution so a catalog model explicitly
+	// marked blocked cannot be reached through an unrestricted or keyless path.
+	// Read-only metadata/resource operations are excluded because they do not
+	// execute the model; optional model-bearing requests are checked when a
+	// model is actually present, just like the existing model allowlist.
+	if r.modelCatalog != nil && evaluationRequest != nil &&
+		evaluationRequest.Model != "" &&
+		evaluationRequest.RequestType != schemas.ListModelsRequest &&
+		evaluationRequest.RequestType != schemas.ModelRetrieveRequest &&
+		(IsModelRequiredForRequest(evaluationRequest.RequestType) || IsModelCheckedWhenPresent(evaluationRequest.RequestType)) {
+		if health := r.modelCatalog.ModelGovernanceBlockReason(evaluationRequest.Provider, evaluationRequest.Model); health != "" {
+			return &EvaluationResult{
+				Decision: DecisionModelBlocked,
+				Reason:   fmt.Sprintf("Model '%s' is blocked by model governance (health=%s)", evaluationRequest.Model, health),
+			}
+		}
+	}
+
 	// No access at all is a request nothing granted anything: it presented nothing, or what it
 	// presented resolved to nothing, and the funnel has refused the second before this. What is left
 	// is unrestricted, and an allowlist there is none of cannot deny anything.

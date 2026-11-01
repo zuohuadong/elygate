@@ -233,6 +233,93 @@ func (s *Store) GetCapabilityEntry(model string, provider schemas.ModelProvider)
 	return nil
 }
 
+// GetModelGovernanceHealth returns the editorial health marker for a model
+// without materializing a full pricing Entry. It follows the same exact,
+// canonical-base, and family fallback order as GetCapabilityEntry, while
+// keeping the hot governance check to a read-only string lookup.
+func (s *Store) GetModelGovernanceHealth(model string, provider schemas.ModelProvider) string {
+	if s == nil || model == "" {
+		return ""
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	normalizedProvider := normalizeProvider(string(provider))
+	if health, found := s.governanceHealthForExactUnsafe(model, normalizedProvider); found {
+		return health
+	}
+
+	baseModel := s.baseModelNameUnsafe(model)
+	if baseModel != model {
+		if health, found := s.governanceHealthForExactUnsafe(baseModel, normalizedProvider); found {
+			return health
+		}
+	}
+
+	var matchingKeys []string
+	for key, pricing := range s.pricingData {
+		if normalizeProvider(pricing.Provider) != normalizedProvider {
+			continue
+		}
+		if s.baseModelNameUnsafe(pricing.Model) == baseModel {
+			matchingKeys = append(matchingKeys, key)
+		}
+	}
+	if len(matchingKeys) == 0 {
+		return ""
+	}
+	slices.Sort(matchingKeys)
+	for _, mode := range []string{
+		normalizeRequestType(schemas.ChatCompletionRequest),
+		normalizeRequestType(schemas.ResponsesRequest),
+		normalizeRequestType(schemas.TextCompletionRequest),
+	} {
+		for _, key := range matchingKeys {
+			parts := strings.SplitN(key, "|", 3)
+			if len(parts) == 3 && parts[2] == mode {
+				return strings.TrimSpace(s.pricingData[key].AdditionalAttributes["health"])
+			}
+		}
+	}
+	return strings.TrimSpace(s.pricingData[matchingKeys[0]].AdditionalAttributes["health"])
+}
+
+func (s *Store) governanceHealthForExactUnsafe(model, provider string) (string, bool) {
+	for _, mode := range []schemas.RequestType{
+		schemas.ChatCompletionRequest,
+		schemas.ResponsesRequest,
+		schemas.TextCompletionRequest,
+		schemas.EmbeddingRequest,
+		schemas.RerankRequest,
+		schemas.DecisionRequest,
+		schemas.SpeechRequest,
+		schemas.TranscriptionRequest,
+		schemas.ImageGenerationRequest,
+		schemas.ImageEditRequest,
+		schemas.ImageVariationRequest,
+		schemas.VideoGenerationRequest,
+		schemas.OCRRequest,
+	} {
+		key := makeKey(model, provider, normalizeRequestType(mode))
+		if pricing, ok := s.pricingData[key]; ok {
+			return strings.TrimSpace(pricing.AdditionalAttributes["health"]), true
+		}
+	}
+
+	prefix := model + "|" + provider + "|"
+	var matchingKeys []string
+	for key := range s.pricingData {
+		if strings.HasPrefix(key, prefix) {
+			matchingKeys = append(matchingKeys, key)
+		}
+	}
+	if len(matchingKeys) == 0 {
+		return "", false
+	}
+	slices.Sort(matchingKeys)
+	return strings.TrimSpace(s.pricingData[matchingKeys[0]].AdditionalAttributes["health"]), true
+}
+
 // BaseModelName returns the canonical base model name. Uses the pre-computed
 // base_model from the pricing catalog when present, falling back to
 // algorithmic date/version stripping for unknown models.

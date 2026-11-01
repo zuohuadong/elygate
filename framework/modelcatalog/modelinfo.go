@@ -4,10 +4,43 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 
 	providerUtils "github.com/maximhq/bifrost/core/providers/utils"
 	"github.com/maximhq/bifrost/core/schemas"
 )
+
+// ModelGovernanceBlockReason returns the normalized catalog health state when
+// the model is explicitly marked unavailable for inference. Editorial health
+// metadata is intentionally opt-in: unknown or informational states continue
+// to be served, while only states that unambiguously revoke execution are
+// enforced here. An empty result means the model has no hard governance block.
+//
+// This lookup is kept on the catalog so every caller uses the same pricing /
+// capability fallback rules as GetModelInfo, including dated model IDs and
+// provider aliases.
+func (mc *ModelCatalog) ModelGovernanceBlockReason(provider schemas.ModelProvider, model string) string {
+	if mc == nil || model == "" {
+		return ""
+	}
+
+	health := ""
+	if mc.modelGovernanceHealth == nil {
+		health = mc.datasheet.GetModelGovernanceHealth(model, provider)
+	} else {
+		health = mc.modelGovernanceHealth.GetOrCompute(
+			string(provider)+"\x00"+model,
+			func() string { return mc.datasheet.GetModelGovernanceHealth(model, provider) },
+		)
+	}
+	health = strings.ToLower(health)
+	switch health {
+	case "blocked", "disabled", "revoked", "quarantined", "unavailable":
+		return health
+	default:
+		return ""
+	}
+}
 
 // GetModelInfo returns pricing and capability metadata for a (provider, model)
 // pair in the same shape the /v1/models endpoint reports, or nil when the

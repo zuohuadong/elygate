@@ -47,6 +47,10 @@ type ModelCatalog struct {
 	// 0 means "no cap known" and is cached too, so a model missing from the
 	// sheet pays the full-table capability scan once per generation, not per request.
 	maxOutputTokens *gencache.Cache[int]
+	// modelGovernanceHealth memoizes the editorial health marker used by the
+	// request-time hard block. Empty values are cached too, so unknown models
+	// do not rescan the datasheet on every request.
+	modelGovernanceHealth *gencache.Cache[string]
 
 	// MCP library sync configuration (protected by syncMu)
 	mcpLibraryURL          string
