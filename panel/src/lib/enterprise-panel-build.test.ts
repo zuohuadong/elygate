@@ -100,7 +100,7 @@ describe('enterprise panel build contract', () => {
 		expect(workflow.on.push.paths).toEqual(workflow.on.pull_request.paths);
 		for (const path of ['.bun-version', 'panel/**', 'enterprise/employee-portal/**',
 			'transports/bifrost-http/**', 'framework/configstore/**', 'framework/logstore/**',
-			'plugins/logging/**', 'Makefile', 'transports/Dockerfile*', '.github/workflows/panel-tests.yml',
+			'plugins/routing/**', 'plugins/logging/**', 'Makefile', 'transports/Dockerfile*', '.github/workflows/panel-tests.yml',
 			'.github/workflows/scripts/smoke-elygate-image.sh', '.github/workflows/scripts/smoke-elygate-recovery.mjs',
 			'examples/single-node-postgres/**',
 			'scripts/production/**', 'scripts/go-local.sh', 'scripts/test-controlplane-postgres.sh']) {

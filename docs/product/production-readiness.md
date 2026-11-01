@@ -130,6 +130,15 @@ race 定向套件通过（3 个包，无失败/跳过），`git diff --check` �
 在线 Shadow、ownership/fencing、真实供应商或生产切换授权；总目标保持
 **active / PARTIAL**。
 
+### 2026-11-02 路由治理变更纳入生产恢复 CI 触发范围
+
+发现 `panel-tests.yml` 的 `push`/`pull_request` 路径过滤遗漏
+`plugins/routing/**`，导致路由治理代码变更不会自动触发生产镜像、启动和隔离
+恢复门禁。现已在两种事件的相同路径集合中补齐该目录，并同步更新工作流契约测试；
+面板生产构建契约 53 项、327 个断言通过，`actionlint` 和 `git diff --check`
+通过。该改动只修正 CI 触发覆盖，不代表本次提交的远端工作流已经完成，也不替代
+真实镜像、恢复、registry、供应商或生产切换验收。
+
 ### 2026-11-02 路由发布写 API 与独立面板动作
 
 本轮补齐 canonical control-plane 的管理员发布/回滚写入口：
