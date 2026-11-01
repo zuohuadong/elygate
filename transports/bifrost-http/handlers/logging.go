@@ -3089,6 +3089,15 @@ func parseMCPFiltersAndPagination(ctx *fasthttp.RequestCtx) (*logstore.MCPToolLo
 	if statuses := string(ctx.QueryArgs().Peek("status")); statuses != "" {
 		filters.Status = parseCommaSeparated(statuses)
 	}
+	if riskLevels := string(ctx.QueryArgs().Peek("risk_levels")); riskLevels != "" {
+		filters.RiskLevels = parseCommaSeparated(riskLevels)
+	}
+	if approvalStates := string(ctx.QueryArgs().Peek("approval_states")); approvalStates != "" {
+		filters.ApprovalStates = parseCommaSeparated(approvalStates)
+	}
+	if decisions := string(ctx.QueryArgs().Peek("governance_decisions")); decisions != "" {
+		filters.GovernanceDecisions = parseCommaSeparated(decisions)
+	}
 	if virtualKeyIDs := string(ctx.QueryArgs().Peek("virtual_key_ids")); virtualKeyIDs != "" {
 		filters.VirtualKeyIDs = parseCommaSeparated(virtualKeyIDs)
 	}
@@ -3221,6 +3230,15 @@ func parseMCPFilters(ctx *fasthttp.RequestCtx) (*logstore.MCPToolLogSearchFilter
 	}
 	if statuses := string(ctx.QueryArgs().Peek("status")); statuses != "" {
 		filters.Status = parseCommaSeparated(statuses)
+	}
+	if riskLevels := string(ctx.QueryArgs().Peek("risk_levels")); riskLevels != "" {
+		filters.RiskLevels = parseCommaSeparated(riskLevels)
+	}
+	if approvalStates := string(ctx.QueryArgs().Peek("approval_states")); approvalStates != "" {
+		filters.ApprovalStates = parseCommaSeparated(approvalStates)
+	}
+	if decisions := string(ctx.QueryArgs().Peek("governance_decisions")); decisions != "" {
+		filters.GovernanceDecisions = parseCommaSeparated(decisions)
 	}
 	if virtualKeyIDs := string(ctx.QueryArgs().Peek("virtual_key_ids")); virtualKeyIDs != "" {
 		filters.VirtualKeyIDs = parseCommaSeparated(virtualKeyIDs)

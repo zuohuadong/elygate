@@ -478,6 +478,9 @@ func migrationClickHouseMCPToolLogsTable(ctx context.Context, db *gorm.DB, clust
 		ttl:         chLogsTTL(retentionDays),
 		skipIndexes: []string{
 			"INDEX idx_mcp_logs_status status TYPE bloom_filter GRANULARITY 1",
+			"INDEX idx_mcp_logs_risk_level risk_level TYPE bloom_filter GRANULARITY 1",
+			"INDEX idx_mcp_logs_approval_state approval_state TYPE bloom_filter GRANULARITY 1",
+			"INDEX idx_mcp_logs_governance_decision governance_decision TYPE bloom_filter GRANULARITY 1",
 			"INDEX idx_mcp_logs_virtual_key_id virtual_key_id TYPE bloom_filter GRANULARITY 1",
 			"INDEX idx_mcp_logs_tool_name tool_name TYPE bloom_filter GRANULARITY 1",
 			"INDEX idx_mcp_logs_session_id session_id TYPE bloom_filter GRANULARITY 1",

@@ -1776,6 +1776,14 @@ func TestMCPHooksPersistPluginLogs(t *testing.T) {
 	ctx.SetValue(schemas.BifrostContextKeyRequestHeaders, map[string]string{
 		"x-bf-agent-correlation-id": "agent-mcp-normal",
 	})
+	expires := time.Now().UTC().Add(time.Minute)
+	ctx.SetMCPGovernanceAudit(&schemas.MCPGovernanceAudit{
+		RiskLevel:          schemas.MCPToolRiskHigh,
+		ApprovalState:      "approved",
+		ApprovalExpiresAt:  &expires,
+		GovernanceDecision: "allow",
+		GovernanceReason:   "allowed",
+	})
 	schemas.SetRedactionDataOnContext(ctx, schemas.RedactionData{
 		ReversibleMappings: schemas.RedactionMapsByPhase{
 			Input:  map[string]string{"EMAIL-1": "private@example.com"},
@@ -1859,6 +1867,18 @@ func TestMCPHooksPersistPluginLogs(t *testing.T) {
 	}
 	if logEntry.Latency == nil || *logEntry.Latency != 42 {
 		t.Fatalf("expected latency 42, got %#v", logEntry.Latency)
+	}
+	if logEntry.RiskLevel == nil || *logEntry.RiskLevel != "high" {
+		t.Fatalf("expected risk level high, got %#v", logEntry.RiskLevel)
+	}
+	if logEntry.ApprovalState == nil || *logEntry.ApprovalState != "approved" {
+		t.Fatalf("expected approval state approved, got %#v", logEntry.ApprovalState)
+	}
+	if logEntry.GovernanceDecision == nil || *logEntry.GovernanceDecision != "allow" {
+		t.Fatalf("expected governance decision allow, got %#v", logEntry.GovernanceDecision)
+	}
+	if logEntry.GovernanceReason == nil || *logEntry.GovernanceReason != "allowed" {
+		t.Fatalf("expected governance reason allowed, got %#v", logEntry.GovernanceReason)
 	}
 	var pluginLogs map[string][]schemas.PluginLogEntry
 	if err := json.Unmarshal([]byte(logEntry.PluginLogs), &pluginLogs); err != nil {

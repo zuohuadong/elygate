@@ -171,6 +171,20 @@ API 继续保留用于现有工具许可路径，但不能满足 destructive 工
 签发 API/UI、跨进程授权存储、Kill Switch、结果审计、在线 Shadow、正式制品
 或生产切换授权；MCP 生产门禁仍保持 **PARTIAL**。
 
+### 2026-11-02 MCP 治理结果持久审计
+
+MCP 工具日志现在持久记录治理风险等级、审批状态及过期时间、治理决定和
+拒绝/允许原因，并支持按风险、审批状态和治理决定检索。治理 pre-hook 在
+短路、成功和读取路径统一写入 request-scoped audit，logging post-hook 在
+工具结果或拒绝错误最终确定后落库；SQLite/PostgreSQL 日志迁移、字段往返、
+治理拒绝和 logging 持久化均有定向测试，ClickHouse 通过共享模型启动时
+reconcile 新字段。
+
+本项闭合了“风险/审批/结果进入统一 MCPToolLog”这一持久审计边界，但不等同
+于审批签发 API/UI、跨进程授权存储、Agent/Application/Tool Kill Switch、
+参数级限制、在线 Shadow、跨进程 ownership/fencing、正式制品或生产切换授权；
+MCP 生产门禁仍保持 **PARTIAL**。
+
 ## 当前执行状态与剩余门禁
 
 ### 2026-11-01 同候选真实恢复 CI

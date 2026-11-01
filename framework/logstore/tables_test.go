@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/maximhq/bifrost/core/schemas"
 	"github.com/stretchr/testify/assert"
@@ -335,6 +336,33 @@ func TestMCPToolLogGovernanceSetsRoundTrip(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestMCPToolLogGovernanceAuditRoundTrip(t *testing.T) {
+	expires := time.Now().UTC().Add(time.Minute).Truncate(time.Microsecond)
+	risk, approval, decision, reason := "high", "approved", "allow", "allowed"
+	entry := &MCPToolLog{
+		RiskLevel:          &risk,
+		ApprovalState:      &approval,
+		ApprovalExpiresAt:  &expires,
+		GovernanceDecision: &decision,
+		GovernanceReason:   &reason,
+	}
+	require.NoError(t, entry.SerializeFields())
+
+	stored := &MCPToolLog{
+		RiskLevel:          entry.RiskLevel,
+		ApprovalState:      entry.ApprovalState,
+		ApprovalExpiresAt:  entry.ApprovalExpiresAt,
+		GovernanceDecision: entry.GovernanceDecision,
+		GovernanceReason:   entry.GovernanceReason,
+	}
+	require.NoError(t, stored.DeserializeFields())
+	require.Equal(t, "high", *stored.RiskLevel)
+	require.Equal(t, "approved", *stored.ApprovalState)
+	require.Equal(t, expires, *stored.ApprovalExpiresAt)
+	require.Equal(t, "allow", *stored.GovernanceDecision)
+	require.Equal(t, "allowed", *stored.GovernanceReason)
 }
 
 func TestAgentLogGovernanceSetsRoundTrip(t *testing.T) {

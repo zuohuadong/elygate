@@ -1722,6 +1722,7 @@ func (p *GovernancePlugin) PreMCPHook(ctx *schemas.BifrostContext, req *schemas.
 	if !req.RequestType.IsExecuteTool() && !isRead {
 		return req, nil, nil
 	}
+	stampMCPGovernanceAudit(ctx, req)
 
 	// Codemode meta-tools are not governed as tool executions, but their
 	// discovery side (listToolFiles, readToolFile, getToolDocs) enumerates tools
@@ -1735,6 +1736,7 @@ func (p *GovernancePlugin) PreMCPHook(ctx *schemas.BifrostContext, req *schemas.
 
 	// Validate required headers are present
 	if headerErr := p.validateRequiredHeaders(ctx); headerErr != nil {
+		finishMCPGovernanceAudit(ctx, "deny", mcpAuditReason(headerErr, "missing_required_headers"))
 		return req, &schemas.MCPPluginShortCircuit{Error: headerErr}, nil
 	}
 
@@ -1748,6 +1750,7 @@ func (p *GovernancePlugin) PreMCPHook(ctx *schemas.BifrostContext, req *schemas.
 
 	// Convert BifrostError to MCPPluginShortCircuit if needed
 	if bifrostError != nil {
+		finishMCPGovernanceAudit(ctx, "deny", mcpAuditReason(bifrostError, "governance_denied"))
 		return req, &schemas.MCPPluginShortCircuit{
 			Error: bifrostError,
 		}, nil
@@ -1758,6 +1761,7 @@ func (p *GovernancePlugin) PreMCPHook(ctx *schemas.BifrostContext, req *schemas.
 	// so a direct Go caller is held to the grant too.
 	if isRead {
 		p.stampMCPToolAccessForCodemode(ctx)
+		finishMCPGovernanceAudit(ctx, "allow", "read")
 		return req, nil, nil
 	}
 
@@ -1775,6 +1779,7 @@ func (p *GovernancePlugin) PreMCPHook(ctx *schemas.BifrostContext, req *schemas.
 	hasShortLivedAuthorization := hasMCPShortLivedExecutionAuthorization(ctx, req)
 	if access != nil && !access.IsMCPToolAllowed(toolName) && !hasExactAuthorization {
 		ctx.SetValue(governanceRejectedContextKey, true)
+		finishMCPGovernanceAudit(ctx, "deny", "tool_not_allowed")
 		return req, &schemas.MCPPluginShortCircuit{Error: &schemas.BifrostError{
 			Type:       bifrost.Ptr(string(DecisionMCPToolBlocked)),
 			StatusCode: bifrost.Ptr(403),
@@ -1790,6 +1795,7 @@ func (p *GovernancePlugin) PreMCPHook(ctx *schemas.BifrostContext, req *schemas.
 	if metadata, _ := ctx.Value(schemas.BifrostContextKeyMCPToolExecutionMetadata).(*schemas.MCPToolExecutionMetadata); metadata != nil &&
 		metadata.RiskLevel == schemas.MCPToolRiskHigh && !hasShortLivedAuthorization {
 		ctx.SetValue(governanceRejectedContextKey, true)
+		finishMCPGovernanceAudit(ctx, "deny", "short_lived_authorization_required")
 		return req, &schemas.MCPPluginShortCircuit{Error: &schemas.BifrostError{
 			Type:       bifrost.Ptr(string(DecisionMCPToolBlocked)),
 			StatusCode: bifrost.Ptr(403),
@@ -1799,6 +1805,7 @@ func (p *GovernancePlugin) PreMCPHook(ctx *schemas.BifrostContext, req *schemas.
 		}}, nil
 	}
 
+	finishMCPGovernanceAudit(ctx, "allow", "allowed")
 	return req, nil, nil
 }
 

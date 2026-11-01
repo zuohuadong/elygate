@@ -2004,6 +2004,15 @@ type MCPToolLog struct {
 	Decision *string `gorm:"type:varchar(16)" json:"decision,omitempty"`
 	Source   *string `gorm:"type:varchar(16);index:idx_mcp_logs_source" json:"source,omitempty"`
 
+	// MCP governance audit snapshots. These are separate from the endpoint-agent
+	// Decision field because a gateway call can be governed without an endpoint
+	// decision.
+	RiskLevel          *string    `gorm:"type:varchar(16);index:idx_mcp_logs_risk_level" json:"risk_level,omitempty"`
+	ApprovalState      *string    `gorm:"type:varchar(24);index:idx_mcp_logs_approval_state" json:"approval_state,omitempty"`
+	ApprovalExpiresAt  *time.Time `gorm:"index:idx_mcp_logs_approval_expires_at" json:"approval_expires_at,omitempty"`
+	GovernanceDecision *string    `gorm:"type:varchar(16);index:idx_mcp_logs_governance_decision" json:"governance_decision,omitempty"`
+	GovernanceReason   *string    `gorm:"type:varchar(512)" json:"governance_reason,omitempty"`
+
 	// Method is the MCP method for a prompt or resource read ("prompts/get", "resources/read"),
 	// whose prompt name or resource URI is in ToolName; nil for a tool call.
 	Method *string `gorm:"type:varchar(32)" json:"method,omitempty"`
@@ -2435,21 +2444,24 @@ type MCPToolLogSearchFilters struct {
 	ProjectIDs      []string `json:"project_ids,omitempty"`
 	DeviceIDs       []string `json:"device_ids,omitempty"`
 
-	ToolNames          []string   `json:"tool_names,omitempty"`
-	ServerLabels       []string   `json:"server_labels,omitempty"`
-	Status             []string   `json:"status,omitempty"`
-	VirtualKeyIDs      []string   `json:"virtual_key_ids,omitempty"`
-	LLMRequestIDs      []string   `json:"llm_request_ids,omitempty"`
-	AgentNames         []string   `json:"agent_names,omitempty"`
-	SessionID          string     `json:"session_id,omitempty"`
-	AgentCorrelationID string     `json:"agent_correlation_id,omitempty"`
-	Apps               []string   `json:"apps,omitempty"`        // Backend-detected client apps
-	UserAgents         []string   `json:"user_agents,omitempty"` // Raw User-Agent strings; kept for compatibility/debug filtering
-	StartTime          *time.Time `json:"start_time,omitempty"`
-	EndTime            *time.Time `json:"end_time,omitempty"`
-	MinLatency         *float64   `json:"min_latency,omitempty"`
-	MaxLatency         *float64   `json:"max_latency,omitempty"`
-	ContentSearch      string     `json:"content_search,omitempty"`
+	ToolNames           []string   `json:"tool_names,omitempty"`
+	ServerLabels        []string   `json:"server_labels,omitempty"`
+	Status              []string   `json:"status,omitempty"`
+	RiskLevels          []string   `json:"risk_levels,omitempty"`
+	ApprovalStates      []string   `json:"approval_states,omitempty"`
+	GovernanceDecisions []string   `json:"governance_decisions,omitempty"`
+	VirtualKeyIDs       []string   `json:"virtual_key_ids,omitempty"`
+	LLMRequestIDs       []string   `json:"llm_request_ids,omitempty"`
+	AgentNames          []string   `json:"agent_names,omitempty"`
+	SessionID           string     `json:"session_id,omitempty"`
+	AgentCorrelationID  string     `json:"agent_correlation_id,omitempty"`
+	Apps                []string   `json:"apps,omitempty"`        // Backend-detected client apps
+	UserAgents          []string   `json:"user_agents,omitempty"` // Raw User-Agent strings; kept for compatibility/debug filtering
+	StartTime           *time.Time `json:"start_time,omitempty"`
+	EndTime             *time.Time `json:"end_time,omitempty"`
+	MinLatency          *float64   `json:"min_latency,omitempty"`
+	MaxLatency          *float64   `json:"max_latency,omitempty"`
+	ContentSearch       string     `json:"content_search,omitempty"`
 }
 
 // MCPToolLogSearchResult represents the result of an MCP tool log search

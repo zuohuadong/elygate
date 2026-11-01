@@ -49,6 +49,30 @@ func (l *MCPToolLog) ApplyGovernanceContext(ctx *schemas.BifrostContext) {
 		businessUnitIDs: &l.BusinessUnitIDsParsed, businessUnitNames: &l.BusinessUnitNamesParsed,
 		budgetIDs: &l.BudgetIDsParsed, rateLimitIDs: &l.RateLimitIDsParsed,
 	})
+	if ctx != nil {
+		if audit, _ := ctx.Value(schemas.BifrostContextKeyMCPGovernanceAudit).(*schemas.MCPGovernanceAudit); audit != nil {
+			if audit.RiskLevel != "" {
+				value := string(audit.RiskLevel)
+				l.RiskLevel = &value
+			}
+			if audit.ApprovalState != "" {
+				value := audit.ApprovalState
+				l.ApprovalState = &value
+			}
+			if audit.ApprovalExpiresAt != nil {
+				value := audit.ApprovalExpiresAt.UTC()
+				l.ApprovalExpiresAt = &value
+			}
+			if audit.GovernanceDecision != "" {
+				value := audit.GovernanceDecision
+				l.GovernanceDecision = &value
+			}
+			if audit.GovernanceReason != "" {
+				value := audit.GovernanceReason
+				l.GovernanceReason = &value
+			}
+		}
+	}
 }
 
 func (l *AgentLog) ApplyGovernanceContext(ctx *schemas.BifrostContext) {

@@ -127,6 +127,11 @@ func TestMCPDestructiveToolRequiresShortLivedAuthorization(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, short)
 		require.Contains(t, short.Error.Error.Message, "short-term authorization")
+		audit, ok := ctx.Value(schemas.BifrostContextKeyMCPGovernanceAudit).(*schemas.MCPGovernanceAudit)
+		require.True(t, ok)
+		require.Equal(t, "missing", audit.ApprovalState)
+		require.Equal(t, "deny", audit.GovernanceDecision)
+		require.Equal(t, "short_lived_authorization_required", audit.GovernanceReason)
 	})
 
 	t.Run("legacy approval is insufficient", func(t *testing.T) {
@@ -137,6 +142,8 @@ func TestMCPDestructiveToolRequiresShortLivedAuthorization(t *testing.T) {
 		_, short, err := p.PreMCPHook(ctx, req)
 		require.NoError(t, err)
 		require.NotNil(t, short)
+		audit, _ := ctx.Value(schemas.BifrostContextKeyMCPGovernanceAudit).(*schemas.MCPGovernanceAudit)
+		require.Equal(t, "legacy", audit.ApprovalState)
 	})
 
 	t.Run("unexpired exact approval is accepted", func(t *testing.T) {
@@ -147,6 +154,9 @@ func TestMCPDestructiveToolRequiresShortLivedAuthorization(t *testing.T) {
 		_, short, err := p.PreMCPHook(ctx, req)
 		require.NoError(t, err)
 		require.Nil(t, short)
+		audit, _ := ctx.Value(schemas.BifrostContextKeyMCPGovernanceAudit).(*schemas.MCPGovernanceAudit)
+		require.Equal(t, "approved", audit.ApprovalState)
+		require.Equal(t, "allow", audit.GovernanceDecision)
 	})
 
 	t.Run("expired approval is rejected", func(t *testing.T) {
@@ -157,6 +167,8 @@ func TestMCPDestructiveToolRequiresShortLivedAuthorization(t *testing.T) {
 		_, short, err := p.PreMCPHook(ctx, req)
 		require.NoError(t, err)
 		require.NotNil(t, short)
+		audit, _ := ctx.Value(schemas.BifrostContextKeyMCPGovernanceAudit).(*schemas.MCPGovernanceAudit)
+		require.Equal(t, "expired", audit.ApprovalState)
 	})
 
 	t.Run("retargeted approval is rejected", func(t *testing.T) {
@@ -167,6 +179,8 @@ func TestMCPDestructiveToolRequiresShortLivedAuthorization(t *testing.T) {
 		_, short, err := p.PreMCPHook(ctx, otherReq)
 		require.NoError(t, err)
 		require.NotNil(t, short)
+		audit, _ := ctx.Value(schemas.BifrostContextKeyMCPGovernanceAudit).(*schemas.MCPGovernanceAudit)
+		require.Equal(t, "mismatched", audit.ApprovalState)
 	})
 
 	t.Run("unannotated tool path remains compatible", func(t *testing.T) {

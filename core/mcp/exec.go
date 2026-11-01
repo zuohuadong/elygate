@@ -86,8 +86,10 @@ func (m *MCPManager) executeToolWithHooks(
 	// The metadata is protected while the hook pipeline is active so a request
 	// cannot forge or retarget the risk classification.
 	var previousMetadata any
+	var previousAudit any
 	if ctx != nil {
 		previousMetadata = ctx.Value(schemas.BifrostContextKeyMCPToolExecutionMetadata)
+		previousAudit = ctx.Value(schemas.BifrostContextKeyMCPGovernanceAudit)
 		ctx.SetMCPToolExecutionMetadata(m.mcpToolExecutionMetadata(request))
 		defer func() {
 			if previousMetadata == nil {
@@ -98,6 +100,13 @@ func (m *MCPManager) executeToolWithHooks(
 				} else {
 					ctx.ClearMCPToolExecutionMetadata()
 				}
+			}
+			if previousAudit == nil {
+				ctx.ClearMCPGovernanceAudit()
+			} else if audit, ok := previousAudit.(*schemas.MCPGovernanceAudit); ok {
+				ctx.SetMCPGovernanceAudit(audit)
+			} else {
+				ctx.ClearMCPGovernanceAudit()
 			}
 		}()
 	}

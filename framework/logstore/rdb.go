@@ -5426,6 +5426,15 @@ func (s *RDBLogStore) applyMCPFilters(baseQuery *gorm.DB, filters MCPToolLogSear
 	if len(filters.Status) > 0 {
 		baseQuery = baseQuery.Where("status IN ?", filters.Status)
 	}
+	if len(filters.RiskLevels) > 0 {
+		baseQuery = baseQuery.Where("risk_level IN ?", filters.RiskLevels)
+	}
+	if len(filters.ApprovalStates) > 0 {
+		baseQuery = baseQuery.Where("approval_state IN ?", filters.ApprovalStates)
+	}
+	if len(filters.GovernanceDecisions) > 0 {
+		baseQuery = baseQuery.Where("governance_decision IN ?", filters.GovernanceDecisions)
+	}
 	if len(filters.VirtualKeyIDs) > 0 {
 		baseQuery = baseQuery.Where("virtual_key_id IN ?", filters.VirtualKeyIDs)
 	}

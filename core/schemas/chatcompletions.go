@@ -453,6 +453,17 @@ type MCPToolExecutionMetadata struct {
 	OpenWorldHint   *bool
 }
 
+// MCPGovernanceAudit is the request-scoped, Bifrost-owned result of MCP
+// governance evaluation. It is copied into the durable MCP tool log by the
+// logging plugin after all pre-hooks have run.
+type MCPGovernanceAudit struct {
+	RiskLevel          MCPToolRiskLevel
+	ApprovalState      string
+	ApprovalExpiresAt  *time.Time
+	GovernanceDecision string
+	GovernanceReason   string
+}
+
 // ChatTool represents a tool definition.
 //
 // Three shapes coexist under this type:

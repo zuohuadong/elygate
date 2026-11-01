@@ -716,6 +716,35 @@ func TestMCPGovernanceSnapshotsMigrationIsRegistered(t *testing.T) {
 	t.Fatal("mcp_tool_logs_add_governance_snapshots is not registered in logstoreMigrationSteps")
 }
 
+func TestMigrationAddMCPGovernanceAuditColumns(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "migrations.db")), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	require.NoError(t, err)
+	require.NoError(t, db.Exec("CREATE TABLE mcp_tool_logs (id TEXT PRIMARY KEY)").Error)
+	require.NoError(t, db.Exec("INSERT INTO mcp_tool_logs (id) VALUES (?)", "mcp-existing").Error)
+
+	ctx := context.Background()
+	require.NoError(t, migrationAddMCPGovernanceAuditColumns(ctx, db, testLogger{}))
+	for _, field := range []string{"RiskLevel", "ApprovalState", "ApprovalExpiresAt", "GovernanceDecision", "GovernanceReason"} {
+		require.True(t, db.Migrator().HasColumn(&MCPToolLog{}, field), "missing column for %s", field)
+	}
+	require.NoError(t, migrationAddMCPGovernanceAuditColumns(ctx, db, testLogger{}))
+
+	var count int64
+	require.NoError(t, db.Table("mcp_tool_logs").Where("id = ?", "mcp-existing").Count(&count).Error)
+	assert.Equal(t, int64(1), count)
+}
+
+func TestMCPGovernanceAuditMigrationIsRegistered(t *testing.T) {
+	for _, step := range logstoreMigrationSteps {
+		for _, id := range step.IDs {
+			if id == "mcp_tool_logs_add_governance_audit_columns" {
+				return
+			}
+		}
+	}
+	t.Fatal("mcp_tool_logs_add_governance_audit_columns is not registered in logstoreMigrationSteps")
+}
+
 // TestMigrationAddWarpConversationTables_NonRollbackable pins that rolling the
 // history tables back is refused while they hold anything. warp_conversations
 // and warp_messages are persistent user content - saved chats someone can

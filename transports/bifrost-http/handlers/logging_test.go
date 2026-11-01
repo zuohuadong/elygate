@@ -1600,7 +1600,7 @@ func TestCorrelationFilterParsing(t *testing.T) {
 // TestMCPAttributionFilterParsing keeps detail-link filters identical across list and analytics endpoints.
 func TestMCPAttributionFilterParsing(t *testing.T) {
 	var ctx fasthttp.RequestCtx
-	ctx.Request.SetRequestURI("/api/mcp-logs?user_ids=u1,u2&team_ids=t1&customer_ids=c1&business_unit_ids=b1&project_ids=p1&device_ids=d1")
+	ctx.Request.SetRequestURI("/api/mcp-logs?user_ids=u1,u2&team_ids=t1&customer_ids=c1&business_unit_ids=b1&project_ids=p1&device_ids=d1&risk_levels=high,medium&approval_states=missing&governance_decisions=deny")
 	list, _, err := parseMCPFiltersAndPagination(&ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -1616,6 +1616,9 @@ func TestMCPAttributionFilterParsing(t *testing.T) {
 	for _, filters := range []*logstore.MCPToolLogSearchFilters{list, stats, histogram} {
 		if !reflect.DeepEqual(filters.UserIDs, []string{"u1", "u2"}) || !reflect.DeepEqual(filters.TeamIDs, []string{"t1"}) || !reflect.DeepEqual(filters.CustomerIDs, []string{"c1"}) || !reflect.DeepEqual(filters.BusinessUnitIDs, []string{"b1"}) || !reflect.DeepEqual(filters.ProjectIDs, []string{"p1"}) || !reflect.DeepEqual(filters.DeviceIDs, []string{"d1"}) {
 			t.Fatalf("lost attribution filters: %+v", filters)
+		}
+		if !reflect.DeepEqual(filters.RiskLevels, []string{"high", "medium"}) || !reflect.DeepEqual(filters.ApprovalStates, []string{"missing"}) || !reflect.DeepEqual(filters.GovernanceDecisions, []string{"deny"}) {
+			t.Fatalf("lost MCP governance audit filters: %+v", filters)
 		}
 	}
 }

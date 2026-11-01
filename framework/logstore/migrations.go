@@ -333,6 +333,7 @@ var logstoreMigrationSteps = []migrationStep{
 	{IDs: []string{"logs_add_served_model_column"}, run: migrationAddServedModelColumn},
 	{IDs: []string{"logs_add_tool_call_names_column"}, run: migrationAddToolCallNamesColumn},
 	{IDs: []string{"mcp_tool_logs_add_governance_snapshots"}, run: migrationAddMCPGovernanceSnapshots},
+	{IDs: []string{"mcp_tool_logs_add_governance_audit_columns"}, run: migrationAddMCPGovernanceAuditColumns},
 	{IDs: []string{"logs_add_session_tree_columns"}, run: migrationAddSessionTreeColumns},
 	{IDs: []string{"logs_add_warp_conversation_tables"}, run: migrationAddWarpConversationTables},
 	{IDs: []string{"logs_add_warp_conversations_updated_at_index"}, run: migrationAddWarpConversationsUpdatedAtIndex},
@@ -2914,6 +2915,26 @@ var performanceIndexes = []performanceIndexDef{
 	},
 	{
 		table: "mcp_tool_logs",
+		name:  "idx_mcp_logs_risk_level",
+		sql:   "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_mcp_logs_risk_level ON mcp_tool_logs(risk_level) WHERE risk_level IS NOT NULL",
+	},
+	{
+		table: "mcp_tool_logs",
+		name:  "idx_mcp_logs_approval_state",
+		sql:   "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_mcp_logs_approval_state ON mcp_tool_logs(approval_state) WHERE approval_state IS NOT NULL",
+	},
+	{
+		table: "mcp_tool_logs",
+		name:  "idx_mcp_logs_approval_expires_at",
+		sql:   "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_mcp_logs_approval_expires_at ON mcp_tool_logs(approval_expires_at) WHERE approval_expires_at IS NOT NULL",
+	},
+	{
+		table: "mcp_tool_logs",
+		name:  "idx_mcp_logs_governance_decision",
+		sql:   "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_mcp_logs_governance_decision ON mcp_tool_logs(governance_decision) WHERE governance_decision IS NOT NULL",
+	},
+	{
+		table: "mcp_tool_logs",
 		name:  "idx_mcp_logs_cost",
 		sql:   "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_mcp_logs_cost ON mcp_tool_logs(cost)",
 	},
@@ -5380,6 +5401,55 @@ func migrationAddMCPGovernanceSnapshots(ctx context.Context, db *gorm.DB, logger
 	}})
 	if err := m.Migrate(); err != nil {
 		return fmt.Errorf("error while adding governance snapshot columns to mcp tool logs: %s", err.Error())
+	}
+	return nil
+}
+
+// migrationAddMCPGovernanceAuditColumns persists the risk classification and
+// approval outcome produced by the MCP governance hook. Existing rows remain
+// nullable because they predate this audit surface.
+func migrationAddMCPGovernanceAuditColumns(ctx context.Context, db *gorm.DB, logger schemas.Logger) error {
+	migrationName := "mcp_tool_logs_add_governance_audit_columns"
+	logger.Info("[logstore] starting migration %s", migrationName)
+	defer logger.Info("[logstore] finished migration %s", migrationName)
+	opts := *migrator.DefaultOptions
+	opts.UseTransaction = true
+	columns := []string{
+		"risk_level",
+		"approval_state",
+		"approval_expires_at",
+		"governance_decision",
+		"governance_reason",
+	}
+	m := migrator.New(db, &opts, []*migrator.Migration{{
+		ID: migrationName,
+		Migrate: func(tx *gorm.DB) error {
+			tx = tx.WithContext(ctx)
+			if err := boundDDLLockWait(tx); err != nil {
+				return err
+			}
+			for _, col := range columns {
+				if err := addColumnIfNotExists(tx, logger, &MCPToolLog{}, col); err != nil {
+					return fmt.Errorf("add %s column to mcp_tool_logs: %w", col, err)
+				}
+			}
+			return nil
+		},
+		Rollback: func(tx *gorm.DB) error {
+			tx = tx.WithContext(ctx)
+			if err := boundDDLLockWait(tx); err != nil {
+				return err
+			}
+			for i := len(columns) - 1; i >= 0; i-- {
+				if err := dropColumnIfExists(tx, logger, &MCPToolLog{}, columns[i]); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	}})
+	if err := m.Migrate(); err != nil {
+		return fmt.Errorf("error while adding MCP governance audit columns: %w", err)
 	}
 	return nil
 }

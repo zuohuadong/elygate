@@ -1,6 +1,7 @@
 package governance
 
 import (
+	"fmt"
 	"time"
 
 	bifrost "github.com/maximhq/bifrost/core"
@@ -21,6 +22,92 @@ type mcpAuthorization struct {
 	toolName   string
 	shortLived bool
 	expiresAt  time.Time
+}
+
+const (
+	mcpApprovalNotRequired = "not_required"
+	mcpApprovalApproved    = "approved"
+	mcpApprovalMissing     = "missing"
+	mcpApprovalExpired     = "expired"
+	mcpApprovalMismatched  = "mismatched"
+	mcpApprovalLegacy      = "legacy"
+)
+
+// stampMCPGovernanceAudit initializes the request-scoped audit record before
+// governance evaluates the request. The logging plugin persists the final
+// decision after all pre-hooks have run.
+func stampMCPGovernanceAudit(ctx *schemas.BifrostContext, req *schemas.BifrostMCPRequest) {
+	if ctx == nil || req == nil {
+		return
+	}
+	audit := &schemas.MCPGovernanceAudit{
+		RiskLevel:     schemas.MCPToolRiskUnknown,
+		ApprovalState: mcpApprovalNotRequired,
+	}
+	if metadata, _ := ctx.Value(schemas.BifrostContextKeyMCPToolExecutionMetadata).(*schemas.MCPToolExecutionMetadata); metadata != nil {
+		audit.RiskLevel = metadata.RiskLevel
+	}
+	if audit.RiskLevel == schemas.MCPToolRiskHigh {
+		audit.ApprovalState, audit.ApprovalExpiresAt = mcpApprovalState(ctx, req)
+	}
+	ctx.SetMCPGovernanceAudit(audit)
+}
+
+func mcpApprovalState(ctx *schemas.BifrostContext, req *schemas.BifrostMCPRequest) (string, *time.Time) {
+	approval, ok := ctx.Value(mcpAuthorizationContextKey).(mcpAuthorization)
+	if !ok {
+		return mcpApprovalMissing, nil
+	}
+	expiresAt := approval.expiresAt
+	var expiresAtPtr *time.Time
+	if !expiresAt.IsZero() {
+		copy := expiresAt
+		expiresAtPtr = &copy
+	}
+	if approval.clientName == "" || approval.toolName == "" ||
+		req.ClientName != approval.clientName || req.GetToolName() != approval.toolName {
+		return mcpApprovalMismatched, expiresAtPtr
+	}
+	if !approval.shortLived {
+		return mcpApprovalLegacy, expiresAtPtr
+	}
+	if expiresAt.IsZero() || !time.Now().Before(expiresAt) {
+		return mcpApprovalExpired, expiresAtPtr
+	}
+	return mcpApprovalApproved, expiresAtPtr
+}
+
+func finishMCPGovernanceAudit(ctx *schemas.BifrostContext, decision, reason string) {
+	if ctx == nil {
+		return
+	}
+	audit, _ := ctx.Value(schemas.BifrostContextKeyMCPGovernanceAudit).(*schemas.MCPGovernanceAudit)
+	if audit == nil {
+		audit = &schemas.MCPGovernanceAudit{
+			RiskLevel:     schemas.MCPToolRiskUnknown,
+			ApprovalState: mcpApprovalNotRequired,
+		}
+	}
+	audit.GovernanceDecision = decision
+	audit.GovernanceReason = reason
+	ctx.SetMCPGovernanceAudit(audit)
+}
+
+func mcpAuditReason(err *schemas.BifrostError, fallback string) string {
+	if err == nil {
+		return fallback
+	}
+	if err.Type != nil && *err.Type != "" {
+		return *err.Type
+	}
+	if err.Error != nil && err.Error.Message != "" {
+		const maxReasonLength = 512
+		if len(err.Error.Message) > maxReasonLength {
+			return err.Error.Message[:maxReasonLength]
+		}
+		return err.Error.Message
+	}
+	return fmt.Sprintf("mcp_governance_error:%s", fallback)
 }
 
 // SetMCPExecutionAuthorization records a transport-verified approval for one MCP call.

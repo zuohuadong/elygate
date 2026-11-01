@@ -58,6 +58,7 @@ var reservedKeys = map[BifrostContextKey]struct{}{
 
 var additionalReservedKeys = map[BifrostContextKey]struct{}{
 	BifrostContextKeyMCPToolExecutionMetadata: {},
+	BifrostContextKeyMCPGovernanceAudit:       {},
 }
 
 // isReservedKey reports whether key is a reserved context key whose writes are
@@ -674,6 +675,19 @@ func (bc *BifrostContext) SetMCPToolExecutionMetadata(metadata *MCPToolExecution
 // Bifrost-internal (set by core - DO NOT SET THIS MANUALLY).
 func (bc *BifrostContext) ClearMCPToolExecutionMetadata() {
 	bc.setReservedValue(BifrostContextKeyMCPToolExecutionMetadata, nil)
+}
+
+// SetMCPGovernanceAudit writes the governance result while the MCP plugin
+// pipeline may have restricted public context writes.
+// Bifrost-internal (set by the governance plugin - DO NOT SET THIS MANUALLY).
+func (bc *BifrostContext) SetMCPGovernanceAudit(audit *MCPGovernanceAudit) {
+	bc.setReservedValue(BifrostContextKeyMCPGovernanceAudit, audit)
+}
+
+// ClearMCPGovernanceAudit removes the request-scoped MCP governance result.
+// Bifrost-internal (set by the governance plugin - DO NOT SET THIS MANUALLY).
+func (bc *BifrostContext) ClearMCPGovernanceAudit() {
+	bc.setReservedValue(BifrostContextKeyMCPGovernanceAudit, nil)
 }
 
 // ClearValue clears a value from the internal userValues map.
