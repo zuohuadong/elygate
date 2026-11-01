@@ -20,6 +20,13 @@
 	let loaded = $state(false);
 	let error = $state('');
 	let actionStatus = $state('');
+	let pendingMutation = $state<{
+		operation: 'publish' | 'rollback';
+		idempotencyKey: string;
+		expectedEpoch: number;
+		versionId?: string;
+		rollbackOfEpoch?: number;
+	} | null>(null);
 	let sequence = 0;
 	let controller: AbortController | undefined;
 	function text(zh: string, en: string): string { return i18n.locale === 'zh-CN' ? zh : en; }
@@ -68,6 +75,14 @@
 
 	async function publish(): Promise<void> {
 		if (busy || !head || !selectedVersionId) return;
+		const expectedEpoch = head.epoch;
+		const pending = pendingMutation?.operation === 'publish' &&
+			pendingMutation.expectedEpoch === expectedEpoch &&
+			pendingMutation.versionId === selectedVersionId
+			? pendingMutation
+			: null;
+		const idempotencyKey = pending?.idempotencyKey ?? crypto.randomUUID();
+		pendingMutation = { operation: 'publish', idempotencyKey, expectedEpoch, versionId: selectedVersionId };
 		busy = true;
 		error = '';
 		actionStatus = '';
@@ -76,16 +91,18 @@
 				method: 'POST',
 				body: JSON.stringify({
 					version_id: selectedVersionId,
-					expected_epoch: head.epoch,
-					idempotency_key: crypto.randomUUID(),
+					expected_epoch: expectedEpoch,
+					idempotency_key: idempotencyKey,
 				}),
 			});
+			pendingMutation = null;
 			busy = false;
 			await load(offset);
 			actionStatus = text('发布请求已处理。', 'Publish request processed.');
 		} catch (cause) {
+			if (cause instanceof ApiError && cause.status >= 400 && cause.status < 500) pendingMutation = null;
 			error = cause instanceof ApiError && cause.status === 503
-				? text('发布已持久化但尚未确认安装，请稍后用同一操作重试。', 'The publish is durable but installation is not confirmed; retry the same action shortly.')
+				? text('发布已持久化但尚未确认安装，请用同一按钮重试。', 'The publish is durable but installation is not confirmed; retry with the same button.')
 				: displayError(cause, text('发布失败。', 'Publish failed.'));
 			busy = false;
 		}
@@ -94,6 +111,14 @@
 	async function rollback(release: RoutingRelease): Promise<void> {
 		if (busy || !head || !release.application || release.epoch >= head.epoch) return;
 		if (!window.confirm(text(`确认回滚到代次 #${release.epoch}？`, `Roll back to epoch #${release.epoch}?`))) return;
+		const expectedEpoch = head.epoch;
+		const pending = pendingMutation?.operation === 'rollback' &&
+			pendingMutation.expectedEpoch === expectedEpoch &&
+			pendingMutation.rollbackOfEpoch === release.epoch
+			? pendingMutation
+			: null;
+		const idempotencyKey = pending?.idempotencyKey ?? crypto.randomUUID();
+		pendingMutation = { operation: 'rollback', idempotencyKey, expectedEpoch, rollbackOfEpoch: release.epoch };
 		busy = true;
 		error = '';
 		actionStatus = '';
@@ -102,16 +127,18 @@
 				method: 'POST',
 				body: JSON.stringify({
 					rollback_of_epoch: release.epoch,
-					expected_epoch: head.epoch,
-					idempotency_key: crypto.randomUUID(),
+					expected_epoch: expectedEpoch,
+					idempotency_key: idempotencyKey,
 				}),
 			});
+			pendingMutation = null;
 			busy = false;
 			await load(offset);
 			actionStatus = text('回滚请求已处理。', 'Rollback request processed.');
 		} catch (cause) {
+			if (cause instanceof ApiError && cause.status >= 400 && cause.status < 500) pendingMutation = null;
 			error = cause instanceof ApiError && cause.status === 503
-				? text('回滚已持久化但尚未确认安装，请稍后重试。', 'The rollback is durable but installation is not confirmed; retry shortly.')
+				? text('回滚已持久化但尚未确认安装，请用同一按钮重试。', 'The rollback is durable but installation is not confirmed; retry with the same button.')
 				: displayError(cause, text('回滚失败。', 'Rollback failed.'));
 			busy = false;
 		}
@@ -144,14 +171,14 @@
 					{:else}<option value="">{text('暂无可发布版本', 'No immutable versions')}</option>{/each}
 				</select>
 			</label>
-			<button class="action" type="button" disabled={busy || !active || !selectedVersionId} onclick={() => void publish()}><Rocket size={16} aria-hidden="true" />{text('发布版本', 'Publish version')}</button>
+			<button class="action" type="button" disabled={busy || !active || !selectedVersionId} onclick={() => void publish()}><Rocket size={16} aria-hidden="true" />{pendingMutation?.operation === 'publish' ? text('重试发布', 'Retry publish') : text('发布版本', 'Publish version')}</button>
 		</div>
 	{/if}
 	{#if loaded && !busy && !error && head && !releases.length}<p class="empty">{text('本页暂无发布记录', 'No release records on this page')}</p>{/if}
 	<ul>{#each releases as release (release.id)}
 		<li><div class="release-title"><strong>#{release.epoch} · {release.operation === 'rollback' ? text('回滚', 'Rollback') : text('发布', 'Publish')}</strong><span>{release.epoch !== head?.epoch ? text('已被取代', 'Superseded') : release.application ? text('已确认安装', 'Installation acknowledged') : text('待安装', 'Pending installation')}</span></div>
 			<time datetime={release.created_at}>{new Date(release.created_at).toLocaleString(i18n.locale)}</time>
-			{#if head && head.state === 'applied' && release.application && release.epoch < head.epoch}<button class="action rollback" type="button" disabled={busy || !active} onclick={() => void rollback(release)}><Undo2 size={16} aria-hidden="true" />{text('回滚到此版本', 'Roll back here')}</button>{/if}
+			{#if head && head.state === 'applied' && release.application && release.epoch < head.epoch}<button class="action rollback" type="button" disabled={busy || !active} onclick={() => void rollback(release)}><Undo2 size={16} aria-hidden="true" />{pendingMutation?.operation === 'rollback' && pendingMutation.rollbackOfEpoch === release.epoch ? text('重试回滚', 'Retry rollback') : text('回滚到此版本', 'Roll back here')}</button>{/if}
 			<details><summary>{text('回执详情', 'Receipt details')}</summary><dl>
 				<dt>{text('接收回执', 'Acceptance receipt')}</dt><dd>{release.id}</dd>
 				<dt>{text('版本', 'Version')}</dt><dd>{release.version_id}</dd>
