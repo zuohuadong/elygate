@@ -103,7 +103,7 @@ describe('enterprise panel build contract', () => {
 			'plugins/logging/**', 'Makefile', 'transports/Dockerfile*', '.github/workflows/panel-tests.yml',
 			'.github/workflows/scripts/smoke-elygate-image.sh', '.github/workflows/scripts/smoke-elygate-recovery.mjs',
 			'examples/single-node-postgres/**',
-			'scripts/production/**', 'scripts/go-local.sh']) {
+			'scripts/production/**', 'scripts/go-local.sh', 'scripts/test-controlplane-postgres.sh']) {
 			expect(workflow.on.push.paths).toContain(path);
 		}
 		expect(workflow.on).toHaveProperty('workflow_dispatch');
@@ -663,5 +663,76 @@ esac
 		const routingCrashIndex = steps.findIndex((step: { name?: string }) => step.name === 'Run routing installation process crash regressions');
 		expect(routingCrashIndex).toBeGreaterThan(webhookAuditIndex);
 		expect(steps[routingCrashIndex].run).toBe("bash scripts/go-local.sh test -race -p 1 ./transports/bifrost-http/controlplane -run '^TestRoutingInstallationProcessCrash$' -count=1 -timeout=360s");
+		const routingServerIndex = steps.findIndex((step: { name?: string }) => step.name === 'Run routing server policy regressions');
+		expect(routingServerIndex).toBeGreaterThan(routingCrashIndex);
+		expect(steps[routingServerIndex].run).toBe("bash scripts/go-local.sh test -race -p 1 ./transports/bifrost-http/server -run '^TestRouting(Admission|Startup|ReleaseActivation|RollbackActivation|Policy)' -count=1 -timeout=300s");
+		const postgresToolsIndex = steps.findIndex((step: { name?: string }) => step.name === 'Install private PostgreSQL test tools');
+		expect(postgresToolsIndex).toBeGreaterThan(routingServerIndex);
+		expect(steps[postgresToolsIndex].run).toContain('sudo apt-get install --yes postgresql-16');
+		const postgresRoutingIndex = steps.findIndex((step: { name?: string }) => step.name === 'Run PostgreSQL routing publication regressions');
+		expect(postgresRoutingIndex).toBeGreaterThan(postgresToolsIndex);
+		expect(steps[postgresRoutingIndex].env).toEqual({
+			POSTGRES_BIN: '/usr/lib/postgresql/16/bin',
+			ELYGATE_TEST_PACKAGES: './bifrost-http/server',
+		});
+		expect(steps[postgresRoutingIndex].run).toBe("bash scripts/test-controlplane-postgres.sh -mod=readonly -race -p 1 -run '^TestRouting(Admission|Startup|ReleaseActivation|RollbackActivation|Policy|InstallationProcessCrash)' -timeout=360s");
+		for (const index of [routingServerIndex, postgresToolsIndex, postgresRoutingIndex]) {
+			expect(steps[index].if).toBeUndefined();
+			expect(steps[index]['continue-on-error']).not.toBe(true);
+		}
+	});
+
+	test.each(['', './bifrost-http/server'])('private PostgreSQL runner keeps the complete Go package list after flags: %s', async (extraPackages) => {
+		const workspace = mkdtempSync(join(tmpdir(), 'egpg-'));
+		try {
+			const stub = `#!/usr/bin/env bash
+set -euo pipefail
+case "\${0##*/}" in
+  postgres)
+    printf '%s\\n' "$$" > "$TEST_POSTGRES_PID"
+    trap 'exit 0' TERM
+    while :; do sleep 0.1; done ;;
+  pg_isready) test -f "$TEST_POSTGRES_PID" ;;
+  pg_ctl) kill -TERM "$(cat "$TEST_POSTGRES_PID")" ;;
+  psql) printf '0\\n' ;;
+  go)
+    [[ "$GOWORK" == off ]]
+    printf '%s\\n' "$@" > "$TEST_GO_ARGS" ;;
+  initdb|pg_dump|pg_restore) ;;
+  *) exit 2 ;;
+esac
+`;
+			for (const executable of ['initdb', 'postgres', 'pg_ctl', 'pg_isready', 'psql', 'pg_dump', 'pg_restore', 'go']) {
+				await Bun.write(join(workspace, executable), stub);
+				chmodSync(join(workspace, executable), 0o700);
+			}
+			const argsPath = join(workspace, 'go.args');
+			const proc = Bun.spawn(['bash', new URL('../../../scripts/test-controlplane-postgres.sh', import.meta.url).pathname,
+				'-mod=readonly', '-race', '-p', '1', '-run', '^TestRouting', '-timeout=360s'], {
+				env: { ...process.env, POSTGRES_BIN: workspace, TMPDIR: workspace,
+					ELYGATE_TEST_PACKAGES: extraPackages, TEST_GO_ARGS: argsPath, TEST_POSTGRES_PID: join(workspace, 'postgres.pid') },
+				stdout: 'pipe', stderr: 'pipe',
+			});
+			const stderr = await new Response(proc.stderr).text();
+			expect(await proc.exited, stderr).toBe(0);
+			const packages = ['./bifrost-http/controlplane', ...(extraPackages ? [extraPackages] : [])];
+			expect((await Bun.file(argsPath).text()).trim().split('\n')).toEqual([
+				'test', '-count=1', '-timeout=5m', '-mod=readonly', '-race', '-p', '1', '-run', '^TestRouting', '-timeout=360s', ...packages,
+			]);
+		} finally {
+			rmSync(workspace, { recursive: true, force: true });
+		}
+	});
+
+	test.each(['-args', 'example.invalid/private-package'])('private PostgreSQL runner rejects nonlocal package arguments before allocation: %s', async (extraPackages) => {
+		const proc = Bun.spawn(['bash', new URL('../../../scripts/test-controlplane-postgres.sh', import.meta.url).pathname], {
+			env: { ...process.env, ELYGATE_TEST_PACKAGES: extraPackages },
+			stdout: 'pipe', stderr: 'pipe',
+		});
+		const stdout = await new Response(proc.stdout).text();
+		const stderr = await new Response(proc.stderr).text();
+		expect(await proc.exited).toBe(2);
+		expect(stdout).toBe('');
+		expect(stderr).toBe('Additional PostgreSQL test packages must be local paths.\n');
 	});
 });

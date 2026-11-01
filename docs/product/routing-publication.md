@@ -802,6 +802,20 @@ writes and production acceptance remain open. Status: **PARTIAL**.
 
 ## Verification
 
+- Follow-up `routing-startup-store-ci` (parent `5b5e7e65a`, source the continuing
+  production-readiness goal) adds CI coverage for the latest startup/file-sync
+  regressions without changing publication behavior or the ownership decision.
+  Native, low risk, root is the sole writer, external=0. The PostgreSQL runner
+  accepts explicit additional local packages through `ELYGATE_TEST_PACKAGES`,
+  keeping all packages together after flags so Go does not silently pass a
+  trailing package to the test binary. Its default controlplane scope is retained.
+  The final local SQLite server race run passed in 10.452s; the private PostgreSQL
+  18 runner passed the four installation crash cases in controlplane (51.040s)
+  and the server admission/startup/activation/rollback/policy selection (78.288s).
+  It verified zero owned databases and completed shutdown. PostgreSQL 16 CI is
+  configured but not yet counted as passing. No HTTP publication route,
+  cross-process fencing, power-loss guarantee or production approval is added.
+
 - Stage 1 passed `go test -buildvcs=false ./rules -count=1`, targeted `-race`
   tests for `TestRuleGeneration`, `TestRoutingEvaluationKeepsRuleAndProgramGeneration`
   and `TestRuleStore_`, both benchmark runs above, and `git diff --check`.

@@ -6,6 +6,40 @@
 不以本次已实现的功能重新定义完成标准。新系统只兼容 Bifrost 上游契约，
 不增加旧 Elygate 兼容层；独立 `panel/` 不替换为上游 `ui/`。
 
+## 2026-11-01 路由双存储 CI 覆盖
+
+后续项 `routing-startup-store-ci`：parent 为 `5b5e7e65a`，source 为持续上线
+目标和启动协调测试，reason 为新 server 回归尚未纳入 CI，且将包路径与 flags
+混排会让已有 PostgreSQL runner 漏跑默认包。Native、低风险、root 单 writer、
+external=0；范围冻结为 workflow、runner、构建契约及两份验收文档，不改变
+业务实现、进程 ownership 决策或生产授权。
+
+为避免 routing server 的 PostgreSQL 证据只存在于本机，面板 CI 的 API
+contracts job 新增 SQLite `-race` 的 server policy regressions，以及使用
+PostgreSQL 16 工具执行 controlplane 与 server 两个包的 routing acceptance。
+这里指定数据库主版本，不声称锁定 apt 软件包的精确修订。
+`scripts/test-controlplane-postgres.sh` 保留
+controlplane 为默认包，并通过受校验的 `ELYGATE_TEST_PACKAGES` 追加 server
+包；这些包作为一组放在 Go flags 之后，避免漏跑。附加包拒绝 flag 和非本地
+路径；两个 stub 执行回归核对实际 Go argv，不把模拟进程计作数据库验收。
+
+本地针对同一命令的 SQLite server race、私有 PostgreSQL 18 controlplane
+强杀恢复四场景（51.040s）和 PostgreSQL server 启动/激活/回滚/策略回归
+（78.288s）均通过，无失败或跳过。runner 检查零测试库残留且正常停止实例；
+日志在 `/Volumes/Datas/.codex-tmp/elygate-cp-pg.JvQymy/`。第一轮手写 zsh
+harness 虽然 server 用例通过，但 cleanup 使用只读变量名而退出 1，不计完整
+通过；后续使用上述实际 Bash runner 的成功结果。最终完整 Panel 测试
+440 项通过、2619 个断言，API proxy 集成 1 项通过、12 个断言；
+Svelte 检查零错误/警告，ShellCheck、Bash 语法、actionlint 和 diff 检查通过。
+该增量只有 CI 时间和临时数据库/磁盘成本，无推理路径或常驻内存增量。
+新提交的 PostgreSQL 16 远端 CI 仍须按同 SHA 实际结果确认，不用本机
+PostgreSQL 18 代替；整体保持 **active / PARTIAL**。
+
+父提交 `5b5e7e65aac56814774194d302ef42c8acda3fa7` 的 run `41264989390`
+四个 job 已全部成功，但该 run 没有本次新增双存储步骤，不能替代其证据。
+路由发布/回滚写接口、ownership 人工决策、在线 Shadow、模型约束强制、
+MCP 审批与 Kill Switch、完整敏感审计及正式发布/生产验收仍未完成。
+
 ## 2026-11-01 模型目录元数据收口
 
 后续项 `model-governance-annotations`，parent 为

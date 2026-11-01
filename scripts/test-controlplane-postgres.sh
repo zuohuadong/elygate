@@ -2,6 +2,17 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TEST_PACKAGES=(./bifrost-http/controlplane)
+if [[ -n "${ELYGATE_TEST_PACKAGES:-}" ]]; then
+	read -r -a extra_test_packages <<< "$ELYGATE_TEST_PACKAGES"
+	for package in "${extra_test_packages[@]}"; do
+		if [[ "$package" != ./* ]]; then
+			printf 'Additional PostgreSQL test packages must be local paths.\n' >&2
+			exit 2
+		fi
+	done
+	TEST_PACKAGES+=("${extra_test_packages[@]}")
+fi
 if [[ -n "${POSTGRES_BIN:-}" ]]; then
 	export PATH="$POSTGRES_BIN:$PATH"
 fi
@@ -66,7 +77,7 @@ fi
 
 export ELYGATE_TEST_POSTGRES_SOCKET="$SOCKET_DIR"
 cd "$ROOT_DIR/transports"
-GOWORK=off go test -count=1 -timeout=5m "$@" ./bifrost-http/controlplane
+GOWORK=off go test -count=1 -timeout=5m "$@" "${TEST_PACKAGES[@]}"
 
 remaining="$(psql -X -h "$SOCKET_DIR" -p 5432 -U elygate_controlplane_test -d postgres -At \
 	-c "SELECT count(*) FROM pg_database WHERE starts_with(datname, 'elygate_cp_test_')")"

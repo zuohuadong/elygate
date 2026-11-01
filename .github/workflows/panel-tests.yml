@@ -18,6 +18,7 @@ on:
       - "examples/single-node-postgres/**"
       - "scripts/production/**"
       - "scripts/go-local.sh"
+      - "scripts/test-controlplane-postgres.sh"
   push:
     branches: [main, dev]
     paths:
@@ -36,6 +37,7 @@ on:
       - "examples/single-node-postgres/**"
       - "scripts/production/**"
       - "scripts/go-local.sh"
+      - "scripts/test-controlplane-postgres.sh"
   workflow_dispatch:
 
 permissions:
@@ -204,3 +206,14 @@ jobs:
         run: bash scripts/go-local.sh test -p 1 ./transports/bifrost-http/handlers ./transports/bifrost-http/controlplane -run '^Test(ManagementWebhookAuditAfterPersistence|WebhookHandlerAuditsCommittedChangesBeforeMemoryReconciliation|WebhookHandlerAuditsDeleteBeforeMemoryRemoval)$' -count=1 -timeout=180s
       - name: Run routing installation process crash regressions
         run: bash scripts/go-local.sh test -race -p 1 ./transports/bifrost-http/controlplane -run '^TestRoutingInstallationProcessCrash$' -count=1 -timeout=360s
+      - name: Run routing server policy regressions
+        run: bash scripts/go-local.sh test -race -p 1 ./transports/bifrost-http/server -run '^TestRouting(Admission|Startup|ReleaseActivation|RollbackActivation|Policy)' -count=1 -timeout=300s
+      - name: Install private PostgreSQL test tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-16
+      - name: Run PostgreSQL routing publication regressions
+        env:
+          POSTGRES_BIN: /usr/lib/postgresql/16/bin
+          ELYGATE_TEST_PACKAGES: ./bifrost-http/server
+        run: bash scripts/test-controlplane-postgres.sh -mod=readonly -race -p 1 -run '^TestRouting(Admission|Startup|ReleaseActivation|RollbackActivation|Policy|InstallationProcessCrash)' -timeout=360s
