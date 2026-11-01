@@ -79,8 +79,9 @@ func TestConvertToolFunctionParametersToMCPInputSchemaPreservesLegacyDefinitions
 // fakeInstructionsToolManager reports a fixed aggregate and records the context it was asked
 // with, so a test can assert the hook resolves the text per request rather than once at build.
 type fakeInstructionsToolManager struct {
-	instructions string
-	seenCtx      context.Context
+	instructions       string
+	seenCtx            context.Context
+	seenApprovalHeader atomic.Value
 }
 
 func (f *fakeInstructionsToolManager) GetAvailableMCPTools(context.Context) []schemas.ChatTool {
@@ -245,12 +246,22 @@ func (e *echoToolManager) GetAvailableMCPTools(ctx context.Context) []schemas.Ch
 	return []schemas.ChatTool{{Type: schemas.ChatToolTypeFunction, Function: &schemas.ChatToolFunction{Name: "gw-echo"}}}
 }
 
-func (e *echoToolManager) ExecuteChatMCPTool(_ context.Context, call *schemas.ChatAssistantMessageToolCall) (*schemas.ChatMessage, *schemas.BifrostError) {
+func (e *echoToolManager) ExecuteChatMCPTool(ctx context.Context, call *schemas.ChatAssistantMessageToolCall) (*schemas.ChatMessage, *schemas.BifrostError) {
+	if headers, ok := ctx.Value(schemas.BifrostContextKeyRequestHeaders).(map[string]string); ok {
+		e.seenApprovalHeader.Store(headers["x-bf-mcp-approval"])
+	}
 	var args struct {
 		Text string `json:"text"`
 	}
 	_ = json.Unmarshal([]byte(call.Function.Arguments), &args)
 	return &schemas.ChatMessage{Content: &schemas.ChatMessageContent{ContentStr: &args.Text}}, nil
+}
+
+func (e *echoToolManager) approvalHeader() string {
+	if value := e.seenApprovalHeader.Load(); value != nil {
+		return value.(string)
+	}
+	return ""
 }
 
 // startGateway serves h's routes on a loopback listener and returns its base URL.
@@ -311,6 +322,32 @@ func TestMCPGateway_ProtocolVersionMatrix(t *testing.T) {
 			assert.Equal(t, "hi", res.Content[0].(mcp.TextContent).Text)
 		})
 	}
+}
+
+func TestMCPGateway_ToolCallContextRetainsApprovalHeader(t *testing.T) {
+	const approvalToken = "approval-token-for-tool-call"
+	tm := &echoToolManager{fakeInstructionsToolManager{instructions: "gateway instructions"}}
+	h, err := NewMCPServerHandler(context.Background(), &lib.Config{ClientConfig: &configstore.ClientConfig{}}, tm, nil, nil, nil)
+	require.NoError(t, err)
+	baseURL := startGateway(t, h)
+
+	req, err := http.NewRequest(http.MethodPost, baseURL+"/mcp", strings.NewReader(
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"gw-echo","arguments":{"text":"hi"}}}`,
+	))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("MCP-Protocol-Version", mcp.ProtocolVersion20250618)
+	req.Header.Set("x-bf-mcp-approval", approvalToken)
+	resp, err := (&http.Client{Timeout: 3 * time.Second}).Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	assert.Contains(t, string(body), `"hi"`)
+	assert.Equal(t, approvalToken, tm.approvalHeader(),
+		"the approval header must remain available when the actual tools/call message reaches the tool manager")
 }
 
 // Transport rules a client sees on the wire, checked with raw HTTP.

@@ -77,7 +77,9 @@ PostgreSQL 18 代替；整体保持 **active / PARTIAL**。
 父提交 `5b5e7e65aac56814774194d302ef42c8acda3fa7` 的 run `41264989390`
 四个 job 已全部成功，但该 run 没有本次新增双存储步骤，不能替代其证据。
 路由发布/回滚写接口、ownership 人工决策、在线 Shadow、模型约束强制、
-MCP 审批与 Kill Switch、完整敏感审计及正式发布/生产验收仍未完成。
+MCP 审批与 Kill Switch 的生产化证据、正式发布/生产验收仍未完成；相关
+MCP 风险、审批、撤销、Kill Switch 和结果审计代码已在后续条目闭合，本段
+只保留其生产证据边界。
 
 ## 2026-11-01 模型目录元数据收口
 
@@ -167,9 +169,9 @@ MCP 工具的上游 `readOnlyHint`、`destructiveHint`、`idempotentHint` 和
 API 继续保留用于现有工具许可路径，但不能满足 destructive 工具的短期审批门。
 风险分类、元数据复制隔离、缺失/过期/改目标拒绝和未标注回归均有定向 Go 测试。
 
-本项只闭合风险信号到执行前治理和一次性短期授权的局部边界，不等同于审批
-签发 API/UI、跨进程授权存储、Kill Switch、结果审计、在线 Shadow、正式制品
-或生产切换授权；MCP 生产门禁仍保持 **PARTIAL**。
+本项只闭合风险信号到执行前治理和一次性短期授权的局部边界，不等同于后续
+新增的审批签发 API/UI、跨进程授权存储、Kill Switch、结果审计、在线 Shadow、
+正式制品或生产切换授权；MCP 生产门禁仍保持 **PARTIAL**。
 
 ### 2026-11-02 MCP 治理结果持久审计
 
@@ -228,8 +230,8 @@ Apple M4 单样本 `BenchmarkMCPKillSwitchDecision -benchmem` 为
 0 警告；`bun run build` 成功并完成静态资源复制；`git diff --check` 通过。
 这只证明 panel 代码和上游管理 API 的本地契约，不证明真实管理员会话、真实
 PostgreSQL 多实例读取、浏览器到生产后端的权限/持久化、正式 registry 制品或
-生产切换授权。MCP 审批签发 API/UI、跨进程授权存储、ownership/fencing、在线
-Shadow 以及真实供应商/TLS 仍保持未完成；总目标继续 **active / PARTIAL**。
+生产切换授权。跨进程授权存储、ownership/fencing、在线 Shadow 以及真实供应商/
+TLS 仍保持未完成；总目标继续 **active / PARTIAL**。
 
 ### 2026-11-02 MCP 短期审批签发与撤销（本地 PASS_SCOPED）
 
