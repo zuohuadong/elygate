@@ -1843,3 +1843,24 @@ run `41364582905` 已于 2026-11-02 00:18:05 UTC 完成并成功。四个 job
 正式 registry 制品、真实供应商/TLS、跨进程 ownership/fencing、在线
 Shadow、升级/回滚演练或生产切换授权。CodSpeed run `41364582918` 查询时
 仍为 `queued`，不计性能验收。整体目标继续保持 **active / PARTIAL**。
+
+### 2026-11-02 在线 Shadow Evaluation 运行时基础
+
+后续项 `routing-shadow-runtime-sampling`：parent 为当前生产准备目标，
+source 为统一策略验收门，reason 为已有离线模拟不能观察候选策略与真实请求
+决策差异。范围冻结为 routing plugin 的可选运行时组件、定向 race 测试和本节
+记录；不改变默认请求行为，不增加旧 Elygate 兼容层，不伪装成已完成的生产
+策略中心。
+
+新增可注入的 `ShadowEvaluator`：候选 `rules.Store` 通过有界异步队列按采样率
+执行，提交前复制模型、范围、元数据、请求头、查询参数和 fallback 等小型路由
+上下文；不复制请求正文，不在后台调用请求生命周期内的模型/复杂度 resolver。
+队列满时丢弃样本而不是阻塞真实请求，关闭时先排空已接收样本。`RoutingPlugin`
+在 live 决策成功或规则错误后提交对比，报告包含 live/candidate 决策、差异、
+候选错误和最小请求归属字段；候选决策绝不写回服务请求。
+
+`plugins/routing/...` race 定向套件通过（3 个包，无失败/跳过），`go vet`
+通过，`gofmt` 与 `git diff --check` 通过。该项是可注入的运行时基础，
+尚未连接策略版本发布 API、管理员面板、持久 Shadow 报表/聚合、跨进程候选
+ownership 或全量实时传输路径，因此在线 Shadow 的产品验收仍保持 **PARTIAL**，
+整体目标继续 **active / PARTIAL**。

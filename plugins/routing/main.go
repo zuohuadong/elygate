@@ -58,6 +58,17 @@ type Config struct {
 	// KVStore is the runtime-only shared store used for complexity
 	// session state. It is injected by the host and is never serialized.
 	KVStore schemas.KVStore `json:"-"`
+	// ShadowPolicyStore is an optional immutable candidate policy used for
+	// sampled, asynchronous comparison. It is runtime-only and never served.
+	ShadowPolicyStore rules.Store `json:"-"`
+	// ShadowSampleRate is the fraction of requests submitted to the shadow
+	// evaluator. Zero disables shadow evaluation.
+	ShadowSampleRate float64 `json:"shadow_sample_rate,omitempty"`
+	// ShadowQueueSize bounds the number of copied request contexts waiting for
+	// candidate evaluation. Zero uses the default.
+	ShadowQueueSize int `json:"shadow_queue_size,omitempty"`
+	// ShadowReporter receives candidate-vs-live reports. It is runtime-only.
+	ShadowReporter ShadowReporter `json:"-"`
 }
 
 // chainMaxDepthOrDefault resolves the configured chain depth, falling back to the default.
@@ -68,6 +79,13 @@ func (c *Config) chainMaxDepthOrDefault() *int {
 	}
 	defaultDepth := rules.DefaultChainMaxDepth
 	return &defaultDepth
+}
+
+func (c *Config) shadowQueueSizeOrDefault() int {
+	if c == nil || c.ShadowQueueSize <= 0 {
+		return 64
+	}
+	return c.ShadowQueueSize
 }
 
 // RoutingPlugin evaluates routing rules for every request.
@@ -116,6 +134,7 @@ type RoutingPlugin struct {
 	// /v1/responses; it stays nil until wired, in which case no fallback runs.
 	responsesRequestExecutor atomic.Pointer[ResponsesRequestExecutor]
 	decisionRequestExecutor  atomic.Pointer[DecisionRequestExecutor]
+	shadowEvaluator          atomic.Pointer[ShadowEvaluator]
 }
 
 // Init initializes and returns a routing plugin instance.
@@ -182,6 +201,21 @@ func InitFromStore(
 		logger:             logger,
 		semanticClassifier: complexity.NewSemanticClassifier(ctx, logger),
 		llmClassifier:      complexity.NewLLMClassifier(logger),
+	}
+	if config != nil && config.ShadowPolicyStore != nil && config.ShadowReporter != nil && config.ShadowSampleRate > 0 {
+		shadow, err := NewShadowEvaluator(
+			config.ShadowPolicyStore,
+			governancePlugin,
+			logger,
+			*chainMaxDepth,
+			config.ShadowSampleRate,
+			config.shadowQueueSizeOrDefault(),
+			config.ShadowReporter,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize routing shadow evaluator: %w", err)
+		}
+		plugin.shadowEvaluator.Store(shadow)
 	}
 	if config != nil && config.KVStore != nil {
 		plugin.sessionStore = newComplexitySessionStore(config.KVStore, complexitySessionInactivityTTL)
@@ -537,9 +571,15 @@ func (p *RoutingPlugin) applyRoutingRules(ctx *schemas.BifrostContext, req *sche
 	// Evaluate routing rules
 	decision, err := p.engine.EvaluateRoutingRules(ctx, routingCtx)
 	if err != nil {
+		if shadow := p.shadowEvaluator.Load(); shadow != nil {
+			shadow.Submit(routingCtx, nil)
+		}
 		p.logger.Error("failed to evaluate routing rules: %v", err)
 		ctx.AppendRoutingEngineLog(schemas.RoutingEngineRoutingRule, schemas.LogLevelError, fmt.Sprintf("Routing rule evaluation error: %v", err))
 		return nil, nil
+	}
+	if shadow := p.shadowEvaluator.Load(); shadow != nil {
+		shadow.Submit(routingCtx, decision)
 	}
 	if decision == nil {
 		return nil, nil
@@ -593,6 +633,22 @@ func (p *RoutingPlugin) applyRoutingRules(ctx *schemas.BifrostContext, req *sche
 
 	p.logger.Debug("[Routing] Applied routing decision: provider=%s, model=%s, keyID=%s, fallbacks=%v", decision.Provider, decision.Model, decision.KeyID, configstoreTables.RoutingFallbackStrings(decision.Fallbacks))
 	return decision, nil
+}
+
+// SetShadowEvaluator installs an optional asynchronous candidate-policy
+// evaluator. Replacing one drains and closes the previous evaluator. A nil
+// evaluator disables shadow comparisons.
+func (p *RoutingPlugin) SetShadowEvaluator(evaluator *ShadowEvaluator) {
+	if p == nil {
+		if evaluator != nil {
+			evaluator.Close()
+		}
+		return
+	}
+	previous := p.shadowEvaluator.Swap(evaluator)
+	if previous != nil {
+		previous.Close()
+	}
 }
 
 func requestMetadata(req *schemas.BifrostRequest) map[string]string {
@@ -664,6 +720,9 @@ func (p *RoutingPlugin) persistComplexityTurnTier(ctx *schemas.BifrostContext) {
 // Cleanup implements schemas.BasePlugin.
 func (p *RoutingPlugin) Cleanup() error {
 	p.cleanupOnce.Do(func() {
+		if shadow := p.shadowEvaluator.Swap(nil); shadow != nil {
+			shadow.Close()
+		}
 		if p.generationsCancel != nil {
 			p.generationsCancel()
 			p.generationsWg.Wait()
