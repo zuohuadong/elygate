@@ -1827,3 +1827,19 @@ root 单 writer、external=0；不改变 Bifrost 上游异步协议，不增加�
 随后文档修订提交 `cd262079a` 的 Snyk run `41348433677` 也已成功；
 同 SHA 的 CodSpeed run `41348433678` 仍为 `queued`，因此当前分支仍没有
 可计入的性能验收回执。
+
+### 2026-11-02 路由治理候选 CI 收口
+
+候选提交 `ee58ab207b65144999dbcd212356ca58806ac509` 的 GitHub Actions
+run `41364582905` 已于 2026-11-02 00:18:05 UTC 完成并成功。四个 job
+均通过：employee portal、API contracts（含 SQLite 路由回归、员工契约、
+审计关联、用量导出、模型目录、Relay/Webhook 审计及 PostgreSQL 16 路由
+发布回归）、Svelte panel，以及生产 Docker 构建、启动健康检查和隔离备份/
+恢复。run 产出了候选镜像归档
+`elygate-candidate-ee58ab207b65144999dbcd212356ca58806ac509-41364582905-1`
+（artifact `13107047458`）和 Docker build 记录（artifact `13106319802`）。
+
+该回执只证明当前候选的 CI 构建、定向契约和隔离恢复门通过，不代表已推送
+正式 registry 制品、真实供应商/TLS、跨进程 ownership/fencing、在线
+Shadow、升级/回滚演练或生产切换授权。CodSpeed run `41364582918` 查询时
+仍为 `queued`，不计性能验收。整体目标继续保持 **active / PARTIAL**。
