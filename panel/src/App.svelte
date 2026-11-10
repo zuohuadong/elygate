@@ -152,6 +152,23 @@
 		applyLocaleMetadata(currentLocale);
 	});
 
+	$effect(() => {
+		const locale = currentLocale;
+		if (typeof document === 'undefined') return;
+		const label = locale === 'zh-CN' ? '关闭' : 'Close';
+		const localizeDialogClose = (): void => {
+			document.querySelectorAll('[data-slot="dialog-close"]').forEach((node) => {
+				const screenReaderLabel = node.querySelector('.svadmin-sr-only');
+				if (screenReaderLabel?.textContent?.trim() === 'Close') screenReaderLabel.textContent = label;
+				if (node instanceof HTMLElement && node.childElementCount === 0 && node.textContent?.trim() === 'Close') node.textContent = label;
+			});
+		};
+		localizeDialogClose();
+		const observer = new MutationObserver(localizeDialogClose);
+		observer.observe(document.body, { childList: true, subtree: true });
+		return () => observer.disconnect();
+	});
+
 	const builtInResourcePages = {
 		providers: { list: ProvidersPage },
 		'virtual-keys': { list: VirtualKeysPage },

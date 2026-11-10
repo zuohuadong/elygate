@@ -83,6 +83,33 @@
 	function isLoaded(plugin: ManagedPlugin): boolean {
 		return loadedNames.includes(plugin.actualName) || loadedNames.includes(plugin.name) || plugin.status.status === 'active';
 	}
+
+	function placementLabel(value: string): string {
+		if (value === 'post_builtin') return text('内置插件之后', 'After built-ins');
+		if (value === 'pre_builtin') return text('内置插件之前', 'Before built-ins');
+		return value || '—';
+	}
+	function orderLabel(value: number): string {
+		return text(`第 ${value + 1} 位`, `#${value + 1}`);
+	}
+	function pluginDisplayName(plugin: ManagedPlugin): string {
+		const names: Record<string, [string, string]> = {
+			logging: ['请求日志', 'Request logging'],
+			governance: ['治理', 'Governance'],
+			telemetry: ['遥测', 'Telemetry'],
+			otel: ['链路追踪', 'Tracing'],
+			semantic_cache: ['语义缓存', 'Semantic cache'],
+			mocker: ['模拟响应', 'Mock responses'],
+			maxim: ['Maxim 观测', 'Maxim observability'],
+			jsonparser: ['JSON 解析', 'JSON parsing'],
+			prompts: ['提示词', 'Prompts'],
+			routing: ['路由', 'Routing'],
+			compat: ['兼容层', 'Compatibility'],
+			model_catalog_resolver: ['模型目录解析', 'Model catalog resolver'],
+		};
+		const label = names[plugin.actualName] ?? names[plugin.name];
+		return label ? text(label[0], label[1]) : (plugin.actualName || plugin.name);
+	}
 	function validationMessage(cause: unknown): string {
 		if (!(cause instanceof Error)) return text('插件保存失败。', 'Failed to save plugin.');
 		if (cause.message === 'name-required') return text('插件名称不能为空。', 'Plugin name is required.');
@@ -222,10 +249,10 @@
 
 		<main class="plugin-detail">
 			{#if selected}
-				<header class="detail-heading"><div><div class="title-row"><h2>{selected.name}</h2><span class={`status-pill ${statusBucket(selected)}`}>{statusLabel(selected)}</span>{#if selected.isCustom}<span class="type-pill">{text('自定义 / 企业', 'Custom / enterprise')}</span>{/if}</div>{#if selectedDescription}<p class="plugin-description">{selectedDescription}</p>{/if}<p class="plugin-path">{selected.path || text(`随 ${getAppName()} 分发的内置插件`, `Built into the ${getAppName()} distribution`)}</p></div><div class="actions"><button type="button" disabled={busyName === selected.name} onclick={() => void toggle(selected)}>{selected.enabled ? text('停用', 'Disable') : text('启用', 'Enable')}</button><button class="primary" type="button" onclick={() => openEdit(selected)}>{text('编辑配置', 'Edit configuration')}</button>{#if selected.isCustom}<button class="danger" type="button" disabled={busyName === selected.name} onclick={() => void remove(selected)}>{text('删除', 'Delete')}</button>{/if}</div></header>
-				<div class="detail-grid"><article><h3>{text('运行信息', 'Runtime')}</h3><dl><div><dt>{text('实际名称', 'Actual name')}</dt><dd>{selected.actualName || '—'}</dd></div><div><dt>{text('状态', 'Status')}</dt><dd>{statusLabel(selected)}</dd></div><div><dt>{text('加载状态', 'Loaded')}</dt><dd>{isLoaded(selected) ? text('是', 'Yes') : text('否', 'No')}</dd></div><div><dt>{text('位置 / 顺序', 'Placement / order')}</dt><dd>{selected.placement} / {selected.order}</dd></div></dl></article><article><h3>{text('钩子能力', 'Hook capabilities')}</h3><div class="badges">{#each [...selected.status.types, ...selected.features] as type (type)}<span>{type.toUpperCase()}</span>{:else}<span>{text('服务端未报告类型', 'No types reported')}</span>{/each}</div><p>{text('企业插件返回的钩子类型、功能标识和运行状态会在此自动显示，无需在面板硬编码插件名称。', 'Hook types, feature identifiers, and runtime status reported by enterprise plugins appear here without hard-coded plugin names.')}</p></article></div>
-				<details class="config-preview"><summary>{text('技术详情：生效配置', 'Technical details: effective configuration')}</summary><div><p>{text('Secret 已由服务端脱敏；原样保存脱敏占位符时，后端保留已存储凭据。', 'Secrets are server-redacted; saving placeholders unchanged preserves stored credentials on the backend.')}</p></div><pre>{JSON.stringify(selected.config, null, 2)}</pre></details>
-				<details class="logs"><summary>{text('技术详情：加载日志', 'Technical details: load logs')}</summary>{#each selected.status.logs as log, index (`${index}-${log}`)}<code class:error-log={/(error|failed|exception|panic|fatal)/i.test(log)}>{log}</code>{:else}<p>{text('没有运行时日志。', 'No runtime logs.')}</p>{/each}</details>
+				<header class="detail-heading"><div><div class="title-row"><h2>{pluginDisplayName(selected)}</h2><span class={`status-pill ${statusBucket(selected)}`}>{statusLabel(selected)}</span>{#if selected.isCustom}<span class="type-pill">{text('自定义 / 企业', 'Custom / enterprise')}</span>{/if}</div>{#if selectedDescription}<p class="plugin-description">{selectedDescription}</p>{/if}<p class="plugin-path">{selected.path || text(`随 ${getAppName()} 分发的内置插件`, `Built into the ${getAppName()} distribution`)}</p></div><div class="actions"><button type="button" disabled={busyName === selected.name} onclick={() => void toggle(selected)}>{selected.enabled ? text('停用', 'Disable') : text('启用', 'Enable')}</button><button class="primary" type="button" onclick={() => openEdit(selected)}>{text('编辑配置', 'Edit configuration')}</button>{#if selected.isCustom}<button class="danger" type="button" disabled={busyName === selected.name} onclick={() => void remove(selected)}>{text('删除', 'Delete')}</button>{/if}</div></header>
+				<div class="detail-grid"><article><h3>{text('运行信息', 'Runtime')}</h3><dl><div><dt>{text('插件名称', 'Plugin name')}</dt><dd title={selected.actualName || selected.name}>{pluginDisplayName(selected)}</dd></div><div><dt>{text('状态', 'Status')}</dt><dd>{statusLabel(selected)}</dd></div><div><dt>{text('加载状态', 'Loaded')}</dt><dd>{isLoaded(selected) ? text('已加载', 'Loaded') : text('未加载', 'Not loaded')}</dd></div><div><dt>{text('位置 / 顺序', 'Placement / order')}</dt><dd>{placementLabel(selected.placement)} / {orderLabel(selected.order)}</dd></div></dl></article><article><h3>{text('钩子能力', 'Hook capabilities')}</h3><div class="badges">{#each [...selected.status.types, ...selected.features] as type (type)}<span>{type.toUpperCase()}</span>{:else}<span>{text('服务端未报告类型', 'No types reported')}</span>{/each}</div><p>{text('企业插件返回的钩子类型、功能标识和运行状态会在此自动显示，无需在面板硬编码插件名称。', 'Hook types, feature identifiers, and runtime status reported by enterprise plugins appear here without hard-coded plugin names.')}</p></article></div>
+				<details class="config-preview"><summary>{text('技术详情：生效配置', 'Technical details: effective configuration')}</summary><div><p>{text('密钥已由服务端隐藏；原样保存脱敏占位符时，后端会保留已存储凭据。', 'Secrets are hidden by the server; saving placeholders unchanged preserves stored credentials on the backend.')}</p></div><pre>{JSON.stringify(selected.config, null, 2)}</pre></details>
+				{@const loadFailed = selected.status.logs.some((log) => /(error|failed|exception|panic|fatal)/i.test(log))}<p class="load-summary">{selected.status.logs.length ? (loadFailed ? text('加载结果：存在错误（原始日志见下方技术详情）', 'Load result: errors found (see technical details)') : text('加载结果：成功', 'Load result: success')) : text('加载结果：无日志', 'Load result: no logs')}</p><details class="logs"><summary>{text('技术详情：加载日志', 'Technical details: load logs')}</summary>{#each selected.status.logs as log, index (`${index}-${log}`)}<code class:error-log={/(error|failed|exception|panic|fatal)/i.test(log)}>{log}</code>{:else}<p>{text('没有运行时日志。', 'No runtime logs.')}</p>{/each}</details>
 			{:else}<div class="empty-detail">{text('选择一个插件查看配置和运行状态。', 'Select a plugin to inspect configuration and runtime state.')}</div>{/if}
 		</main>
 	</div>
@@ -303,6 +330,7 @@
 	.detail-heading { align-items: start; border-bottom: 1px solid var(--border); padding-bottom: .9rem; }
 	.title-row { justify-content: start; }
 	.status-pill, .type-pill, .badges span { border-radius: 999px; font-size: .68rem; padding: .22rem .5rem; }
+	.load-summary { color: var(--muted-foreground); font-size: .8rem; margin: .35rem 0 .5rem; }
 	.type-pill, .badges span { background: var(--muted); }
 	.detail-grid { display: grid; gap: .8rem; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: .9rem; }
 	.detail-grid article, .config-preview, .logs { border: 1px solid var(--border); border-radius: .75rem; padding: .9rem; }

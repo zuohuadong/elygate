@@ -224,7 +224,7 @@
 
 <section class="page-shell">
 	<header class="page-heading"><div><p class="eyebrow">{getAppName()} / {i18n.t('elygate.system')}</p><h1>{i18n.t('elygate.cachingConfig')}</h1><p>{i18n.t('elygate.cachingHint')}</p></div><div class="toggle"><span>{plugin?.enabled === true ? i18n.t('elygate.enabled') : i18n.t('elygate.disabled')}</span><button type="button" onclick={() => void save(plugin?.enabled !== true)} disabled={isMutating || cacheEnableBlocked} title={cacheEnableBlocked ? i18n.t('elygate.vectorStoreRequired') : undefined}>{plugin?.enabled === true ? i18n.t('elygate.disable') : i18n.t('elygate.enable')}</button>{#if cacheEnableBlocked}<span class="toggle-hint">{i18n.t('elygate.vectorStoreRequired')}</span>{/if}</div></header>
-	{#if !vectorStoreConnected}<div class="notice warning">{i18n.t('elygate.vectorStoreRequired')}</div>{/if}{#if loadWarning}<div class="notice warning" role="status">{loadWarning}</div>{/if}{#if error}<div class="notice error" role="alert">{error}</div>{/if}{#if notice}<div class="notice success" role="status">{notice}</div>{/if}
+	{#if !vectorStoreConnected}<div class="notice warning">{i18n.t('elygate.vectorStoreRequired')}</div>{/if}{#if loadWarning}<div class="notice warning" role="status"><span>{loadWarning}</span> <button type="button" onclick={() => void load()} disabled={isLoading}>{text('重试', 'Retry')}</button></div>{/if}{#if error}<div class="notice error" role="alert">{error}</div>{/if}{#if notice}<div class="notice success" role="status">{notice}</div>{/if}
 	<form class="vector-store-card" onsubmit={(event) => { event.preventDefault(); void saveVectorStore(); }}>
 		<header><div><h2>{i18n.t('elygate.vectorStore')}</h2><p>{i18n.t('elygate.vectorStoreHint')}</p></div><span class:ok={vectorStoreConnected}>{vectorStoreConnected ? i18n.t('elygate.conn.connected') : i18n.t('elygate.conn.disconnected')}</span></header>
 		{#if vectorStore?.management_message}<div class="notice warning">{vectorStore.management_message}</div>{/if}
@@ -288,6 +288,7 @@
 	.notice.success { background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); }
 	.notice.warning { background: color-mix(in oklch, #d97706 12%, transparent); color: #b45309; }
 	.notice.warning p { margin: .45rem 0 0; }
+	.notice.warning button { margin-left: .5rem; padding: .25rem .5rem; }
 	@media (max-width: 760px) { .page-heading { flex-direction: column; } .form-grid { grid-template-columns: 1fr 1fr; } }
 	@media (max-width: 520px) { .form-grid { grid-template-columns: 1fr; } }
 </style>

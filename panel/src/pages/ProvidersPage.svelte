@@ -85,6 +85,7 @@
 		const status = stringValue(key, 'status');
 		if (status === 'success' || status === 'active') return i18n.locale === 'zh-CN' ? '验证成功' : 'Verified';
 		if (status === 'error' || status === 'failed') return i18n.locale === 'zh-CN' ? '验证失败' : 'Failed';
+		if (status === 'list_models_failed') return i18n.locale === 'zh-CN' ? '模型列表获取失败' : 'Model list unavailable';
 		return status || i18n.t('elygate.enabled');
 	}
 
@@ -467,10 +468,10 @@
 
 {#if modal === 'create' || modal === 'edit'}
 	<div class="modal-backdrop"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="provider-dialog-title"><header><h2 id="provider-dialog-title">{modal === 'create' ? i18n.t('elygate.create') : i18n.t('elygate.edit')} {i18n.t('elygate.providers')}</h2><button type="button" onclick={() => (modal = null)}>{i18n.t('elygate.close')}</button></header>
-		<form onsubmit={submitProvider}><div class="form-hint" role="note">{i18n.t('elygate.apiKeySeparateHint')}</div>{#if modalError}<div class="notice error" role="alert">{modalError}</div>{/if}<label>{i18n.t('elygate.providerName')}<input bind:value={providerForm.name} required disabled={modal === 'edit' || hasActiveMutation()} /><small>{i18n.t('elygate.providerNameHelp')}</small></label>
+		<form onsubmit={submitProvider}><div class="form-hint" role="note">{i18n.t('elygate.apiKeySeparateHint')}</div>{#if modalError && !networkInvalid}<div class="notice error" role="alert">{modalError}</div>{/if}<label>{i18n.t('elygate.providerName')}<input bind:value={providerForm.name} required disabled={modal === 'edit' || hasActiveMutation()} /><small>{i18n.t('elygate.providerNameHelp')}</small></label>
 			<div class="grid-two"><label>{i18n.t('elygate.concurrency')}<input type="number" min="1" bind:value={providerForm.concurrency} /></label><label>{i18n.t('elygate.bufferSize')}<input type="number" min="1" bind:value={providerForm.bufferSize} /></label></div>
 			<label>{i18n.t('elygate.maxRetries')}<input type="number" min="0" step="1" bind:value={providerForm.maxRetries} placeholder={i18n.t('elygate.unset')} /><small>{i18n.t('elygate.maxRetriesHint')}</small></label>
-				<label>{i18n.t('elygate.networkConfig')}<textarea class:invalid={networkInvalid} bind:this={networkField} bind:value={providerForm.network} rows="5"></textarea><small>{text('基础地址填在这里，例如 https://token.sensenova.cn（不要带 /v1，系统会自动补齐）；填写完整接口地址会导致请求路径重复。', 'Enter the base URL here, for example https://token.sensenova.cn (do not include /v1; it is appended automatically).')}</small></label><label>{i18n.t('elygate.proxyConfig')}<textarea bind:value={providerForm.proxy} rows="3"></textarea></label>
+				<label>{i18n.t('elygate.networkConfig')}<textarea class:invalid={networkInvalid} bind:this={networkField} bind:value={providerForm.network} rows="5"></textarea>{#if networkInvalid}<small class="field-error" role="alert">{modalError}</small>{:else}<small>{text('基础地址填在这里，例如 https://token.sensenova.cn（不要带 /v1，系统会自动补齐）；填写完整接口地址会导致请求路径重复。', 'Enter the base URL here, for example https://token.sensenova.cn (do not include /v1; it is appended automatically).')}</small>{/if}</label><label>{i18n.t('elygate.proxyConfig')}<textarea bind:value={providerForm.proxy} rows="3"></textarea></label>
 				<label>{i18n.t('elygate.customConfig')}<textarea bind:value={providerForm.custom} rows="3"></textarea><small>{i18n.t('elygate.providerCustomHint')}</small></label><label>{i18n.t('elygate.openaiConfig')}<textarea bind:value={providerForm.openai} rows="2"></textarea><small>{i18n.t('elygate.providerOpenAIHint')}</small></label>
 			<div class="checks"><label><input type="checkbox" bind:checked={providerForm.sendBackRequest} /> {i18n.t('elygate.sendBackRawRequest')}</label><label><input type="checkbox" bind:checked={providerForm.sendBackResponse} /> {i18n.t('elygate.sendBackRawResponse')}</label><label><input type="checkbox" bind:checked={providerForm.storeRaw} /> {i18n.t('elygate.storeRawRequestResponse')}</label></div>
 			<footer><button type="button" disabled={hasActiveMutation()} onclick={() => { if (!hasActiveMutation()) modal = null; }}>{i18n.t('elygate.cancel')}</button><button class="primary" type="submit" disabled={hasActiveMutation()}>{i18n.t('elygate.save')}</button></footer>
@@ -486,6 +487,7 @@
 
 <style>
 		textarea.invalid { border-color: var(--destructive); box-shadow: 0 0 0 1px var(--destructive); }
+		.field-error { color: var(--destructive); }
 	.page-shell { max-width: 1280px; margin: 0 auto; padding: 1.5rem; }
 	.page-heading { align-items: flex-start; display: flex; justify-content: space-between; gap: 1rem; margin-bottom: 1.5rem; }
 	.eyebrow { color: var(--primary); font-size: .75rem; font-weight: 700; letter-spacing: .12em; margin: 0 0 .45rem; text-transform: uppercase; }
