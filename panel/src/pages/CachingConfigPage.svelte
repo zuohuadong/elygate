@@ -46,9 +46,12 @@
 	let isSaving = $state(false);
 	let error = $state('');
 	let notice = $state('');
+	let loadWarning = $state('');
 	let isClearing = $state(false);
 	const cacheEnableBlocked = $derived(plugin?.enabled !== true && !vectorStoreConnected);
 	const isMutating = $derived(isSaving || isSavingVectorStore || isClearing);
+
+	function text(zh: string, en: string): string { return i18n.locale === 'zh-CN' ? zh : en; }
 
 	function defaults(): CacheForm {
 		return { ttl: 300, threshold: .8, dimension: 1, conversationHistoryThreshold: 3, excludeSystemPrompt: false, cacheByModel: true, cacheByProvider: true, provider: '', embeddingModel: '', vectorStoreNamespace: '', defaultCacheKey: '' };
@@ -86,18 +89,38 @@
 	async function load(): Promise<void> {
 		isLoading = true;
 		error = '';
+		loadWarning = '';
 		try {
-			const [pluginPayload, providerPayload, configPayload, vectorStorePayload] = await Promise.all([
+			const [pluginResult, providerResult, configResult, vectorStoreResult] = await Promise.allSettled([
 				requestJson('/api/plugins'),
 				requestJson('/api/providers'),
 				requestJson<JsonRecord>('/api/config'),
 				requestJson<VectorStoreConfigResponse>('/api/vector-store-config'),
 			]);
+			if (pluginResult.status === 'rejected') throw pluginResult.reason;
+			const pluginPayload = pluginResult.value;
 			plugin = getListPayload(pluginPayload).find((item) => item.name === PLUGIN_NAME) ?? null;
-			providers = getListPayload(providerPayload);
-			vectorStoreConnected = configPayload.is_cache_connected === true;
-			vectorStore = vectorStorePayload;
-			vectorStoreForm = vectorStoreDraft(vectorStorePayload);
+			providers = providerResult.status === 'fulfilled' ? getListPayload(providerResult.value) : [];
+			vectorStoreConnected = configResult.status === 'fulfilled' && configResult.value.is_cache_connected === true;
+			if (vectorStoreResult.status === 'fulfilled') {
+				vectorStore = vectorStoreResult.value;
+				vectorStoreForm = vectorStoreDraft(vectorStoreResult.value);
+			} else {
+				vectorStore = {
+					enabled: false,
+					type: 'pgvector',
+					supported: false,
+					runtime_connected: false,
+					restart_required: false,
+					editable: false,
+					managed_by: 'config.json',
+				};
+				vectorStoreForm = vectorStoreDraft(vectorStore);
+				loadWarning = text(
+					'当前服务端未提供向量存储配置接口，缓存存储设置暂不可用；请确认服务端版本已启用该接口。',
+					'The server does not expose the vector-store configuration endpoint; cache storage settings are unavailable until the server enables it.',
+				);
+			}
 			applyConfig(plugin && isJsonRecord(plugin.config) ? plugin.config : {});
 		} catch (cause) {
 			error = displayError(cause, i18n.t('elygate.loadFailed'));
@@ -201,7 +224,7 @@
 
 <section class="page-shell">
 	<header class="page-heading"><div><p class="eyebrow">{getAppName()} / {i18n.t('elygate.system')}</p><h1>{i18n.t('elygate.cachingConfig')}</h1><p>{i18n.t('elygate.cachingHint')}</p></div><div class="toggle"><span>{plugin?.enabled === true ? i18n.t('elygate.enabled') : i18n.t('elygate.disabled')}</span><button type="button" onclick={() => void save(plugin?.enabled !== true)} disabled={isMutating || cacheEnableBlocked} title={cacheEnableBlocked ? i18n.t('elygate.vectorStoreRequired') : undefined}>{plugin?.enabled === true ? i18n.t('elygate.disable') : i18n.t('elygate.enable')}</button>{#if cacheEnableBlocked}<span class="toggle-hint">{i18n.t('elygate.vectorStoreRequired')}</span>{/if}</div></header>
-	{#if !vectorStoreConnected}<div class="notice warning">{i18n.t('elygate.vectorStoreRequired')}</div>{/if}{#if error}<div class="notice error" role="alert">{error}</div>{/if}{#if notice}<div class="notice success" role="status">{notice}</div>{/if}
+	{#if !vectorStoreConnected}<div class="notice warning">{i18n.t('elygate.vectorStoreRequired')}</div>{/if}{#if loadWarning}<div class="notice warning" role="status">{loadWarning}</div>{/if}{#if error}<div class="notice error" role="alert">{error}</div>{/if}{#if notice}<div class="notice success" role="status">{notice}</div>{/if}
 	<form class="vector-store-card" onsubmit={(event) => { event.preventDefault(); void saveVectorStore(); }}>
 		<header><div><h2>{i18n.t('elygate.vectorStore')}</h2><p>{i18n.t('elygate.vectorStoreHint')}</p></div><span class:ok={vectorStoreConnected}>{vectorStoreConnected ? i18n.t('elygate.conn.connected') : i18n.t('elygate.conn.disconnected')}</span></header>
 		{#if vectorStore?.management_message}<div class="notice warning">{vectorStore.management_message}</div>{/if}

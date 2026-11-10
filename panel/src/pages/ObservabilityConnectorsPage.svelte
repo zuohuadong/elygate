@@ -35,6 +35,21 @@
 	const selectedDefinition = $derived(connectors.find((connector) => connector.id === selectedId) ?? connectors[0]);
 	const selectedPlugin = $derived(plugins.find((plugin) => plugin.name === selectedDefinition.pluginName || plugin.actualName === selectedDefinition.pluginName));
 
+	function connectorDescription(connector: ConnectorDefinition): string {
+		if (i18n.locale !== 'zh-CN') return connector.description;
+		const descriptions: Record<string, string> = {
+			otel: '导出 OTLP 链路与指标',
+			prometheus: '提供 Prometheus 指标端点',
+			maxim: '导出大模型可观测数据',
+			datadog: '导出 APM 与指标',
+			bigquery: '导出仓库日志',
+			kafka: '导出流式事件',
+			pubsub: '导出 Google Cloud Pub/Sub 事件',
+			newrelic: '导出 APM 数据',
+		};
+		return descriptions[connector.id] ?? connector.description;
+	}
+
 	function selectConnector(id: string): void {
 		selectedId = id;
 		const definition = connectors.find((connector) => connector.id === id) ?? connectors[0];
@@ -91,12 +106,12 @@
 	<div class="workspace" aria-busy={isLoading}>
 		<nav aria-label={i18n.t('elygate.connectors')}>
 			{#each connectors as connector (connector.id)}
-				<button type="button" class:is-active={selectedId === connector.id} disabled={!connector.available} onclick={() => selectConnector(connector.id)}><span class="connector-icon">{connector.label.slice(0, 2).toUpperCase()}</span><span><strong>{connector.label}</strong><small>{connector.description}</small></span>{#if !connector.available}<em>{i18n.t('elygate.comingSoon')}</em>{:else if plugins.some((plugin) => (plugin.name === connector.pluginName || plugin.actualName === connector.pluginName) && plugin.enabled)}<em class="active">{i18n.t('elygate.enabled')}</em>{/if}</button>
+				<button type="button" class:is-active={selectedId === connector.id} disabled={!connector.available} onclick={() => selectConnector(connector.id)}><span class="connector-icon">{connector.label.slice(0, 2).toUpperCase()}</span><span><strong>{connector.label}</strong><small>{connectorDescription(connector)}</small></span>{#if !connector.available}<em>{i18n.t('elygate.comingSoon')}</em>{:else if plugins.some((plugin) => (plugin.name === connector.pluginName || plugin.actualName === connector.pluginName) && plugin.enabled)}<em class="active">{i18n.t('elygate.enabled')}</em>{/if}</button>
 			{/each}
 		</nav>
 		<main>
-			<header><div><h2>{selectedDefinition.label}</h2><p>{selectedDefinition.description}</p></div><label class="switch"><input type="checkbox" bind:checked={enabled} disabled={!selectedDefinition.available} /><span>{enabled ? i18n.t('elygate.enabled') : i18n.t('elygate.disabled')}</span></label></header>
-			<div class="status"><span>{i18n.t('elygate.runtimeStatus')}</span><code>{selectedPlugin ? prettyJson(selectedPlugin.status ?? 'configured', 'configured') : i18n.t('elygate.notConfigured')}</code></div>
+			<header><div><h2>{selectedDefinition.label}</h2><p>{connectorDescription(selectedDefinition)}</p></div><label class="switch"><input type="checkbox" bind:checked={enabled} disabled={!selectedDefinition.available} /><span>{enabled ? i18n.t('elygate.enabled') : i18n.t('elygate.disabled')}</span></label></header>
+			<details class="status technical-details"><summary>{i18n.t('elygate.runtimeStatus')}</summary><code>{selectedPlugin ? prettyJson(selectedPlugin.status ?? 'configured', 'configured') : i18n.t('elygate.notConfigured')}</code></details>
 			<label class="config-label"><span>{i18n.t('elygate.connectorConfig')}</span><small>{i18n.t('elygate.connectorConfigHint')}</small><textarea bind:value={configJson} rows="20" spellcheck="false" disabled={!selectedDefinition.available}></textarea></label>
 			<footer><button class="primary" type="button" onclick={() => void save()} disabled={!selectedDefinition.available || isSaving}>{isSaving ? i18n.t('elygate.saving') : i18n.t('elygate.save')}</button></footer>
 		</main>
@@ -127,7 +142,8 @@
 	main header p { color: var(--muted-foreground); font-size: .8rem; margin: .35rem 0 0; }
 	.switch { align-items: center; display: flex; gap: .45rem; }
 	.status { background: var(--muted); border-radius: .55rem; display: grid; gap: .35rem; margin: 1rem 0; padding: .7rem; }
-	.status span, .config-label > span { font-size: .78rem; font-weight: 700; }
+	.technical-details summary { cursor: pointer; font-weight: 700; }
+	.config-label > span { font-size: .78rem; font-weight: 700; }
 	.status code { color: var(--muted-foreground); font-size: .72rem; max-height: 6rem; overflow: auto; white-space: pre-wrap; }
 	.config-label { display: grid; gap: .35rem; }
 	.config-label small { color: var(--muted-foreground); }

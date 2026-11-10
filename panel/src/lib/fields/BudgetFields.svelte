@@ -15,14 +15,14 @@
 
 <div class="budget-fields">
 	<div class="field">
-		<label for={`${prefix}-daily`}>{text('日预算 (USD)', 'Daily budget (USD)')}</label>
+		<label for={`${prefix}-daily`}>{text('日预算（元）', 'Daily budget (CNY)')}</label>
 		<input id={`${prefix}-daily`} inputmode="decimal" autocomplete="off" bind:value={daily} {disabled}
 			placeholder={text('未设置', 'Not set')} onblur={() => dailyTouched = true}
 			aria-invalid={dailyInvalid} aria-describedby={dailyInvalid ? `${prefix}-daily-error` : undefined} />
 		{#if dailyInvalid}<span id={`${prefix}-daily-error`} class="field-error">{text('请输入大于零的有限金额', 'Enter a finite amount greater than zero')}</span>{/if}
 	</div>
 	<div class="field">
-		<label for={`${prefix}-monthly`}>{text('月预算 (USD)', 'Monthly budget (USD)')}</label>
+		<label for={`${prefix}-monthly`}>{text('月预算（元）', 'Monthly budget (CNY)')}</label>
 		<input id={`${prefix}-monthly`} inputmode="decimal" autocomplete="off" bind:value={monthly} {disabled}
 			placeholder={text('未设置', 'Not set')} onblur={() => monthlyTouched = true}
 			aria-invalid={monthlyInvalid} aria-describedby={monthlyInvalid ? `${prefix}-monthly-error` : undefined} />

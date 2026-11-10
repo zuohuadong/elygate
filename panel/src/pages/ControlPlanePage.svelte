@@ -16,6 +16,7 @@
 	interface ControlPlaneTab {
 		id: string;
 		label: string;
+		description: string;
 		columns: { key: string; label: string }[];
 	}
 	interface ProjectRow { id: string; name: string; organization_id: string; status: string; daily_budget?: number | null; monthly_budget?: number | null; }
@@ -46,41 +47,114 @@
 		{
 			id: 'control-plane-projects',
 			label: text('项目', 'Projects'),
+			description: text('项目用于归集应用与用量，可在右侧设为当前项目。', 'Projects group applications and usage; select one on the right.'),
 			columns: [
-				{ key: 'name', label: text('名称', 'Name') },
-				{ key: 'organization_id', label: text('组织', 'Organization') },
+				{ key: 'name', label: text('项目名称', 'Name') },
+				{ key: 'organization_id', label: text('所属组织', 'Organization') },
 				{ key: 'status', label: text('状态', 'Status') },
 			],
 		},
 		{
 			id: 'control-plane-applications',
 			label: text('应用', 'Applications'),
+			description: text('为项目创建应用并绑定虚拟密钥。', 'Create applications under a project and bind virtual keys.'),
 			columns: [
-				{ key: 'name', label: text('名称', 'Name') },
+				{ key: 'name', label: text('应用名称', 'Name') },
 				{ key: 'environment', label: text('环境', 'Environment') },
 				{ key: 'status', label: text('状态', 'Status') },
 			],
 		},
 		{
 			id: 'usage-ledger',
-			label: text('用量', 'Usage'),
+			label: text('用量账本', 'Usage Ledger'),
+			description: text('查看按应用汇总的用量投影、同步水位和审计事件。', 'Inspect application usage, sync watermark, and audit events.'),
 			columns: [
 				{ key: 'occurred_at', label: text('时间', 'Time') },
 				{ key: 'application_id', label: text('应用', 'Application') },
-				{ key: 'user_id', label: text('用户 ID', 'User ID') },
-				{ key: 'provider', label: text('提供商', 'Provider') },
+				{ key: 'user_id', label: text('用户编号', 'User ID') },
+				{ key: 'provider', label: text('供应商', 'Provider') },
 				{ key: 'model', label: text('模型', 'Model') },
 				{ key: 'status', label: text('状态', 'Status') },
-				{ key: 'total_tokens', label: text('Token 数', 'Tokens') },
-				{ key: 'cost', label: text('费用', 'Cost') },
+				{ key: 'total_tokens', label: text('令牌用量', 'Tokens') },
+				{ key: 'cost', label: text('成本', 'Cost') },
 			],
 		},
 	]);
 
 	const activeTab = $derived(tabs.find((tab) => tab.id === resourceName) ?? tabs[0]);
-
 	function text(zh: string, en: string): string {
 		return i18n.locale === 'zh-CN' ? zh : en;
+	}
+
+	function statusLabel(value: unknown): string {
+		const status = String(value ?? '');
+		const labels: Record<string, string> = {
+			active: text('启用', 'Active'),
+			enabled: text('启用', 'Enabled'),
+			inactive: text('停用', 'Inactive'),
+			disabled: text('停用', 'Disabled'),
+			pending: text('待处理', 'Pending'),
+			success: text('成功', 'Success'),
+			error: text('失败', 'Error'),
+			cancelled: text('已取消', 'Cancelled'),
+		};
+		return labels[status] ?? (status || '—');
+	}
+
+	function environmentLabel(value: unknown): string {
+		const environment = String(value ?? '');
+		const labels: Record<string, string> = {
+			production: text('生产环境', 'Production'),
+			staging: text('预发布环境', 'Staging'),
+			development: text('开发环境', 'Development'),
+			testing: text('测试环境', 'Testing'),
+		};
+		return labels[environment.toLowerCase()] ?? (environment || '—');
+	}
+
+	function organizationLabel(value: unknown): string {
+		const organization = String(value ?? '');
+		return organization.toLowerCase() === 'default' ? text('默认组织', 'Default organization') : organization || '—';
+	}
+
+	function projectLabel(value: unknown): string {
+		const name = String(value ?? '');
+		return name.toLowerCase() === 'default' ? text('默认项目', 'Default project') : name || '—';
+	}
+
+	function auditActionLabel(value: unknown): string {
+		const action = String(value ?? '');
+		const labels: Record<string, string> = {
+			'virtual_key.reveal': text('查看虚拟密钥', 'Reveal virtual key'),
+			'virtual_key.create': text('创建虚拟密钥', 'Create virtual key'),
+			'virtual_key.update': text('更新虚拟密钥', 'Update virtual key'),
+			'virtual_key.delete': text('删除虚拟密钥', 'Delete virtual key'),
+		};
+		return labels[action] ?? (action || '—');
+	}
+
+	function auditResourceLabel(value: unknown): string {
+		const resource = String(value ?? '');
+		const labels: Record<string, string> = {
+			virtual_key: text('虚拟密钥', 'Virtual key'),
+			application: text('应用', 'Application'),
+			project: text('项目', 'Project'),
+		};
+		return labels[resource] ?? (resource || '—');
+	}
+
+	function shortId(value: unknown): string {
+		const id = String(value ?? '');
+		return id.length > 8 ? `${id.slice(0, 8)}…` : id || '—';
+	}
+
+	async function copyId(value: unknown): Promise<void> {
+		try {
+			await navigator.clipboard.writeText(String(value ?? ''));
+			notice = text('记录编号已复制。', 'Record ID copied.');
+		} catch {
+			error = text('复制失败，请手动选择编号。', 'Copy failed; select the ID manually.');
+		}
 	}
 
 	function readTotal(payload: unknown, fallback: number): number {
@@ -129,6 +203,7 @@
 	let budgetSaving = $state(false);
 	let keyName = $state('');
 	let virtualKeyId = $state('');
+	let virtualKeys = $state.raw<{ id: string; name: string }[]>([]);
 	let loading = $state(true);
 	let saving = $state(false);
 	let error = $state('');
@@ -141,7 +216,7 @@
 
 	function handleError(cause: unknown, fallback: string): void {
 		error = cause instanceof Error && cause.message === 'invalid-budget-amount'
-			? text('预算必须是大于零的有限 USD 金额，或留空', 'Budgets must be finite USD amounts greater than zero, or empty')
+			? text('预算必须是大于零的有限金额（元），或留空', 'Budgets must be finite CNY amounts greater than zero, or empty')
 			: displayError(cause, fallback);
 	}
 
@@ -190,6 +265,18 @@
 			projects = [];
 		} finally {
 			loading = false;
+		}
+	}
+
+	async function loadVirtualKeys(): Promise<void> {
+		try {
+			const payload = await requestJson<unknown>('/api/governance/virtual-keys?limit=100');
+			virtualKeys = getListPayload(payload).map((row) => ({
+				id: String(row.id ?? ''),
+				name: String(row.name ?? row.id ?? ''),
+			})).filter((row) => row.id !== '' && row.id !== '[REDACTED]');
+		} catch {
+			virtualKeys = [];
 		}
 	}
 
@@ -646,18 +733,19 @@
 	}
 
 	onMount(() => {
-		void loadProjects().catch((cause) => handleError(cause, text('加载控制平面数据失败', 'Failed to load control-plane data')));
+		void Promise.all([loadProjects(), loadVirtualKeys()]).catch((cause) => handleError(cause, text('加载控制平面数据失败', 'Failed to load control-plane data')));
 	});
 </script>
 
 <svelte:head>
-	<title>{activeTab.label} · {appName}</title>
+	<title>{activeTab.label} - {appName}</title>
 </svelte:head>
 
 <section class="page">
 	<header>
 		<div>
-			<h1>{activeTab.id === 'usage-ledger' ? text('用量账本', 'Usage Ledger') : activeTab.label}</h1>
+			<h1>{activeTab.label}</h1>
+			<p>{activeTab.description}</p>
 		</div>
 		<button class="secondary" type="button" onclick={refreshPage} disabled={activeTab.id === 'usage-ledger' ? usageLoading : loading}>{text('刷新', 'Refresh')}</button>
 	</header>
@@ -679,7 +767,7 @@
 				{#if loading}<p class="muted">{text('加载中…', 'Loading…')}</p>{:else if projects.length === 0}<p class="muted">{text('暂无项目', 'No projects yet')}</p>{:else}
 					<div class="table-wrap"><table><thead><tr>{#each activeTab.columns as column (column.key)}<th>{column.label}</th>{/each}<th></th></tr></thead><tbody>
 						{#each projects as project (project.id)}
-							<tr class:selected={project.id === selectedProject}><td>{project.name}</td><td>{project.organization_id}</td><td>{project.status}</td><td><button type="button" class="link" onclick={() => selectProject(project.id)}>{text('选择', 'Select')}</button></td></tr>
+							<tr class:selected={project.id === selectedProject}><td>{projectLabel(project.name)}</td><td>{organizationLabel(project.organization_id)}</td><td>{statusLabel(project.status)}</td><td><button type="button" class="link" onclick={() => selectProject(project.id)}>{text('设为当前项目', 'Set as current project')}</button></td></tr>
 						{/each}
 					</tbody></table></div>
 				{/if}
@@ -708,7 +796,7 @@
 				{#if applications.length === 0}<p class="muted">{text('当前项目暂无应用', 'No applications in this project')}</p>{:else}
 					<div class="table-wrap"><table><thead><tr>{#each activeTab.columns as column (column.key)}<th>{column.label}</th>{/each}<th></th></tr></thead><tbody>
 						{#each applications as application (application.id)}
-							<tr class:selected={application.id === selectedApplication}><td>{application.name}</td><td>{application.environment}</td><td>{application.status}</td><td><button type="button" class="link" onclick={() => selectApplication(application.id)}>{text('选择', 'Select')}</button></td></tr>
+							<tr class:selected={application.id === selectedApplication}><td>{application.name}</td><td>{environmentLabel(application.environment)}</td><td>{statusLabel(application.status)}</td><td><button type="button" class="link" onclick={() => selectApplication(application.id)}>{text('设为当前应用', 'Set as current application')}</button></td></tr>
 						{/each}
 					</tbody></table></div>
 				{/if}
@@ -732,8 +820,8 @@
 
 			<form class="card" onsubmit={(event) => { event.preventDefault(); void bindVirtualKey(); }}>
 				<h2>{text('绑定已有虚拟密钥', 'Bind an existing virtual key')}</h2>
-				<p class="warn">{text('绑定会撤销该虚拟密钥在其他应用上的有效绑定。Any active binding on another application will be revoked.', 'Any active binding on another application will be revoked.')}</p>
-				<label>{text('虚拟密钥 ID', 'Virtual key ID')}<input bind:value={virtualKeyId} placeholder="virtual key uuid" autocomplete="off" /></label>
+				<p class="warn">{text('绑定后，该虚拟密钥在原应用上的绑定会自动失效，请确认后再操作。', 'Binding this virtual key revokes its active binding on any other application.')}</p>
+				<label>{text('虚拟密钥（按名称选择）', 'Virtual key (select by name)')}<select bind:value={virtualKeyId}><option value="">{text('请选择虚拟密钥', 'Select a virtual key')}</option>{#each virtualKeys as key (key.id)}<option value={key.id}>{key.name}</option>{/each}</select></label>
 				<button type="submit" disabled={loading || saving || !selectedApplication || !virtualKeyId.trim()}>{saving ? text('绑定中…', 'Binding…') : text('绑定密钥', 'Bind key')}</button>
 			</form>
 		</div>
@@ -759,13 +847,13 @@
 			<label>{text('应用', 'Application')}<select bind:value={usageApplicationFilter} onchange={() => changeUsageApplication()} disabled={usageLoading || usageFilterLoading || !usageProjectFilter}><option value="">{text('全部应用', 'All applications')}</option>{#each usageApplicationOptions as option (option.id)}<option value={option.id}>{option.name}</option>{/each}</select></label>
 			<label>{text('开始时间', 'Start time')}<input type="datetime-local" bind:value={usageStartFilter} /></label>
 			<label>{text('结束时间', 'End time')}<input type="datetime-local" bind:value={usageEndFilter} /></label>
-			<label>{text('用户 ID', 'User ID')}<input bind:value={usageUserFilter} autocomplete="off" autocapitalize="none" spellcheck={false} /></label>
-			<label>{text('提供商', 'Provider')}<input bind:value={usageProviderFilter} autocomplete="off" autocapitalize="none" spellcheck={false} /></label>
+			<label>{text('用户编号', 'User ID')}<input bind:value={usageUserFilter} autocomplete="off" autocapitalize="none" spellcheck={false} /></label>
+			<label>{text('供应商', 'Provider')}<input bind:value={usageProviderFilter} autocomplete="off" autocapitalize="none" spellcheck={false} /></label>
 			<label>{text('模型', 'Model')}<input bind:value={usageModelFilter} autocomplete="off" autocapitalize="none" spellcheck={false} /></label>
-			<label>{text('会话 ID', 'Session ID')}<input bind:value={usageSessionFilter} autocomplete="off" /></label>
-			<label>{text('父会话 ID', 'Parent session ID')}<input bind:value={usageParentSessionFilter} autocomplete="off" /></label>
-			<label>{text('Agent', 'Agent')}<input bind:value={usageAgentFilter} autocomplete="off" /></label>
-			<label class="check"><input type="checkbox" bind:checked={usageSubagentOnly} />{text('仅子 Agent', 'Subagents only')}</label>
+			<label>{text('会话编号', 'Session ID')}<input bind:value={usageSessionFilter} autocomplete="off" /></label>
+			<label>{text('上级会话编号', 'Parent session ID')}<input bind:value={usageParentSessionFilter} autocomplete="off" /></label>
+			<label>{text('智能体', 'Agent')}<input bind:value={usageAgentFilter} autocomplete="off" /></label>
+			<label class="check"><input type="checkbox" bind:checked={usageSubagentOnly} />{text('仅看子智能体', 'Subagents only')}</label>
 			<div class="filter-actions"><button type="submit" disabled={usageLoading || usageFilterLoading}>{text('应用筛选', 'Apply filters')}</button><button type="button" class="secondary" onclick={() => resetUsageFilters()} disabled={usageLoading || usageFilterLoading}>{text('重置', 'Reset')}</button><button type="button" class="secondary" onclick={() => exportUsage()}>{text('导出 CSV', 'Export CSV')}</button></div>
 		</form>
 		{#if usageApplicationError}<p class="error" role="alert">{usageApplicationError}</p>{/if}
@@ -775,9 +863,9 @@
 			<div><span>{text('成功请求', 'Successful requests')}</span><strong>{usageSummary?.successful_requests.toLocaleString(i18n.locale) ?? '—'}</strong></div>
 			<div><span>{text('失败请求', 'Failed requests')}</span><strong>{usageSummary?.failed_requests.toLocaleString(i18n.locale) ?? '—'}</strong></div>
 			<div><span>{text('已取消请求', 'Cancelled requests')}</span><strong>{usageSummary?.cancelled_requests.toLocaleString(i18n.locale) ?? '—'}</strong></div>
-			<div><span>{text('输入 Token', 'Prompt tokens')}</span><strong>{usageSummary?.prompt_tokens.toLocaleString(i18n.locale) ?? '—'}</strong></div>
-			<div><span>{text('输出 Token', 'Output tokens')}</span><strong>{usageSummary?.output_tokens.toLocaleString(i18n.locale) ?? '—'}</strong></div>
-			<div><span>{text('总 Token', 'Total tokens')}</span><strong>{usageSummary?.total_tokens.toLocaleString(i18n.locale) ?? '—'}</strong></div>
+			<div><span>{text('输入令牌', 'Prompt tokens')}</span><strong>{usageSummary?.prompt_tokens.toLocaleString(i18n.locale) ?? '—'}</strong></div>
+			<div><span>{text('输出令牌', 'Output tokens')}</span><strong>{usageSummary?.output_tokens.toLocaleString(i18n.locale) ?? '—'}</strong></div>
+			<div><span>{text('总令牌', 'Total tokens')}</span><strong>{usageSummary?.total_tokens.toLocaleString(i18n.locale) ?? '—'}</strong></div>
 			<div><span>{text('总成本', 'Total cost')}</span><strong>{formatUsdCost(usageSummary?.cost)}</strong></div>
 			<div><span>{text('同步水位', 'Watermark')}</span><strong>{formatDate(usageStatus?.watermark)}</strong></div>
 			<div><span>{text('同步延迟', 'Lag')}</span><strong>{usageStatus ? formatDuration(usageStatus.lag_seconds) : '—'}</strong></div>
@@ -791,7 +879,7 @@
 			{#if usageLoading}<p class="muted">{text('加载中…', 'Loading…')}</p>{:else if usageRows.length === 0}<p class="muted">{usageLoadError ? text('账本数据不可用', 'Ledger data unavailable') : text('暂无账本数据', 'No ledger data')}</p>{:else}
 				<div class="table-wrap"><table><thead><tr>{#each activeTab.columns as column (column.key)}<th>{column.label}</th>{/each}</tr></thead><tbody>
 					{#each usageRows as row, index (String(row.id ?? index))}
-						<tr><td>{formatDate(row.occurred_at)}</td><td>{String(row.application_id ?? '—')}</td><td>{String(row.user_id ?? '—')}</td><td>{String(row.provider ?? '—')}</td><td>{String(row.model ?? '—')}</td><td>{String(row.status ?? '—')}</td><td>{String(row.total_tokens ?? '—')}</td><td>{formatUsdCost(row.cost)}</td></tr>
+						<tr><td>{formatDate(row.occurred_at)}</td><td>{String(row.application_id ?? '—')}</td><td>{String(row.user_id ?? '—')}</td><td>{String(row.provider ?? '—')}</td><td>{String(row.model ?? '—')}</td><td>{statusLabel(row.status)}</td><td>{String(row.total_tokens ?? '—')}</td><td>{formatUsdCost(row.cost)}</td></tr>
 					{/each}
 				</tbody></table></div>
 			{/if}
@@ -801,9 +889,9 @@
 		<section class="ledger-section">
 			<h2>{text('审计事件', 'Audit events')}</h2>
 			{#if usageAuditError}<p class="error" role="alert">{usageAuditError}</p>{:else if usageLoading}<p class="muted">{text('加载中…', 'Loading…')}</p>{:else if auditEvents.length === 0}<p class="muted">{text('暂无审计事件', 'No audit events')}</p>{:else}
-				<div class="table-wrap"><table><thead><tr><th>{text('时间', 'Time')}</th><th>{text('操作者', 'Actor')}</th><th>{text('动作', 'Action')}</th><th>{text('资源', 'Resource')}</th><th>ID</th><th>{text('请求关联', 'Correlation')}</th></tr></thead><tbody>
+				<div class="table-wrap"><table><thead><tr><th>{text('时间', 'Time')}</th><th>{text('操作者', 'Actor')}</th><th>{text('动作', 'Action')}</th><th>{text('资源', 'Resource')}</th><th>{text('记录编号', 'Record ID')}</th><th>{text('请求关联', 'Correlation')}</th></tr></thead><tbody>
 					{#each auditEvents as row, index (String(row.id ?? index))}
-						<tr><td>{formatDate(row.created_at)}</td><td>{String(row.actor_id ?? '—')}</td><td>{String(row.action ?? '—')}</td><td>{String(row.resource_type ?? '—')}</td><td>{String(row.resource_id ?? '—')}</td><td class="audit-correlation">
+						<tr><td>{formatDate(row.created_at)}</td><td>{String(row.actor_id ?? '—')}</td><td>{auditActionLabel(row.action)}</td><td>{auditResourceLabel(row.resource_type)}</td><td><span title={String(row.resource_id ?? '')}>{shortId(row.resource_id)}</span> <button type="button" class="link" onclick={() => void copyId(row.resource_id)}>{text('复制', 'Copy')}</button></td><td class="audit-correlation">
 							{#if row.request_id || row.trace_id}
 								<dl>
 									{#if row.request_id}<div><dt>Request ID</dt><dd><code>{String(row.request_id)}</code></dd></div>{/if}

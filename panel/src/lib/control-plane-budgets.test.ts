@@ -27,8 +27,8 @@ describe('control-plane budget helpers', () => {
 		expect(budgetProgress(12, 10)).toBe(100);
 		expect(budgetProgress(-1, 10)).toBe(0);
 		expect(budgetProgress(.8, 1)).toBe(80);
-		expect(formatBudgetAmount(12.5, 'en-US')).toContain('$12.50');
-		expect(formatBudgetAmount(1e-8, 'en-US')).not.toBe('$0.00');
+		expect(formatBudgetAmount(12.5, 'en-US')).toContain('¥12.50');
+		expect(formatBudgetAmount(1e-8, 'en-US')).not.toBe('¥0.00');
 		expect(formatBudgetAmount(Number.MIN_VALUE, 'en-US')).toContain('e-324');
 		expect(Number.parseFloat(formatBudgetAmount(Number.MIN_VALUE, 'en-US').slice(1))).toBeGreaterThan(0);
 	});

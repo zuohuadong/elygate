@@ -65,9 +65,9 @@ export function budgetQuery(project: string, application: string): URLSearchPara
 }
 
 export function formatBudgetAmount(amount: number, locale: string): string {
-	if (amount !== 0 && Math.abs(amount) < 0.0001) return `$${amount.toExponential(3)}`;
+	if (amount !== 0 && Math.abs(amount) < 0.0001) return `¥${amount.toExponential(3)}`;
 	return new Intl.NumberFormat(locale, {
-		style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 8,
+		style: 'currency', currency: 'CNY', minimumFractionDigits: 2, maximumFractionDigits: 8,
 	}).format(amount);
 }
 

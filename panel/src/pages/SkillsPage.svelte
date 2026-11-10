@@ -31,6 +31,8 @@
 	let actionSeq = 0;
 	let mutationSeq = 0;
 
+	function text(zh: string, en: string): string { return i18n.locale === 'zh-CN' ? zh : en; }
+
 	function emptyForm(): SkillForm {
 		return { name: '', description: '', license: '', compatibility: '', allowedTools: '', version: '0.1.0', skillBody: '', metadata: '{}', extraFrontmatter: '{}', files: '[]', serve: true };
 	}
@@ -286,7 +288,8 @@
 				<div class="form-grid"><label>{i18n.t('elygate.name')}<input bind:value={form.name} disabled={!!selected || isSaving || isUploading || isActionBusy} /></label><label>{i18n.t('elygate.version')}<input bind:value={form.version} disabled={isSaving || isUploading || isActionBusy} /></label><label class="wide">{i18n.t('elygate.description')}<input bind:value={form.description} disabled={isSaving || isUploading || isActionBusy} /></label><label>{i18n.t('elygate.license')}<input bind:value={form.license} disabled={isSaving || isUploading || isActionBusy} /></label><label>{i18n.t('elygate.compatibility')}<input bind:value={form.compatibility} disabled={isSaving || isUploading || isActionBusy} /></label><label class="wide">{i18n.t('elygate.allowedTools')}<input bind:value={form.allowedTools} disabled={isSaving || isUploading || isActionBusy} /></label></div>
 				<label>{i18n.t('elygate.skillMarkdown')}<textarea bind:value={form.skillBody} rows="16" disabled={isSaving || isUploading || isActionBusy}></textarea></label>
 				<div class="json-grid"><label>{i18n.t('elygate.metadata')}<textarea bind:value={form.metadata} rows="8" disabled={isSaving || isUploading || isActionBusy}></textarea></label><label>{i18n.t('elygate.extraFrontmatter')}<textarea bind:value={form.extraFrontmatter} rows="8" disabled={isSaving || isUploading || isActionBusy}></textarea></label></div>
-				<label>{i18n.t('elygate.files')} JSON<textarea bind:value={form.files} rows="9" disabled={isSaving || isUploading || isActionBusy}></textarea></label>
+				<label>{i18n.t('elygate.files')}<textarea bind:value={form.files} rows="9" disabled={isSaving || isUploading || isActionBusy}></textarea></label>
+				<details class="technical-details"><summary>{i18n.t('elygate.technicalDetails')}</summary><p>{text('原始字段名：extra_frontmatter / files / skill_md_body / metadata。', 'Raw field names: extra_frontmatter / files / skill_md_body / metadata.')}</p></details>
 				<div class="upload-row">{#key uploadRevision}<input type="file" disabled={isSaving || isUploading || isActionBusy} onchange={(event) => (pendingUpload = event.currentTarget.files?.[0])} />{/key}<input bind:value={uploadPath} placeholder={i18n.t('elygate.filePath')} disabled={isSaving || isUploading || isActionBusy} /><button type="button" onclick={() => void uploadFile()} disabled={isUploading || isSaving || isActionBusy}>{i18n.t('elygate.upload')}</button></div>
 				<footer><label class="serve"><input type="checkbox" bind:checked={form.serve} disabled={isSaving || isUploading || isActionBusy} />{i18n.t('elygate.serveVersion')}</label>{#if selected}<button class="danger" type="button" disabled={isSaving || isUploading || isActionBusy} onclick={() => void removeSkill()}>{i18n.t('elygate.delete')}</button>{/if}<button class="primary" type="submit" disabled={isSaving || isUploading || isActionBusy}>{isSaving ? i18n.t('elygate.saving') : i18n.t('elygate.save')}</button></footer>
 			</form>
@@ -325,6 +328,9 @@
 	.versions h2 { font-size: 1rem; margin: 0 0 .5rem; }
 	.versions > div { border-top: 1px solid var(--border); padding: .55rem 0; }
 	.versions > div > span { display: grid; margin-right: auto; }
+	.technical-details { border: 1px dashed var(--border); border-radius: .55rem; padding: .6rem .75rem; }
+	.technical-details summary { cursor: pointer; font-weight: 700; }
+	.technical-details p { color: var(--muted-foreground); font-size: .75rem; margin: .5rem 0 0; }
 	.notice { border-radius: .65rem; margin-bottom: .8rem; padding: .7rem .85rem; }
 	.notice.error { background: color-mix(in oklch, var(--destructive) 10%, transparent); color: var(--destructive); }
 	.notice.success { background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); }
