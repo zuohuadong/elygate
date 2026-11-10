@@ -153,6 +153,7 @@
 			]);
 			virtualKeys = getListPayload(virtualKeyResponse).filter((item) => item.is_active !== false);
 			clients = getListPayload(clientResponse);
+			revealSecret = false;
 			selectedVirtualKeyId = String(virtualKeys[0]?.id ?? '');
 			const configuredUrl = configFormFromDocument(configResponse).mcpExternalClientUrl.trim();
 			gatewayBaseUrl = /^https?:\/\//i.test(configuredUrl) ? configuredUrl : window.location.origin;
@@ -194,7 +195,7 @@
 		<div class="controls">
 			<label>
 				<span>{i18n.t('elygate.virtualKeys')}</span>
-				<select bind:value={selectedVirtualKeyId} onchange={() => (selectedClientIds = [])} disabled={isLoading}>
+				<select bind:value={selectedVirtualKeyId} onchange={() => { selectedClientIds = []; revealSecret = false; }} disabled={isLoading}>
 					{#each virtualKeys as virtualKey (String(virtualKey.id))}
 						<option value={String(virtualKey.id)}>{String(virtualKey.name ?? virtualKey.id)}</option>
 					{/each}

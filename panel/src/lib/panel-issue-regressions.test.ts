@@ -624,6 +624,8 @@ describe('panel issue regressions', () => {
 		expect(source).toContain('function toggleSecret(');
 		expect(source).toContain("i18n.t('elygate.mcpSecretWarningAbove')");
 		expect(source).toContain('revealSecret ? command : maskedCommand');
+		expect(source).toContain('selectedClientIds = []; revealSecret = false;');
+		expect(source).toContain('revealSecret = false;\n\t\t\tselectedVirtualKeyId');
 	});
 
 	test('employee list labels the login account and separates software from account type', async () => {
