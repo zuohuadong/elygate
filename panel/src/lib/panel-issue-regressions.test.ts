@@ -420,6 +420,23 @@ describe('panel issue regressions', () => {
 		expect(adminApp).toContain("pageLabel = translation.t('common.pageNotFound');");
 	});
 
+	test('global search close control is localized at runtime', async () => {
+		const app = await Bun.file(new URL('../App.svelte', import.meta.url)).text();
+		expect(app).toContain('[data-slot="dialog-close"]');
+		expect(app).toContain("const label = locale === 'zh-CN' ? '关闭' : 'Close'");
+		expect(app).toContain('new MutationObserver(localizeDialogClose)');
+	});
+
+	test('global search resource names avoid unexplained English abbreviations', async () => {
+		const translations = await Bun.file(new URL('./i18n.ts', import.meta.url)).text();
+		expect(translations).toContain("'elygate.rbac': '角色权限'");
+		expect(translations).toContain("'elygate.scim': '企业目录身份源'");
+		expect(translations).toContain("'elygate.apiKeys': '接口密钥'");
+		expect(translations).toContain("'elygate.agentHandover': '智能体交接'");
+		expect(translations).toContain("'elygate.webhooks': '回调通知'");
+		expect(translations).toContain("'elygate.oauthGrants': '第三方授权（OAuth）'");
+	});
+
 	test('global search matches localized resource labels and unknown routes render a fresh 404', async () => {
 		const palette = await Bun.file(`${process.cwd()}/node_modules/@svadmin/ui/dist/components/CommandPalette.svelte`).text();
 		const adminApp = await Bun.file(`${process.cwd()}/node_modules/@svadmin/ui/dist/components/AdminApp.svelte`).text();
@@ -531,7 +548,9 @@ describe('panel issue regressions', () => {
 		expect(generic).toContain("'Enterprise Governance': '企业级管理'");
 		expect(operational).toContain("'source', flag.source ?? 'default'");
 		expect(proxy).toContain("text('不使用代理的主机', 'No-proxy hosts')");
-		expect(proxy).toContain("text('SCIM 企业目录', 'SCIM Enterprise')");
+		expect(proxy).toContain("text('企业目录同步', 'Enterprise directory sync')");
+		expect(proxy).toContain("text('全局代理设置', 'Global proxy settings')");
+		expect(proxy).toContain("text('当前只支持 HTTP 代理；其他类型暂不支持。', 'Only HTTP proxies are currently supported; other types are not available yet.')");
 		expect(docs).toContain('const chineseDocs: Record<string, string>');
 		expect(docs).toContain("content: zh ? chineseDocs.quickstart : quickstartSource");
 		expect(docs).toContain('`连接服务、客户端和 ${getAppName()}。`');
@@ -542,6 +561,45 @@ describe('panel issue regressions', () => {
 		const integrations = await Bun.file(`${process.cwd()}/node_modules/@svadmin/ui/dist/components/IntegrationsSettings.svelte`).text();
 		expect(integrations).toContain("i18n.t('integrations.sourceControl')");
 		expect(integrations).toContain("i18n.t('integrations.statusProvidedByHost')");
+	});
+
+	test('control-plane browser titles keep the admin console suffix', async () => {
+		const source = await Bun.file(new URL('../pages/ControlPlanePage.svelte', import.meta.url)).text();
+		expect(source).toContain("<title>{activeTab.label} - {appName}{i18n.locale === 'zh-CN' ? ' 管理台' : ' Admin Console'}</title>");
+	});
+
+	test('usage ledger humanizes unknown audit actions instead of leaking resource dots', async () => {
+		const source = await Bun.file(new URL('../pages/ControlPlanePage.svelte', import.meta.url)).text();
+		expect(source).toContain('const verbs: Record<string, string>');
+		expect(source).toContain('dashboard_session: \'管理台会话\'');
+		expect(source).toContain('dashboard_ws_ticket: \'管理台实时连接凭据\'');
+		expect(source).toContain('created: \'创建\'');
+		expect(source).toContain('provider_key: \'供应商密钥\'');
+		expect(source).toContain('return `${verbs[verb] ?? verb}${resources[resource] ?? resource}`');
+	});
+
+	test('plugin runtime details are localized and keep raw logs folded', async () => {
+		const source = await Bun.file(new URL('../pages/PluginsPage.svelte', import.meta.url)).text();
+		expect(source).toContain('function placementLabel(');
+		expect(source).toContain('function orderLabel(');
+		expect(source).toContain("text('已加载', 'Loaded')");
+		expect(source).toContain("text('内置插件之后', 'After built-ins')");
+		expect(source).toContain('加载结果：成功');
+		expect(source).toContain('密钥已由服务端隐藏');
+		expect(source).toContain('<h2>{pluginDisplayName(selected)}</h2>');
+		expect(source).toContain('技术详情：加载日志');
+	});
+
+	test('cache config unavailable state offers a retry action', async () => {
+		const source = await Bun.file(new URL('../pages/CachingConfigPage.svelte', import.meta.url)).text();
+		expect(source).toContain("text('重试', 'Retry')");
+		expect(source).toContain('onclick={() => void load()}');
+	});
+
+	test('provider /v1 conflict renders inline under the network field', async () => {
+		const source = await Bun.file(new URL('../pages/ProvidersPage.svelte', import.meta.url)).text();
+		expect(source).toContain('{#if networkInvalid}<small class="field-error" role="alert">{modalError}</small>');
+		expect(source).toContain('{#if modalError && !networkInvalid}');
 	});
 
 	test('employee portal keeps a valid session when usage loading fails', async () => {
@@ -606,6 +664,10 @@ describe('panel issue regressions', () => {
 		expect(source).toContain('function diagnosis(');
 		expect(source).toContain("i18n.t('elygate.logReasonModelMissing')");
 		expect(source).toContain('<details class="technical-details">');
+		expect(source).toContain('<p class="eyebrow">{i18n.t(\'elygate.logDetails\')}</p>');
+		expect(source).toContain("i18n.locale === 'zh-CN' ? '调用模型'");
+		expect(source).toContain('function messageCount(');
+		expect(source).toContain("{#each [['input_history', 'elygate.request']");
 	});
 
 	test('provider modal surfaces /v1 validation in place and provider-key page drops form hints', async () => {

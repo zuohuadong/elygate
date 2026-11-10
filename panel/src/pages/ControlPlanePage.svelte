@@ -130,7 +130,29 @@
 			'virtual_key.update': text('更新虚拟密钥', 'Update virtual key'),
 			'virtual_key.delete': text('删除虚拟密钥', 'Delete virtual key'),
 		};
-		return labels[action] ?? (action || '—');
+		if (labels[action]) return labels[action];
+		if (!action) return '—';
+		if (i18n.locale !== 'zh-CN') return action.replace(/[._]/g, ' ');
+		const [resource, verb] = action.split('.');
+		const resources: Record<string, string> = {
+			virtual_key: '虚拟密钥', application: '应用', project: '项目',
+			employee: '员工', provider: '供应商', provider_key: '供应商密钥',
+			team: '团队', customer: '客户', dashboard_session: '管理台会话',
+			dashboard_ws_ticket: '管理台实时连接凭据', user: '用户', config: '配置',
+			plugin: '插件', mcp: 'MCP', routing_rule: '路由规则',
+		};
+		const verbs: Record<string, string> = {
+			create: '创建', created: '创建', update: '更新', updated: '更新',
+			delete: '删除', deleted: '删除', reveal: '查看', revealed: '查看',
+			login: '登录', logout: '退出', rotate: '轮换', rotated: '轮换',
+			revoke: '撤销', revoked: '撤销', read: '查看', write: '编辑',
+			export: '导出', exported: '导出', import: '导入', imported: '导入',
+			enable: '启用', enabled: '启用', disable: '停用', disabled: '停用',
+			reset: '重置', approve: '批准', reject: '拒绝', bind: '绑定',
+			unbind: '解绑', sync: '同步', synced: '同步',
+		};
+		if (resource && verb) return `${verbs[verb] ?? verb}${resources[resource] ?? resource}`;
+		return action.replace(/[._]/g, ' ');
 	}
 
 	function auditResourceLabel(value: unknown): string {
@@ -738,7 +760,7 @@
 </script>
 
 <svelte:head>
-	<title>{activeTab.label} - {appName}</title>
+	<title>{activeTab.label} - {appName}{i18n.locale === 'zh-CN' ? ' 管理台' : ' Admin Console'}</title>
 </svelte:head>
 
 <section class="page">

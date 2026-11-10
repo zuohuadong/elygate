@@ -330,6 +330,11 @@
 		applyFilters();
 	}
 
+	function messageCount(record: JsonRecord): number | undefined {
+		const value = record.input_history ?? record.responses_input_history;
+		return Array.isArray(value) ? value.length : undefined;
+	}
+
 	function applyFilters(): void {
 		page = 1;
 		void load();
@@ -512,10 +517,10 @@
 {#if selectedLog}
 	<div class="drawer-backdrop" onclick={(event) => event.currentTarget === event.target && (selectedLog = null)} role="presentation">
 		<aside class="drawer" aria-label={i18n.t('elygate.logDetails')}>
-			<header><div><p class="eyebrow">{value(selectedLog, 'object')}</p><h2>{value(selectedLog, 'provider')} / {value(selectedLog, 'model')}</h2></div><button type="button" onclick={() => (selectedLog = null)}>{i18n.t('elygate.close')}</button></header>
+			<header><div><p class="eyebrow">{i18n.t('elygate.logDetails')}</p><h2>{value(selectedLog, 'provider')} / {value(selectedLog, 'model')}</h2></div><button type="button" onclick={() => (selectedLog = null)}>{i18n.t('elygate.close')}</button></header>
 			{#if isDetailLoading}<p>{i18n.t('elygate.loading')}</p>{:else}
-				<div class="detail-badges"><span>{statusLabel(value(selectedLog, 'status'))}</span><span>{Number(selectedLog.latency ?? 0).toFixed(0)} ms</span><span>{formatLogCost(selectedLog.cost)}</span><span>{value(selectedLog, 'id')}</span></div>
-				<section class="diagnosis"><h3>{i18n.t('elygate.logDiagnosis')}</h3><dl><div><dt>{i18n.t('elygate.logResult')}</dt><dd>{diagnosis(selectedLog).result}</dd></div><div><dt>{i18n.t('elygate.logReason')}</dt><dd>{diagnosis(selectedLog).reason}</dd></div><div><dt>{i18n.t('elygate.logAdvice')}</dt><dd>{diagnosis(selectedLog).advice}</dd></div></dl></section>
+				<div class="detail-badges"><span>{statusLabel(value(selectedLog, 'status'))}</span><span>{Number(selectedLog.latency ?? 0).toFixed(0)} ms</span><span>{formatLogCost(selectedLog.cost)}</span><span title={value(selectedLog, 'id')}>{value(selectedLog, 'id').slice(0, 8)}{value(selectedLog, 'id').length > 8 ? '…' : ''}</span></div>
+				<section class="diagnosis"><h3>{i18n.t('elygate.logDiagnosis')}</h3><dl><div><dt>{i18n.t('elygate.logResult')}</dt><dd>{diagnosis(selectedLog).result}</dd></div><div><dt>{i18n.t('elygate.logReason')}</dt><dd>{diagnosis(selectedLog).reason}</dd></div><div><dt>{i18n.t('elygate.logAdvice')}</dt><dd>{diagnosis(selectedLog).advice}</dd></div></dl><p class="request-summary">{i18n.locale === 'zh-CN' ? '调用模型' : 'Model'}：{value(selectedLog, 'model')}{#if messageCount(selectedLog) !== undefined}；{i18n.locale === 'zh-CN' ? '输入' : 'Input'}：{messageCount(selectedLog)} {i18n.locale === 'zh-CN' ? '条消息' : 'messages'}{/if}</p></section>
 				{#if selectedLog.content_hidden === true}<div class="notice">{i18n.t('elygate.contentHidden')}</div>{/if}
 				{#if isJsonRecord(selectedLog.speech_input) && typeof selectedLog.speech_input.input === 'string'}<section><h3>{i18n.t('elygate.speechInput')}</h3><p class="prose-output">{selectedLog.speech_input.input}</p></section>{/if}
 				{#if imageSources(selectedLog).length}<section><h3>{i18n.t('elygate.mediaOutput')}</h3><div class="media-grid">{#each imageSources(selectedLog) as source (source)}<img src={source} alt={i18n.t('elygate.mediaOutput')} />{/each}</div></section>{/if}
@@ -523,10 +528,10 @@
 				{#if transcriptionAudioSource(selectedLog) || selectedTranscription}<section><h3>{i18n.t('elygate.transcription')}</h3>{#if transcriptionAudioSource(selectedLog)}<audio controls src={transcriptionAudioSource(selectedLog)}></audio>{/if}{#if selectedTranscription}<div class="media-meta">{#if selectedTranscription.language}<span>{i18n.t('elygate.detectedLanguage')}: {String(selectedTranscription.language)}</span>{/if}{#if selectedTranscription.duration}<span>{i18n.t('elygate.duration')}: {Number(selectedTranscription.duration).toFixed(1)}s</span>{/if}{#if selectedTranscription.task}<span>{String(selectedTranscription.task)}</span>{/if}</div><p class="prose-output">{String(selectedTranscription.text ?? '')}</p>{#if Array.isArray(selectedTranscription.segments)}<div class="segment-list">{#each selectedTranscription.segments.filter(isJsonRecord) as segment, segmentIndex (segmentIndex)}<div><small>{Number(segment.start ?? 0).toFixed(1)}s – {Number(segment.end ?? 0).toFixed(1)}s</small><span>{String(segment.text ?? '')}</span></div>{/each}</div>{/if}{/if}</section>{/if}
 				{#if selectedVideoSources.length || isJsonRecord(selectedLog.video_generation_input)}<section><h3>{i18n.t('elygate.videoOutput')}</h3>{#if isJsonRecord(selectedLog.video_generation_input) && typeof selectedLog.video_generation_input.prompt === 'string'}<p class="prose-output">{selectedLog.video_generation_input.prompt}</p>{/if}<div class="video-grid">{#each selectedVideoSources as video (video.src)}<video controls preload="metadata" src={video.src}><track kind="captions" /></video>{/each}</div>{#if selectedLog.video_download_output}<pre>{formatted(selectedLog.video_download_output)}</pre>{/if}</section>{/if}
 				{#if selectedOcrInput || selectedOcrOutput}<section><h3>{i18n.t('elygate.ocr')}</h3>{#if selectedOcrInput}<div class="media-meta"><span>{String(selectedOcrInput.type ?? 'OCR')}</span>{#if selectedOcrInput.document_url || selectedOcrInput.image_url}<a href={String(selectedOcrInput.document_url ?? selectedOcrInput.image_url)} target="_blank" rel="noopener noreferrer">{String(selectedOcrInput.document_url ?? selectedOcrInput.image_url)}</a>{/if}</div>{/if}{#if selectedOcrOutput?.document_annotation}<p class="prose-output"><strong>{i18n.t('elygate.documentAnnotation')}:</strong> {String(selectedOcrOutput.document_annotation)}</p>{/if}{#each selectedOcrPages as page, pageIndex (String(page.index ?? pageIndex))}<article class="ocr-page"><header><strong>{i18n.t('elygate.ocrPage')} {Number(page.index ?? pageIndex) + 1}</strong>{#if isJsonRecord(page.dimensions)}<span>{Number(page.dimensions.width ?? 0)} × {Number(page.dimensions.height ?? 0)} px · {Number(page.dimensions.dpi ?? 0)} DPI</span>{/if}</header><pre>{String(page.markdown ?? '')}</pre>{#if Array.isArray(page.images)}<div class="media-grid">{#each page.images.filter(isJsonRecord) as image, imageIndex (String(image.id ?? imageIndex))}{#if ocrImageSource(image.image_base64)}<img src={ocrImageSource(image.image_base64)} alt={`${i18n.t('elygate.extractedImage')} ${imageIndex + 1}`} />{/if}{/each}</div>{/if}</article>{/each}</section>{/if}
-				{#each [['input_history', 'elygate.request'], ['responses_input_history', 'elygate.request'], ['output_message', 'elygate.response'], ['responses_output', 'elygate.response']] as item (item[0])}
-					{#if selectedLog[item[0]] !== undefined && selectedLog[item[0]] !== ''}<section><h3>{i18n.t(item[1])}</h3><pre>{formatted(selectedLog[item[0]])}</pre></section>{/if}
-				{/each}
 				<details class="technical-details"><summary>{i18n.t('elygate.technicalDetails')}</summary>
+					{#each [['input_history', 'elygate.request'], ['responses_input_history', 'elygate.request'], ['output_message', 'elygate.response'], ['responses_output', 'elygate.response']] as item (item[0])}
+						{#if selectedLog[item[0]] !== undefined && selectedLog[item[0]] !== ''}<section><h3>{i18n.t(item[1])}</h3><pre>{formatted(selectedLog[item[0]])}</pre></section>{/if}
+					{/each}
 					{#each [['error_details', 'elygate.errorDetails'], ['plugin_logs', 'elygate.pluginLogs'], ['routing_engine_logs', 'elygate.routingLogs'], ['token_usage', 'elygate.tokenUsage'], ['metadata', 'elygate.metadata'], ['raw_request', 'elygate.rawRequest'], ['raw_response', 'elygate.rawResponse']] as item (item[0])}
 						{#if selectedLog[item[0]] !== undefined && selectedLog[item[0]] !== ''}<section><h3>{i18n.t(item[1])}</h3><pre>{formatted(selectedLog[item[0]])}</pre></section>{/if}
 					{/each}
@@ -586,6 +591,7 @@
 	.detail-badges { flex-wrap: wrap; margin: .8rem 0; }
 	.detail-badges span { background: var(--muted); border-radius: 999px; font-size: .75rem; padding: .3rem .5rem; }
 	.drawer section { border-top: 1px solid var(--border); padding: .8rem 0; }
+	.request-summary { color: var(--muted-foreground); font-size: .8rem; margin: .65rem 0 0; }
 	h3 { font-size: .9rem; margin: 0 0 .5rem; }
 	pre { background: var(--muted); border-radius: .55rem; max-height: 360px; overflow: auto; padding: .7rem; white-space: pre-wrap; word-break: break-word; }
 	.media-grid { display: grid; gap: .6rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
