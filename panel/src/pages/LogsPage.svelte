@@ -14,6 +14,7 @@
 	const i18n = useTranslation();
 	let logs = $state.raw<JsonRecord[]>([]);
 	let filterData = $state.raw<JsonRecord>({});
+	let configuredProviders = $state.raw<string[]>([]);
 	let stats = $state.raw<LogStats>({});
 	let selectedLog = $state.raw<JsonRecord | null>(null);
 	let selectedIds = $state.raw<string[]>([]);
@@ -43,7 +44,7 @@
 
 	const totalPages = $derived(logPageCount(total, Number(pageSize)));
 	const hasNext = $derived(page < totalPages);
-	const providers = $derived(stringList(filterData.providers));
+	const providers = $derived([...new Set([...stringList(filterData.providers), ...configuredProviders])].sort((left, right) => left.localeCompare(right)));
 	const models = $derived(stringList(filterData.models));
 	const selectedVideoSources = $derived(selectedLog ? videoSources(selectedLog) : []);
 	const selectedTranscription = $derived(selectedLog && isJsonRecord(selectedLog.transcription_output) ? selectedLog.transcription_output : null);
@@ -126,10 +127,17 @@
 
 	async function loadFilters(): Promise<void> {
 		try {
-			const payload = await requestJson<JsonRecord>('/api/logs/filterdata?dimensions=models,providers');
-			filterData = payload;
+			const [filterPayload, providerPayload] = await Promise.all([
+				requestJson<JsonRecord>('/api/logs/filterdata?dimensions=models,providers'),
+				requestJson<unknown>('/api/providers'),
+			]);
+			filterData = filterPayload;
+			configuredProviders = getListPayload(providerPayload)
+				.map((provider) => String(provider.name ?? provider.provider ?? ''))
+				.filter((name) => name !== '');
 		} catch {
 			filterData = {};
+			configuredProviders = [];
 		}
 	}
 
@@ -319,6 +327,10 @@
 
 	function submitFilters(event: SubmitEvent): void {
 		event.preventDefault();
+		applyFilters();
+	}
+
+	function applyFilters(): void {
 		page = 1;
 		void load();
 	}
@@ -387,6 +399,52 @@
 		return `data:${mime};base64,${value}`;
 	}
 
+	function diagnosis(record: JsonRecord): { result: string; reason: string; advice: string } {
+		const statusValue = value(record, 'status');
+		if (statusValue === 'success') {
+			return {
+				result: i18n.t('elygate.logResultSuccess'),
+				reason: i18n.t('elygate.logReasonSuccess'),
+				advice: i18n.t('elygate.logAdviceSuccess'),
+			};
+		}
+		const raw = `${JSON.stringify(record.error_details ?? '')} ${JSON.stringify(record.raw_response ?? '')}`.toLowerCase();
+		if (raw.includes('model_not_found') || raw.includes('model is not available') || raw.includes('404')) {
+			return {
+				result: i18n.t('elygate.logResultFailed'),
+				reason: i18n.t('elygate.logReasonModelMissing'),
+				advice: i18n.t('elygate.logAdviceModelMissing'),
+			};
+		}
+		if (raw.includes('401') || raw.includes('unauthorized') || raw.includes('invalid api key')) {
+			return {
+				result: i18n.t('elygate.logResultFailed'),
+				reason: i18n.t('elygate.logReasonAuth'),
+				advice: i18n.t('elygate.logAdviceAuth'),
+			};
+		}
+		if (raw.includes('429') || raw.includes('rate limit')) {
+			return {
+				result: i18n.t('elygate.logResultFailed'),
+				reason: i18n.t('elygate.logReasonRateLimit'),
+				advice: i18n.t('elygate.logAdviceRateLimit'),
+			};
+		}
+		if (raw.includes('timeout') || raw.includes('deadline exceeded')) {
+			return {
+				result: i18n.t('elygate.logResultFailed'),
+				reason: i18n.t('elygate.logReasonTimeout'),
+				advice: i18n.t('elygate.logAdviceTimeout'),
+			};
+		}
+		return {
+			result: i18n.t('elygate.logResultFailed'),
+			reason: i18n.t('elygate.logReasonUnknown'),
+			advice: i18n.t('elygate.logAdviceUnknown'),
+		};
+	}
+
+
 	onMount(() => {
 		void Promise.all([load(), loadFilters()]);
 		void connectWebSocket();
@@ -430,12 +488,13 @@
 
 	<form class="filters" onsubmit={submitFilters}>
 		<label>{i18n.t('elygate.search')}<input bind:value={query} /></label>
-		<label>{i18n.t('elygate.provider')}<select bind:value={provider}><option value="">{i18n.t('elygate.all')}</option>{#each providers as item (item)}<option value={item}>{item}</option>{/each}</select></label>
-		<label>{i18n.t('elygate.model')}<select bind:value={model}><option value="">{i18n.t('elygate.all')}</option>{#each models as item (item)}<option value={item}>{item}</option>{/each}</select></label>
-		<label>{i18n.t('elygate.status')}<select bind:value={status}><option value="">{i18n.t('elygate.all')}</option><option value="success">{i18n.t('elygate.success')}</option><option value="error">{i18n.t('elygate.error')}</option><option value="cancelled">{i18n.t('elygate.cancelled')}</option><option value="processing">{i18n.t('elygate.processing')}</option></select></label>
-		<label>{i18n.t('elygate.timeRange')}<select bind:value={period}><option value="1h">{i18n.t('elygate.period.1h')}</option><option value="24h">{i18n.t('elygate.period.24h')}</option><option value="7d">{i18n.t('elygate.period.7d')}</option><option value="30d">{i18n.t('elygate.period.30d')}</option></select></label>
-		<label>{i18n.t('elygate.pageSize')}<select bind:value={pageSize}><option value="20">20</option><option value="50">50</option><option value="100">100</option></select></label>
-		<button type="submit" disabled={isLoading}>{i18n.t('elygate.search')}</button>
+		<label>{i18n.t('elygate.provider')}<select bind:value={provider} onchange={() => applyFilters()} disabled={providers.length === 0}><option value="">{providers.length === 0 ? i18n.t('elygate.noSelectableProviders') : i18n.t('elygate.all')}</option>{#each providers as item (item)}<option value={item}>{item}</option>{/each}</select></label>
+		<label>{i18n.t('elygate.model')}<select bind:value={model} onchange={() => applyFilters()}><option value="">{i18n.t('elygate.all')}</option>{#each models as item (item)}<option value={item}>{item}</option>{/each}</select></label>
+		<label>{i18n.t('elygate.status')}<select bind:value={status} onchange={() => applyFilters()}><option value="">{i18n.t('elygate.all')}</option><option value="success">{i18n.t('elygate.success')}</option><option value="error">{i18n.t('elygate.error')}</option><option value="cancelled">{i18n.t('elygate.cancelled')}</option><option value="processing">{i18n.t('elygate.processing')}</option></select></label>
+		<label>{i18n.t('elygate.timeRange')}<select bind:value={period} onchange={() => applyFilters()}><option value="1h">{i18n.t('elygate.period.1h')}</option><option value="24h">{i18n.t('elygate.period.24h')}</option><option value="7d">{i18n.t('elygate.period.7d')}</option><option value="30d">{i18n.t('elygate.period.30d')}</option></select></label>
+		<label>{i18n.t('elygate.pageSize')}<select bind:value={pageSize} onchange={() => applyFilters()}><option value="20">20</option><option value="50">50</option><option value="100">100</option></select></label>
+		<button type="submit" disabled={isLoading}>{i18n.t('elygate.applyFilters')}</button>
+		<p class="filter-hint">{i18n.t('elygate.filtersAutoApply')}</p>
 	</form>
 
 	<div class="table-wrap" aria-busy={isLoading}>
@@ -456,6 +515,7 @@
 			<header><div><p class="eyebrow">{value(selectedLog, 'object')}</p><h2>{value(selectedLog, 'provider')} / {value(selectedLog, 'model')}</h2></div><button type="button" onclick={() => (selectedLog = null)}>{i18n.t('elygate.close')}</button></header>
 			{#if isDetailLoading}<p>{i18n.t('elygate.loading')}</p>{:else}
 				<div class="detail-badges"><span>{statusLabel(value(selectedLog, 'status'))}</span><span>{Number(selectedLog.latency ?? 0).toFixed(0)} ms</span><span>{formatLogCost(selectedLog.cost)}</span><span>{value(selectedLog, 'id')}</span></div>
+				<section class="diagnosis"><h3>{i18n.t('elygate.logDiagnosis')}</h3><dl><div><dt>{i18n.t('elygate.logResult')}</dt><dd>{diagnosis(selectedLog).result}</dd></div><div><dt>{i18n.t('elygate.logReason')}</dt><dd>{diagnosis(selectedLog).reason}</dd></div><div><dt>{i18n.t('elygate.logAdvice')}</dt><dd>{diagnosis(selectedLog).advice}</dd></div></dl></section>
 				{#if selectedLog.content_hidden === true}<div class="notice">{i18n.t('elygate.contentHidden')}</div>{/if}
 				{#if isJsonRecord(selectedLog.speech_input) && typeof selectedLog.speech_input.input === 'string'}<section><h3>{i18n.t('elygate.speechInput')}</h3><p class="prose-output">{selectedLog.speech_input.input}</p></section>{/if}
 				{#if imageSources(selectedLog).length}<section><h3>{i18n.t('elygate.mediaOutput')}</h3><div class="media-grid">{#each imageSources(selectedLog) as source (source)}<img src={source} alt={i18n.t('elygate.mediaOutput')} />{/each}</div></section>{/if}
@@ -463,9 +523,14 @@
 				{#if transcriptionAudioSource(selectedLog) || selectedTranscription}<section><h3>{i18n.t('elygate.transcription')}</h3>{#if transcriptionAudioSource(selectedLog)}<audio controls src={transcriptionAudioSource(selectedLog)}></audio>{/if}{#if selectedTranscription}<div class="media-meta">{#if selectedTranscription.language}<span>{i18n.t('elygate.detectedLanguage')}: {String(selectedTranscription.language)}</span>{/if}{#if selectedTranscription.duration}<span>{i18n.t('elygate.duration')}: {Number(selectedTranscription.duration).toFixed(1)}s</span>{/if}{#if selectedTranscription.task}<span>{String(selectedTranscription.task)}</span>{/if}</div><p class="prose-output">{String(selectedTranscription.text ?? '')}</p>{#if Array.isArray(selectedTranscription.segments)}<div class="segment-list">{#each selectedTranscription.segments.filter(isJsonRecord) as segment, segmentIndex (segmentIndex)}<div><small>{Number(segment.start ?? 0).toFixed(1)}s – {Number(segment.end ?? 0).toFixed(1)}s</small><span>{String(segment.text ?? '')}</span></div>{/each}</div>{/if}{/if}</section>{/if}
 				{#if selectedVideoSources.length || isJsonRecord(selectedLog.video_generation_input)}<section><h3>{i18n.t('elygate.videoOutput')}</h3>{#if isJsonRecord(selectedLog.video_generation_input) && typeof selectedLog.video_generation_input.prompt === 'string'}<p class="prose-output">{selectedLog.video_generation_input.prompt}</p>{/if}<div class="video-grid">{#each selectedVideoSources as video (video.src)}<video controls preload="metadata" src={video.src}><track kind="captions" /></video>{/each}</div>{#if selectedLog.video_download_output}<pre>{formatted(selectedLog.video_download_output)}</pre>{/if}</section>{/if}
 				{#if selectedOcrInput || selectedOcrOutput}<section><h3>{i18n.t('elygate.ocr')}</h3>{#if selectedOcrInput}<div class="media-meta"><span>{String(selectedOcrInput.type ?? 'OCR')}</span>{#if selectedOcrInput.document_url || selectedOcrInput.image_url}<a href={String(selectedOcrInput.document_url ?? selectedOcrInput.image_url)} target="_blank" rel="noopener noreferrer">{String(selectedOcrInput.document_url ?? selectedOcrInput.image_url)}</a>{/if}</div>{/if}{#if selectedOcrOutput?.document_annotation}<p class="prose-output"><strong>{i18n.t('elygate.documentAnnotation')}:</strong> {String(selectedOcrOutput.document_annotation)}</p>{/if}{#each selectedOcrPages as page, pageIndex (String(page.index ?? pageIndex))}<article class="ocr-page"><header><strong>{i18n.t('elygate.ocrPage')} {Number(page.index ?? pageIndex) + 1}</strong>{#if isJsonRecord(page.dimensions)}<span>{Number(page.dimensions.width ?? 0)} × {Number(page.dimensions.height ?? 0)} px · {Number(page.dimensions.dpi ?? 0)} DPI</span>{/if}</header><pre>{String(page.markdown ?? '')}</pre>{#if Array.isArray(page.images)}<div class="media-grid">{#each page.images.filter(isJsonRecord) as image, imageIndex (String(image.id ?? imageIndex))}{#if ocrImageSource(image.image_base64)}<img src={ocrImageSource(image.image_base64)} alt={`${i18n.t('elygate.extractedImage')} ${imageIndex + 1}`} />{/if}{/each}</div>{/if}</article>{/each}</section>{/if}
-				{#each [['input_history', 'elygate.request'], ['responses_input_history', 'elygate.request'], ['output_message', 'elygate.response'], ['responses_output', 'elygate.response'], ['error_details', 'elygate.errorDetails'], ['plugin_logs', 'elygate.pluginLogs'], ['routing_engine_logs', 'elygate.routingLogs'], ['token_usage', 'elygate.tokenUsage'], ['metadata', 'elygate.metadata'], ['raw_request', 'elygate.rawRequest'], ['raw_response', 'elygate.rawResponse']] as item (item[0])}
+				{#each [['input_history', 'elygate.request'], ['responses_input_history', 'elygate.request'], ['output_message', 'elygate.response'], ['responses_output', 'elygate.response']] as item (item[0])}
 					{#if selectedLog[item[0]] !== undefined && selectedLog[item[0]] !== ''}<section><h3>{i18n.t(item[1])}</h3><pre>{formatted(selectedLog[item[0]])}</pre></section>{/if}
 				{/each}
+				<details class="technical-details"><summary>{i18n.t('elygate.technicalDetails')}</summary>
+					{#each [['error_details', 'elygate.errorDetails'], ['plugin_logs', 'elygate.pluginLogs'], ['routing_engine_logs', 'elygate.routingLogs'], ['token_usage', 'elygate.tokenUsage'], ['metadata', 'elygate.metadata'], ['raw_request', 'elygate.rawRequest'], ['raw_response', 'elygate.rawResponse']] as item (item[0])}
+						{#if selectedLog[item[0]] !== undefined && selectedLog[item[0]] !== ''}<section><h3>{i18n.t(item[1])}</h3><pre>{formatted(selectedLog[item[0]])}</pre></section>{/if}
+					{/each}
+				</details>
 			{/if}
 		</aside>
 	</div>
@@ -490,6 +555,14 @@
 	.metric-grid article { background: var(--card); border: 1px solid var(--border); border-radius: .75rem; padding: .85rem; }
 	.metric-grid span { color: var(--muted-foreground); font-size: .75rem; }
 	.metric-grid strong { display: block; font-size: 1.25rem; margin-top: .3rem; }
+	.filter-hint { color: var(--muted-foreground); font-size: .72rem; grid-column: 1 / -1; margin: 0; }
+	.diagnosis { background: color-mix(in oklch, var(--primary) 6%, transparent); border: 1px solid var(--border); border-radius: .65rem; margin: .8rem 0; padding: .8rem; }
+	.diagnosis dl { display: grid; gap: .4rem; margin: 0; }
+	.diagnosis dl div { display: grid; gap: .15rem; }
+	.diagnosis dt { color: var(--muted-foreground); font-size: .72rem; }
+	.diagnosis dd { margin: 0; }
+	.technical-details { border-top: 1px solid var(--border); margin-top: .8rem; padding-top: .8rem; }
+	.technical-details summary { cursor: pointer; font-weight: 700; }
 	.filters { align-items: end; display: grid; gap: .6rem; grid-template-columns: minmax(180px, 1.5fr) repeat(5, minmax(110px, .7fr)) auto; margin-bottom: .85rem; }
 	.filters label { color: var(--muted-foreground); display: grid; font-size: .75rem; font-weight: 650; gap: .3rem; }
 	.filters input, .filters select { background: var(--background); border: 1px solid var(--border); border-radius: .5rem; color: var(--foreground); min-width: 0; padding: .55rem; }

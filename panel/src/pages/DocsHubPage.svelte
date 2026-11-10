@@ -40,7 +40,7 @@
 	let selectedSlug = $state('quickstart');
 
 	const chineseDocs: Record<string, string> = {
-		quickstart: `# 30 秒开始\n\n## 安装与启动\n\n在项目目录执行 \`bun install\`，然后运行 \`bun run dev\`。生产环境请使用固定版本镜像并启用管理员认证。\n\n## 发送第一个请求\n\n先在“供应商”和“供应商密钥”页面保存上游凭据，再创建虚拟密钥。向 \`/v1/chat/completions\` 发送带有 \`Authorization: Bearer <virtual-key>\` 的请求即可验证链路。\n\n## 下一步\n\n在运行概览查看请求、延迟、Token 和成本；在请求日志检查单次调用；在系统设置中配置认证、日志、缓存、代理和 MCP 网关。`,
+		quickstart: `# 30 秒开始\n\n## 安装与启动\n\n按部署包说明安装依赖并启动服务。生产环境请使用固定版本镜像并启用管理员认证。\n\n## 发送第一个请求\n\n先在“供应商”和“供应商密钥”页面保存上游凭据，再创建虚拟密钥。创建完成后即可用该密钥验证网关链路。\n\n<details>\n<summary>面向研发：本地启动命令与接口示例</summary>\n\n在项目目录执行 \`bun install\`，然后运行 \`bun run dev\`。\n\n向 \`/v1/chat/completions\` 发送带有 \`Authorization: Bearer <virtual-key>\` 的请求即可验证链路。示例为接口调用格式，仅研发联调时使用。\n\n</details>\n\n## 下一步\n在运行概览查看请求、延迟、令牌用量和成本；在请求日志检查单次调用；在系统设置中配置认证、日志、缓存、代理和 MCP 网关。`,
 		architecture: `# 系统架构\n\n请求先经过认证与虚拟密钥解析，再进入路由规则、供应商适配器和响应记录。日志、缓存、Webhook 与可观测性插件在请求生命周期的对应阶段执行。\n\n生产排障时，先检查 \`/health\`、数据库连通性和供应商状态，再查看请求日志中的请求 ID。`,
 		'mcp-overview': `# MCP 概览\n\nMCP 客户端连接服务目录中的服务，网关统一处理认证、工具同步、虚拟密钥范围和调用日志。客户端配置与 MCP 网关运行参数分开管理。`,
 		'mcp-gateway': `# MCP 网关\n\n在 MCP 网关配置中设置工具同步、执行超时、认证模式和外部客户端地址。保存后，客户端可通过统一端点发现并调用已启用工具。`,
@@ -60,7 +60,7 @@
 			{ slug: 'mcp-gateway', title: zh ? 'MCP 网关' : 'MCP gateway', description: zh ? '通过统一端点暴露聚合工具。' : 'Expose aggregated tools through one endpoint.', category: 'MCP', sourcePath: 'mcp/overview.mdx', content: zh ? chineseDocs['mcp-gateway'] : mcpOverviewSource },
 			{ slug: 'virtual-keys', title: zh ? '虚拟密钥' : 'Virtual keys', description: zh ? '访问控制、预算、限流和路由。' : 'Access control, budgets, limits, and routing.', category: zh ? '治理' : 'Governance', sourcePath: 'features/governance/virtual-keys.mdx', content: zh ? chineseDocs['virtual-keys'] : virtualKeysSource },
 			{ slug: 'routing', title: zh ? '治理路由' : 'Governance routing', description: zh ? '按供应商、模型和权重分配请求。' : 'Route requests by provider, model, and weight.', category: zh ? '治理' : 'Governance', sourcePath: 'features/governance/routing.mdx', content: zh ? chineseDocs.routing : routingSource },
-			{ slug: 'webhooks', title: 'Webhooks', description: zh ? '异步推理完成后的签名回调。' : 'Signed callbacks for completed async inference.', category: zh ? '集成' : 'Integrations', sourcePath: 'features/webhooks.mdx', content: zh ? chineseDocs.webhooks : webhooksSource },
+			{ slug: 'webhooks', title: zh ? '回调通知（Webhook）' : 'Webhooks', description: zh ? '异步推理完成后的签名回调。' : 'Signed callbacks for completed async inference.', category: zh ? '集成' : 'Integrations', sourcePath: 'features/webhooks.mdx', content: zh ? chineseDocs.webhooks : webhooksSource },
 			{ slug: 'plugins', title: zh ? '插件开发' : 'Plugin development', description: zh ? '扩展请求和响应处理生命周期。' : 'Extend the request and response lifecycle.', category: zh ? '扩展' : 'Extensions', sourcePath: 'plugins/getting-started.mdx', content: zh ? chineseDocs.plugins : pluginsSource },
 			{ slug: 'production-security', title: zh ? '生产安全清单' : 'Production security', description: zh ? '部署前的认证、网络和密钥检查。' : 'Authentication, network, and secret checks before deployment.', category: zh ? '部署' : 'Deployment', sourcePath: 'deployment-guides/how-to/security-best-practices.mdx', content: zh ? chineseDocs['production-security'] : deploymentSource },
 		];

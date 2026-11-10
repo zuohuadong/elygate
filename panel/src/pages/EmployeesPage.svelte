@@ -50,6 +50,15 @@
 	function stringValue(record: JsonRecord, key: string): string { return typeof record[key] === 'string' ? String(record[key]) : ''; }
 	function boolValue(record: JsonRecord, key: string): boolean { return record[key] !== false; }
 	function keyList(record: JsonRecord): JsonRecord[] { return Array.isArray(record.virtual_keys) ? record.virtual_keys.filter((key): key is JsonRecord => !!key && typeof key === 'object' && !Array.isArray(key)) : []; }
+	function applicationLabel(value: unknown): string {
+		const applications = String(value ?? '').trim();
+		if (!applications) return '—';
+		return applications
+			.split(/\s*[\/,，]\s*/)
+			.filter(Boolean)
+			.map((name) => ({ workbuddy: 'WorkBuddy', 'codex++': 'Codex++', 'trae work': 'Trae', trae: 'Trae' }[name.toLowerCase()] ?? name))
+			.join(' / ');
+	}
 	function assignedKeyId(record: JsonRecord): string { return stringValue(keyList(record)[0] ?? {}, 'id'); }
 	function assignedKeyName(record: JsonRecord): string { return stringValue(keyList(record)[0] ?? {}, 'name') || '—'; }
 	function focusableElements(): HTMLElement[] {
@@ -225,8 +234,8 @@
 
 	<div class="toolbar"><input type="search" bind:value={search} placeholder={text('搜索姓名、用户名、部门或岗位', 'Search name, username, department, or role')} /><span>{filteredEmployees.length} {text('名员工', 'employees')}</span></div>
 	<div class="table-wrap" aria-busy={loading}>
-		<table><thead><tr><th>{text('员工', 'Employee')}</th><th>{text('部门 / 岗位', 'Department / role')}</th><th>{text('适用软件', 'Applications')}</th><th>{text('专属密钥', 'Dedicated key')}</th><th>{text('状态', 'Status')}</th><th>{text('操作', 'Actions')}</th></tr></thead>
-		<tbody>{#each filteredEmployees as employee (stringValue(employee, 'id'))}<tr><td><strong>{stringValue(employee, 'name')}</strong><small>@{stringValue(employee, 'username')}</small></td><td>{stringValue(employee, 'department') || '—'}<small>{stringValue(employee, 'job_title') || '—'}</small></td><td>{stringValue(employee, 'applications') || '—'}<small>{stringValue(employee, 'account_type') || '—'}</small></td><td>{assignedKeyName(employee)}</td><td><span class:active={boolValue(employee, 'is_active')} class="status">{boolValue(employee, 'is_active') ? text('启用', 'Active') : text('停用', 'Disabled')}</span></td><td class="actions"><button type="button" onclick={() => openEdit(employee)}>{text('编辑', 'Edit')}</button><button type="button" disabled={isResetting(stringValue(employee, 'id'))} onclick={() => void resetPassword(employee)}>{text('重置密码', 'Reset password')}</button></td></tr>{:else}<tr><td colspan="6" class="empty">{loading ? text('正在加载…', 'Loading…') : text('暂无员工。', 'No employees.')}</td></tr>{/each}</tbody></table>
+		<table><thead><tr><th>{text('员工', 'Employee')}</th><th>{text('部门 / 岗位', 'Department / role')}</th><th>{text('适用软件（允许使用的客户端）', 'Applications (allowed clients)')}</th><th>{text('账号类型', 'Account type')}</th><th>{text('专属密钥', 'Dedicated key')}</th><th>{text('状态', 'Status')}</th><th>{text('操作', 'Actions')}</th></tr></thead>
+		<tbody>{#each filteredEmployees as employee (stringValue(employee, 'id'))}<tr><td><strong>{stringValue(employee, 'name')}</strong><small>{text('登录账号', 'Login account')}：{stringValue(employee, 'username')}</small></td><td>{stringValue(employee, 'department') || '—'}<small>{stringValue(employee, 'job_title') || '—'}</small></td><td>{applicationLabel(employee.applications)}</td><td>{stringValue(employee, 'account_type') || '—'}</td><td>{assignedKeyName(employee)}{#if assignedKeyName(employee) !== '—'}<small class="bound">{text('已绑定', 'Bound')}</small>{/if}</td><td><span class:active={boolValue(employee, 'is_active')} class="status">{boolValue(employee, 'is_active') ? text('启用', 'Active') : text('停用', 'Disabled')}</span></td><td class="actions"><button type="button" onclick={() => openEdit(employee)}>{text('编辑', 'Edit')}</button><button type="button" disabled={isResetting(stringValue(employee, 'id'))} onclick={() => void resetPassword(employee)}>{text('重置密码', 'Reset password')}</button></td></tr>{:else}<tr><td colspan="7" class="empty">{loading ? text('正在加载…', 'Loading…') : text('暂无员工。', 'No employees.')}</td></tr>{/each}</tbody></table>
 	</div>
 </section>
 
@@ -269,6 +278,7 @@
 	th { background: var(--muted); font-size: .75rem; }
 	.status { color: var(--muted-foreground); font-weight: 700; }
 	.status.active { color: #16824b; }
+	td small.bound { color: #16824b; font-weight: 700; }
 	.empty { color: var(--muted-foreground); text-align: center; }
 	.modal-backdrop { align-items: center; background: rgb(0 0 0 / .48); display: flex; inset: 0; justify-content: center; padding: 1rem; position: fixed; z-index: 50; }
 	.modal { background: var(--background); border: 1px solid var(--border); border-radius: .5rem; max-height: calc(100vh - 2rem); max-width: 760px; overflow: auto; padding: 1rem; width: 100%; }

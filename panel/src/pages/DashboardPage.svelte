@@ -50,7 +50,7 @@
 		{ labelKey: 'elygate.tokenUsage', buckets: data.overview.tokens.buckets, key: 'total_tokens', format: compact },
 		{ labelKey: 'elygate.totalCost', buckets: data.overview.cost.buckets, key: 'total_cost', format: currency },
 		{ labelKey: 'elygate.averageLatency', buckets: data.overview.latency.buckets, key: 'avg_latency', format: milliseconds, aggregate: bucketLatencyAverage },
-		{ labelKey: 'elygate.throughput', buckets: data.overview.throughput.buckets, key: 'tokens_per_second', format: (value) => `${value.toFixed(1)} tok/s` },
+		{ labelKey: 'elygate.throughput', buckets: data.overview.throughput.buckets, key: 'tokens_per_second', format: throughput },
 	] : []);
 	const providerRows = $derived(providerUsageRows(data));
 	const modelRows = $derived(data?.model_rankings.rankings.rankings ?? []);
@@ -68,6 +68,7 @@
 	function compact(value: number): string { return new Intl.NumberFormat(i18n.locale, { notation: 'compact', maximumFractionDigits: 1 }).format(value); }
 	function currency(value: number): string { return formatUsdCost(value); }
 	function milliseconds(value: number): string { return `${value.toFixed(0)} ms`; }
+	function throughput(value: number): string { return `${value.toFixed(1)} ${i18n.locale === 'zh-CN' ? '令牌/秒' : 'tok/s'}`; }
 	function percentage(value: number): string { return `${value.toFixed(1)}%`; }
 	function isKnownFreeModel(row: Ranking): boolean {
 		return row.provider === 'Agnes-AI' && row.model === 'agnes-2.0-flash';
@@ -203,7 +204,7 @@
 				data={rankingSummaryRows}
 				aggregations={{ total_requests: 'sum', total_tokens: 'sum', total_cost: 'sum' }}
 				precision={{ total_cost: 4 }}
-				suffix={{ total_cost: ' USD' }}
+				suffix={{ total_cost: i18n.locale === 'zh-CN' ? ' 元' : ' CNY' }}
 			/>
 			{@render RankingTable(providerRows, 'provider', i18n)}
 		</div>
@@ -218,7 +219,7 @@
 				data={rankingSummaryRows}
 				aggregations={{ total_requests: 'sum', total_tokens: 'sum', total_cost: 'sum' }}
 				precision={{ total_cost: 4 }}
-				suffix={{ total_cost: ' USD' }}
+				suffix={{ total_cost: i18n.locale === 'zh-CN' ? ' 元' : ' CNY' }}
 			/>
 			{@render RankingTable(modelRows, 'model', i18n)}
 		</div>
@@ -244,7 +245,7 @@
 				data={rankingSummaryRows}
 				aggregations={{ total_requests: 'sum', total_tokens: 'sum', total_cost: 'sum' }}
 				precision={{ total_cost: 4 }}
-				suffix={{ total_cost: ' USD' }}
+				suffix={{ total_cost: i18n.locale === 'zh-CN' ? ' 元' : ' CNY' }}
 			/>
 			{@render RankingTable(dimensionRows, 'name', i18n)}
 		</div>
@@ -256,7 +257,7 @@
 {#snippet RankingTable(rows: Ranking[], nameKey: 'model' | 'provider' | 'name', i18n: ReturnType<typeof useTranslation>)}
 	<div class="table-wrap"><table><thead><tr><th>{i18n.t('elygate.name')}</th><th>{i18n.t('elygate.totalRequests')}</th><th>{i18n.t('elygate.tokenUsage')}</th><th>{i18n.t('elygate.totalCost')}</th><th>{i18n.t('elygate.successRate')}</th><th>{i18n.t('elygate.averageLatency')}</th><th>{i18n.t('elygate.throughput')}</th></tr></thead><tbody>
 		{#each rows as row, index (`${String(row[nameKey] ?? row.id ?? '')}:${index}`)}
-			<tr><td><strong>{String(row[nameKey] ?? row.id ?? '—')}</strong>{#if nameKey === 'model' && row.provider}<small>{row.provider}</small>{/if}</td><td>{integer(row.total_requests ?? 0)}</td><td>{compact(row.total_tokens ?? 0)}</td><td>{formatRankedCost(row.total_cost, nameKey === 'model' && isKnownFreeModel(row), i18n.locale)}</td><td>{row.success_rate === undefined ? '—' : percentage(row.success_rate)}</td><td>{row.avg_latency === undefined ? '—' : milliseconds(row.avg_latency)}</td><td>{row.throughput === undefined ? '—' : `${row.throughput.toFixed(1)} tok/s`}</td></tr>
+			<tr><td><strong>{String(row[nameKey] ?? row.id ?? '—')}</strong>{#if nameKey === 'model' && row.provider}<small>{row.provider}</small>{/if}</td><td>{integer(row.total_requests ?? 0)}</td><td>{compact(row.total_tokens ?? 0)}</td><td>{formatRankedCost(row.total_cost, nameKey === 'model' && isKnownFreeModel(row), i18n.locale)}</td><td>{row.success_rate === undefined ? '—' : percentage(row.success_rate)}</td><td>{row.avg_latency === undefined ? '—' : milliseconds(row.avg_latency)}</td><td>{row.throughput === undefined ? '—' : throughput(row.throughput)}</td></tr>
 		{:else}<tr><td colspan="7">{i18n.t('elygate.empty')}</td></tr>{/each}
 	</tbody></table></div>
 {/snippet}

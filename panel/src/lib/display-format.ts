@@ -1,7 +1,9 @@
 export function formatUsdCost(value: unknown): string {
 	if (value === null || value === undefined || value === '') return '—';
 	const amount = Number(value);
-	return Number.isFinite(amount) ? `$${amount.toFixed(4)}` : '—';
+	// The management console bills in CNY; keep the legacy function name so
+	// every observability surface shares one currency symbol.
+	return Number.isFinite(amount) ? `¥${amount.toFixed(4)}` : '—';
 }
 
 export function formatRankedCost(value: unknown, isFree: boolean, locale: string): string {

@@ -47,7 +47,7 @@ describe('panel issue regressions', () => {
 
 	test('complexity routing keeps technical enum values but localizes visible Chinese copy', async () => {
 		const source = await Bun.file(new URL('../pages/RoutingNetworkSettingsPage.svelte', import.meta.url)).text();
-		expect(source).toContain("text('治理', 'Governance')");
+		expect(source).toContain("text('路由治理', 'Routing governance')");
 		expect(source).toContain("text('简单', 'Simple')");
 		expect(source).not.toContain('简单（SIMPLE）');
 		expect(source).not.toMatch(/>SIMPLE<|>MEDIUM<|>COMPLEX<|>REASONING</);
@@ -215,7 +215,7 @@ describe('panel issue regressions', () => {
 		expect(source).toContain('catch (cause)');
 		expect(source).toContain('disabled={loading || saving || !selectedProject || !applicationName.trim()}');
 		expect(source).toContain('disabled={loading || saving || !selectedApplication || !virtualKeyId.trim()}');
-		expect(source).toContain('Any active binding on another application will be revoked');
+		expect(source).toContain('绑定后，该虚拟密钥在原应用上的绑定会自动失效');
 		expect(source).toContain('projectLoadSeq');
 		expect(source).toContain('keyLoadSeq');
 		expect(source).toContain('sequence === projectLoadSeq && selectedProject === requestedProject');
@@ -272,9 +272,9 @@ describe('panel issue regressions', () => {
 		expect(source).toContain('usageTimeRange(usageStartFilter, usageEndFilter, {');
 		expect(source).toContain('/api/control-plane/usage/summary?${query.toString()}');
 		expect(source).toContain("if (summaryResult.status === 'rejected') throw summaryResult.reason;");
-		expect(source).toContain("text('总 Token', 'Total tokens')");
-		expect(source).toContain("text('输入 Token', 'Prompt tokens')");
-		expect(source).toContain("text('输出 Token', 'Output tokens')");
+		expect(source).toContain("text('总令牌', 'Total tokens')");
+		expect(source).toContain("text('输入令牌', 'Prompt tokens')");
+		expect(source).toContain("text('输出令牌', 'Output tokens')");
 		expect(source).toContain("text('总成本', 'Total cost')");
 		expect(source).toContain("text('已取消请求', 'Cancelled requests')");
 	});
@@ -303,7 +303,7 @@ describe('panel issue regressions', () => {
 			expect(source).toContain(`bind:value={usage${field}Filter}`);
 			expect(source).not.toContain(`usage${field}Filter.trim()`);
 		}
-		expect(source).toContain("{ key: 'user_id', label: text('用户 ID', 'User ID') }");
+		expect(source).toContain("{ key: 'user_id', label: text('用户编号', 'User ID') }");
 		expect(source).toContain("String(row.user_id ?? '—')");
 		expect(source).toContain('onsubmit={(event) => { event.preventDefault(); applyUsageFilters(); }}');
 		expect(source).toContain('if (usageLoading || usageFilterLoading) return;');
@@ -548,5 +548,100 @@ describe('panel issue regressions', () => {
 		const source = await Bun.file(new URL('../pages/EmployeePortalPage.svelte', import.meta.url)).text();
 		expect(source).toMatch(/employee = response\.employee;[\s\S]*try \{[\s\S]*await loadUsageAndKeys\(\);[\s\S]*catch \(cause\)/);
 		expect(source).toMatch(/catch \(cause\) \{[\s\S]*keys = \[\];[\s\S]*stats = \{\};[\s\S]*error =/);
+	});
+	test('control-plane projects and applications render localized names, status, and bindings', async () => {
+		const source = await Bun.file(new URL('../pages/ControlPlanePage.svelte', import.meta.url)).text();
+		expect(source).toContain("text('项目', 'Projects')");
+		expect(source).toContain('projectLabel(project.name)');
+		expect(source).toContain('organizationLabel(project.organization_id)');
+		expect(source).toContain('environmentLabel(application.environment)');
+		expect(source).toContain('statusLabel(project.status)');
+		expect(source).toContain('text(\'虚拟密钥（按名称选择）\', \'Virtual key (select by name)\')');
+		expect(source).not.toContain('elygate.controlPlaneHint');
+	});
+
+	test('usage ledger localizes status, actions, currency, and record ids', async () => {
+		const controlPlane = await Bun.file(new URL('../pages/ControlPlanePage.svelte', import.meta.url)).text();
+		expect(controlPlane).toContain('auditActionLabel(row.action)');
+		expect(controlPlane).toContain('shortId(row.resource_id)');
+		expect(controlPlane).toContain('statusLabel(row.status)');
+		expect(controlPlane).toContain("label: text('用量账本', 'Usage Ledger')");
+		expect(controlPlane).toContain('formatUsdCost(row.cost)');
+		expect(controlPlane).toContain("text('记录编号', 'Record ID')");
+	});
+
+	test('feature flags rename Warp and present a Chinese impact description', async () => {
+		const source = await Bun.file(new URL('../pages/OperationalSettingsPage.svelte', import.meta.url)).text();
+		expect(source).toContain('function flagTitle(');
+		expect(source).toContain('智能问答助手（Warp）');
+		expect(source).toContain('新日志也不会被收录用于智能检索');
+		expect(source).toContain("text('已开启', 'Enabled')");
+	});
+
+	test('connectors and plugin logs keep technical payloads behind a details section', async () => {
+		const connectors = await Bun.file(new URL('../pages/ObservabilityConnectorsPage.svelte', import.meta.url)).text();
+		const plugins = await Bun.file(new URL('../pages/PluginsPage.svelte', import.meta.url)).text();
+		expect(connectors).toContain('function connectorDescription(');
+		expect(connectors).toContain('导出 OTLP 链路与指标');
+		expect(connectors).toContain('technical-details');
+		expect(plugins).toContain('技术详情：加载日志');
+		expect(plugins).toContain('技术详情：生效配置');
+		expect(plugins).toContain('{statusLabel(selected)}');
+	});
+
+	test('caching config tolerates a missing vector-store endpoint without an English duplicate error', async () => {
+		const source = await Bun.file(new URL('../pages/CachingConfigPage.svelte', import.meta.url)).text();
+		expect(source).toContain('Promise.allSettled([');
+		expect(source).toContain('loadWarning');
+		expect(source).toContain('当前服务端未提供向量存储配置接口');
+		expect(source).toContain('supported: false');
+	});
+
+	test('request logs auto-apply filters, expose providers, and fold technical detail', async () => {
+		const source = await Bun.file(new URL('../pages/LogsPage.svelte', import.meta.url)).text();
+		expect(source).toContain("onchange={() => applyFilters()}");
+		expect(source).toContain("i18n.t('elygate.applyFilters')");
+		expect(source).toContain('configuredProviders');
+		expect(source).toContain("requestJson<unknown>('/api/providers')");
+		expect(source).toContain('function diagnosis(');
+		expect(source).toContain("i18n.t('elygate.logReasonModelMissing')");
+		expect(source).toContain('<details class="technical-details">');
+	});
+
+	test('provider modal surfaces /v1 validation in place and provider-key page drops form hints', async () => {
+		const source = await Bun.file(new URL('../pages/ProvidersPage.svelte', import.meta.url)).text();
+		expect(source).toContain('let modalError = $state');
+		expect(source).toContain('bind:this={networkField}');
+		expect(source).toContain('class:invalid={networkInvalid}');
+		expect(source).toContain('基础地址填在这里');
+		expect(source).toContain('在此管理各供应商的接口密钥');
+		expect(source).not.toContain("providerKeysPage ? i18n.t('elygate.apiKeySeparateHint')");
+	});
+
+	test('MCP guide masks the virtual key until an explicit confirmation', async () => {
+		const source = await Bun.file(new URL('../pages/McpUsageGuidePage.svelte', import.meta.url)).text();
+		expect(source).toContain('maskedCommand');
+		expect(source).toContain('function toggleSecret(');
+		expect(source).toContain("i18n.t('elygate.mcpSecretWarningAbove')");
+		expect(source).toContain('revealSecret ? command : maskedCommand');
+	});
+
+	test('employee list labels the login account and separates software from account type', async () => {
+		const source = await Bun.file(new URL('../pages/EmployeesPage.svelte', import.meta.url)).text();
+		expect(source).toContain("text('登录账号', 'Login account')");
+		expect(source).toContain("text('账号类型', 'Account type')");
+		expect(source).toContain("text('已绑定', 'Bound')");
+		expect(source).toContain('function applicationLabel(');
+	});
+
+	test('skills, docs, and UA mappings expose business wording with technical tails folded', async () => {
+		const skills = await Bun.file(new URL('../pages/SkillsPage.svelte', import.meta.url)).text();
+		const docs = await Bun.file(new URL('../pages/DocsHubPage.svelte', import.meta.url)).text();
+		const settings = await Bun.file(new URL('../pages/OperationalSettingsPage.svelte', import.meta.url)).text();
+		expect(skills).toContain("i18n.t('elygate.technicalDetails')");
+		expect(skills).toContain('原始字段名：extra_frontmatter');
+		expect(docs).toContain('面向研发：本地启动命令与接口示例');
+		expect(docs).toContain('回调通知（Webhook）');
+		expect(settings).toContain("text('图标', 'Icon')");
 	});
 });

@@ -31,6 +31,7 @@
 	let isLoading = $state(true);
 	let error = $state('');
 	let copied = $state(false);
+	let revealSecret = $state(false);
 
 	const selectedVirtualKey = $derived(virtualKeys.find((item) => String(item.id ?? '') === selectedVirtualKeyId));
 	const selectedVirtualKeyReady = $derived(isUsableSecret(selectedVirtualKey));
@@ -48,9 +49,26 @@
 		allowedClients.filter((client) => selectedClientIds.includes(clientId(client))),
 	);
 	const command = $derived(buildHarnessConfig(harness, gatewayUrl(), selectedVirtualKeyReady ? selectedVirtualKey : undefined, selectedClients));
+	const maskedCommand = $derived(maskSecret(command, selectedVirtualKey));
 
 	function secretValue(record: JsonRecord | undefined): string {
 		return typeof record?.value === 'string' ? record.value : '';
+	}
+
+	function maskSecret(value: string, record: JsonRecord | undefined): string {
+		const secret = secretValue(record);
+		if (!secret) return value;
+		const masked = secret.length <= 12 ? '****' : `${secret.slice(0, 8)}${'*'.repeat(Math.max(8, secret.length - 12))}${secret.slice(-4)}`;
+		return value.split(secret).join(masked);
+	}
+
+	function toggleSecret(): void {
+		if (revealSecret) {
+			revealSecret = false;
+			return;
+		}
+		if (!window.confirm(i18n.t('elygate.mcpRevealConfirm'))) return;
+		revealSecret = true;
 	}
 
 	function isUsableSecret(record: JsonRecord | undefined): boolean {
@@ -214,11 +232,15 @@
 		</div>
 
 		<div class="output">
+			<p class="secret-warning">{i18n.t('elygate.mcpSecretWarningAbove')}</p>
 			<div class="output-heading">
 				<strong>{i18n.t('elygate.generatedConfig')}</strong>
-				<button type="button" onclick={() => void copyCommand()} disabled={!command}>{copied ? i18n.t('elygate.copied') : i18n.t('elygate.copy')}</button>
+				<div class="output-actions">
+					<button type="button" onclick={() => toggleSecret()} disabled={!command}>{revealSecret ? i18n.t('elygate.hideSecret') : i18n.t('elygate.showSecret')}</button>
+					<button type="button" onclick={() => void copyCommand()} disabled={!command}>{copied ? i18n.t('elygate.copied') : i18n.t('elygate.copyFullConfig')}</button>
+				</div>
 			</div>
-			<pre>{command || (selectedVirtualKey ? i18n.t('elygate.virtualKeyRevealRequired') : i18n.t('elygate.selectVirtualKeyHint'))}</pre>
+			<pre>{command ? (revealSecret ? command : maskedCommand) : (selectedVirtualKey ? i18n.t('elygate.virtualKeyRevealRequired') : i18n.t('elygate.selectVirtualKeyHint'))}</pre>
 			<p>{i18n.t('elygate.secretDisplayWarning')}</p>
 		</div>
 	</div>
@@ -246,7 +268,9 @@
 	button { background: var(--muted); border: 1px solid var(--border); border-radius: .55rem; color: var(--foreground); cursor: pointer; font-weight: 650; padding: .55rem .7rem; }
 	button.is-active, .page-heading > button { background: var(--primary); border-color: var(--primary); color: var(--primary-foreground); }
 	button:disabled { cursor: wait; opacity: .55; }
-	.output-heading { align-items: center; display: flex; justify-content: space-between; }
+	.output-heading { align-items: center; display: flex; justify-content: space-between; gap: .6rem; flex-wrap: wrap; }
+	.output-actions { display: flex; flex-wrap: wrap; gap: .4rem; }
+	.secret-warning { background: color-mix(in oklch, #d97706 12%, transparent); border: 1px solid color-mix(in oklch, #d97706 40%, var(--border)); border-radius: .55rem; color: #92400e; font-size: .8rem; margin: 0 0 .8rem; padding: .6rem .7rem; }
 	pre { background: color-mix(in oklch, var(--foreground) 5%, var(--background)); border: 1px solid var(--border); border-radius: .65rem; min-height: 330px; overflow: auto; padding: 1rem; white-space: pre-wrap; word-break: break-word; }
 	.output p { font-size: .8rem; margin: .7rem 0 0; }
 	.notice { border-radius: .65rem; margin-bottom: 1rem; padding: .75rem 1rem; }

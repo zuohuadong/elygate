@@ -85,7 +85,7 @@
 
 <section class="budget-history" aria-busy={loading} aria-labelledby={`${id}-heading`}>
 	<header>
-		<div><h2 id={`${id}-heading`}>{text('历史预算', 'Budget history')}</h2><p class="muted">{text('已关闭周期 · UTC · USD', 'Closed periods · UTC · USD')}</p></div>
+		<div><h2 id={`${id}-heading`}>{text('历史预算', 'Budget history')}</h2><p class="muted">{text('已关闭周期 · UTC · 元', 'Closed periods · UTC · CNY')}</p></div>
 		<button class="icon-button" type="button" onclick={reload} disabled={loading} aria-label={text('刷新历史预算', 'Refresh budget history')} title={text('刷新历史预算', 'Refresh budget history')}><RefreshCw size={16} aria-hidden="true" /></button>
 	</header>
 	<form onsubmit={applyRange} class="history-filters">
