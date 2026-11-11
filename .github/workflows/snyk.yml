@@ -7,13 +7,15 @@ on:
 
 permissions:
   contents: read
-  security-events: write
 
 jobs:
   snyk-open-source:
     name: Snyk Open Source (deps)
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      contents: read
+      security-events: write # upload-sarif
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
@@ -45,7 +47,7 @@ jobs:
       - name: Setup Node (for UI)
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: "25"
+          node-version-file: ".nvmrc"
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -102,6 +104,9 @@ jobs:
     name: Snyk Code (SAST)
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      contents: read
+      security-events: write # upload-sarif
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
@@ -134,7 +139,7 @@ jobs:
       - name: Setup Node (for UI)
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: "25"
+          node-version-file: ".nvmrc"
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
