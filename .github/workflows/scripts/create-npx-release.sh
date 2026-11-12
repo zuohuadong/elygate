@@ -67,31 +67,36 @@ This NPX package provides a convenient way to run Bifrost without manual binary 
 ---
 _This release was automatically created from tag \`$FULL_TAG\`_"
 
-# Check the tag before trusting an existing release, so a release bound to a
-# stale tag cannot make this run a silent success.
+# Validate the tag binding and release state before writing a tag.
+TAG_AT_HEAD="false"
 echo "🔍 Checking if tag $FULL_TAG exists..."
 if git rev-parse --verify "refs/tags/$FULL_TAG" >/dev/null 2>&1; then
   if [ "$(git rev-list -n 1 "$FULL_TAG")" != "$(git rev-parse HEAD)" ]; then
     echo "❌ Tag $FULL_TAG already exists at a different commit"
     exit 1
   fi
+  TAG_AT_HEAD="true"
   echo "✅ Tag $FULL_TAG already exists."
-else
-  echo "🏷️ Creating tag $FULL_TAG..."
-  git tag "$FULL_TAG"
-  git push origin "$FULL_TAG"
 fi
-
 echo "🔍 Checking if release $FULL_TAG already exists..."
 if release_check "$FULL_TAG"; then
-  echo "ℹ️ Release $FULL_TAG already exists. Skipping creation."
-  exit 0
+  if [ "$TAG_AT_HEAD" = "true" ]; then
+    echo "ℹ️ Release $FULL_TAG already exists. Skipping creation."
+    exit 0
+  fi
+  echo "❌ Release $FULL_TAG exists but its tag is missing"
+  exit 1
 else
   status=$?
   if [ "$status" -ne 1 ]; then
     echo "❌ Could not determine release state for $FULL_TAG"
     exit 1
   fi
+fi
+if [ "$TAG_AT_HEAD" = "false" ]; then
+  echo "🏷️ Creating tag $FULL_TAG..."
+  git tag "$FULL_TAG"
+  git push origin "$FULL_TAG"
 fi
 
 # Create release

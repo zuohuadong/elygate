@@ -63,22 +63,29 @@ if [[ "$PREV_CHANGELOG" == "$CHANGELOG_BODY" ]]; then
   exit 1
 fi
 
-# Preflight the tag and GitHub release before any tag push. Reuse a tag that
-# already points at HEAD, and only create the release when it is definitively absent.
+# Validate tag binding first, then the release state, before any write.
+TAG_AT_HEAD="false"
+if git rev-parse -q --verify "refs/tags/$TAG_NAME" >/dev/null; then
+  if [ "$(git rev-list -n 1 "$TAG_NAME")" != "$(git rev-parse HEAD)" ]; then
+    echo "❌ Tag $TAG_NAME already exists at a different commit"
+    exit 1
+  fi
+  TAG_AT_HEAD="true"
+fi
 if release_check "$TAG_NAME"; then
-  echo "ℹ️ Release $TAG_NAME already exists. Nothing to do."
-  exit 0
+  if [ "$TAG_AT_HEAD" = "true" ]; then
+    echo "ℹ️ Release $TAG_NAME already exists. Nothing to do."
+    exit 0
+  fi
+  echo "❌ Release $TAG_NAME exists but its tag is missing"
+  exit 1
 else
   status=$?
   if [ "$status" -ne 1 ]; then
     exit 1
   fi
 fi
-if git rev-parse -q --verify "refs/tags/$TAG_NAME" >/dev/null; then
-  if [ "$(git rev-list -n 1 "$TAG_NAME")" != "$(git rev-parse HEAD)" ]; then
-    echo "❌ Tag $TAG_NAME already exists at a different commit"
-    exit 1
-  fi
+if [ "$TAG_AT_HEAD" = "true" ]; then
   echo "ℹ️ Reusing existing tag $TAG_NAME at HEAD"
 else
   echo "🏷️ Creating tag: $TAG_NAME"
@@ -113,20 +120,11 @@ go get github.com/maximhq/bifrost/core@v$VERSION
 ---
 _This release was automatically created from version file: \`core/version\`_"
 
-if release_check "$TAG_NAME"; then
-  echo "ℹ️ Release $TAG_NAME already exists. Skipping creation."
-else
-  status=$?
-  if [ "$status" -ne 1 ]; then
-    echo "❌ Could not determine release state for $TAG_NAME"
-    exit 1
-  fi
-  echo "🎉 Creating GitHub release for $TITLE..."
-  gh release create "$TAG_NAME" \
-    --title "$TITLE" \
-    --notes "$BODY" \
-    ${PRERELEASE_FLAG} ${LATEST_FLAG}
-fi
+echo "🎉 Creating GitHub release for $TITLE..."
+gh release create "$TAG_NAME" \
+  --title "$TITLE" \
+  --notes "$BODY" \
+  ${PRERELEASE_FLAG} ${LATEST_FLAG}
 
 echo "✅ Core released successfully"
 echo "success=true" >> "$GITHUB_OUTPUT"

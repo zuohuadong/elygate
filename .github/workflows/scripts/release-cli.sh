@@ -143,20 +143,11 @@ npx @maximhq/bifrost --cli-version v$VERSION
 ---
 _This release was automatically created._"
 
-if release_check "$TAG_NAME"; then
-  echo "ℹ️ GitHub release $TAG_NAME already exists. Skipping."
-else
-  status=$?
-  if [ "$status" -ne 1 ]; then
-    echo "❌ Could not determine release state for $TAG_NAME"
-    exit 1
-  fi
-  echo "🎉 Creating GitHub release for $TITLE..."
-  gh release create "$TAG_NAME" \
-    --title "$TITLE" \
-    --notes "$BODY" \
-    ${PRERELEASE_FLAG}
-fi
+echo "🎉 Creating GitHub release for $TITLE..."
+gh release create "$TAG_NAME" \
+  --title "$TITLE" \
+  --notes "$BODY" \
+  ${PRERELEASE_FLAG}
 
 echo "✅ Bifrost CLI released successfully"
 

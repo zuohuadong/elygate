@@ -64,14 +64,26 @@ if git rev-parse -q --verify "refs/tags/$TAG_NAME" >/dev/null; then
   fi
 fi
 
-# Fail before any dependency commit/push when the release state is unknown, and
-# exit early when this exact tag already has a release.
+# Never move HEAD while an existing tag still needs its release: dependency
+# bumps would leave the tag behind and guarantee a later conflict.
+TAG_AT_HEAD="false"
+if git rev-parse -q --verify "refs/tags/$TAG_NAME" >/dev/null; then
+  TAG_AT_HEAD="true"
+fi
 if release_check "$TAG_NAME"; then
-  echo "ℹ️ Release $TAG_NAME already exists. Nothing to do."
-  exit 0
+  if [ "$TAG_AT_HEAD" = "true" ]; then
+    echo "ℹ️ Release $TAG_NAME already exists. Nothing to do."
+    exit 0
+  fi
+  echo "❌ Release $TAG_NAME exists but its tag is missing"
+  exit 1
 else
   status=$?
   if [ "$status" -ne 1 ]; then
+    exit 1
+  fi
+  if [ "$TAG_AT_HEAD" = "true" ]; then
+    echo "❌ Tag $TAG_NAME exists at HEAD but its GitHub release is missing; recover the release before bumping dependencies"
     exit 1
   fi
 fi
@@ -195,19 +207,10 @@ go get github.com/maximhq/bifrost/framework@$VERSION
 _This release was automatically created and uses core version: \`$CORE_VERSION\`_"
 
 echo "🎉 Creating GitHub release for $TITLE..."
-if release_check "$TAG_NAME"; then
-  echo "ℹ️ Release $TAG_NAME already exists. Skipping creation."
-else
-  status=$?
-  if [ "$status" -ne 1 ]; then
-    echo "❌ Could not determine release state for $TAG_NAME"
-    exit 1
-  fi
-  gh release create "$TAG_NAME" \
+gh release create "$TAG_NAME" \
     --title "$TITLE" \
     --notes "$BODY" \
     ${PRERELEASE_FLAG} ${LATEST_FLAG}
-fi
 
 echo "✅ Framework released successfully"
 echo "success=true" >> "$GITHUB_OUTPUT"

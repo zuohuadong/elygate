@@ -60,19 +60,28 @@ echo "📦 Plugin version: $PLUGIN_VERSION"
 echo "🏷️ Tag name: $TAG_NAME"
 
 # Preflight the tag before modifying or pushing dependency files.
+TAG_AT_HEAD="false"
 if git rev-parse -q --verify "refs/tags/$TAG_NAME" >/dev/null; then
   if [ "$(git rev-list -n 1 "$TAG_NAME")" != "$(git rev-parse HEAD)" ]; then
     echo "❌ Tag $TAG_NAME already exists at a different commit"
     exit 1
   fi
+  TAG_AT_HEAD="true"
 fi
-
 if release_check "$TAG_NAME"; then
-  echo "ℹ️ Release $TAG_NAME already exists. Nothing to do."
-  exit 0
+  if [ "$TAG_AT_HEAD" = "true" ]; then
+    echo "ℹ️ Release $TAG_NAME already exists. Nothing to do."
+    exit 0
+  fi
+  echo "❌ Release $TAG_NAME exists but its tag is missing"
+  exit 1
 else
   status=$?
   if [ "$status" -ne 1 ]; then
+    exit 1
+  fi
+  if [ "$TAG_AT_HEAD" = "true" ]; then
+    echo "❌ Tag $TAG_NAME exists at HEAD but its GitHub release is missing; recover the release before bumping dependencies"
     exit 1
   fi
 fi
@@ -209,19 +218,10 @@ _This release was automatically created from version file: \`plugins/$PLUGIN_NAM
 
 echo "🎉 Creating GitHub release for $TITLE..."
 
-if release_check "$TAG_NAME"; then
-  echo "ℹ️ Release $TAG_NAME already exists. Skipping creation."
-else
-  status=$?
-  if [ "$status" -ne 1 ]; then
-    echo "❌ Could not determine release state for $TAG_NAME"
-    exit 1
-  fi
-  gh release create "$TAG_NAME" \
-    --title "$TITLE" \
-    --notes "$BODY" \
-    ${PRERELEASE_FLAG} ${LATEST_FLAG}
-fi
+gh release create "$TAG_NAME" \
+  --title "$TITLE" \
+  --notes "$BODY" \
+  ${PRERELEASE_FLAG} ${LATEST_FLAG}
 
 echo "✅ Plugin $PLUGIN_NAME released successfully"
 echo "success=true" >> "${GITHUB_OUTPUT:-/dev/null}"
