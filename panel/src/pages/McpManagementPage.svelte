@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { getAppName } from '../lib/branding';
 	import { onMount } from 'svelte';
+	import { withBasePath } from '../lib/base-path';
 	import { useTranslation } from '@svadmin/core/i18n';
 	import { displayValue, getTotal, isJsonRecord, requestJson, type JsonRecord } from '../lib/api';
 	import { displayError, parseJsonObject, prettyJson, csv } from '../lib/forms';
@@ -387,7 +388,7 @@
 		if (!id || busyId) return;
 		if (record.kind === 'flow' && action === 'reauth') {
 			const suffix = record.auth_kind === 'headers' ? '&kind=headers' : '';
-			window.location.assign(`/workspace/mcp-sessions/auth?flow=${encodeURIComponent(id)}${suffix}`);
+			window.location.assign(withBasePath(`/workspace/mcp-sessions/auth?flow=${encodeURIComponent(id)}${suffix}`));
 			return;
 		}
 		if (action === 'revoke' && !window.confirm(text('确认撤销该 MCP 凭据？', 'Revoke this MCP credential?'))) return;

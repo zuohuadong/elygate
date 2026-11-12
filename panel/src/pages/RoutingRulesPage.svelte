@@ -8,10 +8,11 @@
 	import { formatPagination } from '../lib/display-format';
 	import RoutingSimulationPanel from '../lib/RoutingSimulationPanel.svelte';
 	import RoutingReleases from '../lib/RoutingReleases.svelte';
+	import { buildRoutingFallbacks, routingFallbackDrafts, type RoutingFallbackDraft } from '../lib/routing-rules';
 
 	interface Props { resourceName: string; }
 	interface TargetForm { provider: string; model: string; key_id: string; weight: number; }
-	interface RuleForm { name: string; description: string; enabled: boolean; chainRule: boolean; celExpression: string; scope: string; scopeId: string; priority: number; targets: TargetForm[]; fallbacks: string[]; query: string; }
+	interface RuleForm { name: string; description: string; enabled: boolean; chainRule: boolean; celExpression: string; scope: string; scopeId: string; priority: number; targets: TargetForm[]; fallbacks: RoutingFallbackDraft[]; query: string; }
 
 	let { resourceName: _resourceName }: Props = $props();
 	const i18n = useTranslation();
@@ -100,7 +101,7 @@
 			name: stringValue(rule, 'name'), description: stringValue(rule, 'description'), enabled: rule.enabled !== false,
 			chainRule: rule.chain_rule === true, celExpression: stringValue(rule, 'cel_expression') || 'true', scope: stringValue(rule, 'scope') || 'global',
 			scopeId: stringValue(rule, 'scope_id'), priority: Number(rule.priority ?? 0), targets: targetForms(rule.targets),
-			fallbacks: Array.isArray(rule.fallbacks) ? rule.fallbacks.filter((item): item is string => typeof item === 'string') : [], query: prettyJson(rule.query, '{}'),
+			fallbacks: routingFallbackDrafts(rule.fallbacks), query: prettyJson(rule.query, '{}'),
 		};
 		isOpen = true;
 		error = '';
@@ -108,8 +109,13 @@
 
 	function addTarget(): void { form.targets = [...form.targets, { provider: '', model: '', key_id: '', weight: 0 }]; }
 	function removeTarget(index: number): void { if (form.targets.length > 1) form.targets = form.targets.filter((_, itemIndex) => itemIndex !== index); }
-	function addFallback(): void { form.fallbacks = [...form.fallbacks, '']; }
+	function addFallback(): void { form.fallbacks = [...form.fallbacks, { value: '', keyId: '' }]; }
 	function removeFallback(index: number): void { form.fallbacks = form.fallbacks.filter((_, itemIndex) => itemIndex !== index); }
+	function fallbackLabel(value: unknown): string {
+		const [draft] = routingFallbackDrafts([value]);
+		if (!draft) return '';
+		return draft.keyId ? `${draft.value} (${i18n.t('elygate.keyId')}: ${draft.keyId})` : draft.value;
+	}
 
 	async function save(): Promise<void> {
 		if (isSaving) return;
@@ -127,7 +133,7 @@
 				name: formSnapshot.name.trim(), description: formSnapshot.description.trim(), enabled: formSnapshot.enabled, chain_rule: formSnapshot.chainRule,
 				cel_expression: formSnapshot.celExpression.trim(), scope: formSnapshot.scope, scope_id: formSnapshot.scope === 'global' ? null : formSnapshot.scopeId.trim(), priority: formSnapshot.priority,
 				targets: formSnapshot.targets.map((target) => ({ provider: target.provider.trim() || undefined, model: target.model.trim() || undefined, key_id: target.key_id.trim() || undefined, weight: target.weight })),
-				fallbacks: formSnapshot.fallbacks.map((fallback) => fallback.trim()).filter(Boolean), query: parseJsonObject(formSnapshot.query, i18n.t('elygate.queryBuilder'), i18n.t('elygate.invalidJson')),
+				fallbacks: buildRoutingFallbacks(formSnapshot.fallbacks), query: parseJsonObject(formSnapshot.query, i18n.t('elygate.queryBuilder'), i18n.t('elygate.invalidJson')),
 			};
 			const path = contextId ? `/api/routing/rules/${encodeURIComponent(contextId)}` : '/api/routing/rules';
 			await requestJson(path, { method: contextId ? 'PUT' : 'POST', body: JSON.stringify(payload) });
@@ -184,7 +190,7 @@
 	{#if viewMode === 'list'}
 		<div class="rule-list" aria-busy={isLoading}>
 			{#each sortedRules as rule, index (String(rule.id))}
-				<article class:disabled={rule.enabled === false}><div class="priority"><span>{index + 1}</span><small>P{Number(rule.priority ?? 0)}</small></div><div class="rule-main"><header><div><h2>{String(rule.name)}</h2><span>{scopeLabel(rule.scope)}{rule.scope_id ? ` / ${String(rule.scope_id)}` : ''}</span></div><code>{String(rule.cel_expression || 'true')}</code></header><div class="targets">{#each Array.isArray(rule.targets) ? rule.targets.filter(isJsonRecord) : [] as target, targetIndex (targetIndex)}<span>{String(target.provider ?? '*')} / {String(target.model ?? '*')} · {(Number(target.weight ?? 0) * 100).toFixed(0)}%</span>{/each}</div>{#if Array.isArray(rule.fallbacks) && rule.fallbacks.length}<p>↳ {i18n.t('elygate.fallbacks')}: {rule.fallbacks.map(String).join(' → ')}</p>{/if}</div><div class="row-actions"><button type="button" disabled={isSaving || isRuleBusy(String(rule.id ?? ''))} onclick={() => void toggleEnabled(rule)}>{rule.enabled === false ? i18n.t('elygate.enable') : i18n.t('elygate.disable')}</button><button type="button" disabled={isSaving || isLoading || isRuleBusy(String(rule.id ?? ''))} onclick={() => openEdit(rule)}>{i18n.t('elygate.edit')}</button><button class="danger" type="button" disabled={isSaving || isRuleBusy(String(rule.id ?? ''))} onclick={() => void remove(rule)}>{i18n.t('elygate.delete')}</button></div></article>
+				<article class:disabled={rule.enabled === false}><div class="priority"><span>{index + 1}</span><small>P{Number(rule.priority ?? 0)}</small></div><div class="rule-main"><header><div><h2>{String(rule.name)}</h2><span>{scopeLabel(rule.scope)}{rule.scope_id ? ` / ${String(rule.scope_id)}` : ''}</span></div><code>{String(rule.cel_expression || 'true')}</code></header><div class="targets">{#each Array.isArray(rule.targets) ? rule.targets.filter(isJsonRecord) : [] as target, targetIndex (targetIndex)}<span>{String(target.provider ?? '*')} / {String(target.model ?? '*')} · {(Number(target.weight ?? 0) * 100).toFixed(0)}%</span>{/each}</div>{#if Array.isArray(rule.fallbacks) && rule.fallbacks.length}<p>↳ {i18n.t('elygate.fallbacks')}: {rule.fallbacks.map(fallbackLabel).join(' → ')}</p>{/if}</div><div class="row-actions"><button type="button" disabled={isSaving || isRuleBusy(String(rule.id ?? ''))} onclick={() => void toggleEnabled(rule)}>{rule.enabled === false ? i18n.t('elygate.enable') : i18n.t('elygate.disable')}</button><button type="button" disabled={isSaving || isLoading || isRuleBusy(String(rule.id ?? ''))} onclick={() => openEdit(rule)}>{i18n.t('elygate.edit')}</button><button class="danger" type="button" disabled={isSaving || isRuleBusy(String(rule.id ?? ''))} onclick={() => void remove(rule)}>{i18n.t('elygate.delete')}</button></div></article>
 			{:else}<p>{isLoading ? i18n.t('elygate.loading') : i18n.t('elygate.empty')}</p>{/each}
 		</div>
 	{:else}
@@ -197,7 +203,7 @@
 					<code>{String(rule.cel_expression || 'true')}</code>
 					<div class="branch-grid">
 						<div class="match-branch"><span>✓ {i18n.t('elygate.matchedTargets')}</span>{#each Array.isArray(rule.targets) ? rule.targets.filter(isJsonRecord) : [] as target, targetIndex (targetIndex)}<strong>{String(target.provider ?? '*')} / {String(target.model ?? '*')} <small>{(Number(target.weight ?? 0) * 100).toFixed(0)}%</small></strong>{/each}</div>
-						<div class="fallback-branch"><span>↳ {i18n.t('elygate.fallbacks')}</span>{#if Array.isArray(rule.fallbacks) && rule.fallbacks.length}{#each rule.fallbacks as fallback (String(fallback))}<strong>{String(fallback)}</strong>{/each}{:else}<small>{rule.chain_rule === true ? i18n.t('elygate.continueEvaluation') : i18n.t('elygate.terminalRule')}</small>{/if}</div>
+						<div class="fallback-branch"><span>↳ {i18n.t('elygate.fallbacks')}</span>{#if Array.isArray(rule.fallbacks) && rule.fallbacks.length}{#each rule.fallbacks as fallback, fallbackIndex (`${fallbackIndex}-${fallbackLabel(fallback)}`)}<strong>{fallbackLabel(fallback)}</strong>{/each}{:else}<small>{rule.chain_rule === true ? i18n.t('elygate.continueEvaluation') : i18n.t('elygate.terminalRule')}</small>{/if}</div>
 					</div>
 				</article>
 			{:else}<p>{isLoading ? i18n.t('elygate.loading') : i18n.t('elygate.empty')}</p>{/each}
@@ -212,7 +218,7 @@
 		<div class="form-grid"><label>{i18n.t('elygate.name')}<input bind:value={form.name} /></label><label>{i18n.t('elygate.priority')}<input type="number" bind:value={form.priority} /></label><label class="wide">{i18n.t('elygate.description')}<input bind:value={form.description} /></label><label>{i18n.t('elygate.scope')}<select bind:value={form.scope}>{#each ['global', 'team', 'customer', 'virtual_key', 'user'] as scope (scope)}<option value={scope}>{scopeLabel(scope)}</option>{/each}</select></label>{#if form.scope !== 'global'}<label>{i18n.t('elygate.scopeId')}<input bind:value={form.scopeId} /></label>{/if}<label class="switch"><input type="checkbox" bind:checked={form.enabled} />{i18n.t('elygate.enabled')}</label><label class="switch"><input type="checkbox" bind:checked={form.chainRule} />{i18n.t('elygate.chainRule')}</label></div>
 		<label>{i18n.t('elygate.celExpression')}<textarea bind:value={form.celExpression} rows="4"></textarea><small>{i18n.t('elygate.celExamples')}</small></label>
 		<section><div class="section-heading"><h3>{i18n.t('elygate.routingTargets')} · {(totalWeight * 100).toFixed(0)}%</h3><button type="button" onclick={addTarget}>{i18n.t('elygate.addTarget')}</button></div>{#each form.targets as target, index (index)}<div class="target-row"><label>{i18n.t('elygate.provider')}<select bind:value={target.provider}><option value="">*</option>{#each providers as item (String(item.name))}<option value={String(item.name)}>{String(item.name)}</option>{/each}</select></label><label>{i18n.t('elygate.model')}<input bind:value={target.model} /></label><label>{i18n.t('elygate.keyId')}<input bind:value={target.key_id} /></label><label>{i18n.t('elygate.weight')}<input type="number" min="0" max="1" step="any" bind:value={target.weight} /></label><button type="button" onclick={() => removeTarget(index)}>×</button></div>{/each}</section>
-		<section><div class="section-heading"><div><h3>{i18n.t('elygate.fallbacks')}</h3><small>{i18n.t('elygate.fallbackFormatHint')}</small></div><button type="button" onclick={addFallback}>{i18n.t('elygate.addFallback')}</button></div><div class="fallback-grid">{#each form.fallbacks as _fallback, index (index)}<div class="fallback-row"><input bind:value={form.fallbacks[index]} placeholder="openai/gpt-4o" aria-label={`${i18n.t('elygate.fallbacks')} ${index + 1}`} /><button type="button" onclick={() => removeFallback(index)}>×</button></div>{:else}<p>{i18n.t('elygate.noFallbacks')}</p>{/each}</div></section>
+		<section><div class="section-heading"><div><h3>{i18n.t('elygate.fallbacks')}</h3><small>{i18n.t('elygate.fallbackFormatHint')}</small></div><button type="button" onclick={addFallback}>{i18n.t('elygate.addFallback')}</button></div><div class="fallback-grid">{#each form.fallbacks as fallback, index (index)}<div class="fallback-row"><input bind:value={fallback.value} placeholder="openai/gpt-4o" aria-label={`${i18n.t('elygate.fallbacks')} ${index + 1}`} /><input bind:value={fallback.keyId} placeholder={i18n.t('elygate.keyId')} aria-label={`${i18n.t('elygate.fallbacks')} ${index + 1} ${i18n.t('elygate.keyId')}`} /><button type="button" onclick={() => removeFallback(index)}>×</button></div>{:else}<p>{i18n.t('elygate.noFallbacks')}</p>{/each}</div></section>
 		<label class="query-editor">{i18n.t('elygate.queryBuilder')} JSON<textarea bind:value={form.query} rows="7"></textarea></label><footer><button type="button" disabled={isSaving} onclick={() => { if (!isSaving) isOpen = false; }}>{i18n.t('elygate.cancel')}</button><button class="primary" type="submit" disabled={isSaving}>{i18n.t('elygate.save')}</button></footer>
 	</form></fieldset></div></div>
 {/if}
@@ -274,7 +280,7 @@
 	.target-row > button, .fallback-row > button { padding-inline: 0; width: 42px; }
 	.fallback-grid { display: grid; gap: .5rem; margin-top: .5rem; }
 	.fallback-grid p { color: var(--muted-foreground); margin: .25rem 0; }
-	.fallback-row { align-items: center; display: grid; gap: .5rem; grid-template-columns: minmax(0, 1fr) 42px; }
+	.fallback-row { align-items: center; display: grid; gap: .5rem; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) 42px; }
 	.query-editor, .query-editor textarea { min-width: 0; width: 100%; }
 	@media (max-width: 760px) { .page-heading, .rule-main header { flex-direction: column; } .heading-actions { align-items: stretch; flex-direction: column; width: 100%; } .rule-list article { grid-template-columns: auto 1fr; } .row-actions { grid-column: 1 / -1; } .target-row, .branch-grid { grid-template-columns: 1fr; } }
 </style>

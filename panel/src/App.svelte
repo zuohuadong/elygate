@@ -5,6 +5,7 @@
 	import * as enterprisePanel from '@elygate/enterprise-panel';
 	import { ApiError, configureRequestErrorFormatter, getListPayload, getSessionStatus, requestJson } from './lib/api';
 	import { createBifrostAuthProvider } from './lib/auth';
+	import { stripBasePath, withBasePath } from './lib/base-path';
 	import { bifrostDataProvider } from './lib/data-provider';
 	import {
 		registerEnterprisePanelTranslations,
@@ -65,13 +66,14 @@
 	function normalizeInitialHashRoute(): void {
 		if (typeof window === 'undefined') return;
 		const { hash, pathname, search } = window.location;
-		if (hash || pathname === '/') return;
+		const path = stripBasePath(pathname);
+		if (hash || path === '/') return;
 
-		const path = pathname.endsWith('/') ? pathname.slice(0, -1) : pathname;
-		window.history.replaceState(null, '', `/#${path}${search}`);
+		const normalizedPath = path.endsWith('/') ? path.slice(0, -1) : path;
+		window.history.replaceState(null, '', `${withBasePath('/')}#${normalizedPath}${search}`);
 	}
 
-	const publicRoute = typeof window !== 'undefined' ? resolvePublicPanelRoute(window.location.pathname) : null;
+	const publicRoute = typeof window !== 'undefined' ? resolvePublicPanelRoute(stripBasePath(window.location.pathname)) : null;
 	if (!publicRoute) normalizeInitialHashRoute();
 	const enterpriseResourcePages = enterpriseManifest.resourcePages;
 	const enterpriseFallbackResourcePages = enterpriseManifest.fallbackResourcePages;

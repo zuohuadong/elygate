@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { withBasePath } from '../lib/base-path';
 	import { isJsonRecord } from '../lib/api';
 	import { expiryMinutes, isSafeOAuthRedirect, tempTokenFromFragment } from '../lib/oauth-consent';
 	import type { McpPublicRoute } from '../lib/public-routes';
@@ -77,7 +78,7 @@
 	}
 
 	async function flowRequest(path: string, init: RequestInit = {}): Promise<unknown> {
-		const response = await fetch(path, {
+		const response = await fetch(withBasePath(path), {
 			...init,
 			credentials: 'same-origin',
 			headers: {

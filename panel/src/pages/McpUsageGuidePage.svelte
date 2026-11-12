@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { getAppName } from '../lib/branding';
 	import { onMount } from 'svelte';
+	import { getBasePath } from '../lib/base-path';
 	import { useTranslation } from '@svadmin/core/i18n';
 	import { displayError } from '../lib/forms';
 	import { getListPayload, isJsonRecord, requestJson, type JsonRecord } from '../lib/api';
@@ -156,7 +157,7 @@
 			revealSecret = false;
 			selectedVirtualKeyId = String(virtualKeys[0]?.id ?? '');
 			const configuredUrl = configFormFromDocument(configResponse).mcpExternalClientUrl.trim();
-			gatewayBaseUrl = /^https?:\/\//i.test(configuredUrl) ? configuredUrl : window.location.origin;
+			gatewayBaseUrl = /^https?:\/\//i.test(configuredUrl) ? configuredUrl : `${window.location.origin}${getBasePath()}`;
 		} catch (cause) {
 			error = displayError(cause, i18n.t('elygate.loadFailed'));
 		} finally {

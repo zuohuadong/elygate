@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { getAppName } from '../lib/branding';
 	import { onMount } from 'svelte';
+	import { withBasePath } from '../lib/base-path';
 	import { useTranslation } from '@svadmin/core/i18n';
 	import { displayError, prettyJson } from '../lib/forms';
 	import { getListPayload, getTotal, isJsonRecord, requestJson, type JsonRecord } from '../lib/api';
@@ -299,7 +300,7 @@
 		if (stopped) return;
 		try {
 			const ticketResponse = await requestJson<{ ticket?: string }>('/api/session/ws-ticket', { method: 'POST' });
-			const url = new URL('/ws', window.location.href);
+			const url = new URL(withBasePath('/ws'), window.location.href);
 			url.protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 			if (ticketResponse.ticket) url.searchParams.set('ticket', ticketResponse.ticket);
 			websocket = new WebSocket(url);

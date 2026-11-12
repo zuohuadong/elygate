@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { getAppName } from '../lib/branding';
 	import { onMount } from 'svelte';
+	import { withBasePath } from '../lib/base-path';
 	import { isJsonRecord, type JsonRecord } from '../lib/api';
 	import { expiryMinutes, isSafeOAuthRedirect, tempTokenFromFragment } from '../lib/oauth-consent';
 
@@ -53,7 +54,7 @@
 	}
 
 	async function consentRequest(path: string, init: RequestInit = {}): Promise<unknown> {
-		const response = await fetch(path, {
+		const response = await fetch(withBasePath(path), {
 			...init,
 			credentials: 'same-origin',
 			headers: {

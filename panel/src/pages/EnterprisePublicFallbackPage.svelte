@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { PublicPanelRoute } from '../lib/public-routes';
+	import { withBasePath } from '../lib/base-path';
 
 	interface Props { route: PublicPanelRoute; }
 	let { route }: Props = $props();
@@ -12,7 +13,7 @@
 		: 'The OSS panel does not invent private API contracts. Provide this public page from the enterprise panel module or restart the flow from the enterprise feature.';
 </script>
 
-<main><section><div>!</div><h1>{title}</h1><p>{hint}</p><a href="/">{zh ? '返回控制台' : 'Back to console'}</a></section></main>
+<main><section><div>!</div><h1>{title}</h1><p>{hint}</p><a href={withBasePath('/')}>{zh ? '返回控制台' : 'Back to console'}</a></section></main>
 
 <style>
 	:global(body) { margin: 0; }

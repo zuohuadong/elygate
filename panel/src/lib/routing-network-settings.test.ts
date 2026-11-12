@@ -24,17 +24,24 @@ describe('routing and network settings helpers', () => {
 		expect(() => buildComplexityPayload(draft)).toThrow('keywords:reasoning_keywords');
 	});
 
-	test('round-trips redacted proxy credentials and all entity toggles', () => {
+	test('round-trips redacted proxy credentials, CA and all entity toggles', () => {
 		const draft = proxyDraftFromRecord({
 			enabled: true, type: 'http', url: 'https://proxy.example.com:8443', username: 'svc', password: '<redacted>',
-			no_proxy: ' localhost, .internal ', timeout: 60, skip_tls_verify: true,
+			no_proxy: ' localhost, .internal ', timeout: 60, skip_tls_verify: true, ca_cert_pem: 'PEM-CA',
 			enable_for_scim: true, enable_for_inference: true, enable_for_api: true,
 		});
 		expect(buildProxyPayload(draft)).toEqual({
 			enabled: true, type: 'http', url: 'https://proxy.example.com:8443', username: 'svc', password: '<redacted>',
-			no_proxy: 'localhost, .internal', timeout: 60, skip_tls_verify: true,
+			no_proxy: 'localhost, .internal', timeout: 60, skip_tls_verify: true, ca_cert_pem: 'PEM-CA',
 			enable_for_scim: true, enable_for_inference: true, enable_for_api: true,
 		});
+	});
+
+	test('round-trips a socks5 proxy and its scheme', () => {
+		const draft = proxyDraftFromRecord({ enabled: true, type: 'socks5', url: 'socks5://proxy.example.com:1080', timeout: 30 });
+		expect(draft.type).toBe('socks5');
+		expect(buildProxyPayload(draft)).toMatchObject({ type: 'socks5', url: 'socks5://proxy.example.com:1080' });
+		expect(() => buildProxyPayload({ ...draft, url: 'http://proxy.example.com:1080' })).toThrow('url-invalid');
 	});
 
 	test('rejects unsupported proxy URLs and oversized timeouts', () => {

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { getAppName } from '../lib/branding';
 	import { onMount } from 'svelte';
+	import { withBasePath } from '../lib/base-path';
 	import { useTranslation } from '@svadmin/core/i18n';
 	import { displayError, parseJsonArray, parseJsonObject, prettyJson } from '../lib/forms';
 	import { getListPayload, isJsonRecord, requestJson, type JsonRecord } from '../lib/api';
@@ -185,7 +186,7 @@
 			const body = new FormData();
 			body.append('file', file);
 			body.append('path', uploadPath.trim() || file.name);
-			const response = await fetch('/api/skills/files/upload', { method: 'POST', body, credentials: 'same-origin', headers: { Accept: 'application/json' } });
+			const response = await fetch(withBasePath('/api/skills/files/upload'), { method: 'POST', body, credentials: 'same-origin', headers: { Accept: 'application/json' } });
 			const payload: unknown = await response.json().catch(() => ({}));
 			if (!response.ok) throw new Error(isJsonRecord(payload) && typeof payload.error === 'string' ? payload.error : `HTTP ${response.status}`);
 			if (!isJsonRecord(payload)) throw new Error(i18n.t('elygate.operationFailed'));

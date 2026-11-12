@@ -9,15 +9,18 @@ export interface ComplexityDraft {
 	keywords: Record<ComplexityKeywordKey, string>;
 }
 
+export type ProxyType = 'http' | 'socks5';
+
 export interface ProxyDraft {
 	enabled: boolean;
-	type: 'http';
+	type: ProxyType;
 	url: string;
 	username: string;
 	password: string;
 	noProxy: string;
 	timeout: string | number;
 	skipTlsVerify: boolean;
+	caCert: string;
 	enableForScim: boolean;
 	enableForInference: boolean;
 	enableForApi: boolean;
@@ -70,19 +73,20 @@ export function buildComplexityPayload(draft: ComplexityDraft): JsonRecord {
 }
 
 export function emptyProxyDraft(): ProxyDraft {
-	return { enabled: false, type: 'http', url: '', username: '', password: '', noProxy: '', timeout: 30, skipTlsVerify: false, enableForScim: false, enableForInference: false, enableForApi: false };
+	return { enabled: false, type: 'http', url: '', username: '', password: '', noProxy: '', timeout: 30, skipTlsVerify: false, caCert: '', enableForScim: false, enableForInference: false, enableForApi: false };
 }
 
 export function proxyDraftFromRecord(record: JsonRecord): ProxyDraft {
 	return {
 		enabled: record.enabled === true,
-		type: 'http',
+		type: record.type === 'socks5' ? 'socks5' : 'http',
 		url: stringValue(record.url),
 		username: stringValue(record.username),
 		password: stringValue(record.password),
 		noProxy: stringValue(record.no_proxy),
 		timeout: numberValue(record.timeout, 30),
 		skipTlsVerify: record.skip_tls_verify === true,
+		caCert: stringValue(record.ca_cert_pem),
 		enableForScim: record.enable_for_scim === true,
 		enableForInference: record.enable_for_inference === true,
 		enableForApi: record.enable_for_api === true,
@@ -97,17 +101,19 @@ export function buildProxyPayload(draft: ProxyDraft): JsonRecord {
 		if (!url) throw new Error('url-required');
 		let parsed: URL;
 		try { parsed = new URL(url); } catch { throw new Error('url-invalid'); }
-		if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('url-invalid');
+		const allowed = draft.type === 'socks5' ? ['socks5:', 'socks5h:'] : ['http:', 'https:'];
+		if (!allowed.includes(parsed.protocol)) throw new Error('url-invalid');
 	}
 	return {
 		enabled: draft.enabled,
-		type: 'http',
+		type: draft.type,
 		url,
 		username: draft.username.trim(),
 		password: draft.password,
 		no_proxy: draft.noProxy.split(',').map((host) => host.trim()).filter(Boolean).join(', '),
 		timeout,
 		skip_tls_verify: draft.skipTlsVerify,
+		ca_cert_pem: draft.caCert.trim(),
 		enable_for_scim: draft.enableForScim,
 		enable_for_inference: draft.enableForInference,
 		enable_for_api: draft.enableForApi,

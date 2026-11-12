@@ -4,6 +4,7 @@
 	import { getAppName } from '../lib/branding';
 	import { displayError } from '../lib/forms';
 	import { getListPayload, requestJson, type JsonRecord } from '../lib/api';
+	import { withBasePath } from '../lib/base-path';
 
 	interface Props { resourceName: string; }
 	interface EmployeeForm {
@@ -223,7 +224,7 @@
 <section class="page-shell" data-resource={resourceName}>
 	<header class="page-heading">
 		<div><p class="eyebrow">{getAppName()} / {text('企业级管理', 'Enterprise management')}</p><h1>{text('员工管理', 'Employees')}</h1><p>{text('管理员工身份、岗位、账号状态和专属虚拟密钥。员工通过独立门户查看本人用量。', 'Manage employee identity, role, status, and dedicated virtual key. Employees use a separate self-service portal.')}</p></div>
-		<div class="heading-actions"><a class="secondary" href="/employee" target="_blank" rel="noreferrer">{text('员工门户', 'Employee portal')}</a><button class="secondary" type="button" onclick={() => void load()} disabled={loading}>{text('刷新', 'Refresh')}</button><button class="primary" type="button" onclick={openCreate}>{text('新增员工', 'Add employee')}</button></div>
+		<div class="heading-actions"><a class="secondary" href={withBasePath('/employee')} target="_blank" rel="noreferrer">{text('员工门户', 'Employee portal')}</a><button class="secondary" type="button" onclick={() => void load()} disabled={loading}>{text('刷新', 'Refresh')}</button><button class="primary" type="button" onclick={openCreate}>{text('新增员工', 'Add employee')}</button></div>
 	</header>
 
 	{#if error}<div class="notice error" role="alert">{error}</div>{/if}

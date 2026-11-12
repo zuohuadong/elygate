@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { withBasePath } from '../lib/base-path';
 	import { getAppLogo, getAppName, getShortName, resolveBranding } from '../lib/branding';
 	import { requestJson, type JsonRecord } from '../lib/api';
 
@@ -140,7 +141,7 @@
 <svelte:head><meta name="description" content="员工密钥与用量自助门户" /></svelte:head>
 
 <main>
-	<header class="topbar"><a class="brand" href="/employee">{#if logo}<img src={logo} alt="" />{:else}<span>{shortName.slice(0, 1)}</span>{/if}<div><strong>{appName}</strong><small>员工门户</small></div></a>{#if employee}<div class="identity"><div><strong>{String(employee.name ?? '')}</strong><small>@{String(employee.username ?? '')}</small></div><button type="button" onclick={() => void logout()}>退出</button></div>{/if}</header>
+	<header class="topbar"><a class="brand" href={withBasePath('/employee')}>{#if logo}<img src={logo} alt="" />{:else}<span>{shortName.slice(0, 1)}</span>{/if}<div><strong>{appName}</strong><small>员工门户</small></div></a>{#if employee}<div class="identity"><div><strong>{String(employee.name ?? '')}</strong><small>@{String(employee.username ?? '')}</small></div><button type="button" onclick={() => void logout()}>退出</button></div>{/if}</header>
 
 	{#if loading}
 		<section class="center-state"><div class="spinner"></div><p>正在验证登录状态…</p></section>

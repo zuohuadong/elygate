@@ -1,3 +1,5 @@
+import { withBasePath } from './base-path';
+
 export type JsonRecord = Record<string, unknown>;
 
 export interface SessionStatus {
@@ -54,7 +56,7 @@ export async function requestJson<T>(path: string, init: RequestInit = {}): Prom
 	if (!headers.has('Content-Type') && (init.body != null || ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method))) {
 		headers.set('Content-Type', 'application/json');
 	}
-	const response = await fetch(path, {
+	const response = await fetch(withBasePath(path), {
 		credentials: 'same-origin',
 		...init,
 		headers,

@@ -145,8 +145,11 @@ func (h *ConfigHandler) RegisterRoutes(r *router.Router, middlewares ...schemas.
 	r.PUT("/api/config", lib.ChainMiddlewares(h.updateConfig, middlewares...))
 	r.POST("/api/config/metadata", lib.ChainMiddlewares(h.updateMetadata, middlewares...))
 	r.GET("/api/version", lib.ChainMiddlewares(h.getVersion, middlewares...))
+	r.GET("/api/latest-release", lib.ChainMiddlewares(h.getLatestRelease, middlewares...))
 	r.GET("/api/proxy-config", lib.ChainMiddlewares(h.getProxyConfig, middlewares...))
 	r.PUT("/api/proxy-config", lib.ChainMiddlewares(h.updateProxyConfig, middlewares...))
+	r.GET("/api/vector-store-config", lib.ChainMiddlewares(h.getVectorStoreConfig, middlewares...))
+	r.PUT("/api/vector-store-config", lib.ChainMiddlewares(h.updateVectorStoreConfig, middlewares...))
 	r.POST("/api/pricing/force-sync", lib.ChainMiddlewares(h.forceSyncPricing, middlewares...))
 }
 

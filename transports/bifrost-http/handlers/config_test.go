@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/bytedance/sonic"
+	"github.com/fasthttp/router"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/valyala/fasthttp"
@@ -1927,5 +1928,33 @@ func TestUpdateProxyConfig_ErrorsDoNotEchoURLPassword(t *testing.T) {
 			require.Equal(t, fasthttp.StatusBadRequest, put.Response.StatusCode(), string(put.Response.Body()))
 			assert.NotContains(t, string(put.Response.Body()), "s3cret", "the 400 must not quote the stored password")
 		})
+	}
+}
+
+// The panel and the caching E2E flow both read and write /api/vector-store-config.
+// The handlers existed without routes, so every request fell through to the SPA/404
+// catch-all and vector-store settings were unreachable from the panel.
+func TestConfigHandlerRoutesVectorStoreConfiguration(t *testing.T) {
+	r := router.New()
+	h := NewConfigHandler(nil, &lib.Config{})
+	h.RegisterRoutes(r)
+
+	for _, tc := range []struct {
+		method string
+		body   string
+	}{
+		{method: fasthttp.MethodGet},
+		{method: fasthttp.MethodPut, body: `{"enabled":false}`},
+	} {
+		ctx := &fasthttp.RequestCtx{}
+		ctx.Request.Header.SetMethod(tc.method)
+		ctx.Request.SetRequestURI("/api/vector-store-config")
+		if tc.body != "" {
+			ctx.Request.SetBodyString(tc.body)
+		}
+		r.Handler(ctx)
+
+		require.NotEqual(t, fasthttp.StatusNotFound, ctx.Response.StatusCode(), "%s route must be registered", tc.method)
+		require.Equal(t, fasthttp.StatusServiceUnavailable, ctx.Response.StatusCode(), "a nil config store must reach the handler")
 	}
 }

@@ -550,7 +550,9 @@ describe('panel issue regressions', () => {
 		expect(proxy).toContain("text('不使用代理的主机', 'No-proxy hosts')");
 		expect(proxy).toContain("text('企业目录同步', 'Enterprise directory sync')");
 		expect(proxy).toContain("text('全局代理设置', 'Global proxy settings')");
-		expect(proxy).toContain("text('当前只支持 HTTP 代理；其他类型暂不支持。', 'Only HTTP proxies are currently supported; other types are not available yet.')");
+		expect(proxy).toContain("text('HTTP/HTTPS 与 SOCKS5 代理均受支持。', 'HTTP/HTTPS and SOCKS5 proxies are supported.')");
+		expect(proxy).toContain('<option value="socks5">SOCKS5</option>');
+		expect(proxy).toContain('bind:value={proxyDraft.caCert}');
 		expect(docs).toContain('const chineseDocs: Record<string, string>');
 		expect(docs).toContain("content: zh ? chineseDocs.quickstart : quickstartSource");
 		expect(docs).toContain('`连接服务、客户端和 ${getAppName()}。`');
