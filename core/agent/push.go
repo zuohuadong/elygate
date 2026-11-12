@@ -943,22 +943,16 @@ func newPushDeliveryClient(factory *network.HTTPClientFactory, allowPrivate bool
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 		}
 	}
-	dial := network.SSRFSafeDialContext(pushSendTimeout)
+	// No factory is registered: the guarded clients still honour the process
+	// HTTP(S)_PROXY selector and apply the same destination policy on redirect hops.
 	if allowPrivate {
-		dial = network.PrivateNetworkDialContext(pushSendTimeout)
+		client := network.NewPrivateNetworkHTTPClient(pushSendTimeout)
+		client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+		return client
 	}
-	return &http.Client{
-		Transport: &http.Transport{
-			Proxy:                 network.DefaultProxyFunc(network.ClientPurposeAPI),
-			DialContext:           dial,
-			ForceAttemptHTTP2:     true,
-			MaxIdleConns:          100,
-			IdleConnTimeout:       90 * time.Second,
-			TLSHandshakeTimeout:   10 * time.Second,
-			ExpectContinueTimeout: time.Second,
-		},
-		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-	}
+	client := network.NewSSRFSafeHTTPClient(pushSendTimeout)
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return client
 }
 
 // sendPushDownstream re-originates one queued push to the client's real

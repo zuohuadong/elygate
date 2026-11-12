@@ -93,16 +93,36 @@ if ! gh auth status >/dev/null 2>&1; then
   echo "Error: GitHub CLI is not authenticated; refusing to push a release tag."
   exit 1
 fi
-if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+REPO_SLUG="${GITHUB_REPOSITORY:-$(gh repo view --json nameWithOwner -q .nameWithOwner)}"
+RELEASE_ERR=$(mktemp)
+trap 'rm -f "$RELEASE_ERR"' EXIT
+if gh api "repos/${REPO_SLUG}/releases/tags/${TAG_NAME}" >/dev/null 2>"$RELEASE_ERR"; then
   echo "Error: GitHub release $TAG_NAME already exists."
   exit 1
 fi
+# Only a definitive 404 means the release is absent. Auth, network, permission,
+# and repository errors must not be treated as permission to publish a tag.
+if ! grep -q 'HTTP 404' "$RELEASE_ERR"; then
+  echo "Error: could not determine whether GitHub release $TAG_NAME exists."
+  cat "$RELEASE_ERR" >&2
+  exit 1
+fi
 
-# Create and push tag
-echo "🏷️ Creating tag: $TAG_NAME"
+# Create the tag once, but tolerate a previous run that pushed it before the
+# release was created. Reusing a tag is only safe when it points at this commit.
 git config user.name "github-actions[bot]"
 git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-git tag "$TAG_NAME" -m "Release transports v$VERSION" -m "$CHANGELOG_BODY"
+if git rev-parse -q --verify "refs/tags/$TAG_NAME" >/dev/null; then
+  TAG_COMMIT=$(git rev-list -n 1 "$TAG_NAME")
+  if [ "$TAG_COMMIT" != "$(git rev-parse HEAD)" ]; then
+    echo "Error: tag $TAG_NAME already exists at $TAG_COMMIT, not at HEAD."
+    exit 1
+  fi
+  echo "🏷️ Reusing existing tag $TAG_NAME at HEAD"
+else
+  echo "🏷️ Creating tag: $TAG_NAME"
+  git tag "$TAG_NAME" -m "Release transports v$VERSION" -m "$CHANGELOG_BODY"
+fi
 git push origin "$TAG_NAME"
 
 # Create GitHub release
