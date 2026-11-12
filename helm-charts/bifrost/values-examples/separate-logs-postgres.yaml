@@ -1,3 +1,7 @@
+# Pin the image tag so this example renders on its own.
+image:
+  tag: "latest"
+
 # Configuration: config store and logs store on SEPARATE PostgreSQL databases
 # The config store uses the shared `postgresql` connection (here, an external RDS),
 # while the logs store points at a different external PostgreSQL via

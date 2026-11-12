@@ -1,3 +1,7 @@
+# Pin the image tag so this example renders on its own.
+image:
+  tag: "latest"
+
 # Configuration: Production High-Availability Setup
 # PostgreSQL + Weaviate + Auto-scaling + Ingress
 # Usage: helm install bifrost ./bifrost -f values-examples/production-ha.yaml

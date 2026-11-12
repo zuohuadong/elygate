@@ -462,19 +462,22 @@ func TestAgentProxyCARootsScope(t *testing.T) {
 // TestAgentProxyRootsKeyFollowsCAUpdates pins that a cached proxied transport is
 // rebuilt when the proxy CA changes under the same proxy URL.
 func TestAgentProxyRootsKeyFollowsCAUpdates(t *testing.T) {
+	firstTarget := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer firstTarget.Close()
 	cfg := &network.GlobalProxyConfig{
 		Enabled:      true,
 		Type:         network.GlobalProxyTypeHTTP,
 		URL:          "http://127.0.0.1:3128",
 		EnableForAPI: true,
-		CACertPEM:    "-----BEGIN CERTIFICATE-----\nfirst\n-----END CERTIFICATE-----",
+		CACertPEM:    string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: firstTarget.Certificate().Raw})),
 	}
 	factory := network.NewHTTPClientFactory(cfg, nil)
 	m := &Manager{httpClientFactory: factory}
 	first := m.proxyTargetRootsKey()
 	require.NotEmpty(t, first)
 	updated := *cfg
-	updated.CACertPEM = "-----BEGIN CERTIFICATE-----\nsecond\n-----END CERTIFICATE-----"
+	// A new PEM changes the trust anchor even when the certificate is equivalent.
+	updated.CACertPEM = cfg.CACertPEM + "\n"
 	factory.UpdateProxyConfig(&updated)
 	require.NotEqual(t, first, m.proxyTargetRootsKey())
 }

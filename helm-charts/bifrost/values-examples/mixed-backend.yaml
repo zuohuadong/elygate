@@ -1,3 +1,7 @@
+# Pin the image tag so this example renders on its own.
+image:
+  tag: "latest"
+
 # Configuration: SQLite for config store + PostgreSQL for logs store
 # This demonstrates independent backend selection for each store
 # Usage: helm install bifrost ./bifrost -f values-examples/mixed-backend.yaml

@@ -564,6 +564,12 @@ func NewManager(ctx context.Context, store Store, logger schemas.Logger, externa
 	if len(configs) > 0 {
 		config = configs[0]
 	}
+	if config.HTTPClientFactory == nil {
+		// The server registers the process factory during config load. Falling back
+		// to it keeps push callbacks and proxied upstream TLS on the global proxy
+		// even when a bootstrap constructs the gateway without passing the pointer.
+		config.HTTPClientFactory = network.DefaultHTTPClientFactory()
+	}
 	managerCtx, cancel := context.WithCancel(context.Background())
 	m := &Manager{
 		tracer:             config.Tracer,
@@ -628,14 +634,21 @@ func (m *Manager) Reload(ctx context.Context) error {
 		}
 		ready[reg.Name] = m.buildRuntime(reg)
 	}
-	old := make([]*runtimeAgent, 0)
-	m.runtimes.entries.Range(func(_, value any) bool {
-		old = append(old, value.(*runtimeAgent))
+	old := make(map[string]*runtimeAgent)
+	m.runtimes.entries.Range(func(key, value any) bool {
+		old[key.(string)] = value.(*runtimeAgent)
 		return true
 	})
-	m.runtimes.clear()
+	// Publish the new generation before removing superseded keys. Clearing first
+	// would expose an empty registry window to concurrent requests during any
+	// reload, including a proxy/TLS update.
 	for id, runtime := range ready {
 		m.runtimes.store(id, runtime)
+	}
+	for id := range old {
+		if _, keep := ready[id]; !keep {
+			m.runtimes.delete(id)
+		}
 	}
 	m.mutations.Unlock()
 	for _, runtime := range old {

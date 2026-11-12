@@ -45,7 +45,9 @@ if [ -n "$GH_TOKEN" ]; then
         exit 78  # Exit code 78 will be used to skip the job
     fi
 else
-    echo "⚠️  Warning: GH_TOKEN not set, skipping GitHub release check"
+    echo "❌ Error: GH_TOKEN not set; cannot verify the GitHub release"
+    echo "   Refusing to build images without a verified release"
+    exit 78
 fi
 
 # Check if dist binaries exist for the version
