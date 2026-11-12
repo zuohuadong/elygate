@@ -1890,3 +1890,30 @@ func TestGlobalProxyCADoesNotLeakIntoBypassedTargets(t *testing.T) {
 		})
 	}
 }
+
+// TestDialPolicyWithFactoryUsesInjectedProxyCA pins that an injected factory's
+// proxy CA, not the process default, secures the https proxy hop for a policy
+// dialer (the upstream gRPC path in Agent Gateway).
+func TestDialPolicyWithFactoryUsesInjectedProxyCA(t *testing.T) {
+	targetAddr, targetCA := tlsTarget(t)
+	proxyURLText, proxyCA := tunnelingHTTPSProxy(t, targetAddr)
+	_, targetPort, _ := net.SplitHostPort(targetAddr)
+	factory := NewHTTPClientFactory(&GlobalProxyConfig{
+		Enabled: true, Type: GlobalProxyTypeHTTP, URL: proxyURLText, EnableForAPI: true,
+		CACertPEM: proxyCA + targetCA,
+	}, noopTestLogger{})
+	proxyURL, err := url.Parse(proxyURLText)
+	require.NoError(t, err)
+	policy := NewDialPolicy((&net.Dialer{}).DialContext, func(context.Context, string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("203.0.113.10")}, nil
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	conn, err := policy.DialContextWithFactory(ctx, "tcp", "upstream.test:"+targetPort, proxyURL, factory)
+	require.NoError(t, err)
+	defer conn.Close()
+	pool := x509.NewCertPool()
+	require.True(t, pool.AppendCertsFromPEM([]byte(targetCA)))
+	tlsConn := tls.Client(conn, &tls.Config{MinVersion: tls.VersionTLS12, ServerName: "upstream.test", RootCAs: pool})
+	require.NoError(t, tlsConn.HandshakeContext(ctx))
+}

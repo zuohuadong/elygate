@@ -18,7 +18,7 @@ TAG_NAME="transports/v${VERSION}"
 echo "🔍 Verifying bifrost-http release v${VERSION}..."
 
 # Check if the git tag exists
-if ! git rev-parse "${TAG_NAME}" >/dev/null 2>&1; then
+if ! git rev-parse --verify "refs/tags/${TAG_NAME}" >/dev/null 2>&1; then
     echo "⚠️  Git tag ${TAG_NAME} not found"
     echo "   Bifrost-http release did not complete successfully"
     echo "   Skipping Docker image build..."

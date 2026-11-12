@@ -415,12 +415,24 @@ func NewDialPolicy(dial func(ctx context.Context, netw, addr string) (net.Conn, 
 }
 
 // DialContext connects under the policy, tunneling to a validated IP when a
-// proxy is configured. The proxy never resolves the destination itself.
+// proxy is configured. The proxy never resolves the destination itself. Proxy
+// hop TLS settings come from the process default factory.
 func (p *DialPolicy) DialContext(ctx context.Context, netw, addr string, proxyURL *url.URL) (net.Conn, error) {
+	return p.dialContext(ctx, netw, addr, proxyURL, defaultFactory.Load())
+}
+
+// DialContextWithFactory is DialContext bound to factory, for callers whose proxy
+// selection and CA come from an injected factory rather than the process default.
+// A nil factory falls back to the environment-based default.
+func (p *DialPolicy) DialContextWithFactory(ctx context.Context, netw, addr string, proxyURL *url.URL, factory *HTTPClientFactory) (net.Conn, error) {
+	return p.dialContext(ctx, netw, addr, proxyURL, factory)
+}
+
+func (p *DialPolicy) dialContext(ctx context.Context, netw, addr string, proxyURL *url.URL, factory *HTTPClientFactory) (net.Conn, error) {
 	if proxyURL == nil {
 		return p.dial(ctx, netw, addr)
 	}
-	if factory := defaultFactory.Load(); factory != nil {
+	if factory != nil {
 		factory.mu.RLock()
 		configuredURL := factory.proxyURLForPurpose(ClientPurposeAPI)
 		if configuredURL != nil && configuredURL.String() == proxyURL.String() {

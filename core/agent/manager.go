@@ -1310,7 +1310,7 @@ func (m *Manager) buildGeneration(ctx context.Context, config runtimeConfig) (*c
 					if err != nil {
 						return nil, err
 					}
-					return policy.dial.DialContext(dialCtx, "tcp", addr, proxy)
+					return policy.dial.DialContextWithFactory(dialCtx, "tcp", addr, proxy, m.httpClientFactory)
 				}))
 				if grpcErr != nil {
 					return nil, grpcErr

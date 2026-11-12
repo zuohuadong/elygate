@@ -95,7 +95,7 @@ START_FROM="none"
 echo ""
 echo "🔧 Checking core..."
 CORE_TAG="core/v${CORE_VERSION}"
-if git rev-parse --verify "$CORE_TAG" >/dev/null 2>&1; then
+if git rev-parse --verify "refs/tags/$CORE_TAG" >/dev/null 2>&1; then
   echo "   ⏭️ Tag $CORE_TAG already exists"
 else
   # Extract major.minor track from version (e.g., "1.3.55" -> "1.3", "1.4.0-prerelease1" -> "1.4")
@@ -145,7 +145,7 @@ fi
 echo ""
 echo "📦 Checking framework..."
 FRAMEWORK_TAG="framework/v${FRAMEWORK_VERSION}"
-if git rev-parse --verify "$FRAMEWORK_TAG" >/dev/null 2>&1; then
+if git rev-parse --verify "refs/tags/$FRAMEWORK_TAG" >/dev/null 2>&1; then
   echo "   ⏭️ Tag $FRAMEWORK_TAG already exists"
 else
   # Extract major.minor track from version (e.g., "1.3.55" -> "1.3", "1.4.0-prerelease1" -> "1.4")
@@ -222,7 +222,7 @@ for plugin_dir in plugins/*/; do
   tag_name="plugins/${plugin_name}/v${current_version}"
   echo "   📦 Plugin: $plugin_name (v$current_version)"
 
-  if git rev-parse --verify "$tag_name" >/dev/null 2>&1; then
+  if git rev-parse --verify "refs/tags/$tag_name" >/dev/null 2>&1; then
     echo "      ⏭️ Tag already exists"
     continue
   fi
@@ -286,7 +286,7 @@ DOCKER_TAG_EXISTS="false"
 
 # Check if Git tag exists
 GIT_TAG_EXISTS="false"
-if git rev-parse --verify "$TRANSPORT_TAG" >/dev/null 2>&1; then
+if git rev-parse --verify "refs/tags/$TRANSPORT_TAG" >/dev/null 2>&1; then
   echo "   ⏭️ Git tag $TRANSPORT_TAG already exists"
   GIT_TAG_EXISTS="true"
 fi

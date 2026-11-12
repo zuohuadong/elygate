@@ -501,3 +501,33 @@ func TestAgentProxySelectionUsesInjectedFactory(t *testing.T) {
 	require.NotNil(t, proxy)
 	require.Equal(t, "127.0.0.1:3128", proxy.Host)
 }
+
+// TestAgentProxySelectionOverridesCustomTransport pins that an injected factory
+// still controls proxy selection when Manager was constructed with a custom
+// *http.Transport (for example an in-process test transport).
+func TestAgentProxySelectionOverridesCustomTransport(t *testing.T) {
+	injectedURL, _ := url.Parse("http://127.0.0.1:3128")
+	injected := network.NewHTTPClientFactory(&network.GlobalProxyConfig{
+		Enabled: true, Type: network.GlobalProxyTypeHTTP, URL: injectedURL.String(), EnableForAPI: true,
+	}, nil)
+	customURL, _ := url.Parse("http://127.0.0.1:3129")
+	custom := http.DefaultTransport.(*http.Transport).Clone()
+	custom.Proxy = http.ProxyURL(customURL)
+	m := &Manager{
+		httpClient:        &http.Client{Transport: custom},
+		httpClientFactory: injected,
+	}
+	transport := m.configureOutboundTransport(custom.Clone(), outboundPolicy{
+		dial: network.NewDialPolicy((&net.Dialer{}).DialContext, func(context.Context, string) ([]net.IP, error) {
+			return []net.IP{net.ParseIP("203.0.113.10")}, nil
+		}),
+	})
+	routed, ok := transport.(*outboundHTTPTransport)
+	require.True(t, ok)
+	req, err := http.NewRequest(http.MethodGet, "https://upstream.example/card", nil)
+	require.NoError(t, err)
+	proxy, err := routed.proxy(req)
+	require.NoError(t, err)
+	require.NotNil(t, proxy)
+	require.Equal(t, "127.0.0.1:3128", proxy.Host)
+}

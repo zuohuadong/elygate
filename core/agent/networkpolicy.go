@@ -100,8 +100,10 @@ func (m *Manager) policyCurrent(policy outboundPolicy) bool {
 // connections. Proxy tunnels use a checked IP, preserving TLS SNI and HTTP Host.
 func (m *Manager) configureOutboundTransport(tr *http.Transport, policy outboundPolicy) http.RoundTripper {
 	proxy := tr.Proxy
-	if m.httpClient.Transport == nil {
+	if m.httpClientFactory != nil {
 		proxy = m.proxyFunc
+	} else if m.httpClient.Transport == nil {
+		proxy = network.DefaultProxyFunc(network.ClientPurposeAPI)
 	}
 	tr.Proxy = nil
 	tr.DialTLSContext = nil
