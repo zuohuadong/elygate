@@ -290,7 +290,11 @@ func (t *outboundHTTPTransport) RoundTrip(req *http.Request) (*http.Response, er
 		}
 		tr := t.direct.Clone()
 		if t.proxyRoots != nil {
-			if roots := t.proxyRoots(tr.TLSClientConfig.RootCAs); roots != nil {
+			var base *x509.CertPool
+			if tr.TLSClientConfig != nil {
+				base = tr.TLSClientConfig.RootCAs
+			}
+			if roots := t.proxyRoots(base); roots != nil {
 				if tr.TLSClientConfig == nil {
 					tr.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
 				} else {

@@ -147,7 +147,11 @@ fi
 # Create and push tag
 echo "🏷️ Creating tag: $TAG_NAME"
 
-if git rev-parse "$TAG_NAME" >/dev/null 2>&1; then
+if git rev-parse --verify "refs/tags/$TAG_NAME" >/dev/null 2>&1; then
+  if [ "$(git rev-list -n 1 "$TAG_NAME")" != "$(git rev-parse HEAD)" ]; then
+    echo "❌ Tag $TAG_NAME already exists at a different commit"
+    exit 1
+  fi
   echo "ℹ️ Tag already exists: $TAG_NAME (skipping creation)"
 else
   git tag "$TAG_NAME" -m "Release plugin $PLUGIN_NAME v$PLUGIN_VERSION" -m "$CHANGELOG_BODY"

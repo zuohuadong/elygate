@@ -90,6 +90,10 @@ bash "$SCRIPT_DIR/upload-cli-to-r2.sh" "$TAG_NAME"
 
 # Create and push tag
 if git rev-parse -q --verify "refs/tags/$TAG_NAME" >/dev/null; then
+  if [ "$(git rev-list -n 1 "$TAG_NAME")" != "$(git rev-parse HEAD)" ]; then
+    echo "❌ Tag $TAG_NAME already exists at a different commit"
+    exit 1
+  fi
   echo "ℹ️ Tag $TAG_NAME already exists. Reusing it."
 else
   echo "🏷️ Creating tag: $TAG_NAME"

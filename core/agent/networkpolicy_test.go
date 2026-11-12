@@ -531,3 +531,27 @@ func TestAgentProxySelectionOverridesCustomTransport(t *testing.T) {
 	require.NotNil(t, proxy)
 	require.Equal(t, "127.0.0.1:3128", proxy.Host)
 }
+
+// TestAgentProxyRootsHandleMissingTLSConfig pins that enabling a proxy CA on a
+// custom transport without TLSClientConfig does not dereference a nil config.
+func TestAgentProxyRootsHandleMissingTLSConfig(t *testing.T) {
+	target := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer target.Close()
+	caPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: target.Certificate().Raw})
+	factory := network.NewHTTPClientFactory(&network.GlobalProxyConfig{
+		Enabled: true, Type: network.GlobalProxyTypeHTTP, URL: "http://127.0.0.1:1", EnableForAPI: true, CACertPEM: string(caPEM),
+	}, nil)
+	custom := http.DefaultTransport.(*http.Transport).Clone()
+	custom.Proxy = nil
+	custom.TLSClientConfig = nil
+	m := &Manager{httpClient: &http.Client{Transport: custom}, httpClientFactory: factory}
+	transport := m.configureOutboundTransport(custom.Clone(), outboundPolicy{
+		dial: network.NewDialPolicy((&net.Dialer{}).DialContext, func(context.Context, string) ([]net.IP, error) {
+			return []net.IP{net.ParseIP("203.0.113.10")}, nil
+		}),
+	})
+	req, err := http.NewRequest(http.MethodGet, "https://upstream.example/card", nil)
+	require.NoError(t, err)
+	_, err = transport.RoundTrip(req)
+	require.Error(t, err)
+}

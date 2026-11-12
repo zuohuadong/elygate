@@ -43,7 +43,7 @@ jobs:
         env:
           VERSION: ${{ steps.get-version.outputs.version }}
         run: |
-          if git rev-parse "bifrost-migration-cli/v${VERSION}" >/dev/null 2>&1; then
+          if git rev-parse "refs/tags/bifrost-migration-cli/v${VERSION}" >/dev/null 2>&1; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"

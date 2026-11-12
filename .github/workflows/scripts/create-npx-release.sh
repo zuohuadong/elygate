@@ -75,7 +75,11 @@ fi
 
 # Check if tag already exists
 echo "🔍 Checking if tag $FULL_TAG exists..."
-if git rev-parse "$FULL_TAG" >/dev/null 2>&1; then
+if git rev-parse --verify "refs/tags/$FULL_TAG" >/dev/null 2>&1; then
+  if [ "$(git rev-list -n 1 "$FULL_TAG")" != "$(git rev-parse HEAD)" ]; then
+    echo "❌ Tag $FULL_TAG already exists at a different commit"
+    exit 1
+  fi
   echo "✅ Tag $FULL_TAG already exists."
 else
   echo "🏷️ Creating tag $FULL_TAG..."
