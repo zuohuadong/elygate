@@ -310,6 +310,7 @@ bifrost:
   #   noProxy: "localhost,.internal.example.com"
   #   timeout: 30                        # seconds
   #   skipTlsVerify: false
+  #   caCertPem: "env.PROXY_CA_CERT"        # optional; PEM CA trusted for the HTTPS proxy hop / TLS inspection
   #   enableForScim: true                # Enterprise: SCIM directory sync and identity-provider requests
   #   enableForInference: false
   #   enableForApi: false

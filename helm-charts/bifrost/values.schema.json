@@ -452,6 +452,10 @@
               "default": false,
               "description": "Skip TLS certificate verification for the proxy"
             },
+            "caCertPem": {
+              "type": "string",
+              "description": "PEM CA certificate(s) trusted for the HTTPS proxy hop and for TLS through a TLS-inspecting proxy (supports env.VAR_NAME)"
+            },
             "enableForScim": {
               "type": "boolean",
               "default": false,

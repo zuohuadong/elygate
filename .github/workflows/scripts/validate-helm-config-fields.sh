@@ -238,6 +238,46 @@ render_config "$TMPDIR/values-server.yaml"
 assert_field_value 'server.read_buffer_size' '.server.read_buffer_size' '131072'
 
 ###############################################################################
+# 1c. Global proxy config
+###############################################################################
+echo ""
+echo -e "${CYAN}🔀 1c - Global Proxy Config${NC}"
+echo "----------------------------"
+
+cat > "$TMPDIR/values-proxy.yaml" << 'VALS'
+image:
+  tag: v1.0.0
+bifrost:
+  proxyConfig:
+    enabled: true
+    type: socks5
+    url: "socks5://proxy.example.com:1080"
+    username: "env.PROXY_USERNAME"
+    password: "env.PROXY_PASSWORD"
+    noProxy: "localhost,.internal.example.com"
+    timeout: 30
+    skipTlsVerify: false
+    caCertPem: "PEM_DATA"
+    enableForScim: true
+    enableForInference: true
+    enableForApi: true
+VALS
+
+render_config "$TMPDIR/values-proxy.yaml"
+assert_field_value 'proxy_config.enabled' '.proxy_config.enabled' 'true'
+assert_field_value 'proxy_config.type' '.proxy_config.type' '"socks5"'
+assert_field_value 'proxy_config.url' '.proxy_config.url' '"socks5://proxy.example.com:1080"'
+assert_field_value 'proxy_config.username' '.proxy_config.username' '"env.PROXY_USERNAME"'
+assert_field_value 'proxy_config.password' '.proxy_config.password' '"env.PROXY_PASSWORD"'
+assert_field_value 'proxy_config.no_proxy' '.proxy_config.no_proxy' '"localhost,.internal.example.com"'
+assert_field_value 'proxy_config.timeout' '.proxy_config.timeout' '30'
+assert_field_value 'proxy_config.skip_tls_verify' '.proxy_config.skip_tls_verify' 'false'
+assert_field_value 'proxy_config.ca_cert_pem' '.proxy_config.ca_cert_pem' '"PEM_DATA"'
+assert_field_value 'proxy_config.enable_for_scim' '.proxy_config.enable_for_scim' 'true'
+assert_field_value 'proxy_config.enable_for_inference' '.proxy_config.enable_for_inference' 'true'
+assert_field_value 'proxy_config.enable_for_api' '.proxy_config.enable_for_api' 'true'
+
+###############################################################################
 # 2. Framework (Pricing)
 ###############################################################################
 echo ""
