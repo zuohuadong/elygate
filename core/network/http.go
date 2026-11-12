@@ -699,8 +699,10 @@ func (f *HTTPClientFactory) createFasthttpClient(purpose ClientPurpose) *fasthtt
 
 	// TLS to targets: always verified, against the system roots plus the proxy's CA
 	// (a TLS-inspecting proxy re-signs targets with it). skip_tls_verify covers only
-	// the https:// proxy's own certificate (see configureFasthttpProxy).
-	if f.proxyConfig != nil {
+	// the https:// proxy's own certificate (see configureFasthttpProxy). The proxy CA
+	// is only added while the proxy is actually active for this purpose; a disabled
+	// proxy or a purpose that bypasses it must keep the system roots alone.
+	if f.proxyURLForPurpose(purpose) != nil {
 		client.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: f.proxyRoots}
 	}
 
@@ -858,13 +860,15 @@ func (f *HTTPClientFactory) createHTTPClient(key httpClientKey) *http.Client {
 		TLSNextProto: make(map[string]func(authority string, c *tls.Conn) http.RoundTripper),
 	}
 
+	proxyURL := f.proxyURLForPurpose(key.purpose)
 	// TLS to targets: the caller's settings (HTTPClientWithTLS), always verified,
 	// with the proxy's CA added to the roots (a TLS-inspecting proxy re-signs targets
-	// with it). skip_tls_verify covers only the https:// proxy's own certificate.
+	// with it) only while the proxy is active for this purpose. skip_tls_verify covers
+	// only the https:// proxy's own certificate.
 	if key.tls != nil {
 		transport.TLSClientConfig = key.tls.Clone()
 	}
-	if f.proxyConfig != nil {
+	if proxyURL != nil {
 		if transport.TLSClientConfig == nil {
 			transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
 		}
@@ -873,7 +877,6 @@ func (f *HTTPClientFactory) createHTTPClient(key httpClientKey) *http.Client {
 		}
 	}
 
-	proxyURL := f.proxyURLForPurpose(key.purpose)
 	// net/http uses TLSClientConfig for the hop to an https:// proxy as well as for the
 	// target, so an https:// proxy is dialed here instead (DialViaProxyTLS with the hop's
 	// own TLS config) and the transport sees a ready tunnel.

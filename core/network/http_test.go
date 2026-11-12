@@ -1635,7 +1635,8 @@ func tlsTarget(t *testing.T) (addr, caPEM string) {
 	}
 	leafDER, err := x509.CreateCertificate(rand.Reader, &x509.Certificate{
 		SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: "upstream.test"}, DNSNames: []string{"upstream.test"},
-		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+		IPAddresses: []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("::1")},
+		NotBefore:   time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
 		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}, KeyUsage: x509.KeyUsageDigitalSignature,
 	}, caCert, &leafKey.PublicKey, caKey)
 	if err != nil {
@@ -1779,5 +1780,58 @@ func TestGlobalProxyCAFollowsUpdates(t *testing.T) {
 	factory.UpdateProxyConfig(&updated)
 	if fastErr, httpErr := send(); fastErr != nil || httpErr != nil {
 		t.Fatalf("after adding the CA both requests must pass, got fasthttp=%v net/http=%v", fastErr, httpErr)
+	}
+}
+
+// TestGlobalProxyCADoesNotLeakIntoDirectTargets: ca_cert_pem is a trust anchor for
+// the proxy/TLS-inspection path, not a global target root. If the proxy is disabled,
+// or enabled for another purpose only, a direct connection must reject a target
+// signed by that CA.
+func TestGlobalProxyCADoesNotLeakIntoDirectTargets(t *testing.T) {
+	targetAddr, targetCA := tlsTarget(t)
+	_, targetPort, _ := net.SplitHostPort(targetAddr)
+	targetURL := "https://127.0.0.1:" + targetPort + "/"
+
+	for _, tc := range []struct {
+		name string
+		cfg  *GlobalProxyConfig
+	}{
+		{
+			name: "proxy disabled but CA retained",
+			cfg: func() *GlobalProxyConfig {
+				cfg := enabledFor(ClientPurposeAPI, GlobalProxyTypeHTTP, "http://127.0.0.1:3128")
+				cfg.Enabled = false
+				cfg.CACertPEM = targetCA
+				return cfg
+			}(),
+		},
+		{
+			name: "proxy enabled for another purpose only",
+			cfg: func() *GlobalProxyConfig {
+				cfg := enabledFor(ClientPurposeSCIM, GlobalProxyTypeHTTP, "http://127.0.0.1:3128")
+				cfg.CACertPEM = targetCA
+				return cfg
+			}(),
+		},
+	} {
+		factory := NewHTTPClientFactory(tc.cfg, noopTestLogger{})
+		t.Run("fasthttp/"+tc.name, func(t *testing.T) {
+			req := fasthttp.AcquireRequest()
+			resp := fasthttp.AcquireResponse()
+			defer fasthttp.ReleaseRequest(req)
+			defer fasthttp.ReleaseResponse(resp)
+			req.SetRequestURI(targetURL)
+			assertTLSOutcome(t, factory.GetFasthttpClient(ClientPurposeAPI).DoTimeout(req, resp, 5*time.Second), "certificate")
+		})
+		t.Run("net/http/"+tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			r, _ := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
+			resp, err := factory.GetHTTPClient(ClientPurposeAPI).Do(r)
+			if err == nil {
+				resp.Body.Close()
+			}
+			assertTLSOutcome(t, err, "certificate")
+		})
 	}
 }
