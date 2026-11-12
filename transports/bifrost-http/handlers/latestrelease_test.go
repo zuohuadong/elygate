@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/maximhq/bifrost/core/network"
 	"github.com/stretchr/testify/require"
 	"github.com/valyala/fasthttp"
 )
@@ -42,4 +43,36 @@ func TestGetLatestReleaseRejectsUpstreamFailure(t *testing.T) {
 	ctx := &fasthttp.RequestCtx{}
 	(&ConfigHandler{}).getLatestRelease(ctx)
 	require.Equal(t, fasthttp.StatusBadGateway, ctx.Response.StatusCode())
+}
+
+// TestGetLatestReleaseUsesTheConfiguredGlobalProxy: the release feed is an
+// outbound API call, so a deployment that can only reach the internet through
+// enable_for_api must route it through that proxy too.
+func TestGetLatestReleaseUsesTheConfiguredGlobalProxy(t *testing.T) {
+	proxied := make(chan struct{}, 1)
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "release.invalid", r.URL.Host)
+		proxied <- struct{}{}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"name":"v9.9.9"}`))
+	}))
+	t.Cleanup(proxy.Close)
+	network.SetDefaultHTTPClientFactory(network.NewHTTPClientFactory(&network.GlobalProxyConfig{
+		Enabled: true, Type: network.GlobalProxyTypeHTTP, URL: proxy.URL, EnableForAPI: true,
+	}, nil))
+	t.Cleanup(func() { network.SetDefaultHTTPClientFactory(nil) })
+	previous := latestReleaseEndpoint
+	latestReleaseEndpoint = "http://release.invalid/latest-release"
+	t.Cleanup(func() { latestReleaseEndpoint = previous })
+
+	ctx := &fasthttp.RequestCtx{}
+	(&ConfigHandler{}).getLatestRelease(ctx)
+
+	select {
+	case <-proxied:
+	default:
+		t.Fatal("release request did not go through the configured global proxy")
+	}
+	require.Equal(t, fasthttp.StatusOK, ctx.Response.StatusCode())
+	require.JSONEq(t, `{"name":"v9.9.9"}`, string(ctx.Response.Body()))
 }

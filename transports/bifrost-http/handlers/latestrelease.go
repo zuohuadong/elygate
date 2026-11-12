@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/maximhq/bifrost/core/network"
 	"github.com/valyala/fasthttp"
 )
 
@@ -38,7 +39,7 @@ func (h *ConfigHandler) getLatestRelease(ctx *fasthttp.RequestCtx) {
 		return
 	}
 	req.Header.Set("Accept", "application/json")
-	resp, err := (&http.Client{Timeout: latestReleaseTimeout}).Do(req)
+	resp, err := (&http.Client{Timeout: latestReleaseTimeout, Transport: network.DefaultTransport(network.ClientPurposeAPI)}).Do(req)
 	if err != nil {
 		SendError(ctx, fasthttp.StatusBadGateway, "failed to fetch the latest release")
 		return
