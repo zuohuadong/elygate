@@ -311,3 +311,36 @@ func TestLoadProxyConfig_RejectsInvalidCACertPEM(t *testing.T) {
 	require.NotNil(t, inMemory)
 	assert.Equal(t, "http://dashboard.corp:3128", inMemory.URL)
 }
+
+// TestLoadProxyConfig_ReachesTheOutboundFactory: config.json is reconciled before
+// HTTPClientFactory is built, so API/SCIM/MCP traffic uses the declared proxy and
+// its CA from the first request, not only after a dashboard save.
+func TestLoadProxyConfig_ReachesTheOutboundFactory(t *testing.T) {
+	initTestLogger()
+	server := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer server.Close()
+	caPEM := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw}))
+
+	tempDir := createTempDir(t)
+	configData := makeConfigDataWithProvidersAndDir(nil, tempDir)
+	declared := proxyFileConfig("socks5://proxy.corp:1080")
+	declared.Type = network.GlobalProxyTypeSOCKS5
+	declared.CACertPEM = schemas.NewSecretVar(caPEM)
+	declared.EnableForAPI = true
+	declared.EnableForInference = true
+	configData.ProxyConfig = declared
+	createConfigFile(t, tempDir, configData)
+
+	config, err := LoadConfig(context.Background(), tempDir)
+	require.NoError(t, err)
+	defer config.Close(context.Background())
+	require.NotNil(t, config.HTTPClientFactory)
+	stored := config.HTTPClientFactory.GetProxyConfig()
+	require.NotNil(t, stored)
+	assert.True(t, stored.Enabled)
+	assert.Equal(t, network.GlobalProxyTypeSOCKS5, stored.Type)
+	assert.Equal(t, "socks5://proxy.corp:1080", stored.URL)
+	assert.Equal(t, caPEM, stored.CACertPEM)
+	assert.True(t, stored.EnableForAPI)
+	assert.True(t, stored.EnableForInference)
+}

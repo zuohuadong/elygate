@@ -1247,6 +1247,9 @@ func LoadConfig(ctx context.Context, configDirPath string, options ...ConfigLoad
 	// 4a. Global proxy (store only). Loaded before providers so the first
 	// GetConfigForProvider already sees it for providers that inherit it.
 	loadGlobalProxyConfig(ctx, config)
+	// 4b. config.json proxy declaration, reconciled before the outbound factory is
+	// built so API/SCIM/MCP traffic uses the declared proxy on the first request.
+	loadProxyConfig(ctx, config, &configData)
 	// Outbound clients for non-inference traffic (webhooks, skills, plugin downloads,
 	// MCP, OAuth, catalog sync, telemetry), built now so everything constructed below
 	// can take it. Registered as the process default for call sites without a handle.
@@ -1274,9 +1277,7 @@ func LoadConfig(ctx context.Context, configDirPath string, options ...ConfigLoad
 	if err := loadAuthConfig(ctx, config, &configData); err != nil {
 		return nil, err
 	}
-	// 9a. Global proxy config (read by the enterprise build when it builds its outbound clients)
-	loadProxyConfig(ctx, config, &configData)
-	// 9b. Warp config from the file, applied later by the server through the Warp service
+	// 9a. Warp config from the file, applied later by the server through the Warp service
 	config.warpFileConfig = configData.Warp
 	config.warpFileIsSourceOfTruth = configData.isConfigJSONSourceOfTruth()
 	// Recheck after file reconciliation so scope deletions or concurrent
