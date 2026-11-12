@@ -1306,7 +1306,7 @@ func (m *Manager) buildGeneration(ctx context.Context, config runtimeConfig) (*c
 					if !m.policyCurrent(policy) {
 						return nil, gatewayPolicyError("Agent Gateway network permissions changed")
 					}
-					proxy, err := network.DefaultProxyFunc(network.ClientPurposeAPI)(&http.Request{URL: &url.URL{Scheme: "https", Host: addr}})
+					proxy, err := m.proxyFunc(&http.Request{URL: &url.URL{Scheme: "https", Host: addr}})
 					if err != nil {
 						return nil, err
 					}

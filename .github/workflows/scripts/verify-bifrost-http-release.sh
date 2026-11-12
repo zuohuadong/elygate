@@ -14,32 +14,39 @@ if [ -z "$VERSION" ]; then
     exit 1
 fi
 
+TAG_NAME="transports/v${VERSION}"
 echo "🔍 Verifying bifrost-http release v${VERSION}..."
 
 # Check if the git tag exists
-if ! git rev-parse "transports/v${VERSION}" >/dev/null 2>&1; then
-    echo "⚠️  Git tag transports/v${VERSION} not found"
+if ! git rev-parse "${TAG_NAME}" >/dev/null 2>&1; then
+    echo "⚠️  Git tag ${TAG_NAME} not found"
     echo "   Bifrost-http release did not complete successfully"
     echo "   Skipping Docker image build..."
     exit 78  # Exit code 78 will be used to skip the job
 fi
 
-echo "✅ Git tag found: transports/v${VERSION}"
+echo "✅ Git tag found: ${TAG_NAME}"
 
 # Check if the GitHub release exists
-if [ -n "$GH_TOKEN" ]; then
-    echo "🔍 Checking GitHub release..."
-    if gh release view "transports/v${VERSION}" >/dev/null 2>&1; then
-        echo "✅ GitHub release found for transports/v${VERSION}"
-    else
-        echo "⚠️  GitHub release for transports/v${VERSION} not found"
-        echo "   Bifrost-http release did not complete successfully"
-        echo "   Skipping Docker image build..."
-        exit 78  # Exit code 78 will be used to skip the job
-    fi
-else
+if [ -z "$GH_TOKEN" ]; then
     echo "❌ Error: GH_TOKEN not set; cannot verify the GitHub release"
     echo "   Refusing to build images without a verified release"
+    exit 78
+fi
+echo "🔍 Checking GitHub release..."
+REPO_SLUG="${GITHUB_REPOSITORY:-$(gh repo view --json nameWithOwner -q .nameWithOwner)}"
+if ! gh api "repos/${REPO_SLUG}" >/dev/null 2>&1; then
+    echo "❌ Error: repository ${REPO_SLUG} is not accessible with GH_TOKEN"
+    exit 78
+fi
+# The tag is one API path segment; an unencoded slash returns 404 even when the
+# release exists.
+RELEASE_TAG_PATH=${TAG_NAME//\//%2F}
+if gh api "repos/${REPO_SLUG}/releases/tags/${RELEASE_TAG_PATH}" >/dev/null 2>&1; then
+    echo "✅ GitHub release found for ${TAG_NAME}"
+else
+    echo "⚠️  GitHub release for ${TAG_NAME} not found or not readable"
+    echo "   Bifrost-http release did not complete successfully"
     exit 78
 fi
 

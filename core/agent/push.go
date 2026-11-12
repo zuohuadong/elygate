@@ -950,7 +950,7 @@ func newPushDeliveryClient(factory *network.HTTPClientFactory, allowPrivate bool
 		client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 		return client
 	}
-	client := network.NewSSRFSafeHTTPClient(pushSendTimeout)
+	client := network.NewStrictSSRFSafeHTTPClient(pushSendTimeout)
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	return client
 }

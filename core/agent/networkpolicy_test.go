@@ -481,3 +481,23 @@ func TestAgentProxyRootsKeyFollowsCAUpdates(t *testing.T) {
 	factory.UpdateProxyConfig(&updated)
 	require.NotEqual(t, first, m.proxyTargetRootsKey())
 }
+
+// TestAgentProxySelectionUsesInjectedFactory pins that Agent Gateway HTTP/JSON
+// and gRPC select the proxy from the injected factory, not the process default.
+func TestAgentProxySelectionUsesInjectedFactory(t *testing.T) {
+	injected := network.NewHTTPClientFactory(&network.GlobalProxyConfig{
+		Enabled: true, Type: network.GlobalProxyTypeHTTP, URL: "http://127.0.0.1:3128", EnableForAPI: true,
+	}, nil)
+	previous := network.DefaultHTTPClientFactory()
+	network.SetDefaultHTTPClientFactory(network.NewHTTPClientFactory(&network.GlobalProxyConfig{
+		Enabled: true, Type: network.GlobalProxyTypeHTTP, URL: "http://127.0.0.1:3129", EnableForAPI: true,
+	}, nil))
+	t.Cleanup(func() { network.SetDefaultHTTPClientFactory(previous) })
+	m := &Manager{httpClientFactory: injected}
+	req, err := http.NewRequest(http.MethodGet, "https://upstream.example/card", nil)
+	require.NoError(t, err)
+	proxy, err := m.proxyFunc(req)
+	require.NoError(t, err)
+	require.NotNil(t, proxy)
+	require.Equal(t, "127.0.0.1:3128", proxy.Host)
+}

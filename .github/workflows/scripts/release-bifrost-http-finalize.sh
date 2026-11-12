@@ -94,6 +94,18 @@ if ! gh auth status >/dev/null 2>&1; then
   exit 1
 fi
 REPO_SLUG="${GITHUB_REPOSITORY:-$(gh repo view --json nameWithOwner -q .nameWithOwner)}"
+if ! ORIGIN_SLUG=$(gh repo view --json nameWithOwner -q .nameWithOwner); then
+  echo "Error: cannot resolve the origin repository."
+  exit 1
+fi
+if [ "$REPO_SLUG" != "$ORIGIN_SLUG" ]; then
+  echo "Error: target repository $REPO_SLUG does not match origin $ORIGIN_SLUG."
+  exit 1
+fi
+if ! gh api "repos/${REPO_SLUG}" >/dev/null 2>&1; then
+  echo "Error: repository $REPO_SLUG is not accessible with the current token."
+  exit 1
+fi
 RELEASE_ERR=$(mktemp)
 trap 'rm -f "$RELEASE_ERR"' EXIT
 # The tag is a single path segment. GitHub's API returns 404 for a slash left

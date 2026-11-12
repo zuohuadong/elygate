@@ -101,7 +101,7 @@ func (m *Manager) policyCurrent(policy outboundPolicy) bool {
 func (m *Manager) configureOutboundTransport(tr *http.Transport, policy outboundPolicy) http.RoundTripper {
 	proxy := tr.Proxy
 	if m.httpClient.Transport == nil {
-		proxy = network.DefaultProxyFunc(network.ClientPurposeAPI)
+		proxy = m.proxyFunc
 	}
 	tr.Proxy = nil
 	tr.DialTLSContext = nil
@@ -110,6 +110,23 @@ func (m *Manager) configureOutboundTransport(tr *http.Transport, policy outbound
 		return policy.dial.DialContext(ctx, netw, addr, nil)
 	}
 	return &outboundHTTPTransport{direct: tr, proxy: proxy, proxyRoots: m.proxyTargetRoots, proxyRootsKey: m.proxyTargetRootsKey, policy: policy}
+}
+
+// proxyFunc selects the global API proxy from the same factory that supplies the
+// proxy CA. Without an injected factory it falls back to the process default so
+// environment-proxy behavior is preserved.
+func (m *Manager) proxyFunc(req *http.Request) (*url.URL, error) {
+	if m.httpClientFactory == nil {
+		return network.DefaultProxyFunc(network.ClientPurposeAPI)(req)
+	}
+	host := req.URL.Hostname()
+	if host == "" {
+		host = req.URL.Host
+	}
+	if !m.httpClientFactory.ProxyAppliesToTarget(network.ClientPurposeAPI, host) {
+		return nil, nil
+	}
+	return m.httpClientFactory.ProxyURLForPurpose(network.ClientPurposeAPI), nil
 }
 
 // proxyTargetRoots merges the global proxy CA into base when the API proxy is active.
