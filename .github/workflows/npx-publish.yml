@@ -113,14 +113,20 @@ jobs:
           FULL_TAG: ${{ steps.extract-version.outputs.full-tag }}
         run: |
           source ./.github/workflows/scripts/release-state.sh
+          TAG_AT_HEAD="false"
           if git rev-parse --verify "refs/tags/${FULL_TAG}" >/dev/null 2>&1; then
             if [ "$(git rev-list -n 1 "$FULL_TAG")" != "$(git rev-parse HEAD)" ]; then
               echo "Tag $FULL_TAG already exists at a different commit" >&2
               exit 1
             fi
+            TAG_AT_HEAD="true"
           fi
           if release_check "$FULL_TAG"; then
-            exit 0
+            if [ "$TAG_AT_HEAD" = "true" ]; then
+              exit 0
+            fi
+            echo "Release $FULL_TAG exists but its tag is missing" >&2
+            exit 1
           else
             status=$?
             if [ "$status" -ne 1 ]; then
@@ -244,14 +250,20 @@ jobs:
           FULL_TAG: ${{ steps.extract-version.outputs.full-tag }}
         run: |
           source ./.github/workflows/scripts/release-state.sh
+          TAG_AT_HEAD="false"
           if git rev-parse --verify "refs/tags/${FULL_TAG}" >/dev/null 2>&1; then
             if [ "$(git rev-list -n 1 "$FULL_TAG")" != "$(git rev-parse HEAD)" ]; then
               echo "Tag $FULL_TAG already exists at a different commit" >&2
               exit 1
             fi
+            TAG_AT_HEAD="true"
           fi
           if release_check "$FULL_TAG"; then
-            exit 0
+            if [ "$TAG_AT_HEAD" = "true" ]; then
+              exit 0
+            fi
+            echo "Release $FULL_TAG exists but its tag is missing" >&2
+            exit 1
           else
             status=$?
             if [ "$status" -ne 1 ]; then
