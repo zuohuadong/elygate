@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -107,19 +109,48 @@ func (m *Manager) configureOutboundTransport(tr *http.Transport, policy outbound
 	tr.DialContext = func(ctx context.Context, netw, addr string) (net.Conn, error) {
 		return policy.dial.DialContext(ctx, netw, addr, nil)
 	}
-	return &outboundHTTPTransport{direct: tr, proxy: proxy, policy: policy}
+	return &outboundHTTPTransport{direct: tr, proxy: proxy, proxyRoots: m.proxyTargetRoots, policy: policy}
+}
+
+// proxyTargetRoots merges the global proxy CA into base when the API proxy is active.
+func (m *Manager) proxyTargetRoots(base *x509.CertPool) *x509.CertPool {
+	if m.httpClientFactory == nil {
+		return nil
+	}
+	return m.httpClientFactory.ProxyTargetRoots(network.ClientPurposeAPI, base)
+}
+
+// grpcProxyRoots returns the target-root merger for a gRPC interface only when that
+// interface is reached through the global API proxy. Direct gRPC targets keep the
+// upstream's own roots and never trust the proxy's TLS-inspection CA.
+func (m *Manager) grpcProxyRoots(raw string) func(*x509.CertPool) *x509.CertPool {
+	if m.httpClientFactory == nil {
+		return nil
+	}
+	host := raw
+	if _, after, found := strings.Cut(raw, "://"); found {
+		host = after
+	}
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	if !m.httpClientFactory.ProxyAppliesToTarget(network.ClientPurposeAPI, host) {
+		return nil
+	}
+	return m.proxyTargetRoots
 }
 
 // outboundHTTPTransport keeps direct and proxied pools separate. It retains at
 // most one proxy pool, replacing it when operator proxy configuration changes.
 type outboundHTTPTransport struct {
-	direct    *http.Transport
-	proxy     func(*http.Request) (*url.URL, error)
-	policy    outboundPolicy
-	mu        sync.Mutex
-	proxyURL  string
-	proxied   *http.Transport
-	proxyPool *retiringHTTPTransport
+	direct     *http.Transport
+	proxy      func(*http.Request) (*url.URL, error)
+	proxyRoots func(*x509.CertPool) *x509.CertPool
+	policy     outboundPolicy
+	mu         sync.Mutex
+	proxyURL   string
+	proxied    *http.Transport
+	proxyPool  *retiringHTTPTransport
 }
 
 // retiringHTTPTransport drains a pool after it is replaced. Transport
@@ -225,6 +256,16 @@ func (t *outboundHTTPTransport) RoundTrip(req *http.Request) (*http.Response, er
 			t.proxyPool.retire()
 		}
 		tr := t.direct.Clone()
+		if t.proxyRoots != nil {
+			if roots := t.proxyRoots(tr.TLSClientConfig.RootCAs); roots != nil {
+				if tr.TLSClientConfig == nil {
+					tr.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+				} else {
+					tr.TLSClientConfig = tr.TLSClientConfig.Clone()
+				}
+				tr.TLSClientConfig.RootCAs = roots
+			}
+		}
 		// The wrapper selected the proxy for this request. Do not let a cloned
 		// transport select HTTP_PROXY/HTTPS_PROXY a second time and bypass the
 		// destination policy.

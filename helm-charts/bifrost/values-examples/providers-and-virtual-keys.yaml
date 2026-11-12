@@ -399,13 +399,13 @@ bifrost:
           value: ""
           weight: 1
           models: ["*"]
+          aliases:
+            # Logical model -> Bedrock inference profile
+            anthropic.claude-3-5-sonnet: "us.anthropic.claude-3-5-sonnet-20240620-v1:0"
           bedrock_key_config:
             region: "us-east-1"
             access_key: "env.AWS_ACCESS_KEY_ID"
             secret_key: "env.AWS_SECRET_ACCESS_KEY"
-            deployments:
-              # Logical model -> Bedrock inference profile
-              anthropic.claude-3-5-sonnet: "us.anthropic.claude-3-5-sonnet-20240620-v1:0"
             batch_s3_config:
               buckets:
                 - bucket_name: "my-bedrock-batch-bucket"

@@ -2840,6 +2840,7 @@ func (s *BifrostHTTPServer) InitializeAgentGateway(ctx context.Context, registra
 		ExternalURLProvider:      s.Config.GetA2AExternalClientURL,
 		RawCaptureProvider:       s.Config.GetA2AStoreRawRequestResponse,
 		PrivateAllowlistProvider: s.Config.GetA2APrivateAllowlist,
+		HTTPClientFactory:        s.HTTPClientFactory,
 	}
 	if s.Config.ServerConfig != nil {
 		managerConfig.GRPCBaseDomain = s.Config.ServerConfig.A2AGRPCBaseDomain

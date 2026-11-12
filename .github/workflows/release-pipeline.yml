@@ -3691,7 +3691,6 @@ jobs:
 
       - name: Verify bifrost-http release
         id: verify
-        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: |
@@ -3825,7 +3824,6 @@ jobs:
 
       - name: Verify bifrost-http release
         id: verify
-        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: |
@@ -3997,7 +3995,6 @@ jobs:
 
       - name: Verify bifrost-http release
         id: verify
-        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: |
@@ -4135,7 +4132,6 @@ jobs:
 
       - name: Verify bifrost-http release
         id: verify
-        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: |

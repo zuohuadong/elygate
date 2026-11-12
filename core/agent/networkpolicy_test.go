@@ -432,3 +432,29 @@ func TestA2AOperationErrorAttribution(t *testing.T) {
 	require.False(t, wrapped.IsBifrostError)
 	require.ErrorIs(t, wrapped.Error.Error, upstream)
 }
+
+// TestAgentProxyCARootsScope verifies the Agent Gateway trusts the global proxy CA
+// only for targets that actually take the API proxy. Direct and no_proxy/local
+// targets keep their own roots, including gRPC interfaces.
+func TestAgentProxyCARootsScope(t *testing.T) {
+	target := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer target.Close()
+	caPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: target.Certificate().Raw})
+	cfg := &network.GlobalProxyConfig{
+		Enabled:      true,
+		Type:         network.GlobalProxyTypeHTTP,
+		URL:          "http://127.0.0.1:3128",
+		EnableForAPI: true,
+		CACertPEM:    string(caPEM),
+	}
+	m := &Manager{httpClientFactory: network.NewHTTPClientFactory(cfg, nil)}
+	require.NotNil(t, m.proxyTargetRoots(nil), "proxied targets must trust the proxy CA")
+	require.NotNil(t, m.grpcProxyRoots("https://public.example:443"), "proxied gRPC targets must trust the proxy CA")
+	require.Nil(t, m.grpcProxyRoots("https://localhost:443"), "local gRPC targets must not trust the proxy CA")
+
+	off := *cfg
+	off.EnableForAPI = false
+	m = &Manager{httpClientFactory: network.NewHTTPClientFactory(&off, nil)}
+	require.Nil(t, m.proxyTargetRoots(nil))
+	require.Nil(t, m.grpcProxyRoots("https://public.example:443"))
+}

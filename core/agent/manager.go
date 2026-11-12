@@ -373,6 +373,7 @@ type Manager struct {
 	store              Store
 	logger             schemas.Logger
 	httpClient         *http.Client
+	httpClientFactory  *network.HTTPClientFactory
 	pushDeliveryClient *http.Client
 	pushRelayID        string
 	externalURL        string
@@ -522,6 +523,9 @@ type ManagerConfig struct {
 	GRPCBaseDomain            string
 	GRPCPort                  int
 	AllowPrivatePushCallbacks bool // test environments only; see newPushDeliveryClient
+	// HTTPClientFactory provides the global proxy and its CA for upstream and push
+	// traffic. When nil, those paths use DefaultProxyFunc and the environment roots.
+	HTTPClientFactory *network.HTTPClientFactory
 	// ExternalURLProvider, when set, is consulted on every use of the public
 	// base URL so admin configuration changes apply without a process restart,
 	// matching how MCP reads the same setting per request. The constructor's
@@ -571,7 +575,8 @@ func NewManager(ctx context.Context, store Store, logger schemas.Logger, externa
 		rawCaptureFn:       config.RawCaptureProvider,
 		privateAllowlistFn: config.PrivateAllowlistProvider,
 		httpClient:         client,
-		pushDeliveryClient: newPushDeliveryClient(config.AllowPrivatePushCallbacks),
+		httpClientFactory:  config.HTTPClientFactory,
+		pushDeliveryClient: newPushDeliveryClient(config.HTTPClientFactory, config.AllowPrivatePushCallbacks),
 		pushRelayID:        uuid.NewString(),
 		oauthTokens:        make(map[string]oauthToken),
 		oauthFingerprints:  make(map[string][sha256.Size]byte),
@@ -1274,7 +1279,7 @@ func (m *Manager) buildGeneration(ctx context.Context, config runtimeConfig) (*c
 			// call (see upstreamContext), which the SDK gRPC transport sends as
 			// request metadata, so gRPC needs no equivalent of credentialTransport.
 			a2aclient.WithTransport(a2a.TransportProtocolGRPC, a2aclient.TransportFactoryFn(func(_ context.Context, _ *a2a.AgentCard, iface *a2a.AgentInterface) (a2aclient.Transport, error) {
-				target, creds, grpcErr := grpcUpstreamTarget(iface.URL, config.runtimeAuth)
+				target, creds, grpcErr := grpcUpstreamTarget(iface.URL, config.runtimeAuth, m.grpcProxyRoots(iface.URL))
 				if grpcErr != nil {
 					return nil, grpcErr
 				}
@@ -1736,7 +1741,7 @@ func isStrictV1Interface(iface *a2a.AgentInterface, agentCardURL string) bool {
 		}
 		return !requireTLS || u.Scheme == "https" || isLoopbackHost(u.Hostname())
 	case a2a.TransportProtocolGRPC:
-		target, _, err := grpcUpstreamTarget(iface.URL, nil)
+		target, _, err := grpcUpstreamTarget(iface.URL, nil, nil)
 		if err != nil {
 			return false
 		}
@@ -1772,7 +1777,7 @@ func validateStrictV1Interfaces(card *a2a.AgentCard, agentCardURL string) error 
 // expresses for the HTTP bindings. The target must carry an explicit port and
 // nothing besides host and port, so it cannot embed credentials or redirect the
 // dial through resolver tricks.
-func grpcUpstreamTarget(raw string, auth *schemas.UpstreamAuth) (string, credentials.TransportCredentials, error) {
+func grpcUpstreamTarget(raw string, auth *schemas.UpstreamAuth, proxyRoots func(*x509.CertPool) *x509.CertPool) (string, credentials.TransportCredentials, error) {
 	scheme := "https"
 	rest := raw
 	if before, after, found := strings.Cut(raw, "://"); found {
@@ -1795,6 +1800,11 @@ func grpcUpstreamTarget(raw string, auth *schemas.UpstreamAuth) (string, credent
 	tlsConfig, err := upstreamTLSConfig(auth)
 	if err != nil {
 		return "", nil, err
+	}
+	if proxyRoots != nil {
+		if roots := proxyRoots(tlsConfig.RootCAs); roots != nil {
+			tlsConfig.RootCAs = roots
+		}
 	}
 	return rest, credentials.NewTLS(tlsConfig), nil
 }

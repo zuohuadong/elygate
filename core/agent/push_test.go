@@ -1315,13 +1315,13 @@ func TestPushDeliveryClientPrivateCallbacks(t *testing.T) {
 		return c.Do(req)
 	}
 
-	blocked := newPushDeliveryClient(false)
+	blocked := newPushDeliveryClient(nil, false)
 	if resp, err := post(blocked, target.URL); err == nil {
 		resp.Body.Close()
 		t.Fatal("loopback callback was not blocked by default")
 	}
 
-	allowed := newPushDeliveryClient(true)
+	allowed := newPushDeliveryClient(nil, true)
 	resp, err := post(allowed, target.URL)
 	require.NoError(t, err)
 	resp.Body.Close()

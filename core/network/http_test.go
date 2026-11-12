@@ -1835,3 +1835,58 @@ func TestGlobalProxyCADoesNotLeakIntoDirectTargets(t *testing.T) {
 		})
 	}
 }
+
+// TestGlobalProxyCADoesNotLeakIntoBypassedTargets pins the per-request split: with
+// the API proxy active, a no_proxy match or a local target connects directly and must
+// reject a certificate signed by the proxy's TLS-inspection CA.
+func TestGlobalProxyCADoesNotLeakIntoBypassedTargets(t *testing.T) {
+	targetAddr, targetCA := tlsTarget(t)
+	_, targetPort, _ := net.SplitHostPort(targetAddr)
+	targetURL := "https://127.0.0.1:" + targetPort + "/"
+
+	for _, tc := range []struct {
+		name    string
+		noProxy string
+	}{
+		{name: "no_proxy matches all", noProxy: "*"},
+		{name: "local target bypasses the proxy", noProxy: ""},
+	} {
+		cfg := enabledFor(ClientPurposeAPI, GlobalProxyTypeHTTP, "http://127.0.0.1:3128")
+		cfg.NoProxy = tc.noProxy
+		cfg.CACertPEM = targetCA
+		factory := NewHTTPClientFactory(cfg, noopTestLogger{})
+
+		t.Run("fasthttp/"+tc.name, func(t *testing.T) {
+			req := fasthttp.AcquireRequest()
+			resp := fasthttp.AcquireResponse()
+			defer fasthttp.ReleaseRequest(req)
+			defer fasthttp.ReleaseResponse(resp)
+			req.SetRequestURI(targetURL)
+			assertTLSOutcome(t, factory.GetFasthttpClient(ClientPurposeAPI).DoTimeout(req, resp, 5*time.Second), "certificate")
+		})
+		t.Run("net/http/"+tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			r, _ := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
+			resp, err := factory.GetHTTPClient(ClientPurposeAPI).Do(r)
+			if err == nil {
+				resp.Body.Close()
+			}
+			assertTLSOutcome(t, err, "certificate")
+		})
+		t.Run("policy transport/"+tc.name, func(t *testing.T) {
+			policy := NewDialPolicy((&net.Dialer{}).DialContext, func(context.Context, string) ([]net.IP, error) {
+				return []net.IP{net.ParseIP("127.0.0.1")}, nil
+			})
+			client := &http.Client{Transport: factory.PolicyTransport(ClientPurposeAPI, policy)}
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			r, _ := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
+			resp, err := client.Do(r)
+			if err == nil {
+				resp.Body.Close()
+			}
+			assertTLSOutcome(t, err, "certificate")
+		})
+	}
+}

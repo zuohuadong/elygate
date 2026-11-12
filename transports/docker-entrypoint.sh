@@ -70,41 +70,44 @@ ensure_app_dir() {
 # Prepare the app directory before starting the application
 ensure_app_dir
 
-# Parse command line arguments and set environment variables
-parse_args() {
-    while [ $# -gt 0 ]; do
-        case $1 in
-            --port|-port)
-                if [ -n "$2" ]; then
-                    export APP_PORT="$2"
-                    shift 2
-                else
-                    echo "Error: --port requires a value"
-                    exit 1
-                fi
-                ;;
-            --host|-host)
-                if [ -n "$2" ]; then
-                    export APP_HOST="$2"
-                    shift 2
-                else
-                    echo "Error: --host requires a value"
-                    exit 1
-                fi
-                ;;
-            *)
-                # Keep other arguments for the main application
-                set -- "$@" "$1"
-                shift
-                ;;
-        esac
-    done
-}
-
-# Parse arguments if any are provided
-if [ $# -gt 1 ]; then
-    parse_args "$@"
+# Parse command line arguments and set environment variables. Unknown arguments are
+# preserved and forwarded to /app/main. Only the original argument count is parsed;
+# forwarded arguments are appended after that window, so they survive without being
+# parsed again. Keep this in the main shell: a POSIX function's `set --` is local and
+# would silently drop the forwarded arguments.
+if [ $# -gt 0 ] && [ "$1" = "/app/main" ]; then
+    shift
 fi
+remaining=$#
+while [ "$remaining" -gt 0 ]; do
+    case $1 in
+        --port|-port)
+            if [ "$remaining" -lt 2 ] || [ -z "$2" ]; then
+                echo "Error: --port requires a value"
+                exit 1
+            fi
+            export APP_PORT="$2"
+            shift 2
+            remaining=$((remaining - 2))
+            ;;
+        --host|-host)
+            if [ "$remaining" -lt 2 ] || [ -z "$2" ]; then
+                echo "Error: --host requires a value"
+                exit 1
+            fi
+            export APP_HOST="$2"
+            shift 2
+            remaining=$((remaining - 2))
+            ;;
+        *)
+            # Keep other arguments for the main application.
+            forwarded=$1
+            shift
+            set -- "$@" "$forwarded"
+            remaining=$((remaining - 1))
+            ;;
+    esac
+done
 
 # Build the command with environment variables and standard arguments
-exec /app/main -app-dir "$APP_DIR" -port "$APP_PORT" -host "$APP_HOST" -log-level "$LOG_LEVEL" -log-style "$LOG_STYLE"
+exec /app/main -app-dir "$APP_DIR" -port "$APP_PORT" -host "$APP_HOST" -log-level "$LOG_LEVEL" -log-style "$LOG_STYLE" "$@"

@@ -926,7 +926,15 @@ func pushBackoff(attempts int) time.Duration {
 // the private-network boundary between configuration and delivery. When
 // allowPrivate is true the address check is skipped so loopback and private
 // callbacks work; this is only for controlled test environments.
-func newPushDeliveryClient(allowPrivate bool) *http.Client {
+func newPushDeliveryClient(factory *network.HTTPClientFactory, allowPrivate bool) *http.Client {
+	if factory != nil && !allowPrivate {
+		// PolicyTransport keeps the SSRF checks on every dial and adds the global
+		// API proxy with its TLS scope: the proxy CA reaches only proxied targets.
+		return &http.Client{
+			Transport:     factory.PolicyTransport(network.ClientPurposeAPI, network.SSRFPolicy(nil)),
+			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		}
+	}
 	dial := network.SSRFSafeDialContext(pushSendTimeout)
 	if allowPrivate {
 		dial = (&net.Dialer{Timeout: pushSendTimeout}).DialContext
