@@ -2484,6 +2484,14 @@ func (s *BifrostHTTPServer) ReloadProxyConfig(ctx context.Context, config *table
 	if err := s.Config.SetGlobalProxyConfig(config); err != nil {
 		return err
 	}
+	// Agent Gateway runtimes pin their proxied TLS roots and gRPC credentials when
+	// they are built. Rebuild them on every proxy update (including a CA change to
+	// the same proxy URL) so long-lived runtimes pick up the new trust anchors.
+	if s.agentGatewayManager != nil {
+		if err := s.agentGatewayManager.Reload(ctx); err != nil {
+			return err
+		}
+	}
 	s.rebuildRelays(ctx)
 	if config == nil {
 		logger.Info("proxy configuration removed")

@@ -10,6 +10,7 @@
 	import ControlPlaneBudgetOverview from './ControlPlaneBudgetOverview.svelte';
 	import ControlPlaneBudgetHistory from './ControlPlaneBudgetHistory.svelte';
 	import { encodePathSegment, getListPayload, getTotal, isJsonRecord, requestJson, type JsonRecord } from '../lib/api';
+	import { withBasePath } from '../lib/base-path';
 	import { SaveButton } from '@svadmin/ui';
 
 	interface Props { resourceName: string; }
@@ -731,7 +732,7 @@
 			const params = usageQueryParams(0, false);
 			const suffix = params.toString();
 			const link = document.createElement('a');
-			link.href = `/api/control-plane/usage/export${suffix ? `?${suffix}` : ''}`;
+			link.href = withBasePath(`/api/control-plane/usage/export${suffix ? `?${suffix}` : ''}`);
 			link.download = 'elygate-usage.csv';
 			document.body.append(link);
 			link.click();

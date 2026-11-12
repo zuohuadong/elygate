@@ -265,7 +265,7 @@ describe('panel issue regressions', () => {
 		expect(source).toContain("params.set('is_subagent', 'true')");
 		expect(source).toContain('requestJson<unknown>(`/api/control-plane/usage?${query.toString()}`)');
 		expect(source).toContain('usageQueryParams(0, false)');
-		expect(source).toContain("/api/control-plane/usage/export${suffix ? `?${suffix}` : ''}");
+		expect(source).toContain("withBasePath(`/api/control-plane/usage/export${suffix ? `?${suffix}` : ''}`)");
 		expect(source).toContain('document.body.append(link)');
 		expect(source).toContain('link.remove()');
 		expect(source).toContain("text('用量账本', 'Usage Ledger')");

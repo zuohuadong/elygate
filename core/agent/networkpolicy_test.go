@@ -458,3 +458,23 @@ func TestAgentProxyCARootsScope(t *testing.T) {
 	require.Nil(t, m.proxyTargetRoots(nil))
 	require.Nil(t, m.grpcProxyRoots("https://public.example:443"))
 }
+
+// TestAgentProxyRootsKeyFollowsCAUpdates pins that a cached proxied transport is
+// rebuilt when the proxy CA changes under the same proxy URL.
+func TestAgentProxyRootsKeyFollowsCAUpdates(t *testing.T) {
+	cfg := &network.GlobalProxyConfig{
+		Enabled:      true,
+		Type:         network.GlobalProxyTypeHTTP,
+		URL:          "http://127.0.0.1:3128",
+		EnableForAPI: true,
+		CACertPEM:    "-----BEGIN CERTIFICATE-----\nfirst\n-----END CERTIFICATE-----",
+	}
+	factory := network.NewHTTPClientFactory(cfg, nil)
+	m := &Manager{httpClientFactory: factory}
+	first := m.proxyTargetRootsKey()
+	require.NotEmpty(t, first)
+	updated := *cfg
+	updated.CACertPEM = "-----BEGIN CERTIFICATE-----\nsecond\n-----END CERTIFICATE-----"
+	factory.UpdateProxyConfig(&updated)
+	require.NotEqual(t, first, m.proxyTargetRootsKey())
+}

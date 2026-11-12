@@ -109,7 +109,7 @@ func (m *Manager) configureOutboundTransport(tr *http.Transport, policy outbound
 	tr.DialContext = func(ctx context.Context, netw, addr string) (net.Conn, error) {
 		return policy.dial.DialContext(ctx, netw, addr, nil)
 	}
-	return &outboundHTTPTransport{direct: tr, proxy: proxy, proxyRoots: m.proxyTargetRoots, policy: policy}
+	return &outboundHTTPTransport{direct: tr, proxy: proxy, proxyRoots: m.proxyTargetRoots, proxyRootsKey: m.proxyTargetRootsKey, policy: policy}
 }
 
 // proxyTargetRoots merges the global proxy CA into base when the API proxy is active.
@@ -118,6 +118,15 @@ func (m *Manager) proxyTargetRoots(base *x509.CertPool) *x509.CertPool {
 		return nil
 	}
 	return m.httpClientFactory.ProxyTargetRoots(network.ClientPurposeAPI, base)
+}
+
+// proxyTargetRootsKey identifies the current proxy CA so a cached proxied transport
+// is rebuilt when the CA changes but the proxy URL does not.
+func (m *Manager) proxyTargetRootsKey() string {
+	if m.httpClientFactory == nil {
+		return ""
+	}
+	return m.httpClientFactory.ProxyTargetRootsKey(network.ClientPurposeAPI)
 }
 
 // grpcProxyRoots returns the target-root merger for a gRPC interface only when that
@@ -143,14 +152,15 @@ func (m *Manager) grpcProxyRoots(raw string) func(*x509.CertPool) *x509.CertPool
 // outboundHTTPTransport keeps direct and proxied pools separate. It retains at
 // most one proxy pool, replacing it when operator proxy configuration changes.
 type outboundHTTPTransport struct {
-	direct     *http.Transport
-	proxy      func(*http.Request) (*url.URL, error)
-	proxyRoots func(*x509.CertPool) *x509.CertPool
-	policy     outboundPolicy
-	mu         sync.Mutex
-	proxyURL   string
-	proxied    *http.Transport
-	proxyPool  *retiringHTTPTransport
+	direct        *http.Transport
+	proxy         func(*http.Request) (*url.URL, error)
+	proxyRoots    func(*x509.CertPool) *x509.CertPool
+	proxyRootsKey func() string
+	policy        outboundPolicy
+	mu            sync.Mutex
+	proxyURL      string
+	proxied       *http.Transport
+	proxyPool     *retiringHTTPTransport
 }
 
 // retiringHTTPTransport drains a pool after it is replaced. Transport
@@ -247,11 +257,15 @@ func (t *outboundHTTPTransport) RoundTrip(req *http.Request) (*http.Response, er
 	if proxyURL == nil {
 		return t.direct.RoundTrip(req)
 	}
+	proxyKey := proxyURL.String()
+	if t.proxyRootsKey != nil {
+		proxyKey += "\x00" + t.proxyRootsKey()
+	}
 	t.mu.Lock()
 	if t.proxyPool == nil && t.proxied != nil {
 		t.proxyPool = newRetiringHTTPTransport(t.proxied)
 	}
-	if t.proxied == nil || t.proxyURL != proxyURL.String() {
+	if t.proxied == nil || t.proxyURL != proxyKey {
 		if t.proxyPool != nil {
 			t.proxyPool.retire()
 		}
@@ -273,7 +287,7 @@ func (t *outboundHTTPTransport) RoundTrip(req *http.Request) (*http.Response, er
 		tr.DialContext = func(ctx context.Context, netw, addr string) (net.Conn, error) {
 			return t.policy.dial.DialContext(ctx, netw, addr, proxyURL)
 		}
-		t.proxied, t.proxyURL = tr, proxyURL.String()
+		t.proxied, t.proxyURL = tr, proxyKey
 		t.proxyPool = newRetiringHTTPTransport(tr)
 	}
 	pool := t.proxyPool

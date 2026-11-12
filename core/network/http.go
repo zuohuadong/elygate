@@ -1052,6 +1052,18 @@ func (f *HTTPClientFactory) ProxyTargetRoots(purpose ClientPurpose, base *x509.C
 	return f.proxyRootsWith(base)
 }
 
+// ProxyTargetRootsKey identifies the current proxy CA for purpose. Callers that cache
+// a proxied TLS transport use it to rebuild when the CA changes under the same proxy
+// URL, instead of keeping a pool pinned to the previous trust anchors.
+func (f *HTTPClientFactory) ProxyTargetRootsKey(purpose ClientPurpose) string {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	if f.proxyURLForPurpose(purpose) == nil || f.proxyRoots == nil {
+		return ""
+	}
+	return f.proxyConfig.URL + "\x00" + f.proxyConfig.CACertPEM
+}
+
 // ProxyAppliesToTarget reports whether a request for host would take the global proxy
 // for purpose. It is false for no_proxy, local and metadata targets as well as when the
 // proxy is off for purpose.
