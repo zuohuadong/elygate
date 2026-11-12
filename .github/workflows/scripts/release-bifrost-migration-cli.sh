@@ -135,9 +135,11 @@ $CHANGELOG_BODY
 
 ### Installation
 
-#### Binary Download
+#### Build from the release tag
 \`\`\`bash
-npx @maximhq/bifrost-migration-cli --cli-version v$VERSION
+git clone --branch bifrost-migration-cli/v$VERSION https://github.com/maximhq/bifrost.git
+cd bifrost/scripts/bifrost-migration-cli
+go run .
 \`\`\`
 
 ---

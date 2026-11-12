@@ -14,6 +14,7 @@ fi
 
 # Source Go utilities for exponential backoff
 source "$SCRIPT_DIR/go-utils.sh"
+source "$SCRIPT_DIR/release-state.sh"
 
 # Validate input argument
 if [ "${1:-}" = "" ]; then
@@ -125,6 +126,32 @@ echo "✅ Transport build validation successful"
 
 # Note: Migration tests run as a separate CI job (test-migrations) before this release job
 
+# Preflight the release target before any remote write. If the tag already
+# points at HEAD but its release is missing, skip the dependency commit so the
+# tag stays bound to HEAD and finalize can create the release.
+TAG_NAME="transports/v${VERSION}"
+TAG_AT_HEAD="false"
+if git rev-parse -q --verify "refs/tags/$TAG_NAME" >/dev/null; then
+  if [ "$(git rev-list -n 1 "$TAG_NAME")" != "$(git rev-parse HEAD)" ]; then
+    echo "❌ Tag $TAG_NAME already exists at a different commit"
+    exit 1
+  fi
+  TAG_AT_HEAD="true"
+fi
+if release_check "$TAG_NAME"; then
+  if [ "$TAG_AT_HEAD" = "true" ]; then
+    echo "ℹ️ Release $TAG_NAME already exists. Nothing to do."
+    exit 0
+  fi
+  echo "❌ Release $TAG_NAME exists but its tag is missing"
+  exit 1
+else
+  status=$?
+  if [ "$status" -ne 1 ]; then
+    exit 1
+  fi
+fi
+
 # Commit and push changes if any
 # First, pull latest changes to avoid conflicts
 CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
@@ -143,7 +170,9 @@ fi
 git add transports/
 
 # Check if there are staged changes after pulling
-if ! git diff --cached --quiet; then
+if [ "$TAG_AT_HEAD" = "true" ]; then
+  echo "ℹ️ Reusing tag $TAG_NAME at HEAD; skipping dependency commit"
+elif ! git diff --cached --quiet; then
   git config user.name "github-actions[bot]"
   git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
   echo "🔧 Committing and pushing changes..."

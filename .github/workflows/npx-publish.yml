@@ -143,9 +143,20 @@ jobs:
           VERSION: ${{ steps.extract-version.outputs.version }}
         run: |
           echo "Publishing @maximhq/bifrost@${VERSION} to npm..."
-          if npm view @maximhq/bifrost@"${VERSION}" version >/dev/null 2>&1; then
+          NPM_ERR=$(mktemp)
+          if npm view @maximhq/bifrost@"${VERSION}" version >/dev/null 2>"$NPM_ERR"; then
+            rm -f "$NPM_ERR"
             echo "@maximhq/bifrost@${VERSION} already exists on npm. Skipping publish."
             exit 0
+          else
+            status=$?
+            if ! grep -qE 'E404|404 Not Found' "$NPM_ERR"; then
+              echo "Could not determine npm state for @maximhq/bifrost@${VERSION}:" >&2
+              cat "$NPM_ERR" >&2
+              rm -f "$NPM_ERR"
+              exit 1
+            fi
+            rm -f "$NPM_ERR"
           fi
           
           # Try OIDC (Trusted Publishing) first - no token needed
@@ -280,9 +291,20 @@ jobs:
           VERSION: ${{ steps.extract-version.outputs.version }}
         run: |
           echo "Publishing @maximhq/bifrost-cli@${VERSION} to npm..."
-          if npm view @maximhq/bifrost-cli@"${VERSION}" version >/dev/null 2>&1; then
+          NPM_ERR=$(mktemp)
+          if npm view @maximhq/bifrost-cli@"${VERSION}" version >/dev/null 2>"$NPM_ERR"; then
+            rm -f "$NPM_ERR"
             echo "@maximhq/bifrost-cli@${VERSION} already exists on npm. Skipping publish."
             exit 0
+          else
+            status=$?
+            if ! grep -qE 'E404|404 Not Found' "$NPM_ERR"; then
+              echo "Could not determine npm state for @maximhq/bifrost-cli@${VERSION}:" >&2
+              cat "$NPM_ERR" >&2
+              rm -f "$NPM_ERR"
+              exit 1
+            fi
+            rm -f "$NPM_ERR"
           fi
           
           # Try OIDC (Trusted Publishing) first - no token needed

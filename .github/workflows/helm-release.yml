@@ -88,8 +88,21 @@ jobs:
         run: |
           source ./.github/workflows/scripts/release-state.sh
           TAG="helm-chart-v${{ steps.chart-version.outputs.version }}"
+          TAG_AT_HEAD="false"
+          if git rev-parse --verify "refs/tags/$TAG" >/dev/null 2>&1; then
+            if [ "$(git rev-list -n 1 "$TAG")" != "$(git rev-parse HEAD)" ]; then
+              echo "Tag $TAG points at a different commit" >&2
+              exit 1
+            fi
+            TAG_AT_HEAD="true"
+          fi
           if release_check "$TAG"; then
-            echo "exists=true" >> $GITHUB_OUTPUT
+            if [ "$TAG_AT_HEAD" = "true" ]; then
+              echo "exists=true" >> $GITHUB_OUTPUT
+            else
+              echo "Release $TAG exists but its tag is missing" >&2
+              exit 1
+            fi
           else
             status=$?
             if [ "$status" -eq 1 ]; then

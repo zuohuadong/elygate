@@ -81,8 +81,7 @@ else
     exit 1
   fi
   if [ "$TAG_AT_HEAD" = "true" ]; then
-    echo "❌ Tag $TAG_NAME exists at HEAD but its GitHub release is missing; recover the release before bumping dependencies"
-    exit 1
+    echo "ℹ️ Tag $TAG_NAME is at HEAD but its GitHub release is missing; skipping dependency commit to preserve the tag target"
   fi
 fi
 
@@ -125,7 +124,7 @@ fi
 cd ../..
 
 # Commit and push changes if any
-if ! git diff --cached --quiet; then
+if [ "$TAG_AT_HEAD" = "false" ] && ! git diff --cached --quiet; then
   git config user.name "github-actions[bot]"
   git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
   echo "🔧 Committing and pushing changes..."

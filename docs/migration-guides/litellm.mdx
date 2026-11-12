@@ -8,10 +8,12 @@ icon: "train"
 
 The LiteLLM migration tool reads the entities from a running LiteLLM proxy and recreates them in Bifrost through the management API. It is a one-time, operator-run migration: point it at your LiteLLM deployment and your Bifrost gateway, and it will provision the equivalent providers, keys, governance entities, and virtual keys.
 
-It is distributed as an npx package:
+It runs from the repository with the Go toolchain:
 
 ```bash
-npx @maximhq/bifrost-migration-cli
+git clone https://github.com/maximhq/bifrost.git
+cd bifrost/scripts/bifrost-migration-cli
+go run .
 ```
 
 - Read from LiteLLM APIs - reads from the LiteLLM management API, the LiteLLM `config.yaml`, and (optionally) the LiteLLM Postgres database. Both files and the database are needed because the management API masks secrets.
@@ -105,7 +107,7 @@ export BIFROST_API_KEY="your-bifrost-api-key"
 <Step title="Run a dry run and review the plan">
 
 ```bash
-DRY_RUN=1 npx @maximhq/bifrost-migration-cli
+DRY_RUN=1 go run .
 ```
 
 This prints what would be created and a report of everything that could not be carried over faithfully (skipped providers, unmapped models, dropped fields). Sample output:
@@ -127,7 +129,7 @@ REPORT skipped providers (1):
 Once the plan looks correct, run without `DRY_RUN`:
 
 ```bash
-npx @maximhq/bifrost-migration-cli
+go run .
 ```
 
 The tool logs each write with an `OK` / `FAIL` / `SKIP` / `WARN` prefix and a per-entity summary:

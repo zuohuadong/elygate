@@ -111,7 +111,7 @@ func (m *Manager) configureOutboundTransport(tr *http.Transport, policy outbound
 	tr.DialContext = func(ctx context.Context, netw, addr string) (net.Conn, error) {
 		return policy.dial.DialContext(ctx, netw, addr, nil)
 	}
-	return &outboundHTTPTransport{direct: tr, proxy: proxy, proxyRoots: m.proxyTargetRoots, proxyRootsKey: m.proxyTargetRootsKey, policy: policy}
+	return &outboundHTTPTransport{direct: tr, proxy: proxy, proxyRoots: m.proxyTargetRoots, proxyRootsKey: m.proxyTargetRootsKey, policy: policy, factory: m.httpClientFactory}
 }
 
 // proxyFunc selects the global API proxy from the same factory that supplies the
@@ -176,6 +176,7 @@ type outboundHTTPTransport struct {
 	proxyRoots    func(*x509.CertPool) *x509.CertPool
 	proxyRootsKey func() string
 	policy        outboundPolicy
+	factory       *network.HTTPClientFactory
 	mu            sync.Mutex
 	proxyURL      string
 	proxied       *http.Transport
@@ -308,7 +309,7 @@ func (t *outboundHTTPTransport) RoundTrip(req *http.Request) (*http.Response, er
 		// destination policy.
 		tr.Proxy = nil
 		tr.DialContext = func(ctx context.Context, netw, addr string) (net.Conn, error) {
-			return t.policy.dial.DialContext(ctx, netw, addr, proxyURL)
+			return t.policy.dial.DialContextWithFactory(ctx, netw, addr, proxyURL, t.factory)
 		}
 		t.proxied, t.proxyURL = tr, proxyKey
 		t.proxyPool = newRetiringHTTPTransport(tr)

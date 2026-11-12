@@ -87,8 +87,8 @@ for plugin in "${PLUGINS[@]}"; do
   else
     PLUGIN_EXIT_CODE=$?
     echo "❌ Failed to release plugin '$plugin' (exit code: $PLUGIN_EXIT_CODE)"
-    FAILED_PLUGINS+=("$plugin")
-    OVERALL_EXIT_CODE=1
+    echo "Stopping: later plugins must not move HEAD past a failed tag/release."
+    exit "$PLUGIN_EXIT_CODE"
   fi
 done
 
