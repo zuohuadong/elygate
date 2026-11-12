@@ -6,6 +6,7 @@ set -euo pipefail
 
 # Source Go utilities for exponential backoff
 source "$(dirname "$0")/go-utils.sh"
+source "$(dirname "$0")/release-state.sh"
 if [[ $# -lt 1 ]]; then
   echo "Usage: $0 <plugin-name> [core-version] [framework-version]"
   exit 1
@@ -62,6 +63,16 @@ echo "🏷️ Tag name: $TAG_NAME"
 if git rev-parse -q --verify "refs/tags/$TAG_NAME" >/dev/null; then
   if [ "$(git rev-list -n 1 "$TAG_NAME")" != "$(git rev-parse HEAD)" ]; then
     echo "❌ Tag $TAG_NAME already exists at a different commit"
+    exit 1
+  fi
+fi
+
+if release_check "$TAG_NAME"; then
+  echo "ℹ️ Release $TAG_NAME already exists. Nothing to do."
+  exit 0
+else
+  status=$?
+  if [ "$status" -ne 1 ]; then
     exit 1
   fi
 fi
@@ -198,15 +209,18 @@ _This release was automatically created from version file: \`plugins/$PLUGIN_NAM
 
 echo "🎉 Creating GitHub release for $TITLE..."
 
-REPO_SLUG="${GITHUB_REPOSITORY:-$(gh repo view --json nameWithOwner -q .nameWithOwner)}"
-RELEASE_TAG_PATH=${TAG_NAME//\//%2F}
-if gh api "repos/${REPO_SLUG}/releases/tags/${RELEASE_TAG_PATH}" >/dev/null 2>&1; then
+if release_check "$TAG_NAME"; then
   echo "ℹ️ Release $TAG_NAME already exists. Skipping creation."
 else
+  status=$?
+  if [ "$status" -ne 1 ]; then
+    echo "❌ Could not determine release state for $TAG_NAME"
+    exit 1
+  fi
   gh release create "$TAG_NAME" \
     --title "$TITLE" \
     --notes "$BODY" \
-    ${PRERELEASE_FLAG} ${LATEST_FLAG}    
+    ${PRERELEASE_FLAG} ${LATEST_FLAG}
 fi
 
 echo "✅ Plugin $PLUGIN_NAME released successfully"

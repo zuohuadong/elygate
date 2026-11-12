@@ -555,3 +555,30 @@ func TestAgentProxyRootsHandleMissingTLSConfig(t *testing.T) {
 	_, err = transport.RoundTrip(req)
 	require.Error(t, err)
 }
+
+// TestCardHandlerHonorsPublicOnlyDiscovery pins that an auth-bypassed
+// registration cannot borrow the private allowlist through anonymous CardHandler
+// discovery.
+func TestCardHandlerHonorsPublicOnlyDiscovery(t *testing.T) {
+	upstream := httptest.NewServer(a2asrv.NewStaticAgentCardHandler(&a2a.AgentCard{
+		Name: "private-card",
+		SupportedInterfaces: []*a2a.AgentInterface{{
+			URL: "http://127.0.0.1:9000", ProtocolBinding: a2a.TransportProtocolJSONRPC, ProtocolVersion: a2a.Version,
+		}},
+	}))
+	defer upstream.Close()
+	store := &memoryStore{regs: map[string]schemas.AgentRegistration{
+		"private-agent": {Name: "private-agent", AgentCardURL: upstream.URL, Enabled: true, AllowByDefault: true, RequirePublicTarget: true},
+	}}
+	m, err := NewManager(context.Background(), store, nil, "http://gateway", nil, ManagerConfig{
+		PrivateAllowlistProvider: func() []string { return []string{"127.0.0.1"} },
+	})
+	require.NoError(t, err)
+	defer m.Close()
+	handler, found := m.CardHandler("private-agent", "")
+	require.True(t, found)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/", nil))
+	require.Equal(t, http.StatusBadGateway, response.Code)
+	require.Contains(t, response.Body.String(), "private network policy")
+}

@@ -180,6 +180,8 @@ jobs:
 
       - name: Detect what needs release
         id: detect
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: ./.github/workflows/scripts/detect-all-changes.sh "auto"
 
       - name: Validate Helm templates

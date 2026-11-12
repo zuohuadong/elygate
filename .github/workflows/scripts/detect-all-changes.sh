@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 shopt -s nullglob
+source "$(dirname "$0")/release-state.sh"
 
 # Detect what components need to be released based on version changes
 # Usage: ./detect-all-changes.sh
@@ -95,6 +96,7 @@ START_FROM="none"
 # same-name branch or a tag from an unrelated history must fail closed instead of
 # suppressing a release.
 tag_exists() {
+  TAG_RELEASE_MISSING="false"
   local tag="$1"
   git rev-parse --verify "refs/tags/$tag" >/dev/null 2>&1 || return 1
   local commit
@@ -103,7 +105,22 @@ tag_exists() {
     echo "❌ Tag $tag is not in HEAD history; refusing to treat it as released" >&2
     exit 1
   fi
-  return 0
+  local status
+  if release_check "$tag"; then
+    return 0
+  else
+    status=$?
+  fi
+  if [ "$status" -ne 1 ]; then
+    echo "❌ Could not determine release state for $tag" >&2
+    exit 1
+  fi
+  if [ "$commit" = "$(git rev-parse HEAD)" ]; then
+    TAG_RELEASE_MISSING="true"
+    return 1
+  fi
+  echo "❌ Tag $tag exists but its GitHub release is missing and the tag is not at HEAD; manual recovery is required" >&2
+  exit 1
 }
 
 
@@ -114,6 +131,9 @@ CORE_TAG="core/v${CORE_VERSION}"
 if tag_exists "$CORE_TAG"; then
   echo "   ⏭️ Tag $CORE_TAG already exists"
 else
+  if [ "$TAG_RELEASE_MISSING" = "true" ]; then
+    CORE_NEEDS_RELEASE="true"
+  fi
   # Extract major.minor track from version (e.g., "1.3.55" -> "1.3", "1.4.0-prerelease1" -> "1.4")
   CORE_BASE_VERSION=$(echo "$CORE_VERSION" | sed 's/-.*$//')
   CORE_MAJOR_MINOR=$(echo "$CORE_BASE_VERSION" | cut -d. -f1,2)
@@ -164,6 +184,9 @@ FRAMEWORK_TAG="framework/v${FRAMEWORK_VERSION}"
 if tag_exists "$FRAMEWORK_TAG"; then
   echo "   ⏭️ Tag $FRAMEWORK_TAG already exists"
 else
+  if [ "$TAG_RELEASE_MISSING" = "true" ]; then
+    FRAMEWORK_NEEDS_RELEASE="true"
+  fi
   # Extract major.minor track from version (e.g., "1.3.55" -> "1.3", "1.4.0-prerelease1" -> "1.4")
   FRAMEWORK_BASE_VERSION=$(echo "$FRAMEWORK_VERSION" | sed 's/-.*$//')
   FRAMEWORK_MAJOR_MINOR=$(echo "$FRAMEWORK_BASE_VERSION" | cut -d. -f1,2)
@@ -242,6 +265,11 @@ for plugin_dir in plugins/*/; do
     echo "      ⏭️ Tag already exists"
     continue
   fi
+  if [ "$TAG_RELEASE_MISSING" = "true" ]; then
+    echo "      🏷️ Tag exists but its GitHub release is missing - plugin release needed"
+    PLUGIN_CHANGES+=("$plugin_name")
+    continue
+  fi
 
   # Extract major.minor track from version (e.g., "1.3.55" -> "1.3", "1.4.0-prerelease1" -> "1.4")
   plugin_base_version=$(echo "$current_version" | sed 's/-.*$//')
@@ -305,6 +333,9 @@ GIT_TAG_EXISTS="false"
 if tag_exists "$TRANSPORT_TAG"; then
   echo "   ⏭️ Git tag $TRANSPORT_TAG already exists"
   GIT_TAG_EXISTS="true"
+elif [ "$TAG_RELEASE_MISSING" = "true" ]; then
+  echo "   🏷️ Git tag exists but its GitHub release is missing - transport release needed"
+  BIFROST_HTTP_NEEDS_RELEASE="true"
 fi
 
 # Check if Docker tag exists on DockerHub

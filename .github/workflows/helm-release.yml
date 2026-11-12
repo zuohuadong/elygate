@@ -86,10 +86,18 @@ jobs:
       - name: Check if release exists
         id: check-release
         run: |
-          if gh release view "helm-chart-v${{ steps.chart-version.outputs.version }}" &>/dev/null; then
+          source ./.github/workflows/scripts/release-state.sh
+          TAG="helm-chart-v${{ steps.chart-version.outputs.version }}"
+          if release_check "$TAG"; then
             echo "exists=true" >> $GITHUB_OUTPUT
           else
-            echo "exists=false" >> $GITHUB_OUTPUT
+            status=$?
+            if [ "$status" -eq 1 ]; then
+              echo "exists=false" >> $GITHUB_OUTPUT
+            else
+              echo "Could not determine release state for $TAG" >&2
+              exit 1
+            fi
           fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

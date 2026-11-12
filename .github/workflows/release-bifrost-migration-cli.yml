@@ -45,6 +45,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
           VERSION: ${{ steps.get-version.outputs.version }}
         run: |
+          source ./.github/workflows/scripts/release-state.sh
           TAG="bifrost-migration-cli/v${VERSION}"
           if git rev-parse --verify "refs/tags/$TAG" >/dev/null 2>&1; then
             TAG_COMMIT=$(git rev-list -n 1 "$TAG")
@@ -52,14 +53,16 @@ jobs:
               echo "Tag $TAG points outside HEAD history" >&2
               exit 1
             fi
-            ENCODED_TAG=${TAG//\//%2F}
-            if gh api "repos/${GITHUB_REPOSITORY}/releases/tags/$ENCODED_TAG" >/dev/null 2>&1; then
+            if release_check "$TAG"; then
               echo "exists=true" >> "$GITHUB_OUTPUT"
-            elif [ "$TAG_COMMIT" = "$(git rev-parse HEAD)" ]; then
-              echo "exists=false" >> "$GITHUB_OUTPUT"
             else
-              echo "Tag $TAG is complete but its GitHub release is missing; manual recovery is required" >&2
-              exit 1
+              status=$?
+              if [ "$status" -eq 1 ] && [ "$TAG_COMMIT" = "$(git rev-parse HEAD)" ]; then
+                echo "exists=false" >> "$GITHUB_OUTPUT"
+              else
+                echo "Tag $TAG is complete but its GitHub release is missing or unverifiable" >&2
+                exit 1
+              fi
             fi
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"

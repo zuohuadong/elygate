@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+source "$(dirname "$0")/release-state.sh"
 
 # Create GitHub release for NPX package
 # Usage: ./create-npx-release.sh <version> <full-tag>
@@ -81,12 +82,16 @@ else
   git push origin "$FULL_TAG"
 fi
 
-REPO_SLUG="${GITHUB_REPOSITORY:-$(gh repo view --json nameWithOwner -q .nameWithOwner)}"
-RELEASE_TAG_PATH=${FULL_TAG//\//%2F}
 echo "🔍 Checking if release $FULL_TAG already exists..."
-if gh api "repos/${REPO_SLUG}/releases/tags/${RELEASE_TAG_PATH}" >/dev/null 2>&1; then
+if release_check "$FULL_TAG"; then
   echo "ℹ️ Release $FULL_TAG already exists. Skipping creation."
   exit 0
+else
+  status=$?
+  if [ "$status" -ne 1 ]; then
+    echo "❌ Could not determine release state for $FULL_TAG"
+    exit 1
+  fi
 fi
 
 # Create release

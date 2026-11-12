@@ -1072,7 +1072,7 @@ func (m *Manager) CardHandler(name, requestOrigin string) (http.Handler, bool) {
 			AgentName:   name,
 		}
 		start := time.Now()
-		gateCtx := gateContext(ctx)
+		gateCtx := gateContext(WithPublicTargetsOnly(ctx, r.config.requirePublicTarget))
 		var opErr error
 		response, gateErr := m.RunWithPluginPipeline(gateCtx, envelope, func(*schemas.BifrostA2ARequest, func(*schemas.BifrostA2AEvent)) (*schemas.BifrostA2AResponse, error) {
 			card, err := m.resolveCard(gateCtx, r.config.agentCardURL, r.config.discoveryAuth, upstreamCredentialID(r.config.name, "discovery"))

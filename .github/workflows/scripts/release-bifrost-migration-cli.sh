@@ -11,6 +11,7 @@ else
   SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
 fi
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd -P)"
+source "$SCRIPT_DIR/release-state.sh"
 
 # Validate input argument
 if [ "${1:-}" = "" ]; then
@@ -89,6 +90,16 @@ if git rev-parse -q --verify "refs/tags/$TAG_NAME" >/dev/null; then
   fi
 fi
 
+if release_check "$TAG_NAME"; then
+  echo "ℹ️ Release $TAG_NAME already exists. Nothing to do."
+  exit 0
+else
+  status=$?
+  if [ "$status" -ne 1 ]; then
+    exit 1
+  fi
+fi
+
 # --- Publish steps (all checks passed) ---
 
 # Configure and upload to R2
@@ -132,11 +143,14 @@ npx @maximhq/bifrost-migration-cli --cli-version v$VERSION
 ---
 _This release was automatically created._"
 
-REPO_SLUG="${GITHUB_REPOSITORY:-$(gh repo view --json nameWithOwner -q .nameWithOwner)}"
-RELEASE_TAG_PATH=${TAG_NAME//\//%2F}
-if gh api "repos/${REPO_SLUG}/releases/tags/${RELEASE_TAG_PATH}" >/dev/null 2>&1; then
+if release_check "$TAG_NAME"; then
   echo "ℹ️ GitHub release $TAG_NAME already exists. Skipping."
 else
+  status=$?
+  if [ "$status" -ne 1 ]; then
+    echo "❌ Could not determine release state for $TAG_NAME"
+    exit 1
+  fi
   echo "🎉 Creating GitHub release for $TITLE..."
   gh release create "$TAG_NAME" \
     --title "$TITLE" \

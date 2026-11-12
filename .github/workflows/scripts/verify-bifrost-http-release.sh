@@ -25,6 +25,11 @@ if ! git rev-parse --verify "refs/tags/${TAG_NAME}" >/dev/null 2>&1; then
     exit 78  # Exit code 78 will be used to skip the job
 fi
 
+TAG_COMMIT=$(git rev-list -n 1 "${TAG_NAME}")
+if ! git merge-base --is-ancestor "$TAG_COMMIT" HEAD; then
+    echo "❌ Git tag ${TAG_NAME} is outside the current history"
+    exit 78
+fi
 echo "✅ Git tag found: ${TAG_NAME}"
 
 # Check if the GitHub release exists
