@@ -1,3 +1,5 @@
+import { withBasePath } from './base-path';
+
 function stripMdx(source: string): string {
 	return source
 		.replace(/^---\s*[\s\S]*?\s*---\s*/u, '')
@@ -20,6 +22,14 @@ export function applyMediaLoadingHints(html: string): string {
 	return html
 		.replace(/<img(?![^>]*\bloading=)/giu, '<img loading="lazy" decoding="async"')
 		.replace(/<video(?![^>]*\bpreload=)/giu, '<video preload="metadata"');
+}
+
+// Bundled doc media is emitted by Vite as root-absolute /assets/... URLs inside
+// the JS bundle, which the gateway's shell-only base_path rewrite cannot see.
+// Prefix it at render time when the dashboard is mounted under /bifrost.
+export function prefixBundledMediaUrls(html: string, base = withBasePath('/assets/')): string {
+	if (base === '/assets/') return html;
+	return html.replace(/(\b(?:src|href|poster)=["'])\/assets\//giu, `$1${base}`);
 }
 
 export function normalizeMdxDocument(source: string, sourcePath: string): string {

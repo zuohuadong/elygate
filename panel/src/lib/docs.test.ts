@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { bundledDocsPlugin, localizeBundledDocMedia } from '../../vite-docs-plugin.mjs';
-import { applyMediaLoadingHints, normalizeMdxDocument } from './docs';
+import { applyMediaLoadingHints, normalizeMdxDocument, prefixBundledMediaUrls } from './docs';
 
 describe('bundled documentation', () => {
 	const bundledSourcePaths = [
@@ -44,6 +44,17 @@ describe('bundled documentation', () => {
 		const html = applyMediaLoadingHints('<img src="/assets/a.png"><video controls><source src="/assets/a.mp4"></video>');
 		expect(html).toContain('<img loading="lazy" decoding="async"');
 		expect(html).toContain('<video preload="metadata"');
+	});
+
+	test('prefixes bundled media inside the JS-rendered documentation HTML', () => {
+		const html = '<img src="/assets/a.png"><video poster=\'/assets/p.jpg\'><source src="/assets/a.mp4"></video><a href="/assets/download.pdf">doc</a><a href="https://example.com/assets/a.png">external</a>';
+		const prefixed = prefixBundledMediaUrls(html, '/bifrost/assets/');
+		expect(prefixed).toContain('src="/bifrost/assets/a.png"');
+		expect(prefixed).toContain("poster='/bifrost/assets/p.jpg'");
+		expect(prefixed).toContain('src="/bifrost/assets/a.mp4"');
+		expect(prefixed).toContain('href="/bifrost/assets/download.pdf"');
+		expect(prefixed).toContain('https://example.com/assets/a.png');
+		expect(prefixBundledMediaUrls('/assets/a.png', '/assets/')).toBe('/assets/a.png');
 	});
 
 	test('rejects media paths that escape the bundled documentation media root', async () => {

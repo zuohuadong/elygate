@@ -5,7 +5,7 @@
 	import { Marked } from 'marked';
 	import { markedHighlight } from 'marked-highlight';
 	import hljs from 'highlight.js';
-	import { applyMediaLoadingHints, normalizeMdxDocument } from '../lib/docs';
+	import { applyMediaLoadingHints, normalizeMdxDocument, prefixBundledMediaUrls } from '../lib/docs';
 	import quickstartSource from 'elygate-doc:quickstart/gateway/setting-up.mdx';
 	import architectureSource from 'elygate-doc:architecture/core/request-flow.mdx';
 	import mcpOverviewSource from 'elygate-doc:mcp/overview.mdx';
@@ -76,7 +76,7 @@
 
 	function renderDocument(doc: DocEntry): string {
 		const source = normalizeMdxDocument(doc.content, doc.sourcePath);
-		const html = applyMediaLoadingHints(markdown.parse(source, { async: false }) as string);
+		const html = prefixBundledMediaUrls(applyMediaLoadingHints(markdown.parse(source, { async: false }) as string));
 		return DOMPurify.sanitize(html, {
 			ADD_ATTR: ['target', 'rel'],
 			FORBID_TAGS: ['style', 'iframe', 'object', 'embed'],

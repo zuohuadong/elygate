@@ -6277,6 +6277,10 @@
           "default": false,
           "description": "Skip TLS certificate verification for the proxy"
         },
+        "ca_cert_pem": {
+          "type": "string",
+          "description": "PEM CA certificate(s) trusted for the https:// proxy hop and for TLS through a TLS-inspecting proxy (supports env.VAR_NAME)"
+        },
         "enable_for_scim": {
           "type": "boolean",
           "default": false,

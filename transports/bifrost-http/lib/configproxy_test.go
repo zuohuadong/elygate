@@ -2,6 +2,9 @@ package lib
 
 import (
 	"context"
+	"encoding/pem"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/maximhq/bifrost/core/network"
@@ -266,4 +269,45 @@ func TestValidateGlobalProxyURL_ErrorsDoNotQuotePassword(t *testing.T) {
 	err := validateGlobalProxyConfig(configstoreTables.GlobalProxyConfig{Enabled: true, Type: network.GlobalProxyTypeSOCKS5, URL: "socks5://svc:s3cret@10.0.0.5:bad"})
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), "s3cret", "the config.json load logs this error")
+}
+
+// TestLoadProxyConfig_AppliesCACertPEM: the proxy's CA is part of the file declaration and
+// survives the resolved -> stored -> in-memory path, not only the dashboard endpoint.
+func TestLoadProxyConfig_AppliesCACertPEM(t *testing.T) {
+	initTestLogger()
+	server := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer server.Close()
+	caPEM := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw}))
+
+	tempDir := createTempDir(t)
+	configData := makeConfigDataWithProvidersAndDir(nil, tempDir)
+	declared := proxyFileConfig("https://proxy.corp:8443")
+	declared.CACertPEM = schemas.NewSecretVar(caPEM)
+	configData.ProxyConfig = declared
+	createConfigFile(t, tempDir, configData)
+
+	stored, inMemory := bootProxy(t, tempDir, nil)
+	require.NotNil(t, stored)
+	assert.Equal(t, caPEM, stored.CACertPEM)
+	require.NotNil(t, inMemory)
+	assert.Equal(t, caPEM, inMemory.CACertPEM)
+}
+
+// TestLoadProxyConfig_RejectsInvalidCACertPEM: a CA that no client could trust must not
+// replace a working proxy declaration.
+func TestLoadProxyConfig_RejectsInvalidCACertPEM(t *testing.T) {
+	initTestLogger()
+	tempDir := createTempDir(t)
+	configData := makeConfigDataWithProvidersAndDir(nil, tempDir)
+	createConfigFile(t, tempDir, configData)
+	bootProxy(t, tempDir, &configstoreTables.GlobalProxyConfig{Enabled: true, Type: network.GlobalProxyTypeHTTP, URL: "http://dashboard.corp:3128"})
+
+	declared := proxyFileConfig("https://proxy.corp:8443")
+	declared.CACertPEM = schemas.NewSecretVar("not a certificate")
+	configData.ProxyConfig = declared
+	createConfigFile(t, tempDir, configData)
+	stored, inMemory := bootProxy(t, tempDir, nil)
+	assert.Equal(t, "http://dashboard.corp:3128", stored.URL)
+	require.NotNil(t, inMemory)
+	assert.Equal(t, "http://dashboard.corp:3128", inMemory.URL)
 }

@@ -3,6 +3,7 @@ package lib
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,6 +29,7 @@ type GlobalProxyFileConfig struct {
 	NoProxy            string                  `json:"no_proxy,omitempty"`
 	Timeout            int                     `json:"timeout,omitempty"`
 	SkipTLSVerify      bool                    `json:"skip_tls_verify,omitempty"`
+	CACertPEM          *schemas.SecretVar      `json:"ca_cert_pem,omitempty"`
 	EnableForSCIM      bool                    `json:"enable_for_scim,omitempty"`
 	EnableForInference bool                    `json:"enable_for_inference,omitempty"`
 	EnableForAPI       bool                    `json:"enable_for_api,omitempty"`
@@ -49,6 +51,7 @@ func (c *GlobalProxyFileConfig) resolved() configstoreTables.GlobalProxyConfig {
 		NoProxy:            c.NoProxy,
 		Timeout:            c.Timeout,
 		SkipTLSVerify:      c.SkipTLSVerify,
+		CACertPEM:          secretValue(c.CACertPEM),
 		EnableForSCIM:      c.EnableForSCIM,
 		EnableForInference: c.EnableForInference,
 		EnableForAPI:       c.EnableForAPI,
@@ -84,6 +87,9 @@ func validateGlobalProxyConfig(c configstoreTables.GlobalProxyConfig) error {
 	}
 	if c.Timeout < 0 {
 		return errors.New("proxy timeout must be non-negative")
+	}
+	if strings.TrimSpace(c.CACertPEM) != "" && !x509.NewCertPool().AppendCertsFromPEM([]byte(c.CACertPEM)) {
+		return errors.New("proxy ca_cert_pem holds no valid PEM certificate")
 	}
 	return nil
 }
