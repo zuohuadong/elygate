@@ -96,7 +96,10 @@ fi
 REPO_SLUG="${GITHUB_REPOSITORY:-$(gh repo view --json nameWithOwner -q .nameWithOwner)}"
 RELEASE_ERR=$(mktemp)
 trap 'rm -f "$RELEASE_ERR"' EXIT
-if gh api "repos/${REPO_SLUG}/releases/tags/${TAG_NAME}" >/dev/null 2>"$RELEASE_ERR"; then
+# The tag is a single path segment. GitHub's API returns 404 for a slash left
+# unencoded (transports/v1.2.3), which would look like an absent release.
+RELEASE_TAG_PATH=${TAG_NAME//\//%2F}
+if gh api "repos/${REPO_SLUG}/releases/tags/${RELEASE_TAG_PATH}" >/dev/null 2>"$RELEASE_ERR"; then
   echo "Error: GitHub release $TAG_NAME already exists."
   exit 1
 fi
