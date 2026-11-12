@@ -52,7 +52,7 @@ print_success "Helm is installed"
 
 # Lint the chart
 print_info "Linting Helm chart..."
-if helm lint "$CHART_DIR"; then
+if helm lint "$CHART_DIR" --set image.tag="$IMAGE_TAG"; then
     print_success "Chart linting passed"
 else
     print_error "Chart linting failed"

@@ -1327,6 +1327,12 @@ func TestPushDeliveryClientPrivateCallbacks(t *testing.T) {
 	resp.Body.Close()
 	require.Equal(t, http.StatusAccepted, resp.StatusCode)
 
+	// The test escape hatch permits loopback/private but never cloud metadata.
+	if resp, err := post(allowed, "http://169.254.169.254/latest/meta-data/"); err == nil {
+		resp.Body.Close()
+		t.Fatal("metadata callback was allowed by the private-callback escape hatch")
+	}
+
 	resp, err = post(allowed, redirector.URL)
 	require.NoError(t, err)
 	resp.Body.Close()

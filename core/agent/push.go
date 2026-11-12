@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -927,20 +926,30 @@ func pushBackoff(attempts int) time.Duration {
 // allowPrivate is true the address check is skipped so loopback and private
 // callbacks work; this is only for controlled test environments.
 func newPushDeliveryClient(factory *network.HTTPClientFactory, allowPrivate bool) *http.Client {
-	if factory != nil && !allowPrivate {
+	if factory == nil {
+		factory = network.DefaultHTTPClientFactory()
+	}
+	if factory != nil {
 		// PolicyTransport keeps the SSRF checks on every dial and adds the global
 		// API proxy with its TLS scope: the proxy CA reaches only proxied targets.
+		// allowPrivate is the documented test escape hatch for loopback callbacks;
+		// it still refuses link-local, cloud metadata, and unspecified addresses.
+		policy := network.SSRFPolicy(nil)
+		if allowPrivate {
+			policy = network.NewDialPolicy(network.PrivateNetworkDialContext(pushSendTimeout), network.ResolvePrivateNetworkTarget)
+		}
 		return &http.Client{
-			Transport:     factory.PolicyTransport(network.ClientPurposeAPI, network.SSRFPolicy(nil)),
+			Transport:     factory.PolicyTransport(network.ClientPurposeAPI, policy),
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 		}
 	}
 	dial := network.SSRFSafeDialContext(pushSendTimeout)
 	if allowPrivate {
-		dial = (&net.Dialer{Timeout: pushSendTimeout}).DialContext
+		dial = network.PrivateNetworkDialContext(pushSendTimeout)
 	}
 	return &http.Client{
 		Transport: &http.Transport{
+			Proxy:                 network.DefaultProxyFunc(network.ClientPurposeAPI),
 			DialContext:           dial,
 			ForceAttemptHTTP2:     true,
 			MaxIdleConns:          100,

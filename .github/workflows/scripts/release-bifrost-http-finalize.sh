@@ -83,6 +83,21 @@ if [[ "$PREV_CHANGELOG" == "$CHANGELOG_BODY" ]]; then
   exit 1
 fi
 
+# Authenticate and validate the release target before publishing anything. A tag
+# pushed before this check would leave a release-less tag behind on failure.
+if [ -z "${GH_TOKEN:-}" ] && [ -z "${GITHUB_TOKEN:-}" ]; then
+  echo "Error: GH_TOKEN or GITHUB_TOKEN is not set. Please export one to authenticate the GitHub CLI."
+  exit 1
+fi
+if ! gh auth status >/dev/null 2>&1; then
+  echo "Error: GitHub CLI is not authenticated; refusing to push a release tag."
+  exit 1
+fi
+if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+  echo "Error: GitHub release $TAG_NAME already exists."
+  exit 1
+fi
+
 # Create and push tag
 echo "🏷️ Creating tag: $TAG_NAME"
 git config user.name "github-actions[bot]"
@@ -154,11 +169,6 @@ npx @maximhq/bifrost --transport-version v$VERSION
 
 ---
 _This release was automatically created with dependencies: core \`$CORE_VERSION\`, framework \`$FRAMEWORK_VERSION\`. All plugins have been validated and updated._"
-
-if [ -z "${GH_TOKEN:-}" ] && [ -z "${GITHUB_TOKEN:-}" ]; then
-  echo "Error: GH_TOKEN or GITHUB_TOKEN is not set. Please export one to authenticate the GitHub CLI."
-  exit 1
-fi
 
 echo "🎉 Creating GitHub release for $TITLE..."
 gh release create "$TAG_NAME" \

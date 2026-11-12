@@ -14,13 +14,6 @@ if [ -z "$VERSION" ]; then
     exit 1
 fi
 
-# If release was not needed, skip verification
-if [ "$RELEASE_NEEDED" = "false" ]; then
-    echo "ℹ️  Bifrost-http release was not needed, skipping verification"
-    echo "   Docker images will be built with existing version"
-    exit 0
-fi
-
 echo "🔍 Verifying bifrost-http release v${VERSION}..."
 
 # Check if the git tag exists

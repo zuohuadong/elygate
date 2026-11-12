@@ -816,7 +816,10 @@ func (m *Manager) Update(ctx context.Context, name string, req UpdateRequest) (s
 	if err != nil {
 		return schemas.AgentRegistrationView{}, invalidRegistrationError(err)
 	}
-	reg.RequirePublicTarget = requiresPublicTargets(ctx)
+	// The flag is server-owned and only ever tightens: an authenticated admin
+	// updating a registration created through an auth-bypassed path must not
+	// drop its public-only constraint.
+	reg.RequirePublicTarget = existing.RequirePublicTarget || requiresPublicTargets(ctx)
 	reg.CreatedAt = existing.CreatedAt
 	var replacement *runtimeAgent
 	if reg.Enabled {

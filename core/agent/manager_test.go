@@ -3020,3 +3020,21 @@ func TestProxyRequestHandlerDeferredAndClosedOperations(t *testing.T) {
 	require.ErrorIs(t, err, a2a.ErrPushNotificationNotSupported)
 	require.ErrorIs(t, handler.DeleteTaskPushConfig(context.Background(), &a2a.DeleteTaskPushConfigRequest{}), a2a.ErrPushNotificationNotSupported)
 }
+
+// TestUpdatePreservesPublicOnlyForAuthBypassedRegistration pins that an
+// authenticated admin update cannot drop the server-owned public-only flag
+// set when the registration was created through an auth-bypassed path.
+func TestUpdatePreservesPublicOnlyForAuthBypassedRegistration(t *testing.T) {
+	store := &memoryStore{regs: map[string]schemas.AgentRegistration{}}
+	m, err := NewManager(context.Background(), store, nil, "http://gateway", nil)
+	require.NoError(t, err)
+	defer m.Close()
+	cardURL := "http://127.0.0.1:1/card"
+	_, err = m.Create(WithPublicTargetsOnly(context.Background(), true), CreateRequest{Name: "fixture", AgentCardURL: cardURL, Enabled: boolPtr(false)})
+	require.NoError(t, err)
+	_, err = m.Update(context.Background(), "fixture", UpdateRequest{AgentCardURL: &cardURL, Enabled: boolPtr(false)})
+	require.NoError(t, err)
+	stored, err := store.GetAgentRegistration(context.Background(), "fixture")
+	require.NoError(t, err)
+	require.True(t, stored.RequirePublicTarget)
+}

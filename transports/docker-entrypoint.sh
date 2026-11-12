@@ -67,9 +67,6 @@ ensure_app_dir() {
     chmod g+rwX "$APP_DIR/logs" 2>/dev/null || true
 }
 
-# Prepare the app directory before starting the application
-ensure_app_dir
-
 # Parse command line arguments and set environment variables. Unknown arguments are
 # preserved and forwarded to /app/main. Only the original argument count is parsed;
 # forwarded arguments are appended after that window, so they survive without being
@@ -99,6 +96,15 @@ while [ "$remaining" -gt 0 ]; do
             shift 2
             remaining=$((remaining - 2))
             ;;
+        --app-dir|-app-dir)
+            if [ "$remaining" -lt 2 ] || [ -z "$2" ]; then
+                echo "Error: --app-dir requires a value"
+                exit 1
+            fi
+            export APP_DIR="$2"
+            shift 2
+            remaining=$((remaining - 2))
+            ;;
         *)
             # Keep other arguments for the main application.
             forwarded=$1
@@ -108,6 +114,10 @@ while [ "$remaining" -gt 0 ]; do
             ;;
     esac
 done
+
+# The parsed APP_DIR (including an explicit -app-dir override) is the directory
+# the application will use, so prepare and check exactly that one.
+ensure_app_dir
 
 # Build the command with environment variables and standard arguments
 exec /app/main -app-dir "$APP_DIR" -port "$APP_PORT" -host "$APP_HOST" -log-level "$LOG_LEVEL" -log-style "$LOG_STYLE" "$@"

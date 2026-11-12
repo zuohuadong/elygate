@@ -3705,6 +3705,8 @@ func mergeAgentRegistrations(ctx context.Context, config *Config, fileAgents []*
 		}
 		agent.ConfigHash = fileHash
 		if match, ok := existingByName[agent.Name]; ok {
+			// Keep the server-owned public-only constraint across file updates.
+			agent.RequirePublicTarget = match.RequirePublicTarget
 			if match.ConfigHash == fileHash {
 				continue
 			}
@@ -3751,8 +3753,9 @@ func syncAgentRegistrationsFromFile(ctx context.Context, config *Config, fileAge
 			continue
 		}
 		agent.ConfigHash = fileHash
-
 		if match != nil {
+			// Keep the server-owned public-only constraint across file updates.
+			agent.RequirePublicTarget = match.RequirePublicTarget
 			if match.ConfigHash == fileHash {
 				continue
 			}
