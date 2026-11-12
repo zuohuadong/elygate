@@ -260,10 +260,6 @@ jobs:
           if [[ "$VERSION" == *-* ]]; then
             PRERELEASE_FLAG="--prerelease"
           fi
-          if gh release view "$FULL_TAG" >/dev/null 2>&1; then
-            echo "Release $FULL_TAG already exists. Skipping."
-            exit 0
-          fi
           if git rev-parse --verify "refs/tags/${FULL_TAG}" >/dev/null 2>&1; then
             if [ "$(git rev-list -n 1 "$FULL_TAG")" != "$(git rev-parse HEAD)" ]; then
               echo "Tag $FULL_TAG already exists at a different commit" >&2
@@ -272,6 +268,11 @@ jobs:
           else
             git tag "$FULL_TAG"
             git push origin "$FULL_TAG"
+          fi
+          RELEASE_TAG_PATH=${FULL_TAG//\//%2F}
+          if gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG_PATH}" >/dev/null 2>&1; then
+            echo "Release $FULL_TAG already exists. Skipping."
+            exit 0
           fi
           gh release create "$FULL_TAG" \
             --title "Bifrost CLI v$VERSION" \

@@ -91,11 +91,27 @@ echo "   Transport: $TRANSPORT_VERSION"
 
 START_FROM="none"
 
+# A tag is a valid released marker only when it exists and is in HEAD history. A
+# same-name branch or a tag from an unrelated history must fail closed instead of
+# suppressing a release.
+tag_exists() {
+  local tag="$1"
+  git rev-parse --verify "refs/tags/$tag" >/dev/null 2>&1 || return 1
+  local commit
+  commit=$(git rev-list -n 1 "$tag")
+  if ! git merge-base --is-ancestor "$commit" HEAD; then
+    echo "❌ Tag $tag is not in HEAD history; refusing to treat it as released" >&2
+    exit 1
+  fi
+  return 0
+}
+
+
 # Check Core
 echo ""
 echo "🔧 Checking core..."
 CORE_TAG="core/v${CORE_VERSION}"
-if git rev-parse --verify "refs/tags/$CORE_TAG" >/dev/null 2>&1; then
+if tag_exists "$CORE_TAG"; then
   echo "   ⏭️ Tag $CORE_TAG already exists"
 else
   # Extract major.minor track from version (e.g., "1.3.55" -> "1.3", "1.4.0-prerelease1" -> "1.4")
@@ -145,7 +161,7 @@ fi
 echo ""
 echo "📦 Checking framework..."
 FRAMEWORK_TAG="framework/v${FRAMEWORK_VERSION}"
-if git rev-parse --verify "refs/tags/$FRAMEWORK_TAG" >/dev/null 2>&1; then
+if tag_exists "$FRAMEWORK_TAG"; then
   echo "   ⏭️ Tag $FRAMEWORK_TAG already exists"
 else
   # Extract major.minor track from version (e.g., "1.3.55" -> "1.3", "1.4.0-prerelease1" -> "1.4")
@@ -222,7 +238,7 @@ for plugin_dir in plugins/*/; do
   tag_name="plugins/${plugin_name}/v${current_version}"
   echo "   📦 Plugin: $plugin_name (v$current_version)"
 
-  if git rev-parse --verify "refs/tags/$tag_name" >/dev/null 2>&1; then
+  if tag_exists "$tag_name"; then
     echo "      ⏭️ Tag already exists"
     continue
   fi
@@ -286,7 +302,7 @@ DOCKER_TAG_EXISTS="false"
 
 # Check if Git tag exists
 GIT_TAG_EXISTS="false"
-if git rev-parse --verify "refs/tags/$TRANSPORT_TAG" >/dev/null 2>&1; then
+if tag_exists "$TRANSPORT_TAG"; then
   echo "   ⏭️ Git tag $TRANSPORT_TAG already exists"
   GIT_TAG_EXISTS="true"
 fi

@@ -58,6 +58,14 @@ TAG_NAME="plugins/${PLUGIN_NAME}/v${PLUGIN_VERSION}"
 echo "📦 Plugin version: $PLUGIN_VERSION"
 echo "🏷️ Tag name: $TAG_NAME"
 
+# Preflight the tag before modifying or pushing dependency files.
+if git rev-parse -q --verify "refs/tags/$TAG_NAME" >/dev/null; then
+  if [ "$(git rev-list -n 1 "$TAG_NAME")" != "$(git rev-parse HEAD)" ]; then
+    echo "❌ Tag $TAG_NAME already exists at a different commit"
+    exit 1
+  fi
+fi
+
 
 # Update plugin dependencies
 echo "🔧 Updating plugin dependencies..."
@@ -190,7 +198,9 @@ _This release was automatically created from version file: \`plugins/$PLUGIN_NAM
 
 echo "🎉 Creating GitHub release for $TITLE..."
 
-if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+REPO_SLUG="${GITHUB_REPOSITORY:-$(gh repo view --json nameWithOwner -q .nameWithOwner)}"
+RELEASE_TAG_PATH=${TAG_NAME//\//%2F}
+if gh api "repos/${REPO_SLUG}/releases/tags/${RELEASE_TAG_PATH}" >/dev/null 2>&1; then
   echo "ℹ️ Release $TAG_NAME already exists. Skipping creation."
 else
   gh release create "$TAG_NAME" \

@@ -81,6 +81,14 @@ if [ -z "${GH_TOKEN:-}" ] && [ -z "${GITHUB_TOKEN:-}" ]; then
   exit 1
 fi
 
+# Fail before any external write when the version tag belongs to another commit.
+if git rev-parse -q --verify "refs/tags/$TAG_NAME" >/dev/null; then
+  if [ "$(git rev-list -n 1 "$TAG_NAME")" != "$(git rev-parse HEAD)" ]; then
+    echo "❌ Tag $TAG_NAME already exists at a different commit"
+    exit 1
+  fi
+fi
+
 # --- Publish steps (all checks passed) ---
 
 # Configure and upload to R2
@@ -124,7 +132,9 @@ npx @maximhq/bifrost --cli-version v$VERSION
 ---
 _This release was automatically created._"
 
-if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+REPO_SLUG="${GITHUB_REPOSITORY:-$(gh repo view --json nameWithOwner -q .nameWithOwner)}"
+RELEASE_TAG_PATH=${TAG_NAME//\//%2F}
+if gh api "repos/${REPO_SLUG}/releases/tags/${RELEASE_TAG_PATH}" >/dev/null 2>&1; then
   echo "ℹ️ GitHub release $TAG_NAME already exists. Skipping."
 else
   echo "🎉 Creating GitHub release for $TITLE..."

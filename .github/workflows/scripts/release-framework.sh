@@ -54,6 +54,15 @@ fi
 # Fetching all tags
 git fetch --tags >/dev/null 2>&1 || true
 
+# Preflight the tag before any dependency commit/push. An existing tag must point
+# at this commit; a stale tag fails without touching the remote.
+if git rev-parse -q --verify "refs/tags/$TAG_NAME" >/dev/null; then
+  if [ "$(git rev-list -n 1 "$TAG_NAME")" != "$(git rev-parse HEAD)" ]; then
+    echo "❌ Tag $TAG_NAME already exists at a different commit"
+    exit 1
+  fi
+fi
+
 # Get core version from version file
 CORE_VERSION="v$(tr -d '\n\r' < core/version)"
 
@@ -173,7 +182,9 @@ go get github.com/maximhq/bifrost/framework@$VERSION
 _This release was automatically created and uses core version: \`$CORE_VERSION\`_"
 
 echo "🎉 Creating GitHub release for $TITLE..."
-if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+REPO_SLUG="${GITHUB_REPOSITORY:-$(gh repo view --json nameWithOwner -q .nameWithOwner)}"
+RELEASE_TAG_PATH=${TAG_NAME//\//%2F}
+if gh api "repos/${REPO_SLUG}/releases/tags/${RELEASE_TAG_PATH}" >/dev/null 2>&1; then
   echo "ℹ️ Release $TAG_NAME already exists. Skipping creation."
 else
   gh release create "$TAG_NAME" \
