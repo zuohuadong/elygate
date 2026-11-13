@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+
+source "$(dirname "$0")/r2-bucket.sh"
 set -euo pipefail
 
 # Upload CLI builds to R2 with retry logic
@@ -20,7 +22,19 @@ if [[ ! -d "./dist" ]]; then
   exit 1
 fi
 : "${R2_ENDPOINT:?R2_ENDPOINT env var is required}"
-: "${R2_BUCKET:?R2_BUCKET env var is required}"
+validate_r2_bucket
+
+# Every release platform must be present with its checksum before any write.
+REQUIRED_PLATFORMS=("darwin/amd64" "darwin/arm64" "linux/amd64" "linux/arm64" "windows/amd64")
+for platform in "${REQUIRED_PLATFORMS[@]}"; do
+  output_name="bifrost"
+  [[ "$platform" == windows/* ]] && output_name+='.exe'
+  artifact="./dist/$platform/$output_name"
+  if [ ! -s "$artifact" ] || [ ! -s "$artifact.sha256" ]; then
+    echo "❌ Incomplete build: missing $artifact or its checksum; refusing to upload."
+    exit 1
+  fi
+done
 
 # Strip 'cli/' prefix from version
 VERSION_ONLY=${CLI_TAG#cli/v}

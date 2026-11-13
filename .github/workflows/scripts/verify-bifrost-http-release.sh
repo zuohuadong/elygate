@@ -6,6 +6,8 @@
 
 set -e
 
+source "$(dirname "$0")/r2-bucket.sh"
+
 VERSION=$1
 RELEASE_NEEDED=${2:-}
 
@@ -30,11 +32,11 @@ if ! git rev-parse --verify "refs/tags/${TAG_NAME}" >/dev/null 2>&1; then
 fi
 
 TAG_COMMIT=$(git rev-list -n 1 "${TAG_NAME}")
-if ! git merge-base --is-ancestor "$TAG_COMMIT" HEAD; then
-    echo "❌ Git tag ${TAG_NAME} is outside the current history"
+if [ "$TAG_COMMIT" != "$(git rev-parse HEAD)" ]; then
+    echo "❌ Git tag ${TAG_NAME} points at ${TAG_COMMIT}, not at the build commit $(git rev-parse HEAD)"
     exit 78
 fi
-echo "✅ Git tag found: ${TAG_NAME}"
+echo "✅ Git tag found at the build commit: ${TAG_NAME}"
 
 # Check if the GitHub release exists
 if [ -z "$GH_TOKEN" ]; then
@@ -59,24 +61,30 @@ else
     exit 78
 fi
 
-# Check if dist binaries exist for the version
-echo "🔍 Checking if release binaries exist..."
-BINARY_FOUND=false
-
-# Check for common binary paths
-for arch in "darwin/amd64" "darwin/arm64" "linux/amd64"; do
-    BINARY_PATH="dist/${arch}/bifrost-http"
-    if [ -f "$BINARY_PATH" ]; then
-        echo "✅ Found binary: $BINARY_PATH"
-        BINARY_FOUND=true
-        break
-    fi
-done
-
-if [ "$BINARY_FOUND" = false ]; then
-    echo "⚠️  Warning: No release binaries found in dist/, but continuing..."
-    echo "    This might be expected if binaries are uploaded to external storage"
+# Verify the published artifact set on R2. The upload jobs run on separate
+# runners, so the local dist/ is intentionally absent here; the versioned R2
+# prefix is the authoritative released artifact.
+: "${R2_ENDPOINT:?R2_ENDPOINT env var is required to verify released artifacts}"
+validate_r2_bucket
+echo "🔍 Checking released artifacts in R2..."
+export AWS_ACCESS_KEY_ID="${R2_ACCESS_KEY_ID:?R2_ACCESS_KEY_ID env var is required to verify released artifacts}"
+export AWS_SECRET_ACCESS_KEY="${R2_SECRET_ACCESS_KEY:?R2_SECRET_ACCESS_KEY env var is required to verify released artifacts}"
+export AWS_DEFAULT_REGION=us-east-1
+if ! ARTIFACT_LISTING=$(aws s3 ls "s3://$R2_BUCKET/bifrost/v${VERSION}/" \
+      --endpoint-url "$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]')" 2>&1); then
+    echo "❌ Could not list s3://$R2_BUCKET/bifrost/v${VERSION}/"
+    echo "$ARTIFACT_LISTING"
+    exit 78
 fi
+if [ -z "$ARTIFACT_LISTING" ]; then
+    echo "❌ No released artifacts at s3://$R2_BUCKET/bifrost/v${VERSION}/"
+    exit 78
+fi
+if ! grep -q 'bifrost-http' <<<"$ARTIFACT_LISTING" || ! grep -q '\.sha256' <<<"$ARTIFACT_LISTING"; then
+    echo "❌ Released artifact set is missing binaries or checksums"
+    exit 78
+fi
+echo "✅ Released artifacts found in R2"
 
 echo ""
 echo "✅ Verification complete: bifrost-http v${VERSION} was successfully released"

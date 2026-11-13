@@ -31,6 +31,11 @@ if [[ "$FILE_VERSION" != "$VERSION" ]]; then
   exit 1
 fi
 
+# Compile the module before any tag/release write. The workflow can skip the
+# test matrix, so this is the last deterministic build gate on the release path.
+echo "🔨 Compiling core module..."
+go build ./...
+
 cd ..
 
 # Capturing changelog

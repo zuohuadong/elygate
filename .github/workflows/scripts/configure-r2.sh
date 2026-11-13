@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+
+source "$(dirname "$0")/r2-bucket.sh"
 set -euo pipefail
 
 # Configure AWS CLI for R2 uploads
@@ -13,8 +15,10 @@ R2_ENDPOINT="$(echo "$R2_ENDPOINT" | tr -d '[:space:]')"
 R2_ACCESS_KEY_ID="$(echo "$R2_ACCESS_KEY_ID" | tr -d '[:space:]')"
 R2_SECRET_ACCESS_KEY="$(echo "$R2_SECRET_ACCESS_KEY" | tr -d '[:space:]')"
 
+validate_r2_bucket
+
 # Validate environment variables
-if [ -z "${R2_BUCKET:-}" ] || [ -z "$R2_ENDPOINT" ] || [ -z "$R2_ACCESS_KEY_ID" ] || [ -z "$R2_SECRET_ACCESS_KEY" ]; then
+if [ -z "$R2_ENDPOINT" ] || [ -z "$R2_ACCESS_KEY_ID" ] || [ -z "$R2_SECRET_ACCESS_KEY" ]; then
   echo "❌ Missing required R2 credentials or bucket"
   exit 1
 fi

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+
+source "$(dirname "$0")/r2-bucket.sh"
 set -euo pipefail
 
 # Upload builds to R2 with retry logic
@@ -22,7 +24,23 @@ if [[ ! -d "./dist" ]]; then
   exit 1
 fi
 : "${R2_ENDPOINT:?R2_ENDPOINT env var is required}"
-: "${R2_BUCKET:?R2_BUCKET env var is required}"
+validate_r2_bucket
+
+# Refuse an empty or incomplete source: a successful `s3 cp --recursive` over an
+# empty directory would publish a version prefix with no binaries and no checksums.
+BINARY_COUNT=0
+while IFS= read -r binary; do
+  BINARY_COUNT=$((BINARY_COUNT + 1))
+  if [ ! -s "${binary}.sha256" ]; then
+    echo "❌ Missing checksum for ${binary}; refusing to upload."
+    exit 1
+  fi
+done < <(find ./dist -type f \( -name 'bifrost-http' -o -name 'bifrost-http.exe' \) -print)
+if [ "$BINARY_COUNT" -eq 0 ]; then
+  echo "❌ ./dist contains no bifrost-http binaries; refusing to upload."
+  exit 1
+fi
+echo "✅ Found $BINARY_COUNT bifrost-http binaries with checksums"
 
 # Strip 'transports/' prefix from version
 VERSION_ONLY=${TRANSPORT_VERSION#transports/v}

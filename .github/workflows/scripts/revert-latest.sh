@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+
+source "$(dirname "$0")/r2-bucket.sh"
 set -euo pipefail
 
 # Overwrite latest with a specific version from R2
@@ -17,7 +19,7 @@ fi
 
 # Validate required environment variables
 : "${R2_ENDPOINT:?R2_ENDPOINT env var is required}"
-: "${R2_BUCKET:?R2_BUCKET env var is required}"
+validate_r2_bucket
 
 # Clean endpoint URL
 R2_ENDPOINT="$(echo "$R2_ENDPOINT" | tr -d '[:space:]')"
@@ -54,16 +56,25 @@ sync_with_retry() {
   return 1
 }
 
-# Check if the version exists in R2
+# Check if the version exists and actually contains artifacts. `aws s3 ls` on an
+# empty prefix returns 0, so the listing content is the only reliable signal.
 echo "🔍 Checking if version $VERSION exists..."
-if ! aws s3 ls "s3://$R2_BUCKET/bifrost/$VERSION/" \
+if ! SOURCE_LISTING=$(aws s3 ls "s3://$R2_BUCKET/bifrost/$VERSION/" \
      --endpoint-url "$R2_ENDPOINT" \
-     --profile "${R2_AWS_PROFILE:-R2}" >/dev/null 2>&1; then
+     --profile "${R2_AWS_PROFILE:-R2}" 2>&1); then
   echo "❌ Version $VERSION not found in R2 bucket"
   echo "Available versions:"
   aws s3 ls "s3://$R2_BUCKET/bifrost/" \
     --endpoint-url "$R2_ENDPOINT" \
     --profile "${R2_AWS_PROFILE:-R2}" | grep "PRE v" | awk '{print $2}' | sed 's/\///g' || true
+  exit 1
+fi
+if [ -z "$SOURCE_LISTING" ]; then
+  echo "❌ Version prefix s3://$R2_BUCKET/bifrost/$VERSION/ is empty; refusing to overwrite latest/"
+  exit 1
+fi
+if ! grep -q 'bifrost-http' <<<"$SOURCE_LISTING" || ! grep -q '\.sha256' <<<"$SOURCE_LISTING"; then
+  echo "❌ Version prefix s3://$R2_BUCKET/bifrost/$VERSION/ is missing binaries or checksums; refusing to overwrite latest/"
   exit 1
 fi
 

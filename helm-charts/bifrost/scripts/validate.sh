@@ -38,9 +38,19 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHART_DIR="$SCRIPT_DIR/.."
 # Examples and the chart itself require an explicit tag; validation uses a
 # neutral default so both the default values and every example render offline.
-IMAGE_TAG="${IMAGE_TAG:-latest}"
+IMAGE_TAG="${IMAGE_TAG:-v2.5.1}"
 
 print_banner
+
+# Examples must pin an immutable image tag: "latest" makes an example
+# non-reproducible and can silently change which image a user deploys.
+for config in "$CHART_DIR"/values-examples/*.yaml; do
+    tag=$(awk '/^image:/{in_image=1; next} in_image && /^[^[:space:]]/{in_image=0} in_image && /^[[:space:]]+tag:/{gsub(/[" ]/, "", $2); print $2; exit}' "$config")
+    if [ -z "$tag" ] || [ "$tag" = "latest" ]; then
+        print_error "  $(basename "$config"): image.tag must pin a concrete version"
+        exit 1
+    fi
+done
 
 # Check if Helm is installed
 print_info "Checking Helm installation..."

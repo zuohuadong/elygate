@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+
+source "$(dirname "$0")/r2-bucket.sh"
 set -euo pipefail
 
 # Finalize bifrost-http release: changelog, tagging, GitHub release, R2 latest copy
@@ -229,14 +231,19 @@ fi
 
 # Copy versioned R2 path to latest/ for stable releases.
 if [[ "$VERSION" != *-* ]]; then
-  if [ -z "${R2_ENDPOINT:-}" ] || [ -z "${R2_BUCKET:-}" ]; then
-    echo "Error: R2_ENDPOINT and R2_BUCKET are required for a stable release."
+  if [ -z "${R2_ENDPOINT:-}" ]; then
+    echo "Error: R2_ENDPOINT is required for a stable release."
     exit 1
   fi
+  validate_r2_bucket
   R2_ENDPOINT="$(echo "$R2_ENDPOINT" | tr -d '[:space:]')"
   SOURCE_LISTING=$(aws s3 ls "s3://$R2_BUCKET/bifrost/v$VERSION/" --endpoint-url "$R2_ENDPOINT" --profile "${R2_AWS_PROFILE:-R2}")
   if [ -z "$SOURCE_LISTING" ]; then
     echo "Error: versioned R2 prefix s3://$R2_BUCKET/bifrost/v$VERSION/ is empty; refusing to update latest/."
+    exit 1
+  fi
+  if ! grep -q 'bifrost-http' <<<"$SOURCE_LISTING" || ! grep -q '\.sha256' <<<"$SOURCE_LISTING"; then
+    echo "Error: versioned R2 prefix is missing binaries or checksums; refusing to update latest/."
     exit 1
   fi
   echo "📤 Copying versioned binaries to latest/ on R2..."

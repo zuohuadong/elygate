@@ -1,6 +1,6 @@
 # Pin the image tag so this example renders on its own.
 image:
-  tag: "latest"
+  tag: "v2.5.1"
 
 # Configuration: External PostgreSQL (not deployed by Helm)
 # Usage: helm install bifrost ./bifrost -f values-examples/external-postgres.yaml

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+
+source "$(dirname "$0")/r2-bucket.sh"
 set -uo pipefail
 
 # Publishes a test report to R2 so it can be linked from the public Mintlify

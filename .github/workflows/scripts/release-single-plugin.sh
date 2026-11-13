@@ -84,6 +84,43 @@ else
 fi
 
 
+# Capturing changelog
+CHANGELOG_BODY=$(cat $PLUGIN_DIR/changelog.md)
+# Skip comments from changelog
+CHANGELOG_BODY=$(echo "$CHANGELOG_BODY" | grep -v '^<!--' | grep -v '^-->' || true)
+# If changelog is empty, return error
+if [ -z "$CHANGELOG_BODY" ]; then
+  echo "❌ Changelog is empty"
+  exit 1
+fi
+echo "📝 New changelog: $CHANGELOG_BODY"
+
+# Finding previous tag
+echo "🔍 Finding previous tag..."
+PREV_TAG=$(git tag -l "plugins/${PLUGIN_NAME}/v*" | sort -V | tail -1)
+if [[ "$PREV_TAG" == "$TAG_NAME" ]]; then
+  PREV_TAG=$(git tag -l "plugins/${PLUGIN_NAME}/v*" | sort -V | tail -2 | head -1)
+fi
+
+# Only validate changelog changes if there's a previous tag
+if [ -n "$PREV_TAG" ]; then
+  echo "🔍 Previous tag: $PREV_TAG"
+
+  # Get message of the tag
+  echo "🔍 Getting previous tag message..."
+  PREV_CHANGELOG=$(git tag -l --format='%(contents)' "$PREV_TAG")
+  echo "📝 Previous changelog body: $PREV_CHANGELOG"
+
+  # Checking if tag message is the same as the changelog
+  if [[ "$PREV_CHANGELOG" == "$CHANGELOG_BODY" ]]; then
+    echo "❌ Changelog is the same as the previous changelog"
+    exit 1
+  fi
+else
+  echo "ℹ️ No previous tag found - this is the first release"
+fi
+
+
 # Update plugin dependencies
 echo "🔧 Updating plugin dependencies..."
 cd "$PLUGIN_DIR"
@@ -131,43 +168,6 @@ if [ "$TAG_AT_HEAD" = "false" ] && ! git diff --cached --quiet; then
 else
   echo "ℹ️ No staged changes to commit"
 fi
-
-# Capturing changelog
-CHANGELOG_BODY=$(cat $PLUGIN_DIR/changelog.md)
-# Skip comments from changelog
-CHANGELOG_BODY=$(echo "$CHANGELOG_BODY" | grep -v '^<!--' | grep -v '^-->' || true)
-# If changelog is empty, return error
-if [ -z "$CHANGELOG_BODY" ]; then
-  echo "❌ Changelog is empty"
-  exit 1
-fi
-echo "📝 New changelog: $CHANGELOG_BODY"
-
-# Finding previous tag
-echo "🔍 Finding previous tag..."
-PREV_TAG=$(git tag -l "plugins/${PLUGIN_NAME}/v*" | sort -V | tail -1)
-if [[ "$PREV_TAG" == "$TAG_NAME" ]]; then
-  PREV_TAG=$(git tag -l "plugins/${PLUGIN_NAME}/v*" | sort -V | tail -2 | head -1)
-fi
-
-# Only validate changelog changes if there's a previous tag
-if [ -n "$PREV_TAG" ]; then
-  echo "🔍 Previous tag: $PREV_TAG"
-  
-  # Get message of the tag
-  echo "🔍 Getting previous tag message..."
-  PREV_CHANGELOG=$(git tag -l --format='%(contents)' "$PREV_TAG")
-  echo "📝 Previous changelog body: $PREV_CHANGELOG"
-
-  # Checking if tag message is the same as the changelog
-  if [[ "$PREV_CHANGELOG" == "$CHANGELOG_BODY" ]]; then
-    echo "❌ Changelog is the same as the previous changelog"
-    exit 1
-  fi
-else
-  echo "ℹ️ No previous tag found - this is the first release"
-fi
-
 
 # Create and push tag
 echo "🏷️ Creating tag: $TAG_NAME"

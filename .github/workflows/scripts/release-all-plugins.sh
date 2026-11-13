@@ -21,8 +21,9 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 1
 fi
 
-# Validate that the input is valid JSON
-if ! echo "$CHANGED_PLUGINS_JSON" | jq empty >/dev/null 2>&1; then
+# Validate that the input is a JSON array of non-empty strings. `jq empty`
+# accepts scalars and objects, which would later look like an empty list.
+if ! echo "$CHANGED_PLUGINS_JSON" | jq -e 'type == "array" and all(.[]; type == "string" and length > 0)' >/dev/null 2>&1; then
   echo "❌ Error: Invalid JSON provided"
   echo "Input: $CHANGED_PLUGINS_JSON"
   echo "Please provide a valid JSON array of plugin names"
@@ -40,12 +41,14 @@ if jq -e 'length==0' <<<"$CHANGED_PLUGINS_JSON" >/dev/null 2>&1; then
   exit 0
 fi
 
-# Convert JSON array to bash array using readarray to avoid word-splitting
-if ! readarray -t PLUGINS < <(echo "$CHANGED_PLUGINS_JSON" | jq -r '.[]' 2>/dev/null); then
+# Convert JSON array to bash array. Capture jq output first so a parse failure is
+# observed directly instead of being swallowed by process substitution.
+if ! PLUGIN_LIST=$(echo "$CHANGED_PLUGINS_JSON" | jq -er '.[]'); then
   echo "❌ Error: Failed to parse plugin names from JSON"
   echo "Input: $CHANGED_PLUGINS_JSON"
   exit 1
 fi
+readarray -t PLUGINS <<< "$PLUGIN_LIST"
 
 # Verify release-single-plugin.sh exists and is executable
 RELEASE_SCRIPT="./.github/workflows/scripts/release-single-plugin.sh"

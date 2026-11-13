@@ -74,6 +74,36 @@ fi
 CORE_VERSION="v$(tr -d '\n\r' < core/version)"
 
 
+# Capturing changelog
+CHANGELOG_BODY=$(cat framework/changelog.md)
+# Skip comments from changelog
+CHANGELOG_BODY=$(echo "$CHANGELOG_BODY" | grep -v '^<!--' | grep -v '^-->')
+# If changelog is empty, return error
+if [ -z "$CHANGELOG_BODY" ]; then
+  echo "❌ Changelog is empty"
+  exit 1
+fi
+echo "📝 New changelog: $CHANGELOG_BODY"
+
+# Finding previous tag
+echo "🔍 Finding previous tag..."
+PREV_TAG=$(git tag -l "framework/v*" | sort -V | tail -1)
+if [[ "$PREV_TAG" == "$TAG_NAME" ]]; then
+  PREV_TAG=$(git tag -l "framework/v*" | sort -V | tail -2 | head -1)
+fi
+echo "🔍 Previous tag: $PREV_TAG"
+
+# Get message of the tag
+echo "🔍 Getting previous tag message..."
+PREV_CHANGELOG=$(git tag -l --format='%(contents)' "$PREV_TAG")
+echo "📝 Previous changelog body: $PREV_CHANGELOG"
+
+# Checking if tag message is the same as the changelog
+if [[ "$PREV_CHANGELOG" == "$CHANGELOG_BODY" ]]; then
+  echo "❌ Changelog is the same as the previous changelog"
+  exit 1
+fi
+
 # Before starting the test, we need to update hello-word plugin core dependencies
 echo "🔧 Updating hello-word plugin core dependencies..."
 cd examples/plugins/hello-world
@@ -116,36 +146,6 @@ if [ "$TAG_AT_HEAD" = "false" ] && ! git diff --cached --quiet; then
   echo "🔧 Pushed framework bump to $CURRENT_BRANCH"
 else
   echo "No dependency changes detected; skipping commit."
-fi
-
-# Capturing changelog
-CHANGELOG_BODY=$(cat framework/changelog.md)
-# Skip comments from changelog
-CHANGELOG_BODY=$(echo "$CHANGELOG_BODY" | grep -v '^<!--' | grep -v '^-->')
-# If changelog is empty, return error
-if [ -z "$CHANGELOG_BODY" ]; then
-  echo "❌ Changelog is empty"
-  exit 1
-fi
-echo "📝 New changelog: $CHANGELOG_BODY"
-
-# Finding previous tag
-echo "🔍 Finding previous tag..."
-PREV_TAG=$(git tag -l "framework/v*" | sort -V | tail -1)
-if [[ "$PREV_TAG" == "$TAG_NAME" ]]; then
-  PREV_TAG=$(git tag -l "framework/v*" | sort -V | tail -2 | head -1)
-fi
-echo "🔍 Previous tag: $PREV_TAG"
-
-# Get message of the tag
-echo "🔍 Getting previous tag message..."
-PREV_CHANGELOG=$(git tag -l --format='%(contents)' "$PREV_TAG")
-echo "📝 Previous changelog body: $PREV_CHANGELOG"
-
-# Checking if tag message is the same as the changelog
-if [[ "$PREV_CHANGELOG" == "$CHANGELOG_BODY" ]]; then
-  echo "❌ Changelog is the same as the previous changelog"
-  exit 1
 fi
 
 # Create and push tag

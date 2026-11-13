@@ -1,6 +1,6 @@
 # Pin the image tag so this example renders on its own.
 image:
-  tag: "latest"
+  tag: "v2.5.1"
 
 # Configuration: PostgreSQL for config/logs + Weaviate for vector store
 # Usage: helm install bifrost ./bifrost -f values-examples/postgres-weaviate.yaml

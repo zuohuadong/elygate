@@ -79,5 +79,5 @@ if [ -n "${GITHUB_REPOSITORY:-}" ]; then
 
         docker manifest push "${GHCR_IMAGE}:latest"
     fi
-  ) || echo "::warning::GHCR mirroring failed; Docker Hub publish unaffected"
+  )
 fi

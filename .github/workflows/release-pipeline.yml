@@ -3065,6 +3065,10 @@ jobs:
           RUNWARE_API_KEY: ${{ secrets.RUNWARE_API_KEY }}
         run: ./.github/workflows/scripts/release-core.sh "${{ needs.detect-changes.outputs.core-version }}"
 
+      - name: Record release commit
+        id: core-commit
+        run: echo "commit-sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
   framework-release:
     needs:
       [
@@ -3097,6 +3101,7 @@ jobs:
     outputs:
       success: ${{ steps.release.outputs.success }}
       version: ${{ needs.detect-changes.outputs.framework-version }}
+      commit-sha: ${{ steps.framework-commit.outputs.commit-sha }}
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
@@ -3192,6 +3197,10 @@ jobs:
           RUNWARE_API_KEY: ${{ secrets.RUNWARE_API_KEY }}
         run: ./.github/workflows/scripts/release-framework.sh "${{ needs.detect-changes.outputs.framework-version }}"
 
+      - name: Record release commit
+        id: framework-commit
+        run: echo "commit-sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
   plugins-release:
     needs:
       [
@@ -3224,6 +3233,7 @@ jobs:
       contents: write
     outputs:
       success: ${{ steps.release.outputs.success }}
+      commit-sha: ${{ steps.plugins-commit.outputs.commit-sha }}
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
@@ -3248,6 +3258,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          ref: ${{ needs.framework-release.outputs.commit-sha || github.sha }}
           fetch-depth: 0
           fetch-tags: true
           token: ${{ secrets.GH_TOKEN }}
@@ -3338,6 +3349,10 @@ jobs:
           RUNWARE_API_KEY: ${{ secrets.RUNWARE_API_KEY }}
         run: ./.github/workflows/scripts/release-all-plugins.sh '${{ needs.detect-changes.outputs.changed-plugins }}'
 
+      - name: Record release commit
+        id: plugins-commit
+        run: echo "commit-sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
   # Prep: update dependencies, validate build, commit/push
   bifrost-http-prep:
     needs:
@@ -3395,6 +3410,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          ref: ${{ needs.plugins-release.outputs.commit-sha || github.sha }}
           fetch-depth: 0
           fetch-tags: true
           token: ${{ secrets.GH_TOKEN }}
@@ -3695,6 +3711,10 @@ jobs:
         id: verify
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: |
           ./.github/workflows/scripts/verify-bifrost-http-release.sh "${{ needs.detect-changes.outputs.transport-version }}" "${{ needs.detect-changes.outputs.bifrost-http-needs-release }}"
           echo "verified=true" >> $GITHUB_OUTPUT
@@ -3741,7 +3761,6 @@ jobs:
       # by copying it with buildx imagetools (no rebuild). Best-effort: a ghcr.io
       # failure must not fail the Docker Hub release.
       - name: Mirror AMD64 image to GitHub Container Registry
-        continue-on-error: true
         run: |
           docker buildx imagetools create \
             --tag "${{ steps.tags.outputs.ghcr-tag }}" \
@@ -3828,6 +3847,10 @@ jobs:
         id: verify
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: |
           ./.github/workflows/scripts/verify-bifrost-http-release.sh "${{ needs.detect-changes.outputs.transport-version }}" "${{ needs.detect-changes.outputs.bifrost-http-needs-release }}"
           echo "verified=true" >> $GITHUB_OUTPUT
@@ -3874,7 +3897,6 @@ jobs:
       # by copying it with buildx imagetools (no rebuild). Best-effort: a ghcr.io
       # failure must not fail the Docker Hub release.
       - name: Mirror ARM64 image to GitHub Container Registry
-        continue-on-error: true
         run: |
           docker buildx imagetools create \
             --tag "${{ steps.tags.outputs.ghcr-tag }}" \
@@ -3882,7 +3904,7 @@ jobs:
 
   # Docker manifest
   docker-manifest:
-    needs: [check-skip, detect-changes, docker-build-amd64, docker-build-arm64]
+    needs: [check-skip, detect-changes, docker-build-amd64, docker-build-arm64, bifrost-http-prep]
     if: "always() && needs.check-skip.outputs.should-skip != 'true' && needs.docker-build-amd64.result == 'success' && needs.docker-build-arm64.result == 'success'"
     runs-on: builder-8-32
     permissions:
@@ -3908,6 +3930,8 @@ jobs:
 
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.bifrost-http-prep.outputs.commit-sha || github.sha }}
 
       - name: Log in to Docker Hub
         uses: step-security/docker-login-action@870af644803bf9f204aed474adbad2958fec048b # v4.1.0
@@ -3999,6 +4023,10 @@ jobs:
         id: verify
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: |
           ./.github/workflows/scripts/verify-bifrost-http-release.sh "${{ needs.detect-changes.outputs.transport-version }}" "${{ needs.detect-changes.outputs.bifrost-http-needs-release }}"
           echo "verified=true" >> $GITHUB_OUTPUT
@@ -4047,7 +4075,6 @@ jobs:
       # by copying it with buildx imagetools (no rebuild). Best-effort: a ghcr.io
       # failure must not fail the Docker Hub release.
       - name: Mirror UBI9 AMD64 image to GitHub Container Registry
-        continue-on-error: true
         run: |
           docker buildx imagetools create \
             --tag "${{ steps.tags.outputs.ghcr-tag }}" \
@@ -4136,6 +4163,10 @@ jobs:
         id: verify
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: |
           ./.github/workflows/scripts/verify-bifrost-http-release.sh "${{ needs.detect-changes.outputs.transport-version }}" "${{ needs.detect-changes.outputs.bifrost-http-needs-release }}"
           echo "verified=true" >> $GITHUB_OUTPUT
@@ -4184,7 +4215,6 @@ jobs:
       # by copying it with buildx imagetools (no rebuild). Best-effort: a ghcr.io
       # failure must not fail the Docker Hub release.
       - name: Mirror UBI9 ARM64 image to GitHub Container Registry
-        continue-on-error: true
         run: |
           docker buildx imagetools create \
             --tag "${{ steps.tags.outputs.ghcr-tag }}" \
@@ -4192,7 +4222,7 @@ jobs:
 
   # Docker UBI9 manifest — merges amd64 + arm64 into a single multi-arch tag
   docker-manifest-ubi9:
-    needs: [check-skip, detect-changes, docker-build-ubi9-amd64, docker-build-ubi9-arm64]
+    needs: [check-skip, detect-changes, docker-build-ubi9-amd64, docker-build-ubi9-arm64, bifrost-http-prep]
     if: "always() && needs.check-skip.outputs.should-skip != 'true' && needs.docker-build-ubi9-amd64.result == 'success' && needs.docker-build-ubi9-arm64.result == 'success'"
     runs-on: builder-8-32
     permissions:
@@ -4218,6 +4248,8 @@ jobs:
 
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.bifrost-http-prep.outputs.commit-sha || github.sha }}
 
       - name: Log in to Docker Hub
         uses: step-security/docker-login-action@870af644803bf9f204aed474adbad2958fec048b # v4.1.0
