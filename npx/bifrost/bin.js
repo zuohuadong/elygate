@@ -26,6 +26,9 @@ const REQUEST_TIMEOUT_MS = 30_000; // checksum fetch
 // published without one, so a missing checksum is only tolerated below this.
 const CHECKSUM_REQUIRED_SINCE = "v2.3.3";
 
+// Strict SemVer 2.0.0 release tag, no build metadata (Docker/R2 tags cannot carry +).
+const RELEASE_TAG_RE = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?$/;
+
 function isTransportVersionFlag(arg) {
 	const eq = arg.indexOf("=");
 	return (eq === -1 ? arg : arg.slice(0, eq)) === "--transport-version";
@@ -159,8 +162,7 @@ function validateTransportVersion(version) {
 	}
 
 	// Check if version matches v{x.x.x} format
-	const versionRegex = /^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
-	if (versionRegex.test(version)) {
+	if (RELEASE_TAG_RE.test(version)) {
 		return version;
 	}
 
@@ -429,7 +431,7 @@ async function getLatestVersion() {
 		return null;
 	}
 	const name = data && data.name;
-	return typeof name === "string" && parseCoreVersion(name) ? name : null;
+	return typeof name === "string" && RELEASE_TAG_RE.test(name) ? name : null;
 }
 
 // Check if a specific version exists on the download server

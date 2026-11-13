@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 
+source "$(dirname "$0")/semver.sh"
 source "$(dirname "$0")/r2-bucket.sh"
 source "$(dirname "$0")/release-artifacts.sh"
 set -euo pipefail
@@ -51,8 +52,8 @@ fi
 
 # Strip the transports/ prefix and normalise to the v-prefixed R2 directory.
 VERSION_ONLY=${TRANSPORT_VERSION#transports/v}
-if [ -z "$VERSION_ONLY" ] || [ "$VERSION_ONLY" = "$TRANSPORT_VERSION" ]; then
-  echo "❌ Invalid transport version '$TRANSPORT_VERSION'; expected transports/vX.Y.Z"
+if [ "$TRANSPORT_VERSION" != transports/v* ] || ! is_semver "$VERSION_ONLY"; then
+  echo "❌ Invalid transport version '$TRANSPORT_VERSION'; expected transports/vX.Y.Z (SemVer, no build metadata)"
   exit 1
 fi
 CLI_VERSION="v${VERSION_ONLY}"

@@ -63,7 +63,7 @@ function validateMigrationCliVersion(version) {
     }
 
     // Check if version matches v{x.x.x} format
-    const versionRegex = /^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
+    const versionRegex = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?$/;
     if (versionRegex.test(version)) {
         return version;
     }

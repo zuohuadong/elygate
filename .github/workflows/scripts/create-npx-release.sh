@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
+source "$(dirname "$0")/semver.sh"
 source "$(dirname "$0")/release-state.sh"
 
 # Create GitHub release for NPX package
 # Usage: ./create-npx-release.sh <version> <full-tag>
 
-VERSION="$1"
+VERSION="${1#v}"
 FULL_TAG="$2"
+if ! is_semver "$VERSION"; then
+  echo "❌ Invalid version: $1 (strict SemVer 2.0.0 without build metadata)" >&2
+  exit 1
+fi
 
 if [[ -z "$VERSION" || -z "$FULL_TAG" ]]; then
   echo "❌ Usage: $0 <version> <full-tag>"

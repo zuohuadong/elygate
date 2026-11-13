@@ -3,6 +3,7 @@
 source "$(dirname "$0")/r2-bucket.sh"
 source "$(dirname "$0")/release-artifacts.sh"
 set -euo pipefail
+source "$(dirname "$0")/semver.sh"
 
 # Finalize bifrost-http release: changelog, tagging, GitHub release, R2 latest copy
 # Usage: ./release-bifrost-http-finalize.sh <version>
@@ -13,7 +14,11 @@ if [ "${1:-}" = "" ]; then
   exit 1
 fi
 
-VERSION="$1"
+VERSION="${1#v}"
+if ! is_semver "$VERSION"; then
+  echo "❌ Invalid transport version: $1 (strict SemVer 2.0.0 without build metadata)" >&2
+  exit 1
+fi
 TAG_NAME="transports/v${VERSION}"
 
 echo "🏷️ Finalizing bifrost-http v$VERSION release..."

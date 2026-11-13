@@ -278,3 +278,8 @@ CODEBUDDY.md
 CLAUDE.md
 .zed/CONVENTIONS.md
 HERMES.md
+
+# keep the npx migration-cli source tree tracked despite the name ignore above
+!npx/bifrost-migration-cli/
+!npx/bifrost-migration-cli/test/
+!npx/bifrost-migration-cli/test/bin.test.js

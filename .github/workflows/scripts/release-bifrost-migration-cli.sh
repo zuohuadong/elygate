@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+source "$(dirname "$0")/semver.sh"
 
 # Release bifrost-migration-cli component
 # Usage: ./release-bifrost-migration-cli.sh <version>
@@ -20,7 +21,11 @@ if [ "${1:-}" = "" ]; then
   exit 1
 fi
 
-VERSION="$1"
+VERSION="${1#v}"
+if ! is_semver "$VERSION"; then
+  echo "❌ Invalid bifrost-migration-cli version: $1 (strict SemVer 2.0.0 without build metadata)" >&2
+  exit 1
+fi
 TAG_NAME="bifrost-migration-cli/v${VERSION}"
 
 echo "🚀 Releasing bifrost-migration-cli v$VERSION..."

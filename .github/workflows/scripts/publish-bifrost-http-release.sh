@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
+source "$(dirname "$0")/semver.sh"
 
 # Publish a draft transport release only after every Docker/GHCR/UBI9 image and
 # manifest succeeded. Also syncs stable latest/ from the verified version prefix.
 
-VERSION="$1"
+VERSION="${1#v}"
 TAG_NAME="transports/v${VERSION}"
+if ! is_semver "$VERSION"; then
+  echo "❌ Invalid transport version: $1 (strict SemVer 2.0.0 without build metadata)" >&2
+  exit 1
+fi
 
 source "$(dirname "$0")/r2-bucket.sh"
 source "$(dirname "$0")/release-artifacts.sh"

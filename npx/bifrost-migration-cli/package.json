@@ -28,7 +28,7 @@
   "type": "module",
   "main": "bin.js",
   "scripts": {
-    "test": "node --check bin.js"
+    "test": "node --check bin.js && node --test test/*.test.js"
   },
   "bugs": {
     "url": "https://github.com/maximhq/bifrost/issues"

@@ -26,8 +26,10 @@ for guard in validate_version validate_plugin_name; do
   fi
 done
 
-# Extract just the function definitions, each up to its closing brace at column 0.
-FN="$(awk '/^validate_version\(\)/,/^}/' "$TARGET")
+# Extract the shared validator and the function definitions, each up to its
+# closing brace at column 0.
+FN="$(cat "${SCRIPT_DIR}/semver.sh")
+$(awk '/^validate_version\(\)/,/^}/' "$TARGET")
 $(awk '/^validate_plugin_name\(\)/,/^}/' "$TARGET")"
 
 passed=0
@@ -65,7 +67,7 @@ expect_accept "1.6.9-prerelease1"
 expect_accept "1.6.9-prerelease2"
 expect_accept "v2.0.0-prerelease1"
 expect_accept "v1.5.0-prerelease3-ajhfix-base"
-expect_accept "2.0.0-prerelease1+build.5"
+expect_reject "2.0.0-prerelease1+build.5"
 
 # Injection shapes: each of these reaches a shell via ${{ }} textual expansion.
 expect_reject '1.6.9$(id)'

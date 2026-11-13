@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
+source "$(dirname "$0")/semver.sh"
 
 # publish-cli-latest.sh <r2-prefix> <version> <binary>
 # Publish the already-released, complete versioned prefix to latest/.
 
 PREFIX="$1"
-VERSION="$2"
+VERSION="${2#v}"
 BINARY="$3"
+if ! is_semver "$VERSION"; then
+  echo "❌ Invalid version: $2 (strict SemVer 2.0.0 without build metadata)" >&2
+  exit 1
+fi
 
 source "$(dirname "$0")/r2-bucket.sh"
 source "$(dirname "$0")/release-artifacts.sh"

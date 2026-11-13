@@ -116,6 +116,15 @@ test("ignores a latest version that is not a release tag", { skip }, () => {
 	assert.equal(existsSync(join(tmpdir(), escape)), false, "the download escaped the cache directory");
 });
 
+test("rejects non-SemVer transport versions before any network access", { skip }, () => {
+	for (const bad of ["v1.0.0-01", "v1.0.0-..", "v1.0.0-rc..1", "v1.2.3+build.1", "v01.2.3"]) {
+		const r = run({ latest: "v2.4.0", checksum: "match" }, ["--transport-version", bad]);
+		assert.equal(r.status, 1, `${bad}: ${r.stdout}${r.stderr}`);
+		assert.match(r.stderr, /Invalid transport version format/, bad);
+		assert.doesNotMatch(r.stdout, MARKER, bad);
+	}
+});
+
 test("runs older releases published without a checksum, with a warning", { skip }, () => {
 	const r = run({ checksum: "missing" }, ["--transport-version", "v2.3.2"]);
 	assert.equal(r.status, 0, r.stderr);

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 shopt -s nullglob
+source "$(dirname "$0")/semver.sh"
 source "$(dirname "$0")/release-state.sh"
 source "$(dirname "$0")/r2-bucket.sh"
 source "$(dirname "$0")/release-artifacts.sh"
@@ -27,31 +28,15 @@ CHANGED_PLUGINS="[]"
 validate_version() {
   local value="$1"
   local name="$2"
-  # Anchored, and a regex rather than a glob: a `case` pattern like
-  # [0-9]*.[0-9]*.[0-9]* looks structural but is not, because each `*` matches
-  # anything - it accepted 1x.2.3, 1.2.3rc1 and 1.2.3.4. Three numeric components are
-  # required, and a suffix is permitted only after PATCH and only when introduced by
-  # `-` or `+`. The suffix quantifier is `+`, not `*`: a separator introducing nothing
-  # (1.2.3- / 1.2.3+) is malformed per Semantic Versioning 2.0.0 clauses 9 and 10,
-  # which both require that identifiers MUST NOT be empty - and it is the shape a
-  # truncated version file takes, which is worth catching here rather than at tag time.
-  if [[ ! "$value" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([-+][A-Za-z0-9.+_-]+)?$ ]]; then
-    echo "::error::refusing malformed $name version: '$value' (expected MAJOR.MINOR.PATCH, optionally v-prefixed, with an optional -suffix)" >&2
+  # Delegate to the one strict SemVer 2.0.0 validator. It rejects build metadata
+  # because Docker tags, R2 prefixes and release tags cannot carry `+`; accepting
+  # it here would create a version only some artifacts can represent. Every value
+  # read below is interpolated with ${{ }} into downstream `run:` blocks, so
+  # validation must happen at this entry point.
+  if ! is_semver "${value#v}"; then
+    echo "::error::refusing malformed $name version: '$value' (strict SemVer 2.0.0 without build metadata)" >&2
     return 1
   fi
-  # A second, independent check on the character set. The regex above already implies
-  # it, so this is belt-and-braces: it is what keeps a future loosening of the shape
-  # pattern from silently re-admitting shell metacharacters. The set is deliberately wide
-  # enough for the prerelease shapes this repo actually ships - v2.0.0-prerelease1,
-  # and multi-hyphen forms like v1.5.0-prerelease3-ajhfix-base - because a guard that
-  # false-rejects blocks a release, and every character admitted here is inert to a
-  # shell.
-  case "$value" in
-    *[!v0-9.A-Za-z_+-]*)
-      echo "::error::refusing $name version with unexpected characters: '$value'" >&2
-      return 1
-      ;;
-  esac
 }
 
 # Plugin names travel the same way and by a sharper edge: they are collected into the
