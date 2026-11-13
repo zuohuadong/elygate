@@ -27,7 +27,8 @@ if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
     LISTING=$(aws s3 ls --recursive "s3://$R2_BUCKET/$PREFIX/v${VERSION}/" \
       --endpoint-url "$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]')" \
       --profile "${R2_AWS_PROFILE:-R2}")
-    if ! require_platform_listing "$LISTING" "$BINARY" "${CLI_PLATFORMS[@]}" 2>/dev/null; then
+    if ! require_platform_listing "$LISTING" "$BINARY" "${CLI_PLATFORMS[@]}" 2>/dev/null \
+       || ! require_remote_platform_digest "$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]')" "$R2_BUCKET" "$PREFIX" "$VERSION" "$BINARY" "${CLI_PLATFORMS[@]}" 2>/dev/null; then
       echo "exists=false" >> "$GITHUB_OUTPUT"
       exit 0
     fi
@@ -39,6 +40,7 @@ if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
         --endpoint-url "$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]')" \
         --profile "${R2_AWS_PROFILE:-R2}" 2>/dev/null || true)
       if ! require_platform_listing "$LATEST_LISTING" "$BINARY" "${CLI_PLATFORMS[@]}" 2>/dev/null \
+         || ! require_remote_prefix_digest "$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]')" "$R2_BUCKET" "$PREFIX/latest" "$BINARY" "${CLI_PLATFORMS[@]}" 2>/dev/null \
          || [ "$LATEST_VERSION" != "v${VERSION#v}" ]; then
         echo "exists=false" >> "$GITHUB_OUTPUT"
         exit 0

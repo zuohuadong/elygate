@@ -28,5 +28,8 @@
         "bifrost": "bin.js"
     },
     "type": "module",
-    "dependencies": {}
+    "dependencies": {},
+    "scripts": {
+        "test": "node --check bin.js"
+    }
 }

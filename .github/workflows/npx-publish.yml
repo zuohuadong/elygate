@@ -259,6 +259,11 @@ jobs:
         id: extract-version
         run: ./.github/workflows/scripts/read-version-file.sh npx/bifrost-cli/package.json npx/bifrost-cli
 
+      - name: Test package
+        if: steps.check-cli.outputs.changed == 'true'
+        working-directory: npx/bifrost-cli
+        run: npm test
+
       - name: Validate release target
         if: steps.check-cli.outputs.changed == 'true'
         env:
@@ -444,6 +449,11 @@ jobs:
         if: steps.check-migration.outputs.changed == 'true'
         id: extract-version
         run: ./.github/workflows/scripts/read-version-file.sh npx/bifrost-migration-cli/package.json npx/bifrost-migration-cli
+
+      - name: Test package
+        if: steps.check-migration.outputs.changed == 'true'
+        working-directory: npx/bifrost-migration-cli
+        run: npm test
 
       - name: Validate release target
         if: steps.check-migration.outputs.changed == 'true'
