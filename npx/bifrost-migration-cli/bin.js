@@ -176,8 +176,7 @@ async function verifyChecksum(binaryPath, checksumUrl) {
     const res = await fetch(checksumUrl, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
     if (!res.ok) {
         unlinkSync(binaryPath);
-        console.error(`❌ Checksum file not available (${res.status}). Refusing to run an unverified binary.`);
-        process.exit(1);
+        throw new Error(`Checksum file not available (${res.status}). Refusing to run an unverified binary.`);
     }
 
     const checksumContent = (await res.text()).trim();
@@ -185,8 +184,7 @@ async function verifyChecksum(binaryPath, checksumUrl) {
     const expectedHash = checksumContent.split(/\s+/)[0].toLowerCase();
     if (!/^[0-9a-f]{64}$/.test(expectedHash)) {
         unlinkSync(binaryPath);
-        console.error("❌ Could not parse checksum file. Refusing to run an unverified binary.");
-        process.exit(1);
+        throw new Error("Could not parse checksum file. Refusing to run an unverified binary.");
     }
 
     const fileBuffer = readFileSync(binaryPath);
@@ -194,11 +192,7 @@ async function verifyChecksum(binaryPath, checksumUrl) {
 
     if (actualHash !== expectedHash) {
         unlinkSync(binaryPath);
-        console.error(`❌ Checksum verification failed!`);
-        console.error(`   Expected: ${expectedHash}`);
-        console.error(`   Got:      ${actualHash}`);
-        console.error(`   The downloaded binary has been deleted for safety.`);
-        process.exit(1);
+        throw new Error(`Checksum verification failed: expected ${expectedHash}, got ${actualHash}; the binary was deleted for safety.`);
     }
 
     console.log("✅ Checksum verified");

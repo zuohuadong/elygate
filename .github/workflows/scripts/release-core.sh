@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+source "$(dirname "$0")/semver.sh"
 set -euo pipefail
 
 source "$(dirname "$0")/release-state.sh"
@@ -11,7 +12,11 @@ if [[ "${1:-}" == "" ]]; then
   echo "Example: $0 1.2.0"
   exit 1
 fi
-VERSION="$1"
+VERSION="${1#v}"
+if ! is_semver "$VERSION"; then
+  echo "❌ Invalid core version: $1 (strict SemVer 2.0.0 without build metadata)" >&2
+  exit 1
+fi
 
 TAG_NAME="core/v${VERSION}"
 

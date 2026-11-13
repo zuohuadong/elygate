@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+source "$(dirname "$0")/semver.sh"
 set -euo pipefail
 
 # Cross-compile CLI binaries for multiple platforms
@@ -8,7 +9,11 @@ if [[ -z "${1:-}" ]]; then
   echo "Usage: $0 <version>" >&2
   exit 1
 fi
-VERSION="$1"
+VERSION="${1#v}"
+if ! is_semver "$VERSION"; then
+  echo "❌ Invalid version: $1 (strict SemVer 2.0.0 without build metadata)" >&2
+  exit 1
+fi
 
 echo "🔨 Building CLI executables with version: $VERSION"
 

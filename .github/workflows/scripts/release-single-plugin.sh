@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+source "$(dirname "$0")/semver.sh"
 set -euo pipefail
 
 # Release a single plugin
@@ -52,6 +53,14 @@ if [ ! -f "$VERSION_FILE" ]; then
 fi
 
 PLUGIN_VERSION=$(tr -d '\n\r' < "$VERSION_FILE")
+for pair in "core:$CORE_VERSION" "framework:$FRAMEWORK_VERSION" "plugin:$PLUGIN_VERSION"; do
+  label="${pair%%:*}"
+  value="${pair#*:}"
+  if ! is_semver "${value#v}"; then
+    echo "❌ Invalid $label version '$value' (strict SemVer 2.0.0 without build metadata)" >&2
+    exit 1
+  fi
+done
 TAG_NAME="plugins/${PLUGIN_NAME}/v${PLUGIN_VERSION}"
 
 echo "📦 Plugin version: $PLUGIN_VERSION"

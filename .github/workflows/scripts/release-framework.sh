@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+source "$(dirname "$0")/semver.sh"
 set -euo pipefail
 
 # Release framework component
@@ -14,13 +15,12 @@ if [ $# -ne 1 ]; then
   exit 1
 fi
 
-VERSION_RAW="$1"
-# Ensure leading 'v' for module/tag semver
-if [[ "$VERSION_RAW" == v* ]]; then
-  VERSION="$VERSION_RAW"
-else
-  VERSION="v$VERSION_RAW"
+VERSION_RAW="${1#v}"
+if ! is_semver "$VERSION_RAW"; then
+  echo "❌ Invalid framework version: $1 (strict SemVer 2.0.0 without build metadata)" >&2
+  exit 1
 fi
+VERSION="v${VERSION_RAW}"
 
 TAG_NAME="framework/${VERSION}"
 

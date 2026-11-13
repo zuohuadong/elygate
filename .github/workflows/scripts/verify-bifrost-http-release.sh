@@ -1,4 +1,5 @@
 #!/bin/bash
+source "$(dirname "$0")/semver.sh"
 
 # Script to verify if bifrost-http was successfully released
 # This ensures Docker images are only built after a successful bifrost-http release
@@ -9,8 +10,12 @@ set -e
 source "$(dirname "$0")/r2-bucket.sh"
 source "$(dirname "$0")/release-artifacts.sh"
 
-VERSION=$1
+VERSION="${1#v}"
 RELEASE_NEEDED=${2:-}
+if ! is_semver "$VERSION"; then
+    echo "❌ Invalid transport version: $1 (strict SemVer 2.0.0 without build metadata)"
+    exit 1
+fi
 
 if [ -z "$VERSION" ]; then
     echo "❌ Error: Version not provided"

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+source "$(dirname "$0")/semver.sh"
 set -euo pipefail
 
 if [ "${1:-}" = "" ]; then
@@ -6,7 +7,11 @@ if [ "${1:-}" = "" ]; then
   exit 1
 fi
 
-VERSION="$1"
+VERSION="${1#v}"
+if ! is_semver "$VERSION"; then
+  echo "❌ Invalid version: $1 (strict SemVer 2.0.0 without build metadata)" >&2
+  exit 1
+fi
 REGISTRY="docker.io"
 ACCOUNT="maximhq"
 IMAGE_NAME="bifrost"

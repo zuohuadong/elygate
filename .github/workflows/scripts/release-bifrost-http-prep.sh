@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+source "$(dirname "$0")/semver.sh"
 set -euo pipefail
 
 # Prepare bifrost-http release: update dependencies, build UI, validate, commit/push
@@ -22,7 +23,11 @@ if [ "${1:-}" = "" ]; then
   exit 1
 fi
 
-VERSION="$1"
+VERSION="${1#v}"
+if ! is_semver "$VERSION"; then
+  echo "❌ Invalid transport version: $1 (strict SemVer 2.0.0 without build metadata)" >&2
+  exit 1
+fi
 
 echo "🚀 Preparing bifrost-http v$VERSION release..."
 
@@ -43,6 +48,10 @@ for plugin_dir in plugins/*/; do
   if [ -d "$plugin_dir" ]; then
     plugin_name=$(basename "$plugin_dir")
     PLUGIN_VERSION="v$(tr -d '\n\r' < "${plugin_dir}version")"
+    if ! is_semver "${PLUGIN_VERSION#v}"; then
+      echo "❌ Invalid version for plugin $plugin_name: $PLUGIN_VERSION" >&2
+      exit 1
+    fi
     PLUGIN_VERSIONS["$plugin_name"]="$PLUGIN_VERSION"
     echo "   📦 $plugin_name: $PLUGIN_VERSION (from version file)"
   fi
