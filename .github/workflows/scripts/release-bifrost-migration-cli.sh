@@ -137,10 +137,10 @@ if release_check "$TAG_NAME"; then
     SKIP_LATEST_UPLOAD=true bash "$SCRIPT_DIR/upload-bifrost-migration-cli-to-r2.sh" "$TAG_NAME"
     verify_r2_artifacts
   fi
+  release_promote_draft "$TAG_NAME"
   if [[ "$VERSION" != *-* ]]; then
     bash "$SCRIPT_DIR/publish-cli-latest.sh" "bifrost-migration-cli" "$VERSION" "bifrost-migration-cli"
   fi
-  release_promote_draft "$TAG_NAME"
   echo "ℹ️ Release $TAG_NAME and its R2 artifacts already exist. Nothing to do."
   exit 0
 else
