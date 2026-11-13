@@ -2,6 +2,7 @@
 
 source "$(dirname "$0")/r2-bucket.sh"
 source "$(dirname "$0")/release-artifacts.sh"
+source "$(dirname "$0")/release-state.sh"
 set -euo pipefail
 source "$(dirname "$0")/semver.sh"
 
