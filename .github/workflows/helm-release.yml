@@ -59,7 +59,7 @@ jobs:
 
       - name: Run chart-testing (lint)
         run: |
-          helm lint helm-charts/bifrost --set image.tag=latest
+          helm lint helm-charts/bifrost --set image.tag=v2.5.1
 
       - name: Validate Helm templates
         run: |

@@ -17,7 +17,7 @@ For most production deployments, add these settings to your container:
 ```yaml
 services:
   bifrost:
-    image: maximhq/bifrost:latest
+    image: maximhq/bifrost:v2.5.1
     environment:
       - GOGC=200
       - GOMEMLIMIT=3600MiB  # 90% of 4GB memory limit
@@ -151,7 +151,7 @@ deploy:
 ```yaml
 services:
   bifrost:
-    image: maximhq/bifrost:latest
+    image: maximhq/bifrost:v2.5.1
     ports:
       - "8080:8080"
     volumes:
@@ -165,7 +165,7 @@ services:
 ```yaml
 services:
   bifrost:
-    image: maximhq/bifrost:latest
+    image: maximhq/bifrost:v2.5.1
     ports:
       - "8080:8080"
     volumes:
@@ -207,7 +207,7 @@ If you use PostgreSQL for Bifrost storage, ensure the database is UTF8 encoded. 
 ```yaml
 services:
   bifrost-1:
-    image: maximhq/bifrost:latest
+    image: maximhq/bifrost:v2.5.1
     ports:
       - "8081:8080"
     environment:
@@ -229,7 +229,7 @@ services:
       - postgres
 
   bifrost-2:
-    image: maximhq/bifrost:latest
+    image: maximhq/bifrost:v2.5.1
     ports:
       - "8082:8080"
     environment:
@@ -286,7 +286,7 @@ spec:
     spec:
       containers:
         - name: bifrost
-          image: maximhq/bifrost:latest
+          image: maximhq/bifrost:v2.5.1
           ports:
             - containerPort: 8080
           env:

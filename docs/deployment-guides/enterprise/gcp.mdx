@@ -197,7 +197,7 @@ spec:
       - name: ar-pull-secret
       containers:
       - name: bifrost
-        image: REGION-docker.pkg.dev/BIFROST_PROJECT/YOUR_HUB_SLUG/bifrost:latest
+        image: REGION-docker.pkg.dev/BIFROST_PROJECT/YOUR_HUB_SLUG/bifrost:v2.5.1
         ports:
         - containerPort: 8080
           name: http
@@ -324,7 +324,7 @@ kubectl create secret docker-registry ar-pull-secret \
 gcloud auth configure-docker REGION-docker.pkg.dev
 
 # Pull test (requires impersonation or direct access)
-docker pull REGION-docker.pkg.dev/BIFROST_PROJECT/YOUR_HUB_SLUG/bifrost:latest
+docker pull REGION-docker.pkg.dev/BIFROST_PROJECT/YOUR_HUB_SLUG/bifrost:v2.5.1
 ```
 
 ### Verify Workload Identity Configuration

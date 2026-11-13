@@ -69,7 +69,7 @@ docker login -u _json_key -p "$(cat bifrost-credentials.json)" https://REGION-do
 ### Step 2: Pull the Image
 
 ```bash
-docker pull REGION-docker.pkg.dev/BIFROST_PROJECT/YOUR_HUB_SLUG/bifrost:latest
+docker pull REGION-docker.pkg.dev/BIFROST_PROJECT/YOUR_HUB_SLUG/bifrost:v2.5.1
 ```
 
 ### Step 3: Run Bifrost
@@ -80,7 +80,7 @@ docker run -d \
   -p 8080:8080 \
   -v /path/to/config.json:/app/data/config.json:ro \
   -v /path/to/data:/app/data \
-  REGION-docker.pkg.dev/BIFROST_PROJECT/YOUR_HUB_SLUG/bifrost:latest
+  REGION-docker.pkg.dev/BIFROST_PROJECT/YOUR_HUB_SLUG/bifrost:v2.5.1
 ```
 
 ## Kubernetes Deployment
@@ -212,7 +212,7 @@ spec:
       - name: bifrost-pull-secret
       containers:
       - name: bifrost
-        image: REGION-docker.pkg.dev/BIFROST_PROJECT/YOUR_HUB_SLUG/bifrost:latest
+        image: REGION-docker.pkg.dev/BIFROST_PROJECT/YOUR_HUB_SLUG/bifrost:v2.5.1
         ports:
         - containerPort: 8080
           name: http
@@ -353,7 +353,7 @@ version: '3.8'
 
 services:
   bifrost:
-    image: REGION-docker.pkg.dev/BIFROST_PROJECT/YOUR_HUB_SLUG/bifrost:latest
+    image: REGION-docker.pkg.dev/BIFROST_PROJECT/YOUR_HUB_SLUG/bifrost:v2.5.1
     container_name: bifrost
     ports:
       - "8080:8080"
@@ -407,10 +407,10 @@ For environments without internet access, you can mirror the image to your inter
 ```bash
 # Login and pull
 cat bifrost-credentials.json | docker login -u _json_key --password-stdin https://REGION-docker.pkg.dev
-docker pull REGION-docker.pkg.dev/BIFROST_PROJECT/YOUR_HUB_SLUG/bifrost:latest
+docker pull REGION-docker.pkg.dev/BIFROST_PROJECT/YOUR_HUB_SLUG/bifrost:v2.5.1
 
 # Save to tar file
-docker save REGION-docker.pkg.dev/BIFROST_PROJECT/YOUR_HUB_SLUG/bifrost:latest > bifrost-image.tar
+docker save REGION-docker.pkg.dev/BIFROST_PROJECT/YOUR_HUB_SLUG/bifrost:v2.5.1 > bifrost-image.tar
 ```
 
 ### Step 2: Transfer and Load (Air-Gapped Machine)
@@ -420,11 +420,11 @@ docker save REGION-docker.pkg.dev/BIFROST_PROJECT/YOUR_HUB_SLUG/bifrost:latest >
 docker load < bifrost-image.tar
 
 # Tag for internal registry
-docker tag REGION-docker.pkg.dev/BIFROST_PROJECT/YOUR_HUB_SLUG/bifrost:latest \
-  internal-registry.company.com/bifrost:latest
+docker tag REGION-docker.pkg.dev/BIFROST_PROJECT/YOUR_HUB_SLUG/bifrost:v2.5.1 \
+  internal-registry.company.com/bifrost:v2.5.1
 
 # Push to internal registry
-docker push internal-registry.company.com/bifrost:latest
+docker push internal-registry.company.com/bifrost:v2.5.1
 ```
 
 ### Step 3: Update Kubernetes Manifests
@@ -434,7 +434,7 @@ Update the image reference in your deployment:
 ```yaml
 containers:
 - name: bifrost
-  image: internal-registry.company.com/bifrost:latest
+  image: internal-registry.company.com/bifrost:v2.5.1
 ```
 
 ## Credential Rotation
@@ -473,7 +473,7 @@ kubectl rollout restart deployment/bifrost -n bifrost
 docker login -u _json_key -p "$(cat bifrost-credentials.json)" https://REGION-docker.pkg.dev
 
 # Test pull
-docker pull REGION-docker.pkg.dev/BIFROST_PROJECT/YOUR_HUB_SLUG/bifrost:latest
+docker pull REGION-docker.pkg.dev/BIFROST_PROJECT/YOUR_HUB_SLUG/bifrost:v2.5.1
 ```
 
 ### Verify Kubernetes Secret

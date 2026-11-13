@@ -438,7 +438,7 @@ spec:
       serviceAccountName: bifrost
       containers:
       - name: bifrost
-        image: <enterprise_repo_base_url>/bifrost:latest
+        image: <enterprise_repo_base_url>/bifrost:v2.5.1
         ports:
         - containerPort: 8080
           name: http
@@ -505,7 +505,7 @@ spec:
       serviceAccountName: bifrost
       containers:
       - name: bifrost
-        image: <enterprise_repo_base_url>/bifrost:latest
+        image: <enterprise_repo_base_url>/bifrost:v2.5.1
         ports:
         - containerPort: 8080
           name: http
@@ -672,7 +672,7 @@ services:
       - bifrost-net
 
   bifrost-1:
-    image: <enterprise_repo_base_url>/bifrost:latest
+    image: <enterprise_repo_base_url>/bifrost:v2.5.1
     environment:
       - BIFROST_CONFIG=/etc/bifrost/config.json
     volumes:
@@ -685,7 +685,7 @@ services:
       - bifrost-net
 
   bifrost-2:
-    image: <enterprise_repo_base_url>/bifrost:latest
+    image: <enterprise_repo_base_url>/bifrost:v2.5.1
     environment:
       - BIFROST_CONFIG=/etc/bifrost/config.json
     volumes:
@@ -698,7 +698,7 @@ services:
       - bifrost-net
 
   bifrost-3:
-    image: <enterprise_repo_base_url>/bifrost:latest
+    image: <enterprise_repo_base_url>/bifrost:v2.5.1
     environment:
       - BIFROST_CONFIG=/etc/bifrost/config.json
     volumes:
@@ -829,7 +829,7 @@ services:
       - bifrost-net
 
   bifrost-1:
-    image: <enterprise_repo_base_url>/bifrost:latest
+    image: <enterprise_repo_base_url>/bifrost:v2.5.1
     environment:
       - BIFROST_CONFIG=/etc/bifrost/config.json
     volumes:
@@ -842,7 +842,7 @@ services:
       - bifrost-net
 
   bifrost-2:
-    image: <enterprise_repo_base_url>/bifrost:latest
+    image: <enterprise_repo_base_url>/bifrost:v2.5.1
     environment:
       - BIFROST_CONFIG=/etc/bifrost/config.json
     volumes:
@@ -855,7 +855,7 @@ services:
       - bifrost-net
 
   bifrost-3:
-    image: <enterprise_repo_base_url>/bifrost:latest
+    image: <enterprise_repo_base_url>/bifrost:v2.5.1
     environment:
       - BIFROST_CONFIG=/etc/bifrost/config.json
     volumes:
@@ -1121,7 +1121,7 @@ version: '3.8'
 
 services:
   bifrost-1:
-    image: <enterprise_repo_base_url>/bifrost:latest
+    image: <enterprise_repo_base_url>/bifrost:v2.5.1
     network_mode: bridge
     environment:
       - BIFROST_CONFIG=/etc/bifrost/config.json
@@ -1134,7 +1134,7 @@ services:
       - "10102:10102"
 
   bifrost-2:
-    image: <enterprise_repo_base_url>/bifrost:latest
+    image: <enterprise_repo_base_url>/bifrost:v2.5.1
     network_mode: bridge
     environment:
       - BIFROST_CONFIG=/etc/bifrost/config.json
@@ -1147,7 +1147,7 @@ services:
       - "10102:10102"
 
   bifrost-3:
-    image: <enterprise_repo_base_url>/bifrost:latest
+    image: <enterprise_repo_base_url>/bifrost:v2.5.1
     network_mode: bridge
     environment:
       - BIFROST_CONFIG=/etc/bifrost/config.json
@@ -1258,17 +1258,17 @@ mDNS is designed for development and testing. For production, use Kubernetes, Co
 # Start first node
 docker run -p 8080:8080 -p 10101:10101 -p 10201:10102 \
   -v $(pwd)/config-mdns.json:/etc/bifrost/config.json \
-  <enterprise_repo_base_url>/bifrost:latest
+  <enterprise_repo_base_url>/bifrost:v2.5.1
 
 # Start second node (discovers first automatically)
 docker run -p 8081:8080 -p 10111:10101 -p 10211:10102 \
   -v $(pwd)/config-mdns.json:/etc/bifrost/config.json \
-  <enterprise_repo_base_url>/bifrost:latest
+  <enterprise_repo_base_url>/bifrost:v2.5.1
 
 # Start third node (discovers both automatically)
 docker run -p 8082:8080 -p 10121:10101 -p 10221:10102 \
   -v $(pwd)/config-mdns.json:/etc/bifrost/config.json \
-  <enterprise_repo_base_url>/bifrost:latest
+  <enterprise_repo_base_url>/bifrost:v2.5.1
 ```
 
 ### Troubleshooting
@@ -1339,7 +1339,7 @@ services:
       - bifrost-net
 
   bifrost-1:
-    image: <enterprise_repo_base_url>/bifrost:latest
+    image: <enterprise_repo_base_url>/bifrost:v2.5.1
     environment:
       - BIFROST_CONFIG=/etc/bifrost/config.json
     volumes:
@@ -1353,7 +1353,7 @@ services:
       - bifrost-net
 
   bifrost-2:
-    image: <enterprise_repo_base_url>/bifrost:latest
+    image: <enterprise_repo_base_url>/bifrost:v2.5.1
     environment:
       - BIFROST_CONFIG=/etc/bifrost/config.json
     volumes:
@@ -1367,7 +1367,7 @@ services:
       - bifrost-net
 
   bifrost-3:
-    image: <enterprise_repo_base_url>/bifrost:latest
+    image: <enterprise_repo_base_url>/bifrost:v2.5.1
     environment:
       - BIFROST_CONFIG=/etc/bifrost/config.json
     volumes:
@@ -1541,7 +1541,7 @@ spec:
       serviceAccountName: bifrost
       containers:
       - name: bifrost
-        image: <enterprise_repo_base_url>/bifrost:latest
+        image: <enterprise_repo_base_url>/bifrost:v2.5.1
         ports:
         - containerPort: 8080
           name: http

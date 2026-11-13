@@ -311,7 +311,7 @@ cat > /tmp/bifrost-task-definition.json <<EOF
   "containerDefinitions": [
     {
       "name": "bifrost",
-      "image": "maximhq/bifrost:latest",
+      "image": "maximhq/bifrost:v2.5.1",
       "essential": true,
       "entryPoint": ["/bin/sh", "-c"],
       "command": ["if [ -n \"$BIFROST_CONFIG\" ]; then echo \"$BIFROST_CONFIG\" > /app/data/config.json; else echo \"ERROR: BIFROST_CONFIG not set\" >&2 && exit 1; fi && exec /app/docker-entrypoint.sh /app/main"],
@@ -377,7 +377,7 @@ cat > /tmp/bifrost-task-definition.json <<EOF
   "containerDefinitions": [
     {
       "name": "bifrost",
-      "image": "maximhq/bifrost:latest",
+      "image": "maximhq/bifrost:v2.5.1",
       "essential": true,
       "entryPoint": ["/bin/sh", "-c"],
       "command": ["if [ -n \"$BIFROST_CONFIG\" ]; then echo \"$BIFROST_CONFIG\" > /app/data/config.json; else echo \"ERROR: BIFROST_CONFIG not set\" >&2 && exit 1; fi && exec /app/docker-entrypoint.sh /app/main"],
@@ -624,7 +624,7 @@ cat > /tmp/bifrost-task-definition.json <<EOF
   "containerDefinitions": [
     {
       "name": "bifrost",
-      "image": "maximhq/bifrost:latest",
+      "image": "maximhq/bifrost:v2.5.1",
       "cpu": 256,
       "memory": 512,
       "essential": true,
@@ -690,7 +690,7 @@ cat > /tmp/bifrost-task-definition.json <<EOF
   "containerDefinitions": [
     {
       "name": "bifrost",
-      "image": "maximhq/bifrost:latest",
+      "image": "maximhq/bifrost:v2.5.1",
       "cpu": 256,
       "memory": 512,
       "essential": true,

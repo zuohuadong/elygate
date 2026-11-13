@@ -30,8 +30,9 @@ if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
     require_platform_listing "$LISTING" "$BINARY" "${CLI_PLATFORMS[@]}"
     echo "exists=true" >> "$GITHUB_OUTPUT"
     exit 0
+  else
+    status=$?
   fi
-  status=$?
   if [ "$status" -ne 1 ]; then
     echo "Could not determine release state for $TAG" >&2
     exit 1
@@ -43,8 +44,9 @@ fi
 if release_check "$TAG"; then
   echo "Release $TAG exists but its tag is missing; refusing to publish" >&2
   exit 1
+else
+  status=$?
 fi
-status=$?
 if [ "$status" -ne 1 ]; then
   echo "Could not determine release state for $TAG" >&2
   exit 1

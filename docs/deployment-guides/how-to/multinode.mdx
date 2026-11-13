@@ -181,7 +181,7 @@ spec:
     spec:
       containers:
       - name: bifrost
-        image: maximhq/bifrost:latest
+        image: maximhq/bifrost:v2.5.1
         ports:
         - containerPort: 8080
           name: http
@@ -255,7 +255,7 @@ services:
       - bifrost-3
 
   bifrost-1:
-    image: maximhq/bifrost:latest
+    image: maximhq/bifrost:v2.5.1
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
@@ -265,7 +265,7 @@ services:
       - "8080"
 
   bifrost-2:
-    image: maximhq/bifrost:latest
+    image: maximhq/bifrost:v2.5.1
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
@@ -275,7 +275,7 @@ services:
       - "8080"
 
   bifrost-3:
-    image: maximhq/bifrost:latest
+    image: maximhq/bifrost:v2.5.1
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}

@@ -3774,8 +3774,8 @@ jobs:
           platforms: linux/amd64
 
       # Mirror the just-pushed Docker Hub image to GitHub Container Registry (ghcr.io)
-      # by copying it with buildx imagetools (no rebuild). Best-effort: a ghcr.io
-      # failure must not fail the Docker Hub release.
+      # by copying it with buildx imagetools (no rebuild). This is a required
+      # release gate: a GHCR failure fails the job instead of silently passing.
       - name: Mirror AMD64 image to GitHub Container Registry
         run: |
           docker buildx imagetools create \
@@ -3910,8 +3910,8 @@ jobs:
           platforms: linux/arm64
 
       # Mirror the just-pushed Docker Hub image to GitHub Container Registry (ghcr.io)
-      # by copying it with buildx imagetools (no rebuild). Best-effort: a ghcr.io
-      # failure must not fail the Docker Hub release.
+      # by copying it with buildx imagetools (no rebuild). This is a required
+      # release gate: a GHCR failure fails the job instead of silently passing.
       - name: Mirror ARM64 image to GitHub Container Registry
         run: |
           docker buildx imagetools create \
@@ -4088,13 +4088,29 @@ jobs:
           cache-to: type=gha,mode=max,scope=docker-ubi9-amd64
 
       # Mirror the just-pushed Docker Hub image to GitHub Container Registry (ghcr.io)
-      # by copying it with buildx imagetools (no rebuild). Best-effort: a ghcr.io
-      # failure must not fail the Docker Hub release.
+      # by copying it with buildx imagetools (no rebuild). This is a required
+      # release gate: a GHCR failure fails the job instead of silently passing.
       - name: Mirror UBI9 AMD64 image to GitHub Container Registry
         run: |
           docker buildx imagetools create \
             --tag "${{ steps.tags.outputs.ghcr-tag }}" \
             "${{ steps.tags.outputs.dockerhub-tag }}"
+
+      - name: Smoke test UBI9 AMD64 image
+        run: |
+          IMAGE="${{ steps.tags.outputs.tags }}"
+          docker pull "$IMAGE"
+          docker run --rm --entrypoint sh "$IMAGE" -c 'test "$(id -u)" = "1001"; test -x /app/bifrost-http; test -x /app/docker-entrypoint.sh; test -f /licenses/LICENSE; command -v curl-minimal'
+          docker run -d --name ubi9-smoke-amd64 -p 18081:8080 "$IMAGE"
+          trap 'docker rm -f ubi9-smoke-amd64 >/dev/null 2>&1 || true' EXIT
+          healthy=false
+          for i in $(seq 1 45); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' ubi9-smoke-amd64 2>/dev/null || echo starting)
+            if [ "$status" = "healthy" ]; then healthy=true; break; fi
+            sleep 2
+          done
+          docker logs ubi9-smoke-amd64 || true
+          test "$healthy" = "true"
 
   # Docker build UBI9 arm64
   docker-build-ubi9-arm64:
@@ -4228,13 +4244,29 @@ jobs:
           cache-to: type=gha,mode=max,scope=docker-ubi9-arm64
 
       # Mirror the just-pushed Docker Hub image to GitHub Container Registry (ghcr.io)
-      # by copying it with buildx imagetools (no rebuild). Best-effort: a ghcr.io
-      # failure must not fail the Docker Hub release.
+      # by copying it with buildx imagetools (no rebuild). This is a required
+      # release gate: a GHCR failure fails the job instead of silently passing.
       - name: Mirror UBI9 ARM64 image to GitHub Container Registry
         run: |
           docker buildx imagetools create \
             --tag "${{ steps.tags.outputs.ghcr-tag }}" \
             "${{ steps.tags.outputs.dockerhub-tag }}"
+
+      - name: Smoke test UBI9 ARM64 image
+        run: |
+          IMAGE="${{ steps.tags.outputs.tags }}"
+          docker pull "$IMAGE"
+          docker run --rm --entrypoint sh "$IMAGE" -c 'test "$(id -u)" = "1001"; test -x /app/bifrost-http; test -x /app/docker-entrypoint.sh; test -f /licenses/LICENSE; command -v curl-minimal'
+          docker run -d --name ubi9-smoke-arm64 -p 18082:8080 "$IMAGE"
+          trap 'docker rm -f ubi9-smoke-arm64 >/dev/null 2>&1 || true' EXIT
+          healthy=false
+          for i in $(seq 1 45); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' ubi9-smoke-arm64 2>/dev/null || echo starting)
+            if [ "$status" = "healthy" ]; then healthy=true; break; fi
+            sleep 2
+          done
+          docker logs ubi9-smoke-arm64 || true
+          test "$healthy" = "true"
 
   # Docker UBI9 manifest — merges amd64 + arm64 into a single multi-arch tag
   docker-manifest-ubi9:

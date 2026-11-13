@@ -42,6 +42,11 @@ IMAGE_TAG="${IMAGE_TAG:-v2.5.1}"
 
 print_banner
 
+if [ "$IMAGE_TAG" = "latest" ]; then
+    print_error "IMAGE_TAG must pin a concrete version, not latest"
+    exit 1
+fi
+
 # Examples must pin an immutable image tag: "latest" makes an example
 # non-reproducible and can silently change which image a user deploys.
 for config in "$CHART_DIR"/values-examples/*.yaml; do
@@ -51,6 +56,14 @@ for config in "$CHART_DIR"/values-examples/*.yaml; do
         exit 1
     fi
 done
+
+DOCS_DIR="$CHART_DIR/../../docs"
+if [ -d "$DOCS_DIR" ]; then
+    if grep -rq 'bifrost:latest' "$DOCS_DIR"; then
+        print_error "Deployment docs must not reference bifrost:latest"
+        exit 1
+    fi
+fi
 
 # Check if Helm is installed
 print_info "Checking Helm installation..."

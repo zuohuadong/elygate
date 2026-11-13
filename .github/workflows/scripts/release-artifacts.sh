@@ -25,6 +25,17 @@ require_platform_dist() {
       echo "❌ Incomplete build: missing $artifact or its checksum" >&2
       return 1
     fi
+    local expected actual
+    expected=$(awk '{print $1}' "$artifact.sha256")
+    if command -v sha256sum >/dev/null 2>&1; then
+      actual=$(sha256sum "$artifact" | awk '{print $1}')
+    else
+      actual=$(shasum -a 256 "$artifact" | awk '{print $1}')
+    fi
+    if [ "$expected" != "$actual" ]; then
+      echo "❌ Checksum mismatch for $artifact" >&2
+      return 1
+    fi
   done
 }
 

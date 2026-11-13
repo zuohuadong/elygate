@@ -44,7 +44,7 @@ if [[ "$VERSION" != *-* ]]; then
 fi
 
 # Additionally mirror the multi-arch manifest to GitHub Container Registry (ghcr.io).
-# This is purely additive and does not affect the Docker Hub tags above.
+# This is a required part of the release, not an optional mirror.
 #
 # NOTE on first run / package visibility: GHCR creates new container packages as
 # PRIVATE by default. Until a maintainer flips visibility for the package

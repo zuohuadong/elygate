@@ -79,6 +79,11 @@ if ! upload_with_retry "./dist/" "s3://$R2_BUCKET/bifrost-migration-cli/$CLI_VER
   exit 1
 fi
 
+if [[ "${SKIP_LATEST_UPLOAD:-false}" == "true" ]]; then
+  echo "⏭️ Skipping latest/ upload; it is published after the GitHub release exists"
+  exit 0
+fi
+
 # Check if this is a prerelease version (semver: presence of a hyphen denotes pre-release)
 if [[ "$CLI_VERSION" == *-* ]]; then
   echo "🔍 Detected prerelease version: $CLI_VERSION"

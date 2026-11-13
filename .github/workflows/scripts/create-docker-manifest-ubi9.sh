@@ -39,7 +39,7 @@ if [[ "$VERSION" != *-* ]]; then
 fi
 
 # Additionally mirror the UBI9 multi-arch manifest to GitHub Container Registry (ghcr.io).
-# This is purely additive and does not affect the Docker Hub tags above. New GHCR
+# This is a required part of the release, not an optional mirror. New GHCR
 # packages are PRIVATE by default — see create-docker-manifest.sh header for the
 # one-time visibility flip required for anonymous pulls.
 if [ -n "${GITHUB_REPOSITORY:-}" ]; then

@@ -114,6 +114,9 @@ if release_check "$TAG_NAME"; then
     exit 1
   fi
   verify_r2_artifacts
+  if [[ "$VERSION" != *-* ]]; then
+    bash "$SCRIPT_DIR/publish-cli-latest.sh" "bifrost-cli" "$VERSION" "bifrost"
+  fi
   echo "ℹ️ Release $TAG_NAME and its R2 artifacts already exist. Nothing to do."
   exit 0
 else
@@ -126,7 +129,7 @@ fi
 # --- Publish steps (all checks passed) ---
 
 echo "📤 Uploading binaries..."
-bash "$SCRIPT_DIR/upload-cli-to-r2.sh" "$TAG_NAME"
+SKIP_LATEST_UPLOAD=true bash "$SCRIPT_DIR/upload-cli-to-r2.sh" "$TAG_NAME"
 verify_r2_artifacts
 
 # Create and push tag
@@ -171,6 +174,10 @@ gh release create "$TAG_NAME" \
   --notes "$BODY" \
   ${PRERELEASE_FLAG}
 
+
+if [[ "$VERSION" != *-* ]]; then
+  bash "$SCRIPT_DIR/publish-cli-latest.sh" "bifrost-cli" "$VERSION" "bifrost"
+fi
 echo "✅ Bifrost CLI released successfully"
 
 # Print summary

@@ -217,6 +217,7 @@ fi
 BODY="## Bifrost HTTP Transport Release v$VERSION
 
 $CHANGELOG_BODY
+$PLUGIN_UPDATES
 
 ### Installation
 
