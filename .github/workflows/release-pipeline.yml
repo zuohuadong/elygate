@@ -325,7 +325,7 @@ jobs:
           make build-ui
           echo "🔨 Building bifrost-http binary..."
           mkdir -p tmp
-          (cd transports/bifrost-http && go build -o ../../tmp/bifrost-http .)
+          (cd transports/bifrost-http && go build -ldflags "-X main.Version=v${GITHUB_SHA}" -o ../../tmp/bifrost-http .)
           ls -lh tmp/bifrost-http
 
       - name: Test panel runtime
