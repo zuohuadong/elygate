@@ -154,16 +154,18 @@ async function checkVersionExists(version, platformDir, archDir, binaryName) {
 async function verifyChecksum(binaryPath, checksumUrl) {
 	const res = await fetch(checksumUrl);
 	if (!res.ok) {
-		console.warn(`⚠️ Checksum file not available (${res.status}), skipping verification`);
-		return;
+		const { unlinkSync } = await import("fs");
+		unlinkSync(binaryPath);
+		throw new Error(`Checksum file not available (${res.status}); refusing to install an unverified binary`);
 	}
 
 	const checksumContent = (await res.text()).trim();
 	// Format: "<hash>  <filename>" (shasum output)
-	const expectedHash = checksumContent.split(/\s+/)[0];
-	if (!expectedHash) {
-		console.warn("⚠️ Could not parse checksum file, skipping verification");
-		return;
+	const expectedHash = checksumContent.split(/\s+/)[0].toLowerCase();
+	if (!/^[0-9a-f]{64}$/.test(expectedHash)) {
+		const { unlinkSync } = await import("fs");
+		unlinkSync(binaryPath);
+		throw new Error("Could not parse checksum file; refusing to install an unverified binary");
 	}
 
 	const fileBuffer = readFileSync(binaryPath);

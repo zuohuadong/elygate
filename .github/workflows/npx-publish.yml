@@ -6,8 +6,7 @@ on:
     branches:
       - main
     paths:
-      - 'npx/bifrost/package.json'
-      - 'npx/bifrost-cli/package.json'
+      - 'npx/**'
       - '.github/workflows/npx-publish.yml'
       - '.github/workflows/scripts/extract-npx-version.sh'
       - '.github/workflows/scripts/semver.sh'
@@ -41,7 +40,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Check if pipeline should be skipped
-        id: check        
+        id: check
         run: |
           COMMIT_MESSAGE=$(git log -1 --pretty=%B)
           FIRST_LINE=$(echo "$COMMIT_MESSAGE" | head -n 1)
@@ -82,7 +81,7 @@ jobs:
       - name: Check if bifrost package.json changed
         id: check-bifrost
         run: |
-          if git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" | grep -q '^npx/bifrost/package.json$'; then
+          if git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" | grep -q '^npx/bifrost/'; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
@@ -164,14 +163,14 @@ jobs:
             fi
             rm -f "$NPM_ERR"
           fi
-          
+
           # Try OIDC (Trusted Publishing) first - no token needed
           echo "Attempting publish with OIDC (Trusted Publishing)..."
           if npm publish --provenance --access public 2>&1; then
             echo "Published successfully with OIDC!"
             exit 0
           fi
-          
+
           # Fallback to NPM_TOKEN if OIDC fails
           if [ -n "$NPM_TOKEN" ]; then
             echo "OIDC failed, falling back to NPM_TOKEN..."
@@ -246,10 +245,10 @@ jobs:
           node-version-file: ".nvmrc"
           registry-url: "https://registry.npmjs.org"
 
-      - name: Check if bifrost-cli package.json changed
+      - name: Check if bifrost-cli package changed
         id: check-cli
         run: |
-          if git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" | grep -q '^npx/bifrost-cli/package.json$'; then
+          if git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" | grep -q '^npx/bifrost-cli/'; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
@@ -312,14 +311,14 @@ jobs:
             fi
             rm -f "$NPM_ERR"
           fi
-          
+
           # Try OIDC (Trusted Publishing) first - no token needed
           echo "Attempting publish with OIDC (Trusted Publishing)..."
           if npm publish --provenance --access public 2>&1; then
             echo "Published successfully with OIDC!"
             exit 0
           fi
-          
+
           # Fallback to NPM_TOKEN if OIDC fails
           if [ -n "$NPM_TOKEN" ]; then
             echo "OIDC failed, falling back to NPM_TOKEN..."
@@ -401,6 +400,192 @@ jobs:
           if [ -n "$COMMIT_AUTHOR" ]; then AUTHOR="$COMMIT_AUTHOR"; fi
           if [ "${{ job.status }}" = "success" ]; then
             MESSAGE="**NPX Bifrost CLI Published**\n**Status**: Success\n**Version**: \`${VERSION}\`\n**Package**: \`@maximhq/bifrost-cli\`\n**[View on npm](https://www.npmjs.com/package/@maximhq/bifrost-cli)**\n**Commit**: \`${{ github.sha }}\`\n**Author**: ${AUTHOR}\n**[View Workflow Run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})**"
+          else
+            MESSAGE="**NPX Bifrost CLI Publish Failed**\n**Status**: Failed\n**Commit**: \`${{ github.sha }}\`\n**Author**: ${AUTHOR}\n**[View Workflow Run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})**"
+          fi
+          payload="$(jq -n --arg content "$MESSAGE" '{content:$content}')"
+          curl -sS -H "Content-Type: application/json" -d "$payload" "$DISCORD_WEBHOOK"
+
+  publish-bifrost-migration-cli:
+    needs: [check-skip]
+    if: needs.check-skip.outputs.should-skip != 'true'
+    runs-on: builder-8-32
+    permissions:
+      contents: write
+      id-token: write # Required for npm provenance
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: ".nvmrc"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Check if bifrost-migration-cli package changed
+        id: check-migration
+        run: |
+          if git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" | grep -q '^npx/bifrost-migration-cli/'; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Extract version
+        if: steps.check-migration.outputs.changed == 'true'
+        id: extract-version
+        run: ./.github/workflows/scripts/read-version-file.sh npx/bifrost-migration-cli/package.json npx/bifrost-migration-cli
+
+      - name: Validate release target
+        if: steps.check-migration.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FULL_TAG: ${{ steps.extract-version.outputs.full-tag }}
+        run: |
+          source ./.github/workflows/scripts/release-state.sh
+          TAG_AT_HEAD="false"
+          if git rev-parse --verify "refs/tags/${FULL_TAG}" >/dev/null 2>&1; then
+            if [ "$(git rev-list -n 1 "$FULL_TAG")" != "$(git rev-parse HEAD)" ]; then
+              echo "Tag $FULL_TAG already exists at a different commit" >&2
+              exit 1
+            fi
+            TAG_AT_HEAD="true"
+          fi
+          if release_check "$FULL_TAG"; then
+            if [ "$TAG_AT_HEAD" = "true" ]; then
+              exit 0
+            fi
+            echo "Release $FULL_TAG exists but its tag is missing" >&2
+            exit 1
+          else
+            status=$?
+            if [ "$status" -ne 1 ]; then
+              echo "Could not determine release state for $FULL_TAG" >&2
+              exit 1
+            fi
+          fi
+
+      - name: Publish to npm
+        if: steps.check-migration.outputs.changed == 'true'
+        working-directory: npx/bifrost-migration-cli
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          VERSION: ${{ steps.extract-version.outputs.version }}
+        run: |
+          echo "Publishing @maximhq/bifrost-migration-cli@${VERSION} to npm..."
+          NPM_ERR=$(mktemp)
+          if npm view @maximhq/bifrost-migration-cli@"${VERSION}" version >/dev/null 2>"$NPM_ERR"; then
+            rm -f "$NPM_ERR"
+            echo "@maximhq/bifrost-migration-cli@${VERSION} already exists on npm. Skipping publish."
+            exit 0
+          else
+            status=$?
+            if ! grep -qE 'E404|404 Not Found' "$NPM_ERR"; then
+              echo "Could not determine npm state for @maximhq/bifrost-migration-cli@${VERSION}:" >&2
+              cat "$NPM_ERR" >&2
+              rm -f "$NPM_ERR"
+              exit 1
+            fi
+            rm -f "$NPM_ERR"
+          fi
+
+          # Try OIDC (Trusted Publishing) first - no token needed
+          echo "Attempting publish with OIDC (Trusted Publishing)..."
+          if npm publish --provenance --access public 2>&1; then
+            echo "Published successfully with OIDC!"
+            exit 0
+          fi
+
+          # Fallback to NPM_TOKEN if OIDC fails
+          if [ -n "$NPM_TOKEN" ]; then
+            echo "OIDC failed, falling back to NPM_TOKEN..."
+            export NODE_AUTH_TOKEN="$NPM_TOKEN"
+            npm publish --access public
+          else
+            echo "OIDC failed and no NPM_TOKEN available"
+            exit 1
+          fi
+
+      - name: Configure Git
+        if: steps.check-migration.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Create GitHub Release
+        if: steps.check-migration.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.extract-version.outputs.version }}
+          FULL_TAG: ${{ steps.extract-version.outputs.full-tag }}
+        run: |
+          PRERELEASE_FLAG=""
+          if [[ "$VERSION" == *-* ]]; then
+            PRERELEASE_FLAG="--prerelease"
+          fi
+          source ./.github/workflows/scripts/release-state.sh
+          TAG_AT_HEAD="false"
+          if git rev-parse --verify "refs/tags/${FULL_TAG}" >/dev/null 2>&1; then
+            if [ "$(git rev-list -n 1 "$FULL_TAG")" != "$(git rev-parse HEAD)" ]; then
+              echo "Tag $FULL_TAG already exists at a different commit" >&2
+              exit 1
+            fi
+            TAG_AT_HEAD="true"
+          fi
+          if release_check "$FULL_TAG"; then
+            if [ "$TAG_AT_HEAD" = "true" ]; then
+              echo "Release $FULL_TAG already exists. Skipping."
+              exit 0
+            fi
+            echo "Release $FULL_TAG exists but its tag is missing" >&2
+            exit 1
+          else
+            status=$?
+            if [ "$status" -ne 1 ]; then
+              echo "Could not determine release state for $FULL_TAG" >&2
+              exit 1
+            fi
+          fi
+          if [ "$TAG_AT_HEAD" = "false" ]; then
+            git tag "$FULL_TAG"
+            git push origin "$FULL_TAG"
+          fi
+          gh release create "$FULL_TAG" \
+            --title "Bifrost CLI v$VERSION" \
+            --notes "## Bifrost CLI v$VERSION
+
+          Install or run via npx:
+
+          \`\`\`bash
+          npx -y @maximhq/bifrost-migration-cli
+          \`\`\`
+
+          - [View on npm](https://www.npmjs.com/package/@maximhq/bifrost-migration-cli)
+          - [Documentation](https://docs.getbifrost.ai/quickstart/cli/getting-started)" \
+            --latest=false \
+            ${PRERELEASE_FLAG}
+
+      - name: Discord Notification
+        if: always() && steps.check-migration.outputs.changed == 'true'
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          VERSION: ${{ steps.extract-version.outputs.version }}
+          FULL_TAG: ${{ steps.extract-version.outputs.full-tag }}
+        run: |
+          AUTHOR="${{ github.actor }}"
+          COMMIT_AUTHOR="$(git log -1 --pretty=%an || true)"
+          if [ -n "$COMMIT_AUTHOR" ]; then AUTHOR="$COMMIT_AUTHOR"; fi
+          if [ "${{ job.status }}" = "success" ]; then
+            MESSAGE="**NPX Bifrost CLI Published**\n**Status**: Success\n**Version**: \`${VERSION}\`\n**Package**: \`@maximhq/bifrost-migration-cli\`\n**[View on npm](https://www.npmjs.com/package/@maximhq/bifrost-migration-cli)**\n**Commit**: \`${{ github.sha }}\`\n**Author**: ${AUTHOR}\n**[View Workflow Run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})**"
           else
             MESSAGE="**NPX Bifrost CLI Publish Failed**\n**Status**: Failed\n**Commit**: \`${{ github.sha }}\`\n**Author**: ${AUTHOR}\n**[View Workflow Run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})**"
           fi

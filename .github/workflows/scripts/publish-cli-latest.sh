@@ -21,6 +21,7 @@ ENDPOINT="$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]')"
 SOURCE_LISTING=$(aws s3 ls --recursive "s3://$R2_BUCKET/$PREFIX/v${VERSION}/" \
   --endpoint-url "$ENDPOINT" --profile "${R2_AWS_PROFILE:-R2}")
 require_platform_listing "$SOURCE_LISTING" "$BINARY" "${CLI_PLATFORMS[@]}"
+require_remote_platform_digest "$ENDPOINT" "$R2_BUCKET" "$PREFIX" "$VERSION" "$BINARY" "${CLI_PLATFORMS[@]}"
 
 aws s3 sync "s3://$R2_BUCKET/$PREFIX/v${VERSION}/" "s3://$R2_BUCKET/$PREFIX/latest/" \
   --endpoint-url "$ENDPOINT" \
@@ -31,6 +32,7 @@ aws s3 sync "s3://$R2_BUCKET/$PREFIX/v${VERSION}/" "s3://$R2_BUCKET/$PREFIX/late
 LATEST_LISTING=$(aws s3 ls --recursive "s3://$R2_BUCKET/$PREFIX/latest/" \
   --endpoint-url "$ENDPOINT" --profile "${R2_AWS_PROFILE:-R2}")
 require_platform_listing "$LATEST_LISTING" "$BINARY" "${CLI_PLATFORMS[@]}"
+require_remote_prefix_digest "$ENDPOINT" "$R2_BUCKET" "$PREFIX/latest" "$BINARY" "${CLI_PLATFORMS[@]}"
 LATEST_VERSION=$(aws s3 cp "s3://$R2_BUCKET/$PREFIX/latest/version.txt" - \
   --endpoint-url "$ENDPOINT" --profile "${R2_AWS_PROFILE:-R2}")
 if [ "$LATEST_VERSION" != "v${VERSION#v}" ]; then

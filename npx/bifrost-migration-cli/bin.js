@@ -182,8 +182,8 @@ async function verifyChecksum(binaryPath, checksumUrl) {
 
     const checksumContent = (await res.text()).trim();
     // Format: "<hash>  <filename>" (shasum output)
-    const expectedHash = checksumContent.split(/\s+/)[0];
-    if (!expectedHash) {
+    const expectedHash = checksumContent.split(/\s+/)[0].toLowerCase();
+    if (!/^[0-9a-f]{64}$/.test(expectedHash)) {
         unlinkSync(binaryPath);
         console.error("❌ Could not parse checksum file. Refusing to run an unverified binary.");
         process.exit(1);
