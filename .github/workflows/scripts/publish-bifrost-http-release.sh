@@ -26,8 +26,12 @@ RESTORE_ON_FAIL=false
 RESTORE_TO_EMPTY=false
 restore_latest() {
   local code=$?
+  trap - EXIT
+  if [ -n "$RECEIPT_KEY" ]; then
+    echo "🧹 Removing incomplete receipt $RECEIPT_KEY..."
+    aws s3 rm "s3://$R2_BUCKET/$RECEIPT_KEY" --endpoint-url "$ENDPOINT" --profile "${R2_AWS_PROFILE:-R2}" >/dev/null 2>&1 || true
+  fi
   if [ "$RESTORE_ON_FAIL" = "true" ]; then
-    trap - EXIT
     if [ "$RESTORE_TO_EMPTY" = "true" ]; then
       echo "↩️ Restoring empty latest/..."
       aws s3 rm "s3://$R2_BUCKET/bifrost/latest/" --recursive \
@@ -44,9 +48,6 @@ restore_latest() {
         echo "❌ Restored latest/ failed digest verification" >&2
         exit 1
       fi
-    fi
-    if [ -n "$RECEIPT_KEY" ]; then
-      aws s3 rm "s3://$R2_BUCKET/$RECEIPT_KEY" --endpoint-url "$ENDPOINT" --profile "${R2_AWS_PROFILE:-R2}" >/dev/null 2>&1 || true
     fi
   fi
   exit "$code"

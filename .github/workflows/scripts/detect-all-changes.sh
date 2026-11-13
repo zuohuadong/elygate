@@ -87,7 +87,21 @@ TRANSPORT_VERSION=$(cat transports/version)
 # ship no candidate: the previous release tag means "already released". Compare
 # against the latest transport release baseline, not just HEAD^, so a panel
 # change buried in an earlier commit cannot be masked by an existing tag.
-BASE_TRANSPORT_TAG=$(git tag -l "transports/v*" | sort -V | tail -1)
+BASE_TRANSPORT_TAG=""
+for candidate in $(git tag -l "transports/v*" | sort -V -r); do
+  candidate_commit=$(git rev-list -n 1 "$candidate")
+  git merge-base --is-ancestor "$candidate_commit" HEAD || continue
+  if release_check "$candidate"; then
+    BASE_TRANSPORT_TAG="$candidate"
+    break
+  else
+    status=$?
+    if [ "$status" -ne 1 ]; then
+      echo "❌ Could not determine release state for $candidate" >&2
+      exit 1
+    fi
+  fi
+done
 if [ -n "$BASE_TRANSPORT_TAG" ]; then
   if ! git diff --quiet "$BASE_TRANSPORT_TAG" HEAD -- panel transports/Dockerfile; then
     BASE_VERSION=$(git show "$BASE_TRANSPORT_TAG:transports/version" 2>/dev/null | tr -d '[:space:]' || true)
