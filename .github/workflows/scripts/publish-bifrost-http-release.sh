@@ -23,12 +23,22 @@ require_remote_platform_digest "$ENDPOINT" "$R2_BUCKET" bifrost "$VERSION" bifro
 BACKUP=""
 RESTORE_ON_FAIL=false
 restore_latest() {
+  local code=$?
   if [ "$RESTORE_ON_FAIL" = "true" ] && [ -n "$BACKUP" ]; then
+    trap - EXIT
     echo "↩️ Restoring previous latest/ from $BACKUP..."
-    aws s3 sync "s3://$R2_BUCKET/$BACKUP/" "s3://$R2_BUCKET/bifrost/latest/" \
+    if ! aws s3 sync "s3://$R2_BUCKET/$BACKUP/" "s3://$R2_BUCKET/bifrost/latest/" \
       --endpoint-url "$ENDPOINT" --profile "${R2_AWS_PROFILE:-R2}" \
-      --no-progress --delete || echo "❌ Restore from $BACKUP failed" >&2
+      --no-progress --delete; then
+      echo "❌ Restore from $BACKUP failed" >&2
+      exit 1
+    fi
+    if ! require_remote_prefix_digest "$ENDPOINT" "$R2_BUCKET" "bifrost/latest" bifrost-http "${BIFROST_HTTP_PLATFORMS[@]}"; then
+      echo "❌ Restored latest/ failed digest verification" >&2
+      exit 1
+    fi
   fi
+  exit "$code"
 }
 trap restore_latest EXIT
 

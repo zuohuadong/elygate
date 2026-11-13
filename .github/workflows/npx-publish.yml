@@ -151,8 +151,9 @@ jobs:
           NPM_ERR=$(mktemp)
           if npm view @maximhq/bifrost@"${VERSION}" version >/dev/null 2>"$NPM_ERR"; then
             rm -f "$NPM_ERR"
-            echo "@maximhq/bifrost@${VERSION} already exists on npm; bump the package version before publishing new content." >&2
-            exit 1
+            echo "@maximhq/bifrost@${VERSION} already exists on npm; verifying/repairing the GitHub release."
+            bash ./.github/workflows/scripts/create-npx-release.sh "${VERSION}" "${FULL_TAG}"
+            exit 0
           else
             status=$?
             if ! grep -qE 'E404|404 Not Found' "$NPM_ERR"; then
@@ -304,8 +305,9 @@ jobs:
           NPM_ERR=$(mktemp)
           if npm view @maximhq/bifrost-cli@"${VERSION}" version >/dev/null 2>"$NPM_ERR"; then
             rm -f "$NPM_ERR"
-            echo "@maximhq/bifrost-cli@${VERSION} already exists on npm; bump the package version before publishing new content." >&2
-            exit 1
+            echo "@maximhq/bifrost-cli@${VERSION} already exists on npm; verifying/repairing the GitHub release."
+            bash ./.github/workflows/scripts/create-npx-release.sh "${VERSION}" "${FULL_TAG}"
+            exit 0
           else
             status=$?
             if ! grep -qE 'E404|404 Not Found' "$NPM_ERR"; then
@@ -495,8 +497,9 @@ jobs:
           NPM_ERR=$(mktemp)
           if npm view @maximhq/bifrost-migration-cli@"${VERSION}" version >/dev/null 2>"$NPM_ERR"; then
             rm -f "$NPM_ERR"
-            echo "@maximhq/bifrost-migration-cli@${VERSION} already exists on npm; bump the package version before publishing new content." >&2
-            exit 1
+            echo "@maximhq/bifrost-migration-cli@${VERSION} already exists on npm; verifying/repairing the GitHub release."
+            bash ./.github/workflows/scripts/create-npx-release.sh "${VERSION}" "${FULL_TAG}"
+            exit 0
           else
             status=$?
             if ! grep -qE 'E404|404 Not Found' "$NPM_ERR"; then

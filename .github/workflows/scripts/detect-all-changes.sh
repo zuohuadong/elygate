@@ -84,12 +84,15 @@ FRAMEWORK_VERSION=$(cat framework/version)
 TRANSPORT_VERSION=$(cat transports/version)
 
 # A panel/UI or production-image change without a version bump would otherwise
-# ship no candidate: the existing tag means "already released". Fail closed and
-# require an explicit transports/version bump.
-if git rev-parse -q --verify HEAD^ >/dev/null 2>&1; then
-  if ! git diff --quiet HEAD^ HEAD -- panel transports/Dockerfile; then
-    if git diff --quiet HEAD^ HEAD -- transports/version; then
-      echo "❌ panel/Dockerfile changed without bumping transports/version; refusing to skip the release" >&2
+# ship no candidate: the previous release tag means "already released". Compare
+# against the latest transport release baseline, not just HEAD^, so a panel
+# change buried in an earlier commit cannot be masked by an existing tag.
+BASE_TRANSPORT_TAG=$(git tag -l "transports/v*" | sort -V | tail -1)
+if [ -n "$BASE_TRANSPORT_TAG" ]; then
+  if ! git diff --quiet "$BASE_TRANSPORT_TAG" HEAD -- panel transports/Dockerfile; then
+    BASE_VERSION=$(git show "$BASE_TRANSPORT_TAG:transports/version" 2>/dev/null | tr -d '[:space:]' || true)
+    if [ "$BASE_VERSION" = "$TRANSPORT_VERSION" ]; then
+      echo "❌ panel/Dockerfile changed since $BASE_TRANSPORT_TAG without bumping transports/version; refusing to skip the release" >&2
       exit 1
     fi
   fi
