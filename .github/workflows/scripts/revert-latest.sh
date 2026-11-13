@@ -75,7 +75,7 @@ if [ -z "$SOURCE_LISTING" ]; then
   exit 1
 fi
 require_platform_listing "$SOURCE_LISTING" bifrost-http "${BIFROST_HTTP_PLATFORMS[@]}"
-require_remote_platform_digest "$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]')" "$R2_BUCKET" bifrost "$VERSION" bifrost-http "${BIFROST_HTTP_PLATFORMS[@]}"
+require_remote_platform_digest "$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]')" "$R2_BUCKET" bifrost "${VERSION#v}" bifrost-http "${BIFROST_HTTP_PLATFORMS[@]}"
 
 echo "✅ Version $VERSION found in R2"
 
