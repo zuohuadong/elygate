@@ -84,9 +84,13 @@ if git rev-parse -q --verify "refs/tags/$TAG_NAME" >/dev/null; then
 fi
 if release_check "$TAG_NAME"; then
   if [ "$TAG_AT_HEAD" = "true" ]; then
-    release_promote_draft "$TAG_NAME"
-    echo "ℹ️ Release $TAG_NAME already exists. Nothing to do."
-    exit 0
+    if release_is_draft "$TAG_NAME"; then
+      echo "ℹ️ Draft release $TAG_NAME exists; running release checks before promotion."
+      RELEASE_IS_DRAFT="true"
+    else
+      echo "ℹ️ Release $TAG_NAME already exists. Nothing to do."
+      exit 0
+    fi
   fi
   echo "❌ Release $TAG_NAME exists but its tag is missing"
   exit 1
@@ -132,6 +136,9 @@ go get github.com/maximhq/bifrost/core@v$VERSION
 _This release was automatically created from version file: \`core/version\`_"
 
 echo "🎉 Creating GitHub release for $TITLE..."
+if [ "${RELEASE_IS_DRAFT:-false}" = "true" ]; then
+  release_promote_draft "$TAG_NAME"
+else
 gh release create "$TAG_NAME" \
   --title "$TITLE" \
   --notes "$BODY" \
@@ -139,3 +146,4 @@ gh release create "$TAG_NAME" \
 
 echo "✅ Core released successfully"
 echo "success=true" >> "$GITHUB_OUTPUT"
+fi

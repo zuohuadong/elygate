@@ -164,8 +164,17 @@ fi
 if release_check "$TAG_NAME"; then
   if release_is_draft "$TAG_NAME"; then
     if [ "$TAG_AT_HEAD" = "true" ]; then
-      echo "ℹ️ Draft release $TAG_NAME already exists at HEAD; leaving it for finalize/promote."
-      exit 0
+      validate_r2_bucket
+      DRAFT_LISTING=$(aws s3 ls --recursive "s3://$R2_BUCKET/bifrost/v${VERSION}/" \
+        --endpoint-url "$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]')" \
+        --profile "${R2_AWS_PROFILE:-R2}")
+      if require_platform_listing "$DRAFT_LISTING" bifrost-http "${BIFROST_HTTP_PLATFORMS[@]}"; then
+        echo "ℹ️ Draft release $TAG_NAME already exists at HEAD; leaving it for finalize/promote."
+        echo "success=true" >> "$GITHUB_OUTPUT"
+        echo "commit-sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        exit 0
+      fi
+      echo "🔁 Draft release $TAG_NAME has incomplete artifacts; rebuilding them."
     fi
     echo "❌ Draft release $TAG_NAME exists but its tag is not at HEAD"
     exit 1

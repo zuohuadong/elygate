@@ -119,6 +119,11 @@ jobs:
               if release_is_draft "$TAG"; then
                 echo "draft=true" >> "$GITHUB_OUTPUT"
               else
+                status=$?
+                if [ "$status" -ne 1 ]; then
+                  echo "Could not determine draft state for $TAG" >&2
+                  exit 1
+                fi
                 echo "draft=false" >> "$GITHUB_OUTPUT"
               fi
               echo "exists=true" >> $GITHUB_OUTPUT

@@ -140,6 +140,16 @@ tag_exists() {
   fi
   local status
   if release_check "$tag"; then
+    if release_is_draft "$tag"; then
+      TAG_RELEASE_MISSING="true"
+      return 1
+    else
+      status=$?
+      if [ "$status" -ne 1 ]; then
+        echo "❌ Could not determine draft state for $tag" >&2
+        exit 1
+      fi
+    fi
     return 0
   else
     status=$?
