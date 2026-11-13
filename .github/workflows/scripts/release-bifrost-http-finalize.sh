@@ -237,7 +237,7 @@ if [[ "$VERSION" != *-* ]]; then
   fi
   validate_r2_bucket
   R2_ENDPOINT="$(echo "$R2_ENDPOINT" | tr -d '[:space:]')"
-  SOURCE_LISTING=$(aws s3 ls "s3://$R2_BUCKET/bifrost/v$VERSION/" --endpoint-url "$R2_ENDPOINT" --profile "${R2_AWS_PROFILE:-R2}")
+  SOURCE_LISTING=$(aws s3 ls --recursive "s3://$R2_BUCKET/bifrost/v$VERSION/" --endpoint-url "$R2_ENDPOINT" --profile "${R2_AWS_PROFILE:-R2}")
   if [ -z "$SOURCE_LISTING" ]; then
     echo "Error: versioned R2 prefix s3://$R2_BUCKET/bifrost/v$VERSION/ is empty; refusing to update latest/."
     exit 1

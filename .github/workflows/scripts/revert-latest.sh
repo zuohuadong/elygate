@@ -59,7 +59,7 @@ sync_with_retry() {
 # Check if the version exists and actually contains artifacts. `aws s3 ls` on an
 # empty prefix returns 0, so the listing content is the only reliable signal.
 echo "🔍 Checking if version $VERSION exists..."
-if ! SOURCE_LISTING=$(aws s3 ls "s3://$R2_BUCKET/bifrost/$VERSION/" \
+if ! SOURCE_LISTING=$(aws s3 ls --recursive "s3://$R2_BUCKET/bifrost/$VERSION/" \
      --endpoint-url "$R2_ENDPOINT" \
      --profile "${R2_AWS_PROFILE:-R2}" 2>&1); then
   echo "❌ Version $VERSION not found in R2 bucket"

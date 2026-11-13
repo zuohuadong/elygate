@@ -70,7 +70,7 @@ echo "🔍 Checking released artifacts in R2..."
 export AWS_ACCESS_KEY_ID="${R2_ACCESS_KEY_ID:?R2_ACCESS_KEY_ID env var is required to verify released artifacts}"
 export AWS_SECRET_ACCESS_KEY="${R2_SECRET_ACCESS_KEY:?R2_SECRET_ACCESS_KEY env var is required to verify released artifacts}"
 export AWS_DEFAULT_REGION=us-east-1
-if ! ARTIFACT_LISTING=$(aws s3 ls "s3://$R2_BUCKET/bifrost/v${VERSION}/" \
+if ! ARTIFACT_LISTING=$(aws s3 ls --recursive "s3://$R2_BUCKET/bifrost/v${VERSION}/" \
       --endpoint-url "$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]')" 2>&1); then
     echo "❌ Could not list s3://$R2_BUCKET/bifrost/v${VERSION}/"
     echo "$ARTIFACT_LISTING"
