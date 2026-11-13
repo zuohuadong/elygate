@@ -3374,6 +3374,7 @@ jobs:
       contents: write
     outputs:
       success: ${{ steps.prep.outputs.success }}
+      commit-sha: ${{ steps.prep.outputs.commit-sha }}
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
@@ -3455,12 +3456,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          ref: ${{ needs.bifrost-http-prep.outputs.commit-sha }}
           fetch-depth: 0
           fetch-tags: true
           token: ${{ secrets.GH_TOKEN }}
-
-      - name: Pull latest changes
-        run: git pull --tags origin ${{ github.ref_name }}
 
       - name: Set up Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
@@ -3532,12 +3531,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          ref: ${{ needs.bifrost-http-prep.outputs.commit-sha }}
           fetch-depth: 0
           fetch-tags: true
           token: ${{ secrets.GH_TOKEN }}
-
-      - name: Pull latest changes
-        run: git pull --tags origin ${{ github.ref_name }}
 
       # The arm-64-2cpu-8gb image ships without Docker, libatomic (needed by the
       # linux-arm64 Node binary) or build tools; see the script for details.
@@ -3590,6 +3587,7 @@ jobs:
     outputs:
       success: ${{ steps.release.outputs.success }}
       version: ${{ needs.detect-changes.outputs.transport-version }}
+      commit-sha: ${{ needs.bifrost-http-prep.outputs.commit-sha }}
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
@@ -3605,12 +3603,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          ref: ${{ needs.bifrost-http-prep.outputs.commit-sha }}
           fetch-depth: 0
           fetch-tags: true
           token: ${{ secrets.GH_TOKEN }}
-
-      - name: Pull latest changes
-        run: git pull --tags origin ${{ github.ref_name }}
 
       - name: Configure R2
         env:
@@ -3691,11 +3687,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          ref: ${{ needs.bifrost-http-release.outputs.commit-sha || github.sha }}
           fetch-depth: 0
           fetch-tags: true
-
-      - name: Sync release commit
-        run: git pull --tags origin ${{ github.ref_name }}
 
       - name: Verify bifrost-http release
         id: verify
@@ -3724,7 +3718,6 @@ jobs:
       - name: Determine Docker tags
         id: tags
         run: |
-          git pull origin ${{ github.ref_name }}
           VERSION="${{ needs.detect-changes.outputs.transport-version }}"
           BASE_TAG="${{ env.REGISTRY }}/${{ env.ACCOUNT }}/${{ env.IMAGE_NAME }}:v${VERSION}-amd64"
           GHCR_REPO=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
@@ -3822,6 +3815,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          ref: ${{ needs.bifrost-http-release.outputs.commit-sha || github.sha }}
           fetch-depth: 0
           fetch-tags: true
 
@@ -3829,9 +3823,6 @@ jobs:
       # linux-arm64 Node binary) or build tools; see the script for details.
       - name: Install arm64 runner dependencies
         run: bash ./.github/workflows/scripts/install-arm64-runner-deps.sh docker gh
-
-      - name: Sync release commit
-        run: git pull --tags origin ${{ github.ref_name }}
 
       - name: Verify bifrost-http release
         id: verify
@@ -3860,7 +3851,6 @@ jobs:
       - name: Determine Docker tags
         id: tags
         run: |
-          git pull origin ${{ github.ref_name }}
           VERSION="${{ needs.detect-changes.outputs.transport-version }}"
           BASE_TAG="${{ env.REGISTRY }}/${{ env.ACCOUNT }}/${{ env.IMAGE_NAME }}:v${VERSION}-arm64"
           GHCR_REPO=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
@@ -4001,11 +3991,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          ref: ${{ needs.bifrost-http-release.outputs.commit-sha || github.sha }}
           fetch-depth: 0
           fetch-tags: true
-
-      - name: Sync release commit
-        run: git pull --tags origin ${{ github.ref_name }}
 
       - name: Verify bifrost-http release
         id: verify
@@ -4034,7 +4022,6 @@ jobs:
       - name: Determine Docker tags
         id: tags
         run: |
-          git pull origin ${{ github.ref_name }}
           VERSION="${{ needs.detect-changes.outputs.transport-version }}"
           BASE_TAG="${{ env.REGISTRY }}/${{ env.ACCOUNT }}/${{ env.IMAGE_NAME }}:v${VERSION}-ubi9-amd64"
           GHCR_REPO=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
@@ -4136,6 +4123,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          ref: ${{ needs.bifrost-http-release.outputs.commit-sha || github.sha }}
           fetch-depth: 0
           fetch-tags: true
 
@@ -4143,9 +4131,6 @@ jobs:
       # linux-arm64 Node binary) or build tools; see the script for details.
       - name: Install arm64 runner dependencies
         run: bash ./.github/workflows/scripts/install-arm64-runner-deps.sh docker gh
-
-      - name: Sync release commit
-        run: git pull --tags origin ${{ github.ref_name }}
 
       - name: Verify bifrost-http release
         id: verify
@@ -4174,7 +4159,6 @@ jobs:
       - name: Determine Docker tags
         id: tags
         run: |
-          git pull origin ${{ github.ref_name }}
           VERSION="${{ needs.detect-changes.outputs.transport-version }}"
           BASE_TAG="${{ env.REGISTRY }}/${{ env.ACCOUNT }}/${{ env.IMAGE_NAME }}:v${VERSION}-ubi9-arm64"
           GHCR_REPO=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')

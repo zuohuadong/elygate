@@ -194,3 +194,4 @@ fi
 
 echo "✅ Prep complete for bifrost-http v$VERSION"
 echo "success=true" >> "$GITHUB_OUTPUT"
+echo "commit-sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
