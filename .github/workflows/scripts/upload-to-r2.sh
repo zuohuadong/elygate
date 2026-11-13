@@ -49,6 +49,14 @@ else
   echo "✅ Found the complete five-platform bifrost-http set"
 fi
 
+# Strip the transports/ prefix and normalise to the v-prefixed R2 directory.
+VERSION_ONLY=${TRANSPORT_VERSION#transports/v}
+if [ -z "$VERSION_ONLY" ] || [ "$VERSION_ONLY" = "$TRANSPORT_VERSION" ]; then
+  echo "❌ Invalid transport version '$TRANSPORT_VERSION'; expected transports/vX.Y.Z"
+  exit 1
+fi
+CLI_VERSION="v${VERSION_ONLY}"
+
 echo "📤 Uploading binaries for version: $CLI_VERSION"
 
 # Function to upload with retry

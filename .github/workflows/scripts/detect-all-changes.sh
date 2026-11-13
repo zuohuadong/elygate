@@ -2,6 +2,8 @@
 set -euo pipefail
 shopt -s nullglob
 source "$(dirname "$0")/release-state.sh"
+source "$(dirname "$0")/r2-bucket.sh"
+source "$(dirname "$0")/release-artifacts.sh"
 
 # Detect what components need to be released based on version changes
 # Usage: ./detect-all-changes.sh
@@ -339,6 +341,17 @@ DOCKER_TAG_EXISTS="false"
 GIT_TAG_EXISTS="false"
 if tag_exists "$TRANSPORT_TAG" transports; then
   echo "   ⏭️ Git tag $TRANSPORT_TAG already exists"
+  # An existing transport release is only usable when all five platform
+  # binaries and checksums are actually present in R2.
+  validate_r2_bucket
+  R2_LISTING=$(aws s3 ls --recursive "s3://$R2_BUCKET/bifrost/v${TRANSPORT_VERSION}/" \
+    --endpoint-url "$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]')" \
+    --profile "${R2_AWS_PROFILE:-R2}")
+  if [ -z "$R2_LISTING" ]; then
+    echo "❌ Transport release $TRANSPORT_TAG has no artifacts in R2" >&2
+    exit 1
+  fi
+  require_platform_listing "$R2_LISTING" bifrost-http "${BIFROST_HTTP_PLATFORMS[@]}"
   GIT_TAG_EXISTS="true"
 elif [ "$TAG_RELEASE_MISSING" = "true" ]; then
   echo "   🏷️ Git tag exists but its GitHub release is missing - transport release needed"

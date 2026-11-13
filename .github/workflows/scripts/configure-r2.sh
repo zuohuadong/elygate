@@ -8,7 +8,8 @@ set -euo pipefail
 
 echo "⚙️ Configuring AWS CLI for R2..."
 
-pip install awscli
+AWS_CLI_VERSION="1.46.2"
+pip install --no-cache-dir "awscli==${AWS_CLI_VERSION}"
 
 # Clean and trim environment variables (removing any whitespace)
 R2_ENDPOINT="$(echo "$R2_ENDPOINT" | tr -d '[:space:]')"

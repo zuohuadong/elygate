@@ -157,6 +157,9 @@ jobs:
             packages.microsoft.com:443
             proxy.golang.org:443
             registry.hub.docker.com:443
+            7defe2860d5ee49a1e667e1eeea34b25.r2.cloudflarestorage.com:443
+            files.pythonhosted.org:443
+            pypi.org:443
             release-assets.githubusercontent.com:443
             storage.googleapis.com:443
             sum.golang.org:443
@@ -178,10 +181,20 @@ jobs:
         with:
           go-version: "1.27.3"
 
+      - name: Configure R2
+        env:
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: bash ./.github/workflows/scripts/configure-r2.sh
+
       - name: Detect what needs release
         id: detect
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
         run: ./.github/workflows/scripts/detect-all-changes.sh "auto"
 
       - name: Validate Helm templates
