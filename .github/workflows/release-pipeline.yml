@@ -3410,7 +3410,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ needs.plugins-release.outputs.commit-sha || github.sha }}
+          ref: ${{ needs.plugins-release.outputs.commit-sha || needs.framework-release.outputs.commit-sha || github.sha }}
           fetch-depth: 0
           fetch-tags: true
           token: ${{ secrets.GH_TOKEN }}
@@ -3434,7 +3434,7 @@ jobs:
         id: prep
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
-          EXPECTED_COMMIT: ${{ needs.plugins-release.outputs.commit-sha || github.sha }}
+          EXPECTED_COMMIT: ${{ needs.plugins-release.outputs.commit-sha || needs.framework-release.outputs.commit-sha || github.sha }}
         run: ./.github/workflows/scripts/release-bifrost-http-prep.sh "${{ needs.detect-changes.outputs.transport-version }}"
 
   # Build darwin, windows, linux/amd64 binaries and upload to R2
