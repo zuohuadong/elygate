@@ -17,12 +17,11 @@ is_semver() {
 # Removes exactly one trailing line ending; any other whitespace (an internal
 # newline, a split version, tabs) makes the value invalid instead of joining it
 # into a version the file never held. A leading 'v' is normalised away.
-read_semver_file() {
-  local file="$1" value
-  [[ -f "$file" ]] || return 1
-  # Command substitution strips every trailing newline, which would hide a file
+read_semver_stdin() {
+  local value
+  # Command substitution strips every trailing newline, which would hide input
   # ending in a blank line. Append a sentinel and remove it instead.
-  value="$(cat "$file"; printf x)"
+  value="$(cat; printf x)"
   value="${value%x}"
   if [[ "$value" == *$'\n' ]]; then
     value="${value%$'\n'}"
@@ -32,4 +31,9 @@ read_semver_file() {
   value="${value#v}"
   is_semver "$value" || return 1
   printf '%s\n' "$value"
+}
+
+read_semver_file() {
+  [[ -f "$1" ]] || return 1
+  read_semver_stdin < "$1"
 }

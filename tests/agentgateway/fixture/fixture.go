@@ -248,7 +248,7 @@ func Start(bind, host string) (*Server, error) {
 		_ = listener.Close()
 		return nil, fmt.Errorf("listen for lifecycle gRPC fixture: %w", err)
 	}
-	grpcURL := fmt.Sprintf("grpc://%s", net.JoinHostPort(host, strconv.Itoa(grpcListener.Addr().(*net.TCPAddr).Port)))
+	grpcURL := fmt.Sprintf("http://%s", net.JoinHostPort(host, strconv.Itoa(grpcListener.Addr().(*net.TCPAddr).Port)))
 	publicCard := card(baseURL, grpcURL)
 	extendedCard := *publicCard
 	extendedCard.Description = "Extended static lifecycle fixture card"

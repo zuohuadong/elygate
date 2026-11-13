@@ -9,6 +9,7 @@ set -euo pipefail
 source "$(dirname "$0")/setup-go-workspace.sh"
 
 PORT="${AGENTGATEWAY_PORT:-18080}"
+GRPC_PORT="${AGENTGATEWAY_GRPC_PORT:-18082}"
 WORK_DIR="$(mktemp -d)"
 SERVER_LOG="${WORK_DIR}/server.log"
 APP_DIR="${WORK_DIR}/app"
@@ -44,7 +45,7 @@ mkdir -p "${APP_DIR}"
 cat > "${APP_DIR}/config.json" <<JSON
 {
   "\$schema": "https://www.getbifrost.ai/schema",
-  "server": { "a2a_allow_private_push_callbacks": true },
+  "server": { "a2a_allow_private_push_callbacks": true, "a2a_grpc_base_domain": "localhost", "a2a_grpc_port": ${GRPC_PORT} },
   "client": { "a2a_external_client_url": "http://127.0.0.1:${PORT}", "a2a_private_allowlist": ["127.0.0.1"], "enforce_auth_on_inference": false },
   "governance": {
     "auth_config": {
@@ -60,7 +61,7 @@ cat > "${APP_DIR}/config.json" <<JSON
 JSON
 
 echo "Starting bifrost-http on :${PORT}..."
-"${WORK_DIR}/bifrost-http" -app-dir "${APP_DIR}" -port "${PORT}" -host 127.0.0.1 >"${SERVER_LOG}" 2>&1 &
+BIFROST_A2A_GRPC_LISTEN_PORT="${GRPC_PORT}" "${WORK_DIR}/bifrost-http" -app-dir "${APP_DIR}" -port "${PORT}" -host 127.0.0.1 >"${SERVER_LOG}" 2>&1 &
 SERVER_PID=$!
 
 for _ in $(seq 1 60); do
