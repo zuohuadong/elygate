@@ -126,9 +126,8 @@ echo "✅ Transport build validation successful"
 
 # Note: Migration tests run as a separate CI job (test-migrations) before this release job
 
-# Preflight the release target before any remote write. If the tag already
-# points at HEAD but its release is missing, skip the dependency commit so the
-# tag stays bound to HEAD and finalize can create the release.
+# Tag binding is decided before any pull. If the tag already points at HEAD we
+# must not advance HEAD while its release is still missing.
 TAG_NAME="transports/v${VERSION}"
 TAG_AT_HEAD="false"
 if git rev-parse -q --verify "refs/tags/$TAG_NAME" >/dev/null; then
@@ -138,6 +137,31 @@ if git rev-parse -q --verify "refs/tags/$TAG_NAME" >/dev/null; then
   fi
   TAG_AT_HEAD="true"
 fi
+
+CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+if [ "$CURRENT_BRANCH" = "HEAD" ]; then
+  # In detached HEAD state (common in CI), use GITHUB_REF_NAME or default to main
+  CURRENT_BRANCH="${GITHUB_REF_NAME:-main}"
+fi
+
+if [ "$TAG_AT_HEAD" = "false" ]; then
+  echo "Pulling latest changes from origin/$CURRENT_BRANCH..."
+  if ! git pull --tags origin "$CURRENT_BRANCH"; then
+    echo "❌ Error: git pull origin $CURRENT_BRANCH failed"
+    exit 1
+  fi
+  if git rev-parse -q --verify "refs/tags/$TAG_NAME" >/dev/null; then
+    if [ "$(git rev-list -n 1 "$TAG_NAME")" != "$(git rev-parse HEAD)" ]; then
+      echo "❌ Tag $TAG_NAME already exists at a different commit"
+      exit 1
+    fi
+    TAG_AT_HEAD="true"
+  fi
+else
+  echo "ℹ️ Tag $TAG_NAME is already at HEAD; skipping pull to preserve the tag target"
+fi
+
+# Release state is checked only after the final HEAD is fixed.
 if release_check "$TAG_NAME"; then
   if [ "$TAG_AT_HEAD" = "true" ]; then
     echo "ℹ️ Release $TAG_NAME already exists. Nothing to do."
@@ -150,20 +174,6 @@ else
   if [ "$status" -ne 1 ]; then
     exit 1
   fi
-fi
-
-# Commit and push changes if any
-# First, pull latest changes to avoid conflicts
-CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
-if [ "$CURRENT_BRANCH" = "HEAD" ]; then
-  # In detached HEAD state (common in CI), use GITHUB_REF_NAME or default to main
-  CURRENT_BRANCH="${GITHUB_REF_NAME:-main}"
-fi
-
-echo "Pulling latest changes from origin/$CURRENT_BRANCH..."
-if ! git pull origin "$CURRENT_BRANCH"; then
-  echo "❌ Error: git pull origin $CURRENT_BRANCH failed"
-  exit 1
 fi
 
 # Stage any changes made to transports/
