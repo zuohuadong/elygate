@@ -31,6 +31,16 @@ if ! release_check "transports/${VERSION}"; then
   echo "❌ GitHub release transports/${VERSION} does not exist or is unreadable" >&2
   exit 1
 fi
+if release_is_draft "transports/${VERSION}"; then
+  echo "❌ GitHub release transports/${VERSION} is still a draft; refusing to move latest" >&2
+  exit 1
+else
+  draft_status=$?
+  if [ "$draft_status" -ne 1 ]; then
+    echo "❌ Could not determine draft state for transports/${VERSION}" >&2
+    exit 1
+  fi
+fi
 
 # Validate required environment variables
 : "${R2_ENDPOINT:?R2_ENDPOINT env var is required}"

@@ -71,9 +71,10 @@ if release_check "$TAG_NAME"; then
       echo "ℹ️ Release $TAG_NAME already exists. Nothing to do."
       exit 0
     fi
+  else
+    echo "❌ Release $TAG_NAME exists but its tag is missing"
+    exit 1
   fi
-  echo "❌ Release $TAG_NAME exists but its tag is missing"
-  exit 1
 else
   status=$?
   if [ "$status" -ne 1 ]; then

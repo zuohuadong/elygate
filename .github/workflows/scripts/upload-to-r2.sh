@@ -52,7 +52,7 @@ fi
 
 # Strip the transports/ prefix and normalise to the v-prefixed R2 directory.
 VERSION_ONLY=${TRANSPORT_VERSION#transports/v}
-if [ "$TRANSPORT_VERSION" != transports/v* ] || ! is_semver "$VERSION_ONLY"; then
+if [[ "$TRANSPORT_VERSION" != transports/v* ]] || ! is_semver "$VERSION_ONLY"; then
   echo "❌ Invalid transport version '$TRANSPORT_VERSION'; expected transports/vX.Y.Z (SemVer, no build metadata)"
   exit 1
 fi
