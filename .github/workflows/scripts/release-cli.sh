@@ -12,6 +12,7 @@ else
 fi
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd -P)"
 source "$SCRIPT_DIR/release-state.sh"
+source "$SCRIPT_DIR/release-artifacts.sh"
 
 # Validate input argument
 if [ "${1:-}" = "" ]; then
@@ -90,8 +91,30 @@ if git rev-parse -q --verify "refs/tags/$TAG_NAME" >/dev/null; then
   fi
 fi
 
+# Configure R2 before reading release state so an existing release is verified
+# against its published artifacts, not just the GitHub API.
+bash "$SCRIPT_DIR/configure-r2.sh"
+
+verify_r2_artifacts() {
+  local listing
+  listing=$(aws s3 ls --recursive "s3://$R2_BUCKET/bifrost-cli/v${VERSION}/" \
+    --endpoint-url "$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]')" \
+    --profile "${R2_AWS_PROFILE:-R2}")
+  if [ -z "$listing" ]; then
+    echo "❌ No released artifacts at s3://$R2_BUCKET/bifrost-cli/v${VERSION}/"
+    return 1
+  fi
+  require_platform_listing "$listing" bifrost "${CLI_PLATFORMS[@]}"
+}
+
 if release_check "$TAG_NAME"; then
-  echo "ℹ️ Release $TAG_NAME already exists. Nothing to do."
+  if ! git rev-parse -q --verify "refs/tags/$TAG_NAME" >/dev/null \
+     || [ "$(git rev-list -n 1 "$TAG_NAME")" != "$(git rev-parse HEAD)" ]; then
+    echo "❌ Release $TAG_NAME exists but its tag is missing or not at HEAD"
+    exit 1
+  fi
+  verify_r2_artifacts
+  echo "ℹ️ Release $TAG_NAME and its R2 artifacts already exist. Nothing to do."
   exit 0
 else
   status=$?
@@ -102,10 +125,9 @@ fi
 
 # --- Publish steps (all checks passed) ---
 
-# Configure and upload to R2
 echo "📤 Uploading binaries..."
-bash "$SCRIPT_DIR/configure-r2.sh"
 bash "$SCRIPT_DIR/upload-cli-to-r2.sh" "$TAG_NAME"
+verify_r2_artifacts
 
 # Create and push tag
 if git rev-parse -q --verify "refs/tags/$TAG_NAME" >/dev/null; then

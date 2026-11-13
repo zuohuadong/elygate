@@ -97,12 +97,19 @@ START_FROM="none"
 # suppressing a release.
 tag_exists() {
   TAG_RELEASE_MISSING="false"
-  local tag="$1"
+  local tag="$1" path="$2"
   git rev-parse --verify "refs/tags/$tag" >/dev/null 2>&1 || return 1
   local commit
   commit=$(git rev-list -n 1 "$tag")
   if ! git merge-base --is-ancestor "$commit" HEAD; then
     echo "❌ Tag $tag is not in HEAD history; refusing to treat it as released" >&2
+    exit 1
+  fi
+  # A tag is only evidence for the current release when it points at HEAD, or
+  # when the package content since the tag has not changed. Otherwise an old tag
+  # would mask a needed release for a version that should have been bumped.
+  if [ "$commit" != "$(git rev-parse HEAD)" ] && ! git diff --quiet "$tag" HEAD -- "$path"; then
+    echo "❌ Tag $tag points at $commit but $path has changed since then; bump the version" >&2
     exit 1
   fi
   local status
@@ -128,7 +135,7 @@ tag_exists() {
 echo ""
 echo "🔧 Checking core..."
 CORE_TAG="core/v${CORE_VERSION}"
-if tag_exists "$CORE_TAG"; then
+if tag_exists "$CORE_TAG" core; then
   echo "   ⏭️ Tag $CORE_TAG already exists"
 else
   if [ "$TAG_RELEASE_MISSING" = "true" ]; then
@@ -181,7 +188,7 @@ fi
 echo ""
 echo "📦 Checking framework..."
 FRAMEWORK_TAG="framework/v${FRAMEWORK_VERSION}"
-if tag_exists "$FRAMEWORK_TAG"; then
+if tag_exists "$FRAMEWORK_TAG" framework; then
   echo "   ⏭️ Tag $FRAMEWORK_TAG already exists"
 else
   if [ "$TAG_RELEASE_MISSING" = "true" ]; then
@@ -261,7 +268,7 @@ for plugin_dir in plugins/*/; do
   tag_name="plugins/${plugin_name}/v${current_version}"
   echo "   📦 Plugin: $plugin_name (v$current_version)"
 
-  if tag_exists "$tag_name"; then
+  if tag_exists "$tag_name" "plugins/${plugin_name}"; then
     echo "      ⏭️ Tag already exists"
     continue
   fi
@@ -330,7 +337,7 @@ DOCKER_TAG_EXISTS="false"
 
 # Check if Git tag exists
 GIT_TAG_EXISTS="false"
-if tag_exists "$TRANSPORT_TAG"; then
+if tag_exists "$TRANSPORT_TAG" transports; then
   echo "   ⏭️ Git tag $TRANSPORT_TAG already exists"
   GIT_TAG_EXISTS="true"
 elif [ "$TAG_RELEASE_MISSING" = "true" ]; then

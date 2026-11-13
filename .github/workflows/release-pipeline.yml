@@ -3434,6 +3434,7 @@ jobs:
         id: prep
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          EXPECTED_COMMIT: ${{ needs.plugins-release.outputs.commit-sha || github.sha }}
         run: ./.github/workflows/scripts/release-bifrost-http-prep.sh "${{ needs.detect-changes.outputs.transport-version }}"
 
   # Build darwin, windows, linux/amd64 binaries and upload to R2
@@ -3514,6 +3515,7 @@ jobs:
           R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
           SKIP_LATEST_UPLOAD: "true"
+          ALLOW_PARTIAL_UPLOAD: "true"
         run: bash ./.github/workflows/scripts/upload-to-r2.sh "transports/v${{ needs.detect-changes.outputs.transport-version }}"
 
   # Build linux/arm64 natively on ARM runner and upload to R2
@@ -3591,6 +3593,7 @@ jobs:
           R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
           SKIP_LATEST_UPLOAD: "true"
+          ALLOW_PARTIAL_UPLOAD: "true"
         run: bash ./.github/workflows/scripts/upload-to-r2.sh "transports/v${{ needs.detect-changes.outputs.transport-version }}"
 
   # Finalize: changelog, tagging, GitHub release, R2 latest copy
@@ -3703,7 +3706,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ needs.bifrost-http-release.outputs.commit-sha || github.sha }}
+          ref: ${{ needs.bifrost-http-release.outputs.commit-sha || format('refs/tags/transports/v{0}', needs.detect-changes.outputs.transport-version) }}
           fetch-depth: 0
           fetch-tags: true
 
@@ -3834,7 +3837,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ needs.bifrost-http-release.outputs.commit-sha || github.sha }}
+          ref: ${{ needs.bifrost-http-release.outputs.commit-sha || format('refs/tags/transports/v{0}', needs.detect-changes.outputs.transport-version) }}
           fetch-depth: 0
           fetch-tags: true
 
@@ -3931,7 +3934,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ needs.bifrost-http-prep.outputs.commit-sha || github.sha }}
+          ref: ${{ needs.bifrost-http-prep.outputs.commit-sha || format('refs/tags/transports/v{0}', needs.detect-changes.outputs.transport-version) }}
 
       - name: Log in to Docker Hub
         uses: step-security/docker-login-action@870af644803bf9f204aed474adbad2958fec048b # v4.1.0
@@ -4015,7 +4018,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ needs.bifrost-http-release.outputs.commit-sha || github.sha }}
+          ref: ${{ needs.bifrost-http-release.outputs.commit-sha || format('refs/tags/transports/v{0}', needs.detect-changes.outputs.transport-version) }}
           fetch-depth: 0
           fetch-tags: true
 
@@ -4150,7 +4153,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ needs.bifrost-http-release.outputs.commit-sha || github.sha }}
+          ref: ${{ needs.bifrost-http-release.outputs.commit-sha || format('refs/tags/transports/v{0}', needs.detect-changes.outputs.transport-version) }}
           fetch-depth: 0
           fetch-tags: true
 
@@ -4249,7 +4252,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ needs.bifrost-http-prep.outputs.commit-sha || github.sha }}
+          ref: ${{ needs.bifrost-http-prep.outputs.commit-sha || format('refs/tags/transports/v{0}', needs.detect-changes.outputs.transport-version) }}
 
       - name: Log in to Docker Hub
         uses: step-security/docker-login-action@870af644803bf9f204aed474adbad2958fec048b # v4.1.0

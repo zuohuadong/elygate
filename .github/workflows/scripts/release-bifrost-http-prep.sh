@@ -72,6 +72,67 @@ for plugin_name in "${!PLUGIN_VERSIONS[@]}"; do
   echo "     - $plugin_name: ${PLUGIN_VERSIONS[$plugin_name]}"
 done
 
+# --- Immutable input and preflight (no writes before this block completes) ---
+if [ -n "${EXPECTED_COMMIT:-}" ] && [ "$(git rev-parse HEAD)" != "$EXPECTED_COMMIT" ]; then
+  echo "❌ HEAD $(git rev-parse HEAD) does not match the input commit $EXPECTED_COMMIT"
+  exit 1
+fi
+
+TAG_NAME="transports/v${VERSION}"
+CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+if [ "$CURRENT_BRANCH" = "HEAD" ]; then
+  CURRENT_BRANCH="${GITHUB_REF_NAME:-main}"
+fi
+
+# Fetch tags/state only. Pulling would move HEAD past the commit exported by the
+# previous release job and break the immutable release chain.
+git fetch --tags
+
+TAG_AT_HEAD="false"
+if git rev-parse -q --verify "refs/tags/$TAG_NAME" >/dev/null; then
+  if [ "$(git rev-list -n 1 "$TAG_NAME")" != "$(git rev-parse HEAD)" ]; then
+    echo "❌ Tag $TAG_NAME already exists at a different commit"
+    exit 1
+  fi
+  TAG_AT_HEAD="true"
+fi
+
+# Capturing changelog
+CHANGELOG_BODY=$(cat transports/changelog.md)
+CHANGELOG_BODY=$(echo "$CHANGELOG_BODY" | grep -v '^<!--' | grep -v '^-->' || true)
+if [ -z "$CHANGELOG_BODY" ]; then
+  echo "❌ Changelog is empty"
+  exit 1
+fi
+echo "📝 New changelog: $CHANGELOG_BODY"
+
+echo "🔍 Finding previous tag..."
+PREV_TAG=$(git tag -l "transports/v*" | sort -V | tail -1)
+if [[ "$PREV_TAG" == "$TAG_NAME" ]]; then
+  PREV_TAG=$(git tag -l "transports/v*" | sort -V | tail -2 | head -1)
+fi
+if [ -n "$PREV_TAG" ]; then
+  PREV_CHANGELOG=$(git tag -l --format='%(contents:body)' "$PREV_TAG")
+  if [[ "$PREV_CHANGELOG" == "$CHANGELOG_BODY" ]]; then
+    echo "❌ Changelog is the same as the previous changelog"
+    exit 1
+  fi
+fi
+
+if release_check "$TAG_NAME"; then
+  if [ "$TAG_AT_HEAD" = "true" ]; then
+    echo "ℹ️ Release $TAG_NAME already exists. Nothing to do."
+    exit 0
+  fi
+  echo "❌ Release $TAG_NAME exists but its tag is missing"
+  exit 1
+else
+  status=$?
+  if [ "$status" -ne 1 ]; then
+    exit 1
+  fi
+fi
+
 # Update transport dependencies to use plugin versions from version files
 echo "🔧 Using plugin versions from version files for transport..."
 
@@ -125,56 +186,6 @@ cd ..
 echo "✅ Transport build validation successful"
 
 # Note: Migration tests run as a separate CI job (test-migrations) before this release job
-
-# Tag binding is decided before any pull. If the tag already points at HEAD we
-# must not advance HEAD while its release is still missing.
-TAG_NAME="transports/v${VERSION}"
-TAG_AT_HEAD="false"
-if git rev-parse -q --verify "refs/tags/$TAG_NAME" >/dev/null; then
-  if [ "$(git rev-list -n 1 "$TAG_NAME")" != "$(git rev-parse HEAD)" ]; then
-    echo "❌ Tag $TAG_NAME already exists at a different commit"
-    exit 1
-  fi
-  TAG_AT_HEAD="true"
-fi
-
-CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
-if [ "$CURRENT_BRANCH" = "HEAD" ]; then
-  # In detached HEAD state (common in CI), use GITHUB_REF_NAME or default to main
-  CURRENT_BRANCH="${GITHUB_REF_NAME:-main}"
-fi
-
-if [ "$TAG_AT_HEAD" = "false" ]; then
-  echo "Pulling latest changes from origin/$CURRENT_BRANCH..."
-  if ! git pull --tags origin "$CURRENT_BRANCH"; then
-    echo "❌ Error: git pull origin $CURRENT_BRANCH failed"
-    exit 1
-  fi
-  if git rev-parse -q --verify "refs/tags/$TAG_NAME" >/dev/null; then
-    if [ "$(git rev-list -n 1 "$TAG_NAME")" != "$(git rev-parse HEAD)" ]; then
-      echo "❌ Tag $TAG_NAME already exists at a different commit"
-      exit 1
-    fi
-    TAG_AT_HEAD="true"
-  fi
-else
-  echo "ℹ️ Tag $TAG_NAME is already at HEAD; skipping pull to preserve the tag target"
-fi
-
-# Release state is checked only after the final HEAD is fixed.
-if release_check "$TAG_NAME"; then
-  if [ "$TAG_AT_HEAD" = "true" ]; then
-    echo "ℹ️ Release $TAG_NAME already exists. Nothing to do."
-    exit 0
-  fi
-  echo "❌ Release $TAG_NAME exists but its tag is missing"
-  exit 1
-else
-  status=$?
-  if [ "$status" -ne 1 ]; then
-    exit 1
-  fi
-fi
 
 # Stage any changes made to transports/
 git add transports/

@@ -108,7 +108,7 @@ if [ -n "$PREV_TAG" ]; then
 
   # Get message of the tag
   echo "🔍 Getting previous tag message..."
-  PREV_CHANGELOG=$(git tag -l --format='%(contents)' "$PREV_TAG")
+  PREV_CHANGELOG=$(git tag -l --format='%(contents:body)' "$PREV_TAG")
   echo "📝 Previous changelog body: $PREV_CHANGELOG"
 
   # Checking if tag message is the same as the changelog

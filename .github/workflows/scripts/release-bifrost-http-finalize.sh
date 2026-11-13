@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 source "$(dirname "$0")/r2-bucket.sh"
+source "$(dirname "$0")/release-artifacts.sh"
 set -euo pipefail
 
 # Finalize bifrost-http release: changelog, tagging, GitHub release, R2 latest copy
@@ -76,7 +77,7 @@ echo "🔍 Previous tag: $PREV_TAG"
 
 # Get message of the tag
 echo "🔍 Getting previous tag message..."
-PREV_CHANGELOG=$(git tag -l --format='%(contents)' "$PREV_TAG")
+PREV_CHANGELOG=$(git tag -l --format='%(contents:body)' "$PREV_TAG")
 echo "📝 Previous changelog body: $PREV_CHANGELOG"
 
 # Checking if tag message is the same as the changelog
@@ -134,6 +135,24 @@ elif [ "$RELEASE_EXISTS" = "true" ]; then
   echo "Error: GitHub release $TAG_NAME exists but its tag is missing."
   exit 1
 fi
+
+
+# Verify the complete released artifact set before publishing a tag or release.
+# This must happen before any remote write so a missing platform does not leave a
+# tag/release without artifacts.
+if [ -z "${R2_ENDPOINT:-}" ]; then
+  echo "Error: R2_ENDPOINT is required to verify released artifacts."
+  exit 1
+fi
+validate_r2_bucket
+R2_ENDPOINT="$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]')"
+ARTIFACT_LISTING=$(aws s3 ls --recursive "s3://$R2_BUCKET/bifrost/v$VERSION/" --endpoint-url "$R2_ENDPOINT" --profile "${R2_AWS_PROFILE:-R2}")
+if [ -z "$ARTIFACT_LISTING" ]; then
+  echo "Error: versioned R2 prefix s3://$R2_BUCKET/bifrost/v$VERSION/ is empty; refusing to publish."
+  exit 1
+fi
+require_platform_listing "$ARTIFACT_LISTING" bifrost-http "${BIFROST_HTTP_PLATFORMS[@]}"
+echo "✅ Complete five-platform artifact set found in R2"
 
 if [ "$RELEASE_EXISTS" = "false" ]; then
 # Create the tag once, but tolerate a previous run that pushed it before the
@@ -229,23 +248,9 @@ else
   echo "ℹ️ GitHub release $TAG_NAME already exists; verifying R2 latest/ only."
 fi
 
-# Copy versioned R2 path to latest/ for stable releases.
+# Copy versioned R2 path to latest/ for stable releases. The artifact set was
+# verified above, before the tag/release were written.
 if [[ "$VERSION" != *-* ]]; then
-  if [ -z "${R2_ENDPOINT:-}" ]; then
-    echo "Error: R2_ENDPOINT is required for a stable release."
-    exit 1
-  fi
-  validate_r2_bucket
-  R2_ENDPOINT="$(echo "$R2_ENDPOINT" | tr -d '[:space:]')"
-  SOURCE_LISTING=$(aws s3 ls --recursive "s3://$R2_BUCKET/bifrost/v$VERSION/" --endpoint-url "$R2_ENDPOINT" --profile "${R2_AWS_PROFILE:-R2}")
-  if [ -z "$SOURCE_LISTING" ]; then
-    echo "Error: versioned R2 prefix s3://$R2_BUCKET/bifrost/v$VERSION/ is empty; refusing to update latest/."
-    exit 1
-  fi
-  if ! grep -q 'bifrost-http' <<<"$SOURCE_LISTING" || ! grep -q '\.sha256' <<<"$SOURCE_LISTING"; then
-    echo "Error: versioned R2 prefix is missing binaries or checksums; refusing to update latest/."
-    exit 1
-  fi
   echo "📤 Copying versioned binaries to latest/ on R2..."
   aws s3 sync "s3://$R2_BUCKET/bifrost/v$VERSION/" "s3://$R2_BUCKET/bifrost/latest/" \
     --endpoint-url "$R2_ENDPOINT" \

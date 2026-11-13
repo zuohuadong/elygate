@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 source "$(dirname "$0")/r2-bucket.sh"
+source "$(dirname "$0")/release-artifacts.sh"
 set -euo pipefail
 
 # Overwrite latest with a specific version from R2
@@ -73,10 +74,7 @@ if [ -z "$SOURCE_LISTING" ]; then
   echo "❌ Version prefix s3://$R2_BUCKET/bifrost/$VERSION/ is empty; refusing to overwrite latest/"
   exit 1
 fi
-if ! grep -q 'bifrost-http' <<<"$SOURCE_LISTING" || ! grep -q '\.sha256' <<<"$SOURCE_LISTING"; then
-  echo "❌ Version prefix s3://$R2_BUCKET/bifrost/$VERSION/ is missing binaries or checksums; refusing to overwrite latest/"
-  exit 1
-fi
+require_platform_listing "$SOURCE_LISTING" bifrost-http "${BIFROST_HTTP_PLATFORMS[@]}"
 
 echo "✅ Version $VERSION found in R2"
 

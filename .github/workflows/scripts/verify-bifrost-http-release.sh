@@ -7,6 +7,7 @@
 set -e
 
 source "$(dirname "$0")/r2-bucket.sh"
+source "$(dirname "$0")/release-artifacts.sh"
 
 VERSION=$1
 RELEASE_NEEDED=${2:-}
@@ -17,10 +18,8 @@ if [ -z "$VERSION" ]; then
 fi
 
 TAG_NAME="transports/v${VERSION}"
-if [ "$RELEASE_NEEDED" != "true" ]; then
-    echo "ℹ️  Bifrost-http release is not needed; skipping release verification"
-    exit 0
-fi
+# Even when no new transport release is needed, Docker builds must be based on
+# the exact tag commit and its complete published artifact set.
 echo "🔍 Verifying bifrost-http release v${VERSION}..."
 
 # Check if the git tag exists
@@ -80,10 +79,7 @@ if [ -z "$ARTIFACT_LISTING" ]; then
     echo "❌ No released artifacts at s3://$R2_BUCKET/bifrost/v${VERSION}/"
     exit 78
 fi
-if ! grep -q 'bifrost-http' <<<"$ARTIFACT_LISTING" || ! grep -q '\.sha256' <<<"$ARTIFACT_LISTING"; then
-    echo "❌ Released artifact set is missing binaries or checksums"
-    exit 78
-fi
+require_platform_listing "$ARTIFACT_LISTING" bifrost-http "${BIFROST_HTTP_PLATFORMS[@]}"
 echo "✅ Released artifacts found in R2"
 
 echo ""
