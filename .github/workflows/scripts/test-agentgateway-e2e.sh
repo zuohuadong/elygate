@@ -79,6 +79,24 @@ if [ "${READY:-0}" != "1" ]; then
   exit 1
 fi
 
+# Deterministic auth smoke: the admin API must reject anonymous access and
+# accept a valid session before the broader Agent Gateway suite runs.
+UNAUTH_CODE=$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:${PORT}/api/config" || echo 000)
+case "$UNAUTH_CODE" in
+  401|403) ;;
+  *) echo "anonymous /api/config returned HTTP $UNAUTH_CODE; expected 401/403" >&2; TEST_FAILED=1; exit 1;;
+esac
+COOKIE_JAR="${WORK_DIR}/cookies.txt"
+if ! curl -fsS -c "$COOKIE_JAR" -H 'Content-Type: application/json' \
+  -d "{\"username\":\"e2e-admin\",\"password\":\"${ADMIN_PASSWORD}\"}" \
+  "http://127.0.0.1:${PORT}/api/session/login" >/dev/null; then
+  echo "admin login failed" >&2; TEST_FAILED=1; exit 1
+fi
+AUTH_CODE=$(curl -sS -o /dev/null -w '%{http_code}' -b "$COOKIE_JAR" "http://127.0.0.1:${PORT}/api/config?from_db=true" || echo 000)
+if [ "$AUTH_CODE" != "200" ]; then
+  echo "authenticated /api/config returned HTTP $AUTH_CODE; expected 200" >&2; TEST_FAILED=1; exit 1
+fi
+
 echo "Running Agent Gateway E2E..."
 if ! (cd tests/agentgateway && AGENTGATEWAY_URL="http://127.0.0.1:${PORT}" AGENTGATEWAY_ADMIN_USER=e2e-admin AGENTGATEWAY_ADMIN_PASS="${ADMIN_PASSWORD}" GOWORK=off go test ./... -count=1 -v -timeout 5m); then
   TEST_FAILED=1

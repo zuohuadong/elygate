@@ -58,12 +58,14 @@ for config in "$CHART_DIR"/values-examples/*.yaml; do
 done
 
 DOCS_DIR="$CHART_DIR/../../docs"
-if [ -d "$DOCS_DIR" ]; then
-    if grep -rq 'bifrost:latest' "$DOCS_DIR"; then
-        print_error "Deployment docs must not reference bifrost:latest"
+TERRAFORM_DIR="$CHART_DIR/../../terraform"
+for tree in "$DOCS_DIR" "$TERRAFORM_DIR"; do
+    [ -d "$tree" ] || continue
+    if grep -rqE 'bifrost:latest|image_tag[[:space:]]*=[[:space:]]*["'\'']latest["'\'']|IMAGE_TAG.*`latest`' "$tree"; then
+        print_error "Deployment docs and Terraform examples must pin an immutable Bifrost image"
         exit 1
     fi
-fi
+done
 
 # Check if Helm is installed
 print_info "Checking Helm installation..."

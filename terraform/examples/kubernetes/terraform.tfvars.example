@@ -4,7 +4,7 @@
 #          Use environment variables, a secrets manager, or .gitignore this file.
 # =============================================================================
 
-image_tag   = "latest"
+image_tag   = "v2.5.1"
 name_prefix = "bifrost"
 
 # -----------------------------------------------------------------------------

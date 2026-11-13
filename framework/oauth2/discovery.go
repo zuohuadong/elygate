@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -60,7 +62,7 @@ func SetDiscoveryDialContextForTests(dial func(ctx context.Context, network, add
 // SetPrivateTargetAllowlist.
 var (
 	oauthDiscoveryTransport            = newOAuthDiscoveryTransport(oauthDialContext(10*time.Second, network.SSRFSafeDialContext(10*time.Second), proxiesFromEnvironment()...))
-	oauthAllowlistedDiscoveryTransport atomic.Pointer[http.Transport]
+	oauthAllowlistedDiscoveryTransport atomic.Pointer[oauthHTTPTransport]
 )
 
 func init() {
@@ -69,7 +71,7 @@ func init() {
 
 // newAllowlistedTransport builds a transport for the allowlisted destination
 // policy, with an empty connection pool.
-func newAllowlistedTransport() *http.Transport {
+func newAllowlistedTransport() *oauthHTTPTransport {
 	return newOAuthAllowlistedDiscoveryTransport(oauthDialContext(10*time.Second, network.AllowlistedPrivateDialContext(10*time.Second, privateTargetAllowlist.Load), proxiesFromEnvironment()...))
 }
 
@@ -185,19 +187,19 @@ func proxiesFromEnvironment() []*url.URL {
 // newOAuthDiscoveryTransport builds a transport around dial with bounded idle
 // connection settings. Production uses the single shared instance above; a
 // test dialer override gets its own transport so it never mutates the shared one.
-func newOAuthDiscoveryTransport(dial func(ctx context.Context, network, addr string) (net.Conn, error)) *http.Transport {
+func newOAuthDiscoveryTransport(dial func(ctx context.Context, network, addr string) (net.Conn, error)) *oauthHTTPTransport {
 	return newOAuthTransportWithProxy(dial, oauthProxySelector(network.DefaultProxyFunc(network.ClientPurposeAPI)))
 }
 
 // newOAuthAllowlistedDiscoveryTransport is newOAuthDiscoveryTransport for the
 // allowlisted destination policy: its proxy selector also lets through an
 // IP-literal destination privateTargetAllowlist permits.
-func newOAuthAllowlistedDiscoveryTransport(dial func(ctx context.Context, network, addr string) (net.Conn, error)) *http.Transport {
+func newOAuthAllowlistedDiscoveryTransport(dial func(ctx context.Context, network, addr string) (net.Conn, error)) *oauthHTTPTransport {
 	return newOAuthTransportWithProxy(dial, oauthAllowlistedProxySelector(network.DefaultProxyFunc(network.ClientPurposeAPI), privateTargetAllowlist.Load))
 }
 
-func newOAuthTransportWithProxy(dial func(ctx context.Context, network, addr string) (net.Conn, error), proxy func(*http.Request) (*url.URL, error)) *http.Transport {
-	return &http.Transport{
+func newOAuthTransportWithProxy(dial func(ctx context.Context, network, addr string) (net.Conn, error), proxy func(*http.Request) (*url.URL, error)) *oauthHTTPTransport {
+	base := &http.Transport{
 		Proxy:               proxy,
 		DialContext:         dial,
 		MaxIdleConns:        32,
@@ -205,6 +207,60 @@ func newOAuthTransportWithProxy(dial func(ctx context.Context, network, addr str
 		IdleConnTimeout:     90 * time.Second,
 		TLSHandshakeTimeout: 10 * time.Second,
 	}
+	out := &oauthHTTPTransport{Transport: base}
+	out.refreshProxyTransport()
+	return out
+}
+
+// oauthHTTPTransport routes each request to a direct or proxy-aware transport.
+// The proxy-aware one trusts the global proxy CA; the direct one never does.
+// The proxy-aware transport is rebuilt when the registered factory or its CA
+// changes, so a transport created before the server registers its factory still
+// picks the proxy TLS settings up.
+type oauthHTTPTransport struct {
+	*http.Transport
+	mu      sync.Mutex
+	proxied *http.Transport
+	key     string
+}
+
+func (t *oauthHTTPTransport) refreshProxyTransport() *http.Transport {
+	factory := network.DefaultHTTPClientFactory()
+	if factory == nil {
+		return nil
+	}
+	key := factory.ProxyTargetRootsKey(network.ClientPurposeAPI)
+	roots := factory.ProxyTargetRoots(network.ClientPurposeAPI, nil)
+	hopTLS := factory.ProxyHopTLS(network.ClientPurposeAPI)
+	if roots == nil && hopTLS == nil {
+		return nil
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.proxied != nil && t.key == key {
+		return t.proxied
+	}
+	proxied := t.Transport.Clone()
+	if roots != nil {
+		proxied.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: roots}
+	}
+	proxied.Proxy = func(req *http.Request) (*url.URL, error) { return t.Transport.Proxy(req) }
+	if hopTLS != nil {
+		network.DialHTTPSProxyWithHopTLS(proxied, hopTLS)
+	}
+	t.proxied = proxied
+	t.key = key
+	return proxied
+}
+
+func (t *oauthHTTPTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	proxied := t.refreshProxyTransport()
+	if proxied != nil {
+		if proxyURL, err := t.Transport.Proxy(req); err == nil && proxyURL != nil {
+			return proxied.RoundTrip(req)
+		}
+	}
+	return t.Transport.RoundTrip(req)
 }
 
 // oauthProxySelector wraps a proxy chooser (network.DefaultProxyFunc in

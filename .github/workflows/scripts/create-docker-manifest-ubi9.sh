@@ -42,7 +42,8 @@ fi
 # This is a required part of the release, not an optional mirror. New GHCR
 # packages are PRIVATE by default — see create-docker-manifest.sh header for the
 # one-time visibility flip required for anonymous pulls.
-if [ -n "${GITHUB_REPOSITORY:-}" ]; then
+: "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required for GHCR publishing}"
+if [ -n "${GITHUB_REPOSITORY}" ]; then
   (
     set -e
     GHCR_IMAGE="ghcr.io/$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"

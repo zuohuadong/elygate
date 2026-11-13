@@ -157,6 +157,9 @@ jobs:
             packages.microsoft.com:443
             proxy.golang.org:443
             registry.hub.docker.com:443
+            auth.docker.io:443
+            ghcr.io:443
+            registry-1.docker.io:443
             7defe2860d5ee49a1e667e1eeea34b25.r2.cloudflarestorage.com:443
             files.pythonhosted.org:443
             pypi.org:443
@@ -188,6 +191,19 @@ jobs:
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: bash ./.github/workflows/scripts/configure-r2.sh
+
+      - name: Log in to Docker Hub
+        uses: step-security/docker-login-action@870af644803bf9f204aed474adbad2958fec048b # v4.1.0
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Log in to GitHub Container Registry
+        uses: step-security/docker-login-action@870af644803bf9f204aed474adbad2958fec048b # v4.1.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Detect what needs release
         id: detect
@@ -2078,7 +2094,7 @@ jobs:
   # private push callbacks enabled and exercises tests/agentgateway.
   test-agentgateway:
     needs: [check-skip, detect-changes, build-gateway]
-    if: needs.check-skip.outputs.should-skip != 'true' && needs.check-skip.outputs.skip-tests != 'true' && needs.detect-changes.outputs.bifrost-http-needs-release == 'true'
+    if: needs.check-skip.outputs.should-skip != 'true' && needs.check-skip.outputs.skip-tests != 'true'
     runs-on: builder-8-32
     permissions:
       contents: read
@@ -4100,7 +4116,7 @@ jobs:
         run: |
           IMAGE="${{ steps.tags.outputs.tags }}"
           docker pull "$IMAGE"
-          docker run --rm --entrypoint sh "$IMAGE" -c 'test "$(id -u)" = "1001"; test -x /app/bifrost-http; test -x /app/docker-entrypoint.sh; test -f /licenses/LICENSE; command -v curl-minimal'
+          docker run --rm --entrypoint sh "$IMAGE" -c 'test "$(id -u)" = "1001"; test -x /app/main; test -x /app/docker-entrypoint.sh; test -f /licenses/LICENSE; command -v curl-minimal'
           docker run -d --name ubi9-smoke-amd64 -p 18081:8080 "$IMAGE"
           trap 'docker rm -f ubi9-smoke-amd64 >/dev/null 2>&1 || true' EXIT
           healthy=false
@@ -4256,7 +4272,7 @@ jobs:
         run: |
           IMAGE="${{ steps.tags.outputs.tags }}"
           docker pull "$IMAGE"
-          docker run --rm --entrypoint sh "$IMAGE" -c 'test "$(id -u)" = "1001"; test -x /app/bifrost-http; test -x /app/docker-entrypoint.sh; test -f /licenses/LICENSE; command -v curl-minimal'
+          docker run --rm --entrypoint sh "$IMAGE" -c 'test "$(id -u)" = "1001"; test -x /app/main; test -x /app/docker-entrypoint.sh; test -f /licenses/LICENSE; command -v curl-minimal'
           docker run -d --name ubi9-smoke-arm64 -p 18082:8080 "$IMAGE"
           trap 'docker rm -f ubi9-smoke-arm64 >/dev/null 2>&1 || true' EXIT
           healthy=false

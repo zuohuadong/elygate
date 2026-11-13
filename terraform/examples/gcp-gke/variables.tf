@@ -12,7 +12,7 @@ variable "region" {
 variable "image_tag" {
   description = "Bifrost Docker image tag."
   type        = string
-  default     = "latest"
+  default     = "v2.5.1"
 }
 
 variable "name_prefix" {

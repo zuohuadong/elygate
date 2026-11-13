@@ -1064,6 +1064,19 @@ func (f *HTTPClientFactory) ProxyTargetRoots(purpose ClientPurpose, base *x509.C
 	return f.proxyRootsWith(base)
 }
 
+// ProxyHopTLS returns the TLS config for the hop to an https:// proxy for purpose,
+// or nil when no proxy is active. It carries the proxy CA and skip_tls_verify,
+// and must only be used for the hop: direct and no_proxy targets keep the
+// system-root TLS config.
+func (f *HTTPClientFactory) ProxyHopTLS(purpose ClientPurpose) *tls.Config {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	if f.proxyURLForPurpose(purpose) == nil || f.proxyConfig == nil {
+		return nil
+	}
+	return f.proxyConfig.proxyTLS(f.proxyRoots)
+}
+
 // ProxyTargetRootsKey identifies the current proxy CA for purpose. Callers that cache
 // a proxied TLS transport use it to rebuild when the CA changes under the same proxy
 // URL, instead of keeping a pool pinned to the previous trust anchors.

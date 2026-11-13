@@ -53,7 +53,8 @@ fi
 # return 403/404 even after a successful push here. This is one-time per
 # package and not something this script can fix automatically — the GHCR
 # REST API does not currently expose visibility-PATCH for container packages.
-if [ -n "${GITHUB_REPOSITORY:-}" ]; then
+: "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required for GHCR publishing}"
+if [ -n "${GITHUB_REPOSITORY}" ]; then
   (
     set -e
     GHCR_IMAGE="ghcr.io/$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"

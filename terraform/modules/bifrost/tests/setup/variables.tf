@@ -49,7 +49,7 @@ variable "audit_logs" { default = null }
 variable "websocket" { default = null }
 variable "server" { default = null }
 
-variable "image_tag" { default = "latest" }
+variable "image_tag" { default = "v2.5.1" }
 variable "image_repository" { default = "maximhq/bifrost" }
 variable "name_prefix" { default = "bifrost" }
 

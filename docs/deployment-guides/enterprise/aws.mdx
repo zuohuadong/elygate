@@ -177,7 +177,7 @@ spec:
       serviceAccountName: bifrost-sa
       containers:
       - name: bifrost
-        image: BIFROST_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/YOUR_HUB_SLUG:latest
+        image: BIFROST_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/YOUR_HUB_SLUG:v2.5.1
         ports:
         - containerPort: 8080
           name: http
@@ -277,7 +277,7 @@ The task execution role allows ECS to pull images from ECR.
   "containerDefinitions": [
     {
       "name": "bifrost",
-      "image": "BIFROST_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/YOUR_HUB_SLUG:latest",
+      "image": "BIFROST_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/YOUR_HUB_SLUG:v2.5.1",
       "portMappings": [
         {
           "containerPort": 8080,
@@ -327,7 +327,7 @@ aws ecr get-login-password --region us-east-1 | \
   BIFROST_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com
 
 # Pull test
-docker pull BIFROST_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/YOUR_HUB_SLUG:latest
+docker pull BIFROST_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/YOUR_HUB_SLUG:v2.5.1
 ```
 
 ### Verify IRSA Configuration

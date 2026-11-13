@@ -5,7 +5,7 @@
 # =============================================================================
 
 region              = "eastus"
-image_tag           = "latest"
+image_tag           = "v2.5.1"
 name_prefix         = "bifrost"
 resource_group_name = "bifrost-rg"
 

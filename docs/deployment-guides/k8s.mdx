@@ -15,7 +15,7 @@ module "bifrost" {
   cloud_provider = "aws"          # "aws" | "gcp" | "azure" | "kubernetes"
   service        = "eks"          # AWS: "ecs" | "eks", GCP: "gke" | "cloud-run", Azure: "aks" | "aci", K8s: "deployment"
   region         = "us-east-1"
-  image_tag      = "latest"
+  image_tag      = "v2.5.1"
 }
 ```
 See the [Terraform module README](https://github.com/maximhq/bifrost/tree/main/terraform) for full documentation and examples.

@@ -284,6 +284,31 @@ if [ $HEALTH_OK -eq 0 ]; then
   exit 1
 fi
 
+# Deterministic container-internal API/auth smoke. This does not call a provider;
+# it proves the built image serves the inference surface and enforces the admin
+# login route rather than only answering /health.
+API_BODY=$(mktemp)
+API_CODE=$(curl -sS -o "$API_BODY" -w '%{http_code}' \
+  -H 'Authorization: Bearer smoke-invalid' \
+  "http://localhost:${TEST_PORT}/v1/models" || echo 000)
+case "$API_CODE" in
+  000) echo "ERROR: /v1/models did not respond" >&2; cat "$API_BODY" >&2; exit 1;;
+esac
+if ! grep -qE '^[[:space:]]*[\[{]' "$API_BODY"; then
+  echo "ERROR: /v1/models did not return JSON (HTTP $API_CODE)" >&2
+  cat "$API_BODY" >&2
+  exit 1
+fi
+LOGIN_CODE=$(curl -sS -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' \
+  -d '{"username":"smoke","password":"wrong"}' \
+  "http://localhost:${TEST_PORT}/api/session/login" || echo 000)
+case "$LOGIN_CODE" in
+  400|401|403) ;;
+  *) echo "ERROR: invalid admin login returned HTTP $LOGIN_CODE" >&2; exit 1;;
+esac
+rm -f "$API_BODY"
+echo "Container API/auth smoke passed (models=$API_CODE login=$LOGIN_CODE)"
+
 # # Run E2E API tests
 # echo ""
 # echo "=== Running E2E API tests ==="

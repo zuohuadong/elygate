@@ -112,7 +112,7 @@ make deploy-ecs \
 | `ECS_CLUSTER_NAME` | `bifrost-cluster` | Name of the ECS cluster |
 | `ECS_SERVICE_NAME` | `bifrost-service` | Name of the ECS service |
 | `ECS_TASK_FAMILY` | `bifrost-task` | Task definition family name |
-| `IMAGE_TAG` | `latest` | Bifrost Docker image tag |
+| `IMAGE_TAG` | `v2.5.1` | Bifrost Docker image tag |
 | `LAUNCH_TYPE` | `FARGATE` | Launch type: `FARGATE` or `EC2` |
 | `SECRET_BACKEND` | `secretsmanager` | Secret storage: `secretsmanager` or `ssm` |
 | `AWS_REGION` | `us-east-1` | AWS region |
@@ -836,7 +836,7 @@ Parameters:
   
   ImageTag:
     Type: String
-    Default: latest
+    Default: v2.5.1
     Description: Bifrost Docker image tag
   
   LaunchType:
@@ -1260,7 +1260,7 @@ aws cloudformation wait stack-delete-complete \
 | `ClusterName` | `bifrost-cluster` | No | ECS cluster name (must exist) |
 | `ServiceName` | `bifrost-service` | No | ECS service name |
 | `TaskFamily` | `bifrost-task` | No | Task definition family |
-| `ImageTag` | `latest` | No | Docker image tag |
+| `ImageTag` | `v2.5.1` | No | Docker image tag |
 | `LaunchType` | `FARGATE` | No | `FARGATE` or `EC2` |
 | `ContainerPort` | `8080` | No | Container port |
 | `DesiredCount` | `1` | No | Number of tasks |

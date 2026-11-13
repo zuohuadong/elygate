@@ -23,7 +23,11 @@
         },
         "tag": {
           "type": "string",
-          "description": "Image tag (required - validated at template render time)"
+          "minLength": 1,
+          "not": {
+            "enum": ["latest", "stable", "main", "master"]
+          },
+          "description": "Immutable image tag or digest; mutable aliases such as latest are rejected"
         }
       }
     },

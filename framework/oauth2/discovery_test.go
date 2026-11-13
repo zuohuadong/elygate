@@ -2,8 +2,14 @@ package oauth2
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"io"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -35,7 +41,7 @@ func TestNewOAuthDiscoveryHTTPClientBlocksLoopback(t *testing.T) {
 
 	for _, ctx := range []context.Context{context.Background(), withRequirePublicTarget(context.Background(), true)} {
 		client := newOAuthDiscoveryHTTPClient(ctx, time.Second)
-		transport, ok := client.Transport.(*http.Transport)
+		transport, ok := client.Transport.(*oauthHTTPTransport)
 		require.True(t, ok)
 		require.NotNil(t, transport.DialContext)
 
@@ -66,7 +72,7 @@ func TestNewOAuthDiscoveryHTTPClientFollowsPrivateTargetAllowlist(t *testing.T) 
 	require.NoError(t, err, "an allowlisted loopback OAuth server must be reachable")
 	resp.Body.Close()
 
-	transport, ok := newOAuthDiscoveryHTTPClient(ctx, time.Second).Transport.(*http.Transport)
+	transport, ok := newOAuthDiscoveryHTTPClient(ctx, time.Second).Transport.(*oauthHTTPTransport)
 	require.True(t, ok)
 	_, err = transport.DialContext(context.Background(), "tcp", "169.254.169.254:80")
 	require.Error(t, err)
@@ -744,4 +750,43 @@ func TestOAuthRequestsNeverReadCallerValuesWhileDialing(t *testing.T) {
 	_, err := DiscoverOAuthMetadata(cancelled, server.URL)
 	require.Error(t, err, "a cancelled caller must still stop the request")
 	assert.Equal(t, before, dialed.Load(), "a cancelled request must not dial")
+}
+
+func TestOAuthTransportScopesProxyTLS(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	tmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "oauth-proxy-ca"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		IsCA:                  true,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
+		BasicConstraintsValid: true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	require.NoError(t, err)
+	caPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+
+	previous := network.DefaultHTTPClientFactory()
+	t.Cleanup(func() { network.SetDefaultHTTPClientFactory(previous) })
+	network.SetDefaultHTTPClientFactory(network.NewHTTPClientFactory(&network.GlobalProxyConfig{
+		Enabled:      true,
+		Type:         network.GlobalProxyTypeHTTP,
+		URL:          "http://proxy.example:8080",
+		CACertPEM:    string(caPEM),
+		EnableForAPI: true,
+	}, nil))
+
+	transport := newOAuthDiscoveryTransport((&net.Dialer{}).DialContext)
+	require.NotNil(t, transport.proxied, "a proxy CA must install the proxy-aware transport")
+	require.NotNil(t, transport.proxied.TLSClientConfig)
+	require.NotNil(t, transport.proxied.TLSClientConfig.RootCAs)
+	require.Nil(t, transport.Transport.TLSClientConfig, "direct OAuth targets must keep system roots")
+
+	req, err := http.NewRequest(http.MethodGet, "https://oauth.example/.well-known/oauth-authorization-server", nil)
+	require.NoError(t, err)
+	proxyURL, err := transport.Proxy(req)
+	require.NoError(t, err)
+	require.NotNil(t, proxyURL)
 }

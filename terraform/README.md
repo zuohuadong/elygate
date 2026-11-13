@@ -115,7 +115,7 @@ terraform apply
 | `cloud_provider` | (required) | `"aws"`, `"gcp"`, `"azure"`, or `"kubernetes"` |
 | `service` | (required) | Service type (see table above) |
 | `region` | (required) | Cloud region |
-| `image_tag` | `"latest"` | Bifrost Docker image tag |
+| `image_tag` | `"v2.5.1"` | Bifrost Docker image tag |
 | `desired_count` | `1` | Number of replicas |
 | `cpu` | `512` | CPU units (ECS) or millicores (K8s) |
 | `memory` | `1024` | Memory in MB |

@@ -358,7 +358,15 @@ elif [ "$TAG_RELEASE_MISSING" = "true" ]; then
   BIFROST_HTTP_NEEDS_RELEASE="true"
 fi
 
-# Check if Docker tag exists on DockerHub
+# A tag only counts as published when the manifest exists and contains both
+# architectures. Checking every registry/edition lets a failed GHCR mirror or a
+# missing UBI9 manifest trigger an idempotent Docker repair on rerun.
+manifest_complete() {
+  local image="$1" json
+  json=$(docker manifest inspect "$image" 2>/dev/null) || return 1
+  jq -e '((.manifests // []) | map(.platform.architecture) | (index("amd64") != null and index("arm64") != null))' <<<"$json" >/dev/null
+}
+
 echo "   🐳 Checking DockerHub for tag v${TRANSPORT_VERSION}..."
 DOCKER_ERR=$(mktemp)
 DOCKER_CODE=$(curl -sS -o "$DOCKER_ERR" -w '%{http_code}' "https://registry.hub.docker.com/v2/repositories/maximhq/bifrost/tags/v${TRANSPORT_VERSION}/" || echo 000)
@@ -375,6 +383,24 @@ else
   cat "$DOCKER_ERR" >&2
   rm -f "$DOCKER_ERR"
   exit 1
+fi
+
+if [ "$DOCKER_TAG_EXISTS" = "true" ]; then
+  GHCR_REPO="$(printf '%s' "${GITHUB_REPOSITORY:-}" | tr '[:upper:]' '[:lower:]')"
+  if [ -z "$GHCR_REPO" ]; then
+    echo "❌ GITHUB_REPOSITORY is required to verify GHCR images" >&2
+    exit 1
+  fi
+  for image in \
+    "docker.io/maximhq/bifrost:v${TRANSPORT_VERSION}" \
+    "ghcr.io/${GHCR_REPO}:v${TRANSPORT_VERSION}" \
+    "docker.io/maximhq/bifrost:v${TRANSPORT_VERSION}-ubi9" \
+    "ghcr.io/${GHCR_REPO}:v${TRANSPORT_VERSION}-ubi9"; do
+    if ! manifest_complete "$image"; then
+      echo "   ❌ Missing or incomplete manifest: $image"
+      DOCKER_TAG_EXISTS="false"
+    fi
+  done
 fi
 
 # Determine if release is needed

@@ -31,4 +31,10 @@ aws s3 sync "s3://$R2_BUCKET/$PREFIX/v${VERSION}/" "s3://$R2_BUCKET/$PREFIX/late
 LATEST_LISTING=$(aws s3 ls --recursive "s3://$R2_BUCKET/$PREFIX/latest/" \
   --endpoint-url "$ENDPOINT" --profile "${R2_AWS_PROFILE:-R2}")
 require_platform_listing "$LATEST_LISTING" "$BINARY" "${CLI_PLATFORMS[@]}"
+LATEST_VERSION=$(aws s3 cp "s3://$R2_BUCKET/$PREFIX/latest/version.txt" - \
+  --endpoint-url "$ENDPOINT" --profile "${R2_AWS_PROFILE:-R2}")
+if [ "$LATEST_VERSION" != "$VERSION" ]; then
+  echo "❌ latest/version.txt is '$LATEST_VERSION', expected '$VERSION'" >&2
+  exit 1
+fi
 echo "✅ latest/ now matches v${VERSION}"
