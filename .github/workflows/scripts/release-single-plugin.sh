@@ -35,11 +35,9 @@ if [ "$CURRENT_BRANCH" = "HEAD" ]; then
   CURRENT_BRANCH="${GITHUB_REF_NAME:-main}"
 fi
 
-echo "Pulling latest changes from origin/$CURRENT_BRANCH..."
-if ! git pull origin "$CURRENT_BRANCH"; then
-  echo "❌ Error: git pull origin $CURRENT_BRANCH failed"
-  exit 1
-fi
+# CI already checks out the release commit. Pulling here would move HEAD after
+# the tag was bound to it; fetch only tags for the binding check.
+git fetch --tags
 
 echo "🔌 Releasing plugin: $PLUGIN_NAME"
 echo "🔧 Core version: $CORE_VERSION"
@@ -129,7 +127,7 @@ if [ "$TAG_AT_HEAD" = "false" ] && ! git diff --cached --quiet; then
   git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
   echo "🔧 Committing and pushing changes..."
   git commit -m "plugins/${PLUGIN_NAME}: bump core to $CORE_VERSION and framework to $FRAMEWORK_VERSION --skip-ci"
-  git push -u origin HEAD
+  git push origin HEAD:"$CURRENT_BRANCH"
 else
   echo "ℹ️ No staged changes to commit"
 fi

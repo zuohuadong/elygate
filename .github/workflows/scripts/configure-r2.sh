@@ -14,8 +14,8 @@ R2_ACCESS_KEY_ID="$(echo "$R2_ACCESS_KEY_ID" | tr -d '[:space:]')"
 R2_SECRET_ACCESS_KEY="$(echo "$R2_SECRET_ACCESS_KEY" | tr -d '[:space:]')"
 
 # Validate environment variables
-if [ -z "$R2_ENDPOINT" ] || [ -z "$R2_ACCESS_KEY_ID" ] || [ -z "$R2_SECRET_ACCESS_KEY" ]; then
-  echo "❌ Missing required R2 credentials"
+if [ -z "${R2_BUCKET:-}" ] || [ -z "$R2_ENDPOINT" ] || [ -z "$R2_ACCESS_KEY_ID" ] || [ -z "$R2_SECRET_ACCESS_KEY" ]; then
+  echo "❌ Missing required R2 credentials or bucket"
   exit 1
 fi
 
@@ -27,5 +27,5 @@ aws configure set --profile R2 s3.signature_version s3v4
 
 # Test connection
 echo "🔍 Testing R2 connection..."
-aws s3 ls s3://prod-downloads/ --endpoint-url "$R2_ENDPOINT" --profile R2 >/dev/null
+aws s3 ls "s3://${R2_BUCKET}/" --endpoint-url "$R2_ENDPOINT" --profile R2 >/dev/null
 echo "✅ R2 connection successful"

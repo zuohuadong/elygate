@@ -135,8 +135,15 @@ jobs:
       - name: Update Helm repository index
         run: |
           cd helm-charts
-          # Download existing index if it exists
-          curl -sLO https://maximhq.github.io/bifrost/helm-charts/index.yaml || true
+          # Download existing index. Only a definitive 404 means this is the first
+          # publish; network/auth errors must not overwrite history with one chart.
+          HTTP_CODE=$(curl -sS -o index.yaml -w '%{http_code}' https://maximhq.github.io/bifrost/helm-charts/index.yaml || echo 000)
+          if [ "$HTTP_CODE" = "404" ]; then
+            rm -f index.yaml
+          elif [ "$HTTP_CODE" != "200" ]; then
+            echo "Could not download the existing Helm index (HTTP $HTTP_CODE)" >&2
+            exit 1
+          fi
           # Merge with new chart only if index.yaml exists
           if [ -f index.yaml ]; then
             helm repo index . --url https://github.com/maximhq/bifrost/releases/download/helm-chart-v${{ steps.chart-version.outputs.version }} --merge index.yaml
@@ -157,8 +164,6 @@ jobs:
           user_email: "github-actions[bot]@users.noreply.github.com"
 
       - name: Login to GitHub Container Registry
-        if: steps.check-release.outputs.exists == 'false'
-        continue-on-error: true
         uses: step-security/docker-login-action@870af644803bf9f204aed474adbad2958fec048b # v4.1.0
         with:
           registry: ghcr.io
@@ -166,18 +171,19 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Login to Docker Hub
-        if: steps.check-release.outputs.exists == 'false'
-        continue-on-error: true
         uses: step-security/docker-login-action@870af644803bf9f204aed474adbad2958fec048b # v4.1.0
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Push Helm chart as OCI artifact to GHCR
-        if: steps.check-release.outputs.exists == 'false'
-        continue-on-error: true
         run: |
-          helm push helm-charts/bifrost-${{ steps.chart-version.outputs.version }}.tgz oci://ghcr.io/maximhq/helm-charts
+          OCI_REF="oci://ghcr.io/maximhq/helm-charts/bifrost"
+          if helm show chart "$OCI_REF" --version "${{ steps.chart-version.outputs.version }}" >/dev/null 2>&1; then
+            echo "OCI artifact already exists; skipping push"
+          else
+            helm push helm-charts/bifrost-${{ steps.chart-version.outputs.version }}.tgz oci://ghcr.io/maximhq/helm-charts
+          fi
 
       # - name: Push Helm chart as OCI artifact to Docker Hub
       #   if: steps.check-release.outputs.exists == 'false'

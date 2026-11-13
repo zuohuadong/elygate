@@ -111,18 +111,18 @@ trap 'rm -f "$RELEASE_ERR"' EXIT
 # The tag is a single path segment. GitHub's API returns 404 for a slash left
 # unencoded (transports/v1.2.3), which would look like an absent release.
 RELEASE_TAG_PATH=${TAG_NAME//\//%2F}
+RELEASE_EXISTS="false"
 if gh api "repos/${REPO_SLUG}/releases/tags/${RELEASE_TAG_PATH}" >/dev/null 2>"$RELEASE_ERR"; then
-  echo "Error: GitHub release $TAG_NAME already exists."
-  exit 1
-fi
-# Only a definitive 404 means the release is absent. Auth, network, permission,
-# and repository errors must not be treated as permission to publish a tag.
-if ! grep -q 'HTTP 404' "$RELEASE_ERR"; then
+  RELEASE_EXISTS="true"
+elif ! grep -q 'HTTP 404' "$RELEASE_ERR"; then
+  # Only a definitive 404 means the release is absent. Auth, network, permission,
+  # and repository errors must not be treated as permission to publish a tag.
   echo "Error: could not determine whether GitHub release $TAG_NAME exists."
   cat "$RELEASE_ERR" >&2
   exit 1
 fi
 
+if [ "$RELEASE_EXISTS" = "false" ]; then
 # Create the tag once, but tolerate a previous run that pushed it before the
 # release was created. Reusing a tag is only safe when it points at this commit.
 git config user.name "github-actions[bot]"
@@ -212,6 +212,9 @@ gh release create "$TAG_NAME" \
   ${PRERELEASE_FLAG} ${LATEST_FLAG}
 
 echo "✅ Bifrost HTTP released successfully"
+else
+  echo "ℹ️ GitHub release $TAG_NAME already exists; verifying R2 latest/ only."
+fi
 
 # Copy versioned R2 path to latest/ for stable releases
 if [[ "$VERSION" != *-* ]]; then

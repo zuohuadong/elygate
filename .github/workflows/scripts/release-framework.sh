@@ -33,27 +33,10 @@ if [ "$CURRENT_BRANCH" = "HEAD" ]; then
   CURRENT_BRANCH="${GITHUB_REF_NAME:-main}"
 fi
 
-echo "Pulling latest changes from origin/$CURRENT_BRANCH..."
-if ! git pull origin "$CURRENT_BRANCH"; then
-  echo "❌ Error: git pull origin $CURRENT_BRANCH failed"
-  exit 1
-fi
-
-# Check for merge conflicts or unexpected working-tree changes
-if ! git diff --quiet; then
-  echo "❌ Error: Unstaged changes detected after pull (possible merge conflict)"
-  git status --short
-  exit 1
-fi
-
-if ! git diff --cached --quiet; then
-  echo "❌ Error: Staged changes detected after pull (unexpected state)"
-  git status --short
-  exit 1
-fi
-
-# Fetching all tags
-git fetch --tags >/dev/null 2>&1 || true
+# Do not pull here: CI already checks out the release commit, and a pull after a
+# tag is bound to HEAD would move the recovery target. Tags are fetched so the
+# binding check sees the remote state.
+git fetch --tags
 
 # Preflight the tag before any dependency commit/push. An existing tag must point
 # at this commit; a stale tag fails without touching the remote.

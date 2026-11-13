@@ -131,12 +131,13 @@ func (s *AgentGatewayGRPCServer) intercept(ctx context.Context) (context.Context
 	if s.config.GetA2AExternalClientURL() == "" {
 		return nil, nil, status.Error(codes.Unavailable, "agent gateway disabled: configure a2a_external_client_url")
 	}
-	delegate, err := s.delegateFor(ctx)
+	authedCtx, cancel, err := s.authenticate(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
-	authedCtx, cancel, err := s.authenticate(ctx)
+	delegate, err := s.delegateFor(authedCtx)
 	if err != nil {
+		cancel()
 		return nil, nil, err
 	}
 	return context.WithValue(authedCtx, agentGatewayGRPCDelegateKey{}, delegate), cancel, nil

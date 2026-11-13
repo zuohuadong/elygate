@@ -7,7 +7,7 @@
 set -e
 
 VERSION=$1
-RELEASE_NEEDED=$2
+RELEASE_NEEDED=${2:-}
 
 if [ -z "$VERSION" ]; then
     echo "❌ Error: Version not provided"
@@ -15,6 +15,10 @@ if [ -z "$VERSION" ]; then
 fi
 
 TAG_NAME="transports/v${VERSION}"
+if [ "$RELEASE_NEEDED" != "true" ]; then
+    echo "ℹ️  Bifrost-http release is not needed; skipping release verification"
+    exit 0
+fi
 echo "🔍 Verifying bifrost-http release v${VERSION}..."
 
 # Check if the git tag exists
