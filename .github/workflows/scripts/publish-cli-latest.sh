@@ -23,6 +23,37 @@ SOURCE_LISTING=$(aws s3 ls --recursive "s3://$R2_BUCKET/$PREFIX/v${VERSION}/" \
 require_platform_listing "$SOURCE_LISTING" "$BINARY" "${CLI_PLATFORMS[@]}"
 require_remote_platform_digest "$ENDPOINT" "$R2_BUCKET" "$PREFIX" "$VERSION" "$BINARY" "${CLI_PLATFORMS[@]}"
 
+BACKUP="$PREFIX/latest-backup-$(date +%s)-$$"
+RESTORE_ON_FAIL=false
+restore_latest() {
+  local code=$?
+  if [ "$RESTORE_ON_FAIL" = "true" ]; then
+    trap - EXIT
+    echo "↩️ Restoring previous $PREFIX/latest/ from $BACKUP..."
+    if ! aws s3 sync "s3://$R2_BUCKET/$BACKUP/" "s3://$R2_BUCKET/$PREFIX/latest/" \
+      --endpoint-url "$ENDPOINT" --profile "${R2_AWS_PROFILE:-R2}" --no-progress --delete; then
+      echo "❌ Restore from $BACKUP failed" >&2
+      exit 1
+    fi
+    if ! require_remote_prefix_digest "$ENDPOINT" "$R2_BUCKET" "$PREFIX/latest" "$BINARY" "${CLI_PLATFORMS[@]}"; then
+      echo "❌ Restored $PREFIX/latest/ failed digest verification" >&2
+      exit 1
+    fi
+  fi
+  exit "$code"
+}
+trap restore_latest EXIT
+
+aws s3 sync "s3://$R2_BUCKET/$PREFIX/latest/" "s3://$R2_BUCKET/$BACKUP/" \
+  --endpoint-url "$ENDPOINT" --profile "${R2_AWS_PROFILE:-R2}" --no-progress
+BACKUP_LISTING=$(aws s3 ls --recursive "s3://$R2_BUCKET/$BACKUP/" \
+  --endpoint-url "$ENDPOINT" --profile "${R2_AWS_PROFILE:-R2}")
+if [ -z "$BACKUP_LISTING" ]; then
+  echo "❌ Snapshot of $PREFIX/latest/ is empty; refusing to overwrite it" >&2
+  exit 1
+fi
+RESTORE_ON_FAIL=true
+
 aws s3 sync "s3://$R2_BUCKET/$PREFIX/v${VERSION}/" "s3://$R2_BUCKET/$PREFIX/latest/" \
   --endpoint-url "$ENDPOINT" \
   --profile "${R2_AWS_PROFILE:-R2}" \
@@ -39,4 +70,8 @@ if [ "$LATEST_VERSION" != "v${VERSION#v}" ]; then
   echo "❌ latest/version.txt is '$LATEST_VERSION', expected 'v${VERSION#v}'" >&2
   exit 1
 fi
+RESTORE_ON_FAIL=false
+trap - EXIT
+aws s3 rm "s3://$R2_BUCKET/$BACKUP/" --recursive \
+  --endpoint-url "$ENDPOINT" --profile "${R2_AWS_PROFILE:-R2}" >/dev/null 2>&1 || true
 echo "✅ latest/ now matches v${VERSION}"

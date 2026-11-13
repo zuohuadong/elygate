@@ -146,13 +146,14 @@ jobs:
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           VERSION: ${{ steps.extract-version.outputs.version }}
+          FULL_TAG: ${{ steps.extract-version.outputs.full-tag }}
         run: |
           echo "Publishing @maximhq/bifrost@${VERSION} to npm..."
           NPM_ERR=$(mktemp)
           if npm view @maximhq/bifrost@"${VERSION}" version >/dev/null 2>"$NPM_ERR"; then
             rm -f "$NPM_ERR"
             echo "@maximhq/bifrost@${VERSION} already exists on npm; verifying/repairing the GitHub release."
-            bash ./.github/workflows/scripts/create-npx-release.sh "${VERSION}" "${FULL_TAG}"
+            bash "${{ github.workspace }}/.github/workflows/scripts/create-npx-release.sh" "${VERSION}" "${FULL_TAG}"
             exit 0
           else
             status=$?
@@ -300,13 +301,14 @@ jobs:
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           VERSION: ${{ steps.extract-version.outputs.version }}
+          FULL_TAG: ${{ steps.extract-version.outputs.full-tag }}
         run: |
           echo "Publishing @maximhq/bifrost-cli@${VERSION} to npm..."
           NPM_ERR=$(mktemp)
           if npm view @maximhq/bifrost-cli@"${VERSION}" version >/dev/null 2>"$NPM_ERR"; then
             rm -f "$NPM_ERR"
             echo "@maximhq/bifrost-cli@${VERSION} already exists on npm; verifying/repairing the GitHub release."
-            bash ./.github/workflows/scripts/create-npx-release.sh "${VERSION}" "${FULL_TAG}"
+            bash "${{ github.workspace }}/.github/workflows/scripts/create-npx-release.sh" "${VERSION}" "${FULL_TAG}"
             exit 0
           else
             status=$?
@@ -492,13 +494,14 @@ jobs:
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           VERSION: ${{ steps.extract-version.outputs.version }}
+          FULL_TAG: ${{ steps.extract-version.outputs.full-tag }}
         run: |
           echo "Publishing @maximhq/bifrost-migration-cli@${VERSION} to npm..."
           NPM_ERR=$(mktemp)
           if npm view @maximhq/bifrost-migration-cli@"${VERSION}" version >/dev/null 2>"$NPM_ERR"; then
             rm -f "$NPM_ERR"
             echo "@maximhq/bifrost-migration-cli@${VERSION} already exists on npm; verifying/repairing the GitHub release."
-            bash ./.github/workflows/scripts/create-npx-release.sh "${VERSION}" "${FULL_TAG}"
+            bash "${{ github.workspace }}/.github/workflows/scripts/create-npx-release.sh" "${VERSION}" "${FULL_TAG}"
             exit 0
           else
             status=$?

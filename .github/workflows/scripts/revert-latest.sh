@@ -97,12 +97,22 @@ echo "✅ Version $VERSION found in R2"
 BACKUP="bifrost/latest-backup-$(date +%s)-$$"
 RESTORE_ON_FAIL=false
 restore_latest() {
+  local code=$?
   if [ "$RESTORE_ON_FAIL" = "true" ]; then
+    trap - EXIT
     echo "↩️ Restoring previous latest/ from $BACKUP..."
-    aws s3 sync "s3://$R2_BUCKET/$BACKUP/" "s3://$R2_BUCKET/bifrost/latest/" \
+    if ! aws s3 sync "s3://$R2_BUCKET/$BACKUP/" "s3://$R2_BUCKET/bifrost/latest/" \
       --endpoint-url "$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]')" \
-      --profile "${R2_AWS_PROFILE:-R2}" --no-progress --delete || true
+      --profile "${R2_AWS_PROFILE:-R2}" --no-progress --delete; then
+      echo "❌ Restore from $BACKUP failed" >&2
+      exit 1
+    fi
+    if ! require_remote_prefix_digest "$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]')" "$R2_BUCKET" "bifrost/latest" bifrost-http "${BIFROST_HTTP_PLATFORMS[@]}"; then
+      echo "❌ Restored latest/ failed digest verification" >&2
+      exit 1
+    fi
   fi
+  exit "$code"
 }
 trap restore_latest EXIT
 if ! sync_with_retry "s3://$R2_BUCKET/bifrost/latest/" "s3://$R2_BUCKET/$BACKUP/"; then
