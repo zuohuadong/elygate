@@ -165,7 +165,7 @@ function validateTransportVersion(version) {
 	}
 
 	console.error(`Invalid transport version format: ${version}`);
-	console.error(`Transport version must be either "latest", "v1.2.3", or "v1.2.3-prerelease1"`);
+	console.error(`Transport version must be either "latest", "v1.2.3", or "v1.2.3-prerelease.1" (build metadata "+..." is not supported)`);
 	process.exit(1);
 }
 

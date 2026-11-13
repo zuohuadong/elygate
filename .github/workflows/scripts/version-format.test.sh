@@ -221,11 +221,11 @@ expect_file_reject "$TMPDIR_VF/version" 'a version holding a tab'
 
 # Strict SemVer 2.0.0: these feed npm publish, which refuses anything else, so
 # they are rejected here before a tag or release is created for them.
-for v in 1.0.0-0 1.0.0-alpha-1 1.0.0-x.7.z.92 1.0.0-0a.1 2.0.0+build.05 1.0.0-rc.1+sha.5114f85; do
+for v in 1.0.0-0 1.0.0-alpha-1 1.0.0-x.7.z.92 1.0.0-0a.1; do
   printf '%s\n' "$v" > "$TMPDIR_VF/version"
   expect_file_accept "$TMPDIR_VF/version" "$v"
 done
-for v in 1.0.0-.. 01.2.3 1.02.3 1.2.03 1.0.0-01 1.0.0-rc..1 1.0.0-rc. 1.0.0+build..1 1.0.0-rc_1; do
+for v in 1.0.0-.. 01.2.3 1.02.3 1.2.03 1.0.0-01 1.0.0-rc..1 1.0.0-rc. 1.0.0+build..1 1.0.0-rc_1 2.0.0+build.05 1.0.0-rc.1+sha.5114f85; do
   printf '%s\n' "$v" > "$TMPDIR_VF/version"
   expect_file_reject "$TMPDIR_VF/version" "non-SemVer $v"
 done
@@ -247,8 +247,8 @@ expect_npx() {
     echo "FAIL: extract-npx-version.sh should $want $v (rc=$rc)" >&2; failed=$((failed + 1))
   fi
 }
-for v in 1.6.3 1.0.0-rc.1 1.0.0-0 2.0.0+build.05; do expect_npx accept "$v"; done
-for v in 1.0.0-.. 01.2.3 1.0.0-01 1.0.0-rc..1 '1.0.0$(id)'; do expect_npx reject "$v"; done
+for v in 1.6.3 1.0.0-rc.1 1.0.0-0; do expect_npx accept "$v"; done
+for v in 1.0.0-.. 01.2.3 1.0.0-01 1.0.0-rc..1 '1.0.0$(id)' 2.0.0+build.05; do expect_npx reject "$v"; done
 
 # No workflow may read a version straight into GITHUB_OUTPUT: that is exactly the
 # shape release-cli.yml had before read-version-file.sh. Workflows read versions

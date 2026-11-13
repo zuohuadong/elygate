@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 
+source "$(dirname "$0")/semver.sh"
 source "$(dirname "$0")/r2-bucket.sh"
 source "$(dirname "$0")/release-artifacts.sh"
 set -euo pipefail
@@ -12,10 +13,11 @@ if [[ $# -ne 1 ]]; then
   exit 1
 fi
 CLI_TAG="$1"
-# Validate tag format: must be cli/vX.Y.Z or cli/vX.Y.Z-prerelease
-if [[ ! "$CLI_TAG" =~ ^cli/v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
+VERSION_PART="${CLI_TAG#cli/v}"
+if [[ "$CLI_TAG" != cli/v* ]] || ! is_semver "$VERSION_PART"; then
   echo "❌ Invalid tag format: $CLI_TAG"
   echo "   Expected format: cli/vX.Y.Z or cli/vX.Y.Z-prerelease (e.g., cli/v1.0.0, cli/v1.0.0-rc.1)"
+  echo "   Build metadata (+...) is not supported: Docker and R2 tags cannot carry '+'."
   exit 1
 fi
 if [[ ! -d "./dist" ]]; then
