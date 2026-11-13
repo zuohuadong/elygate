@@ -8,6 +8,12 @@ on:
     paths:
       - 'npx/bifrost/package.json'
       - 'npx/bifrost-cli/package.json'
+      - '.github/workflows/npx-publish.yml'
+      - '.github/workflows/scripts/extract-npx-version.sh'
+      - '.github/workflows/scripts/semver.sh'
+      - '.github/workflows/scripts/create-npx-release.sh'
+      - '.github/workflows/scripts/read-version-file.sh'
+      - '.github/workflows/scripts/release-state.sh'
 
 # Prevent concurrent runs for the same trigger
 concurrency:

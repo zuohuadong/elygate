@@ -76,3 +76,20 @@ require_remote_platform_digest() {
     fi
   done
 }
+
+# require_remote_prefix_digest <endpoint> <bucket> <key-prefix> <binary> <platform...>
+require_remote_prefix_digest() {
+  local endpoint="$1" bucket="$2" key_prefix="$3" binary="$4"; shift 4
+  local platform name remote_sha remote_actual
+  for platform in "$@"; do
+    name="$(platform_output_name "$binary" "$platform")"
+    remote_sha=$(aws s3 cp "s3://$bucket/$key_prefix/$platform/$name.sha256" - \
+      --endpoint-url "$endpoint" --profile "${R2_AWS_PROFILE:-R2}" | awk '{print $1}')
+    remote_actual=$(aws s3 cp "s3://$bucket/$key_prefix/$platform/$name" - \
+      --endpoint-url "$endpoint" --profile "${R2_AWS_PROFILE:-R2}" | sha256_stdin)
+    if [ -z "$remote_sha" ] || [ "$remote_sha" != "$remote_actual" ]; then
+      echo "❌ Remote checksum mismatch for $key_prefix/$platform/$name" >&2
+      return 1
+    fi
+  done
+}

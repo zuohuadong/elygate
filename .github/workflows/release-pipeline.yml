@@ -2998,6 +2998,7 @@ jobs:
         test-api-integrations,
         test-warp,
         test-cost-accuracy,
+        test-load-performance,
         test-docker-image-amd64,
         test-docker-image-arm64,
       ]
@@ -4496,6 +4497,9 @@ jobs:
         core-release,
         framework-release,
         plugins-release,
+        bifrost-http-prep,
+        build-binaries-x86,
+        build-binaries-arm64,
         bifrost-http-release,
         docker-build-amd64,
         docker-build-arm64,
@@ -4504,6 +4508,7 @@ jobs:
         docker-build-ubi9-arm64,
         docker-manifest-ubi9,
         publish-bifrost-http-release,
+        push-mintlify-changelog,
       ]
     # A run rejected at the phone gate ran nothing, so there is no release to
     # report; without this clause Discord would get an all-skipped "complete".
@@ -4587,7 +4592,7 @@ jobs:
               skipped) if [ "$DOCKER_NEEDS_RELEASE" = "true" ]; then DOCKER_INCOMPLETE=true; fi;;
             esac
           done
-          for result in "${{ needs.detect-changes.result }}" "${{ needs.build-gateway.result }}" "${{ needs.test-core.result }}" "${{ needs.test-core-integrations.result }}" "${{ needs.test-core-unit.result }}" "${{ needs.test-proxy-e2e.result }}" "${{ needs.test-memory.result }}" "${{ needs.test-vllm.result }}" "${{ needs.test-cli-harness.result }}" "${{ needs.test-framework.result }}" "${{ needs.test-plugins.result }}" "${{ needs.test-bifrost-http.result }}" "${{ needs.test-live.result }}" "${{ needs.test-migrations.result }}" "${{ needs.test-agentgateway.result }}" "${{ needs.test-api-integrations.result }}" "${{ needs.test-warp.result }}" "${{ needs.test-cost-accuracy.result }}" "${{ needs.test-docker-image-amd64.result }}" "${{ needs.test-docker-image-arm64.result }}"; do
+          for result in "${{ needs.detect-changes.result }}" "${{ needs.build-gateway.result }}" "${{ needs.test-core.result }}" "${{ needs.test-core-integrations.result }}" "${{ needs.test-core-unit.result }}" "${{ needs.test-proxy-e2e.result }}" "${{ needs.test-memory.result }}" "${{ needs.test-vllm.result }}" "${{ needs.test-cli-harness.result }}" "${{ needs.test-framework.result }}" "${{ needs.test-plugins.result }}" "${{ needs.test-bifrost-http.result }}" "${{ needs.test-live.result }}" "${{ needs.test-migrations.result }}" "${{ needs.test-agentgateway.result }}" "${{ needs.test-api-integrations.result }}" "${{ needs.test-warp.result }}" "${{ needs.test-cost-accuracy.result }}" "${{ needs.test-load-performance.result }}" "${{ needs.test-docker-image-amd64.result }}" "${{ needs.test-docker-image-arm64.result }}" "${{ needs.core-release.result }}" "${{ needs.framework-release.result }}" "${{ needs.plugins-release.result }}" "${{ needs.bifrost-http-prep.result }}" "${{ needs.build-binaries-x86.result }}" "${{ needs.build-binaries-arm64.result }}" "${{ needs.bifrost-http-release.result }}" "${{ needs.push-mintlify-changelog.result }}"; do
             case "$result" in
               failure|cancelled|timed_out) TITLE="🚨 **Release Pipeline Incomplete**"; DOCKER_STATUS="❌ A required gate failed";;
             esac

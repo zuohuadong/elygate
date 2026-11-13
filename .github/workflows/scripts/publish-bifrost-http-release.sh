@@ -24,10 +24,12 @@ if [[ "$VERSION" != *-* ]]; then
   aws s3 sync "s3://$R2_BUCKET/bifrost/v${VERSION}/" "s3://$R2_BUCKET/bifrost/latest/" \
     --endpoint-url "$ENDPOINT" \
     --profile "${R2_AWS_PROFILE:-R2}" \
-    --no-progress
+    --no-progress \
+    --delete
   LATEST_LISTING=$(aws s3 ls --recursive "s3://$R2_BUCKET/bifrost/latest/" \
     --endpoint-url "$ENDPOINT" --profile "${R2_AWS_PROFILE:-R2}")
   require_platform_listing "$LATEST_LISTING" bifrost-http "${BIFROST_HTTP_PLATFORMS[@]}"
+  require_remote_prefix_digest "$ENDPOINT" "$R2_BUCKET" "bifrost/latest" bifrost-http "${BIFROST_HTTP_PLATFORMS[@]}"
 fi
 
 if [[ "$VERSION" != *-* ]]; then
