@@ -15,6 +15,7 @@ on:
       - '.github/workflows/scripts/release-state.sh'
       - '.github/workflows/scripts/release-bifrost-migration-cli.sh'
       - '.github/workflows/scripts/upload-bifrost-migration-cli-to-r2.sh'
+      - '.github/workflows/scripts/semver.sh'
       - '.github/workflows/scripts/build-bifrost-migration-cli-executables.sh'
 
 # Prevent concurrent runs

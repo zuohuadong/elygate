@@ -80,6 +80,7 @@ if [ -z "$ARTIFACT_LISTING" ]; then
     exit 78
 fi
 require_platform_listing "$ARTIFACT_LISTING" bifrost-http "${BIFROST_HTTP_PLATFORMS[@]}"
+require_remote_platform_digest "$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]')" "$R2_BUCKET" bifrost "$VERSION" bifrost-http "${BIFROST_HTTP_PLATFORMS[@]}"
 echo "✅ Released artifacts found in R2"
 
 echo ""

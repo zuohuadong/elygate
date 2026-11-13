@@ -152,6 +152,7 @@ if [ -z "$ARTIFACT_LISTING" ]; then
   exit 1
 fi
 require_platform_listing "$ARTIFACT_LISTING" bifrost-http "${BIFROST_HTTP_PLATFORMS[@]}"
+require_remote_platform_digest "$R2_ENDPOINT" "$R2_BUCKET" bifrost "$VERSION" bifrost-http "${BIFROST_HTTP_PLATFORMS[@]}"
 echo "✅ Complete five-platform artifact set found in R2"
 
 if [ "$RELEASE_EXISTS" = "false" ]; then

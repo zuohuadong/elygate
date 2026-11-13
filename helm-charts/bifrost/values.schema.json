@@ -23,8 +23,8 @@
         },
         "tag": {
           "type": "string",
-          "pattern": "^(v?[0-9]+\\.[0-9]+\\.[0-9]+([-.+][0-9A-Za-z.-]+)?|sha256:[a-f0-9]{64})$",
-          "description": "Immutable semver image tag or digest; mutable aliases such as latest are rejected"
+          "pattern": "^v?(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$",
+          "description": "Immutable SemVer image tag; mutable aliases and digests are rejected"
         }
       }
     },

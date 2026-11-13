@@ -4471,8 +4471,15 @@ jobs:
         check-skip,
         approve-run,
         detect-changes,
+        build-gateway,
         test-core,
+        test-core-integrations,
+        test-core-unit,
+        approve-flaky-test-core,
         test-proxy-e2e,
+        test-memory,
+        approve-memory-regression,
+        test-vllm,
         resolve-cli-versions,
         test-cli-harness,
         test-framework,
@@ -4481,6 +4488,8 @@ jobs:
         test-live,
         test-migrations,
         test-agentgateway,
+        test-api-integrations,
+        test-warp,
         test-cost-accuracy,
         test-docker-image-amd64,
         test-docker-image-arm64,
@@ -4576,6 +4585,11 @@ jobs:
             case "$result" in
               failure|cancelled|timed_out) DOCKER_INCOMPLETE=true;;
               skipped) if [ "$DOCKER_NEEDS_RELEASE" = "true" ]; then DOCKER_INCOMPLETE=true; fi;;
+            esac
+          done
+          for result in "${{ needs.detect-changes.result }}" "${{ needs.build-gateway.result }}" "${{ needs.test-core.result }}" "${{ needs.test-core-integrations.result }}" "${{ needs.test-core-unit.result }}" "${{ needs.test-proxy-e2e.result }}" "${{ needs.test-memory.result }}" "${{ needs.test-vllm.result }}" "${{ needs.test-cli-harness.result }}" "${{ needs.test-framework.result }}" "${{ needs.test-plugins.result }}" "${{ needs.test-bifrost-http.result }}" "${{ needs.test-live.result }}" "${{ needs.test-migrations.result }}" "${{ needs.test-agentgateway.result }}" "${{ needs.test-api-integrations.result }}" "${{ needs.test-warp.result }}" "${{ needs.test-cost-accuracy.result }}" "${{ needs.test-docker-image-amd64.result }}" "${{ needs.test-docker-image-arm64.result }}"; do
+            case "$result" in
+              failure|cancelled|timed_out) TITLE="🚨 **Release Pipeline Incomplete**"; DOCKER_STATUS="❌ A required gate failed";;
             esac
           done
           if [ "$DOCKER_INCOMPLETE" = "true" ]; then

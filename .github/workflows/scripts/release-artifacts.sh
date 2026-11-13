@@ -59,3 +59,20 @@ sha256_file() {
 sha256_stdin() {
   if command -v sha256sum >/dev/null 2>&1; then sha256sum | awk '{print $1}'; else shasum -a 256 | awk '{print $1}'; fi
 }
+
+# require_remote_platform_digest <endpoint> <bucket> <prefix> <version> <binary> <platform...>
+require_remote_platform_digest() {
+  local endpoint="$1" bucket="$2" prefix="$3" version="$4" binary="$5"; shift 5
+  local platform name remote_sha remote_actual
+  for platform in "$@"; do
+    name="$(platform_output_name "$binary" "$platform")"
+    remote_sha=$(aws s3 cp "s3://$bucket/$prefix/v$version/$platform/$name.sha256" - \
+      --endpoint-url "$endpoint" --profile "${R2_AWS_PROFILE:-R2}" | awk '{print $1}')
+    remote_actual=$(aws s3 cp "s3://$bucket/$prefix/v$version/$platform/$name" - \
+      --endpoint-url "$endpoint" --profile "${R2_AWS_PROFILE:-R2}" | sha256_stdin)
+    if [ -z "$remote_sha" ] || [ "$remote_sha" != "$remote_actual" ]; then
+      echo "❌ Remote checksum mismatch for $platform/$name" >&2
+      return 1
+    fi
+  done
+}

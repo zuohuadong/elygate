@@ -18,6 +18,7 @@ ENDPOINT="$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]')"
 LISTING=$(aws s3 ls --recursive "s3://$R2_BUCKET/bifrost/v${VERSION}/" \
   --endpoint-url "$ENDPOINT" --profile "${R2_AWS_PROFILE:-R2}")
 require_platform_listing "$LISTING" bifrost-http "${BIFROST_HTTP_PLATFORMS[@]}"
+require_remote_platform_digest "$ENDPOINT" "$R2_BUCKET" bifrost "$VERSION" bifrost-http "${BIFROST_HTTP_PLATFORMS[@]}"
 
 if [[ "$VERSION" != *-* ]]; then
   aws s3 sync "s3://$R2_BUCKET/bifrost/v${VERSION}/" "s3://$R2_BUCKET/bifrost/latest/" \

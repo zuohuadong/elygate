@@ -63,7 +63,7 @@ jobs:
 
       - name: Reject mutable image tag
         run: |
-          for tag in latest latest-ubi9 latestfoo; do
+          for tag in latest latest-ubi9 latestfoo v1.2.3-01 v1.2.3-foo..bar; do
             if helm template bifrost helm-charts/bifrost --set image.tag="$tag" >/dev/null 2>&1; then
               echo "image.tag=$tag must be rejected" >&2
               exit 1
