@@ -12,8 +12,10 @@ import (
 	"time"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
+	"github.com/a2aproject/a2a-go/v2/a2agrpc/v1"
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
 	"github.com/a2aproject/a2a-go/v2/a2asrv/push"
+	"google.golang.org/grpc"
 )
 
 const (
@@ -192,13 +194,15 @@ func (*fixtureAuth) Before(ctx context.Context, callCtx *a2asrv.CallContext, _ *
 }
 
 // card describes the lifecycle fixture's supported protocol capabilities.
-func card(baseURL string) *a2a.AgentCard {
+func card(baseURL, grpcURL string) *a2a.AgentCard {
 	return &a2a.AgentCard{
 		Name:        "Strict v1 Lifecycle Fixture",
 		Description: "Static single-context task lifecycle fixture",
 		Version:     "1.0.0",
 		SupportedInterfaces: []*a2a.AgentInterface{
 			a2a.NewAgentInterface(baseURL+"/jsonrpc", a2a.TransportProtocolJSONRPC),
+			a2a.NewAgentInterface(baseURL, a2a.TransportProtocolHTTPJSON),
+			a2a.NewAgentInterface(grpcURL, a2a.TransportProtocolGRPC),
 		},
 		DefaultInputModes:  []string{textMode},
 		DefaultOutputModes: []string{textMode},
@@ -221,6 +225,7 @@ type Server struct {
 	// CardURL is the Agent Card URL to register with the gateway.
 	CardURL string
 	server  *http.Server
+	grpc    *grpc.Server
 	gate    chan struct{}
 	once    sync.Once
 }
@@ -238,7 +243,13 @@ func Start(bind, host string) (*Server, error) {
 		return nil, fmt.Errorf("listen for lifecycle fixture: %w", err)
 	}
 	baseURL := fmt.Sprintf("http://%s", net.JoinHostPort(host, strconv.Itoa(listener.Addr().(*net.TCPAddr).Port)))
-	publicCard := card(baseURL)
+	grpcListener, err := net.Listen("tcp", bind)
+	if err != nil {
+		_ = listener.Close()
+		return nil, fmt.Errorf("listen for lifecycle gRPC fixture: %w", err)
+	}
+	grpcURL := fmt.Sprintf("grpc://%s", net.JoinHostPort(host, strconv.Itoa(grpcListener.Addr().(*net.TCPAddr).Port)))
+	publicCard := card(baseURL, grpcURL)
 	extendedCard := *publicCard
 	extendedCard.Description = "Extended static lifecycle fixture card"
 	exec := newExecutor()
@@ -257,13 +268,25 @@ func Start(bind, host string) (*Server, error) {
 	mux := http.NewServeMux()
 	mux.Handle(a2asrv.WellKnownAgentCardPath, a2asrv.NewStaticAgentCardHandler(publicCard))
 	mux.Handle("/jsonrpc", a2asrv.NewJSONRPCHandler(handler))
+	// Root dispatch serves the HTTP+JSON binding; exact /jsonrpc and card paths
+	// are more specific and keep taking precedence.
+	mux.Handle("/", a2asrv.NewRESTHandler(handler))
 	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go func() { _ = srv.Serve(listener) }()
-	return &Server{CardURL: baseURL + a2asrv.WellKnownAgentCardPath, server: srv, gate: gate}, nil
+
+	grpcServer := grpc.NewServer()
+	a2agrpc.NewHandler(handler).RegisterWith(grpcServer)
+	go func() { _ = grpcServer.Serve(grpcListener) }()
+	return &Server{CardURL: baseURL + a2asrv.WellKnownAgentCardPath, server: srv, grpc: grpcServer, gate: gate}, nil
 }
 
 // Close stops the fixture server and drops open connections.
-func (s *Server) Close() error { return s.server.Close() }
+func (s *Server) Close() error {
+	if s.grpc != nil {
+		s.grpc.Stop()
+	}
+	return s.server.Close()
+}
 
 // NewLifecycleHandler exposes the existing finite lifecycle fixture for alternate transport tests.
 func NewLifecycleHandler(publicCard *a2a.AgentCard) (a2asrv.RequestHandler, func()) {
