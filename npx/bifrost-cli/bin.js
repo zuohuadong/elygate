@@ -7,6 +7,7 @@ import { dirname, join } from "path";
 import { Readable } from "stream";
 import { createInterface } from "readline";
 
+const REQUEST_TIMEOUT_MS = 30_000;
 const BASE_URL = "https://downloads.getmaxim.ai";
 
 // Parse CLI version from command line arguments
@@ -92,7 +93,7 @@ function getPlatformArchAndBinary() {
 }
 
 async function downloadBinary(url, dest) {
-	const res = await fetch(url);
+	const res = await fetch(url, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
 
 	if (!res.ok) {
 		console.error(`❌ Download failed: ${res.status} ${res.statusText}`);
@@ -146,13 +147,13 @@ async function downloadBinary(url, dest) {
 // Check if a specific version exists on the download server
 async function checkVersionExists(version, platformDir, archDir, binaryName) {
 	const url = `${BASE_URL}/bifrost-cli/${version}/${platformDir}/${archDir}/${binaryName}`;
-	const res = await fetch(url, { method: "HEAD" });
+	const res = await fetch(url, { method: "HEAD", signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
 	return res.ok;
 }
 
 // Verify the downloaded binary against its SHA-256 checksum
 async function verifyChecksum(binaryPath, checksumUrl) {
-	const res = await fetch(checksumUrl);
+	const res = await fetch(checksumUrl, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
 	if (!res.ok) {
 		const { unlinkSync } = await import("fs");
 		unlinkSync(binaryPath);

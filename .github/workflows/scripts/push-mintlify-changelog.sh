@@ -128,15 +128,22 @@ if [ -n "${TEST_REPORTS_BASE_URL:-}" ]; then
       CLI_HARNESS_INTRO="The CLI harness ran a single leg (\`${CLI_HARNESS_LABELS}\`) for this release."
       ;;
   esac
+  if [ "${PROVIDER_HARNESS_RAN:-false}" = "true" ]; then
+    PROVIDER_TEXT="Every release is gated on the provider harness and the CLI harness."
+    PROVIDER_ROW="| Provider harness | Every provider × modality through a live gateway | [requests]($REPORTS_BASE/provider-harness/index.html) · [failure breakdown]($REPORTS_BASE/provider-harness/harness-failures.md) |"
+  else
+    PROVIDER_TEXT="The provider harness did not run for this release; only the CLI harness results are reported here."
+    PROVIDER_ROW=""
+  fi
   CHANGELOG_BODY+="
 ## Test reports
 
-Every release is gated on the provider harness and the CLI harness.
+$PROVIDER_TEXT
 $CLI_HARNESS_INTRO
 
 | Suite | What it covers | Report |
 | --- | --- | --- |
-| Provider harness | Every provider × modality through a live gateway | [requests]($REPORTS_BASE/provider-harness/index.html) · [failure breakdown]($REPORTS_BASE/provider-harness/harness-failures.md) |
+$PROVIDER_ROW
 $CLI_HARNESS_ROWS
 
 The CLI harness reports include the full conversation for every scenario - each

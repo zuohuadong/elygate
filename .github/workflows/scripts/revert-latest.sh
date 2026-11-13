@@ -2,6 +2,7 @@
 
 source "$(dirname "$0")/r2-bucket.sh"
 source "$(dirname "$0")/release-artifacts.sh"
+source "$(dirname "$0")/release-state.sh"
 set -euo pipefail
 
 # Overwrite latest with a specific version from R2
@@ -13,9 +14,21 @@ if [[ $# -ne 1 ]]; then
 fi
 
 VERSION="$1"
-# Ensure version starts with 'v'
 if [[ ! "$VERSION" =~ ^v ]]; then
   VERSION="v${VERSION}"
+fi
+if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
+  echo "❌ Invalid version '$VERSION'; expected vX.Y.Z" >&2
+  exit 1
+fi
+: "${GH_TOKEN:?GH_TOKEN env var is required to verify the release before rollback}"
+if ! git rev-parse -q --verify "refs/tags/transports/${VERSION}" >/dev/null; then
+  echo "❌ Git tag transports/${VERSION} does not exist" >&2
+  exit 1
+fi
+if ! release_check "transports/${VERSION}"; then
+  echo "❌ GitHub release transports/${VERSION} does not exist or is unreadable" >&2
+  exit 1
 fi
 
 # Validate required environment variables
@@ -79,10 +92,31 @@ require_remote_platform_digest "$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]'
 
 echo "✅ Version $VERSION found in R2"
 
-# Sync the specific version to latest
+# Keep a temporary copy of the current latest/ so a failed switch can restore it.
+BACKUP="bifrost/latest-backup-$(date +%s)-$$"
+RESTORE_ON_FAIL=false
+restore_latest() {
+  if [ "$RESTORE_ON_FAIL" = "true" ]; then
+    echo "↩️ Restoring previous latest/ from $BACKUP..."
+    aws s3 sync "s3://$R2_BUCKET/$BACKUP/" "s3://$R2_BUCKET/bifrost/latest/" \
+      --endpoint-url "$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]')" \
+      --profile "${R2_AWS_PROFILE:-R2}" --no-progress --delete || true
+  fi
+}
+trap restore_latest EXIT
+RESTORE_ON_FAIL=true
+if ! sync_with_retry "s3://$R2_BUCKET/bifrost/latest/" "s3://$R2_BUCKET/$BACKUP/"; then
+  echo "❌ Could not snapshot current latest/; refusing to overwrite it" >&2
+  exit 1
+fi
 if ! sync_with_retry "s3://$R2_BUCKET/bifrost/$VERSION/" "s3://$R2_BUCKET/bifrost/latest/"; then
   exit 1
 fi
+RESTORE_ON_FAIL=false
+trap - EXIT
+aws s3 rm "s3://$R2_BUCKET/$BACKUP/" --recursive \
+  --endpoint-url "$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]')" \
+  --profile "${R2_AWS_PROFILE:-R2}" >/dev/null 2>&1 || true
 
 require_remote_prefix_digest "$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]')" "$R2_BUCKET" "bifrost/latest" bifrost-http "${BIFROST_HTTP_PLATFORMS[@]}"
 echo "🎉 Successfully reverted latest to version $VERSION"

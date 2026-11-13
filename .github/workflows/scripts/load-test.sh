@@ -52,6 +52,14 @@ MAX_OVERHEAD_P50_US="${MAX_OVERHEAD_P50_US:-5000}"      # p50 overhead threshold
 MAX_OVERHEAD_P90_US="${MAX_OVERHEAD_P90_US:-10000}"     # p90 overhead threshold (10ms)
 MAX_OVERHEAD_P95_US="${MAX_OVERHEAD_P95_US:-20000}"     # p95 overhead threshold (20ms)
 MAX_OVERHEAD_P99_US="${MAX_OVERHEAD_P99_US:-100000}"    # p99 overhead threshold (100ms)
+# CI uses fixed thresholds; a local operator may override them.
+if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
+  MAX_OVERHEAD_MEAN_US=5000
+  MAX_OVERHEAD_P50_US=5000
+  MAX_OVERHEAD_P90_US=10000
+  MAX_OVERHEAD_P95_US=20000
+  MAX_OVERHEAD_P99_US=100000
+fi
 
 # Results storage for summary table
 RESULTS_FILE="${WORK_DIR}/load-test-results.md"
@@ -1016,6 +1024,12 @@ EOF
   echo "| Overhead (${CURRENT_MODE_LABEL}) | ${actual_rps} | ${OVERHEAD_DURATION}s | ~${test_concurrency} | ${success_pct}% | ${us_mean}µs | ${us_50}µs | ${us_90}µs | ${us_95}µs | ${us_99}µs |" >> "${RESULTS_FILE}"
 
   append_overhead_json "${CURRENT_MODE_KEY}" "${test_rate}" "${test_concurrency}" "${actual_rps}" "${success_pct}" "${us_mean}" "${us_50}" "${us_90}" "${us_95}" "${us_99}"
+
+  if [ "$success_pct" != "100.00" ]; then
+    echo ""
+    log_error "FAILED: overhead mode success rate is ${success_pct}% (expected 100%)"
+    exit 1
+  fi
 
   # Check tiered thresholds (skip Min/Max — single-point extremes are too noisy)
   local failed=0

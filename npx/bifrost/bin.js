@@ -208,7 +208,7 @@ async function getPlatformArchAndBinary() {
 async function downloadBinary(url, dest) {
 	// console.log(`🔄 Downloading binary from ${url}...`);
 
-	const res = await fetch(url);
+	const res = await fetch(url, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
 
 	if (!res.ok) {
 		console.error(`❌ Download failed: ${res.status} ${res.statusText}`);
@@ -418,7 +418,7 @@ function cacheDir() {
 // treated as unresolved.
 async function getLatestVersion() {
 	const releaseUrl = "https://getbifrost.ai/latest-release";
-	const res = await fetch(releaseUrl);
+	const res = await fetch(releaseUrl, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
 	if (!res.ok) {
 		return null;
 	}
@@ -435,7 +435,7 @@ async function getLatestVersion() {
 // Check if a specific version exists on the download server
 async function checkVersionExists(version, platformDir, archDir, binaryName) {
 	const url = `${BASE_URL}/bifrost/${version}/${platformDir}/${archDir}/${binaryName}`;
-	const res = await fetch(url, { method: "HEAD" });
+	const res = await fetch(url, { method: "HEAD", signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
 	return res.ok;
 }
 

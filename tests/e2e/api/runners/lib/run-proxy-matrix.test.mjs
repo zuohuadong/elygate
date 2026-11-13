@@ -509,7 +509,9 @@ await test("the --skip-core-test warning names every job the flag skips", () => 
   const jobs = [...workflow.matchAll(/^  ([A-Za-z0-9_-]+):\n[\s\S]*?(?=^  [A-Za-z0-9_-]+:\n|(?![\s\S]))/gm)]
     .filter((m) => /^\s+(?:if:.*|)needs\.check-skip\.outputs\.skip-core-test != 'true'/m.test(m[0]) || /^\s+if:.*skip-core-test != 'true'/m.test(m[0]))
     .map((m) => m[1]);
-  assert.ok(jobs.includes("test-proxy-e2e"), `no job gated on skip-core-test found: ${jobs}`);
+  assert.ok(jobs.includes("test-core"), `test-core must remain gated on skip-core-test: ${jobs}`);
+  assert.ok(jobs.includes("test-core-integrations"), `test-core-integrations must remain gated: ${jobs}`);
+  assert.ok(!jobs.includes("test-proxy-e2e"), "proxy E2E must not be bypassed by --skip-core-test");
   const warning = workflow.split("\n").find((l) => l.includes("::warning::--skip-core-test"));
   assert.ok(warning, "--skip-core-test warning not found");
   const unnamed = jobs.filter((j) => !new RegExp(`\\b${j}\\b`).test(warning));

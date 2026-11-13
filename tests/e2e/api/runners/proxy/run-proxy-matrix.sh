@@ -60,6 +60,16 @@ APP_DIR="$REPO_ROOT/$APP_DIR_REL"
 MANIFEST="tests/e2e/api/collections/proxy-smoke-manifest.json"
 ALL_CELLS="global-http global-https global-socks5 provider-http provider-https provider-socks5 env-http env-https env-socks5"
 PROXY_CELLS="${PROXY_CELLS:-$ALL_CELLS}"
+if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
+  if [ "$PROXY_CELLS" != "$ALL_CELLS" ]; then
+    echo "❌ CI must run all nine proxy cells, got: '$PROXY_CELLS'" >&2
+    exit 1
+  fi
+  if [ "${PROXY_E2E_STRICT_EGRESS:-0}" != "1" ]; then
+    echo "❌ CI must run with PROXY_E2E_STRICT_EGRESS=1" >&2
+    exit 1
+  fi
+fi
 RERUN_ATTEMPTS="${RERUN_ATTEMPTS:-1}"
 EGRESS_GROUP="bifrost-egress"
 
