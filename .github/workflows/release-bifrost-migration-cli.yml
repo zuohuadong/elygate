@@ -7,6 +7,14 @@ on:
     paths:
       - 'scripts/bifrost-migration-cli/**'
       - '.github/workflows/release-bifrost-migration-cli.yml'
+      - '.github/workflows/scripts/check-cli-release.sh'
+      - '.github/workflows/scripts/release-artifacts.sh'
+      - '.github/workflows/scripts/publish-cli-latest.sh'
+      - '.github/workflows/scripts/configure-r2.sh'
+      - '.github/workflows/scripts/r2-bucket.sh'
+      - '.github/workflows/scripts/release-state.sh'
+      - '.github/workflows/scripts/release-bifrost-migration-cli.sh'
+      - '.github/workflows/scripts/upload-bifrost-migration-cli-to-r2.sh'
       - '.github/workflows/scripts/build-bifrost-migration-cli-executables.sh'
 
 # Prevent concurrent runs

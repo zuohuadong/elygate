@@ -102,7 +102,7 @@ func TestSecuritySmoke(t *testing.T) {
 	// Explicitly allowlisting the host must grant access.
 	setAllow([]string{"127.0.0.1"})
 	status, body, _ = gw.Do(ctx, "POST", "/api/agents", map[string]any{"name": name, "agent_card_url": fx.CardURL, "enabled": true, "allow_by_default": true, "forward_accepted_credential": false, "forward_accepted_credential_overrides_auth": false}, nil)
-	if status != 200 {
+	if status != 201 {
 		t.Fatalf("allowlisted agent registration = %d: %s", status, body)
 	}
 	t.Cleanup(func() {

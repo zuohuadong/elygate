@@ -7,6 +7,14 @@ on:
     paths:
       - 'cli/**'
       - '.github/workflows/release-cli.yml'
+      - '.github/workflows/scripts/check-cli-release.sh'
+      - '.github/workflows/scripts/release-artifacts.sh'
+      - '.github/workflows/scripts/publish-cli-latest.sh'
+      - '.github/workflows/scripts/configure-r2.sh'
+      - '.github/workflows/scripts/r2-bucket.sh'
+      - '.github/workflows/scripts/release-state.sh'
+      - '.github/workflows/scripts/release-cli.sh'
+      - '.github/workflows/scripts/upload-cli-to-r2.sh'
       - '.github/workflows/scripts/build-cli-executables.sh'
 
 # Prevent concurrent runs

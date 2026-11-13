@@ -4537,6 +4537,7 @@ jobs:
       - name: Discord Notification
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          DOCKER_NEEDS_RELEASE: ${{ needs.detect-changes.outputs.docker-needs-release }}
         run: |
           # Build status summary
           CORE_STATUS="⏭️ Skipped"
@@ -4570,11 +4571,17 @@ jobs:
 
           TITLE="🚀 **Release Pipeline Complete**"
           DOCKER_STATUS="✅ Published"
+          DOCKER_INCOMPLETE=false
           for result in "${{ needs.docker-build-amd64.result }}" "${{ needs.docker-build-arm64.result }}" "${{ needs.docker-manifest.result }}" "${{ needs.docker-build-ubi9-amd64.result }}" "${{ needs.docker-build-ubi9-arm64.result }}" "${{ needs.docker-manifest-ubi9.result }}" "${{ needs.publish-bifrost-http-release.result }}"; do
             case "$result" in
-              failure|cancelled|timed_out) TITLE="🚨 **Release Pipeline Incomplete**"; DOCKER_STATUS="❌ Docker/GHCR failed";;
+              failure|cancelled|timed_out) DOCKER_INCOMPLETE=true;;
+              skipped) if [ "$DOCKER_NEEDS_RELEASE" = "true" ]; then DOCKER_INCOMPLETE=true; fi;;
             esac
           done
+          if [ "$DOCKER_INCOMPLETE" = "true" ]; then
+            TITLE="🚨 **Release Pipeline Incomplete**"
+            DOCKER_STATUS="❌ Docker/GHCR/UBI9 or release publish did not complete"
+          fi
 
           # Build the message with proper formatting
           MESSAGE=$(printf "%s\n\n**Components:**\n• Core: %s\n• Framework: %s\n• Plugins: %s\n• Bifrost HTTP: %s\n• Docker/GHCR/UBI9: %s\n\n**Details:**\n• Branch: \`${{ github.ref_name }}\`\n• Commit: \`%.8s\`\n• Author: %s\n\n[View Workflow Run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" "$TITLE" "$CORE_STATUS" "$FRAMEWORK_STATUS" "$PLUGINS_STATUS" "$BIFROST_STATUS" "$DOCKER_STATUS" "${{ github.sha }}" "${{ github.actor }}")
