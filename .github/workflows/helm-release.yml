@@ -116,6 +116,11 @@ jobs:
           fi
           if release_check "$TAG"; then
             if [ "$TAG_AT_HEAD" = "true" ]; then
+              if release_is_draft "$TAG"; then
+                echo "draft=true" >> "$GITHUB_OUTPUT"
+              else
+                echo "draft=false" >> "$GITHUB_OUTPUT"
+              fi
               echo "exists=true" >> $GITHUB_OUTPUT
             else
               echo "Release $TAG exists but its tag is missing" >&2
@@ -123,6 +128,7 @@ jobs:
             fi
           else
             status=$?
+            echo "draft=false" >> "$GITHUB_OUTPUT"
             if [ "$status" -eq 1 ]; then
               echo "exists=false" >> $GITHUB_OUTPUT
             else
@@ -147,6 +153,13 @@ jobs:
             --target ${{ github.sha }} \
             --title "Helm Chart v${{ steps.chart-version.outputs.version }}" \
             --notes "Helm chart release for Bifrost v${{ steps.chart-version.outputs.version }}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Promote draft GitHub Release
+        if: steps.check-release.outputs.draft == 'true'
+        run: |
+          gh release edit "helm-chart-v${{ steps.chart-version.outputs.version }}" --draft=false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

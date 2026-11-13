@@ -140,6 +140,7 @@ if release_check "$TAG_NAME"; then
   if [[ "$VERSION" != *-* ]]; then
     bash "$SCRIPT_DIR/publish-cli-latest.sh" "bifrost-cli" "$VERSION" "bifrost"
   fi
+  release_promote_draft "$TAG_NAME"
   echo "ℹ️ Release $TAG_NAME and its R2 artifacts already exist. Nothing to do."
   exit 0
 else

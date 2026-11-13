@@ -61,12 +61,9 @@ for plugin_dir in plugins/*/; do
     [ -f "${plugin_dir}go.mod" ] || continue
     plugin_name=$(basename "$plugin_dir")
     if [ ! -f "${plugin_dir}version" ]; then
-      if grep -q "replace github.com/maximhq/bifrost/plugins/$plugin_name => ../plugins/$plugin_name" transports/go.mod; then
-        echo "   📦 $plugin_name: local replace (no version file)"
-        continue
-      fi
-      echo "❌ $plugin_dir has no version file and no local replace in transports/go.mod" >&2
-      exit 1
+      # Validated against the structured go.mod view below.
+      echo "   📦 $plugin_name: no version file (checking local replace)"
+      continue
     fi
     PLUGIN_VERSION="v$(read_semver_file "${plugin_dir}version")"
     if ! is_semver "${PLUGIN_VERSION#v}"; then
@@ -90,9 +87,13 @@ while IFS=$'\t' read -r plugin_name current_version; do
   if jq -e --arg p "$local_path" '.Replace[]? | select(.Old.Path == $p) | select(.New.Path != null) | select(.New.Path | startswith("../"))' >/dev/null <<<"$GOMOD_JSON"; then
     is_local_replace=true
   fi
-  if [ ! -f "../plugins/$plugin_name/version" ] && [ "$is_local_replace" = "true" ]; then
-    echo "   📦 $plugin_name: local replace (no version file)"
-    continue
+  if [ ! -f "../plugins/$plugin_name/version" ]; then
+    if [ "$is_local_replace" = "true" ]; then
+      echo "   📦 $plugin_name: local replace (no version file)"
+      continue
+    fi
+    echo "❌ $plugin_name has no version file and no local replace in transports/go.mod" >&2
+    exit 1
   fi
   if ! is_semver "${current_version#v}"; then
     echo "❌ Invalid version for transport plugin $plugin_name: $current_version" >&2
@@ -195,8 +196,8 @@ go mod edit -go=1.27.3 -toolchain=none
 for plugin_name in "${!PLUGIN_VERSIONS[@]}"; do
   plugin_version="${PLUGIN_VERSIONS[$plugin_name]}"
 
-  # Check if transport depends on this plugin
-  if grep -q "github.com/maximhq/bifrost/plugins/$plugin_name" go.mod; then
+  # Check if transport depends on this plugin in the structured require set.
+  if jq -e --arg p "github.com/maximhq/bifrost/plugins/$plugin_name" '.Require[]? | select(.Path == $p)' >/dev/null <<<"$GOMOD_JSON"; then
     echo "  📦 Using $plugin_name plugin $plugin_version"
     # Textual require bump — skips loading the currently-declared version's go.mod
     go mod edit -require="github.com/maximhq/bifrost/plugins/$plugin_name@$plugin_version"

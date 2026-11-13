@@ -45,7 +45,7 @@ mkdir -p "${APP_DIR}"
 cat > "${APP_DIR}/config.json" <<JSON
 {
   "\$schema": "https://www.getbifrost.ai/schema",
-  "server": { "a2a_allow_private_push_callbacks": true, "a2a_grpc_base_domain": "localhost", "a2a_grpc_port": ${GRPC_PORT} },
+  "server": { "a2a_allow_private_push_callbacks": true, "a2a_grpc_base_domain": "127.0.0.1.nip.io", "a2a_grpc_port": ${GRPC_PORT} },
   "client": { "a2a_external_client_url": "http://127.0.0.1:${PORT}", "a2a_private_allowlist": ["127.0.0.1"], "enforce_auth_on_inference": false },
   "governance": {
     "auth_config": {

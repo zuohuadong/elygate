@@ -51,3 +51,19 @@ release_is_draft() {
   rm -f "$err"
   [[ "$value" == "true" ]]
 }
+
+# release_promote_draft <tag>: publish an existing draft release. Absence or a
+# published release is a no-op; unknown state fails closed.
+release_promote_draft() {
+  local tag="$1"
+  if release_is_draft "$tag"; then
+    echo "🚀 Promoting draft GitHub release $tag..."
+    gh release edit "$tag" --draft=false
+  else
+    local status=$?
+    if [ "$status" -ne 1 ]; then
+      echo "Could not determine draft state for $tag" >&2
+      return 1
+    fi
+  fi
+}

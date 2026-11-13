@@ -59,6 +59,7 @@ if git rev-parse -q --verify "refs/tags/$TAG_NAME" >/dev/null; then
 fi
 if release_check "$TAG_NAME"; then
   if [ "$TAG_AT_HEAD" = "true" ]; then
+    release_promote_draft "$TAG_NAME"
     echo "ℹ️ Release $TAG_NAME already exists. Nothing to do."
     exit 0
   fi

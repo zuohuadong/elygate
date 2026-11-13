@@ -51,6 +51,7 @@ if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
         exit 0
       fi
     fi
+    release_promote_draft "$TAG"
     echo "exists=true" >> "$GITHUB_OUTPUT"
     exit 0
   else

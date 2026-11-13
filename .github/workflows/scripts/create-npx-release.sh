@@ -86,6 +86,7 @@ fi
 echo "🔍 Checking if release $FULL_TAG already exists..."
 if release_check "$FULL_TAG"; then
   if [ "$TAG_AT_HEAD" = "true" ]; then
+    release_promote_draft "$FULL_TAG"
     echo "ℹ️ Release $FULL_TAG already exists. Skipping creation."
     exit 0
   fi

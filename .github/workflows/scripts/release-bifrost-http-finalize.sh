@@ -48,11 +48,8 @@ for plugin_dir in plugins/*/; do
     [ -f "${plugin_dir}go.mod" ] || continue
     plugin_name=$(basename "$plugin_dir")
     if [ ! -f "${plugin_dir}version" ]; then
-      if grep -q "replace github.com/maximhq/bifrost/plugins/$plugin_name => ../plugins/$plugin_name" transports/go.mod; then
-        continue
-      fi
-      echo "❌ $plugin_dir has no version file and no local replace in transports/go.mod" >&2
-      exit 1
+      # Validated against the structured go.mod view below.
+      continue
     fi
     PLUGIN_VERSION="v$(read_semver_file "${plugin_dir}version")"
     if ! is_semver "${PLUGIN_VERSION#v}"; then
@@ -73,8 +70,12 @@ while IFS=$'\t' read -r plugin_name plugin_version; do
   if jq -e --arg p "$local_path" '.Replace[]? | select(.Old.Path == $p) | select(.New.Path != null) | select(.New.Path | startswith("../"))' >/dev/null <<<"$GOMOD_JSON"; then
     is_local_replace=true
   fi
-  if [ ! -f "plugins/$plugin_name/version" ] && [ "$is_local_replace" = "true" ]; then
-    continue
+  if [ ! -f "plugins/$plugin_name/version" ]; then
+    if [ "$is_local_replace" = "true" ]; then
+      continue
+    fi
+    echo "❌ $plugin_name has no version file and no local replace in transports/go.mod" >&2
+    exit 1
   fi
   if ! is_semver "${plugin_version#v}"; then
     echo "❌ Invalid version for transport plugin $plugin_name: $plugin_version" >&2
