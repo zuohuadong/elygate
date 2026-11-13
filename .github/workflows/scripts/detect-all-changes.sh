@@ -352,6 +352,7 @@ if tag_exists "$TRANSPORT_TAG" transports; then
     exit 1
   fi
   require_platform_listing "$R2_LISTING" bifrost-http "${BIFROST_HTTP_PLATFORMS[@]}"
+  require_remote_platform_digest "$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]')" "$R2_BUCKET" bifrost "$TRANSPORT_VERSION" bifrost-http "${BIFROST_HTTP_PLATFORMS[@]}"
   GIT_TAG_EXISTS="true"
 elif [ "$TAG_RELEASE_MISSING" = "true" ]; then
   echo "   🏷️ Git tag exists but its GitHub release is missing - transport release needed"

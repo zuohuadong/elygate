@@ -261,6 +261,13 @@ async function main() {
     mkdirSync(installDir, { recursive: true });
     const binaryPath = join(installDir, binaryName);
 
+    if (isPinned && existsSync(binaryPath)) {
+        try {
+            await verifyChecksum(binaryPath, `${downloadUrl}.sha256`);
+        } catch {
+            try { unlinkSync(binaryPath); } catch { }
+        }
+    }
     if (!isPinned || !existsSync(binaryPath)) {
         const tempBinaryPath = `${binaryPath}.download-${process.pid}-${Date.now()}`;
         try {

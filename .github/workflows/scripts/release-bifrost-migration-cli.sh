@@ -105,6 +105,7 @@ verify_r2_artifacts() {
     return 1
   fi
   require_platform_listing "$listing" bifrost-migration-cli "${CLI_PLATFORMS[@]}"
+  require_remote_platform_digest "$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]')" "$R2_BUCKET" "bifrost-migration-cli" "$VERSION" bifrost-migration-cli "${CLI_PLATFORMS[@]}"
   local platform name local_sha remote_sha
   for platform in "${CLI_PLATFORMS[@]}"; do
     name="bifrost-migration-cli"
