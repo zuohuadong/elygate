@@ -3404,6 +3404,11 @@ jobs:
   # Security scan runs inside the release pipeline (not only as a separate
   # push workflow) so a finding or scanner failure blocks the release graph.
   security-scan:
+    needs: [check-skip, approve-run]
+    if: needs.check-skip.outputs.should-skip != 'true' && needs.approve-run.result == 'success'
+    permissions:
+      contents: read
+      security-events: write
     uses: ./.github/workflows/snyk.yml
     secrets: inherit
 
@@ -4676,4 +4681,7 @@ jobs:
           MESSAGE=$(printf "%s\n\n**Components:**\n• Core: %s\n• Framework: %s\n• Plugins: %s\n• Bifrost HTTP: %s\n• Docker/GHCR/UBI9: %s\n\n**Details:**\n• Branch: \`${{ github.ref_name }}\`\n• Commit: \`%.8s\`\n• Author: %s\n\n[View Workflow Run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" "$TITLE" "$CORE_STATUS" "$FRAMEWORK_STATUS" "$PLUGINS_STATUS" "$BIFROST_STATUS" "$DOCKER_STATUS" "${{ github.sha }}" "${{ github.actor }}")
 
           payload="$(jq -n --arg content "$MESSAGE" '{content:$content}')"
-          curl -sS -H "Content-Type: application/json" -d "$payload" "$DISCORD_WEBHOOK"
+          curl -sS --fail-with-body -H "Content-Type: application/json" -d "$payload" "$DISCORD_WEBHOOK"
+          if [ "$TITLE" = "🚨 **Release Pipeline Incomplete**" ]; then
+            exit 1
+          fi

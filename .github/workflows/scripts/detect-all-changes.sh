@@ -83,6 +83,18 @@ CORE_VERSION=$(cat core/version)
 FRAMEWORK_VERSION=$(cat framework/version)
 TRANSPORT_VERSION=$(cat transports/version)
 
+# A panel/UI or production-image change without a version bump would otherwise
+# ship no candidate: the existing tag means "already released". Fail closed and
+# require an explicit transports/version bump.
+if git rev-parse -q --verify HEAD^ >/dev/null 2>&1; then
+  if ! git diff --quiet HEAD^ HEAD -- panel transports/Dockerfile; then
+    if git diff --quiet HEAD^ HEAD -- transports/version; then
+      echo "❌ panel/Dockerfile changed without bumping transports/version; refusing to skip the release" >&2
+      exit 1
+    fi
+  fi
+fi
+
 validate_version "$CORE_VERSION" "core"
 validate_version "$FRAMEWORK_VERSION" "framework"
 validate_version "$TRANSPORT_VERSION" "transport"
