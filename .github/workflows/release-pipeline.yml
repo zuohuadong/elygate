@@ -51,17 +51,17 @@ jobs:
             echo "should-skip=false" >> $GITHUB_OUTPUT
           fi
 
-          # --skip-core-test drops the three jobs that make live calls to every
-          # upstream provider: test-core (the ~90 minute provider harness),
-          # test-core-integrations (the core module's live provider suite) and
-          # test-proxy-e2e (the harness smoke set through real proxies). Every
-          # other test job still runs, including test-core-unit, so the release is
-          # still gated on the whole suite minus the jobs that depend on eight
-          # third-party APIs being healthy at that moment.
+          # --skip-core-test drops the two jobs that make live calls to every
+          # upstream provider: test-core (the ~90 minute provider harness) and
+          # test-core-integrations (the core module's live provider suite). The
+          # proxy E2E gate always runs, because a proxy misconfiguration is a
+          # security boundary rather than an upstream-provider outage. Every
+          # other test job still runs, including test-core-unit.
           #
-          # Skipping them does not cascade: every downstream release job already
-          # accepts `needs.<job>.result == 'skipped'` alongside 'success' (the
-          # same path a bifrost-http-only release takes when test-core never runs).
+          # Skipping the two provider jobs does not cascade: every downstream
+          # release job accepts `needs.<job>.result == 'skipped'` alongside
+          # 'success' (the same path a bifrost-http-only release takes when
+          # test-core never runs).
           #
           # Distinct from --skip-ci, which skips the entire pipeline including the
           # release, and from skip_tests, which drops every test job and is admin-only.
@@ -70,7 +70,7 @@ jobs:
           # passed. Use it when a provider outage is blocking a release that has
           # nothing to do with that provider - not to get a red harness out the door.
           if [[ "$FIRST_LINE" == *"--skip-core-test"* ]]; then
-            echo "::warning::--skip-core-test found in the commit subject: the live provider jobs (test-core, test-core-integrations, test-proxy-e2e) will not run for this release. All other test jobs still gate it."
+            echo "::warning::--skip-core-test found in the commit subject: test-core and test-core-integrations will not run for this release. The proxy E2E and all other test jobs still gate it."
             echo "skip-core-test=true" >> $GITHUB_OUTPUT
           else
             echo "skip-core-test=false" >> $GITHUB_OUTPUT
@@ -628,8 +628,7 @@ jobs:
     needs: [check-skip, detect-changes, build-gateway]
     if: |
       needs.check-skip.outputs.should-skip != 'true' &&
-      needs.check-skip.outputs.skip-tests != 'true' &&
-      needs.check-skip.outputs.skip-core-test != 'true'
+      needs.check-skip.outputs.skip-tests != 'true'
     runs-on: builder-8-32
     timeout-minutes: 45
     permissions:
