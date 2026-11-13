@@ -3,6 +3,7 @@
 source "$(dirname "$0")/r2-bucket.sh"
 source "$(dirname "$0")/release-artifacts.sh"
 source "$(dirname "$0")/release-state.sh"
+source "$(dirname "$0")/semver.sh"
 set -euo pipefail
 
 # Overwrite latest with a specific version from R2
@@ -17,8 +18,8 @@ VERSION="$1"
 if [[ ! "$VERSION" =~ ^v ]]; then
   VERSION="v${VERSION}"
 fi
-if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
-  echo "❌ Invalid version '$VERSION'; expected vX.Y.Z" >&2
+if ! is_semver "${VERSION#v}" || [[ "$VERSION" == *-* ]] || [[ "$VERSION" == *+* ]]; then
+  echo "❌ Invalid or non-stable version '$VERSION'; latest requires a stable vX.Y.Z" >&2
   exit 1
 fi
 : "${GH_TOKEN:?GH_TOKEN env var is required to verify the release before rollback}"
@@ -104,19 +105,24 @@ restore_latest() {
   fi
 }
 trap restore_latest EXIT
-RESTORE_ON_FAIL=true
 if ! sync_with_retry "s3://$R2_BUCKET/bifrost/latest/" "s3://$R2_BUCKET/$BACKUP/"; then
   echo "❌ Could not snapshot current latest/; refusing to overwrite it" >&2
   exit 1
 fi
+BACKUP_LISTING=$(aws s3 ls --recursive "s3://$R2_BUCKET/$BACKUP/" \
+  --endpoint-url "$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]')" --profile "${R2_AWS_PROFILE:-R2}")
+if [ -z "$BACKUP_LISTING" ]; then
+  echo "❌ Snapshot of latest/ is empty; refusing to overwrite it" >&2
+  exit 1
+fi
+RESTORE_ON_FAIL=true
 if ! sync_with_retry "s3://$R2_BUCKET/bifrost/$VERSION/" "s3://$R2_BUCKET/bifrost/latest/"; then
   exit 1
 fi
+require_remote_prefix_digest "$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]')" "$R2_BUCKET" "bifrost/latest" bifrost-http "${BIFROST_HTTP_PLATFORMS[@]}"
 RESTORE_ON_FAIL=false
 trap - EXIT
 aws s3 rm "s3://$R2_BUCKET/$BACKUP/" --recursive \
   --endpoint-url "$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]')" \
   --profile "${R2_AWS_PROFILE:-R2}" >/dev/null 2>&1 || true
-
-require_remote_prefix_digest "$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]')" "$R2_BUCKET" "bifrost/latest" bifrost-http "${BIFROST_HTTP_PLATFORMS[@]}"
 echo "🎉 Successfully reverted latest to version $VERSION"

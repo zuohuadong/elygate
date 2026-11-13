@@ -309,11 +309,11 @@ jobs:
         with:
           bun-version-file: .bun-version
 
-      - name: Test panel
+      - name: Test panel unit
         run: |
           cd panel
           bun install --frozen-lockfile
-          bun test src tests
+          bun test src/lib/*.test.ts tests/*.test.ts
           bun run check
 
       - name: Build UI and bifrost-http binary
@@ -327,6 +327,14 @@ jobs:
           mkdir -p tmp
           (cd transports/bifrost-http && go build -o ../../tmp/bifrost-http .)
           ls -lh tmp/bifrost-http
+
+      - name: Test panel runtime
+        env:
+          ELYGATE_TEST_BINARY: ${{ github.workspace }}/tmp/bifrost-http
+          ELYGATE_TEST_COMMIT: ${{ github.sha }}
+        run: |
+          cd panel
+          bun test tests/runtime
 
       - name: Upload bifrost-http binary
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
@@ -4375,6 +4383,7 @@ jobs:
     needs: [detect-changes, bifrost-http-release, docker-manifest, docker-manifest-ubi9]
     if: |
       always() &&
+      (needs.detect-changes.outputs.bifrost-http-needs-release == 'true' || needs.detect-changes.outputs.docker-needs-release == 'true') &&
       (needs.bifrost-http-release.result == 'success' || (needs.detect-changes.outputs.bifrost-http-needs-release == 'false' && needs.bifrost-http-release.result == 'skipped')) &&
       (needs.docker-manifest.result == 'success' || (needs.detect-changes.outputs.docker-needs-release == 'false' && needs.docker-manifest.result == 'skipped')) &&
       (needs.docker-manifest-ubi9.result == 'success' || (needs.detect-changes.outputs.docker-needs-release == 'false' && needs.docker-manifest-ubi9.result == 'skipped'))
@@ -4494,7 +4503,7 @@ jobs:
           # script no CLI legs ran, so it emits no rows instead of defaulting to
           # the three standard labels and linking reports that do not exist.
           CLI_HARNESS_LABELS: ${{ needs.resolve-cli-versions.outputs.matrix && join(fromJSON(needs.resolve-cli-versions.outputs.matrix).*.label, ' ') || '' }}
-          PROVIDER_HARNESS_RAN: ${{ needs.test-core.result == 'success' }}
+          PROVIDER_HARNESS_RAN: ${{ needs.test-core.result != 'skipped' }}
         run: |
           ./.github/workflows/scripts/push-mintlify-changelog.sh "${{ needs.detect-changes.outputs.transport-version }}"
 

@@ -133,7 +133,7 @@ if [ -n "${TEST_REPORTS_BASE_URL:-}" ]; then
     PROVIDER_ROW="| Provider harness | Every provider × modality through a live gateway | [requests]($REPORTS_BASE/provider-harness/index.html) · [failure breakdown]($REPORTS_BASE/provider-harness/harness-failures.md) |"
   else
     PROVIDER_TEXT="The provider harness did not run for this release; only the CLI harness results are reported here."
-    PROVIDER_ROW=""
+    PROVIDER_ROW="| Provider harness | Did not run for this release | - |"
   fi
   CHANGELOG_BODY+="
 ## Test reports
