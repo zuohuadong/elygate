@@ -112,7 +112,7 @@ if [ "$TAG_AT_HEAD" = "false" ] && ! git diff --cached --quiet; then
     # In detached HEAD state (common in CI), use GITHUB_REF_NAME or default to main
     CURRENT_BRANCH="${GITHUB_REF_NAME:-main}"
   fi
-  git push origin "$CURRENT_BRANCH"
+  git push origin HEAD:"$CURRENT_BRANCH"
   echo "🔧 Pushed framework bump to $CURRENT_BRANCH"
 else
   echo "No dependency changes detected; skipping commit."

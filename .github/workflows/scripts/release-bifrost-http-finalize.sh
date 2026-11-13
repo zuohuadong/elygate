@@ -122,6 +122,17 @@ elif ! grep -q 'HTTP 404' "$RELEASE_ERR"; then
   exit 1
 fi
 
+if git rev-parse -q --verify "refs/tags/$TAG_NAME" >/dev/null; then
+  TAG_COMMIT=$(git rev-list -n 1 "$TAG_NAME")
+  if [ "$TAG_COMMIT" != "$(git rev-parse HEAD)" ]; then
+    echo "Error: tag $TAG_NAME points at $TAG_COMMIT, not at HEAD."
+    exit 1
+  fi
+elif [ "$RELEASE_EXISTS" = "true" ]; then
+  echo "Error: GitHub release $TAG_NAME exists but its tag is missing."
+  exit 1
+fi
+
 if [ "$RELEASE_EXISTS" = "false" ]; then
 # Create the tag once, but tolerate a previous run that pushed it before the
 # release was created. Reusing a tag is only safe when it points at this commit.
@@ -216,18 +227,24 @@ else
   echo "ℹ️ GitHub release $TAG_NAME already exists; verifying R2 latest/ only."
 fi
 
-# Copy versioned R2 path to latest/ for stable releases
+# Copy versioned R2 path to latest/ for stable releases.
 if [[ "$VERSION" != *-* ]]; then
-  if [ -n "${R2_ENDPOINT:-}" ] && [ -n "${R2_BUCKET:-}" ]; then
-    echo "📤 Copying versioned binaries to latest/ on R2..."
-    R2_ENDPOINT="$(echo "$R2_ENDPOINT" | tr -d '[:space:]')"
-    aws s3 sync "s3://$R2_BUCKET/bifrost/v$VERSION/" "s3://$R2_BUCKET/bifrost/latest/" \
-      --endpoint-url "$R2_ENDPOINT" \
-      --profile "${R2_AWS_PROFILE:-R2}" \
-      --no-progress \
-      --delete
-    echo "✅ Latest binaries updated on R2"
+  if [ -z "${R2_ENDPOINT:-}" ] || [ -z "${R2_BUCKET:-}" ]; then
+    echo "Error: R2_ENDPOINT and R2_BUCKET are required for a stable release."
+    exit 1
   fi
+  R2_ENDPOINT="$(echo "$R2_ENDPOINT" | tr -d '[:space:]')"
+  SOURCE_LISTING=$(aws s3 ls "s3://$R2_BUCKET/bifrost/v$VERSION/" --endpoint-url "$R2_ENDPOINT" --profile "${R2_AWS_PROFILE:-R2}")
+  if [ -z "$SOURCE_LISTING" ]; then
+    echo "Error: versioned R2 prefix s3://$R2_BUCKET/bifrost/v$VERSION/ is empty; refusing to update latest/."
+    exit 1
+  fi
+  echo "📤 Copying versioned binaries to latest/ on R2..."
+  aws s3 sync "s3://$R2_BUCKET/bifrost/v$VERSION/" "s3://$R2_BUCKET/bifrost/latest/" \
+    --endpoint-url "$R2_ENDPOINT" \
+    --profile "${R2_AWS_PROFILE:-R2}" \
+    --no-progress
+  echo "✅ Latest binaries updated on R2"
 fi
 
 # Print summary

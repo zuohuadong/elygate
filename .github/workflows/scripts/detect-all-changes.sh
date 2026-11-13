@@ -340,12 +340,21 @@ fi
 
 # Check if Docker tag exists on DockerHub
 echo "   🐳 Checking DockerHub for tag v${TRANSPORT_VERSION}..."
-DOCKER_CHECK_RESPONSE=$(curl -s "https://registry.hub.docker.com/v2/repositories/maximhq/bifrost/tags/v${TRANSPORT_VERSION}/" 2>/dev/null || echo "")
-if [ -n "$DOCKER_CHECK_RESPONSE" ] && echo "$DOCKER_CHECK_RESPONSE" | grep -q '"name"'; then
+DOCKER_ERR=$(mktemp)
+DOCKER_CODE=$(curl -sS -o "$DOCKER_ERR" -w '%{http_code}' "https://registry.hub.docker.com/v2/repositories/maximhq/bifrost/tags/v${TRANSPORT_VERSION}/" || echo 000)
+if [ "$DOCKER_CODE" = "200" ] && grep -q '"name"' "$DOCKER_ERR"; then
+  rm -f "$DOCKER_ERR"
   echo "   ⏭️ Docker tag v${TRANSPORT_VERSION} already exists on DockerHub"
   DOCKER_TAG_EXISTS="true"
-else
+elif [ "$DOCKER_CODE" = "404" ]; then
+  rm -f "$DOCKER_ERR"
   echo "   ❌ Docker tag v${TRANSPORT_VERSION} not found on DockerHub"
+  DOCKER_TAG_EXISTS="false"
+else
+  echo "   ❌ Could not determine Docker Hub state (HTTP $DOCKER_CODE)" >&2
+  cat "$DOCKER_ERR" >&2
+  rm -f "$DOCKER_ERR"
+  exit 1
 fi
 
 # Determine if release is needed

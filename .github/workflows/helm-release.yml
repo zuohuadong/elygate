@@ -179,10 +179,18 @@ jobs:
       - name: Push Helm chart as OCI artifact to GHCR
         run: |
           OCI_REF="oci://ghcr.io/maximhq/helm-charts/bifrost"
-          if helm show chart "$OCI_REF" --version "${{ steps.chart-version.outputs.version }}" >/dev/null 2>&1; then
+          OCI_ERR=$(mktemp)
+          if helm show chart "$OCI_REF" --version "${{ steps.chart-version.outputs.version }}" >/dev/null 2>"$OCI_ERR"; then
+            rm -f "$OCI_ERR"
             echo "OCI artifact already exists; skipping push"
-          else
+          elif grep -qiE 'not found|404' "$OCI_ERR"; then
+            rm -f "$OCI_ERR"
             helm push helm-charts/bifrost-${{ steps.chart-version.outputs.version }}.tgz oci://ghcr.io/maximhq/helm-charts
+          else
+            echo "Could not determine OCI artifact state:" >&2
+            cat "$OCI_ERR" >&2
+            rm -f "$OCI_ERR"
+            exit 1
           fi
 
       # - name: Push Helm chart as OCI artifact to Docker Hub
