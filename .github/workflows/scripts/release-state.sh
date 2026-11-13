@@ -10,7 +10,7 @@ release_repo_slug() {
 # 0 = GitHub release exists; 1 = definitive HTTP 404 (absent); 2 = unknown/error.
 # The tag is one API path segment, so the slash is percent-encoded.
 release_check() {
-  local tag="$1" repo encoded err status
+  local tag="$1" repo encoded err
   repo=$(release_repo_slug)
   encoded=${tag//\//%2F}
   err=$(mktemp)
@@ -26,7 +26,6 @@ release_check() {
     rm -f "$err"
     return 0
   fi
-  status=$?
   if grep -q 'HTTP 404' "$err"; then
     rm -f "$err"
     return 1
