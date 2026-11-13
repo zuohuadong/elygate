@@ -6982,8 +6982,14 @@
     },
     "initContainers": {
       "type": "array",
+      "description": "Init containers prepended to the Bifrost pod. Standard Kubernetes container specs.",
       "items": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "image": { "type": "string", "minLength": 1 }
+        },
+        "required": ["name", "image"]
       }
     },
     "extraContainers": {

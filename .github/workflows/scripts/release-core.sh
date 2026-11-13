@@ -30,7 +30,7 @@ if [[ ! -f version ]]; then
   echo "❌ Missing core/version file"
   exit 1
 fi
-FILE_VERSION="$(cat version | tr -d '[:space:]')"
+FILE_VERSION="$(read_semver_file version)"
 if [[ "$FILE_VERSION" != "$VERSION" ]]; then
   echo "❌ Version mismatch: arg=$VERSION, core/version=$FILE_VERSION"
   exit 1

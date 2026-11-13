@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+source "$(dirname "$0")/semver.sh"
 
 source "$(dirname "$0")/r2-bucket.sh"
 set -uo pipefail
@@ -34,6 +35,10 @@ if [ $# -ne 3 ]; then
 fi
 
 VERSION="${1#v}"
+if ! is_semver "$VERSION"; then
+  echo "❌ Invalid version: $1 (strict SemVer 2.0.0 without build metadata)" >&2
+  exit 1
+fi
 LABEL="$2"
 SOURCE_DIR="$3"
 

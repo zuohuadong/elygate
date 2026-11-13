@@ -19,13 +19,17 @@ if ! is_semver "$VERSION"; then
   echo "❌ Invalid transport version: $1 (strict SemVer 2.0.0 without build metadata)" >&2
   exit 1
 fi
+if ! TRANSPORT_FILE_VERSION="$(read_semver_file transports/version)" || [ "$TRANSPORT_FILE_VERSION" != "$VERSION" ]; then
+  echo "❌ transports/version must be '$VERSION' (read '${TRANSPORT_FILE_VERSION:-invalid}')" >&2
+  exit 1
+fi
 TAG_NAME="transports/v${VERSION}"
 
 echo "🏷️ Finalizing bifrost-http v$VERSION release..."
 
 # Get core and framework versions from version files
-CORE_VERSION="v$(tr -d '\n\r' < core/version)"
-FRAMEWORK_VERSION="v$(tr -d '\n\r' < framework/version)"
+CORE_VERSION="v$(read_semver_file core/version)"
+FRAMEWORK_VERSION="v$(read_semver_file framework/version)"
 if ! is_semver "${CORE_VERSION#v}"; then
   echo "❌ Invalid core/version: $CORE_VERSION" >&2
   exit 1
@@ -50,7 +54,7 @@ for plugin_dir in plugins/*/; do
       echo "❌ $plugin_dir has no version file and no local replace in transports/go.mod" >&2
       exit 1
     fi
-    PLUGIN_VERSION="v$(tr -d '\n\r' < "${plugin_dir}version")"
+    PLUGIN_VERSION="v$(read_semver_file "${plugin_dir}version")"
     if ! is_semver "${PLUGIN_VERSION#v}"; then
       echo "❌ Invalid version for plugin $plugin_name: $PLUGIN_VERSION" >&2
       exit 1
@@ -61,10 +65,13 @@ done
 
 # Check which plugins are actually used by the transport
 while IFS= read -r plugin_line; do
-  plugin_name=$(echo "$plugin_line" | awk -F'/' '{print $NF}' | awk '{print $1}')
-  plugin_version=$(echo "$plugin_line" | awk '{print $NF}')
+  plugin_name=$(awk '{print $1}' <<< "$plugin_line" | awk -F'/' '{print $NF}')
+  plugin_version=$(awk '{print $2}' <<< "$plugin_line")
+  if [ -z "$plugin_version" ] || [ "$plugin_version" = "//" ]; then
+    plugin_version="$(awk '{print $3}' <<< "$plugin_line")"
+  fi
 
-  if grep -q "replace github.com/maximhq/bifrost/plugins/$plugin_name => ../plugins/$plugin_name" transports/go.mod; then
+  if [ ! -f "plugins/$plugin_name/version" ] && grep -q "replace github.com/maximhq/bifrost/plugins/$plugin_name => ../plugins/$plugin_name" transports/go.mod; then
     continue
   fi
   if ! is_semver "${plugin_version#v}"; then
@@ -187,6 +194,13 @@ require_platform_listing "$ARTIFACT_LISTING" bifrost-http "${BIFROST_HTTP_PLATFO
 require_remote_platform_digest "$R2_ENDPOINT" "$R2_BUCKET" bifrost "$VERSION" bifrost-http "${BIFROST_HTTP_PLATFORMS[@]}"
 echo "✅ Complete five-platform artifact set found in R2"
 
+if [ "$RELEASE_EXISTS" = "true" ]; then
+  if RELEASE_DRAFT=$(gh api "repos/${REPO_SLUG}/releases/tags/${RELEASE_TAG_PATH}" --jq '.draft') && [ "$RELEASE_DRAFT" = "true" ]; then
+    echo "ℹ️ Draft release $TAG_NAME already exists; keeping it for Docker promotion."
+  else
+    echo "ℹ️ Published release $TAG_NAME already exists; no release to create."
+  fi
+fi
 if [ "$RELEASE_EXISTS" = "false" ]; then
 # Create the tag once, but tolerate a previous run that pushed it before the
 # release was created. Reusing a tag is only safe when it points at this commit.

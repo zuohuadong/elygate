@@ -77,6 +77,16 @@ for candidate in $(git tag -l "transports/v*" | sort -V -r); do
   candidate_commit=$(git rev-list -n 1 "$candidate")
   git merge-base --is-ancestor "$candidate_commit" HEAD || continue
   if release_check "$candidate"; then
+    if release_is_draft "$candidate"; then
+      echo "ℹ️ Skipping draft release $candidate as a panel baseline"
+      continue
+    else
+      draft_status=$?
+      if [ "$draft_status" -ne 1 ]; then
+        echo "❌ Could not determine draft state for $candidate" >&2
+        exit 1
+      fi
+    fi
     BASE_TRANSPORT_TAG="$candidate"
     break
   else

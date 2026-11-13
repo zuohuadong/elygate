@@ -28,12 +28,16 @@ if ! is_semver "$VERSION"; then
   echo "❌ Invalid transport version: $1 (strict SemVer 2.0.0 without build metadata)" >&2
   exit 1
 fi
+if ! TRANSPORT_FILE_VERSION="$(read_semver_file transports/version)" || [ "$TRANSPORT_FILE_VERSION" != "$VERSION" ]; then
+  echo "❌ transports/version must be '$VERSION' (read '${TRANSPORT_FILE_VERSION:-invalid}')" >&2
+  exit 1
+fi
 
 echo "🚀 Preparing bifrost-http v$VERSION release..."
 
 # Get core and framework versions from version files
-CORE_VERSION="v$(tr -d '\n\r' < core/version)"
-FRAMEWORK_VERSION="v$(tr -d '\n\r' < framework/version)"
+CORE_VERSION="v$(read_semver_file core/version)"
+FRAMEWORK_VERSION="v$(read_semver_file framework/version)"
 if ! is_semver "${CORE_VERSION#v}"; then
   echo "❌ Invalid core/version: $CORE_VERSION" >&2
   exit 1
@@ -64,7 +68,7 @@ for plugin_dir in plugins/*/; do
       echo "❌ $plugin_dir has no version file and no local replace in transports/go.mod" >&2
       exit 1
     fi
-    PLUGIN_VERSION="v$(tr -d '\n\r' < "${plugin_dir}version")"
+    PLUGIN_VERSION="v$(read_semver_file "${plugin_dir}version")"
     if ! is_semver "${PLUGIN_VERSION#v}"; then
       echo "❌ Invalid version for plugin $plugin_name: $PLUGIN_VERSION" >&2
       exit 1
@@ -79,11 +83,14 @@ cd transports
 echo "🔍 Checking for additional plugins in transport go.mod..."
 # Parse go.mod plugin lines and add missing ones
 while IFS= read -r plugin_line; do
-  plugin_name=$(echo "$plugin_line" | awk -F'/' '{print $NF}' | awk '{print $1}')
-  current_version=$(echo "$plugin_line" | awk '{print $NF}')
+  plugin_name=$(awk '{print $1}' <<< "$plugin_line" | awk -F'/' '{print $NF}')
+  current_version=$(awk '{print $2}' <<< "$plugin_line")
+  if [ -z "$current_version" ] || [ "$current_version" = "//" ]; then
+    current_version="$(awk '{print $3}' <<< "$plugin_line")"
+  fi
 
-  # Local replaces carry v0.0.0 and must not be bumped or validated as releases.
-  if grep -q "replace github.com/maximhq/bifrost/plugins/$plugin_name => ../plugins/$plugin_name" go.mod; then
+  # Only a plugin with no version file may carry a local v0.0.0 replace.
+  if [ ! -f "../plugins/$plugin_name/version" ] && grep -q "replace github.com/maximhq/bifrost/plugins/$plugin_name => ../plugins/$plugin_name" go.mod; then
     continue
   fi
   if ! is_semver "${current_version#v}"; then
@@ -154,6 +161,14 @@ if [ -n "$PREV_TAG" ]; then
 fi
 
 if release_check "$TAG_NAME"; then
+  if release_is_draft "$TAG_NAME"; then
+    if [ "$TAG_AT_HEAD" = "true" ]; then
+      echo "ℹ️ Draft release $TAG_NAME already exists at HEAD; leaving it for finalize/promote."
+      exit 0
+    fi
+    echo "❌ Draft release $TAG_NAME exists but its tag is not at HEAD"
+    exit 1
+  fi
   if [ "$TAG_AT_HEAD" = "true" ]; then
     echo "ℹ️ Release $TAG_NAME already exists. Nothing to do."
     exit 0

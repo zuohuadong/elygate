@@ -293,6 +293,8 @@ API_CODE=$(curl -sS -o "$API_BODY" -w '%{http_code}' \
   "http://localhost:${TEST_PORT}/v1/models" || true)
 case "$API_CODE" in
   000) echo "ERROR: /v1/models did not respond" >&2; cat "$API_BODY" >&2; exit 1;;
+  200|401|403) ;;
+  *) echo "ERROR: /v1/models returned unexpected HTTP $API_CODE" >&2; cat "$API_BODY" >&2; exit 1;;
 esac
 if ! grep -qE '^[[:space:]]*[\[{]' "$API_BODY"; then
   echo "ERROR: /v1/models did not return JSON (HTTP $API_CODE)" >&2

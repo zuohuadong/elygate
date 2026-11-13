@@ -35,3 +35,19 @@ release_check() {
   rm -f "$err"
   return 2
 }
+
+# release_is_draft <tag>
+# 0 = the existing release is a draft; 1 = it is published or absent.
+# Unknown API state returns 2 so callers fail closed.
+release_is_draft() {
+  local tag="$1" repo encoded value err
+  repo=$(release_repo_slug)
+  encoded=${tag//\//%2F}
+  err=$(mktemp)
+  if ! value=$(gh api "repos/${repo}/releases/tags/${encoded}" --jq '.draft' 2>"$err"); then
+    rm -f "$err"
+    return 2
+  fi
+  rm -f "$err"
+  [[ "$value" == "true" ]]
+}

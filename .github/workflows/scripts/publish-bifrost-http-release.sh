@@ -34,7 +34,18 @@ restore_latest() {
   trap - EXIT
   if [ -n "$RECEIPT_KEY" ]; then
     echo "🧹 Removing incomplete receipt $RECEIPT_KEY..."
-    aws s3 rm "s3://$R2_BUCKET/$RECEIPT_KEY" --endpoint-url "$ENDPOINT" --profile "${R2_AWS_PROFILE:-R2}" >/dev/null 2>&1 || true
+    removed=false
+    for _ in 1 2 3; do
+      if aws s3 rm "s3://$R2_BUCKET/$RECEIPT_KEY" --endpoint-url "$ENDPOINT" --profile "${R2_AWS_PROFILE:-R2}" >/dev/null 2>&1; then
+        removed=true
+        break
+      fi
+      sleep 2
+    done
+    if [ "$removed" != "true" ]; then
+      echo "❌ Could not remove incomplete receipt $RECEIPT_KEY; manual recovery required" >&2
+      exit 1
+    fi
   fi
   if [ "$RESTORE_ON_FAIL" = "true" ]; then
     if [ "$RESTORE_TO_EMPTY" = "true" ]; then

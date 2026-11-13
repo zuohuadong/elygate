@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+source "$(dirname "$0")/semver.sh"
 set -euo pipefail
 
 # check-cli-release.sh <tag> <binary> <r2-prefix> <version>
@@ -8,7 +9,11 @@ set -euo pipefail
 TAG="$1"
 BINARY="$2"
 PREFIX="$3"
-VERSION="$4"
+VERSION="${4#v}"
+if ! is_semver "$VERSION"; then
+  echo "❌ Invalid version: $4 (strict SemVer 2.0.0 without build metadata)" >&2
+  exit 1
+fi
 
 source "$(dirname "$0")/release-state.sh"
 source "$(dirname "$0")/r2-bucket.sh"

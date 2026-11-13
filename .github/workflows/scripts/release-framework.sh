@@ -21,6 +21,10 @@ if ! is_semver "$VERSION_RAW"; then
   exit 1
 fi
 VERSION="v${VERSION_RAW}"
+if ! FRAMEWORK_FILE_VERSION="$(read_semver_file framework/version)" || [ "v${FRAMEWORK_FILE_VERSION}" != "$VERSION" ]; then
+  echo "❌ framework/version must be '${VERSION_RAW}' (read '${FRAMEWORK_FILE_VERSION:-invalid}')" >&2
+  exit 1
+fi
 
 TAG_NAME="framework/${VERSION}"
 
@@ -71,7 +75,7 @@ else
 fi
 
 # Get core version from version file
-CORE_VERSION="v$(tr -d '\n\r' < core/version)"
+CORE_VERSION="v$(read_semver_file core/version)"
 if ! is_semver "${CORE_VERSION#v}"; then
   echo "❌ Invalid core/version: $CORE_VERSION" >&2
   exit 1

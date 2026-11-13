@@ -19,14 +19,14 @@ PLUGIN_NAME="$1"
 if [ -n "${2:-}" ]; then
   CORE_VERSION="$2"
 else
-  CORE_VERSION="v$(tr -d '\n\r' < core/version)"
+  CORE_VERSION="v$(read_semver_file core/version)"
 fi
 
 # Get framework version from parameter or version file
 if [ -n "${3:-}" ]; then
   FRAMEWORK_VERSION="$3"
 else
-  FRAMEWORK_VERSION="v$(tr -d '\n\r' < framework/version)"
+  FRAMEWORK_VERSION="v$(read_semver_file framework/version)"
 fi
 
 # Ensure we have the latest version
@@ -47,12 +47,16 @@ echo "🔧 Framework version: $FRAMEWORK_VERSION"
 PLUGIN_DIR="plugins/$PLUGIN_NAME"
 VERSION_FILE="$PLUGIN_DIR/version"
 
+if [ ! -f "$PLUGIN_DIR/go.mod" ]; then
+  echo "❌ Not a Go plugin module (no go.mod): $PLUGIN_DIR"
+  exit 1
+fi
 if [ ! -f "$VERSION_FILE" ]; then
   echo "❌ Version file not found: $VERSION_FILE"
   exit 1
 fi
 
-PLUGIN_VERSION=$(tr -d '\n\r' < "$VERSION_FILE")
+PLUGIN_VERSION=$(read_semver_file "$VERSION_FILE")
 for pair in "core:$CORE_VERSION" "framework:$FRAMEWORK_VERSION" "plugin:$PLUGIN_VERSION"; do
   label="${pair%%:*}"
   value="${pair#*:}"
@@ -150,7 +154,7 @@ if [ -f "go.mod" ]; then
       echo "❌ Version file not found for plugin dependency: $dependency"
       exit 1
     fi
-    dependency_version=$(tr -d '\n\r' < "$dependency_version_file")
+    dependency_version=$(read_semver_file "$dependency_version_file")
     if ! is_semver "${dependency_version#v}"; then
       echo "❌ Invalid version for plugin dependency $dependency: $dependency_version" >&2
       exit 1
