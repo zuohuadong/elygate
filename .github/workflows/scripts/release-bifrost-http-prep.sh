@@ -34,6 +34,14 @@ echo "🚀 Preparing bifrost-http v$VERSION release..."
 # Get core and framework versions from version files
 CORE_VERSION="v$(tr -d '\n\r' < core/version)"
 FRAMEWORK_VERSION="v$(tr -d '\n\r' < framework/version)"
+if ! is_semver "${CORE_VERSION#v}"; then
+  echo "❌ Invalid core/version: $CORE_VERSION" >&2
+  exit 1
+fi
+if ! is_semver "${FRAMEWORK_VERSION#v}"; then
+  echo "❌ Invalid framework/version: $FRAMEWORK_VERSION" >&2
+  exit 1
+fi
 
 echo "🔍 DEBUG: CORE_VERSION: $CORE_VERSION"
 echo "🔍 DEBUG: FRAMEWORK_VERSION: $FRAMEWORK_VERSION"
@@ -46,7 +54,16 @@ declare -A PLUGIN_VERSIONS
 # Get versions for plugins that exist in the plugins/ directory
 for plugin_dir in plugins/*/; do
   if [ -d "$plugin_dir" ]; then
+    [ -f "${plugin_dir}go.mod" ] || continue
     plugin_name=$(basename "$plugin_dir")
+    if [ ! -f "${plugin_dir}version" ]; then
+      if grep -q "replace github.com/maximhq/bifrost/plugins/$plugin_name => ../plugins/$plugin_name" transports/go.mod; then
+        echo "   📦 $plugin_name: local replace (no version file)"
+        continue
+      fi
+      echo "❌ $plugin_dir has no version file and no local replace in transports/go.mod" >&2
+      exit 1
+    fi
     PLUGIN_VERSION="v$(tr -d '\n\r' < "${plugin_dir}version")"
     if ! is_semver "${PLUGIN_VERSION#v}"; then
       echo "❌ Invalid version for plugin $plugin_name: $PLUGIN_VERSION" >&2
@@ -65,6 +82,14 @@ while IFS= read -r plugin_line; do
   plugin_name=$(echo "$plugin_line" | awk -F'/' '{print $NF}' | awk '{print $1}')
   current_version=$(echo "$plugin_line" | awk '{print $NF}')
 
+  # Local replaces carry v0.0.0 and must not be bumped or validated as releases.
+  if grep -q "replace github.com/maximhq/bifrost/plugins/$plugin_name => ../plugins/$plugin_name" go.mod; then
+    continue
+  fi
+  if ! is_semver "${current_version#v}"; then
+    echo "❌ Invalid version for transport plugin $plugin_name: $current_version" >&2
+    exit 1
+  fi
   # Only add if we don't already have this plugin
   if [[ -z "${PLUGIN_VERSIONS[$plugin_name]:-}" ]]; then
     echo "   📦 $plugin_name: $current_version (from transport go.mod)"

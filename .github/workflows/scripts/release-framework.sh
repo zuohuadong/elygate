@@ -72,7 +72,10 @@ fi
 
 # Get core version from version file
 CORE_VERSION="v$(tr -d '\n\r' < core/version)"
-
+if ! is_semver "${CORE_VERSION#v}"; then
+  echo "❌ Invalid core/version: $CORE_VERSION" >&2
+  exit 1
+fi
 
 # Capturing changelog
 CHANGELOG_BODY=$(cat framework/changelog.md)

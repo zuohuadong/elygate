@@ -151,6 +151,10 @@ if [ -f "go.mod" ]; then
       exit 1
     fi
     dependency_version=$(tr -d '\n\r' < "$dependency_version_file")
+    if ! is_semver "${dependency_version#v}"; then
+      echo "❌ Invalid version for plugin dependency $dependency: $dependency_version" >&2
+      exit 1
+    fi
     DEPENDENCIES+=("${dependency}@v${dependency_version#v}")
   done <<< "$PLUGIN_DEPENDENCIES"
   go_get_with_backoff "${DEPENDENCIES[@]}"
