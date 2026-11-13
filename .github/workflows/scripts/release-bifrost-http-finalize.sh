@@ -212,9 +212,14 @@ require_remote_platform_digest "$R2_ENDPOINT" "$R2_BUCKET" bifrost "$VERSION" bi
 echo "✅ Complete five-platform artifact set found in R2"
 
 if [ "$RELEASE_EXISTS" = "true" ]; then
-  if RELEASE_DRAFT=$(gh api "repos/${REPO_SLUG}/releases/tags/${RELEASE_TAG_PATH}" --jq '.draft') && [ "$RELEASE_DRAFT" = "true" ]; then
+  if release_is_draft "$TAG_NAME"; then
     echo "ℹ️ Draft release $TAG_NAME already exists; keeping it for Docker promotion."
   else
+    draft_status=$?
+    if [ "$draft_status" -ne 1 ]; then
+      echo "❌ Could not determine draft state for $TAG_NAME" >&2
+      exit 1
+    fi
     echo "ℹ️ Published release $TAG_NAME already exists; no release to create."
   fi
 fi

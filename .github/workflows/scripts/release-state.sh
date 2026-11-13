@@ -49,7 +49,11 @@ release_is_draft() {
     return 2
   fi
   rm -f "$err"
-  [[ "$value" == "true" ]]
+  case "$value" in
+    true) return 0 ;;
+    false) return 1 ;;
+    *) return 2 ;;
+  esac
 }
 
 # release_promote_draft <tag>: publish an existing draft release. Absence or a

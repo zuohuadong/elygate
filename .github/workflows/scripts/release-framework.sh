@@ -63,6 +63,11 @@ if release_check "$TAG_NAME"; then
       echo "ℹ️ Draft release $TAG_NAME exists; running release checks before promotion."
       RELEASE_IS_DRAFT="true"
     else
+      draft_status=$?
+      if [ "$draft_status" -ne 1 ]; then
+        echo "❌ Could not determine draft state for $TAG_NAME" >&2
+        exit 1
+      fi
       echo "ℹ️ Release $TAG_NAME already exists. Nothing to do."
       exit 0
     fi
