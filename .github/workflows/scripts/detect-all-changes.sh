@@ -64,9 +64,9 @@ validate_plugin_name() {
 }
 
 # Get current versions
-CORE_VERSION=$(cat core/version)
-FRAMEWORK_VERSION=$(cat framework/version)
-TRANSPORT_VERSION=$(cat transports/version)
+CORE_VERSION=$(read_semver_file core/version)
+FRAMEWORK_VERSION=$(read_semver_file framework/version)
+TRANSPORT_VERSION=$(read_semver_file transports/version)
 
 # A panel/UI or production-image change without a version bump would otherwise
 # ship no candidate: the previous release tag means "already released". Compare
@@ -267,7 +267,7 @@ echo "🔌 Checking plugins..."
 PLUGIN_CHANGES=()
 
 for plugin_dir in plugins/*/; do
-  if [ ! -d "$plugin_dir" ]; then
+  if [ ! -d "$plugin_dir" ] || [ ! -f "${plugin_dir}go.mod" ]; then
     continue
   fi
 
@@ -280,7 +280,7 @@ for plugin_dir in plugins/*/; do
     continue
   fi
 
-  current_version=$(cat "$version_file" | tr -d '\n\r')
+  current_version=$(read_semver_file "$version_file")
   if [ -z "$current_version" ]; then
     echo "   ⚠️ Empty version file for: $plugin_name"
     continue
@@ -364,20 +364,33 @@ DOCKER_TAG_EXISTS="false"
 # Check if Git tag exists
 GIT_TAG_EXISTS="false"
 if tag_exists "$TRANSPORT_TAG" transports; then
-  echo "   ⏭️ Git tag $TRANSPORT_TAG already exists"
-  # An existing transport release is only usable when all five platform
-  # binaries and checksums are actually present in R2.
-  validate_r2_bucket
-  R2_LISTING=$(aws s3 ls --recursive "s3://$R2_BUCKET/bifrost/v${TRANSPORT_VERSION}/" \
-    --endpoint-url "$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]')" \
-    --profile "${R2_AWS_PROFILE:-R2}")
-  if [ -z "$R2_LISTING" ]; then
-    echo "❌ Transport release $TRANSPORT_TAG has no artifacts in R2" >&2
-    exit 1
+  if release_is_draft "$TRANSPORT_TAG"; then
+    draft_status=0
+  else
+    draft_status=$?
   fi
-  require_platform_listing "$R2_LISTING" bifrost-http "${BIFROST_HTTP_PLATFORMS[@]}"
-  require_remote_platform_digest "$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]')" "$R2_BUCKET" bifrost "$TRANSPORT_VERSION" bifrost-http "${BIFROST_HTTP_PLATFORMS[@]}"
-  GIT_TAG_EXISTS="true"
+  if [ "$draft_status" -eq 0 ]; then
+    echo "   🏷️ Draft release $TRANSPORT_TAG awaits promotion - transport release needed"
+    BIFROST_HTTP_NEEDS_RELEASE="true"
+  elif [ "$draft_status" -ne 1 ]; then
+    echo "❌ Could not determine draft state for $TRANSPORT_TAG" >&2
+    exit 1
+  else
+    echo "   ⏭️ Git tag $TRANSPORT_TAG already exists"
+    # An existing transport release is only usable when all five platform
+    # binaries and checksums are actually present in R2.
+    validate_r2_bucket
+    R2_LISTING=$(aws s3 ls --recursive "s3://$R2_BUCKET/bifrost/v${TRANSPORT_VERSION}/" \
+      --endpoint-url "$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]')" \
+      --profile "${R2_AWS_PROFILE:-R2}")
+    if [ -z "$R2_LISTING" ]; then
+      echo "❌ Transport release $TRANSPORT_TAG has no artifacts in R2" >&2
+      exit 1
+    fi
+    require_platform_listing "$R2_LISTING" bifrost-http "${BIFROST_HTTP_PLATFORMS[@]}"
+    require_remote_platform_digest "$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]')" "$R2_BUCKET" bifrost "$TRANSPORT_VERSION" bifrost-http "${BIFROST_HTTP_PLATFORMS[@]}"
+    GIT_TAG_EXISTS="true"
+  fi
 elif [ "$TAG_RELEASE_MISSING" = "true" ]; then
   echo "   🏷️ Git tag exists but its GitHub release is missing - transport release needed"
   BIFROST_HTTP_NEEDS_RELEASE="true"

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+source "$(dirname "$0")/semver.sh"
 
 # Check the dependency flow and suggest next steps
 # Usage: ./check-dependency-flow.sh <stage> [version]
@@ -18,6 +19,11 @@ if [[ $# -lt 1 ]]; then
 fi
 STAGE="${1:-}"
 VERSION="${2:-}"
+if [ -n "$VERSION" ] && ! is_semver "${VERSION#v}"; then
+  echo "❌ Invalid version: $VERSION (strict SemVer 2.0.0 without build metadata)" >&2
+  exit 1
+fi
+VERSION="${VERSION#v}"
 
 # Validate stage first, then enforce version requirement by stage
 case "$STAGE" in

@@ -25,10 +25,16 @@ curl -fsS -o /dev/null "http://127.0.0.1:${PORT}/health"
 BODY=$(mktemp)
 CODE=$(curl -sS -o "$BODY" -w '%{http_code}' -H 'Authorization: Bearer smoke-invalid' \
   "http://127.0.0.1:${PORT}/v1/models" || true)
-if [ -z "$CODE" ] || [ "$CODE" = "000" ] || ! grep -qE '^[[:space:]]*[\[{]' "$BODY"; then
-  echo "❌ $IMAGE /v1/models returned HTTP ${CODE:-none} without JSON" >&2
+case "$CODE" in
+  200|401|403) ;;
+  *) echo "❌ $IMAGE /v1/models returned HTTP ${CODE:-none}; expected 200/401/403" >&2
+     cat "$BODY" >&2 || true
+     docker logs "$NAME" 2>&1 | tail -50 >&2 || true
+     exit 1;;
+esac
+if ! grep -qE '^[[:space:]]*[\[{]' "$BODY"; then
+  echo "❌ $IMAGE /v1/models returned HTTP $CODE without JSON" >&2
   cat "$BODY" >&2 || true
-  docker logs "$NAME" 2>&1 | tail -50 >&2 || true
   exit 1
 fi
 LOGIN=$(curl -sS -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' \

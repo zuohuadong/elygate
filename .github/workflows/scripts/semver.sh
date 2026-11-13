@@ -20,9 +20,14 @@ is_semver() {
 read_semver_file() {
   local file="$1" value
   [[ -f "$file" ]] || return 1
-  value="$(cat "$file")"
-  value="${value%$'\n'}"
-  value="${value%$'\r'}"
+  # Command substitution strips every trailing newline, which would hide a file
+  # ending in a blank line. Append a sentinel and remove it instead.
+  value="$(cat "$file"; printf x)"
+  value="${value%x}"
+  if [[ "$value" == *$'\n' ]]; then
+    value="${value%$'\n'}"
+    value="${value%$'\r'}"
+  fi
   [[ ! "$value" =~ [[:space:]] ]] || return 1
   value="${value#v}"
   is_semver "$value" || return 1

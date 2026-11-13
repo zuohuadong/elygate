@@ -11,6 +11,8 @@ set -uo pipefail
 #
 # Usage: ./module-major.test.sh [repo-root]
 
+source "$(dirname "${BASH_SOURCE[0]}")/semver.sh"
+
 REPO_ROOT="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
 
 passed=0
@@ -19,7 +21,7 @@ failed=0
 for dir in "$REPO_ROOT"/core "$REPO_ROOT"/framework "$REPO_ROOT"/transports "$REPO_ROOT"/cli "$REPO_ROOT"/plugins/*; do
   [ -f "$dir/go.mod" ] && [ -f "$dir/version" ] || continue
   rel="${dir#"$REPO_ROOT"/}"
-  version="$(tr -d '\n\r' < "$dir/version")"
+  version="$(read_semver_file "$dir/version")"
   major="${version%%.*}"
   module="$(awk '$1 == "module" { print $2; exit }' "$dir/go.mod")"
 

@@ -36,8 +36,12 @@ if [[ "$(basename "$FILE")" == "package.json" ]]; then
 else
   # Strip only the trailing line ending. Deleting all whitespace would join a
   # split file ("1.0.1" over "0") into a version it never held (1.0.10).
-  VERSION=$(cat "$FILE")
-  VERSION="${VERSION%$'\r'}"
+  VERSION="$(cat "$FILE"; printf x)"
+  VERSION="${VERSION%x}"
+  if [[ "$VERSION" == *$'\n' ]]; then
+    VERSION="${VERSION%$'\n'}"
+    VERSION="${VERSION%$'\r'}"
+  fi
 fi
 
 if ! is_semver "$VERSION"; then

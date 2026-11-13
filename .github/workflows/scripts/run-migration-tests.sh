@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+source "$(dirname "$0")/semver.sh"
 set -euo pipefail
 
 # Migration Tests for Bifrost
@@ -142,7 +143,7 @@ get_previous_versions() {
   local count="${1:-3}"
   cd "$REPO_ROOT"
   local current
-  current="v$(tr -d '[:space:]' < "$REPO_ROOT/transports/version")"
+  current="v$(read_semver_file "$REPO_ROOT/transports/version")"
   { git tag -l "transports/v*" | awk '!/-/' | sed 's|transports/||'; echo "$current"; } \
     | sort -V -u \
     | awk -v cur="$current" '$0 == cur { exit } { print }' \

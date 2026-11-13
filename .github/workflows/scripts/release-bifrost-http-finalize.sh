@@ -63,29 +63,45 @@ for plugin_dir in plugins/*/; do
   fi
 done
 
-# Check which plugins are actually used by the transport
-while IFS= read -r plugin_line; do
-  plugin_name=$(awk '{print $1}' <<< "$plugin_line" | awk -F'/' '{print $NF}')
-  plugin_version=$(awk '{print $2}' <<< "$plugin_line")
-  if [ -z "$plugin_version" ] || [ "$plugin_version" = "//" ]; then
-    plugin_version="$(awk '{print $3}' <<< "$plugin_line")"
+# Check which plugins are actually used by the transport. Parse go mod edit
+# -json so replace blocks and comments cannot be mistaken for requirements.
+GOMOD_JSON=$(cd transports && go mod edit -json)
+while IFS=$'\t' read -r plugin_name plugin_version; do
+  [ -n "$plugin_name" ] || continue
+  local_path="github.com/maximhq/bifrost/plugins/$plugin_name"
+  is_local_replace=false
+  if jq -e --arg p "$local_path" '.Replace[]? | select(.Old.Path == $p) | select(.New.Path != null) | select(.New.Path | startswith("../"))' >/dev/null <<<"$GOMOD_JSON"; then
+    is_local_replace=true
   fi
-
-  if [ ! -f "plugins/$plugin_name/version" ] && grep -q "replace github.com/maximhq/bifrost/plugins/$plugin_name => ../plugins/$plugin_name" transports/go.mod; then
+  if [ ! -f "plugins/$plugin_name/version" ] && [ "$is_local_replace" = "true" ]; then
     continue
   fi
   if ! is_semver "${plugin_version#v}"; then
     echo "❌ Invalid version for transport plugin $plugin_name: $plugin_version" >&2
     exit 1
   fi
-  # Use version file version if available, otherwise use go.mod version
   if [[ -n "${PLUGIN_VERSIONS[$plugin_name]:-}" ]]; then
+    if [ "v${PLUGIN_VERSIONS[$plugin_name]#v}" != "v${plugin_version#v}" ]; then
+      echo "❌ $plugin_name version mismatch: version file ${PLUGIN_VERSIONS[$plugin_name]}, go.mod $plugin_version" >&2
+      exit 1
+    fi
     PLUGINS_USED+=("$plugin_name:${PLUGIN_VERSIONS[$plugin_name]}")
   else
     PLUGIN_VERSIONS["$plugin_name"]="$plugin_version"
     PLUGINS_USED+=("$plugin_name:$plugin_version")
   fi
-done < <(grep "github.com/maximhq/bifrost/plugins/" transports/go.mod)
+done < <(jq -r '.Require[]? | select(.Path | startswith("github.com/maximhq/bifrost/plugins/")) | [(.Path | split("/") | last), .Version] | @tsv' <<<"$GOMOD_JSON")
+
+CORE_REQUIRE=$(jq -r '.Require[]? | select(.Path == "github.com/maximhq/bifrost/core") | .Version' <<<"$GOMOD_JSON")
+FRAMEWORK_REQUIRE=$(jq -r '.Require[]? | select(.Path == "github.com/maximhq/bifrost/framework") | .Version' <<<"$GOMOD_JSON")
+if [ "v${CORE_REQUIRE#v}" != "v${CORE_VERSION#v}" ]; then
+  echo "❌ transports/go.mod requires core $CORE_REQUIRE, but core/version is $CORE_VERSION" >&2
+  exit 1
+fi
+if [ "v${FRAMEWORK_REQUIRE#v}" != "v${FRAMEWORK_VERSION#v}" ]; then
+  echo "❌ transports/go.mod requires framework $FRAMEWORK_REQUIRE, but framework/version is $FRAMEWORK_VERSION" >&2
+  exit 1
+fi
 
 echo "🔧 Versions:"
 echo "   Core: $CORE_VERSION"

@@ -30,7 +30,7 @@ RECEIPT_KEY=""
 RESTORE_ON_FAIL=false
 RESTORE_TO_EMPTY=false
 restore_latest() {
-  local code=$?
+  local code=$? cleanup_failed=false
   trap - EXIT
   if [ -n "$RECEIPT_KEY" ]; then
     echo "🧹 Removing incomplete receipt $RECEIPT_KEY..."
@@ -43,8 +43,8 @@ restore_latest() {
       sleep 2
     done
     if [ "$removed" != "true" ]; then
-      echo "❌ Could not remove incomplete receipt $RECEIPT_KEY; manual recovery required" >&2
-      exit 1
+      echo "❌ Could not remove incomplete receipt $RECEIPT_KEY" >&2
+      cleanup_failed=true
     fi
   fi
   if [ "$RESTORE_ON_FAIL" = "true" ]; then
@@ -65,6 +65,10 @@ restore_latest() {
         exit 1
       fi
     fi
+  fi
+  if [ "$cleanup_failed" = "true" ]; then
+    echo "❌ Receipt cleanup failed; manual recovery required" >&2
+    exit 1
   fi
   exit "$code"
 }

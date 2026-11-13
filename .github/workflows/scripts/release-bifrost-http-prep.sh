@@ -78,31 +78,31 @@ for plugin_dir in plugins/*/; do
   fi
 done
 
-# Also check for any plugins already in transport go.mod that might not be in plugins/ directory
+# Also inspect modules that are required by transport go.mod. Parse go mod edit
+# -json so replace blocks and comments cannot be mistaken for a version.
 cd transports
+GOMOD_JSON=$(go mod edit -json)
 echo "🔍 Checking for additional plugins in transport go.mod..."
-# Parse go.mod plugin lines and add missing ones
-while IFS= read -r plugin_line; do
-  plugin_name=$(awk '{print $1}' <<< "$plugin_line" | awk -F'/' '{print $NF}')
-  current_version=$(awk '{print $2}' <<< "$plugin_line")
-  if [ -z "$current_version" ] || [ "$current_version" = "//" ]; then
-    current_version="$(awk '{print $3}' <<< "$plugin_line")"
+while IFS=$'\t' read -r plugin_name current_version; do
+  [ -n "$plugin_name" ] || continue
+  local_path="github.com/maximhq/bifrost/plugins/$plugin_name"
+  is_local_replace=false
+  if jq -e --arg p "$local_path" '.Replace[]? | select(.Old.Path == $p) | select(.New.Path != null) | select(.New.Path | startswith("../"))' >/dev/null <<<"$GOMOD_JSON"; then
+    is_local_replace=true
   fi
-
-  # Only a plugin with no version file may carry a local v0.0.0 replace.
-  if [ ! -f "../plugins/$plugin_name/version" ] && grep -q "replace github.com/maximhq/bifrost/plugins/$plugin_name => ../plugins/$plugin_name" go.mod; then
+  if [ ! -f "../plugins/$plugin_name/version" ] && [ "$is_local_replace" = "true" ]; then
+    echo "   📦 $plugin_name: local replace (no version file)"
     continue
   fi
   if ! is_semver "${current_version#v}"; then
     echo "❌ Invalid version for transport plugin $plugin_name: $current_version" >&2
     exit 1
   fi
-  # Only add if we don't already have this plugin
   if [[ -z "${PLUGIN_VERSIONS[$plugin_name]:-}" ]]; then
     echo "   📦 $plugin_name: $current_version (from transport go.mod)"
     PLUGIN_VERSIONS["$plugin_name"]="$current_version"
   fi
-done < <(grep "github.com/maximhq/bifrost/plugins/" go.mod)
+done < <(jq -r '.Require[]? | select(.Path | startswith("github.com/maximhq/bifrost/plugins/")) | [(.Path | split("/") | last), .Version] | @tsv' <<<"$GOMOD_JSON")
 cd ..
 
 echo "🔧 Using versions:"
