@@ -67,7 +67,7 @@ kubectl create secret generic openai-credentials \
 ```yaml
 # openai-values.yaml
 image:
-  tag: "v1.4.11"
+  tag: "v2.5.1"
 
 bifrost:
   providers:
@@ -152,7 +152,7 @@ kubectl create secret generic anthropic-credentials \
 ```yaml
 # anthropic-values.yaml
 image:
-  tag: "v1.4.11"
+  tag: "v2.5.1"
 
 bifrost:
   providers:
@@ -223,7 +223,7 @@ kubectl create secret generic azure-credentials \
 ```yaml
 # azure-apikey-values.yaml
 image:
-  tag: "v1.4.11"
+  tag: "v2.5.1"
 
 bifrost:
   providers:
@@ -290,7 +290,7 @@ kubectl create secret generic azure-config \
 ```yaml
 # azure-msi-values.yaml
 image:
-  tag: "v1.4.11"
+  tag: "v2.5.1"
 
 serviceAccount:
   annotations:
@@ -371,7 +371,7 @@ kubectl create secret generic aws-credentials \
 ```yaml
 # bedrock-static-values.yaml
 image:
-  tag: "v1.4.11"
+  tag: "v2.5.1"
 
 bifrost:
   providers:
@@ -427,7 +427,7 @@ serviceAccount:
 ```yaml
 # bedrock-irsa-values.yaml
 image:
-  tag: "v1.4.11"
+  tag: "v2.5.1"
 
 serviceAccount:
   annotations:
@@ -458,7 +458,7 @@ Assumes a cross-account role on top of the default credential chain.
 ```yaml
 # bedrock-assumerole-values.yaml
 image:
-  tag: "v1.4.11"
+  tag: "v2.5.1"
 
 bifrost:
   providers:
@@ -537,7 +537,7 @@ kubectl create secret generic gcp-credentials \
 ```yaml
 # vertex-sa-values.yaml
 image:
-  tag: "v1.4.11"
+  tag: "v2.5.1"
 
 bifrost:
   providers:
@@ -596,7 +596,7 @@ serviceAccount:
 ```yaml
 # vertex-wli-values.yaml
 image:
-  tag: "v1.4.11"
+  tag: "v2.5.1"
 
 serviceAccount:
   annotations:
@@ -638,7 +638,7 @@ serviceAccount:
 ```yaml
 # vertex-aws-wif-values.yaml
 image:
-  tag: "v1.4.11"
+  tag: "v2.5.1"
 
 serviceAccount:
   annotations:
@@ -803,7 +803,7 @@ bifrost:
 
 ```bash
 helm install bifrost bifrost/bifrost \
-  --set image.tag=v1.4.11 \
+  --set image.tag=v2.5.1 \
   -f provider-values.yaml
 ```
 
@@ -821,7 +821,7 @@ Self-hosted providers point to a URL you operate. No API key is typically requir
 ```yaml
 # ollama-values.yaml
 image:
-  tag: "v1.4.11"
+  tag: "v2.5.1"
 
 bifrost:
   providers:
@@ -865,7 +865,7 @@ vLLM instances are model-specific - one key per served model.
 ```yaml
 # vllm-values.yaml
 image:
-  tag: "v1.4.11"
+  tag: "v2.5.1"
 
 bifrost:
   providers:
@@ -897,7 +897,7 @@ helm install bifrost bifrost/bifrost -f vllm-values.yaml
 ```yaml
 # sgl-values.yaml
 image:
-  tag: "v1.4.11"
+  tag: "v2.5.1"
 
 bifrost:
   providers:
@@ -961,7 +961,7 @@ Combine providers in a single values file:
 ```yaml
 # multi-provider-values.yaml
 image:
-  tag: "v1.4.11"
+  tag: "v2.5.1"
 
 bifrost:
   providers:

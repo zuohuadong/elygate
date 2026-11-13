@@ -1086,7 +1086,7 @@ func (f *HTTPClientFactory) ProxyTargetRootsKey(purpose ClientPurpose) string {
 	if f.proxyURLForPurpose(purpose) == nil || f.proxyRoots == nil {
 		return ""
 	}
-	return f.proxyConfig.URL + "\x00" + f.proxyConfig.CACertPEM
+	return f.proxyConfig.URL + "\x00" + f.proxyConfig.CACertPEM + "\x00" + fmt.Sprint(f.proxyConfig.SkipTLSVerify)
 }
 
 // ProxyAppliesToTarget reports whether a request for host would take the global proxy

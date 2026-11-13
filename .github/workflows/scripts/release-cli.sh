@@ -105,6 +105,19 @@ verify_r2_artifacts() {
     return 1
   fi
   require_platform_listing "$listing" bifrost "${CLI_PLATFORMS[@]}"
+  local platform name local_sha remote_sha
+  for platform in "${CLI_PLATFORMS[@]}"; do
+    name="bifrost"
+    [[ "$platform" == windows/* ]] && name+='.exe'
+    local_sha=$(sha256_file "./dist/$platform/$name")
+    remote_sha=$(aws s3 cp "s3://$R2_BUCKET/bifrost-cli/v${VERSION}/$platform/$name" - \
+      --endpoint-url "$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]')" \
+      --profile "${R2_AWS_PROFILE:-R2}" | sha256_stdin)
+    if [ "$local_sha" != "$remote_sha" ]; then
+      echo "❌ Remote artifact digest mismatch for $platform/$name"
+      return 1
+    fi
+  done
 }
 
 if release_check "$TAG_NAME"; then
@@ -113,7 +126,11 @@ if release_check "$TAG_NAME"; then
     echo "❌ Release $TAG_NAME exists but its tag is missing or not at HEAD"
     exit 1
   fi
-  verify_r2_artifacts
+  if ! verify_r2_artifacts; then
+    echo "🔁 Versioned R2 prefix is incomplete; repairing from this build"
+    SKIP_LATEST_UPLOAD=true bash "$SCRIPT_DIR/upload-cli-to-r2.sh" "$TAG_NAME"
+    verify_r2_artifacts
+  fi
   if [[ "$VERSION" != *-* ]]; then
     bash "$SCRIPT_DIR/publish-cli-latest.sh" "bifrost-cli" "$VERSION" "bifrost"
   fi

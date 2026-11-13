@@ -63,10 +63,12 @@ jobs:
 
       - name: Reject mutable image tag
         run: |
-          if helm template bifrost helm-charts/bifrost --set image.tag=latest >/dev/null 2>&1; then
-            echo "image.tag=latest must be rejected" >&2
-            exit 1
-          fi
+          for tag in latest latest-ubi9 latestfoo; do
+            if helm template bifrost helm-charts/bifrost --set image.tag="$tag" >/dev/null 2>&1; then
+              echo "image.tag=$tag must be rejected" >&2
+              exit 1
+            fi
+          done
 
       - name: Run full chart validator
         run: bash helm-charts/bifrost/scripts/validate.sh

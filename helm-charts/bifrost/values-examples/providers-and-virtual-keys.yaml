@@ -48,7 +48,7 @@
 image:
   repository: docker.io/maximhq/bifrost
   pullPolicy: IfNotPresent
-  tag: "v1.3.55"
+  tag: "v2.5.1"
 
 replicaCount: 1
 

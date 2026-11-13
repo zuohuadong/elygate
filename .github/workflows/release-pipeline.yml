@@ -309,6 +309,12 @@ jobs:
         with:
           bun-version-file: .bun-version
 
+      - name: Test panel
+        run: |
+          cd panel
+          bun test src/lib/*.test.ts tests/*.test.ts
+          bun run check
+
       - name: Build UI and bifrost-http binary
         run: |
           # The workspace must exist before the build so the transport resolves
@@ -621,13 +627,7 @@ jobs:
     needs: [check-skip, detect-changes, build-gateway]
     if: |
       needs.check-skip.outputs.should-skip != 'true' &&
-      needs.check-skip.outputs.skip-tests != 'true' &&
-      needs.check-skip.outputs.skip-core-test != 'true' &&
-      (
-        needs.detect-changes.outputs.core-needs-release == 'true' ||
-        needs.detect-changes.outputs.framework-needs-release == 'true' ||
-        needs.detect-changes.outputs.bifrost-http-needs-release == 'true'
-      )
+      needs.check-skip.outputs.skip-tests != 'true'
     runs-on: builder-8-32
     timeout-minutes: 45
     permissions:
@@ -3982,6 +3982,14 @@ jobs:
         run: |
           ./.github/workflows/scripts/create-docker-manifest.sh "${{ needs.detect-changes.outputs.transport-version }}"
 
+      - name: Smoke published image
+        env:
+          GHCR_REPO: ${{ github.repository }}
+        run: |
+          VERSION="${{ needs.detect-changes.outputs.transport-version }}"
+          ./.github/workflows/scripts/smoke-published-image.sh "docker.io/maximhq/bifrost:v${VERSION}" 18083
+          ./.github/workflows/scripts/smoke-published-image.sh "ghcr.io/$(echo "$GHCR_REPO" | tr '[:upper:]' '[:lower:]'):v${VERSION}" 18084
+
   # Docker build UBI9 amd64
   docker-build-ubi9-amd64:
     needs:
@@ -4332,6 +4340,60 @@ jobs:
         run: |
           ./.github/workflows/scripts/create-docker-manifest-ubi9.sh "${{ needs.detect-changes.outputs.transport-version }}"
 
+      - name: Smoke published image
+        env:
+          GHCR_REPO: ${{ github.repository }}
+        run: |
+          VERSION="${{ needs.detect-changes.outputs.transport-version }}"
+          ./.github/workflows/scripts/smoke-published-image.sh "docker.io/maximhq/bifrost:v${VERSION}-ubi9" 18083
+          ./.github/workflows/scripts/smoke-published-image.sh "ghcr.io/$(echo "$GHCR_REPO" | tr '[:upper:]' '[:lower:]'):v${VERSION}-ubi9" 18084
+
+  # Promote the draft transport release only after both Docker and UBI9
+  # multi-arch manifests succeeded, then sync stable latest/.
+  publish-bifrost-http-release:
+    needs: [detect-changes, bifrost-http-release, docker-manifest, docker-manifest-ubi9]
+    if: |
+      always() &&
+      needs.bifrost-http-release.result == 'success' &&
+      (needs.docker-manifest.result == 'success' || (needs.detect-changes.outputs.docker-needs-release == 'false' && needs.docker-manifest.result == 'skipped')) &&
+      (needs.docker-manifest-ubi9.result == 'success' || (needs.detect-changes.outputs.docker-needs-release == 'false' && needs.docker-manifest-ubi9.result == 'skipped'))
+    runs-on: builder-8-32
+    permissions:
+      contents: write
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            7defe2860d5ee49a1e667e1eeea34b25.r2.cloudflarestorage.com:443
+            api.github.com:443
+            files.pythonhosted.org:443
+            github.com:443
+            pypi.org:443
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.bifrost-http-release.outputs.commit-sha }}
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Configure R2
+        env:
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: bash ./.github/workflows/scripts/configure-r2.sh
+
+      - name: Publish transport release
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: ./.github/workflows/scripts/publish-bifrost-http-release.sh "${{ needs.detect-changes.outputs.transport-version }}"
+
   # Push Mintlify changelog
   push-mintlify-changelog:
     needs:
@@ -4426,8 +4488,13 @@ jobs:
         framework-release,
         plugins-release,
         bifrost-http-release,
+        docker-build-amd64,
+        docker-build-arm64,
         docker-manifest,
+        docker-build-ubi9-amd64,
+        docker-build-ubi9-arm64,
         docker-manifest-ubi9,
+        publish-bifrost-http-release,
       ]
     # A run rejected at the phone gate ran nothing, so there is no release to
     # report; without this clause Discord would get an all-skipped "complete".
@@ -4501,8 +4568,16 @@ jobs:
             BIFROST_STATUS="❌ Failed"
           fi
 
+          TITLE="🚀 **Release Pipeline Complete**"
+          DOCKER_STATUS="✅ Published"
+          for result in "${{ needs.docker-build-amd64.result }}" "${{ needs.docker-build-arm64.result }}" "${{ needs.docker-manifest.result }}" "${{ needs.docker-build-ubi9-amd64.result }}" "${{ needs.docker-build-ubi9-arm64.result }}" "${{ needs.docker-manifest-ubi9.result }}" "${{ needs.publish-bifrost-http-release.result }}"; do
+            case "$result" in
+              failure|cancelled|timed_out) TITLE="🚨 **Release Pipeline Incomplete**"; DOCKER_STATUS="❌ Docker/GHCR failed";;
+            esac
+          done
+
           # Build the message with proper formatting
-          MESSAGE=$(printf "🚀 **Release Pipeline Complete**\n\n**Components:**\n• Core: %s\n• Framework: %s\n• Plugins: %s\n• Bifrost HTTP: %s\n\n**Details:**\n• Branch: \`${{ github.ref_name }}\`\n• Commit: \`%.8s\`\n• Author: %s\n\n[View Workflow Run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" "$CORE_STATUS" "$FRAMEWORK_STATUS" "$PLUGINS_STATUS" "$BIFROST_STATUS" "${{ github.sha }}" "${{ github.actor }}")
+          MESSAGE=$(printf "%s\n\n**Components:**\n• Core: %s\n• Framework: %s\n• Plugins: %s\n• Bifrost HTTP: %s\n• Docker/GHCR/UBI9: %s\n\n**Details:**\n• Branch: \`${{ github.ref_name }}\`\n• Commit: \`%.8s\`\n• Author: %s\n\n[View Workflow Run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" "$TITLE" "$CORE_STATUS" "$FRAMEWORK_STATUS" "$PLUGINS_STATUS" "$BIFROST_STATUS" "$DOCKER_STATUS" "${{ github.sha }}" "${{ github.actor }}")
 
           payload="$(jq -n --arg content "$MESSAGE" '{content:$content}')"
           curl -sS -H "Content-Type: application/json" -d "$payload" "$DISCORD_WEBHOOK"

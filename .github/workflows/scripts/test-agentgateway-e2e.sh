@@ -81,7 +81,7 @@ fi
 
 # Deterministic auth smoke: the admin API must reject anonymous access and
 # accept a valid session before the broader Agent Gateway suite runs.
-UNAUTH_CODE=$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:${PORT}/api/config" || echo 000)
+UNAUTH_CODE=$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:${PORT}/api/config" || true)
 case "$UNAUTH_CODE" in
   401|403) ;;
   *) echo "anonymous /api/config returned HTTP $UNAUTH_CODE; expected 401/403" >&2; TEST_FAILED=1; exit 1;;
@@ -92,7 +92,7 @@ if ! curl -fsS -c "$COOKIE_JAR" -H 'Content-Type: application/json' \
   "http://127.0.0.1:${PORT}/api/session/login" >/dev/null; then
   echo "admin login failed" >&2; TEST_FAILED=1; exit 1
 fi
-AUTH_CODE=$(curl -sS -o /dev/null -w '%{http_code}' -b "$COOKIE_JAR" "http://127.0.0.1:${PORT}/api/config?from_db=true" || echo 000)
+AUTH_CODE=$(curl -sS -o /dev/null -w '%{http_code}' -b "$COOKIE_JAR" "http://127.0.0.1:${PORT}/api/config?from_db=true" || true)
 if [ "$AUTH_CODE" != "200" ]; then
   echo "authenticated /api/config returned HTTP $AUTH_CODE; expected 200" >&2; TEST_FAILED=1; exit 1
 fi

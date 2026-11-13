@@ -12,7 +12,7 @@ module "bifrost" {
   cloud_provider = "aws"       # "aws" | "gcp" | "azure" | "kubernetes"
   service        = "ecs"       # AWS: "ecs" | "eks", GCP: "gke" | "cloud-run", Azure: "aks" | "aci", K8s: "deployment"
   region         = "us-east-1"
-  image_tag      = "v1.4.6"
+  image_tag      = "v2.5.1"
 
   # Option A: Provide a config.json file
   config_json_file = "./config.json"

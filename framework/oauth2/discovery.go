@@ -224,6 +224,13 @@ type oauthHTTPTransport struct {
 	key     string
 }
 
+type oauthProxyChoiceKey struct{}
+
+func oauthProxyChoice(ctx context.Context) (*url.URL, bool) {
+	v, ok := ctx.Value(oauthProxyChoiceKey{}).(*url.URL)
+	return v, ok
+}
+
 func (t *oauthHTTPTransport) refreshProxyTransport() *http.Transport {
 	factory := network.DefaultHTTPClientFactory()
 	if factory == nil {
@@ -244,7 +251,12 @@ func (t *oauthHTTPTransport) refreshProxyTransport() *http.Transport {
 	if roots != nil {
 		proxied.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: roots}
 	}
-	proxied.Proxy = func(req *http.Request) (*url.URL, error) { return t.Transport.Proxy(req) }
+	proxied.Proxy = func(req *http.Request) (*url.URL, error) {
+		if chosen, ok := oauthProxyChoice(req.Context()); ok {
+			return chosen, nil
+		}
+		return t.Transport.Proxy(req)
+	}
 	if hopTLS != nil {
 		network.DialHTTPSProxyWithHopTLS(proxied, hopTLS)
 	}
@@ -257,7 +269,10 @@ func (t *oauthHTTPTransport) RoundTrip(req *http.Request) (*http.Response, error
 	proxied := t.refreshProxyTransport()
 	if proxied != nil {
 		if proxyURL, err := t.Transport.Proxy(req); err == nil && proxyURL != nil {
-			return proxied.RoundTrip(req)
+			// Pin this request's proxy decision: the proxy-aware transport must
+			// not re-run a selector that a live config update could change.
+			ctx := context.WithValue(req.Context(), oauthProxyChoiceKey{}, proxyURL)
+			return proxied.RoundTrip(req.WithContext(ctx))
 		}
 	}
 	return t.Transport.RoundTrip(req)

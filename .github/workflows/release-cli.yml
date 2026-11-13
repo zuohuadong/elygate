@@ -4,6 +4,10 @@ on:
   push:
     branches:
       - main
+    paths:
+      - 'cli/**'
+      - '.github/workflows/release-cli.yml'
+      - '.github/workflows/scripts/build-cli-executables.sh'
 
 # Prevent concurrent runs
 concurrency:

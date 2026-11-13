@@ -770,13 +770,14 @@ func TestOAuthTransportScopesProxyTLS(t *testing.T) {
 
 	previous := network.DefaultHTTPClientFactory()
 	t.Cleanup(func() { network.SetDefaultHTTPClientFactory(previous) })
-	network.SetDefaultHTTPClientFactory(network.NewHTTPClientFactory(&network.GlobalProxyConfig{
+	factory := network.NewHTTPClientFactory(&network.GlobalProxyConfig{
 		Enabled:      true,
 		Type:         network.GlobalProxyTypeHTTP,
 		URL:          "http://proxy.example:8080",
 		CACertPEM:    string(caPEM),
 		EnableForAPI: true,
-	}, nil))
+	}, nil)
+	network.SetDefaultHTTPClientFactory(factory)
 
 	transport := newOAuthDiscoveryTransport((&net.Dialer{}).DialContext)
 	require.NotNil(t, transport.proxied, "a proxy CA must install the proxy-aware transport")
@@ -789,4 +790,16 @@ func TestOAuthTransportScopesProxyTLS(t *testing.T) {
 	proxyURL, err := transport.Proxy(req)
 	require.NoError(t, err)
 	require.NotNil(t, proxyURL)
+
+	beforeKey := transport.key
+	factory.UpdateProxyConfig(&network.GlobalProxyConfig{
+		Enabled:       true,
+		Type:          network.GlobalProxyTypeHTTP,
+		URL:           "http://proxy.example:8080",
+		CACertPEM:     string(caPEM),
+		EnableForAPI:  true,
+		SkipTLSVerify: true,
+	})
+	transport.refreshProxyTransport()
+	require.NotEqual(t, beforeKey, transport.key)
 }

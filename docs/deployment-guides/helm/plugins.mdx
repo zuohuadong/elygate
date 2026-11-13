@@ -26,7 +26,7 @@ bifrost:
 ```bash
 # Enable an opt-in plugin at install time
 helm install bifrost bifrost/bifrost \
-  --set image.tag=v1.4.11 \
+  --set image.tag=v2.5.1 \
   --set bifrost.plugins.otel.enabled=true
 
 # Or upgrade to enable a plugin without touching other values
@@ -190,7 +190,7 @@ kubectl create secret generic semantic-cache-secret \
 ```yaml
 # semantic-cache-values.yaml
 image:
-  tag: "v1.4.11"
+  tag: "v2.5.1"
 
 vectorStore:
   enabled: true
@@ -274,7 +274,7 @@ Sends distributed traces and push-based metrics to any OTLP-compatible collector
 ```yaml
 # otel-values.yaml
 image:
-  tag: "v1.4.11"
+  tag: "v2.5.1"
 
 bifrost:
   plugins:
@@ -352,7 +352,7 @@ Inject the node IP via the downward API and reference it with `agent_host` / `do
 ```yaml
 # datadog-values.yaml
 image:
-  tag: "v1.4.11"
+  tag: "v2.5.1"
 
 bifrost:
   plugins:
@@ -364,7 +364,7 @@ bifrost:
         dogstatsd_host: "env.HOST_IP"    # node-local DaemonSet agent (metrics)
         # agent_port / dogstatsd_port default to 8126 / 8125 — set only for non-standard ports
         env: "production"
-        version: "v1.4.11"
+        version: "v2.5.1"
         enable_traces: true
         custom_tags:
           team: "platform"
@@ -410,7 +410,7 @@ kubectl create secret generic maxim-credentials \
 ```yaml
 # maxim-values.yaml
 image:
-  tag: "v1.4.11"
+  tag: "v2.5.1"
 
 bifrost:
   plugins:
@@ -507,7 +507,7 @@ helm upgrade bifrost bifrost/bifrost --reuse-values -f custom-plugin-values.yaml
 ```yaml
 # all-plugins-values.yaml
 image:
-  tag: "v1.4.11"
+  tag: "v2.5.1"
 
 bifrost:
   encryptionKeySecret:

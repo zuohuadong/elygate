@@ -242,22 +242,12 @@ echo "🎉 Creating GitHub release for $TITLE..."
 gh release create "$TAG_NAME" \
   --title "$TITLE" \
   --notes "$BODY" \
-  ${PRERELEASE_FLAG} ${LATEST_FLAG}
+  --draft \
+  ${PRERELEASE_FLAG}
 
 echo "✅ Bifrost HTTP released successfully"
 else
   echo "ℹ️ GitHub release $TAG_NAME already exists; verifying R2 latest/ only."
-fi
-
-# Copy versioned R2 path to latest/ for stable releases. The artifact set was
-# verified above, before the tag/release were written.
-if [[ "$VERSION" != *-* ]]; then
-  echo "📤 Copying versioned binaries to latest/ on R2..."
-  aws s3 sync "s3://$R2_BUCKET/bifrost/v$VERSION/" "s3://$R2_BUCKET/bifrost/latest/" \
-    --endpoint-url "$R2_ENDPOINT" \
-    --profile "${R2_AWS_PROFILE:-R2}" \
-    --no-progress
-  echo "✅ Latest binaries updated on R2"
 fi
 
 # Print summary

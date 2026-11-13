@@ -369,7 +369,8 @@ manifest_complete() {
 
 echo "   🐳 Checking DockerHub for tag v${TRANSPORT_VERSION}..."
 DOCKER_ERR=$(mktemp)
-DOCKER_CODE=$(curl -sS -o "$DOCKER_ERR" -w '%{http_code}' "https://registry.hub.docker.com/v2/repositories/maximhq/bifrost/tags/v${TRANSPORT_VERSION}/" || echo 000)
+DOCKER_CODE=$(curl -sS -o "$DOCKER_ERR" -w '%{http_code}' "https://registry.hub.docker.com/v2/repositories/maximhq/bifrost/tags/v${TRANSPORT_VERSION}/" || true)
+if [ -z "$DOCKER_CODE" ]; then DOCKER_CODE=000; fi
 if [ "$DOCKER_CODE" = "200" ] && grep -q '"name"' "$DOCKER_ERR"; then
   rm -f "$DOCKER_ERR"
   echo "   ⏭️ Docker tag v${TRANSPORT_VERSION} already exists on DockerHub"
@@ -401,6 +402,18 @@ if [ "$DOCKER_TAG_EXISTS" = "true" ]; then
       DOCKER_TAG_EXISTS="false"
     fi
   done
+  if [[ "$TRANSPORT_VERSION" != *-* ]]; then
+    for image in \
+      "docker.io/maximhq/bifrost:latest" \
+      "ghcr.io/${GHCR_REPO}:latest" \
+      "docker.io/maximhq/bifrost:latest-ubi9" \
+      "ghcr.io/${GHCR_REPO}:latest-ubi9"; do
+      if ! manifest_complete "$image"; then
+        echo "   ❌ Missing or incomplete latest manifest: $image"
+        DOCKER_TAG_EXISTS="false"
+      fi
+    done
+  fi
 fi
 
 # Determine if release is needed

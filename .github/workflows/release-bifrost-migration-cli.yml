@@ -4,6 +4,10 @@ on:
   push:
     branches:
       - main
+    paths:
+      - 'scripts/bifrost-migration-cli/**'
+      - '.github/workflows/release-bifrost-migration-cli.yml'
+      - '.github/workflows/scripts/build-bifrost-migration-cli-executables.sh'
 
 # Prevent concurrent runs
 concurrency:

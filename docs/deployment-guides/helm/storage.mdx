@@ -39,7 +39,7 @@ Simplest setup - no external database required. Bifrost runs as a StatefulSet wi
 ```yaml
 # sqlite-values.yaml
 image:
-  tag: "v1.4.11"
+  tag: "v2.5.1"
 
 storage:
   mode: sqlite
@@ -83,7 +83,7 @@ kubectl get pvc
 helm upgrade bifrost bifrost/bifrost \
   --reuse-values \
   --set storage.persistence.existingClaim=<your-old-pvc-name> \
-  --set image.tag=v1.4.11
+  --set image.tag=v2.5.1
 ```
 
 ---
@@ -110,7 +110,7 @@ Ensure the database is created with **UTF8 encoding**. The embedded PostgreSQL d
 ```yaml
 # embedded-postgres-values.yaml
 image:
-  tag: "v1.4.11"
+  tag: "v2.5.1"
 
 storage:
   mode: postgres
@@ -195,7 +195,7 @@ kubectl create secret generic external-postgres-credentials \
 ```yaml
 # external-postgres-values.yaml
 image:
-  tag: "v1.4.11"
+  tag: "v2.5.1"
 
 storage:
   mode: postgres
@@ -294,7 +294,7 @@ kubectl create secret generic logs-postgres-credentials \
 ```yaml
 # split-postgres-values.yaml
 image:
-  tag: "v1.4.11"
+  tag: "v2.5.1"
 
 storage:
   mode: postgres
@@ -371,7 +371,7 @@ Run the config store on PostgreSQL (fast lookups, shared across replicas) while 
 ```yaml
 # mixed-values.yaml
 image:
-  tag: "v1.4.11"
+  tag: "v2.5.1"
 
 storage:
   mode: sqlite           # default fallback
@@ -450,7 +450,7 @@ kubectl create secret generic clickhouse-credentials \
 ```yaml
 # clickhouse-logs-values.yaml
 image:
-  tag: "v1.4.11"
+  tag: "v2.5.1"
 
 storage:
   mode: postgres            # config store backend
@@ -846,6 +846,6 @@ Apply any of the vector store options above with:
 
 ```bash
 helm install bifrost bifrost/bifrost \
-  --set image.tag=v1.4.11 \
+  --set image.tag=v2.5.1 \
   -f storage-values.yaml
 ```
