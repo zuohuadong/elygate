@@ -628,7 +628,8 @@ jobs:
     needs: [check-skip, detect-changes, build-gateway]
     if: |
       needs.check-skip.outputs.should-skip != 'true' &&
-      needs.check-skip.outputs.skip-tests != 'true'
+      needs.check-skip.outputs.skip-tests != 'true' &&
+      needs.check-skip.outputs.skip-core-test != 'true'
     runs-on: builder-8-32
     timeout-minutes: 45
     permissions:
@@ -4367,7 +4368,7 @@ jobs:
     needs: [detect-changes, bifrost-http-release, docker-manifest, docker-manifest-ubi9]
     if: |
       always() &&
-      needs.bifrost-http-release.result == 'success' &&
+      (needs.bifrost-http-release.result == 'success' || (needs.detect-changes.outputs.bifrost-http-needs-release == 'false' && needs.bifrost-http-release.result == 'skipped')) &&
       (needs.docker-manifest.result == 'success' || (needs.detect-changes.outputs.docker-needs-release == 'false' && needs.docker-manifest.result == 'skipped')) &&
       (needs.docker-manifest-ubi9.result == 'success' || (needs.detect-changes.outputs.docker-needs-release == 'false' && needs.docker-manifest-ubi9.result == 'skipped'))
     runs-on: builder-8-32
@@ -4388,7 +4389,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ needs.bifrost-http-release.outputs.commit-sha }}
+          ref: ${{ needs.bifrost-http-release.outputs.commit-sha || format('refs/tags/transports/v{0}', needs.detect-changes.outputs.transport-version) }}
           fetch-depth: 0
           fetch-tags: true
 
@@ -4447,7 +4448,7 @@ jobs:
         docker-manifest-ubi9,
         publish-bifrost-http-release,
       ]
-    if: "always() && needs.check-skip.outputs.should-skip != 'true' && needs.detect-changes.result == 'success' && (needs.test-load-performance.result == 'success' || needs.check-skip.outputs.skip-tests == 'true') && (needs.test-memory.result == 'success' || needs.test-memory.result == 'skipped' || (needs.test-memory.result == 'failure' && needs.approve-memory-regression.result == 'success')) && (needs.test-vllm.result == 'success' || needs.test-vllm.result == 'skipped') && (needs.test-core.result == 'success' || needs.test-core.result == 'skipped' || (needs.test-core.result == 'failure' && needs.approve-flaky-test-core.result == 'success')) && (needs.test-proxy-e2e.result == 'success' || needs.test-proxy-e2e.result == 'skipped') && (needs.test-core-integrations.result == 'success' || needs.test-core-integrations.result == 'skipped') && (needs.test-core-unit.result == 'success' || needs.test-core-unit.result == 'skipped') && (needs.test-cli-harness.result == 'success' || needs.test-cli-harness.result == 'skipped') && (needs.resolve-cli-versions.result == 'success' || needs.resolve-cli-versions.result == 'skipped') && (needs.test-framework.result == 'success' || needs.test-framework.result == 'skipped') && (needs.test-plugins.result == 'success' || needs.test-plugins.result == 'skipped') && (needs.test-bifrost-http.result == 'success' || needs.test-bifrost-http.result == 'skipped') && (needs.test-live.result == 'success' || needs.test-live.result == 'skipped') && (needs.test-migrations.result == 'success' || needs.test-migrations.result == 'skipped') && (needs.test-agentgateway.result == 'success' || needs.test-agentgateway.result == 'skipped') && (needs.test-api-integrations.result == 'success' || needs.test-api-integrations.result == 'skipped') && (needs.test-warp.result == 'success' || needs.test-warp.result == 'skipped') && (needs.test-cost-accuracy.result == 'success' || needs.test-cost-accuracy.result == 'skipped') && (needs.test-docker-image-amd64.result == 'success' || needs.test-docker-image-amd64.result == 'skipped') && (needs.test-docker-image-arm64.result == 'success' || needs.test-docker-image-arm64.result == 'skipped') && (needs.detect-changes.outputs.core-needs-release == 'false' || needs.core-release.result == 'success') && (needs.detect-changes.outputs.framework-needs-release == 'false' || needs.framework-release.result == 'success') && (needs.detect-changes.outputs.plugins-need-release == 'false' || needs.plugins-release.result == 'success') && (needs.detect-changes.outputs.bifrost-http-needs-release == 'false' || needs.bifrost-http-release.result == 'success') && (needs.detect-changes.outputs.docker-needs-release == 'false' || (needs.docker-build-amd64.result == 'success' && needs.docker-build-arm64.result == 'success' && needs.docker-manifest.result == 'success' && needs.docker-build-ubi9-amd64.result == 'success' && needs.docker-build-ubi9-arm64.result == 'success' && needs.docker-manifest-ubi9.result == 'success' && needs.publish-bifrost-http-release.result == 'success'))"
+    if: "always() && needs.check-skip.outputs.should-skip != 'true' && needs.detect-changes.result == 'success' && (needs.detect-changes.outputs.core-needs-release == 'true' || needs.detect-changes.outputs.framework-needs-release == 'true' || needs.detect-changes.outputs.plugins-need-release == 'true' || needs.detect-changes.outputs.bifrost-http-needs-release == 'true' || needs.detect-changes.outputs.docker-needs-release == 'true') && (needs.test-load-performance.result == 'success' || needs.check-skip.outputs.skip-tests == 'true') && (needs.test-memory.result == 'success' || needs.test-memory.result == 'skipped' || (needs.test-memory.result == 'failure' && needs.approve-memory-regression.result == 'success')) && (needs.test-vllm.result == 'success' || needs.test-vllm.result == 'skipped') && (needs.test-core.result == 'success' || needs.test-core.result == 'skipped' || (needs.test-core.result == 'failure' && needs.approve-flaky-test-core.result == 'success')) && (needs.test-proxy-e2e.result == 'success' || needs.test-proxy-e2e.result == 'skipped') && (needs.test-core-integrations.result == 'success' || needs.test-core-integrations.result == 'skipped') && (needs.test-core-unit.result == 'success' || needs.test-core-unit.result == 'skipped') && (needs.test-cli-harness.result == 'success' || needs.test-cli-harness.result == 'skipped') && (needs.resolve-cli-versions.result == 'success' || needs.resolve-cli-versions.result == 'skipped') && (needs.test-framework.result == 'success' || needs.test-framework.result == 'skipped') && (needs.test-plugins.result == 'success' || needs.test-plugins.result == 'skipped') && (needs.test-bifrost-http.result == 'success' || needs.test-bifrost-http.result == 'skipped') && (needs.test-live.result == 'success' || needs.test-live.result == 'skipped') && (needs.test-migrations.result == 'success' || needs.test-migrations.result == 'skipped') && (needs.test-agentgateway.result == 'success' || needs.test-agentgateway.result == 'skipped') && (needs.test-api-integrations.result == 'success' || needs.test-api-integrations.result == 'skipped') && (needs.test-warp.result == 'success' || needs.test-warp.result == 'skipped') && (needs.test-cost-accuracy.result == 'success' || needs.test-cost-accuracy.result == 'skipped') && (needs.test-docker-image-amd64.result == 'success' || needs.test-docker-image-amd64.result == 'skipped') && (needs.test-docker-image-arm64.result == 'success' || needs.test-docker-image-arm64.result == 'skipped') && (needs.detect-changes.outputs.core-needs-release == 'false' || needs.core-release.result == 'success') && (needs.detect-changes.outputs.framework-needs-release == 'false' || needs.framework-release.result == 'success') && (needs.detect-changes.outputs.plugins-need-release == 'false' || needs.plugins-release.result == 'success') && (needs.detect-changes.outputs.bifrost-http-needs-release == 'false' || needs.bifrost-http-release.result == 'success') && (needs.detect-changes.outputs.docker-needs-release == 'false' || (needs.docker-build-amd64.result == 'success' && needs.docker-build-arm64.result == 'success' && needs.docker-manifest.result == 'success' && needs.docker-build-ubi9-amd64.result == 'success' && needs.docker-build-ubi9-arm64.result == 'success' && needs.docker-manifest-ubi9.result == 'success' && needs.publish-bifrost-http-release.result == 'success'))"
     runs-on: builder-8-32
     permissions:
       contents: write
@@ -4576,6 +4577,7 @@ jobs:
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           DOCKER_NEEDS_RELEASE: ${{ needs.detect-changes.outputs.docker-needs-release }}
+          ANY_RELEASE_REQUIRED: ${{ needs.detect-changes.outputs.core-needs-release == 'true' || needs.detect-changes.outputs.framework-needs-release == 'true' || needs.detect-changes.outputs.plugins-need-release == 'true' || needs.detect-changes.outputs.bifrost-http-needs-release == 'true' || needs.detect-changes.outputs.docker-needs-release == 'true' }}
         run: |
           # Build status summary
           CORE_STATUS="⏭️ Skipped"
@@ -4632,7 +4634,7 @@ jobs:
           check_required_release "${{ needs.detect-changes.outputs.framework-needs-release }}" "${{ needs.framework-release.result }}"
           check_required_release "${{ needs.detect-changes.outputs.plugins-need-release }}" "${{ needs.plugins-release.result }}"
           check_required_release "${{ needs.detect-changes.outputs.bifrost-http-needs-release }}" "${{ needs.bifrost-http-release.result }}"
-          if [ "${{ needs.check-skip.outputs.skip-tests }}" != "true" ] && [ "${{ needs.push-mintlify-changelog.result }}" = "skipped" ]; then
+          if [ "$ANY_RELEASE_REQUIRED" = "true" ] && [ "${{ needs.check-skip.outputs.skip-tests }}" != "true" ] && [ "${{ needs.push-mintlify-changelog.result }}" = "skipped" ]; then
             TITLE="🚨 **Release Pipeline Incomplete**"
           fi
 
