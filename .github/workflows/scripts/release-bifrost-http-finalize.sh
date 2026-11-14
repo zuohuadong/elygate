@@ -204,6 +204,11 @@ fi
 validate_r2_bucket
 R2_ENDPOINT="$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]')"
 ARTIFACT_LISTING=$(aws s3 ls --recursive "s3://$R2_BUCKET/bifrost/v$VERSION/" --endpoint-url "$R2_ENDPOINT" --profile "${R2_AWS_PROFILE:-R2}")
+VERSION_MARKER=$(aws s3 cp "s3://$R2_BUCKET/bifrost/v$VERSION/version.txt" - --endpoint-url "$R2_ENDPOINT" --profile "${R2_AWS_PROFILE:-R2}" 2>/dev/null || true)
+if [ "$VERSION_MARKER" != "v${VERSION#v}" ]; then
+  echo "Error: version.txt is '$VERSION_MARKER', expected 'v${VERSION#v}'" >&2
+  exit 1
+fi
 if [ -z "$ARTIFACT_LISTING" ]; then
   echo "Error: versioned R2 prefix s3://$R2_BUCKET/bifrost/v$VERSION/ is empty; refusing to publish."
   exit 1

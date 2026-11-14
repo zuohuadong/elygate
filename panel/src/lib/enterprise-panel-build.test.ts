@@ -112,7 +112,7 @@ describe('enterprise panel build contract', () => {
 			'plugins/routing/**', 'plugins/logging/**', 'Makefile', 'transports/Dockerfile*', '.github/workflows/panel-tests.yml',
 			'.github/workflows/scripts/smoke-elygate-image.sh', '.github/workflows/scripts/smoke-elygate-recovery.mjs',
 			'examples/single-node-postgres/**',
-			'scripts/production/**', 'scripts/go-local.sh', 'scripts/test-controlplane-postgres.sh']) {
+			'scripts/production/**', 'scripts/go-local.sh', 'scripts/test-controlplane-postgres.sh', 'docs/**', '.dockerignore']) {
 			expect(workflow.on.push.paths).toContain(path);
 		}
 		expect(workflow.on).toHaveProperty('workflow_dispatch');
