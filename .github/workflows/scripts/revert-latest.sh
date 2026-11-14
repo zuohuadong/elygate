@@ -100,6 +100,13 @@ if [ -z "$SOURCE_LISTING" ]; then
 fi
 require_platform_listing "$SOURCE_LISTING" bifrost-http "${BIFROST_HTTP_PLATFORMS[@]}"
 require_remote_platform_digest "$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]')" "$R2_BUCKET" bifrost "${VERSION#v}" bifrost-http "${BIFROST_HTTP_PLATFORMS[@]}"
+SOURCE_MARKER=$(aws s3 cp "s3://$R2_BUCKET/bifrost/$VERSION/version.txt" - \
+  --endpoint-url "$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]')" \
+  --profile "${R2_AWS_PROFILE:-R2}" 2>/dev/null || true)
+if [ "$SOURCE_MARKER" != "v${VERSION#v}" ]; then
+  echo "❌ version.txt is '$SOURCE_MARKER', expected 'v${VERSION#v}'" >&2
+  exit 1
+fi
 
 echo "✅ Version $VERSION found in R2"
 
@@ -140,6 +147,13 @@ if ! sync_with_retry "s3://$R2_BUCKET/bifrost/$VERSION/" "s3://$R2_BUCKET/bifros
   exit 1
 fi
 require_remote_prefix_digest "$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]')" "$R2_BUCKET" "bifrost/latest" bifrost-http "${BIFROST_HTTP_PLATFORMS[@]}"
+LATEST_MARKER=$(aws s3 cp "s3://$R2_BUCKET/bifrost/latest/version.txt" - \
+  --endpoint-url "$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]')" \
+  --profile "${R2_AWS_PROFILE:-R2}" 2>/dev/null || true)
+if [ "$LATEST_MARKER" != "v${VERSION#v}" ]; then
+  echo "❌ restored latest/version.txt is '$LATEST_MARKER', expected 'v${VERSION#v}'" >&2
+  exit 1
+fi
 RESTORE_ON_FAIL=false
 trap - EXIT
 aws s3 rm "s3://$R2_BUCKET/$BACKUP/" --recursive \
