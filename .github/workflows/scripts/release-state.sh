@@ -60,9 +60,10 @@ release_is_draft() {
 # published release is a no-op; unknown state fails closed.
 release_promote_draft() {
   local tag="$1"
+  shift || true
   if release_is_draft "$tag"; then
     echo "🚀 Promoting draft GitHub release $tag..."
-    gh release edit "$tag" --draft=false
+    gh release edit "$tag" --draft=false "$@"
   else
     local status=$?
     if [ "$status" -ne 1 ]; then

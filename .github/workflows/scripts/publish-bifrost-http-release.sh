@@ -116,7 +116,7 @@ rm -f "$RECEIPT"
 if [[ "$VERSION" != *-* ]]; then
   gh release edit "$TAG_NAME" --draft=false --latest
 else
-  gh release edit "$TAG_NAME" --draft=false
+  gh release edit "$TAG_NAME" --draft=false --latest=false
 fi
 RECEIPT_KEY=""
 

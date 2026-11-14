@@ -221,8 +221,9 @@ if [[ "$PLUGIN_VERSION" == *-* ]]; then
 fi
 
 # Mark as latest if not a prerelease
-LATEST_FLAG=""
-if [[ "$PLUGIN_VERSION" != *-* ]]; then
+if [[ "$PLUGIN_VERSION" == *-* ]]; then
+  LATEST_FLAG="--latest=false"
+else
   LATEST_FLAG="--latest"
 fi
 
@@ -249,7 +250,7 @@ fi
 echo "🎉 Creating GitHub release for $TITLE..."
 
 if [ "${RELEASE_IS_DRAFT:-false}" = "true" ]; then
-  release_promote_draft "$TAG_NAME"
+  release_promote_draft "$TAG_NAME" ${LATEST_FLAG}
 else
 gh release create "$TAG_NAME" \
   --title "$TITLE" \

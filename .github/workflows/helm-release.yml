@@ -172,6 +172,60 @@ jobs:
             gh release upload "helm-chart-v${{ steps.chart-version.outputs.version }}" "$CHART" --clobber
           fi
           gh release view "helm-chart-v${{ steps.chart-version.outputs.version }}" --json assets --jq '.assets[].name' | grep -qx "$CHART"
+          gh release download "helm-chart-v${{ steps.chart-version.outputs.version }}" -p "$CHART" -O "$RUNNER_TEMP/remote-$CHART"
+          [ "$(sha256sum "$CHART" | awk '{print $1}')" = "$(sha256sum "$RUNNER_TEMP/remote-$CHART" | awk '{print $1}')" ]
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Login to GitHub Container Registry
+        uses: step-security/docker-login-action@870af644803bf9f204aed474adbad2958fec048b # v4.1.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Login to Docker Hub
+        uses: step-security/docker-login-action@870af644803bf9f204aed474adbad2958fec048b # v4.1.0
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Push Helm chart as OCI artifact to GHCR
+        run: |
+          OCI_REF="oci://ghcr.io/maximhq/helm-charts/bifrost"
+          OCI_ERR=$(mktemp)
+          if helm show chart "$OCI_REF" --version "${{ steps.chart-version.outputs.version }}" >/dev/null 2>"$OCI_ERR"; then
+            rm -f "$OCI_ERR"
+            echo "OCI artifact already exists; skipping push"
+          elif grep -qiE 'not found|404' "$OCI_ERR"; then
+            rm -f "$OCI_ERR"
+            helm push helm-charts/bifrost-${{ steps.chart-version.outputs.version }}.tgz oci://ghcr.io/maximhq/helm-charts
+          else
+            echo "Could not determine OCI artifact state:" >&2
+            cat "$OCI_ERR" >&2
+            rm -f "$OCI_ERR"
+            exit 1
+          fi
+          VERSION="${{ steps.chart-version.outputs.version }}"
+          CHART="bifrost-$VERSION.tgz"
+          mkdir -p "$RUNNER_TEMP/oci-verify"
+          helm pull oci://ghcr.io/maximhq/helm-charts/bifrost --version "$VERSION" -d "$RUNNER_TEMP/oci-verify"
+          [ "$(sha256sum "helm-charts/$CHART" | awk '{print $1}')" = "$(sha256sum "$RUNNER_TEMP/oci-verify/$CHART" | awk '{print $1}')" ]
+
+      - name: Verify and promote draft GitHub Release
+        if: steps.check-release.outputs.exists == 'false' || steps.check-release.outputs.draft == 'true'
+        run: |
+          cd helm-charts
+          VERSION="${{ steps.chart-version.outputs.version }}"
+          CHART="bifrost-$VERSION.tgz"
+          test -s "$CHART"
+          gh release view "helm-chart-v$VERSION" --json assets --jq '.assets[].name' | grep -qx "$CHART"
+          gh release download "helm-chart-v$VERSION" -p "$CHART" -O "$RUNNER_TEMP/remote-$CHART"
+          test -s "$RUNNER_TEMP/remote-$CHART"
+          [ "$(sha256sum "$CHART" | awk '{print $1}')" = "$(sha256sum "$RUNNER_TEMP/remote-$CHART" | awk '{print $1}')" ]
+          helm pull oci://ghcr.io/maximhq/helm-charts/bifrost --version "$VERSION" -d "$RUNNER_TEMP"
+          [ "$(sha256sum "$CHART" | awk '{print $1}')" = "$(sha256sum "$RUNNER_TEMP/$CHART" | awk '{print $1}')" ]
+          gh release edit "helm-chart-v$VERSION" --draft=false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -205,53 +259,6 @@ jobs:
           enable_jekyll: false
           user_name: "github-actions[bot]"
           user_email: "github-actions[bot]@users.noreply.github.com"
-
-      - name: Login to GitHub Container Registry
-        uses: step-security/docker-login-action@870af644803bf9f204aed474adbad2958fec048b # v4.1.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Login to Docker Hub
-        uses: step-security/docker-login-action@870af644803bf9f204aed474adbad2958fec048b # v4.1.0
-        with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-
-      - name: Push Helm chart as OCI artifact to GHCR
-        run: |
-          OCI_REF="oci://ghcr.io/maximhq/helm-charts/bifrost"
-          OCI_ERR=$(mktemp)
-          if helm show chart "$OCI_REF" --version "${{ steps.chart-version.outputs.version }}" >/dev/null 2>"$OCI_ERR"; then
-            rm -f "$OCI_ERR"
-            echo "OCI artifact already exists; skipping push"
-          elif grep -qiE 'not found|404' "$OCI_ERR"; then
-            rm -f "$OCI_ERR"
-            helm push helm-charts/bifrost-${{ steps.chart-version.outputs.version }}.tgz oci://ghcr.io/maximhq/helm-charts
-          else
-            echo "Could not determine OCI artifact state:" >&2
-            cat "$OCI_ERR" >&2
-            rm -f "$OCI_ERR"
-            exit 1
-          fi
-
-      - name: Verify and promote draft GitHub Release
-        if: steps.check-release.outputs.exists == 'false' || steps.check-release.outputs.draft == 'true'
-        run: |
-          cd helm-charts
-          VERSION="${{ steps.chart-version.outputs.version }}"
-          CHART="bifrost-$VERSION.tgz"
-          test -s "$CHART"
-          gh release view "helm-chart-v$VERSION" --json assets --jq '.assets[].name' | grep -qx "$CHART"
-          gh release download "helm-chart-v$VERSION" -p "$CHART" -O "$RUNNER_TEMP/remote-$CHART"
-          test -s "$RUNNER_TEMP/remote-$CHART"
-          [ "$(sha256sum "$CHART" | awk '{print $1}')" = "$(sha256sum "$RUNNER_TEMP/remote-$CHART" | awk '{print $1}')" ]
-          helm pull oci://ghcr.io/maximhq/helm-charts/bifrost --version "$VERSION" -d "$RUNNER_TEMP"
-          [ "$(sha256sum "$CHART" | awk '{print $1}')" = "$(sha256sum "$RUNNER_TEMP/$CHART" | awk '{print $1}')" ]
-          gh release edit "helm-chart-v$VERSION" --draft=false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # - name: Push Helm chart as OCI artifact to Docker Hub
       #   if: steps.check-release.outputs.exists == 'false'

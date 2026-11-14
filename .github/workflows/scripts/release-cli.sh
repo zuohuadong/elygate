@@ -137,7 +137,7 @@ if release_check "$TAG_NAME"; then
     SKIP_LATEST_UPLOAD=true bash "$SCRIPT_DIR/upload-cli-to-r2.sh" "$TAG_NAME"
     verify_r2_artifacts
   fi
-  release_promote_draft "$TAG_NAME"
+  release_promote_draft "$TAG_NAME" ${LATEST_FLAG}
   if [[ "$VERSION" != *-* ]]; then
     bash "$SCRIPT_DIR/publish-cli-latest.sh" "bifrost-cli" "$VERSION" "bifrost"
   fi
@@ -176,6 +176,9 @@ TITLE="Bifrost CLI v$VERSION"
 PRERELEASE_FLAG=""
 if [[ "$VERSION" == *-* ]]; then
   PRERELEASE_FLAG="--prerelease"
+  LATEST_FLAG="--latest=false"
+else
+  LATEST_FLAG="--latest"
 fi
 
 BODY="## Bifrost CLI Release v$VERSION
@@ -196,7 +199,7 @@ echo "🎉 Creating GitHub release for $TITLE..."
 gh release create "$TAG_NAME" \
   --title "$TITLE" \
   --notes "$BODY" \
-  ${PRERELEASE_FLAG}
+  ${PRERELEASE_FLAG} ${LATEST_FLAG}
 
 
 if [[ "$VERSION" != *-* ]]; then

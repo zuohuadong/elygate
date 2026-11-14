@@ -251,11 +251,6 @@ if [[ "$VERSION" == *-* ]]; then
   PRERELEASE_FLAG="--prerelease"
 fi
 
-LATEST_FLAG=""
-if [[ "$VERSION" != *-* ]]; then
-  LATEST_FLAG="--latest"
-fi
-
 # Generate plugin version summary
 PLUGIN_UPDATES=""
 if [ ${#PLUGINS_USED[@]} -gt 0 ]; then
@@ -312,7 +307,7 @@ echo "🎉 Creating GitHub release for $TITLE..."
 gh release create "$TAG_NAME" \
   --title "$TITLE" \
   --notes "$BODY" \
-  --draft \
+  --draft --latest=false \
   ${PRERELEASE_FLAG}
 
 echo "✅ Bifrost HTTP released successfully"
