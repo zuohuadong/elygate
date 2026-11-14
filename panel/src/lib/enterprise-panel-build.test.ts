@@ -63,13 +63,13 @@ describe('enterprise panel build contract', () => {
 		expect(dockerfile).toContain('COPY --from=builder /app/transports/docker-entrypoint.sh .');
 	});
 
-	test('employee portal bases both stages on a pinned image digest', async () => {
+	test('employee portal bases both stages on the verified pinned image digest', async () => {
 		const dockerfile = await Bun.file(new URL('../../../enterprise/employee-portal/Dockerfile', import.meta.url)).text();
 		const fromLines = dockerfile.split('\n').filter((line) => line.trimStart().startsWith('FROM '));
-		expect(fromLines.length).toBeGreaterThanOrEqual(2);
-		for (const line of fromLines) {
-			expect(line).toMatch(/@sha256:[0-9a-f]{64}(\s|$)/);
-		}
+		expect(fromLines).toHaveLength(2);
+		const images = fromLines.map((line) => line.trim().split(/\s+/)[1]);
+		const expected = 'oven/bun:1.4.4-alpine@sha256:4cf82f5686b196504fe119db3fcd9185b191f82ece82c40680e597228ec6070a';
+		expect(images).toEqual([expected, expected]);
 	});
 
 	test('local release Dockerfile includes the panel documentation sources', async () => {
