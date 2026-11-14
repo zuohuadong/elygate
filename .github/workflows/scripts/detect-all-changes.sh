@@ -98,7 +98,7 @@ for candidate in $(git tag -l "transports/v*" | sort -V -r); do
   fi
 done
 if [ -n "$BASE_TRANSPORT_TAG" ]; then
-  if ! git diff --quiet "$BASE_TRANSPORT_TAG" HEAD -- panel transports/Dockerfile enterprise/employee-portal; then
+  if ! git diff --quiet "$BASE_TRANSPORT_TAG" HEAD -- panel transports/Dockerfile enterprise/employee-portal docs; then
     BASE_VERSION=$(git show "$BASE_TRANSPORT_TAG:transports/version" 2>/dev/null | read_semver_stdin) || { echo "❌ Invalid transports/version at $BASE_TRANSPORT_TAG" >&2; exit 1; }
     if [ "$BASE_VERSION" = "$TRANSPORT_VERSION" ]; then
       echo "❌ panel/Dockerfile changed since $BASE_TRANSPORT_TAG without bumping transports/version; refusing to skip the release" >&2
@@ -400,6 +400,22 @@ if tag_exists "$TRANSPORT_TAG" transports; then
       BIFROST_HTTP_NEEDS_RELEASE="true"
     else
       GIT_TAG_EXISTS="true"
+      if [[ "$TRANSPORT_VERSION" != *-* ]]; then
+        LATEST_LISTING=$(aws s3 ls --recursive "s3://$R2_BUCKET/bifrost/latest/" \
+          --endpoint-url "$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]')" \
+          --profile "${R2_AWS_PROFILE:-R2}")
+        LATEST_VERSION=$(aws s3 cp "s3://$R2_BUCKET/bifrost/latest/version.txt" - \
+          --endpoint-url "$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]')" \
+          --profile "${R2_AWS_PROFILE:-R2}" 2>/dev/null || true)
+        if [ -z "$LATEST_LISTING" ] \
+          || [ "$LATEST_VERSION" != "v${TRANSPORT_VERSION#v}" ] \
+          || ! require_platform_listing "$LATEST_LISTING" bifrost-http "${BIFROST_HTTP_PLATFORMS[@]}" \
+          || ! require_remote_prefix_digest "$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]')" "$R2_BUCKET" "bifrost/latest" bifrost-http "${BIFROST_HTTP_PLATFORMS[@]}"; then
+          echo "🔁 bifrost/latest is missing or does not match v${TRANSPORT_VERSION} - latest repair needed"
+          BIFROST_HTTP_NEEDS_RELEASE="true"
+          GIT_TAG_EXISTS="false"
+        fi
+      fi
     fi
   fi
 elif [ "$TAG_RELEASE_MISSING" = "true" ]; then
