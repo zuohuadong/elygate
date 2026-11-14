@@ -85,6 +85,12 @@ if [ -z "$ARTIFACT_LISTING" ]; then
     echo "❌ No released artifacts at s3://$R2_BUCKET/bifrost/v${VERSION}/"
     exit 78
 fi
+VERSION_MARKER=$(aws s3 cp "s3://$R2_BUCKET/bifrost/v${VERSION}/version.txt" - \
+  --endpoint-url "$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]')" 2>/dev/null || true)
+if [ "$VERSION_MARKER" != "v${VERSION#v}" ]; then
+    echo "❌ version.txt is '$VERSION_MARKER', expected 'v${VERSION#v}'"
+    exit 78
+fi
 require_platform_listing "$ARTIFACT_LISTING" bifrost-http "${BIFROST_HTTP_PLATFORMS[@]}"
 require_remote_platform_digest "$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]')" "$R2_BUCKET" bifrost "$VERSION" bifrost-http "${BIFROST_HTTP_PLATFORMS[@]}"
 echo "✅ Released artifacts found in R2"

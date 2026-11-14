@@ -3277,6 +3277,8 @@ jobs:
         test-live,
         test-migrations,
         test-agentgateway,
+        test-memory,
+        approve-memory-regression,
         test-api-integrations,
         test-warp,
         test-cost-accuracy,
