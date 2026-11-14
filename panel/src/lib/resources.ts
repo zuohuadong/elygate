@@ -39,6 +39,7 @@ const RESOURCE_SPECS: ResourceSpec[] = [
 	['skills', 'elygate.skills', 'sparkles'],
 	['prompt-folders', 'elygate.promptFolders', 'folder'],
 	['prompts', 'elygate.prompts', 'message-square-text'],
+	['agent-config', 'elygate.agentConfig', 'package-check'],
 	['user-agent-mappings', 'elygate.userAgentMappings', 'tags'],
 	['connectors', 'elygate.connectors', 'cable'],
 	['usage-ledger', 'elygate.usageLedger', 'landmark'],
@@ -230,6 +231,7 @@ export function createMenu(
 				menuItem(locale, 'plugins', 'elygate.plugins', 'plug'),
 				menuItem(locale, 'skills', 'elygate.skills', 'sparkles'),
 				menuItem(locale, 'prompts', 'elygate.prompts', 'message-square-text'),
+				menuItem(locale, 'agent-config', 'elygate.agentConfig', 'package-check'),
 			]),
 		},
 		{

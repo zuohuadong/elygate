@@ -24,6 +24,7 @@
 	import { pageTitleForHash } from './lib/page-metadata';
 	import { enterprisePanelManifest as fallbackEnterprisePanelManifest } from './enterprise-fallback';
 	import DashboardPage from './pages/DashboardPage.svelte';
+	import AgentConfigPage from './pages/AgentConfigPage.svelte';
 	import BifrostResourcePage from './pages/BifrostResourcePage.svelte';
 	import CachingConfigPage from './pages/CachingConfigPage.svelte';
 	import ConfigPage from './pages/ConfigPage.svelte';
@@ -199,6 +200,7 @@
 		'mcp-kill-switches': { list: McpKillSwitchesPage },
 		plugins: { list: PluginsPage },
 		skills: { list: SkillsPage },
+		'agent-config': { list: AgentConfigPage },
 		'prompt-folders': { list: PromptRepositoryPage },
 		prompts: { list: PromptRepositoryPage },
 		'user-agent-mappings': { list: OperationalSettingsPage },

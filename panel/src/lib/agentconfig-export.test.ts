@@ -1,0 +1,81 @@
+import { describe, expect, test } from 'bun:test';
+import { buildAgentConfigPublic, type AgentConfigExportSource } from './agentconfig-export';
+
+const SOURCE: AgentConfigExportSource = {
+	models: {
+		models: [
+			{ provider: 'openai', name: 'openai/gpt-4o' },
+			{ provider: 'openai', name: 'openai/gpt-4o' },
+			{ provider: 'anthropic', name: 'claude-sonnet-4', alias: 'sonnet' },
+			{ provider: '', name: 'broken' },
+		],
+	},
+	mcpClients: {
+		clients: [
+			{
+				config: {
+					name: 'github',
+					connection_type: 'stdio',
+					disabled: false,
+					stdio_config: { command: 'npx', args: ['-y', '@modelcontextprotocol/server-github'], envs: ['GITHUB_TOKEN=ghp_super_secret', 'PLAIN_NAME'] },
+				},
+				tools: [{ name: 'create_issue' }],
+			},
+			{ config: { name: 'remote-docs', connection_type: 'http', connection_string: 'https://private.example.com/mcp?token=secret' } },
+			{ config: { name: 'in-process', connection_type: 'inprocess' } },
+		],
+	},
+	skills: { skills: [{ id: 'skill-1', name: 'Docs' }, { id: '' }] },
+	prompts: { prompts: [{ id: 'prompt-1', name: 'Review' }, { id: 'prompt-2', name: 'x'.repeat(90) }] },
+	agents: { agents: [{ name: 'researcher', display_name: 'Researcher', model: 'openai/gpt-4o', skill_ids: ['skill-1'] }, { name: 'x'.repeat(70) }] },
+};
+
+describe('AgentConfig export mapping', () => {
+	test('maps Elygate resources to the ACB public section', () => {
+		const result = buildAgentConfigPublic(SOURCE);
+		expect(result.counts).toEqual({ models: 2, mcp: 2, skills: 1, prompts: 2, agents: 1 });
+		expect(result.capabilities).toEqual(['mcp', 'models', 'skills', 'prompts', 'agents']);
+		expect(result.pub.models).toEqual([
+			{ provider: 'openai', id: 'gpt-4o' },
+			{ provider: 'anthropic', id: 'claude-sonnet-4', alias: 'sonnet' },
+		]);
+		expect(result.pub.mcp).toEqual([
+			{
+				name: 'github',
+				enabled: true,
+				transport: 'stdio',
+				command: 'npx',
+				args: ['-y', '@modelcontextprotocol/server-github'],
+				envKeys: ['GITHUB_TOKEN', 'PLAIN_NAME'],
+			},
+			{ name: 'remote-docs', enabled: true, transport: 'http', args: [], envKeys: [] },
+		]);
+		expect(result.pub.skills).toEqual([{ id: 'Docs', enabled: true, order: 1 }]);
+		expect(result.pub.prompts[1]).toEqual({ id: 'prompt-2', title: 'x'.repeat(80) });
+		expect(result.pub.agents).toEqual([{ id: 'researcher', name: 'Researcher', model: 'openai/gpt-4o', skillIds: ['skill-1'] }]);
+	});
+
+	test('never leaks secret values or private endpoints into the public bundle', () => {
+		const serialized = JSON.stringify(buildAgentConfigPublic(SOURCE).pub);
+		expect(serialized).not.toContain('ghp_super_secret');
+		expect(serialized).not.toContain('private.example.com');
+		expect(serialized).not.toContain('token=secret');
+	});
+
+	test('reports each omission and downgrade to the exporter', () => {
+		const codes = buildAgentConfigPublic(SOURCE).warnings.map((warning) => warning.code);
+		expect(codes).toContain('model-invalid');
+		expect(codes).toContain('mcp-env-values-omitted');
+		expect(codes).toContain('mcp-endpoint-not-public');
+		expect(codes).toContain('mcp-unsupported-transport');
+		expect(codes).toContain('skill-invalid');
+		expect(codes).toContain('prompt-title-truncated');
+		expect(codes).toContain('agent-invalid');
+	});
+
+	test('produces an empty but valid public section when nothing is configured', () => {
+		const result = buildAgentConfigPublic({ models: undefined, mcpClients: undefined, skills: undefined, prompts: undefined, agents: undefined });
+		expect(result.counts).toEqual({ models: 0, mcp: 0, skills: 0, prompts: 0, agents: 0 });
+		expect(result.pub).toEqual({ mcp: [], models: [], skills: [], prompts: [], agents: [], resources: [] });
+	});
+});
