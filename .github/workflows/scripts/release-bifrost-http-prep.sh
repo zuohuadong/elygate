@@ -184,6 +184,7 @@ if release_check "$TAG_NAME"; then
     echo "ℹ️ Release $TAG_NAME already exists; rebuilding artifacts for an idempotent repair."
     echo "success=true" >> "$GITHUB_OUTPUT"
     echo "commit-sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+    exit 0
   fi
   echo "❌ Release $TAG_NAME exists but its tag is missing"
   exit 1

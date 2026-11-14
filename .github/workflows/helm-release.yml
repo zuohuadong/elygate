@@ -233,8 +233,14 @@ jobs:
           [ "$(sha256sum "$CHART" | awk '{print $1}')" = "$(sha256sum "$RUNNER_TEMP/remote-$CHART" | awk '{print $1}')" ]
           helm pull oci://ghcr.io/maximhq/helm-charts/bifrost --version "$VERSION" -d "$RUNNER_TEMP"
           [ "$(sha256sum "$CHART" | awk '{print $1}')" = "$(sha256sum "$RUNNER_TEMP/$CHART" | awk '{print $1}')" ]
-          if [[ "$VERSION" == *-* ]]; then LATEST="--latest=false"; else LATEST="--latest"; fi
-          gh release edit "helm-chart-v$VERSION" --draft=false "$LATEST"
+          if [[ "$VERSION" == *-* ]]; then
+            PRE="--prerelease"
+            LATEST="--latest=false"
+          else
+            PRE="--prerelease=false"
+            LATEST="--latest"
+          fi
+          gh release edit "helm-chart-v$VERSION" --draft=false "$PRE" "$LATEST"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
