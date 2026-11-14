@@ -32,7 +32,10 @@ if [[ ! -f "$FILE" ]]; then
 fi
 
 if [[ "$(basename "$FILE")" == "package.json" ]]; then
-  VERSION="$(jq -j '.version' "$FILE"; printf x)"
+  if ! VERSION="$(jq -j '.version, "x"' "$FILE")"; then
+    echo "::error::invalid JSON in $FILE" >&2
+    exit 1
+  fi
   VERSION="${VERSION%x}"
 else
   # Strip only the trailing line ending. Deleting all whitespace would join a
