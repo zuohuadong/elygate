@@ -90,7 +90,7 @@ jobs:
 
   docker:
     name: Build production Docker image
-    needs: panel
+    needs: [panel, employee-portal]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -102,6 +102,14 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Set up Docker Buildx
         uses: step-security/setup-buildx-action@f931205d68723ad9589fd2a7e2ece238bf9de341 # v4.0.0
+      - name: Build employee portal image without publishing
+        uses: step-security/docker-build-push-action@846549baaf047e867d038826129a64d81df0f704 # v7.1.0
+        with:
+          context: ./enterprise/employee-portal
+          file: ./enterprise/employee-portal/Dockerfile
+          push: false
+          tags: elygate-employee-portal:panel-ci
+
       - name: Build image without publishing
         uses: step-security/docker-build-push-action@846549baaf047e867d038826129a64d81df0f704 # v7.1.0
         with:

@@ -206,6 +206,11 @@ go get github.com/maximhq/bifrost/framework@$VERSION
 ---
 _This release was automatically created and uses core version: \`$CORE_VERSION\`_"
 
+if [ "${RELEASE_IS_DRAFT:-false}" = "true" ] && ! git diff --cached --quiet; then
+  echo "❌ Draft recovery produced dependency changes that are not in the tagged commit; refusing to promote" >&2
+  exit 1
+fi
+
 echo "🎉 Creating GitHub release for $TITLE..."
 if [ "${RELEASE_IS_DRAFT:-false}" = "true" ]; then
   release_promote_draft "$TAG_NAME"

@@ -161,10 +161,17 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Promote draft GitHub Release
-        if: steps.check-release.outputs.draft == 'true'
+      - name: Ensure release asset exists
+        if: steps.check-release.outputs.exists == 'true'
         run: |
-          gh release edit "helm-chart-v${{ steps.chart-version.outputs.version }}" --draft=false
+          cd helm-charts
+          CHART="bifrost-${{ steps.chart-version.outputs.version }}.tgz"
+          test -s "$CHART"
+          ASSETS=$(gh release view "helm-chart-v${{ steps.chart-version.outputs.version }}" --json assets --jq '.assets[].name')
+          if ! grep -qx "$CHART" <<<"$ASSETS"; then
+            gh release upload "helm-chart-v${{ steps.chart-version.outputs.version }}" "$CHART" --clobber
+          fi
+          gh release view "helm-chart-v${{ steps.chart-version.outputs.version }}" --json assets --jq '.assets[].name' | grep -qx "$CHART"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -228,6 +235,18 @@ jobs:
             rm -f "$OCI_ERR"
             exit 1
           fi
+
+      - name: Verify and promote draft GitHub Release
+        if: steps.check-release.outputs.draft == 'true'
+        run: |
+          cd helm-charts
+          CHART="bifrost-${{ steps.chart-version.outputs.version }}.tgz"
+          test -s "$CHART"
+          gh release view "helm-chart-v${{ steps.chart-version.outputs.version }}" --json assets --jq '.assets[].name' | grep -qx "$CHART"
+          helm show chart oci://ghcr.io/maximhq/helm-charts/bifrost --version "${{ steps.chart-version.outputs.version }}" >/dev/null
+          gh release edit "helm-chart-v${{ steps.chart-version.outputs.version }}" --draft=false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # - name: Push Helm chart as OCI artifact to Docker Hub
       #   if: steps.check-release.outputs.exists == 'false'

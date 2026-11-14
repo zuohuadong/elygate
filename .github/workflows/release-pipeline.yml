@@ -316,6 +316,14 @@ jobs:
           bun test src/lib/*.test.ts tests/*.test.ts
           bun run check
 
+      - name: Test employee portal
+        run: |
+          cd enterprise/employee-portal
+          bun install --frozen-lockfile
+          bun run test
+          bun run check
+          bun run build
+
       - name: Build UI and bifrost-http binary
         run: |
           # The workspace must exist before the build so the transport resolves

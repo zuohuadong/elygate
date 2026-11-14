@@ -18,7 +18,8 @@ fi
 echo "📋 Reading version from ${PACKAGE_JSON}"
 
 # Extract version from package.json using jq
-VERSION=$(jq -r '.version' "${PACKAGE_JSON}")
+VERSION="$(jq -j '.version' "${PACKAGE_JSON}"; printf x)"
+VERSION="${VERSION%x}"
 
 if [[ -z "${VERSION}" ]] || [[ "${VERSION}" == "null" ]]; then
   echo "❌ Failed to extract version from package.json"

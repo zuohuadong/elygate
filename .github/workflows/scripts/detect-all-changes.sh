@@ -98,7 +98,7 @@ for candidate in $(git tag -l "transports/v*" | sort -V -r); do
   fi
 done
 if [ -n "$BASE_TRANSPORT_TAG" ]; then
-  if ! git diff --quiet "$BASE_TRANSPORT_TAG" HEAD -- panel transports/Dockerfile; then
+  if ! git diff --quiet "$BASE_TRANSPORT_TAG" HEAD -- panel transports/Dockerfile enterprise/employee-portal; then
     BASE_VERSION=$(git show "$BASE_TRANSPORT_TAG:transports/version" 2>/dev/null | read_semver_stdin) || { echo "❌ Invalid transports/version at $BASE_TRANSPORT_TAG" >&2; exit 1; }
     if [ "$BASE_VERSION" = "$TRANSPORT_VERSION" ]; then
       echo "❌ panel/Dockerfile changed since $BASE_TRANSPORT_TAG without bumping transports/version; refusing to skip the release" >&2

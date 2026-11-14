@@ -117,7 +117,7 @@ describe('enterprise panel build contract', () => {
 		}
 		expect(workflow.on).toHaveProperty('workflow_dispatch');
 		expect(workflow.permissions).toEqual({ contents: 'read' });
-		expect(workflow.jobs.docker.needs).toBe('panel');
+		expect(workflow.jobs.docker.needs).toEqual(['panel', 'employee-portal']);
 		const imageBuild = workflow.jobs.docker.steps.find((step: { name?: string }) =>
 			step.name === 'Build image without publishing');
 		expect(imageBuild.with.push).toBe(false);

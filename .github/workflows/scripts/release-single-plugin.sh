@@ -241,6 +241,11 @@ go get github.com/maximhq/bifrost/plugins/$PLUGIN_NAME@v$PLUGIN_VERSION
 ---
 _This release was automatically created from version file: \`plugins/$PLUGIN_NAME/version\`_"
 
+if [ "${RELEASE_IS_DRAFT:-false}" = "true" ] && ! git diff --cached --quiet; then
+  echo "❌ Draft recovery produced dependency changes that are not in the tagged commit; refusing to promote" >&2
+  exit 1
+fi
+
 echo "🎉 Creating GitHub release for $TITLE..."
 
 if [ "${RELEASE_IS_DRAFT:-false}" = "true" ]; then
