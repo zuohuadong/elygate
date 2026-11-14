@@ -204,6 +204,13 @@ type ProviderQueue struct {
 	done       chan struct{}        // closed by signalClosing() to signal shutdown; never written to otherwise
 	closing    uint32               // atomic: 0 = open, 1 = closing
 	signalOnce sync.Once
+	// Sender admission. closing is advertised before done closes, but a producer
+	// that read it as open can still be inside the send select. activeSenders
+	// makes the final drain wait for those producers so no message can be
+	// deposited after the queue has been retired.
+	sendersMu     sync.Mutex
+	sendersCond   *sync.Cond
+	activeSenders int
 }
 
 func isLargePayloadPassthrough(ctx *schemas.BifrostContext) bool {
@@ -235,6 +242,41 @@ func (pq *ProviderQueue) signalClosing() {
 // Uses atomic load for lock-free checking.
 func (pq *ProviderQueue) isClosing() bool {
 	return atomic.LoadUint32(&pq.closing) == 1
+}
+
+// beginSend admits a producer only while the queue is open. Every successful
+// call must be paired with endSend before the producer waits for a response.
+func (pq *ProviderQueue) beginSend() bool {
+	pq.sendersMu.Lock()
+	defer pq.sendersMu.Unlock()
+	if pq.isClosing() {
+		return false
+	}
+	pq.activeSenders++
+	return true
+}
+
+func (pq *ProviderQueue) endSend() {
+	pq.sendersMu.Lock()
+	pq.activeSenders--
+	if pq.activeSenders == 0 && pq.sendersCond != nil {
+		pq.sendersCond.Broadcast()
+	}
+	pq.sendersMu.Unlock()
+}
+
+// waitSenders blocks until every producer that entered beginSend has left the
+// send critical section. It must run before the final drain so the drain is
+// genuinely final.
+func (pq *ProviderQueue) waitSenders() {
+	pq.sendersMu.Lock()
+	defer pq.sendersMu.Unlock()
+	if pq.sendersCond == nil {
+		pq.sendersCond = sync.NewCond(&pq.sendersMu)
+	}
+	for pq.activeSenders > 0 {
+		pq.sendersCond.Wait()
+	}
 }
 
 // PluginPipeline encapsulates the execution of plugin PreHooks and PostHooks, tracks how many plugins ran, and manages short-circuiting and error aggregation.
@@ -4312,7 +4354,8 @@ func (bifrost *Bifrost) RemoveProvider(providerKey schemas.ModelProvider) error 
 		bifrost.logger.Debug("all workers for provider %s have stopped", providerKey)
 	}
 
-	// Step 3b: Final drain sweep — see drainQueueWithErrors for full explanation.
+	// Step 3b: Wait for in-flight senders, then perform the final drain sweep.
+	pq.waitSenders()
 	bifrost.drainQueueWithErrors(pq)
 
 	// Step 3c: Wait for retired worker generations from earlier provider updates.
@@ -4549,6 +4592,7 @@ transferComplete:
 	// Step 7: Signal the old queue is closing. Stale producers that still hold a
 	// reference to oldPq will detect this via isClosing() and re-route to newPq.
 	oldPq.signalClosing()
+	oldPq.waitSenders()
 	bifrost.logger.Debug("signaled closing for old queue of provider %s", providerKey)
 
 	// Step 8: Cleanup old workers asynchronously. Waiting here under the provider
@@ -6703,29 +6747,38 @@ func (bifrost *Bifrost) tryRequest(ctx *schemas.BifrostContext, req *schemas.Bif
 		pq = reroutedPq
 	}
 
-	// Use select with done channel to detect shutdown during send
+	// Use select with done channel to detect shutdown during send. Admission is
+	// paired with endSend before any wait for the worker response, so the final
+	// drain can wait for in-flight senders without waiting for their responses.
+	if !pq.beginSend() {
+		return bifrost.rejectUnqueuedRequest(ctx, pipeline, preCount, msg, req.RequestType, provider, model, newBifrostErrorFromMsg("provider is shutting down"))
+	}
 	select {
 	case pq.queue <- msg:
-		// Message was sent successfully
+		pq.endSend()
 	case <-pq.done:
+		pq.endSend()
 		return bifrost.rejectUnqueuedRequest(ctx, pipeline, preCount, msg, req.RequestType, provider, model, newBifrostErrorFromMsg("provider is shutting down"))
 	case <-ctx.Done():
+		pq.endSend()
 		return bifrost.rejectUnqueuedRequest(ctx, pipeline, preCount, msg, req.RequestType, provider, model, newBifrostCtxDoneError(ctx, "while waiting for queue space"))
 	default:
+		pq.endSend()
 		if bifrost.dropExcessRequests.Load() {
 			bifrost.logger.Warn("request dropped: queue is full, please increase the queue size or set dropExcessRequests to false")
 			return bifrost.rejectUnqueuedRequest(ctx, pipeline, preCount, msg, req.RequestType, provider, model, newBifrostQueueFullError())
 		}
-		// Re-check closing flag before blocking send (lock-free atomic check)
-		if pq.isClosing() {
+		if !pq.beginSend() {
 			return bifrost.rejectUnqueuedRequest(ctx, pipeline, preCount, msg, req.RequestType, provider, model, newBifrostErrorFromMsg("provider is shutting down"))
 		}
 		select {
 		case pq.queue <- msg:
-			// Message was sent successfully
+			pq.endSend()
 		case <-pq.done:
+			pq.endSend()
 			return bifrost.rejectUnqueuedRequest(ctx, pipeline, preCount, msg, req.RequestType, provider, model, newBifrostErrorFromMsg("provider is shutting down"))
 		case <-ctx.Done():
+			pq.endSend()
 			return bifrost.rejectUnqueuedRequest(ctx, pipeline, preCount, msg, req.RequestType, provider, model, newBifrostCtxDoneError(ctx, "while waiting for queue space"))
 		}
 	}
@@ -7098,29 +7151,38 @@ func (bifrost *Bifrost) tryStreamRequest(ctx *schemas.BifrostContext, req *schem
 		pq = reroutedPq
 	}
 
-	// Use select with done channel to detect shutdown during send
+	// Use select with done channel to detect shutdown during send. Admission is
+	// paired with endSend before any wait for the worker response, so the final
+	// drain can wait for in-flight senders without waiting for their responses.
+	if !pq.beginSend() {
+		return bifrost.rejectUnqueuedStreamRequest(ctx, pipeline, preCount, msg, req.RequestType, provider, model, newBifrostErrorFromMsg("provider is shutting down"))
+	}
 	select {
 	case pq.queue <- msg:
-		// Message was sent successfully
+		pq.endSend()
 	case <-pq.done:
+		pq.endSend()
 		return bifrost.rejectUnqueuedStreamRequest(ctx, pipeline, preCount, msg, req.RequestType, provider, model, newBifrostErrorFromMsg("provider is shutting down"))
 	case <-ctx.Done():
+		pq.endSend()
 		return bifrost.rejectUnqueuedStreamRequest(ctx, pipeline, preCount, msg, req.RequestType, provider, model, newBifrostCtxDoneError(ctx, "while waiting for queue space"))
 	default:
+		pq.endSend()
 		if bifrost.dropExcessRequests.Load() {
 			bifrost.logger.Warn("request dropped: queue is full, please increase the queue size or set dropExcessRequests to false")
 			return bifrost.rejectUnqueuedStreamRequest(ctx, pipeline, preCount, msg, req.RequestType, provider, model, newBifrostQueueFullError())
 		}
-		// Re-check closing flag before blocking send (lock-free atomic check)
-		if pq.isClosing() {
+		if !pq.beginSend() {
 			return bifrost.rejectUnqueuedStreamRequest(ctx, pipeline, preCount, msg, req.RequestType, provider, model, newBifrostErrorFromMsg("provider is shutting down"))
 		}
 		select {
 		case pq.queue <- msg:
-			// Message was sent successfully
+			pq.endSend()
 		case <-pq.done:
+			pq.endSend()
 			return bifrost.rejectUnqueuedStreamRequest(ctx, pipeline, preCount, msg, req.RequestType, provider, model, newBifrostErrorFromMsg("provider is shutting down"))
 		case <-ctx.Done():
+			pq.endSend()
 			return bifrost.rejectUnqueuedStreamRequest(ctx, pipeline, preCount, msg, req.RequestType, provider, model, newBifrostCtxDoneError(ctx, "while waiting for queue space"))
 		}
 	}
@@ -11636,6 +11698,7 @@ func (bifrost *Bifrost) Shutdown() {
 	bifrost.requestQueues.Range(func(key, value interface{}) bool {
 		pq := value.(*ProviderQueue)
 		pq.signalClosing()
+		pq.waitSenders()
 		return true
 	})
 

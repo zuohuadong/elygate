@@ -9509,3 +9509,33 @@ func TestUsageEstimationTokenizersFollowConfig(t *testing.T) {
 	client.UpdateUsageEstimationTokenizers([]string{"gpt2"})
 	expect("update to an unknown family", "cl100k_base")
 }
+
+func TestProviderQueueClosingWaitsForInFlightSenders(t *testing.T) {
+	pq := &ProviderQueue{done: make(chan struct{})}
+	if !pq.beginSend() {
+		t.Fatal("open queue rejected a sender")
+	}
+	pq.signalClosing()
+	if pq.beginSend() {
+		t.Fatal("closing queue admitted a new sender")
+	}
+
+	waited := make(chan struct{})
+	go func() {
+		pq.waitSenders()
+		close(waited)
+	}()
+
+	select {
+	case <-waited:
+		t.Fatal("waitSenders returned while a sender was still admitted")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	pq.endSend()
+	select {
+	case <-waited:
+	case <-time.After(time.Second):
+		t.Fatal("waitSenders did not observe the last sender leaving")
+	}
+}
