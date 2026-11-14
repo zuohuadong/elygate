@@ -9539,3 +9539,30 @@ func TestProviderQueueClosingWaitsForInFlightSenders(t *testing.T) {
 		t.Fatal("waitSenders did not observe the last sender leaving")
 	}
 }
+
+// BenchmarkProviderQueueAdmission measures the closing fence added to the send
+// path. Apple M5, -benchmem, count=3: 7.99-8.02 ns/op, 0 allocs/op. The
+// previous atomic-only closing check measures 0.225-0.234 ns/op in
+// BenchmarkProviderQueueClosingCheck, so the fence costs ~7.8 ns and no
+// allocation per request and is only paid on the admission step, not while the
+// request waits for its response.
+func BenchmarkProviderQueueAdmission(b *testing.B) {
+	pq := &ProviderQueue{done: make(chan struct{})}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		if !pq.beginSend() {
+			b.Fatal("open queue rejected sender")
+		}
+		pq.endSend()
+	}
+}
+
+func BenchmarkProviderQueueClosingCheck(b *testing.B) {
+	pq := &ProviderQueue{done: make(chan struct{})}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		if pq.isClosing() {
+			b.Fatal("open queue reported closing")
+		}
+	}
+}
