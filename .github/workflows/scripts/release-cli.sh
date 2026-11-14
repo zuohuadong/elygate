@@ -26,6 +26,11 @@ if ! is_semver "$VERSION"; then
   echo "❌ Invalid CLI version: $1 (strict SemVer 2.0.0 without build metadata)" >&2
   exit 1
 fi
+if [[ "$VERSION" == *-* ]]; then
+  LATEST_FLAG="--latest=false"
+else
+  LATEST_FLAG="--latest"
+fi
 TAG_NAME="cli/v${VERSION}"
 
 echo "🚀 Releasing bifrost CLI v$VERSION..."

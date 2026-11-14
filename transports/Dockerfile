@@ -1,6 +1,6 @@
 # Default named context for OSS builds. Buildx can replace this stage with
 # --build-context enterprise_panel=/path/to/private-panel-module.
-FROM scratch AS enterprise_panel
+FROM scratch AS enterprise_panel_fallback
 COPY panel/src/enterprise-fallback/index.ts /index.ts
 
 # --- UI Build Stage: Build the Svelte svadmin panel ---
@@ -22,7 +22,7 @@ COPY panel/src/enterprise-fallback/index.ts /index.ts
   # The named context is isolated from the default repository context and is
   # only present in this build stage. Enterprise jobs point the path argument
   # at /opt/elygate-enterprise-panel/index.ts.
-  COPY --from=enterprise_panel / /opt/elygate-enterprise-panel/
+  COPY --from=enterprise_panel_fallback / /opt/elygate-enterprise-panel/
 
   # Build and type-check without the local copy-build step; the next stage embeds out/.
   ARG BIFROST_ENTERPRISE_PANEL_PATH

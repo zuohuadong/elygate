@@ -263,6 +263,11 @@ else
   echo "ℹ️ No staged changes to commit"
 fi
 
+if [ "$TAG_AT_HEAD" = "true" ] && ! git diff --cached --quiet; then
+  echo "❌ Dependency changes are staged but tag $TAG_NAME points at the old commit; refusing to publish" >&2
+  exit 1
+fi
+
 echo "✅ Prep complete for bifrost-http v$VERSION"
 echo "success=true" >> "$GITHUB_OUTPUT"
 echo "commit-sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"

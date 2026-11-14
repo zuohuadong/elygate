@@ -393,13 +393,14 @@ if tag_exists "$TRANSPORT_TAG" transports; then
     R2_LISTING=$(aws s3 ls --recursive "s3://$R2_BUCKET/bifrost/v${TRANSPORT_VERSION}/" \
       --endpoint-url "$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]')" \
       --profile "${R2_AWS_PROFILE:-R2}")
-    if [ -z "$R2_LISTING" ]; then
-      echo "❌ Transport release $TRANSPORT_TAG has no artifacts in R2" >&2
-      exit 1
+    if [ -z "$R2_LISTING" ] \
+      || ! require_platform_listing "$R2_LISTING" bifrost-http "${BIFROST_HTTP_PLATFORMS[@]}" \
+      || ! require_remote_platform_digest "$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]')" "$R2_BUCKET" bifrost "$TRANSPORT_VERSION" bifrost-http "${BIFROST_HTTP_PLATFORMS[@]}"; then
+      echo "🔁 Transport release $TRANSPORT_TAG has incomplete R2 artifacts - repair needed"
+      BIFROST_HTTP_NEEDS_RELEASE="true"
+    else
+      GIT_TAG_EXISTS="true"
     fi
-    require_platform_listing "$R2_LISTING" bifrost-http "${BIFROST_HTTP_PLATFORMS[@]}"
-    require_remote_platform_digest "$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]')" "$R2_BUCKET" bifrost "$TRANSPORT_VERSION" bifrost-http "${BIFROST_HTTP_PLATFORMS[@]}"
-    GIT_TAG_EXISTS="true"
   fi
 elif [ "$TAG_RELEASE_MISSING" = "true" ]; then
   echo "   🏷️ Git tag exists but its GitHub release is missing - transport release needed"

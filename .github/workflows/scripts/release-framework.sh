@@ -179,6 +179,11 @@ else
   git push origin "$TAG_NAME"
 fi
 
+if [ "${TAG_AT_HEAD:-false}" = "true" ] && ! git diff --cached --quiet; then
+  echo "❌ Dependency changes are staged but the existing tag points at the old commit; refusing to publish" >&2
+  exit 1
+fi
+
 # Create GitHub release
 TITLE="Framework $VERSION"
 

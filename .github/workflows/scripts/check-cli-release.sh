@@ -10,6 +10,11 @@ TAG="$1"
 BINARY="$2"
 PREFIX="$3"
 VERSION="${4#v}"
+if [[ "$VERSION" == *-* ]]; then
+  LATEST_FLAG="--latest=false"
+else
+  LATEST_FLAG="--latest"
+fi
 if ! is_semver "$VERSION"; then
   echo "❌ Invalid version: $4 (strict SemVer 2.0.0 without build metadata)" >&2
   exit 1
@@ -51,7 +56,7 @@ if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
         exit 0
       fi
     fi
-    release_promote_draft "$TAG"
+    release_promote_draft "$TAG" "$LATEST_FLAG"
     echo "exists=true" >> "$GITHUB_OUTPUT"
     exit 0
   else

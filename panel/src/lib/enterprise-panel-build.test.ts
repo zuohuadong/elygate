@@ -52,8 +52,8 @@ describe('enterprise panel build contract', () => {
 	test('Docker build supports an isolated named enterprise panel context', async () => {
 		const dockerfile = await Bun.file(new URL('../../../transports/Dockerfile', import.meta.url)).text();
 		expect(dockerfile).not.toContain('COPY panel/patches ./patches');
-		expect(dockerfile).toContain('FROM scratch AS enterprise_panel');
-		expect(dockerfile).toContain('COPY --from=enterprise_panel / /opt/elygate-enterprise-panel/');
+		expect(dockerfile).toContain('FROM scratch AS enterprise_panel_fallback');
+		expect(dockerfile).toContain('COPY --from=enterprise_panel_fallback / /opt/elygate-enterprise-panel/');
 		expect(dockerfile).toContain('COPY docs/ /docs/');
 		expect(dockerfile).toContain('BIFROST_ENTERPRISE_PANEL_PATH=$BIFROST_ENTERPRISE_PANEL_PATH');
 		expect(dockerfile).toContain('FROM --platform=$BUILDPLATFORM oven/bun:');

@@ -1,5 +1,9 @@
 name: Release Helm Chart
 
+concurrency:
+  group: helm-release
+  cancel-in-progress: false
+
 on:
   push:
     branches:
@@ -14,6 +18,7 @@ permissions:
 
 jobs:
   release:
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/v1.5.0'
     runs-on: builder-8-32
     permissions:
       contents: write
@@ -184,13 +189,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Login to Docker Hub
-        uses: step-security/docker-login-action@870af644803bf9f204aed474adbad2958fec048b # v4.1.0
-        with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-
       - name: Push Helm chart as OCI artifact to GHCR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           OCI_REF="oci://ghcr.io/maximhq/helm-charts/bifrost"
           OCI_ERR=$(mktemp)
@@ -211,6 +212,12 @@ jobs:
           mkdir -p "$RUNNER_TEMP/oci-verify"
           helm pull oci://ghcr.io/maximhq/helm-charts/bifrost --version "$VERSION" -d "$RUNNER_TEMP/oci-verify"
           [ "$(sha256sum "helm-charts/$CHART" | awk '{print $1}')" = "$(sha256sum "$RUNNER_TEMP/oci-verify/$CHART" | awk '{print $1}')" ]
+          MANIFEST=$(curl -fsS -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H 'Accept: application/vnd.oci.image.manifest.v1+json' \
+            "https://ghcr.io/v2/maximhq/helm-charts/bifrost/manifests/$VERSION")
+          LAYER=$(jq -er '.layers[0].digest' <<<"$MANIFEST")
+          EXPECTED="sha256:$(sha256sum "helm-charts/$CHART" | awk '{print $1}')"
+          [ "$LAYER" = "$EXPECTED" ]
 
       - name: Verify and promote draft GitHub Release
         if: steps.check-release.outputs.exists == 'false' || steps.check-release.outputs.draft == 'true'

@@ -367,7 +367,7 @@ jobs:
           if release_check "$FULL_TAG"; then
             if [ "$TAG_AT_HEAD" = "true" ]; then
               echo "Release $FULL_TAG already exists; promoting if still a draft."
-              release_promote_draft "$FULL_TAG"
+              release_promote_draft "$FULL_TAG" --latest=false
               exit 0
             fi
             echo "Release $FULL_TAG exists but its tag is missing" >&2
@@ -561,7 +561,7 @@ jobs:
           if release_check "$FULL_TAG"; then
             if [ "$TAG_AT_HEAD" = "true" ]; then
               echo "Release $FULL_TAG already exists; promoting if still a draft."
-              release_promote_draft "$FULL_TAG"
+              release_promote_draft "$FULL_TAG" --latest=false
               exit 0
             fi
             echo "Release $FULL_TAG exists but its tag is missing" >&2

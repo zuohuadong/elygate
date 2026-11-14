@@ -108,7 +108,18 @@ jobs:
           context: ./enterprise/employee-portal
           file: ./enterprise/employee-portal/Dockerfile
           push: false
+          load: true
           tags: elygate-employee-portal:panel-ci
+
+      - name: Smoke employee portal image
+        run: |
+          docker run -d --name elygate-employee-portal-smoke             -p 18090:8090             -e EMPLOYEE_PORTAL_SESSION_SECRET=0123456789abcdef0123456789abcdef             -e EMPLOYEE_PORTAL_PUBLIC_URL=http://127.0.0.1:18090             -e BIFROST_MANAGEMENT_URL=http://127.0.0.1:18080             -e BIFROST_MANAGEMENT_TOKEN=smoke             -e SUPAUTH_ISSUER=http://127.0.0.1:9999             -e SUPAUTH_CLIENT_ID=smoke             elygate-employee-portal:panel-ci
+          trap 'docker rm -f elygate-employee-portal-smoke >/dev/null 2>&1 || true' EXIT
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:18090/health >/dev/null; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:18090/health
 
       - name: Build image without publishing
         uses: step-security/docker-build-push-action@846549baaf047e867d038826129a64d81df0f704 # v7.1.0
