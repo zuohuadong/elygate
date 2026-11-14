@@ -212,7 +212,8 @@ jobs:
           mkdir -p "$RUNNER_TEMP/oci-verify"
           helm pull oci://ghcr.io/maximhq/helm-charts/bifrost --version "$VERSION" -d "$RUNNER_TEMP/oci-verify"
           [ "$(sha256sum "helm-charts/$CHART" | awk '{print $1}')" = "$(sha256sum "$RUNNER_TEMP/oci-verify/$CHART" | awk '{print $1}')" ]
-          MANIFEST=$(curl -fsS -H "Authorization: Bearer $GITHUB_TOKEN" \
+          PULL_TOKEN=$(curl -fsS "https://ghcr.io/token?service=ghcr.io&scope=repository:maximhq/helm-charts/bifrost:pull" | jq -er '.token')
+          MANIFEST=$(curl -fsS -H "Authorization: Bearer $PULL_TOKEN" \
             -H 'Accept: application/vnd.oci.image.manifest.v1+json' \
             "https://ghcr.io/v2/maximhq/helm-charts/bifrost/manifests/$VERSION")
           LAYER=$(jq -er '.layers[0].digest' <<<"$MANIFEST")
@@ -232,7 +233,8 @@ jobs:
           [ "$(sha256sum "$CHART" | awk '{print $1}')" = "$(sha256sum "$RUNNER_TEMP/remote-$CHART" | awk '{print $1}')" ]
           helm pull oci://ghcr.io/maximhq/helm-charts/bifrost --version "$VERSION" -d "$RUNNER_TEMP"
           [ "$(sha256sum "$CHART" | awk '{print $1}')" = "$(sha256sum "$RUNNER_TEMP/$CHART" | awk '{print $1}')" ]
-          gh release edit "helm-chart-v$VERSION" --draft=false
+          if [[ "$VERSION" == *-* ]]; then LATEST="--latest=false"; else LATEST="--latest"; fi
+          gh release edit "helm-chart-v$VERSION" --draft=false "$LATEST"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
