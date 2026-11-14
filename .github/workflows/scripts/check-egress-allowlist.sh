@@ -192,6 +192,8 @@ HARNESS_MARKERS = ("test-core.sh", "test-provider-harness.sh", "test-proxy-e2e.s
 NOT_DIALLED_HOSTS = {
     # Fetched by the provider's own server-side tooling, never by Bifrost.
     "example.com": "MCP server_url and web_fetch targets - dereferenced by the provider",
+    "example.org": "documentation/fixture URL in the harness collection; never dialed",
+    "runware.ai": "documentation link in a folder description; never dialed",
     "mcp.deepwiki.com": "native OpenAI/Anthropic MCP tools - dereferenced by the provider",
     "www.youtube.com": "Gemini video input - Google fetches the URL server-side",
     "www.wikipedia.org": "Gemini URL-context target - Google fetches the URL server-side",

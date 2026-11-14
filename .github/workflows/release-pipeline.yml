@@ -419,6 +419,7 @@ jobs:
             7defe2860d5ee49a1e667e1eeea34b25.r2.cloudflarestorage.com:443
             accounts.google.com:443
             aiplatform.googleapis.com:443
+            texttospeech.googleapis.com:443
             api.anthropic.com:443
             api.cerebras.ai:443
             api.minimax.io:443
@@ -676,6 +677,7 @@ jobs:
             7defe2860d5ee49a1e667e1eeea34b25.r2.cloudflarestorage.com:443
             accounts.google.com:443
             aiplatform.googleapis.com:443
+            texttospeech.googleapis.com:443
             api.anthropic.com:443
             api.cerebras.ai:443
             api.cohere.ai:443
@@ -900,6 +902,7 @@ jobs:
             7defe2860d5ee49a1e667e1eeea34b25.r2.cloudflarestorage.com:443
             accounts.google.com:443
             aiplatform.googleapis.com:443
+            texttospeech.googleapis.com:443
             api.anthropic.com:443
             api.cerebras.ai:443
             api.minimax.io:443
@@ -2248,6 +2251,7 @@ jobs:
             api.tokenfactory.nebius.com:443
             iojs.org:443
             aiplatform.googleapis.com:443
+            texttospeech.googleapis.com:443
             api.anthropic.com:443
             api.cerebras.ai:443
             api.minimax.io:443

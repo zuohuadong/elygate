@@ -163,15 +163,14 @@ fi
 
 if release_check "$TAG_NAME"; then
   if release_is_draft "$TAG_NAME"; then
-    if [ "$TAG_AT_HEAD" = "true" ]; then
-      # Let the downstream build jobs rebuild/re-upload every platform, then
-      # finalize promotes the existing draft. No R2 read is needed here.
-      echo "ℹ️ Draft release $TAG_NAME exists at HEAD; rebuilding artifacts before promotion."
+    if git rev-parse -q --verify "refs/tags/$TAG_NAME" >/dev/null; then
+      if [ "$TAG_AT_HEAD" = "true" ]; then REPAIR_COMMIT="$(git rev-parse HEAD)"; else REPAIR_COMMIT="$(git rev-list -n 1 "$TAG_NAME")"; fi
+      echo "ℹ️ Draft release $TAG_NAME exists; rebuilding artifacts at $REPAIR_COMMIT before promotion."
       echo "success=true" >> "$GITHUB_OUTPUT"
-      echo "commit-sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      echo "commit-sha=$REPAIR_COMMIT" >> "$GITHUB_OUTPUT"
       exit 0
     fi
-    echo "❌ Draft release $TAG_NAME exists but its tag is not at HEAD"
+    echo "❌ Draft release $TAG_NAME exists but its tag is missing"
     exit 1
   else
     draft_status=$?
@@ -180,10 +179,11 @@ if release_check "$TAG_NAME"; then
       exit 1
     fi
   fi
-  if [ "$TAG_AT_HEAD" = "true" ]; then
-    echo "ℹ️ Release $TAG_NAME already exists; rebuilding artifacts for an idempotent repair."
+  if git rev-parse -q --verify "refs/tags/$TAG_NAME" >/dev/null; then
+    if [ "$TAG_AT_HEAD" = "true" ]; then REPAIR_COMMIT="$(git rev-parse HEAD)"; else REPAIR_COMMIT="$(git rev-list -n 1 "$TAG_NAME")"; fi
+    echo "ℹ️ Release $TAG_NAME already exists; repairing artifacts at $REPAIR_COMMIT."
     echo "success=true" >> "$GITHUB_OUTPUT"
-    echo "commit-sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+    echo "commit-sha=$REPAIR_COMMIT" >> "$GITHUB_OUTPUT"
     exit 0
   fi
   echo "❌ Release $TAG_NAME exists but its tag is missing"
