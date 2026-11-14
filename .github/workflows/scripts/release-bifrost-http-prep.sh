@@ -132,11 +132,9 @@ git fetch --tags
 
 TAG_AT_HEAD="false"
 if git rev-parse -q --verify "refs/tags/$TAG_NAME" >/dev/null; then
-  if [ "$(git rev-list -n 1 "$TAG_NAME")" != "$(git rev-parse HEAD)" ]; then
-    echo "❌ Tag $TAG_NAME already exists at a different commit"
-    exit 1
+  if [ "$(git rev-list -n 1 "$TAG_NAME")" = "$(git rev-parse HEAD)" ]; then
+    TAG_AT_HEAD="true"
   fi
-  TAG_AT_HEAD="true"
 fi
 
 # Capturing changelog
@@ -191,6 +189,10 @@ if release_check "$TAG_NAME"; then
 else
   status=$?
   if [ "$status" -ne 1 ]; then
+    exit 1
+  fi
+  if git rev-parse -q --verify "refs/tags/$TAG_NAME" >/dev/null; then
+    echo "❌ Tag $TAG_NAME exists at an older commit but its GitHub release is missing; manual recovery required" >&2
     exit 1
   fi
 fi
