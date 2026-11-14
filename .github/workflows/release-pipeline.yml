@@ -4665,11 +4665,17 @@ jobs:
               skipped) if [ "$DOCKER_NEEDS_RELEASE" = "true" ]; then DOCKER_INCOMPLETE=true; fi;;
             esac
           done
-          for result in "${{ needs.detect-changes.result }}" "${{ needs.build-gateway.result }}" "${{ needs.security-scan.result }}" "${{ needs.test-core.result }}" "${{ needs.test-core-integrations.result }}" "${{ needs.test-core-unit.result }}" "${{ needs.test-proxy-e2e.result }}" "${{ needs.test-memory.result }}" "${{ needs.test-vllm.result }}" "${{ needs.test-cli-harness.result }}" "${{ needs.test-framework.result }}" "${{ needs.test-plugins.result }}" "${{ needs.test-bifrost-http.result }}" "${{ needs.test-live.result }}" "${{ needs.test-migrations.result }}" "${{ needs.test-agentgateway.result }}" "${{ needs.test-api-integrations.result }}" "${{ needs.test-warp.result }}" "${{ needs.test-cost-accuracy.result }}" "${{ needs.test-load-performance.result }}" "${{ needs.resolve-cli-versions.result }}" "${{ needs.test-docker-image-amd64.result }}" "${{ needs.test-docker-image-arm64.result }}" "${{ needs.core-release.result }}" "${{ needs.framework-release.result }}" "${{ needs.plugins-release.result }}" "${{ needs.bifrost-http-prep.result }}" "${{ needs.build-binaries-x86.result }}" "${{ needs.build-binaries-arm64.result }}" "${{ needs.bifrost-http-release.result }}" "${{ needs.push-mintlify-changelog.result }}"; do
+          for result in "${{ needs.detect-changes.result }}" "${{ needs.build-gateway.result }}" "${{ needs.security-scan.result }}" "${{ needs.test-core-integrations.result }}" "${{ needs.test-core-unit.result }}" "${{ needs.test-proxy-e2e.result }}" "${{ needs.test-vllm.result }}" "${{ needs.test-cli-harness.result }}" "${{ needs.test-framework.result }}" "${{ needs.test-plugins.result }}" "${{ needs.test-bifrost-http.result }}" "${{ needs.test-live.result }}" "${{ needs.test-migrations.result }}" "${{ needs.test-agentgateway.result }}" "${{ needs.test-api-integrations.result }}" "${{ needs.test-warp.result }}" "${{ needs.test-cost-accuracy.result }}" "${{ needs.test-load-performance.result }}" "${{ needs.resolve-cli-versions.result }}" "${{ needs.test-docker-image-amd64.result }}" "${{ needs.test-docker-image-arm64.result }}" "${{ needs.core-release.result }}" "${{ needs.framework-release.result }}" "${{ needs.plugins-release.result }}" "${{ needs.bifrost-http-prep.result }}" "${{ needs.build-binaries-x86.result }}" "${{ needs.build-binaries-arm64.result }}" "${{ needs.bifrost-http-release.result }}" "${{ needs.push-mintlify-changelog.result }}"; do
             case "$result" in
               failure|cancelled|timed_out) TITLE="🚨 **Release Pipeline Incomplete**"; DOCKER_STATUS="❌ A required gate failed";;
             esac
           done
+          if [ "${{ needs.test-core.result }}" = "failure" ] && [ "${{ needs.approve-flaky-test-core.result }}" != "success" ]; then
+            TITLE="🚨 **Release Pipeline Incomplete**"; DOCKER_STATUS="❌ Core test failure was not approved"
+          fi
+          if [ "${{ needs.test-memory.result }}" = "failure" ] && [ "${{ needs.approve-memory-regression.result }}" != "success" ]; then
+            TITLE="🚨 **Release Pipeline Incomplete**"; DOCKER_STATUS="❌ Memory test failure was not approved"
+          fi
           if [ "$DOCKER_INCOMPLETE" = "true" ]; then
             TITLE="🚨 **Release Pipeline Incomplete**"
             DOCKER_STATUS="❌ Docker/GHCR/UBI9 or release publish did not complete"

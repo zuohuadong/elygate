@@ -2,6 +2,14 @@ name: NPX Package Publish
 
 # Triggers when main is pushed and package.json has changed
 on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: "Package to repair"
+        required: true
+        default: all
+        type: choice
+        options: [all, bifrost, bifrost-cli, bifrost-migration-cli]
   push:
     branches:
       - main
@@ -80,8 +88,15 @@ jobs:
 
       - name: Check if bifrost package.json changed
         id: check-bifrost
+        env:
+          REPAIR_PACKAGE: ${{ github.event.inputs.package }}
         run: |
-          if git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" | grep -q '^npx/bifrost/'; then
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            case "$REPAIR_PACKAGE" in
+              all|bifrost) echo "changed=true" >> "$GITHUB_OUTPUT" ;;
+              *) echo "changed=false" >> "$GITHUB_OUTPUT" ;;
+            esac
+          elif git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" | grep -q '^npx/bifrost/'; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
@@ -249,8 +264,15 @@ jobs:
 
       - name: Check if bifrost-cli package changed
         id: check-cli
+        env:
+          REPAIR_PACKAGE: ${{ github.event.inputs.package }}
         run: |
-          if git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" | grep -q '^npx/bifrost-cli/'; then
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            case "$REPAIR_PACKAGE" in
+              all|bifrost-cli) echo "changed=true" >> "$GITHUB_OUTPUT" ;;
+              *) echo "changed=false" >> "$GITHUB_OUTPUT" ;;
+            esac
+          elif git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" | grep -q '^npx/bifrost-cli/'; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
@@ -443,8 +465,15 @@ jobs:
 
       - name: Check if bifrost-migration-cli package changed
         id: check-migration
+        env:
+          REPAIR_PACKAGE: ${{ github.event.inputs.package }}
         run: |
-          if git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" | grep -q '^npx/bifrost-migration-cli/'; then
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            case "$REPAIR_PACKAGE" in
+              all|bifrost-migration-cli) echo "changed=true" >> "$GITHUB_OUTPUT" ;;
+              *) echo "changed=false" >> "$GITHUB_OUTPUT" ;;
+            esac
+          elif git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" | grep -q '^npx/bifrost-migration-cli/'; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"

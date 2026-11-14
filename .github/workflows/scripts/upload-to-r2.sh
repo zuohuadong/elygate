@@ -57,6 +57,7 @@ if [[ "$TRANSPORT_VERSION" != transports/v* ]] || ! is_semver "$VERSION_ONLY"; t
   exit 1
 fi
 CLI_VERSION="v${VERSION_ONLY}"
+printf '%s' "$CLI_VERSION" > ./dist/version.txt
 
 echo "📤 Uploading binaries for version: $CLI_VERSION"
 

@@ -99,6 +99,12 @@ if [[ "$VERSION" != *-* ]]; then
     --delete
   LATEST_LISTING=$(aws s3 ls --recursive "s3://$R2_BUCKET/bifrost/latest/" \
     --endpoint-url "$ENDPOINT" --profile "${R2_AWS_PROFILE:-R2}")
+  LATEST_VERSION=$(aws s3 cp "s3://$R2_BUCKET/bifrost/latest/version.txt" - \
+    --endpoint-url "$ENDPOINT" --profile "${R2_AWS_PROFILE:-R2}")
+  if [ "$LATEST_VERSION" != "v${VERSION#v}" ]; then
+    echo "❌ latest/version.txt is '$LATEST_VERSION', expected 'v${VERSION#v}'" >&2
+    exit 1
+  fi
   require_platform_listing "$LATEST_LISTING" bifrost-http "${BIFROST_HTTP_PLATFORMS[@]}"
   require_remote_prefix_digest "$ENDPOINT" "$R2_BUCKET" "bifrost/latest" bifrost-http "${BIFROST_HTTP_PLATFORMS[@]}"
 fi
