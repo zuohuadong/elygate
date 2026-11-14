@@ -393,7 +393,11 @@ if tag_exists "$TRANSPORT_TAG" transports; then
     R2_LISTING=$(aws s3 ls --recursive "s3://$R2_BUCKET/bifrost/v${TRANSPORT_VERSION}/" \
       --endpoint-url "$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]')" \
       --profile "${R2_AWS_PROFILE:-R2}")
-    if [ -z "$R2_LISTING" ] \
+    VERSION_MARKER=$(aws s3 cp "s3://$R2_BUCKET/bifrost/v${TRANSPORT_VERSION}/version.txt" - \
+      --endpoint-url "$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]')" \
+      --profile "${R2_AWS_PROFILE:-R2}" 2>/dev/null || true)
+    if [ "$VERSION_MARKER" != "v${TRANSPORT_VERSION#v}" ] \
+      || [ -z "$R2_LISTING" ] \
       || ! require_platform_listing "$R2_LISTING" bifrost-http "${BIFROST_HTTP_PLATFORMS[@]}" \
       || ! require_remote_platform_digest "$(printf '%s' "$R2_ENDPOINT" | tr -d '[:space:]')" "$R2_BUCKET" bifrost "$TRANSPORT_VERSION" bifrost-http "${BIFROST_HTTP_PLATFORMS[@]}"; then
       echo "🔁 Transport release $TRANSPORT_TAG has incomplete R2 artifacts - repair needed"

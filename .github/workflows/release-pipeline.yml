@@ -153,6 +153,7 @@ jobs:
             archive.ubuntu.com:443
             dl.google.com:443
             esm.ubuntu.com:443
+            api.github.com:443
             github.com:443
             packages.microsoft.com:443
             proxy.golang.org:443
@@ -164,6 +165,9 @@ jobs:
             files.pythonhosted.org:443
             pypi.org:443
             release-assets.githubusercontent.com:443
+            7defe2860d5ee49a1e667e1eeea34b25.r2.cloudflarestorage.com:443
+            files.pythonhosted.org:443
+            pypi.org:443
             storage.googleapis.com:443
             sum.golang.org:443
 
@@ -276,6 +280,7 @@ jobs:
             esm.ubuntu.com:443
             fonts.googleapis.com:443
             fonts.gstatic.com:443
+            api.github.com:443
             github.com:443
             iojs.org:443
             nodejs.org:443
@@ -283,6 +288,9 @@ jobs:
             proxy.golang.org:443
             registry.npmjs.org:443
             release-assets.githubusercontent.com:443
+            7defe2860d5ee49a1e667e1eeea34b25.r2.cloudflarestorage.com:443
+            files.pythonhosted.org:443
+            pypi.org:443
             storage.googleapis.com:443
             sum.golang.org:443
             us-central1-aiplatform.googleapis.com:443
@@ -450,6 +458,7 @@ jobs:
             files.pythonhosted.org:443
             pypi.org:443
             getbifrost.ai:443
+            api.github.com:443
             github.com:443
             huggingface.co:443
             iojs.org:443
@@ -464,6 +473,9 @@ jobs:
             registry.npmjs.org:443
             release-assets.githubusercontent.com:443
             router.huggingface.co:443
+            7defe2860d5ee49a1e667e1eeea34b25.r2.cloudflarestorage.com:443
+            files.pythonhosted.org:443
+            pypi.org:443
             storage.googleapis.com:443
             sum.golang.org:443
             us-central1-aiplatform.googleapis.com:443
@@ -700,6 +712,7 @@ jobs:
             files.pythonhosted.org:443
             pypi.org:443
             getbifrost.ai:443
+            api.github.com:443
             github.com:443
             huggingface.co:443
             iojs.org:443
@@ -715,6 +728,9 @@ jobs:
             release-assets.githubusercontent.com:443
             releases.astral.sh:443
             router.huggingface.co:443
+            7defe2860d5ee49a1e667e1eeea34b25.r2.cloudflarestorage.com:443
+            files.pythonhosted.org:443
+            pypi.org:443
             storage.googleapis.com:443
             sum.golang.org:443
             us-central1-aiplatform.googleapis.com:443
@@ -923,6 +939,7 @@ jobs:
             files.pythonhosted.org:443
             pypi.org:443
             getbifrost.ai:443
+            api.github.com:443
             github.com:443
             huggingface.co:443
             iojs.org:443
@@ -938,6 +955,9 @@ jobs:
             release-assets.githubusercontent.com:443
             releases.astral.sh:443
             router.huggingface.co:443
+            7defe2860d5ee49a1e667e1eeea34b25.r2.cloudflarestorage.com:443
+            files.pythonhosted.org:443
+            pypi.org:443
             storage.googleapis.com:443
             sum.golang.org:443
             us-central1-aiplatform.googleapis.com:443
@@ -1268,6 +1288,7 @@ jobs:
             api.github.com:443
             archive.ubuntu.com:443
             esm.ubuntu.com:443
+            api.github.com:443
             github.com:443
             iojs.org:443
             nodejs.org:443
@@ -1393,6 +1414,7 @@ jobs:
             fonts.gstatic.com:443
             generativelanguage.googleapis.com:443
             getbifrost.ai:443
+            api.github.com:443
             github.com:443
             iojs.org:443
             files.pythonhosted.org:443
@@ -1405,6 +1427,9 @@ jobs:
             registry.npmjs.org:443
             release-assets.githubusercontent.com:443
             statsig.anthropic.com:443
+            7defe2860d5ee49a1e667e1eeea34b25.r2.cloudflarestorage.com:443
+            files.pythonhosted.org:443
+            pypi.org:443
             storage.googleapis.com:443
             sum.golang.org:443
             www.getbifrost.ai:443
@@ -1557,12 +1582,16 @@ jobs:
           egress-policy: block
           allowed-endpoints: >
             api.github.com:443
+            api.github.com:443
             github.com:443
             release-assets.githubusercontent.com:443
             api.runpod.io:443
             rest.runpod.io:443
             *.proxy.runpod.net:443
             proxy.golang.org:443
+            7defe2860d5ee49a1e667e1eeea34b25.r2.cloudflarestorage.com:443
+            files.pythonhosted.org:443
+            pypi.org:443
             storage.googleapis.com:443
             sum.golang.org:443
 
@@ -1630,6 +1659,7 @@ jobs:
             dl-cdn.alpinelinux.org:443
             generativelanguage.googleapis.com:443
             ghcr.io:443
+            api.github.com:443
             github.com:443
             openrouter.ai:443
             pkg-containers.githubusercontent.com:443
@@ -1638,6 +1668,9 @@ jobs:
             proxy.golang.org:443
             registry-1.docker.io:443
             release-assets.githubusercontent.com:443
+            7defe2860d5ee49a1e667e1eeea34b25.r2.cloudflarestorage.com:443
+            files.pythonhosted.org:443
+            pypi.org:443
             storage.googleapis.com:443
             sum.golang.org:443
             telemetry.qdrant.io:443
@@ -1761,6 +1794,7 @@ jobs:
             esm.ubuntu.com:443
             getbifrost.ai:443
             ghcr.io:443
+            api.github.com:443
             github.com:443
             packages.microsoft.com:443
             pkg-containers.githubusercontent.com:443
@@ -1768,6 +1802,9 @@ jobs:
             proxy.golang.org:443
             registry-1.docker.io:443
             release-assets.githubusercontent.com:443
+            7defe2860d5ee49a1e667e1eeea34b25.r2.cloudflarestorage.com:443
+            files.pythonhosted.org:443
+            pypi.org:443
             storage.googleapis.com:443
             sum.golang.org:443
             telemetry.qdrant.io:443
@@ -1887,12 +1924,16 @@ jobs:
             fonts.googleapis.com:443
             fonts.gstatic.com:443
             getbifrost.ai:443
+            api.github.com:443
             github.com:443
             nodejs.org:443
             openrouter.ai:443
             proxy.golang.org:443
             registry.npmjs.org:443
             release-assets.githubusercontent.com:443
+            7defe2860d5ee49a1e667e1eeea34b25.r2.cloudflarestorage.com:443
+            files.pythonhosted.org:443
+            pypi.org:443
             storage.googleapis.com:443
             sum.golang.org:443
             uploader.codecov.io:443
@@ -1938,12 +1979,16 @@ jobs:
             api.github.com:443
             files.pythonhosted.org:443
             getbifrost.ai:443
+            api.github.com:443
             github.com:443
             objects.githubusercontent.com:443
             proxy.golang.org:443
             pypi.org:443
             release-assets.githubusercontent.com:443
             releases.astral.sh:443
+            7defe2860d5ee49a1e667e1eeea34b25.r2.cloudflarestorage.com:443
+            files.pythonhosted.org:443
+            pypi.org:443
             storage.googleapis.com:443
             stun.l.google.com:19302
             sum.golang.org:443
@@ -2035,6 +2080,7 @@ jobs:
             esm.ubuntu.com:443
             generativelanguage.googleapis.com:443
             getbifrost.ai:443
+            api.github.com:443
             github.com:443
             nodejs.org:443
             openrouter.ai:443
@@ -2045,6 +2091,9 @@ jobs:
             registry-1.docker.io:443
             registry.npmjs.org:443
             release-assets.githubusercontent.com:443
+            7defe2860d5ee49a1e667e1eeea34b25.r2.cloudflarestorage.com:443
+            files.pythonhosted.org:443
+            pypi.org:443
             storage.googleapis.com:443
             sum.golang.org:443
 
@@ -2125,9 +2174,13 @@ jobs:
           allowed-endpoints: >
             127.0.0.1
             getbifrost.ai:443
+            api.github.com:443
             github.com:443
             proxy.golang.org:443
             release-assets.githubusercontent.com:443
+            7defe2860d5ee49a1e667e1eeea34b25.r2.cloudflarestorage.com:443
+            files.pythonhosted.org:443
+            pypi.org:443
             storage.googleapis.com:443
             sum.golang.org:443
             www.getbifrost.ai:443
@@ -2227,6 +2280,7 @@ jobs:
             generativelanguage.googleapis.com:443
             getbifrost.ai:443
             ghcr.io:443
+            api.github.com:443
             github.com:443
             huggingface.co:443
             maxim-o1.openai.azure.com:443
@@ -2240,6 +2294,9 @@ jobs:
             registry-1.docker.io:443
             registry.npmjs.org:443
             release-assets.githubusercontent.com:443
+            7defe2860d5ee49a1e667e1eeea34b25.r2.cloudflarestorage.com:443
+            files.pythonhosted.org:443
+            pypi.org:443
             storage.googleapis.com:443
             sum.golang.org:443
             telemetry.qdrant.io:443
@@ -2395,6 +2452,7 @@ jobs:
             auth.docker.io:443
             cr.weaviate.io:443
             getbifrost.ai:443
+            api.github.com:443
             github.com:443
             iojs.org:443
             nodejs.org:443
@@ -2404,6 +2462,9 @@ jobs:
             registry-1.docker.io:443
             registry.npmjs.org:443
             release-assets.githubusercontent.com:443
+            7defe2860d5ee49a1e667e1eeea34b25.r2.cloudflarestorage.com:443
+            files.pythonhosted.org:443
+            pypi.org:443
             storage.googleapis.com:443
             sum.golang.org:443
             www.getbifrost.ai:443
@@ -2504,6 +2565,7 @@ jobs:
             codeload.github.com:443
             generativelanguage.googleapis.com:443
             getbifrost.ai:443
+            api.github.com:443
             github.com:443
             objects.githubusercontent.com:443
             openrouter.ai:443
@@ -2512,6 +2574,9 @@ jobs:
             proxy.golang.org:443
             registry-1.docker.io:443
             release-assets.githubusercontent.com:443
+            7defe2860d5ee49a1e667e1eeea34b25.r2.cloudflarestorage.com:443
+            files.pythonhosted.org:443
+            pypi.org:443
             storage.googleapis.com:443
             sum.golang.org:443
             www.getbifrost.ai:443
@@ -2603,12 +2668,16 @@ jobs:
             codeload.github.com:443
             generativelanguage.googleapis.com:443
             getbifrost.ai:443
+            api.github.com:443
             github.com:443
             huggingface.co:443
             objects.githubusercontent.com:443
             openrouter.ai:443
             proxy.golang.org:443
             release-assets.githubusercontent.com:443
+            7defe2860d5ee49a1e667e1eeea34b25.r2.cloudflarestorage.com:443
+            files.pythonhosted.org:443
+            pypi.org:443
             storage.googleapis.com:443
             sum.golang.org:443
             www.getbifrost.ai:443
@@ -2722,6 +2791,7 @@ jobs:
             generativelanguage.googleapis.com:443
             getbifrost.ai:443
             ghcr.io:443
+            api.github.com:443
             github.com:443
             huggingface.co:443
             maxim-o1.openai.azure.com:443
@@ -2735,6 +2805,9 @@ jobs:
             registry-1.docker.io:443
             registry.npmjs.org:443
             release-assets.githubusercontent.com:443
+            7defe2860d5ee49a1e667e1eeea34b25.r2.cloudflarestorage.com:443
+            files.pythonhosted.org:443
+            pypi.org:443
             storage.googleapis.com:443
             sum.golang.org:443
             telemetry.qdrant.io:443
@@ -2880,6 +2953,7 @@ jobs:
             generativelanguage.googleapis.com:443
             getbifrost.ai:443
             ghcr.io:443
+            api.github.com:443
             github.com:443
             huggingface.co:443
             maxim-o1.openai.azure.com:443
@@ -2895,6 +2969,9 @@ jobs:
             registry-1.docker.io:443
             registry.npmjs.org:443
             release-assets.githubusercontent.com:443
+            7defe2860d5ee49a1e667e1eeea34b25.r2.cloudflarestorage.com:443
+            files.pythonhosted.org:443
+            pypi.org:443
             storage.googleapis.com:443
             sum.golang.org:443
             telemetry.qdrant.io:443
@@ -3036,6 +3113,7 @@ jobs:
           egress-policy: block
           allowed-endpoints: >
             api.github.com:443
+            api.github.com:443
             github.com:443
             nodejs.org:443
             release-assets.githubusercontent.com:443
@@ -3165,9 +3243,13 @@ jobs:
           egress-policy: block
           allowed-endpoints: >
             api.github.com:443
+            api.github.com:443
             github.com:443
             proxy.golang.org:443
             release-assets.githubusercontent.com:443
+            7defe2860d5ee49a1e667e1eeea34b25.r2.cloudflarestorage.com:443
+            files.pythonhosted.org:443
+            pypi.org:443
             storage.googleapis.com:443
             sum.golang.org:443
 
@@ -3309,11 +3391,15 @@ jobs:
             api.github.com:443
             archive.ubuntu.com:443
             esm.ubuntu.com:443
+            api.github.com:443
             github.com:443
             nodejs.org:443
             packages.microsoft.com:443
             proxy.golang.org:443
             release-assets.githubusercontent.com:443
+            7defe2860d5ee49a1e667e1eeea34b25.r2.cloudflarestorage.com:443
+            files.pythonhosted.org:443
+            pypi.org:443
             storage.googleapis.com:443
             sum.golang.org:443
 
@@ -3475,11 +3561,15 @@ jobs:
             api.github.com:443
             fonts.googleapis.com:443
             fonts.gstatic.com:443
+            api.github.com:443
             github.com:443
             nodejs.org:443
             proxy.golang.org:443
             registry.npmjs.org:443
             release-assets.githubusercontent.com:443
+            7defe2860d5ee49a1e667e1eeea34b25.r2.cloudflarestorage.com:443
+            files.pythonhosted.org:443
+            pypi.org:443
             storage.googleapis.com:443
             sum.golang.org:443
 
@@ -3537,6 +3627,7 @@ jobs:
             files.pythonhosted.org:443
             fonts.googleapis.com:443
             fonts.gstatic.com:443
+            api.github.com:443
             github.com:443
             nodejs.org:443
             packages.microsoft.com:443
@@ -3544,6 +3635,9 @@ jobs:
             pypi.org:443
             registry.npmjs.org:443
             release-assets.githubusercontent.com:443
+            7defe2860d5ee49a1e667e1eeea34b25.r2.cloudflarestorage.com:443
+            files.pythonhosted.org:443
+            pypi.org:443
             storage.googleapis.com:443
 
       - name: Checkout repository
@@ -3612,6 +3706,7 @@ jobs:
             files.pythonhosted.org:443
             fonts.googleapis.com:443
             fonts.gstatic.com:443
+            api.github.com:443
             github.com:443
             nodejs.org:443
             _https._tcp.ports.ubuntu.com:443
@@ -3620,6 +3715,9 @@ jobs:
             pypi.org:443
             registry.npmjs.org:443
             release-assets.githubusercontent.com:443
+            7defe2860d5ee49a1e667e1eeea34b25.r2.cloudflarestorage.com:443
+            files.pythonhosted.org:443
+            pypi.org:443
             storage.googleapis.com:443
 
       - name: Checkout repository
@@ -3692,6 +3790,7 @@ jobs:
             7defe2860d5ee49a1e667e1eeea34b25.r2.cloudflarestorage.com:443
             api.github.com:443
             files.pythonhosted.org:443
+            api.github.com:443
             github.com:443
             pypi.org:443
 
@@ -3776,6 +3875,7 @@ jobs:
             fonts.googleapis.com:443
             fonts.gstatic.com:443
             ghcr.io:443
+            api.github.com:443
             github.com:443
             pkg-containers.githubusercontent.com:443
             production.cloudflare.docker.com:443
@@ -3783,6 +3883,9 @@ jobs:
             proxy.golang.org:443
             registry-1.docker.io:443
             registry.npmjs.org:443
+            7defe2860d5ee49a1e667e1eeea34b25.r2.cloudflarestorage.com:443
+            files.pythonhosted.org:443
+            pypi.org:443
             storage.googleapis.com:443
 
       - name: Checkout repository
@@ -3907,6 +4010,7 @@ jobs:
             fonts.googleapis.com:443
             fonts.gstatic.com:443
             ghcr.io:443
+            api.github.com:443
             github.com:443
             pkg-containers.githubusercontent.com:443
             _https._tcp.ports.ubuntu.com:443
@@ -3916,6 +4020,9 @@ jobs:
             proxy.golang.org:443
             registry-1.docker.io:443
             registry.npmjs.org:443
+            7defe2860d5ee49a1e667e1eeea34b25.r2.cloudflarestorage.com:443
+            files.pythonhosted.org:443
+            pypi.org:443
             storage.googleapis.com:443
             tuf-repo-cdn.sigstore.dev:443
 
@@ -3929,7 +4036,7 @@ jobs:
       # The arm-64-2cpu-8gb image ships without Docker, libatomic (needed by the
       # linux-arm64 Node binary) or build tools; see the script for details.
       - name: Install arm64 runner dependencies
-        run: bash ./.github/workflows/scripts/install-arm64-runner-deps.sh docker gh
+        run: bash ./.github/workflows/scripts/install-arm64-runner-deps.sh docker gh aws
 
       - name: Verify bifrost-http release
         id: verify
@@ -4010,6 +4117,7 @@ jobs:
           allowed-endpoints: >
             auth.docker.io:443
             ghcr.io:443
+            api.github.com:443
             github.com:443
             pkg-containers.githubusercontent.com:443
             production.cloudflare.docker.com:443
@@ -4100,6 +4208,7 @@ jobs:
             fonts.googleapis.com:443
             fonts.gstatic.com:443
             ghcr.io:443
+            api.github.com:443
             github.com:443
             pkg-containers.githubusercontent.com:443
             production.cloudflare.docker.com:443
@@ -4109,6 +4218,9 @@ jobs:
             *.redhat.com:443
             *.quay.io:443
             registry.npmjs.org:443
+            7defe2860d5ee49a1e667e1eeea34b25.r2.cloudflarestorage.com:443
+            files.pythonhosted.org:443
+            pypi.org:443
             storage.googleapis.com:443
 
       - name: Checkout repository
@@ -4251,6 +4363,7 @@ jobs:
             fonts.googleapis.com:443
             fonts.gstatic.com:443
             ghcr.io:443
+            api.github.com:443
             github.com:443
             pkg-containers.githubusercontent.com:443
             _https._tcp.ports.ubuntu.com:443
@@ -4262,6 +4375,9 @@ jobs:
             *.redhat.com:443
             *.quay.io:443
             registry.npmjs.org:443
+            7defe2860d5ee49a1e667e1eeea34b25.r2.cloudflarestorage.com:443
+            files.pythonhosted.org:443
+            pypi.org:443
             storage.googleapis.com:443
             tuf-repo-cdn.sigstore.dev:443
 
@@ -4275,7 +4391,7 @@ jobs:
       # The arm-64-2cpu-8gb image ships without Docker, libatomic (needed by the
       # linux-arm64 Node binary) or build tools; see the script for details.
       - name: Install arm64 runner dependencies
-        run: bash ./.github/workflows/scripts/install-arm64-runner-deps.sh docker gh
+        run: bash ./.github/workflows/scripts/install-arm64-runner-deps.sh docker gh aws
 
       - name: Verify bifrost-http release
         id: verify
@@ -4374,6 +4490,7 @@ jobs:
           allowed-endpoints: >
             auth.docker.io:443
             ghcr.io:443
+            api.github.com:443
             github.com:443
             pkg-containers.githubusercontent.com:443
             production.cloudflare.docker.com:443
@@ -4432,6 +4549,7 @@ jobs:
             7defe2860d5ee49a1e667e1eeea34b25.r2.cloudflarestorage.com:443
             api.github.com:443
             files.pythonhosted.org:443
+            api.github.com:443
             github.com:443
             pypi.org:443
 
@@ -4509,6 +4627,7 @@ jobs:
         with:
           egress-policy: block
           allowed-endpoints: >
+            api.github.com:443
             github.com:443
 
       - name: Checkout repository
@@ -4608,6 +4727,7 @@ jobs:
             discord.com:443
             discordapp.com:443
             dl.google.com:443
+            api.github.com:443
             github.com:443
             esm.ubuntu.com:443
             packages.microsoft.com:443
