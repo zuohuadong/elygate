@@ -2632,22 +2632,28 @@ func TestCreateSTDIOConnectionRejectsDirectoryCommand(t *testing.T) {
 // TestPreflightStdioCommandLeavesArgumentsAlone pins the boundary of the only
 // pre-spawn check. A script or option value that does not exist on this host is
 // a working configuration when a container runner, a wrapper or an optional
-// config flag resolves it, so arguments must never be refused here.
+// config flag resolves it, so arguments must never be refused here. Each case
+// goes through the real constructor with its own argument list.
 func TestPreflightStdioCommandLeavesArgumentsAlone(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
 		name string
-		cmd  string
 		args []string
 	}{
-		{"container-internal script", "echo", []string{"-i", "image", "python", "/app/only-in-container/server.py"}},
-		{"optional rcfile", "echo", []string{"--rcfile", "/nonexistent/for-bifrost-test/optional-init.sh", "-c", "true"}},
-		{"optional env file", "echo", []string{"--env-file-if-exists", "/nonexistent/for-bifrost-test/mcp.env", "server.js"}},
-		{"output path", "echo", []string{"--out", "/nonexistent/for-bifrost-test/report.py"}},
+		{"container-internal script", []string{"-i", "image", "python", "/app/only-in-container/server.py"}},
+		{"optional rcfile", []string{"--rcfile", "/nonexistent/for-bifrost-test/optional-init.sh", "-c", "true"}},
+		{"optional env file", []string{"--env-file-if-exists", "/nonexistent/for-bifrost-test/mcp.env", "server.js"}},
+		{"output path", []string{"--out", "/nonexistent/for-bifrost-test/report.py"}},
 	}
 	for _, tc := range cases {
-		require.NoError(t, preflightStdioCommand(tc.cmd, "arg-client"), tc.name)
+		config := &schemas.MCPClientConfig{
+			Name:           "arg-client",
+			ConnectionType: schemas.MCPConnectionTypeSTDIO,
+			StdioConfig:    &schemas.MCPStdioConfig{Command: "echo", Args: tc.args},
+		}
+		_, _, err := (&MCPManager{}).createSTDIOConnection(context.Background(), config, nil)
+		require.NoError(t, err, tc.name)
 	}
 
 	// The same helper still refuses an unresolvable command, which is the case
