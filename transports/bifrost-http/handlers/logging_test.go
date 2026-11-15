@@ -2499,3 +2499,163 @@ func TestMCPHistogramRoutesHonourBucketSize(t *testing.T) {
 		require.Equal(t, fasthttp.StatusBadRequest, ctx.Response.StatusCode(), "%s accepted bucket_size=1h", name)
 	}
 }
+
+// dashboardBucketLogManager records every bucket width the dashboard passes to a
+// sub-query, so one explicit bucket_size can be checked across the whole payload.
+type dashboardBucketLogManager struct {
+	loggingplugin.LogManager
+	sizes []int64
+	stats int
+}
+
+func (m *dashboardBucketLogManager) record(size int64) { m.sizes = append(m.sizes, size) }
+
+func (m *dashboardBucketLogManager) GetStats(_ context.Context, _ *logstore.SearchFilters) (*logstore.SearchStats, error) {
+	m.stats++
+	return &logstore.SearchStats{}, nil
+}
+
+func (m *dashboardBucketLogManager) GetHistogram(_ context.Context, _ *logstore.SearchFilters, size int64) (*logstore.HistogramResult, error) {
+	m.record(size)
+	return &logstore.HistogramResult{}, nil
+}
+
+func (m *dashboardBucketLogManager) GetTokenHistogram(_ context.Context, _ *logstore.SearchFilters, size int64) (*logstore.TokenHistogramResult, error) {
+	m.record(size)
+	return &logstore.TokenHistogramResult{}, nil
+}
+
+func (m *dashboardBucketLogManager) GetCostHistogram(_ context.Context, _ *logstore.SearchFilters, size int64) (*logstore.CostHistogramResult, error) {
+	m.record(size)
+	return &logstore.CostHistogramResult{}, nil
+}
+
+func (m *dashboardBucketLogManager) GetLatencyHistogram(_ context.Context, _ *logstore.SearchFilters, size int64) (*logstore.LatencyHistogramResult, error) {
+	m.record(size)
+	return &logstore.LatencyHistogramResult{}, nil
+}
+
+func (m *dashboardBucketLogManager) GetThroughputHistogram(_ context.Context, _ *logstore.SearchFilters, size int64) (*logstore.ThroughputHistogramResult, error) {
+	m.record(size)
+	return &logstore.ThroughputHistogramResult{}, nil
+}
+
+func (m *dashboardBucketLogManager) GetModelHistogram(_ context.Context, _ *logstore.SearchFilters, size int64) (*logstore.ModelHistogramResult, error) {
+	m.record(size)
+	return &logstore.ModelHistogramResult{}, nil
+}
+
+func (m *dashboardBucketLogManager) GetProviderCostHistogram(_ context.Context, _ *logstore.SearchFilters, size int64) (*logstore.ProviderCostHistogramResult, error) {
+	m.record(size)
+	return &logstore.ProviderCostHistogramResult{}, nil
+}
+
+func (m *dashboardBucketLogManager) GetProviderTokenHistogram(_ context.Context, _ *logstore.SearchFilters, size int64) (*logstore.ProviderTokenHistogramResult, error) {
+	m.record(size)
+	return &logstore.ProviderTokenHistogramResult{}, nil
+}
+
+func (m *dashboardBucketLogManager) GetProviderLatencyHistogram(_ context.Context, _ *logstore.SearchFilters, size int64) (*logstore.ProviderLatencyHistogramResult, error) {
+	m.record(size)
+	return &logstore.ProviderLatencyHistogramResult{}, nil
+}
+
+func (m *dashboardBucketLogManager) GetProviderThroughputHistogram(_ context.Context, _ *logstore.SearchFilters, size int64) (*logstore.ProviderThroughputHistogramResult, error) {
+	m.record(size)
+	return &logstore.ProviderThroughputHistogramResult{}, nil
+}
+
+func (m *dashboardBucketLogManager) GetModelRankings(_ context.Context, _ *logstore.SearchFilters) (*logstore.ModelRankingResult, error) {
+	return &logstore.ModelRankingResult{}, nil
+}
+
+func (m *dashboardBucketLogManager) GetDimensionRankings(_ context.Context, _ *logstore.SearchFilters, _ logstore.RankingDimension) (*logstore.DimensionRankingResult, error) {
+	return &logstore.DimensionRankingResult{}, nil
+}
+
+func (m *dashboardBucketLogManager) GetMCPHistogram(_ context.Context, _ logstore.MCPToolLogSearchFilters, size int64) (*logstore.MCPHistogramResult, error) {
+	m.record(size)
+	return &logstore.MCPHistogramResult{}, nil
+}
+
+func (m *dashboardBucketLogManager) GetMCPCostHistogram(_ context.Context, _ logstore.MCPToolLogSearchFilters, size int64) (*logstore.MCPCostHistogramResult, error) {
+	m.record(size)
+	return &logstore.MCPCostHistogramResult{}, nil
+}
+
+func (m *dashboardBucketLogManager) GetMCPTopTools(_ context.Context, _ logstore.MCPToolLogSearchFilters, _ int) (*logstore.MCPTopToolsResult, error) {
+	return &logstore.MCPTopToolsResult{}, nil
+}
+
+// TestDashboardPropagatesOneExplicitBucketSizeToEverySubQuery: an explicit
+// bucket_size must reach every histogram in the dashboard payload, not just some
+// of them, so every section of the page shares one resolution.
+func TestDashboardPropagatesOneExplicitBucketSizeToEverySubQuery(t *testing.T) {
+	mgr := &dashboardBucketLogManager{}
+	h := &LoggingHandler{logManager: mgr, redactedKeysManager: noRedactedKeys{}, config: &lib.Config{ClientConfig: &configstore.ClientConfig{}}}
+	ctx := &fasthttp.RequestCtx{}
+	req := fasthttp.AcquireRequest()
+	t.Cleanup(func() { fasthttp.ReleaseRequest(req) })
+	ctx.Init(req, &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 12345}, nil)
+	ctx.QueryArgs().Set("start_time", "2026-01-01T00:00:00Z")
+	ctx.QueryArgs().Set("end_time", "2026-01-02T00:00:00Z")
+	ctx.QueryArgs().Set("bucket_size", "300")
+	h.getDashboard(ctx)
+
+	require.Equal(t, fasthttp.StatusOK, ctx.Response.StatusCode(), string(ctx.Response.Body()))
+	require.GreaterOrEqual(t, mgr.stats, 1, "dashboard did not read stats")
+	require.NotEmpty(t, mgr.sizes, "dashboard passed no bucket size to any sub-query")
+	for _, size := range mgr.sizes {
+		require.EqualValues(t, 300, size, "a dashboard sub-query received a different bucket size: %v", mgr.sizes)
+	}
+}
+
+// TestRankingsRoutesRejectUnusableFilters keeps the two ranking routes on the
+// same 400 contract as the list, stats and histogram routes.
+func TestRankingsRoutesRejectUnusableFilters(t *testing.T) {
+	h := &LoggingHandler{logManager: &topicFilterLogManager{}, redactedKeysManager: noRedactedKeys{}, config: &lib.Config{ClientConfig: &configstore.ClientConfig{}}}
+	cases := []struct {
+		name  string
+		route fasthttp.RequestHandler
+		query map[string]string
+	}{
+		{"model rankings: malformed start_time", h.getModelRankings, map[string]string{"start_time": "1700000000"}},
+		{"model rankings: empty topic_ids", h.getModelRankings, map[string]string{"topic_ids": " , "}},
+		{"dimension rankings: malformed end_time", h.getDimensionRankings, map[string]string{"dimension": "team", "end_time": "yesterday"}},
+		{"dimension rankings: empty topic_ids", h.getDimensionRankings, map[string]string{"dimension": "team", "topic_ids": " , "}},
+	}
+	for _, tc := range cases {
+		ctx := &fasthttp.RequestCtx{}
+		for k, v := range tc.query {
+			ctx.QueryArgs().Set(k, v)
+		}
+		tc.route(ctx)
+		require.Equal(t, fasthttp.StatusBadRequest, ctx.Response.StatusCode(), "%s answered %d: %s", tc.name, ctx.Response.StatusCode(), ctx.Response.Body())
+	}
+}
+
+// TestBreakdownHistogramsRejectMalformedBucketSize extends the bucket_size
+// validation to the breakdown families and the dimension handlers.
+func TestBreakdownHistogramsRejectMalformedBucketSize(t *testing.T) {
+	h := &LoggingHandler{logManager: &bucketSizeFamilyLogManager{}, redactedKeysManager: noRedactedKeys{}, config: &lib.Config{ClientConfig: &configstore.ClientConfig{}}}
+	routes := map[string]fasthttp.RequestHandler{
+		"GET /api/logs/histogram/cost/by-provider":       h.getLogsProviderCostHistogram,
+		"GET /api/logs/histogram/tokens/by-provider":     h.getLogsProviderTokenHistogram,
+		"GET /api/logs/histogram/latency/by-provider":    h.getLogsProviderLatencyHistogram,
+		"GET /api/logs/histogram/throughput/by-provider": h.getLogsProviderThroughputHistogram,
+		"GET /api/logs/histogram/cost/by-dimension":      h.getLogsDimensionCostHistogram,
+		"GET /api/logs/histogram/tokens/by-dimension":    h.getLogsDimensionTokenHistogram,
+		"GET /api/logs/histogram/latency/by-dimension":   h.getLogsDimensionLatencyHistogram,
+	}
+	for name, route := range routes {
+		ctx := &fasthttp.RequestCtx{}
+		ctx.QueryArgs().Set("start_time", "2026-01-01T00:00:00Z")
+		ctx.QueryArgs().Set("end_time", "2026-01-02T00:00:00Z")
+		ctx.QueryArgs().Set("bucket_size", "1h")
+		if strings.Contains(name, "by-dimension") {
+			ctx.QueryArgs().Set("dimension", "provider")
+		}
+		route(ctx)
+		require.Equal(t, fasthttp.StatusBadRequest, ctx.Response.StatusCode(), "%s accepted bucket_size=1h: %s", name, ctx.Response.Body())
+	}
+}
