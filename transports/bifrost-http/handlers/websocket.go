@@ -99,11 +99,18 @@ func (h *WebSocketHandler) getUpgrader() websocket.FastHTTPUpgrader {
 		ReadBufferSize:  1024,
 		WriteBufferSize: 1024,
 		CheckOrigin: func(ctx *fasthttp.RequestCtx) bool {
+			host := string(ctx.Request.Header.Peek("Host"))
 			origin := string(ctx.Request.Header.Peek("Origin"))
 			if origin == "" {
 				// If no Origin header, check the Host header for direct connections
-				host := string(ctx.Request.Header.Peek("Host"))
 				return isLocalhost(host)
+			}
+			// The dashboard is normally served by this same process, so a same-origin
+			// upgrade is already bounded by the browser's same-origin policy and the
+			// caller's session. An empty allowed_origins list means "no extra origins
+			// are allowed", not "the gateway's own origin is forbidden".
+			if isSameOrigin(origin, host) {
+				return true
 			}
 			// Check the configured allowlist; localhost is implicit only when no allowlist exists.
 			return IsOriginAllowed(origin, h.allowedOrigins)

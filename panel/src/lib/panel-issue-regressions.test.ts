@@ -127,6 +127,9 @@ describe('panel issue regressions', () => {
 		expect(source).not.toContain("fetch('https://getbifrost.ai/latest-release'");
 		expect(source).not.toContain('AbortController');
 		expect(source).not.toContain('controller.abort()');
+		// Issue #198: the gateway allows 10s for the third-party feed and caches
+		// the success, so a 3s client race could only ever drop a valid answer.
+		expect(source).toContain('resolve(undefined), 8000)');
 	});
 
 	test('provider retries are explicit and leave the default unchanged when unset', async () => {
@@ -541,6 +544,9 @@ describe('panel issue regressions', () => {
 	test('fourth-round settings and documentation surfaces are localized', async () => {
 		const generic = await Bun.file(new URL('../pages/GenericAdminPage.svelte', import.meta.url)).text();
 		const operational = await Bun.file(new URL('../pages/OperationalSettingsPage.svelte', import.meta.url)).text();
+		// Issue #199: the routing-rules descriptor must name a registered route.
+		expect(generic).toContain("endpoint: '/api/routing/rules'");
+		expect(generic).not.toContain('/api/governance/routing-rules');
 		const proxy = await Bun.file(new URL('../pages/RoutingNetworkSettingsPage.svelte', import.meta.url)).text();
 		const docs = await Bun.file(new URL('../pages/DocsHubPage.svelte', import.meta.url)).text();
 		const translations = await Bun.file(new URL('./i18n.ts', import.meta.url)).text();

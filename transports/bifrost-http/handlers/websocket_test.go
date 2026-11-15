@@ -407,3 +407,65 @@ func TestWebSocketStopClosesClients(t *testing.T) {
 		t.Fatalf("write after Stop panicked inside the websocket library: %v", err)
 	}
 }
+
+// TestWebSocketCheckOriginAllowsSameOriginWithoutAllowlist pins issue #197: a
+// deployment whose client.allowed_origins is stored as an empty list (the
+// default config.json shape) must still accept the dashboard's own same-origin
+// upgrade. Only the localhost fallback used to be implicit, so the panel's own
+// wss://<public host>/ws handshake was rejected with 403 and live log streaming
+// never connected.
+func TestWebSocketCheckOriginAllowsSameOriginWithoutAllowlist(t *testing.T) {
+	handler := NewWebSocketHandler(context.Background(), nil)
+	checkOrigin := handler.getUpgrader().CheckOrigin
+	require.NotNil(t, checkOrigin)
+
+	newCtx := func(host, origin string) *fasthttp.RequestCtx {
+		ctx := &fasthttp.RequestCtx{}
+		ctx.Request.SetRequestURI("/ws")
+		ctx.Request.Header.SetHost(host)
+		if origin != "" {
+			ctx.Request.Header.Set("Origin", origin)
+		}
+		return ctx
+	}
+
+	cases := []struct {
+		name   string
+		host   string
+		origin string
+		want   bool
+	}{
+		{"same origin", "lingxi.xai.xigu.team", "https://lingxi.xai.xigu.team", true},
+		{"same origin with port", "gateway.example.com:8443", "https://gateway.example.com:8443", true},
+		{"same origin behind tls proxy", "gateway.example.com", "https://gateway.example.com:443", true},
+		{"same origin case insensitive", "Gateway.Example.com", "https://gateway.example.com", true},
+		{"cross origin rejected", "lingxi.xai.xigu.team", "https://evil.example.com", false},
+		{"suffix spoof rejected", "lingxi.xai.xigu.team", "https://lingxi.xai.xigu.team.evil.com", false},
+		{"different port rejected", "gateway.example.com:8443", "https://gateway.example.com:9443", false},
+		{"malformed origin rejected", "gateway.example.com", "not-a-url", false},
+		{"no origin falls back to localhost only", "gateway.example.com", "", false},
+		{"no origin localhost", "127.0.0.1:18080", "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, checkOrigin(newCtx(tc.host, tc.origin)))
+		})
+	}
+}
+
+// TestWebSocketCheckOriginHonoursAllowlistWhenConfigured keeps the cross-origin
+// contract intact: an explicit allowlist still gates non-same-origin upgrades.
+func TestWebSocketCheckOriginHonoursAllowlistWhenConfigured(t *testing.T) {
+	handler := NewWebSocketHandler(context.Background(), []string{"https://console.example.com"})
+	checkOrigin := handler.getUpgrader().CheckOrigin
+
+	ctx := &fasthttp.RequestCtx{}
+	ctx.Request.Header.SetHost("gateway.example.com")
+	ctx.Request.Header.Set("Origin", "https://console.example.com")
+	require.True(t, checkOrigin(ctx))
+
+	ctx = &fasthttp.RequestCtx{}
+	ctx.Request.Header.SetHost("gateway.example.com")
+	ctx.Request.Header.Set("Origin", "https://elsewhere.example.com")
+	require.False(t, checkOrigin(ctx))
+}

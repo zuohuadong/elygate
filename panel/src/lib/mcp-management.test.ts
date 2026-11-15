@@ -8,6 +8,7 @@ import {
 	buildOAuthGrantQuery,
 	createCoalescedRefresh,
 	createEmptyMcpClientDraft,
+	mcpClientFilterFacets,
 	localizeMcpCatalogDescription,
 	localizeMcpCatalogValue,
 	mcpExposureDraft,
@@ -253,9 +254,24 @@ describe('MCP management helpers', () => {
 		expect(maxActiveRuns).toBe(1);
 	});
 
-	test('loads server-provided MCP facets and keeps client checkboxes compact', async () => {
+	test('derives MCP client facets from client records instead of a missing endpoint', async () => {
 		const source = await Bun.file(new URL('../pages/McpManagementPage.svelte', import.meta.url)).text();
-		expect(source).toContain("requestJson<unknown>('/api/mcp/clients/filterdata')");
+		// Issue #196: /api/mcp/clients/filterdata does not exist on the gateway, so
+		// requesting it only produced a 404 and permanently empty filter dropdowns.
+		expect(source).not.toContain('/api/mcp/clients/filterdata');
+		expect(source).toContain('mcpClientFilterFacets(clients)');
+		expect(source).toContain("requestJson<unknown>('/api/mcp/library/filterdata')");
+		expect(mcpClientFilterFacets([
+			{ name: 'a', config: { connection_type: 'http', auth_type: 'oauth' } },
+			{ connection_type: 'stdio', auth_type: 'none' },
+			{ name: 'b', config: { connection_type: 'sse', auth_type: 'oauth' } },
+			{ name: 'c', config: {} },
+		])).toEqual({
+			connection_types: ['http', 'sse', 'stdio'],
+			auth_types: ['none', 'oauth'],
+			states: ['healthy', 'unstable'],
+		});
+		expect(mcpClientFilterFacets([])).toEqual({ connection_types: [], auth_types: [], states: ['healthy', 'unstable'] });
 		expect(source).toContain("facet('connection_types')");
 		expect(source).toContain("facet('auth_types')");
 		expect(source).toContain("facet('states')");

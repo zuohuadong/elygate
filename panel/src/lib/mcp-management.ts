@@ -1,10 +1,13 @@
 import { csv, parseJsonObject } from './forms';
-import type { JsonRecord } from './api';
+import { isJsonRecord, type JsonRecord } from './api';
 import type { ElygateLocale } from './i18n';
 
 export type McpConnectionType = 'http' | 'sse' | 'stdio';
 export type McpAuthType = 'none' | 'headers' | 'oauth' | 'per_user_oauth' | 'per_user_headers';
 export const mcpMaxProtocolVersions = ['', 'auto', '2026-07-28', '2025-11-25', '2025-06-18'] as const;
+// The only runtime states GET /api/mcp/clients accepts; disabled is a separate
+// boolean facet (the `disabled` query parameter), not a state value.
+export const mcpClientStates = ['healthy', 'unstable'] as const;
 
 interface McpExposurePolicy {
 	maxProtocolVersion: string;
@@ -230,6 +233,32 @@ export function buildMcpClientQuery(filters: McpClientFilters): string {
 	if (filters.disabled !== undefined) params.set('disabled', String(filters.disabled));
 	if (filters.allVirtualKeys) params.set('all_virtual_keys', 'true');
 	return params.toString();
+}
+
+// mcpClientFilterFacets derives the client list's filter options from the
+// clients actually present. There is no /api/mcp/clients/filterdata endpoint
+// (only the library has one), so the panel builds the facets it needs from the
+// same records it already fetches — a mismatch there used to mean 404s and
+// permanently empty dropdowns.
+export function mcpClientFilterFacets(clients: JsonRecord[]): {
+	connection_types: string[];
+	auth_types: string[];
+	states: string[];
+} {
+	const connectionTypes = new Set<string>();
+	const authTypes = new Set<string>();
+	for (const client of clients) {
+		const config = isJsonRecord(client.config) ? client.config : client;
+		const connectionType = typeof config.connection_type === 'string' ? config.connection_type.trim() : '';
+		if (connectionType) connectionTypes.add(connectionType);
+		const authType = typeof config.auth_type === 'string' ? config.auth_type.trim() : '';
+		if (authType) authTypes.add(authType);
+	}
+	return {
+		connection_types: [...connectionTypes].sort(),
+		auth_types: [...authTypes].sort(),
+		states: [...mcpClientStates],
+	};
 }
 
 export function buildMcpLibraryQuery(filters: McpLibraryFilters): string {

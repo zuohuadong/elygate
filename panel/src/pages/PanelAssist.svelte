@@ -29,7 +29,10 @@
 			const response = await Promise.race([
 				requestJson<JsonRecord>('/api/latest-release'),
 				new Promise<undefined>((resolve) => {
-					timeout = window.setTimeout(() => resolve(undefined), 3000);
+					// The gateway bounds its own upstream fetch at 10s and caches the
+					// result, so racing it at 3s only cancelled the answer before it
+					// could arrive.
+					timeout = window.setTimeout(() => resolve(undefined), 8000);
 				}),
 			]);
 			if (!response || !isJsonRecord(response)) return;

@@ -21,6 +21,7 @@
 		createEmptyMcpClientDraft,
 		localizeMcpCatalogDescription,
 		localizeMcpCatalogValue,
+		mcpClientFilterFacets,
 		mcpExposureDraft,
 		mcpMaxProtocolVersions,
 		mcpOriginalPromptName,
@@ -161,15 +162,16 @@
 	async function loadFilterMetadata(): Promise<void> {
 		const requestedMode = mode;
 		if (mode === 'clients') {
-			let filtersPayload: unknown;
+			// The clients endpoint has no filterdata sibling, so the facets come from
+			// the records themselves rather than a request that can only 404.
+			let clients: JsonRecord[];
 			try {
-				filtersPayload = await requestJson<unknown>('/api/mcp/clients/filterdata');
+				clients = await loadAllMcpClients();
 			} catch {
 				return;
 			}
 			if (mode !== requestedMode) return;
-			if (!isJsonRecord(filtersPayload)) return;
-			filterData = filtersPayload;
+			filterData = mcpClientFilterFacets(clients);
 			connectionTypes = connectionTypes.filter((item) => facet('connection_types').includes(item));
 			authTypes = authTypes.filter((item) => facet('auth_types').includes(item));
 			states = states.filter((item) => facet('states').includes(item));

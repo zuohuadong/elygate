@@ -129,7 +129,7 @@
 		'routing-rules': {
 			titleKey: 'elygate.routingRules',
 			eyebrow: 'Routing',
-			endpoint: '/api/governance/routing-rules',
+			endpoint: '/api/routing/rules',
 			helpKey: 'elygate.routingRulesHelp',
 			listKey: 'rules',
 			itemKey: 'rule',

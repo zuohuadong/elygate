@@ -3,7 +3,9 @@ package handlers
 import (
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/maximhq/bifrost/core/network"
 	"github.com/stretchr/testify/require"
@@ -75,4 +77,101 @@ func TestGetLatestReleaseUsesTheConfiguredGlobalProxy(t *testing.T) {
 	}
 	require.Equal(t, fasthttp.StatusOK, ctx.Response.StatusCode())
 	require.JSONEq(t, `{"name":"v9.9.9"}`, string(ctx.Response.Body()))
+}
+
+// TestGetLatestReleaseToleratesSlowUpstream pins issue #198: the feed lives on a
+// third party over the public internet and its cold DNS + TLS handshake takes
+// over three seconds, so the old 3s bound turned a healthy feed into a 502.
+func TestGetLatestReleaseToleratesSlowUpstream(t *testing.T) {
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		<-release
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"name":"v2.5.1"}`))
+	}))
+	t.Cleanup(server.Close)
+	previous := latestReleaseEndpoint
+	latestReleaseEndpoint = server.URL
+	t.Cleanup(func() {
+		latestReleaseEndpoint = previous
+		resetLatestReleaseCache()
+	})
+	resetLatestReleaseCache()
+	// Release the upstream response after the old 3s bound has elapsed but well
+	// inside the current one.
+	go func() {
+		time.Sleep(3200 * time.Millisecond)
+		close(release)
+	}()
+
+	ctx := &fasthttp.RequestCtx{}
+	started := time.Now()
+	(&ConfigHandler{}).getLatestRelease(ctx)
+	elapsed := time.Since(started)
+
+	require.Equal(t, fasthttp.StatusOK, ctx.Response.StatusCode())
+	require.JSONEq(t, `{"name":"v2.5.1"}`, string(ctx.Response.Body()))
+	require.GreaterOrEqual(t, elapsed, 3200*time.Millisecond, "handler returned before the upstream answered")
+}
+
+// TestGetLatestReleaseCachesSuccessfulFetch: the dashboard checks releases on
+// every load, so one slow upstream answer must not be refetched each time.
+func TestGetLatestReleaseCachesSuccessfulFetch(t *testing.T) {
+	var hits atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"name":"v9.9.9","changelogUrl":"https://example.com/v9"}`))
+	}))
+	t.Cleanup(server.Close)
+	previous := latestReleaseEndpoint
+	latestReleaseEndpoint = server.URL
+	t.Cleanup(func() {
+		latestReleaseEndpoint = previous
+		resetLatestReleaseCache()
+	})
+	resetLatestReleaseCache()
+
+	for i := 0; i < 3; i++ {
+		ctx := &fasthttp.RequestCtx{}
+		(&ConfigHandler{}).getLatestRelease(ctx)
+		require.Equal(t, fasthttp.StatusOK, ctx.Response.StatusCode())
+		require.JSONEq(t, `{"name":"v9.9.9","changelogUrl":"https://example.com/v9"}`, string(ctx.Response.Body()))
+	}
+	require.EqualValues(t, 1, hits.Load(), "cached release responses must not refetch the upstream")
+}
+
+// TestGetLatestReleaseDoesNotCacheFailures: an upstream outage must be retried
+// instead of being pinned in the cache as a 502 (or worse, as a success).
+func TestGetLatestReleaseDoesNotCacheFailures(t *testing.T) {
+	var hits atomic.Int32
+	failing := true
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		if failing {
+			http.Error(w, "nope", http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"name":"v3.0.0"}`))
+	}))
+	t.Cleanup(server.Close)
+	previous := latestReleaseEndpoint
+	latestReleaseEndpoint = server.URL
+	t.Cleanup(func() {
+		latestReleaseEndpoint = previous
+		resetLatestReleaseCache()
+	})
+	resetLatestReleaseCache()
+
+	ctx := &fasthttp.RequestCtx{}
+	(&ConfigHandler{}).getLatestRelease(ctx)
+	require.Equal(t, fasthttp.StatusBadGateway, ctx.Response.StatusCode())
+
+	failing = false
+	ctx = &fasthttp.RequestCtx{}
+	(&ConfigHandler{}).getLatestRelease(ctx)
+	require.Equal(t, fasthttp.StatusOK, ctx.Response.StatusCode())
+	require.JSONEq(t, `{"name":"v3.0.0"}`, string(ctx.Response.Body()))
+	require.EqualValues(t, 2, hits.Load())
 }
