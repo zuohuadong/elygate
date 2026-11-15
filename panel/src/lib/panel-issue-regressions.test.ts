@@ -129,7 +129,7 @@ describe('panel issue regressions', () => {
 		expect(source).not.toContain('controller.abort()');
 		// Issue #198: the gateway allows 10s for the third-party feed and caches
 		// the success, so a 3s client race could only ever drop a valid answer.
-		expect(source).toContain('resolve(undefined), 8000)');
+		expect(source).toContain('resolve(undefined), 15000)');
 	});
 
 	test('provider retries are explicit and leave the default unchanged when unset', async () => {

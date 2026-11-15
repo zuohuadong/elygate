@@ -236,17 +236,20 @@ export function buildMcpClientQuery(filters: McpClientFilters): string {
 }
 
 // mcpClientFilterFacets derives the client list's filter options from the
-// clients actually present. There is no /api/mcp/clients/filterdata endpoint
-// (only the library has one), so the panel builds the facets it needs from the
-// same records it already fetches — a mismatch there used to mean 404s and
-// permanently empty dropdowns.
-export function mcpClientFilterFacets(clients: JsonRecord[]): {
+// clients the panel has already seen. There is no /api/mcp/clients/filterdata
+// endpoint (only the library has one), and the client page refreshes every few
+// seconds, so facets are accumulated from the records each refresh already
+// fetches instead of re-enumerating every client on every cycle.
+export function mcpClientFilterFacets(
+	clients: JsonRecord[],
+	known: { connection_types?: string[]; auth_types?: string[] } = {},
+): {
 	connection_types: string[];
 	auth_types: string[];
 	states: string[];
 } {
-	const connectionTypes = new Set<string>();
-	const authTypes = new Set<string>();
+	const connectionTypes = new Set<string>(known.connection_types ?? []);
+	const authTypes = new Set<string>(known.auth_types ?? []);
 	for (const client of clients) {
 		const config = isJsonRecord(client.config) ? client.config : client;
 		const connectionType = typeof config.connection_type === 'string' ? config.connection_type.trim() : '';

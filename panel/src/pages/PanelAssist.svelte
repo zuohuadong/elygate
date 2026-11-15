@@ -29,10 +29,10 @@
 			const response = await Promise.race([
 				requestJson<JsonRecord>('/api/latest-release'),
 				new Promise<undefined>((resolve) => {
-					// The gateway bounds its own upstream fetch at 10s and caches the
-					// result, so racing it at 3s only cancelled the answer before it
-					// could arrive.
-					timeout = window.setTimeout(() => resolve(undefined), 8000);
+					// The gateway allows 10s for the third-party feed, so the client
+					// bound has to sit past that plus transfer time; racing at 3s only
+					// discarded answers the gateway was about to deliver.
+					timeout = window.setTimeout(() => resolve(undefined), 15000);
 				}),
 			]);
 			if (!response || !isJsonRecord(response)) return;

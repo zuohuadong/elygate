@@ -137,6 +137,14 @@
 			const payload = await requestJson<unknown>(path);
 			records = recordList(payload, key);
 			total = getTotal(payload, records.length);
+			if (mode === 'clients') {
+				// Accumulated across refreshes, so a filter's options never collapse to
+				// just what the current page happens to hold.
+				filterData = mcpClientFilterFacets(records, filterData);
+				connectionTypes = connectionTypes.filter((item) => facet('connection_types').includes(item));
+				authTypes = authTypes.filter((item) => facet('auth_types').includes(item));
+				states = states.filter((item) => facet('states').includes(item));
+			}
 			if (total > 0 && offset >= total) { offset = Math.floor((total - 1) / pageSize) * pageSize; await load(); }
 		} catch (cause) {
 			error = displayError(cause, text('加载失败。', 'Failed to load.'));
@@ -162,19 +170,8 @@
 	async function loadFilterMetadata(): Promise<void> {
 		const requestedMode = mode;
 		if (mode === 'clients') {
-			// The clients endpoint has no filterdata sibling, so the facets come from
-			// the records themselves rather than a request that can only 404.
-			let clients: JsonRecord[];
-			try {
-				clients = await loadAllMcpClients();
-			} catch {
-				return;
-			}
-			if (mode !== requestedMode) return;
-			filterData = mcpClientFilterFacets(clients);
-			connectionTypes = connectionTypes.filter((item) => facet('connection_types').includes(item));
-			authTypes = authTypes.filter((item) => facet('auth_types').includes(item));
-			states = states.filter((item) => facet('states').includes(item));
+			// The clients endpoint has no filterdata sibling; load() accumulates the
+			// facets from the page it just fetched, so this path stays off the wire.
 			return;
 		}
 		if (mode !== 'library') { filterData = {}; return; }

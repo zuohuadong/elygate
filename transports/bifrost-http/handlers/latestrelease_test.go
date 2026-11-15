@@ -12,6 +12,21 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
+// pointLatestReleaseAt repoints the release endpoint for one test and keeps the
+// module-level success cache out of the way: the cache is keyed by endpoint, and
+// a fixed endpoint reused across runs (-count=2) would otherwise serve the
+// previous run's answer and never reach the fake upstream.
+func pointLatestReleaseAt(t *testing.T, endpoint string) {
+	t.Helper()
+	previous := latestReleaseEndpoint
+	latestReleaseEndpoint = endpoint
+	resetLatestReleaseCache()
+	t.Cleanup(func() {
+		latestReleaseEndpoint = previous
+		resetLatestReleaseCache()
+	})
+}
+
 func TestGetLatestReleaseNormalizesAndBoundsTheFeed(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, http.MethodGet, r.Method)
@@ -20,9 +35,7 @@ func TestGetLatestReleaseNormalizesAndBoundsTheFeed(t *testing.T) {
 		_, _ = w.Write([]byte(`{"tag":"v1.2.3","changelog_url":"https://example.com/changes"}`))
 	}))
 	t.Cleanup(server.Close)
-	previous := latestReleaseEndpoint
-	latestReleaseEndpoint = server.URL
-	t.Cleanup(func() { latestReleaseEndpoint = previous })
+	pointLatestReleaseAt(t, server.URL)
 
 	ctx := &fasthttp.RequestCtx{}
 	ctx.Request.Header.SetMethod(fasthttp.MethodGet)
@@ -38,9 +51,7 @@ func TestGetLatestReleaseRejectsUpstreamFailure(t *testing.T) {
 		http.Error(w, "nope", http.StatusServiceUnavailable)
 	}))
 	t.Cleanup(server.Close)
-	previous := latestReleaseEndpoint
-	latestReleaseEndpoint = server.URL
-	t.Cleanup(func() { latestReleaseEndpoint = previous })
+	pointLatestReleaseAt(t, server.URL)
 
 	ctx := &fasthttp.RequestCtx{}
 	(&ConfigHandler{}).getLatestRelease(ctx)
@@ -63,9 +74,7 @@ func TestGetLatestReleaseUsesTheConfiguredGlobalProxy(t *testing.T) {
 		Enabled: true, Type: network.GlobalProxyTypeHTTP, URL: proxy.URL, EnableForAPI: true,
 	}, nil))
 	t.Cleanup(func() { network.SetDefaultHTTPClientFactory(nil) })
-	previous := latestReleaseEndpoint
-	latestReleaseEndpoint = "http://release.invalid/latest-release"
-	t.Cleanup(func() { latestReleaseEndpoint = previous })
+	pointLatestReleaseAt(t, "http://release.invalid/latest-release")
 
 	ctx := &fasthttp.RequestCtx{}
 	(&ConfigHandler{}).getLatestRelease(ctx)
@@ -90,13 +99,7 @@ func TestGetLatestReleaseToleratesSlowUpstream(t *testing.T) {
 		_, _ = w.Write([]byte(`{"name":"v2.5.1"}`))
 	}))
 	t.Cleanup(server.Close)
-	previous := latestReleaseEndpoint
-	latestReleaseEndpoint = server.URL
-	t.Cleanup(func() {
-		latestReleaseEndpoint = previous
-		resetLatestReleaseCache()
-	})
-	resetLatestReleaseCache()
+	pointLatestReleaseAt(t, server.URL)
 	// Release the upstream response after the old 3s bound has elapsed but well
 	// inside the current one.
 	go func() {
@@ -124,13 +127,7 @@ func TestGetLatestReleaseCachesSuccessfulFetch(t *testing.T) {
 		_, _ = w.Write([]byte(`{"name":"v9.9.9","changelogUrl":"https://example.com/v9"}`))
 	}))
 	t.Cleanup(server.Close)
-	previous := latestReleaseEndpoint
-	latestReleaseEndpoint = server.URL
-	t.Cleanup(func() {
-		latestReleaseEndpoint = previous
-		resetLatestReleaseCache()
-	})
-	resetLatestReleaseCache()
+	pointLatestReleaseAt(t, server.URL)
 
 	for i := 0; i < 3; i++ {
 		ctx := &fasthttp.RequestCtx{}
@@ -156,13 +153,7 @@ func TestGetLatestReleaseDoesNotCacheFailures(t *testing.T) {
 		_, _ = w.Write([]byte(`{"name":"v3.0.0"}`))
 	}))
 	t.Cleanup(server.Close)
-	previous := latestReleaseEndpoint
-	latestReleaseEndpoint = server.URL
-	t.Cleanup(func() {
-		latestReleaseEndpoint = previous
-		resetLatestReleaseCache()
-	})
-	resetLatestReleaseCache()
+	pointLatestReleaseAt(t, server.URL)
 
 	ctx := &fasthttp.RequestCtx{}
 	(&ConfigHandler{}).getLatestRelease(ctx)

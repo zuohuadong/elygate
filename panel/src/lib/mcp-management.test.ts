@@ -259,7 +259,7 @@ describe('MCP management helpers', () => {
 		// Issue #196: /api/mcp/clients/filterdata does not exist on the gateway, so
 		// requesting it only produced a 404 and permanently empty filter dropdowns.
 		expect(source).not.toContain('/api/mcp/clients/filterdata');
-		expect(source).toContain('mcpClientFilterFacets(clients)');
+		expect(source).toContain('mcpClientFilterFacets(records, filterData)');
 		expect(source).toContain("requestJson<unknown>('/api/mcp/library/filterdata')");
 		expect(mcpClientFilterFacets([
 			{ name: 'a', config: { connection_type: 'http', auth_type: 'oauth' } },
@@ -272,6 +272,12 @@ describe('MCP management helpers', () => {
 			states: ['healthy', 'unstable'],
 		});
 		expect(mcpClientFilterFacets([])).toEqual({ connection_types: [], auth_types: [], states: ['healthy', 'unstable'] });
+		// Facets accumulate across refreshes: a page that no longer carries the
+		// previously seen variants must not collapse the dropdown options.
+		expect(mcpClientFilterFacets([{ config: { connection_type: 'http' } }], {
+			connection_types: ['sse'],
+			auth_types: ['oauth'],
+		})).toEqual({ connection_types: ['http', 'sse'], auth_types: ['oauth'], states: ['healthy', 'unstable'] });
 		expect(source).toContain("facet('connection_types')");
 		expect(source).toContain("facet('auth_types')");
 		expect(source).toContain("facet('states')");
