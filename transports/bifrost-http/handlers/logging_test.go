@@ -2235,6 +2235,65 @@ func (m *bucketSizeLogManager) GetCostHistogram(_ context.Context, _ *logstore.S
 	return &logstore.CostHistogramResult{}, nil
 }
 
+// bucketSizeFamilyLogManager records the bucket width passed to any of the
+// breakdown histograms and answers an empty result.
+type bucketSizeFamilyLogManager struct {
+	loggingplugin.LogManager
+	last int64
+}
+
+func (m *bucketSizeFamilyLogManager) record(size int64) { m.last = size }
+
+func (m *bucketSizeFamilyLogManager) GetLatencyHistogram(_ context.Context, _ *logstore.SearchFilters, size int64) (*logstore.LatencyHistogramResult, error) {
+	m.record(size)
+	return &logstore.LatencyHistogramResult{}, nil
+}
+
+func (m *bucketSizeFamilyLogManager) GetModelHistogram(_ context.Context, _ *logstore.SearchFilters, size int64) (*logstore.ModelHistogramResult, error) {
+	m.record(size)
+	return &logstore.ModelHistogramResult{}, nil
+}
+
+func (m *bucketSizeFamilyLogManager) GetThroughputHistogram(_ context.Context, _ *logstore.SearchFilters, size int64) (*logstore.ThroughputHistogramResult, error) {
+	m.record(size)
+	return &logstore.ThroughputHistogramResult{}, nil
+}
+
+func (m *bucketSizeFamilyLogManager) GetProviderCostHistogram(_ context.Context, _ *logstore.SearchFilters, size int64) (*logstore.ProviderCostHistogramResult, error) {
+	m.record(size)
+	return &logstore.ProviderCostHistogramResult{}, nil
+}
+
+func (m *bucketSizeFamilyLogManager) GetProviderTokenHistogram(_ context.Context, _ *logstore.SearchFilters, size int64) (*logstore.ProviderTokenHistogramResult, error) {
+	m.record(size)
+	return &logstore.ProviderTokenHistogramResult{}, nil
+}
+
+func (m *bucketSizeFamilyLogManager) GetProviderLatencyHistogram(_ context.Context, _ *logstore.SearchFilters, size int64) (*logstore.ProviderLatencyHistogramResult, error) {
+	m.record(size)
+	return &logstore.ProviderLatencyHistogramResult{}, nil
+}
+
+func (m *bucketSizeFamilyLogManager) GetProviderThroughputHistogram(_ context.Context, _ *logstore.SearchFilters, size int64) (*logstore.ProviderThroughputHistogramResult, error) {
+	m.record(size)
+	return &logstore.ProviderThroughputHistogramResult{}, nil
+}
+
+func (m *bucketSizeFamilyLogManager) GetDimensionCostHistogram(_ context.Context, _ *logstore.SearchFilters, size int64, _ logstore.HistogramDimension) (*logstore.DimensionCostHistogramResult, error) {
+	m.record(size)
+	return &logstore.DimensionCostHistogramResult{}, nil
+}
+
+func (m *bucketSizeFamilyLogManager) GetDimensionTokenHistogram(_ context.Context, _ *logstore.SearchFilters, size int64, _ logstore.HistogramDimension) (*logstore.DimensionTokenHistogramResult, error) {
+	m.record(size)
+	return &logstore.DimensionTokenHistogramResult{}, nil
+}
+
+func (m *bucketSizeFamilyLogManager) GetDimensionLatencyHistogram(_ context.Context, _ *logstore.SearchFilters, size int64, _ logstore.HistogramDimension) (*logstore.DimensionLatencyHistogramResult, error) {
+	m.record(size)
+	return &logstore.DimensionLatencyHistogramResult{}, nil
+}
+
 // TestHistogramRoutesHonourExplicitBucketSize pins the shared bucket_size
 // contract. Only /histogram/cost used to read the parameter, so an explicit
 // width silently produced a different resolution on every other chart.
@@ -2315,5 +2374,128 @@ func TestLogsRoutesRejectMalformedTimeWindow(t *testing.T) {
 	}
 	if mgr.searched != nil || mgr.counted != nil || mgr.histogrammed != nil {
 		t.Fatalf("the store was queried with a malformed window: searched %#v counted %#v histogrammed %#v", mgr.searched, mgr.counted, mgr.histogrammed)
+	}
+}
+
+// TestHistogramRoutesHonourBucketSizeAcrossFamilies extends the bucket_size
+// contract to the provider and dimension breakdowns, which share the parsing but
+// have their own handlers.
+func TestHistogramRoutesHonourBucketSizeAcrossFamilies(t *testing.T) {
+	mgr := &bucketSizeFamilyLogManager{}
+	h := &LoggingHandler{logManager: mgr, redactedKeysManager: noRedactedKeys{}, config: &lib.Config{ClientConfig: &configstore.ClientConfig{}}}
+	window := func(ctx *fasthttp.RequestCtx, size string) {
+		ctx.QueryArgs().Set("start_time", "2026-01-01T00:00:00Z")
+		ctx.QueryArgs().Set("end_time", "2026-01-02T00:00:00Z")
+		ctx.QueryArgs().Set("bucket_size", size)
+	}
+
+	for name, route := range map[string]fasthttp.RequestHandler{
+		"GET /api/logs/histogram/latency":                h.getLogsLatencyHistogram,
+		"GET /api/logs/histogram/models":                 h.getLogsModelHistogram,
+		"GET /api/logs/histogram/throughput":             h.getLogsThroughputHistogram,
+		"GET /api/logs/histogram/cost/by-provider":       h.getLogsProviderCostHistogram,
+		"GET /api/logs/histogram/tokens/by-provider":     h.getLogsProviderTokenHistogram,
+		"GET /api/logs/histogram/latency/by-provider":    h.getLogsProviderLatencyHistogram,
+		"GET /api/logs/histogram/throughput/by-provider": h.getLogsProviderThroughputHistogram,
+		"GET /api/logs/histogram/cost/by-dimension":      h.getLogsDimensionCostHistogram,
+		"GET /api/logs/histogram/tokens/by-dimension":    h.getLogsDimensionTokenHistogram,
+		"GET /api/logs/histogram/latency/by-dimension":   h.getLogsDimensionLatencyHistogram,
+	} {
+		mgr.last = 0
+		ctx := &fasthttp.RequestCtx{}
+		window(ctx, "600")
+		if strings.Contains(name, "by-dimension") {
+			ctx.QueryArgs().Set("dimension", "provider")
+		}
+		route(ctx)
+		require.Equal(t, fasthttp.StatusOK, ctx.Response.StatusCode(), "%s: %s", name, ctx.Response.Body())
+		require.EqualValues(t, 600, mgr.last, "%s ignored bucket_size", name)
+	}
+}
+
+// TestDashboardHonoursBucketSizeBeforeQuerying pins that /api/logs/dashboard
+// reads the same bucket_size contract and rejects a bad value before touching
+// the store (the manager here panics if any sub-query runs).
+func TestDashboardHonoursBucketSizeBeforeQuerying(t *testing.T) {
+	h := &LoggingHandler{logManager: &topicFilterLogManager{}, redactedKeysManager: noRedactedKeys{}, config: &lib.Config{ClientConfig: &configstore.ClientConfig{}}}
+	ctx := &fasthttp.RequestCtx{}
+	ctx.QueryArgs().Set("start_time", "2026-01-01T00:00:00Z")
+	ctx.QueryArgs().Set("end_time", "2026-01-02T00:00:00Z")
+	ctx.QueryArgs().Set("bucket_size", "1h")
+	h.getDashboard(ctx)
+	require.Equal(t, fasthttp.StatusBadRequest, ctx.Response.StatusCode(), string(ctx.Response.Body()))
+	require.Contains(t, string(ctx.Response.Body()), "bucket_size")
+}
+
+// TestExplicitPeriodDoesNotExcuseAMalformedTimeArg pins the contract for the
+// combination of a valid period with a malformed start_time/end_time: the
+// malformed argument is refused instead of being silently overridden, so a
+// client that sends both learns its time filter was unusable.
+func TestExplicitPeriodDoesNotExcuseAMalformedTimeArg(t *testing.T) {
+	h := &LoggingHandler{logManager: &topicFilterLogManager{}, redactedKeysManager: noRedactedKeys{}, config: &lib.Config{ClientConfig: &configstore.ClientConfig{}}}
+	routes := map[string]fasthttp.RequestHandler{
+		"GET /api/logs":           h.getLogs,
+		"GET /api/logs/histogram": h.getLogsHistogram,
+		"GET /api/logs/dashboard": h.getDashboard,
+	}
+	for name, route := range routes {
+		ctx := &fasthttp.RequestCtx{}
+		ctx.QueryArgs().Set("period", "24h")
+		ctx.QueryArgs().Set("start_time", "1700000000")
+		route(ctx)
+		require.Equal(t, fasthttp.StatusBadRequest, ctx.Response.StatusCode(), "%s: %s", name, ctx.Response.Body())
+	}
+}
+
+// bucketSizeMCPLogManager records the bucket width of the MCP tool-log
+// histograms.
+type bucketSizeMCPLogManager struct {
+	loggingplugin.LogManager
+	last int64
+}
+
+func (m *bucketSizeMCPLogManager) record(size int64) { m.last = size }
+
+func (m *bucketSizeMCPLogManager) GetMCPHistogram(_ context.Context, _ logstore.MCPToolLogSearchFilters, size int64) (*logstore.MCPHistogramResult, error) {
+	m.record(size)
+	return &logstore.MCPHistogramResult{}, nil
+}
+
+func (m *bucketSizeMCPLogManager) GetMCPLatencyHistogram(_ context.Context, _ logstore.MCPToolLogSearchFilters, size int64) (*logstore.LatencyHistogramResult, error) {
+	m.record(size)
+	return &logstore.LatencyHistogramResult{}, nil
+}
+
+func (m *bucketSizeMCPLogManager) GetMCPCostHistogram(_ context.Context, _ logstore.MCPToolLogSearchFilters, size int64) (*logstore.MCPCostHistogramResult, error) {
+	m.record(size)
+	return &logstore.MCPCostHistogramResult{}, nil
+}
+
+// TestMCPHistogramRoutesHonourBucketSize keeps the MCP tool-log metrics on the
+// same bucket_size contract as the LLM log charts.
+func TestMCPHistogramRoutesHonourBucketSize(t *testing.T) {
+	mgr := &bucketSizeMCPLogManager{}
+	h := &LoggingHandler{logManager: mgr, redactedKeysManager: noRedactedKeys{}, config: &lib.Config{ClientConfig: &configstore.ClientConfig{}}}
+	routes := map[string]fasthttp.RequestHandler{
+		"GET /api/mcp-logs/histogram":         h.getMCPHistogram,
+		"GET /api/mcp-logs/histogram/latency": h.getMCPLatencyHistogram,
+		"GET /api/mcp-logs/histogram/cost":    h.getMCPCostHistogram,
+	}
+	for name, route := range routes {
+		mgr.last = 0
+		ctx := &fasthttp.RequestCtx{}
+		ctx.QueryArgs().Set("start_time", "2026-01-01T00:00:00Z")
+		ctx.QueryArgs().Set("end_time", "2026-01-02T00:00:00Z")
+		ctx.QueryArgs().Set("bucket_size", "1800")
+		route(ctx)
+		require.Equal(t, fasthttp.StatusOK, ctx.Response.StatusCode(), "%s: %s", name, ctx.Response.Body())
+		require.EqualValues(t, 1800, mgr.last, "%s ignored bucket_size", name)
+
+		ctx = &fasthttp.RequestCtx{}
+		ctx.QueryArgs().Set("start_time", "2026-01-01T00:00:00Z")
+		ctx.QueryArgs().Set("end_time", "2026-01-02T00:00:00Z")
+		ctx.QueryArgs().Set("bucket_size", "1h")
+		route(ctx)
+		require.Equal(t, fasthttp.StatusBadRequest, ctx.Response.StatusCode(), "%s accepted bucket_size=1h", name)
 	}
 }

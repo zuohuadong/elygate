@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
@@ -2692,4 +2693,72 @@ func TestPreflightStdioTargetPinsScriptExtensionRules(t *testing.T) {
 	for _, tc := range cases {
 		assert.Equal(t, tc.want, isStdioScriptPath(tc.arg), "isStdioScriptPath(%q)", tc.arg)
 	}
+}
+
+// TestPreflightStdioTargetLeavesContainerRunnersAlone: a container runner
+// resolves its arguments on the other side of a boundary this process cannot
+// see, so a path that only exists inside the image must not be refused.
+func TestPreflightStdioTargetLeavesContainerRunnersAlone(t *testing.T) {
+	t.Parallel()
+
+	// `docker` need not be installed: a missing runner is a genuine error, so
+	// point the check at a real command that is not an interpreter.
+	require.NoError(t, preflightStdioTarget("echo", []string{"/app/only-in-container/server.py"}, "container-client"))
+	// Even an interpreter command is only probed for its first non-flag
+	// argument, so later paths used as data are left alone.
+	require.NoError(t, preflightStdioTarget("echo", []string{"--out", "/data/report.py"}, "output-client"))
+}
+
+// TestPreflightStdioTargetSkipsDataPathsAfterTheEntryScript: only the entry
+// script is the host's business; later arguments can name output files or data
+// the server itself creates.
+func TestPreflightStdioTargetSkipsDataPathsAfterTheEntryScript(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	script := filepath.Join(dir, "server.py")
+	require.NoError(t, os.WriteFile(script, []byte("print('hi')\n"), 0o644))
+
+	require.NoError(t, preflightStdioTarget("python3", []string{"-u", script, "--out", "/nonexistent/for-bifrost-test/report.py"}, "data-client"))
+}
+
+// TestPreflightStdioTargetRejectsMissingEntryScript covers the sandbox case: the
+// interpreter is present, the script is not reachable from this process.
+func TestPreflightStdioTargetRejectsMissingEntryScript(t *testing.T) {
+	t.Parallel()
+
+	err := preflightStdioTarget("python3", []string{"-u", "/nonexistent/for-bifrost-test/mcp_server.py"}, "sandbox-client")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "/nonexistent/for-bifrost-test/mcp_server.py")
+	require.Contains(t, err.Error(), "not reachable from the gateway")
+	require.Contains(t, err.Error(), "PrivateTmp")
+}
+
+// TestPreflightStdioTargetAcceptsReachableEntryScript: the happy path must not
+// be refused.
+func TestPreflightStdioTargetAcceptsReachableEntryScript(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	script := filepath.Join(dir, "server.py")
+	require.NoError(t, os.WriteFile(script, []byte("print('hi')\n"), 0o644))
+
+	require.NoError(t, preflightStdioTarget("python3", []string{"-u", script}, "ok-client"))
+	// A flag value that is not a script path is skipped; the entry script after
+	// it is still the one probed.
+	require.NoError(t, preflightStdioTarget("python3", []string{"-W", "error", script}, "flags-client"))
+}
+
+// TestPreflightStdioTargetOnlyProbesInterpreters pins the interpreter gate: the
+// same script path through a non-interpreter command is not this process's
+// business and must not fail.
+func TestPreflightStdioTargetOnlyProbesInterpreters(t *testing.T) {
+	t.Parallel()
+
+	require.NoError(t, preflightStdioTarget("echo", []string{"/nonexistent/for-bifrost-test/server.py"}, "non-interpreter"))
+	require.False(t, isStdioInterpreter("echo", "/bin/echo"))
+	require.True(t, isStdioInterpreter("python3", "/usr/bin/python3"))
+	require.True(t, isStdioInterpreter("/usr/bin/python3.12", "/usr/bin/python3.12"))
+	require.True(t, isStdioInterpreter("node", "/usr/bin/node"))
+	require.False(t, isStdioInterpreter("docker", "/usr/bin/docker"))
 }

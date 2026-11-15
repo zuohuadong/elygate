@@ -4032,14 +4032,24 @@ func (m *MCPManager) createHTTPConnection(ctx context.Context, config *schemas.M
 	return client.NewClient(httpTransport, manualInputRoundTrips), connectionInfo, nil
 }
 
-// stdioScriptExtensions are the argument suffixes treated as a script the
-// subprocess is expected to execute. Only these are probed before spawn: a bare
-// absolute path argument can legitimately name a directory or a path the server
-// creates itself, and refusing those would break working configurations.
-var stdioScriptExtensions = []string{".py", ".js", ".mjs", ".cjs", ".ts", ".sh", ".rb", ".pl", ".php", ".jar"}
+// stdioInterpreterCommands are the commands that execute a script file handed
+// to them as an argument. Only for these is an absolute script argument probed
+// on the host: a container runner (docker, podman, nerdctl), an orchestrator, or
+// a wrapper script resolves its arguments on the other side of a boundary this
+// process cannot see, so /app/server.py existing only inside the container is a
+// working configuration.
+var stdioInterpreterCommands = map[string]bool{
+	"python": true, "python3": true, "node": true, "nodejs": true, "deno": true,
+	"bun": true, "tsx": true, "ts-node": true, "sh": true, "bash": true, "zsh": true,
+	"dash": true, "ruby": true, "perl": true, "php": true, "pwsh": true, "powershell": true,
+}
 
-// preflightStdioTarget reports a stdio client whose command or script argument
-// cannot be reached from this process.
+// stdioScriptExtensions are the argument suffixes treated as a script for those
+// interpreters.
+var stdioScriptExtensions = []string{".py", ".js", ".mjs", ".cjs", ".ts", ".sh", ".rb", ".pl", ".php", ".ps1"}
+
+// preflightStdioTarget reports a stdio client whose command, or whose
+// interpreter entry script, cannot be reached from this process.
 //
 // A path that exists in a login shell can still be invisible to the gateway: a
 // unit with PrivateTmp=true, ProtectHome=yes or ProtectSystem=full sees a
@@ -4049,41 +4059,86 @@ var stdioScriptExtensions = []string{".py", ".js", ".mjs", ".cjs", ".ts", ".sh",
 // timeout expires, which says nothing about the real cause, so the failure is
 // classified here instead, as a permanent misconfiguration with a message that
 // names the path and the sandboxing class of problem.
+//
+// The script check is deliberately narrow: the command must be a known host
+// interpreter and the argument must be that interpreter's entry script. Any
+// other absolute argument (a mount path, an output file, a container-internal
+// path) is left alone, because refusing those would break working setups.
 func preflightStdioTarget(cmd string, args []string, clientName string) error {
-	if strings.ContainsRune(cmd, os.PathSeparator) {
-		info, err := os.Stat(cmd)
-		switch {
-		case err != nil:
-			return fmt.Errorf("stdio command %q for MCP client %s is not reachable: %w", cmd, clientName, err)
-		case info.IsDir():
-			return fmt.Errorf("stdio command %q for MCP client %s is a directory", cmd, clientName)
+	commandPath, err := resolveStdioCommand(cmd)
+	if err != nil {
+		if errors.Is(err, exec.ErrNotFound) {
+			return fmt.Errorf("stdio command %q for MCP client %s was not found on the service PATH: %w", cmd, clientName, err)
 		}
-	} else if _, err := exec.LookPath(cmd); err != nil {
-		return fmt.Errorf("stdio command %q for MCP client %s was not found on the service PATH: %w", cmd, clientName, err)
+		return fmt.Errorf("stdio command %q for MCP client %s is not usable: %w", cmd, clientName, err)
+	}
+	if !isStdioInterpreter(cmd, commandPath) {
+		return nil
 	}
 	for _, arg := range args {
-		if !isStdioScriptPath(arg) {
+		// The entry script is the first argument that is not a flag; an
+		// interpreter's own flags (-u, -O, --inspect) come before it.
+		if strings.HasPrefix(arg, "-") {
 			continue
 		}
-		info, err := os.Stat(arg)
-		switch {
-		case err != nil:
-			return fmt.Errorf("stdio argument %q for MCP client %s is not reachable from the gateway: %w; the service's sandbox (PrivateTmp, ProtectHome, ProtectSystem) can hide a path that exists in an interactive shell", arg, clientName, err)
-		case info.IsDir():
-			return fmt.Errorf("stdio argument %q for MCP client %s is a directory", arg, clientName)
+		if !isStdioScriptPath(arg) {
+			return nil
 		}
+		info, statErr := os.Stat(arg)
+		if statErr != nil {
+			return fmt.Errorf("stdio script %q for MCP client %s is not reachable from the gateway: %w; the service's sandbox (PrivateTmp, ProtectHome, ProtectSystem) can hide a path that exists in an interactive shell", arg, clientName, statErr)
+		}
+		if info.IsDir() {
+			return fmt.Errorf("stdio script %q for MCP client %s is a directory", arg, clientName)
+		}
+		return nil
 	}
 	return nil
 }
 
-// isStdioScriptPath reports whether arg names an absolute path to a script the
-// subprocess is expected to run.
+// resolveStdioCommand resolves the command the transport will spawn: an
+// explicit path is stat'ed, a bare name is looked up on the service PATH.
+func resolveStdioCommand(cmd string) (string, error) {
+	if strings.ContainsRune(cmd, os.PathSeparator) {
+		info, err := os.Stat(cmd)
+		if err != nil {
+			return "", err
+		}
+		if info.IsDir() {
+			return "", fmt.Errorf("%s is a directory", cmd)
+		}
+		return cmd, nil
+	}
+	return exec.LookPath(cmd)
+}
+
+// isStdioInterpreter reports whether the spawned command runs a script passed to
+// it, using the command name as written and the resolved binary's base name so a
+// path to a python3 build counts as python3.
+func isStdioInterpreter(cmd, resolved string) bool {
+	if stdioInterpreterCommands[strings.TrimSuffix(strings.ToLower(filepath.Base(cmd)), ".exe")] {
+		return true
+	}
+	base := strings.TrimSuffix(strings.ToLower(filepath.Base(resolved)), ".exe")
+	if stdioInterpreterCommands[base] {
+		return true
+	}
+	// Versioned names such as python3.12 or python3.11.
+	for suffix := range stdioInterpreterCommands {
+		if strings.HasPrefix(base, suffix) && base[len(suffix)] >= '0' && base[len(suffix)] <= '9' {
+			return true
+		}
+	}
+	return false
+}
+
+// isStdioScriptPath reports whether arg names an absolute path a host
+// interpreter would run as a script.
 func isStdioScriptPath(arg string) bool {
 	if !filepath.IsAbs(arg) {
 		return false
 	}
-	ext := strings.ToLower(filepath.Ext(arg))
-	return slices.Contains(stdioScriptExtensions, ext)
+	return slices.Contains(stdioScriptExtensions, strings.ToLower(filepath.Ext(arg)))
 }
 
 // createSTDIOConnection creates a STDIO-based MCP client connection without holding locks.

@@ -1318,11 +1318,17 @@ func parseTimeWindow(ctx *fasthttp.RequestCtx) (*time.Time, *time.Time, error) {
 // read the parameter, so the same query silently returned a differently
 // bucketed chart from the rest of the family.
 func histogramBucketSize(ctx *fasthttp.RequestCtx, filters *logstore.SearchFilters) (int64, error) {
-	size := calculateBucketSize(filters.StartTime, filters.EndTime)
+	return histogramBucketSizeFor(ctx, filters.StartTime, filters.EndTime)
+}
+
+// histogramBucketSizeFor is histogramBucketSize for the filter families that are
+// not logstore.SearchFilters (MCP tool logs carry their own type).
+func histogramBucketSizeFor(ctx *fasthttp.RequestCtx, start, end *time.Time) (int64, error) {
+	size := calculateBucketSize(start, end)
 	if !ctx.QueryArgs().Has("bucket_size") {
 		return size, nil
 	}
-	return parseBucketSizeOverride(string(ctx.QueryArgs().Peek("bucket_size")), filters.StartTime, filters.EndTime)
+	return parseBucketSizeOverride(string(ctx.QueryArgs().Peek("bucket_size")), start, end)
 }
 
 func parseAgentNamesFilter(ctx *fasthttp.RequestCtx, filters *logstore.SearchFilters) {
@@ -2129,7 +2135,11 @@ func (h *LoggingHandler) getDashboard(ctx *fasthttp.RequestCtx) {
 	if !ParseRankingLimit(ctx, filters) {
 		return
 	}
-	bucketSizeSeconds := calculateBucketSize(filters.StartTime, filters.EndTime)
+	bucketSizeSeconds, err := histogramBucketSize(ctx, filters)
+	if err != nil {
+		SendError(ctx, fasthttp.StatusBadRequest, err.Error())
+		return
+	}
 
 	mcpFilters, err := parseMCPHistogramFilters(ctx)
 	if err != nil {
@@ -3875,7 +3885,11 @@ func (h *LoggingHandler) getMCPHistogram(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, fasthttp.StatusBadRequest, err.Error())
 		return
 	}
-	bucketSizeSeconds := calculateBucketSize(filters.StartTime, filters.EndTime)
+	bucketSizeSeconds, err := histogramBucketSizeFor(ctx, filters.StartTime, filters.EndTime)
+	if err != nil {
+		SendError(ctx, fasthttp.StatusBadRequest, err.Error())
+		return
+	}
 
 	result, err := h.logManager.GetMCPHistogram(ctx, *filters, bucketSizeSeconds)
 	if err != nil {
@@ -3895,7 +3909,11 @@ func (h *LoggingHandler) getMCPLatencyHistogram(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, fasthttp.StatusBadRequest, err.Error())
 		return
 	}
-	bucketSizeSeconds := calculateBucketSize(filters.StartTime, filters.EndTime)
+	bucketSizeSeconds, err := histogramBucketSizeFor(ctx, filters.StartTime, filters.EndTime)
+	if err != nil {
+		SendError(ctx, fasthttp.StatusBadRequest, err.Error())
+		return
+	}
 
 	result, err := h.logManager.GetMCPLatencyHistogram(ctx, *filters, bucketSizeSeconds)
 	if err != nil {
@@ -3914,7 +3932,11 @@ func (h *LoggingHandler) getMCPCostHistogram(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, fasthttp.StatusBadRequest, err.Error())
 		return
 	}
-	bucketSizeSeconds := calculateBucketSize(filters.StartTime, filters.EndTime)
+	bucketSizeSeconds, err := histogramBucketSizeFor(ctx, filters.StartTime, filters.EndTime)
+	if err != nil {
+		SendError(ctx, fasthttp.StatusBadRequest, err.Error())
+		return
+	}
 
 	result, err := h.logManager.GetMCPCostHistogram(ctx, *filters, bucketSizeSeconds)
 	if err != nil {
