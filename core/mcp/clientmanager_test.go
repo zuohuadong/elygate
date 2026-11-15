@@ -2592,3 +2592,104 @@ func BenchmarkExecuteChatTool_PerCallHTTPUpstream(b *testing.B) {
 		})
 	}
 }
+
+// TestCreateSTDIOConnectionRejectsUnreachableScriptPath pins the preflight for a
+// script argument the service cannot see. Before it, the child started and
+// exited immediately ("transport closed" only after the 30s initialize timeout),
+// which pointed nowhere near the real cause: a sandboxed path.
+func TestCreateSTDIOConnectionRejectsUnreachableScriptPath(t *testing.T) {
+	t.Parallel()
+
+	config := &schemas.MCPClientConfig{
+		Name:           "test-stdio-client",
+		ConnectionType: schemas.MCPConnectionTypeSTDIO,
+		StdioConfig: &schemas.MCPStdioConfig{
+			Command: "python3",
+			Args:    []string{"-u", "/nonexistent/for-bifrost-test/mcp_server.py"},
+		},
+	}
+
+	_, _, err := (&MCPManager{}).createSTDIOConnection(context.Background(), config, nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "/nonexistent/for-bifrost-test/mcp_server.py")
+	require.Contains(t, err.Error(), "not reachable from the gateway")
+	require.Contains(t, err.Error(), "PrivateTmp")
+	require.True(t, isPermanentConnectError(err), "an unreachable path must not be retried")
+}
+
+// TestCreateSTDIOConnectionRejectsMissingCommand keeps the existing exec error
+// path but names the client and the service PATH.
+func TestCreateSTDIOConnectionRejectsMissingCommand(t *testing.T) {
+	t.Parallel()
+
+	config := &schemas.MCPClientConfig{
+		Name:           "test-stdio-client",
+		ConnectionType: schemas.MCPConnectionTypeSTDIO,
+		StdioConfig:    &schemas.MCPStdioConfig{Command: "definitely-not-a-real-command-bifrost"},
+	}
+
+	_, _, err := (&MCPManager{}).createSTDIOConnection(context.Background(), config, nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "was not found on the service PATH")
+	require.Contains(t, err.Error(), "test-stdio-client")
+	require.True(t, isPermanentConnectError(err))
+}
+
+// TestCreateSTDIOConnectionAllowsNonScriptAbsoluteArguments: only script
+// arguments are probed. A server invoked with a mount path it creates itself
+// (e.g. --root /workspace) must keep working.
+func TestCreateSTDIOConnectionAllowsNonScriptAbsoluteArguments(t *testing.T) {
+	t.Parallel()
+
+	config := &schemas.MCPClientConfig{
+		Name:           "test-stdio-client",
+		ConnectionType: schemas.MCPConnectionTypeSTDIO,
+		StdioConfig: &schemas.MCPStdioConfig{
+			Command: "echo",
+			Args:    []string{"--root", "/nonexistent/for-bifrost-test/workspace"},
+		},
+	}
+
+	_, _, err := (&MCPManager{}).createSTDIOConnection(context.Background(), config, nil)
+	require.NoError(t, err)
+}
+
+// TestCreateSTDIOConnectionRejectsDirectoryCommand covers a command that
+// resolves to a directory rather than an executable.
+func TestCreateSTDIOConnectionRejectsDirectoryCommand(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	config := &schemas.MCPClientConfig{
+		Name:           "test-stdio-client",
+		ConnectionType: schemas.MCPConnectionTypeSTDIO,
+		StdioConfig:    &schemas.MCPStdioConfig{Command: dir},
+	}
+
+	_, _, err := (&MCPManager{}).createSTDIOConnection(context.Background(), config, nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "is a directory")
+}
+
+// TestPreflightStdioTargetPinsScriptExtensionRules documents which arguments are
+// probed, so the false-positive boundary is explicit.
+func TestPreflightStdioTargetPinsScriptExtensionRules(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		arg  string
+		want bool
+	}{
+		{"/srv/mcp/server.py", true},
+		{"/srv/mcp/server.mjs", true},
+		{"/srv/mcp/run.sh", true},
+		{"/srv/mcp/server.PY", true},
+		{"/workspace", false},
+		{"server.py", false},
+		{"--root", false},
+		{"https://example.com/server.py", false},
+	}
+	for _, tc := range cases {
+		assert.Equal(t, tc.want, isStdioScriptPath(tc.arg), "isStdioScriptPath(%q)", tc.arg)
+	}
+}

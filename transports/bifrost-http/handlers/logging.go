@@ -768,7 +768,8 @@ func (h *LoggingHandler) getLogs(ctx *fasthttp.RequestCtx) {
 	if projectIDs := string(ctx.QueryArgs().Peek("project_ids")); projectIDs != "" {
 		filters.ProjectIDs = parseCommaSeparated(projectIDs)
 	}
-	if !parseTopicIDsFilter(ctx, filters) {
+	if err := parseTopicIDsFilter(ctx, filters); err != nil {
+		SendError(ctx, fasthttp.StatusBadRequest, err.Error())
 		return
 	}
 	if routingEngines := string(ctx.QueryArgs().Peek("routing_engine_used")); routingEngines != "" {
@@ -790,16 +791,12 @@ func (h *LoggingHandler) getLogs(ctx *fasthttp.RequestCtx) {
 	}
 	parseAgentCorrelationIDFilter(ctx, filters)
 	parseComplexityFilters(ctx, filters)
-	if startTime := string(ctx.QueryArgs().Peek("start_time")); startTime != "" {
-		if t, err := time.Parse(time.RFC3339Nano, startTime); err == nil {
-			filters.StartTime = &t
-		}
+	startTime, endTime, err := parseTimeWindow(ctx)
+	if err != nil {
+		SendError(ctx, fasthttp.StatusBadRequest, err.Error())
+		return
 	}
-	if endTime := string(ctx.QueryArgs().Peek("end_time")); endTime != "" {
-		if t, err := time.Parse(time.RFC3339Nano, endTime); err == nil {
-			filters.EndTime = &t
-		}
-	}
+	filters.StartTime, filters.EndTime = startTime, endTime
 	if period := string(ctx.QueryArgs().Peek("period")); period != "" {
 		if start, end := ResolvePeriod(period, string(ctx.QueryArgs().Peek("timezone"))); start != nil {
 			filters.StartTime = start
@@ -1072,7 +1069,8 @@ func (h *LoggingHandler) getLogsStats(ctx *fasthttp.RequestCtx) {
 	if projectIDs := string(ctx.QueryArgs().Peek("project_ids")); projectIDs != "" {
 		filters.ProjectIDs = parseCommaSeparated(projectIDs)
 	}
-	if !parseTopicIDsFilter(ctx, filters) {
+	if err := parseTopicIDsFilter(ctx, filters); err != nil {
+		SendError(ctx, fasthttp.StatusBadRequest, err.Error())
 		return
 	}
 	if routingEngines := string(ctx.QueryArgs().Peek("routing_engine_used")); routingEngines != "" {
@@ -1094,16 +1092,12 @@ func (h *LoggingHandler) getLogsStats(ctx *fasthttp.RequestCtx) {
 	}
 	parseAgentCorrelationIDFilter(ctx, filters)
 	parseComplexityFilters(ctx, filters)
-	if startTime := string(ctx.QueryArgs().Peek("start_time")); startTime != "" {
-		if t, err := time.Parse(time.RFC3339Nano, startTime); err == nil {
-			filters.StartTime = &t
-		}
+	startTime, endTime, err := parseTimeWindow(ctx)
+	if err != nil {
+		SendError(ctx, fasthttp.StatusBadRequest, err.Error())
+		return
 	}
-	if endTime := string(ctx.QueryArgs().Peek("end_time")); endTime != "" {
-		if t, err := time.Parse(time.RFC3339Nano, endTime); err == nil {
-			filters.EndTime = &t
-		}
-	}
+	filters.StartTime, filters.EndTime = startTime, endTime
 	if period := string(ctx.QueryArgs().Peek("period")); period != "" {
 		if start, end := ResolvePeriod(period, string(ctx.QueryArgs().Peek("timezone"))); start != nil {
 			filters.StartTime = start
@@ -1239,11 +1233,16 @@ func previousPeriodFilters(filters *logstore.SearchFilters) *logstore.SearchFilt
 
 // getLogsHistogram handles GET /api/logs/histogram - Get time-bucketed request counts
 func (h *LoggingHandler) getLogsHistogram(ctx *fasthttp.RequestCtx) {
-	filters := parseHistogramFilters(ctx)
-	if filters == nil {
+	filters, err := parseHistogramFilters(ctx)
+	if err != nil {
+		SendError(ctx, fasthttp.StatusBadRequest, err.Error())
 		return
 	}
-	bucketSizeSeconds := calculateBucketSize(filters.StartTime, filters.EndTime)
+	bucketSizeSeconds, err := histogramBucketSize(ctx, filters)
+	if err != nil {
+		SendError(ctx, fasthttp.StatusBadRequest, err.Error())
+		return
+	}
 
 	result, err := h.logManager.GetHistogram(ctx, filters, bucketSizeSeconds)
 	if err != nil {
@@ -1291,6 +1290,41 @@ func parseBucketSizeOverride(raw string, start, end *time.Time) (int64, error) {
 	return size, nil
 }
 
+// parseTimeWindow parses the optional start_time/end_time filters. A present but
+// malformed value is an error rather than a silent omission: dropping it answers
+// the request with a different window (usually all time) than the caller asked
+// for, which reads as a successful result instead of a client mistake.
+func parseTimeWindow(ctx *fasthttp.RequestCtx) (*time.Time, *time.Time, error) {
+	var start, end *time.Time
+	if raw := string(ctx.QueryArgs().Peek("start_time")); raw != "" {
+		parsed, err := time.Parse(time.RFC3339Nano, raw)
+		if err != nil {
+			return nil, nil, fmt.Errorf("invalid start_time format: %w", err)
+		}
+		start = &parsed
+	}
+	if raw := string(ctx.QueryArgs().Peek("end_time")); raw != "" {
+		parsed, err := time.Parse(time.RFC3339Nano, raw)
+		if err != nil {
+			return nil, nil, fmt.Errorf("invalid end_time format: %w", err)
+		}
+		end = &parsed
+	}
+	return start, end, nil
+}
+
+// histogramBucketSize resolves one histogram's bucket width and honours an
+// explicit bucket_size on every histogram endpoint. Only /histogram/cost used to
+// read the parameter, so the same query silently returned a differently
+// bucketed chart from the rest of the family.
+func histogramBucketSize(ctx *fasthttp.RequestCtx, filters *logstore.SearchFilters) (int64, error) {
+	size := calculateBucketSize(filters.StartTime, filters.EndTime)
+	if !ctx.QueryArgs().Has("bucket_size") {
+		return size, nil
+	}
+	return parseBucketSizeOverride(string(ctx.QueryArgs().Peek("bucket_size")), filters.StartTime, filters.EndTime)
+}
+
 func parseAgentNamesFilter(ctx *fasthttp.RequestCtx, filters *logstore.SearchFilters) {
 	filters.AgentNames = parseCommaSeparated(string(ctx.QueryArgs().Peek("agent_names")))
 }
@@ -1331,21 +1365,20 @@ func parseGuardrailOutcomesFilter(ctx *fasthttp.RequestCtx, filters *logstore.Se
 // parseTopicIDsFilter reads the Warp topics a query narrows to. A topic_ids
 // that names no id ("," or blanks) writes a 400 and returns false: read as
 // absent it would widen the query to every topic.
-func parseTopicIDsFilter(ctx *fasthttp.RequestCtx, filters *logstore.SearchFilters) bool {
+func parseTopicIDsFilter(ctx *fasthttp.RequestCtx, filters *logstore.SearchFilters) error {
 	if !ctx.QueryArgs().Has("topic_ids") {
-		return true
+		return nil
 	}
 	filters.TopicIDs = parseCommaSeparated(string(ctx.QueryArgs().Peek("topic_ids")))
 	if len(filters.TopicIDs) == 0 {
-		SendError(ctx, fasthttp.StatusBadRequest, "topic_ids must name at least one topic id")
-		return false
+		return fmt.Errorf("topic_ids must name at least one topic id")
 	}
-	return true
+	return nil
 }
 
 // parseHistogramFilters extracts common filter parameters from query args. It
 // returns nil after writing a 400 when a parameter is unusable.
-func parseHistogramFilters(ctx *fasthttp.RequestCtx) *logstore.SearchFilters {
+func parseHistogramFilters(ctx *fasthttp.RequestCtx) (*logstore.SearchFilters, error) {
 	filters := &logstore.SearchFilters{}
 
 	if providers := string(ctx.QueryArgs().Peek("providers")); providers != "" {
@@ -1390,8 +1423,8 @@ func parseHistogramFilters(ctx *fasthttp.RequestCtx) *logstore.SearchFilters {
 	if projectIDs := string(ctx.QueryArgs().Peek("project_ids")); projectIDs != "" {
 		filters.ProjectIDs = parseCommaSeparated(projectIDs)
 	}
-	if !parseTopicIDsFilter(ctx, filters) {
-		return nil
+	if err := parseTopicIDsFilter(ctx, filters); err != nil {
+		return nil, err
 	}
 	if routingEngines := string(ctx.QueryArgs().Peek("routing_engine_used")); routingEngines != "" {
 		filters.RoutingEngineUsed = parseCommaSeparated(routingEngines)
@@ -1412,16 +1445,11 @@ func parseHistogramFilters(ctx *fasthttp.RequestCtx) *logstore.SearchFilters {
 	}
 	parseAgentCorrelationIDFilter(ctx, filters)
 	parseComplexityFilters(ctx, filters)
-	if startTime := string(ctx.QueryArgs().Peek("start_time")); startTime != "" {
-		if t, err := time.Parse(time.RFC3339Nano, startTime); err == nil {
-			filters.StartTime = &t
-		}
+	startTime, endTime, err := parseTimeWindow(ctx)
+	if err != nil {
+		return nil, err
 	}
-	if endTime := string(ctx.QueryArgs().Peek("end_time")); endTime != "" {
-		if t, err := time.Parse(time.RFC3339Nano, endTime); err == nil {
-			filters.EndTime = &t
-		}
-	}
+	filters.StartTime, filters.EndTime = startTime, endTime
 	if period := string(ctx.QueryArgs().Peek("period")); period != "" {
 		if start, end := ResolvePeriod(period, string(ctx.QueryArgs().Peek("timezone"))); start != nil {
 			filters.StartTime = start
@@ -1476,16 +1504,21 @@ func parseHistogramFilters(ctx *fasthttp.RequestCtx) *logstore.SearchFilters {
 	parseMetadataFilters(ctx, filters)
 	parseSessionTreeFilters(ctx, filters)
 
-	return filters
+	return filters, nil
 }
 
 // getLogsTokenHistogram handles GET /api/logs/histogram/tokens - Get time-bucketed token usage
 func (h *LoggingHandler) getLogsTokenHistogram(ctx *fasthttp.RequestCtx) {
-	filters := parseHistogramFilters(ctx)
-	if filters == nil {
+	filters, err := parseHistogramFilters(ctx)
+	if err != nil {
+		SendError(ctx, fasthttp.StatusBadRequest, err.Error())
 		return
 	}
-	bucketSizeSeconds := calculateBucketSize(filters.StartTime, filters.EndTime)
+	bucketSizeSeconds, err := histogramBucketSize(ctx, filters)
+	if err != nil {
+		SendError(ctx, fasthttp.StatusBadRequest, err.Error())
+		return
+	}
 
 	result, err := h.logManager.GetTokenHistogram(ctx, filters, bucketSizeSeconds)
 	if err != nil {
@@ -1499,18 +1532,15 @@ func (h *LoggingHandler) getLogsTokenHistogram(ctx *fasthttp.RequestCtx) {
 
 // getLogsCostHistogram handles GET /api/logs/histogram/cost - Get time-bucketed cost data with model breakdown
 func (h *LoggingHandler) getLogsCostHistogram(ctx *fasthttp.RequestCtx) {
-	filters := parseHistogramFilters(ctx)
-	if filters == nil {
+	filters, err := parseHistogramFilters(ctx)
+	if err != nil {
+		SendError(ctx, fasthttp.StatusBadRequest, err.Error())
 		return
 	}
-	bucketSizeSeconds := calculateBucketSize(filters.StartTime, filters.EndTime)
-	if ctx.QueryArgs().Has("bucket_size") {
-		size, err := parseBucketSizeOverride(string(ctx.QueryArgs().Peek("bucket_size")), filters.StartTime, filters.EndTime)
-		if err != nil {
-			SendError(ctx, fasthttp.StatusBadRequest, err.Error())
-			return
-		}
-		bucketSizeSeconds = size
+	bucketSizeSeconds, err := histogramBucketSize(ctx, filters)
+	if err != nil {
+		SendError(ctx, fasthttp.StatusBadRequest, err.Error())
+		return
 	}
 
 	result, err := h.logManager.GetCostHistogram(ctx, filters, bucketSizeSeconds)
@@ -1525,11 +1555,16 @@ func (h *LoggingHandler) getLogsCostHistogram(ctx *fasthttp.RequestCtx) {
 
 // getLogsModelHistogram handles GET /api/logs/histogram/models - Get time-bucketed model usage with success/error breakdown
 func (h *LoggingHandler) getLogsModelHistogram(ctx *fasthttp.RequestCtx) {
-	filters := parseHistogramFilters(ctx)
-	if filters == nil {
+	filters, err := parseHistogramFilters(ctx)
+	if err != nil {
+		SendError(ctx, fasthttp.StatusBadRequest, err.Error())
 		return
 	}
-	bucketSizeSeconds := calculateBucketSize(filters.StartTime, filters.EndTime)
+	bucketSizeSeconds, err := histogramBucketSize(ctx, filters)
+	if err != nil {
+		SendError(ctx, fasthttp.StatusBadRequest, err.Error())
+		return
+	}
 
 	result, err := h.logManager.GetModelHistogram(ctx, filters, bucketSizeSeconds)
 	if err != nil {
@@ -1543,11 +1578,16 @@ func (h *LoggingHandler) getLogsModelHistogram(ctx *fasthttp.RequestCtx) {
 
 // getLogsLatencyHistogram handles GET /api/logs/histogram/latency - Get time-bucketed latency percentiles
 func (h *LoggingHandler) getLogsLatencyHistogram(ctx *fasthttp.RequestCtx) {
-	filters := parseHistogramFilters(ctx)
-	if filters == nil {
+	filters, err := parseHistogramFilters(ctx)
+	if err != nil {
+		SendError(ctx, fasthttp.StatusBadRequest, err.Error())
 		return
 	}
-	bucketSizeSeconds := calculateBucketSize(filters.StartTime, filters.EndTime)
+	bucketSizeSeconds, err := histogramBucketSize(ctx, filters)
+	if err != nil {
+		SendError(ctx, fasthttp.StatusBadRequest, err.Error())
+		return
+	}
 
 	result, err := h.logManager.GetLatencyHistogram(ctx, filters, bucketSizeSeconds)
 	if err != nil {
@@ -1561,11 +1601,16 @@ func (h *LoggingHandler) getLogsLatencyHistogram(ctx *fasthttp.RequestCtx) {
 
 // getLogsProviderCostHistogram handles GET /api/logs/histogram/cost/by-provider - Get time-bucketed cost data with provider breakdown
 func (h *LoggingHandler) getLogsProviderCostHistogram(ctx *fasthttp.RequestCtx) {
-	filters := parseHistogramFilters(ctx)
-	if filters == nil {
+	filters, err := parseHistogramFilters(ctx)
+	if err != nil {
+		SendError(ctx, fasthttp.StatusBadRequest, err.Error())
 		return
 	}
-	bucketSizeSeconds := calculateBucketSize(filters.StartTime, filters.EndTime)
+	bucketSizeSeconds, err := histogramBucketSize(ctx, filters)
+	if err != nil {
+		SendError(ctx, fasthttp.StatusBadRequest, err.Error())
+		return
+	}
 
 	result, err := h.logManager.GetProviderCostHistogram(ctx, filters, bucketSizeSeconds)
 	if err != nil {
@@ -1579,11 +1624,16 @@ func (h *LoggingHandler) getLogsProviderCostHistogram(ctx *fasthttp.RequestCtx) 
 
 // getLogsProviderTokenHistogram handles GET /api/logs/histogram/tokens/by-provider - Get time-bucketed token usage with provider breakdown
 func (h *LoggingHandler) getLogsProviderTokenHistogram(ctx *fasthttp.RequestCtx) {
-	filters := parseHistogramFilters(ctx)
-	if filters == nil {
+	filters, err := parseHistogramFilters(ctx)
+	if err != nil {
+		SendError(ctx, fasthttp.StatusBadRequest, err.Error())
 		return
 	}
-	bucketSizeSeconds := calculateBucketSize(filters.StartTime, filters.EndTime)
+	bucketSizeSeconds, err := histogramBucketSize(ctx, filters)
+	if err != nil {
+		SendError(ctx, fasthttp.StatusBadRequest, err.Error())
+		return
+	}
 
 	result, err := h.logManager.GetProviderTokenHistogram(ctx, filters, bucketSizeSeconds)
 	if err != nil {
@@ -1597,11 +1647,16 @@ func (h *LoggingHandler) getLogsProviderTokenHistogram(ctx *fasthttp.RequestCtx)
 
 // getLogsProviderLatencyHistogram handles GET /api/logs/histogram/latency/by-provider - Get time-bucketed latency percentiles with provider breakdown
 func (h *LoggingHandler) getLogsProviderLatencyHistogram(ctx *fasthttp.RequestCtx) {
-	filters := parseHistogramFilters(ctx)
-	if filters == nil {
+	filters, err := parseHistogramFilters(ctx)
+	if err != nil {
+		SendError(ctx, fasthttp.StatusBadRequest, err.Error())
 		return
 	}
-	bucketSizeSeconds := calculateBucketSize(filters.StartTime, filters.EndTime)
+	bucketSizeSeconds, err := histogramBucketSize(ctx, filters)
+	if err != nil {
+		SendError(ctx, fasthttp.StatusBadRequest, err.Error())
+		return
+	}
 
 	result, err := h.logManager.GetProviderLatencyHistogram(ctx, filters, bucketSizeSeconds)
 	if err != nil {
@@ -1615,11 +1670,16 @@ func (h *LoggingHandler) getLogsProviderLatencyHistogram(ctx *fasthttp.RequestCt
 
 // getLogsThroughputHistogram handles GET /api/logs/histogram/throughput - Get time-bucketed token-generation throughput (tokens/sec)
 func (h *LoggingHandler) getLogsThroughputHistogram(ctx *fasthttp.RequestCtx) {
-	filters := parseHistogramFilters(ctx)
-	if filters == nil {
+	filters, err := parseHistogramFilters(ctx)
+	if err != nil {
+		SendError(ctx, fasthttp.StatusBadRequest, err.Error())
 		return
 	}
-	bucketSizeSeconds := calculateBucketSize(filters.StartTime, filters.EndTime)
+	bucketSizeSeconds, err := histogramBucketSize(ctx, filters)
+	if err != nil {
+		SendError(ctx, fasthttp.StatusBadRequest, err.Error())
+		return
+	}
 
 	result, err := h.logManager.GetThroughputHistogram(ctx, filters, bucketSizeSeconds)
 	if err != nil {
@@ -1633,11 +1693,16 @@ func (h *LoggingHandler) getLogsThroughputHistogram(ctx *fasthttp.RequestCtx) {
 
 // getLogsProviderThroughputHistogram handles GET /api/logs/histogram/throughput/by-provider - Get time-bucketed tokens/sec with provider breakdown
 func (h *LoggingHandler) getLogsProviderThroughputHistogram(ctx *fasthttp.RequestCtx) {
-	filters := parseHistogramFilters(ctx)
-	if filters == nil {
+	filters, err := parseHistogramFilters(ctx)
+	if err != nil {
+		SendError(ctx, fasthttp.StatusBadRequest, err.Error())
 		return
 	}
-	bucketSizeSeconds := calculateBucketSize(filters.StartTime, filters.EndTime)
+	bucketSizeSeconds, err := histogramBucketSize(ctx, filters)
+	if err != nil {
+		SendError(ctx, fasthttp.StatusBadRequest, err.Error())
+		return
+	}
 
 	result, err := h.logManager.GetProviderThroughputHistogram(ctx, filters, bucketSizeSeconds)
 	if err != nil {
@@ -1671,11 +1736,16 @@ func (h *LoggingHandler) getLogsDimensionCostHistogram(ctx *fasthttp.RequestCtx)
 	if !ok {
 		return
 	}
-	filters := parseHistogramFilters(ctx)
-	if filters == nil {
+	filters, err := parseHistogramFilters(ctx)
+	if err != nil {
+		SendError(ctx, fasthttp.StatusBadRequest, err.Error())
 		return
 	}
-	bucketSizeSeconds := calculateBucketSize(filters.StartTime, filters.EndTime)
+	bucketSizeSeconds, err := histogramBucketSize(ctx, filters)
+	if err != nil {
+		SendError(ctx, fasthttp.StatusBadRequest, err.Error())
+		return
+	}
 
 	result, err := h.logManager.GetDimensionCostHistogram(ctx, filters, bucketSizeSeconds, dimension)
 	if err != nil {
@@ -1693,11 +1763,16 @@ func (h *LoggingHandler) getLogsDimensionTokenHistogram(ctx *fasthttp.RequestCtx
 	if !ok {
 		return
 	}
-	filters := parseHistogramFilters(ctx)
-	if filters == nil {
+	filters, err := parseHistogramFilters(ctx)
+	if err != nil {
+		SendError(ctx, fasthttp.StatusBadRequest, err.Error())
 		return
 	}
-	bucketSizeSeconds := calculateBucketSize(filters.StartTime, filters.EndTime)
+	bucketSizeSeconds, err := histogramBucketSize(ctx, filters)
+	if err != nil {
+		SendError(ctx, fasthttp.StatusBadRequest, err.Error())
+		return
+	}
 
 	result, err := h.logManager.GetDimensionTokenHistogram(ctx, filters, bucketSizeSeconds, dimension)
 	if err != nil {
@@ -1715,11 +1790,16 @@ func (h *LoggingHandler) getLogsDimensionLatencyHistogram(ctx *fasthttp.RequestC
 	if !ok {
 		return
 	}
-	filters := parseHistogramFilters(ctx)
-	if filters == nil {
+	filters, err := parseHistogramFilters(ctx)
+	if err != nil {
+		SendError(ctx, fasthttp.StatusBadRequest, err.Error())
 		return
 	}
-	bucketSizeSeconds := calculateBucketSize(filters.StartTime, filters.EndTime)
+	bucketSizeSeconds, err := histogramBucketSize(ctx, filters)
+	if err != nil {
+		SendError(ctx, fasthttp.StatusBadRequest, err.Error())
+		return
+	}
 
 	result, err := h.logManager.GetDimensionLatencyHistogram(ctx, filters, bucketSizeSeconds, dimension)
 	if err != nil {
@@ -1787,8 +1867,9 @@ func ParseRankingLimit(ctx *fasthttp.RequestCtx, filters *logstore.SearchFilters
 
 // getModelRankings handles GET /api/logs/rankings - Get models ranked by usage with trends
 func (h *LoggingHandler) getModelRankings(ctx *fasthttp.RequestCtx) {
-	filters := parseHistogramFilters(ctx)
-	if filters == nil {
+	filters, err := parseHistogramFilters(ctx)
+	if err != nil {
+		SendError(ctx, fasthttp.StatusBadRequest, err.Error())
 		return
 	}
 	if !ParseRankingLimit(ctx, filters) {
@@ -1817,8 +1898,9 @@ func (h *LoggingHandler) getDimensionRankings(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	filters := parseHistogramFilters(ctx)
-	if filters == nil {
+	filters, err := parseHistogramFilters(ctx)
+	if err != nil {
+		SendError(ctx, fasthttp.StatusBadRequest, err.Error())
 		return
 	}
 	if !ParseRankingLimit(ctx, filters) {
@@ -2039,8 +2121,9 @@ const dashboardMCPTopToolsLimit = 10
 // concurrently; if any fails the whole request fails, so consumers always get a
 // complete payload or a clear error, never partial data.
 func (h *LoggingHandler) getDashboard(ctx *fasthttp.RequestCtx) {
-	filters := parseHistogramFilters(ctx)
-	if filters == nil {
+	filters, err := parseHistogramFilters(ctx)
+	if err != nil {
+		SendError(ctx, fasthttp.StatusBadRequest, err.Error())
 		return
 	}
 	if !ParseRankingLimit(ctx, filters) {

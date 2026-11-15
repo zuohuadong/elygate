@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -4030,6 +4032,60 @@ func (m *MCPManager) createHTTPConnection(ctx context.Context, config *schemas.M
 	return client.NewClient(httpTransport, manualInputRoundTrips), connectionInfo, nil
 }
 
+// stdioScriptExtensions are the argument suffixes treated as a script the
+// subprocess is expected to execute. Only these are probed before spawn: a bare
+// absolute path argument can legitimately name a directory or a path the server
+// creates itself, and refusing those would break working configurations.
+var stdioScriptExtensions = []string{".py", ".js", ".mjs", ".cjs", ".ts", ".sh", ".rb", ".pl", ".php", ".jar"}
+
+// preflightStdioTarget reports a stdio client whose command or script argument
+// cannot be reached from this process.
+//
+// A path that exists in a login shell can still be invisible to the gateway: a
+// unit with PrivateTmp=true, ProtectHome=yes or ProtectSystem=full sees a
+// different /tmp, no /home, and a read-only /usr, so `python3 /tmp/server.py`
+// spawns a process that exits with status 2 before the MCP handshake. The
+// transport then reports "transport closed" only when the 30s initialize
+// timeout expires, which says nothing about the real cause, so the failure is
+// classified here instead, as a permanent misconfiguration with a message that
+// names the path and the sandboxing class of problem.
+func preflightStdioTarget(cmd string, args []string, clientName string) error {
+	if strings.ContainsRune(cmd, os.PathSeparator) {
+		info, err := os.Stat(cmd)
+		switch {
+		case err != nil:
+			return fmt.Errorf("stdio command %q for MCP client %s is not reachable: %w", cmd, clientName, err)
+		case info.IsDir():
+			return fmt.Errorf("stdio command %q for MCP client %s is a directory", cmd, clientName)
+		}
+	} else if _, err := exec.LookPath(cmd); err != nil {
+		return fmt.Errorf("stdio command %q for MCP client %s was not found on the service PATH: %w", cmd, clientName, err)
+	}
+	for _, arg := range args {
+		if !isStdioScriptPath(arg) {
+			continue
+		}
+		info, err := os.Stat(arg)
+		switch {
+		case err != nil:
+			return fmt.Errorf("stdio argument %q for MCP client %s is not reachable from the gateway: %w; the service's sandbox (PrivateTmp, ProtectHome, ProtectSystem) can hide a path that exists in an interactive shell", arg, clientName, err)
+		case info.IsDir():
+			return fmt.Errorf("stdio argument %q for MCP client %s is a directory", arg, clientName)
+		}
+	}
+	return nil
+}
+
+// isStdioScriptPath reports whether arg names an absolute path to a script the
+// subprocess is expected to run.
+func isStdioScriptPath(arg string) bool {
+	if !filepath.IsAbs(arg) {
+		return false
+	}
+	ext := strings.ToLower(filepath.Ext(arg))
+	return slices.Contains(stdioScriptExtensions, ext)
+}
+
 // createSTDIOConnection creates a STDIO-based MCP client connection without holding locks.
 // If overrides is non-nil with a populated StdioCommand/StdioArgs, those replace the config values.
 func (m *MCPManager) createSTDIOConnection(_ context.Context, config *schemas.MCPClientConfig, overrides *schemas.BifrostMCPConnectRequest) (*client.Client, *schemas.MCPClientConnectionInfo, error) {
@@ -4069,6 +4125,13 @@ func (m *MCPManager) createSTDIOConnection(_ context.Context, config *schemas.MC
 		if os.Getenv(envName) == "" {
 			return nil, nil, misconfiguredError{fmt.Errorf("environment variable %s is not set for MCP client %s", envName, config.Name)}
 		}
+	}
+
+	// Refuse an unreachable command or script before spawning. Without this the
+	// child starts, exits immediately, and the operator only sees
+	// "transport error: transport closed" once the initialize handshake times out.
+	if err := preflightStdioTarget(cmd, args, config.Name); err != nil {
+		return nil, nil, misconfiguredError{err}
 	}
 
 	// Create STDIO transport

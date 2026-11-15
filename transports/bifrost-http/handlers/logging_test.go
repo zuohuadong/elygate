@@ -196,7 +196,10 @@ func TestParseToolCallNamesFilter(t *testing.T) {
 	t.Run("histogram filters honour it", func(t *testing.T) {
 		ctx := &fasthttp.RequestCtx{}
 		ctx.QueryArgs().Set("tool_call_names", "search")
-		filters := parseHistogramFilters(ctx)
+		filters, err := parseHistogramFilters(ctx)
+		if err != nil {
+			t.Fatalf("parse histogram filters: %v", err)
+		}
 		if got, want := filters.ToolCallNames, []string{"search"}; !reflect.DeepEqual(got, want) {
 			t.Fatalf("histogram tool call names = %#v, want %#v", got, want)
 		}
@@ -246,7 +249,10 @@ func TestParseMetadataFilters(t *testing.T) {
 	t.Run("histogram filters honour it", func(t *testing.T) {
 		ctx := &fasthttp.RequestCtx{}
 		ctx.Request.SetRequestURI(`/api/logs/histogram?metadata_env=%5B%22prod%22%2C%22staging%22%5D`)
-		filters := parseHistogramFilters(ctx)
+		filters, err := parseHistogramFilters(ctx)
+		if err != nil {
+			t.Fatalf("parse histogram filters: %v", err)
+		}
 		if got, want := map[string][]string(filters.MetadataFilters), map[string][]string{"env": {"prod", "staging"}}; !reflect.DeepEqual(got, want) {
 			t.Fatalf("histogram metadata filters = %#v, want %#v", got, want)
 		}
@@ -280,7 +286,10 @@ func TestParseGuardrailOutcomesFilter(t *testing.T) {
 	t.Run("histogram filters honour it", func(t *testing.T) {
 		ctx := &fasthttp.RequestCtx{}
 		ctx.QueryArgs().Set("guardrail_outcomes", "blocked")
-		filters := parseHistogramFilters(ctx)
+		filters, err := parseHistogramFilters(ctx)
+		if err != nil {
+			t.Fatalf("parse histogram filters: %v", err)
+		}
 		if got, want := filters.GuardrailOutcomes, []string{"blocked"}; !reflect.DeepEqual(got, want) {
 			t.Fatalf("histogram guardrail outcomes = %#v, want %#v", got, want)
 		}
@@ -296,16 +305,24 @@ func TestParseTopicIDsFilter(t *testing.T) {
 	want := []string{"topic-a", "topic-b"}
 
 	filters := &logstore.SearchFilters{}
-	parseTopicIDsFilter(ctx, filters)
+	if err := parseTopicIDsFilter(ctx, filters); err != nil {
+		t.Fatalf("parse topic ids: %v", err)
+	}
 	if !reflect.DeepEqual(filters.TopicIDs, want) {
 		t.Fatalf("topic ids = %#v, want %#v", filters.TopicIDs, want)
 	}
-	if got := parseHistogramFilters(ctx).TopicIDs; !reflect.DeepEqual(got, want) {
+	histogramFilters, err := parseHistogramFilters(ctx)
+	if err != nil {
+		t.Fatalf("parse histogram filters: %v", err)
+	}
+	if got := histogramFilters.TopicIDs; !reflect.DeepEqual(got, want) {
 		t.Fatalf("histogram topic ids = %#v, want %#v", got, want)
 	}
 
 	kept := &logstore.SearchFilters{TopicIDs: []string{"topic-a"}}
-	parseTopicIDsFilter(&fasthttp.RequestCtx{}, kept)
+	if err := parseTopicIDsFilter(&fasthttp.RequestCtx{}, kept); err != nil {
+		t.Fatalf("parse topic ids: %v", err)
+	}
 	if !reflect.DeepEqual(kept.TopicIDs, []string{"topic-a"}) {
 		t.Fatalf("an absent parameter must leave the filter alone, got %#v", kept.TopicIDs)
 	}
@@ -381,8 +398,8 @@ func TestLogsRoutesRejectTopicIDsNamingNoTopic(t *testing.T) {
 	if mgr.searched != nil || mgr.counted != nil || mgr.histogrammed != nil {
 		t.Fatalf("the store was queried: searched %#v, counted %#v, histogrammed %#v", mgr.searched, mgr.counted, mgr.histogrammed)
 	}
-	if !parseTopicIDsFilter(&fasthttp.RequestCtx{}, &logstore.SearchFilters{}) {
-		t.Fatal("an absent topic_ids must be accepted")
+	if err := parseTopicIDsFilter(&fasthttp.RequestCtx{}, &logstore.SearchFilters{}); err != nil {
+		t.Fatalf("an absent topic_ids must be accepted, got %v", err)
 	}
 }
 
@@ -914,7 +931,8 @@ func TestParseHistogramFiltersResolvesCalendarPeriodInTimezone(t *testing.T) {
 	ctx := &fasthttp.RequestCtx{}
 	ctx.QueryArgs().Set("period", "this_month")
 	ctx.QueryArgs().Set("timezone", "America/New_York")
-	filters := parseHistogramFilters(ctx)
+	filters, err := parseHistogramFilters(ctx)
+	require.NoError(t, err)
 
 	loc, err := time.LoadLocation("America/New_York")
 	require.NoError(t, err)
@@ -1809,7 +1827,7 @@ func TestCorrelationFilterParsing(t *testing.T) {
 	if llm.SessionID != "session-1" || llm.AgentCorrelationID != "agent-1" || !reflect.DeepEqual(llm.AgentNames, []string{"library-research", "code-reviewer"}) {
 		t.Fatalf("lost LLM correlation filters: %+v", llm)
 	}
-	if got := parseHistogramFilters(&ctx); got.SessionID != "session-1" || got.AgentCorrelationID != "agent-1" || !reflect.DeepEqual(got.AgentNames, llm.AgentNames) {
+	if got, err := parseHistogramFilters(&ctx); err != nil || got.SessionID != "session-1" || got.AgentCorrelationID != "agent-1" || !reflect.DeepEqual(got.AgentNames, llm.AgentNames) {
 		t.Fatalf("lost LLM histogram correlation filters: %+v", got)
 	}
 
@@ -2190,5 +2208,112 @@ func TestParseBucketSizeOverride(t *testing.T) {
 				t.Fatalf("got %d, %v; want %d", got, err, tc.want)
 			}
 		})
+	}
+}
+
+// bucketSizeLogManager records the bucket width each histogram route asks the
+// store for, so the shared bucket_size contract can be checked end to end.
+type bucketSizeLogManager struct {
+	loggingplugin.LogManager
+	histogram int64
+	token     int64
+	cost      int64
+}
+
+func (m *bucketSizeLogManager) GetHistogram(_ context.Context, _ *logstore.SearchFilters, size int64) (*logstore.HistogramResult, error) {
+	m.histogram = size
+	return &logstore.HistogramResult{}, nil
+}
+
+func (m *bucketSizeLogManager) GetTokenHistogram(_ context.Context, _ *logstore.SearchFilters, size int64) (*logstore.TokenHistogramResult, error) {
+	m.token = size
+	return &logstore.TokenHistogramResult{}, nil
+}
+
+func (m *bucketSizeLogManager) GetCostHistogram(_ context.Context, _ *logstore.SearchFilters, size int64) (*logstore.CostHistogramResult, error) {
+	m.cost = size
+	return &logstore.CostHistogramResult{}, nil
+}
+
+// TestHistogramRoutesHonourExplicitBucketSize pins the shared bucket_size
+// contract. Only /histogram/cost used to read the parameter, so an explicit
+// width silently produced a different resolution on every other chart.
+func TestHistogramRoutesHonourExplicitBucketSize(t *testing.T) {
+	mgr := &bucketSizeLogManager{}
+	h := &LoggingHandler{logManager: mgr, redactedKeysManager: noRedactedKeys{}, config: &lib.Config{ClientConfig: &configstore.ClientConfig{}}}
+	window := func(ctx *fasthttp.RequestCtx, size string) {
+		ctx.QueryArgs().Set("start_time", "2026-01-01T00:00:00Z")
+		ctx.QueryArgs().Set("end_time", "2026-01-02T00:00:00Z")
+		ctx.QueryArgs().Set("bucket_size", size)
+	}
+
+	ctx := &fasthttp.RequestCtx{}
+	window(ctx, "60")
+	h.getLogsHistogram(ctx)
+	require.Equal(t, fasthttp.StatusOK, ctx.Response.StatusCode(), string(ctx.Response.Body()))
+	require.EqualValues(t, 60, mgr.histogram, "GET /api/logs/histogram ignored bucket_size")
+
+	ctx = &fasthttp.RequestCtx{}
+	window(ctx, "300")
+	h.getLogsTokenHistogram(ctx)
+	require.Equal(t, fasthttp.StatusOK, ctx.Response.StatusCode(), string(ctx.Response.Body()))
+	require.EqualValues(t, 300, mgr.token, "GET /api/logs/histogram/tokens ignored bucket_size")
+
+	ctx = &fasthttp.RequestCtx{}
+	window(ctx, "900")
+	h.getLogsCostHistogram(ctx)
+	require.Equal(t, fasthttp.StatusOK, ctx.Response.StatusCode(), string(ctx.Response.Body()))
+	require.EqualValues(t, 900, mgr.cost, "GET /api/logs/histogram/cost ignored bucket_size")
+}
+
+// TestHistogramRoutesRejectMalformedBucketSize: the parameter is either honoured
+// or refused, never silently ignored, and every histogram route agrees on the
+// accepted format.
+func TestHistogramRoutesRejectMalformedBucketSize(t *testing.T) {
+	h := &LoggingHandler{logManager: &bucketSizeLogManager{}, redactedKeysManager: noRedactedKeys{}, config: &lib.Config{ClientConfig: &configstore.ClientConfig{}}}
+	routes := map[string]fasthttp.RequestHandler{
+		"GET /api/logs/histogram":        h.getLogsHistogram,
+		"GET /api/logs/histogram/tokens": h.getLogsTokenHistogram,
+		"GET /api/logs/histogram/cost":   h.getLogsCostHistogram,
+	}
+	for name, route := range routes {
+		for _, size := range []string{"1h", "0", "7", "86401"} {
+			ctx := &fasthttp.RequestCtx{}
+			ctx.QueryArgs().Set("start_time", "2026-01-01T00:00:00Z")
+			ctx.QueryArgs().Set("end_time", "2026-01-02T00:00:00Z")
+			ctx.QueryArgs().Set("bucket_size", size)
+			route(ctx)
+			if ctx.Response.StatusCode() != fasthttp.StatusBadRequest {
+				t.Fatalf("%s accepted bucket_size=%q with %d: %s", name, size, ctx.Response.StatusCode(), ctx.Response.Body())
+			}
+		}
+	}
+}
+
+// TestLogsRoutesRejectMalformedTimeWindow pins that a malformed start_time or
+// end_time is a 400. The rows and stats routes used to drop it, answering with
+// every log instead of the requested window, which reads as a successful
+// (unfiltered) result.
+func TestLogsRoutesRejectMalformedTimeWindow(t *testing.T) {
+	mgr := &topicFilterLogManager{}
+	h := &LoggingHandler{logManager: mgr, redactedKeysManager: noRedactedKeys{}, config: &lib.Config{ClientConfig: &configstore.ClientConfig{}}}
+	routes := map[string]fasthttp.RequestHandler{
+		"GET /api/logs":                  h.getLogs,
+		"GET /api/logs/stats":            h.getLogsStats,
+		"GET /api/logs/histogram":        h.getLogsHistogram,
+		"GET /api/logs/histogram/tokens": h.getLogsTokenHistogram,
+	}
+	for name, route := range routes {
+		for _, query := range []string{"start_time=1700000000", "end_time=yesterday", "start_time=2026-01-01"} {
+			ctx := &fasthttp.RequestCtx{}
+			ctx.Request.SetRequestURI("/api/logs?" + query)
+			route(ctx)
+			if ctx.Response.StatusCode() != fasthttp.StatusBadRequest {
+				t.Fatalf("%s accepted %q with %d: %s", name, query, ctx.Response.StatusCode(), ctx.Response.Body())
+			}
+		}
+	}
+	if mgr.searched != nil || mgr.counted != nil || mgr.histogrammed != nil {
+		t.Fatalf("the store was queried with a malformed window: searched %#v counted %#v histogrammed %#v", mgr.searched, mgr.counted, mgr.histogrammed)
 	}
 }
