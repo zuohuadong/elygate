@@ -13,7 +13,6 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
@@ -2594,32 +2593,9 @@ func BenchmarkExecuteChatTool_PerCallHTTPUpstream(b *testing.B) {
 	}
 }
 
-// TestCreateSTDIOConnectionRejectsUnreachableScriptPath pins the preflight for a
-// script argument the service cannot see. Before it, the child started and
-// exited immediately ("transport closed" only after the 30s initialize timeout),
-// which pointed nowhere near the real cause: a sandboxed path.
-func TestCreateSTDIOConnectionRejectsUnreachableScriptPath(t *testing.T) {
-	t.Parallel()
-
-	config := &schemas.MCPClientConfig{
-		Name:           "test-stdio-client",
-		ConnectionType: schemas.MCPConnectionTypeSTDIO,
-		StdioConfig: &schemas.MCPStdioConfig{
-			Command: "python3",
-			Args:    []string{"-u", "/nonexistent/for-bifrost-test/mcp_server.py"},
-		},
-	}
-
-	_, _, err := (&MCPManager{}).createSTDIOConnection(context.Background(), config, nil)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "/nonexistent/for-bifrost-test/mcp_server.py")
-	require.Contains(t, err.Error(), "not reachable from the gateway")
-	require.Contains(t, err.Error(), "PrivateTmp")
-	require.True(t, isPermanentConnectError(err), "an unreachable path must not be retried")
-}
-
-// TestCreateSTDIOConnectionRejectsMissingCommand keeps the existing exec error
-// path but names the client and the service PATH.
+// TestCreateSTDIOConnectionRejectsMissingCommand keeps the fast failure for a
+// command that cannot be resolved: it fails the same way on every attempt, so it
+// is refused before spawn and named with the client and the service PATH.
 func TestCreateSTDIOConnectionRejectsMissingCommand(t *testing.T) {
 	t.Parallel()
 
@@ -2633,26 +2609,7 @@ func TestCreateSTDIOConnectionRejectsMissingCommand(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "was not found on the service PATH")
 	require.Contains(t, err.Error(), "test-stdio-client")
-	require.True(t, isPermanentConnectError(err))
-}
-
-// TestCreateSTDIOConnectionAllowsNonScriptAbsoluteArguments: only script
-// arguments are probed. A server invoked with a mount path it creates itself
-// (e.g. --root /workspace) must keep working.
-func TestCreateSTDIOConnectionAllowsNonScriptAbsoluteArguments(t *testing.T) {
-	t.Parallel()
-
-	config := &schemas.MCPClientConfig{
-		Name:           "test-stdio-client",
-		ConnectionType: schemas.MCPConnectionTypeSTDIO,
-		StdioConfig: &schemas.MCPStdioConfig{
-			Command: "echo",
-			Args:    []string{"--root", "/nonexistent/for-bifrost-test/workspace"},
-		},
-	}
-
-	_, _, err := (&MCPManager{}).createSTDIOConnection(context.Background(), config, nil)
-	require.NoError(t, err)
+	require.True(t, isPermanentConnectError(err), "an unresolvable command must not be retried")
 }
 
 // TestCreateSTDIOConnectionRejectsDirectoryCommand covers a command that
@@ -2672,93 +2629,63 @@ func TestCreateSTDIOConnectionRejectsDirectoryCommand(t *testing.T) {
 	require.Contains(t, err.Error(), "is a directory")
 }
 
-// TestPreflightStdioTargetPinsScriptExtensionRules documents which arguments are
-// probed, so the false-positive boundary is explicit.
-func TestPreflightStdioTargetPinsScriptExtensionRules(t *testing.T) {
+// TestPreflightStdioCommandLeavesArgumentsAlone pins the boundary of the only
+// pre-spawn check. A script or option value that does not exist on this host is
+// a working configuration when a container runner, a wrapper or an optional
+// config flag resolves it, so arguments must never be refused here.
+func TestPreflightStdioCommandLeavesArgumentsAlone(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		arg  string
-		want bool
+		name string
+		cmd  string
+		args []string
 	}{
-		{"/srv/mcp/server.py", true},
-		{"/srv/mcp/server.mjs", true},
-		{"/srv/mcp/run.sh", true},
-		{"/srv/mcp/server.PY", true},
-		{"/workspace", false},
-		{"server.py", false},
-		{"--root", false},
-		{"https://example.com/server.py", false},
+		{"container-internal script", "echo", []string{"-i", "image", "python", "/app/only-in-container/server.py"}},
+		{"optional rcfile", "echo", []string{"--rcfile", "/nonexistent/for-bifrost-test/optional-init.sh", "-c", "true"}},
+		{"optional env file", "echo", []string{"--env-file-if-exists", "/nonexistent/for-bifrost-test/mcp.env", "server.js"}},
+		{"output path", "echo", []string{"--out", "/nonexistent/for-bifrost-test/report.py"}},
 	}
 	for _, tc := range cases {
-		assert.Equal(t, tc.want, isStdioScriptPath(tc.arg), "isStdioScriptPath(%q)", tc.arg)
+		require.NoError(t, preflightStdioCommand(tc.cmd, "arg-client"), tc.name)
 	}
+
+	// The same helper still refuses an unresolvable command, which is the case
+	// the check exists for.
+	require.Error(t, preflightStdioCommand("definitely-not-a-real-command-bifrost", "arg-client"))
 }
 
-// TestPreflightStdioTargetLeavesContainerRunnersAlone: a container runner
-// resolves its arguments on the other side of a boundary this process cannot
-// see, so a path that only exists inside the image must not be refused.
-func TestPreflightStdioTargetLeavesContainerRunnersAlone(t *testing.T) {
+// TestCreateSTDIOConnectionAllowsAbsentOptionalConfigPaths drives the real
+// constructor: a client whose option value names a missing file but whose entry
+// command exists must be built, not refused as a permanent misconfiguration.
+func TestCreateSTDIOConnectionAllowsAbsentOptionalConfigPaths(t *testing.T) {
 	t.Parallel()
 
-	// `docker` need not be installed: a missing runner is a genuine error, so
-	// point the check at a real command that is not an interpreter.
-	require.NoError(t, preflightStdioTarget("echo", []string{"/app/only-in-container/server.py"}, "container-client"))
-	// Even an interpreter command is only probed for its first non-flag
-	// argument, so later paths used as data are left alone.
-	require.NoError(t, preflightStdioTarget("echo", []string{"--out", "/data/report.py"}, "output-client"))
+	config := &schemas.MCPClientConfig{
+		Name:           "test-stdio-client",
+		ConnectionType: schemas.MCPConnectionTypeSTDIO,
+		StdioConfig: &schemas.MCPStdioConfig{
+			Command: "echo",
+			Args:    []string{"--rcfile", "/nonexistent/for-bifrost-test/optional-init.sh", "-c", "true"},
+		},
+	}
+
+	_, _, err := (&MCPManager{}).createSTDIOConnection(context.Background(), config, nil)
+	require.NoError(t, err)
 }
 
-// TestPreflightStdioTargetSkipsDataPathsAfterTheEntryScript: only the entry
-// script is the host's business; later arguments can name output files or data
-// the server itself creates.
-func TestPreflightStdioTargetSkipsDataPathsAfterTheEntryScript(t *testing.T) {
+// TestStdioInitializeErrorAddsTheStartHint: a stdio child that exits before the
+// handshake only yields "transport closed", so the error carries the causes to
+// check. Other transports keep their message unchanged.
+func TestStdioInitializeErrorAddsTheStartHint(t *testing.T) {
 	t.Parallel()
 
-	dir := t.TempDir()
-	script := filepath.Join(dir, "server.py")
-	require.NoError(t, os.WriteFile(script, []byte("print('hi')\n"), 0o644))
+	base := errors.New("transport error: transport closed")
+	stdioErr := stdioInitializeError(schemas.MCPConnectionTypeSTDIO, base)
+	require.ErrorIs(t, stdioErr, base)
+	require.Contains(t, stdioErr.Error(), "PrivateTmp")
+	require.Contains(t, stdioErr.Error(), "did not complete the MCP handshake")
 
-	require.NoError(t, preflightStdioTarget("python3", []string{"-u", script, "--out", "/nonexistent/for-bifrost-test/report.py"}, "data-client"))
-}
-
-// TestPreflightStdioTargetRejectsMissingEntryScript covers the sandbox case: the
-// interpreter is present, the script is not reachable from this process.
-func TestPreflightStdioTargetRejectsMissingEntryScript(t *testing.T) {
-	t.Parallel()
-
-	err := preflightStdioTarget("python3", []string{"-u", "/nonexistent/for-bifrost-test/mcp_server.py"}, "sandbox-client")
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "/nonexistent/for-bifrost-test/mcp_server.py")
-	require.Contains(t, err.Error(), "not reachable from the gateway")
-	require.Contains(t, err.Error(), "PrivateTmp")
-}
-
-// TestPreflightStdioTargetAcceptsReachableEntryScript: the happy path must not
-// be refused.
-func TestPreflightStdioTargetAcceptsReachableEntryScript(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	script := filepath.Join(dir, "server.py")
-	require.NoError(t, os.WriteFile(script, []byte("print('hi')\n"), 0o644))
-
-	require.NoError(t, preflightStdioTarget("python3", []string{"-u", script}, "ok-client"))
-	// A flag value that is not a script path is skipped; the entry script after
-	// it is still the one probed.
-	require.NoError(t, preflightStdioTarget("python3", []string{"-W", "error", script}, "flags-client"))
-}
-
-// TestPreflightStdioTargetOnlyProbesInterpreters pins the interpreter gate: the
-// same script path through a non-interpreter command is not this process's
-// business and must not fail.
-func TestPreflightStdioTargetOnlyProbesInterpreters(t *testing.T) {
-	t.Parallel()
-
-	require.NoError(t, preflightStdioTarget("echo", []string{"/nonexistent/for-bifrost-test/server.py"}, "non-interpreter"))
-	require.False(t, isStdioInterpreter("echo", "/bin/echo"))
-	require.True(t, isStdioInterpreter("python3", "/usr/bin/python3"))
-	require.True(t, isStdioInterpreter("/usr/bin/python3.12", "/usr/bin/python3.12"))
-	require.True(t, isStdioInterpreter("node", "/usr/bin/node"))
-	require.False(t, isStdioInterpreter("docker", "/usr/bin/docker"))
+	httpErr := stdioInitializeError(schemas.MCPConnectionTypeHTTP, base)
+	require.Equal(t, "failed to initialize MCP client: "+base.Error(), httpErr.Error())
 }

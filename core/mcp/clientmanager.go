@@ -12,7 +12,6 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -3387,7 +3386,7 @@ func (m *MCPManager) connectToMCPClientWithin(dialCtx, requestCtx context.Contex
 			initRetryConfig,
 			m.logger,
 		); initErr != nil {
-			return nil, fmt.Errorf("failed to initialize MCP client: %w", initErr)
+			return nil, stdioInitializeError(config.ConnectionType, initErr)
 		}
 		m.logger.Debug("%s [%s] Client initialized successfully", MCPLogPrefix, config.Name)
 
@@ -4032,114 +4031,47 @@ func (m *MCPManager) createHTTPConnection(ctx context.Context, config *schemas.M
 	return client.NewClient(httpTransport, manualInputRoundTrips), connectionInfo, nil
 }
 
-// stdioInterpreterCommands are the commands that execute a script file handed
-// to them as an argument. Only for these is an absolute script argument probed
-// on the host: a container runner (docker, podman, nerdctl), an orchestrator, or
-// a wrapper script resolves its arguments on the other side of a boundary this
-// process cannot see, so /app/server.py existing only inside the container is a
-// working configuration.
-var stdioInterpreterCommands = map[string]bool{
-	"python": true, "python3": true, "node": true, "nodejs": true, "deno": true,
-	"bun": true, "tsx": true, "ts-node": true, "sh": true, "bash": true, "zsh": true,
-	"dash": true, "ruby": true, "perl": true, "php": true, "pwsh": true, "powershell": true,
-}
-
-// stdioScriptExtensions are the argument suffixes treated as a script for those
-// interpreters.
-var stdioScriptExtensions = []string{".py", ".js", ".mjs", ".cjs", ".ts", ".sh", ".rb", ".pl", ".php", ".ps1"}
-
-// preflightStdioTarget reports a stdio client whose command, or whose
-// interpreter entry script, cannot be reached from this process.
+// preflightStdioCommand reports a stdio client whose command cannot be
+// resolved, and is the only pre-spawn check: an argument is not inspected.
 //
-// A path that exists in a login shell can still be invisible to the gateway: a
-// unit with PrivateTmp=true, ProtectHome=yes or ProtectSystem=full sees a
-// different /tmp, no /home, and a read-only /usr, so `python3 /tmp/server.py`
-// spawns a process that exits with status 2 before the MCP handshake. The
-// transport then reports "transport closed" only when the 30s initialize
-// timeout expires, which says nothing about the real cause, so the failure is
-// classified here instead, as a permanent misconfiguration with a message that
-// names the path and the sandboxing class of problem.
-//
-// The script check is deliberately narrow: the command must be a known host
-// interpreter and the argument must be that interpreter's entry script. Any
-// other absolute argument (a mount path, an output file, a container-internal
-// path) is left alone, because refusing those would break working setups.
-func preflightStdioTarget(cmd string, args []string, clientName string) error {
-	commandPath, err := resolveStdioCommand(cmd)
-	if err != nil {
-		if errors.Is(err, exec.ErrNotFound) {
-			return fmt.Errorf("stdio command %q for MCP client %s was not found on the service PATH: %w", cmd, clientName, err)
+// A command that is missing or is a directory fails the same way on every
+// attempt, so it is classified as a permanent misconfiguration here instead of
+// after a 30s initialize timeout. Arguments are left alone on purpose: the entry
+// script of a container runner or a wrapper exists only on the other side of a
+// boundary this process cannot see, and an option value (bash --rcfile, node
+// --env-file-if-exists) can legitimately name a path that does not exist. Those
+// configurations work, so refusing them before spawn would break them.
+func preflightStdioCommand(cmd string, clientName string) error {
+	if strings.ContainsRune(cmd, os.PathSeparator) {
+		info, err := os.Stat(cmd)
+		switch {
+		case err != nil:
+			return fmt.Errorf("stdio command %q for MCP client %s is not reachable: %w", cmd, clientName, err)
+		case info.IsDir():
+			return fmt.Errorf("stdio command %q for MCP client %s is a directory", cmd, clientName)
 		}
-		return fmt.Errorf("stdio command %q for MCP client %s is not usable: %w", cmd, clientName, err)
-	}
-	if !isStdioInterpreter(cmd, commandPath) {
 		return nil
 	}
-	for _, arg := range args {
-		// The entry script is the first argument that is not a flag; an
-		// interpreter's own flags (-u, -O, --inspect) come before it.
-		if strings.HasPrefix(arg, "-") {
-			continue
-		}
-		if !isStdioScriptPath(arg) {
-			return nil
-		}
-		info, statErr := os.Stat(arg)
-		if statErr != nil {
-			return fmt.Errorf("stdio script %q for MCP client %s is not reachable from the gateway: %w; the service's sandbox (PrivateTmp, ProtectHome, ProtectSystem) can hide a path that exists in an interactive shell", arg, clientName, statErr)
-		}
-		if info.IsDir() {
-			return fmt.Errorf("stdio script %q for MCP client %s is a directory", arg, clientName)
-		}
-		return nil
+	if _, err := exec.LookPath(cmd); err != nil {
+		return fmt.Errorf("stdio command %q for MCP client %s was not found on the service PATH: %w", cmd, clientName, err)
 	}
 	return nil
 }
 
-// resolveStdioCommand resolves the command the transport will spawn: an
-// explicit path is stat'ed, a bare name is looked up on the service PATH.
-func resolveStdioCommand(cmd string) (string, error) {
-	if strings.ContainsRune(cmd, os.PathSeparator) {
-		info, err := os.Stat(cmd)
-		if err != nil {
-			return "", err
-		}
-		if info.IsDir() {
-			return "", fmt.Errorf("%s is a directory", cmd)
-		}
-		return cmd, nil
+// stdioInitializeError wraps an initialize failure, adding the stdio start hint
+// for a stdio client whose child produced no handshake answer.
+func stdioInitializeError(connType schemas.MCPConnectionType, initErr error) error {
+	if connType != schemas.MCPConnectionTypeSTDIO {
+		return fmt.Errorf("failed to initialize MCP client: %w", initErr)
 	}
-	return exec.LookPath(cmd)
+	return fmt.Errorf("failed to initialize MCP client: %w%s", initErr, stdioStartHint)
 }
 
-// isStdioInterpreter reports whether the spawned command runs a script passed to
-// it, using the command name as written and the resolved binary's base name so a
-// path to a python3 build counts as python3.
-func isStdioInterpreter(cmd, resolved string) bool {
-	if stdioInterpreterCommands[strings.TrimSuffix(strings.ToLower(filepath.Base(cmd)), ".exe")] {
-		return true
-	}
-	base := strings.TrimSuffix(strings.ToLower(filepath.Base(resolved)), ".exe")
-	if stdioInterpreterCommands[base] {
-		return true
-	}
-	// Versioned names such as python3.12 or python3.11.
-	for suffix := range stdioInterpreterCommands {
-		if strings.HasPrefix(base, suffix) && base[len(suffix)] >= '0' && base[len(suffix)] <= '9' {
-			return true
-		}
-	}
-	return false
-}
-
-// isStdioScriptPath reports whether arg names an absolute path a host
-// interpreter would run as a script.
-func isStdioScriptPath(arg string) bool {
-	if !filepath.IsAbs(arg) {
-		return false
-	}
-	return slices.Contains(stdioScriptExtensions, strings.ToLower(filepath.Ext(arg)))
-}
+// stdioStartHint is appended to a failed stdio initialization. The transport
+// reports a closed pipe when the child exits before the handshake answers, and
+// the child's own stderr and exit status are not part of that error, so the
+// message points at the causes that produce it.
+const stdioStartHint = " (the command started but did not complete the MCP handshake; check the arguments, that the script is readable by the service user, and that a unit sandbox such as PrivateTmp, ProtectHome or ProtectSystem is not hiding its path)"
 
 // createSTDIOConnection creates a STDIO-based MCP client connection without holding locks.
 // If overrides is non-nil with a populated StdioCommand/StdioArgs, those replace the config values.
@@ -4182,10 +4114,9 @@ func (m *MCPManager) createSTDIOConnection(_ context.Context, config *schemas.MC
 		}
 	}
 
-	// Refuse an unreachable command or script before spawning. Without this the
-	// child starts, exits immediately, and the operator only sees
-	// "transport error: transport closed" once the initialize handshake times out.
-	if err := preflightStdioTarget(cmd, args, config.Name); err != nil {
+	// Refuse an unresolvable command before spawning. Without this a missing
+	// binary only surfaces when the initialize handshake times out.
+	if err := preflightStdioCommand(cmd, config.Name); err != nil {
 		return nil, nil, misconfiguredError{err}
 	}
 
