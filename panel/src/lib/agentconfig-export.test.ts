@@ -200,6 +200,32 @@ describe('AgentConfig export mapping', () => {
 		expect(JSON.stringify(result.pub)).not.toContain('plainvalue');
 	});
 
+	test('a bare --key argument is treated as a credential, a sort key is not', () => {
+		const source: AgentConfigExportSource = {
+			models: undefined,
+			mcpClients: {
+				clients: [
+					{
+						config: {
+							name: 'keys',
+							connection_type: 'stdio',
+							stdio_config: {
+								command: 'server',
+								args: ['--key', 'plain-secret', '--sort-key=created', 'OPENAI_KEY: plain-secret', '--limit=10'],
+							},
+						},
+					},
+				],
+			},
+			skills: undefined,
+			prompts: undefined,
+			agents: undefined,
+		};
+		const result = buildAgentConfigPublic(source);
+		expect(result.pub.mcp[0].args).toEqual(['--sort-key=created', '--limit=10']);
+		expect(JSON.stringify(result.pub)).not.toContain('plain-secret');
+	});
+
 	test('produces an empty but valid public section when nothing is configured', () => {
 		const result = buildAgentConfigPublic({ models: undefined, mcpClients: undefined, skills: undefined, prompts: undefined, agents: undefined });
 		expect(result.counts).toEqual({ models: 0, mcp: 0, skills: 0, prompts: 0, agents: 0 });

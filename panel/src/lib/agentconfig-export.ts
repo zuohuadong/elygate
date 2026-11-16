@@ -117,8 +117,9 @@ function modelEntries(payload: unknown, warnings: AgentConfigExportWarning[]): A
 // CLIENT_SECRET and client-secret are one word. A bare `key` is deliberately not in
 // the flag list: --sort-key and --partition-key are ordinary arguments. It is accepted
 // for assignments and header names, where OPENAI_KEY and X-Auth-Token carry secrets.
-const SECRET_SUFFIX = /(?:apikey|accesskey|privatekey|token|secret|password|passwd|pwd|auth|authorization|credential|bearer)$/;
-const SECRET_SUFFIX_WITH_KEY = /(?:apikey|accesskey|privatekey|token|secret|password|passwd|pwd|auth|authorization|credential|bearer|key)$/;
+const SECRET_SUFFIX = /(?:apikey|accesskey|privatekey|token|secret|password|passwd|pwd|auth|authorization|credential|bearer|key)$/;
+// A bare `key` is a credential unless it names one of these ordinary arguments.
+const NOT_A_SECRET_KEY = /^(?:sort|order|partition|primary|foreign|row|cache|group|dedup|map|index|shard|hash|lookup|merge|search|filter|unique|natural|synthetic|stable|join|routing|refresh|schema|object|value)key$/;
 
 function normalizeName(name: string): string {
 	return name.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -128,10 +129,11 @@ const AUTH_HEADER = /^(?:authorization|proxy-authorization|x-api-key|api-key)\s*
 // -H/--header carry arbitrary headers, so they are treated as credential flags.
 const HEADER_FLAG = /^(?:h|header|headers)$/i;
 
-function isSecretName(name: string, allowBareKey = true): boolean {
+function isSecretName(name: string): boolean {
 	const normalized = normalizeName(name);
 	if (!normalized) return false;
-	return (allowBareKey ? SECRET_SUFFIX_WITH_KEY : SECRET_SUFFIX).test(normalized);
+	if (NOT_A_SECRET_KEY.test(normalized)) return false;
+	return SECRET_SUFFIX.test(normalized);
 }
 
 function flagName(token: string): string {
@@ -154,7 +156,7 @@ function isSecretHeader(token: string): boolean {
 	const separator = token.indexOf(':');
 	if (separator <= 0) return false;
 	const name = token.slice(0, separator);
-	if (!/^[a-z0-9][a-z0-9-]*$/i.test(name.trim())) return false;
+	if (!/^[a-z0-9][a-z0-9_-]*$/i.test(name.trim())) return false;
 	return isSecretName(name) || AUTH_HEADER.test(token.trim());
 }
 
@@ -164,7 +166,7 @@ function tokenCarriesSecret(token: string): boolean {
 	if (SECRET_TOKEN.test(trimmed) || AUTH_HEADER.test(trimmed) || isSecretAssignment(trimmed) || isSecretHeader(trimmed)) return true;
 	if (!trimmed.startsWith('-')) return false;
 	const name = flagName(trimmed);
-	return isSecretName(name, false) || HEADER_FLAG.test(name);
+	return isSecretName(name) || HEADER_FLAG.test(name);
 }
 
 // A command line is one string, so it is inspected token by token. Token-level

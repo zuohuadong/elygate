@@ -134,6 +134,16 @@ test.describe('AgentConfig deep link per employee', () => {
     await expect(page.getByRole('status').filter({ hasText: /Downloaded|已改为下载/ })).toBeVisible()
   })
 
+  test('still delivers for a key whose only grant is an assigned virtual MCP', async ({ page }) => {
+    await page.route('**/api/governance/virtual-keys/vk-1', (route) =>
+      route.fulfill({ json: { virtual_key: { id: 'vk-1', name: 'alice-key', is_active: true, allow_all_providers: false, provider_configs: [], mcp_configs: [], agent_grants: [] }, virtual_mcp_ids: [12] } }),
+    )
+    await page.getByTestId('employee-agent-config-emp-1').click()
+    await expect(page.getByText(/no models, MCP servers or agents|没有可用的模型/)).toHaveCount(0)
+    // Either the link is copied or the file is downloaded: both deliver the bundle.
+    await expect(page.getByRole('status').filter({ hasText: /AgentConfig|已改为下载/ })).toBeVisible()
+  })
+
   test('names the failed source instead of claiming the key grants nothing', async ({ page }) => {
     // The key's only real grant is a model, and the model source is the one that fails:
     // reporting "no grants" here would be wrong, the panel cannot know.

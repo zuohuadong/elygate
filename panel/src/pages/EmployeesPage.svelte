@@ -258,7 +258,10 @@
 			const incomplete = loaded.failed.length > 0
 				? text(`（${loaded.failed.map((name) => sourceLabels[name]).join('、')} 读取失败，配置可能不完整）`, ` (${loaded.failed.join(', ')} failed to load, so the bundle may be incomplete)`)
 				: '';
-			if (!scoped.hasScopedContent) {
+			// A key whose MCP access comes from its assigned virtual MCPs grants something
+			// real even though the bundle cannot list those clients; deliver what it has and
+			// say so, rather than claiming the key grants nothing.
+			if (!scoped.hasScopedContent && !scope.mcpOutsideKey) {
 				if (loaded.failed.length > 0) {
 					throw new Error(text(`部分配置来源读取失败${incomplete}，无法确认该密钥的授权范围。`, `Some configuration sources failed to load${incomplete}, so the key's grants cannot be confirmed.`));
 				}
