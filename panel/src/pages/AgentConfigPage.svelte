@@ -66,6 +66,8 @@
 			'mcp-name-too-long': ['跳过了名称超过 64 字符的 MCP client', 'Skipped an MCP client whose name exceeds 64 characters'],
 			'mcp-endpoint-not-public': ['HTTP/SSE 连接地址位于加密区，公共导出只保留名称和传输方式', 'An HTTP/SSE endpoint lives in the encrypted section; the public bundle keeps only its name and transport'],
 			'mcp-env-values-omitted': ['MCP 环境变量只导出名称，不导出值', 'Only MCP environment variable names were exported, not values'],
+			'mcp-args-redacted': ['MCP 启动参数中含疑似密钥，已移除', 'Suspected credentials were removed from the MCP launch arguments'],
+			'mcp-tools-restricted': ['该 MCP client 只授权了部分工具，无法在配置包中表达，已跳过', 'This MCP client grants only some of its tools, which a bundle cannot express, so it was skipped'],
 			'model-invalid': ['跳过了缺少有效 provider/id 的模型', 'Skipped a model without a valid provider/id'],
 			'skill-invalid': ['跳过了标识无效的 Skill', 'Skipped a skill with an invalid id'],
 			'prompt-invalid': ['跳过了标识无效的提示词', 'Skipped a prompt with an invalid id'],

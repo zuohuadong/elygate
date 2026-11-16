@@ -16,13 +16,22 @@ const MOCK_EMPLOYEE = {
   virtual_keys: [{ id: 'vk-1', name: 'alice-key' }],
 }
 
+// The detail endpoint wraps the key and nests each MCP client under mcp_client, which
+// is the shape the panel actually receives.
 const MOCK_VIRTUAL_KEY = {
-  id: 'vk-1',
-  name: 'alice-key',
-  allow_all_providers: false,
-  provider_configs: [{ provider: 'openai', allowed_models: ['gpt-4o'], blacklisted_models: [] }],
-  mcp_configs: [{ mcp_client_name: 'github' }],
-  agent_grants: [{ agent_name: 'researcher' }],
+  virtual_key: {
+    id: 'vk-1',
+    name: 'alice-key',
+    is_active: true,
+    allow_all_providers: false,
+    provider_configs: [{ provider: 'openai', allowed_models: ['gpt-4o'], blacklisted_models: ['regex:^gpt-4o-mini$'] }],
+    mcp_configs: [
+      { mcp_client: { name: 'github' }, tools_to_execute: ['*'] },
+      { mcp_client: { name: 'partially-granted' }, tools_to_execute: ['read_file'] },
+    ],
+    agent_grants: [{ agent_name: 'researcher' }],
+  },
+  virtual_mcp_ids: [],
 }
 
 const MOCK_SOURCES = {
@@ -35,10 +44,11 @@ const MOCK_SOURCES = {
   },
   mcpClients: {
     clients: [
-      { config: { name: 'github', connection_type: 'stdio', stdio_config: { command: 'npx', envs: ['GITHUB_TOKEN=ghp_e2e_secret'] } } },
+      { config: { name: 'github', connection_type: 'stdio', stdio_config: { command: 'npx', args: ['--api-key', 'sk-e2e-secret-value'], envs: ['GITHUB_TOKEN=ghp_e2e_secret'] } } },
+      { config: { name: 'partially-granted', connection_type: 'stdio', stdio_config: { command: 'npx' } } },
       { config: { name: 'unassigned-docs', connection_type: 'stdio', stdio_config: { command: 'npx' } } },
     ],
-    total_count: 2,
+    total_count: 3,
   },
   skills: { skills: [{ id: 'skill-1', name: 'docs' }], total: 1 },
   prompts: { prompts: [{ id: 'prompt-1', name: 'Code Review' }] },
@@ -77,18 +87,42 @@ test.describe('AgentConfig deep link per employee', () => {
     expect(bundle.pub.models).toEqual([{ provider: 'openai', id: 'gpt-4o' }])
     expect(bundle.pub.mcp.map((entry: { name: string }) => entry.name)).toEqual(['github'])
     expect(bundle.pub.mcp[0].envKeys).toEqual(['GITHUB_TOKEN'])
+    expect(bundle.pub.mcp[0].args).toEqual([])
     expect(bundle.pub.agents.map((entry: { id: string }) => entry.id)).toEqual(['researcher'])
-    expect(JSON.stringify(bundle)).not.toContain('gpt-4o-mini')
-    expect(JSON.stringify(bundle)).not.toContain('claude-sonnet-4')
-    expect(clipboard).not.toContain('ghp_e2e_secret')
-    expect(JSON.stringify(bundle)).not.toContain('ghp_e2e_secret')
+    const serialized = JSON.stringify(bundle)
+    expect(serialized).not.toContain('gpt-4o-mini')
+    expect(serialized).not.toContain('claude-sonnet-4')
+    expect(serialized).not.toContain('partially-granted')
+    expect(serialized).not.toContain('unassigned-docs')
+    expect(serialized).not.toContain('unassigned-writer')
+    expect(serialized).not.toContain('ghp_e2e_secret')
+    expect(serialized).not.toContain('sk-e2e-secret-value')
   })
 
   test('refuses to copy when the bound key grants nothing reachable', async ({ page }) => {
     await page.route('**/api/governance/virtual-keys/vk-1', (route) =>
-      route.fulfill({ json: { id: 'vk-1', name: 'alice-key', allow_all_providers: false, provider_configs: [], mcp_configs: [], agent_grants: [] } }),
+      route.fulfill({ json: { virtual_key: { id: 'vk-1', name: 'alice-key', is_active: true, allow_all_providers: false, provider_configs: [], mcp_configs: [], agent_grants: [] } } }),
     )
     await page.getByTestId('employee-agent-config-emp-1').click()
     await expect(page.getByText(/grants no models|没有可用的模型/)).toBeVisible()
+  })
+
+  test('refuses to copy for a disabled key', async ({ page }) => {
+    await page.route('**/api/governance/virtual-keys/vk-1', (route) =>
+      route.fulfill({ json: { virtual_key: { ...MOCK_VIRTUAL_KEY.virtual_key, is_active: false } } }),
+    )
+    await page.getByTestId('employee-agent-config-emp-1').click()
+    await expect(page.getByText(/virtual key is disabled|虚拟密钥已停用/)).toBeVisible()
+  })
+
+  test('names the failed source instead of claiming the key grants nothing', async ({ page }) => {
+    // The key's only real grant is a model, and the model source is the one that fails:
+    // reporting "no grants" here would be wrong, the panel cannot know.
+    await page.route('**/api/models?*', (route) => route.fulfill({ status: 503, json: { error: 'unavailable' } }))
+    await page.route('**/api/mcp/clients?*', (route) => route.fulfill({ json: { clients: [], total_count: 0 } }))
+    await page.route('**/api/agents', (route) => route.fulfill({ json: { agents: [] } }))
+    await page.getByTestId('employee-agent-config-emp-1').click()
+    await expect(page.getByText(/failed to load|读取失败/)).toBeVisible()
+    await expect(page.getByText(/grants no models|没有可用的模型/)).toHaveCount(0)
   })
 })

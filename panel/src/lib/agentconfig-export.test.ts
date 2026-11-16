@@ -73,6 +73,45 @@ describe('AgentConfig export mapping', () => {
 		expect(codes).toContain('agent-invalid');
 	});
 
+	test('drops credential-bearing launch arguments and says so', () => {
+		const source: AgentConfigExportSource = {
+			models: undefined,
+			mcpClients: {
+				clients: [
+					{
+						config: {
+							name: 'flagged',
+							connection_type: 'stdio',
+							stdio_config: {
+								command: 'server',
+								args: ['--verbose', '--api-key', 'sk-live-abcdefgh12345678', '--token=plainvalue', '--path', '/srv/tools'],
+							},
+						},
+					},
+					{
+						config: {
+							name: 'bare',
+							connection_type: 'stdio',
+							stdio_config: { command: 'server', args: ['--flag', 'ghp_abcdefgh12345678', 'xoxb-1234567890-abcdef'] },
+						},
+					},
+				],
+			},
+			skills: undefined,
+			prompts: undefined,
+			agents: undefined,
+		};
+		const result = buildAgentConfigPublic(source);
+		expect(result.pub.mcp[0].args).toEqual(['--verbose', '--path', '/srv/tools']);
+		expect(result.pub.mcp[1].args).toEqual(['--flag']);
+		expect(result.warnings.filter((warning) => warning.code === 'mcp-args-redacted').map((warning) => warning.name)).toEqual(['flagged', 'bare']);
+		const serialized = JSON.stringify(result.pub);
+		expect(serialized).not.toContain('sk-live-abcdefgh12345678');
+		expect(serialized).not.toContain('plainvalue');
+		expect(serialized).not.toContain('ghp_abcdefgh12345678');
+		expect(serialized).not.toContain('xoxb-1234567890-abcdef');
+	});
+
 	test('produces an empty but valid public section when nothing is configured', () => {
 		const result = buildAgentConfigPublic({ models: undefined, mcpClients: undefined, skills: undefined, prompts: undefined, agents: undefined });
 		expect(result.counts).toEqual({ models: 0, mcp: 0, skills: 0, prompts: 0, agents: 0 });

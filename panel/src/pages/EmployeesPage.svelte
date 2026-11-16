@@ -7,8 +7,8 @@
 	import { withBasePath } from '../lib/base-path';
 	import { ACB_FILE_EXTENSION, ACB_MIME_TYPE, bundleToFileString } from '../lib/agentconfig';
 	import { buildScopedAgentConfig } from '../lib/agentconfig-assignment';
-	import { scopeFromVirtualKey } from '../lib/agentconfig-scope';
-	import { loadAgentConfigSources } from '../lib/agentconfig-source';
+	import { scopeFromVirtualKey, vkScopeProblem } from '../lib/agentconfig-scope';
+	import { loadAgentConfigSources, type AgentConfigSourceName } from '../lib/agentconfig-source';
 
 	interface Props { resourceName: string; }
 	interface EmployeeForm {
@@ -41,6 +41,13 @@
 	let loadSeq = 0;
 	let resetIds = $state<string[]>([]);
 	let agentConfigIds = $state<string[]>([]);
+	const sourceLabels: Record<AgentConfigSourceName, string> = {
+		models: i18n.locale === 'zh-CN' ? '模型' : 'models',
+		mcpClients: 'MCP',
+		skills: 'Skills',
+		prompts: i18n.locale === 'zh-CN' ? '提示词' : 'prompts',
+		agents: 'Agents',
+	};
 	const filteredEmployees = $derived.by(() => {
 		const query = search.trim().toLowerCase();
 		if (!query) return employees;
@@ -57,6 +64,16 @@
 	function stringValue(record: JsonRecord, key: string): string { return typeof record[key] === 'string' ? String(record[key]) : ''; }
 	function boolValue(record: JsonRecord, key: string): boolean { return record[key] !== false; }
 	function keyList(record: JsonRecord): JsonRecord[] { return Array.isArray(record.virtual_keys) ? record.virtual_keys.filter((key): key is JsonRecord => !!key && typeof key === 'object' && !Array.isArray(key)) : []; }
+	function downloadBundleFile(fileName: string, contents: string): void {
+		const objectUrl = URL.createObjectURL(new Blob([contents], { type: ACB_MIME_TYPE }));
+		const anchor = document.createElement('a');
+		anchor.href = objectUrl;
+		anchor.download = fileName;
+		document.body.appendChild(anchor);
+		anchor.click();
+		anchor.remove();
+		URL.revokeObjectURL(objectUrl);
+	}
 	function applicationLabel(value: unknown): string {
 		const applications = String(value ?? '').trim();
 		if (!applications) return '—';
@@ -226,31 +243,43 @@
 		notice = '';
 		try {
 			const key = await requestJson<JsonRecord>(`/api/governance/virtual-keys/${encodeURIComponent(keyId)}`);
+			// A key that is disabled or expired is refused by governance for every
+			// request, so handing out a bundle describing its grants would be a lie.
+			const problem = vkScopeProblem(key);
+			if (problem === 'inactive') throw new Error(text('该员工的虚拟密钥已停用，无法生成可用配置。', 'The bound virtual key is disabled, so there is no usable configuration to hand out.'));
+			if (problem === 'expired') throw new Error(text('该员工的虚拟密钥已过期，请先续期后重试。', 'The bound virtual key has expired; renew it and retry.'));
 			const loaded = await loadAgentConfigSources();
 			const label = `${stringValue(employee, 'name') || stringValue(employee, 'username') || employeeId} · ${assignedKeyName(employee)}`;
-			const scoped = await buildScopedAgentConfig(loaded.source, scopeFromVirtualKey(key), label);
+			const scope = scopeFromVirtualKey(key);
+			const scoped = await buildScopedAgentConfig(loaded.source, scope, label, key);
+			// A failed source can be the only one the key grants, so report the failure
+			// before concluding the key grants nothing.
+			const incomplete = loaded.failed.length > 0
+				? text(`（${loaded.failed.map((name) => sourceLabels[name]).join('、')} 读取失败，配置可能不完整）`, ` (${loaded.failed.join(', ')} failed to load, so the bundle may be incomplete)`)
+				: '';
 			if (!scoped.hasScopedContent) {
+				if (loaded.failed.length > 0) {
+					throw new Error(text(`部分配置来源读取失败${incomplete}，无法确认该密钥的授权范围。`, `Some configuration sources failed to load${incomplete}, so the key's grants cannot be confirmed.`));
+				}
 				throw new Error(text('该密钥没有可用的模型、MCP 或 Agent 授权，生成的配置为空。', 'This key grants no models, MCP servers or agents, so the bundle would be empty.'));
 			}
-			const incomplete = loaded.failed.length > 0
-				? text('（部分配置来源读取失败，请稍后重试）', ' (some configuration sources failed to load; retry later)')
+			const narrowed = scoped.result.warnings.length > 0
+				? text(`（${scoped.result.warnings.length} 项已收窄或省略）`, ` (${scoped.result.warnings.length} items narrowed or omitted)`)
 				: '';
-			if (!scoped.fitsDeepLink) {
+			if (!scoped.fitsDeepLink || !navigator.clipboard) {
+				// Both a grant too large for a URL and a browser without clipboard access
+				// still have to deliver this key's own bundle; the global export is not a
+				// substitute because it describes the whole gateway.
 				const fileName = `${label.replace(/[^\w.-]+/g, '-')}${ACB_FILE_EXTENSION}`;
-				const objectUrl = URL.createObjectURL(new Blob([bundleToFileString(scoped.bundle)], { type: ACB_MIME_TYPE }));
-				const anchor = document.createElement('a');
-				anchor.href = objectUrl;
-				anchor.download = fileName;
-				document.body.appendChild(anchor);
-				anchor.click();
-				anchor.remove();
-				URL.revokeObjectURL(objectUrl);
-				notice = text(`授权范围过大，深链超出长度上限，已改为下载 ${fileName}${incomplete}。`, `The grant is too large for a deep link, so ${fileName} was downloaded instead${incomplete}.`);
+				downloadBundleFile(fileName, bundleToFileString(scoped.bundle));
+				const reason = scoped.fitsDeepLink
+					? text('浏览器不支持剪贴板', 'the browser has no clipboard access')
+					: text('授权范围超出深链长度上限', 'the grant exceeds the deep-link length limit');
+				notice = text(`已改为下载 ${fileName}（${reason}）${narrowed}${incomplete}。`, `Downloaded ${fileName} instead (${reason})${narrowed}${incomplete}.`);
 				return;
 			}
-			if (!navigator.clipboard) throw new Error(text('浏览器不支持剪贴板，请改用 AgentConfig 页面下载。', 'The browser has no clipboard access; download the bundle from the AgentConfig page instead.'));
 			await navigator.clipboard.writeText(scoped.deepLink);
-			notice = text(`已复制该员工专属的 AgentConfig 深链${incomplete}。`, `Copied this employee's AgentConfig deep link${incomplete}.`);
+			notice = text(`已复制该员工专属的 AgentConfig 深链${narrowed}${incomplete}。`, `Copied this employee's AgentConfig deep link${narrowed}${incomplete}.`);
 		} catch (cause) {
 			error = displayError(cause, text('生成 AgentConfig 失败。', 'Failed to build the AgentConfig bundle.'));
 		} finally {

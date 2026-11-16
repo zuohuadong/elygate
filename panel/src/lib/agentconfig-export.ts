@@ -16,6 +16,8 @@ export type AgentConfigExportWarningCode =
 	| 'mcp-name-too-long'
 	| 'mcp-endpoint-not-public'
 	| 'mcp-env-values-omitted'
+	| 'mcp-args-redacted'
+	| 'mcp-tools-restricted'
 	| 'model-invalid'
 	| 'skill-invalid'
 	| 'prompt-invalid'
@@ -102,6 +104,37 @@ function modelEntries(payload: unknown, warnings: AgentConfigExportWarning[]): A
 	return entries;
 }
 
+// A secret can ride in a command-line argument just as easily as in an environment
+// value (`--api-key sk-...`), and args travel in the public payload. A flag that names a
+// credential drops itself and its value; a bare value shaped like a known token drops
+// alone. Dropping too little leaks, dropping too much only makes the server need its
+// args from the user, so the redaction stays shape-based rather than statistical.
+const SECRET_ARG_FLAG = /^(?:--?)?(?:[a-z0-9]+[-_])*(?:api[-_]?key|apikey|token|secret|password|passwd|pwd|auth|credential|bearer|access[-_]?key)s?$/i;
+const SECRET_ARG_VALUE = /^(?:sk-[a-z0-9_-]{8,}|gh[pousr]_[a-z0-9]{8,}|github_pat_[a-z0-9_]{8,}|xox[abposr]-[a-z0-9-]{8,}|akia[a-z0-9]{12,}|bearer\s+\S{8,}|ey[a-z0-9_-]{8,}\.[a-z0-9_-]{8,}\.[a-z0-9_-]{8,})$/i;
+
+function redactArgs(args: string[]): { args: string[]; redacted: boolean } {
+	const kept: string[] = [];
+	let redacted = false;
+	for (let index = 0; index < args.length; index += 1) {
+		const arg = args[index];
+		const separator = arg.indexOf('=');
+		const flag = (separator === -1 ? arg : arg.slice(0, separator)).trim();
+		if (SECRET_ARG_FLAG.test(flag)) {
+			redacted = true;
+			// A flag without an inline value carries the credential in the next
+			// argument, so that one goes too.
+			if (separator === -1 && index + 1 < args.length) index += 1;
+			continue;
+		}
+		if (SECRET_ARG_VALUE.test(arg.trim())) {
+			redacted = true;
+			continue;
+		}
+		kept.push(arg);
+	}
+	return { args: kept, redacted };
+}
+
 function mcpEntries(payload: unknown, warnings: AgentConfigExportWarning[]): AcbMcpEntry[] {
 	const entries: AcbMcpEntry[] = [];
 	for (const client of arrayFrom(payload, 'clients')) {
@@ -126,7 +159,7 @@ function mcpEntries(payload: unknown, warnings: AgentConfigExportWarning[]): Acb
 		}
 		const stdio = isJsonRecord(config.stdio_config) ? config.stdio_config : {};
 		const command = stringValue(stdio, 'command');
-		const args = stringList(stdio.args);
+		const rawArgs = stringList(stdio.args);
 		const envs = stringList(stdio.envs);
 		const envKeys: string[] = [];
 		let omittedEnvValue = false;
@@ -137,6 +170,8 @@ function mcpEntries(payload: unknown, warnings: AgentConfigExportWarning[]): Acb
 			if (validLength(key, 128) && !envKeys.includes(key)) envKeys.push(key);
 		}
 		if (omittedEnvValue) warnings.push({ code: 'mcp-env-values-omitted', name });
+		const { args, redacted } = redactArgs(rawArgs);
+		if (redacted) warnings.push({ code: 'mcp-args-redacted', name });
 		entries.push({
 			name,
 			enabled,

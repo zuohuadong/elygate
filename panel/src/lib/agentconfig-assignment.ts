@@ -13,9 +13,9 @@ import type { AgentConfigSources } from './agentconfig-source';
 export interface ScopedAgentConfig {
 	result: AgentConfigExportResult;
 	bundle: AcbBundle;
+	// deepLink is empty when the grant does not fit a protocol URL; the caller then
+	// ships the .acfg file rather than a truncated-looking link.
 	deepLink: string;
-	// fitsDeepLink is false when the link exceeds what a protocol URL should carry;
-	// the caller then ships the .acfg file instead of pasting a truncated-looking URL.
 	fitsDeepLink: boolean;
 	// hasScopedContent counts only the sources a key grants (models, MCP servers,
 	// agents). Skills and prompts are global, so they would keep a denial-only bundle
@@ -27,16 +27,25 @@ function deepLinkBytes(value: string): number {
 	return new TextEncoder().encode(value).length;
 }
 
-export async function buildScopedAgentConfig(sources: AgentConfigSources, scope: AgentConfigScope, label: string): Promise<ScopedAgentConfig> {
-	const scoped = applyAgentConfigScope(sources, scope) as AgentConfigExportSource;
-	const result = buildAgentConfigPublic(scoped);
+export async function buildScopedAgentConfig(sources: AgentConfigSources, scope: AgentConfigScope, label: string, key?: unknown): Promise<ScopedAgentConfig> {
+	const scoped = applyAgentConfigScope(sources, scope, key);
+	const result = buildAgentConfigPublic(scoped.source as AgentConfigExportSource);
+	result.warnings = [...scoped.warnings, ...result.warnings];
 	const bundle = await buildBundle({ label, src: 'elygate', trust: 'shared', pub: result.pub });
-	const deepLink = bundleToDeepLink(bundle);
+	let deepLink = '';
+	try {
+		const candidate = bundleToDeepLink(bundle);
+		// bundleToDeepLink throws above ACB_DEEP_LINK_MAX_BYTES; check again so a link
+		// that is only just inside the encoder limit still respects this bound.
+		if (deepLinkBytes(candidate) <= ACB_DEEP_LINK_MAX_BYTES) deepLink = candidate;
+	} catch {
+		deepLink = '';
+	}
 	return {
 		result,
 		bundle,
 		deepLink,
-		fitsDeepLink: deepLinkBytes(deepLink) <= ACB_DEEP_LINK_MAX_BYTES,
+		fitsDeepLink: deepLink !== '',
 		hasScopedContent: result.counts.models + result.counts.mcp + result.counts.agents > 0,
 	};
 }

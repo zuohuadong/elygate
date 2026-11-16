@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { applyAgentConfigScope, globalAgentConfigScope, scopeFromVirtualKey } from './agentconfig-scope';
+import { applyAgentConfigScope, globalAgentConfigScope, matchEntry, scopeFromVirtualKey, virtualKeyFromResponse, vkScopeProblem } from './agentconfig-scope';
 import { buildScopedAgentConfig } from './agentconfig-assignment';
 
 const SOURCES = {
@@ -30,15 +30,57 @@ function names(payload: unknown, key: string): string[] {
 	});
 }
 
+// The detail endpoint wraps the key, and it nests the MCP client under mcp_client
+// (mcp_client_name is not serialized). Both shapes are what the panel actually sees.
 const KEY = {
-	allow_all_providers: false,
-	provider_configs: [{ provider: 'openai', allowed_models: ['gpt-4o'], blacklisted_models: [] }],
-	mcp_configs: [{ mcp_client_name: 'github' }],
-	agent_grants: [{ agent_name: 'researcher' }],
+	virtual_key: {
+		id: 'vk-1',
+		name: 'alice-key',
+		is_active: true,
+		allow_all_providers: false,
+		provider_configs: [{ provider: 'openai', allowed_models: ['gpt-4o'], blacklisted_models: [] }],
+		mcp_configs: [{ mcp_client: { name: 'github' }, tools_to_execute: ['*'] }],
+		agent_grants: [{ agent_name: 'researcher' }],
+	},
 };
 
+describe('virtualKeyFromResponse', () => {
+	test('unwraps the detail response', () => {
+		expect(virtualKeyFromResponse(KEY)).toBe(KEY.virtual_key);
+	});
+	test('accepts a bare key payload', () => {
+		expect(virtualKeyFromResponse({ id: 'vk-2' })).toEqual({ id: 'vk-2' });
+	});
+	test('accepts a single-entry list payload', () => {
+		expect(virtualKeyFromResponse({ virtual_keys: [{ id: 'vk-3' }] })).toEqual({ id: 'vk-3' });
+	});
+});
+
+describe('matchEntry', () => {
+	test('plain entries compare case-insensitively', () => {
+		expect(matchEntry('GPT-4o', 'gpt-4o')).toBe(true);
+		expect(matchEntry('gpt-4o', 'gpt-4o-mini')).toBe(false);
+	});
+	test('regex entries are full matches', () => {
+		expect(matchEntry('regex:^gpt-4.*$', 'gpt-4o')).toBe(true);
+		expect(matchEntry('regex:^gpt-4$', 'gpt-4o')).toBe(false);
+	});
+	test('an invalid pattern never matches', () => {
+		expect(matchEntry('regex:(unclosed', 'anything')).toBe(false);
+	});
+});
+
+describe('vkScopeProblem', () => {
+	test('flags disabled and expired keys', () => {
+		expect(vkScopeProblem({ virtual_key: { is_active: false } })).toBe('inactive');
+		expect(vkScopeProblem({ expires_at: '2020-01-01T00:00:00Z' }, new Date('2026-01-01T00:00:00Z'))).toBe('expired');
+		expect(vkScopeProblem({ expires_at: '2030-01-01T00:00:00Z' }, new Date('2026-01-01T00:00:00Z'))).toBeNull();
+		expect(vkScopeProblem({ is_active: true })).toBeNull();
+	});
+});
+
 describe('scopeFromVirtualKey', () => {
-	test('reads providers, mcp clients and agent grants', () => {
+	test('reads providers, mcp clients and agent grants from the wrapped payload', () => {
 		const scope = scopeFromVirtualKey(KEY);
 		expect(scope.allowAllProviders).toBe(false);
 		expect(scope.providers.openai).toEqual({ allowed: ['gpt-4o'], blocked: [] });
@@ -63,48 +105,69 @@ describe('scopeFromVirtualKey', () => {
 describe('applyAgentConfigScope', () => {
 	test('the global scope leaves every source untouched', () => {
 		const scoped = applyAgentConfigScope(SOURCES, globalAgentConfigScope());
-		expect(scoped).toBe(SOURCES);
+		expect(scoped.source).toBe(SOURCES);
+		expect(scoped.warnings).toEqual([]);
 	});
 
 	test('narrows models to the provider allow list and drops unreachable providers', () => {
-		const scoped = applyAgentConfigScope(SOURCES, scopeFromVirtualKey(KEY));
-		expect(names(scoped.models, 'models')).toEqual(['openai/gpt-4o']);
+		const scoped = applyAgentConfigScope(SOURCES, scopeFromVirtualKey(KEY), KEY);
+		expect(names(scoped.source.models, 'models')).toEqual(['openai/gpt-4o']);
 	});
 
-	test('accepts bare and provider-prefixed allow list entries', () => {
-		const scope = scopeFromVirtualKey({ allow_all_providers: false, provider_configs: [{ provider: 'anthropic', allowed_models: ['anthropic/claude-opus-4'] }] });
-		expect(names(applyAgentConfigScope(SOURCES, scope).models, 'models')).toEqual(['anthropic/claude-opus-4']);
+	test('allow list entries are bare model names, like governance compares them', () => {
+		const key = { virtual_key: { allow_all_providers: false, provider_configs: [{ provider: 'anthropic', allowed_models: ['anthropic/claude-opus-4'] }] } };
+		expect(names(applyAgentConfigScope(SOURCES, scopeFromVirtualKey(key), key).source.models, 'models')).toEqual([]);
+		const bare = { virtual_key: { allow_all_providers: false, provider_configs: [{ provider: 'anthropic', allowed_models: ['claude-opus-4'] }] } };
+		expect(names(applyAgentConfigScope(SOURCES, scopeFromVirtualKey(bare), bare).source.models, 'models')).toEqual(['anthropic/claude-opus-4']);
 	});
 
-	test('a wildcard allows every model of the provider and a blacklist still wins', () => {
-		const scope = scopeFromVirtualKey({ allow_all_providers: false, provider_configs: [{ provider: 'openai', allowed_models: ['*'], blacklisted_models: ['gpt-4o-mini'] }] });
-		expect(names(applyAgentConfigScope(SOURCES, scope).models, 'models')).toEqual(['openai/gpt-4o']);
+	test('a wildcard allow list plus a regex blacklist keeps blacklist precedence', () => {
+		const key = { virtual_key: { allow_all_providers: false, provider_configs: [{ provider: 'openai', allowed_models: ['*'], blacklisted_models: ['regex:^gpt-4.*$'] }] } };
+		expect(names(applyAgentConfigScope(SOURCES, scopeFromVirtualKey(key), key).source.models, 'models')).toEqual([]);
+	});
+
+	test('a blacklist entry matches case-insensitively', () => {
+		const key = { virtual_key: { allow_all_providers: false, provider_configs: [{ provider: 'openai', allowed_models: ['*'], blacklisted_models: ['GPT-4o-MINI'] }] } };
+		expect(names(applyAgentConfigScope(SOURCES, scopeFromVirtualKey(key), key).source.models, 'models')).toEqual(['openai/gpt-4o']);
+	});
+
+	test('a "*" listed beside other entries is not unrestricted', () => {
+		const key = { virtual_key: { allow_all_providers: false, provider_configs: [{ provider: 'openai', allowed_models: ['*', 'gpt-4o-mini'] }] } };
+		expect(names(applyAgentConfigScope(SOURCES, scopeFromVirtualKey(key), key).source.models, 'models')).toEqual(['openai/gpt-4o-mini']);
 	});
 
 	test('an allow-all key still honours the provider entries it names', () => {
-		const scope = scopeFromVirtualKey({ allow_all_providers: true, provider_configs: [{ provider: 'openai', allowed_models: ['gpt-4o-mini'] }] });
-		expect(names(applyAgentConfigScope(SOURCES, scope).models, 'models')).toEqual(['openai/gpt-4o-mini', 'anthropic/claude-sonnet-4', 'anthropic/claude-opus-4']);
+		const key = { virtual_key: { allow_all_providers: true, provider_configs: [{ provider: 'openai', allowed_models: ['gpt-4o-mini'] }] } };
+		expect(names(applyAgentConfigScope(SOURCES, scopeFromVirtualKey(key), key).source.models, 'models')).toEqual(['openai/gpt-4o-mini', 'anthropic/claude-sonnet-4', 'anthropic/claude-opus-4']);
 	});
 
 	test('filters MCP clients and agents to the grants and keeps skills and prompts', () => {
-		const scoped = applyAgentConfigScope(SOURCES, scopeFromVirtualKey(KEY));
-		expect(names(scoped.mcpClients, 'clients')).toEqual(['github']);
-		expect(names(scoped.agents, 'agents')).toEqual(['researcher']);
-		expect(scoped.skills).toBe(SOURCES.skills);
-		expect(scoped.prompts).toBe(SOURCES.prompts);
+		const scoped = applyAgentConfigScope(SOURCES, scopeFromVirtualKey(KEY), KEY);
+		expect(names(scoped.source.mcpClients, 'clients')).toEqual(['github']);
+		expect(names(scoped.source.agents, 'agents')).toEqual(['researcher']);
+		expect(scoped.source.skills).toBe(SOURCES.skills);
+		expect(scoped.source.prompts).toBe(SOURCES.prompts);
+	});
+
+	test('a client granted only some tools is skipped with a warning', () => {
+		const key = { virtual_key: { allow_all_providers: false, provider_configs: [], mcp_configs: [{ mcp_client: { name: 'github' }, tools_to_execute: ['read_file'] }, { mcp_client: { name: 'docs' }, tools_to_execute: [] }] } };
+		const scoped = applyAgentConfigScope(SOURCES, scopeFromVirtualKey(key), key);
+		expect(names(scoped.source.mcpClients, 'clients')).toEqual([]);
+		expect(scoped.warnings.map((warning) => warning.code)).toEqual(['mcp-tools-restricted', 'mcp-tools-restricted']);
 	});
 
 	test('a key with no grants exports nothing reachable', () => {
-		const scoped = applyAgentConfigScope(SOURCES, scopeFromVirtualKey({}));
-		expect(names(scoped.models, 'models')).toEqual([]);
-		expect(names(scoped.mcpClients, 'clients')).toEqual([]);
-		expect(names(scoped.agents, 'agents')).toEqual([]);
+		const key = { virtual_key: {} };
+		const scoped = applyAgentConfigScope(SOURCES, scopeFromVirtualKey(key), key);
+		expect(names(scoped.source.models, 'models')).toEqual([]);
+		expect(names(scoped.source.mcpClients, 'clients')).toEqual([]);
+		expect(names(scoped.source.agents, 'agents')).toEqual([]);
 	});
 });
 
 describe('buildScopedAgentConfig', () => {
 	test('produces a deep link that carries only the granted entries', async () => {
-		const scoped = await buildScopedAgentConfig(SOURCES, scopeFromVirtualKey(KEY), 'Alice · alice-key');
+		const scoped = await buildScopedAgentConfig(SOURCES, scopeFromVirtualKey(KEY), 'Alice · alice-key', KEY);
 		expect(scoped.hasScopedContent).toBe(true);
 		expect(scoped.fitsDeepLink).toBe(true);
 		expect(scoped.deepLink.startsWith('agentconfig://import?')).toBe(true);
@@ -115,8 +178,26 @@ describe('buildScopedAgentConfig', () => {
 	});
 
 	test('reports no granted access even though global skills and prompts remain', async () => {
-		const scoped = await buildScopedAgentConfig(SOURCES, scopeFromVirtualKey({}), 'empty');
+		const scoped = await buildScopedAgentConfig(SOURCES, scopeFromVirtualKey({}), 'empty', {});
 		expect(scoped.hasScopedContent).toBe(false);
 		expect(scoped.result.counts).toEqual({ models: 0, mcp: 0, skills: 1, prompts: 1, agents: 0 });
+	});
+
+	test('falls back to the file when the grant cannot fit a deep link', async () => {
+		const many = {
+			...SOURCES,
+			agents: { agents: Array.from({ length: 400 }, (_, index) => ({ name: `agent-${index}-${'x'.repeat(40)}` })) },
+		};
+		const key = { virtual_key: { agent_grants: many.agents.agents.map((agent) => ({ agent_name: agent.name })) } };
+		const scoped = await buildScopedAgentConfig(many, scopeFromVirtualKey(key), 'big', key);
+		expect(scoped.fitsDeepLink).toBe(false);
+		expect(scoped.deepLink).toBe('');
+		expect(scoped.result.counts.agents).toBe(400);
+	});
+
+	test('surfaces the scoping warnings on the result', async () => {
+		const key = { virtual_key: { mcp_configs: [{ mcp_client: { name: 'github' }, tools_to_execute: ['read_file'] }] } };
+		const scoped = await buildScopedAgentConfig(SOURCES, scopeFromVirtualKey(key), 'partial', key);
+		expect(scoped.result.warnings.map((warning) => warning.code)).toContain('mcp-tools-restricted');
 	});
 });

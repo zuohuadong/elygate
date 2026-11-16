@@ -6,28 +6,38 @@
 // or agents the key cannot reach. The virtual key is the only source of truth for
 // those limits, so this module turns one key's governance payload into a filter and
 // applies it to the five export sources.
+//
+// The allow/deny semantics mirror the gateway's own (`core/schemas/account.go` and
+// `framework/grant`): a list is unrestricted only when it is exactly ["*"], plain
+// entries compare case-insensitively, `regex:` entries are full-match patterns, and a
+// blacklist always wins over an allowlist. Getting this looser than the gateway would
+// hand out a bundle advertising models the key is refused.
 
 import { isJsonRecord, type JsonRecord } from './api';
+import type { AgentConfigExportSource, AgentConfigExportWarning } from './agentconfig-export';
 
 export interface AgentConfigProviderScope {
-	// Models this provider grants. '*' grants every model the provider serves.
 	allowed: string[];
 	blocked: string[];
 }
 
 export interface AgentConfigScope {
-	// allowAllProviders comes from the key's own flag: when true the key names no
-	// provider list and every configured provider is reachable.
+	// allowAllProviders comes from the key's own flag: when true the key reaches every
+	// provider it lists no provider config for.
 	allowAllProviders: boolean;
 	providers: Record<string, AgentConfigProviderScope>;
-	// restrictMcp/restrictAgents say whether the key's lists are a restriction at
-	// all. A key with no MCP entry cannot reach any MCP server (deny-by-default), so
-	// an absent list still restricts; the same is true for agents. The flags keep
-	// that distinct from "this build has no such scoping".
+	// restrictMcp/restrictAgents say whether the key's lists are a restriction at all.
+	// A key reaches only the MCP servers and agents it names, so an absent list denies
+	// everything; the flags keep that distinct from "this build has no such scoping".
 	restrictMcp: boolean;
 	mcpClientNames: string[];
 	restrictAgents: boolean;
 	agentNames: string[];
+}
+
+export interface ScopedAgentConfigSource {
+	source: AgentConfigExportSource;
+	warnings: AgentConfigExportWarning[];
 }
 
 // globalAgentConfigScope is the unscoped view used by the whole-gateway export.
@@ -50,11 +60,61 @@ function recordArray(value: unknown): JsonRecord[] {
 	return Array.isArray(value) ? value.filter(isJsonRecord) : [];
 }
 
-// scopeFromVirtualKey reads one virtual key (as the governance API returns it) into
-// a scope. Unknown or missing fields fall back to deny-by-default, matching how
-// governance itself treats an empty provider list or an empty MCP list.
+// matchEntry mirrors schemas.MatchEntry: case-insensitive exact match for plain
+// entries, full RE2-style match for `regex:` entries, and an uncompilable pattern
+// never matches (fail-closed).
+export function matchEntry(entry: string, value: string): boolean {
+	if (!entry.toLowerCase().startsWith('regex:')) {
+		return entry.toLowerCase() === value.toLowerCase();
+	}
+	const pattern = entry.slice('regex:'.length);
+	if (pattern === '*' || pattern === '') return false;
+	try {
+		return new RegExp(`^(?:${pattern})$`, 'i').test(value);
+	} catch {
+		return false;
+	}
+}
+
+function isUnrestricted(list: string[]): boolean {
+	return list.length === 1 && list[0] === '*';
+}
+
+// listAllows mirrors WhiteList.IsAllowed: exactly ["*"] allows everything, anything
+// else allows only what it matches.
+function listAllows(list: string[], value: string): boolean {
+	return isUnrestricted(list) || list.some((entry) => matchEntry(entry, value));
+}
+
+// listBlocks mirrors BlackList.IsBlocked.
+function listBlocks(list: string[], value: string): boolean {
+	return isUnrestricted(list) || list.some((entry) => matchEntry(entry, value));
+}
+
+// virtualKeyFromResponse unwraps the detail endpoint, which answers
+// `{ virtual_key: {...}, virtual_mcp_ids: [...] }`, while create/list payloads are the
+// key itself.
+export function virtualKeyFromResponse(payload: unknown): JsonRecord {
+	if (!isJsonRecord(payload)) return {};
+	if (isJsonRecord(payload.virtual_key)) return payload.virtual_key;
+	const list = Array.isArray(payload.virtual_keys) ? payload.virtual_keys.filter(isJsonRecord) : [];
+	return list.length === 1 ? list[0] : payload;
+}
+
+// mcpClientName reads the client name from either payload shape: the detail response
+// nests the client (`mcp_client.name`) because `mcp_client_name` is not serialized,
+// while config-file payloads carry the flat field.
+function mcpClientName(config: JsonRecord): string {
+	if (typeof config.mcp_client_name === 'string') return config.mcp_client_name.trim();
+	const client = isJsonRecord(config.mcp_client) ? config.mcp_client : {};
+	return typeof client.name === 'string' ? client.name.trim() : '';
+}
+
+// scopeFromVirtualKey reads one virtual key into a scope. Unknown or missing fields
+// fall back to deny-by-default, matching how governance treats an empty provider list
+// or an empty MCP list.
 export function scopeFromVirtualKey(key: unknown): AgentConfigScope {
-	const record = isJsonRecord(key) ? key : {};
+	const record = virtualKeyFromResponse(key);
 	const allowAllProviders = record.allow_all_providers === true;
 	const providers: Record<string, AgentConfigProviderScope> = {};
 	for (const config of recordArray(record.provider_configs)) {
@@ -67,12 +127,7 @@ export function scopeFromVirtualKey(key: unknown): AgentConfigScope {
 			? { allowed: mergeUnique(previous.allowed, allowed), blocked: mergeUnique(previous.blocked, blocked) }
 			: { allowed, blocked };
 	}
-	// An allow-all key can still name provider configs, in which case those entries
-	// carry model or key restrictions for the providers they mention. Providers the
-	// key does not name stay fully allowed.
-	const mcpClientNames = recordArray(record.mcp_configs)
-		.map((config) => (typeof config.mcp_client_name === 'string' ? config.mcp_client_name.trim() : ''))
-		.filter(Boolean);
+	const mcpClientNames = recordArray(record.mcp_configs).map(mcpClientName).filter(Boolean);
 	const agentNames = recordArray(record.agent_grants)
 		.map((grant) => (typeof grant.agent_name === 'string' ? grant.agent_name.trim() : ''))
 		.filter(Boolean);
@@ -84,6 +139,34 @@ export function scopeFromVirtualKey(key: unknown): AgentConfigScope {
 		restrictAgents: true,
 		agentNames,
 	};
+}
+
+// mcpGrantIsWholeClient reports whether the key grants every tool of the client. ACB
+// has no per-tool field, so a client granted only some of its tools cannot be exported
+// without overstating access; those clients are dropped with a warning instead.
+export function mcpWholeClientGrants(key: unknown): { whole: Set<string>; partial: Set<string> } {
+	const whole = new Set<string>();
+	const partial = new Set<string>();
+	for (const config of recordArray(virtualKeyFromResponse(key).mcp_configs)) {
+		const name = mcpClientName(config);
+		if (!name) continue;
+		if (isUnrestricted(stringList(config.tools_to_execute))) {
+			whole.add(name);
+			continue;
+		}
+		partial.add(name);
+	}
+	return { whole, partial };
+}
+
+export function vkScopeProblem(key: unknown, now: Date = new Date()): 'inactive' | 'expired' | null {
+	const record = virtualKeyFromResponse(key);
+	if (record.is_active === false) return 'inactive';
+	const expiresAt = typeof record.expires_at === 'string' ? record.expires_at : '';
+	if (!expiresAt) return null;
+	const expiry = new Date(expiresAt);
+	if (Number.isNaN(expiry.getTime())) return null;
+	return expiry.getTime() <= now.getTime() ? 'expired' : null;
 }
 
 function mergeUnique(left: string[], right: string[]): string[] {
@@ -101,14 +184,14 @@ function modelIdentifier(model: JsonRecord): { provider: string; id: string } {
 	return { provider, id: name.startsWith(prefix) ? name.slice(prefix.length) : name };
 }
 
+// modelAllowed mirrors grant.permitAllowsModel: a provider the key configures is held
+// to that config's blacklist and allowlist even under allow-all; a provider it does not
+// configure is opened up only by allow-all.
 function modelAllowed(scope: AgentConfigScope, provider: string, id: string): boolean {
-	if (scope.allowAllProviders && !(provider in scope.providers)) return true;
 	const rule = scope.providers[provider];
-	if (!rule) return false;
-	const blocked = (value: string) => rule.blocked.includes('*') || rule.blocked.includes(value) || rule.blocked.includes(`${provider}/${value}`);
-	if (blocked(id)) return false;
-	const allowed = (value: string) => rule.allowed.includes('*') || rule.allowed.includes(value) || rule.allowed.includes(`${provider}/${value}`);
-	return allowed(id);
+	if (!rule) return scope.allowAllProviders;
+	if (listBlocks(rule.blocked, id)) return false;
+	return listAllows(rule.allowed, id);
 }
 
 function filterModels(payload: unknown, scope: AgentConfigScope): unknown {
@@ -121,15 +204,14 @@ function filterModels(payload: unknown, scope: AgentConfigScope): unknown {
 	return { ...payload, models };
 }
 
-function filterMcp(payload: unknown, scope: AgentConfigScope): unknown {
+function filterMcp(payload: unknown, scope: AgentConfigScope, whole: Set<string>): unknown {
 	if (!scope.restrictMcp) return payload;
 	if (!isJsonRecord(payload) || !Array.isArray(payload.clients)) return payload;
-	const allowed = new Set(scope.mcpClientNames);
 	const clients = payload.clients.filter((client) => {
 		if (!isJsonRecord(client)) return false;
 		const config = isJsonRecord(client.config) ? client.config : client;
 		const name = typeof config.name === 'string' ? config.name.trim() : '';
-		return Boolean(name) && allowed.has(name);
+		return Boolean(name) && whole.has(name);
 	});
 	return { ...payload, clients };
 }
@@ -154,16 +236,26 @@ export function isGlobalScope(scope: AgentConfigScope): boolean {
 
 // applyAgentConfigScope narrows the five export sources to what the key may use.
 // Skills and prompts are not scoped per key today, so they pass through unchanged.
-export function applyAgentConfigScope(
-	source: { models: unknown; mcpClients: unknown; skills: unknown; prompts: unknown; agents: unknown },
-	scope: AgentConfigScope,
-): { models: unknown; mcpClients: unknown; skills: unknown; prompts: unknown; agents: unknown } {
-	if (isGlobalScope(scope)) return source;
+// `key` is only consulted for MCP tool-level grants, which the sources alone cannot
+// express.
+export function applyAgentConfigScope(source: AgentConfigExportSource, scope: AgentConfigScope, key?: unknown): ScopedAgentConfigSource {
+	if (isGlobalScope(scope)) return { source, warnings: [] };
+	const warnings: AgentConfigExportWarning[] = [];
+	const { whole, partial } = mcpWholeClientGrants(key ?? {});
+	// A client the key reaches through a project or access profile rather than its own
+	// mcp_configs is not in `whole`, so it must not be exported. Report the ones the key
+	// names with a tool subset so an operator knows why they are missing.
+	for (const name of partial) {
+		if (!whole.has(name)) warnings.push({ code: 'mcp-tools-restricted', name });
+	}
 	return {
-		models: filterModels(source.models, scope),
-		mcpClients: filterMcp(source.mcpClients, scope),
-		skills: source.skills,
-		prompts: source.prompts,
-		agents: filterAgents(source.agents, scope),
+		source: {
+			models: filterModels(source.models, scope),
+			mcpClients: filterMcp(source.mcpClients, scope, whole),
+			skills: source.skills,
+			prompts: source.prompts,
+			agents: filterAgents(source.agents, scope),
+		},
+		warnings,
 	};
 }
