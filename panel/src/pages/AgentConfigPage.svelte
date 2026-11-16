@@ -25,13 +25,18 @@
 
 	let { resourceName }: Props = $props();
 	const i18n = useTranslation();
-	const sourceLabels: Record<AgentConfigSourceName, string> = {
-		models: i18n.locale === 'zh-CN' ? '模型' : 'models',
-		mcpClients: 'MCP',
-		skills: 'Skills',
-		prompts: i18n.locale === 'zh-CN' ? '提示词' : 'prompts',
-		agents: 'Agents',
-	};
+	// Read through a function so a language switch is reflected in later messages.
+	function sourceLabel(name: AgentConfigSourceName): string {
+		const labels: Record<AgentConfigSourceName, [string, string]> = {
+			models: ['模型', 'models'],
+			mcpClients: ['MCP', 'MCP'],
+			skills: ['Skills', 'Skills'],
+			prompts: ['提示词', 'prompts'],
+			agents: ['Agents', 'Agents'],
+		};
+		const [zh, en] = labels[name];
+		return text(zh, en);
+	}
 	let label = $state('');
 	let source = $state.raw<AgentConfigExportSource>({
 		models: { models: [] },
@@ -70,6 +75,7 @@
 			'mcp-args-redacted': ['MCP 启动参数中含疑似密钥，已移除', 'Suspected credentials were removed from the MCP launch arguments'],
 			'mcp-command-not-public': ['MCP 启动命令含疑似密钥，已跳过该 client', 'An MCP launch command contained a suspected credential, so the client was skipped'],
 			'agent-disabled': ['已停用的 Agent 不会导出', 'A disabled agent was left out'],
+			'mcp-disabled': ['MCP client 已停用，未导出', 'A disabled MCP client was left out'],
 			'mcp-grants-elsewhere': ['该密钥还通过虚拟 MCP 获得了 MCP 授权，配置包只包含密钥自身声明的 client', 'This key also reaches MCP servers through an assigned virtual MCP; the bundle lists only the clients the key itself declares'],
 			'mcp-tools-restricted': ['该 MCP client 只授权了部分工具，无法在配置包中表达，已跳过', 'This MCP client grants only some of its tools, which a bundle cannot express, so it was skipped'],
 			'model-invalid': ['跳过了缺少有效 provider/id 的模型', 'Skipped a model without a valid provider/id'],
@@ -89,7 +95,7 @@
 		copied = false;
 		const loaded = await loadAgentConfigSources();
 		source = loaded.source;
-		sourceErrors = loaded.failed.map((name) => sourceLabels[name]);
+		sourceErrors = loaded.failed.map((name) => sourceLabel(name));
 		if (loaded.failed.length === AGENT_CONFIG_SOURCE_NAMES.length) {
 			error = text('所有配置数据都加载失败，无法生成配置包。', 'Every configuration source failed to load, so no bundle can be generated.');
 		}

@@ -103,7 +103,8 @@ describe('AgentConfig export mapping', () => {
 		};
 		const result = buildAgentConfigPublic(source);
 		expect(result.pub.mcp[0].args).toEqual(['--verbose', '--path', '/srv/tools']);
-		expect(result.pub.mcp[1].args).toEqual(['--flag']);
+		// The flag carried the token as its value, so it goes with it.
+		expect(result.pub.mcp[1].args).toEqual([]);
 		expect(result.warnings.filter((warning) => warning.code === 'mcp-args-redacted').map((warning) => warning.name)).toEqual(['flagged', 'bare']);
 		const serialized = JSON.stringify(result.pub);
 		expect(serialized).not.toContain('sk-live-abcdefgh12345678');
@@ -224,6 +225,30 @@ describe('AgentConfig export mapping', () => {
 		const result = buildAgentConfigPublic(source);
 		expect(result.pub.mcp[0].args).toEqual(['--sort-key=created', '--limit=10']);
 		expect(JSON.stringify(result.pub)).not.toContain('plain-secret');
+	});
+
+	test('drops a separated credential value and a URL that carries userinfo', () => {
+		const source: AgentConfigExportSource = {
+			models: undefined,
+			mcpClients: {
+				clients: [
+					{
+						config: {
+							name: 'split',
+							connection_type: 'stdio',
+							stdio_config: { command: 'server', args: ['OPENAI_KEY:', 'plain-secret', '--user', 'https://user:pass@example.com/mcp', '--verbose'] },
+						},
+					},
+				],
+			},
+			skills: undefined,
+			prompts: undefined,
+			agents: undefined,
+		};
+		const result = buildAgentConfigPublic(source);
+		expect(result.pub.mcp[0].args).toEqual(['--verbose']);
+		expect(JSON.stringify(result.pub)).not.toContain('plain-secret');
+		expect(JSON.stringify(result.pub)).not.toContain('user:pass');
 	});
 
 	test('produces an empty but valid public section when nothing is configured', () => {

@@ -41,13 +41,18 @@
 	let loadSeq = 0;
 	let resetIds = $state<string[]>([]);
 	let agentConfigIds = $state<string[]>([]);
-	const sourceLabels: Record<AgentConfigSourceName, string> = {
-		models: i18n.locale === 'zh-CN' ? '模型' : 'models',
-		mcpClients: 'MCP',
-		skills: 'Skills',
-		prompts: i18n.locale === 'zh-CN' ? '提示词' : 'prompts',
-		agents: 'Agents',
-	};
+	// Read through a function so a language switch is reflected in messages built later.
+	function sourceLabel(name: AgentConfigSourceName): string {
+		const labels: Record<AgentConfigSourceName, [string, string]> = {
+			models: ['模型', 'models'],
+			mcpClients: ['MCP', 'MCP'],
+			skills: ['Skills', 'Skills'],
+			prompts: ['提示词', 'prompts'],
+			agents: ['Agents', 'Agents'],
+		};
+		const [zh, en] = labels[name];
+		return text(zh, en);
+	}
 	const filteredEmployees = $derived.by(() => {
 		const query = search.trim().toLowerCase();
 		if (!query) return employees;
@@ -256,7 +261,7 @@
 			// A failed source can be the only one the key grants, so report the failure
 			// before concluding the key grants nothing.
 			const incomplete = loaded.failed.length > 0
-				? text(`（${loaded.failed.map((name) => sourceLabels[name]).join('、')} 读取失败，配置可能不完整）`, ` (${loaded.failed.join(', ')} failed to load, so the bundle may be incomplete)`)
+				? text(`（${loaded.failed.map((name) => sourceLabel(name)).join('、')} 读取失败，配置可能不完整）`, ` (${loaded.failed.join(', ')} failed to load, so the bundle may be incomplete)`)
 				: '';
 			// A key whose MCP access comes from its assigned virtual MCPs grants something
 			// real even though the bundle cannot list those clients; deliver what it has and
@@ -264,6 +269,12 @@
 			if (!scoped.hasScopedContent && !scope.mcpOutsideKey) {
 				if (loaded.failed.length > 0) {
 					throw new Error(text(`部分配置来源读取失败${incomplete}，无法确认该密钥的授权范围。`, `Some configuration sources failed to load${incomplete}, so the key's grants cannot be confirmed.`));
+				}
+				// A grant can be real yet impossible to express (a client with a tool subset,
+				// an in-process server, a disabled client). Name that reason instead of
+				// claiming the key grants nothing.
+				if (scoped.result.warnings.length > 0) {
+					throw new Error(text(`该密钥的授权无法写入 AgentConfig（${scoped.result.warnings.length} 项被省略或收窄，例如 MCP client 仅授权部分工具、已停用，或为 in-process 类型），请调整授权后重试。`, `This key's grants cannot be expressed in an AgentConfig bundle (${scoped.result.warnings.length} items narrowed or omitted: an MCP client with a tool subset, a disabled client, or an in-process one); adjust the grant and retry.`));
 				}
 				throw new Error(text('该密钥没有可用的模型、MCP 或 Agent 授权，生成的配置为空。', 'This key grants no models, MCP servers or agents, so the bundle would be empty.'));
 			}

@@ -129,11 +129,21 @@ describe('applyAgentConfigScope', () => {
 		expect(names(scoped.source.models, 'models')).toEqual(['openai/gpt-4o']);
 	});
 
-	test('allow list entries are bare model names, like governance compares them', () => {
+	test('a provider-prefixed allow entry grants the model, as the model catalog resolves it', () => {
 		const key = { virtual_key: { allow_all_providers: false, provider_configs: [{ provider: 'anthropic', allowed_models: ['anthropic/claude-opus-4'] }] } };
-		expect(names(applyAgentConfigScope(SOURCES, scopeFromVirtualKey(key), key).source.models, 'models')).toEqual([]);
+		expect(names(applyAgentConfigScope(SOURCES, scopeFromVirtualKey(key), key).source.models, 'models')).toEqual(['anthropic/claude-opus-4']);
 		const bare = { virtual_key: { allow_all_providers: false, provider_configs: [{ provider: 'anthropic', allowed_models: ['claude-opus-4'] }] } };
 		expect(names(applyAgentConfigScope(SOURCES, scopeFromVirtualKey(bare), bare).source.models, 'models')).toEqual(['anthropic/claude-opus-4']);
+	});
+
+	test('a prefixed entry for another provider grants nothing here', () => {
+		const key = { virtual_key: { allow_all_providers: false, provider_configs: [{ provider: 'openai', allowed_models: ['anthropic/claude-opus-4'] }] } };
+		expect(names(applyAgentConfigScope(SOURCES, scopeFromVirtualKey(key), key).source.models, 'models')).toEqual([]);
+	});
+
+	test('a pattern with RE2 inline flags is not dropped as uncompilable', () => {
+		const key = { virtual_key: { allow_all_providers: false, provider_configs: [{ provider: 'openai', allowed_models: ['regex:(?i)^GPT-4O$'] }] } };
+		expect(names(applyAgentConfigScope(SOURCES, scopeFromVirtualKey(key), key).source.models, 'models')).toEqual(['openai/gpt-4o']);
 	});
 
 	test('a wildcard allow list plus a regex blacklist keeps blacklist precedence', () => {
@@ -229,6 +239,22 @@ describe('applyAgentConfigScope', () => {
 		const scoped = applyAgentConfigScope(sources, scopeFromVirtualKey(key), key);
 		// A client the key names stays closed even though it is allowed by default.
 		expect(names(scoped.source.mcpClients, 'clients')).toEqual(['public-client']);
+	});
+
+	test('a client that withholds tools is not exported, and disabled clients are flagged', () => {
+		const sources = {
+			...SOURCES,
+			mcpClients: {
+				clients: [
+					{ config: { name: 'narrowed', tools_to_execute: ['read_file'], allow_by_default: true } },
+					{ config: { name: 'off', disabled: true, allow_by_default: true } },
+					{ config: { name: 'open', allow_by_default: true } },
+				],
+			},
+		};
+		const scoped = applyAgentConfigScope(sources, scopeFromVirtualKey({ virtual_key: {} }), { virtual_key: {} });
+		expect(names(scoped.source.mcpClients, 'clients')).toEqual(['open']);
+		expect(scoped.warnings.map((warning) => `${warning.code}:${warning.name}`)).toEqual(['mcp-tools-restricted:narrowed', 'mcp-disabled:off']);
 	});
 
 	test('a key with no grants exports nothing reachable', () => {

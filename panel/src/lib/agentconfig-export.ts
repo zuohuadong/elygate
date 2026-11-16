@@ -20,6 +20,7 @@ export type AgentConfigExportWarningCode =
 	| 'mcp-command-not-public'
 	| 'mcp-tools-restricted'
 	| 'mcp-grants-elsewhere'
+	| 'mcp-disabled'
 	| 'model-invalid'
 	| 'skill-invalid'
 	| 'prompt-invalid'
@@ -160,9 +161,13 @@ function isSecretHeader(token: string): boolean {
 	return isSecretName(name) || AUTH_HEADER.test(token.trim());
 }
 
+// A URL that carries userinfo (https://user:pass@host) authenticates on its own.
+const URL_WITH_USERINFO = /^[a-z][a-z0-9+.-]*:\/\/[^/\s@]+@/i;
+
 function tokenCarriesSecret(token: string): boolean {
 	const trimmed = token.trim().replace(/^(["'])(.*)\1$/, '$2');
 	if (!trimmed) return false;
+	if (URL_WITH_USERINFO.test(trimmed)) return true;
 	if (SECRET_TOKEN.test(trimmed) || AUTH_HEADER.test(trimmed) || isSecretAssignment(trimmed) || isSecretHeader(trimmed)) return true;
 	if (!trimmed.startsWith('-')) return false;
 	const name = flagName(trimmed);
@@ -184,8 +189,19 @@ function redactArgs(args: string[]): { args: string[]; redacted: boolean } {
 			redacted = true;
 			// A flag with no inline value carries the credential in the next argument,
 			// so that one goes too. A bare assignment carries its own value already.
-			const inline = arg.includes('=') || !arg.trim().startsWith('-');
+			// A separate value belongs to the credential either way: `--key value` and
+			// `OPENAI_KEY:` + value both carry it in the next argument.
+			const separatorOnly = arg.trim().endsWith(':');
+			const inline = !separatorOnly && (arg.includes('=') || !arg.trim().startsWith('-'));
 			if (!inline && index + 1 < args.length) index += 1;
+			continue;
+		}
+		// A flag whose only value is a credential loses the flag too: leaving it behind
+		// would hand the client an argument the server cannot parse.
+		const next = index + 1 < args.length ? args[index + 1] : '';
+		if (arg.trim().startsWith('-') && !arg.includes('=') && next !== '' && !next.trim().startsWith('-') && tokenCarriesSecret(next)) {
+			redacted = true;
+			index += 1;
 			continue;
 		}
 		kept.push(arg);

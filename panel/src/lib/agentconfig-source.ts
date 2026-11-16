@@ -58,7 +58,10 @@ async function fetchPaged(path: string, key: string, totalKeys: string[]): Promi
 			}
 		}
 		offset += rows.length;
-		if (rows.length === 0 || offset >= total || items.length >= MAX_ITEMS) break;
+		if (rows.length === 0 || offset >= total) break;
+		// Silently stopping at the cap would export a subset as if it were everything, and
+		// a key whitelisted only for the missing rows would look ungranted.
+		if (items.length >= MAX_ITEMS) throw new Error(`${path} has more than ${MAX_ITEMS} rows; refusing to export a truncated set`);
 	}
 	return { [key]: items };
 }

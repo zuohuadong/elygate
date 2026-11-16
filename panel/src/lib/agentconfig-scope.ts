@@ -82,10 +82,20 @@ export function matchEntry(entry: string, value: string): boolean {
 	if (!entry.startsWith('regex:')) {
 		return entry.toLowerCase() === value.toLowerCase();
 	}
-	const pattern = entry.slice('regex:'.length);
+	let pattern = entry.slice('regex:'.length);
 	if (pattern === '*' || pattern === '') return false;
+	// RE2 patterns may open with inline flag groups ((?i), (?is), ...). JavaScript has no
+	// such syntax, so they are lifted into real flags instead of failing to compile and
+	// silently denying a model the key can reach.
+	let flags = 'i';
+	for (;;) {
+		const inline = /^\(\?([ims]+)\)/.exec(pattern);
+		if (!inline) break;
+		for (const flag of inline[1]) if (!flags.includes(flag)) flags += flag;
+		pattern = pattern.slice(inline[0].length);
+	}
 	try {
-		return new RegExp(`^(?:${pattern})$`, 'i').test(value);
+		return new RegExp(`^(?:${pattern})$`, flags).test(value);
 	} catch {
 		return false;
 	}
@@ -95,10 +105,16 @@ function isUnrestricted(list: string[]): boolean {
 	return list.length === 1 && list[0] === '*';
 }
 
-// listAllows/listBlocks mirror WhiteList.IsAllowed and BlackList.IsBlocked for the
-// non-wildcard entries; the ["*"] case is carried by the per-row flags above.
-function listAllows(list: string[], value: string): boolean {
-	return list.some((entry) => matchEntry(entry, value));
+// listAllows mirrors WhiteList.IsAllowed for the non-wildcard entries, including the
+// provider-prefixed form the gateway resolves through its model catalog: an entry
+// "openai/gpt-4o" grants gpt-4o (framework/modelcatalog/models.go, IsModelAllowedForProvider).
+function listAllows(list: string[], value: string, provider: string): boolean {
+	return list.some((entry) => {
+		if (matchEntry(entry, value)) return true;
+		const prefix = `${provider}/`;
+		if (!entry.includes('/') || entry.slice(0, prefix.length).toLowerCase() !== prefix.toLowerCase()) return false;
+		return entry.slice(prefix.length) === value;
+	});
 }
 
 function listBlocks(list: string[], value: string): boolean {
@@ -231,7 +247,7 @@ function modelAllowed(scope: AgentConfigScope, provider: string, id: string): bo
 	const rule = scope.providers[provider];
 	if (!rule) return scope.allowAllProviders;
 	if (rule.blockedAll || listBlocks(rule.blocked, id)) return false;
-	return rule.allowedUnrestricted || listAllows(rule.allowed, id);
+	return rule.allowedUnrestricted || listAllows(rule.allowed, id, provider);
 }
 
 function filterModels(payload: unknown, scope: AgentConfigScope): unknown {
@@ -244,6 +260,17 @@ function filterModels(payload: unknown, scope: AgentConfigScope): unknown {
 	return { ...payload, models };
 }
 
+// clientNarrowerThanItsGrant reports a client whose own tools_to_execute exposes only
+// some tools. Reaching the client is not enough to export it: the bundle's entry starts
+// the server itself, so it would carry every tool the client withholds from callers.
+function clientExposesEveryTool(config: JsonRecord): boolean {
+	const tools = config.tools_to_execute;
+	// Absent means the client was never narrowed; an explicit list that is not ["*"]
+	// narrows it (core/mcp/exec.go applies the client allow-list last).
+	if (!Array.isArray(tools)) return true;
+	return isUnrestricted(stringList(tools));
+}
+
 function filterMcp(payload: unknown, scope: AgentConfigScope, whole: Set<string>, partial: Set<string>): unknown {
 	if (!scope.restrictMcp) return payload;
 	if (!isJsonRecord(payload) || !Array.isArray(payload.clients)) return payload;
@@ -252,6 +279,10 @@ function filterMcp(payload: unknown, scope: AgentConfigScope, whole: Set<string>
 		const config = isJsonRecord(client.config) ? client.config : client;
 		const name = typeof config.name === 'string' ? config.name.trim() : '';
 		if (!name) return false;
+		if (!clientExposesEveryTool(config)) return false;
+		// A disabled client has no running connection, so nothing caller-side can reach
+		// it even when the key grants it or the client is open to everyone.
+		if (config.disabled === true) return false;
 		if (whole.has(name)) return true;
 		// Governance registers a client the key names — even with no tools — so the
 		// allow-by-default fallback cannot reopen it. Only a client the key does not
@@ -296,6 +327,20 @@ export function applyAgentConfigScope(source: AgentConfigExportSource, scope: Ag
 	// names with a tool subset so an operator knows why they are missing.
 	for (const name of partial) {
 		if (!whole.has(name)) warnings.push({ code: 'mcp-tools-restricted', name });
+	}
+	for (const client of recordArray(isJsonRecord(source.mcpClients) ? source.mcpClients.clients : undefined)) {
+		const config = isJsonRecord(client.config) ? client.config : client;
+		const name = typeof config.name === 'string' ? config.name.trim() : '';
+		if (!name) continue;
+		// Only clients this key could reach are worth explaining; the rest are already
+		// absent from the bundle for the plain reason that the key does not grant them.
+		const granted = whole.has(name) || partial.has(name) || (config.allow_by_default === true && !partial.has(name));
+		if (!granted) continue;
+		if (!clientExposesEveryTool(config)) {
+			warnings.push({ code: 'mcp-tools-restricted', name });
+			continue;
+		}
+		if (config.disabled === true) warnings.push({ code: 'mcp-disabled', name });
 	}
 	if (scope.mcpOutsideKey) warnings.push({ code: 'mcp-grants-elsewhere' });
 	return {
