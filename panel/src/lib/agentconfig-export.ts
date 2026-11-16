@@ -120,7 +120,7 @@ function modelEntries(payload: unknown, warnings: AgentConfigExportWarning[]): A
 // for assignments and header names, where OPENAI_KEY and X-Auth-Token carry secrets.
 // `user`/`username`/`login` are on the list because a launch argument spelled that way
 // carries a user:password pair for the server it starts.
-const SECRET_SUFFIX = /(?:apikey|accesskey|privatekey|token|secret|password|passwd|pwd|auth|authorization|credential|creds|bearer|key|user|username|login|userinfo)$/;
+const SECRET_SUFFIX = /(?:apikey|accesskey|privatekey|token|secret|password|passwd|pwd|auth|authorization|credential|creds|bearer|key|user|username|login|userinfo|cookie|cookies|session|sessionid)$/;
 // A bare `key` is a credential unless it names one of these ordinary arguments.
 const NOT_A_SECRET_KEY = /^(?:sort|order|partition|primary|foreign|row|cache|group|dedup|map|index|shard|hash|lookup|merge|search|filter|unique|natural|synthetic|stable|join|routing|refresh|schema|object|value)key$/;
 
@@ -130,7 +130,7 @@ function normalizeName(name: string): string {
 const SECRET_TOKEN = /^(?:sk-[a-z0-9_-]{8,}|gh[pousr]_[a-z0-9]{8,}|github_pat_[a-z0-9_]{8,}|xox[abposr]-[a-z0-9-]{8,}|akia[a-z0-9]{12,}|ey[a-z0-9_-]{8,}\.[a-z0-9_-]{8,}\.[a-z0-9_-]{8,})$/i;
 const AUTH_HEADER = /^(?:authorization|proxy-authorization|x-api-key|api-key)\s*:/i;
 // -H/--header carry arbitrary headers, so they are treated as credential flags.
-const HEADER_FLAG = /^(?:h|header|headers|u|user|username|login|userinfo|creds)$/i;
+const HEADER_FLAG = /^(?:h|header|headers|u|user|username|login|userinfo|creds|cookie|cookies)$/i;
 
 function isSecretName(name: string): boolean {
 	const normalized = normalizeName(name);
@@ -167,7 +167,10 @@ function isSecretHeader(token: string): boolean {
 const URL_WITH_USERINFO = /[a-z][a-z0-9+.-]*:\/\/[^/\s@]*@/i;
 // A signed URL authenticates through its query string (S3 X-Amz-Signature, ?token=,
 // ?sig=, ...). Handing it to the public payload is handing over the credential.
-const URL_SECRET_QUERY = /[?&](?:x-amz-signature|x-amz-credential|x-amz-security-token|sig|signature|token|access[_-]?token|api[_-]?key|key|secret|password|passwd|pwd|auth|code|ticket)=/i;
+const URL_SECRET_QUERY = /[?&](?:x-amz-signature|x-amz-credential|x-amz-security-token|x-goog-signature|x-goog-credential|sig|signature|token|access[_-]?token|api[_-]?key|key|secret|password|passwd|pwd|auth|code|ticket)=/i;
+// Short flags whose name says nothing: -p is a port in most servers and a password in
+// some, so a non-numeric value is treated as the credential it probably is.
+const SHORT_CREDENTIAL_FLAG = /^-(?:p|pw)$/i;
 
 function tokenCarriesSecret(token: string): boolean {
 	const trimmed = token.trim().replace(/^(["'])(.*)\1$/, '$2');
@@ -204,6 +207,11 @@ function redactArgs(args: string[]): { args: string[]; redacted: boolean } {
 		// A flag whose only value is a credential loses the flag too: leaving it behind
 		// would hand the client an argument the server cannot parse.
 		const next = index + 1 < args.length ? args[index + 1] : '';
+		if (SHORT_CREDENTIAL_FLAG.test(arg.trim()) && next !== '' && !/^\d+$/.test(next.trim())) {
+			redacted = true;
+			index += 1;
+			continue;
+		}
 		if (arg.trim().startsWith('-') && !arg.includes('=') && next !== '' && !next.trim().startsWith('-') && tokenCarriesSecret(next)) {
 			redacted = true;
 			index += 1;

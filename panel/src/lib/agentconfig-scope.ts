@@ -19,6 +19,9 @@ import type { AgentConfigExportSource, AgentConfigExportWarning } from './agentc
 export interface AgentConfigProviderScope {
 	allowed: string[];
 	blocked: string[];
+	// A provider config that binds no credential cannot serve any model: governance
+	// selects a key per request and has nothing to select.
+	hasCredential: boolean;
 	// A key can list the same provider more than once. Governance denies if any row's
 	// blacklist blocks and allows if any row's allowlist allows, so the flags keep
 	// per-row ["*"] meaning after the rows are merged: concatenating them would turn a
@@ -157,14 +160,17 @@ export function scopeFromVirtualKey(key: unknown): AgentConfigScope {
 		const previous = providers[provider];
 		const allowed = stringList(config.allowed_models);
 		const blocked = stringList(config.blacklisted_models);
+		// allow_all_keys false with no bound key leaves the provider unusable.
+		const hasCredential = config.allow_all_keys === true || recordArray(config.keys).length > 0;
 		providers[provider] = previous
 			? {
 				allowed: mergeUnique(previous.allowed, allowed),
 				blocked: mergeUnique(previous.blocked, blocked),
+				hasCredential: previous.hasCredential || hasCredential,
 				allowedUnrestricted: previous.allowedUnrestricted || isUnrestricted(allowed),
 				blockedAll: previous.blockedAll || isUnrestricted(blocked),
 			}
-			: { allowed, blocked, allowedUnrestricted: isUnrestricted(allowed), blockedAll: isUnrestricted(blocked) };
+			: { allowed, blocked, hasCredential, allowedUnrestricted: isUnrestricted(allowed), blockedAll: isUnrestricted(blocked) };
 	}
 	const mcpClientNames = recordArray(record.mcp_configs).map(mcpClientName).filter(Boolean);
 	const agentNames = recordArray(record.agent_grants)
@@ -248,6 +254,7 @@ function modelIdentifier(model: JsonRecord): { provider: string; id: string } {
 function modelAllowed(scope: AgentConfigScope, provider: string, id: string): boolean {
 	const rule = scope.providers[provider];
 	if (!rule) return scope.allowAllProviders;
+	if (!rule.hasCredential) return false;
 	if (rule.blockedAll || listBlocks(rule.blocked, id)) return false;
 	return rule.allowedUnrestricted || listAllows(rule.allowed, id, provider);
 }

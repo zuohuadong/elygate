@@ -24,6 +24,9 @@
 
 	let { resourceName }: Props = $props();
 	const i18n = useTranslation();
+	// Warnings that say something about what this key grants, as opposed to a global
+	// export limitation such as a long prompt title.
+	const SCOPE_WARNING_CODES = new Set(['mcp-tools-restricted', 'mcp-disabled', 'mcp-grants-elsewhere']);
 	let employees = $state.raw<JsonRecord[]>([]);
 	let virtualKeys = $state.raw<JsonRecord[]>([]);
 	let form = $state<EmployeeForm>(emptyForm());
@@ -287,8 +290,11 @@
 				// A grant can be real yet impossible to express (a client with a tool subset,
 				// an in-process server, a disabled client). Name that reason instead of
 				// claiming the key grants nothing.
-				if (scoped.result.warnings.length > 0) {
-					throw new Error(text(`该密钥的授权无法写入 AgentConfig（${scoped.result.warnings.length} 项被省略或收窄，例如 MCP client 仅授权部分工具、已停用，或为 in-process 类型），请调整授权后重试。`, `This key's grants cannot be expressed in an AgentConfig bundle (${scoped.result.warnings.length} items narrowed or omitted: an MCP client with a tool subset, a disabled client, or an in-process one); adjust the grant and retry.`));
+				// Only the scoping warnings (a client the key grants but the bundle cannot
+				// express) explain an empty result; a global prompt-title warning does not.
+				const scopeWarnings = scoped.result.warnings.filter((warning) => SCOPE_WARNING_CODES.has(warning.code));
+				if (scopeWarnings.length > 0) {
+					throw new Error(text(`该密钥的授权无法写入 AgentConfig（${scopeWarnings.length} 个 MCP client 仅授权部分工具、已停用，或为 in-process 类型），请调整授权后重试。`, `This key's grants cannot be expressed in an AgentConfig bundle (${scopeWarnings.length} MCP client(s) with a tool subset, disabled, or in-process); adjust the grant and retry.`));
 				}
 				throw new Error(text('该密钥没有可用的模型、MCP 或 Agent 授权，生成的配置为空。', 'This key grants no models, MCP servers or agents, so the bundle would be empty.'));
 			}

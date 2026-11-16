@@ -21,6 +21,8 @@ const MOCK_BUNDLE_SOURCES = {
 }
 
 test.describe('AgentConfig bundle export', () => {
+  test.use({ permissions: ['clipboard-read', 'clipboard-write'] })
+
   test.beforeEach(async ({ page }) => {
     await page.route('**/api/models?*', (route) => route.fulfill({ json: MOCK_BUNDLE_SOURCES.models }))
     await page.route('**/api/mcp/clients?*', (route) => route.fulfill({ json: MOCK_BUNDLE_SOURCES.mcpClients }))
@@ -38,6 +40,16 @@ test.describe('AgentConfig bundle export', () => {
     const preview = page.getByTestId('agentconfig-public-preview')
     await expect(preview).toContainText('gpt-4o')
     await expect(preview).toContainText('GITHUB_TOKEN')
+  })
+
+  test('copies a deep link that carries the public payload only', async ({ page }) => {
+    await page.getByRole('button', { name: /Copy import deep link|复制导入深链/ }).click()
+    const clipboard = await page.evaluate(() => navigator.clipboard.readText())
+    expect(clipboard.startsWith('agentconfig://import?v=1&bundle=')).toBe(true)
+    const bundle = JSON.parse(Buffer.from(clipboard.slice('agentconfig://import?v=1&bundle='.length), 'base64url').toString('utf8'))
+    expect(bundle.pub.models).toEqual([{ provider: 'openai', id: 'gpt-4o' }])
+    expect(bundle.pub.mcp[0].envKeys).toEqual(['GITHUB_TOKEN'])
+    expect(JSON.stringify(bundle)).not.toContain('ghp_e2e_secret')
   })
 
   test('downloads an ACB v1 file without secret values', async ({ page }) => {

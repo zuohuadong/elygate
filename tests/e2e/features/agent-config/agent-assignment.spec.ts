@@ -24,7 +24,7 @@ const MOCK_VIRTUAL_KEY = {
     name: 'alice-key',
     is_active: true,
     allow_all_providers: false,
-    provider_configs: [{ provider: 'openai', allowed_models: ['gpt-4o'], blacklisted_models: ['regex:^gpt-4o-mini$'] }],
+    provider_configs: [{ provider: 'openai', allow_all_keys: true, allowed_models: ['gpt-4o'], blacklisted_models: ['regex:^gpt-4o-mini$'] }],
     mcp_configs: [
       { mcp_client: { name: 'github' }, tools_to_execute: ['*'] },
       { mcp_client: { name: 'partially-granted' }, tools_to_execute: ['read_file'] },
@@ -143,8 +143,15 @@ test.describe('AgentConfig deep link per employee', () => {
     )
     await page.getByTestId('employee-agent-config-emp-1').click()
     await expect(page.getByText(/no models, MCP servers or agents|没有可用的模型/)).toHaveCount(0)
-    // Either the link is copied or the file is downloaded: both deliver the bundle.
-    await expect(page.getByRole('status').filter({ hasText: /AgentConfig|已改为下载/ })).toBeVisible()
+    await expect(page.getByRole('status').filter({ hasText: /AgentConfig/ })).toBeVisible()
+    // The delivered bundle really is this key's: global skills/prompts, no MCP client,
+    // because the access comes from the virtual MCP rather than the key's own config.
+    const clipboard = await page.evaluate(() => navigator.clipboard.readText())
+    expect(clipboard.startsWith('agentconfig://import?v=1&bundle=')).toBe(true)
+    const bundle = JSON.parse(Buffer.from(clipboard.slice('agentconfig://import?v=1&bundle='.length), 'base64url').toString('utf8'))
+    expect(bundle.pub.mcp).toEqual([])
+    expect(bundle.pub.skills.map((entry: { id: string }) => entry.id)).toEqual(['docs'])
+    expect(bundle.pub.models).toEqual([])
   })
 
   test('says the virtual MCP could not be read instead of claiming no grant', async ({ page }) => {

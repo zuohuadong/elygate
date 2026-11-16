@@ -38,7 +38,7 @@ const KEY = {
 		name: 'alice-key',
 		is_active: true,
 		allow_all_providers: false,
-		provider_configs: [{ provider: 'openai', allowed_models: ['gpt-4o'], blacklisted_models: [] }],
+		provider_configs: [{ provider: 'openai', allow_all_keys: true, allowed_models: ['gpt-4o'], blacklisted_models: [] }],
 		mcp_configs: [{ mcp_client: { name: 'github' }, tools_to_execute: ['*'] }],
 		agent_grants: [{ agent_name: 'researcher' }],
 	},
@@ -98,7 +98,7 @@ describe('scopeFromVirtualKey', () => {
 	test('reads providers, mcp clients and agent grants from the wrapped payload', () => {
 		const scope = scopeFromVirtualKey(KEY);
 		expect(scope.allowAllProviders).toBe(false);
-		expect(scope.providers.openai).toEqual({ allowed: ['gpt-4o'], blocked: [], allowedUnrestricted: false, blockedAll: false });
+		expect(scope.providers.openai).toEqual({ allowed: ['gpt-4o'], blocked: [], hasCredential: true, allowedUnrestricted: false, blockedAll: false });
 		expect(scope.mcpClientNames).toEqual(['github']);
 		expect(scope.agentNames).toEqual(['researcher']);
 	});
@@ -130,39 +130,39 @@ describe('applyAgentConfigScope', () => {
 	});
 
 	test('a provider-prefixed allow entry grants the model, as the model catalog resolves it', () => {
-		const key = { virtual_key: { allow_all_providers: false, provider_configs: [{ provider: 'anthropic', allowed_models: ['anthropic/claude-opus-4'] }] } };
+		const key = { virtual_key: { allow_all_providers: false, provider_configs: [{ provider: 'anthropic', allow_all_keys: true, allowed_models: ['anthropic/claude-opus-4'] }] } };
 		expect(names(applyAgentConfigScope(SOURCES, scopeFromVirtualKey(key), key).source.models, 'models')).toEqual(['anthropic/claude-opus-4']);
-		const bare = { virtual_key: { allow_all_providers: false, provider_configs: [{ provider: 'anthropic', allowed_models: ['claude-opus-4'] }] } };
+		const bare = { virtual_key: { allow_all_providers: false, provider_configs: [{ provider: 'anthropic', allow_all_keys: true, allowed_models: ['claude-opus-4'] }] } };
 		expect(names(applyAgentConfigScope(SOURCES, scopeFromVirtualKey(bare), bare).source.models, 'models')).toEqual(['anthropic/claude-opus-4']);
 	});
 
 	test('a prefixed entry for another provider grants nothing here', () => {
-		const key = { virtual_key: { allow_all_providers: false, provider_configs: [{ provider: 'openai', allowed_models: ['anthropic/claude-opus-4'] }] } };
+		const key = { virtual_key: { allow_all_providers: false, provider_configs: [{ provider: 'openai', allow_all_keys: true, allowed_models: ['anthropic/claude-opus-4'] }] } };
 		expect(names(applyAgentConfigScope(SOURCES, scopeFromVirtualKey(key), key).source.models, 'models')).toEqual([]);
 	});
 
 	test('a pattern with RE2 inline flags is not dropped as uncompilable', () => {
-		const key = { virtual_key: { allow_all_providers: false, provider_configs: [{ provider: 'openai', allowed_models: ['regex:(?i)^GPT-4O$'] }] } };
+		const key = { virtual_key: { allow_all_providers: false, provider_configs: [{ provider: 'openai', allow_all_keys: true, allowed_models: ['regex:(?i)^GPT-4O$'] }] } };
 		expect(names(applyAgentConfigScope(SOURCES, scopeFromVirtualKey(key), key).source.models, 'models')).toEqual(['openai/gpt-4o']);
 	});
 
 	test('a wildcard allow list plus a regex blacklist keeps blacklist precedence', () => {
-		const key = { virtual_key: { allow_all_providers: false, provider_configs: [{ provider: 'openai', allowed_models: ['*'], blacklisted_models: ['regex:^gpt-4.*$'] }] } };
+		const key = { virtual_key: { allow_all_providers: false, provider_configs: [{ provider: 'openai', allow_all_keys: true, allowed_models: ['*'], blacklisted_models: ['regex:^gpt-4.*$'] }] } };
 		expect(names(applyAgentConfigScope(SOURCES, scopeFromVirtualKey(key), key).source.models, 'models')).toEqual([]);
 	});
 
 	test('a blacklist entry matches case-insensitively', () => {
-		const key = { virtual_key: { allow_all_providers: false, provider_configs: [{ provider: 'openai', allowed_models: ['*'], blacklisted_models: ['GPT-4o-MINI'] }] } };
+		const key = { virtual_key: { allow_all_providers: false, provider_configs: [{ provider: 'openai', allow_all_keys: true, allowed_models: ['*'], blacklisted_models: ['GPT-4o-MINI'] }] } };
 		expect(names(applyAgentConfigScope(SOURCES, scopeFromVirtualKey(key), key).source.models, 'models')).toEqual(['openai/gpt-4o']);
 	});
 
 	test('a "*" listed beside other entries is not unrestricted', () => {
-		const key = { virtual_key: { allow_all_providers: false, provider_configs: [{ provider: 'openai', allowed_models: ['*', 'gpt-4o-mini'] }] } };
+		const key = { virtual_key: { allow_all_providers: false, provider_configs: [{ provider: 'openai', allow_all_keys: true, allowed_models: ['*', 'gpt-4o-mini'] }] } };
 		expect(names(applyAgentConfigScope(SOURCES, scopeFromVirtualKey(key), key).source.models, 'models')).toEqual(['openai/gpt-4o-mini']);
 	});
 
 	test('an allow-all key still honours the provider entries it names', () => {
-		const key = { virtual_key: { allow_all_providers: true, provider_configs: [{ provider: 'openai', allowed_models: ['gpt-4o-mini'] }] } };
+		const key = { virtual_key: { allow_all_providers: true, provider_configs: [{ provider: 'openai', allow_all_keys: true, allowed_models: ['gpt-4o-mini'] }] } };
 		expect(names(applyAgentConfigScope(SOURCES, scopeFromVirtualKey(key), key).source.models, 'models')).toEqual(['openai/gpt-4o-mini', 'anthropic/claude-sonnet-4', 'anthropic/claude-opus-4']);
 	});
 
@@ -182,19 +182,19 @@ describe('applyAgentConfigScope', () => {
 	});
 
 	test('whitespace around "*" is not the wildcard, exactly as governance stores it', () => {
-		const key = { virtual_key: { allow_all_providers: false, provider_configs: [{ provider: 'openai', allowed_models: [' * '] }] } };
+		const key = { virtual_key: { allow_all_providers: false, provider_configs: [{ provider: 'openai', allow_all_keys: true, allowed_models: [' * '] }] } };
 		expect(names(applyAgentConfigScope(SOURCES, scopeFromVirtualKey(key), key).source.models, 'models')).toEqual([]);
 	});
 
 	test('an uppercase Regex: prefix is a literal entry, not a pattern', () => {
-		const key = { virtual_key: { allow_all_providers: false, provider_configs: [{ provider: 'openai', allowed_models: ['Regex:^gpt-4.*$'] }] } };
+		const key = { virtual_key: { allow_all_providers: false, provider_configs: [{ provider: 'openai', allow_all_keys: true, allowed_models: ['Regex:^gpt-4.*$'] }] } };
 		expect(names(applyAgentConfigScope(SOURCES, scopeFromVirtualKey(key), key).source.models, 'models')).toEqual([]);
 	});
 
 	test('one block-everything row still blocks after two rows for the same provider merge', () => {
 		const key = { virtual_key: { allow_all_providers: false, provider_configs: [
-			{ provider: 'openai', allowed_models: ['*'], blacklisted_models: ['*'] },
-			{ provider: 'openai', allowed_models: ['gpt-4o'], blacklisted_models: ['gpt-4o-mini'] },
+			{ provider: 'openai', allow_all_keys: true, allowed_models: ['*'], blacklisted_models: ['*'] },
+			{ provider: 'openai', allow_all_keys: true, allowed_models: ['gpt-4o'], blacklisted_models: ['gpt-4o-mini'] },
 		] } };
 		expect(names(applyAgentConfigScope(SOURCES, scopeFromVirtualKey(key), key).source.models, 'models')).toEqual([]);
 	});
@@ -255,6 +255,13 @@ describe('applyAgentConfigScope', () => {
 		const scoped = applyAgentConfigScope(sources, scopeFromVirtualKey({ virtual_key: {} }), { virtual_key: {} });
 		expect(names(scoped.source.mcpClients, 'clients')).toEqual(['open']);
 		expect(scoped.warnings.map((warning) => `${warning.code}:${warning.name}`)).toEqual(['mcp-tools-restricted:narrowed', 'mcp-disabled:off']);
+	});
+
+	test('a provider that binds no credential grants no models', () => {
+		const unbound = { virtual_key: { allow_all_providers: false, provider_configs: [{ provider: 'openai', allow_all_keys: false, keys: [], allowed_models: ['*'] }] } };
+		expect(names(applyAgentConfigScope(SOURCES, scopeFromVirtualKey(unbound), unbound).source.models, 'models')).toEqual([]);
+		const bound = { virtual_key: { allow_all_providers: false, provider_configs: [{ provider: 'openai', allow_all_keys: false, keys: [{ id: 1, name: 'k1' }], allowed_models: ['*'] }] } };
+		expect(names(applyAgentConfigScope(SOURCES, scopeFromVirtualKey(bound), bound).source.models, 'models')).toEqual(['openai/gpt-4o', 'openai/gpt-4o-mini']);
 	});
 
 	test('a key with no grants exports nothing reachable', () => {
