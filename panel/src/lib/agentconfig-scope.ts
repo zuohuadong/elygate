@@ -39,6 +39,9 @@ export interface AgentConfigScope {
 	mcpClientNames: string[];
 	restrictAgents: boolean;
 	agentNames: string[];
+	// mcpOutsideKey marks a key that can also reach MCP servers through the virtual
+	// MCPs assigned to it, which its own mcp_configs do not describe.
+	mcpOutsideKey: boolean;
 }
 
 export interface ScopedAgentConfigSource {
@@ -55,6 +58,7 @@ export function globalAgentConfigScope(): AgentConfigScope {
 		mcpClientNames: [],
 		restrictAgents: false,
 		agentNames: [],
+		mcpOutsideKey: false,
 	};
 }
 
@@ -124,6 +128,8 @@ function mcpClientName(config: JsonRecord): string {
 // fall back to deny-by-default, matching how governance treats an empty provider list
 // or an empty MCP list.
 export function scopeFromVirtualKey(key: unknown): AgentConfigScope {
+	// virtual_mcp_ids rides beside the key in the detail response, not inside it.
+	const wrapper = isJsonRecord(key) ? key : {};
 	const record = virtualKeyFromResponse(key);
 	const allowAllProviders = record.allow_all_providers === true;
 	const providers: Record<string, AgentConfigProviderScope> = {};
@@ -146,6 +152,9 @@ export function scopeFromVirtualKey(key: unknown): AgentConfigScope {
 	const agentNames = recordArray(record.agent_grants)
 		.map((grant) => (typeof grant.agent_name === 'string' ? grant.agent_name.trim() : ''))
 		.filter(Boolean);
+	const virtualMcpIDs = [wrapper.virtual_mcp_ids, record.virtual_mcp_ids]
+		.flatMap((value) => (Array.isArray(value) ? value : []))
+		.filter((id): id is string => typeof id === 'string' && id.trim() !== '');
 	return {
 		allowAllProviders,
 		providers,
@@ -153,6 +162,7 @@ export function scopeFromVirtualKey(key: unknown): AgentConfigScope {
 		mcpClientNames,
 		restrictAgents: true,
 		agentNames,
+		mcpOutsideKey: virtualMcpIDs.length > 0,
 	};
 }
 
@@ -177,11 +187,22 @@ export function mcpWholeClientGrants(key: unknown): { whole: Set<string>; partia
 // vkScopeProblem reports why a key cannot be handed out at all. The API serializes
 // expires_at from a time.Time, so a value the panel cannot parse means the payload is
 // not the shape expected; treat that as unusable rather than as "never expires".
+const VIRTUAL_KEY_FIELDS = ['id', 'name', 'value', 'allow_all_providers', 'provider_configs', 'mcp_configs', 'agent_grants', 'is_active', 'expires_at', 'virtual_mcp_ids'];
+
+// A payload carrying none of the key's own fields is not a key (an error body, a
+// null wrapper, a renamed field), and treating it as one would report "no grants".
+function looksLikeVirtualKey(record: JsonRecord): boolean {
+	return VIRTUAL_KEY_FIELDS.some((field) => field in record);
+}
+
 export function vkScopeProblem(key: unknown, now: Date = new Date()): 'inactive' | 'expired' | 'unreadable' | null {
 	const record = virtualKeyFromResponse(key);
+	if (!looksLikeVirtualKey(record)) return 'unreadable';
 	if (record.is_active === false) return 'inactive';
-	if (record.expires_at === undefined || record.expires_at === null || record.expires_at === '') return null;
-	if (typeof record.expires_at !== 'string') return 'unreadable';
+	if (record.expires_at === undefined || record.expires_at === null) return null;
+	// The API omits expires_at when the key never expires (omitempty on a *time.Time),
+	// so an empty or non-string value is not "never expires".
+	if (typeof record.expires_at !== 'string' || record.expires_at.trim() === '') return 'unreadable';
 	const expiry = new Date(record.expires_at);
 	if (Number.isNaN(expiry.getTime())) return 'unreadable';
 	return expiry.getTime() <= now.getTime() ? 'expired' : null;
@@ -241,7 +262,10 @@ function filterAgents(payload: unknown, scope: AgentConfigScope): unknown {
 	const agents = payload.agents.filter((agent) => {
 		if (!isJsonRecord(agent)) return false;
 		const name = typeof agent.name === 'string' ? agent.name.trim() : '';
-		return Boolean(name) && allowed.has(name);
+		if (!name) return false;
+		// Governance grants allow_by_default registrations to every caller, so they are
+		// reachable even though the key names none of them.
+		return allowed.has(name) || agent.allow_by_default === true;
 	});
 	return { ...payload, agents };
 }
@@ -266,6 +290,7 @@ export function applyAgentConfigScope(source: AgentConfigExportSource, scope: Ag
 	for (const name of partial) {
 		if (!whole.has(name)) warnings.push({ code: 'mcp-tools-restricted', name });
 	}
+	if (scope.mcpOutsideKey) warnings.push({ code: 'mcp-grants-elsewhere' });
 	return {
 		source: {
 			models: filterModels(source.models, scope),

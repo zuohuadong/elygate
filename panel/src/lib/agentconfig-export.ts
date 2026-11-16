@@ -19,6 +19,7 @@ export type AgentConfigExportWarningCode =
 	| 'mcp-args-redacted'
 	| 'mcp-command-not-public'
 	| 'mcp-tools-restricted'
+	| 'mcp-grants-elsewhere'
 	| 'model-invalid'
 	| 'skill-invalid'
 	| 'prompt-invalid'
@@ -107,37 +108,49 @@ function modelEntries(payload: unknown, warnings: AgentConfigExportWarning[]): A
 }
 
 // A secret can ride in a command-line argument just as easily as in an environment
-// value (`--api-key sk-...`), and args travel in the public payload. A flag that names a
-// credential drops itself and its value; a bare value shaped like a known token drops
-// alone. Dropping too little leaks, dropping too much only makes the server need its
-// args from the user, so the redaction stays shape-based rather than statistical.
-const SECRET_WORDS = 'api[-_]?key|apikey|token|secret|password|passwd|pwd|auth|authorization|credential|bearer|access[-_]?key|private[-_]?key';
-// A flag that names a credential, or carries a header that may hold one, drops itself
-// and (when it has no inline value) the argument after it.
-const SECRET_ARG_FLAG = new RegExp(`^(?:--?)?(?:[a-z0-9]+[-_])*(?:${SECRET_WORDS})s?$|^(?:--?)?headers?$`, 'i');
-// An argument that is itself a credential: a known token shape, an auth header value,
-// or a `NAME=value` pairing whose NAME is a credential word.
-const SECRET_ARG_VALUE = new RegExp([
-	'^(?:sk-[a-z0-9_-]{8,}|gh[pousr]_[a-z0-9]{8,}|github_pat_[a-z0-9_]{8,}|xox[abposr]-[a-z0-9-]{8,}|akia[a-z0-9]{12,}|ey[a-z0-9_-]{8,}\\.[a-z0-9_-]{8,}\\.[a-z0-9_-]{8,})$',
-	'^(?:authorization|proxy-authorization)\\s*:',
-	'^(?:bearer|basic|token|digest|apikey)\\s+\\S{4,}$',
-	`(?:^|[\\s,;&=])(?:${SECRET_WORDS})=[^\\s]{1,}`,
-].join('|'), 'i');
+// value, and args travel in the public payload. Anything that names a credential is
+// removed: a flag whose name is one (or the next argument after it), a `NAME=value`
+// pairing whose name is one, an authentication header, or a bare token-shaped value.
+// Dropping too little leaks; dropping too much only means the user must supply that
+// argument themselves, so the decision is shape-based rather than statistical.
+const SECRET_NAME = /(?:^|[^a-z0-9])(?:api[-_]?key|apikey|token|secret|password|passwd|pwd|auth|authorization|credential|bearer|access[-_]?key|private[-_]?key)$/i;
+const SECRET_TOKEN = /^(?:sk-[a-z0-9_-]{8,}|gh[pousr]_[a-z0-9]{8,}|github_pat_[a-z0-9_]{8,}|xox[abposr]-[a-z0-9-]{8,}|akia[a-z0-9]{12,}|ey[a-z0-9_-]{8,}\.[a-z0-9_-]{8,}\.[a-z0-9_-]{8,})$/i;
+const AUTH_HEADER = /^(?:authorization|proxy-authorization|x-api-key|api-key)\s*:/i;
+// -H/--header carry arbitrary headers, so they are treated as credential flags.
+const HEADER_FLAG = /^(?:h|header|headers)$/i;
 
-function carriesSecret(value: string): boolean {
-	return SECRET_ARG_VALUE.test(value.trim());
+function isSecretName(name: string): boolean {
+	return SECRET_NAME.test(name.trim());
 }
 
-// A command line is a single string, so the arguments inside it are inspected
-// token by token. Only dash-prefixed tokens are treated as credential flags, so a
-// subcommand that merely shares a word ("cli auth login") is not mistaken for one.
+function flagName(token: string): string {
+	const trimmed = token.trim().replace(/^--?/, '');
+	const separator = trimmed.indexOf('=');
+	const name = separator === -1 ? trimmed : trimmed.slice(0, separator);
+	return name;
+}
+
+// isSecretAssignment finds `NAME=value` anywhere in the token, so `--env=A=B` and a
+// bare `OPENAI_API_KEY=...` are both caught.
+function isSecretAssignment(token: string): boolean {
+	const parts = token.split('=');
+	if (parts.length < 2) return false;
+	return parts.slice(0, -1).some((part) => isSecretName(part));
+}
+
+function tokenCarriesSecret(token: string): boolean {
+	const trimmed = token.trim().replace(/^(["'])(.*)\1$/, '$2');
+	if (!trimmed) return false;
+	if (SECRET_TOKEN.test(trimmed) || AUTH_HEADER.test(trimmed) || isSecretAssignment(trimmed)) return true;
+	if (!trimmed.startsWith('-')) return false;
+	const name = flagName(trimmed);
+	return isSecretName(name) || HEADER_FLAG.test(name);
+}
+
+// A command line is one string, so it is inspected token by token. Token-level
+// matching keeps a subcommand that merely shares a word ("cli auth login") intact.
 function commandCarriesSecret(command: string): boolean {
-	return command.split(/\s+/).some((token) => {
-		const trimmed = token.replace(/^["']|["']$/g, '');
-		if (!trimmed) return false;
-		if (trimmed.startsWith('-') && SECRET_ARG_FLAG.test(trimmed)) return true;
-		return carriesSecret(trimmed);
-	});
+	return command.split(/\s+/).some(tokenCarriesSecret);
 }
 
 function redactArgs(args: string[]): { args: string[]; redacted: boolean } {
@@ -145,19 +158,12 @@ function redactArgs(args: string[]): { args: string[]; redacted: boolean } {
 	let redacted = false;
 	for (let index = 0; index < args.length; index += 1) {
 		const arg = args[index];
-		const separator = arg.indexOf('=');
-		const flag = (separator === -1 ? arg : arg.slice(0, separator)).trim();
-		// Only a dash-prefixed flag names a credential; a bare positional word that
-		// shares the name ("auth" as a subcommand) must survive.
-		if (flag.startsWith('-') && SECRET_ARG_FLAG.test(flag)) {
+		if (tokenCarriesSecret(arg)) {
 			redacted = true;
-			// A flag without an inline value carries the credential in the next
-			// argument, so that one goes too.
-			if (separator === -1 && index + 1 < args.length) index += 1;
-			continue;
-		}
-		if (SECRET_ARG_VALUE.test(arg.trim())) {
-			redacted = true;
+			// A flag with no inline value carries the credential in the next argument,
+			// so that one goes too. A bare assignment carries its own value already.
+			const inline = arg.includes('=') || !arg.trim().startsWith('-');
+			if (!inline && index + 1 < args.length) index += 1;
 			continue;
 		}
 		kept.push(arg);

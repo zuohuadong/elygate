@@ -81,6 +81,16 @@ describe('vkScopeProblem', () => {
 	test('an unparseable expiry is unusable rather than never-expiring', () => {
 		expect(vkScopeProblem({ expires_at: 'not-a-date' })).toBe('unreadable');
 		expect(vkScopeProblem({ expires_at: 1234 })).toBe('unreadable');
+		// The API omits expires_at for a key that never expires, so an empty value is a
+		// payload we do not understand rather than a permanent key.
+		expect(vkScopeProblem({ expires_at: '' })).toBe('unreadable');
+	});
+
+	test('a payload with none of the key fields is unreadable, not grant-less', () => {
+		expect(vkScopeProblem({})).toBe('unreadable');
+		expect(vkScopeProblem({ error: 'boom' })).toBe('unreadable');
+		expect(vkScopeProblem({ virtual_key: null })).toBe('unreadable');
+		expect(vkScopeProblem({ virtual_key: { id: 'vk-1' } })).toBeNull();
 	});
 });
 
@@ -184,6 +194,18 @@ describe('applyAgentConfigScope', () => {
 		const scoped = applyAgentConfigScope(SOURCES, scopeFromVirtualKey(key), key);
 		expect(names(scoped.source.mcpClients, 'clients')).toEqual([]);
 		expect(scoped.warnings.map((warning) => warning.code)).toEqual(['mcp-tools-restricted']);
+	});
+
+	test('agents granted to every caller by default are kept', () => {
+		const sources = { ...SOURCES, agents: { agents: [{ name: 'public-agent', allow_by_default: true }, { name: 'private-agent', allow_by_default: false }] } };
+		const key = { virtual_key: { agent_grants: [] } };
+		expect(names(applyAgentConfigScope(sources, scopeFromVirtualKey(key), key).source.agents, 'agents')).toEqual(['public-agent']);
+	});
+
+	test('a key that also reaches MCP through virtual MCPs says so', () => {
+		const key = { virtual_key: { mcp_configs: [{ mcp_client: { name: 'github' }, tools_to_execute: ['*'] }] }, virtual_mcp_ids: ['vmcp-1'] };
+		const scoped = applyAgentConfigScope(SOURCES, scopeFromVirtualKey(key), key);
+		expect(scoped.warnings.map((warning) => warning.code)).toEqual(['mcp-grants-elsewhere']);
 	});
 
 	test('a key with no grants exports nothing reachable', () => {

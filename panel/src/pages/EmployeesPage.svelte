@@ -284,9 +284,11 @@
 				// substitute because it describes the whole gateway.
 				const fileName = `${label.replace(/[^\w.-]+/g, '-')}${ACB_FILE_EXTENSION}`;
 				downloadBundleFile(fileName, bundleToFileString(scoped.bundle));
-				const reason = scoped.fitsDeepLink
-					? text('浏览器拒绝写入剪贴板', 'the browser refused the clipboard write')
-					: text('授权范围超出深链长度上限', 'the grant exceeds the deep-link length limit');
+				const reason = !scoped.fitsDeepLink
+					? text('授权范围超出深链长度上限', 'the grant exceeds the deep-link length limit')
+					: !navigator.clipboard
+						? text('浏览器不支持剪贴板', 'the browser has no clipboard access')
+						: text('浏览器拒绝写入剪贴板', 'the browser refused the clipboard write');
 				notice = text(`已改为下载 ${fileName}（${reason}）${narrowed}${incomplete}。`, `Downloaded ${fileName} instead (${reason})${narrowed}${incomplete}.`);
 				return;
 			}

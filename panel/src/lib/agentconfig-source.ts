@@ -38,7 +38,10 @@ async function fetchPaged(path: string, key: string, totalKeys: string[]): Promi
 	for (let page = 0; page < MAX_PAGES; page += 1) {
 		const separator = path.includes('?') ? '&' : '?';
 		const payload = await requestJson<Record<string, unknown>>(`${path}${separator}limit=${PAGE_SIZE}&offset=${offset}`);
-		const rows = Array.isArray(payload[key]) ? payload[key] as unknown[] : [];
+		// A 200 without the array is a broken contract, not an empty page. Reading it as
+		// empty would report a configured gateway as having nothing to export.
+		if (!Array.isArray(payload[key])) throw new Error(`${path} answered without a '${key}' array`);
+		const rows = payload[key] as unknown[];
 		for (const row of rows) {
 			const identity = typeof row === 'object' && row !== null
 				? JSON.stringify(Object.fromEntries(Object.entries(row).filter(([field]) => field !== 'tools' && field !== 'resources' && field !== 'prompts')))

@@ -143,6 +143,36 @@ describe('AgentConfig export mapping', () => {
 		expect(JSON.stringify(result.pub)).not.toContain('topsecret');
 	});
 
+	test('catches inline credential forms in arguments and commands', () => {
+		const source: AgentConfigExportSource = {
+			models: undefined,
+			mcpClients: {
+				clients: [
+					{
+						config: {
+							name: 'inline',
+							connection_type: 'stdio',
+							stdio_config: { command: 'server', args: ['--token=topsecret', '-H', 'X-Api-Key: topsecret', 'OPENAI_API_KEY=topsecret', '--verbose'] },
+						},
+					},
+					{ config: { name: 'cmd-eq', connection_type: 'stdio', stdio_config: { command: 'server --token=topsecret' } } },
+					{ config: { name: 'cmd-header', connection_type: 'stdio', stdio_config: { command: 'server --header=Authorization: Bearer topsecret' } } },
+					{ config: { name: 'cmd-h', connection_type: 'stdio', stdio_config: { command: 'server -H X-Api-Key: topsecret' } } },
+					{ config: { name: 'clean', connection_type: 'stdio', stdio_config: { command: 'cli auth login' } } },
+				],
+			},
+			skills: undefined,
+			prompts: undefined,
+			agents: undefined,
+		};
+		const result = buildAgentConfigPublic(source);
+		expect(result.pub.mcp.map((entry) => entry.name)).toEqual(['inline', 'clean']);
+		expect(result.pub.mcp[0].args).toEqual(['--verbose']);
+		expect(JSON.stringify(result.pub)).not.toContain('topsecret');
+		// A subcommand that merely shares a word with a credential name is not a secret.
+		expect(result.pub.mcp[1].command).toBe('cli auth login');
+	});
+
 	test('produces an empty but valid public section when nothing is configured', () => {
 		const result = buildAgentConfigPublic({ models: undefined, mcpClients: undefined, skills: undefined, prompts: undefined, agents: undefined });
 		expect(result.counts).toEqual({ models: 0, mcp: 0, skills: 0, prompts: 0, agents: 0 });

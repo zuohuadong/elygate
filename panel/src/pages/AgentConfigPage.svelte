@@ -4,6 +4,7 @@
 	import { getAppName } from '../lib/branding';
 	import { displayError } from '../lib/forms';
 	import {
+		ACB_DEEP_LINK_MAX_BYTES,
 		ACB_FILE_EXTENSION,
 		ACB_MIME_TYPE,
 		buildBundle,
@@ -69,6 +70,7 @@
 			'mcp-args-redacted': ['MCP 启动参数中含疑似密钥，已移除', 'Suspected credentials were removed from the MCP launch arguments'],
 			'mcp-command-not-public': ['MCP 启动命令含疑似密钥，已跳过该 client', 'An MCP launch command contained a suspected credential, so the client was skipped'],
 			'agent-disabled': ['已停用的 Agent 不会导出', 'A disabled agent was left out'],
+			'mcp-grants-elsewhere': ['该密钥还通过虚拟 MCP 获得了 MCP 授权，配置包只包含密钥自身声明的 client', 'This key also reaches MCP servers through an assigned virtual MCP; the bundle lists only the clients the key itself declares'],
 			'mcp-tools-restricted': ['该 MCP client 只授权了部分工具，无法在配置包中表达，已跳过', 'This MCP client grants only some of its tools, which a bundle cannot express, so it was skipped'],
 			'model-invalid': ['跳过了缺少有效 provider/id 的模型', 'Skipped a model without a valid provider/id'],
 			'skill-invalid': ['跳过了标识无效的 Skill', 'Skipped a skill with an invalid id'],
@@ -138,6 +140,11 @@
 		try {
 			const bundle = await currentBundle();
 			const link = bundleToDeepLink(bundle);
+			// bundleToDeepLink bounds the encoded segment; this bounds the whole URL,
+			// which is the string actually pasted into a client.
+			if (new TextEncoder().encode(link).length > ACB_DEEP_LINK_MAX_BYTES) {
+				throw new Error(text('配置包超出深链长度上限，请改用下载 .acfg 文件。', 'The bundle exceeds the deep-link length limit; download the .acfg file instead.'));
+			}
 			await navigator.clipboard.writeText(link);
 			copied = true;
 			notice = text('AgentConfig 深链已复制。', 'AgentConfig deep link copied.');
