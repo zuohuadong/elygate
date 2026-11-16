@@ -60,6 +60,21 @@ async function fetchPaged(path: string, key: string, totalKeys: string[]): Promi
 	return { [key]: items };
 }
 
+// listShape names the array each endpoint must answer with. A 200 carrying the wrong
+// shape is a contract failure, not an empty list: treating it as empty would make the
+// caller report "this key grants nothing", which is a different (and wrong) story.
+const LIST_SHAPE: Record<AgentConfigSourceName, (payload: unknown) => boolean> = {
+	models: (payload) => isJsonRecord(payload) && Array.isArray(payload.models),
+	mcpClients: (payload) => isJsonRecord(payload) && Array.isArray(payload.clients),
+	skills: (payload) => isJsonRecord(payload) && Array.isArray(payload.skills),
+	prompts: (payload) => isJsonRecord(payload) && Array.isArray(payload.prompts),
+	agents: (payload) => isJsonRecord(payload) && Array.isArray(payload.agents),
+};
+
+function isJsonRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 export async function loadAgentConfigSources(): Promise<AgentConfigSourceLoad> {
 	const requests: Record<AgentConfigSourceName, () => Promise<unknown>> = {
 		models: () => requestJson<unknown>('/api/models?unfiltered=true&limit=0'),
@@ -79,7 +94,7 @@ export async function loadAgentConfigSources(): Promise<AgentConfigSourceLoad> {
 	const failed: AgentConfigSourceName[] = [];
 	results.forEach((result, index) => {
 		const name = AGENT_CONFIG_SOURCE_NAMES[index];
-		if (result.status === 'fulfilled') {
+		if (result.status === 'fulfilled' && LIST_SHAPE[name](result.value)) {
 			source[name] = result.value;
 			return;
 		}

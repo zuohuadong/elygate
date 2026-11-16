@@ -248,6 +248,7 @@
 			const problem = vkScopeProblem(key);
 			if (problem === 'inactive') throw new Error(text('该员工的虚拟密钥已停用，无法生成可用配置。', 'The bound virtual key is disabled, so there is no usable configuration to hand out.'));
 			if (problem === 'expired') throw new Error(text('该员工的虚拟密钥已过期，请先续期后重试。', 'The bound virtual key has expired; renew it and retry.'));
+			if (problem === 'unreadable') throw new Error(text('虚拟密钥响应无法识别（过期时间字段异常），已拒绝生成配置。', 'The virtual key response could not be read (unexpected expiry value); refusing to build a bundle from it.'));
 			const loaded = await loadAgentConfigSources();
 			const label = `${stringValue(employee, 'name') || stringValue(employee, 'username') || employeeId} · ${assignedKeyName(employee)}`;
 			const scope = scopeFromVirtualKey(key);
@@ -266,19 +267,29 @@
 			const narrowed = scoped.result.warnings.length > 0
 				? text(`（${scoped.result.warnings.length} 项已收窄或省略）`, ` (${scoped.result.warnings.length} items narrowed or omitted)`)
 				: '';
-			if (!scoped.fitsDeepLink || !navigator.clipboard) {
+			// A clipboard object can exist and still refuse the write (permissions, an
+			// insecure context, a browser policy), so the write decides, not its presence.
+			let copied = false;
+			if (scoped.fitsDeepLink && navigator.clipboard) {
+				try {
+					await navigator.clipboard.writeText(scoped.deepLink);
+					copied = true;
+				} catch {
+					copied = false;
+				}
+			}
+			if (!copied) {
 				// Both a grant too large for a URL and a browser without clipboard access
 				// still have to deliver this key's own bundle; the global export is not a
 				// substitute because it describes the whole gateway.
 				const fileName = `${label.replace(/[^\w.-]+/g, '-')}${ACB_FILE_EXTENSION}`;
 				downloadBundleFile(fileName, bundleToFileString(scoped.bundle));
 				const reason = scoped.fitsDeepLink
-					? text('浏览器不支持剪贴板', 'the browser has no clipboard access')
+					? text('浏览器拒绝写入剪贴板', 'the browser refused the clipboard write')
 					: text('授权范围超出深链长度上限', 'the grant exceeds the deep-link length limit');
 				notice = text(`已改为下载 ${fileName}（${reason}）${narrowed}${incomplete}。`, `Downloaded ${fileName} instead (${reason})${narrowed}${incomplete}.`);
 				return;
 			}
-			await navigator.clipboard.writeText(scoped.deepLink);
 			notice = text(`已复制该员工专属的 AgentConfig 深链${narrowed}${incomplete}。`, `Copied this employee's AgentConfig deep link${narrowed}${incomplete}.`);
 		} catch (cause) {
 			error = displayError(cause, text('生成 AgentConfig 失败。', 'Failed to build the AgentConfig bundle.'));

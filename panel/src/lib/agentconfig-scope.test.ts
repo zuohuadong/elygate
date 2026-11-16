@@ -77,13 +77,18 @@ describe('vkScopeProblem', () => {
 		expect(vkScopeProblem({ expires_at: '2030-01-01T00:00:00Z' }, new Date('2026-01-01T00:00:00Z'))).toBeNull();
 		expect(vkScopeProblem({ is_active: true })).toBeNull();
 	});
+
+	test('an unparseable expiry is unusable rather than never-expiring', () => {
+		expect(vkScopeProblem({ expires_at: 'not-a-date' })).toBe('unreadable');
+		expect(vkScopeProblem({ expires_at: 1234 })).toBe('unreadable');
+	});
 });
 
 describe('scopeFromVirtualKey', () => {
 	test('reads providers, mcp clients and agent grants from the wrapped payload', () => {
 		const scope = scopeFromVirtualKey(KEY);
 		expect(scope.allowAllProviders).toBe(false);
-		expect(scope.providers.openai).toEqual({ allowed: ['gpt-4o'], blocked: [] });
+		expect(scope.providers.openai).toEqual({ allowed: ['gpt-4o'], blocked: [], allowedUnrestricted: false, blockedAll: false });
 		expect(scope.mcpClientNames).toEqual(['github']);
 		expect(scope.agentNames).toEqual(['researcher']);
 	});
@@ -154,6 +159,31 @@ describe('applyAgentConfigScope', () => {
 		const scoped = applyAgentConfigScope(SOURCES, scopeFromVirtualKey(key), key);
 		expect(names(scoped.source.mcpClients, 'clients')).toEqual([]);
 		expect(scoped.warnings.map((warning) => warning.code)).toEqual(['mcp-tools-restricted', 'mcp-tools-restricted']);
+	});
+
+	test('whitespace around "*" is not the wildcard, exactly as governance stores it', () => {
+		const key = { virtual_key: { allow_all_providers: false, provider_configs: [{ provider: 'openai', allowed_models: [' * '] }] } };
+		expect(names(applyAgentConfigScope(SOURCES, scopeFromVirtualKey(key), key).source.models, 'models')).toEqual([]);
+	});
+
+	test('an uppercase Regex: prefix is a literal entry, not a pattern', () => {
+		const key = { virtual_key: { allow_all_providers: false, provider_configs: [{ provider: 'openai', allowed_models: ['Regex:^gpt-4.*$'] }] } };
+		expect(names(applyAgentConfigScope(SOURCES, scopeFromVirtualKey(key), key).source.models, 'models')).toEqual([]);
+	});
+
+	test('one block-everything row still blocks after two rows for the same provider merge', () => {
+		const key = { virtual_key: { allow_all_providers: false, provider_configs: [
+			{ provider: 'openai', allowed_models: ['*'], blacklisted_models: ['*'] },
+			{ provider: 'openai', allowed_models: ['gpt-4o'], blacklisted_models: ['gpt-4o-mini'] },
+		] } };
+		expect(names(applyAgentConfigScope(SOURCES, scopeFromVirtualKey(key), key).source.models, 'models')).toEqual([]);
+	});
+
+	test('whitespace around "*" in the tool grant is not a whole-client grant', () => {
+		const key = { virtual_key: { mcp_configs: [{ mcp_client: { name: 'github' }, tools_to_execute: [' * '] }] } };
+		const scoped = applyAgentConfigScope(SOURCES, scopeFromVirtualKey(key), key);
+		expect(names(scoped.source.mcpClients, 'clients')).toEqual([]);
+		expect(scoped.warnings.map((warning) => warning.code)).toEqual(['mcp-tools-restricted']);
 	});
 
 	test('a key with no grants exports nothing reachable', () => {

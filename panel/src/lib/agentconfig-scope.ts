@@ -19,6 +19,12 @@ import type { AgentConfigExportSource, AgentConfigExportWarning } from './agentc
 export interface AgentConfigProviderScope {
 	allowed: string[];
 	blocked: string[];
+	// A key can list the same provider more than once. Governance denies if any row's
+	// blacklist blocks and allows if any row's allowlist allows, so the flags keep
+	// per-row ["*"] meaning after the rows are merged: concatenating them would turn a
+	// block-everything row into a literal "*" entry that matches nothing.
+	allowedUnrestricted: boolean;
+	blockedAll: boolean;
 }
 
 export interface AgentConfigScope {
@@ -52,8 +58,11 @@ export function globalAgentConfigScope(): AgentConfigScope {
 	};
 }
 
+// stringList keeps entries verbatim. Governance compares the stored strings as they
+// are, so trimming or dropping whitespace-only entries here would widen a rule: " * "
+// is not ["*"] to the gateway.
 function stringList(value: unknown): string[] {
-	return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string').map((item) => item.trim()).filter(Boolean) : [];
+	return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 }
 
 function recordArray(value: unknown): JsonRecord[] {
@@ -64,7 +73,9 @@ function recordArray(value: unknown): JsonRecord[] {
 // entries, full RE2-style match for `regex:` entries, and an uncompilable pattern
 // never matches (fail-closed).
 export function matchEntry(entry: string, value: string): boolean {
-	if (!entry.toLowerCase().startsWith('regex:')) {
+	// Only a lowercase `regex:` prefix is a pattern; `Regex:` is a plain literal to
+	// the gateway (core/schemas/regexentry.go).
+	if (!entry.startsWith('regex:')) {
 		return entry.toLowerCase() === value.toLowerCase();
 	}
 	const pattern = entry.slice('regex:'.length);
@@ -80,15 +91,14 @@ function isUnrestricted(list: string[]): boolean {
 	return list.length === 1 && list[0] === '*';
 }
 
-// listAllows mirrors WhiteList.IsAllowed: exactly ["*"] allows everything, anything
-// else allows only what it matches.
+// listAllows/listBlocks mirror WhiteList.IsAllowed and BlackList.IsBlocked for the
+// non-wildcard entries; the ["*"] case is carried by the per-row flags above.
 function listAllows(list: string[], value: string): boolean {
-	return isUnrestricted(list) || list.some((entry) => matchEntry(entry, value));
+	return list.some((entry) => matchEntry(entry, value));
 }
 
-// listBlocks mirrors BlackList.IsBlocked.
 function listBlocks(list: string[], value: string): boolean {
-	return isUnrestricted(list) || list.some((entry) => matchEntry(entry, value));
+	return list.some((entry) => matchEntry(entry, value));
 }
 
 // virtualKeyFromResponse unwraps the detail endpoint, which answers
@@ -124,8 +134,13 @@ export function scopeFromVirtualKey(key: unknown): AgentConfigScope {
 		const allowed = stringList(config.allowed_models);
 		const blocked = stringList(config.blacklisted_models);
 		providers[provider] = previous
-			? { allowed: mergeUnique(previous.allowed, allowed), blocked: mergeUnique(previous.blocked, blocked) }
-			: { allowed, blocked };
+			? {
+				allowed: mergeUnique(previous.allowed, allowed),
+				blocked: mergeUnique(previous.blocked, blocked),
+				allowedUnrestricted: previous.allowedUnrestricted || isUnrestricted(allowed),
+				blockedAll: previous.blockedAll || isUnrestricted(blocked),
+			}
+			: { allowed, blocked, allowedUnrestricted: isUnrestricted(allowed), blockedAll: isUnrestricted(blocked) };
 	}
 	const mcpClientNames = recordArray(record.mcp_configs).map(mcpClientName).filter(Boolean);
 	const agentNames = recordArray(record.agent_grants)
@@ -159,13 +174,16 @@ export function mcpWholeClientGrants(key: unknown): { whole: Set<string>; partia
 	return { whole, partial };
 }
 
-export function vkScopeProblem(key: unknown, now: Date = new Date()): 'inactive' | 'expired' | null {
+// vkScopeProblem reports why a key cannot be handed out at all. The API serializes
+// expires_at from a time.Time, so a value the panel cannot parse means the payload is
+// not the shape expected; treat that as unusable rather than as "never expires".
+export function vkScopeProblem(key: unknown, now: Date = new Date()): 'inactive' | 'expired' | 'unreadable' | null {
 	const record = virtualKeyFromResponse(key);
 	if (record.is_active === false) return 'inactive';
-	const expiresAt = typeof record.expires_at === 'string' ? record.expires_at : '';
-	if (!expiresAt) return null;
-	const expiry = new Date(expiresAt);
-	if (Number.isNaN(expiry.getTime())) return null;
+	if (record.expires_at === undefined || record.expires_at === null || record.expires_at === '') return null;
+	if (typeof record.expires_at !== 'string') return 'unreadable';
+	const expiry = new Date(record.expires_at);
+	if (Number.isNaN(expiry.getTime())) return 'unreadable';
 	return expiry.getTime() <= now.getTime() ? 'expired' : null;
 }
 
@@ -190,8 +208,8 @@ function modelIdentifier(model: JsonRecord): { provider: string; id: string } {
 function modelAllowed(scope: AgentConfigScope, provider: string, id: string): boolean {
 	const rule = scope.providers[provider];
 	if (!rule) return scope.allowAllProviders;
-	if (listBlocks(rule.blocked, id)) return false;
-	return listAllows(rule.allowed, id);
+	if (rule.blockedAll || listBlocks(rule.blocked, id)) return false;
+	return rule.allowedUnrestricted || listAllows(rule.allowed, id);
 }
 
 function filterModels(payload: unknown, scope: AgentConfigScope): unknown {

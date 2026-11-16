@@ -112,6 +112,37 @@ describe('AgentConfig export mapping', () => {
 		expect(serialized).not.toContain('xoxb-1234567890-abcdef');
 	});
 
+	test('redacts wrapped credentials and drops a command that embeds one', () => {
+		const source: AgentConfigExportSource = {
+			models: undefined,
+			mcpClients: {
+				clients: [
+					{
+						config: {
+							name: 'headers',
+							connection_type: 'stdio',
+							stdio_config: { command: 'server', args: ['--header', 'Authorization: Bearer topsecret', '--env=API_KEY=topsecret', '--verbose'] },
+						},
+					},
+					{ config: { name: 'wrapped', connection_type: 'stdio', stdio_config: { command: 'sh -c "server --token topsecret"' } } },
+					{ config: { name: 'disabled-agent-holder', connection_type: 'stdio', stdio_config: { command: 'server' } } },
+				],
+			},
+			skills: undefined,
+			prompts: undefined,
+			agents: { agents: [{ name: 'disabled', enabled: false }, { name: 'enabled', enabled: true }] },
+		};
+		const result = buildAgentConfigPublic(source);
+		expect(result.pub.mcp.map((entry) => entry.name)).toEqual(['headers', 'disabled-agent-holder']);
+		expect(result.pub.mcp[0].args).toEqual(['--verbose']);
+		expect(result.pub.agents.map((entry) => entry.id)).toEqual(['enabled']);
+		const codes = result.warnings.map((warning) => warning.code);
+		expect(codes).toContain('mcp-args-redacted');
+		expect(codes).toContain('mcp-command-not-public');
+		expect(codes).toContain('agent-disabled');
+		expect(JSON.stringify(result.pub)).not.toContain('topsecret');
+	});
+
 	test('produces an empty but valid public section when nothing is configured', () => {
 		const result = buildAgentConfigPublic({ models: undefined, mcpClients: undefined, skills: undefined, prompts: undefined, agents: undefined });
 		expect(result.counts).toEqual({ models: 0, mcp: 0, skills: 0, prompts: 0, agents: 0 });

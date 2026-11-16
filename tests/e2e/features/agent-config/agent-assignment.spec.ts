@@ -115,6 +115,25 @@ test.describe('AgentConfig deep link per employee', () => {
     await expect(page.getByText(/virtual key is disabled|虚拟密钥已停用/)).toBeVisible()
   })
 
+  test('downloads the bundle when the clipboard write is refused', async ({ page }) => {
+    // The clipboard object exists and still rejects the write (permission, insecure
+    // context, policy), so the fallback has to hang off the write, not its presence.
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: { writeText: () => Promise.reject(new Error('denied')) },
+      })
+    })
+    await page.reload()
+    await expectPoll(page.getByTestId('employee-agent-config-emp-1')).toBeVisible()
+
+    const downloadPromise = page.waitForEvent('download')
+    await page.getByTestId('employee-agent-config-emp-1').click()
+    const download = await downloadPromise
+    expect(download.suggestedFilename().endsWith('.acfg')).toBe(true)
+    await expect(page.getByRole('status').filter({ hasText: /Downloaded|已改为下载/ })).toBeVisible()
+  })
+
   test('names the failed source instead of claiming the key grants nothing', async ({ page }) => {
     // The key's only real grant is a model, and the model source is the one that fails:
     // reporting "no grants" here would be wrong, the panel cannot know.
