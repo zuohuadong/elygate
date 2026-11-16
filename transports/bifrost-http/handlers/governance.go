@@ -323,6 +323,15 @@ type GovernanceHandler struct {
 	expiryCleanupStop context.CancelFunc
 	// now is the clock, overridden in tests.
 	now func() time.Time
+	// auditOnlineLimit/auditExportLimit lower the audit-chain caps. Zero means the
+	// built-in defaults; tests set them so a chain of a few events exercises the
+	// same refusals a production-sized chain does.
+	auditOnlineLimit int
+	auditExportLimit int
+	// auditExportBatchSize overrides the export page size; zero means the default.
+	auditExportBatchSize int
+	// auditExportMaxBytesLimit overrides the export size ceiling; zero means the default.
+	auditExportMaxBytesLimit int
 }
 
 // GovernanceRouteRegistrar registers one replaceable governance route family.

@@ -7,6 +7,9 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"io"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -19,6 +22,7 @@ import (
 	"github.com/maximhq/bifrost/framework/configstore"
 	configstoreTables "github.com/maximhq/bifrost/framework/configstore/tables"
 	"github.com/maximhq/bifrost/framework/encrypt"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/valyala/fasthttp"
 	"gorm.io/gorm"
@@ -984,7 +988,10 @@ func TestGovernanceAuditSingleEventTamperReturnsConflict(t *testing.T) {
 }
 
 func TestGovernanceAuditOnlineLimitReturnsRequestEntityTooLarge(t *testing.T) {
-	_, store, r := setupGovernanceAuditHandler(t)
+	handler, store, r := setupGovernanceAuditHandler(t)
+	// Pin the export-cap refusal too: export has its own, much higher cap, so the
+	// chain below is over both only once the export cap is lowered to it.
+	handler.auditExportLimit = governanceAuditMaxOnlineEvents
 	require.NoError(t, store.DB().Model(&configstoreTables.TableGovernanceAuditHead{}).
 		Where("id = ?", governanceAuditHeadID).
 		Updates(map[string]any{
@@ -1007,6 +1014,9 @@ func TestGovernanceAuditOnlineLimitReturnsRequestEntityTooLarge(t *testing.T) {
 	} {
 		ctx := performGovernanceAuditRequest(r, fasthttp.MethodGet, uri, "", true)
 		require.Equal(t, fasthttp.StatusRequestEntityTooLarge, ctx.Response.StatusCode(), string(ctx.Response.Body()))
+		// A bare 413 leaves an operator with a compliance record they cannot read:
+		// the refusal has to say how big the chain is and what to do about it.
+		assert.Contains(t, string(ctx.Response.Body()), strconv.Itoa(governanceAuditMaxOnlineEvents))
 	}
 }
 
@@ -1083,4 +1093,164 @@ func TestGovernanceVirtualKeyCommittedReloadFailuresReturnReceipt(t *testing.T) 
 		require.NoError(t, err)
 		require.Equal(t, "Committed update", stored.Name)
 	})
+}
+
+// TestGovernanceAuditExportSurpassesOnlineLimit pins the escape hatch: a chain too
+// long to verify in one request must still export. Before the split caps, the
+// export shared the verification limit, so a deployment past 10,000 events could
+// neither verify nor take its audit chain anywhere -- the one operation whose job
+// is to handle a large chain was refused for being large.
+func TestGovernanceAuditExportSurpassesOnlineLimit(t *testing.T) {
+	handler, _, r := setupGovernanceAuditHandler(t)
+	handler.auditOnlineLimit = 2
+	handler.auditExportLimit = 50
+	// Two events per page, so a five-event chain exercises the page boundaries the
+	// streaming export stitches its JSON array across.
+	handler.auditExportBatchSize = 2
+
+	const creations = 5
+	for i := 0; i < creations; i++ {
+		ctx := performGovernanceAuditRequest(r, fasthttp.MethodPost, "/api/governance/virtual-keys",
+			`{"name":"Export beyond online limit `+strconv.Itoa(i)+`"}`, true)
+		require.Equal(t, fasthttp.StatusOK, ctx.Response.StatusCode(), string(ctx.Response.Body()))
+	}
+
+	verifyCtx := performGovernanceAuditRequest(r, fasthttp.MethodGet, "/api/governance/audit-logs/verify", "", true)
+	require.Equal(t, fasthttp.StatusRequestEntityTooLarge, verifyCtx.Response.StatusCode(), string(verifyCtx.Response.Body()))
+	assert.Contains(t, string(verifyCtx.Response.Body()), "export the chain")
+
+	exportCtx := performGovernanceAuditRequest(r, fasthttp.MethodGet, "/api/governance/audit-logs/export", "", true)
+	require.Equal(t, fasthttp.StatusOK, exportCtx.Response.StatusCode(), string(exportCtx.Response.Body()))
+	var exported struct {
+		Manifest     governanceAuditExportManifest                 `json:"manifest"`
+		Events       []configstoreTables.TableGovernanceAuditEvent `json:"events"`
+		Verification struct {
+			Valid bool `json:"valid"`
+		} `json:"verification"`
+	}
+	require.NoError(t, json.Unmarshal(exportCtx.Response.Body(), &exported), string(exportCtx.Response.Body()))
+	assert.Equal(t, creations, exported.Manifest.Count)
+	assert.Len(t, exported.Events, creations)
+	assert.Equal(t, uint64(1), exported.Manifest.FirstSequence)
+	assert.Equal(t, uint64(creations), exported.Manifest.LastSequence)
+	// The body must still be one JSON document downloaded as an attachment, even
+	// though it is written page by page.
+	assert.Contains(t, string(exportCtx.Response.Header.Peek("Content-Disposition")), "governance-audit-export.json")
+	for i, event := range exported.Events {
+		assert.Equal(t, uint64(i+1), event.Sequence, "the streamed array keeps chain order")
+	}
+}
+
+// TestGovernanceAuditExportEmptyChainIsWellFormed: with no events the streamed
+// exporter still has to produce one valid JSON document with an empty array, not a
+// dangling comma or a truncated object.
+func TestGovernanceAuditExportEmptyChainIsWellFormed(t *testing.T) {
+	handler, _, r := setupGovernanceAuditHandler(t)
+	handler.auditExportBatchSize = 2
+
+	ctx := performGovernanceAuditRequest(r, fasthttp.MethodGet, "/api/governance/audit-logs/export", "", true)
+	require.Equal(t, fasthttp.StatusOK, ctx.Response.StatusCode(), string(ctx.Response.Body()))
+	var exported struct {
+		Manifest governanceAuditExportManifest                 `json:"manifest"`
+		Events   []configstoreTables.TableGovernanceAuditEvent `json:"events"`
+	}
+	require.NoError(t, json.Unmarshal(ctx.Response.Body(), &exported), string(ctx.Response.Body()))
+	assert.Equal(t, 0, exported.Manifest.Count)
+	assert.Empty(t, exported.Events)
+	assert.Equal(t, uint64(0), exported.Manifest.LastSequence)
+}
+
+// TestGovernanceAuditExportRefusesToShipBrokenChain: when the rows stop forming one
+// continuous chain under the walk (retention deleted some, or an event was removed),
+// the export must refuse instead of writing a file whose event array and signed
+// manifest disagree. Nothing is streamed in that case, so the client gets a status,
+// not a truncated download.
+func TestGovernanceAuditExportRefusesToShipBrokenChain(t *testing.T) {
+	handler, store, r := setupGovernanceAuditHandler(t)
+	handler.auditExportBatchSize = 2
+	for i := 0; i < 4; i++ {
+		ctx := performGovernanceAuditRequest(r, fasthttp.MethodPost, "/api/governance/virtual-keys",
+			`{"name":"Export gap `+strconv.Itoa(i)+`"}`, true)
+		require.Equal(t, fasthttp.StatusOK, ctx.Response.StatusCode(), string(ctx.Response.Body()))
+	}
+	require.NoError(t, store.DB().Where("sequence = ?", 3).Delete(&configstoreTables.TableGovernanceAuditEvent{}).Error)
+
+	ctx := performGovernanceAuditRequest(r, fasthttp.MethodGet, "/api/governance/audit-logs/export", "", true)
+	require.Equal(t, fasthttp.StatusConflict, ctx.Response.StatusCode(), string(ctx.Response.Body()))
+	assert.Contains(t, string(ctx.Response.Body()), "retry")
+	assert.NotContains(t, string(ctx.Response.Body()), `"manifest"`, "a refused export must not look like an export")
+}
+
+// TestGovernanceAuditExportRefusesToExceedSizeLimit: the export writes to a temp file
+// before anything is sent, so the cap keeps a huge chain from filling the volume
+// instead of hanging the request.
+func TestGovernanceAuditExportRefusesToExceedSizeLimit(t *testing.T) {
+	handler, _, r := setupGovernanceAuditHandler(t)
+	handler.auditExportMaxBytesLimit = 16
+	ctx := performGovernanceAuditRequest(r, fasthttp.MethodPost, "/api/governance/virtual-keys", `{"name":"Export size"}`, true)
+	require.Equal(t, fasthttp.StatusOK, ctx.Response.StatusCode(), string(ctx.Response.Body()))
+
+	exportCtx := performGovernanceAuditRequest(r, fasthttp.MethodGet, "/api/governance/audit-logs/export", "", true)
+	require.Equal(t, fasthttp.StatusRequestEntityTooLarge, exportCtx.Response.StatusCode(), string(exportCtx.Response.Body()))
+	assert.Contains(t, string(exportCtx.Response.Body()), "size limit")
+
+	// The ceiling covers the bytes written around the events too, not only the
+	// events: an empty chain still has a header and closing punctuation, so a cap
+	// smaller than those refuses instead of returning an oversized file.
+	emptyHandler, _, emptyRouter := setupGovernanceAuditHandler(t)
+	emptyHandler.auditExportMaxBytesLimit = 16
+	emptyCtx := performGovernanceAuditRequest(emptyRouter, fasthttp.MethodGet, "/api/governance/audit-logs/export", "", true)
+	require.Equal(t, fasthttp.StatusRequestEntityTooLarge, emptyCtx.Response.StatusCode(), string(emptyCtx.Response.Body()))
+}
+
+// TestGovernanceAuditSequenceZeroAnomalyIsRefused: a row at sequence 0 is not a
+// valid chain entry. The walk must reach it so the shared verifier can refuse the
+// chain — bounding the first page at sequence > 0 would hide the row and report a
+// clean verification for a chain that is not the one stored.
+func TestGovernanceAuditSequenceZeroAnomalyIsRefused(t *testing.T) {
+	_, store, r := setupGovernanceAuditHandler(t)
+	for i := 0; i < 2; i++ {
+		ctx := performGovernanceAuditRequest(r, fasthttp.MethodPost, "/api/governance/virtual-keys",
+			`{"name":"Sequence zero `+strconv.Itoa(i)+`"}`, true)
+		require.Equal(t, fasthttp.StatusOK, ctx.Response.StatusCode(), string(ctx.Response.Body()))
+	}
+	anomaly := configstoreTables.TableGovernanceAuditEvent{
+		Sequence: 0, ID: "audit-sequence-zero", SchemaVersion: governanceAuditSchemaVersion,
+		OccurredAt: time.Now().UTC().Truncate(time.Microsecond), ActorID: "local-admin", ActorName: "Local administrator",
+		AuthMethod: "local-session", LocalAdmin: true, Action: "virtual_key.update", Resource: "virtual_key",
+		ResourceID: "vk-sequence-zero", Outcome: "success", BeforeJSON: "{}", AfterJSON: "{}", MetadataJSON: "{}",
+		PreviousHash: "", EventHash: strings.Repeat("c", 64), Signature: "invalid", KeyID: "invalid",
+	}
+	require.NoError(t, store.DB().Create(&anomaly).Error)
+
+	for _, uri := range []string{"/api/governance/audit-logs/verify", "/api/governance/audit-logs/export"} {
+		ctx := performGovernanceAuditRequest(r, fasthttp.MethodGet, uri, "", true)
+		require.Equal(t, fasthttp.StatusConflict, ctx.Response.StatusCode(), "%s body=%s", uri, ctx.Response.Body())
+		assert.Contains(t, string(ctx.Response.Body()), "not continuous", "%s must name the continuity break", uri)
+	}
+}
+
+// TestGovernanceAuditExportFileRemovesOnClose: the temp export must be removed when
+// the stream that owns it is closed, not while the handle is still open. On Windows an
+// open file cannot be deleted, so removing it in the handler would leave every export
+// behind (up to the byte ceiling each time).
+func TestGovernanceAuditExportFileRemovesOnClose(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "export.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{"events":[]}`), 0o600))
+
+	handle, err := os.Open(path)
+	require.NoError(t, err)
+	stream := &governanceAuditExportFile{file: handle, path: path}
+	contents, err := io.ReadAll(stream)
+	require.NoError(t, err)
+	assert.Contains(t, string(contents), "events")
+
+	require.NoError(t, stream.Close())
+	_, statErr := os.Stat(path)
+	assert.True(t, errors.Is(statErr, os.ErrNotExist), "the export temp file must be gone after the stream closes")
+
+	// Closing an already-removed export is still success: fasthttp may close a stream
+	// it has already discarded.
+	require.NoError(t, stream.Close())
 }

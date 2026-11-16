@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/ed25519"
@@ -11,11 +12,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/bytedance/sonic"
 	"github.com/google/uuid"
 	"github.com/maximhq/bifrost/core/schemas"
 	"github.com/maximhq/bifrost/framework/configstore"
@@ -43,11 +46,30 @@ const (
 	governanceAuditAlgorithm       = "Ed25519"
 	governanceAuditMaxJSONBytes    = 256 * 1024
 	governanceAuditMaxOnlineEvents = 10_000
+	// governanceAuditMaxExportEvents bounds an export, not an interactive verify.
+	// The chain is the compliance record, so "too big to verify in a request" must
+	// not also mean "too big to export": the export is how an operator takes a
+	// chain that outgrew the online limit somewhere it can be verified offline.
+	governanceAuditMaxExportEvents = 250_000
+	// governanceAuditExportBatchSize is the per-query page size for an export, so a
+	// large chain is read in bounded chunks instead of one unbounded SELECT.
+	governanceAuditExportBatchSize = 2_000
+	// governanceAuditMaxExportBytes bounds the export file an operator can pull in
+	// one request. The export is written to a temp file (so a mid-walk failure can
+	// never hand back a truncated "complete" download) and that file must not be
+	// allowed to fill the volume.
+	governanceAuditMaxExportBytes = 512 << 20
 )
 
 var (
 	errGovernanceForbidden        = errors.New("governance action is not authorized")
 	errGovernanceAuditOnlineLimit = errors.New("governance audit chain exceeds the online verification limit")
+	errGovernanceAuditExportLimit = errors.New("governance audit chain exceeds the export limit")
+	errGovernanceAuditExportSize  = errors.New("governance audit export exceeds the size limit")
+	// errGovernanceAuditChainChanged means the rows stopped forming one continuous
+	// chain under the walk: retention deleted events, or an event was removed. The
+	// export refuses rather than shipping a file the manifest cannot describe.
+	errGovernanceAuditChainChanged = errors.New("governance audit chain changed while exporting")
 )
 
 // governanceDatabaseContext keeps fasthttp's server-scoped RequestCtx cancellation
@@ -782,47 +804,101 @@ type governanceAuditVerifyResult struct {
 	Reason                 string `json:"reason,omitempty"`
 }
 
-func verifyGovernanceAuditEventsWithKeys(events []configstoreTables.TableGovernanceAuditEvent, head configstoreTables.TableGovernanceAuditHead, publicKeys map[string]ed25519.PublicKey) governanceAuditVerifyResult {
-	result := governanceAuditVerifyResult{Valid: true, HeadSequence: head.LastSequence, HeadHash: head.LastHash}
-	previousHash := ""
+// governanceAuditChainVerifier walks a chain page by page, so a chain too large to
+// hold in memory can still be verified. It is the only implementation of the chain
+// rules: verifyGovernanceAuditEventsWithKeys drives it over an in-memory slice, and
+// the streaming export drives it over pages.
+type governanceAuditChainVerifier struct {
+	publicKeys   map[string]ed25519.PublicKey
+	previousHash string
+	eventsCount  int
+	checked      uint64
+	failure      uint64
+	reason       string
+	failed       bool
+}
+
+func newGovernanceAuditChainVerifier(publicKeys map[string]ed25519.PublicKey) *governanceAuditChainVerifier {
+	return &governanceAuditChainVerifier{publicKeys: publicKeys}
+}
+
+// add verifies the next page. Once a check has failed the remaining pages are
+// ignored: the caller only needs the first failure.
+func (v *governanceAuditChainVerifier) add(events []configstoreTables.TableGovernanceAuditEvent) {
+	if v.failed {
+		return
+	}
 	for i := range events {
 		event := &events[i]
-		expectedSequence := uint64(i + 1)
+		expectedSequence := uint64(v.eventsCount + 1)
 		if event.Sequence != expectedSequence {
-			result.Valid, result.FailureSequence, result.Reason = false, expectedSequence, "audit sequence is not continuous"
-			return result
+			v.fail(expectedSequence, "audit sequence is not continuous")
+			return
 		}
-		if event.PreviousHash != previousHash {
-			result.Valid, result.FailureSequence, result.Reason = false, event.Sequence, "previous hash mismatch"
-			return result
+		if event.PreviousHash != v.previousHash {
+			v.fail(event.Sequence, "previous hash mismatch")
+			return
 		}
-		publicKey, ok := publicKeys[event.KeyID]
+		publicKey, ok := v.publicKeys[event.KeyID]
 		if !ok {
-			result.Valid, result.FailureSequence, result.Reason = false, event.Sequence, "unknown audit signing key"
-			return result
+			v.fail(event.Sequence, "unknown audit signing key")
+			return
 		}
 		canonical, marshalErr := canonicalGovernanceAuditEvent(event)
 		if marshalErr != nil {
-			result.Valid, result.FailureSequence, result.Reason = false, event.Sequence, marshalErr.Error()
-			return result
+			v.fail(event.Sequence, marshalErr.Error())
+			return
 		}
 		digest := sha256.Sum256(canonical)
 		if event.EventHash != hex.EncodeToString(digest[:]) {
-			result.Valid, result.FailureSequence, result.Reason = false, event.Sequence, "event hash mismatch"
-			return result
+			v.fail(event.Sequence, "event hash mismatch")
+			return
 		}
 		signature, decodeErr := base64.StdEncoding.DecodeString(event.Signature)
 		if decodeErr != nil || !ed25519.Verify(publicKey, digest[:], signature) {
-			result.Valid, result.FailureSequence, result.Reason = false, event.Sequence, "event signature mismatch"
-			return result
+			v.fail(event.Sequence, "event signature mismatch")
+			return
 		}
-		previousHash = event.EventHash
-		result.CheckedThroughSequence = event.Sequence
+		v.previousHash = event.EventHash
+		v.eventsCount++
+		v.checked = event.Sequence
 	}
-	if uint64(len(events)) != head.LastSequence || previousHash != head.LastHash {
-		result.Valid, result.FailureSequence, result.Reason = false, uint64(len(events))+1, "audit head does not match stored events"
+}
+
+// Failed reports whether a check has already refused the chain, so a caller that
+// writes while it verifies can stop before appending another event.
+func (v *governanceAuditChainVerifier) Failed() bool { return v.failed }
+
+func (v *governanceAuditChainVerifier) Reason() string { return v.reason }
+
+func (v *governanceAuditChainVerifier) FailureSequence() uint64 { return v.failure }
+
+func (v *governanceAuditChainVerifier) fail(sequence uint64, reason string) {
+	v.failed, v.failure, v.reason = true, sequence, reason
+}
+
+// finish compares what was verified against the head the walk started from.
+func (v *governanceAuditChainVerifier) finish(head configstoreTables.TableGovernanceAuditHead) governanceAuditVerifyResult {
+	result := governanceAuditVerifyResult{
+		Valid:                  !v.failed,
+		CheckedThroughSequence: v.checked,
+		HeadSequence:           head.LastSequence,
+		HeadHash:               head.LastHash,
+	}
+	if v.failed {
+		result.FailureSequence, result.Reason = v.failure, v.reason
+		return result
+	}
+	if uint64(v.eventsCount) != head.LastSequence || v.previousHash != head.LastHash {
+		result.Valid, result.FailureSequence, result.Reason = false, uint64(v.eventsCount)+1, "audit head does not match stored events"
 	}
 	return result
+}
+
+func verifyGovernanceAuditEventsWithKeys(events []configstoreTables.TableGovernanceAuditEvent, head configstoreTables.TableGovernanceAuditHead, publicKeys map[string]ed25519.PublicKey) governanceAuditVerifyResult {
+	verifier := newGovernanceAuditChainVerifier(publicKeys)
+	verifier.add(events)
+	return verifier.finish(head)
 }
 
 func verifyGovernanceAuditEvents(events []configstoreTables.TableGovernanceAuditEvent, head configstoreTables.TableGovernanceAuditHead) governanceAuditVerifyResult {
@@ -833,30 +909,151 @@ func verifyGovernanceAuditEvents(events []configstoreTables.TableGovernanceAudit
 	return verifyGovernanceAuditEventsWithKeys(events, head, map[string]ed25519.PublicKey{keyID: publicKey})
 }
 
-func (h *GovernanceHandler) loadGovernanceAuditChain(ctx context.Context) ([]configstoreTables.TableGovernanceAuditEvent, configstoreTables.TableGovernanceAuditHead, error) {
+// auditOnlineEventLimit is the interactive-verify cap: verifying replays the whole
+// chain inside one request.
+func (h *GovernanceHandler) auditOnlineEventLimit() int {
+	if h.auditOnlineLimit > 0 {
+		return h.auditOnlineLimit
+	}
+	return governanceAuditMaxOnlineEvents
+}
+
+// auditExportEventLimit is the export cap. It is deliberately far above the online
+// one, because an export is the only remaining way to verify a chain that outgrew
+// interactive verification.
+func (h *GovernanceHandler) auditExportEventLimit() int {
+	if h.auditExportLimit > 0 {
+		return h.auditExportLimit
+	}
+	return governanceAuditMaxExportEvents
+}
+
+// auditExportMaxBytes is the export size ceiling.
+func (h *GovernanceHandler) auditExportMaxBytes() int {
+	if h.auditExportMaxBytesLimit > 0 {
+		return h.auditExportMaxBytesLimit
+	}
+	return governanceAuditMaxExportBytes
+}
+
+// loadGovernanceAuditHead snapshots the chain tail under the same lock the append
+// path uses, and refuses a chain longer than maxEvents. The refusal wraps the
+// sentinel naming the policy the caller hit and carries the numbers plus the next
+// step, since "413" alone leaves an operator with a compliance record they cannot
+// read. `export` selects which policy a refusal names: it is explicit rather than
+// inferred from maxEvents, because the two caps can coincide.
+func (h *GovernanceHandler) loadGovernanceAuditHead(ctx context.Context, maxEvents int, export bool) (configstoreTables.TableGovernanceAuditHead, error) {
 	var head configstoreTables.TableGovernanceAuditHead
 	err := h.configStore.ExecuteTransaction(ctx, func(tx *gorm.DB) error {
-		// Snapshot the authoritative tail under the same lock used by append, then
-		// release it before scanning events so verification/export never blocks
-		// governance writes for the duration of an O(N) read.
+		// Release the lock before scanning events so verification/export never
+		// blocks governance writes for the duration of an O(N) read.
 		if err := dbForUpdate(tx.WithContext(ctx)).First(&head, "id = ?", governanceAuditHeadID).Error; err != nil {
 			return err
 		}
-		if head.LastSequence > governanceAuditMaxOnlineEvents {
-			return errGovernanceAuditOnlineLimit
+		if head.LastSequence > uint64(maxEvents) {
+			return &governanceAuditChainTooLargeError{
+				sequence: head.LastSequence,
+				limit:    maxEvents,
+				export:   export,
+			}
 		}
 		return nil
 	})
+	return head, err
+}
+
+// auditExportPageSize is the number of events read and streamed per page.
+func (h *GovernanceHandler) auditExportPageSize() int {
+	if h.auditExportBatchSize > 0 {
+		return h.auditExportBatchSize
+	}
+	return governanceAuditExportBatchSize
+}
+
+// eachGovernanceAuditPage reads the snapshot frozen by head in bounded pages. Rows
+// at or below head.LastSequence are immutable, and pages advance by sequence rather
+// than by OFFSET: an OFFSET walk skips an unread event when an earlier one is
+// deleted underneath it, which would silently export a chain with a hole.
+func (h *GovernanceHandler) eachGovernanceAuditPage(ctx context.Context, head configstoreTables.TableGovernanceAuditHead, maxEvents int, fn func([]configstoreTables.TableGovernanceAuditEvent) error) error {
+	pageSize := h.auditExportPageSize()
+	var lastSequence uint64
+	firstPage := true
+	seen := 0
+	for seen < maxEvents {
+		remaining := maxEvents - seen
+		if remaining < pageSize {
+			pageSize = remaining
+		}
+		var page []configstoreTables.TableGovernanceAuditEvent
+		query := h.configStore.DB().WithContext(ctx).
+			Where("sequence <= ?", head.LastSequence).
+			Order("sequence ASC").
+			Limit(pageSize)
+		// The first page has no lower bound: a row at sequence 0 is not a valid chain
+		// entry, and the verifier has to see it to refuse the chain. Excluding it here
+		// would hide the anomaly and let verification pass on a chain that is not the
+		// one stored.
+		if !firstPage {
+			query = query.Where("sequence > ?", lastSequence)
+		}
+		firstPage = false
+		if err := query.Find(&page).Error; err != nil {
+			return err
+		}
+		if len(page) == 0 {
+			return nil
+		}
+		if err := fn(page); err != nil {
+			return err
+		}
+		seen += len(page)
+		lastSequence = page[len(page)-1].Sequence
+		if len(page) < pageSize {
+			return nil
+		}
+	}
+	return nil
+}
+
+// loadGovernanceAuditChain reads the whole chain for an interactive verify, which
+// holds it only up to the online cap.
+func (h *GovernanceHandler) loadGovernanceAuditChain(ctx context.Context, maxEvents int, export bool) ([]configstoreTables.TableGovernanceAuditEvent, configstoreTables.TableGovernanceAuditHead, error) {
+	head, err := h.loadGovernanceAuditHead(ctx, maxEvents, export)
 	if err != nil {
 		return nil, head, err
 	}
-	var events []configstoreTables.TableGovernanceAuditEvent
-	err = h.configStore.DB().WithContext(ctx).
-		Where("sequence <= ?", head.LastSequence).
-		Order("sequence ASC").
-		Limit(governanceAuditMaxOnlineEvents).
-		Find(&events).Error
+	events := make([]configstoreTables.TableGovernanceAuditEvent, 0, head.LastSequence)
+	err = h.eachGovernanceAuditPage(ctx, head, maxEvents, func(page []configstoreTables.TableGovernanceAuditEvent) error {
+		events = append(events, page...)
+		return nil
+	})
 	return events, head, err
+}
+
+// governanceAuditChainTooLargeError is the refusal a caller gets when the chain is
+// longer than the policy they hit. It unwraps to the sentinel for that policy so
+// handlers keep mapping it to 413, and its message tells the operator the size, the
+// cap and what to do next.
+type governanceAuditChainTooLargeError struct {
+	sequence uint64
+	limit    int
+	export   bool
+}
+
+func (e *governanceAuditChainTooLargeError) Error() string {
+	if e.export {
+		return fmt.Sprintf("%s: the chain has %d events, above the %d-event export limit",
+			errGovernanceAuditExportLimit.Error(), e.sequence, e.limit)
+	}
+	return fmt.Sprintf("%s: the chain has %d events, above the %d-event online verification limit; export the chain (GET /api/governance/audit-logs/export) and verify the exported file offline",
+		errGovernanceAuditOnlineLimit.Error(), e.sequence, e.limit)
+}
+
+func (e *governanceAuditChainTooLargeError) Unwrap() error {
+	if e.export {
+		return errGovernanceAuditExportLimit
+	}
+	return errGovernanceAuditOnlineLimit
 }
 
 func (h *GovernanceHandler) verifyGovernanceAuditLog(ctx *fasthttp.RequestCtx) {
@@ -876,8 +1073,10 @@ func (h *GovernanceHandler) verifyGovernanceAuditLog(ctx *fasthttp.RequestCtx) {
 		SendError(ctx, fasthttp.StatusInternalServerError, "Failed to load governance audit event")
 		return
 	}
-	if target.Sequence > governanceAuditMaxOnlineEvents {
-		SendError(ctx, fasthttp.StatusRequestEntityTooLarge, errGovernanceAuditOnlineLimit.Error())
+	if onlineLimit := h.auditOnlineEventLimit(); target.Sequence > uint64(onlineLimit) {
+		SendError(ctx, fasthttp.StatusRequestEntityTooLarge, (&governanceAuditChainTooLargeError{
+			sequence: target.Sequence, limit: onlineLimit,
+		}).Error())
 		return
 	}
 	var events []configstoreTables.TableGovernanceAuditEvent
@@ -901,7 +1100,7 @@ func (h *GovernanceHandler) verifyGovernanceAuditChain(ctx *fasthttp.RequestCtx)
 		SendError(ctx, fasthttp.StatusServiceUnavailable, err.Error())
 		return
 	}
-	events, head, err := h.loadGovernanceAuditChain(dbCtx)
+	events, head, err := h.loadGovernanceAuditChain(dbCtx, h.auditOnlineEventLimit(), false)
 	if err != nil {
 		if errors.Is(err, errGovernanceAuditOnlineLimit) {
 			SendError(ctx, fasthttp.StatusRequestEntityTooLarge, err.Error())
@@ -946,6 +1145,32 @@ type governanceAuditExportManifest struct {
 	KeyID         string    `json:"key_id"`
 }
 
+// governanceAuditExportFile is the finished export handed to fasthttp. Its Close
+// removes the temp file after the handle is closed: on Windows an open file cannot
+// be deleted, so removing it while it is still open would silently fail and leave the
+// export behind on every download. fasthttp closes the body stream once the response
+// is written or discarded, which is when the removal is safe on every platform.
+type governanceAuditExportFile struct {
+	file   *os.File
+	path   string
+	closed bool
+}
+
+func (f *governanceAuditExportFile) Read(p []byte) (int, error) { return f.file.Read(p) }
+
+// Close is idempotent: fasthttp may close a body stream it has already discarded.
+func (f *governanceAuditExportFile) Close() error {
+	if f.closed {
+		return nil
+	}
+	f.closed = true
+	closeErr := f.file.Close()
+	if removeErr := os.Remove(f.path); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) && closeErr == nil {
+		closeErr = removeErr
+	}
+	return closeErr
+}
+
 func (h *GovernanceHandler) exportGovernanceAuditLogs(ctx *fasthttp.RequestCtx) {
 	dbCtx := governanceDatabaseContext()
 	keyRows, publicKeys, err := h.loadGovernanceAuditPublicKeys(dbCtx)
@@ -953,18 +1178,14 @@ func (h *GovernanceHandler) exportGovernanceAuditLogs(ctx *fasthttp.RequestCtx) 
 		SendError(ctx, fasthttp.StatusServiceUnavailable, err.Error())
 		return
 	}
-	events, head, err := h.loadGovernanceAuditChain(dbCtx)
+	exportLimit := h.auditExportEventLimit()
+	head, err := h.loadGovernanceAuditHead(dbCtx, exportLimit, true)
 	if err != nil {
-		if errors.Is(err, errGovernanceAuditOnlineLimit) {
+		if errors.Is(err, errGovernanceAuditExportLimit) || errors.Is(err, errGovernanceAuditOnlineLimit) {
 			SendError(ctx, fasthttp.StatusRequestEntityTooLarge, err.Error())
 			return
 		}
 		SendError(ctx, fasthttp.StatusInternalServerError, "Failed to export governance audit logs")
-		return
-	}
-	verification := verifyGovernanceAuditEventsWithKeys(events, head, publicKeys)
-	if !verification.Valid {
-		SendJSONWithStatus(ctx, map[string]any{"verification": verification}, fasthttp.StatusConflict)
 		return
 	}
 	privateKey, _, keyID, err := governanceAuditSigningKey()
@@ -973,21 +1194,141 @@ func (h *GovernanceHandler) exportGovernanceAuditLogs(ctx *fasthttp.RequestCtx) 
 		return
 	}
 	manifest := governanceAuditExportManifest{
-		SchemaVersion: governanceAuditSchemaVersion, Count: len(events), HeadHash: head.LastHash,
+		SchemaVersion: governanceAuditSchemaVersion, Count: int(head.LastSequence), HeadHash: head.LastHash,
 		ExportedAt: time.Now().UTC(), KeyID: keyID,
 	}
-	if len(events) > 0 {
-		manifest.FirstSequence = events[0].Sequence
-		manifest.LastSequence = events[len(events)-1].Sequence
+	if head.LastSequence > 0 {
+		manifest.FirstSequence = 1
+		manifest.LastSequence = head.LastSequence
 	}
 	canonicalManifest, _ := json.Marshal(manifest)
 	manifestDigest := sha256.Sum256(canonicalManifest)
-	response := map[string]any{
+	header, err := sonic.ConfigStd.Marshal(map[string]any{
 		"manifest": manifest, "manifest_hash": hex.EncodeToString(manifestDigest[:]),
 		"manifest_signature": base64.StdEncoding.EncodeToString(ed25519.Sign(privateKey, manifestDigest[:])),
 		"public_keys":        keyRows,
-		"events":             events,
+	})
+	if err != nil {
+		SendError(ctx, fasthttp.StatusInternalServerError, "Failed to encode governance audit export")
+		return
+	}
+
+	// The export is serialized to a temp file while it is verified, then sent. A
+	// response streamed straight from the database would start after verification
+	// succeeded and still fail mid-way: fasthttp ends the chunked body normally, so
+	// the operator would get a 200 and a truncated file that looks like a complete
+	// export. Writing first also keeps memory at O(page).
+	tmp, err := os.CreateTemp("", "governance-audit-export-*.json")
+	if err != nil {
+		logger.Error("governance audit export: failed to create temp file: %v", err)
+		SendError(ctx, fasthttp.StatusInternalServerError, "Failed to export governance audit logs")
+		return
+	}
+	tmpPath := tmp.Name()
+	// Until the file is handed to fasthttp, this defer is the only cleanup. After the
+	// handoff the stream owns removal (see governanceAuditExportFile), because the
+	// deferred remove would run while the handle is still open.
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			os.Remove(tmpPath)
+		}
+	}()
+	// One accounting point for the size ceiling: every byte that reaches the file is
+	// counted here, header and closing punctuation included, so a cap can never be
+	// exceeded by the bytes written around the events.
+	maxBytes := h.auditExportMaxBytes()
+	written := 0
+	writeChunk := func(w *bufio.Writer, data []byte) error {
+		if written+len(data) > maxBytes {
+			return errGovernanceAuditExportSize
+		}
+		n, err := w.Write(data)
+		written += n
+		return err
+	}
+	writer := bufio.NewWriterSize(tmp, 64<<10)
+	if err := writeChunk(writer, append(header[:len(header)-1], `,"events":[`...)); err != nil {
+		tmp.Close()
+		if errors.Is(err, errGovernanceAuditExportSize) {
+			SendError(ctx, fasthttp.StatusRequestEntityTooLarge, fmt.Sprintf("%s: the export would exceed %d bytes", errGovernanceAuditExportSize.Error(), maxBytes))
+			return
+		}
+		logger.Error("governance audit export: failed to write header: %v", err)
+		SendError(ctx, fasthttp.StatusInternalServerError, "Failed to export governance audit logs")
+		return
+	}
+
+	verifier := newGovernanceAuditChainVerifier(publicKeys)
+	first := true
+	walkErr := h.eachGovernanceAuditPage(dbCtx, head, exportLimit, func(page []configstoreTables.TableGovernanceAuditEvent) error {
+		verifier.add(page)
+		if verifier.Failed() {
+			// The chain stopped forming one continuous history under us (retention
+			// or a deletion). Stop before writing a page the manifest cannot cover.
+			return errGovernanceAuditChainChanged
+		}
+		for i := range page {
+			encoded, err := sonic.ConfigStd.Marshal(&page[i])
+			if err != nil {
+				return err
+			}
+			if !first {
+				if err := writeChunk(writer, []byte{','}); err != nil {
+					return err
+				}
+			}
+			first = false
+			if err := writeChunk(writer, encoded); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if walkErr == nil {
+		walkErr = writeChunk(writer, []byte("]}\n"))
+	}
+	if walkErr == nil {
+		walkErr = writer.Flush()
+	}
+	if closeErr := tmp.Close(); walkErr == nil {
+		walkErr = closeErr
+	}
+	if walkErr != nil {
+		switch {
+		case errors.Is(walkErr, errGovernanceAuditExportSize):
+			SendError(ctx, fasthttp.StatusRequestEntityTooLarge, fmt.Sprintf("%s: the export would exceed %d bytes", errGovernanceAuditExportSize.Error(), maxBytes))
+		case errors.Is(walkErr, errGovernanceAuditChainChanged):
+			SendError(ctx, fasthttp.StatusConflict, fmt.Sprintf("%s: %s at sequence %d; retry once the chain is stable",
+				errGovernanceAuditChainChanged.Error(), verifier.Reason(), verifier.FailureSequence()))
+		default:
+			logger.Error("governance audit export: failed to build export: %v", walkErr)
+			SendError(ctx, fasthttp.StatusInternalServerError, "Failed to export governance audit logs")
+		}
+		return
+	}
+	verification := verifier.finish(head)
+	if !verification.Valid {
+		// A complete, unbroken walk already closed the file; this only catches a
+		// mismatch between what was written and the head the walk started from.
+		SendJSONWithStatus(ctx, map[string]any{"verification": verification}, fasthttp.StatusConflict)
+		return
+	}
+	// Hand the finished file to fasthttp as a fixed-length body stream rather than
+	// through ctx.SendFile: SendFile lets fasthttp keep a compressed sibling of the
+	// response next to it when the client sends Accept-Encoding, and that sibling is
+	// keyed by this export's unique temp name, so repeated exports would leak one
+	// never-collected file each. A body stream is never compressed, its declared
+	// length means a short read aborts the transfer instead of ending it normally,
+	// and fasthttp closes the reader once the response is written.
+	exportFile, err := os.Open(tmpPath)
+	if err != nil {
+		logger.Error("governance audit export: failed to reopen export: %v", err)
+		SendError(ctx, fasthttp.StatusInternalServerError, "Failed to export governance audit logs")
+		return
 	}
 	ctx.Response.Header.Set("Content-Disposition", `attachment; filename="governance-audit-export.json"`)
-	SendJSON(ctx, response)
+	ctx.SetContentType("application/json")
+	ctx.Response.SetBodyStream(&governanceAuditExportFile{file: exportFile, path: tmpPath}, written)
+	handedOff = true
 }
