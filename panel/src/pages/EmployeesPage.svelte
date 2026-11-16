@@ -8,7 +8,7 @@
 	import { ACB_FILE_EXTENSION, ACB_MIME_TYPE, bundleToFileString } from '../lib/agentconfig';
 	import { buildScopedAgentConfig } from '../lib/agentconfig-assignment';
 	import { scopeFromVirtualKey, vkScopeProblem } from '../lib/agentconfig-scope';
-	import { assignedVirtualMcpGrantsTools, loadAgentConfigSources, type AgentConfigSourceName } from '../lib/agentconfig-source';
+	import { assignedVirtualMcpGrants, loadAgentConfigSources, type AgentConfigSourceName } from '../lib/agentconfig-source';
 
 	interface Props { resourceName: string; }
 	interface EmployeeForm {
@@ -265,7 +265,11 @@
 				const ids = Array.isArray(wrapper.virtual_mcp_ids)
 					? wrapper.virtual_mcp_ids.map((id) => String(id)).filter(Boolean)
 					: [];
-				scope.mcpOutsideKey = await assignedVirtualMcpGrantsTools(ids);
+				const grant = await assignedVirtualMcpGrants(ids);
+				if (grant === 'unreadable') {
+					throw new Error(text('无法读取该密钥分配的虚拟 MCP，无法确认授权范围，请稍后重试。', 'The virtual MCPs assigned to this key could not be read, so its grants cannot be confirmed; retry later.'));
+				}
+				scope.mcpOutsideKey = grant === 'grants';
 			}
 			const scoped = await buildScopedAgentConfig(loaded.source, scope, label, key);
 			// A failed source can be the only one the key grants, so report the failure

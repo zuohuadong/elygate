@@ -30,15 +30,23 @@ const PAGE_SIZE = 100;
 const MAX_PAGES = 50;
 const MAX_ITEMS = 5000;
 
-// assignedVirtualMcpGrantsTools resolves the virtual MCPs assigned to a key and reports
-// whether any of them actually offers tools. The key only carries ids, and an assigned
-// but disabled or empty virtual MCP grants nothing, so the ids alone cannot answer.
-export async function assignedVirtualMcpGrantsTools(ids: string[]): Promise<boolean> {
+// 'unreadable' keeps a failed lookup from reading as "grants nothing": the caller has to
+// say the assignment could not be resolved instead of claiming the key is ungranted.
+export type VirtualMcpGrant = 'grants' | 'none' | 'unreadable';
+
+// assignedVirtualMcpGrants resolves the virtual MCPs assigned to a key and reports whether
+// any of them actually offers tools. The key only carries ids, and an assigned but disabled
+// or empty virtual MCP grants nothing, so the ids alone cannot answer.
+export async function assignedVirtualMcpGrants(ids: string[]): Promise<VirtualMcpGrant> {
+	let unreadable = false;
 	for (const id of ids) {
 		try {
 			const payload = await requestJson<Record<string, unknown>>(`/api/mcp/virtual-mcps/${encodeURIComponent(id)}`);
 			const definition = payload.virtual_mcp;
-			if (!definition || typeof definition !== 'object' || Array.isArray(definition)) continue;
+			if (!definition || typeof definition !== 'object' || Array.isArray(definition)) {
+				unreadable = true;
+				continue;
+			}
 			const record = definition as Record<string, unknown>;
 			if (record.enabled === false) continue;
 			const tools = Array.isArray(record.tools) ? record.tools : [];
@@ -48,13 +56,12 @@ export async function assignedVirtualMcpGrantsTools(ids: string[]): Promise<bool
 				const names = Array.isArray(spec.tool_names) ? spec.tool_names : [];
 				return names.length > 0;
 			});
-			if (grantsATool) return true;
+			if (grantsATool) return 'grants';
 		} catch {
-			// An unreadable virtual MCP cannot be shown to grant anything.
-			continue;
+			unreadable = true;
 		}
 	}
-	return false;
+	return unreadable ? 'unreadable' : 'none';
 }
 
 async function fetchPaged(path: string, key: string, totalKeys: string[]): Promise<unknown> {

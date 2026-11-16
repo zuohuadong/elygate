@@ -280,6 +280,36 @@ describe('AgentConfig export mapping', () => {
 			.toEqual(['narrowed', 'no-tools', 'absent']);
 	});
 
+	test('drops a user:password argument and a signed URL', () => {
+		const source: AgentConfigExportSource = {
+			models: undefined,
+			mcpClients: {
+				clients: [
+					{
+						config: {
+							name: 'creds',
+							connection_type: 'stdio',
+							tools_to_execute: ['*'],
+							stdio_config: {
+								command: 'server',
+								args: ['--user', 'alice:plain-secret', '-u', 'bob:other-secret', '--url=https://host/mcp?sig=raw-secret-value', '--verbose'],
+							},
+						},
+					},
+				],
+			},
+			skills: undefined,
+			prompts: undefined,
+			agents: undefined,
+		};
+		const result = buildAgentConfigPublic(source);
+		expect(result.pub.mcp[0].args).toEqual(['--verbose']);
+		const serialized = JSON.stringify(result.pub);
+		expect(serialized).not.toContain('plain-secret');
+		expect(serialized).not.toContain('other-secret');
+		expect(serialized).not.toContain('raw-secret-value');
+	});
+
 	test('produces an empty but valid public section when nothing is configured', () => {
 		const result = buildAgentConfigPublic({ models: undefined, mcpClients: undefined, skills: undefined, prompts: undefined, agents: undefined });
 		expect(result.counts).toEqual({ models: 0, mcp: 0, skills: 0, prompts: 0, agents: 0 });

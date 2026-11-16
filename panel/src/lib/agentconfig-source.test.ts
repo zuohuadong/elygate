@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { assignedVirtualMcpGrantsTools, loadAgentConfigSources } from './agentconfig-source';
+import { assignedVirtualMcpGrants, loadAgentConfigSources } from './agentconfig-source';
 
 const originalFetch = globalThis.fetch;
 
@@ -71,12 +71,12 @@ describe('loadAgentConfigSources', () => {
 	});
 });
 
-describe('assignedVirtualMcpGrantsTools', () => {
+describe('assignedVirtualMcpGrants', () => {
 	test('an enabled virtual MCP with tool names grants something', async () => {
 		mockSources({
 			'/api/mcp/virtual-mcps/12': () => jsonResponse({ virtual_mcp: { id: 12, enabled: true, tools: [{ tool_names: ['github-read'] }] } }),
 		});
-		expect(await assignedVirtualMcpGrantsTools(['12'])).toBe(true);
+		expect(await assignedVirtualMcpGrants(['12'])).toBe('grants');
 	});
 
 	test('a disabled or tool-less virtual MCP grants nothing', async () => {
@@ -84,11 +84,11 @@ describe('assignedVirtualMcpGrantsTools', () => {
 			'/api/mcp/virtual-mcps/12': () => jsonResponse({ virtual_mcp: { id: 12, enabled: false, tools: [{ tool_names: ['github-read'] }] } }),
 			'/api/mcp/virtual-mcps/13': () => jsonResponse({ virtual_mcp: { id: 13, enabled: true, tools: [{ tool_names: [] }] } }),
 		});
-		expect(await assignedVirtualMcpGrantsTools(['12', '13'])).toBe(false);
+		expect(await assignedVirtualMcpGrants(['12', '13'])).toBe('none');
 	});
 
-	test('an unreadable virtual MCP is not assumed to grant anything', async () => {
+	test('an unreadable virtual MCP is reported as unreadable, not as no grant', async () => {
 		mockSources({ '/api/mcp/virtual-mcps/99': () => jsonResponse({ error: 'not found' }, 404) });
-		expect(await assignedVirtualMcpGrantsTools(['99'])).toBe(false);
+		expect(await assignedVirtualMcpGrants(['99'])).toBe('unreadable');
 	});
 });

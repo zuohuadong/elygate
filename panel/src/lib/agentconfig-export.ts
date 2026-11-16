@@ -118,7 +118,9 @@ function modelEntries(payload: unknown, warnings: AgentConfigExportWarning[]): A
 // CLIENT_SECRET and client-secret are one word. A bare `key` is deliberately not in
 // the flag list: --sort-key and --partition-key are ordinary arguments. It is accepted
 // for assignments and header names, where OPENAI_KEY and X-Auth-Token carry secrets.
-const SECRET_SUFFIX = /(?:apikey|accesskey|privatekey|token|secret|password|passwd|pwd|auth|authorization|credential|bearer|key)$/;
+// `user`/`username`/`login` are on the list because a launch argument spelled that way
+// carries a user:password pair for the server it starts.
+const SECRET_SUFFIX = /(?:apikey|accesskey|privatekey|token|secret|password|passwd|pwd|auth|authorization|credential|creds|bearer|key|user|username|login|userinfo)$/;
 // A bare `key` is a credential unless it names one of these ordinary arguments.
 const NOT_A_SECRET_KEY = /^(?:sort|order|partition|primary|foreign|row|cache|group|dedup|map|index|shard|hash|lookup|merge|search|filter|unique|natural|synthetic|stable|join|routing|refresh|schema|object|value)key$/;
 
@@ -128,7 +130,7 @@ function normalizeName(name: string): string {
 const SECRET_TOKEN = /^(?:sk-[a-z0-9_-]{8,}|gh[pousr]_[a-z0-9]{8,}|github_pat_[a-z0-9_]{8,}|xox[abposr]-[a-z0-9-]{8,}|akia[a-z0-9]{12,}|ey[a-z0-9_-]{8,}\.[a-z0-9_-]{8,}\.[a-z0-9_-]{8,})$/i;
 const AUTH_HEADER = /^(?:authorization|proxy-authorization|x-api-key|api-key)\s*:/i;
 // -H/--header carry arbitrary headers, so they are treated as credential flags.
-const HEADER_FLAG = /^(?:h|header|headers)$/i;
+const HEADER_FLAG = /^(?:h|header|headers|u|user|username|login|userinfo|creds)$/i;
 
 function isSecretName(name: string): boolean {
 	const normalized = normalizeName(name);
