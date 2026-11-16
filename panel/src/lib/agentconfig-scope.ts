@@ -22,6 +22,9 @@ export interface AgentConfigProviderScope {
 	// A provider config that binds no credential cannot serve any model: governance
 	// selects a key per request and has nothing to select.
 	hasCredential: boolean;
+	// A bound key can narrow the models further (its own allow/black-list and enabled
+	// flag), and the request is only served when some enabled key supports the model.
+	keyRules: { allowed: string[]; blocked: string[]; allowedUnrestricted: boolean; blockedAll: boolean }[];
 	// A key can list the same provider more than once. Governance denies if any row's
 	// blacklist blocks and allows if any row's allowlist allows, so the flags keep
 	// per-row ["*"] meaning after the rows are merged: concatenating them would turn a
@@ -160,17 +163,24 @@ export function scopeFromVirtualKey(key: unknown): AgentConfigScope {
 		const previous = providers[provider];
 		const allowed = stringList(config.allowed_models);
 		const blocked = stringList(config.blacklisted_models);
+		const keys = recordArray(config.keys).filter((key) => key.enabled !== false);
 		// allow_all_keys false with no bound key leaves the provider unusable.
-		const hasCredential = config.allow_all_keys === true || recordArray(config.keys).length > 0;
+		const hasCredential = config.allow_all_keys === true || keys.length > 0;
+		const keyRules = keys.map((key) => {
+			const keyAllowed = stringList(key.models);
+			const keyBlocked = stringList(key.blacklisted_models);
+			return { allowed: keyAllowed, blocked: keyBlocked, allowedUnrestricted: isUnrestricted(keyAllowed), blockedAll: isUnrestricted(keyBlocked) };
+		});
 		providers[provider] = previous
 			? {
 				allowed: mergeUnique(previous.allowed, allowed),
 				blocked: mergeUnique(previous.blocked, blocked),
 				hasCredential: previous.hasCredential || hasCredential,
+				keyRules: [...previous.keyRules, ...keyRules],
 				allowedUnrestricted: previous.allowedUnrestricted || isUnrestricted(allowed),
 				blockedAll: previous.blockedAll || isUnrestricted(blocked),
 			}
-			: { allowed, blocked, hasCredential, allowedUnrestricted: isUnrestricted(allowed), blockedAll: isUnrestricted(blocked) };
+			: { allowed, blocked, hasCredential, keyRules, allowedUnrestricted: isUnrestricted(allowed), blockedAll: isUnrestricted(blocked) };
 	}
 	const mcpClientNames = recordArray(record.mcp_configs).map(mcpClientName).filter(Boolean);
 	const agentNames = recordArray(record.agent_grants)
@@ -256,7 +266,13 @@ function modelAllowed(scope: AgentConfigScope, provider: string, id: string): bo
 	if (!rule) return scope.allowAllProviders;
 	if (!rule.hasCredential) return false;
 	if (rule.blockedAll || listBlocks(rule.blocked, id)) return false;
-	return rule.allowedUnrestricted || listAllows(rule.allowed, id, provider);
+	if (!(rule.allowedUnrestricted || listAllows(rule.allowed, id, provider))) return false;
+	// A bound key can withhold the model even when the key config allows it
+	// (core/bifrost.go keySupportsModel), so one enabled key has to support it.
+	if (rule.keyRules.length === 0) return true;
+	return rule.keyRules.some((key) => (key.blockedAll || listBlocks(key.blocked, id))
+		? false
+		: key.allowedUnrestricted || listAllows(key.allowed, id, provider));
 }
 
 function filterModels(payload: unknown, scope: AgentConfigScope): unknown {

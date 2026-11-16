@@ -21,6 +21,7 @@ export type AgentConfigExportWarningCode =
 	| 'mcp-tools-restricted'
 	| 'mcp-grants-elsewhere'
 	| 'mcp-disabled'
+	| 'mcp-no-command'
 	| 'model-invalid'
 	| 'skill-invalid'
 	| 'prompt-invalid'
@@ -131,6 +132,9 @@ const SECRET_TOKEN = /^(?:sk-[a-z0-9_-]{8,}|gh[pousr]_[a-z0-9]{8,}|github_pat_[a
 const AUTH_HEADER = /^(?:authorization|proxy-authorization|x-api-key|api-key)\s*:/i;
 // -H/--header carry arbitrary headers, so they are treated as credential flags.
 const HEADER_FLAG = /^(?:h|header|headers|u|user|username|login|userinfo|creds|cookie|cookies)$/i;
+// An authentication scheme word that stands on its own after a header name, holding the
+// actual secret in the argument after it (Authorization: Bearer <secret>).
+const AUTH_SCHEME_WORD = /^(?:bearer|basic|digest|negotiate|ntlm|token|apikey|hmac)$/i;
 
 function isSecretName(name: string): boolean {
 	const normalized = normalizeName(name);
@@ -188,6 +192,21 @@ function commandCarriesSecret(command: string): boolean {
 	return command.split(/\s+/).some(tokenCarriesSecret);
 }
 
+// afterCredentialFlag returns the index of the last argument belonging to a credential
+// flag, starting at the argument after the flag. A header may be spelled out across
+// several arguments ("Authorization:", "Bearer", "<secret>"), so prefix-shaped tokens
+// are consumed together with the secret they introduce.
+function afterCredentialFlag(args: string[], start: number): number {
+	let index = start;
+	for (let step = 0; step < 3 && index + 1 < args.length; step += 1) {
+		const token = (args[index] ?? '').trim();
+		const isPrefix = token.endsWith(':') || AUTH_SCHEME_WORD.test(token);
+		if (!isPrefix) break;
+		index += 1;
+	}
+	return index;
+}
+
 function redactArgs(args: string[]): { args: string[]; redacted: boolean } {
 	const kept: string[] = [];
 	let redacted = false;
@@ -198,10 +217,11 @@ function redactArgs(args: string[]): { args: string[]; redacted: boolean } {
 			// A flag with no inline value carries the credential in the next argument,
 			// so that one goes too. A bare assignment carries its own value already.
 			// A separate value belongs to the credential either way: `--key value` and
-			// `OPENAI_KEY:` + value both carry it in the next argument.
+			// `OPENAI_KEY:` + value both carry it in the next argument. When the next
+			// argument is only a scheme word (Bearer), the secret is the one after it.
 			const separatorOnly = arg.trim().endsWith(':');
 			const inline = !separatorOnly && (arg.includes('=') || !arg.trim().startsWith('-'));
-			if (!inline && index + 1 < args.length) index += 1;
+			if (!inline && index + 1 < args.length) index = afterCredentialFlag(args, index + 1);
 			continue;
 		}
 		// A flag whose only value is a credential loses the flag too: leaving it behind
@@ -210,6 +230,12 @@ function redactArgs(args: string[]): { args: string[]; redacted: boolean } {
 		if (SHORT_CREDENTIAL_FLAG.test(arg.trim()) && next !== '' && !/^\d+$/.test(next.trim())) {
 			redacted = true;
 			index += 1;
+			continue;
+		}
+		if (arg.trim().endsWith(':') && next !== '' && AUTH_SCHEME_WORD.test(next.trim())) {
+			// `Authorization:` then `Bearer` then the secret.
+			redacted = true;
+			index = afterCredentialFlag(args, index);
 			continue;
 		}
 		if (arg.trim().startsWith('-') && !arg.includes('=') && next !== '' && !next.trim().startsWith('-') && tokenCarriesSecret(next)) {
@@ -260,6 +286,11 @@ function mcpEntries(payload: unknown, warnings: AgentConfigExportWarning[]): Acb
 		// so the client is skipped rather than shipped half-configured.
 		if (command && commandCarriesSecret(command)) {
 			warnings.push({ code: 'mcp-command-not-public', name });
+			continue;
+		}
+		if (!command) {
+			// Args without a command produce an entry nothing can start.
+			warnings.push({ code: 'mcp-no-command', name });
 			continue;
 		}
 		const rawArgs = stringList(stdio.args);

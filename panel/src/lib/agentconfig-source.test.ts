@@ -87,6 +87,14 @@ describe('assignedVirtualMcpGrants', () => {
 		expect(await assignedVirtualMcpGrants(['12', '13'])).toBe('none');
 	});
 
+	test('a tool spec whose source client is gone grants nothing', async () => {
+		mockSources({
+			'/api/mcp/virtual-mcps/12': () => jsonResponse({ virtual_mcp: { id: 12, enabled: true, tools: [{ mcp_client_id: 'deleted', tool_names: ['github-read'] }] } }),
+		});
+		expect(await assignedVirtualMcpGrants(['12'], new Set(['alive']))).toBe('none');
+		expect(await assignedVirtualMcpGrants(['12'], new Set(['deleted']))).toBe('grants');
+	});
+
 	test('an unreadable virtual MCP is reported as unreadable, not as no grant', async () => {
 		mockSources({ '/api/mcp/virtual-mcps/99': () => jsonResponse({ error: 'not found' }, 404) });
 		expect(await assignedVirtualMcpGrants(['99'])).toBe('unreadable');

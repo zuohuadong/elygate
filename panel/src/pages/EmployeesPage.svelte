@@ -26,7 +26,7 @@
 	const i18n = useTranslation();
 	// Warnings that say something about what this key grants, as opposed to a global
 	// export limitation such as a long prompt title.
-	const SCOPE_WARNING_CODES = new Set(['mcp-tools-restricted', 'mcp-disabled', 'mcp-grants-elsewhere']);
+	const SCOPE_WARNING_CODES = new Set(['mcp-tools-restricted', 'mcp-disabled', 'mcp-grants-elsewhere', 'mcp-unsupported-transport', 'mcp-command-not-public', 'mcp-no-command']);
 	let employees = $state.raw<JsonRecord[]>([]);
 	let virtualKeys = $state.raw<JsonRecord[]>([]);
 	let form = $state<EmployeeForm>(emptyForm());
@@ -268,7 +268,17 @@
 				const ids = Array.isArray(wrapper.virtual_mcp_ids)
 					? wrapper.virtual_mcp_ids.map((id) => String(id)).filter(Boolean)
 					: [];
-				const grant = await assignedVirtualMcpGrants(ids);
+				// A virtual MCP naming a client that no longer exists grants nothing.
+				const clients = (loaded.source.mcpClients as { clients?: unknown[] } | undefined)?.clients ?? [];
+				const knownClientIDs = new Set<string>();
+				for (const client of clients) {
+					if (!client || typeof client !== 'object') continue;
+					const config = (client as { config?: unknown }).config ?? client;
+					if (!config || typeof config !== 'object') continue;
+					const id = (config as { client_id?: unknown }).client_id;
+					if (typeof id === 'string' && id) knownClientIDs.add(id);
+				}
+				const grant = await assignedVirtualMcpGrants(ids, knownClientIDs);
 				if (grant === 'unreadable') {
 					throw new Error(text('无法读取该密钥分配的虚拟 MCP，无法确认授权范围，请稍后重试。', 'The virtual MCPs assigned to this key could not be read, so its grants cannot be confirmed; retry later.'));
 				}

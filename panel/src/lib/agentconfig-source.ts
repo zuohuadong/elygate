@@ -37,7 +37,10 @@ export type VirtualMcpGrant = 'grants' | 'none' | 'unreadable';
 // assignedVirtualMcpGrants resolves the virtual MCPs assigned to a key and reports whether
 // any of them actually offers tools. The key only carries ids, and an assigned but disabled
 // or empty virtual MCP grants nothing, so the ids alone cannot answer.
-export async function assignedVirtualMcpGrants(ids: string[]): Promise<VirtualMcpGrant> {
+// knownClientIDs is the set of MCP clients that still exist. A virtual MCP tool spec
+// naming a client that was deleted resolves to nothing at runtime, so it cannot count
+// as a grant.
+export async function assignedVirtualMcpGrants(ids: string[], knownClientIDs?: Set<string>): Promise<VirtualMcpGrant> {
 	let unreadable = false;
 	for (const id of ids) {
 		try {
@@ -54,7 +57,11 @@ export async function assignedVirtualMcpGrants(ids: string[]): Promise<VirtualMc
 				if (!tool || typeof tool !== 'object') return false;
 				const spec = tool as Record<string, unknown>;
 				const names = Array.isArray(spec.tool_names) ? spec.tool_names : [];
-				return names.length > 0;
+				if (names.length === 0) return false;
+				const clientID = typeof spec.mcp_client_id === 'string' ? spec.mcp_client_id.trim() : '';
+				// Without a client set the check cannot be made; with one, a spec whose
+				// client is gone grants nothing.
+				return knownClientIDs === undefined || (clientID !== '' && knownClientIDs.has(clientID));
 			});
 			if (grantsATool) return 'grants';
 		} catch {

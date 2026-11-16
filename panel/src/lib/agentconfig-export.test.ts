@@ -310,6 +310,44 @@ describe('AgentConfig export mapping', () => {
 		expect(serialized).not.toContain('raw-secret-value');
 	});
 
+	test('drops a header whose scheme and secret arrive as separate arguments', () => {
+		const source: AgentConfigExportSource = {
+			models: undefined,
+			mcpClients: {
+				clients: [
+					{
+						config: {
+							name: 'split-header',
+							connection_type: 'stdio',
+							tools_to_execute: ['*'],
+							stdio_config: { command: 'server', args: ['--header', 'Authorization:', 'Bearer', 'topsecret', '--verbose'] },
+						},
+					},
+				],
+			},
+			skills: undefined,
+			prompts: undefined,
+			agents: undefined,
+		};
+		const result = buildAgentConfigPublic(source);
+		expect(result.pub.mcp[0].args).toEqual(['--verbose']);
+		expect(JSON.stringify(result.pub)).not.toContain('topsecret');
+		expect(JSON.stringify(result.pub)).not.toContain('Bearer');
+	});
+
+	test('a stdio client with no command is not exported', () => {
+		const source: AgentConfigExportSource = {
+			models: undefined,
+			mcpClients: { clients: [{ config: { name: 'no-command', connection_type: 'stdio', tools_to_execute: ['*'], stdio_config: { args: ['--verbose'] } } }] },
+			skills: undefined,
+			prompts: undefined,
+			agents: undefined,
+		};
+		const result = buildAgentConfigPublic(source);
+		expect(result.pub.mcp).toEqual([]);
+		expect(result.warnings.map((warning) => warning.code)).toEqual(['mcp-no-command']);
+	});
+
 	test('produces an empty but valid public section when nothing is configured', () => {
 		const result = buildAgentConfigPublic({ models: undefined, mcpClients: undefined, skills: undefined, prompts: undefined, agents: undefined });
 		expect(result.counts).toEqual({ models: 0, mcp: 0, skills: 0, prompts: 0, agents: 0 });

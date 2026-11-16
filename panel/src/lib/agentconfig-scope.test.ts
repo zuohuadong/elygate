@@ -98,7 +98,7 @@ describe('scopeFromVirtualKey', () => {
 	test('reads providers, mcp clients and agent grants from the wrapped payload', () => {
 		const scope = scopeFromVirtualKey(KEY);
 		expect(scope.allowAllProviders).toBe(false);
-		expect(scope.providers.openai).toEqual({ allowed: ['gpt-4o'], blocked: [], hasCredential: true, allowedUnrestricted: false, blockedAll: false });
+		expect(scope.providers.openai).toEqual({ allowed: ['gpt-4o'], blocked: [], hasCredential: true, keyRules: [], allowedUnrestricted: false, blockedAll: false });
 		expect(scope.mcpClientNames).toEqual(['github']);
 		expect(scope.agentNames).toEqual(['researcher']);
 	});
@@ -260,8 +260,31 @@ describe('applyAgentConfigScope', () => {
 	test('a provider that binds no credential grants no models', () => {
 		const unbound = { virtual_key: { allow_all_providers: false, provider_configs: [{ provider: 'openai', allow_all_keys: false, keys: [], allowed_models: ['*'] }] } };
 		expect(names(applyAgentConfigScope(SOURCES, scopeFromVirtualKey(unbound), unbound).source.models, 'models')).toEqual([]);
-		const bound = { virtual_key: { allow_all_providers: false, provider_configs: [{ provider: 'openai', allow_all_keys: false, keys: [{ id: 1, name: 'k1' }], allowed_models: ['*'] }] } };
+		const bound = { virtual_key: { allow_all_providers: false, provider_configs: [{ provider: 'openai', allow_all_keys: false, keys: [{ id: 1, name: 'k1', models: ['*'] }], allowed_models: ['*'] }] } };
 		expect(names(applyAgentConfigScope(SOURCES, scopeFromVirtualKey(bound), bound).source.models, 'models')).toEqual(['openai/gpt-4o', 'openai/gpt-4o-mini']);
+		// A bound key with no model list denies every model (deny-by-default in the key table).
+		const emptyKey = { virtual_key: { allow_all_providers: false, provider_configs: [{ provider: 'openai', allow_all_keys: false, keys: [{ id: 1, name: 'k1' }], allowed_models: ['*'] }] } };
+		expect(names(applyAgentConfigScope(SOURCES, scopeFromVirtualKey(emptyKey), emptyKey).source.models, 'models')).toEqual([]);
+	});
+
+	test('a bound key that withholds models narrows the provider to what it serves', () => {
+		const key = { virtual_key: { allow_all_providers: false, provider_configs: [{
+			provider: 'openai',
+			allow_all_keys: false,
+			allowed_models: ['*'],
+			keys: [{ id: 1, models: ['gpt-4o'], enabled: true }],
+		}] } };
+		expect(names(applyAgentConfigScope(SOURCES, scopeFromVirtualKey(key), key).source.models, 'models')).toEqual(['openai/gpt-4o']);
+	});
+
+	test('a disabled key serves nothing', () => {
+		const key = { virtual_key: { allow_all_providers: false, provider_configs: [{
+			provider: 'openai',
+			allow_all_keys: false,
+			allowed_models: ['*'],
+			keys: [{ id: 1, models: ['*'], enabled: false }],
+		}] } };
+		expect(names(applyAgentConfigScope(SOURCES, scopeFromVirtualKey(key), key).source.models, 'models')).toEqual([]);
 	});
 
 	test('a key with no grants exports nothing reachable', () => {
