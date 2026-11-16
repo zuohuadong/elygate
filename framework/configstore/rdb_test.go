@@ -7470,3 +7470,23 @@ func TestDatasheetOverride_UpsertCancelledAfterInsertSavesNothing(t *testing.T) 
 	require.NoError(t, err)
 	assert.Empty(t, rows, "an upsert that returns an error must not have committed the row")
 }
+
+// TestWebhookEndpointCreateStampsCallerTimes pins that the create path leaves
+// real timestamps on the caller's struct: the row is written through an isolated
+// copy (so a failed write cannot corrupt the caller's plaintext secret), and
+// GORM stamps CreatedAt/UpdatedAt on that copy. A create response built from the
+// caller's struct must still report the times a later read returns.
+func TestWebhookEndpointCreateStampsCallerTimes(t *testing.T) {
+	store := setupRDBTestStore(t)
+	ctx := context.Background()
+
+	endpoint := testWebhookEndpoint("create-stamps-times")
+	require.NoError(t, store.CreateWebhookEndpoint(ctx, endpoint))
+	require.False(t, endpoint.CreatedAt.IsZero(), "create must stamp created_at on the caller's struct")
+	require.False(t, endpoint.UpdatedAt.IsZero(), "create must stamp updated_at on the caller's struct")
+
+	fetched, err := store.GetWebhookEndpointByID(ctx, endpoint.ID)
+	require.NoError(t, err)
+	assert.WithinDuration(t, fetched.CreatedAt, endpoint.CreatedAt, time.Second)
+	assert.WithinDuration(t, fetched.UpdatedAt, endpoint.UpdatedAt, time.Second)
+}

@@ -4144,7 +4144,8 @@ func (h *GovernanceHandler) createTeam(ctx *fasthttp.RequestCtx) {
 			return
 		}
 		logger.Error("failed to create team: %v", err)
-		SendError(ctx, 500, "failed to create team")
+		logger.Error("failed to create team: %v", err)
+		SendError(ctx, 500, fmt.Sprintf("failed to create team: %v", err))
 		return
 	}
 	// Reloading team from in-memory store
@@ -4457,7 +4458,7 @@ func (h *GovernanceHandler) updateTeam(ctx *fasthttp.RequestCtx) {
 			return
 		}
 		logger.Error("failed to update team: %v", err)
-		SendError(ctx, 500, "Failed to update team")
+		SendError(ctx, 500, fmt.Sprintf("Failed to update team: %v", err))
 		return
 	}
 	// Reloading team from in-memory store.
@@ -4670,7 +4671,8 @@ func (h *GovernanceHandler) createCustomer(ctx *fasthttp.RequestCtx) {
 			SendError(ctx, 409, "A customer with this name already exists")
 			return
 		}
-		SendError(ctx, 500, "failed to create customer")
+		logger.Error("failed to create customer: %v", err)
+		SendError(ctx, 500, fmt.Sprintf("failed to create customer: %v", err))
 		return
 	}
 	preloadedCustomer, err := h.governanceManager.ReloadCustomer(ctx, customer.ID)
@@ -4890,7 +4892,8 @@ func (h *GovernanceHandler) updateCustomer(ctx *fasthttp.RequestCtx) {
 			SendError(ctx, 404, "Customer not found")
 			return
 		}
-		SendError(ctx, 500, "Failed to update customer")
+		logger.Error("failed to update customer: %v", err)
+		SendError(ctx, 500, fmt.Sprintf("Failed to update customer: %v", err))
 		return
 	}
 
@@ -4999,30 +5002,32 @@ func (h *GovernanceHandler) getRateLimits(ctx *fasthttp.RequestCtx) {
 	})
 }
 
-// validateRateLimit validates the rate limit
+// validateRateLimit validates the rate limit. Every refusal is a badRequestError:
+// a caller who sent a limit that can never admit a request made a request error,
+// not a server fault, and handlers must answer 400 rather than 500 for it.
 func validateRateLimit(rateLimit *configstoreTables.TableRateLimit) error {
 	if rateLimit.TokenMaxLimit != nil && (*rateLimit.TokenMaxLimit < 0 || *rateLimit.TokenMaxLimit == 0) {
-		return fmt.Errorf("rate limit token max limit cannot be negative or zero: %d", *rateLimit.TokenMaxLimit)
+		return &badRequestError{err: fmt.Errorf("rate limit token max limit cannot be negative or zero: %d", *rateLimit.TokenMaxLimit)}
 	}
 	// Only require token reset duration if token limit is set
 	if rateLimit.TokenMaxLimit != nil {
 		if rateLimit.TokenResetDuration == nil {
-			return fmt.Errorf("rate limit token reset duration is required")
+			return &badRequestError{err: fmt.Errorf("rate limit token reset duration is required")}
 		}
 		if d, err := configstoreTables.ParseDuration(*rateLimit.TokenResetDuration); err != nil || d <= 0 {
-			return fmt.Errorf("invalid rate limit token reset duration (must be a positive duration): %s", *rateLimit.TokenResetDuration)
+			return &badRequestError{err: fmt.Errorf("invalid rate limit token reset duration (must be a positive duration): %s", *rateLimit.TokenResetDuration)}
 		}
 	}
 	if rateLimit.RequestMaxLimit != nil && (*rateLimit.RequestMaxLimit < 0 || *rateLimit.RequestMaxLimit == 0) {
-		return fmt.Errorf("rate limit request max limit cannot be negative or zero: %d", *rateLimit.RequestMaxLimit)
+		return &badRequestError{err: fmt.Errorf("rate limit request max limit cannot be negative or zero: %d", *rateLimit.RequestMaxLimit)}
 	}
 	// Only require request reset duration if request limit is set
 	if rateLimit.RequestMaxLimit != nil {
 		if rateLimit.RequestResetDuration == nil {
-			return fmt.Errorf("rate limit request reset duration is required")
+			return &badRequestError{err: fmt.Errorf("rate limit request reset duration is required")}
 		}
 		if d, err := configstoreTables.ParseDuration(*rateLimit.RequestResetDuration); err != nil || d <= 0 {
-			return fmt.Errorf("invalid rate limit request reset duration (must be a positive duration): %s", *rateLimit.RequestResetDuration)
+			return &badRequestError{err: fmt.Errorf("invalid rate limit request reset duration (must be a positive duration): %s", *rateLimit.RequestResetDuration)}
 		}
 	}
 	return nil
@@ -5044,23 +5049,24 @@ func (h *GovernanceHandler) getConfiguredProviderSet(ctx context.Context) (map[s
 	return providerSet, nil
 }
 
-// validateBudget validates the budget
+// validateBudget validates the budget. Refusals are badRequestErrors for the same
+// reason validateRateLimit's are: the limit and reset window come from the request.
 func validateBudget(budget *configstoreTables.TableBudget) error {
 	if budget.MaxLimit < 0 || budget.MaxLimit == 0 {
-		return fmt.Errorf("budget max limit cannot be negative or zero: %.2f", budget.MaxLimit)
+		return &badRequestError{err: fmt.Errorf("budget max limit cannot be negative or zero: %.2f", budget.MaxLimit)}
 	}
 	if budget.ResetDuration == "" {
-		return fmt.Errorf("budget reset duration is required")
+		return &badRequestError{err: fmt.Errorf("budget reset duration is required")}
 	}
 	if d, err := configstoreTables.ParseDuration(budget.ResetDuration); err != nil || d <= 0 {
-		return fmt.Errorf("invalid budget reset duration (must be a positive duration): %s", budget.ResetDuration)
+		return &badRequestError{err: fmt.Errorf("invalid budget reset duration (must be a positive duration): %s", budget.ResetDuration)}
 	}
 	if budget.ResetConfig != nil {
 		if !configstoreTables.IsQuarterlyDuration(budget.ResetDuration) {
-			return fmt.Errorf("reset_config is only valid on a quarterly reset duration, got: %s", budget.ResetDuration)
+			return &badRequestError{err: fmt.Errorf("reset_config is only valid on a quarterly reset duration, got: %s", budget.ResetDuration)}
 		}
 		if month := budget.ResetConfig.QuarterStartMonth; month != 0 && (month < 1 || month > 12) {
-			return fmt.Errorf("quarter_start_month must be between 1 and 12, got: %d", month)
+			return &badRequestError{err: fmt.Errorf("quarter_start_month must be between 1 and 12, got: %d", month)}
 		}
 	}
 	return nil
@@ -5544,6 +5550,11 @@ func (h *GovernanceHandler) createModelConfig(ctx *fasthttp.RequestCtx) {
 		}
 		return nil
 	}); err != nil {
+		var badReqErr *badRequestError
+		if errors.As(err, &badReqErr) {
+			SendError(ctx, 400, err.Error())
+			return
+		}
 		logger.Error("failed to create model config: %v", err)
 		SendError(ctx, 500, fmt.Sprintf("Failed to create model config: %v", err))
 		return
@@ -5681,6 +5692,11 @@ func (h *GovernanceHandler) updateModelConfig(ctx *fasthttp.RequestCtx) {
 
 		return nil
 	}); err != nil {
+		var badReqErr *badRequestError
+		if errors.As(err, &badReqErr) {
+			SendError(ctx, 400, err.Error())
+			return
+		}
 		logger.Error("failed to update model config: %v", err)
 		SendError(ctx, 500, fmt.Sprintf("Failed to update model config: %v", err))
 		return

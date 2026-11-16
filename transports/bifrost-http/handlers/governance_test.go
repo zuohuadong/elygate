@@ -6167,3 +6167,125 @@ func TestVirtualKeyMCPConfigCallerErrorsAre400(t *testing.T) {
 	assert.Equal(t, a.MCPConfigs[0].ID, unchanged.MCPConfigs[0].ID)
 	assert.Equal(t, []string{"echo"}, []string(unchanged.MCPConfigs[0].ToolsToExecute))
 }
+
+// TestZeroLimitsAreClientErrors pins one contract across the governance write
+// routes: a budget or rate-limit ceiling that can never admit a request is the
+// caller's mistake, so it answers 400 with the reason rather than 500. The
+// refusals used to surface as 500 because the table-level validators returned
+// plain errors that the transaction callers treated as internal failures, and
+// team/customer dropped the reason entirely.
+func TestZeroLimitsAreClientErrors(t *testing.T) {
+	SetLogger(&mockLogger{})
+
+	cases := []struct {
+		name       string
+		body       string
+		handler    func(*GovernanceHandler) fasthttp.RequestHandler
+		want       string
+		modelLevel bool // model-config routes need the model-config manager, not the VK one
+	}{
+		{
+			name:    "virtual key budget",
+			body:    `{"name":"zero-budget-vk","budgets":[{"max_limit":0,"reset_duration":"1d"}]}`,
+			handler: func(h *GovernanceHandler) fasthttp.RequestHandler { return h.createVirtualKey },
+			want:    "budget max limit cannot be negative or zero",
+		},
+		{
+			name:    "virtual key request rate limit",
+			body:    `{"name":"zero-rl-vk","rate_limit":{"request_max_limit":0,"request_reset_duration":"1m"}}`,
+			handler: func(h *GovernanceHandler) fasthttp.RequestHandler { return h.createVirtualKey },
+			want:    "rate limit request max limit cannot be negative or zero",
+		},
+		{
+			name:    "virtual key token rate limit",
+			body:    `{"name":"zero-tok-vk","rate_limit":{"token_max_limit":0,"token_reset_duration":"1m"}}`,
+			handler: func(h *GovernanceHandler) fasthttp.RequestHandler { return h.createVirtualKey },
+			want:    "rate limit token max limit cannot be negative or zero",
+		},
+		{
+			name:    "team budget",
+			body:    `{"name":"zero-budget-team","budgets":[{"max_limit":0,"reset_duration":"1d"}]}`,
+			handler: func(h *GovernanceHandler) fasthttp.RequestHandler { return h.createTeam },
+			want:    "budget max limit cannot be negative or zero",
+		},
+		{
+			name:    "customer budget",
+			body:    `{"name":"zero-budget-customer","budgets":[{"max_limit":0,"reset_duration":"1d"}]}`,
+			handler: func(h *GovernanceHandler) fasthttp.RequestHandler { return h.createCustomer },
+			want:    "budget max limit cannot be negative or zero",
+		},
+		{
+			name:       "model config budget",
+			body:       `{"model_name":"zero-budget-model","budgets":[{"max_limit":0,"reset_duration":"1d"}]}`,
+			handler:    func(h *GovernanceHandler) fasthttp.RequestHandler { return h.createModelConfig },
+			want:       "budget max limit cannot be negative or zero",
+			modelLevel: true,
+		},
+		{
+			name:       "model config rate limit",
+			body:       `{"model_name":"zero-rl-model","rate_limit":{"request_max_limit":0,"request_reset_duration":"1m"}}`,
+			handler:    func(h *GovernanceHandler) fasthttp.RequestHandler { return h.createModelConfig },
+			want:       "rate limit request max limit cannot be negative or zero",
+			modelLevel: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := setupPricingOverrideHandlerStore(t)
+			var manager GovernanceManager
+			if tc.modelLevel {
+				manager = &modelConfigTestGovernanceManager{store: store}
+			} else {
+				manager = &budgetOverrideTestGovernanceManager{store: store}
+			}
+			h := &GovernanceHandler{configStore: store, governanceManager: manager}
+			ctx := newTestRequestCtx(tc.body)
+			tc.handler(h)(ctx)
+			require.Equal(t, fasthttp.StatusBadRequest, ctx.Response.StatusCode(), "body=%s", ctx.Response.Body())
+			assert.Contains(t, string(ctx.Response.Body()), tc.want)
+		})
+	}
+}
+
+// failingTransactionStore fails every write transaction while reads still reach
+// the real store, so a handler's server-error branch can be exercised without a
+// real database fault.
+type failingTransactionStore struct {
+	configstore.ConfigStore
+	err error
+}
+
+func (s failingTransactionStore) ExecuteTransaction(context.Context, func(*gorm.DB) error) error {
+	return s.err
+}
+
+// TestTeamAndCustomerUpdateKeepServerErrorReason: the update routes used to
+// answer a bare "Failed to update team"/"Failed to update customer" for a
+// genuine server-side failure, leaving the caller nothing to act on. The reason
+// must survive, exactly as it does on create.
+func TestTeamAndCustomerUpdateKeepServerErrorReason(t *testing.T) {
+	SetLogger(&mockLogger{})
+	base := setupPricingOverrideHandlerStore(t)
+	ctx := context.Background()
+
+	require.NoError(t, base.CreateTeam(ctx, &configstoreTables.TableTeam{ID: "team-err", Name: "team-error-reason"}))
+	require.NoError(t, base.CreateCustomer(ctx, &configstoreTables.TableCustomer{ID: "customer-err", Name: "customer-error-reason"}))
+
+	h := &GovernanceHandler{
+		configStore:       failingTransactionStore{ConfigStore: base, err: errors.New("transaction exploded")},
+		governanceManager: &budgetOverrideTestGovernanceManager{store: base},
+	}
+
+	teamCtx := newTestRequestCtx(`{"name":"team-error-reason-2"}`)
+	teamCtx.SetUserValue("team_id", "team-err")
+	h.updateTeam(teamCtx)
+	require.Equal(t, fasthttp.StatusInternalServerError, teamCtx.Response.StatusCode(), "body=%s", teamCtx.Response.Body())
+	assert.Contains(t, string(teamCtx.Response.Body()), "transaction exploded")
+
+	customerCtx := newTestRequestCtx(`{"name":"customer-error-reason-2"}`)
+	customerCtx.SetUserValue("customer_id", "customer-err")
+	h.updateCustomer(customerCtx)
+	require.Equal(t, fasthttp.StatusInternalServerError, customerCtx.Response.StatusCode(), "body=%s", customerCtx.Response.Body())
+	assert.Contains(t, string(customerCtx.Response.Body()), "transaction exploded")
+}

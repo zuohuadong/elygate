@@ -2245,6 +2245,25 @@ func (gs *LocalGovernanceStore) CheckRateLimit(ctx context.Context, entityWiseRa
 
 // Generic check budget method
 // The idea is to keep this as a common method for checking all budgets. The entire business logic resides in here
+// formatBudgetUSD renders a budget amount for a refusal message. Four decimals
+// are enough for any ordinary budget, but a micro-budget (a probe key capped at
+// 1e-6, say) rounds to "0.0000" there, and a refusal that reports a limit of
+// zero for a non-zero limit reads as a bug in the comparison itself. Amounts
+// that four decimals would misreport keep their significant digits instead.
+func formatBudgetUSD(amount float64) string {
+	rounded := strconv.FormatFloat(amount, 'f', 4, 64)
+	if rounded != "0.0000" && rounded != "-0.0000" {
+		return rounded
+	}
+	if amount == 0 {
+		return rounded
+	}
+	// 'f' with precision -1 is the shortest representation that round-trips, so
+	// every non-zero amount keeps at least one significant digit no matter how
+	// small the configured ceiling is.
+	return strconv.FormatFloat(amount, 'f', -1, 64)
+}
+
 func (gs *LocalGovernanceStore) CheckBudget(ctx context.Context, entityWiseBudgets EntityWiseBudgets, baselines map[string]float64) (Decision, error) {
 	// Check each budget in hierarchy order using in-memory data
 	now := time.Now()
@@ -2276,8 +2295,8 @@ func (gs *LocalGovernanceStore) CheckBudget(ctx context.Context, entityWiseBudge
 			// Check if current usage (local + remote baseline) exceeds budget limit
 			if budget.CurrentUsage+baseline >= effectiveMaxLimit {
 				gs.logger.Debug("LocalStore CheckBudget: Budget %s EXCEEDED", budget.ID)
-				return DecisionBudgetExceeded, fmt.Errorf("%s budget exceeded: %.4f >= %.4f dollars",
-					entity, budget.CurrentUsage+baseline, effectiveMaxLimit)
+				return DecisionBudgetExceeded, fmt.Errorf("%s budget exceeded: %s >= %s dollars",
+					entity, formatBudgetUSD(budget.CurrentUsage+baseline), formatBudgetUSD(effectiveMaxLimit))
 			}
 		}
 	}

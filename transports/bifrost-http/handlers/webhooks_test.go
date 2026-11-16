@@ -714,3 +714,43 @@ func BenchmarkWebhookHandlerUpdateAudit(b *testing.B) {
 		}
 	}
 }
+
+// TestWebhookHandlerListDeliveriesUnknownEndpoint: an unknown endpoint answers
+// 404 like every other sub-route of the resource. A 200 with an empty list would
+// tell a caller polling after a delete that the endpoint still exists.
+func TestWebhookHandlerListDeliveriesUnknownEndpoint(t *testing.T) {
+	handler, _ := newWebhookTestHandler(t)
+
+	ctx := newWebhookRequestCtx("", map[string]string{"id": "11111111-1111-1111-1111-111111111111"})
+	handler.listWebhookDeliveries(ctx)
+	require.Equal(t, fasthttp.StatusNotFound, ctx.Response.StatusCode(), "body=%s", ctx.Response.Body())
+	assert.Contains(t, string(ctx.Response.Body()), "Webhook endpoint not found")
+}
+
+// TestWebhookHandlerListDeliveriesExistenceFollowsConfigStore: the config store,
+// not the in-memory cache, decides whether the endpoint still exists. A delete
+// whose cache eviction failed leaves a stale cache entry behind, and a cache miss
+// on a live row must not hide its delivery history either.
+func TestWebhookHandlerListDeliveriesExistenceFollowsConfigStore(t *testing.T) {
+	handler, config := newWebhookTestHandler(t)
+	id, _ := createTestWebhookEndpoint(t, handler, "deliveries-authority-test")
+	now := time.Now().UTC().Truncate(time.Second)
+	seedWebhookDelivery(t, config, "d-cache", "wh1", id, now)
+
+	// A stale cache entry says the endpoint exists, but the row is gone.
+	require.NoError(t, config.ConfigStore.DeleteWebhookEndpoint(context.Background(), id))
+	_, cached := config.WebhookEndpointByID(id)
+	require.True(t, cached, "the cache still holds the deleted endpoint")
+	stale := newWebhookRequestCtx("", map[string]string{"id": id})
+	handler.listWebhookDeliveries(stale)
+	require.Equal(t, fasthttp.StatusNotFound, stale.Response.StatusCode(), "body=%s", stale.Response.Body())
+
+	// And the reverse: the row exists, the cache does not know it.
+	otherID, _ := createTestWebhookEndpoint(t, handler, "deliveries-cache-miss-test")
+	config.RemoveWebhookEndpoint(otherID)
+	_, cached = config.WebhookEndpointByID(otherID)
+	require.False(t, cached, "the cache was dropped")
+	miss := newWebhookRequestCtx("", map[string]string{"id": otherID})
+	handler.listWebhookDeliveries(miss)
+	require.Equal(t, fasthttp.StatusOK, miss.Response.StatusCode(), "body=%s", miss.Response.Body())
+}

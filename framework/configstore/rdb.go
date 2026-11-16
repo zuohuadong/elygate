@@ -11113,7 +11113,15 @@ func (s *RDBConfigStore) CreateWebhookEndpoint(ctx context.Context, endpoint *ta
 		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}
-		return s.parseGormError(tx.Create(persist).Error)
+		if err := s.parseGormError(tx.Create(persist).Error); err != nil {
+			return err
+		}
+		// GORM stamps CreatedAt/UpdatedAt on the row it writes, which is the
+		// isolated copy, so the caller's struct would still carry zero times and
+		// a create response built from it would disagree with a later read.
+		endpoint.CreatedAt = persist.CreatedAt
+		endpoint.UpdatedAt = persist.UpdatedAt
+		return nil
 	})
 }
 

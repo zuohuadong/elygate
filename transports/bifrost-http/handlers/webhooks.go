@@ -542,6 +542,19 @@ func (h *WebhookHandler) listWebhookDeliveries(ctx *fasthttp.RequestCtx) {
 			return
 		}
 	}
+	// An unknown endpoint answers 404 like every other sub-route of this
+	// resource; without the check the empty delivery list would read as "this
+	// endpoint exists and has delivered nothing". The config store is the
+	// authority: the in-memory cache can outlive a delete whose cache eviction
+	// failed, and a cache miss on a live row must not hide its delivery history.
+	if _, err := h.store.ConfigStore.GetWebhookEndpointByID(ctx, id); err != nil {
+		if errors.Is(err, configstore.ErrNotFound) {
+			SendError(ctx, fasthttp.StatusNotFound, "Webhook endpoint not found")
+			return
+		}
+		SendError(ctx, fasthttp.StatusInternalServerError, fmt.Sprintf("Failed to load webhook endpoint: %v", err))
+		return
+	}
 	limit, offset = ClampPaginationParams(limit, offset)
 	filters := &logstore.WebhookDeliverySearchFilters{EndpointIDs: []string{id}}
 	result, err := h.store.LogsStore.SearchWebhookDeliveries(ctx, filters, logstore.PaginationOptions{Limit: limit, Offset: offset})

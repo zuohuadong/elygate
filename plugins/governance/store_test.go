@@ -2520,3 +2520,32 @@ func BenchmarkStampVirtualKeyMetadata(b *testing.B) {
 		})
 	}
 }
+
+// TestBudgetRefusalKeepsMicroLimitPrecision: a refusal must report the limit it
+// compared against. Four decimals turn a 1e-6 budget into "0.0000", which reads
+// as a comparison bug rather than a spent micro-budget, while ordinary amounts
+// keep their four decimals.
+func TestBudgetRefusalKeepsMicroLimitPrecision(t *testing.T) {
+	store, err := NewLocalGovernanceStore(context.Background(), NewMockLogger(), nil, &configstore.GovernanceConfig{}, nil, nil)
+	require.NoError(t, err)
+
+	budget := buildBudgetWithUsage("micro-budget", 0.000001, 0.01, "1d")
+	decision, err := store.CheckBudget(context.Background(), EntityWiseBudgets{"VirtualKey": {budget}}, nil)
+	require.Error(t, err)
+	assert.Equal(t, DecisionBudgetExceeded, decision)
+	assert.Contains(t, err.Error(), "0.0100 >= 0.000001 dollars", "the refusal reports the real micro limit")
+
+	// Any non-zero ceiling keeps a significant digit, however small: a limit of
+	// 1e-9 must not be reported as "0" either.
+	nano := buildBudgetWithUsage("nano-budget", 0.000000001, 0.01, "1d")
+	decision, err = store.CheckBudget(context.Background(), EntityWiseBudgets{"VirtualKey": {nano}}, nil)
+	require.Error(t, err)
+	assert.Equal(t, DecisionBudgetExceeded, decision)
+	assert.Contains(t, err.Error(), ">= 0.000000001 dollars", "a nano budget still prints as non-zero")
+
+	ordinary := buildBudgetWithUsage("ordinary-budget", 1, 2, "1d")
+	decision, err = store.CheckBudget(context.Background(), EntityWiseBudgets{"VirtualKey": {ordinary}}, nil)
+	require.Error(t, err)
+	assert.Equal(t, DecisionBudgetExceeded, decision)
+	assert.Contains(t, err.Error(), "2.0000 >= 1.0000 dollars", "ordinary amounts keep four decimals")
+}
