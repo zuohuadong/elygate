@@ -30,11 +30,39 @@ const PAGE_SIZE = 100;
 const MAX_PAGES = 50;
 const MAX_ITEMS = 5000;
 
+// assignedVirtualMcpGrantsTools resolves the virtual MCPs assigned to a key and reports
+// whether any of them actually offers tools. The key only carries ids, and an assigned
+// but disabled or empty virtual MCP grants nothing, so the ids alone cannot answer.
+export async function assignedVirtualMcpGrantsTools(ids: string[]): Promise<boolean> {
+	for (const id of ids) {
+		try {
+			const payload = await requestJson<Record<string, unknown>>(`/api/mcp/virtual-mcps/${encodeURIComponent(id)}`);
+			const definition = payload.virtual_mcp;
+			if (!definition || typeof definition !== 'object' || Array.isArray(definition)) continue;
+			const record = definition as Record<string, unknown>;
+			if (record.enabled === false) continue;
+			const tools = Array.isArray(record.tools) ? record.tools : [];
+			const grantsATool = tools.some((tool) => {
+				if (!tool || typeof tool !== 'object') return false;
+				const spec = tool as Record<string, unknown>;
+				const names = Array.isArray(spec.tool_names) ? spec.tool_names : [];
+				return names.length > 0;
+			});
+			if (grantsATool) return true;
+		} catch {
+			// An unreadable virtual MCP cannot be shown to grant anything.
+			continue;
+		}
+	}
+	return false;
+}
+
 async function fetchPaged(path: string, key: string, totalKeys: string[]): Promise<unknown> {
 	const items: unknown[] = [];
 	const seen = new Set<string>();
 	let offset = 0;
 	let total = Number.POSITIVE_INFINITY;
+	let finished = false;
 	for (let page = 0; page < MAX_PAGES; page += 1) {
 		const separator = path.includes('?') ? '&' : '?';
 		const payload = await requestJson<Record<string, unknown>>(`${path}${separator}limit=${PAGE_SIZE}&offset=${offset}`);
@@ -58,11 +86,17 @@ async function fetchPaged(path: string, key: string, totalKeys: string[]): Promi
 			}
 		}
 		offset += rows.length;
-		if (rows.length === 0 || offset >= total) break;
+		if (rows.length === 0 || offset >= total) {
+			finished = true;
+			break;
+		}
 		// Silently stopping at the cap would export a subset as if it were everything, and
 		// a key whitelisted only for the missing rows would look ungranted.
 		if (items.length >= MAX_ITEMS) throw new Error(`${path} has more than ${MAX_ITEMS} rows; refusing to export a truncated set`);
 	}
+	// Without a usable total a paginated endpoint can run out of pages instead of reaching
+	// the end, which would look like a complete answer.
+	if (!finished) throw new Error(`${path} did not reach its last page within ${MAX_PAGES} pages; refusing to export a partial set`);
 	return { [key]: items };
 }
 

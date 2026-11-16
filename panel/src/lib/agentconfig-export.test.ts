@@ -17,11 +17,12 @@ const SOURCE: AgentConfigExportSource = {
 					name: 'github',
 					connection_type: 'stdio',
 					disabled: false,
+					tools_to_execute: ['*'],
 					stdio_config: { command: 'npx', args: ['-y', '@modelcontextprotocol/server-github'], envs: ['GITHUB_TOKEN=ghp_super_secret', 'PLAIN_NAME'] },
 				},
 				tools: [{ name: 'create_issue' }],
 			},
-			{ config: { name: 'remote-docs', connection_type: 'http', connection_string: 'https://private.example.com/mcp?token=secret' } },
+			{ config: { name: 'remote-docs', connection_type: 'http', tools_to_execute: ['*'], connection_string: 'https://private.example.com/mcp?token=secret' } },
 			{ config: { name: 'in-process', connection_type: 'inprocess' } },
 		],
 	},
@@ -82,6 +83,7 @@ describe('AgentConfig export mapping', () => {
 						config: {
 							name: 'flagged',
 							connection_type: 'stdio',
+							tools_to_execute: ['*'],
 							stdio_config: {
 								command: 'server',
 								args: ['--verbose', '--api-key', 'sk-live-abcdefgh12345678', '--token=plainvalue', '--path', '/srv/tools'],
@@ -92,6 +94,7 @@ describe('AgentConfig export mapping', () => {
 						config: {
 							name: 'bare',
 							connection_type: 'stdio',
+							tools_to_execute: ['*'],
 							stdio_config: { command: 'server', args: ['--flag', 'ghp_abcdefgh12345678', 'xoxb-1234567890-abcdef'] },
 						},
 					},
@@ -122,11 +125,12 @@ describe('AgentConfig export mapping', () => {
 						config: {
 							name: 'headers',
 							connection_type: 'stdio',
+							tools_to_execute: ['*'],
 							stdio_config: { command: 'server', args: ['--header', 'Authorization: Bearer topsecret', '--env=API_KEY=topsecret', '--verbose'] },
 						},
 					},
-					{ config: { name: 'wrapped', connection_type: 'stdio', stdio_config: { command: 'sh -c "server --token topsecret"' } } },
-					{ config: { name: 'disabled-agent-holder', connection_type: 'stdio', stdio_config: { command: 'server' } } },
+					{ config: { name: 'wrapped', connection_type: 'stdio', tools_to_execute: ['*'], stdio_config: { command: 'sh -c "server --token topsecret"' } } },
+					{ config: { name: 'disabled-agent-holder', connection_type: 'stdio', tools_to_execute: ['*'], stdio_config: { command: 'server' } } },
 				],
 			},
 			skills: undefined,
@@ -153,13 +157,14 @@ describe('AgentConfig export mapping', () => {
 						config: {
 							name: 'inline',
 							connection_type: 'stdio',
+							tools_to_execute: ['*'],
 							stdio_config: { command: 'server', args: ['--token=topsecret', '-H', 'X-Api-Key: topsecret', 'OPENAI_API_KEY=topsecret', '--verbose'] },
 						},
 					},
-					{ config: { name: 'cmd-eq', connection_type: 'stdio', stdio_config: { command: 'server --token=topsecret' } } },
-					{ config: { name: 'cmd-header', connection_type: 'stdio', stdio_config: { command: 'server --header=Authorization: Bearer topsecret' } } },
-					{ config: { name: 'cmd-h', connection_type: 'stdio', stdio_config: { command: 'server -H X-Api-Key: topsecret' } } },
-					{ config: { name: 'clean', connection_type: 'stdio', stdio_config: { command: 'cli auth login' } } },
+					{ config: { name: 'cmd-eq', connection_type: 'stdio', tools_to_execute: ['*'], stdio_config: { command: 'server --token=topsecret' } } },
+					{ config: { name: 'cmd-header', connection_type: 'stdio', tools_to_execute: ['*'], stdio_config: { command: 'server --header=Authorization: Bearer topsecret' } } },
+					{ config: { name: 'cmd-h', connection_type: 'stdio', tools_to_execute: ['*'], stdio_config: { command: 'server -H X-Api-Key: topsecret' } } },
+					{ config: { name: 'clean', connection_type: 'stdio', tools_to_execute: ['*'], stdio_config: { command: 'cli auth login' } } },
 				],
 			},
 			skills: undefined,
@@ -183,6 +188,7 @@ describe('AgentConfig export mapping', () => {
 						config: {
 							name: 'names',
 							connection_type: 'stdio',
+							tools_to_execute: ['*'],
 							stdio_config: {
 								command: 'server',
 								args: ['--clientSecret=plainvalue', '--client-secret', 'plainvalue', 'OPENAI_KEY=plainvalue', 'X-Auth-Token: plainvalue', '--sort-key', 'created_at'],
@@ -210,6 +216,7 @@ describe('AgentConfig export mapping', () => {
 						config: {
 							name: 'keys',
 							connection_type: 'stdio',
+							tools_to_execute: ['*'],
 							stdio_config: {
 								command: 'server',
 								args: ['--key', 'plain-secret', '--sort-key=created', 'OPENAI_KEY: plain-secret', '--limit=10'],
@@ -236,6 +243,7 @@ describe('AgentConfig export mapping', () => {
 						config: {
 							name: 'split',
 							connection_type: 'stdio',
+							tools_to_execute: ['*'],
 							stdio_config: { command: 'server', args: ['OPENAI_KEY:', 'plain-secret', '--user', 'https://user:pass@example.com/mcp', '--verbose'] },
 						},
 					},
@@ -249,6 +257,27 @@ describe('AgentConfig export mapping', () => {
 		expect(result.pub.mcp[0].args).toEqual(['--verbose']);
 		expect(JSON.stringify(result.pub)).not.toContain('plain-secret');
 		expect(JSON.stringify(result.pub)).not.toContain('user:pass');
+	});
+
+	test('a client whose own allow-list withholds tools is skipped in every export', () => {
+		const source: AgentConfigExportSource = {
+			models: undefined,
+			mcpClients: {
+				clients: [
+					{ config: { name: 'narrowed', connection_type: 'stdio', tools_to_execute: ['read_file'], stdio_config: { command: 'server' } } },
+					{ config: { name: 'no-tools', connection_type: 'stdio', tools_to_execute: [], stdio_config: { command: 'server' } } },
+					{ config: { name: 'absent', connection_type: 'stdio', stdio_config: { command: 'server' } } },
+					{ config: { name: 'open', connection_type: 'stdio', tools_to_execute: ['*'], stdio_config: { command: 'server' } } },
+				],
+			},
+			skills: undefined,
+			prompts: undefined,
+			agents: undefined,
+		};
+		const result = buildAgentConfigPublic(source);
+		expect(result.pub.mcp.map((entry) => entry.name)).toEqual(['open']);
+		expect(result.warnings.filter((warning) => warning.code === 'mcp-tools-restricted').map((warning) => warning.name))
+			.toEqual(['narrowed', 'no-tools', 'absent']);
 	});
 
 	test('produces an empty but valid public section when nothing is configured', () => {

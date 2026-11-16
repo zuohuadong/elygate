@@ -162,7 +162,7 @@ function isSecretHeader(token: string): boolean {
 }
 
 // A URL that carries userinfo (https://user:pass@host) authenticates on its own.
-const URL_WITH_USERINFO = /^[a-z][a-z0-9+.-]*:\/\/[^/\s@]+@/i;
+const URL_WITH_USERINFO = /[a-z][a-z0-9+.-]*:\/\/[^/\s@]*@/i;
 
 function tokenCarriesSecret(token: string): boolean {
 	const trimmed = token.trim().replace(/^(["'])(.*)\1$/, '$2');
@@ -224,6 +224,15 @@ function mcpEntries(payload: unknown, warnings: AgentConfigExportWarning[]): Acb
 			continue;
 		}
 		const enabled = booleanValue(config, 'disabled') !== true;
+		const clientTools = config.tools_to_execute;
+		// A client whose own allow-list withholds tools cannot be represented in ACB (no
+		// per-tool field), and the bundle's entry starts the server itself. An absent list
+		// means the same thing to callers as an empty one: no reachable tools
+		// (core/mcp/connect.go, core/mcp/utils.go shouldSkipToolForConfig).
+		if (!Array.isArray(clientTools) || !(clientTools.length === 1 && clientTools[0] === '*')) {
+			warnings.push({ code: 'mcp-tools-restricted', name });
+			continue;
+		}
 		if (connectionType !== 'stdio') {
 			// ACB puts HTTP/SSE endpoints in the encrypted secret section. A public
 			// export keeps the entry so a client can ask the user for the URL.

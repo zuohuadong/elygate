@@ -44,9 +44,9 @@ const MOCK_SOURCES = {
   },
   mcpClients: {
     clients: [
-      { config: { name: 'github', connection_type: 'stdio', stdio_config: { command: 'npx', args: ['--api-key', 'sk-e2e-secret-value'], envs: ['GITHUB_TOKEN=ghp_e2e_secret'] } } },
-      { config: { name: 'partially-granted', connection_type: 'stdio', stdio_config: { command: 'npx' } } },
-      { config: { name: 'unassigned-docs', connection_type: 'stdio', stdio_config: { command: 'npx' } } },
+      { config: { name: 'github', connection_type: 'stdio', tools_to_execute: ['*'], stdio_config: { command: 'npx', args: ['--api-key', 'sk-e2e-secret-value'], envs: ['GITHUB_TOKEN=ghp_e2e_secret'] } } },
+      { config: { name: 'partially-granted', connection_type: 'stdio', tools_to_execute: ['*'], stdio_config: { command: 'npx' } } },
+      { config: { name: 'unassigned-docs', connection_type: 'stdio', tools_to_execute: ['*'], stdio_config: { command: 'npx' } } },
     ],
     total_count: 3,
   },
@@ -137,6 +137,9 @@ test.describe('AgentConfig deep link per employee', () => {
   test('still delivers for a key whose only grant is an assigned virtual MCP', async ({ page }) => {
     await page.route('**/api/governance/virtual-keys/vk-1', (route) =>
       route.fulfill({ json: { virtual_key: { id: 'vk-1', name: 'alice-key', is_active: true, allow_all_providers: false, provider_configs: [], mcp_configs: [], agent_grants: [] }, virtual_mcp_ids: [12] } }),
+    )
+    await page.route('**/api/mcp/virtual-mcps/12', (route) =>
+      route.fulfill({ json: { virtual_mcp: { id: 12, name: 'team-tools', enabled: true, tools: [{ tool_names: ['github-read'] }] } } }),
     )
     await page.getByTestId('employee-agent-config-emp-1').click()
     await expect(page.getByText(/no models, MCP servers or agents|没有可用的模型/)).toHaveCount(0)

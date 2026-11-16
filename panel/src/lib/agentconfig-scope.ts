@@ -111,8 +111,10 @@ function isUnrestricted(list: string[]): boolean {
 function listAllows(list: string[], value: string, provider: string): boolean {
 	return list.some((entry) => {
 		if (matchEntry(entry, value)) return true;
+		// The catalog comparison is exact, provider name included, so the prefix is
+		// compared as written.
 		const prefix = `${provider}/`;
-		if (!entry.includes('/') || entry.slice(0, prefix.length).toLowerCase() !== prefix.toLowerCase()) return false;
+		if (!entry.startsWith(prefix)) return false;
 		return entry.slice(prefix.length) === value;
 	});
 }

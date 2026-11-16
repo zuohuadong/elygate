@@ -13,8 +13,8 @@ const SOURCES = {
 	},
 	mcpClients: {
 		clients: [
-			{ config: { name: 'github', connection_type: 'stdio', stdio_config: { command: 'npx' } } },
-			{ config: { name: 'docs', connection_type: 'stdio', stdio_config: { command: 'npx' } } },
+			{ config: { name: 'github', connection_type: 'stdio', tools_to_execute: ['*'], stdio_config: { command: 'npx' } } },
+			{ config: { name: 'docs', connection_type: 'stdio', tools_to_execute: ['*'], stdio_config: { command: 'npx' } } },
 		],
 	},
 	skills: { skills: [{ id: 'skill-1', name: 'Docs' }] },
@@ -229,9 +229,9 @@ describe('applyAgentConfigScope', () => {
 			...SOURCES,
 			mcpClients: {
 				clients: [
-					{ config: { name: 'public-client', allow_by_default: true } },
-					{ config: { name: 'private-client', allow_by_default: false } },
-					{ config: { name: 'named-restricted', allow_by_default: true } },
+					{ config: { name: 'public-client', allow_by_default: true, tools_to_execute: ['*'] } },
+					{ config: { name: 'private-client', allow_by_default: false, tools_to_execute: ['*'] } },
+					{ config: { name: 'named-restricted', allow_by_default: true, tools_to_execute: ['*'] } },
 				],
 			},
 		};
@@ -247,8 +247,8 @@ describe('applyAgentConfigScope', () => {
 			mcpClients: {
 				clients: [
 					{ config: { name: 'narrowed', tools_to_execute: ['read_file'], allow_by_default: true } },
-					{ config: { name: 'off', disabled: true, allow_by_default: true } },
-					{ config: { name: 'open', allow_by_default: true } },
+					{ config: { name: 'off', disabled: true, allow_by_default: true, tools_to_execute: ['*'] } },
+					{ config: { name: 'open', allow_by_default: true, tools_to_execute: ['*'] } },
 				],
 			},
 		};

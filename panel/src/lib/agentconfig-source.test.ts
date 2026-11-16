@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { loadAgentConfigSources } from './agentconfig-source';
+import { assignedVirtualMcpGrantsTools, loadAgentConfigSources } from './agentconfig-source';
 
 const originalFetch = globalThis.fetch;
 
@@ -53,9 +53,42 @@ describe('loadAgentConfigSources', () => {
 		expect((loaded.source.skills as { skills: unknown[] }).skills).toHaveLength(1);
 	});
 
+	test('a paginated endpoint that never reaches its last page fails instead of truncating', async () => {
+		let call = 0;
+		globalThis.fetch = (async () => {
+			call += 1;
+			// No total anywhere: only the page cap can stop this.
+			return jsonResponse({ clients: Array.from({ length: 100 }, (_, index) => ({ config: { name: `client-${call}-${index}` } })) });
+		}) as unknown as typeof fetch;
+		const loaded = await loadAgentConfigSources();
+		expect(loaded.failed).toContain('mcpClients');
+	});
+
 	test('a non-200 response is a failed source', async () => {
 		mockSources({ ...HEALTHY, '/api/skills': () => jsonResponse({ error: 'unavailable' }, 503) });
 		const loaded = await loadAgentConfigSources();
 		expect(loaded.failed).toEqual(['skills']);
+	});
+});
+
+describe('assignedVirtualMcpGrantsTools', () => {
+	test('an enabled virtual MCP with tool names grants something', async () => {
+		mockSources({
+			'/api/mcp/virtual-mcps/12': () => jsonResponse({ virtual_mcp: { id: 12, enabled: true, tools: [{ tool_names: ['github-read'] }] } }),
+		});
+		expect(await assignedVirtualMcpGrantsTools(['12'])).toBe(true);
+	});
+
+	test('a disabled or tool-less virtual MCP grants nothing', async () => {
+		mockSources({
+			'/api/mcp/virtual-mcps/12': () => jsonResponse({ virtual_mcp: { id: 12, enabled: false, tools: [{ tool_names: ['github-read'] }] } }),
+			'/api/mcp/virtual-mcps/13': () => jsonResponse({ virtual_mcp: { id: 13, enabled: true, tools: [{ tool_names: [] }] } }),
+		});
+		expect(await assignedVirtualMcpGrantsTools(['12', '13'])).toBe(false);
+	});
+
+	test('an unreadable virtual MCP is not assumed to grant anything', async () => {
+		mockSources({ '/api/mcp/virtual-mcps/99': () => jsonResponse({ error: 'not found' }, 404) });
+		expect(await assignedVirtualMcpGrantsTools(['99'])).toBe(false);
 	});
 });

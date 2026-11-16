@@ -8,7 +8,7 @@
 	import { ACB_FILE_EXTENSION, ACB_MIME_TYPE, bundleToFileString } from '../lib/agentconfig';
 	import { buildScopedAgentConfig } from '../lib/agentconfig-assignment';
 	import { scopeFromVirtualKey, vkScopeProblem } from '../lib/agentconfig-scope';
-	import { loadAgentConfigSources, type AgentConfigSourceName } from '../lib/agentconfig-source';
+	import { assignedVirtualMcpGrantsTools, loadAgentConfigSources, type AgentConfigSourceName } from '../lib/agentconfig-source';
 
 	interface Props { resourceName: string; }
 	interface EmployeeForm {
@@ -257,6 +257,16 @@
 			const loaded = await loadAgentConfigSources();
 			const label = `${stringValue(employee, 'name') || stringValue(employee, 'username') || employeeId} · ${assignedKeyName(employee)}`;
 			const scope = scopeFromVirtualKey(key);
+			// The ids alone do not say whether those virtual MCPs offer anything: a disabled
+			// or empty one grants nothing, and treating the assignment as access would hand
+			// out a bundle plus a claim that does not hold.
+			if (scope.mcpOutsideKey) {
+				const wrapper = key as { virtual_mcp_ids?: unknown };
+				const ids = Array.isArray(wrapper.virtual_mcp_ids)
+					? wrapper.virtual_mcp_ids.map((id) => String(id)).filter(Boolean)
+					: [];
+				scope.mcpOutsideKey = await assignedVirtualMcpGrantsTools(ids);
+			}
 			const scoped = await buildScopedAgentConfig(loaded.source, scope, label, key);
 			// A failed source can be the only one the key grants, so report the failure
 			// before concluding the key grants nothing.

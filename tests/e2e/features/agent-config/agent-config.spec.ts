@@ -9,6 +9,7 @@ const MOCK_BUNDLE_SOURCES = {
       config: {
         name: 'github',
         connection_type: 'stdio',
+        tools_to_execute: ['*'],
         stdio_config: { command: 'npx', args: ['-y', '@modelcontextprotocol/server-github'], envs: ['GITHUB_TOKEN=ghp_e2e_secret'] },
       },
     }],
