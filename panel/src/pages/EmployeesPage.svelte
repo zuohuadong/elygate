@@ -5,6 +5,10 @@
 	import { displayError } from '../lib/forms';
 	import { getListPayload, requestJson, type JsonRecord } from '../lib/api';
 	import { withBasePath } from '../lib/base-path';
+	import { ACB_FILE_EXTENSION, ACB_MIME_TYPE, bundleToFileString } from '../lib/agentconfig';
+	import { buildScopedAgentConfig } from '../lib/agentconfig-assignment';
+	import { scopeFromVirtualKey } from '../lib/agentconfig-scope';
+	import { loadAgentConfigSources } from '../lib/agentconfig-source';
 
 	interface Props { resourceName: string; }
 	interface EmployeeForm {
@@ -36,6 +40,7 @@
 	let returnFocusElement = $state<HTMLElement | null>(null);
 	let loadSeq = 0;
 	let resetIds = $state<string[]>([]);
+	let agentConfigIds = $state<string[]>([]);
 	const filteredEmployees = $derived.by(() => {
 		const query = search.trim().toLowerCase();
 		if (!query) return employees;
@@ -43,6 +48,7 @@
 			.some((value) => String(value ?? '').toLowerCase().includes(query)));
 	});
 	function isResetting(id: string): boolean { return resetIds.includes(id); }
+	function isCopyingAgentConfig(id: string): boolean { return agentConfigIds.includes(id); }
 
 	function text(zh: string, en: string): string { return i18n.locale === 'zh-CN' ? zh : en; }
 	function emptyForm(): EmployeeForm {
@@ -204,6 +210,54 @@
 		}
 	}
 
+	// copyAgentConfig hands the employee's own key its AgentConfig deep link: the
+	// bundle is narrowed to the models, MCP servers and agents that key is allowed to
+	// use, so the import cannot advertise access the key does not have.
+	async function copyAgentConfig(employee: JsonRecord): Promise<void> {
+		const keyId = assignedKeyId(employee);
+		const employeeId = stringValue(employee, 'id');
+		if (!keyId) {
+			error = text('该员工尚未绑定虚拟密钥，无法生成配置。', 'This employee has no bound virtual key, so no configuration can be built.');
+			return;
+		}
+		if (isCopyingAgentConfig(employeeId)) return;
+		agentConfigIds = [...agentConfigIds, employeeId];
+		error = '';
+		notice = '';
+		try {
+			const key = await requestJson<JsonRecord>(`/api/governance/virtual-keys/${encodeURIComponent(keyId)}`);
+			const loaded = await loadAgentConfigSources();
+			const label = `${stringValue(employee, 'name') || stringValue(employee, 'username') || employeeId} · ${assignedKeyName(employee)}`;
+			const scoped = await buildScopedAgentConfig(loaded.source, scopeFromVirtualKey(key), label);
+			if (!scoped.hasScopedContent) {
+				throw new Error(text('该密钥没有可用的模型、MCP 或 Agent 授权，生成的配置为空。', 'This key grants no models, MCP servers or agents, so the bundle would be empty.'));
+			}
+			const incomplete = loaded.failed.length > 0
+				? text('（部分配置来源读取失败，请稍后重试）', ' (some configuration sources failed to load; retry later)')
+				: '';
+			if (!scoped.fitsDeepLink) {
+				const fileName = `${label.replace(/[^\w.-]+/g, '-')}${ACB_FILE_EXTENSION}`;
+				const objectUrl = URL.createObjectURL(new Blob([bundleToFileString(scoped.bundle)], { type: ACB_MIME_TYPE }));
+				const anchor = document.createElement('a');
+				anchor.href = objectUrl;
+				anchor.download = fileName;
+				document.body.appendChild(anchor);
+				anchor.click();
+				anchor.remove();
+				URL.revokeObjectURL(objectUrl);
+				notice = text(`授权范围过大，深链超出长度上限，已改为下载 ${fileName}${incomplete}。`, `The grant is too large for a deep link, so ${fileName} was downloaded instead${incomplete}.`);
+				return;
+			}
+			if (!navigator.clipboard) throw new Error(text('浏览器不支持剪贴板，请改用 AgentConfig 页面下载。', 'The browser has no clipboard access; download the bundle from the AgentConfig page instead.'));
+			await navigator.clipboard.writeText(scoped.deepLink);
+			notice = text(`已复制该员工专属的 AgentConfig 深链${incomplete}。`, `Copied this employee's AgentConfig deep link${incomplete}.`);
+		} catch (cause) {
+			error = displayError(cause, text('生成 AgentConfig 失败。', 'Failed to build the AgentConfig bundle.'));
+		} finally {
+			agentConfigIds = agentConfigIds.filter((current) => current !== employeeId);
+		}
+	}
+
 	async function copyCredential(): Promise<void> {
 		if (!revealedCredential) return;
 		try {
@@ -236,7 +290,7 @@
 	<div class="toolbar"><input type="search" bind:value={search} placeholder={text('搜索姓名、用户名、部门或岗位', 'Search name, username, department, or role')} /><span>{filteredEmployees.length} {text('名员工', 'employees')}</span></div>
 	<div class="table-wrap" aria-busy={loading}>
 		<table><thead><tr><th>{text('员工', 'Employee')}</th><th>{text('部门 / 岗位', 'Department / role')}</th><th>{text('适用软件（允许使用的客户端）', 'Applications (allowed clients)')}</th><th>{text('账号类型', 'Account type')}</th><th>{text('专属密钥', 'Dedicated key')}</th><th>{text('状态', 'Status')}</th><th>{text('操作', 'Actions')}</th></tr></thead>
-		<tbody>{#each filteredEmployees as employee (stringValue(employee, 'id'))}<tr><td><strong>{stringValue(employee, 'name')}</strong><small>{text('登录账号', 'Login account')}：{stringValue(employee, 'username')}</small></td><td>{stringValue(employee, 'department') || '—'}<small>{stringValue(employee, 'job_title') || '—'}</small></td><td>{applicationLabel(employee.applications)}</td><td>{stringValue(employee, 'account_type') || '—'}</td><td>{assignedKeyName(employee)}{#if assignedKeyName(employee) !== '—'}<small class="bound">{text('已绑定', 'Bound')}</small>{/if}</td><td><span class:active={boolValue(employee, 'is_active')} class="status">{boolValue(employee, 'is_active') ? text('启用', 'Active') : text('停用', 'Disabled')}</span></td><td class="actions"><button type="button" onclick={() => openEdit(employee)}>{text('编辑', 'Edit')}</button><button type="button" disabled={isResetting(stringValue(employee, 'id'))} onclick={() => void resetPassword(employee)}>{text('重置密码', 'Reset password')}</button></td></tr>{:else}<tr><td colspan="7" class="empty">{loading ? text('正在加载…', 'Loading…') : text('暂无员工。', 'No employees.')}</td></tr>{/each}</tbody></table>
+		<tbody>{#each filteredEmployees as employee (stringValue(employee, 'id'))}<tr><td><strong>{stringValue(employee, 'name')}</strong><small>{text('登录账号', 'Login account')}：{stringValue(employee, 'username')}</small></td><td>{stringValue(employee, 'department') || '—'}<small>{stringValue(employee, 'job_title') || '—'}</small></td><td>{applicationLabel(employee.applications)}</td><td>{stringValue(employee, 'account_type') || '—'}</td><td>{assignedKeyName(employee)}{#if assignedKeyName(employee) !== '—'}<small class="bound">{text('已绑定', 'Bound')}</small>{/if}</td><td><span class:active={boolValue(employee, 'is_active')} class="status">{boolValue(employee, 'is_active') ? text('启用', 'Active') : text('停用', 'Disabled')}</span></td><td class="actions"><button type="button" onclick={() => openEdit(employee)}>{text('编辑', 'Edit')}</button><button type="button" disabled={isResetting(stringValue(employee, 'id'))} onclick={() => void resetPassword(employee)}>{text('重置密码', 'Reset password')}</button><button type="button" data-testid={`employee-agent-config-${stringValue(employee, 'id')}`} disabled={!assignedKeyId(employee) || isCopyingAgentConfig(stringValue(employee, 'id'))} onclick={() => void copyAgentConfig(employee)}>{isCopyingAgentConfig(stringValue(employee, 'id')) ? text('生成中…', 'Building…') : text('复制 AgentConfig', 'Copy AgentConfig')}</button></td></tr>{:else}<tr><td colspan="7" class="empty">{loading ? text('正在加载…', 'Loading…') : text('暂无员工。', 'No employees.')}</td></tr>{/each}</tbody></table>
 	</div>
 </section>
 

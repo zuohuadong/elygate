@@ -2,7 +2,6 @@
 	import { onMount } from 'svelte';
 	import { useTranslation } from '@svadmin/core/i18n';
 	import { getAppName } from '../lib/branding';
-	import { requestJson } from '../lib/api';
 	import { displayError } from '../lib/forms';
 	import {
 		ACB_FILE_EXTENSION,
@@ -19,11 +18,19 @@
 		type AgentConfigExportSource,
 		type AgentConfigExportWarningCode,
 	} from '../lib/agentconfig-export';
+	import { AGENT_CONFIG_SOURCE_NAMES, loadAgentConfigSources, type AgentConfigSourceName } from '../lib/agentconfig-source';
 
 	interface Props { resourceName: string; }
 
 	let { resourceName }: Props = $props();
 	const i18n = useTranslation();
+	const sourceLabels: Record<AgentConfigSourceName, string> = {
+		models: i18n.locale === 'zh-CN' ? '模型' : 'models',
+		mcpClients: 'MCP',
+		skills: 'Skills',
+		prompts: i18n.locale === 'zh-CN' ? '提示词' : 'prompts',
+		agents: 'Agents',
+	};
 	let label = $state('');
 	let source = $state.raw<AgentConfigExportSource>({
 		models: { models: [] },
@@ -69,76 +76,15 @@
 		return `${text(zh, en)}${suffix}`;
 	}
 
-	async function fetchPaged(path: string, key: string, totalKeys: string[]): Promise<unknown> {
-		const pageSize = 100;
-		const items: unknown[] = [];
-		const seen = new Set<string>();
-		let offset = 0;
-		let total = Number.POSITIVE_INFINITY;
-		for (let page = 0; page < 50; page += 1) {
-			const separator = path.includes('?') ? '&' : '?';
-			const payload = await requestJson<Record<string, unknown>>(`${path}${separator}limit=${pageSize}&offset=${offset}`);
-			const rows = Array.isArray(payload[key]) ? payload[key] as unknown[] : [];
-			for (const row of rows) {
-				const identity = typeof row === 'object' && row !== null
-					? JSON.stringify(Object.fromEntries(Object.entries(row).filter(([field]) => field !== 'tools' && field !== 'resources' && field !== 'prompts')))
-					: String(row);
-				if (seen.has(identity)) continue;
-				seen.add(identity);
-				items.push(row);
-			}
-			for (const totalKey of totalKeys) {
-				const candidate = payload[totalKey];
-				if (typeof candidate === 'number' && Number.isFinite(candidate)) {
-					total = candidate;
-					break;
-				}
-			}
-			offset += rows.length;
-			if (rows.length === 0 || offset >= total || items.length >= 5000) break;
-		}
-		return { [key]: items };
-	}
-
 	async function load(): Promise<void> {
 		isLoading = true;
 		error = '';
 		notice = '';
 		copied = false;
-		sourceErrors = [];
-		const results = await Promise.allSettled([
-			requestJson<unknown>('/api/models?unfiltered=true&limit=0'),
-			fetchPaged('/api/mcp/clients', 'clients', ['total_count', 'total']),
-			fetchPaged('/api/skills', 'skills', ['total']),
-			requestJson<unknown>('/api/prompt-repo/prompts'),
-			requestJson<unknown>('/api/agents'),
-		]);
-		const names: [string, string][] = [
-			['模型', 'models'],
-			['MCP', 'MCP'],
-			['Skills', 'skills'],
-			['提示词', 'prompts'],
-			['Agents', 'agents'],
-		];
-		const failureLabels: string[] = [];
-		const values: unknown[] = [];
-		results.forEach((result, index) => {
-			if (result.status === 'fulfilled') {
-				values[index] = result.value;
-			} else {
-				values[index] = undefined;
-				failureLabels.push(text(...names[index]));
-			}
-		});
-		source = {
-			models: values[0] ?? { models: [] },
-			mcpClients: values[1] ?? { clients: [] },
-			skills: values[2] ?? { skills: [] },
-			prompts: values[3] ?? { prompts: [] },
-			agents: values[4] ?? { agents: [] },
-		};
-		sourceErrors = failureLabels;
-		if (results.every((result) => result.status === 'rejected')) {
+		const loaded = await loadAgentConfigSources();
+		source = loaded.source;
+		sourceErrors = loaded.failed.map((name) => sourceLabels[name]);
+		if (loaded.failed.length === AGENT_CONFIG_SOURCE_NAMES.length) {
 			error = text('所有配置数据都加载失败，无法生成配置包。', 'Every configuration source failed to load, so no bundle can be generated.');
 		}
 		if (!label) label = defaultLabel();
