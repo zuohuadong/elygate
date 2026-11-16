@@ -163,11 +163,14 @@ function isSecretHeader(token: string): boolean {
 
 // A URL that carries userinfo (https://user:pass@host) authenticates on its own.
 const URL_WITH_USERINFO = /[a-z][a-z0-9+.-]*:\/\/[^/\s@]*@/i;
+// A signed URL authenticates through its query string (S3 X-Amz-Signature, ?token=,
+// ?sig=, ...). Handing it to the public payload is handing over the credential.
+const URL_SECRET_QUERY = /[?&](?:x-amz-signature|x-amz-credential|x-amz-security-token|sig|signature|token|access[_-]?token|api[_-]?key|key|secret|password|passwd|pwd|auth|code|ticket)=/i;
 
 function tokenCarriesSecret(token: string): boolean {
 	const trimmed = token.trim().replace(/^(["'])(.*)\1$/, '$2');
 	if (!trimmed) return false;
-	if (URL_WITH_USERINFO.test(trimmed)) return true;
+	if (URL_WITH_USERINFO.test(trimmed) || URL_SECRET_QUERY.test(trimmed)) return true;
 	if (SECRET_TOKEN.test(trimmed) || AUTH_HEADER.test(trimmed) || isSecretAssignment(trimmed) || isSecretHeader(trimmed)) return true;
 	if (!trimmed.startsWith('-')) return false;
 	const name = flagName(trimmed);
