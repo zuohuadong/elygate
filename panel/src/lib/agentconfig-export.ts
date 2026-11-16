@@ -113,14 +113,25 @@ function modelEntries(payload: unknown, warnings: AgentConfigExportWarning[]): A
 // pairing whose name is one, an authentication header, or a bare token-shaped value.
 // Dropping too little leaks; dropping too much only means the user must supply that
 // argument themselves, so the decision is shape-based rather than statistical.
-const SECRET_NAME = /(?:^|[^a-z0-9])(?:api[-_]?key|apikey|token|secret|password|passwd|pwd|auth|authorization|credential|bearer|access[-_]?key|private[-_]?key)$/i;
+// Matching runs on the normalized name (letters and digits only), so clientSecret,
+// CLIENT_SECRET and client-secret are one word. A bare `key` is deliberately not in
+// the flag list: --sort-key and --partition-key are ordinary arguments. It is accepted
+// for assignments and header names, where OPENAI_KEY and X-Auth-Token carry secrets.
+const SECRET_SUFFIX = /(?:apikey|accesskey|privatekey|token|secret|password|passwd|pwd|auth|authorization|credential|bearer)$/;
+const SECRET_SUFFIX_WITH_KEY = /(?:apikey|accesskey|privatekey|token|secret|password|passwd|pwd|auth|authorization|credential|bearer|key)$/;
+
+function normalizeName(name: string): string {
+	return name.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+}
 const SECRET_TOKEN = /^(?:sk-[a-z0-9_-]{8,}|gh[pousr]_[a-z0-9]{8,}|github_pat_[a-z0-9_]{8,}|xox[abposr]-[a-z0-9-]{8,}|akia[a-z0-9]{12,}|ey[a-z0-9_-]{8,}\.[a-z0-9_-]{8,}\.[a-z0-9_-]{8,})$/i;
 const AUTH_HEADER = /^(?:authorization|proxy-authorization|x-api-key|api-key)\s*:/i;
 // -H/--header carry arbitrary headers, so they are treated as credential flags.
 const HEADER_FLAG = /^(?:h|header|headers)$/i;
 
-function isSecretName(name: string): boolean {
-	return SECRET_NAME.test(name.trim());
+function isSecretName(name: string, allowBareKey = true): boolean {
+	const normalized = normalizeName(name);
+	if (!normalized) return false;
+	return (allowBareKey ? SECRET_SUFFIX_WITH_KEY : SECRET_SUFFIX).test(normalized);
 }
 
 function flagName(token: string): string {
@@ -138,13 +149,22 @@ function isSecretAssignment(token: string): boolean {
 	return parts.slice(0, -1).some((part) => isSecretName(part));
 }
 
+// A header carries its name before the colon (X-Auth-Token: value).
+function isSecretHeader(token: string): boolean {
+	const separator = token.indexOf(':');
+	if (separator <= 0) return false;
+	const name = token.slice(0, separator);
+	if (!/^[a-z0-9][a-z0-9-]*$/i.test(name.trim())) return false;
+	return isSecretName(name) || AUTH_HEADER.test(token.trim());
+}
+
 function tokenCarriesSecret(token: string): boolean {
 	const trimmed = token.trim().replace(/^(["'])(.*)\1$/, '$2');
 	if (!trimmed) return false;
-	if (SECRET_TOKEN.test(trimmed) || AUTH_HEADER.test(trimmed) || isSecretAssignment(trimmed)) return true;
+	if (SECRET_TOKEN.test(trimmed) || AUTH_HEADER.test(trimmed) || isSecretAssignment(trimmed) || isSecretHeader(trimmed)) return true;
 	if (!trimmed.startsWith('-')) return false;
 	const name = flagName(trimmed);
-	return isSecretName(name) || HEADER_FLAG.test(name);
+	return isSecretName(name, false) || HEADER_FLAG.test(name);
 }
 
 // A command line is one string, so it is inspected token by token. Token-level

@@ -152,9 +152,10 @@ export function scopeFromVirtualKey(key: unknown): AgentConfigScope {
 	const agentNames = recordArray(record.agent_grants)
 		.map((grant) => (typeof grant.agent_name === 'string' ? grant.agent_name.trim() : ''))
 		.filter(Boolean);
+	// The detail endpoint serializes these as numbers ([]uint), so both forms count.
 	const virtualMcpIDs = [wrapper.virtual_mcp_ids, record.virtual_mcp_ids]
 		.flatMap((value) => (Array.isArray(value) ? value : []))
-		.filter((id): id is string => typeof id === 'string' && id.trim() !== '');
+		.filter((id) => (typeof id === 'string' && id.trim() !== '') || (typeof id === 'number' && Number.isFinite(id)));
 	return {
 		allowAllProviders,
 		providers,
@@ -243,14 +244,20 @@ function filterModels(payload: unknown, scope: AgentConfigScope): unknown {
 	return { ...payload, models };
 }
 
-function filterMcp(payload: unknown, scope: AgentConfigScope, whole: Set<string>): unknown {
+function filterMcp(payload: unknown, scope: AgentConfigScope, whole: Set<string>, partial: Set<string>): unknown {
 	if (!scope.restrictMcp) return payload;
 	if (!isJsonRecord(payload) || !Array.isArray(payload.clients)) return payload;
 	const clients = payload.clients.filter((client) => {
 		if (!isJsonRecord(client)) return false;
 		const config = isJsonRecord(client.config) ? client.config : client;
 		const name = typeof config.name === 'string' ? config.name.trim() : '';
-		return Boolean(name) && whole.has(name);
+		if (!name) return false;
+		if (whole.has(name)) return true;
+		// Governance registers a client the key names — even with no tools — so the
+		// allow-by-default fallback cannot reopen it. Only a client the key does not
+		// mention at all is opened up by allow_by_default.
+		if (partial.has(name)) return false;
+		return config.allow_by_default === true;
 	});
 	return { ...payload, clients };
 }
@@ -294,7 +301,7 @@ export function applyAgentConfigScope(source: AgentConfigExportSource, scope: Ag
 	return {
 		source: {
 			models: filterModels(source.models, scope),
-			mcpClients: filterMcp(source.mcpClients, scope, whole),
+			mcpClients: filterMcp(source.mcpClients, scope, whole, partial),
 			skills: source.skills,
 			prompts: source.prompts,
 			agents: filterAgents(source.agents, scope),

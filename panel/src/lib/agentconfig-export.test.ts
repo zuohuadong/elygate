@@ -173,6 +173,33 @@ describe('AgentConfig export mapping', () => {
 		expect(result.pub.mcp[1].command).toBe('cli auth login');
 	});
 
+	test('matches credential names by normalized suffix, not only a fixed list', () => {
+		const source: AgentConfigExportSource = {
+			models: undefined,
+			mcpClients: {
+				clients: [
+					{
+						config: {
+							name: 'names',
+							connection_type: 'stdio',
+							stdio_config: {
+								command: 'server',
+								args: ['--clientSecret=plainvalue', '--client-secret', 'plainvalue', 'OPENAI_KEY=plainvalue', 'X-Auth-Token: plainvalue', '--sort-key', 'created_at'],
+							},
+						},
+					},
+				],
+			},
+			skills: undefined,
+			prompts: undefined,
+			agents: undefined,
+		};
+		const result = buildAgentConfigPublic(source);
+		// An ordinary key argument survives; every credential-shaped name does not.
+		expect(result.pub.mcp[0].args).toEqual(['--sort-key', 'created_at']);
+		expect(JSON.stringify(result.pub)).not.toContain('plainvalue');
+	});
+
 	test('produces an empty but valid public section when nothing is configured', () => {
 		const result = buildAgentConfigPublic({ models: undefined, mcpClients: undefined, skills: undefined, prompts: undefined, agents: undefined });
 		expect(result.counts).toEqual({ models: 0, mcp: 0, skills: 0, prompts: 0, agents: 0 });

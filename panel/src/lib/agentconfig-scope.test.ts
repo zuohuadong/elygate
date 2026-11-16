@@ -208,6 +208,29 @@ describe('applyAgentConfigScope', () => {
 		expect(scoped.warnings.map((warning) => warning.code)).toEqual(['mcp-grants-elsewhere']);
 	});
 
+	test('numeric virtual MCP ids, as the endpoint serializes them, also count', () => {
+		const key = { virtual_key: { mcp_configs: [] }, virtual_mcp_ids: [12] };
+		const scoped = applyAgentConfigScope(SOURCES, scopeFromVirtualKey(key), key);
+		expect(scoped.warnings.map((warning) => warning.code)).toEqual(['mcp-grants-elsewhere']);
+	});
+
+	test('a client governance opens to every caller is kept, unless the key names it', () => {
+		const sources = {
+			...SOURCES,
+			mcpClients: {
+				clients: [
+					{ config: { name: 'public-client', allow_by_default: true } },
+					{ config: { name: 'private-client', allow_by_default: false } },
+					{ config: { name: 'named-restricted', allow_by_default: true } },
+				],
+			},
+		};
+		const key = { virtual_key: { mcp_configs: [{ mcp_client: { name: 'named-restricted' }, tools_to_execute: ['read_file'] }] } };
+		const scoped = applyAgentConfigScope(sources, scopeFromVirtualKey(key), key);
+		// A client the key names stays closed even though it is allowed by default.
+		expect(names(scoped.source.mcpClients, 'clients')).toEqual(['public-client']);
+	});
+
 	test('a key with no grants exports nothing reachable', () => {
 		const key = { virtual_key: {} };
 		const scoped = applyAgentConfigScope(SOURCES, scopeFromVirtualKey(key), key);

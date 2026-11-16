@@ -248,7 +248,7 @@
 			const problem = vkScopeProblem(key);
 			if (problem === 'inactive') throw new Error(text('该员工的虚拟密钥已停用，无法生成可用配置。', 'The bound virtual key is disabled, so there is no usable configuration to hand out.'));
 			if (problem === 'expired') throw new Error(text('该员工的虚拟密钥已过期，请先续期后重试。', 'The bound virtual key has expired; renew it and retry.'));
-			if (problem === 'unreadable') throw new Error(text('虚拟密钥响应无法识别（过期时间字段异常），已拒绝生成配置。', 'The virtual key response could not be read (unexpected expiry value); refusing to build a bundle from it.'));
+			if (problem === 'unreadable') throw new Error(text('虚拟密钥响应无法识别（可能后端异常或字段变更），已拒绝据此生成配置。', 'The virtual key response could not be read (a backend fault or a changed field), so no bundle was built from it.'));
 			const loaded = await loadAgentConfigSources();
 			const label = `${stringValue(employee, 'name') || stringValue(employee, 'username') || employeeId} · ${assignedKeyName(employee)}`;
 			const scope = scopeFromVirtualKey(key);
@@ -283,7 +283,15 @@
 				// still have to deliver this key's own bundle; the global export is not a
 				// substitute because it describes the whole gateway.
 				const fileName = `${label.replace(/[^\w.-]+/g, '-')}${ACB_FILE_EXTENSION}`;
-				downloadBundleFile(fileName, bundleToFileString(scoped.bundle));
+				// bundleToFileString refuses a payload above the ACB file limit; say that
+				// plainly instead of falling through to a generic failure.
+				let contents: string;
+				try {
+					contents = bundleToFileString(scoped.bundle);
+				} catch {
+					throw new Error(text('该密钥的授权范围超过 AgentConfig 文件上限（1 MB），无法交付；请缩小授权范围后重试。', 'This key grants more than the 1 MB AgentConfig file limit allows, so nothing can be delivered; narrow the grant and retry.'));
+				}
+				downloadBundleFile(fileName, contents);
 				const reason = !scoped.fitsDeepLink
 					? text('授权范围超出深链长度上限', 'the grant exceeds the deep-link length limit')
 					: !navigator.clipboard
