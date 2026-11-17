@@ -191,12 +191,20 @@ describe('applyAgentConfigScope', () => {
 		expect(names(applyAgentConfigScope(SOURCES, scopeFromVirtualKey(key), key).source.models, 'models')).toEqual([]);
 	});
 
-	test('a block-everything row blocks only itself, and the other row still grants', () => {
+	test('a blacklist on any row denies the model for the whole provider', () => {
 		const key = { virtual_key: { allow_all_providers: false, provider_configs: [
 			{ provider: 'openai', allow_all_keys: true, allowed_models: ['*'], blacklisted_models: ['*'] },
 			{ provider: 'openai', allow_all_keys: true, allowed_models: ['gpt-4o'], blacklisted_models: ['gpt-4o-mini'] },
 		] } };
-		expect(names(applyAgentConfigScope(SOURCES, scopeFromVirtualKey(key), key).source.models, 'models')).toEqual(['openai/gpt-4o']);
+		expect(names(applyAgentConfigScope(SOURCES, scopeFromVirtualKey(key), key).source.models, 'models')).toEqual([]);
+	});
+
+	test('a row that allows a model another row blacklists still denies it', () => {
+		const key = { virtual_key: { allow_all_providers: false, provider_configs: [
+			{ provider: 'openai', allow_all_keys: true, allowed_models: ['*'], blacklisted_models: ['gpt-4o'] },
+			{ provider: 'openai', allow_all_keys: true, allowed_models: ['gpt-4o'], blacklisted_models: [] },
+		] } };
+		expect(names(applyAgentConfigScope(SOURCES, scopeFromVirtualKey(key), key).source.models, 'models')).toEqual(['openai/gpt-4o-mini']);
 	});
 
 	test('a row whose own key withholds the model grants nothing, even if another row allows it', () => {

@@ -190,6 +190,29 @@ test.describe('AgentConfig deep link per employee', () => {
     await expect(page.getByText(/grants no models|没有可用的模型/)).toBeVisible()
   })
 
+  test('a virtual MCP over a partially-granted client is a grant the bundle cannot express', async ({ page }) => {
+    await page.route('**/api/governance/virtual-keys/vk-1', (route) =>
+      route.fulfill({ json: { virtual_key: { id: 'vk-1', name: 'alice-key', is_active: true, allow_all_providers: false, provider_configs: [], mcp_configs: [], agent_grants: [] }, virtual_mcp_ids: [12] } }),
+    )
+    await page.route('**/api/mcp/virtual-mcps/12', (route) =>
+      route.fulfill({ json: { virtual_mcp: { id: 12, name: 'team-tools', enabled: true, tools: [{ mcp_client_id: 'client-partial', tool_names: ['github-read'] }] } } }),
+    )
+    await page.route('**/api/mcp/clients?*', (route) => route.fulfill({ json: {
+      clients: [{ config: { client_id: 'client-partial', name: 'client-partial', connection_type: 'stdio', tools_to_execute: ['read_file'], stdio_config: { command: 'npx' } } }],
+      total_count: 1,
+    } }))
+    await page.route('**/api/agents', (route) => route.fulfill({ json: { agents: [] } }))
+    await page.route('**/api/models?*', (route) => route.fulfill({ json: { models: [] } }))
+    await page.getByTestId('employee-agent-config-emp-1').click()
+    // The grant is real, so the bundle is delivered; the client itself cannot be expressed
+    // in ACB, and the notice says one item was narrowed or omitted.
+    await expect(page.getByRole('status').filter({ hasText: /items narrowed or omitted|项已收窄或省略/ })).toBeVisible()
+    await expect(page.getByText(/grants no models|没有可用的模型/)).toHaveCount(0)
+    const clipboard = await page.evaluate(() => navigator.clipboard.readText())
+    const bundle = JSON.parse(Buffer.from(clipboard.slice('agentconfig://import?v=1&bundle='.length), 'base64url').toString('utf8'))
+    expect(bundle.pub.mcp).toEqual([])
+  })
+
   test('says the virtual MCP could not be read instead of claiming no grant', async ({ page }) => {
     await page.route('**/api/governance/virtual-keys/vk-1', (route) =>
       route.fulfill({ json: { virtual_key: { id: 'vk-1', name: 'alice-key', is_active: true, allow_all_providers: false, provider_configs: [], mcp_configs: [], agent_grants: [] }, virtual_mcp_ids: [12] } }),

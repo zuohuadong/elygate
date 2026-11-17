@@ -279,15 +279,17 @@ function keySupportsModel(key: AgentConfigKeyGrant, provider: string, id: string
 	return key.vllmModel === '' || key.vllmModel === id;
 }
 
-// modelAllowed keeps the rows apart: a row grants the model only when its own list allows
-// it and one of its own keys can serve it. Unioning the rows would export a model that
-// one row allows but only another row's keys could serve.
+// modelAllowed keeps the rows apart in one direction only. A deny is provider-wide — the
+// gateway refuses a model any row blacklists (framework/grant blacklistsModel iterates
+// every permit) — while an allow has to come from a row whose own keys can serve the
+// model. Unioning the allows across rows would export a model one row allows but only
+// another row's keys could serve.
 function modelAllowed(scope: AgentConfigScope, provider: string, id: string): boolean {
 	const rule = scope.providers[provider];
 	if (!rule) return scope.allowAllProviders;
+	if (rule.grants.some((grant) => grant.blockedAll || listBlocks(grant.blocked, id))) return false;
 	return rule.grants.some((grant) => {
 		if (!grant.hasCredential) return false;
-		if (grant.blockedAll || listBlocks(grant.blocked, id)) return false;
 		if (!(grant.allowedUnrestricted || listAllows(grant.allowed, id, provider))) return false;
 		if (grant.keys.length === 0) return true;
 		return grant.keys.some((key) => keySupportsModel(key, provider, id));

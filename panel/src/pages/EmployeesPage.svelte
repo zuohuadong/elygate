@@ -280,10 +280,12 @@
 					const record = config as Record<string, unknown>;
 					const id = typeof record.client_id === 'string' ? record.client_id : '';
 					if (!id || record.disabled === true) continue;
-					// An absent or null list means the same to callers as an empty one: no
-					// reachable tools (core/schemas/mcp.go ToolsToExecute semantics).
+					// Reachability, not expressibility: a client that exposes a named subset of
+					// tools still serves them to a virtual MCP spec that names one, even though
+					// no ACB entry can carry that subset. An absent or null list reaches
+					// nothing (core/schemas/mcp.go ToolsToExecute semantics).
 					const tools = record.tools_to_execute;
-					if (!Array.isArray(tools) || !(tools.length === 1 && tools[0] === '*')) continue;
+					if (!Array.isArray(tools) || tools.length === 0) continue;
 					usableClientIDs.add(id);
 				}
 				const grant = await assignedVirtualMcpGrants(ids, usableClientIDs);
