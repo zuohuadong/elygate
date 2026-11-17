@@ -7490,3 +7490,51 @@ func TestWebhookEndpointCreateStampsCallerTimes(t *testing.T) {
 	assert.WithinDuration(t, fetched.CreatedAt, endpoint.CreatedAt, time.Second)
 	assert.WithinDuration(t, fetched.UpdatedAt, endpoint.UpdatedAt, time.Second)
 }
+
+// The virtual key detail read has to carry a bound key's own model rules: a caller that
+// only sees the allow-list cannot tell a disabled key, a blacklisted model, or a vLLM
+// key pinned to one served name, and would report access the gateway refuses.
+func TestGetVirtualKeyCarriesKeyModelRules(t *testing.T) {
+	ctx := context.Background()
+	store := setupRDBTestStore(t)
+
+	disabled := false
+	served := "served-a"
+	key := &tables.TableKey{
+		KeyID:                 "key-with-rules",
+		Name:                  "key-with-rules",
+		Provider:              "openai",
+		Value:                 *schemas.NewSecretVar("sk-test"),
+		Models:                schemas.WhiteList{"*"},
+		BlacklistedModels:     schemas.BlackList{"gpt-4o"},
+		Enabled:               &disabled,
+		VLLMKeyConfig:         &schemas.VLLMKeyConfig{ModelName: served},
+	}
+	require.NoError(t, store.DB().WithContext(ctx).Create(key).Error)
+
+	vk := &tables.TableVirtualKey{
+		ID:    "vk-key-rules",
+		Name:  "Key Rules",
+		Value: *schemas.NewSecretVar("vk-key-rules-value"),
+		IsActive: schemas.Ptr(true),
+		ProviderConfigs: []tables.TableVirtualKeyProviderConfig{{
+			Provider:      "openai",
+			AllowedModels: schemas.WhiteList{"*"},
+			AllowAllKeys:  false,
+			Keys:          []tables.TableKey{*key},
+		}},
+	}
+	require.NoError(t, store.CreateVirtualKey(ctx, vk))
+
+	stored, err := store.GetVirtualKey(ctx, vk.ID)
+	require.NoError(t, err)
+	require.Len(t, stored.ProviderConfigs, 1)
+	require.Len(t, stored.ProviderConfigs[0].Keys, 1)
+	got := stored.ProviderConfigs[0].Keys[0]
+	require.Equal(t, []string{"*"}, []string(got.Models))
+	require.Equal(t, []string{"gpt-4o"}, []string(got.BlacklistedModels))
+	require.NotNil(t, got.Enabled)
+	require.False(t, *got.Enabled)
+	require.NotNil(t, got.VLLMKeyConfig)
+	require.Equal(t, "served-a", got.VLLMKeyConfig.ModelName)
+}

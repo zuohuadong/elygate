@@ -401,6 +401,25 @@ describe('AgentConfig export mapping', () => {
 		expect(result.warnings.map((warning) => warning.code)).toContain('mcp-command-not-public');
 	});
 
+	test('a passphrase argument and a passphrase description are refused', () => {
+		const source: AgentConfigExportSource = {
+			models: undefined,
+			mcpClients: {
+				clients: [
+					{ config: { name: 'pass', connection_type: 'stdio', tools_to_execute: ['*'], stdio_config: { command: 'server', args: ['--passphrase', 's3cr3t', '--verbose'] } } },
+					{ config: { name: 'described', connection_type: 'stdio', tools_to_execute: ['*'], description: 'Passphrase: s3cr3t', stdio_config: { command: 'server' } } },
+				],
+			},
+			skills: undefined,
+			prompts: undefined,
+			agents: undefined,
+		};
+		const result = buildAgentConfigPublic(source);
+		expect(result.pub.mcp[0].args).toEqual(['--verbose']);
+		expect(result.pub.mcp[1].description).toBeUndefined();
+		expect(JSON.stringify(result.pub)).not.toContain('s3cr3t');
+	});
+
 	test('a stdio client with no command is not exported', () => {
 		const source: AgentConfigExportSource = {
 			models: undefined,

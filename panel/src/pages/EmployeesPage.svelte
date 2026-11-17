@@ -269,17 +269,22 @@
 				const ids = Array.isArray(wrapper.virtual_mcp_ids)
 					? wrapper.virtual_mcp_ids.map((id) => String(id)).filter(Boolean)
 					: [];
-				// A virtual MCP naming a client that no longer exists grants nothing.
+				// A virtual MCP naming a deleted, disabled, or tool-less client grants nothing:
+				// none of those serve a tool at runtime.
 				const clients = (loaded.source.mcpClients as { clients?: unknown[] } | undefined)?.clients ?? [];
-				const knownClientIDs = new Set<string>();
+				const usableClientIDs = new Set<string>();
 				for (const client of clients) {
 					if (!client || typeof client !== 'object') continue;
 					const config = (client as { config?: unknown }).config ?? client;
 					if (!config || typeof config !== 'object') continue;
-					const id = (config as { client_id?: unknown }).client_id;
-					if (typeof id === 'string' && id) knownClientIDs.add(id);
+					const record = config as Record<string, unknown>;
+					const id = typeof record.client_id === 'string' ? record.client_id : '';
+					if (!id || record.disabled === true) continue;
+					const tools = record.tools_to_execute;
+					if (Array.isArray(tools) && !(tools.length === 1 && tools[0] === '*')) continue;
+					usableClientIDs.add(id);
 				}
-				const grant = await assignedVirtualMcpGrants(ids, knownClientIDs);
+				const grant = await assignedVirtualMcpGrants(ids, usableClientIDs);
 				if (grant === 'unreadable') {
 					throw new Error(text('无法读取该密钥分配的虚拟 MCP，无法确认授权范围，请稍后重试。', 'The virtual MCPs assigned to this key could not be read, so its grants cannot be confirmed; retry later.'));
 				}

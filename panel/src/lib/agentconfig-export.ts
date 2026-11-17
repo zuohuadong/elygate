@@ -122,7 +122,7 @@ function modelEntries(payload: unknown, warnings: AgentConfigExportWarning[]): A
 // for assignments and header names, where OPENAI_KEY and X-Auth-Token carry secrets.
 // `user`/`username`/`login` are on the list because a launch argument spelled that way
 // carries a user:password pair for the server it starts.
-const SECRET_SUFFIX = /(?:apikey|accesskey|privatekey|token|secret|password|passwd|pwd|auth|authorization|credential|creds|bearer|key|user|username|login|userinfo|cookie|cookies|session|sessionid)$/;
+const SECRET_SUFFIX = /(?:apikey|accesskey|privatekey|token|secret|password|passwd|pwd|auth|authorization|credential|creds|bearer|key|user|username|login|userinfo|cookie|cookies|session|sessionid|passphrase|passwd|passcode|pin|otp|privatekey|seed|recovery)$/;
 // A bare `key` is a credential unless it names one of these ordinary arguments.
 const NOT_A_SECRET_KEY = /^(?:sort|order|partition|primary|foreign|row|cache|group|dedup|map|index|shard|hash|lookup|merge|search|filter|unique|natural|synthetic|stable|join|routing|refresh|schema|object|value)key$/;
 

@@ -4080,8 +4080,12 @@ func preloadVirtualKeyBaseRelations(db *gorm.DB) *gorm.DB {
 		Preload("ProviderConfigs").
 		Preload("ProviderConfigs.Budgets").
 		Preload("ProviderConfigs.RateLimit").
+		// The key's own model rules are part of the virtual key's effective access: a key
+		// can blacklist models, be disabled, or serve one vLLM model name, and governance
+		// refuses a model no enabled key supports. Selecting only the allow-list left the
+		// management read unable to report (or honour) the rest.
 		Preload("ProviderConfigs.Keys", func(db *gorm.DB) *gorm.DB {
-			return db.Select("id, name, key_id, models_json, provider")
+			return db.Select("id, name, key_id, models_json, blacklisted_models_json, enabled, vllm_url, vllm_model_name, provider")
 		}).
 		Preload("MCPConfigs").
 		Preload("MCPConfigs.MCPClient").
