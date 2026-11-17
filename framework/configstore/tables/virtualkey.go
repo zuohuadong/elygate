@@ -197,6 +197,13 @@ func (pc *TableVirtualKeyProviderConfig) AfterFind(tx *gorm.DB) error {
 			key.SageMakerEndpointsJSON = nil
 			key.SageMakerKeyConfig = nil
 
+			// A vLLM endpoint URL is a credential (it can carry userinfo or a token),
+			// while the model name it serves is ordinary metadata.
+			key.VLLMUrl = nil
+			if key.VLLMKeyConfig != nil {
+				key.VLLMKeyConfig.URL = *schemas.NewSecretVar("")
+			}
+
 			pc.Keys[i] = *key
 		}
 	}

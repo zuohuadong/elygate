@@ -280,8 +280,10 @@
 					const record = config as Record<string, unknown>;
 					const id = typeof record.client_id === 'string' ? record.client_id : '';
 					if (!id || record.disabled === true) continue;
+					// An absent or null list means the same to callers as an empty one: no
+					// reachable tools (core/schemas/mcp.go ToolsToExecute semantics).
 					const tools = record.tools_to_execute;
-					if (Array.isArray(tools) && !(tools.length === 1 && tools[0] === '*')) continue;
+					if (!Array.isArray(tools) || !(tools.length === 1 && tools[0] === '*')) continue;
 					usableClientIDs.add(id);
 				}
 				const grant = await assignedVirtualMcpGrants(ids, usableClientIDs);
@@ -310,7 +312,7 @@
 				// express) explain an empty result; a global prompt-title warning does not.
 				const scopeWarnings = scoped.result.warnings.filter((warning) => SCOPE_WARNING_CODES.has(warning.code));
 				if (scopeWarnings.length > 0) {
-					throw new Error(text(`该密钥的授权无法写入 AgentConfig（${scopeWarnings.length} 个 MCP client 仅授权部分工具、已停用，或为 in-process 类型），请调整授权后重试。`, `This key's grants cannot be expressed in an AgentConfig bundle (${scopeWarnings.length} MCP client(s) with a tool subset, disabled, or in-process); adjust the grant and retry.`));
+					throw new Error(text(`该密钥的授权无法写入 AgentConfig（${scopeWarnings.length} 项被省略：MCP client 仅授权部分工具、已停用、为 in-process 类型、缺少启动命令或含密钥，或 Agent 名称超出上限），请调整授权后重试。`, `This key's grants cannot be expressed in an AgentConfig bundle (${scopeWarnings.length} items omitted: an MCP client with a tool subset, disabled, in-process, missing a launch command or carrying a credential, or an agent name over the limit); adjust the grant and retry.`));
 				}
 				throw new Error(text('该密钥没有可用的模型、MCP 或 Agent 授权，生成的配置为空。', 'This key grants no models, MCP servers or agents, so the bundle would be empty.'));
 			}

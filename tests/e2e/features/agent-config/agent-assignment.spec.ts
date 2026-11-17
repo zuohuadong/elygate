@@ -172,6 +172,24 @@ test.describe('AgentConfig deep link per employee', () => {
     await expect(page.getByText(/grants no models|没有可用的模型/)).toBeVisible()
   })
 
+  test('an assigned virtual MCP whose source client has no tool grant grants nothing', async ({ page }) => {
+    await page.route('**/api/governance/virtual-keys/vk-1', (route) =>
+      route.fulfill({ json: { virtual_key: { id: 'vk-1', name: 'alice-key', is_active: true, allow_all_providers: false, provider_configs: [], mcp_configs: [], agent_grants: [] }, virtual_mcp_ids: [12] } }),
+    )
+    await page.route('**/api/mcp/virtual-mcps/12', (route) =>
+      route.fulfill({ json: { virtual_mcp: { id: 12, name: 'team-tools', enabled: true, tools: [{ mcp_client_id: 'client-empty', tool_names: ['github-read'] }] } } }),
+    )
+    // No tools_to_execute at all: callers reach nothing from this client.
+    await page.route('**/api/mcp/clients?*', (route) => route.fulfill({ json: {
+      clients: [{ config: { client_id: 'client-empty', name: 'client-empty', connection_type: 'stdio', stdio_config: { command: 'npx' } } }],
+      total_count: 1,
+    } }))
+    await page.route('**/api/agents', (route) => route.fulfill({ json: { agents: [] } }))
+    await page.route('**/api/models?*', (route) => route.fulfill({ json: { models: [] } }))
+    await page.getByTestId('employee-agent-config-emp-1').click()
+    await expect(page.getByText(/grants no models|没有可用的模型/)).toBeVisible()
+  })
+
   test('says the virtual MCP could not be read instead of claiming no grant', async ({ page }) => {
     await page.route('**/api/governance/virtual-keys/vk-1', (route) =>
       route.fulfill({ json: { virtual_key: { id: 'vk-1', name: 'alice-key', is_active: true, allow_all_providers: false, provider_configs: [], mcp_configs: [], agent_grants: [] }, virtual_mcp_ids: [12] } }),

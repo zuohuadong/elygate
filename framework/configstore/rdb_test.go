@@ -7508,7 +7508,7 @@ func TestGetVirtualKeyCarriesKeyModelRules(t *testing.T) {
 		Models:                schemas.WhiteList{"*"},
 		BlacklistedModels:     schemas.BlackList{"gpt-4o"},
 		Enabled:               &disabled,
-		VLLMKeyConfig:         &schemas.VLLMKeyConfig{ModelName: served},
+		VLLMKeyConfig:         &schemas.VLLMKeyConfig{ModelName: served, URL: *schemas.NewSecretVar("https://user:pass@vllm.internal/v1")},
 	}
 	require.NoError(t, store.DB().WithContext(ctx).Create(key).Error)
 
@@ -7537,4 +7537,7 @@ func TestGetVirtualKeyCarriesKeyModelRules(t *testing.T) {
 	require.False(t, *got.Enabled)
 	require.NotNil(t, got.VLLMKeyConfig)
 	require.Equal(t, "served-a", got.VLLMKeyConfig.ModelName)
+	// The endpoint URL is a credential, and this read must not hand it out.
+	require.Nil(t, got.VLLMUrl)
+	require.Empty(t, got.VLLMKeyConfig.URL.GetValue())
 }
