@@ -95,6 +95,13 @@ describe('assignedVirtualMcpGrants', () => {
 		expect(await assignedVirtualMcpGrants(['12'], new Set(['deleted']))).toBe('grants');
 	});
 
+	test('an empty tool name does not count as a tool', async () => {
+		mockSources({
+			'/api/mcp/virtual-mcps/12': () => jsonResponse({ virtual_mcp: { id: 12, enabled: true, tools: [{ mcp_client_id: 'alive', tool_names: ['', '  '] }] } }),
+		});
+		expect(await assignedVirtualMcpGrants(['12'], new Set(['alive']))).toBe('none');
+	});
+
 	test('an unreadable virtual MCP is reported as unreadable, not as no grant', async () => {
 		mockSources({ '/api/mcp/virtual-mcps/99': () => jsonResponse({ error: 'not found' }, 404) });
 		expect(await assignedVirtualMcpGrants(['99'])).toBe('unreadable');

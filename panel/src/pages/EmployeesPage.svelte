@@ -26,7 +26,8 @@
 	const i18n = useTranslation();
 	// Warnings that say something about what this key grants, as opposed to a global
 	// export limitation such as a long prompt title.
-	const SCOPE_WARNING_CODES = new Set(['mcp-tools-restricted', 'mcp-disabled', 'mcp-grants-elsewhere', 'mcp-unsupported-transport', 'mcp-command-not-public', 'mcp-no-command']);
+	const SCOPE_WARNING_CODES = new Set(['mcp-tools-restricted', 'mcp-disabled', 'mcp-grants-elsewhere', 'mcp-unsupported-transport',
+		'mcp-command-not-public', 'mcp-no-command', 'mcp-name-too-long', 'mcp-description-redacted', 'agent-invalid']);
 	let employees = $state.raw<JsonRecord[]>([]);
 	let virtualKeys = $state.raw<JsonRecord[]>([]);
 	let form = $state<EmployeeForm>(emptyForm());

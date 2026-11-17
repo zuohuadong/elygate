@@ -22,6 +22,7 @@ export type AgentConfigExportWarningCode =
 	| 'mcp-grants-elsewhere'
 	| 'mcp-disabled'
 	| 'mcp-no-command'
+	| 'mcp-description-redacted'
 	| 'model-invalid'
 	| 'skill-invalid'
 	| 'prompt-invalid'
@@ -175,6 +176,7 @@ const URL_SECRET_QUERY = /[?&](?:x-amz-signature|x-amz-credential|x-amz-security
 // Short flags whose name says nothing: -p is a port in most servers and a password in
 // some, so a non-numeric value is treated as the credential it probably is.
 const SHORT_CREDENTIAL_FLAG = /^-(?:p|pw)$/i;
+const SHORT_CREDENTIAL_ASSIGNMENT = /^-(?:p|pw)=(.*)$/i;
 
 function tokenCarriesSecret(token: string): boolean {
 	const trimmed = token.trim().replace(/^(["'])(.*)\1$/, '$2');
@@ -187,9 +189,18 @@ function tokenCarriesSecret(token: string): boolean {
 }
 
 // A command line is one string, so it is inspected token by token. Token-level
-// matching keeps a subcommand that merely shares a word ("cli auth login") intact.
+// matching keeps a subcommand that merely shares a word ("cli auth login") intact, and
+// the short-flag rule is applied here too, since `-p secret` is as likely in a command
+// line as in an argument list.
 function commandCarriesSecret(command: string): boolean {
-	return command.split(/\s+/).some(tokenCarriesSecret);
+	const tokens = command.split(/\s+/).map((token) => token.replace(/^(["'])(.*)\1$/, '$2'));
+	return tokens.some((token, index) => {
+		if (tokenCarriesSecret(token)) return true;
+		const assignment = SHORT_CREDENTIAL_ASSIGNMENT.exec(token.trim());
+		if (assignment && !/^\d+$/.test(assignment[1].trim())) return true;
+		const next = tokens[index + 1] ?? '';
+		return SHORT_CREDENTIAL_FLAG.test(token.trim()) && next !== '' && !/^\d+$/.test(next.trim());
+	});
 }
 
 // afterCredentialFlag returns the index of the last argument belonging to a credential
@@ -226,6 +237,11 @@ function redactArgs(args: string[]): { args: string[]; redacted: boolean } {
 		}
 		// A flag whose only value is a credential loses the flag too: leaving it behind
 		// would hand the client an argument the server cannot parse.
+		const shortAssignment = SHORT_CREDENTIAL_ASSIGNMENT.exec(arg.trim());
+		if (shortAssignment && !/^\d+$/.test(shortAssignment[1].trim())) {
+			redacted = true;
+			continue;
+		}
 		const next = index + 1 < args.length ? args[index + 1] : '';
 		if (SHORT_CREDENTIAL_FLAG.test(arg.trim()) && next !== '' && !/^\d+$/.test(next.trim())) {
 			redacted = true;
@@ -246,6 +262,19 @@ function redactArgs(args: string[]): { args: string[]; redacted: boolean } {
 		kept.push(arg);
 	}
 	return { args: kept, redacted };
+}
+
+// A description is free text, so it can carry a pasted credential. It is checked with the
+// same rules as an argument and dropped entirely when it matches, rather than trimmed: a
+// partially redacted sentence reads like a redaction that missed.
+function descriptionField(config: JsonRecord, name: string, warnings: AgentConfigExportWarning[]): { description?: string } {
+	const description = stringValue(config, 'description');
+	if (!description) return {};
+	if (commandCarriesSecret(description)) {
+		warnings.push({ code: 'mcp-description-redacted', name });
+		return {};
+	}
+	return { description: description.slice(0, 200) };
 }
 
 function mcpEntries(payload: unknown, warnings: AgentConfigExportWarning[]): AcbMcpEntry[] {
@@ -313,7 +342,7 @@ function mcpEntries(payload: unknown, warnings: AgentConfigExportWarning[]): Acb
 			...(command ? { command } : {}),
 			args,
 			envKeys,
-			...(stringValue(config, 'description') ? { description: stringValue(config, 'description').slice(0, 200) } : {}),
+			...descriptionField(config, name, warnings),
 		});
 	}
 	return entries;

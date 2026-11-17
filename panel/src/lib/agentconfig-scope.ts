@@ -16,21 +16,33 @@
 import { isJsonRecord, type JsonRecord } from './api';
 import type { AgentConfigExportSource, AgentConfigExportWarning } from './agentconfig-export';
 
-export interface AgentConfigProviderScope {
+// AgentConfigKeyGrant is one bound provider key's own model rules. A key with an empty
+// allow-list denies every model (framework/configstore/tables/key.go), and a vLLM key
+// can be pinned to a single served model name (core/bifrost.go keySupportsModel).
+export interface AgentConfigKeyGrant {
 	allowed: string[];
 	blocked: string[];
-	// A provider config that binds no credential cannot serve any model: governance
-	// selects a key per request and has nothing to select.
-	hasCredential: boolean;
-	// A bound key can narrow the models further (its own allow/black-list and enabled
-	// flag), and the request is only served when some enabled key supports the model.
-	keyRules: { allowed: string[]; blocked: string[]; allowedUnrestricted: boolean; blockedAll: boolean }[];
-	// A key can list the same provider more than once. Governance denies if any row's
-	// blacklist blocks and allows if any row's allowlist allows, so the flags keep
-	// per-row ["*"] meaning after the rows are merged: concatenating them would turn a
-	// block-everything row into a literal "*" entry that matches nothing.
 	allowedUnrestricted: boolean;
 	blockedAll: boolean;
+	vllmModel: string;
+}
+
+// AgentConfigProviderGrant is one row of the key's provider_configs. Rows are kept apart
+// because they are separate grants: a row's allow-list only ever reaches the models its
+// own keys can serve, so merging rows across keys would export models no row serves.
+export interface AgentConfigProviderGrant {
+	allowed: string[];
+	blocked: string[];
+	allowedUnrestricted: boolean;
+	blockedAll: boolean;
+	// A row that binds no credential cannot serve any model: governance selects a key per
+	// request and has nothing to select.
+	hasCredential: boolean;
+	keys: AgentConfigKeyGrant[];
+}
+
+export interface AgentConfigProviderScope {
+	grants: AgentConfigProviderGrant[];
 }
 
 export interface AgentConfigScope {
@@ -160,27 +172,33 @@ export function scopeFromVirtualKey(key: unknown): AgentConfigScope {
 	for (const config of recordArray(record.provider_configs)) {
 		const provider = typeof config.provider === 'string' ? config.provider.trim() : '';
 		if (!provider) continue;
-		const previous = providers[provider];
 		const allowed = stringList(config.allowed_models);
 		const blocked = stringList(config.blacklisted_models);
 		const keys = recordArray(config.keys).filter((key) => key.enabled !== false);
-		// allow_all_keys false with no bound key leaves the provider unusable.
-		const hasCredential = config.allow_all_keys === true || keys.length > 0;
-		const keyRules = keys.map((key) => {
+		const grants = keys.map((key) => {
 			const keyAllowed = stringList(key.models);
 			const keyBlocked = stringList(key.blacklisted_models);
-			return { allowed: keyAllowed, blocked: keyBlocked, allowedUnrestricted: isUnrestricted(keyAllowed), blockedAll: isUnrestricted(keyBlocked) };
+			const vllm = isJsonRecord(key.vllm_key_config) ? key.vllm_key_config : {};
+			const vllmModel = typeof vllm.model_name === 'string' ? vllm.model_name.trim() : '';
+			return {
+				allowed: keyAllowed,
+				blocked: keyBlocked,
+				allowedUnrestricted: isUnrestricted(keyAllowed),
+				blockedAll: isUnrestricted(keyBlocked),
+				vllmModel,
+			};
 		});
-		providers[provider] = previous
-			? {
-				allowed: mergeUnique(previous.allowed, allowed),
-				blocked: mergeUnique(previous.blocked, blocked),
-				hasCredential: previous.hasCredential || hasCredential,
-				keyRules: [...previous.keyRules, ...keyRules],
-				allowedUnrestricted: previous.allowedUnrestricted || isUnrestricted(allowed),
-				blockedAll: previous.blockedAll || isUnrestricted(blocked),
-			}
-			: { allowed, blocked, hasCredential, keyRules, allowedUnrestricted: isUnrestricted(allowed), blockedAll: isUnrestricted(blocked) };
+		const grant: AgentConfigProviderGrant = {
+			allowed,
+			blocked,
+			allowedUnrestricted: isUnrestricted(allowed),
+			blockedAll: isUnrestricted(blocked),
+			// allow_all_keys false with no bound key leaves the row unusable.
+			hasCredential: config.allow_all_keys === true || keys.length > 0,
+			keys: grants,
+		};
+		const previous = providers[provider];
+		providers[provider] = { grants: previous ? [...previous.grants, grant] : [grant] };
 	}
 	const mcpClientNames = recordArray(record.mcp_configs).map(mcpClientName).filter(Boolean);
 	const agentNames = recordArray(record.agent_grants)
@@ -243,14 +261,6 @@ export function vkScopeProblem(key: unknown, now: Date = new Date()): 'inactive'
 	return expiry.getTime() <= now.getTime() ? 'expired' : null;
 }
 
-function mergeUnique(left: string[], right: string[]): string[] {
-	const merged = [...left];
-	for (const item of right) {
-		if (!merged.includes(item)) merged.push(item);
-	}
-	return merged;
-}
-
 function modelIdentifier(model: JsonRecord): { provider: string; id: string } {
 	const provider = typeof model.provider === 'string' ? model.provider.trim() : '';
 	const name = typeof model.name === 'string' ? model.name.trim() : '';
@@ -261,18 +271,27 @@ function modelIdentifier(model: JsonRecord): { provider: string; id: string } {
 // modelAllowed mirrors grant.permitAllowsModel: a provider the key configures is held
 // to that config's blacklist and allowlist even under allow-all; a provider it does not
 // configure is opened up only by allow-all.
+// keySupportsModel mirrors core/bifrost.go: the key's own allow/black-list decides, and a
+// vLLM key pinned to one served model name only serves that name.
+function keySupportsModel(key: AgentConfigKeyGrant, provider: string, id: string): boolean {
+	if (key.blockedAll || listBlocks(key.blocked, id)) return false;
+	if (!(key.allowedUnrestricted || listAllows(key.allowed, id, provider))) return false;
+	return key.vllmModel === '' || key.vllmModel === id;
+}
+
+// modelAllowed keeps the rows apart: a row grants the model only when its own list allows
+// it and one of its own keys can serve it. Unioning the rows would export a model that
+// one row allows but only another row's keys could serve.
 function modelAllowed(scope: AgentConfigScope, provider: string, id: string): boolean {
 	const rule = scope.providers[provider];
 	if (!rule) return scope.allowAllProviders;
-	if (!rule.hasCredential) return false;
-	if (rule.blockedAll || listBlocks(rule.blocked, id)) return false;
-	if (!(rule.allowedUnrestricted || listAllows(rule.allowed, id, provider))) return false;
-	// A bound key can withhold the model even when the key config allows it
-	// (core/bifrost.go keySupportsModel), so one enabled key has to support it.
-	if (rule.keyRules.length === 0) return true;
-	return rule.keyRules.some((key) => (key.blockedAll || listBlocks(key.blocked, id))
-		? false
-		: key.allowedUnrestricted || listAllows(key.allowed, id, provider));
+	return rule.grants.some((grant) => {
+		if (!grant.hasCredential) return false;
+		if (grant.blockedAll || listBlocks(grant.blocked, id)) return false;
+		if (!(grant.allowedUnrestricted || listAllows(grant.allowed, id, provider))) return false;
+		if (grant.keys.length === 0) return true;
+		return grant.keys.some((key) => keySupportsModel(key, provider, id));
+	});
 }
 
 function filterModels(payload: unknown, scope: AgentConfigScope): unknown {

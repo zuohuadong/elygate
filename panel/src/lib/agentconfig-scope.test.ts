@@ -98,7 +98,7 @@ describe('scopeFromVirtualKey', () => {
 	test('reads providers, mcp clients and agent grants from the wrapped payload', () => {
 		const scope = scopeFromVirtualKey(KEY);
 		expect(scope.allowAllProviders).toBe(false);
-		expect(scope.providers.openai).toEqual({ allowed: ['gpt-4o'], blocked: [], hasCredential: true, keyRules: [], allowedUnrestricted: false, blockedAll: false });
+		expect(scope.providers.openai).toEqual({ grants: [{ allowed: ['gpt-4o'], blocked: [], allowedUnrestricted: false, blockedAll: false, hasCredential: true, keys: [] }] });
 		expect(scope.mcpClientNames).toEqual(['github']);
 		expect(scope.agentNames).toEqual(['researcher']);
 	});
@@ -191,12 +191,27 @@ describe('applyAgentConfigScope', () => {
 		expect(names(applyAgentConfigScope(SOURCES, scopeFromVirtualKey(key), key).source.models, 'models')).toEqual([]);
 	});
 
-	test('one block-everything row still blocks after two rows for the same provider merge', () => {
+	test('a block-everything row blocks only itself, and the other row still grants', () => {
 		const key = { virtual_key: { allow_all_providers: false, provider_configs: [
 			{ provider: 'openai', allow_all_keys: true, allowed_models: ['*'], blacklisted_models: ['*'] },
 			{ provider: 'openai', allow_all_keys: true, allowed_models: ['gpt-4o'], blacklisted_models: ['gpt-4o-mini'] },
 		] } };
+		expect(names(applyAgentConfigScope(SOURCES, scopeFromVirtualKey(key), key).source.models, 'models')).toEqual(['openai/gpt-4o']);
+	});
+
+	test('a row whose own key withholds the model grants nothing, even if another row allows it', () => {
+		const key = { virtual_key: { allow_all_providers: false, provider_configs: [
+			{ provider: 'openai', allow_all_keys: false, allowed_models: ['gpt-4o'], keys: [{ id: 1, models: ['gpt-4o-mini'] }] },
+			{ provider: 'openai', allow_all_keys: false, allowed_models: ['gpt-4o-mini'], keys: [{ id: 2, models: ['gpt-4o'] }] },
+		] } };
 		expect(names(applyAgentConfigScope(SOURCES, scopeFromVirtualKey(key), key).source.models, 'models')).toEqual([]);
+	});
+
+	test('a vLLM key pinned to one served model exports only that model', () => {
+		const key = { virtual_key: { allow_all_providers: false, provider_configs: [
+			{ provider: 'anthropic', allow_all_keys: false, allowed_models: ['*'], keys: [{ id: 1, models: ['*'], vllm_key_config: { model_name: 'claude-opus-4' } }] },
+		] } };
+		expect(names(applyAgentConfigScope(SOURCES, scopeFromVirtualKey(key), key).source.models, 'models')).toEqual(['anthropic/claude-opus-4']);
 	});
 
 	test('whitespace around "*" in the tool grant is not a whole-client grant', () => {

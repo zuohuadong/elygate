@@ -56,7 +56,10 @@ export async function assignedVirtualMcpGrants(ids: string[], knownClientIDs?: S
 			const grantsATool = tools.some((tool) => {
 				if (!tool || typeof tool !== 'object') return false;
 				const spec = tool as Record<string, unknown>;
-				const names = Array.isArray(spec.tool_names) ? spec.tool_names : [];
+				// An empty name is not a tool the runtime exposes, so it does not count.
+				const names = Array.isArray(spec.tool_names)
+					? spec.tool_names.filter((name) => typeof name === 'string' && name.trim() !== '')
+					: [];
 				if (names.length === 0) return false;
 				const clientID = typeof spec.mcp_client_id === 'string' ? spec.mcp_client_id.trim() : '';
 				// Without a client set the check cannot be made; with one, a spec whose

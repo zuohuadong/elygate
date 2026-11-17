@@ -335,6 +335,72 @@ describe('AgentConfig export mapping', () => {
 		expect(JSON.stringify(result.pub)).not.toContain('Bearer');
 	});
 
+	test('a credential short flag inside a command line drops the client', () => {
+		const source: AgentConfigExportSource = {
+			models: undefined,
+			mcpClients: {
+				clients: [
+					{ config: { name: 'cmd-short', connection_type: 'stdio', tools_to_execute: ['*'], stdio_config: { command: 'server -p plain-secret' } } },
+					{ config: { name: 'cmd-port', connection_type: 'stdio', tools_to_execute: ['*'], stdio_config: { command: 'server -p 8080' } } },
+				],
+			},
+			skills: undefined,
+			prompts: undefined,
+			agents: undefined,
+		};
+		const result = buildAgentConfigPublic(source);
+		// A numeric value is a port, which is not a credential.
+		expect(result.pub.mcp.map((entry) => entry.name)).toEqual(['cmd-port']);
+		expect(JSON.stringify(result.pub)).not.toContain('plain-secret');
+	});
+
+	test('drops -p=secret and a description that carries a credential', () => {
+		const source: AgentConfigExportSource = {
+			models: undefined,
+			mcpClients: {
+				clients: [
+					{
+						config: {
+							name: 'short',
+							connection_type: 'stdio',
+							tools_to_execute: ['*'],
+							stdio_config: { command: 'server', args: ['-p=plain-secret', '--verbose'] },
+						},
+					},
+					{
+						config: {
+							name: 'described',
+							connection_type: 'stdio',
+							tools_to_execute: ['*'],
+							description: 'Authorization: Bearer sk-live-abcdefgh12345678',
+							stdio_config: { command: 'server' },
+						},
+					},
+					{
+						config: {
+							name: 'cmd-assignment',
+							connection_type: 'stdio',
+							tools_to_execute: ['*'],
+							stdio_config: { command: 'server -p=plain-secret' },
+						},
+					},
+				],
+			},
+			skills: undefined,
+			prompts: undefined,
+			agents: undefined,
+		};
+		const result = buildAgentConfigPublic(source);
+		expect(result.pub.mcp.map((entry) => entry.name)).toEqual(['short', 'described']);
+		expect(result.pub.mcp[0].args).toEqual(['--verbose']);
+		expect(result.pub.mcp[1].description).toBeUndefined();
+		const serialized = JSON.stringify(result.pub);
+		expect(serialized).not.toContain('plain-secret');
+		expect(serialized).not.toContain('sk-live-abcdefgh12345678');
+		expect(result.warnings.map((warning) => warning.code)).toContain('mcp-description-redacted');
+		expect(result.warnings.map((warning) => warning.code)).toContain('mcp-command-not-public');
+	});
+
 	test('a stdio client with no command is not exported', () => {
 		const source: AgentConfigExportSource = {
 			models: undefined,

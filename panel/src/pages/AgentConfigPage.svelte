@@ -73,6 +73,7 @@
 			'mcp-endpoint-not-public': ['HTTP/SSE 连接地址位于加密区，公共导出只保留名称和传输方式', 'An HTTP/SSE endpoint lives in the encrypted section; the public bundle keeps only its name and transport'],
 			'mcp-env-values-omitted': ['MCP 环境变量只导出名称，不导出值', 'Only MCP environment variable names were exported, not values'],
 			'mcp-args-redacted': ['MCP 启动参数中含疑似密钥，已移除', 'Suspected credentials were removed from the MCP launch arguments'],
+			'mcp-description-redacted': ['MCP client 描述含疑似密钥，已省略', 'An MCP client description contained a suspected credential and was left out'],
 			'mcp-no-command': ['MCP client 缺少启动命令，未导出', 'An MCP client had no launch command, so it was left out'],
 			'mcp-command-not-public': ['MCP 启动命令含疑似密钥，已跳过该 client', 'An MCP launch command contained a suspected credential, so the client was skipped'],
 			'agent-disabled': ['已停用的 Agent 不会导出', 'A disabled agent was left out'],
