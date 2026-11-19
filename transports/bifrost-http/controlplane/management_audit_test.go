@@ -134,7 +134,7 @@ func TestDashboardSessionAuditRegisteredLoginLogout(t *testing.T) {
 		require.Equal(t, "sha256:"+encrypt.HashSHA256(token), event.ResourceID)
 	}
 	require.Equal(t, 401, readAudit("Bearer "+token).Response.StatusCode())
-	feed := readAudit("Basic " + base64.StdEncoding.EncodeToString([]byte("dashboard-admin:dashboard-test-password")))
+	feed := readAudit("Bearer " + base64.StdEncoding.EncodeToString([]byte("dashboard-admin:dashboard-test-password")))
 	require.Equal(t, 200, feed.Response.StatusCode())
 	var payload struct {
 		Data []AuditEvent `json:"data"`
@@ -530,7 +530,7 @@ func TestManagementAuditBatchIsAtomicAndHashesCacheKeys(t *testing.T) {
 	require.Zero(t, count, "the first batch must roll back when the second fails")
 }
 
-func TestManagementAuditUsesVerifiedBasicIdentity(t *testing.T) {
+func TestManagementAuditUsesVerifiedBearerIdentity(t *testing.T) {
 	store, _ := testControlPlaneStore(t)
 	h := NewHandler(store, nil)
 	passwordHash, err := encrypt.Hash("test-admin-password")
@@ -547,7 +547,7 @@ func TestManagementAuditUsesVerifiedBasicIdentity(t *testing.T) {
 	for _, password := range []string{"wrong-password", "test-admin-password"} {
 		request := &fasthttp.RequestCtx{}
 		request.Request.SetRequestURI("/api/rss/feeds/1")
-		request.Request.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte("operator:"+password)))
+		request.Request.Header.Set("Authorization", "Bearer "+base64.StdEncoding.EncodeToString([]byte("operator:"+password)))
 		request.Request.Header.Set("X-User-ID", "forged-user")
 		route(request)
 	}
@@ -658,7 +658,7 @@ func TestManagementRoutingAuditAfterPersistence(t *testing.T) {
 	auth.UpdateAuthConfig(&configstore.AuthConfig{
 		IsEnabled: true, AdminUserName: schemas.NewSecretVar("routing-admin"), AdminPassword: schemas.NewSecretVar(passwordHash),
 	})
-	authorization := "Basic " + base64.StdEncoding.EncodeToString([]byte("routing-admin:routing-test-password"))
+	authorization := "Bearer " + base64.StdEncoding.EncodeToString([]byte("routing-admin:routing-test-password"))
 	customConfig := complexity.DefaultAnalyzerConfig()
 	customConfig.TierBoundaries.SimpleMedium = 0.12
 	updateConfig := complexity.DefaultAnalyzerConfig()
@@ -885,7 +885,7 @@ func TestManagementPromptAuditAfterPersistence(t *testing.T) {
 	auth.UpdateAuthConfig(&configstore.AuthConfig{
 		IsEnabled: true, AdminUserName: schemas.NewSecretVar("prompt-admin"), AdminPassword: schemas.NewSecretVar(hash),
 	})
-	authorization := "Basic " + base64.StdEncoding.EncodeToString([]byte("prompt-admin:prompt-audit-test-password"))
+	authorization := "Bearer " + base64.StdEncoding.EncodeToString([]byte("prompt-admin:prompt-audit-test-password"))
 	// Cases: all eleven reload-producing routes; committed success/panic, rejected writes, audit failure during panic.
 	for index, spec := range promptAuditMutations(1, 1) {
 		t.Run(spec.name, func(t *testing.T) {

@@ -49,7 +49,7 @@ func TestDashboardFailedLoginAuditRegisteredRoutes(t *testing.T) {
 	handlers.NewSessionHandler(store.ConfigStoreWithSessionAudit(), nil).RegisterRoutes(r,
 		auth.APIMiddleware(), audit.ManagementAuditMiddleware(testLogger))
 
-	// Cases: repeated rejection, valid Basic/cookie headers, API-key bypass, corrupt hash.
+	// Cases: repeated rejection, valid Bearer credentials/cookie headers, API-key bypass, corrupt hash.
 	for index, variant := range []string{"username", "password", "repeat", "basic", "cookie", "api-key", "hash-error"} {
 		t.Run(variant, func(t *testing.T) {
 			var httpRequest fasthttp.Request
@@ -66,7 +66,7 @@ func TestDashboardFailedLoginAuditRegisteredRoutes(t *testing.T) {
 				body = `{"username":"unverified-username-secret","password":"failed-login-password-secret"}`
 			}
 			if variant == "basic" {
-				request.Request.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte("failed-login-admin-secret:failed-login-password-secret")))
+				request.Request.Header.Set("Authorization", "Bearer "+base64.StdEncoding.EncodeToString([]byte("failed-login-admin-secret:failed-login-password-secret")))
 			}
 			if variant == "api-key" {
 				request.SetUserValue(schemas.IsAPIKeyAuthContextKey, true)
@@ -107,7 +107,7 @@ func TestDashboardFailedLoginAuditRegisteredRoutes(t *testing.T) {
 		request.Request.SetRequestURI("/api/control-plane/audit-events?limit=100")
 		request.Request.Header.SetMethod("GET")
 		if authorized {
-			request.Request.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte("failed-login-admin-secret:failed-login-password-secret")))
+			request.Request.Header.Set("Authorization", "Bearer "+base64.StdEncoding.EncodeToString([]byte("failed-login-admin-secret:failed-login-password-secret")))
 		}
 		r.Handler(request)
 		if !authorized {

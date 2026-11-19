@@ -187,7 +187,7 @@ func TestAuditCorrelationNativeMutationRoutes(t *testing.T) {
 		request.Request.Header.SetMethod(method)
 		request.Request.SetRequestURI(path)
 		request.Request.Header.SetContentType("application/json")
-		request.Request.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte("admin:audit-correlation-test-password")))
+		request.Request.Header.Set("Authorization", "Bearer "+base64.StdEncoding.EncodeToString([]byte("admin:audit-correlation-test-password")))
 		request.Request.Header.Set(lib.HeaderRequestID, fmt.Sprintf("mutation-%d", sequence))
 		request.SetUserValue(schemas.BifrostContextKeyExportTraceID, strings.Repeat("a", 32))
 		request.Request.SetBodyString(body)

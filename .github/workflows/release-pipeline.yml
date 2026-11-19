@@ -93,11 +93,12 @@ jobs:
             echo "skip-tests=false" >> $GITHUB_OUTPUT
           fi
 
-  # Phone gate. Parks the run on the release-run-approval environment, whose only
-  # protection rule is the bifrost-release-gate GitHub App. The service behind that
-  # App pushes an Approve/Reject prompt to the admin's phone and calls back GitHub
-  # with the answer. Nothing below runs - no provider quota, no runner minutes -
-  # until the tap arrives. Version-bump pushes carry --skip-ci and never reach this
+  # Phone gate. Parks the run on the release-run-approval environment, which needs
+  # two approvals: the bifrost-release-gate GitHub App rule and a required reviewer.
+  # The service behind that App (approve.getbifrost.dev) pushes an Approve/Reject
+  # prompt to the admin's phone and calls back GitHub with the answer; the reviewer
+  # approves separately on the run page. Nothing below runs - no provider quota, no
+  # runner minutes - until both arrive. Version-bump pushes carry --skip-ci and never reach this
   # job. The job holds no secrets, checks out nothing and allows no egress: it is a
   # named point in the graph for the environment rule to hold, nothing more.
   approve-run:
@@ -186,7 +187,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
-          go-version: "1.27.3"
+          go-version: "1.27.4"
 
       - name: Configure R2
         env:
@@ -305,7 +306,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
-          go-version: "1.27.3"
+          go-version: "1.27.4"
 
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -423,8 +424,11 @@ jobs:
             api.anthropic.com:443
             api.cerebras.ai:443
             api.minimax.io:443
+            api.soniox.com:443
+            tts-rt.soniox.com:443
             ark.ap-southeast.bytepluses.com:443
             inference.baseten.co:443
+            llm.kimchi.dev:443
             api.cloudflare.com:443
             api.cohere.ai:443
             api.deepseek.com:443
@@ -458,6 +462,7 @@ jobs:
             generativelanguage.googleapis.com:443
             files.pythonhosted.org:443
             pypi.org:443
+            raw.githubusercontent.com:443
             getbifrost.ai:443
             api.github.com:443
             github.com:443
@@ -483,6 +488,7 @@ jobs:
             www.berkshirehathaway.com:443
             www.getbifrost.ai:443
             api.dev.runwayml.com:443
+            api.machgen.ai:443
             api.sarvam.ai:443
             api.typesafe.ai:443
             petstore3.swagger.io:443
@@ -496,7 +502,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
-          go-version: "1.27.3"
+          go-version: "1.27.4"
 
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -556,8 +562,10 @@ jobs:
           SGL_API_KEY: ${{ secrets.SGL_API_KEY }}
           CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
           MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+          SONIOX_API_KEY: ${{ secrets.SONIOX_API_KEY }}
           BYTEPLUS_API_KEY: ${{ secrets.BYTEPLUS_API_KEY }}
           BASETEN_API_KEY: ${{ secrets.BASETEN_API_KEY }}
+          KIMCHI_API_KEY: ${{ secrets.KIMCHI_API_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           SARVAM_API_KEY: ${{ secrets.SARVAM_API_KEY }}
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
@@ -592,6 +600,7 @@ jobs:
           BEDROCK_GUARDRAIL_VERSION: ${{ vars.BEDROCK_GUARDRAIL_VERSION }}
           NEBIUS_API_KEY: ${{ secrets.NEBIUS_API_KEY }}
           RUNWAY_API_KEY: ${{ secrets.RUNWAY_API_KEY }}
+          MACHGEN_API_KEY: ${{ secrets.MACHGEN_API_KEY }}
         run: ./.github/workflows/scripts/test-core.sh
 
       - name: Upload provider harness reports
@@ -713,6 +722,7 @@ jobs:
             generativelanguage.googleapis.com:443
             files.pythonhosted.org:443
             pypi.org:443
+            raw.githubusercontent.com:443
             getbifrost.ai:443
             api.github.com:443
             github.com:443
@@ -740,6 +750,7 @@ jobs:
             www.getbifrost.ai:443
             api.runware.ai:443
             api.dev.runwayml.com:443
+            api.machgen.ai:443
             api.typesafe.ai:443
             ai.google.dev:443
             code.claude.com:443
@@ -778,7 +789,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
-          go-version: "1.27.3"
+          go-version: "1.27.4"
 
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -872,6 +883,7 @@ jobs:
           BEDROCK_GUARDRAIL_VERSION: ${{ vars.BEDROCK_GUARDRAIL_VERSION }}
           NEBIUS_API_KEY: ${{ secrets.NEBIUS_API_KEY }}
           RUNWAY_API_KEY: ${{ secrets.RUNWAY_API_KEY }}
+          MACHGEN_API_KEY: ${{ secrets.MACHGEN_API_KEY }}
           RUNWARE_API_KEY: ${{ secrets.RUNWARE_API_KEY }}
         run: ./.github/workflows/scripts/test-proxy-e2e.sh
 
@@ -906,8 +918,11 @@ jobs:
             api.anthropic.com:443
             api.cerebras.ai:443
             api.minimax.io:443
+            api.soniox.com:443
+            tts-rt.soniox.com:443
             ark.ap-southeast.bytepluses.com:443
             inference.baseten.co:443
+            llm.kimchi.dev:443
             api.cloudflare.com:443
             api.cohere.ai:443
             api.deepseek.com:443
@@ -973,7 +988,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
-          go-version: "1.27.3"
+          go-version: "1.27.4"
 
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -1040,8 +1055,10 @@ jobs:
           SGL_API_KEY: ${{ secrets.SGL_API_KEY }}
           CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
           MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+          SONIOX_API_KEY: ${{ secrets.SONIOX_API_KEY }}
           BYTEPLUS_API_KEY: ${{ secrets.BYTEPLUS_API_KEY }}
           BASETEN_API_KEY: ${{ secrets.BASETEN_API_KEY }}
+          KIMCHI_API_KEY: ${{ secrets.KIMCHI_API_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           SARVAM_API_KEY: ${{ secrets.SARVAM_API_KEY }}
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
@@ -1062,6 +1079,7 @@ jobs:
           REPLICATE_API_KEY: ${{ secrets.REPLICATE_API_KEY }}
           NEBIUS_API_KEY: ${{ secrets.NEBIUS_API_KEY }}
           RUNWAY_API_KEY: ${{ secrets.RUNWAY_API_KEY }}
+          MACHGEN_API_KEY: ${{ secrets.MACHGEN_API_KEY }}
         run: ./.github/workflows/scripts/test-integrations.sh --parallel-files
 
   test-core-unit:
@@ -1083,7 +1101,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
-          go-version: "1.27.3"
+          go-version: "1.27.4"
 
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -1199,7 +1217,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
-          go-version: "1.27.3"
+          go-version: "1.27.4"
 
       - name: Run memory regression tests
         run: |
@@ -1397,8 +1415,11 @@ jobs:
             api.anthropic.com:443
             api.cerebras.ai:443
             api.minimax.io:443
+            api.soniox.com:443
+            tts-rt.soniox.com:443
             ark.ap-southeast.bytepluses.com:443
             inference.baseten.co:443
+            llm.kimchi.dev:443
             api.cohere.ai:443
             api.deepseek.com:443
             api.elevenlabs.io:443
@@ -1446,7 +1467,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
-          go-version: "1.27.3"
+          go-version: "1.27.4"
 
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -1500,6 +1521,7 @@ jobs:
           BIFROST_ENCRYPTION_KEY: ${{ secrets.BIFROST_ENCRYPTION_KEY }}
           CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
           MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+          SONIOX_API_KEY: ${{ secrets.SONIOX_API_KEY }}
           BYTEPLUS_API_KEY: ${{ secrets.BYTEPLUS_API_KEY }}
           BASETEN_API_KEY: ${{ secrets.BASETEN_API_KEY }}
           COHERE_API_KEY: ${{ secrets.COHERE_API_KEY }}
@@ -1516,6 +1538,7 @@ jobs:
           PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
           REPLICATE_API_KEY: ${{ secrets.REPLICATE_API_KEY }}
           RUNWAY_API_KEY: ${{ secrets.RUNWAY_API_KEY }}
+          MACHGEN_API_KEY: ${{ secrets.MACHGEN_API_KEY }}
           VERTEX_CREDENTIALS: ${{ secrets.VERTEX_CREDENTIALS }}
           VERTEX_PROJECT_ID: ${{ secrets.VERTEX_PROJECT_ID }}
           XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
@@ -1607,7 +1630,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
-          go-version: "1.27.3"
+          go-version: "1.27.4"
 
       - name: Create vLLM pods on RunPod
         env:
@@ -1645,8 +1668,11 @@ jobs:
             _grpc_config.localhost:443
             api.cerebras.ai:443
             api.minimax.io:443
+            api.soniox.com:443
+            tts-rt.soniox.com:443
             ark.ap-southeast.bytepluses.com:443
             inference.baseten.co:443
+            llm.kimchi.dev:443
             api.cohere.ai:443
             api.deepseek.com:443
             api.elevenlabs.io:443
@@ -1688,7 +1714,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
-          go-version: "1.27.3"
+          go-version: "1.27.4"
 
       - name: Set up Docker Compose
         run: |
@@ -1729,8 +1755,10 @@ jobs:
           SGL_API_KEY: ${{ secrets.SGL_API_KEY }}
           CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
           MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+          SONIOX_API_KEY: ${{ secrets.SONIOX_API_KEY }}
           BYTEPLUS_API_KEY: ${{ secrets.BYTEPLUS_API_KEY }}
           BASETEN_API_KEY: ${{ secrets.BASETEN_API_KEY }}
+          KIMCHI_API_KEY: ${{ secrets.KIMCHI_API_KEY }}
           SARVAM_API_KEY: ${{ secrets.SARVAM_API_KEY }}
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
           DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
@@ -1752,6 +1780,7 @@ jobs:
           NEBIUS_API_KEY: ${{ secrets.NEBIUS_API_KEY }}
           REPLICATE_API_KEY: ${{ secrets.REPLICATE_API_KEY }}
           RUNWAY_API_KEY: ${{ secrets.RUNWAY_API_KEY }}
+          MACHGEN_API_KEY: ${{ secrets.MACHGEN_API_KEY }}
           XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
         run: ./.github/workflows/scripts/test-framework.sh
 
@@ -1775,8 +1804,11 @@ jobs:
             _https._tcp.packages.microsoft.com:443
             api.cerebras.ai:443
             api.minimax.io:443
+            api.soniox.com:443
+            tts-rt.soniox.com:443
             ark.ap-southeast.bytepluses.com:443
             inference.baseten.co:443
+            llm.kimchi.dev:443
             api.cohere.ai:443
             api.deepseek.com:443
             api.elevenlabs.io:443
@@ -1828,7 +1860,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
-          go-version: "1.27.3"
+          go-version: "1.27.4"
 
       - name: Set up Docker Compose
         run: |
@@ -1869,8 +1901,10 @@ jobs:
           SGL_API_KEY: ${{ secrets.SGL_API_KEY }}
           CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
           MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+          SONIOX_API_KEY: ${{ secrets.SONIOX_API_KEY }}
           BYTEPLUS_API_KEY: ${{ secrets.BYTEPLUS_API_KEY }}
           BASETEN_API_KEY: ${{ secrets.BASETEN_API_KEY }}
+          KIMCHI_API_KEY: ${{ secrets.KIMCHI_API_KEY }}
           SARVAM_API_KEY: ${{ secrets.SARVAM_API_KEY }}
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
           DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
@@ -1892,6 +1926,7 @@ jobs:
           NEBIUS_API_KEY: ${{ secrets.NEBIUS_API_KEY }}
           REPLICATE_API_KEY: ${{ secrets.REPLICATE_API_KEY }}
           RUNWAY_API_KEY: ${{ secrets.RUNWAY_API_KEY }}
+          MACHGEN_API_KEY: ${{ secrets.MACHGEN_API_KEY }}
           XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
         run: ./.github/workflows/scripts/test-all-plugins.sh
 
@@ -1909,8 +1944,11 @@ jobs:
           allowed-endpoints: >
             api.cerebras.ai:443
             api.minimax.io:443
+            api.soniox.com:443
+            tts-rt.soniox.com:443
             ark.ap-southeast.bytepluses.com:443
             inference.baseten.co:443
+            llm.kimchi.dev:443
             api.cohere.ai:443
             api.deepseek.com:443
             api.elevenlabs.io:443
@@ -1951,7 +1989,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
-          go-version: "1.27.3"
+          go-version: "1.27.4"
 
       - name: Run bifrost-http unit tests
         env:
@@ -2005,7 +2043,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
-          go-version: "1.27.3"
+          go-version: "1.27.4"
 
       # The suite's OpenAI Python SDK leg runs through uv; without it those cases skip.
       - name: Install uv
@@ -2066,8 +2104,11 @@ jobs:
             api.anthropic.com:443
             api.cerebras.ai:443
             api.minimax.io:443
+            api.soniox.com:443
+            tts-rt.soniox.com:443
             ark.ap-southeast.bytepluses.com:443
             inference.baseten.co:443
+            llm.kimchi.dev:443
             api.cohere.ai:443
             api.deepseek.com:443
             api.elevenlabs.io:443
@@ -2109,7 +2150,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
-          go-version: "1.27.3"
+          go-version: "1.27.4"
 
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -2197,7 +2238,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
-          go-version: "1.27.3"
+          go-version: "1.27.4"
 
       - name: Download prebuilt bifrost-http binary
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
@@ -2255,8 +2296,11 @@ jobs:
             api.anthropic.com:443
             api.cerebras.ai:443
             api.minimax.io:443
+            api.soniox.com:443
+            tts-rt.soniox.com:443
             ark.ap-southeast.bytepluses.com:443
             inference.baseten.co:443
+            llm.kimchi.dev:443
             api.cohere.ai:443
             api.deepseek.com:443
             api.elevenlabs.io:443
@@ -2315,7 +2359,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
-          go-version: "1.27.3"
+          go-version: "1.27.4"
 
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -2386,8 +2430,10 @@ jobs:
           PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
           CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
           MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+          SONIOX_API_KEY: ${{ secrets.SONIOX_API_KEY }}
           BYTEPLUS_API_KEY: ${{ secrets.BYTEPLUS_API_KEY }}
           BASETEN_API_KEY: ${{ secrets.BASETEN_API_KEY }}
+          KIMCHI_API_KEY: ${{ secrets.KIMCHI_API_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           SARVAM_API_KEY: ${{ secrets.SARVAM_API_KEY }}
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
@@ -2412,6 +2458,7 @@ jobs:
           AWS_ARN: ${{ secrets.AWS_ARN }}
           NEBIUS_API_KEY: ${{ secrets.NEBIUS_API_KEY }}
           RUNWAY_API_KEY: ${{ secrets.RUNWAY_API_KEY }}
+          MACHGEN_API_KEY: ${{ secrets.MACHGEN_API_KEY }}
         run: |
           chmod +x ./.github/workflows/scripts/test-api-integrations.sh
           ./.github/workflows/scripts/test-api-integrations.sh
@@ -2479,7 +2526,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
-          go-version: "1.27.3"
+          go-version: "1.27.4"
 
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -2555,8 +2602,11 @@ jobs:
             172.38.0.11:5432
             api.cerebras.ai:443
             api.minimax.io:443
+            api.soniox.com:443
+            tts-rt.soniox.com:443
             ark.ap-southeast.bytepluses.com:443
             inference.baseten.co:443
+            llm.kimchi.dev:443
             api.cohere.ai:443
             api.deepseek.com:443
             api.elevenlabs.io:443
@@ -2602,7 +2652,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
-          go-version: "1.27.3"
+          go-version: "1.27.4"
 
       # This job still builds the mocker/hitter binaries from
       # bifrost-benchmarking itself - only bifrost-http comes prebuilt.
@@ -2658,8 +2708,11 @@ jobs:
             127.0.0.1:8080
             api.cerebras.ai:443
             api.minimax.io:443
+            api.soniox.com:443
+            tts-rt.soniox.com:443
             ark.ap-southeast.bytepluses.com:443
             inference.baseten.co:443
+            llm.kimchi.dev:443
             api.cohere.ai:443
             api.deepseek.com:443
             api.elevenlabs.io:443
@@ -2703,7 +2756,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
-          go-version: "1.27.3"
+          go-version: "1.27.4"
 
       # load-test.sh's build_bifrost_http already no-ops when tmp/bifrost-http
       # is present, so this download is all that is needed here.
@@ -2767,8 +2820,11 @@ jobs:
             api.anthropic.com:443
             api.cerebras.ai:443
             api.minimax.io:443
+            api.soniox.com:443
+            tts-rt.soniox.com:443
             ark.ap-southeast.bytepluses.com:443
             inference.baseten.co:443
+            llm.kimchi.dev:443
             api.cohere.ai:443
             api.deepseek.com:443
             api.elevenlabs.io:443
@@ -2826,7 +2882,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
-          go-version: "1.27.3"
+          go-version: "1.27.4"
 
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -2863,8 +2919,10 @@ jobs:
           PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
           CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
           MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+          SONIOX_API_KEY: ${{ secrets.SONIOX_API_KEY }}
           BYTEPLUS_API_KEY: ${{ secrets.BYTEPLUS_API_KEY }}
           BASETEN_API_KEY: ${{ secrets.BASETEN_API_KEY }}
+          KIMCHI_API_KEY: ${{ secrets.KIMCHI_API_KEY }}
           SARVAM_API_KEY: ${{ secrets.SARVAM_API_KEY }}
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
           DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
@@ -2889,6 +2947,7 @@ jobs:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           NEBIUS_API_KEY: ${{ secrets.NEBIUS_API_KEY }}
           RUNWAY_API_KEY: ${{ secrets.RUNWAY_API_KEY }}
+          MACHGEN_API_KEY: ${{ secrets.MACHGEN_API_KEY }}
         run: |
           chmod +x ./.github/workflows/scripts/test-docker-image.sh
           ./.github/workflows/scripts/test-docker-image.sh linux/amd64
@@ -2927,8 +2986,11 @@ jobs:
             api.anthropic.com:443
             api.cerebras.ai:443
             api.minimax.io:443
+            api.soniox.com:443
+            tts-rt.soniox.com:443
             ark.ap-southeast.bytepluses.com:443
             inference.baseten.co:443
+            llm.kimchi.dev:443
             api.cohere.ai:443
             api.deepseek.com:443
             api.elevenlabs.io:443
@@ -2996,7 +3058,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
-          go-version: "1.27.3"
+          go-version: "1.27.4"
 
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -3033,8 +3095,10 @@ jobs:
           PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
           CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
           MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+          SONIOX_API_KEY: ${{ secrets.SONIOX_API_KEY }}
           BYTEPLUS_API_KEY: ${{ secrets.BYTEPLUS_API_KEY }}
           BASETEN_API_KEY: ${{ secrets.BASETEN_API_KEY }}
+          KIMCHI_API_KEY: ${{ secrets.KIMCHI_API_KEY }}
           SARVAM_API_KEY: ${{ secrets.SARVAM_API_KEY }}
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
           DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
@@ -3059,6 +3123,7 @@ jobs:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           NEBIUS_API_KEY: ${{ secrets.NEBIUS_API_KEY }}
           RUNWAY_API_KEY: ${{ secrets.RUNWAY_API_KEY }}
+          MACHGEN_API_KEY: ${{ secrets.MACHGEN_API_KEY }}
         run: |
           chmod +x ./.github/workflows/scripts/test-docker-image.sh
           ./.github/workflows/scripts/test-docker-image.sh linux/arm64
@@ -3132,7 +3197,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
-          go-version: "1.27.3"
+          go-version: "1.27.4"
 
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -3173,8 +3238,10 @@ jobs:
           SGL_API_KEY: ${{ secrets.SGL_API_KEY }}
           CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
           MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+          SONIOX_API_KEY: ${{ secrets.SONIOX_API_KEY }}
           BYTEPLUS_API_KEY: ${{ secrets.BYTEPLUS_API_KEY }}
           BASETEN_API_KEY: ${{ secrets.BASETEN_API_KEY }}
+          KIMCHI_API_KEY: ${{ secrets.KIMCHI_API_KEY }}
           SARVAM_API_KEY: ${{ secrets.SARVAM_API_KEY }}
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
           DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
@@ -3194,6 +3261,7 @@ jobs:
           REPLICATE_API_KEY: ${{ secrets.REPLICATE_API_KEY }}
           REPLICATE_OWNER: ${{ secrets.REPLICATE_OWNER }}
           RUNWAY_API_KEY: ${{ secrets.RUNWAY_API_KEY }}
+          MACHGEN_API_KEY: ${{ secrets.MACHGEN_API_KEY }}
           RUNWARE_API_KEY: ${{ secrets.RUNWARE_API_KEY }}
         run: ./.github/workflows/scripts/release-core.sh "${{ needs.detect-changes.outputs.core-version }}"
 
@@ -3267,7 +3335,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
-          go-version: "1.27.3"
+          go-version: "1.27.4"
 
       - name: Configure Git
         run: |
@@ -3317,8 +3385,10 @@ jobs:
           SGL_API_KEY: ${{ secrets.SGL_API_KEY }}
           CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
           MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+          SONIOX_API_KEY: ${{ secrets.SONIOX_API_KEY }}
           BYTEPLUS_API_KEY: ${{ secrets.BYTEPLUS_API_KEY }}
           BASETEN_API_KEY: ${{ secrets.BASETEN_API_KEY }}
+          KIMCHI_API_KEY: ${{ secrets.KIMCHI_API_KEY }}
           SARVAM_API_KEY: ${{ secrets.SARVAM_API_KEY }}
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
           DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
@@ -3336,6 +3406,7 @@ jobs:
           REPLICATE_API_KEY: ${{ secrets.REPLICATE_API_KEY }}
           REPLICATE_OWNER: ${{ secrets.REPLICATE_OWNER }}
           RUNWAY_API_KEY: ${{ secrets.RUNWAY_API_KEY }}
+          MACHGEN_API_KEY: ${{ secrets.MACHGEN_API_KEY }}
           RUNWARE_API_KEY: ${{ secrets.RUNWARE_API_KEY }}
         run: ./.github/workflows/scripts/release-framework.sh "${{ needs.detect-changes.outputs.framework-version }}"
 
@@ -3424,7 +3495,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
-          go-version: "1.27.3"
+          go-version: "1.27.4"
 
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -3479,8 +3550,10 @@ jobs:
           SGL_API_KEY: ${{ secrets.SGL_API_KEY }}
           CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
           MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+          SONIOX_API_KEY: ${{ secrets.SONIOX_API_KEY }}
           BYTEPLUS_API_KEY: ${{ secrets.BYTEPLUS_API_KEY }}
           BASETEN_API_KEY: ${{ secrets.BASETEN_API_KEY }}
+          KIMCHI_API_KEY: ${{ secrets.KIMCHI_API_KEY }}
           SARVAM_API_KEY: ${{ secrets.SARVAM_API_KEY }}
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
           DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
@@ -3498,6 +3571,7 @@ jobs:
           REPLICATE_API_KEY: ${{ secrets.REPLICATE_API_KEY }}
           REPLICATE_OWNER: ${{ secrets.REPLICATE_OWNER }}
           RUNWAY_API_KEY: ${{ secrets.RUNWAY_API_KEY }}
+          MACHGEN_API_KEY: ${{ secrets.MACHGEN_API_KEY }}
           RUNWARE_API_KEY: ${{ secrets.RUNWARE_API_KEY }}
         run: ./.github/workflows/scripts/release-all-plugins.sh '${{ needs.detect-changes.outputs.changed-plugins }}'
 
@@ -3588,7 +3662,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
-          go-version: "1.27.3"
+          go-version: "1.27.4"
 
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -3655,7 +3729,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
-          go-version: "1.27.3"
+          go-version: "1.27.4"
 
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -3740,7 +3814,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
-          go-version: "1.27.3"
+          go-version: "1.27.4"
 
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0

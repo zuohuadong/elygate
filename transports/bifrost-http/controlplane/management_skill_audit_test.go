@@ -177,7 +177,7 @@ func TestManagementSkillAuditAfterPersistence(t *testing.T) {
 	auth.UpdateAuthConfig(&configstore.AuthConfig{
 		IsEnabled: true, AdminUserName: schemas.NewSecretVar("skill-admin"), AdminPassword: schemas.NewSecretVar(hash),
 	})
-	authorization := "Basic " + base64.StdEncoding.EncodeToString([]byte("skill-admin:skill-audit-test-password"))
+	authorization := "Bearer " + base64.StdEncoding.EncodeToString([]byte("skill-admin:skill-audit-test-password"))
 	// Cases: serving/saved-only/shift; success, reread error/panic, rejected write, audit failure.
 	for _, mutation := range skillAuditMutations() {
 		t.Run(mutation.name, func(t *testing.T) {

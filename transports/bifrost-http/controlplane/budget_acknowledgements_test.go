@@ -312,7 +312,7 @@ func TestBudgetAcknowledgementRoutesRequireAdminAndWriteGuard(t *testing.T) {
 	}
 }
 
-func TestBudgetAcknowledgementsBasicAndSessionUseTrustedActor(t *testing.T) {
+func TestBudgetAcknowledgementsBearerAndSessionUseTrustedActor(t *testing.T) {
 	store, cs := testControlPlaneStore(t)
 	id := seedBudgetNotifications(t, store, 8)[0].AlertID
 	hash, err := encrypt.Hash("ack-test-only")
@@ -330,7 +330,7 @@ func TestBudgetAcknowledgementsBasicAndSessionUseTrustedActor(t *testing.T) {
 		request.Request.SetRequestURI("http://admin.test" + path)
 		request.Request.Header.SetMethod("PUT")
 		request.Request.Header.SetContentType("application/json")
-		request.Request.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte("operator:"+password)))
+		request.Request.Header.Set("Authorization", "Bearer "+base64.StdEncoding.EncodeToString([]byte("operator:"+password)))
 		request.Request.SetBodyString(`{"acknowledged":true}`)
 		r.Handler(request)
 		if password == "wrong" {
@@ -352,7 +352,7 @@ func TestBudgetAcknowledgementsBasicAndSessionUseTrustedActor(t *testing.T) {
 	request.Request.SetBodyString(`{"acknowledged":true}`)
 	r.Handler(request)
 	require.Equal(t, 200, request.Response.StatusCode(), string(request.Response.Body()))
-	require.Len(t, acknowledgementAudits(t, store), 1, "sessions and Basic share the same administrator")
+	require.Len(t, acknowledgementAudits(t, store), 1, "sessions and the Bearer-encoded credentials share the same administrator")
 }
 
 func TestBudgetAcknowledgementsListPreservesFilteringAndPagination(t *testing.T) {

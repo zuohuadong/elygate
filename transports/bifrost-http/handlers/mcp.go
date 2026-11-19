@@ -198,7 +198,7 @@ func (h *MCPHandler) runOAuthBootstrap(ctx *fasthttp.RequestCtx, oauthCfg *OAuth
 		Resource:        oauthCfg.Resource,
 
 		RequirePublicTarget:       requirePublicTarget,
-		ClientMetadataURL:         base + oauthClientMetadataPath,
+		ClientMetadataURL:         h.oauthHandler.oauthProvider.ClientMetadataDocumentURL(redirectURI),
 		UseClientMetadataDocument: oauthCfg.UseClientMetadataDocument,
 	})
 }
@@ -840,6 +840,7 @@ func (h *MCPHandler) verifyMCPClientHeaders(ctx *fasthttp.RequestCtx) {
 		ClientID:               clientConfig.ID,
 		Name:                   clientConfig.Name,
 		IsCodeModeClient:       clientConfig.IsCodeModeClient,
+		ServerTypeOnSlug:       clientConfig.ServerTypeOnSlug,
 		ConnectionType:         string(clientConfig.ConnectionType),
 		ConnectionString:       clientConfig.ConnectionString,
 		StdioConfig:            clientConfig.StdioConfig,
@@ -1049,6 +1050,7 @@ func (h *MCPHandler) verifyMCPClientExchange(ctx *fasthttp.RequestCtx) {
 		ClientID:               clientConfig.ID,
 		Name:                   clientConfig.Name,
 		IsCodeModeClient:       clientConfig.IsCodeModeClient,
+		ServerTypeOnSlug:       clientConfig.ServerTypeOnSlug,
 		ConnectionType:         string(clientConfig.ConnectionType),
 		ConnectionString:       clientConfig.ConnectionString,
 		StdioConfig:            clientConfig.StdioConfig,
@@ -1949,6 +1951,7 @@ func (h *MCPHandler) getMCPClientsPaginated(ctx *fasthttp.RequestCtx, params con
 			Name:                   dbClient.Name,
 			EndpointSlug:           dbClient.EndpointSlug,
 			IsCodeModeClient:       dbClient.IsCodeModeClient,
+			ServerTypeOnSlug:       dbClient.ServerTypeOnSlug,
 			ConnectionType:         schemas.MCPConnectionType(dbClient.ConnectionType),
 			ConnectionString:       dbClient.ConnectionString,
 			StdioConfig:            dbClient.StdioConfig,
@@ -2324,6 +2327,7 @@ type MCPClientUpdateRequest struct {
 	Disabled               *bool                           `json:"disabled,omitempty"`
 	AllowByDefault         *bool                           `json:"allow_by_default,omitempty"`
 	IsCodeModeClient       *bool                           `json:"is_code_mode_client,omitempty"`
+	ServerTypeOnSlug       *string                         `json:"server_type_on_slug,omitempty"` // "inherit", "enabled" or "disabled"
 	IsPingAvailable        *bool                           `json:"is_ping_available,omitempty"`
 	NeedsSessionStickiness *bool                           `json:"needs_session_stickiness,omitempty"`
 	ToolSyncInterval       *MCPSyncInterval                `json:"tool_sync_interval,omitempty"`
@@ -2358,6 +2362,15 @@ func (req *MCPClientUpdateRequest) resolvedAllowByDefault(existing bool) bool {
 		return existing
 	}
 	return schemas.ResolveAllowByDefault(req.AllowByDefault, req.AllowOnAllVirtualKeys)
+}
+
+// resolvedServerTypeOnSlug applies PATCH semantics to server_type_on_slug: existing when the request
+// omits it, otherwise the sent value ("inherit" clears the override).
+func (req *MCPClientUpdateRequest) resolvedServerTypeOnSlug(existing schemas.MCPServerTypeOnSlug) (schemas.MCPServerTypeOnSlug, error) {
+	if req.ServerTypeOnSlug == nil {
+		return existing, nil
+	}
+	return schemas.ParseMCPServerTypeOnSlug(*req.ServerTypeOnSlug)
 }
 
 // rejectPrivateMCPTargetIfAuthBypassed refuses to register an HTTP/SSE MCP
@@ -2687,7 +2700,7 @@ func (h *MCPHandler) addMCPClient(ctx *fasthttp.RequestCtx) {
 			SendError(ctx, fasthttp.StatusBadRequest, msg)
 			return
 		}
-		prepared, status, msg := prepareOpenAPIConfig(ctx, req.Name, req.OpenAPIConfig)
+		prepared, status, msg := prepareOpenAPIConfig(ctx, req.Name, req.OpenAPIConfig, h.store.MCPOpenAPIMaxSpecBytes())
 		if status != 0 {
 			SendError(ctx, status, msg)
 			return
@@ -2873,6 +2886,7 @@ func (h *MCPHandler) addMCPClient(ctx *fasthttp.RequestCtx) {
 			Name:                   req.Name,
 			EndpointSlug:           req.EndpointSlug,
 			IsCodeModeClient:       req.IsCodeModeClient,
+			ServerTypeOnSlug:       req.ServerTypeOnSlug,
 			IsPingAvailable:        &isPingAvailable,
 			NeedsSessionStickiness: req.NeedsSessionStickiness,
 			ToolSyncInterval:       resolvedToolSyncInterval,
@@ -3031,6 +3045,7 @@ func (h *MCPHandler) addMCPClient(ctx *fasthttp.RequestCtx) {
 			Name:                   req.Name,
 			EndpointSlug:           req.EndpointSlug,
 			IsCodeModeClient:       req.IsCodeModeClient,
+			ServerTypeOnSlug:       req.ServerTypeOnSlug,
 			IsPingAvailable:        &isPingAvailable,
 			NeedsSessionStickiness: req.NeedsSessionStickiness,
 			ToolSyncInterval:       resolvedToolSyncInterval,
@@ -3178,6 +3193,7 @@ func (h *MCPHandler) addMCPClient(ctx *fasthttp.RequestCtx) {
 			Name:                   req.Name,
 			EndpointSlug:           req.EndpointSlug,
 			IsCodeModeClient:       req.IsCodeModeClient,
+			ServerTypeOnSlug:       req.ServerTypeOnSlug,
 			IsPingAvailable:        &isPingAvailable,
 			NeedsSessionStickiness: req.NeedsSessionStickiness,
 			ToolSyncInterval:       resolvedToolSyncInterval,
@@ -3268,6 +3284,7 @@ func (h *MCPHandler) addMCPClient(ctx *fasthttp.RequestCtx) {
 			Name:                   req.Name,
 			EndpointSlug:           req.EndpointSlug,
 			IsCodeModeClient:       req.IsCodeModeClient,
+			ServerTypeOnSlug:       req.ServerTypeOnSlug,
 			IsPingAvailable:        req.IsPingAvailable,
 			NeedsSessionStickiness: req.NeedsSessionStickiness,
 			ToolSyncInterval:       resolvedToolSyncInterval,
@@ -3325,6 +3342,7 @@ func (h *MCPHandler) addMCPClient(ctx *fasthttp.RequestCtx) {
 		Name:                   req.Name,
 		EndpointSlug:           req.EndpointSlug,
 		IsCodeModeClient:       req.IsCodeModeClient,
+		ServerTypeOnSlug:       req.ServerTypeOnSlug,
 		ConnectionType:         schemas.MCPConnectionType(req.ConnectionType),
 		ConnectionString:       req.ConnectionString,
 		RequirePublicTarget:    req.RequirePublicTarget,
@@ -3481,6 +3499,11 @@ func (h *MCPHandler) updateMCPClient(ctx *fasthttp.RequestCtx) {
 	isCodeMode := existingConfig.IsCodeModeClient
 	if req.IsCodeModeClient != nil {
 		isCodeMode = *req.IsCodeModeClient
+	}
+	serverTypeOnSlug, err := req.resolvedServerTypeOnSlug(existingConfig.ServerTypeOnSlug)
+	if err != nil {
+		SendError(ctx, fasthttp.StatusBadRequest, err.Error())
+		return
 	}
 	isPingAvailable := existingConfig.IsPingAvailable
 	if req.IsPingAvailable != nil {
@@ -3663,7 +3686,7 @@ func (h *MCPHandler) updateMCPClient(ctx *fasthttp.RequestCtx) {
 		// later connects from the document fresh.
 		rebuildOpenAPIServer = !disabled && req.OpenAPIConfig == nil && existingConfig.OpenAPIConfig != nil &&
 			strings.TrimSpace(existingConfig.OpenAPIConfig.Spec) == "" && existingConfig.OpenAPIConfig.SpecURL != nil
-		prepared, status, msg := prepareOpenAPIConfig(ctx, name, candidate)
+		prepared, status, msg := prepareOpenAPIConfig(ctx, name, candidate, h.store.MCPOpenAPIMaxSpecBytes())
 		if status != 0 {
 			SendError(ctx, status, msg)
 			return
@@ -4005,6 +4028,7 @@ func (h *MCPHandler) updateMCPClient(ctx *fasthttp.RequestCtx) {
 		ClientID:               id,
 		Name:                   name,
 		IsCodeModeClient:       isCodeMode,
+		ServerTypeOnSlug:       serverTypeOnSlug,
 		ConnectionType:         string(existingConfig.ConnectionType),
 		ConnectionString:       existingConfig.ConnectionString,
 		RequirePublicTarget:    requirePublicTarget,
@@ -4106,6 +4130,7 @@ func (h *MCPHandler) updateMCPClient(ctx *fasthttp.RequestCtx) {
 		ID:                     id,
 		Name:                   name,
 		IsCodeModeClient:       isCodeMode,
+		ServerTypeOnSlug:       serverTypeOnSlug,
 		ConnectionType:         existingConfig.ConnectionType,
 		ConnectionString:       existingConfig.ConnectionString,
 		RequirePublicTarget:    requirePublicTarget,
@@ -4805,6 +4830,7 @@ func (h *MCPHandler) completePerUserOAuthAdminRepair(ctx *fasthttp.RequestCtx, b
 		ClientID:               clientConfig.ID,
 		Name:                   clientConfig.Name,
 		IsCodeModeClient:       clientConfig.IsCodeModeClient,
+		ServerTypeOnSlug:       clientConfig.ServerTypeOnSlug,
 		ConnectionType:         string(clientConfig.ConnectionType),
 		ConnectionString:       clientConfig.ConnectionString,
 		StdioConfig:            clientConfig.StdioConfig,
@@ -5107,6 +5133,7 @@ func (h *MCPHandler) completeMCPClientOAuth(ctx *fasthttp.RequestCtx) {
 				ClientID:               mcpClientConfig.ID,
 				Name:                   mcpClientConfig.Name,
 				IsCodeModeClient:       mcpClientConfig.IsCodeModeClient,
+				ServerTypeOnSlug:       mcpClientConfig.ServerTypeOnSlug,
 				ConnectionType:         string(mcpClientConfig.ConnectionType),
 				ConnectionString:       mcpClientConfig.ConnectionString,
 				StdioConfig:            mcpClientConfig.StdioConfig,
@@ -5247,6 +5274,7 @@ func (h *MCPHandler) completeMCPClientOAuth(ctx *fasthttp.RequestCtx) {
 			ClientID:               mcpClientConfig.ID,
 			Name:                   mcpClientConfig.Name,
 			IsCodeModeClient:       mcpClientConfig.IsCodeModeClient,
+			ServerTypeOnSlug:       mcpClientConfig.ServerTypeOnSlug,
 			ConnectionType:         string(mcpClientConfig.ConnectionType),
 			ConnectionString:       mcpClientConfig.ConnectionString,
 			StdioConfig:            mcpClientConfig.StdioConfig,

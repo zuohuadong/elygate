@@ -81,6 +81,7 @@ func TestModelCatalogAuditThroughManagementRoute(t *testing.T) {
 		{name: "unauthorized", unauthorized: true, status: 401},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			handlers.SetLogger(noopTestLogger{})
 			ctx := t.Context()
 			cs := newRoutingTestConfigStore(t)
 			rows := []tables.TableModelPricing{
@@ -119,7 +120,10 @@ func TestModelCatalogAuditThroughManagementRoute(t *testing.T) {
 			server := &BifrostHTTPServer{Config: cfg}
 			hash, err := encrypt.Hash("catalog-test-password")
 			require.NoError(t, err)
-			auth := &handlers.AuthMiddleware{}
+			// A real session store: the Bearer path validates the session first, and a
+			// nil store would panic there rather than fall through to the credentials.
+			auth, err := handlers.InitAuthMiddleware(cs, nil, nil, "")
+			require.NoError(t, err)
 			auth.UpdateAuthConfig(&configstore.AuthConfig{
 				IsEnabled: true, AdminUserName: schemas.NewSecretVar("catalog-admin"),
 				AdminPassword: schemas.NewSecretVar(hash),
@@ -143,7 +147,9 @@ func TestModelCatalogAuditThroughManagementRoute(t *testing.T) {
 			}
 			body, err := json.Marshal(batch)
 			require.NoError(t, err)
-			authorization := "Basic " + base64.StdEncoding.EncodeToString([]byte("catalog-admin:catalog-test-password"))
+			// Bearer, not Basic: admin-only handlers (the audit feed included) need a
+			// session or the Bearer-encoded credentials to run as the local admin.
+			authorization := "Bearer " + base64.StdEncoding.EncodeToString([]byte("catalog-admin:catalog-test-password"))
 			if tc.unauthorized {
 				authorization = ""
 			}
@@ -194,7 +200,7 @@ func TestModelCatalogAuditThroughManagementRoute(t *testing.T) {
 			} else {
 				require.Empty(t, events)
 			}
-			feed := catalogAuditRequest(routes, "GET", "/api/control-plane/audit-events", "Basic "+base64.StdEncoding.EncodeToString([]byte("catalog-admin:catalog-test-password")), "")
+			feed := catalogAuditRequest(routes, "GET", "/api/control-plane/audit-events", "Bearer "+base64.StdEncoding.EncodeToString([]byte("catalog-admin:catalog-test-password")), "")
 			require.Equal(t, 200, feed.Response.StatusCode())
 			require.NotContains(t, string(feed.Response.Body()), "private-description")
 			require.NotContains(t, string(feed.Response.Body()), "private-region")

@@ -193,6 +193,7 @@ examples/mcps/oauth-demo-server/oauth-demo-server
 # binaries
 tests/cmd/e2eseed/e2eseed
 tests/cmd/seedvks/seedvks
+tests/cmd/complexitysuggesteval/complexitysuggesteval
 
 # routing harness ledgers (local run journals, never committed)
 tests/e2e/api/routing/ledger-*
@@ -278,6 +279,9 @@ CODEBUDDY.md
 CLAUDE.md
 .zed/CONVENTIONS.md
 HERMES.md
+
+# Local assistant output, never committed
+Claude outputs/
 
 # keep the npx migration-cli source tree tracked despite the name ignore above
 !npx/bifrost-migration-cli/

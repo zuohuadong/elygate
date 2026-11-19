@@ -65,6 +65,8 @@ var reservedKeys = map[BifrostContextKey]struct{}{
 	BifrostContextKeyMCPAgentServedRoute:     {},
 	BifrostContextKeyMCPInstructionsText:     {},
 	BifrostContextKeyClientIP:                {},
+
+	BifrostContextKeyPassthroughModelListFilter: {},
 }
 
 var additionalReservedKeys = map[BifrostContextKey]struct{}{

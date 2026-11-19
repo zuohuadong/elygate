@@ -81,7 +81,7 @@ func TestManagementWebhookAuditAfterPersistence(t *testing.T) {
 		IsEnabled: true, AdminUserName: schemas.NewSecretVar("webhook-admin"),
 		AdminPassword: schemas.NewSecretVar(hash),
 	})
-	authorization := "Basic " + base64.StdEncoding.EncodeToString([]byte("webhook-admin:test-only-webhook-password"))
+	authorization := "Bearer " + base64.StdEncoding.EncodeToString([]byte("webhook-admin:test-only-webhook-password"))
 	const body = `{"name":"updated-webhook","url":"https://93.184.216.34/hook","events":["async_job.completed"],"headers":{"Authorization":"test-only-webhook-updated-header"}}`
 	// Each operation must distinguish rejection, failed writes, and post-commit reconciliation failure.
 	for _, mutation := range []struct {

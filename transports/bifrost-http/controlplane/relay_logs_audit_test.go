@@ -107,7 +107,7 @@ func TestRelayLogsDeletionAuditThroughManagementRoute(t *testing.T) {
 			relayHandler := handlers.NewRelaysHandler(relay.NewManager(cs, nil), nil, cfg, nil)
 			relayHandler.RegisterRoutes(routes, auth.APIMiddleware(), audit.ManagementAuditMiddleware(logger))
 			relayHandler.RegisterLogRoutes(routes, auth.APIMiddleware(), audit.ManagementAuditMiddleware(logger))
-			authorization := "Basic " + base64.StdEncoding.EncodeToString([]byte("relay-admin:relay-test-password"))
+			authorization := "Bearer " + base64.StdEncoding.EncodeToString([]byte("relay-admin:relay-test-password"))
 			mutationAuth := authorization
 			if tc.unauthorized {
 				mutationAuth = ""

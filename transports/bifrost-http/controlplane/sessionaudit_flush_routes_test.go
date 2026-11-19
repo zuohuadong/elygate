@@ -136,7 +136,7 @@ func TestDashboardSessionFlushAuditConfigRoutes(t *testing.T) {
 			request.Request.SetRequestURI("/api/config")
 			switch tc.credential {
 			case "basic":
-				request.Request.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte("old-admin:"+password)))
+				request.Request.Header.Set("Authorization", "Bearer "+base64.StdEncoding.EncodeToString([]byte("old-admin:"+password)))
 			case "bearer":
 				request.Request.Header.Set("Authorization", "Bearer "+token)
 			case "cookie":

@@ -294,7 +294,7 @@ func TestNotificationReceiptRoutesRequireRealAdminAndJSONHostGuard(t *testing.T)
 	}
 }
 
-func TestNotificationReceiptBasicAndSessionShareLocalAdminState(t *testing.T) {
+func TestNotificationReceiptBearerAndSessionShareLocalAdminState(t *testing.T) {
 	store, cs := testControlPlaneStore(t)
 	id := createReceiptNotification(t, store)
 	hash, err := encrypt.Hash("receipt-test-only")
@@ -311,7 +311,7 @@ func TestNotificationReceiptBasicAndSessionShareLocalAdminState(t *testing.T) {
 		request.Request.SetRequestURI("http://admin.test/api/control-plane/notification-receipts/" + id)
 		request.Request.Header.SetMethod("PUT")
 		request.Request.Header.SetContentType("application/json")
-		request.Request.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte("operator:"+password)))
+		request.Request.Header.Set("Authorization", "Bearer "+base64.StdEncoding.EncodeToString([]byte("operator:"+password)))
 		request.Request.SetBodyString(`{"read":true}`)
 		r.Handler(request)
 		if password == "wrong" {
